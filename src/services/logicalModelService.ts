@@ -13,8 +13,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Document, parseDocument, isAlias, isMap, isNode, isPair, isScalar, isSeq } from 'yaml';
-import type { Pair, YAMLMap, YAMLSeq } from 'yaml';
+import { Document, Pair, YAMLMap, YAMLSeq, parseDocument, isAlias, isMap, isNode, isPair, isScalar, isSeq, visit } from 'yaml';
+import type { Alias, Node, Scalar } from 'yaml';
 
 import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, classifyModelLoadError, parseLogicalModelText } from '@erd-studio/core';
 import type { ModelLoadErrorKind } from '@erd-studio/core';
@@ -110,8 +110,40 @@ const COLUMN_KEYS = [
   'isPrimaryKey', 'isForeignKey', 'isNaturalKey',
   'scdType', 'additiveType', 'meta',
 ] as const;
+/** dbt's spelling of a column's `dataType`, which core reads as an alias (#144). */
+const DATA_TYPE_ALIAS = 'data_type';
+/** Whether a pair's key is `key`, as a plain or scalar key. */
+function keyIs(pair: Pair, key: string): boolean {
+  return isScalar(pair.key) ? pair.key.value === key : pair.key === key;
+}
+/**
+ * Set a parsed scalar's value in place, keeping its style and comments. The
+ * `yaml` library keeps the text it parsed the node from in `source`, and
+ * that text is what a number is read as (core's `scalarValue`, and this
+ * service's), so it goes too: left behind, `scdType: &s 2` changed to 1 would
+ * still read as 2 to this save while it prints 1.
+ */
+function setScalarValue(node: Scalar, value: unknown): void {
+  node.value = value;
+  node.source = undefined;
+}
 /** What core's reader fills in for a column key the file leaves out or leaves empty. */
 const COLUMN_READ_DEFAULTS: Readonly<Record<string, unknown>> = { name: '', dataType: 'unknown' };
+/**
+ * The text each editable document was parsed from. The `yaml` library keeps
+ * node offsets but not the source, and one question needs it: whether a key
+ * that a write drops really had a blank line after it (see
+ * {@link LogicalModelService.renameDataTypeAlias}).
+ */
+const SOURCE_TEXT = new WeakMap<Document, string>();
+/**
+ * Every alias a save in progress judged to read as the model already has it,
+ * with a detached copy of what it read then (see
+ * {@link LogicalModelService.confirmAliases}).
+ */
+const KEPT_ALIASES = new WeakMap<Document, Map<Alias, Node>>();
+/** A line holding nothing but whitespace. */
+const BLANK_LINE = /\n[ \t]*\r?\n/;
 
 // ---------------------------------------------------------------------------
 // Service
@@ -775,10 +807,12 @@ export class LogicalModelService {
       return null;
     }
     try {
-      const doc = parseDocument(fs.readFileSync(filePath, 'utf-8'));
+      const text = fs.readFileSync(filePath, 'utf-8');
+      const doc = parseDocument(text);
       if (doc.errors.length > 0 || !isMap(doc.contents)) {
         return null;
       }
+      SOURCE_TEXT.set(doc, text);
       return doc;
     } catch (err) {
       console.warn(`[LogicalModelService] Rewriting unparseable model file ${filePath}:`, err);
@@ -792,8 +826,108 @@ export class LogicalModelService {
    */
   private applyModel(doc: Document, root: YAMLMap, model: SemanticModel, filePath: string): void {
     const plain = this.modelToPlain(model);
-    this.syncMap(doc, root, plain, MODEL_KEYS);
-    this.syncRelationships(doc, root, (plain.relationships ?? []) as Record<string, unknown>[], filePath);
+    KEPT_ALIASES.set(doc, new Map());
+    try {
+      this.syncMap(doc, root, plain, MODEL_KEYS);
+      this.syncRelationships(doc, root, (plain.relationships ?? []) as Record<string, unknown>[], filePath);
+      this.settleKeptAliases(doc);
+    } finally {
+      KEPT_ALIASES.delete(doc);
+    }
+  }
+
+  /**
+   * Note every alias in `node` (itself, or anywhere inside a map or list) as
+   * reading what the model wants, with a copy of what it reads now. Keys are
+   * synced in a fixed order, not file order, so a later write may still
+   * change the anchor such an alias points at — `description: *g` kept, then
+   * `grain: &g` edited in place; {@link settleKeptAliases} undoes that.
+   */
+  private confirmAliases(doc: Document, node: unknown): void {
+    const kept = KEPT_ALIASES.get(doc);
+    if (!kept || !isNode(node)) return;
+    if (isAlias(node)) {
+      kept.set(node, this.detach(doc, node));
+      return;
+    }
+    visit(node, {
+      Alias: (key, alias) => {
+        if (key !== 'key') kept.set(alias, this.detach(doc, alias));
+      },
+    });
+  }
+
+  /**
+   * After every write of a save: a kept alias (see {@link confirmAliases})
+   * that no longer reads what it read when it was kept — its anchor was
+   * rewritten, or dropped, by this same save — becomes a plain copy of that
+   * value, keeping the line's comments, so no key the canvas did not change
+   * reads differently. An alias whose anchor did not change stays an alias.
+   */
+  private settleKeptAliases(doc: Document): void {
+    const kept = KEPT_ALIASES.get(doc);
+    if (!kept || kept.size === 0) return;
+    const reads = (node: unknown): string => JSON.stringify(this.plainOf(doc, node)) ?? 'undefined';
+    const changed = new Map<Alias, Node>();
+    for (const [alias, was] of kept) {
+      if (reads(alias) !== reads(was)) changed.set(alias, was);
+    }
+    if (changed.size === 0) return;
+    visit(doc, {
+      Alias: (key, alias) => {
+        const was = changed.get(alias);
+        if (key === 'key' || !was) return undefined;
+        return this.withCommentsOf(alias, was);
+      },
+    });
+  }
+
+  /**
+   * A copy of what `node` reads as, sharing nothing with the document: aliases
+   * resolved into copies, anchors and the top node's comments left out, and a
+   * number keeps its source text (`007`). A self-referencing alias reads null.
+   */
+  private detach(doc: Document, node: unknown, top = true, path = new Set<unknown>()): Node {
+    if (isAlias(node)) {
+      const target = node.resolve(doc);
+      if (target === undefined || path.has(target)) return doc.createNode(null) as Node;
+      return this.detach(doc, target, top, path);
+    }
+    let copy: Node;
+    if (isScalar(node)) {
+      const scalar = node.clone() as Scalar;
+      if (typeof scalar.value === 'number' && scalar.source !== undefined && String(scalar.value) !== scalar.source) {
+        scalar.value = scalar.source;
+      }
+      copy = scalar;
+    } else if (isMap(node) || isSeq(node)) {
+      path.add(node);
+      const part = (n: unknown): unknown => (isNode(n) ? this.detach(doc, n, false, path) : n);
+      if (isMap(node)) {
+        const map = new YAMLMap();
+        map.items = node.items.map((pair) => new Pair(part(pair.key), part(pair.value)));
+        copy = map;
+      } else {
+        const seq = new YAMLSeq();
+        seq.items = node.items.map((item) => (isPair(item) ? item.clone() : part(item)));
+        copy = seq;
+      }
+      path.delete(node);
+      (copy as YAMLMap | YAMLSeq).flow = node.flow;
+      if (!top) {
+        copy.commentBefore = node.commentBefore;
+        copy.comment = node.comment;
+      }
+    } else {
+      return doc.createNode(isNode(node) ? this.plainOf(doc, node) : node) as Node;
+    }
+    copy.anchor = undefined;
+    if (top) {
+      copy.comment = undefined;
+      copy.commentBefore = undefined;
+      copy.spaceBefore = undefined;
+    }
+    return copy;
   }
 
   /**
@@ -826,7 +960,11 @@ export class LogicalModelService {
     const claimed = new Set<number>();
     const claim = (i: number): number => (i === -1 ? i : (claimed.add(i), i));
     const matchOf = desired.map((want) => claim(read.findIndex((r, i) => !claimed.has(i) && same(r, want))));
-    if (matchOf.every((i) => i !== -1) && read.every((r, i) => r === null || claimed.has(i))) return;
+    claimed.forEach((i) => this.confirmAliases(doc, list.items[i]));
+    if (matchOf.every((i) => i !== -1) && read.every((r, i) => r === null || claimed.has(i))) {
+      if (isAlias(existing)) this.confirmAliases(doc, existing);
+      return;
+    }
     const unknown = read.findIndex((r) => r === undefined);
     if (unknown !== -1) throw refuse(list.items[unknown], 'this relationship entry cannot be read');
     if (isAlias(existing)) throw refuse(existing, '"relationships:" is an alias of a list written elsewhere');
@@ -903,7 +1041,10 @@ export class LogicalModelService {
     leaveAlone: ReadonlySet<string> = new Set(),
   ): void {
     for (const key of managedKeys) {
-      if (leaveAlone.has(key)) continue;
+      if (leaveAlone.has(key)) {
+        this.confirmAliases(doc, map.get(key, true));
+        continue;
+      }
       if (!(key in desired)) {
         if (map.has(key)) map.delete(key);
         continue;
@@ -911,6 +1052,16 @@ export class LogicalModelService {
       const value = desired[key];
       const existing = map.get(key, true);
 
+      if (isAlias(existing)) {
+        // `key: *x` that already reads as `value` stays an alias, comments
+        // and all; one that changed becomes the new value, keeping its comments.
+        if (this.aliasReadsAs(doc, key, existing, value)) {
+          this.confirmAliases(doc, existing);
+          continue;
+        }
+        map.set(key, this.withCommentsOf(existing, doc.createNode(value) as Node));
+        continue;
+      }
       if (key === 'rationale' && isMap(existing) && value && typeof value === 'object' && !Array.isArray(value)) {
         this.syncMap(doc, existing, value as Record<string, unknown>, RATIONALE_KEYS);
         continue;
@@ -929,13 +1080,13 @@ export class LogicalModelService {
           // Same text, but the parser coerced it (e.g. `007` -> 7). Pin the
           // node to the string the model actually uses so it is not written
           // back as `7`; the node's comments are untouched.
-          existing.value = value;
+          setScalarValue(existing, value);
           continue;
         }
-        // YAMLMap.set updates the existing Scalar's value in place, keeping
-        // its style and comments.
-        map.set(key, value);
-        continue;
+        if (this.isScalarLike(value)) {
+          setScalarValue(existing, value);
+          continue;
+        }
       }
       map.set(key, this.isScalarLike(value) ? value : doc.createNode(value));
     }
@@ -963,14 +1114,100 @@ export class LogicalModelService {
         map.items.push(doc.createPair(key, value));
         continue;
       }
-      if (this.sameMetaValue(doc, pair.value, value)) continue;
+      if (this.sameMetaValue(doc, pair.value, value)) {
+        this.confirmAliases(doc, pair.value);
+        continue;
+      }
       if (isScalar(pair.value) && this.isScalarLike(value)) {
         // Keep the node, and with it any trailing comment on the line.
-        pair.value.value = value;
+        setScalarValue(pair.value, value);
+      } else if (isAlias(pair.value)) {
+        pair.value = this.withCommentsOf(pair.value, doc.createNode(value) as Node);
       } else {
         pair.value = doc.createNode(value);
       }
     }
+  }
+
+  /**
+   * Whether the alias `node`, the value of managed key `key`, already reads as
+   * `value` — compared the way core's reader reads that key, so an unchanged
+   * save leaves `dataType: *x # note` exactly as written. Text keys compare
+   * as `String()` of the scalar's source (`str()`), flags by the reader's
+   * `bool()`, `scdType` by `Number()`; a map or list (`meta`, `rationale`,
+   * `columns`) is read through core's own parser on both sides. A value the
+   * reader cannot see as the same is reported as changed, so it is written.
+   */
+  private aliasReadsAs(doc: Document, key: string, node: Alias, value: unknown): boolean {
+    const target = node.resolve(doc);
+    if (target === undefined) return false;
+    if (value === null || value === undefined) return isScalar(target) && this.scalarValue(target) === null;
+    if (typeof value === 'object') {
+      const read = (v: unknown): string | undefined => {
+        try {
+          const probe = parseLogicalModelText(new Document({ name: 'probe', [key]: v }).toString(), 'probe');
+          return JSON.stringify((probe as unknown as Record<string, unknown> | null)?.[key]);
+        } catch {
+          return undefined;
+        }
+      };
+      const was = read(this.plainOf(doc, target));
+      return was !== undefined && was === read(value);
+    }
+    if (!isScalar(target)) return false;
+    const read = this.scalarValue(target);
+    if (read === null) return false;
+    if (typeof value === 'boolean') {
+      return value === (read === true || (typeof read === 'string' && /^(true|yes|on)$/i.test(read.trim())));
+    }
+    if (typeof value === 'number') return Number(read) === value;
+    return String(read) === String(value);
+  }
+
+  /**
+   * A node tree as core's reader turns it into plain values: aliases resolved,
+   * scalars as their source text, a raw `!!pairs` entry as its `String()`.
+   */
+  private plainOf(doc: Document, node: unknown, path = new Set<unknown>()): unknown {
+    if (isAlias(node)) {
+      const target = node.resolve(doc);
+      return path.has(target) ? null : this.plainOf(doc, target, path);
+    }
+    if (isMap(node)) {
+      path.add(node);
+      const obj: Record<string, unknown> = {};
+      for (const pair of node.items) {
+        Object.defineProperty(obj, String(this.plainOf(doc, pair.key, path)), {
+          value: this.plainOf(doc, pair.value, path), enumerable: true, writable: true, configurable: true,
+        });
+      }
+      path.delete(node);
+      return obj;
+    }
+    if (isSeq(node)) {
+      path.add(node);
+      const items = node.items.map((item) => this.plainOf(doc, item, path));
+      path.delete(node);
+      return items;
+    }
+    if (isScalar(node)) return this.scalarValue(node);
+    if (isPair(node)) return String(node);
+    return node ?? null;
+  }
+
+  /** `node`, to stand in place of the alias `old`, carrying the line's comments. */
+  private withCommentsOf(old: Alias, node: Node): Node {
+    if (isScalar(node)) {
+      if (old.commentBefore) node.commentBefore = old.commentBefore;
+      if (old.comment) node.comment = old.comment;
+    } else {
+      // A block map or list would print a trailing comment after its last
+      // line; the line's comment goes first in the block instead.
+      const lines = [old.commentBefore, old.comment].filter((c): c is string => Boolean(c));
+      if (lines.length > 0) node.commentBefore = lines.join('\n');
+    }
+    if (old.spaceBefore) node.spaceBefore = true;
+    return node;
   }
 
   /**
@@ -1040,7 +1277,13 @@ export class LogicalModelService {
     seq.items = desired.map((col, i) => {
       const node = matches[i];
       if (node) {
-        this.syncMap(doc, node, col, COLUMN_KEYS, this.readDefaultsLeftOut(node, col));
+        this.renameDataTypeAlias(doc, node);
+        const leaveAlone = this.readDefaultsLeftOut(doc, node, col);
+        if (this.dataTypeAliasFate(doc, node) === 'anchored') {
+          leaveAlone.add('dataType');
+          this.syncKeptDataType(doc, node, col);
+        }
+        this.syncMap(doc, node, col, COLUMN_KEYS, leaveAlone);
         return node;
       }
       return doc.createNode(col);
@@ -1048,14 +1291,167 @@ export class LogicalModelService {
   }
 
   /**
+   * Turn dbt's `data_type:` into `dataType:` on a column whose type the reader
+   * takes from `data_type` (#144) — see {@link dataTypeAliasFate}. Renaming
+   * the key where it stands — same position, value, style and comments — is
+   * what lets the sync that follows find the type it is about to write
+   * instead of adding a second key beside it. An empty `dataType:` beside it
+   * holds nothing, so it gives way, and every comment on it moves to the
+   * renamed key: see {@link foldEmptyDataType}. A `data_type` next to a
+   * `dataType` that holds a value is left alone: the reader ignores it, and
+   * it is the user's.
+   */
+  private renameDataTypeAlias(doc: Document, node: YAMLMap): void {
+    if (this.dataTypeAliasFate(doc, node) !== 'rename') return;
+    const pair = node.items.find((p) => keyIs(p, DATA_TYPE_ALIAS))!;
+    if (!isScalar(pair.key)) pair.key = doc.createNode(pair.key);
+    const empty = node.items.findIndex((p) => keyIs(p, 'dataType'));
+    if (empty !== -1) this.foldEmptyDataType(doc, node, empty, pair);
+    setScalarValue(pair.key as Scalar, 'dataType');
+  }
+
+  /**
+   * Drop the empty `dataType:` at `node.items[index]` in favour of `pair`
+   * (the `data_type` about to be renamed), keeping every comment either key
+   * carried. The dropped key's come first, then the renamed key's own: they
+   * all become comment lines above the renamed key, except that the dropped
+   * key's one-line trailing comment (`dataType: # TODO`) stays on the line
+   * when the renamed key has none of its own.
+   *
+   * The `yaml` library hands an empty value every comment line below it, up
+   * to the next key (`# about data_type` above `data_type:` is stored on the
+   * empty `dataType:`), and then marks that next key as having a blank line
+   * before it whether or not there was one. So the key that follows the
+   * dropped one gets a blank line only when the file had one there, read
+   * from the source text.
+   */
+  private foldEmptyDataType(doc: Document, node: YAMLMap, index: number, pair: Pair): void {
+    const [gone] = node.items.splice(index, 1);
+    const commentsOf = (n: unknown): { before?: string; trailing?: string } =>
+      isNode(n) ? { before: n.commentBefore ?? undefined, trailing: n.comment ?? undefined } : {};
+    const goneKey = commentsOf(gone.key);
+    const goneValue = commentsOf(gone.value);
+    const key = pair.key as Scalar;
+    const lines: (string | undefined)[] = [goneKey.before, goneKey.trailing, goneValue.before];
+    let trailing = goneValue.trailing;
+    // Only a comment written on the dropped key's own line (`dataType: # TODO`)
+    // can stay on the line; one on a line of its own below it stays a line.
+    const source = SOURCE_TEXT.get(doc);
+    const valueRange = isNode(gone.value) ? gone.value.range : undefined;
+    const onKeyLine = source === undefined || !valueRange
+      || !/^[ \t]*\r?\n/.test(source.slice(valueRange[0], valueRange[2]));
+    if (trailing !== undefined && !trailing.includes('\n') && onKeyLine && isNode(pair.value) && !pair.value.comment) {
+      pair.value.comment = trailing;
+      trailing = undefined;
+    }
+    lines.push(trailing, key.commentBefore ?? undefined);
+    const merged = lines.filter((line): line is string => line !== undefined && line !== '');
+    if (merged.length > 0) key.commentBefore = merged.join('\n');
+
+    // The key now first after the dropped one's place, if any.
+    const next = node.items[index];
+    if (!next || !isScalar(next.key)) return;
+    const from = isScalar(gone.key) ? gone.key.range?.[0] : undefined;
+    const to = next.key.range?.[0];
+    const blankInside = source !== undefined && from !== undefined && to !== undefined
+      ? BLANK_LINE.test(source.slice(from, to))
+      : Boolean(next.key.spaceBefore) && !goneValue.trailing;
+    next.key.spaceBefore = (isScalar(gone.key) && gone.key.spaceBefore) || blankInside || undefined;
+  }
+
+  /**
+   * What a write of this column does with its `data_type:` key (#144) — the
+   * one rule {@link renameDataTypeAlias} and doctor share, matching core's
+   * reader (`dataType` read as a plain value, aliases resolved, else
+   * `data_type`): `'rename'` when the reader takes the type from it (no
+   * `dataType`, or an empty one — also an alias of an empty value), `'ignored'`
+   * when a `dataType` holding a value (even `''`) wins and the key is kept as
+   * written, null with no `data_type`.
+   *
+   * `'anchored'` is a `'rename'` that would touch a YAML anchor: the empty
+   * `dataType` (its key or its value) or the `data_type` key carries one
+   * (`dataType: &x`). Dropping that node leaves every `*x` pointing at
+   * nothing, so the file stops parsing; renaming the anchored key renames
+   * every `*k:` key too; and writing the type into the empty anchored value
+   * would retype every column that says `*x`. So both keys stay exactly as
+   * written and the type is kept in `data_type`, where the reader already
+   * takes it from ({@link syncKeptDataType}) — no column reads differently.
+   */
+  private dataTypeAliasFate(doc: Document, node: YAMLMap): 'rename' | 'ignored' | 'anchored' | null {
+    const alias = node.items.find((p) => keyIs(p, DATA_TYPE_ALIAS));
+    if (!alias) return null;
+    const own = node.items.find((p) => keyIs(p, 'dataType'));
+    const value = own && isAlias(own.value) ? own.value.resolve(doc) : own?.value;
+    const empty = value === null || value === undefined || (isScalar(value) && value.value === null);
+    if (!empty) return 'ignored';
+    const anchored = (n: unknown): boolean => isNode(n) && !isAlias(n) && Boolean(n.anchor);
+    return anchored(alias.key) || (own !== undefined && (anchored(own.key) || anchored(own.value))) ? 'anchored' : 'rename';
+  }
+
+  /**
+   * Write `desired.dataType` into the `data_type` of an `'anchored'` column
+   * (see {@link dataTypeAliasFate}) — the key the reader takes it from — and
+   * only when it reads differently, so a save that changes nothing leaves the
+   * file byte-identical. A type the reader would fill in anyway (`unknown`
+   * over an empty `data_type`) is not written.
+   */
+  private syncKeptDataType(doc: Document, node: YAMLMap, desired: Record<string, unknown>): void {
+    if (!('dataType' in desired)) return;
+    const wanted = desired.dataType;
+    const raw = node.get(DATA_TYPE_ALIAS, true);
+    const existing = isAlias(raw) ? raw.resolve(doc) : raw;
+    const read = isScalar(existing) ? this.scalarValue(existing) : existing;
+    if (isNode(read)) return; // a list or map: the user's, never overwritten
+    if (read === null || read === undefined ? wanted === COLUMN_READ_DEFAULTS.dataType : String(read) === String(wanted)) {
+      this.confirmAliases(doc, raw);
+      return;
+    }
+    this.syncMap(doc, node, { [DATA_TYPE_ALIAS]: wanted }, [DATA_TYPE_ALIAS]);
+  }
+
+  /**
+   * The columns of `name`'s file that spell their type dbt's way
+   * (`data_type:`), in file order (#144); `erd-studio doctor` lists them.
+   * Read from the same YAML document a write edits: `columns` are the keys
+   * {@link renameDataTypeAlias} renames the next time ERD Studio writes this
+   * file, `ignored` the `data_type` keys beside a `dataType` that wins (kept
+   * as written, so they stay listed until the user deletes them), `anchored`
+   * the `data_type` keys a write keeps because renaming would touch a YAML
+   * anchor (see {@link dataTypeAliasFate}). All empty for a missing,
+   * unparseable or unsafe file — those are reported elsewhere.
+   */
+  dataTypeAliasColumns(name: string): { columns: string[]; ignored: string[]; anchored: string[] } {
+    const found = { columns: [] as string[], ignored: [] as string[], anchored: [] as string[] };
+    const filePath = this.resolveModelPath(name);
+    const doc = filePath === null ? null : this.loadEditableDocument(filePath);
+    if (!doc || !isMap(doc.contents)) return found;
+    const resolve = (node: unknown): unknown => (isAlias(node) ? node.resolve(doc) : node);
+    const columns = resolve(doc.contents.get('columns', true));
+    if (!isSeq(columns)) return found;
+    columns.items.forEach((item, i) => {
+      const col = resolve(item);
+      const fate = isMap(col) ? this.dataTypeAliasFate(doc, col) : null;
+      if (!isMap(col) || fate === null) return;
+      const nameNode = col.get('name', true);
+      const value = isScalar(nameNode) ? this.scalarValue(nameNode) : nameNode;
+      const label = value === undefined || value === null || value === '' ? `#${i + 1}` : String(value);
+      ({ rename: found.columns, ignored: found.ignored, anchored: found.anchored })[fate].push(label);
+    });
+    return found;
+  }
+
+  /**
    * Keys `node` leaves out (or empty) whose desired value is only what the
    * reader fills in for them — `dataType: unknown` for a column with no type.
-   * A save leaves those alone, so it never adds a default nobody typed.
+   * A save leaves those alone, so it never adds a default nobody typed. An
+   * alias is read through, as the reader does, so `dataType: *x` of an empty
+   * anchor stays an alias rather than turning into `unknown`.
    */
-  private readDefaultsLeftOut(node: YAMLMap, desired: Record<string, unknown>): Set<string> {
+  private readDefaultsLeftOut(doc: Document, node: YAMLMap, desired: Record<string, unknown>): Set<string> {
     const keys = new Set<string>();
     for (const [key, fallback] of Object.entries(COLUMN_READ_DEFAULTS)) {
-      const existing = node.get(key, true);
+      const raw = node.get(key, true);
+      const existing = isAlias(raw) ? raw.resolve(doc) : raw;
       const empty = existing === undefined || existing === null || (isScalar(existing) && existing.value === null);
       if (empty && desired[key] === fallback) keys.add(key);
     }

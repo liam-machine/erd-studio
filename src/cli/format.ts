@@ -28,6 +28,25 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** Names listed in full before a doctor line shortens the rest to "and N more". */
+const NAMES_SHOWN = 5;
+
+/** `a, b, c` — or the first few and "and N more" (never "and 1 more"). */
+function nameList(names: string[]): string {
+  if (names.length <= NAMES_SHOWN + 1) return names.join(', ');
+  return `${names.slice(0, NAMES_SHOWN).join(', ')} and ${names.length - NAMES_SHOWN} more`;
+}
+
+/**
+ * `payment_id uses …` for one column, `4 columns use … (a, b, c, d)` for
+ * more: the subject of a doctor line about some of a model file's columns.
+ */
+function columnsSubject(names: string[], verbOne: string, verbMany: string, rest: string): string {
+  return names.length === 1
+    ? `${names[0]} ${verbOne} ${rest}`
+    : `${plural(names.length, 'column')} ${verbMany} ${rest} (${nameList(names)})`;
+}
+
 function fixLine(f: Fix, p: Paint): string {
   const mark = f.severity === 'blocking' ? p.red('✗') : p.yellow('!');
   const where = f.column ? `${f.model}.${f.column}` : f.model;
@@ -112,7 +131,19 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     lines.push(`${p.red('✗')} ${describeUnreadable(u, 'doctor')}`);
   }
   for (const a of r.erd.dataTypeAliasFiles) {
-    lines.push(`${p.yellow('!')} ${a.file}: ${a.columns.join(', ')} spelled data_type — read as dataType, saved back as dataType`);
+    if (a.columns.length > 0) {
+      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.columns, 'uses', 'use', "dbt's data_type")}`
+        + ` — read as dataType; the next edit of this model on the canvas writes ${a.columns.length === 1 ? 'it' : 'them'} back as dataType`);
+    }
+    if (a.ignored.length > 0) {
+      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.ignored, 'has', 'have', 'both dataType and data_type')}`
+        + (a.ignored.length === 1 ? ' — data_type is ignored; delete it' : ' — each data_type is ignored; delete them'));
+    }
+    if (a.anchored.length > 0) {
+      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.anchored, 'uses', 'use', "dbt's data_type")}`
+        + ' — read as dataType, but kept as written: a YAML anchor sits on the empty dataType or the data_type key,'
+        + ' and renaming would break what refers to it');
+    }
   }
   lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
   lines.push('', 'Next steps:');

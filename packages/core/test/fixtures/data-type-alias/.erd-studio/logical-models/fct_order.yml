@@ -1,0 +1,20 @@
+name: fct_order
+schema: silver
+description: Orders, with column types spelled the way dbt's schema.yml spells them
+columns:
+  - name: order_id
+    data_type: INT
+    description: Order identifier
+    isPrimaryKey: true
+  - name: customer_id
+    data_type: INT
+    isForeignKey: true
+  - name: amount
+    data_type: DECIMAL(18,2) # money
+  - name: status
+    dataType: VARCHAR
+    data_type: TEXT # dataType wins
+  - name: note
+    data_type: ~
+  - name: placed_at
+    description: No type at all

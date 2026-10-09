@@ -1,0 +1,9 @@
+name: dim_customer
+schema: silver
+description: Customers, spelled the ERD Studio way
+columns:
+  - name: customer_id
+    dataType: INT
+    isPrimaryKey: true
+  - name: customer_name
+    dataType: VARCHAR

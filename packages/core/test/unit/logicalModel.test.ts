@@ -433,3 +433,28 @@ describe('compositeKey on a relationship entry (#133 L2)', () => {
     expect(parseLogicalModelText(text, 'pit')!.relationships!.map((r) => r.compositeKey ?? null)).toEqual(['fk_sat', null, null, null]);
   });
 });
+
+describe("dbt's data_type spelling of a column type (#144)", () => {
+  const typeOf = (column: string): string | undefined =>
+    parseLogicalModelText(`name: fct_order\ncolumns:\n  - name: amount\n${column}`, 'x')?.columns?.[0].dataType;
+
+  it('reads data_type exactly as it reads dataType', () => {
+    for (const value of ['INT', 'DECIMAL(18,2)', '007', 'true', '"varchar(255)"']) {
+      expect(typeOf(`    data_type: ${value}\n`)).toBe(typeOf(`    dataType: ${value}\n`));
+    }
+    expect(typeOf('    data_type: DECIMAL(18,2)  # money\n')).toBe('DECIMAL(18,2)');
+  });
+
+  it('lets dataType win when both are present, even an empty one', () => {
+    expect(typeOf('    data_type: TEXT\n    dataType: VARCHAR\n')).toBe('VARCHAR');
+    expect(typeOf('    dataType: VARCHAR\n    data_type: TEXT\n')).toBe('VARCHAR');
+    expect(typeOf('    dataType: ""\n    data_type: TEXT\n')).toBe('');
+  });
+
+  it('falls back to data_type when dataType is null, and to unknown when neither has a value', () => {
+    expect(typeOf('    dataType: ~\n    data_type: TEXT\n')).toBe('TEXT');
+    expect(typeOf('    description: no type\n')).toBe('unknown');
+    expect(typeOf('    data_type: ~\n')).toBe('unknown');
+    expect(typeOf('    data_type:\n')).toBe('unknown');
+  });
+});

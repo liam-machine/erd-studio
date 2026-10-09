@@ -32,6 +32,7 @@ const DOMAIN_CASES: Record<string, string> = {
   'library-relationships': '.erd-studio/gold/sales.json',
   'v4-nameless-column': '.erd-studio/silver/orders.json',
   'composite-and-self': '.erd-studio/gold/vault.json',
+  'data-type-alias': '.erd-studio/silver/orders.json',
 };
 
 const ERROR_CASES: Record<string, string> = {

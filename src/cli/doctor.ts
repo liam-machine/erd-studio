@@ -104,8 +104,9 @@ export interface DoctorResult extends Envelope {
     conflictedDomainFiles: ConflictedDomainFile[];
     /**
      * Model files that spell a column type dbt's way (`data_type:`). They read
-     * as `dataType`, and the next save from the canvas writes them back as
-     * `dataType` — a warning, not a next step: nothing is broken.
+     * as `dataType`, and the next time ERD Studio writes that model's file (a
+     * canvas edit to the model or a relationship stored in it) the key is
+     * renamed `dataType` — a warning, not a next step: nothing is broken.
      */
     dataTypeAliasFiles: DataTypeAliasFile[];
   };
@@ -124,8 +125,24 @@ export interface DataTypeAliasFile {
   name: string;
   /** Project-relative, forward slashes. */
   file: string;
-  /** The columns that use `data_type`, in file order. */
+  /**
+   * The columns whose type is read from `data_type`, in file order: the next
+   * write of this file renames each key to `dataType`, which clears them.
+   */
   columns: string[];
+  /**
+   * The columns that have both keys, in file order: `dataType` wins, and the
+   * `data_type` beside it is ignored and kept as written, so only deleting it
+   * clears them.
+   */
+  ignored: string[];
+  /**
+   * The columns whose type is read from `data_type` but whose keys a write
+   * keeps as written, in file order: the empty `dataType` beside it (or the
+   * `data_type` key) carries a YAML anchor, and renaming would break or
+   * change what refers to it. Only a hand edit of the anchor clears them.
+   */
+  anchored: string[];
 }
 
 export interface DoctorOptions {
@@ -203,7 +220,11 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   for (const entry of ctx.logicalModelService.listModelFiles()) {
     if (entry.shadowedBy) { continue; }
     const err = ctx.logicalModelService.getModelFileError(entry.name);
-    if (err) { unreadable.push(toUnreadableModelFile(ctx.root, err)); }
+    if (err) { unreadable.push(toUnreadableModelFile(ctx.root, err)); continue; }
+    const { columns, ignored, anchored } = ctx.logicalModelService.dataTypeAliasColumns(entry.name);
+    if (columns.length + ignored.length + anchored.length > 0) {
+      aliased.push({ name: entry.name, file: relPath(ctx.root, entry.filePath), columns, ignored, anchored });
+    }
   }
   return {
     semanticDirExists: true,

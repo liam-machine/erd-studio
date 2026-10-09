@@ -102,6 +102,12 @@ interface YamlModel {
 interface YamlColumn {
   name: string;
   dataType: string;
+  /**
+   * dbt's spelling of `dataType` (a schema.yml column's `data_type:`), read as
+   * an alias (#144). `dataType` wins whenever it holds a value; the extension
+   * renames the key `dataType` the next time it writes this model's file.
+   */
+  data_type?: unknown;
   description?: string;
   isPrimaryKey?: boolean;
   isForeignKey?: boolean;
@@ -384,7 +390,9 @@ function yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
       .map((col) => {
         const column: ColumnDef = {
           name: str(col.name) ?? '',
-          dataType: str(col.dataType) ?? 'unknown',
+          // `dataType` holding any value (even '') wins; an absent or null
+          // `dataType` falls back to dbt's `data_type` before the default (#144).
+          dataType: str(col.dataType) ?? str(col.data_type) ?? 'unknown',
           description: str(col.description) ?? '',
         };
         if (bool(col.isPrimaryKey)) column.isPrimaryKey = true;
