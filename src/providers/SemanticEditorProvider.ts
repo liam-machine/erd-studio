@@ -83,6 +83,7 @@ import {
   computeMissingPositions,
   DomainValidationError,
   EMPTY_DBT_KEY_INDEX,
+  parseDomainJson,
   sameLink,
   setMetaEntry,
   toDisplayDomain,
@@ -2103,7 +2104,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const panelKey = document.uri.toString();
 
     const text = document.getText();
-    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const parsed = this.parseDomainDocument(document, text);
     const section = this.getStageSection(parsed, stage);
 
     try {
@@ -2266,6 +2267,32 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const names = filePaths.map((p) => path.relative(this.workspaceRoot, p).split(path.sep).join('/'));
     return `Could not save ${names.join(', ')} — the change is open in the editor but not on disk. ` +
       'Save the file from its tab (or revert it), then try again.';
+  }
+
+  /**
+   * The open domain document, parsed for an edit or a handler that reads it
+   * (#151). Core's `parseDomainJson` reads it — the load path's parser — so a
+   * document that is empty, not JSON, or holds git conflict markers (written
+   * while the canvas was open, before its refresh) refuses with the load
+   * path's plain message ("…has unresolved git merge conflicts (first at
+   * line N)…") instead of a raw SyntaxError, naming the file project-relative
+   * as other toasts do. It throws `EditRefused` before any edit is built, so
+   * nothing is written. Telemetry sniffs and refresh paths keep their own
+   * tolerant `JSON.parse`: a bad document there is not the user's error.
+   */
+  private parseDomainDocument(document: vscode.TextDocument, text: string = document.getText()): Record<string, unknown> {
+    const shown = path.relative(this.workspaceRoot, document.uri.fsPath).split(path.sep).join('/');
+    let data: unknown;
+    try {
+      data = parseDomainJson(text, shown);
+    } catch (err) {
+      if (err instanceof DomainFileError) throw new EditRefused(err.message);
+      throw err;
+    }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new EditRefused(`Domain file ${shown} does not contain a JSON object.`);
+    }
+    return data as Record<string, unknown>;
   }
 
   /**
@@ -2694,7 +2721,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       model = { ...model, name: model.name.trim() };
 
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
       const section = this.getStageSection(parsed, stage);
 
       // V5: create central model file + add name reference to domain
@@ -2837,7 +2864,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       // V5: write to central model file
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
       if (this.isDomainV5(parsed)) {
         const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const columns = model.columns ?? [];
@@ -2910,7 +2937,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
 
       // V5: write column update to central model file, cascade rename to domain
       if (this.isDomainV5(parsed)) {
@@ -3034,7 +3061,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<void> {
     try {
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
 
       // V5: write to central model file, cascade orphaned relationships in the domain.
       // No-op silently if the column or model is already gone (e.g. spam-clicked delete).
@@ -3101,7 +3128,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<void> {
     try {
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
 
       // V5: write to central model file
       if (this.isDomainV5(parsed)) {
@@ -3173,7 +3200,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       // V5: write to central model file
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
       if (this.isDomainV5(parsed)) {
         const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const columns = model.columns ?? [];
@@ -3280,7 +3307,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
     errorLabel: string,
   ): Promise<{ home: 'library' | 'domain'; changed: SemanticModel[] } | null> {
-    const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+    const parsed = this.parseDomainDocument(document);
     const v5 = this.isDomainV5(parsed);
     const models = v5 ? this.logicalModelService.listModels() : [];
     const home = v5 && this.relationshipsInLibrary(models) ? 'library' : 'domain';
@@ -3347,7 +3374,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
       const section = this.getStageSection(parsed, stage);
 
       // V5: rename central model file + update domain references
@@ -3527,7 +3554,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     try {
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
 
       if (this.isDomainV5(parsed)) {
         const success = await this.applyDomainEdit(
@@ -3927,7 +3954,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
       const section = this.getStageSection(parsed, stage);
 
       // V5: add model reference to domain (create model file from manifest if needed)
@@ -4111,7 +4138,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<void> {
     telemetry.feature('addFromDbtStarted');
     try {
-      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document);
       if (!this.isDomainV5(parsed)) {
         telemetry.feature('addFromDbtNeedsV5');
         this.post(webview, {
@@ -4171,7 +4198,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<void> {
     try {
       // Re-read inside the queue: an edit may have landed while the picker was open.
-      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document);
       const section = this.getStageSection(parsed, 'logical');
       const existingNames = (section.models ?? []) as string[];
       const draft = buildDbtDraft({
@@ -4261,7 +4288,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       // V5: write to central model file
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
       if (this.isDomainV5(parsed)) {
         const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const existing = model.rationale ?? {};
@@ -4317,7 +4344,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       // V5: write to central model file
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
       if (this.isDomainV5(parsed)) {
         const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const description = payload.description?.trim() || undefined;
@@ -4362,7 +4389,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       // V5: write to central model file
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
       if (this.isDomainV5(parsed)) {
         const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const grain = payload.grain?.trim() || undefined;
@@ -4409,7 +4436,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     payload: { modelName: string; alias: string },
   ): Promise<void> {
     try {
-      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document);
       if (!this.isDomainV5(parsed)) {
         webview.postMessage({
           type: 'error',
@@ -4444,7 +4471,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     payload: UpdateMetaMessage['payload'],
   ): Promise<void> {
     try {
-      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document);
       if (!this.isDomainV5(parsed)) {
         webview.postMessage({
           type: 'error',
@@ -4483,7 +4510,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       // V5: write to central model file
       const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsed = this.parseDomainDocument(document, text);
       if (this.isDomainV5(parsed)) {
         const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           if (payload.modelRole) { model.modelRole = payload.modelRole as import('../types/semantic').ModelRole; } else { delete model.modelRole; }
@@ -4674,15 +4701,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
 
       // Parse domain info from the document
-      const parsed = JSON.parse(document.getText());
+      const parsed = this.parseDomainDocument(document);
 
       const syncPlan = buildSyncPlan(report, selections, {
         manifest,
         ymlData,
         projectRoot: this.workspaceRoot,
         semanticDir,
-        domain: parsed.domain ?? '',
-        layer: parsed.layer ?? '',
+        domain: (parsed.domain as string | undefined) ?? '',
+        layer: (parsed.layer as string | undefined) ?? '',
         modelFolder: (name) => this.logicalModelService.modelFolder(name),
       });
 
