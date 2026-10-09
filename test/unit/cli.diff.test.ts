@@ -154,10 +154,15 @@ describe('diff', () => {
     expect(r.code).toBe(1);
     const d = (JSON.parse(r.out) as DiffResult).domains[0];
     expect(d.unreadableModelFiles).toEqual([expect.objectContaining({ name: 'fct_task_event', kind: 'yamlOther', line: 2, mergeConflict: true })]);
-    expect(d.fixes.filter((f) => f.kind === 'fix-model-yaml')).toEqual([expect.objectContaining({ line: 2 })]);
+    const fixes = d.fixes.filter((f) => f.kind === 'fix-model-yaml');
+    expect(fixes).toEqual([expect.objectContaining({ line: 2 })]);
+    // An assistant reads the fix: it shows the conflict and asks, never picks a side.
+    expect(fixes[0].explain).toContain('.erd-studio/logical-models/fct_task_event.yml line 2: unresolved git merge conflict');
+    expect(fixes[0].explain).toContain("ask which side to keep (don't pick a side or run git commands yourself)");
+    expect(fixes[0].explain).not.toContain('git add');
 
     const human = await run(['diff', '--domain', '.erd-studio/silver/showcase.json'], root);
-    expect(human.out).toContain('✗ fct_task_event.yml line 2: unresolved git merge conflict — keep one side, save, then git add');
+    expect(human.out).toContain('✗ fct_task_event.yml line 2: unresolved git merge conflict — resolve it (keep one side), save, then re-run diff');
   });
 
   it('a domain in a layer layers.json does not define: skipped by --all, unknown-layer for --domain', async () => {

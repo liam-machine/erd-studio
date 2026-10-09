@@ -151,10 +151,14 @@ function aliasTargets(doc: Document): Map<Alias, unknown> {
  * Parse the text of a logical model file.
  *
  * Returns null for an empty file, a file whose root is not a mapping, or a
- * model with no `name`. Throws on YAML syntax errors (the first error yaml
- * reports), `YamlNodeLimitError` when `maxNodes` is set and exceeded, and
- * `YamlCharLimitError` when `maxChars` is. A limit that is not a number of at
- * least 0 (or Infinity) throws a TypeError.
+ * model with no `name`. Throws on YAML syntax errors: the first error yaml
+ * reports, except that text holding unresolved git merge conflicts throws an
+ * Error named `ModelMergeConflictError` instead, with `mergeConflict: true`,
+ * `line` (the 1-based line of the first `<<<<<<<`) and yaml's error as its
+ * `cause` — `classifyModelLoadError` turns it into a `loadError` with
+ * `mergeConflict` set. Also throws `YamlNodeLimitError` when `maxNodes` is
+ * set and exceeded, and `YamlCharLimitError` when `maxChars` is. A limit that
+ * is not a number of at least 0 (or Infinity) throws a TypeError.
  * `fallbackName` names the model when its `name` is not a usable string.
  */
 export function parseLogicalModelText(

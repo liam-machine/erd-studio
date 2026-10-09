@@ -89,9 +89,22 @@ export const MODEL_YAML_HINTS: Record<ModelFileErrorKind, string> = {
   read: 'the file could not be read — check it exists and is readable',
 };
 
-/** The advice for an unreadable model file: the merge-conflict one, else its kind's. */
+/**
+ * The advice an AI assistant reads for an unreadable model file (doctor's
+ * next step, diff's fix): the merge-conflict one, else its kind's. Which side
+ * of a conflict to keep is the user's call — it is usually a teammate's work —
+ * so the conflict advice asks the assistant to show it, not to resolve it.
+ */
 export function unreadableHint(u: Pick<UnreadableModelFile, 'kind' | 'mergeConflict'>): string {
-  return u.mergeConflict ? 'unresolved git merge conflict — keep one side, save, then git add' : MODEL_YAML_HINTS[u.kind];
+  return u.mergeConflict
+    ? 'unresolved git merge conflict — git left two versions there: show the user the file and line and ask which side '
+      + "to keep (don't pick a side or run git commands yourself)"
+    : MODEL_YAML_HINTS[u.kind];
+}
+
+/** The terminal line's advice for a conflicted file: short, and it picks no side. */
+export function mergeConflictHumanHint(rerun: 'doctor' | 'diff'): string {
+  return `unresolved git merge conflict — resolve it (keep one side), save, then re-run ${rerun}`;
 }
 
 /** A {@link ModelFileError} as the CLI reports it: project-relative, redacted. */
@@ -109,10 +122,13 @@ export function toUnreadableModelFile(root: string, err: ModelFileError): Unread
   };
 }
 
-/** `fct_order.yml line 4: YAML error (BLOCK_AS_IMPLICIT_KEY) — wrap the value in double quotes`. */
-export function describeUnreadable(u: UnreadableModelFile): string {
+/**
+ * `fct_order.yml line 4: YAML error (BLOCK_AS_IMPLICIT_KEY) — wrap the value in double quotes`,
+ * for the terminal; `rerun` names the command to run again once a conflict is resolved.
+ */
+export function describeUnreadable(u: UnreadableModelFile, rerun: 'doctor' | 'diff'): string {
   const where = `${path.posix.basename(u.file)}${u.line !== undefined ? ` line ${u.line}` : ''}`;
-  if (u.mergeConflict) { return `${where}: ${unreadableHint(u)}`; }
+  if (u.mergeConflict) { return `${where}: ${mergeConflictHumanHint(rerun)}`; }
   const what = u.kind === 'read' ? 'could not be read' : `YAML error${u.code ? ` (${u.code})` : ''}`;
   return u.kind === 'read' ? `${where}: ${MODEL_YAML_HINTS.read}` : `${where}: ${what} — ${MODEL_YAML_HINTS[u.kind]}`;
 }
@@ -408,8 +424,11 @@ export function fixesFromPlan(
     fixes.push({
       severity: 'blocking', kind: 'fix-model-yaml', model: u.name, file: u.file,
       ...(u.line !== undefined ? { line: u.line } : {}),
-      explain: `${describeUnreadable(u)}. Fix this file before anything else — until it parses, `
-        + 'ERD Studio sees the model as empty and every other difference for it is meaningless.',
+      explain: u.mergeConflict
+        ? `${u.file}${u.line !== undefined ? ` line ${u.line}` : ''}: ${unreadableHint(u)}. Raise this before anything `
+          + 'else — until it is resolved, ERD Studio sees the model as empty and every other difference for it is meaningless.'
+        : `${describeUnreadable(u, 'diff')}. Fix this file before anything else — until it parses, `
+          + 'ERD Studio sees the model as empty and every other difference for it is meaningless.',
     });
   }
   // A model-level resolution would only arise for a model compare() did not
