@@ -122,8 +122,9 @@ the helper will be missing: ask them to start it from VS Code's integrated termi
 **Seen as:** any of these, from doctor or the diff, at any stage:
 - doctor's `resolve-merge-conflicts` step — `erd.conflictedDomainFiles` lists each diagram file
   (`file`, `line`);
-- a `fix-model-yaml` step or fix whose model file has `mergeConflict: true` (doctor's
-  `erd.unreadableModelFiles`, the diff's `unreadableModelFiles`);
+- a `fix-model-yaml` step or fix whose model file's entry in doctor's `erd.unreadableModelFiles`
+  or the diff's `unreadableModelFiles` has `mergeConflict: true` (the step and the fix themselves
+  carry no such field);
 - a diff `error` with code `merge-conflict` (a diagram file the diff could not load).
 
 The file still holds git's conflict markers (`<<<<<<<` … `=======` … `>>>>>>>`): two people
@@ -138,21 +139,25 @@ chosen. Only the user knows which version is right — it is often a teammate's 
    > left both after a merge, and ERD Studio can't open it until one is chosen."
 
 3. Read the file and look at what differs between the two versions. Each conflict runs from a
-   `<<<<<<<` line to a `>>>>>>>` line, split by `=======`; the label after each marker says where
-   that version came from (`HEAD` is the branch they are on). A file can hold several — doctor
-   names only the first line, so check for every `<<<<<<<`.
+   `<<<<<<<` line to a `>>>>>>>` line, split by `=======`; the labels after `<<<<<<<` and
+   `>>>>>>>` name the two sides. Do not assume which one is "theirs": during a rebase the two
+   swap (`HEAD` is then the branch being rebased onto), so describe each version by what it
+   contains, not by its label. A file can hold several — doctor names only the first line, so
+   check for every `<<<<<<<`.
    - **Only `viewConfig.positions` differ** (where tables sit on the canvas): say either side is
-     safe — the design is the same, only the layout differs. Offer to keep theirs or ours, and
-     edit only once the user says which.
+     safe — the design is the same, only the layout differs. Offer to keep either one, and edit
+     only once the user says which.
    - **Anything else differs:** describe each version in one line and ask which to keep. Do not
      recommend one.
 4. Never pick a side unasked. Never run `git add`, `git checkout --ours` / `--theirs`,
    `git merge`, `git commit`, `git restore`, `git stash` or any other git command — finishing the
    merge is the user's job, in their own git tool.
 5. If the user names a side, Edit the file: keep that version's lines, delete the other version
-   and the three marker lines, change nothing else. Then remind them to finish the merge in git.
-6. Once the user says the file is resolved and saved, re-run doctor (or the diff) — "Checking
-   again now the conflict is resolved." — and carry on from where you stopped.
+   and the three marker lines, change nothing else. Your edit saves the file, so re-run doctor
+   (or the diff) straight away — "Checking again now the conflict is resolved." — and remind
+   them to finish the merge in git.
+6. If the user resolves it themselves instead, re-run doctor (or the diff) once they say the file
+   is saved, then carry on from where you stopped.
 
 ## Manifest stale or unreadable
 

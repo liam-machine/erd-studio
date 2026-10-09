@@ -205,7 +205,7 @@ the result and tell the user what you found in one or two sentences, based on `d
   `--trust-venv` on every later doctor run. On a no, carry on as if it were not there. Your
   assistant may also ask before each command that runs it; that is expected.
 - **A merge conflict** (a `resolve-merge-conflicts` step, a `merge-conflict` error, or a
-  `fix-model-yaml` with `mergeConflict: true`, at any stage): git left two versions in a file.
+  `fix-model-yaml` whose `unreadableModelFiles` entry has `mergeConflict: true`, at any stage): git left two versions in a file.
   Stop and follow `references/troubleshooting.md` → "Merge conflicts"; never pick a side or run git.
 - **`fusion-v2`, `cloud-cli`, `unknown`** — say what it means in one line, as
   `references/dbt-setup.md` section 1 says (Cloud CLI: carry on from the project files).
@@ -412,7 +412,7 @@ Then loop, following `references/verify-and-fix.md`, which maps every fix to its
 - **`phantoms`** — models in the diagram that dbt does not have. Always ask (unless the backlog
   lists it as intentional): usually a typo or a model not built yet. Offer to rename it to the
   real dbt name or remove it from this domain. Never delete a model file under `logical-models/`.
-- **`fix-model-yaml`** first, always: fix that line, re-run the diff (a merge conflict: Stage 1).
+- **`fix-model-yaml`** first, always: the file does not parse — fix that line, re-run the diff (a merge conflict: Stage 1).
 - **`needsMigration`** — older file format; suggest **ERD Studio: Migrate to v5**, skip it now.
 - Re-run the diff after each round of edits. **Stop after 3 rounds.** List what remains using
   each fix's `explain` text and suggest looking at it together with **⊕ Diff** on the canvas.

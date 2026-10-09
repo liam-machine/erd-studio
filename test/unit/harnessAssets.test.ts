@@ -414,13 +414,38 @@ describe('setup skill: merge conflicts are the user\'s to settle (#150)', () => 
   it('never treats a merge conflict as a YAML fix', () => {
     const fix = ref('verify-and-fix.md');
     const row = fix.split('\n').find((l) => l.startsWith('| `fix-model-yaml`')) ?? '';
-    expect(row).toContain('**Except with `mergeConflict: true`:**');
+    expect(row).toContain('**Except when the file\'s `unreadableModelFiles` entry has `mergeConflict: true`:**');
     expect(row).toContain('do not edit it; ask the user');
     expect(fix).toContain('**Merge conflicts** are always the user\'s');
     expect(ref('building-the-model.md')).toContain('`mergeConflict: true`: that file holds two versions from a git merge');
     // Every place SKILL.md tells the assistant to fix a fix-model-yaml carves the conflict out.
     expect(body()).toContain('except a merge conflict, which is the user\'s to settle (Stage 1)');
     expect(body()).toContain('re-run the diff (a merge conflict: Stage 1)');
+  });
+
+  it('puts mergeConflict on the unreadableModelFiles entry, never on the fix or the step', () => {
+    // The CLI carries the flag only on UnreadableModelFile; Fix and NextStep have no such field.
+    const block = (src: string, name: string): string => {
+      const start = src.indexOf(`export interface ${name} {`);
+      expect(start, name).toBeGreaterThan(-1);
+      return src.slice(start, src.indexOf('\n}', start));
+    };
+    expect(block(cli('diff.ts'), 'UnreadableModelFile')).toContain('mergeConflict?: true');
+    expect(block(cli('diff.ts'), 'Fix')).not.toContain('mergeConflict');
+    expect(block(cli('doctor.ts'), 'NextStep')).not.toContain('mergeConflict');
+    // So no skill text may say a fix or step "with" / "has" / "marked" the flag, and every
+    // paragraph or table row that names the flag also names where it really sits.
+    const texts: Record<string, string> = { 'SKILL.md': body() };
+    for (const name of fs.readdirSync(path.join(__dirname, '../../src/harness/claude/erd-studio-setup/references'))) {
+      texts[name] = ref(name);
+    }
+    for (const [name, text] of Object.entries(texts)) {
+      expect(text, name).not.toMatch(/`fix-model-yaml`(?: step| fix| step or fix)? (?:with|has|marked) `mergeConflict/);
+      expect(text, name).not.toContain('Except with `mergeConflict');
+      for (const para of text.split(/\n\s*\n|\n(?=\|)/)) {
+        if (para.includes('`mergeConflict: true`')) { expect(para, `${name}: ${para}`).toContain('unreadableModelFiles'); }
+      }
+    }
   });
 
   it('pre-approves no git command', () => {
