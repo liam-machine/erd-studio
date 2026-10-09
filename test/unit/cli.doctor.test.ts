@@ -267,6 +267,45 @@ describe('doctor via main', () => {
     expect(clean.nextSteps.some((s) => s.id === 'fix-model-yaml')).toBe(false);
   });
 
+  it('names model files that spell a column type data_type, as a warning and never a next step (#144)', async () => {
+    const root = copyFixture('dbt-project');
+    const before = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(before.erd.dataTypeAliasFiles).toEqual([]);
+
+    fs.mkdirSync(path.join(root, '.erd-studio/logical-models/gold'));
+    fs.writeFileSync(
+      path.join(root, '.erd-studio/logical-models/gold/fct_refund.yml'),
+      [
+        'name: fct_refund',
+        'columns:',
+        '  - name: refund_id',
+        '    dataType: INT',
+        '  - name: amount',
+        '    data_type: DECIMAL(18,2)',
+        '  - name: reason',
+        '    dataType: VARCHAR',
+        '    data_type: TEXT',
+        '',
+      ].join('\n'),
+    );
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(r.erd.dataTypeAliasFiles).toEqual([
+      { name: 'fct_refund', file: '.erd-studio/logical-models/gold/fct_refund.yml', columns: ['amount', 'reason'] },
+    ]);
+    expect(r.erd.unreadableModelFiles).toEqual([]);
+    expect(r.nextSteps).toEqual(before.nextSteps);
+
+    let out = '';
+    const code = await main(['doctor', '--project', root, '--no-dbt'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: root,
+      env: cleanEnv,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain(".erd-studio/logical-models/gold/fct_refund.yml: amount, reason use dbt's data_type");
+  });
+
   it('prints JSON and exits 0, also for a folder with no project', async () => {
     let out = '';
     const io = { stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: tmp, env: cleanEnv };

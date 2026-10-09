@@ -1245,6 +1245,105 @@ describe('LogicalModelService — a save adds nothing the user did not change', 
   });
 });
 
+describe('LogicalModelService — dbt\'s data_type spelling (#144)', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+  let file: string;
+
+  beforeEach(() => {
+    tempDir = createTempWorkspace();
+    service = new LogicalModelService(tempDir);
+    service.ensureDir();
+    file = service.modelPath('fct_order');
+  });
+  afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  const DBT_SPELLED = [
+    'name: fct_order',
+    'columns:',
+    '  - name: order_id',
+    '    data_type: INT',
+    '    isPrimaryKey: true',
+    '  - name: amount',
+    '    data_type: DECIMAL(18,2) # money',
+    '    description: Order total',
+    '',
+  ].join('\n');
+  const RENAMED = DBT_SPELLED.split('data_type:').join('dataType:');
+
+  it('renames every column\'s data_type to dataType in place on the next save, keeping its comment', () => {
+    fs.writeFileSync(file, DBT_SPELLED);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns!.map((c) => c.dataType)).toEqual(['INT', 'DECIMAL(18,2)']);
+
+    model.description = 'Orders';
+    expect(service.serializeModel(model)).toBe(`${RENAMED}description: Orders\n`);
+    service.saveModel(model);
+
+    const after = fs.readFileSync(file, 'utf-8');
+    expect(after).toBe(`${RENAMED}description: Orders\n`);
+    expect(after).toContain('    dataType: DECIMAL(18,2) # money\n');
+    expect(after).not.toContain('data_type');
+    expect(service.getModel('fct_order')!.columns!.map((c) => c.dataType)).toEqual(['INT', 'DECIMAL(18,2)']);
+  });
+
+  it('writes an edited type into the renamed key, not beside it', () => {
+    fs.writeFileSync(file, DBT_SPELLED);
+    const model = service.getModel('fct_order')!;
+    model.columns![1].dataType = 'NUMERIC(20,4)';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(RENAMED.replace('DECIMAL(18,2)', 'NUMERIC(20,4)'));
+  });
+
+  it('renames an empty data_type without filling in a type nobody typed', () => {
+    const yml = 'name: fct_order\ncolumns:\n  - name: note\n    data_type: ~\n  - name: memo # later\n    data_type:\n';
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns!.map((c) => c.dataType)).toEqual(['unknown', 'unknown']);
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(`${yml.split('data_type:').join('dataType:')}description: Orders\n`);
+  });
+
+  it('keeps both keys when a column has dataType and data_type', () => {
+    const yml = 'name: fct_order\ncolumns:\n  - name: status\n    data_type: TEXT # from dbt\n    dataType: VARCHAR\n';
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns![0].dataType).toBe('VARCHAR');
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(`${yml}description: Orders\n`);
+  });
+
+  it('leaves a file already spelled dataType byte-identical on a save that changes nothing', () => {
+    fs.writeFileSync(file, RENAMED);
+    service.saveModel(service.getModel('fct_order')!);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(RENAMED);
+  });
+
+  it('names the columns that use data_type, in file order, for doctor', () => {
+    fs.writeFileSync(file, [
+      'name: fct_order',
+      'columns:',
+      '  - name: order_id',
+      '    dataType: INT',
+      '  - name: status',
+      '    dataType: VARCHAR',
+      '    data_type: TEXT',
+      '  - name: amount',
+      '    data_type: DECIMAL(18,2)',
+      '',
+    ].join('\n'));
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual(['status', 'amount']);
+
+    fs.writeFileSync(file, RENAMED);
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual([]);
+    expect(service.dataTypeAliasColumns('no_such_model')).toEqual([]);
+    fs.writeFileSync(file, 'name: fct_order\ncolumns:\n  - name: a\n    data_type: [INT\n');
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual([]);
+  });
+});
+
 describe('LogicalModelService — a direct write keeps the file\'s line endings', () => {
   let tempDir: string;
   let service: LogicalModelService;

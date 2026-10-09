@@ -158,6 +158,8 @@ Models are defined once and can be referenced from several domains. Editing a mo
 | `additiveType` | string | No | Fact measures: `"additive"`, `"semi-additive"`, or `"non-additive"`. |
 | `meta` | map | No | Free-form, dbt-style metadata for this column. See [Metadata](#metadata-meta). Omit entirely if empty. |
 
+**`data_type` (still read).** A column whose type is spelled the way dbt's schema.yml spells it, `data_type:`, is read as `dataType` (#144). When a column has both keys, `dataType` wins whenever it holds a value (even `""`); `data_type` is used only when `dataType` is absent or null. ERD Studio writes `dataType` only: the next save from the canvas renames a lone `data_type` key to `dataType` in place (its value and comment unchanged), and leaves a `data_type` that sits beside a `dataType` alone. `erd-studio doctor` lists the files and columns that use it. Write `dataType`; the JSON schema still flags `data_type` as an unknown key.
+
 ### ModelRole Enum
 
 | Value | Use Case |

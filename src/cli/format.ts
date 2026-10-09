@@ -112,7 +112,7 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     lines.push(`${p.red('✗')} ${describeUnreadable(u)}`);
   }
   for (const a of r.erd.dataTypeAliasFiles) {
-    lines.push(`${p.yellow('!')} ${a.file}: ${a.columns.join(', ')} spelled data_type — read as dataType, saved back as dataType`);
+    lines.push(`${p.yellow('!')} ${a.file}: ${a.columns.join(', ')} use dbt's data_type — read as dataType and saved back as dataType (where a column has both, dataType wins)`);
   }
   lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
   lines.push('', 'Next steps:');

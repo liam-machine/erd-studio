@@ -1,0 +1,29 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: orders (layer silver, logical stage)
+%% Description: A model file that spells column types data_type (#144)
+
+  %% Model fct_order
+  %%   schema: silver
+  %%   description: Orders, with column types spelled the way dbt's schema.yml spells them
+  "fct_order" {
+    INT order_id PK "Order identifier"
+    INT customer_id FK
+    DECIMAL_18_2 amount "type DECIMAL(18,2)"
+    VARCHAR status
+    unknown note
+    unknown placed_at "No type at all"
+  }
+
+  %% Model dim_customer
+  %%   schema: silver
+  %%   description: Customers, spelled the ERD Studio way
+  "dim_customer" {
+    INT customer_id PK
+    VARCHAR customer_name
+  }
+
+  %% fct_order.customer_id -> dim_customer.customer_id, many-to-one
+  "fct_order" }o--|| "dim_customer" : "customer_id"

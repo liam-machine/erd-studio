@@ -5,6 +5,8 @@
   "composite-and-self.unified": [
     "warn: [DomainService] Relationships in pit_customer's model file marked compositeKey \"fk_lonely\" do not form one composite key (it has only one column pair); drawn separately"
   ],
+  "data-type-alias.host": [],
+  "data-type-alias.unified": [],
   "dbt-project.physical.host": [],
   "dbt-project.stage-physical": [],
   "errors.array.host": [

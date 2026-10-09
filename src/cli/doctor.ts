@@ -122,7 +122,10 @@ export interface DataTypeAliasFile {
   name: string;
   /** Project-relative, forward slashes. */
   file: string;
-  /** The columns that use `data_type`, in file order. */
+  /**
+   * The columns that use `data_type`, in file order — also one that has a
+   * `dataType` too, whose `data_type` is ignored and kept on save.
+   */
   columns: string[];
 }
 
@@ -196,7 +199,9 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   for (const entry of ctx.logicalModelService.listModelFiles()) {
     if (entry.shadowedBy) { continue; }
     const err = ctx.logicalModelService.getModelFileError(entry.name);
-    if (err) { unreadable.push(toUnreadableModelFile(ctx.root, err)); }
+    if (err) { unreadable.push(toUnreadableModelFile(ctx.root, err)); continue; }
+    const columns = ctx.logicalModelService.dataTypeAliasColumns(entry.name);
+    if (columns.length > 0) { aliased.push({ name: entry.name, file: relPath(ctx.root, entry.filePath), columns }); }
   }
   return {
     semanticDirExists: true,

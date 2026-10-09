@@ -1,0 +1,28 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project orders {
+  Note: '''Layer: silver
+Stage: logical
+
+A model file that spells column types data_type (#144)'''
+}
+
+Table silver.fct_order {
+  order_id INT [pk, note: 'Order identifier']
+  customer_id INT
+  amount "DECIMAL(18,2)"
+  status VARCHAR
+  note unknown
+  placed_at unknown [note: 'No type at all']
+  Note: 'Orders, with column types spelled the way dbt\'s schema.yml spells them'
+}
+
+Table silver.dim_customer {
+  customer_id INT [pk]
+  customer_name VARCHAR
+  Note: 'Customers, spelled the ERD Studio way'
+}
+
+Ref: silver.fct_order.customer_id > silver.dim_customer.customer_id

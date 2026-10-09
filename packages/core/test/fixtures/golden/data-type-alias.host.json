@@ -1,0 +1,126 @@
+{
+  "type": "domainLoaded",
+  "payload": {
+    "schemaVersion": 5,
+    "domain": "orders",
+    "layer": "silver",
+    "stage": "logical",
+    "description": "A model file that spells column types data_type (#144)",
+    "models": [
+      {
+        "name": "fct_order",
+        "schema": "silver",
+        "description": "Orders, with column types spelled the way dbt's schema.yml spells them",
+        "columns": [
+          {
+            "name": "order_id",
+            "dataType": "INT",
+            "description": "Order identifier",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "customer_id",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
+          },
+          {
+            "name": "amount",
+            "dataType": "DECIMAL(18,2)",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "status",
+            "dataType": "VARCHAR",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "note",
+            "dataType": "unknown",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "placed_at",
+            "dataType": "unknown",
+            "description": "No type at all",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ]
+      },
+      {
+        "name": "dim_customer",
+        "schema": "silver",
+        "description": "Customers, spelled the ERD Studio way",
+        "columns": [
+          {
+            "name": "customer_id",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "customer_name",
+            "dataType": "VARCHAR",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "fct_order",
+        "fromColumn": "customer_id",
+        "toModel": "dim_customer",
+        "toColumn": "customer_id",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "positions": {
+        "fct_order": {
+          "x": 0,
+          "y": 0
+        },
+        "dim_customer": {
+          "x": 400,
+          "y": 0
+        }
+      }
+    },
+    "templates": [],
+    "manifestModels": [],
+    "existingModels": [],
+    "layerConfig": {
+      "id": "silver",
+      "label": "Silver",
+      "abbreviation": "SLV",
+      "color": "#a0a0a0",
+      "creatable": true,
+      "order": 0
+    },
+    "readOnly": false,
+    "positionDraggable": true
+  },
+  "welcomeDismissed": false
+}

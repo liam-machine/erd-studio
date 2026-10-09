@@ -108,6 +108,12 @@ const COLUMN_KEYS = [
   'isPrimaryKey', 'isForeignKey', 'isNaturalKey',
   'scdType', 'additiveType', 'meta',
 ] as const;
+/** dbt's spelling of a column's `dataType`, which core reads as an alias (#144). */
+const DATA_TYPE_ALIAS = 'data_type';
+/** Whether a pair's key is `key`, as a plain or scalar key. */
+function keyIs(pair: Pair, key: string): boolean {
+  return isScalar(pair.key) ? pair.key.value === key : pair.key === key;
+}
 /** What core's reader fills in for a column key the file leaves out or leaves empty. */
 const COLUMN_READ_DEFAULTS: Readonly<Record<string, unknown>> = { name: '', dataType: 'unknown' };
 
@@ -1038,11 +1044,57 @@ export class LogicalModelService {
     seq.items = desired.map((col, i) => {
       const node = matches[i];
       if (node) {
+        this.renameDataTypeAlias(node);
         this.syncMap(doc, node, col, COLUMN_KEYS, this.readDefaultsLeftOut(node, col));
         return node;
       }
       return doc.createNode(col);
     });
+  }
+
+  /**
+   * Turn dbt's `data_type:` into `dataType:` on a column that has no
+   * `dataType` key (#144). The reader takes the type from `data_type` then,
+   * so renaming the key where it stands — same position, value, style and
+   * comments — is what lets the sync that follows find the type it is about
+   * to write instead of adding a second key beside it. A `data_type` next to
+   * a `dataType` is left alone: the reader ignores it, and it is the user's.
+   */
+  private renameDataTypeAlias(node: YAMLMap): void {
+    if (node.has('dataType')) return;
+    const pair = node.items.find((p) => keyIs(p, DATA_TYPE_ALIAS));
+    if (!pair) return;
+    if (isScalar(pair.key)) {
+      pair.key.value = 'dataType';
+    } else {
+      pair.key = 'dataType';
+    }
+  }
+
+  /**
+   * The columns of `name`'s file that spell their type dbt's way
+   * (`data_type:`), in file order (#144); `erd-studio doctor` lists them. Read
+   * from the same YAML document a save edits, so it names every key
+   * {@link renameDataTypeAlias} would rename, plus any `data_type` sitting
+   * beside a `dataType` (kept, and ignored by the reader). Empty for a
+   * missing, unparseable or unsafe file — those are reported elsewhere.
+   */
+  dataTypeAliasColumns(name: string): string[] {
+    const filePath = this.resolveModelPath(name);
+    const doc = filePath === null ? null : this.loadEditableDocument(filePath);
+    if (!doc || !isMap(doc.contents)) return [];
+    const resolve = (node: unknown): unknown => (isAlias(node) ? node.resolve(doc) : node);
+    const columns = resolve(doc.contents.get('columns', true));
+    if (!isSeq(columns)) return [];
+    const found: string[] = [];
+    columns.items.forEach((item, i) => {
+      const col = resolve(item);
+      if (!isMap(col) || !col.items.some((p) => keyIs(p, DATA_TYPE_ALIAS))) return;
+      const nameNode = col.get('name', true);
+      const value = isScalar(nameNode) ? this.scalarValue(nameNode) : nameNode;
+      found.push(value === undefined || value === null || value === '' ? `#${i + 1}` : String(value));
+    });
+    return found;
   }
 
   /**
