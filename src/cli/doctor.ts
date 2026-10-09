@@ -249,6 +249,23 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: null,
     });
   }
+  // A model file that does not parse renders as an empty model whatever
+  // state dbt is in, so it comes before the dbt steps too — as the step's
+  // own why says, it is to be fixed before anything else.
+  if (r.erd.unreadableModelFiles.length > 0) {
+    const list = r.erd.unreadableModelFiles.map((u) =>
+      `${u.file}${u.line !== undefined ? `:${u.line}` : ''}${u.code ? ` (${u.code})` : ''} — ${unreadableHint(u)}`);
+    steps.push({
+      id: 'fix-model-yaml',
+      title: `Fix ${r.erd.unreadableModelFiles.length === 1 ? 'a model file that does' : `${r.erd.unreadableModelFiles.length} model files that do`} not parse`,
+      why: `${list.join('; ')}. `
+        + 'ERD Studio shows these models as empty until they parse; fix them before anything else.'
+        + (r.erd.unreadableModelFiles.some((u) => u.mergeConflict)
+          ? " A merge conflict is the user's to resolve; once they have saved the file, re-run doctor."
+          : ''),
+      command: null,
+    });
+  }
   if (dbt.checked && !dbt.found && !dbt.untrustedVenvDbt) {
     steps.push({
       id: 'install-dbt',
@@ -301,20 +318,6 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
         + 'The catalog holds the real column types from your warehouse; it needs a live connection.'
         + (cloud ? ' With the dbt Cloud CLI the catalog is built remotely, so local output is not guaranteed.' : ''),
       command: dbt.commands.catalog,
-    });
-  }
-  if (r.erd.unreadableModelFiles.length > 0) {
-    const list = r.erd.unreadableModelFiles.map((u) =>
-      `${u.file}${u.line !== undefined ? `:${u.line}` : ''}${u.code ? ` (${u.code})` : ''} — ${unreadableHint(u)}`);
-    steps.push({
-      id: 'fix-model-yaml',
-      title: `Fix ${r.erd.unreadableModelFiles.length === 1 ? 'a model file that does' : `${r.erd.unreadableModelFiles.length} model files that do`} not parse`,
-      why: `${list.join('; ')}. `
-        + 'ERD Studio shows these models as empty until they parse; fix them before anything else.'
-        + (r.erd.unreadableModelFiles.some((u) => u.mergeConflict)
-          ? " A merge conflict is the user's to resolve; once they have saved the file, re-run doctor."
-          : ''),
-      command: null,
     });
   }
   if (r.erd.domainFormatIssues.length > 0) {
