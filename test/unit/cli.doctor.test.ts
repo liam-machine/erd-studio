@@ -273,4 +273,118 @@ describe('doctor via main', () => {
     expect(await main(['doctor', '--json', '--no-dbt'], io)).toBe(0);
     expect(JSON.parse(out).project.found).toBe(false);
   });
+
+  /** A diagram whose positions git left conflicted, its first `<<<<<<<` on line 5. */
+  function writeConflictedDomain(root: string): void {
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(root, '.erd-studio', 'silver'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.erd-studio', 'silver', 'orders.json'), [
+      '{',
+      '  "schemaVersion": 5,',
+      '  "logical": { "models": [], "relationships": [] },',
+      '  "viewConfig": {',
+      '<<<<<<< HEAD',
+      '    "positions": {}',
+      '=======',
+      '    "positions": { "a": { "x": 1, "y": 2 } }',
+      '>>>>>>> feature',
+      '  }',
+      '}',
+    ].join('\n'));
+  }
+
+  it('lists a diagram holding git merge conflicts with its line, and puts resolving it before every dbt step (#145)', async () => {
+    // No dbt on PATH, no manifest and no catalog: install-dbt, run-parse and
+    // run-catalog are all due, and the conflict must come before each of them.
+    const root = copyFixture('dbt-project-modern-tests');
+    writeConflictedDomain(root);
+
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', env: cleanEnv, homeDir: home });
+    expect(r.erd.conflictedDomainFiles).toEqual([{ file: '.erd-studio/silver/orders.json', line: 5 }]);
+    expect(r.erd.domainFormatIssues).toEqual([]);
+    const ids = r.nextSteps.map((s) => s.id);
+    expect(ids.slice(0, 4)).toEqual(['resolve-merge-conflicts', 'install-dbt', 'run-parse', 'run-catalog']);
+    expect(ids).not.toContain('ready');
+
+    const step = r.nextSteps.find((s) => s.id === 'resolve-merge-conflicts')!;
+    expect(step.title).toBe('Resolve the git merge conflict in a diagram');
+    expect(step.why).toContain('.erd-studio/silver/orders.json:5');
+    expect(step.why).toContain('This file still holds git conflict markers');
+    // The choice of side is the user's: the assistant shows it and asks.
+    expect(step.why).toContain('ask the user which side to keep');
+    expect(step.why).toContain("Don't pick a side or run git commands yourself");
+    expect(step.why).not.toContain('git add');
+
+    let out = '';
+    const code = await main(['doctor', '--project', root, '--no-dbt'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: root,
+      env: cleanEnv,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('.erd-studio/silver/orders.json line 5: unresolved git merge conflict — resolve it (keep one side), save, then re-run doctor');
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps the venv safety question ahead of a conflicted diagram (#145)', async () => {
+    const root = copyFixture('dbt-project-modern-tests');
+    writeFakeDbt(path.join(root, '.venv', 'bin', 'dbt'), CORE_OUTPUT);
+    fs.writeFileSync(path.join(root, '.venv', 'bin', 'activate'), '');
+    writeConflictedDomain(root);
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', env: cleanEnv, homeDir: home });
+    const ids = r.nextSteps.map((s) => s.id);
+    expect(ids.slice(0, 2)).toEqual(['confirm-venv', 'resolve-merge-conflicts']);
+    expect(ids.indexOf('run-parse')).toBeGreaterThan(1);
+  });
+
+  it('reports a model file holding git merge conflicts as unreadable, flagged, at its first marker (#145)', async () => {
+    const root = copyFixture('dbt-project');
+    fs.writeFileSync(path.join(root, '.erd-studio/logical-models/fct_task_event.yml'), [
+      'name: fct_task_event',
+      '<<<<<<< HEAD',
+      'description: ours',
+      '=======',
+      'description: theirs',
+      '>>>>>>> feature',
+      'columns: []',
+      '',
+    ].join('\n'));
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(r.erd.unreadableModelFiles).toEqual([{
+      name: 'fct_task_event',
+      file: '.erd-studio/logical-models/fct_task_event.yml',
+      kind: 'yamlOther',
+      line: 2,
+      mergeConflict: true,
+      message: 'Unresolved git merge conflict (first at line 2)',
+    }]);
+    expect(r.erd.conflictedDomainFiles).toEqual([]);
+    const why = r.nextSteps.find((s) => s.id === 'fix-model-yaml')!.why;
+    expect(why).toContain('.erd-studio/logical-models/fct_task_event.yml:2 — unresolved git merge conflict — git left two versions there: '
+      + "show the user the file and line and ask which side to keep (don't pick a side or run git commands yourself)");
+    expect(why).toContain("A merge conflict is the user's to resolve; once they have saved the file, re-run doctor.");
+    expect(why).not.toContain('git add');
+  });
+
+  it('puts a model file that does not parse right after a conflicted diagram, before every dbt step (#145)', async () => {
+    // No dbt on PATH, no manifest and no catalog: the model renders as empty
+    // whatever dbt's state, so fixing it must not wait behind the dbt steps.
+    const root = copyFixture('dbt-project-modern-tests');
+    writeConflictedDomain(root);
+    fs.mkdirSync(path.join(root, '.erd-studio', 'logical-models'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.erd-studio', 'logical-models', 'orders.yml'), [
+      'name: orders',
+      '<<<<<<< HEAD',
+      'description: ours',
+      '=======',
+      'description: theirs',
+      '>>>>>>> feature',
+      'columns: []',
+      '',
+    ].join('\n'));
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', env: cleanEnv, homeDir: home });
+    expect(r.nextSteps.map((s) => s.id).slice(0, 5)).toEqual([
+      'resolve-merge-conflicts', 'fix-model-yaml', 'install-dbt', 'run-parse', 'run-catalog',
+    ]);
+  });
 });

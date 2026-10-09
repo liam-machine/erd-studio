@@ -539,6 +539,8 @@ Red Hat YAML matches paths with dot-folders skipped, so a project inside a hidde
 5. Relationship identity `(fromModel, fromColumn, toModel, toColumn)` must be unique, in either direction, and both models should be in `logical.models`.
 6. `viewConfig` must be at the root of the document.
 
+**Unresolved git merge conflicts.** A domain or model file that still holds git's conflict markers — a `<<<<<<<` line, then `=======`, then `>>>>>>>` (a diff3 `|||||||` section between the first two is fine) — and so does not parse is reported as a merge conflict, with the line of the first `<<<<<<<`, rather than as invalid JSON or a YAML error: the canvas says so (and loads by itself once the file is resolved and saved), a model file's node reads "Unresolved git merge conflict on line N", `erd-studio diff` / `export` report the error code `merge-conflict`, and `erd-studio doctor` lists the file under `conflictedDomainFiles` (a model file under `unreadableModelFiles`, with `mergeConflict: true`). A file that parses is never reported, whatever its text contains. Keep one side of each conflict, save, then `git add` the file; when only `viewConfig.positions` conflicts, either side is safe to keep.
+
 ## Complete Example
 
 File: `.erd-studio/silver/sales.json`

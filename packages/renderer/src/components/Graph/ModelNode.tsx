@@ -549,6 +549,13 @@ function describeLoadError(error: ModelLoadError): string {
   if (error.kind === 'read') {
     return "ERD Studio can't read this file.";
   }
+  // Absent from a DisplayDomain built by an older core, which then reads as
+  // the YAML error below — still true of a conflicted file.
+  if (error.mergeConflict) {
+    return error.line !== undefined
+      ? `Unresolved git merge conflict on line ${error.line} — ERD Studio can't read this file.`
+      : "Unresolved git merge conflict — ERD Studio can't read this file.";
+  }
   return error.line !== undefined
     ? `YAML error on line ${error.line} — ERD Studio can't read this file.`
     : "YAML error — ERD Studio can't read this file.";

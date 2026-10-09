@@ -22,7 +22,10 @@ export async function openModelFileAt(filePath: string, line?: number, column?: 
 }
 
 /** The one tip the notification gives, tailored to what went wrong. */
-export function modelFileErrorTip(kind: ModelFileErrorKind): string {
+export function modelFileErrorTip(kind: ModelFileErrorKind, mergeConflict?: boolean): string {
+  if (mergeConflict) {
+    return 'Tip: keep one side of each conflict, save, then git add the file.';
+  }
   switch (kind) {
     case 'yamlIndent':
       return 'Tip: indent with spaces, not tabs, and line up keys at the same level.';
@@ -40,13 +43,16 @@ export function modelFileErrorTip(kind: ModelFileErrorKind): string {
 }
 
 /** The notification text for a model file that exists but cannot be read. */
-export function modelFileErrorNotice(error: Pick<ModelFileError, 'filePath' | 'kind' | 'line'>): string {
+export function modelFileErrorNotice(error: Pick<ModelFileError, 'filePath' | 'kind' | 'line' | 'mergeConflict'>): string {
   const base = path.basename(error.filePath);
-  const tip = modelFileErrorTip(error.kind);
+  const tip = modelFileErrorTip(error.kind, error.mergeConflict);
   if (error.kind === 'read') {
     return `${base} couldn't be read and can't be shown on the diagram. ${tip}`;
   }
   const where = error.line !== undefined ? ` on line ${error.line}` : '';
+  if (error.mergeConflict) {
+    return `${base} has an unresolved git merge conflict${where} and can't be shown on the diagram. ${tip}`;
+  }
   return `${base} has a YAML error${where} and can't be shown on the diagram. ${tip}`;
 }
 

@@ -187,6 +187,12 @@ export interface ModelLoadError {
   kind: ModelLoadErrorKind;
   /** 1-based line of the error, when the parser reported one. */
   line?: number;
+  /**
+   * The file holds unresolved git merge conflicts (#145); `line` is then the
+   * first `<<<<<<<`. Absent otherwise, and from older cores — which read the
+   * same file as a YAML error on some line, still true.
+   */
+  mergeConflict?: true;
 }
 
 /**

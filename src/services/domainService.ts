@@ -236,7 +236,11 @@ export class DomainService {
         ? (name) => {
           const error = this.logicalModelService!.getModelFileError(name);
           return error
-            ? { kind: error.kind, ...(error.line !== undefined ? { line: error.line } : {}) }
+            ? {
+              kind: error.kind,
+              ...(error.line !== undefined ? { line: error.line } : {}),
+              ...(error.mergeConflict ? { mergeConflict: true as const } : {}),
+            }
             : null;
         }
         : undefined,

@@ -1748,9 +1748,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private modelUnavailableMessage(modelName: string): string {
     const error = this.logicalModelService.getModelFileError(modelName);
     if (error) {
-      return error.kind === 'read'
-        ? `Can't edit "${modelName}": its file could not be read.`
-        : `Can't edit "${modelName}": its file has a YAML error${error.line !== undefined ? ` on line ${error.line}` : ''}.`;
+      const where = error.line !== undefined ? ` on line ${error.line}` : '';
+      if (error.kind === 'read') return `Can't edit "${modelName}": its file could not be read.`;
+      return error.mergeConflict
+        ? `Can't edit "${modelName}": its file has an unresolved git merge conflict${where}.`
+        : `Can't edit "${modelName}": its file has a YAML error${where}.`;
     }
     return `Model "${modelName}" not found in logical-models/.`;
   }
@@ -2419,6 +2421,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.postLoadError(webview, errorKey, {
         message,
         ...(err instanceof DomainFileError ? { kind: 'domain-file' as const } : {}),
+        ...(err instanceof DomainFileError && err.mergeConflict ? { mergeConflict: true as const } : {}),
       }, err, classifyDomainLoadFailure(err));
     }
   }

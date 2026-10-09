@@ -89,6 +89,8 @@ export interface EditorState extends CanvasState {
    * are worth offering (see App.tsx). Null for an unclassified error.
    */
   errorKind: ErrorMessage['payload']['kind'] | null;
+  /** The domain file holds unresolved git merge conflicts (#145); false unless the host said so. */
+  errorMergeConflict: boolean;
   /** Available model templates loaded from semantic/templates/*.json. */
   templates: ModelTemplate[];
   /** Manifest models available to add to this domain (not already in domain). @deprecated Use existingModels. */
@@ -183,7 +185,7 @@ export interface EditorActions extends CanvasActions {
   setManifestMissing: (missing: boolean) => void;
   /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
   dismissManifestHint: () => void;
-  setError: (error: string | null, kind?: ErrorMessage['payload']['kind']) => void;
+  setError: (error: string | null, kind?: ErrorMessage['payload']['kind'], mergeConflict?: boolean) => void;
   setTemplates: (templates: ModelTemplate[]) => void;
   setManifestModels: (models: ManifestModelPreview[]) => void;
   /** Register a function to focus the search input (called by Toolbar on mount). */
@@ -270,6 +272,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   addExistingModelDialogOpen: false,
   error: null,
   errorKind: null,
+  errorMergeConflict: false,
   templates: [],
   manifestModels: [],
   _searchFocusFn: null,
@@ -311,7 +314,11 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   dismissPhysicalSourceNotice: () => set({ physicalSourceNoticeDismissed: true }),
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
   dismissManifestHint: () => set({ manifestHintDismissed: true }),
-  setError: (error, kind) => set({ error, errorKind: error === null ? null : (kind ?? null) }),
+  setError: (error, kind, mergeConflict) => set({
+    error,
+    errorKind: error === null ? null : (kind ?? null),
+    errorMergeConflict: error !== null && mergeConflict === true,
+  }),
   setTemplates: (templates) => set({ templates }),
   setManifestModels: (models) => set({ manifestModels: models }),
   registerSearchFocus: (focusFn) => set({ _searchFocusFn: focusFn }),
@@ -385,6 +392,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     domain,
     error: null,
     errorKind: null,
+    errorMergeConflict: false,
     // The notice gets to speak again only when the artifacts behind the stage
     // actually changed. setDomain is NOT only a host payload — usePositionPersistence
     // calls it locally to merge optimistic positions after a drag — so resetting

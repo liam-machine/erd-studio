@@ -3,7 +3,7 @@
  * CLI prints without `--json`). Colour only on a TTY and never with NO_COLOR.
  */
 
-import { describeUnreadable, type DiffResult, type DomainDiff, type Fix } from './diff';
+import { describeUnreadable, mergeConflictHumanHint, type DiffResult, type DomainDiff, type Fix } from './diff';
 import type { DoctorResult } from './doctor';
 import type { InventoryResult } from './inventory';
 
@@ -72,7 +72,7 @@ function domainBlock(d: DomainDiff, p: Paint): string[] {
   const unreadable = new Map(d.unreadableModelFiles.map((u) => [u.name, u]));
   const lines = [`${head} — ${summary}`, ...d.fixes.map((f) => {
     const u = f.kind === 'fix-model-yaml' ? unreadable.get(f.model) : undefined;
-    return u ? `  ${p.red('✗')} ${describeUnreadable(u)}` : fixLine(f, p);
+    return u ? `  ${p.red('✗')} ${describeUnreadable(u, 'diff')}` : fixLine(f, p);
   })];
   if (d.modelsWithoutColumns.length > 0) {
     lines.push(p.dim(`  ${plural(d.modelsWithoutColumns.length, 'model')} with no column information in dbt yet: ${d.modelsWithoutColumns.join(', ')}`));
@@ -105,8 +105,14 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     + (r.artifacts.manifest.models !== null ? ` (${plural(r.artifacts.manifest.models, 'model')})` : ''));
   lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
   lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'domain')}, ${plural(r.erd.logicalModels, 'logical model')}`);
+  for (const c of r.erd.conflictedDomainFiles) {
+    lines.push(`${p.red('✗')} ${c.file} line ${c.line}: ${mergeConflictHumanHint('doctor')}`);
+  }
   for (const u of r.erd.unreadableModelFiles) {
-    lines.push(`${p.red('✗')} ${describeUnreadable(u)}`);
+    lines.push(`${p.red('✗')} ${describeUnreadable(u, 'doctor')}`);
+  }
+  for (const a of r.erd.dataTypeAliasFiles) {
+    lines.push(`${p.yellow('!')} ${a.file}: ${a.columns.join(', ')} spelled data_type — read as dataType, saved back as dataType`);
   }
   lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
   lines.push('', 'Next steps:');

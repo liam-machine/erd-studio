@@ -116,6 +116,61 @@ describe('diff', () => {
     expect(JSON.parse(missing.out).error.code).toBe('domain-missing');
   });
 
+  it('a diagram holding git merge conflicts is merge-conflict: its own error under --all, exit 3 for --domain and export (#145)', async () => {
+    const root = copyProject();
+    const file = path.join(root, '.erd-studio/silver/showcase.json');
+    const lines = fs.readFileSync(file, 'utf-8').split('\n');
+    const at = lines.findIndex((l) => l.includes('"viewConfig"'));
+    lines.splice(at + 1, 0, '<<<<<<< HEAD', '    "zoom": 1,', '=======', '    "zoom": 2,', '>>>>>>> feature');
+    fs.writeFileSync(file, lines.join('\n'));
+    const line = at + 2;
+
+    const ctx = await buildCliContext({ project: root, semanticDir: '.erd-studio' });
+    const { result, exitCode } = runDiff(ctx, { all: true });
+    expect(exitCode).toBe(1);
+    const showcase = result.domains.find((d) => d.file === '.erd-studio/silver/showcase.json')!;
+    expect(showcase.error).toEqual({
+      code: 'merge-conflict',
+      message: `.erd-studio/silver/showcase.json has unresolved git merge conflicts (first at line ${line}): `
+        + 'git left two versions there. Show the user the file and line; if only positions differ either side is safe to keep, '
+        + "otherwise ask the user which side to keep. Don't pick a side or run git commands yourself.",
+    });
+
+    for (const argv of [
+      ['diff', '--json', '--domain', '.erd-studio/silver/showcase.json'],
+      ['export', '--json', '--domain', '.erd-studio/silver/showcase.json', '--format', 'mermaid'],
+    ]) {
+      const r = await run(argv, root);
+      expect(r.code, argv[0]).toBe(3);
+      expect(JSON.parse(r.out).error, argv[0]).toEqual(showcase.error);
+      expect(r.out).not.toContain(root);
+    }
+
+    // The terminal line carries the same advice: it never tells anyone to resolve it themselves.
+    const human = await run(['diff', '--all'], root);
+    expect(human.out).toContain(`showcase (silver) — could not be compared: ${showcase.error!.message}`);
+    expect(human.out).not.toMatch(/Resolve them in the file/);
+  });
+
+  it('reports a model file holding git merge conflicts as a flagged fix-model-yaml at its first marker (#145)', async () => {
+    const root = copyProject();
+    fs.writeFileSync(path.join(root, '.erd-studio/logical-models/fct_task_event.yml'),
+      'name: fct_task_event\n<<<<<<< HEAD\ndescription: a\n=======\ndescription: b\n>>>>>>> feature\ncolumns: []\n');
+    const r = await run(['diff', '--domain', '.erd-studio/silver/showcase.json', '--json'], root);
+    expect(r.code).toBe(1);
+    const d = (JSON.parse(r.out) as DiffResult).domains[0];
+    expect(d.unreadableModelFiles).toEqual([expect.objectContaining({ name: 'fct_task_event', kind: 'yamlOther', line: 2, mergeConflict: true })]);
+    const fixes = d.fixes.filter((f) => f.kind === 'fix-model-yaml');
+    expect(fixes).toEqual([expect.objectContaining({ line: 2 })]);
+    // An assistant reads the fix: it shows the conflict and asks, never picks a side.
+    expect(fixes[0].explain).toContain('.erd-studio/logical-models/fct_task_event.yml line 2: unresolved git merge conflict');
+    expect(fixes[0].explain).toContain("ask which side to keep (don't pick a side or run git commands yourself)");
+    expect(fixes[0].explain).not.toContain('git add');
+
+    const human = await run(['diff', '--domain', '.erd-studio/silver/showcase.json'], root);
+    expect(human.out).toContain('✗ fct_task_event.yml line 2: unresolved git merge conflict — resolve it (keep one side), save, then re-run diff');
+  });
+
   it('a domain in a layer layers.json does not define: skipped by --all, unknown-layer for --domain', async () => {
     const root = copyProject();
     fs.mkdirSync(path.join(root, '.erd-studio', 'platinum'));

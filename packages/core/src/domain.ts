@@ -25,13 +25,14 @@ import type {
   Annotation,
 } from './types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic.js';
-import { LOGICAL_MODELS_DIR } from './logicalModel.js';
+import { LOGICAL_MODELS_DIR, ModelMergeConflictError } from './logicalModel.js';
 import {
   canonicalRelationship, compositeGroupProblem, linkKey, normaliseCompositeKey, normaliseRelationshipRole, respellRelationship,
   reverseRelationship,
 } from './relationships.js';
 import { keyEvidence } from './keyEvidence.js';
 import type { DbtKeyIndex } from './keyEvidence.js';
+import { findConflictMarkers } from './mergeConflict.js';
 
 /**
  * Sub-directories of the semantic dir that never contain domain files.
@@ -58,18 +59,31 @@ export type DomainFileErrorReason = 'missing' | 'unreadable' | 'empty' | 'invali
  * it is an error about the timing of the read, and the fix is to read again.
  * `ManifestService` already treats a malformed `manifest.json` this way (dbt
  * mid-write); this is the same courtesy for the file the canvas is built from.
+ *
+ * The one 'invalid-json' that is not transient is a file holding unresolved
+ * git merge conflicts (#145): `mergeConflict` is true, `line` is the first
+ * `<<<<<<<`, and re-reading cannot help — someone has to keep one side. It
+ * stays an 'invalid-json' (a flag, not a new reason) so a host that predates
+ * the flag still reports it as the unparseable file it is.
  */
 export class DomainFileError extends Error {
   readonly transient: boolean;
+  /** The file holds unresolved git conflict markers; always false unless reason is 'invalid-json'. */
+  readonly mergeConflict: boolean;
+  /** 1-based line of the first conflict marker, when `mergeConflict`. */
+  readonly line?: number;
 
   constructor(
     readonly reason: DomainFileErrorReason,
     readonly filePath: string,
     message: string,
+    options: { mergeConflict?: boolean; line?: number } = {},
   ) {
     super(message);
     this.name = 'DomainFileError';
-    this.transient = reason === 'empty' || reason === 'invalid-json';
+    this.mergeConflict = options.mergeConflict === true;
+    if (options.line !== undefined) this.line = options.line;
+    this.transient = reason === 'empty' || (reason === 'invalid-json' && !this.mergeConflict);
   }
 }
 
@@ -91,8 +105,10 @@ export const VALID_CARDINALITIES: ReadonlySet<Cardinality> = new Set<Cardinality
  * Parse the text of a domain file.
  *
  * Throws a transient `DomainFileError` for an empty file ('empty') and for
- * text that is not JSON ('invalid-json'). Reading the file — and the
- * 'missing' / 'unreadable' failures — is the caller's job.
+ * text that is not JSON ('invalid-json') — except text holding git conflict
+ * markers, an 'invalid-json' with `mergeConflict` set that is not transient.
+ * Reading the file — and the 'missing' / 'unreadable' failures — is the
+ * caller's job.
  */
 export function parseDomainJson(raw: string, filePath: string): unknown {
   if (raw.trim() === '') {
@@ -106,6 +122,18 @@ export function parseDomainJson(raw: string, filePath: string): unknown {
   try {
     return JSON.parse(raw);
   } catch (err) {
+    // Only text that already failed to parse is checked, so a valid file
+    // whose description quotes a marker can never be reported as conflicted.
+    const line = findConflictMarkers(raw);
+    if (line !== null) {
+      throw new DomainFileError(
+        'invalid-json',
+        filePath,
+        `Domain file ${filePath} has unresolved git merge conflicts (first at line ${line}). `
+          + 'Resolve them in the file — if only positions conflict, either side is safe to keep.',
+        { mergeConflict: true, line },
+      );
+    }
     const message = err instanceof Error ? err.message : String(err);
     throw new DomainFileError(
       'invalid-json',
@@ -373,9 +401,13 @@ const YAML_ERROR_KINDS: Readonly<Record<string, ModelLoadErrorKind>> = {
  * Classify an error thrown while reading or parsing a model file, from its
  * `code` and `linePos` only (never the message, which may quote the file). A
  * Node fs code (`ENOENT`, `EACCES`, …) is a `read`; a YAML code maps through
- * the table above; anything else is `yamlOther`.
+ * the table above; anything else is `yamlOther`. A file holding git conflict
+ * markers is a `yamlOther` with `mergeConflict` and the first marker's line.
  */
 export function classifyModelLoadError(err: unknown): ModelLoadError & { column?: number; code?: string } {
+  if (err instanceof ModelMergeConflictError) {
+    return { kind: 'yamlOther', line: err.line, mergeConflict: true };
+  }
   const e = err as { code?: unknown; linePos?: Array<{ line: number; col: number }> } | null;
   const code = e && typeof e.code === 'string' ? e.code : undefined;
   const pos = e && Array.isArray(e.linePos) ? e.linePos[0] : undefined;
@@ -398,6 +430,11 @@ export function classifyModelLoadError(err: unknown): ModelLoadError & { column?
 export function describeModelLoadError(error: ModelLoadError): string {
   if (error.kind === 'read') {
     return 'logical-models file could not be read';
+  }
+  if (error.mergeConflict) {
+    return error.line !== undefined
+      ? `logical-models file has an unresolved git merge conflict on line ${error.line}`
+      : 'logical-models file has an unresolved git merge conflict';
   }
   return error.line !== undefined
     ? `logical-models file has a YAML error on line ${error.line}`

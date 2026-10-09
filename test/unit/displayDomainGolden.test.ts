@@ -90,6 +90,9 @@ const ERROR_CASES: Record<string, string> = {
   empty: 'silver/empty.json',
   invalid: 'silver/invalid.json',
   badlayer: 'platinum/badlayer.json',
+  // #145: unresolved git merge conflicts, in positions only and in the model list.
+  'conflict-positions': 'silver/conflict-positions.json',
+  'conflict-models': 'silver/conflict-models.json',
 };
 
 const EXPECTED_FILES = [

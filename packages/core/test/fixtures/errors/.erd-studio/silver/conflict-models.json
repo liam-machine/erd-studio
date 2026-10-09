@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 5,
+  "domain": "conflict-models",
+  "layer": "silver",
+  "description": "Two branches added different models",
+  "logical": {
+    "models": [
+      "dim_customer",
+<<<<<<< HEAD
+      "fct_order"
+=======
+      "fct_order",
+      "dim_product"
+>>>>>>> feature/products
+    ],
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {}
+  }
+}

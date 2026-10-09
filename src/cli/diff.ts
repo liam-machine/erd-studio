@@ -73,6 +73,8 @@ export interface UnreadableModelFile {
   column?: number;
   /** The `yaml` library's error code, e.g. `BLOCK_AS_IMPLICIT_KEY`. */
   code?: string;
+  /** The file holds unresolved git merge conflicts (#145); `line` is the first `<<<<<<<`. */
+  mergeConflict?: true;
   /** The parser's own message (may quote the file; never an absolute path). */
   message: string;
 }
@@ -87,6 +89,24 @@ export const MODEL_YAML_HINTS: Record<ModelFileErrorKind, string> = {
   read: 'the file could not be read — check it exists and is readable',
 };
 
+/**
+ * The advice an AI assistant reads for an unreadable model file (doctor's
+ * next step, diff's fix): the merge-conflict one, else its kind's. Which side
+ * of a conflict to keep is the user's call — it is usually a teammate's work —
+ * so the conflict advice asks the assistant to show it, not to resolve it.
+ */
+export function unreadableHint(u: Pick<UnreadableModelFile, 'kind' | 'mergeConflict'>): string {
+  return u.mergeConflict
+    ? 'unresolved git merge conflict — git left two versions there: show the user the file and line and ask which side '
+      + "to keep (don't pick a side or run git commands yourself)"
+    : MODEL_YAML_HINTS[u.kind];
+}
+
+/** The terminal line's advice for a conflicted file: short, and it picks no side. */
+export function mergeConflictHumanHint(rerun: 'doctor' | 'diff'): string {
+  return `unresolved git merge conflict — resolve it (keep one side), save, then re-run ${rerun}`;
+}
+
 /** A {@link ModelFileError} as the CLI reports it: project-relative, redacted. */
 export function toUnreadableModelFile(root: string, err: ModelFileError): UnreadableModelFile {
   const file = relPath(root, err.filePath);
@@ -97,13 +117,18 @@ export function toUnreadableModelFile(root: string, err: ModelFileError): Unread
     ...(err.line !== undefined ? { line: err.line } : {}),
     ...(err.column !== undefined ? { column: err.column } : {}),
     ...(err.code !== undefined ? { code: err.code } : {}),
+    ...(err.mergeConflict ? { mergeConflict: true as const } : {}),
     message: redactPaths(err.message.split(err.filePath).join(file)),
   };
 }
 
-/** `fct_order.yml line 4: YAML error (BLOCK_AS_IMPLICIT_KEY) — wrap the value in double quotes`. */
-export function describeUnreadable(u: UnreadableModelFile): string {
+/**
+ * `fct_order.yml line 4: YAML error (BLOCK_AS_IMPLICIT_KEY) — wrap the value in double quotes`,
+ * for the terminal; `rerun` names the command to run again once a conflict is resolved.
+ */
+export function describeUnreadable(u: UnreadableModelFile, rerun: 'doctor' | 'diff'): string {
   const where = `${path.posix.basename(u.file)}${u.line !== undefined ? ` line ${u.line}` : ''}`;
+  if (u.mergeConflict) { return `${where}: ${mergeConflictHumanHint(rerun)}`; }
   const what = u.kind === 'read' ? 'could not be read' : `YAML error${u.code ? ` (${u.code})` : ''}`;
   return u.kind === 'read' ? `${where}: ${MODEL_YAML_HINTS.read}` : `${where}: ${what} — ${MODEL_YAML_HINTS[u.kind]}`;
 }
@@ -171,6 +196,19 @@ export function resolveDomainPath(ctx: CliContext, arg: string, cwd: string = pr
 }
 
 /**
+ * The advice for a diagram holding git merge conflicts (#145), in place of
+ * core's neutral message (which the Confluence app shows as is): the same
+ * line doctor's `resolve-merge-conflicts` step and {@link unreadableHint}
+ * take — the assistant reading `diff` / `export` shows the user the file and
+ * line and leaves the choice of side to them.
+ */
+export function conflictedDomainMessage(file: string, line: number | undefined): string {
+  return `${file} has unresolved git merge conflicts${line !== undefined ? ` (first at line ${line})` : ''}: `
+    + 'git left two versions there. Show the user the file and line; if only positions differ either side is safe to keep, '
+    + "otherwise ask the user which side to keep. Don't pick a side or run git commands yourself.";
+}
+
+/**
  * Map a thrown domain-load error to a stable code and a redacted message with
  * the project-relative path. Shared with `export --domain`, so one broken file
  * reads the same from both subcommands.
@@ -180,6 +218,7 @@ export function describeDomainError(ctx: CliContext, file: string, err: unknown)
   const raw = err instanceof Error ? err.message : String(err);
   const message = redactPaths(raw.split(file).join(rel));
   if (err instanceof DomainFileError) {
+    if (err.mergeConflict) { return { code: 'merge-conflict', message: conflictedDomainMessage(rel, err.line) }; }
     return { code: err.reason === 'missing' ? 'domain-missing' : 'domain-invalid', message };
   }
   if (/invalid layer/.test(raw)) { return { code: 'unknown-layer', message }; }
@@ -398,8 +437,11 @@ export function fixesFromPlan(
     fixes.push({
       severity: 'blocking', kind: 'fix-model-yaml', model: u.name, file: u.file,
       ...(u.line !== undefined ? { line: u.line } : {}),
-      explain: `${describeUnreadable(u)}. Fix this file before anything else — until it parses, `
-        + 'ERD Studio sees the model as empty and every other difference for it is meaningless.',
+      explain: u.mergeConflict
+        ? `${u.file}${u.line !== undefined ? ` line ${u.line}` : ''}: ${unreadableHint(u)}. Raise this before anything `
+          + 'else — until it is resolved, ERD Studio sees the model as empty and every other difference for it is meaningless.'
+        : `${describeUnreadable(u, 'diff')}. Fix this file before anything else — until it parses, `
+          + 'ERD Studio sees the model as empty and every other difference for it is meaningless.',
     });
   }
   // A model-level resolution would only arise for a model compare() did not

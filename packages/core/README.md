@@ -35,10 +35,12 @@ Bad input rejects with one of four classes, so a host can map them to its own er
 
 | Class | When |
 |---|---|
-| `DomainFileError` | the domain file is missing (`reason: 'missing'`), empty or not JSON |
+| `DomainFileError` | the domain file is missing (`reason: 'missing'`), empty (`'empty'`) or not JSON (`'invalid-json'`), including a file holding unresolved git merge conflicts (`mergeConflict: true`, see below) |
 | `DomainValidationError` | not a loadable domain: not an object, no or a newer `schemaVersion`, a legacy or hybrid layout, an unconfigured layer, a malformed v4 inline model (say, `columns` that is not a list) |
 | `TooManyModelsError` | `logical.models` has more than `maxModels` entries (checked before any model file is read) |
 | `FileTooLargeError` | the domain file is longer than `maxDomainChars` |
+
+A `DomainFileError` carries `transient`: true for an empty or unparseable file, which may be a write still in progress and is worth reading again shortly. The exception is a domain file that still holds git's conflict markers (a `<<<<<<<` line, then `=======`, then `>>>>>>>`; a diff3 `|||||||` section is fine) and so does not parse: it is an `'invalid-json'` with `mergeConflict: true` and `line`, the 1-based line of the first `<<<<<<<`, and it is **not** transient — reading it again cannot help until someone resolves the conflict and saves the file. A file that parses is never reported as a conflict, whatever its text contains, and an older core reports the same file as plain invalid JSON. A model file with conflict markers renders as a placeholder whose `loadError` is `{ kind: 'yamlOther', line, mergeConflict: true }`, `line` again being the first `<<<<<<<`.
 
 A `readFile` rejection is passed through unchanged. For files you do not control, the options also take:
 

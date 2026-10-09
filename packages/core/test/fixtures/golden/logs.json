@@ -13,6 +13,12 @@
   "errors.badlayer.host": [
     "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/platinum/badlayer.json has invalid layer \"diamond\". Expected one of: silver, gold"
   ],
+  "errors.conflict-models.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/conflict-models.json has unresolved git merge conflicts (first at line 9). Resolve them in the file — if only positions conflict, either side is safe to keep."
+  ],
+  "errors.conflict-positions.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/conflict-positions.json has unresolved git merge conflicts (first at line 12). Resolve them in the file — if only positions conflict, either side is safe to keep."
+  ],
   "errors.empty.host": [
     "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/empty.json is empty — re-reading in 150ms (likely mid-write)",
     "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/empty.json is empty — re-reading in 350ms (likely mid-write)",
