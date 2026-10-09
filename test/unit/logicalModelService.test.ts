@@ -10,6 +10,7 @@ import { parseLogicalModelText } from '@erd-studio/core';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
 import type { ManifestData, ManifestModelInfo } from '../../src/types/manifest';
+import type { SemanticModel } from '../../src/types/semantic';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -1496,6 +1497,71 @@ describe('LogicalModelService — dbt\'s data_type spelling (#144)', () => {
     expect(service.dataTypeAliasColumns('no_such_model')).toEqual(none);
     fs.writeFileSync(file, 'name: fct_order\ncolumns:\n  - name: a\n    data_type: [INT\n');
     expect(service.dataTypeAliasColumns('fct_order')).toEqual(none);
+  });
+
+  describe('a YAML alias (*x) as the value', () => {
+    const DEFS = 'name: fct_order\nx-defs:\n  t: &tv INT\n  b: &tv2 BOOLEAN\n';
+    const save = (yml: string, edit?: (m: SemanticModel) => void): string => {
+      fs.writeFileSync(file, yml);
+      const model = service.getModel('fct_order')!;
+      model.description = 'Orders';
+      edit?.(model);
+      service.saveModel(model);
+      return fs.readFileSync(file, 'utf-8');
+    };
+
+    it('renames data_type: *x and keeps the alias and its comment as written', () => {
+      expect(save(`${DEFS}columns:\n  - name: a\n    data_type: *tv2 # ct-dt\n`))
+        .toBe(`${DEFS}columns:\n  - name: a\n    dataType: *tv2 # ct-dt\ndescription: Orders\n`);
+    });
+
+    it('keeps the comment of a dropped empty dataType above a data_type alias, where it was', () => {
+      expect(save(`${DEFS}columns:\n  - name: a\n    dataType:\n    # cb-dt\n    data_type: *tv2\n`))
+        .toBe(`${DEFS}columns:\n  - name: a\n    # cb-dt\n    dataType: *tv2\ndescription: Orders\n`);
+      // A comment on the dropped key's own line stays on the line.
+      expect(save(`${DEFS}columns:\n  - name: a\n    dataType: # TODO\n    data_type: *tv2\n`))
+        .toBe(`${DEFS}columns:\n  - name: a\n    dataType: *tv2 # TODO\ndescription: Orders\n`);
+    });
+
+    it('leaves dataType: *x # comment alone on an unrelated edit', () => {
+      const yml = `${DEFS}columns:\n  - name: a\n    dataType: *tv # c\n`;
+      expect(save(yml)).toBe(`${yml}description: Orders\n`);
+    });
+
+    it('leaves aliased flags, scdType, meta and rationale alone when they read the same', () => {
+      const yml = [
+        'name: fct_order',
+        'x-defs:',
+        '  y: &yes yes',
+        '  two: &two 2',
+        '  m: &m {tier: gold}',
+        '  r: &r {purpose: Track orders}',
+        'rationale: *r # why',
+        'meta: *m # shared',
+        'columns:',
+        '  - name: a',
+        '    dataType: INT',
+        '    isPrimaryKey: *yes # pk',
+        '    scdType: *two # scd',
+        '    meta: *m # cm',
+        '',
+      ].join('\n');
+      const out = save(yml);
+      expect(out).toContain('rationale: *r # why\nmeta: *m # shared\n');
+      expect(out).toContain('    isPrimaryKey: *yes # pk\n    scdType: *two # scd\n    meta: *m # cm\n');
+    });
+
+    it('writes an edited type over the alias, keeping the line\'s comments', () => {
+      const out = save(`${DEFS}columns:\n  - name: a\n    # above\n    dataType: *tv # c\n  - name: b\n    dataType: *tv\n`, (m) => {
+        m.columns![0].dataType = 'BIGINT';
+      });
+      expect(out).toBe(`${DEFS}columns:\n  - name: a\n    # above\n    dataType: BIGINT # c\n  - name: b\n    dataType: *tv\ndescription: Orders\n`);
+      expect(parseLogicalModelText(out, 'fct_order')!.columns!.map((c) => c.dataType)).toEqual(['BIGINT', 'INT']);
+
+      // The same for a renamed data_type alias.
+      expect(save(`${DEFS}columns:\n  - name: a\n    data_type: *tv2 # ct-dt\n`, (m) => { m.columns![0].dataType = 'TEXT'; }))
+        .toBe(`${DEFS}columns:\n  - name: a\n    dataType: TEXT # ct-dt\ndescription: Orders\n`);
+    });
   });
 });
 

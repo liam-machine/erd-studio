@@ -14,7 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Document, parseDocument, isAlias, isMap, isNode, isPair, isScalar, isSeq } from 'yaml';
-import type { Pair, Scalar, YAMLMap, YAMLSeq } from 'yaml';
+import type { Alias, Node, Pair, Scalar, YAMLMap, YAMLSeq } from 'yaml';
 
 import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, classifyModelLoadError, parseLogicalModelText } from '@erd-studio/core';
 import type { ModelLoadErrorKind } from '@erd-studio/core';
@@ -926,6 +926,13 @@ export class LogicalModelService {
       const value = desired[key];
       const existing = map.get(key, true);
 
+      if (isAlias(existing)) {
+        // `key: *x` that already reads as `value` stays an alias, comments
+        // and all; one that changed becomes the new value, keeping its comments.
+        if (this.aliasReadsAs(doc, key, existing, value)) continue;
+        map.set(key, this.replacementFor(doc, existing, value));
+        continue;
+      }
       if (key === 'rationale' && isMap(existing) && value && typeof value === 'object' && !Array.isArray(value)) {
         this.syncMap(doc, existing, value as Record<string, unknown>, RATIONALE_KEYS);
         continue;
@@ -982,10 +989,84 @@ export class LogicalModelService {
       if (isScalar(pair.value) && this.isScalarLike(value)) {
         // Keep the node, and with it any trailing comment on the line.
         pair.value.value = value;
+      } else if (isAlias(pair.value)) {
+        pair.value = this.replacementFor(doc, pair.value, value);
       } else {
         pair.value = doc.createNode(value);
       }
     }
+  }
+
+  /**
+   * Whether the alias `node`, the value of managed key `key`, already reads as
+   * `value` — compared the way core's reader reads that key, so an unchanged
+   * save leaves `dataType: *x # note` exactly as written. Text keys compare
+   * as `String()` of the scalar's source (`str()`), flags by the reader's
+   * `bool()`, `scdType` by `Number()`; a map or list (`meta`, `rationale`,
+   * `columns`) is read through core's own parser on both sides. A value the
+   * reader cannot see as the same is reported as changed, so it is written.
+   */
+  private aliasReadsAs(doc: Document, key: string, node: Alias, value: unknown): boolean {
+    const target = node.resolve(doc);
+    if (target === undefined) return false;
+    if (value === null || value === undefined) return isScalar(target) && this.scalarValue(target) === null;
+    if (typeof value === 'object') {
+      const read = (v: unknown): string | undefined => {
+        try {
+          const probe = parseLogicalModelText(new Document({ name: 'probe', [key]: v }).toString(), 'probe');
+          return JSON.stringify((probe as unknown as Record<string, unknown> | null)?.[key]);
+        } catch {
+          return undefined;
+        }
+      };
+      const was = read(this.plainOf(doc, target));
+      return was !== undefined && was === read(value);
+    }
+    if (!isScalar(target)) return false;
+    const read = this.scalarValue(target);
+    if (read === null) return false;
+    if (typeof value === 'boolean') {
+      return value === (read === true || (typeof read === 'string' && /^(true|yes|on)$/i.test(read.trim())));
+    }
+    if (typeof value === 'number') return Number(read) === value;
+    return String(read) === String(value);
+  }
+
+  /**
+   * A node tree as core's reader turns it into plain values: aliases resolved,
+   * scalars as their source text, a raw `!!pairs` entry as its `String()`.
+   */
+  private plainOf(doc: Document, node: unknown): unknown {
+    if (isAlias(node)) return this.plainOf(doc, node.resolve(doc));
+    if (isMap(node)) {
+      const obj: Record<string, unknown> = {};
+      for (const pair of node.items) {
+        Object.defineProperty(obj, String(this.plainOf(doc, pair.key)), {
+          value: this.plainOf(doc, pair.value), enumerable: true, writable: true, configurable: true,
+        });
+      }
+      return obj;
+    }
+    if (isSeq(node)) return node.items.map((item) => this.plainOf(doc, item));
+    if (isScalar(node)) return this.scalarValue(node);
+    if (isPair(node)) return String(node);
+    return node ?? null;
+  }
+
+  /** A new node for `value` in place of the alias `old`, carrying the line's comments. */
+  private replacementFor(doc: Document, old: Alias, value: unknown): Node {
+    const node = doc.createNode(value) as Node;
+    if (isScalar(node)) {
+      if (old.commentBefore) node.commentBefore = old.commentBefore;
+      if (old.comment) node.comment = old.comment;
+    } else {
+      // A block map or list would print a trailing comment after its last
+      // line; the line's comment goes first in the block instead.
+      const lines = [old.commentBefore, old.comment].filter((c): c is string => Boolean(c));
+      if (lines.length > 0) node.commentBefore = lines.join('\n');
+    }
+    if (old.spaceBefore) node.spaceBefore = true;
+    return node;
   }
 
   /**
@@ -1112,7 +1193,13 @@ export class LogicalModelService {
     const key = pair.key as Scalar;
     const lines: (string | undefined)[] = [goneKey.before, goneKey.trailing, goneValue.before];
     let trailing = goneValue.trailing;
-    if (trailing !== undefined && !trailing.includes('\n') && isNode(pair.value) && !pair.value.comment) {
+    // Only a comment written on the dropped key's own line (`dataType: # TODO`)
+    // can stay on the line; one on a line of its own below it stays a line.
+    const source = SOURCE_TEXT.get(doc);
+    const valueRange = isNode(gone.value) ? gone.value.range : undefined;
+    const onKeyLine = source === undefined || !valueRange
+      || !/^[ \t]*\r?\n/.test(source.slice(valueRange[0], valueRange[2]));
+    if (trailing !== undefined && !trailing.includes('\n') && onKeyLine && isNode(pair.value) && !pair.value.comment) {
       pair.value.comment = trailing;
       trailing = undefined;
     }
@@ -1123,7 +1210,6 @@ export class LogicalModelService {
     // The key now first after the dropped one's place, if any.
     const next = node.items[index];
     if (!next || !isScalar(next.key)) return;
-    const source = SOURCE_TEXT.get(doc);
     const from = isScalar(gone.key) ? gone.key.range?.[0] : undefined;
     const to = next.key.range?.[0];
     const blankInside = source !== undefined && from !== undefined && to !== undefined
