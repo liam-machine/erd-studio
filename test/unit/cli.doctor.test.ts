@@ -292,7 +292,7 @@ describe('doctor via main', () => {
     // `reason` has both keys: its data_type is ignored and never renamed, so it
     // is listed apart from the columns the next write renames.
     expect(r.erd.dataTypeAliasFiles).toEqual([
-      { name: 'fct_refund', file: '.erd-studio/logical-models/gold/fct_refund.yml', columns: ['amount'], ignored: ['reason'] },
+      { name: 'fct_refund', file: '.erd-studio/logical-models/gold/fct_refund.yml', columns: ['amount'], ignored: ['reason'], anchored: [] },
     ]);
     expect(r.erd.unreadableModelFiles).toEqual([]);
     expect(r.nextSteps).toEqual(before.nextSteps);
@@ -331,7 +331,7 @@ describe('doctor via main', () => {
     );
     const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
     expect(r.erd.dataTypeAliasFiles).toEqual([
-      { name: 'fct_payment', file: '.erd-studio/logical-models/fct_payment.yml', columns: renamed, ignored: ['reason', 'note'] },
+      { name: 'fct_payment', file: '.erd-studio/logical-models/fct_payment.yml', columns: renamed, ignored: ['reason', 'note'], anchored: [] },
     ]);
 
     let out = '';
@@ -350,6 +350,29 @@ describe('doctor via main', () => {
     expect(lines).toContain(
       '! .erd-studio/logical-models/fct_payment.yml: 2 columns have both dataType and data_type (reason, note) '
       + '— each data_type is ignored; delete them',
+    );
+  });
+
+  it('lists a data_type kept beside an anchored empty dataType apart, with its own wording (#144)', async () => {
+    const root = copyFixture('dbt-project');
+    fs.writeFileSync(
+      path.join(root, '.erd-studio/logical-models/fct_anchor.yml'),
+      'name: fct_anchor\ncolumns:\n  - name: a\n    dataType: &x\n    data_type: INT\n  - name: b\n    dataType: *x\n',
+    );
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(r.erd.dataTypeAliasFiles).toEqual([
+      { name: 'fct_anchor', file: '.erd-studio/logical-models/fct_anchor.yml', columns: [], ignored: [], anchored: ['a'] },
+    ]);
+    let out = '';
+    await main(['doctor', '--project', root, '--no-dbt'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: root,
+      env: cleanEnv,
+    });
+    expect(out.split('\n')).toContain(
+      "! .erd-studio/logical-models/fct_anchor.yml: a uses dbt's data_type — read as dataType, but kept as written: "
+      + 'a YAML anchor sits on the empty dataType or the data_type key, and renaming would break what refers to it',
     );
   });
 

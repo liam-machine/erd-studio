@@ -139,6 +139,11 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
       lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.ignored, 'has', 'have', 'both dataType and data_type')}`
         + (a.ignored.length === 1 ? ' — data_type is ignored; delete it' : ' — each data_type is ignored; delete them'));
     }
+    if (a.anchored.length > 0) {
+      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.anchored, 'uses', 'use', "dbt's data_type")}`
+        + ' — read as dataType, but kept as written: a YAML anchor sits on the empty dataType or the data_type key,'
+        + ' and renaming would break what refers to it');
+    }
   }
   lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
   lines.push('', 'Next steps:');

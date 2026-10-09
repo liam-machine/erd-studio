@@ -134,6 +134,13 @@ export interface DataTypeAliasFile {
    * clears them.
    */
   ignored: string[];
+  /**
+   * The columns whose type is read from `data_type` but whose keys a write
+   * keeps as written, in file order: the empty `dataType` beside it (or the
+   * `data_type` key) carries a YAML anchor, and renaming would break or
+   * change what refers to it. Only a hand edit of the anchor clears them.
+   */
+  anchored: string[];
 }
 
 export interface DoctorOptions {
@@ -207,9 +214,9 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     if (entry.shadowedBy) { continue; }
     const err = ctx.logicalModelService.getModelFileError(entry.name);
     if (err) { unreadable.push(toUnreadableModelFile(ctx.root, err)); continue; }
-    const { columns, ignored } = ctx.logicalModelService.dataTypeAliasColumns(entry.name);
-    if (columns.length + ignored.length > 0) {
-      aliased.push({ name: entry.name, file: relPath(ctx.root, entry.filePath), columns, ignored });
+    const { columns, ignored, anchored } = ctx.logicalModelService.dataTypeAliasColumns(entry.name);
+    if (columns.length + ignored.length + anchored.length > 0) {
+      aliased.push({ name: entry.name, file: relPath(ctx.root, entry.filePath), columns, ignored, anchored });
     }
   }
   return {

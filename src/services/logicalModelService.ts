@@ -1056,7 +1056,12 @@ export class LogicalModelService {
       const node = matches[i];
       if (node) {
         this.renameDataTypeAlias(doc, node);
-        this.syncMap(doc, node, col, COLUMN_KEYS, this.readDefaultsLeftOut(node, col));
+        const leaveAlone = this.readDefaultsLeftOut(doc, node, col);
+        if (this.dataTypeAliasFate(doc, node) === 'anchored') {
+          leaveAlone.add('dataType');
+          this.syncKeptDataType(doc, node, col);
+        }
+        this.syncMap(doc, node, col, COLUMN_KEYS, leaveAlone);
         return node;
       }
       return doc.createNode(col);
@@ -1135,13 +1140,47 @@ export class LogicalModelService {
    * `dataType`, or an empty one — also an alias of an empty value), `'ignored'`
    * when a `dataType` holding a value (even `''`) wins and the key is kept as
    * written, null with no `data_type`.
+   *
+   * `'anchored'` is a `'rename'` that would touch a YAML anchor: the empty
+   * `dataType` (its key or its value) or the `data_type` key carries one
+   * (`dataType: &x`). Dropping that node leaves every `*x` pointing at
+   * nothing, so the file stops parsing; renaming the anchored key renames
+   * every `*k:` key too; and writing the type into the empty anchored value
+   * would retype every column that says `*x`. So both keys stay exactly as
+   * written and the type is kept in `data_type`, where the reader already
+   * takes it from ({@link syncKeptDataType}) — no column reads differently.
    */
-  private dataTypeAliasFate(doc: Document, node: YAMLMap): 'rename' | 'ignored' | null {
-    if (!node.items.some((p) => keyIs(p, DATA_TYPE_ALIAS))) return null;
+  private dataTypeAliasFate(doc: Document, node: YAMLMap): 'rename' | 'ignored' | 'anchored' | null {
+    const alias = node.items.find((p) => keyIs(p, DATA_TYPE_ALIAS));
+    if (!alias) return null;
     const own = node.items.find((p) => keyIs(p, 'dataType'));
     const value = own && isAlias(own.value) ? own.value.resolve(doc) : own?.value;
     const empty = value === null || value === undefined || (isScalar(value) && value.value === null);
-    return empty ? 'rename' : 'ignored';
+    if (!empty) return 'ignored';
+    const anchored = (n: unknown): boolean => isNode(n) && !isAlias(n) && Boolean(n.anchor);
+    return anchored(alias.key) || (own !== undefined && (anchored(own.key) || anchored(own.value))) ? 'anchored' : 'rename';
+  }
+
+  /**
+   * Write `desired.dataType` into the `data_type` of an `'anchored'` column
+   * (see {@link dataTypeAliasFate}) — the key the reader takes it from — and
+   * only when it reads differently, so a save that changes nothing leaves the
+   * file byte-identical. A type the reader would fill in anyway (`unknown`
+   * over an empty `data_type`) is not written.
+   */
+  private syncKeptDataType(doc: Document, node: YAMLMap, desired: Record<string, unknown>): void {
+    if (!('dataType' in desired)) return;
+    const wanted = desired.dataType;
+    const raw = node.get(DATA_TYPE_ALIAS, true);
+    const existing = isAlias(raw) ? raw.resolve(doc) : raw;
+    const read = isScalar(existing) ? this.scalarValue(existing) : existing;
+    if (isNode(read)) return; // a list or map: the user's, never overwritten
+    if (read === null || read === undefined) {
+      if (wanted === COLUMN_READ_DEFAULTS.dataType) return;
+    } else if (String(read) === String(wanted)) {
+      return;
+    }
+    this.syncMap(doc, node, { [DATA_TYPE_ALIAS]: wanted }, [DATA_TYPE_ALIAS]);
   }
 
   /**
@@ -1150,11 +1189,13 @@ export class LogicalModelService {
    * Read from the same YAML document a write edits: `columns` are the keys
    * {@link renameDataTypeAlias} renames the next time ERD Studio writes this
    * file, `ignored` the `data_type` keys beside a `dataType` that wins (kept
-   * as written, so they stay listed until the user deletes them). Both empty
-   * for a missing, unparseable or unsafe file — those are reported elsewhere.
+   * as written, so they stay listed until the user deletes them), `anchored`
+   * the `data_type` keys a write keeps because renaming would touch a YAML
+   * anchor (see {@link dataTypeAliasFate}). All empty for a missing,
+   * unparseable or unsafe file — those are reported elsewhere.
    */
-  dataTypeAliasColumns(name: string): { columns: string[]; ignored: string[] } {
-    const found = { columns: [] as string[], ignored: [] as string[] };
+  dataTypeAliasColumns(name: string): { columns: string[]; ignored: string[]; anchored: string[] } {
+    const found = { columns: [] as string[], ignored: [] as string[], anchored: [] as string[] };
     const filePath = this.resolveModelPath(name);
     const doc = filePath === null ? null : this.loadEditableDocument(filePath);
     if (!doc || !isMap(doc.contents)) return found;
@@ -1168,7 +1209,7 @@ export class LogicalModelService {
       const nameNode = col.get('name', true);
       const value = isScalar(nameNode) ? this.scalarValue(nameNode) : nameNode;
       const label = value === undefined || value === null || value === '' ? `#${i + 1}` : String(value);
-      (fate === 'rename' ? found.columns : found.ignored).push(label);
+      ({ rename: found.columns, ignored: found.ignored, anchored: found.anchored })[fate].push(label);
     });
     return found;
   }
@@ -1176,12 +1217,15 @@ export class LogicalModelService {
   /**
    * Keys `node` leaves out (or empty) whose desired value is only what the
    * reader fills in for them — `dataType: unknown` for a column with no type.
-   * A save leaves those alone, so it never adds a default nobody typed.
+   * A save leaves those alone, so it never adds a default nobody typed. An
+   * alias is read through, as the reader does, so `dataType: *x` of an empty
+   * anchor stays an alias rather than turning into `unknown`.
    */
-  private readDefaultsLeftOut(node: YAMLMap, desired: Record<string, unknown>): Set<string> {
+  private readDefaultsLeftOut(doc: Document, node: YAMLMap, desired: Record<string, unknown>): Set<string> {
     const keys = new Set<string>();
     for (const [key, fallback] of Object.entries(COLUMN_READ_DEFAULTS)) {
-      const existing = node.get(key, true);
+      const raw = node.get(key, true);
+      const existing = isAlias(raw) ? raw.resolve(doc) : raw;
       const empty = existing === undefined || existing === null || (isScalar(existing) && existing.value === null);
       if (empty && desired[key] === fallback) keys.add(key);
     }
