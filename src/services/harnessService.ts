@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '28';
+export const HARNESS_VERSION = '29';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -282,7 +282,7 @@ columns:
     scdType: 2
 \`\`\`
 
-**YAML quoting — the file must parse, or ERD Studio shows the model as empty.** Wrap every \`description\`, \`grain\`, \`rationale\` and \`dataType\` value in double quotes (escape an inner \`"\` as \`\\"\`), or use a \`|\` block for multi-line text. Always quote a value that contains \`: \` or \` #\`, or starts with any of \`\` \` @ * & ! % [ { - | > ' " \`\`. Indent with spaces, never tabs. One YAML document per file: no \`---\` separators, no markdown code fences, no \`{{ doc() }}\` — paste the text itself. \`erd-studio doctor\` and \`erd-studio diff\` report a file that does not parse as \`fix-model-yaml\` with its line — fix that before anything else.
+**YAML quoting — the file must parse, or ERD Studio shows the model as empty.** Wrap every \`description\`, \`grain\`, \`rationale\` and \`dataType\` value in double quotes (escape an inner \`"\` as \`\\"\`), or use a \`|\` block for multi-line text. Always quote a value that contains \`: \` or \` #\`, or starts with any of \`\` \` @ * & ! % [ { - | > ' " \`\`. Indent with spaces, never tabs. One YAML document per file: no \`---\` separators, no markdown code fences, no \`{{ doc() }}\` — paste the text itself. \`erd-studio doctor\` and \`erd-studio diff\` report a file that does not parse as \`fix-model-yaml\` with its line — fix that before anything else, unless that file's entry in their \`unreadableModelFiles\` list has \`mergeConflict: true\` (the fix itself carries no such field): git left two versions in that file after a merge, so show the user the file and line and ask which side to keep — never pick a side yourself or run git commands. A diagram file with conflict markers gets doctor's \`resolve-merge-conflicts\` step instead; handle it the same way.
 
 | Field | Required | Description |
 |-------|----------|-------------|

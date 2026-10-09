@@ -778,8 +778,18 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 28 (composite foreign keys, self-references, spelling and marking keys, #133 L1–L4)', () => {
-      expect(HARNESS_VERSION).toBe('28');
+    it('is 29 (the setup guide asks the user about merge conflicts, #150)', () => {
+      expect(HARNESS_VERSION).toBe('29');
+    });
+
+    it('tells assistants a merge-conflict fix-model-yaml is the user\'s to settle (#150)', () => {
+      const SCHEMA_CONTENT = service.generateContent('claude');
+      expect(SCHEMA_CONTENT).toContain("unless that file's entry in their `unreadableModelFiles` list has `mergeConflict: true`");
+      // The flag is on the unreadableModelFiles entry, never on the fix (src/cli/diff.ts `Fix`).
+      expect(SCHEMA_CONTENT).not.toMatch(/`fix-model-yaml`[^.]{0,40}(?:with|marked|has) `mergeConflict/);
+      expect(SCHEMA_CONTENT).not.toContain('unless it is marked `mergeConflict: true`');
+      expect(SCHEMA_CONTENT).toContain('never pick a side yourself or run git commands');
+      expect(SCHEMA_CONTENT).toContain("doctor's `resolve-merge-conflicts` step");
     });
 
     it('documents compositeKey, self-references, real spelling and marking the referenced key (#133 L1–L4)', () => {

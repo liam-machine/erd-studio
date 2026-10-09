@@ -64,8 +64,7 @@ These rules matter most: a beginner who gets lost or scared stops, and nothing g
   wrote, counting columns, comparing lists) stay silent unless they find a problem.
 - **Never paste raw JSON or long logs.** Summarise. When a command fails, quote only the one
   line that matters and explain it.
-- **Show progress.** At each stage boundary, show the checklist with the finished steps
-  ticked, e.g.:
+- **Show progress.** At each stage boundary, show the checklist with finished steps ticked, e.g.:
 
   ```
   ✓ 1. Check dbt
@@ -104,9 +103,8 @@ user to type a command that belongs to a different one.
 
 - **The schema skill file** is `SKILL.md` in `.claude/skills/erd-studio/` or
   `.agents/skills/erd-studio/` of the project folder. ERD Studio installs whichever folder the
-  user's assistants read, so check both and read the one that exists, in full. Its `SYNC.md`
-  guide sits next to it. If neither exists, see `references/troubleshooting.md` → "Format rules
-  missing".
+  user's assistants read, so check both and read the one that exists, in full. Its `SYNC.md` guide
+  sits next to it. If neither exists, see `references/troubleshooting.md` → "Format rules missing".
 - Wherever this skill says the user can "run `/erd-studio-setup` again", use your own row's form.
 - **Approvals.** Every assistant asks before it changes a file or runs a command unless the user
   has allowed it. Tell the user once, in Stage 4, in words that fit their assistant, and say that
@@ -191,8 +189,7 @@ one line — never ask the user to choose:
   style (mirror dbt: `references/modelling-approaches.md` "When no style is agreed"). Stage 3b
   comes **after** Stage 6, as its first next step.
 
-If `erd.logicalModels > 0`, add: "You already have N logical models — I won't change any of
-them without asking first."
+If `erd.logicalModels > 0`, add: "You already have N logical models — I'll ask before changing any."
 
 ## Stage 1 — Check dbt
 
@@ -207,6 +204,9 @@ the result and tell the user what you found in one or two sentences, based on `d
   run it if you say so." Only on a yes, re-run doctor with `--trust-venv`, and keep passing
   `--trust-venv` on every later doctor run. On a no, carry on as if it were not there. Your
   assistant may also ask before each command that runs it; that is expected.
+- **A merge conflict** (a `resolve-merge-conflicts` step, a `merge-conflict` error, or a
+  `fix-model-yaml` whose `unreadableModelFiles` entry has `mergeConflict: true`, at any stage): git left two versions in a file.
+  Stop and follow `references/troubleshooting.md` → "Merge conflicts"; never pick a side or run git.
 - **`fusion-v2`, `cloud-cli`, `unknown`** — say what it means in one line, as
   `references/dbt-setup.md` section 1 says (Cloud CLI: carry on from the project files).
 - **Not found** (`dbt.found: false`) — first ask **one** question, because dbt is often
@@ -268,8 +268,7 @@ again now that the manifest is built.") — and report what you have as short �
 ### 3a. The business area
 
 Say "Listing the models in your dbt project," then run `inventory --summary`. Summarise in two or
-three lines: how many models, which folders, and how many are already in ERD Studio
-(`alreadyModelled`).
+three lines: how many models, which folders, and how many ERD Studio already has (`alreadyModelled`).
 
 Explain two terms, one line each:
 - A **domain** is one focused diagram of related tables for one business area — for example
@@ -383,7 +382,8 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
    Models that already have a model file (in any folder) are **referenced by name, never rewritten** —
    they may be someone's careful design and other domains may share them.
 7. Keep a list, **created this session**, of every model yml you wrote (Stage 5 needs it). Then
-   run `doctor` and fix each `fix-model-yaml` file:line it lists first (usually a value to quote).
+   run `doctor` and fix each `fix-model-yaml` file:line it lists first (usually a value to quote) —
+   except a merge conflict, which is the user's to settle (Stage 1).
 8. Tell the user what you wrote in one or two lines ("Wrote 8 model files and the `orders`
    diagram, marking 2 facts and 6 dimensions the Kimball way"), not file by file.
 
@@ -412,7 +412,7 @@ Then loop, following `references/verify-and-fix.md`, which maps every fix to its
 - **`phantoms`** — models in the diagram that dbt does not have. Always ask (unless the backlog
   lists it as intentional): usually a typo or a model not built yet. Offer to rename it to the
   real dbt name or remove it from this domain. Never delete a model file under `logical-models/`.
-- **`fix-model-yaml`** first, always — the file does not parse; fix that line, re-run the diff.
+- **`fix-model-yaml`** first, always: the file does not parse — fix that line, re-run the diff (a merge conflict: Stage 1).
 - **`needsMigration`** — older file format; suggest **ERD Studio: Migrate to v5**, skip it now.
 - Re-run the diff after each round of edits. **Stop after 3 rounds.** List what remains using
   each fix's `explain` text and suggest looking at it together with **⊕ Diff** on the canvas.
@@ -495,4 +495,4 @@ Read these when the stage calls for them — not all up front:
 | `references/metadata.md` | Stage 4 and enriching, before writing model files: dbt's `meta:` and the team's metadata list |
 | `references/building-the-model.md` | Stage 4, before writing any file |
 | `references/verify-and-fix.md` | Stage 5, and for adding dbt relationship tests |
-| `references/troubleshooting.md` | The helper is missing or stale (canvas-fallback mode), the skill or its format rules cannot be found, the safety check keeps blocking, Windows / remote setups |
+| `references/troubleshooting.md` | The helper is missing or stale (canvas-fallback mode), the skill or its format rules cannot be found, the safety check keeps blocking, Windows / remote setups, a merge conflict |

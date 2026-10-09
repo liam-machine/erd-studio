@@ -38,14 +38,14 @@ Per domain (`domains[i]`):
 | Field | Meaning |
 |---|---|
 | `file`, `domain`, `layer` | Which diagram this is |
-| `error` | Set when this one domain could not be checked; explain it and move on |
+| `error` | Set when this one domain could not be checked; explain it and move on. Code `merge-conflict`: the diagram file holds git conflict markers — follow troubleshooting.md → "Merge conflicts" |
 | `needsMigration` | The domain uses the older (v4) format. There are no fixes; suggest **ERD Studio: Migrate to v5** from the Command Palette, then re-run |
 | `clean` | No blocking differences in this domain |
 | `counts.blocking` / `counts.advisory` | How many differences of each kind |
 | `counts.matchedModels` / `matchedColumns` / `matchedRelationships` | What matched — use these in the success line |
 | `phantoms[]` | Models in the diagram that dbt does not have: `reason` is `absent` (not in the project at all) or `disabled` (dbt has it switched off). They are left out of the comparison |
 | `missingModelFiles[]` | Names in `logical.models` with no model file (at the top of `logical-models/` or in any folder) |
-| `unreadableModelFiles[]` | Model files that exist but are not valid YAML: `name`, `file`, `line`, `code` (e.g. `BLOCK_AS_IMPLICIT_KEY`), `kind`, `message`. ERD Studio sees these models as empty, so each gets one `fix-model-yaml` fix instead of its column fixes |
+| `unreadableModelFiles[]` | Model files that exist but are not valid YAML: `name`, `file`, `line`, `code` (e.g. `BLOCK_AS_IMPLICIT_KEY`), `kind`, `message`. ERD Studio sees these models as empty, so each gets one `fix-model-yaml` fix instead of its column fixes. `mergeConflict: true` means the file holds git conflict markers (`line` is the first `<<<<<<<`) |
 | `fixes[]` | What to change, already sorted: blocking first, then by model and column |
 | `report` | The raw comparison — you rarely need it |
 | `plan` | The same content as a canvas sync plan, with dbt as the source of truth everywhere |
@@ -67,7 +67,7 @@ Each fix:
 
 | kind | Edit |
 |---|---|
-| `fix-model-yaml` | **Fix these first.** The file at `file` does not parse (`line` says where). Almost always an unquoted value: wrap it in double quotes (see the quoting rule in building-the-model.md). A tab → spaces; a key twice → keep one; `---` or a code fence → remove it. Re-run the diff before any other fix — until the file parses, every other difference for that model is noise |
+| `fix-model-yaml` | **Fix these first.** The file at `file` does not parse (`line` says where). Almost always an unquoted value: wrap it in double quotes (see the quoting rule in building-the-model.md). A tab → spaces; a key written twice by hand → keep one; `---` or a code fence → remove it. Re-run the diff before any other fix — until the file parses, every other difference for that model is noise. **Except when the file's `unreadableModelFiles` entry has `mergeConflict: true`:** git left two versions in the file, and that is not a YAML slip — do not edit it; ask the user, as troubleshooting.md → "Merge conflicts" says |
 | `add-column` | Append `{ name, dataType, description }` to `columns` in `logical-models/<model>.yml`. `dataType` is `to` (the dbt type), in double quotes; if that is empty, use the SQL cast or `STRING` and add it to "types to confirm". Description: the inventory's text copied verbatim **inside double quotes** (escape any inner `"` as `\"`), or a draft ending in "(draft)" |
 | `remove-column` | Delete the column from the yml, **and** delete every relationship that names it: in the domain JSON (`fromModel`/`fromColumn` or `toModel`/`toColumn`), in this model's own `relationships:` (`fromColumn`), and in any other model yml's `relationships:` that points at it (`toModel`/`toColumn`) |
 | `set-type` | Set the column's `dataType` to `to` |
@@ -117,6 +117,12 @@ and never apply the matching fix — whether the
 model was created this session or existed before, and whether the difference is a column, a
 relationship or a phantom. They count as "kept by choice", not against a clean result.
 
+**Merge conflicts** are always the user's: a `fix-model-yaml` whose file's entry in
+`unreadableModelFiles` has `mergeConflict: true`, or a `merge-conflict` error, means git left two
+versions of the file. Show the file and line, ask which
+side to keep, and never pick one or run a git command yourself (troubleshooting.md → "Merge
+conflicts").
+
 **Advisory fixes** are never applied. List them once at the end: "dbt doesn't know these column
 types yet. Generating the catalog (Stage 2) will fill them in."
 
@@ -124,7 +130,9 @@ types yet. Generating the catalog (Stage 2) will fill them in."
 
 1. Run the diff.
 2. Fix every `fix-model-yaml` first, then run the diff again — the other fixes for that model
-   only mean something once its file parses.
+   only mean something once its file parses. One whose `unreadableModelFiles` entry has
+   `mergeConflict: true` is a question for the user, not a fix (section 3): settle it with them
+   first, then run the diff again.
 3. Apply or ask about the fixes, following section 3.
 4. Run the diff again.
 5. Repeat — **at most 3 rounds.** Each round should shrink the list; if it does not, something
