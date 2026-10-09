@@ -552,6 +552,16 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
     ]);
   });
 
+  it('leaves a file whose relationships list holds a YAML anchor, which rewriting it would drop (#157)', async () => {
+    const anchored = DIM.replace('role: buyer', 'role: &who buyer') + 'description: *who\n';
+    fs.writeFileSync(logicalModelService.modelPath('dim_customer'), anchored);
+    const info = acceptModal();
+    await run();
+    expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(anchored);
+    expect(fs.readFileSync(logicalModelService.modelPath('fct_order'), 'utf-8')).toBe(FCT);
+    expect(JSON.stringify(info.mock.calls)).toMatch(/dim_customer\.yml has comments, YAML anchors or entries/);
+  });
+
   it('has nothing left to do on a second run', async () => {
     const info = acceptModal();
     await run();

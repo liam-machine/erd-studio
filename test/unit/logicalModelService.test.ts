@@ -409,16 +409,14 @@ describe('LogicalModelService', () => {
       expect(model.columns![0].scdType).toBe(2);
       expect(model.columns![1].name).toBe('on');
 
-      // Re-saving an unchanged model must not coerce anything. The
-      // numeric-looking name is pinned as an explicit string (quoted) rather
-      // than being written back as `7`.
+      // Re-saving an unchanged model must not coerce anything: the
+      // numeric-looking name stays `007` as written (#157), neither written
+      // back as `7` nor quoted, and the file is left byte for byte.
+      const before = fs.readFileSync(filePath, 'utf-8');
       service.saveModel(model);
       const after = fs.readFileSync(filePath, 'utf-8');
-      expect(after).toContain('description: 2024-01-01');
-      expect(after).not.toContain('T00:00:00');
-      expect(after).toMatch(/name: ["']007["']/);
+      expect(after).toBe(before);
       expect(after).not.toMatch(/name: 7\b/);
-      expect(after).toContain('scdType: 2');
       expect(service.getModel('dim_date')!.columns![0].name).toBe('007');
     });
 
@@ -1606,6 +1604,166 @@ describe('LogicalModelService — dbt\'s data_type spelling (#144)', () => {
       expect(later).toBe(`name: fct_order\ncolumns:\n${cols.replace('&s 2', '&s 1')}description: 2 # why\n`);
       expect(parseLogicalModelText(later, 'fct_order')!.description).toBe('2');
     });
+  });
+});
+
+describe('LogicalModelService — YAML anchors, aliases and text a save did not change (#157)', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+  let file: string;
+
+  beforeEach(() => {
+    tempDir = createTempWorkspace();
+    service = new LogicalModelService(tempDir);
+    service.ensureDir();
+    file = service.modelPath('fct_order');
+  });
+  afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  /** Write `yml`, apply `change` to the model as read, save, and return the file. */
+  const save = (yml: string, change: (m: SemanticModel) => void = () => {}): string => {
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    change(model);
+    service.saveModel(model);
+    return fs.readFileSync(file, 'utf-8');
+  };
+  const read = (yml: string): SemanticModel => parseLogicalModelText(yml, 'fct_order')!;
+
+  describe('an alias inside a relationships: entry', () => {
+    const DEFS = 'name: fct_order\nx-defs:\n  r: &r buyer\ncolumns:\n  - name: cust_id\n    dataType: INT\n';
+    const REL = 'relationships:\n  - fromColumn: cust_id\n    toModel: dim_customer\n    toColumn: id\n    cardinality: many-to-one\n    role: *r # who\n';
+
+    it('no longer blocks a save that changes nothing, or changes something else', () => {
+      expect(save(DEFS + REL)).toBe(DEFS + REL);
+      expect(save(DEFS + REL, (m) => { m.description = 'Orders'; })).toBe(`${DEFS}${REL}description: Orders\n`);
+      // An alias for an end of the link, or for the whole entry, reads too.
+      const ends = 'name: fct_order\nx-defs:\n  m: &m dim_customer\ncolumns:\n  - name: cust_id\n    dataType: INT\n'
+        + 'relationships:\n  - fromColumn: cust_id\n    toModel: *m\n    toColumn: id\n';
+      expect(save(ends, (m) => { m.description = 'Orders'; })).toBe(`${ends}description: Orders\n`);
+      const whole = 'name: fct_order\nx-defs:\n  e: &e { fromColumn: cust_id, toModel: dim_customer, toColumn: id }\n'
+        + 'relationships:\n  - *e\n';
+      expect(save(whole, (m) => { m.description = 'Orders'; })).toBe(`${whole}description: Orders\n`);
+    });
+
+    it('writes a changed role over the alias, keeping the line\'s comment, and leaves the anchor alone', () => {
+      const out = save(DEFS + REL, (m) => { m.relationships![0].role = 'seller'; });
+      expect(out).toBe(DEFS + REL.replace('role: *r # who', 'role: seller # who'));
+      expect(read(out).relationships![0].role).toBe('seller');
+    });
+
+    it('keeps the alias when the link changes in another field', () => {
+      const out = save(DEFS + REL, (m) => { m.relationships![0].cardinality = 'one-to-one'; });
+      expect(out).toBe(DEFS + REL.replace('many-to-one', 'one-to-one'));
+    });
+  });
+
+  describe('an alias under a key ERD Studio does not manage', () => {
+    it('keeps what it read when the canvas rewrites the anchor', () => {
+      const out = save('name: fct_order\ngrain: &g one row per order\nx-note: *g # same grain\n', (m) => { m.grain = 'one row per line'; });
+      expect(out).toBe('name: fct_order\ngrain: &g one row per line\nx-note: one row per order # same grain\n');
+      // Inside a column too: the column's own unknown key keeps its type.
+      const col = save('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t INT\n    x-source-type: *t\n', (m) => {
+        m.columns![0].dataType = 'BIGINT';
+      });
+      expect(col).toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t BIGINT\n    x-source-type: INT\n');
+    });
+
+    it('is written out as the value it read when the canvas removes the anchor, rather than failing the save', () => {
+      expect(save('name: fct_order\ngrain: &g one row per order\nx-note: *g\n', (m) => { delete m.grain; }))
+        .toBe('name: fct_order\nx-note: one row per order\n');
+      // An anchor in a removed relationship entry, too.
+      const out = save(
+        'name: fct_order\ncolumns:\n  - name: cust_id\n    dataType: INT\nrelationships:\n'
+        + '  - fromColumn: cust_id\n    toModel: dim_customer\n    toColumn: id\n    role: &r buyer\nx-who: *r\n',
+        (m) => { m.relationships = []; },
+      );
+      expect(out).toBe('name: fct_order\ncolumns:\n  - name: cust_id\n    dataType: INT\nx-who: buyer\n');
+    });
+
+    it('stays an alias when its anchor did not change', () => {
+      const yml = 'name: fct_order\ngrain: &g one row per order\nx-note: *g\n';
+      expect(save(yml, (m) => { m.description = 'Orders'; })).toBe(`${yml}description: Orders\n`);
+    });
+
+    it('keeps an alias used as a key reading what it read', () => {
+      const out = save('name: fct_order\ngrain: &g order\nx-by-grain:\n  *g : 1\n', (m) => { m.grain = 'line'; });
+      expect(out).toBe('name: fct_order\ngrain: &g line\nx-by-grain:\n  order: 1\n');
+    });
+  });
+
+  it('never quotes text a save did not change: true stays true, a number keeps its own text', () => {
+    const yml = [
+      'name: fct_order',
+      'description: true',
+      'grain: 007',
+      'meta:',
+      '  a: 007',
+      '  b: 1e3',
+      '  c: .5',
+      '  d: +1',
+      '  e: 0x1F',
+      'x-weights: [ 007, 1e3, .5, +1 ]',
+      'columns:',
+      '  - name: a',
+      '    dataType: INT',
+      '    isPrimaryKey: yes',
+      '    scdType: 2.0',
+      '',
+    ].join('\n');
+    expect(save(yml)).toBe(yml);
+    expect(save(yml, (m) => { m.schema = 'sales'; })).toBe(`${yml}schema: sales\n`);
+    const model = read(yml);
+    expect([model.description, model.grain, model.meta]).toEqual(['true', '007', { a: '007', b: '1e3', c: '.5', d: '+1', e: '0x1F' }]);
+  });
+
+  it('writes a number the canvas changed as usual', () => {
+    expect(save('name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n    scdType: 02\n', (m) => { m.columns![0].scdType = 1; }))
+      .toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n    scdType: 1\n');
+    expect(save('name: fct_order\ncolumns:\n  - name: 007\n    dataType: INT\n', (m) => { m.columns![0].name = '008'; }))
+      .toBe('name: fct_order\ncolumns:\n  - name: "008"\n    dataType: INT\n');
+  });
+
+  it('keeps the line\'s comment when a plain value becomes a map', () => {
+    expect(save('name: fct_order\nmeta: ~ # team tags\n', (m) => { m.meta = { tier: 'gold' }; }))
+      .toBe('name: fct_order\nmeta:\n  # team tags\n  tier: gold\n');
+    expect(save('name: fct_order\nrationale: tbd # ask finance\n', (m) => { m.rationale = { purpose: 'Track orders' }; }))
+      .toBe('name: fct_order\nrationale:\n  # ask finance\n  purpose: Track orders\n');
+    // A column's meta, and a meta key the canvas turns into a list, the same way.
+    expect(save('name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n    meta: ~ # later\n', (m) => {
+      m.columns![0].meta = { pii: 'no' };
+    })).toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n    meta:\n      # later\n      pii: no\n');
+    expect(save('name: fct_order\nmeta:\n  owners: tbd # who\n', (m) => { m.meta = { owners: ['ana', 'bo'] }; }))
+      .toBe('name: fct_order\nmeta:\n  owners:\n    # who\n    - ana\n    - bo\n');
+  });
+
+  it('writes a role the reader did not take as text, though it looks the same', () => {
+    // `role: true` is a YAML boolean: core reads no role from it. Setting the
+    // role "true" on the canvas must write the text, not leave the boolean.
+    const rel = 'relationships:\n  - fromColumn: a\n    toModel: dim_customer\n    toColumn: id\n    cardinality: many-to-one\n';
+    const yml = `name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n${rel}    role: true\n`;
+    expect(read(yml).relationships![0].role).toBeUndefined();
+    const out = save(yml, (m) => { m.relationships![0].role = 'true'; });
+    expect(out).toBe(yml.replace('role: true', 'role: "true"'));
+    expect(read(out).relationships![0].role).toBe('true');
+  });
+
+  it('saves a file with thousands of aliases in linear time', () => {
+    const cols = Array.from({ length: 2000 }, (_, i) => `  - name: c${i}\n    dataType: &t${i} int\n    x-copy: *t${i}\n`).join('');
+    const many = `name: fct_order\nx-defs:\n  d: &d shared\nx-uses: [ ${Array.from({ length: 3000 }, () => '*d').join(', ')} ]\ncolumns:\n${cols}`;
+    const started = Date.now();
+    const out = save(many, (m) => { m.grain = 'g'; });
+    // Quadratic, this took over 10 s; linear, well under one.
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(out).toBe(`${many}grain: g\n`);
+  }, 30_000);
+
+  it('settles a reused number written into a text field in one save', () => {
+    const cols = '  - name: a\n    dataType: INT\n    scdType: &s 2\n';
+    const once = save(`name: fct_order\ncolumns:\n${cols}description: *s # why\n`, (m) => { m.columns![0].scdType = 1; });
+    expect(once).toBe(`name: fct_order\ncolumns:\n${cols.replace('&s 2', '&s 1')}description: 2 # why\n`);
+    expect(save(once)).toBe(once);
+    expect(read(once).description).toBe('2');
   });
 });
 

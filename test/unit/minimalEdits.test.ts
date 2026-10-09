@@ -244,6 +244,12 @@ describe('relationshipsRewriteLoses — files the move leaves alone (#133)', () 
     ['an unknown key', `${BLOCK_2}    description: why\n`],
     ['an unrecognised cardinality', BLOCK_2.replace('many-to-one', 'many_to_one')],
     ['an entry the reader skips', `${BLOCK_2}  - toModel: dim_date\n`],
+    // #157: the block is written anew, so an anchor would vanish from under
+    // an alias elsewhere in the file, and an alias would turn into a copy.
+    ['a YAML anchor', `${BLOCK_2}    role: &buyer buyer\n`],
+    ['a YAML anchor on an entry', BLOCK_2.replace('  - fromColumn', '  - &first\n    fromColumn')],
+    ['a YAML alias', BLOCK_2.replace('cardinality: many-to-one', 'cardinality: *defaults')],
+    ['a YAML alias for the whole list', 'relationships: *defaults\n'],
   ])('is true for %s in the list', (_, block) => {
     expect(relationshipsRewriteLoses(MESSY_BODY + block)).toBe(true);
   });
