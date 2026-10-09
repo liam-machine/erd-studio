@@ -131,8 +131,9 @@ describe('diff', () => {
     const showcase = result.domains.find((d) => d.file === '.erd-studio/silver/showcase.json')!;
     expect(showcase.error).toEqual({
       code: 'merge-conflict',
-      message: `Domain file .erd-studio/silver/showcase.json has unresolved git merge conflicts (first at line ${line}).`
-        + ' Resolve them in the file — if only positions conflict, either side is safe to keep.',
+      message: `.erd-studio/silver/showcase.json has unresolved git merge conflicts (first at line ${line}): `
+        + 'git left two versions there. Show the user the file and line; if only positions differ either side is safe to keep, '
+        + "otherwise ask the user which side to keep. Don't pick a side or run git commands yourself.",
     });
 
     for (const argv of [
@@ -141,9 +142,14 @@ describe('diff', () => {
     ]) {
       const r = await run(argv, root);
       expect(r.code, argv[0]).toBe(3);
-      expect(JSON.parse(r.out).error.code, argv[0]).toBe('merge-conflict');
+      expect(JSON.parse(r.out).error, argv[0]).toEqual(showcase.error);
       expect(r.out).not.toContain(root);
     }
+
+    // The terminal line carries the same advice: it never tells anyone to resolve it themselves.
+    const human = await run(['diff', '--all'], root);
+    expect(human.out).toContain(`showcase (silver) — could not be compared: ${showcase.error!.message}`);
+    expect(human.out).not.toMatch(/Resolve them in the file/);
   });
 
   it('reports a model file holding git merge conflicts as a flagged fix-model-yaml at its first marker (#145)', async () => {

@@ -196,6 +196,19 @@ export function resolveDomainPath(ctx: CliContext, arg: string, cwd: string = pr
 }
 
 /**
+ * The advice for a diagram holding git merge conflicts (#145), in place of
+ * core's neutral message (which the Confluence app shows as is): the same
+ * line doctor's `resolve-merge-conflicts` step and {@link unreadableHint}
+ * take — the assistant reading `diff` / `export` shows the user the file and
+ * line and leaves the choice of side to them.
+ */
+export function conflictedDomainMessage(file: string, line: number | undefined): string {
+  return `${file} has unresolved git merge conflicts${line !== undefined ? ` (first at line ${line})` : ''}: `
+    + 'git left two versions there. Show the user the file and line; if only positions differ either side is safe to keep, '
+    + "otherwise ask the user which side to keep. Don't pick a side or run git commands yourself.";
+}
+
+/**
  * Map a thrown domain-load error to a stable code and a redacted message with
  * the project-relative path. Shared with `export --domain`, so one broken file
  * reads the same from both subcommands.
@@ -205,7 +218,7 @@ export function describeDomainError(ctx: CliContext, file: string, err: unknown)
   const raw = err instanceof Error ? err.message : String(err);
   const message = redactPaths(raw.split(file).join(rel));
   if (err instanceof DomainFileError) {
-    if (err.mergeConflict) { return { code: 'merge-conflict', message }; }
+    if (err.mergeConflict) { return { code: 'merge-conflict', message: conflictedDomainMessage(rel, err.line) }; }
     return { code: err.reason === 'missing' ? 'domain-missing' : 'domain-invalid', message };
   }
   if (/invalid layer/.test(raw)) { return { code: 'unknown-layer', message }; }
