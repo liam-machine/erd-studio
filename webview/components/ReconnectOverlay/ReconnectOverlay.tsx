@@ -1,8 +1,9 @@
 /**
  * ReconnectOverlay — surfaces an orphaned-canvas state to the user.
  *
- * Renders when the webview has sent `ready` but received no `domainLoaded`
- * within the boot grace period. The most common cause is an extension update
+ * Renders when the webview has sent `ready` but received no answer — neither
+ * `domainLoaded` nor `error` — within the boot grace period (the timing rule
+ * is `useReconnectWatchdog`). The most common cause is an extension update
  * that tore down the previous host instance after this panel was already
  * open, leaving no message handler bound. Activation-time auto-recovery
  * should usually fix this before the overlay appears; this is the safety net

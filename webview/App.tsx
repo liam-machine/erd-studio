@@ -57,6 +57,7 @@ import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { FeedbackDialog } from './components/FeedbackDialog/FeedbackDialog';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
+import { useReconnectWatchdog } from './hooks/useReconnectWatchdog';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import type { DisplayDomain } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
@@ -248,20 +249,11 @@ function EditorCanvas() {
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
 
-  // Detect orphaned-canvas state: if `domainLoaded` doesn't arrive within
-  // the boot grace period, the extension host probably can't reach this
-  // panel (typically because it was updated/restarted while the panel was
-  // open). Activation-time auto-recovery in the host should usually fix
-  // this before the overlay ever shows — this is a safety net for edge
-  // cases like extension disable/enable mid-session.
-  const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
-  useEffect(() => {
-    if (domain) return;
-    const overlayTimer = window.setTimeout(() => {
-      setShowReconnectOverlay(true);
-    }, 5000);
-    return () => clearTimeout(overlayTimer);
-  }, [domain]);
+  // Detect orphaned-canvas state: if neither `domainLoaded` nor `error`
+  // arrives within the boot grace period, the extension host probably can't
+  // reach this panel. An error is an answer, so it stops the timer; Retry
+  // clears it and starts a fresh grace period (see useReconnectWatchdog).
+  const showReconnectOverlay = useReconnectWatchdog(!domain && !error);
 
   const handleReconnect = useCallback(() => {
     vscode.postMessage({ type: 'requestReload' });
