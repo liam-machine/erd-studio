@@ -406,9 +406,23 @@ describe('allowlists agree with the Worker', () => {
 
   it('appends the relationship keys after every existing one, so no index moves', () => {
     expect(FEATURES.indexOf('relDragTurned')).toBe(FEATURES.indexOf('relMoveLeftover') + 1);
-    expect(FEATURES[FEATURES.length - 1]).toBe('relStateDomainCopy');
+    expect(FEATURES.indexOf('exportMermaid')).toBe(FEATURES.indexOf('relStateDomainCopy') + 1);
     expect(ERROR_CODES.indexOf('relWriteFailed')).toBe(ERROR_CODES.indexOf('saveFailed') + 1);
-    expect(ERROR_CODES[ERROR_CODES.length - 1]).toBe('relInvCheckFailed');
+    expect(ERROR_CODES.indexOf('exportFailed')).toBe(ERROR_CODES.indexOf('relInvCheckFailed') + 1);
+  });
+
+  it('appends the Export Diagram keys at the very end: completions, the cancel and the empty project as features, a failure as an error', () => {
+    expect(FEATURES.slice(-4)).toEqual(['exportMermaid', 'exportDbml', 'exportCancelled', 'exportNoDiagrams']);
+    expect(ERROR_CODES[ERROR_CODES.length - 1]).toBe('exportFailed');
+    let s = emptyCounters('2026-10-09');
+    s = recordFeature(s, 'exportMermaid');
+    s = recordFeature(s, 'exportDbml');
+    s = recordFeature(s, 'exportCancelled');
+    s = recordFeature(s, 'exportNoDiagrams');
+    s = recordError(s, 'exportFailed');
+    const body = buildHeartbeat(s, ENV);
+    expect(body.features).toEqual({ exportMermaid: 1, exportDbml: 1, exportCancelled: 1, exportNoDiagrams: 1 });
+    expect(body.errors).toEqual({ exportFailed: 1 });
   });
 
   it('telemetry.json documents every feature key', () => {

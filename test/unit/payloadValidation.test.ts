@@ -23,6 +23,7 @@ import {
   validateRelationshipEnds,
   validateOpenModelFilePayload,
   validateDismissManifestHintPayload,
+  validateExportDiagramPayload,
 } from '../../src/providers/payloadValidation';
 import { MODEL_NAME_PATTERN } from '../../src/types/naming';
 
@@ -274,6 +275,17 @@ describe('validateDismissManifestHintPayload (#113)', () => {
 
   it.each([null, 'x', 3, [], { forever: true }])('rejects %j', (value) => {
     expect(validateDismissManifestHintPayload(value)).toMatch(/takes no payload/);
+  });
+});
+
+describe('validateExportDiagramPayload', () => {
+  it('accepts no payload or an empty object', () => {
+    expect(validateExportDiagramPayload(undefined)).toBeNull();
+    expect(validateExportDiagramPayload({})).toBeNull();
+  });
+
+  it.each([null, 'dbml', 3, [], { format: 'dbml' }])('rejects %j', (value) => {
+    expect(validateExportDiagramPayload(value)).toMatch(/takes no payload/);
   });
 });
 

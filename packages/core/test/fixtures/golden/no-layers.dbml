@@ -1,0 +1,39 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project accounts {
+  Note: '''Layer: gold
+Stage: logical'''
+}
+
+Table fct_txn {
+  txn_id BIGINT [pk, note: 'Transaction id']
+  account_key INT [note: 'Account']
+  amount "DECIMAL(18,2)" [note: 'Signed amount (additive)']
+  balance_after "DECIMAL(18,2)" [note: 'Running balance (semi-additive)']
+  Note: '''Role: fact
+
+Transactions'''
+}
+
+Table "007".dim_account {
+  account_key INT [pk, note: 'Surrogate key (SCD type 0)']
+  account_number "VARCHAR(20)" [note: 'Business key (natural key; SCD type 1)']
+  opened_on DATE [note: 'SCD type 2']
+  balance "12.50" [note: '1e3']
+  Note: '''Role: dimension
+Grain: One row per account
+
+Accounts, one row per account
+
+Purpose: Shared account reference
+Design: Shared account reference
+Role choice: Type 2 dimension'''
+}
+
+// Not exported: fct_txn is listed more than once; exported once.
+
+Ref: fct_txn.account_key > "007".dim_account.account_key
+
+// Sticky note 1 (linked to dim_account): Linked note

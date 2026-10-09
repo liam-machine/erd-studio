@@ -1,0 +1,45 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project sales {
+  Note: '''Layer: gold
+Stage: logical
+
+Relationships in the model library in the shapes released extensions wrote, plus a domain-file copy that disagrees'''
+}
+
+Table gold.fct_order {
+  order_line_id BIGINT [pk]
+  customer_key INT
+  order_date_key INT
+  product_key INT
+  amount "DECIMAL(18,2)" [note: 'Additive']
+  Note: '''Role: fact
+Warehouse table (alias): orders
+
+One row per order line'''
+}
+
+Table gold.dim_customer {
+  customer_key INT [pk, note: 'Foreign key']
+  customer_name VARCHAR
+  Note: '''Role: dimension
+Warehouse table (alias): customer'''
+}
+
+Table gold.dim_date {
+  date_key INT [pk]
+  calendar_date DATE
+  Note: 'Role: dimension'
+}
+
+Table gold.dim_product {
+  product_key INT [pk]
+  product_name VARCHAR
+  Note: 'Role: dimension'
+}
+
+Ref: gold.dim_customer.customer_key < gold.fct_order.customer_key
+Ref: gold.fct_order.order_date_key > gold.dim_date.date_key
+Ref: gold.dim_product.product_key > gold.fct_order.product_key

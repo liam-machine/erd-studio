@@ -644,6 +644,18 @@ export interface OpenGettingStartedMessage {
   type: 'openGettingStarted';
 }
 
+/**
+ * Request to export this diagram as Mermaid or DBML — the canvas toolbar's
+ * **Export** button. No payload: the host runs `erdStudio.exportDiagram` with
+ * the panel's document, which asks for the format and what to do with the
+ * text. It always exports the logical (design) stage and writes no domain
+ * data, so it is on the physical-stage allowlist.
+ */
+export interface ExportDiagramMessage {
+  type: 'exportDiagram';
+  payload?: Record<string, never>;
+}
+
 // ---------------------------------------------------------------------------
 // Webview → Extension: Sync reconciliation messages
 // ---------------------------------------------------------------------------
@@ -757,6 +769,7 @@ export type WebviewMessage =
   | OpenFeedbackLinkMessage
   | RequestReloadMessage
   | OpenGettingStartedMessage
+  | ExportDiagramMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage
   | RunDbtParseMessage

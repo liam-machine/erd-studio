@@ -18,7 +18,8 @@
  *                         submitFeedback, copyFeedbackReport,
  *                         openFeedbackLink),
  *                         viewFile, requestReload, dismissWelcome,
- *                         dismissManifestHint, openGettingStarted
+ *                         dismissManifestHint, openGettingStarted,
+ *                         exportDiagram
  *   Extension → Webview:  domainLoaded, stageData (echoes switchStage
  *                         requestId), discrepancyReport, manifestStaleness,
  *                         syncPlanGenerated, openFeedback, feedbackContext,
@@ -71,6 +72,7 @@ import { buildSyncPlan, countSyncPlanActions } from '../services/syncPlanBuilder
 import { findVenvActivate } from '../services/dbtEnv';
 import { runDbtParse } from '../commands/runDbtParse';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
+import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
@@ -368,6 +370,7 @@ import {
   validateMarkKey,
   validateRelationshipEnds,
   validateDismissManifestHintPayload,
+  validateExportDiagramPayload,
   validateAnnotationUpdate,
   validateModelNameSafety,
   validatePoint,
@@ -824,6 +827,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * The domain file of the focused ERD canvas, or undefined when the active
+   * tab is not one of this provider's canvases (Export Diagram's no-argument
+   * route then asks which domain).
+   */
+  activeDomainPath(): string | undefined {
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    if (!(input instanceof vscode.TabInputCustom)) return undefined;
+    return this.openPanels.has(input.uri.toString()) ? input.uri.fsPath : undefined;
+  }
+
+  /**
    * If the active editor tab is one of our canvases, ask its webview to open
    * the Feedback dialog (so the report can include the diagnostics chips and
    * the optional analysis). Returns false when no canvas is active so the
@@ -961,7 +975,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'requestReload', 'openGettingStarted',
           'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
           'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
-          'openModelFile', 'layoutFinished',
+          'openModelFile', 'layoutFinished', 'exportDiagram',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           console.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
@@ -1014,6 +1028,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // No payload to validate. Writes nothing, so it is on the physical allowlist.
             await vscode.commands.executeCommand('erdStudio.showGettingStarted');
             break;
+          case 'exportDiagram': {
+            // Writes no domain data and always exports the logical (design)
+            // stage, so it is on the physical allowlist. The command asks for
+            // the format and the action, and reports its own errors.
+            const payloadError = validateExportDiagramPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await vscode.commands.executeCommand(EXPORT_DIAGRAM_COMMAND, document.uri);
+            break;
+          }
           case 'updatePositions': {
             const payload = (message as Record<string, unknown>).payload as
               | { positions: Record<string, { x: number; y: number }>; annotations?: unknown }

@@ -1,0 +1,106 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project showcase {
+  Note: '''Layer: silver
+Stage: logical
+
+Project task management — tracks projects, tasks, events, and customers'''
+}
+
+Table silver.fct_task_event {
+  event_id INT [pk, note: 'Event id from the source system — a degenerate dimension, and this fact\'s own key (natural key)']
+  task_key INT [note: 'FK to dim_task']
+  project_key INT [note: 'FK to dim_project']
+  customer_key INT [note: 'FK to dim_customer']
+  event_date DATE [note: 'Date the event occurred']
+  event_type VARCHAR [note: 'Type of task event (started, completed, blocked)']
+  amount DECIMAL [note: 'Cost or value of the event (additive)']
+  duration_hours DECIMAL [note: 'Hours spent on this event (additive)']
+  Note: '''Role: transaction-fact
+Grain: One row per task event
+
+Records every task event across all projects and tasks
+
+Purpose: Central fact table tracking all task activity for reporting and analysis
+Design: Transaction grain with surrogate foreign keys to all relevant dimensions
+Measures: duration_hours (additive), amount (additive)'''
+}
+
+Table silver.dim_task {
+  task_key INT [pk, note: 'Surrogate key — one per row, so one per version of the task (SCD type 0)']
+  task_id VARCHAR [note: 'Business key — repeats across the versions of one task (natural key; SCD type 0)']
+  project_key INT [note: 'FK to dim_project']
+  name VARCHAR [note: 'Task name (SCD type 1)']
+  status STRING [note: 'Current lifecycle status (SCD type 2)']
+  Note: '''Role: domain-dim
+Grain: One row per task version
+
+Task dimension tracking individual project tasks
+
+Purpose: Tracks individual tasks and their lifecycle
+Design: SCD Type 2 on status to track historical state changes
+SCD strategy: task_key is unique per row; task_id repeats across the versions of one task, which is why it cannot be the primary key'''
+}
+
+Table silver.dim_project {
+  project_key INT [pk, note: 'Surrogate key — warehouse-generated, one per row (SCD type 0)']
+  project_code VARCHAR [note: 'Business project code from the source system (natural key; SCD type 0)']
+  project_name VARCHAR [note: 'Project name — not unique, so never a key (SCD type 1)']
+  parent_project_key INT [note: 'Parent project for hierarchical rollups (self-reference to project_key)']
+  Note: '''Role: conformed-dim
+Grain: One row per project
+
+Project dimension table
+
+Purpose: Central project reference shared across domains
+Design: Conformed dimension for consistent project attributes
+SCD strategy: project_key is the surrogate facts join to; project_code is the business key'''
+}
+
+Table silver.dim_customer {
+  customer_key INT [pk, note: 'Surrogate key — warehouse-generated, one per row (SCD type 0)']
+  customer_id VARCHAR [note: 'Business key from the source CRM (natural key; SCD type 0)']
+  customer_name VARCHAR [note: 'Full customer name — not unique, so never a key (SCD type 2)']
+  email VARCHAR [note: 'Customer email address (SCD type 1)']
+  Note: '''Role: conformed-dim
+Grain: One row per customer
+
+Customer dimension with demographics and segmentation
+
+Purpose: Central customer reference shared across domains
+Design: Conformed dimension for consistent customer attributes
+SCD strategy: customer_key is the surrogate facts join to; customer_id is the source system\'s business key'''
+}
+
+Table silver.dim_date {
+  date_key INT [pk, note: 'Date key in YYYYMMDD form — meaningful by convention, unlike every other surrogate']
+  calendar_date DATE [note: 'The calendar date — the business key this dimension is identified by (natural key)']
+  fiscal_year INT [note: 'Fiscal year number']
+  fiscal_quarter VARCHAR [note: 'Fiscal quarter (Q1-Q4)']
+  Note: '''Role: conformed-dim
+Grain: One row per calendar date
+
+Date dimension with fiscal calendar attributes
+
+Purpose: Shared date reference for consistent time-based analysis
+Design: The one dimension where a meaningful key is conventional — date_key is YYYYMMDD rather than a meaningless sequence'''
+}
+
+Table fct_order {
+  order_id INT [pk, note: 'Order id from the source system — a degenerate dimension, and this fact\'s own key (natural key)']
+  customer_key INT [note: 'FK to dim_customer']
+  order_date DATE [note: 'Date the order was placed']
+  project_key INT [note: 'FK to dim_project']
+  amount DECIMAL [note: 'Order total amount (additive)']
+  Note: 'Order transaction fact table'
+}
+
+Ref: silver.fct_task_event.task_key > silver.dim_task.task_key
+Ref: silver.dim_task.project_key > silver.dim_project.project_key
+Ref: silver.fct_task_event.project_key > silver.dim_project.project_key
+Ref: silver.dim_project.parent_project_key > silver.dim_project.project_key
+Ref: fct_order.project_key > silver.dim_project.project_key
+Ref: silver.fct_task_event.customer_key > silver.dim_customer.customer_key
+Ref: fct_order.customer_key > silver.dim_customer.customer_key

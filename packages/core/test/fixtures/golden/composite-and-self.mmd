@@ -1,0 +1,37 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: vault (layer gold, logical stage)
+%% Description: A composite foreign key, an entry with a lone compositeKey, and two self-references (one spelled in another case)
+
+  %% Model pit_customer
+  "pit_customer" {
+    binary pit_customer_hk PK
+    binary customer_hk FK
+    date as_of_date FK
+    binary snapshot_hk FK
+  }
+
+  %% Model sat_customer
+  "sat_customer" {
+    binary customer_hk PK
+    timestamp load_date PK
+    string name
+  }
+
+  %% Model employee
+  "employee" {
+    int employee_id PK
+    int manager_id FK
+    int mentor_id FK
+  }
+
+  %% pit_customer.(customer_hk, as_of_date) -> sat_customer.(customer_hk, load_date), many-to-one
+  "pit_customer" }o--|| "sat_customer" : "as of"
+  %% pit_customer.snapshot_hk -> sat_customer.customer_hk, many-to-one
+  "pit_customer" }o--|| "sat_customer" : "snapshot_hk"
+  %% employee.manager_id -> employee.employee_id, many-to-one
+  "employee" }o--|| "employee" : "manager"
+  %% employee.mentor_id -> employee.employee_id, many-to-one
+  "employee" }o--|| "employee" : "mentor_id"

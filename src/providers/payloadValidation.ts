@@ -635,6 +635,21 @@ export function validateDismissManifestHintPayload(value: unknown): string | nul
 }
 
 /**
+ * Validate an `exportDiagram` payload. It carries nothing — the host asks for
+ * the format and the action — so only an absent payload or an empty object
+ * passes, like `addModelsFromDbt`.
+ */
+export function validateExportDiagramPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Export takes no payload.';
+  }
+  return null;
+}
+
+/**
  * Validate an `openModelFile` payload: `{ modelName }`. The name is held to
  * the path-safety rule rather than the authoring pattern, because a model
  * added from dbt may carry a name dbt allows (uppercase, digit-leading) and

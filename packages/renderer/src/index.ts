@@ -35,6 +35,19 @@ export type {
   LayerConfig,
 } from '@erd-studio/core';
 
+// One-way text exports of a diagram (Mermaid erDiagram, DBML), re-exported
+// from @erd-studio/core so a page that renders with this package can offer
+// them without depending on core directly.
+export {
+  toMermaid,
+  toDbml,
+  exportDiagram,
+  diagramExportFileName,
+  DIAGRAM_EXPORT_FORMATS,
+  DIAGRAM_EXPORT_FILE_EXTENSIONS,
+  type DiagramExportFormat,
+} from '@erd-studio/core';
+
 export type {
   ModelFlowNode,
   ModelNodeData,

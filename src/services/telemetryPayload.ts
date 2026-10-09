@@ -185,6 +185,13 @@ export const FEATURES = [
   'relStateUnreadable',
   'relStatePartialComposite',
   'relStateDomainCopy',
+  // Export Diagram… (Mermaid / DBML): one per completed export, by format,
+  // and a cancel at any step. A failure is the `exportFailed` error.
+  'exportMermaid',
+  'exportDbml',
+  'exportCancelled',
+  // A project state, not a cancel: run with no canvas focused and no diagram to pick.
+  'exportNoDiagrams',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -284,6 +291,8 @@ export const ERROR_CODES = [
   'relInvGroupBroken',
   'relInvKeyNotMarked',
   'relInvCheckFailed',
+  // Export Diagram… could not read the domain or write the chosen file.
+  'exportFailed',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 

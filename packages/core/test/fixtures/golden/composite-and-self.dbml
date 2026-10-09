@@ -1,0 +1,37 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project vault {
+  Note: '''Layer: gold
+Stage: logical
+
+A composite foreign key, an entry with a lone compositeKey, and two self-references (one spelled in another case)'''
+}
+
+Table pit_customer {
+  pit_customer_hk binary [pk]
+  customer_hk binary
+  as_of_date date
+  snapshot_hk binary
+}
+
+Table sat_customer {
+  customer_hk binary
+  load_date timestamp
+  name string
+  indexes {
+    (customer_hk, load_date) [pk]
+  }
+}
+
+Table employee {
+  employee_id int [pk]
+  manager_id int
+  mentor_id int
+}
+
+Ref "as of": pit_customer.(customer_hk, as_of_date) > sat_customer.(customer_hk, load_date)
+Ref: pit_customer.snapshot_hk > sat_customer.customer_hk
+Ref manager: employee.manager_id > employee.employee_id
+Ref: employee.mentor_id > employee.employee_id
