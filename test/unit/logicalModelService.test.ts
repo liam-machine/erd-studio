@@ -1588,6 +1588,24 @@ describe('LogicalModelService — dbt\'s data_type spelling (#144)', () => {
       expect(out).toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t Y # a type\n  - name: b\n    # above b\n    dataType: X # b type\n');
       expect(parseLogicalModelText(out, 'fct_order')!.columns!.map((c) => c.dataType)).toEqual(['Y', 'X']);
     });
+
+    it('reads a number changed in place as its new value when settling the aliases kept beside it', () => {
+      const edit = (yml: string): string => {
+        fs.writeFileSync(file, yml);
+        const model = service.getModel('fct_order')!;
+        model.columns![0].scdType = 1;
+        service.saveModel(model);
+        return fs.readFileSync(file, 'utf-8');
+      };
+      const cols = '  - name: a\n    dataType: INT\n    scdType: &s 2 # a scd\n';
+      const other = edit(`name: fct_order\ncolumns:\n${cols}  - name: b\n    dataType: INT\n    scdType: *s # b scd\n`);
+      expect(other).toBe(`name: fct_order\ncolumns:\n${cols.replace('&s 2', '&s 1')}  - name: b\n    dataType: INT\n    scdType: 2 # b scd\n`);
+      expect(parseLogicalModelText(other, 'fct_order')!.columns!.map((c) => c.scdType)).toEqual([1, 2]);
+
+      const later = edit(`name: fct_order\ncolumns:\n${cols}description: *s # why\n`);
+      expect(later).toBe(`name: fct_order\ncolumns:\n${cols.replace('&s 2', '&s 1')}description: 2 # why\n`);
+      expect(parseLogicalModelText(later, 'fct_order')!.description).toBe('2');
+    });
   });
 });
 

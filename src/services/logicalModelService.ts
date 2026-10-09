@@ -114,6 +114,17 @@ const DATA_TYPE_ALIAS = 'data_type';
 function keyIs(pair: Pair, key: string): boolean {
   return isScalar(pair.key) ? pair.key.value === key : pair.key === key;
 }
+/**
+ * Set a parsed scalar's value in place, keeping its style and comments. The
+ * `yaml` library keeps the text it parsed the node from in `source`, and
+ * that text is what a number is read as (core's `scalarValue`, and this
+ * service's), so it goes too: left behind, `scdType: &s 2` changed to 1 would
+ * still read as 2 to this save while it prints 1.
+ */
+function setScalarValue(node: Scalar, value: unknown): void {
+  node.value = value;
+  node.source = undefined;
+}
 /** What core's reader fills in for a column key the file leaves out or leaves empty. */
 const COLUMN_READ_DEFAULTS: Readonly<Record<string, unknown>> = { name: '', dataType: 'unknown' };
 /**
@@ -1067,13 +1078,13 @@ export class LogicalModelService {
           // Same text, but the parser coerced it (e.g. `007` -> 7). Pin the
           // node to the string the model actually uses so it is not written
           // back as `7`; the node's comments are untouched.
-          existing.value = value;
+          setScalarValue(existing, value);
           continue;
         }
-        // YAMLMap.set updates the existing Scalar's value in place, keeping
-        // its style and comments.
-        map.set(key, value);
-        continue;
+        if (this.isScalarLike(value)) {
+          setScalarValue(existing, value);
+          continue;
+        }
       }
       map.set(key, this.isScalarLike(value) ? value : doc.createNode(value));
     }
@@ -1107,7 +1118,7 @@ export class LogicalModelService {
       }
       if (isScalar(pair.value) && this.isScalarLike(value)) {
         // Keep the node, and with it any trailing comment on the line.
-        pair.value.value = value;
+        setScalarValue(pair.value, value);
       } else if (isAlias(pair.value)) {
         pair.value = this.withCommentsOf(pair.value, doc.createNode(value) as Node);
       } else {
@@ -1294,7 +1305,7 @@ export class LogicalModelService {
     if (!isScalar(pair.key)) pair.key = doc.createNode(pair.key);
     const empty = node.items.findIndex((p) => keyIs(p, 'dataType'));
     if (empty !== -1) this.foldEmptyDataType(doc, node, empty, pair);
-    (pair.key as Scalar).value = 'dataType';
+    setScalarValue(pair.key as Scalar, 'dataType');
   }
 
   /**
