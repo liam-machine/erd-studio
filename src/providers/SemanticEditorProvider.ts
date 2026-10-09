@@ -352,6 +352,11 @@ class EditRefused extends Error {
     this.name = 'EditRefused';
   }
 }
+
+/** A refusal the user was told about in plain words, which usage telemetry does not count as a failure. */
+function isExplainedRefusal(err: unknown): boolean {
+  return err instanceof EditRefused || err instanceof RelationshipsRewriteRefused;
+}
 import {
   isValidCardinality,
   isValidRelationshipRole,
@@ -3722,7 +3727,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /** Usage telemetry: a relationship handler threw something other than a refusal it explained. */
   private recordRelationshipFailure(err: unknown): void {
-    if (err instanceof EditRefused || err instanceof RelationshipsRewriteRefused) return;
+    if (isExplainedRefusal(err)) return;
     telemetry.error('relHandlerFailed');
   }
 
@@ -4183,7 +4188,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add models from dbt failed: ${message}`);
-      telemetry.error('addFromDbtFailed');
+      // A refusal the toast explains (a conflicted diagram, a model file
+      // with unsaved edits) is not a breakage.
+      if (!isExplainedRefusal(err)) telemetry.error('addFromDbtFailed');
       this.post(webview, { type: 'error', payload: { message: `Failed to add models from dbt: ${message}` } });
     }
   }
@@ -4270,7 +4277,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add models from dbt failed: ${message}`);
-      telemetry.error('addFromDbtFailed');
+      // A refusal the toast explains (a conflicted diagram, a model file
+      // with unsaved edits) is not a breakage.
+      if (!isExplainedRefusal(err)) telemetry.error('addFromDbtFailed');
       this.post(webview, { type: 'error', payload: { message: `Failed to add models from dbt: ${message}` } });
     }
   }

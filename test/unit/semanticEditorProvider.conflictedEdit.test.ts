@@ -26,6 +26,8 @@ import { ManifestService } from '../../src/services/manifestService';
 import { YmlParserService } from '../../src/services/ymlParserService';
 import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
+import { allSelections } from '../../src/services/syncPlanBuilder';
+import { telemetry } from '../../src/services/telemetryService';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
@@ -94,9 +96,14 @@ function snapshot(dir: string): Map<string, string> {
 /**
  * The showcase diagram open and loaded, then git rewrites its file with a
  * conflict in the positions block — on disk and in the open document — before
- * the canvas has refreshed.
+ * the canvas has refreshed. `beforeConflict` runs on the valid diagram first
+ * (a comparison the sync plan needs).
  */
-async function openThenConflict(rootDir: string, conflicted: (text: string) => string) {
+async function openThenConflict(
+  rootDir: string,
+  conflicted: (text: string) => string,
+  beforeConflict?: (panel: MockPanel) => Promise<void>,
+) {
   const file = path.join(rootDir, '.erd-studio', 'silver', 'showcase.json');
   const provider = buildProvider(rootDir);
   const doc = makeDoc(file);
@@ -112,14 +119,38 @@ async function openThenConflict(rootDir: string, conflicted: (text: string) => s
     { timeout: 4000, interval: 20 },
   );
   expect(errors(panel)).toEqual([]);
+  if (beforeConflict) await beforeConflict(panel);
 
-  const text = conflicted(doc.getText());
-  fs.writeFileSync(file, text);
-  doc._setText(text);
+  conflictNow(file, doc, conflicted);
   panel._postedMessages.length = 0;
   vi.mocked(vscode.workspace.applyEdit).mockClear();
   doc.save.mockClear();
   return { file, doc, panel, before: snapshot(path.join(rootDir, '.erd-studio')) };
+}
+
+/** Git writes the conflicted text, on disk and into the open document. */
+function conflictNow(file: string, doc: ReturnType<typeof makeDoc>, conflicted: (text: string) => string) {
+  const text = conflicted(doc.getText());
+  fs.writeFileSync(file, text);
+  doc._setText(text);
+}
+
+/** One plain merge-conflict toast, and nothing written anywhere. */
+function expectRefused(panel: MockPanel, doc: ReturnType<typeof makeDoc>, before: Map<string, string>) {
+  const errs = errors(panel);
+  expect(errs).toHaveLength(1);
+  const text = errs[0].payload.message as string;
+  expect(text).toContain('has unresolved git merge conflicts (first at line');
+  expect(text).toContain('either side is safe to keep');
+  expect(text).not.toMatch(/SyntaxError|Unexpected token|Expected property name|in JSON at position/);
+  // Named as the user knows it, not by this machine's absolute path.
+  expect(text).toContain('.erd-studio/silver/showcase.json');
+  expect(text).not.toContain(root);
+
+  expect(vscode.workspace.applyEdit).not.toHaveBeenCalled();
+  expect(doc.save).not.toHaveBeenCalled();
+  expect(snapshot(path.join(root, '.erd-studio'))).toEqual(before);
+  expect(posted(panel).some((m) => m.type === 'domainLoaded')).toBe(false);
 }
 
 /** A git conflict over one model's position, as a merge of two layouts leaves it. */
@@ -155,8 +186,8 @@ afterEach(() => {
 });
 
 // Each reaches the document through a different route: applyDomainEdit
-// alone, a handler's own read first, the relationship planner, the model
-// library (v5), the Add-from-dbt draft, and a read-only handler.
+// alone, a handler's own read first, the relationship planner and the model
+// library (v5). Add from dbt and the sync plan have tests of their own below.
 const EDITS: Array<[string, { type: string; payload?: unknown }]> = [
   ['addModel', { type: 'addModel', payload: { name: 'dim_new', schema: '', description: '', columns: [] } }],
   ['updatePositions', { type: 'updatePositions', payload: { positions: { dim_task: { x: 1, y: 2 } } } }],
@@ -183,20 +214,57 @@ describe('an edit on a diagram git left in conflict (#151)', () => {
 
     await panel._simulateMessage(message);
 
-    const errs = errors(panel);
-    expect(errs).toHaveLength(1);
-    const text = errs[0].payload.message as string;
-    expect(text).toContain('has unresolved git merge conflicts (first at line');
-    expect(text).toContain('either side is safe to keep');
-    expect(text).not.toMatch(/SyntaxError|Unexpected token|Expected property name|in JSON at position/);
-    // Named as the user knows it, not by this machine's absolute path.
-    expect(text).toContain('.erd-studio/silver/showcase.json');
-    expect(text).not.toContain(root);
+    expectRefused(panel, doc, before);
+  });
 
-    expect(vscode.workspace.applyEdit).not.toHaveBeenCalled();
-    expect(doc.save).not.toHaveBeenCalled();
-    expect(snapshot(path.join(root, '.erd-studio'))).toEqual(before);
-    expect(posted(panel).some((m) => m.type === 'domainLoaded')).toBe(false);
+  it('Add models from dbt refuses before the picker opens, and is not counted as a failure', async () => {
+    const { doc, panel, before } = await openThenConflict(root, conflictPositions);
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
+    const error = vi.spyOn(telemetry, 'error');
+
+    await panel._simulateMessage({ type: 'addModelsFromDbt' });
+
+    expectRefused(panel, doc, before);
+    expect(pick).not.toHaveBeenCalled();
+    // A refusal the toast explains is not a breakage (CLAUDE.md, Usage telemetry).
+    expect(error).not.toHaveBeenCalledWith('addFromDbtFailed');
+  });
+
+  it('Add models from dbt refuses when git conflicts the diagram while the picker is open', async () => {
+    // The queued half re-reads the document after the picker closes.
+    const { file, doc, panel, before } = await openThenConflict(root, (t) => t);
+    const error = vi.spyOn(telemetry, 'error');
+    let conflictedBefore = before;
+    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementationOnce(async (items: any) => {
+      conflictNow(file, doc, conflictPositions);
+      conflictedBefore = snapshot(path.join(root, '.erd-studio'));
+      return (await items).find((i: any) => i.scope?.id === 'folder:silver');
+    });
+
+    await panel._simulateMessage({ type: 'addModelsFromDbt' });
+
+    expect(pick).toHaveBeenCalledTimes(1);
+    expectRefused(panel, doc, conflictedBefore);
+    expect(error).not.toHaveBeenCalledWith('addFromDbtFailed');
+  });
+
+  it('the sync plan (physical stage) refuses and writes no plan file', async () => {
+    // The fixture ships a plan; start without one so a write would show.
+    const planFile = path.join(root, '.erd-studio', '.sync-plan.json');
+    fs.rmSync(planFile, { force: true });
+    let report: any;
+    const { doc, panel, before } = await openThenConflict(root, conflictPositions, async (p) => {
+      await p._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+      await p._simulateMessage({ type: 'toggleDiscrepancy', payload: { enabled: true, compareAgainst: 'logical' } });
+      report = posted(p).filter((m) => m.type === 'discrepancyReport').at(-1)?.payload;
+      expect(report).toBeTruthy();
+    });
+
+    await panel._simulateMessage({ type: 'generateSyncPlan', payload: { selections: allSelections(report, 'logical') } });
+
+    expectRefused(panel, doc, before);
+    expect(posted(panel).some((m) => m.type === 'syncPlanGenerated')).toBe(false);
+    expect(fs.existsSync(planFile)).toBe(false);
   });
 
   it('names the line of the first marker', async () => {
