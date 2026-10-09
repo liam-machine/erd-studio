@@ -30,6 +30,15 @@ describe('modelFileErrorNotice', () => {
       'dim_x.yml has a YAML error and can\'t be shown on the diagram. Tip: put double quotes around text that contains ": ".',
     );
   });
+
+  it('names an unresolved git merge conflict and how to resolve it (#145)', () => {
+    expect(modelFileErrorNotice({
+      filePath: '/p/.erd-studio/logical-models/dim_x.yml', kind: 'yamlOther', line: 3, mergeConflict: true,
+    })).toBe(
+      "dim_x.yml has an unresolved git merge conflict on line 3 and can't be shown on the diagram. "
+        + 'Tip: keep one side of each conflict, save, then git add the file.',
+    );
+  });
 });
 
 describe('openModelFileAt / notifyModelFileError', () => {

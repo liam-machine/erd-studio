@@ -73,6 +73,8 @@ export interface UnreadableModelFile {
   column?: number;
   /** The `yaml` library's error code, e.g. `BLOCK_AS_IMPLICIT_KEY`. */
   code?: string;
+  /** The file holds unresolved git merge conflicts (#145); `line` is the first `<<<<<<<`. */
+  mergeConflict?: true;
   /** The parser's own message (may quote the file; never an absolute path). */
   message: string;
 }
@@ -87,6 +89,11 @@ export const MODEL_YAML_HINTS: Record<ModelFileErrorKind, string> = {
   read: 'the file could not be read — check it exists and is readable',
 };
 
+/** The advice for an unreadable model file: the merge-conflict one, else its kind's. */
+export function unreadableHint(u: Pick<UnreadableModelFile, 'kind' | 'mergeConflict'>): string {
+  return u.mergeConflict ? 'unresolved git merge conflict — keep one side, save, then git add' : MODEL_YAML_HINTS[u.kind];
+}
+
 /** A {@link ModelFileError} as the CLI reports it: project-relative, redacted. */
 export function toUnreadableModelFile(root: string, err: ModelFileError): UnreadableModelFile {
   const file = relPath(root, err.filePath);
@@ -97,6 +104,7 @@ export function toUnreadableModelFile(root: string, err: ModelFileError): Unread
     ...(err.line !== undefined ? { line: err.line } : {}),
     ...(err.column !== undefined ? { column: err.column } : {}),
     ...(err.code !== undefined ? { code: err.code } : {}),
+    ...(err.mergeConflict ? { mergeConflict: true as const } : {}),
     message: redactPaths(err.message.split(err.filePath).join(file)),
   };
 }
@@ -104,6 +112,7 @@ export function toUnreadableModelFile(root: string, err: ModelFileError): Unread
 /** `fct_order.yml line 4: YAML error (BLOCK_AS_IMPLICIT_KEY) — wrap the value in double quotes`. */
 export function describeUnreadable(u: UnreadableModelFile): string {
   const where = `${path.posix.basename(u.file)}${u.line !== undefined ? ` line ${u.line}` : ''}`;
+  if (u.mergeConflict) { return `${where}: ${unreadableHint(u)}`; }
   const what = u.kind === 'read' ? 'could not be read' : `YAML error${u.code ? ` (${u.code})` : ''}`;
   return u.kind === 'read' ? `${where}: ${MODEL_YAML_HINTS.read}` : `${where}: ${what} — ${MODEL_YAML_HINTS[u.kind]}`;
 }
@@ -180,6 +189,7 @@ export function describeDomainError(ctx: CliContext, file: string, err: unknown)
   const raw = err instanceof Error ? err.message : String(err);
   const message = redactPaths(raw.split(file).join(rel));
   if (err instanceof DomainFileError) {
+    if (err.mergeConflict) { return { code: 'merge-conflict', message }; }
     return { code: err.reason === 'missing' ? 'domain-missing' : 'domain-invalid', message };
   }
   if (/invalid layer/.test(raw)) { return { code: 'unknown-layer', message }; }

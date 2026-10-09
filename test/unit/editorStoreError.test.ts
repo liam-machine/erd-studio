@@ -25,7 +25,7 @@ const domain: DisplayDomain = {
 } as DisplayDomain;
 
 beforeEach(() => {
-  useEditorStore.setState({ domain: null, error: null, errorKind: null });
+  useEditorStore.setState({ domain: null, error: null, errorKind: null, errorMergeConflict: false });
 });
 
 describe('editorStore error lifecycle', () => {
@@ -64,6 +64,23 @@ describe('editorStore error lifecycle', () => {
 
     s.setError(null);
     expect(useEditorStore.getState().errorKind).toBeNull();
+  });
+
+  // #145: the error screen drops Retry and explains a merge conflict.
+  it('carries the merge-conflict flag, and drops it with the error or a fresh domain', () => {
+    const s = useEditorStore.getState();
+    s.setError('Domain file x.json has unresolved git merge conflicts (first at line 9).', 'domain-file', true);
+    expect(useEditorStore.getState().errorMergeConflict).toBe(true);
+    s.setError('Domain file is empty', 'domain-file');
+    expect(useEditorStore.getState().errorMergeConflict).toBe(false);
+
+    s.setError('conflict', 'domain-file', true);
+    s.setError(null);
+    expect(useEditorStore.getState().errorMergeConflict).toBe(false);
+
+    s.setError('conflict', 'domain-file', true);
+    s.setDomain(domain);
+    expect(useEditorStore.getState().errorMergeConflict).toBe(false);
   });
 
   it('forgets a previous kind when an unclassified error replaces it', () => {

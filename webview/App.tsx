@@ -92,6 +92,7 @@ function EditorCanvas() {
   const domain = useEditorStore((s) => s.domain);
   const error = useEditorStore((s) => s.error);
   const errorKind = useEditorStore((s) => s.errorKind);
+  const errorMergeConflict = useEditorStore((s) => s.errorMergeConflict);
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const setError = useEditorStore((s) => s.setError);
@@ -231,7 +232,7 @@ function EditorCanvas() {
           break;
         case 'error':
           useEditorStore.getState().recordError('extension', msg.payload.message);
-          setError(msg.payload.message, msg.payload.kind);
+          setError(msg.payload.message, msg.payload.kind, msg.payload.mergeConflict === true);
           break;
         case 'openFeedback':
           useEditorStore.getState().setFeedbackDialogOpen(true, msg.payload ?? null);
@@ -448,14 +449,31 @@ function EditorCanvas() {
     // reserved directory, and no amount of retrying turns it into a domain.
     // Offering Retry there would be an invitation to press a button that
     // cannot work. Opening it as text is the action that does.
-    const canRetry = errorKind !== 'not-a-domain';
+    // A domain file holding git conflict markers (#145) is not corrupt, and
+    // re-reading it cannot help either: someone has to keep one side. Say so
+    // plainly, and skip Retry — the host reloads the canvas by itself on the
+    // save that resolves it (every change to the document is re-read).
+    const mergeConflict = errorKind === 'domain-file' && errorMergeConflict;
+    const canRetry = errorKind !== 'not-a-domain' && !mergeConflict;
     // The user is the only one who can repair a domain file, so give them a
     // way to see it. Issue #64 dead-ended precisely here: an unparseable file,
     // named in the message, with no route to it.
     const canOpenFile = errorKind === 'domain-file' || errorKind === 'not-a-domain';
     return (
       <div className="editor-message editor-message--error" role="alert">
-        <p style={{ color: 'var(--error-fg)' }}>Error: {error}</p>
+        {mergeConflict ? (
+          <>
+            <p className="editor-message__title">This diagram has unresolved git merge conflicts</p>
+            <p className="editor-message__detail">
+              Git left conflict markers in the file when two changes to it were merged. Open it as text and keep
+              one side of each conflict — if only positions conflict, either side is safe. The diagram reloads by
+              itself as soon as the file is saved.
+            </p>
+            <p className="editor-message__detail editor-message__detail--dim">{error}</p>
+          </>
+        ) : (
+          <p style={{ color: 'var(--error-fg)' }}>Error: {error}</p>
+        )}
         {canRetry && (
           <button
             type="button"
@@ -471,7 +489,7 @@ function EditorCanvas() {
             className="editor-message__button"
             onClick={handleOpenFile}
           >
-            Open as Text
+            {mergeConflict ? 'Open as Text to Resolve' : 'Open as Text'}
           </button>
         )}
         <button

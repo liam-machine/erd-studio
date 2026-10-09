@@ -267,6 +267,72 @@ describe('doctor via main', () => {
     expect(clean.nextSteps.some((s) => s.id === 'fix-model-yaml')).toBe(false);
   });
 
+  it('lists a diagram holding git merge conflicts with its line, and asks for it to be resolved first (#145)', async () => {
+    const root = copyFixture('dbt-project-sparse');
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true });
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+    fs.writeFileSync(path.join(root, 'target', 'catalog.json'), JSON.stringify({ metadata: {}, nodes: {}, sources: {} }));
+    fs.utimesSync(path.join(root, 'target', 'manifest.json'), now, now);
+    fs.mkdirSync(path.join(root, '.erd-studio', 'silver'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.erd-studio', 'silver', 'orders.json'), [
+      '{',
+      '  "schemaVersion": 5,',
+      '  "logical": { "models": [], "relationships": [] },',
+      '  "viewConfig": {',
+      '<<<<<<< HEAD',
+      '    "positions": {}',
+      '=======',
+      '    "positions": { "a": { "x": 1, "y": 2 } }',
+      '>>>>>>> feature',
+      '  }',
+      '}',
+    ].join('\n'));
+
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(r.erd.conflictedDomainFiles).toEqual([{ file: '.erd-studio/silver/orders.json', line: 5 }]);
+    expect(r.erd.domainFormatIssues).toEqual([]);
+    const ids = r.nextSteps.map((s) => s.id);
+    expect(ids).toContain('resolve-merge-conflicts');
+    expect(ids).not.toContain('ready');
+    expect(r.nextSteps.find((s) => s.id === 'resolve-merge-conflicts')!.why).toContain('.erd-studio/silver/orders.json:5');
+
+    let out = '';
+    const code = await main(['doctor', '--project', root, '--no-dbt'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: root,
+      env: cleanEnv,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('.erd-studio/silver/orders.json line 5: unresolved git merge conflict');
+  });
+
+  it('reports a model file holding git merge conflicts as unreadable, flagged, at its first marker (#145)', async () => {
+    const root = copyFixture('dbt-project');
+    fs.writeFileSync(path.join(root, '.erd-studio/logical-models/fct_task_event.yml'), [
+      'name: fct_task_event',
+      '<<<<<<< HEAD',
+      'description: ours',
+      '=======',
+      'description: theirs',
+      '>>>>>>> feature',
+      'columns: []',
+      '',
+    ].join('\n'));
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(r.erd.unreadableModelFiles).toEqual([{
+      name: 'fct_task_event',
+      file: '.erd-studio/logical-models/fct_task_event.yml',
+      kind: 'yamlOther',
+      line: 2,
+      mergeConflict: true,
+      message: 'Unresolved git merge conflict (first at line 2)',
+    }]);
+    expect(r.erd.conflictedDomainFiles).toEqual([]);
+    expect(r.nextSteps.find((s) => s.id === 'fix-model-yaml')!.why)
+      .toContain('.erd-studio/logical-models/fct_task_event.yml:2 — unresolved git merge conflict — keep one side, save, then git add');
+  });
+
   it('prints JSON and exits 0, also for a folder with no project', async () => {
     let out = '';
     const io = { stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: tmp, env: cleanEnv };

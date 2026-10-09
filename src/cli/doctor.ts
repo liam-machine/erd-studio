@@ -15,6 +15,8 @@ import type { FileState } from '../types/harness';
 import { redactPaths } from '../types/feedback';
 import { detectDomainFormat } from '../types/semantic';
 import { normaliseName } from '../services/nameUtils';
+import { DomainFileError } from '../services/domainService';
+import { parseDomainJson } from '@erd-studio/core';
 import {
   dbtCommands,
   dbtExecutableCandidates,
@@ -43,7 +45,7 @@ import {
   type CliContext,
   type Envelope,
 } from './context';
-import { MODEL_YAML_HINTS, toUnreadableModelFile, type UnreadableModelFile } from './diff';
+import { toUnreadableModelFile, unreadableHint, type UnreadableModelFile } from './diff';
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
@@ -185,10 +187,15 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   const conflicted: ConflictedDomainFile[] = [];
   for (const d of domains) {
     try {
-      const format = detectDomainFormat(JSON.parse(fs.readFileSync(d.filePath, 'utf-8')));
+      const format = detectDomainFormat(parseDomainJson(fs.readFileSync(d.filePath, 'utf-8'), d.filePath));
       if (format !== 'v5') { issues.push({ file: relPath(ctx.root, d.filePath), format }); }
-    } catch {
-      // Unreadable / invalid JSON is not a format issue; `diff --all` names it.
+    } catch (err) {
+      // A conflicted diagram cannot load at all, and git's own wording is the
+      // fix (#145). Any other unreadable / invalid JSON is not a format issue;
+      // `diff --all` names it.
+      if (err instanceof DomainFileError && err.mergeConflict && err.line !== undefined) {
+        conflicted.push({ file: relPath(ctx.root, d.filePath), line: err.line });
+      }
     }
   }
   const unreadable: UnreadableModelFile[] = [];
@@ -290,7 +297,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
   }
   if (r.erd.unreadableModelFiles.length > 0) {
     const list = r.erd.unreadableModelFiles.map((u) =>
-      `${u.file}${u.line !== undefined ? `:${u.line}` : ''}${u.code ? ` (${u.code})` : ''} — ${MODEL_YAML_HINTS[u.kind]}`);
+      `${u.file}${u.line !== undefined ? `:${u.line}` : ''}${u.code ? ` (${u.code})` : ''} — ${unreadableHint(u)}`);
     steps.push({
       id: 'fix-model-yaml',
       title: `Fix ${r.erd.unreadableModelFiles.length === 1 ? 'a model file that does' : `${r.erd.unreadableModelFiles.length} model files that do`} not parse`,

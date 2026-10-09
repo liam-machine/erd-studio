@@ -72,6 +72,8 @@ export interface ModelFileError {
   column?: number;
   /** The `yaml` library's error code, e.g. `BLOCK_AS_IMPLICIT_KEY`. */
   code?: string;
+  /** The file holds unresolved git merge conflicts (#145); `line` is the first `<<<<<<<`. */
+  mergeConflict?: true;
   message: string;
 }
 

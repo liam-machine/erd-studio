@@ -216,6 +216,75 @@ describe('a domain file caught mid-write', () => {
   });
 });
 
+describe('a domain file with unresolved git merge conflicts (#145)', () => {
+  /** showcase.json as two branches that moved the same model leave it. */
+  function conflicted(realContent: string): string {
+    const parsed = JSON.parse(realContent) as { viewConfig: { positions: Record<string, { x: number; y: number }> } };
+    const [name, pos] = Object.entries(parsed.viewConfig.positions)[0];
+    const ours = JSON.stringify(pos);
+    const theirs = JSON.stringify({ x: pos.x + 200, y: pos.y + 100 });
+    const lines = JSON.stringify(parsed, null, 2).split('\n');
+    const at = lines.findIndex((l) => l.trimStart().startsWith(`"${name}": {`));
+    // Collapse the entry onto one line so each side is a single line.
+    let end = at;
+    while (!/^\s*}/.test(lines[end]) || end === at) end++;
+    const comma = lines[end].trimEnd().endsWith(',') ? ',' : '';
+    lines.splice(at, end - at + 1,
+      '<<<<<<< HEAD', `      "${name}": ${ours}${comma}`, '=======', `      "${name}": ${theirs}${comma}`, '>>>>>>> feature/move');
+    return lines.join('\n');
+  }
+
+  it('says merge conflict at once — no re-reads — and flags the payload', async () => {
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    const text = conflicted(fs.readFileSync(file, 'utf-8'));
+    const line = text.split('\n').indexOf('<<<<<<< HEAD') + 1;
+    fs.writeFileSync(file, text);
+    const getDomain = vi.spyOn(DomainService.prototype, 'getDomain');
+
+    const { panel } = await open(root, file);
+    const startedAt = Date.now();
+    panel._simulateMessage({ type: 'ready' });
+
+    await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 10 });
+    // The ~1.2s backoff is for a file caught mid-write; a conflict reads the same every time.
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+    expect(getDomain).toHaveBeenCalledTimes(1);
+    const payload = errors(panel)[0].payload;
+    expect(payload).toEqual({
+      message: expect.stringContaining(`has unresolved git merge conflicts (first at line ${line})`),
+      kind: 'domain-file',
+      mergeConflict: true,
+    });
+    expect(payload.message).not.toContain('Invalid JSON');
+  });
+
+  it('loads by itself once the conflict is resolved and the document changes', async () => {
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    const realContent = fs.readFileSync(file, 'utf-8');
+    fs.writeFileSync(file, conflicted(realContent));
+
+    const { doc, panel } = await open(root, file);
+    panel._simulateMessage({ type: 'ready' });
+    await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 10 });
+    expect(types(panel)).not.toContain('domainLoaded');
+
+    // What keeping one side in the text editor (or `git checkout --ours`) does:
+    // the document changes and the file on disk is the resolved one.
+    fs.writeFileSync(file, realContent);
+    doc._setText(realContent);
+    await vscode._fireDidChangeTextDocument(doc);
+
+    await vi.waitFor(() => expect(types(panel)).toContain('domainLoaded'), { timeout: 4000, interval: 10 });
+    expect(errors(panel)).toHaveLength(1);
+  });
+
+  it('is still a json failure to telemetry', () => {
+    const err = new DomainFileError('invalid-json', '/x.json', 'conflict', { mergeConflict: true, line: 3 });
+    expect(err.transient).toBe(false);
+    expect(classifyDomainLoadFailure(err)).toBe('json');
+  });
+});
+
 describe('a JSON file under the semantic dir that is not a domain', () => {
   it('refuses a template with an explanation, not a parse error', async () => {
     const file = path.join(root, '.erd-studio', 'templates', 'fact.json');

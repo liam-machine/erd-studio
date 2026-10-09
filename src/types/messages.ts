@@ -141,6 +141,13 @@ export interface ErrorMessage {
      *   help; opening it as text is the only sensible action.
      */
     kind?: 'domain-file' | 'not-a-domain';
+    /**
+     * With `kind: 'domain-file'`: the file holds unresolved git merge
+     * conflicts (#145). Retrying cannot help — the screen drops Retry and
+     * offers to open the file as text, where VS Code shows the conflict. The
+     * canvas loads by itself once the file is resolved and saved.
+     */
+    mergeConflict?: true;
   };
 }
 

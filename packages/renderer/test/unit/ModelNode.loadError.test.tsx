@@ -76,6 +76,15 @@ describe('ModelNode load error', () => {
     expect(screen.getByText("YAML error — ERD Studio can't read this file.")).toBeTruthy();
   });
 
+  it('names an unresolved git merge conflict, with the line of its first marker (#145)', () => {
+    const { unmount } = renderNode({ loadError: { kind: 'yamlOther', line: 7, mergeConflict: true } });
+    expect(screen.getByText("Unresolved git merge conflict on line 7 — ERD Studio can't read this file.")).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open file' })).toBeTruthy();
+    unmount();
+    renderNode({ loadError: { kind: 'yamlOther', mergeConflict: true } });
+    expect(screen.getByText("Unresolved git merge conflict — ERD Studio can't read this file.")).toBeTruthy();
+  });
+
   it('still says "No columns" for an empty model without a load error', () => {
     const { container } = renderNode();
     expect(container.querySelector('.model-node__empty')?.textContent).toBe('No columns');

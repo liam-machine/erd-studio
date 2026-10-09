@@ -14,6 +14,7 @@ import type { Cardinality, ColumnDef, ModelRelationship, SemanticModel } from '.
 import { readMeta } from './meta.js';
 import { checkLimit } from './limits.js';
 import { normaliseCompositeKey, normaliseRelationshipRole } from './relationships.js';
+import { findConflictMarkers } from './mergeConflict.js';
 
 /** Name of the model directory under the semantic dir (`.erd-studio/logical-models/`). */
 export const LOGICAL_MODELS_DIR = 'logical-models';
@@ -47,6 +48,23 @@ export class YamlCharLimitError extends Error {
   constructor(readonly maxChars: number) {
     super(`YAML document expands to more than ${maxChars} characters of text`);
     this.name = 'YamlCharLimitError';
+  }
+}
+
+/**
+ * A model file that does not parse because it holds unresolved git merge
+ * conflicts (#145). `line` is the first `<<<<<<<`, not where the YAML parser
+ * happened to stop; `classifyModelLoadError` turns it into a `ModelLoadError`
+ * with `mergeConflict` set. Not exported from the package: hosts see the flag.
+ */
+export class ModelMergeConflictError extends Error {
+  readonly mergeConflict = true;
+
+  constructor(readonly line: number, yamlError: unknown) {
+    super(`Unresolved git merge conflict (first at line ${line})`);
+    this.name = 'ModelMergeConflictError';
+    // As `new Error(message, { cause })` sets it (that form needs ES2022 lib typings).
+    Object.defineProperty(this, 'cause', { value: yamlError, writable: true, configurable: true });
   }
 }
 
@@ -224,7 +242,8 @@ export function isSafeModelName(name: unknown): name is string {
  * so every non-string scalar is read back from its original source text
  * instead of its resolved value. Booleans and nulls are kept as-is.
  * `raw` is null for an empty file or a file whose root is not a mapping;
- * `state` holds what is left of the budgets. Throws on YAML syntax errors.
+ * `state` holds what is left of the budgets. Throws on YAML syntax errors —
+ * a `ModelMergeConflictError` when the text holds git conflict markers.
  */
 function parseModelFile(
   content: string,
@@ -233,7 +252,10 @@ function parseModelFile(
 ): { raw: YamlModel | null; state: ToPlainState } {
   const doc = parseDocument(content);
   if (doc.errors.length > 0) {
-    throw doc.errors[0];
+    // Checked only once the parse has failed: a marker-like line inside a
+    // block scalar that parses is the user's text, not a conflict.
+    const conflictLine = findConflictMarkers(content);
+    throw conflictLine !== null ? new ModelMergeConflictError(conflictLine, doc.errors[0]) : doc.errors[0];
   }
   const state: ToPlainState = {
     aliases: aliasTargets(doc),
