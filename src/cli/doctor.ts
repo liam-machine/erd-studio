@@ -47,7 +47,7 @@ import { MODEL_YAML_HINTS, toUnreadableModelFile, type UnreadableModelFile } fro
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
-  | 'fix-model-yaml' | 'migrate-v5' | 'update-harness' | 'ready';
+  | 'resolve-merge-conflicts' | 'fix-model-yaml' | 'migrate-v5' | 'update-harness' | 'ready';
 
 export interface NextStep {
   id: NextStepId;
@@ -94,9 +94,36 @@ export interface DoctorResult extends Envelope {
     domainFormatIssues: Array<{ file: string; format: 'v4' | 'hybrid' | 'legacy' }>;
     /** Library model files that exist but do not parse (shadowed duplicates are never read, so never listed). */
     unreadableModelFiles: UnreadableModelFile[];
+    /**
+     * Domain files holding unresolved git merge conflicts (`<<<<<<<` …
+     * `=======` … `>>>>>>>`); `line` is the first `<<<<<<<`. These cannot load
+     * until the conflict is resolved and the file is saved.
+     */
+    conflictedDomainFiles: ConflictedDomainFile[];
+    /**
+     * Model files that spell a column type dbt's way (`data_type:`). They read
+     * as `dataType`, and the next save from the canvas writes them back as
+     * `dataType` — a warning, not a next step: nothing is broken.
+     */
+    dataTypeAliasFiles: DataTypeAliasFile[];
   };
   harness: { schemaSkill: FileState; setupSkill: FileState; version: string };
   nextSteps: NextStep[];
+}
+
+export interface ConflictedDomainFile {
+  /** Project-relative, forward slashes. */
+  file: string;
+  /** 1-based line of the first conflict marker. */
+  line: number;
+}
+
+export interface DataTypeAliasFile {
+  name: string;
+  /** Project-relative, forward slashes. */
+  file: string;
+  /** The columns that use `data_type`, in file order. */
+  columns: string[];
 }
 
 export interface DoctorOptions {
@@ -148,10 +175,14 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   const semanticRoot = path.join(ctx.root, ctx.semanticDir);
   const exists = fs.existsSync(semanticRoot);
   if (!exists) {
-    return { semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [] };
+    return {
+      semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
+      conflictedDomainFiles: [], dataTypeAliasFiles: [],
+    };
   }
   const domains = ctx.domainService.listDomains(ctx.root, ctx.semanticDir);
   const issues: DoctorResult['erd']['domainFormatIssues'] = [];
+  const conflicted: ConflictedDomainFile[] = [];
   for (const d of domains) {
     try {
       const format = detectDomainFormat(JSON.parse(fs.readFileSync(d.filePath, 'utf-8')));
@@ -161,6 +192,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     }
   }
   const unreadable: UnreadableModelFile[] = [];
+  const aliased: DataTypeAliasFile[] = [];
   for (const entry of ctx.logicalModelService.listModelFiles()) {
     if (entry.shadowedBy) { continue; }
     const err = ctx.logicalModelService.getModelFileError(entry.name);
@@ -173,6 +205,8 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     logicalModels: ctx.logicalModelService.listModelNames().length,
     domainFormatIssues: issues,
     unreadableModelFiles: unreadable,
+    conflictedDomainFiles: conflicted,
+    dataTypeAliasFiles: aliased,
   };
 }
 
@@ -243,6 +277,17 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: dbt.commands.catalog,
     });
   }
+  if (r.erd.conflictedDomainFiles.length > 0) {
+    const n = r.erd.conflictedDomainFiles.length;
+    steps.push({
+      id: 'resolve-merge-conflicts',
+      title: `Resolve the git merge conflict${n === 1 ? ' in a diagram' : `s in ${n} diagrams`}`,
+      why: `${r.erd.conflictedDomainFiles.map((c) => `${c.file}:${c.line}`).join('; ')}. `
+        + 'Each file still holds git conflict markers (<<<<<<< … ======= … >>>>>>>), so the diagram cannot load. '
+        + 'Keep one side of each conflict (if only positions differ, either side is safe), save, then git add the file.',
+      command: null,
+    });
+  }
   if (r.erd.unreadableModelFiles.length > 0) {
     const list = r.erd.unreadableModelFiles.map((u) =>
       `${u.file}${u.line !== undefined ? `:${u.line}` : ''}${u.code ? ` (${u.code})` : ''} — ${MODEL_YAML_HINTS[u.kind]}`);
@@ -298,7 +343,10 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
         catalog: { status: 'missing', path: 'target/catalog.json', modifiedAt: null, nodes: null },
       },
       projectFiles: { schemaYmlFiles: 0, sourceFiles: 0, modelsDiscovered: 0 },
-      erd: { semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [] },
+      erd: {
+        semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
+        conflictedDomainFiles: [], dataTypeAliasFiles: [],
+      },
       harness: { schemaSkill: 'missing', setupSkill: 'missing', version: harnessVersion },
     };
     return { ...base, nextSteps: [] };

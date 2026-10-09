@@ -105,8 +105,14 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     + (r.artifacts.manifest.models !== null ? ` (${plural(r.artifacts.manifest.models, 'model')})` : ''));
   lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
   lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'domain')}, ${plural(r.erd.logicalModels, 'logical model')}`);
+  for (const c of r.erd.conflictedDomainFiles) {
+    lines.push(`${p.red('✗')} ${c.file} line ${c.line}: unresolved git merge conflict — keep one side, save, then git add`);
+  }
   for (const u of r.erd.unreadableModelFiles) {
     lines.push(`${p.red('✗')} ${describeUnreadable(u)}`);
+  }
+  for (const a of r.erd.dataTypeAliasFiles) {
+    lines.push(`${p.yellow('!')} ${a.file}: ${a.columns.join(', ')} spelled data_type — read as dataType, saved back as dataType`);
   }
   lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
   lines.push('', 'Next steps:');
