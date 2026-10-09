@@ -1562,6 +1562,32 @@ describe('LogicalModelService — dbt\'s data_type spelling (#144)', () => {
       expect(save(`${DEFS}columns:\n  - name: a\n    data_type: *tv2 # ct-dt\n`, (m) => { m.columns![0].dataType = 'TEXT'; }))
         .toBe(`${DEFS}columns:\n  - name: a\n    dataType: TEXT # ct-dt\ndescription: Orders\n`);
     });
+
+    it('never lets a kept alias follow an anchor the same save rewrites', () => {
+      // Keys are synced in a fixed order, not file order: whichever comes first,
+      // an alias of a key the canvas rewrote keeps what it read, and its comments.
+      const edit = (yml: string, change: (m: SemanticModel) => void): string => {
+        fs.writeFileSync(file, yml);
+        const model = service.getModel('fct_order')!;
+        change(model);
+        service.saveModel(model);
+        return fs.readFileSync(file, 'utf-8');
+      };
+      expect(edit('name: fct_order\ngrain: &g foo\ndescription: *g # same\n', (m) => { m.grain = 'bar'; }))
+        .toBe('name: fct_order\ngrain: &g bar\ndescription: foo # same\n');
+      expect(edit('name: fct_order\ncolumns:\n  - name: a\n    description: &d INT\n    dataType: *d # dt\n', (m) => {
+        m.columns![0].description = 'Order id';
+      })).toBe('name: fct_order\ncolumns:\n  - name: a\n    description: &d Order id\n    dataType: INT # dt\n');
+      expect(edit('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t X\ngrain: *t\n', (m) => { m.columns![0].dataType = 'Y'; }))
+        .toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t Y\ngrain: X\n');
+      // The anchor's own column edited: the other column's alias keeps its type and both comments.
+      const out = edit(
+        'name: fct_order\ncolumns:\n  - name: a\n    dataType: &t X # a type\n  - name: b\n    # above b\n    dataType: *t # b type\n',
+        (m) => { m.columns![0].dataType = 'Y'; },
+      );
+      expect(out).toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t Y # a type\n  - name: b\n    # above b\n    dataType: X # b type\n');
+      expect(parseLogicalModelText(out, 'fct_order')!.columns!.map((c) => c.dataType)).toEqual(['Y', 'X']);
+    });
   });
 });
 

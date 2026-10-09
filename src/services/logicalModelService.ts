@@ -13,8 +13,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Document, parseDocument, isAlias, isMap, isNode, isPair, isScalar, isSeq } from 'yaml';
-import type { Alias, Node, Pair, Scalar, YAMLMap, YAMLSeq } from 'yaml';
+import { Document, Pair, YAMLMap, YAMLSeq, parseDocument, isAlias, isMap, isNode, isPair, isScalar, isSeq, visit } from 'yaml';
+import type { Alias, Node, Scalar } from 'yaml';
 
 import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, classifyModelLoadError, parseLogicalModelText } from '@erd-studio/core';
 import type { ModelLoadErrorKind } from '@erd-studio/core';
@@ -123,6 +123,12 @@ const COLUMN_READ_DEFAULTS: Readonly<Record<string, unknown>> = { name: '', data
  * {@link LogicalModelService.renameDataTypeAlias}).
  */
 const SOURCE_TEXT = new WeakMap<Document, string>();
+/**
+ * Every alias a save in progress judged to read as the model already has it,
+ * with a detached copy of what it read then (see
+ * {@link LogicalModelService.confirmAliases}).
+ */
+const KEPT_ALIASES = new WeakMap<Document, Map<Alias, Node>>();
 /** A line holding nothing but whitespace. */
 const BLANK_LINE = /\n[ \t]*\r?\n/;
 
@@ -807,8 +813,108 @@ export class LogicalModelService {
    */
   private applyModel(doc: Document, root: YAMLMap, model: SemanticModel, filePath: string): void {
     const plain = this.modelToPlain(model);
-    this.syncMap(doc, root, plain, MODEL_KEYS);
-    this.syncRelationships(doc, root, (plain.relationships ?? []) as Record<string, unknown>[], filePath);
+    KEPT_ALIASES.set(doc, new Map());
+    try {
+      this.syncMap(doc, root, plain, MODEL_KEYS);
+      this.syncRelationships(doc, root, (plain.relationships ?? []) as Record<string, unknown>[], filePath);
+      this.settleKeptAliases(doc);
+    } finally {
+      KEPT_ALIASES.delete(doc);
+    }
+  }
+
+  /**
+   * Note every alias in `node` (itself, or anywhere inside a map or list) as
+   * reading what the model wants, with a copy of what it reads now. Keys are
+   * synced in a fixed order, not file order, so a later write may still
+   * change the anchor such an alias points at — `description: *g` kept, then
+   * `grain: &g` edited in place; {@link settleKeptAliases} undoes that.
+   */
+  private confirmAliases(doc: Document, node: unknown): void {
+    const kept = KEPT_ALIASES.get(doc);
+    if (!kept || !isNode(node)) return;
+    if (isAlias(node)) {
+      kept.set(node, this.detach(doc, node));
+      return;
+    }
+    visit(node, {
+      Alias: (key, alias) => {
+        if (key !== 'key') kept.set(alias, this.detach(doc, alias));
+      },
+    });
+  }
+
+  /**
+   * After every write of a save: a kept alias (see {@link confirmAliases})
+   * that no longer reads what it read when it was kept — its anchor was
+   * rewritten, or dropped, by this same save — becomes a plain copy of that
+   * value, keeping the line's comments, so no key the canvas did not change
+   * reads differently. An alias whose anchor did not change stays an alias.
+   */
+  private settleKeptAliases(doc: Document): void {
+    const kept = KEPT_ALIASES.get(doc);
+    if (!kept || kept.size === 0) return;
+    const reads = (node: unknown): string => JSON.stringify(this.plainOf(doc, node)) ?? 'undefined';
+    const changed = new Map<Alias, Node>();
+    for (const [alias, was] of kept) {
+      if (reads(alias) !== reads(was)) changed.set(alias, was);
+    }
+    if (changed.size === 0) return;
+    visit(doc, {
+      Alias: (key, alias) => {
+        const was = changed.get(alias);
+        if (key === 'key' || !was) return undefined;
+        return this.withCommentsOf(alias, was);
+      },
+    });
+  }
+
+  /**
+   * A copy of what `node` reads as, sharing nothing with the document: aliases
+   * resolved into copies, anchors and the top node's comments left out, and a
+   * number keeps its source text (`007`). A self-referencing alias reads null.
+   */
+  private detach(doc: Document, node: unknown, top = true, path = new Set<unknown>()): Node {
+    if (isAlias(node)) {
+      const target = node.resolve(doc);
+      if (target === undefined || path.has(target)) return doc.createNode(null) as Node;
+      return this.detach(doc, target, top, path);
+    }
+    let copy: Node;
+    if (isScalar(node)) {
+      const scalar = node.clone() as Scalar;
+      if (typeof scalar.value === 'number' && scalar.source !== undefined && String(scalar.value) !== scalar.source) {
+        scalar.value = scalar.source;
+      }
+      copy = scalar;
+    } else if (isMap(node) || isSeq(node)) {
+      path.add(node);
+      const part = (n: unknown): unknown => (isNode(n) ? this.detach(doc, n, false, path) : n);
+      if (isMap(node)) {
+        const map = new YAMLMap();
+        map.items = node.items.map((pair) => new Pair(part(pair.key), part(pair.value)));
+        copy = map;
+      } else {
+        const seq = new YAMLSeq();
+        seq.items = node.items.map((item) => (isPair(item) ? item.clone() : part(item)));
+        copy = seq;
+      }
+      path.delete(node);
+      (copy as YAMLMap | YAMLSeq).flow = node.flow;
+      if (!top) {
+        copy.commentBefore = node.commentBefore;
+        copy.comment = node.comment;
+      }
+    } else {
+      return doc.createNode(isNode(node) ? this.plainOf(doc, node) : node) as Node;
+    }
+    copy.anchor = undefined;
+    if (top) {
+      copy.comment = undefined;
+      copy.commentBefore = undefined;
+      copy.spaceBefore = undefined;
+    }
+    return copy;
   }
 
   /**
@@ -841,7 +947,11 @@ export class LogicalModelService {
     const claimed = new Set<number>();
     const claim = (i: number): number => (i === -1 ? i : (claimed.add(i), i));
     const matchOf = desired.map((want) => claim(read.findIndex((r, i) => !claimed.has(i) && same(r, want))));
-    if (matchOf.every((i) => i !== -1) && read.every((r, i) => r === null || claimed.has(i))) return;
+    claimed.forEach((i) => this.confirmAliases(doc, list.items[i]));
+    if (matchOf.every((i) => i !== -1) && read.every((r, i) => r === null || claimed.has(i))) {
+      if (isAlias(existing)) this.confirmAliases(doc, existing);
+      return;
+    }
     const unknown = read.findIndex((r) => r === undefined);
     if (unknown !== -1) throw refuse(list.items[unknown], 'this relationship entry cannot be read');
     if (isAlias(existing)) throw refuse(existing, '"relationships:" is an alias of a list written elsewhere');
@@ -918,7 +1028,10 @@ export class LogicalModelService {
     leaveAlone: ReadonlySet<string> = new Set(),
   ): void {
     for (const key of managedKeys) {
-      if (leaveAlone.has(key)) continue;
+      if (leaveAlone.has(key)) {
+        this.confirmAliases(doc, map.get(key, true));
+        continue;
+      }
       if (!(key in desired)) {
         if (map.has(key)) map.delete(key);
         continue;
@@ -929,8 +1042,11 @@ export class LogicalModelService {
       if (isAlias(existing)) {
         // `key: *x` that already reads as `value` stays an alias, comments
         // and all; one that changed becomes the new value, keeping its comments.
-        if (this.aliasReadsAs(doc, key, existing, value)) continue;
-        map.set(key, this.replacementFor(doc, existing, value));
+        if (this.aliasReadsAs(doc, key, existing, value)) {
+          this.confirmAliases(doc, existing);
+          continue;
+        }
+        map.set(key, this.withCommentsOf(existing, doc.createNode(value) as Node));
         continue;
       }
       if (key === 'rationale' && isMap(existing) && value && typeof value === 'object' && !Array.isArray(value)) {
@@ -985,12 +1101,15 @@ export class LogicalModelService {
         map.items.push(doc.createPair(key, value));
         continue;
       }
-      if (this.sameMetaValue(doc, pair.value, value)) continue;
+      if (this.sameMetaValue(doc, pair.value, value)) {
+        this.confirmAliases(doc, pair.value);
+        continue;
+      }
       if (isScalar(pair.value) && this.isScalarLike(value)) {
         // Keep the node, and with it any trailing comment on the line.
         pair.value.value = value;
       } else if (isAlias(pair.value)) {
-        pair.value = this.replacementFor(doc, pair.value, value);
+        pair.value = this.withCommentsOf(pair.value, doc.createNode(value) as Node);
       } else {
         pair.value = doc.createNode(value);
       }
@@ -1036,26 +1155,35 @@ export class LogicalModelService {
    * A node tree as core's reader turns it into plain values: aliases resolved,
    * scalars as their source text, a raw `!!pairs` entry as its `String()`.
    */
-  private plainOf(doc: Document, node: unknown): unknown {
-    if (isAlias(node)) return this.plainOf(doc, node.resolve(doc));
+  private plainOf(doc: Document, node: unknown, path = new Set<unknown>()): unknown {
+    if (isAlias(node)) {
+      const target = node.resolve(doc);
+      return path.has(target) ? null : this.plainOf(doc, target, path);
+    }
     if (isMap(node)) {
+      path.add(node);
       const obj: Record<string, unknown> = {};
       for (const pair of node.items) {
-        Object.defineProperty(obj, String(this.plainOf(doc, pair.key)), {
-          value: this.plainOf(doc, pair.value), enumerable: true, writable: true, configurable: true,
+        Object.defineProperty(obj, String(this.plainOf(doc, pair.key, path)), {
+          value: this.plainOf(doc, pair.value, path), enumerable: true, writable: true, configurable: true,
         });
       }
+      path.delete(node);
       return obj;
     }
-    if (isSeq(node)) return node.items.map((item) => this.plainOf(doc, item));
+    if (isSeq(node)) {
+      path.add(node);
+      const items = node.items.map((item) => this.plainOf(doc, item, path));
+      path.delete(node);
+      return items;
+    }
     if (isScalar(node)) return this.scalarValue(node);
     if (isPair(node)) return String(node);
     return node ?? null;
   }
 
-  /** A new node for `value` in place of the alias `old`, carrying the line's comments. */
-  private replacementFor(doc: Document, old: Alias, value: unknown): Node {
-    const node = doc.createNode(value) as Node;
+  /** `node`, to stand in place of the alias `old`, carrying the line's comments. */
+  private withCommentsOf(old: Alias, node: Node): Node {
     if (isScalar(node)) {
       if (old.commentBefore) node.commentBefore = old.commentBefore;
       if (old.comment) node.comment = old.comment;
@@ -1261,9 +1389,8 @@ export class LogicalModelService {
     const existing = isAlias(raw) ? raw.resolve(doc) : raw;
     const read = isScalar(existing) ? this.scalarValue(existing) : existing;
     if (isNode(read)) return; // a list or map: the user's, never overwritten
-    if (read === null || read === undefined) {
-      if (wanted === COLUMN_READ_DEFAULTS.dataType) return;
-    } else if (String(read) === String(wanted)) {
+    if (read === null || read === undefined ? wanted === COLUMN_READ_DEFAULTS.dataType : String(read) === String(wanted)) {
+      this.confirmAliases(doc, raw);
       return;
     }
     this.syncMap(doc, node, { [DATA_TYPE_ALIAS]: wanted }, [DATA_TYPE_ALIAS]);
