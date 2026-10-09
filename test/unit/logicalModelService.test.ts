@@ -1329,6 +1329,89 @@ describe('LogicalModelService — dbt\'s data_type spelling (#144)', () => {
     expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: [] });
   });
 
+  it('keeps every comment of a dropped empty dataType, its own first, with no blank line left behind', () => {
+    const yml = [
+      'name: fct_order',
+      'columns:',
+      '  - name: status',
+      '    # about dataType',
+      '    dataType: # TODO fill',
+      '    # about data_type',
+      '    data_type: INT # from dbt',
+      '    description: Status',
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns![0].dataType).toBe('INT');
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe([
+      'name: fct_order',
+      'columns:',
+      '  - name: status',
+      '    # about dataType',
+      '    # TODO fill',
+      '    # about data_type',
+      '    dataType: INT # from dbt',
+      '    description: Status',
+      'description: Orders',
+      '',
+    ].join('\n'));
+  });
+
+  it('keeps the trailing comment of an empty dataType written after data_type', () => {
+    const yml = 'name: fct_order\ncolumns:\n  - name: status\n    data_type: INT # dbt\n    dataType: # empty\n    description: Status\n';
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(
+      'name: fct_order\ncolumns:\n  - name: status\n    # empty\n    dataType: INT # dbt\n    description: Status\ndescription: Orders\n',
+    );
+  });
+
+  it('moves a lone trailing comment onto the renamed line, and keeps a blank line the file really had', () => {
+    const yml = 'name: fct_order\ncolumns:\n  - name: status\n    dataType: # TODO\n\n    data_type: INT\n    description: Status\n';
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(
+      'name: fct_order\ncolumns:\n  - name: status\n\n    dataType: INT # TODO\n    description: Status\ndescription: Orders\n',
+    );
+  });
+
+  it('reads a dataType alias of an empty value as empty, as the reader does', () => {
+    const yml = [
+      'name: fct_order',
+      'meta:',
+      '  n: &n ~',
+      'columns:',
+      '  - name: status',
+      '    dataType: *n',
+      '    data_type: INT',
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns![0].dataType).toBe('INT');
+    // Doctor lists it as one a write renames, not as an ignored key to delete.
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: ['status'], ignored: [] });
+
+    model.description = 'Orders';
+    service.saveModel(model);
+    const after = fs.readFileSync(file, 'utf-8');
+    expect(after).toBe('name: fct_order\nmeta:\n  n: &n ~\ncolumns:\n  - name: status\n    dataType: INT\ndescription: Orders\n');
+    expect(service.getModel('fct_order')!.columns![0].dataType).toBe('INT');
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: [] });
+
+    // An alias of a value still wins, so data_type beside it stays ignored.
+    fs.writeFileSync(file, yml.replace('&n ~', '&n VARCHAR'));
+    expect(service.getModel('fct_order')!.columns![0].dataType).toBe('VARCHAR');
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: ['status'] });
+  });
+
   it('leaves a file already spelled dataType byte-identical on a save that changes nothing', () => {
     fs.writeFileSync(file, RENAMED);
     service.saveModel(service.getModel('fct_order')!);

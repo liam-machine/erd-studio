@@ -14,7 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Document, parseDocument, isAlias, isMap, isNode, isPair, isScalar, isSeq } from 'yaml';
-import type { Pair, YAMLMap, YAMLSeq } from 'yaml';
+import type { Pair, Scalar, YAMLMap, YAMLSeq } from 'yaml';
 
 import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, classifyModelLoadError, parseLogicalModelText } from '@erd-studio/core';
 import type { ModelLoadErrorKind } from '@erd-studio/core';
@@ -116,6 +116,15 @@ function keyIs(pair: Pair, key: string): boolean {
 }
 /** What core's reader fills in for a column key the file leaves out or leaves empty. */
 const COLUMN_READ_DEFAULTS: Readonly<Record<string, unknown>> = { name: '', dataType: 'unknown' };
+/**
+ * The text each editable document was parsed from. The `yaml` library keeps
+ * node offsets but not the source, and one question needs it: whether a key
+ * that a write drops really had a blank line after it (see
+ * {@link LogicalModelService.renameDataTypeAlias}).
+ */
+const SOURCE_TEXT = new WeakMap<Document, string>();
+/** A line holding nothing but whitespace. */
+const BLANK_LINE = /\n[ \t]*\r?\n/;
 
 // ---------------------------------------------------------------------------
 // Service
@@ -779,10 +788,12 @@ export class LogicalModelService {
       return null;
     }
     try {
-      const doc = parseDocument(fs.readFileSync(filePath, 'utf-8'));
+      const text = fs.readFileSync(filePath, 'utf-8');
+      const doc = parseDocument(text);
       if (doc.errors.length > 0 || !isMap(doc.contents)) {
         return null;
       }
+      SOURCE_TEXT.set(doc, text);
       return doc;
     } catch (err) {
       console.warn(`[LogicalModelService] Rewriting unparseable model file ${filePath}:`, err);
@@ -1044,7 +1055,7 @@ export class LogicalModelService {
     seq.items = desired.map((col, i) => {
       const node = matches[i];
       if (node) {
-        this.renameDataTypeAlias(node);
+        this.renameDataTypeAlias(doc, node);
         this.syncMap(doc, node, col, COLUMN_KEYS, this.readDefaultsLeftOut(node, col));
         return node;
       }
@@ -1058,41 +1069,78 @@ export class LogicalModelService {
    * the key where it stands — same position, value, style and comments — is
    * what lets the sync that follows find the type it is about to write
    * instead of adding a second key beside it. An empty `dataType:` beside it
-   * holds nothing, so it gives way (any comment on it moves to the renamed
-   * key). A `data_type` next to a `dataType` that holds a value is left
-   * alone: the reader ignores it, and it is the user's.
+   * holds nothing, so it gives way, and every comment on it moves to the
+   * renamed key: see {@link foldEmptyDataType}. A `data_type` next to a
+   * `dataType` that holds a value is left alone: the reader ignores it, and
+   * it is the user's.
    */
-  private renameDataTypeAlias(node: YAMLMap): void {
-    if (this.dataTypeAliasFate(node) !== 'rename') return;
+  private renameDataTypeAlias(doc: Document, node: YAMLMap): void {
+    if (this.dataTypeAliasFate(doc, node) !== 'rename') return;
     const pair = node.items.find((p) => keyIs(p, DATA_TYPE_ALIAS))!;
+    if (!isScalar(pair.key)) pair.key = doc.createNode(pair.key);
     const empty = node.items.findIndex((p) => keyIs(p, 'dataType'));
-    if (empty !== -1) {
-      const [gone] = node.items.splice(empty, 1);
-      if (isScalar(gone.key) && gone.key.commentBefore && isScalar(pair.key) && !pair.key.commentBefore) {
-        pair.key.commentBefore = gone.key.commentBefore;
-      }
-      if (isScalar(gone.value) && gone.value.comment && isScalar(pair.value) && !pair.value.comment) {
-        pair.value.comment = gone.value.comment;
-      }
+    if (empty !== -1) this.foldEmptyDataType(doc, node, empty, pair);
+    (pair.key as Scalar).value = 'dataType';
+  }
+
+  /**
+   * Drop the empty `dataType:` at `node.items[index]` in favour of `pair`
+   * (the `data_type` about to be renamed), keeping every comment either key
+   * carried. The dropped key's come first, then the renamed key's own: they
+   * all become comment lines above the renamed key, except that the dropped
+   * key's one-line trailing comment (`dataType: # TODO`) stays on the line
+   * when the renamed key has none of its own.
+   *
+   * The `yaml` library hands an empty value every comment line below it, up
+   * to the next key (`# about data_type` above `data_type:` is stored on the
+   * empty `dataType:`), and then marks that next key as having a blank line
+   * before it whether or not there was one. So the key that follows the
+   * dropped one gets a blank line only when the file had one there, read
+   * from the source text.
+   */
+  private foldEmptyDataType(doc: Document, node: YAMLMap, index: number, pair: Pair): void {
+    const [gone] = node.items.splice(index, 1);
+    const commentsOf = (n: unknown): { before?: string; trailing?: string } =>
+      isNode(n) ? { before: n.commentBefore ?? undefined, trailing: n.comment ?? undefined } : {};
+    const goneKey = commentsOf(gone.key);
+    const goneValue = commentsOf(gone.value);
+    const key = pair.key as Scalar;
+    const lines: (string | undefined)[] = [goneKey.before, goneKey.trailing, goneValue.before];
+    let trailing = goneValue.trailing;
+    if (trailing !== undefined && !trailing.includes('\n') && isNode(pair.value) && !pair.value.comment) {
+      pair.value.comment = trailing;
+      trailing = undefined;
     }
-    if (isScalar(pair.key)) {
-      pair.key.value = 'dataType';
-    } else {
-      pair.key = 'dataType';
-    }
+    lines.push(trailing, key.commentBefore ?? undefined);
+    const merged = lines.filter((line): line is string => line !== undefined && line !== '');
+    if (merged.length > 0) key.commentBefore = merged.join('\n');
+
+    // The key now first after the dropped one's place, if any.
+    const next = node.items[index];
+    if (!next || !isScalar(next.key)) return;
+    const source = SOURCE_TEXT.get(doc);
+    const from = isScalar(gone.key) ? gone.key.range?.[0] : undefined;
+    const to = next.key.range?.[0];
+    const blankInside = source !== undefined && from !== undefined && to !== undefined
+      ? BLANK_LINE.test(source.slice(from, to))
+      : Boolean(next.key.spaceBefore) && !goneValue.trailing;
+    next.key.spaceBefore = (isScalar(gone.key) && gone.key.spaceBefore) || blankInside || undefined;
   }
 
   /**
    * What a write of this column does with its `data_type:` key (#144) — the
    * one rule {@link renameDataTypeAlias} and doctor share, matching core's
-   * reader: `'rename'` when the reader takes the type from it (no `dataType`,
-   * or an empty one), `'ignored'` when a `dataType` holding a value (even
-   * `''`) wins and the key is kept as written, null with no `data_type`.
+   * reader (`dataType` read as a plain value, aliases resolved, else
+   * `data_type`): `'rename'` when the reader takes the type from it (no
+   * `dataType`, or an empty one — also an alias of an empty value), `'ignored'`
+   * when a `dataType` holding a value (even `''`) wins and the key is kept as
+   * written, null with no `data_type`.
    */
-  private dataTypeAliasFate(node: YAMLMap): 'rename' | 'ignored' | null {
+  private dataTypeAliasFate(doc: Document, node: YAMLMap): 'rename' | 'ignored' | null {
     if (!node.items.some((p) => keyIs(p, DATA_TYPE_ALIAS))) return null;
     const own = node.items.find((p) => keyIs(p, 'dataType'));
-    const empty = !own || own.value === null || own.value === undefined || (isScalar(own.value) && own.value.value === null);
+    const value = own && isAlias(own.value) ? own.value.resolve(doc) : own?.value;
+    const empty = value === null || value === undefined || (isScalar(value) && value.value === null);
     return empty ? 'rename' : 'ignored';
   }
 
@@ -1115,7 +1163,7 @@ export class LogicalModelService {
     if (!isSeq(columns)) return found;
     columns.items.forEach((item, i) => {
       const col = resolve(item);
-      const fate = isMap(col) ? this.dataTypeAliasFate(col) : null;
+      const fate = isMap(col) ? this.dataTypeAliasFate(doc, col) : null;
       if (!isMap(col) || fate === null) return;
       const nameNode = col.get('name', true);
       const value = isScalar(nameNode) ? this.scalarValue(nameNode) : nameNode;
