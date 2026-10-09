@@ -267,6 +267,13 @@ describe('doctor via main', () => {
     expect(clean.nextSteps.some((s) => s.id === 'fix-model-yaml')).toBe(false);
   });
 
+  it('prints JSON and exits 0, also for a folder with no project', async () => {
+    let out = '';
+    const io = { stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: tmp, env: cleanEnv };
+    expect(await main(['doctor', '--json', '--no-dbt'], io)).toBe(0);
+    expect(JSON.parse(out).project.found).toBe(false);
+  });
+
   it('lists a diagram holding git merge conflicts with its line, and asks for it to be resolved first (#145)', async () => {
     const root = copyFixture('dbt-project-sparse');
     fs.rmSync(path.join(root, '.erd-studio'), { recursive: true });
@@ -331,12 +338,5 @@ describe('doctor via main', () => {
     expect(r.erd.conflictedDomainFiles).toEqual([]);
     expect(r.nextSteps.find((s) => s.id === 'fix-model-yaml')!.why)
       .toContain('.erd-studio/logical-models/fct_task_event.yml:2 — unresolved git merge conflict — keep one side, save, then git add');
-  });
-
-  it('prints JSON and exits 0, also for a folder with no project', async () => {
-    let out = '';
-    const io = { stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: tmp, env: cleanEnv };
-    expect(await main(['doctor', '--json', '--no-dbt'], io)).toBe(0);
-    expect(JSON.parse(out).project.found).toBe(false);
   });
 });
