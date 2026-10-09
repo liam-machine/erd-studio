@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.6.8 — 2026-10-09
 
 ### Added
 - **Export a diagram as Mermaid or DBML.** **ERD Studio: Export Diagram…** turns a diagram's design into text in one of two open formats: [Mermaid](https://mermaid.js.org) `erDiagram`, which GitHub, GitLab and many wikis draw as a picture inside a document, or [DBML](https://dbml.dbdiagram.io), which dbdiagram.io and other DBML tools read. Pick a format, then **Copy to Clipboard**, **Open in Editor** or **Save As…**. It is in the command palette, on each diagram's right-click menu in the sidebar, and behind the new **⤓** (Export) button in the canvas's top corner. The export always holds the logical design (even from the Physical tab): every model, column, key and relationship, plus grain, model role, SCD type, additivity, natural keys, alias, rationale, relationship roles and plain-text `meta` (as readable lines in the table and column notes in DBML, and as key markers and comments in Mermaid). Both formats stick to syntax old and new tools read: the DBML opens in DBML tools built on DBML's own parser from mid-2022 onwards (`@dbml/core` 2.4.2 or later), not only the latest, and the Mermaid in Mermaid 10.0 and later. Diagram positions are not exported, and each file carries a version line and a note of what it leaves out. Nothing about how ERD Studio stores your diagrams changes, and nothing reads an export back in.
