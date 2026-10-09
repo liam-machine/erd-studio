@@ -100,6 +100,8 @@ const EXPECTED_FILES = [
   'dbt-project.physical.host.json',
   ...Object.keys(ERROR_CASES).map((c) => `errors.${c}.host.json`),
   'logs.json',
+  // The diagram export goldens, owned by packages/core/test/unit/exportDiagram.golden.test.ts.
+  ...Object.keys(DOMAIN_CASES).flatMap((c) => [`${c}.dbml`, `${c}.mmd`]),
 ].sort();
 
 const LINE_COLUMN = / \(line \d+ column \d+\)/g;

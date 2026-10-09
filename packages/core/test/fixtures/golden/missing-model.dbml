@@ -1,0 +1,25 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project partial {
+  Note: '''Layer: silver
+Stage: logical
+
+A domain whose model references do not all resolve'''
+}
+
+Table silver.dim_customer {
+  customer_key INT [pk, note: 'Surrogate key']
+  customer_name VARCHAR [note: 'Display name']
+  Note: 'Customers'
+}
+
+// Table dim_missing is not exported: it has no columns, and a DBML table needs at least one.
+
+// Table broken is not exported: its model file could not be read (yamlIndent, line 5).
+
+// Table nameless is not exported: it has no columns, and a DBML table needs at least one.
+
+// Not exported: dim_missing.customer_key -> dim_customer.customer_key (dim_missing has no column customer_key).
+// Not exported: broken.customer_key -> dim_customer.customer_key (broken has no column customer_key).

@@ -237,6 +237,10 @@ const FEATURES = [
   'relStateUnreadable',
   'relStatePartialComposite',
   'relStateDomainCopy',
+  'exportMermaid',
+  'exportDbml',
+  'exportCancelled',
+  'exportNoDiagrams',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -307,6 +311,7 @@ const ERROR_CODES = [
   'relInvGroupBroken',
   'relInvKeyNotMarked',
   'relInvCheckFailed',
+  'exportFailed',
 ];
 
 /**

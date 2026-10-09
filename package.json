@@ -93,6 +93,12 @@
         "icon": "$(wand)"
       },
       {
+        "command": "erdStudio.exportDiagram",
+        "title": "Export Diagram…",
+        "category": "ERD Studio",
+        "icon": "$(export)"
+      },
+      {
         "command": "erdStudio.createDomain",
         "title": "Create Semantic Domain",
         "category": "ERD Studio"
@@ -418,6 +424,11 @@
     ],
     "menus": {
       "view/item/context": [
+        {
+          "command": "erdStudio.exportDiagram",
+          "when": "view == erdStudio.domainTree && viewItem == domain",
+          "group": "5_export@1"
+        },
         {
           "command": "erdStudio.renameDomain",
           "when": "view == erdStudio.domainTree && viewItem == domain",

@@ -8,9 +8,14 @@
  * because a silently dropped `--domain` would diff the wrong thing.
  */
 
-export type CliCommand = 'doctor' | 'inventory' | 'diff' | 'version' | 'help';
+import { DIAGRAM_EXPORT_FORMATS, type DiagramExportFormat } from '@erd-studio/core';
 
-export const CLI_COMMANDS: readonly CliCommand[] = ['doctor', 'inventory', 'diff', 'version', 'help'];
+export type CliCommand = 'doctor' | 'inventory' | 'diff' | 'export' | 'version' | 'help';
+
+export const CLI_COMMANDS: readonly CliCommand[] = ['doctor', 'inventory', 'diff', 'export', 'version', 'help'];
+
+/** `mermaid|dbml` — the export formats as the usage text and its errors spell them. */
+const FORMAT_CHOICES = DIAGRAM_EXPORT_FORMATS.join('|');
 
 export interface CliOptions {
   command: CliCommand;
@@ -32,12 +37,14 @@ export interface CliOptions {
   summary: boolean;
   /** inventory: restrict to these model names. */
   models?: string[];
-  /** diff: domain files (repeatable). */
+  /** diff: domain files (repeatable); export: exactly one. */
   domains: string[];
   /** diff: every domain under the semantic dir. */
   all: boolean;
   /** diff: advisory rows block too. */
   strict: boolean;
+  /** export: the text format to print. */
+  format?: DiagramExportFormat;
 }
 
 export class CliUsageError extends Error {
@@ -62,9 +69,10 @@ const FLAGS: Record<string, FlagSpec> = {
   '--trust-venv': { takesValue: false, commands: ['doctor'] },
   '--summary': { takesValue: false, commands: ['inventory'] },
   '--models': { takesValue: true, commands: ['inventory'] },
-  '--domain': { takesValue: true, commands: ['diff'] },
+  '--domain': { takesValue: true, commands: ['diff', 'export'] },
   '--all': { takesValue: false, commands: ['diff'] },
   '--strict': { takesValue: false, commands: ['diff'] },
+  '--format': { takesValue: true, commands: ['export'] },
 };
 
 export const DEFAULT_CLI_SEMANTIC_DIR = '.erd-studio';
@@ -120,7 +128,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
     if (arg.startsWith('-') && arg !== '-') { throw new CliUsageError(`Unknown option ${arg}.`); }
     if (command !== null) { throw new CliUsageError(`Unexpected argument "${arg}".`); }
     if (!(CLI_COMMANDS as readonly string[]).includes(arg)) {
-      throw new CliUsageError(`Unknown command "${arg}". Expected one of: doctor, inventory, diff, version.`);
+      throw new CliUsageError(`Unknown command "${arg}". Expected one of: doctor, inventory, diff, export, version.`);
     }
     command = arg as CliCommand;
   }
@@ -158,6 +166,17 @@ export function parseArgs(argv: readonly string[]): CliOptions {
       case '--domain': opts.domains.push(value!); break;
       case '--all': opts.all = true; break;
       case '--strict': opts.strict = true; break;
+      case '--format': {
+        const format = value!.trim().toLowerCase();
+        if (!(DIAGRAM_EXPORT_FORMATS as readonly string[]).includes(format)) {
+          throw new CliUsageError(`Unknown --format "${value}". Expected one of: ${FORMAT_CHOICES}.`);
+        }
+        if (opts.format !== undefined && opts.format !== format) {
+          throw new CliUsageError('Use --format once.');
+        }
+        opts.format = format as DiagramExportFormat;
+        break;
+      }
       default: break;
     }
   }
@@ -167,6 +186,17 @@ export function parseArgs(argv: readonly string[]): CliOptions {
   }
   if (opts.command === 'diff' && opts.domains.length > 0 && opts.all) {
     throw new CliUsageError('Use either --domain or --all, not both.');
+  }
+  if (opts.command === 'export') {
+    if (opts.domains.length === 0) {
+      throw new CliUsageError(`export needs --domain <path> and --format ${FORMAT_CHOICES}.`);
+    }
+    if (opts.domains.length > 1) {
+      throw new CliUsageError('export takes one --domain (it prints one diagram).');
+    }
+    if (opts.format === undefined) {
+      throw new CliUsageError(`export needs --format ${FORMAT_CHOICES}.`);
+    }
   }
   return opts;
 }
@@ -186,6 +216,7 @@ Usage:
   erd-studio doctor    [--json] [--no-dbt] [--dbt <path>] [--trust-venv]
   erd-studio inventory [--json] [--summary] [--models a,b,c]
   erd-studio diff      [--json] (--domain <path> | --all) [--strict]
+  erd-studio export    [--json] --domain <path> --format ${FORMAT_CHOICES}
   erd-studio version
 
 Shared options:
@@ -194,6 +225,9 @@ Shared options:
   --json                machine-readable output on stdout
   --quiet               no human-readable output (exit code only)
   --verbose             show internal diagnostics on stderr
+
+export prints the domain's logical (design) diagram on stdout and writes no file:
+  erd-studio export --domain .erd-studio/gold/sales.json --format dbml > sales.dbml
 
 Exit codes: 0 ok · 1 diff found drift · 2 usage error · 3 project/domain problem · 4 internal error
 `;

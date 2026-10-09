@@ -1,0 +1,51 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: sales (layer gold, logical stage)
+%% Description: Relationships in the model library in the shapes released extensions wrote, plus a domain-file copy that disagrees
+
+  %% Model fct_order
+  %%   schema: gold
+  %%   alias: orders
+  %%   role: fact
+  %%   description: One row per order line
+  "fct_order" {
+    BIGINT order_line_id PK
+    INT customer_key
+    INT order_date_key FK
+    INT product_key
+    DECIMAL_18_2 amount "type DECIMAL(18,2); additive"
+  }
+
+  %% Model dim_customer
+  %%   schema: gold
+  %%   alias: customer
+  %%   role: dimension
+  "dim_customer" {
+    INT customer_key PK, FK
+    VARCHAR customer_name
+  }
+
+  %% Model dim_date
+  %%   schema: gold
+  %%   role: dimension
+  "dim_date" {
+    INT date_key PK
+    DATE calendar_date
+  }
+
+  %% Model dim_product
+  %%   schema: gold
+  %%   role: dimension
+  "dim_product" {
+    INT product_key PK, FK
+    VARCHAR product_name
+  }
+
+  %% dim_customer.customer_key -> fct_order.customer_key, one-to-many
+  "dim_customer" ||--o{ "fct_order" : "customer_key"
+  %% fct_order.order_date_key -> dim_date.date_key, many-to-one
+  "fct_order" }o--|| "dim_date" : "order_date_key"
+  %% dim_product.product_key -> fct_order.product_key, many-to-one
+  "dim_product" }o--|| "fct_order" : "product_key"

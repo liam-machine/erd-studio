@@ -38,10 +38,23 @@ import {
   FileTooLargeError,
   YamlNodeLimitError,
   YamlCharLimitError,
+  toDbml,
   type DisplayDomain,
   type LoadDisplayDomainOptions,
 } from '@erd-studio/core';
-import { ErdCanvas, transformDomain, repickHandleSides, type ErdCanvasHandle, type ErdCanvasProps } from '@erd-studio/renderer';
+import {
+  ErdCanvas,
+  transformDomain,
+  repickHandleSides,
+  toMermaid,
+  exportDiagram,
+  diagramExportFileName,
+  DIAGRAM_EXPORT_FORMATS,
+  DIAGRAM_EXPORT_FILE_EXTENSIONS,
+  type DiagramExportFormat,
+  type ErdCanvasHandle,
+  type ErdCanvasProps,
+} from '@erd-studio/renderer';
 import { createCanvasStore, CanvasStoreProvider, type CanvasStore } from '@erd-studio/renderer/store';
 import { estimateNodeHeight, NODE_WIDTH } from '@erd-studio/renderer/sizing';
 import { CanvasEnvironmentProvider, ModelNode, useCanvasGraph, type CanvasHost } from '@erd-studio/renderer/editor';
@@ -56,6 +69,11 @@ export const host: CanvasHost = { postMessage: (m) => void m.type };
 export const handle: ErdCanvasHandle | null = null;
 export const props: Partial<ErdCanvasProps> = { nodesDraggable: true };
 export const width: number = NODE_WIDTH + estimateNodeHeight(0, false);
+export const exportFormat: DiagramExportFormat = DIAGRAM_EXPORT_FORMATS[0];
+export async function exported(): Promise<string[]> {
+  const domain = await loaded;
+  return [toDbml(domain), toMermaid(domain), exportDiagram(domain, exportFormat), diagramExportFileName(domain, 'dbml'), DIAGRAM_EXPORT_FILE_EXTENSIONS.mermaid];
+}
 export { ErdCanvas, transformDomain, repickHandleSides, CanvasStoreProvider, CanvasEnvironmentProvider, ModelNode, useCanvasGraph };
 `;
 

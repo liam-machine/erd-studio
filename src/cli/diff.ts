@@ -170,8 +170,12 @@ export function resolveDomainPath(ctx: CliContext, arg: string, cwd: string = pr
   return hit;
 }
 
-/** Map a thrown domain-load error to a stable code and a redacted message with the project-relative path. */
-function describeDomainError(ctx: CliContext, file: string, err: unknown): { code: string; message: string } {
+/**
+ * Map a thrown domain-load error to a stable code and a redacted message with
+ * the project-relative path. Shared with `export --domain`, so one broken file
+ * reads the same from both subcommands.
+ */
+export function describeDomainError(ctx: CliContext, file: string, err: unknown): { code: string; message: string } {
   const rel = relPath(ctx.root, file);
   const raw = err instanceof Error ? err.message : String(err);
   const message = redactPaths(raw.split(file).join(rel));

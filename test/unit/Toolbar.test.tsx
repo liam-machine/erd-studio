@@ -22,10 +22,12 @@ const mockRunElkLayout = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ model_a: { x: 10, y: 20 } }),
 );
 
-// Prevent acquireVsCodeApi() from throwing at module load time
+// Prevent acquireVsCodeApi() from throwing at module load time. One shared
+// postMessage so a test can see what the toolbar sent.
+const mockPostMessage = vi.hoisted(() => vi.fn());
 vi.mock('../../webview/hooks/useVsCodeApi', () => ({
   useVsCodeApi: () => ({
-    postMessage: vi.fn(),
+    postMessage: mockPostMessage,
     getState: vi.fn(),
     setState: vi.fn(),
   }),
@@ -240,7 +242,7 @@ describe('Toolbar layout-dirty button', () => {
  * class, which is what the component actually reads.
  */
 describe('the top-right corner actions', () => {
-  /** Width of the corner with both labels showing, as a real browser reports it. */
+  /** Width of the corner in its labelled form, as a real browser reports it. */
   const EXPANDED_WIDTH = 200;
 
   /**
@@ -339,8 +341,58 @@ describe('the top-right corner actions', () => {
     fireEvent.click(trigger());
 
     expect(trigger().getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('menuitem', { name: /Export as Mermaid or DBML/ })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /Send feedback/ })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /Open as JSON file/ })).toBeTruthy();
+  });
+
+  it('posts exportDiagram (no payload) from the labelled button', () => {
+    layout({ toolbarRight: 900, cornerRight: 1400 });
+    render(<Toolbar {...defaultProps} />);
+    const button = screen.getByRole('button', { name: /export diagram as mermaid or dbml/i });
+    expect(button.className).toBe('toolbar__corner-button toolbar__corner-button--icon');
+    expect(button.getAttribute('title')).toBe('Export as Mermaid or DBML');
+
+    fireEvent.click(button);
+
+    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+    expect(mockPostMessage).toHaveBeenCalledWith({ type: 'exportDiagram' });
+  });
+
+  // A third labelled button would make the corner collapse to ⋯ about 155px of
+  // window sooner, hiding the Feedback and View File labels at common widths;
+  // as a glyph the size of the ⋯ trigger, Export costs far less of that room.
+  it('shows Export as a glyph beside the two labelled buttons, its name in the tooltip', () => {
+    layout({ toolbarRight: 900, cornerRight: 1400 });
+    render(<Toolbar {...defaultProps} />);
+    const buttons = Array.from(document.querySelectorAll('.toolbar__corner-actions > button'));
+    expect(buttons.map((b) => b.textContent)).toEqual(['⤓', '💬 Feedback', '{ } View File']);
+    expect(buttons[0].getAttribute('aria-label')).toBe('Export diagram as Mermaid or DBML');
+  });
+
+  it('posts exportDiagram from the overflow menu and closes it', () => {
+    layout({ toolbarRight: 900, cornerRight: 1000 });
+    render(<Toolbar {...defaultProps} />);
+    fireEvent.click(trigger());
+    fireEvent.click(screen.getByRole('menuitem', { name: /Export as Mermaid or DBML/ }));
+
+    expect(mockPostMessage).toHaveBeenCalledWith({ type: 'exportDiagram' });
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('shows Export on the physical stage too, saying it exports the logical design', () => {
+    const saved = mockStoreState.domain;
+    mockStoreState.domain = { ...mockDomain, stage: 'physical' as const, readOnly: true };
+    try {
+      layout({ toolbarRight: 900, cornerRight: 1400 });
+      render(<Toolbar {...defaultProps} />);
+      const button = screen.getByRole('button', { name: /export diagram as mermaid or dbml/i });
+      expect(button.getAttribute('title')).toMatch(/logical design/);
+      fireEvent.click(button);
+      expect(mockPostMessage).toHaveBeenCalledWith({ type: 'exportDiagram' });
+    } finally {
+      mockStoreState.domain = saved;
+    }
   });
 
   it('opens the feedback dialog from either form', () => {

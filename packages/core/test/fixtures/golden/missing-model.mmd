@@ -1,0 +1,32 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: partial (layer silver, logical stage)
+%% Description: A domain whose model references do not all resolve
+
+  %% Model dim_customer
+  %%   schema: silver
+  %%   description: Customers
+  "dim_customer" {
+    INT customer_key PK "Surrogate key"
+    VARCHAR customer_name "Display name"
+  }
+
+  %% Model dim_missing
+  %%   no columns yet
+  "dim_missing" {
+  }
+
+  %% Model broken
+  %%   its model file could not be read (yamlIndent, line 5)
+  "broken" {
+  }
+
+  %% Model nameless
+  %%   no columns yet
+  "nameless" {
+  }
+
+  %% Not exported: dim_missing.customer_key -> dim_customer.customer_key (dim_missing has no column customer_key).
+  %% Not exported: broken.customer_key -> dim_customer.customer_key (broken has no column customer_key).

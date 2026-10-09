@@ -1,6 +1,6 @@
 /**
  * `erd-studio` CLI entry point (dist/cli.js) — the read-only helper the
- * `/erd-studio-setup` skill drives: `doctor`, `inventory`, `diff`, `version`.
+ * `/erd-studio-setup` skill drives: `doctor`, `inventory`, `diff`, `export`, `version`.
  *
  * Launched through the ~/.erd-studio-cli shims (cliLauncherService), under
  * plain Node or VS Code's own Electron with ELECTRON_RUN_AS_NODE. It never
@@ -15,6 +15,7 @@ import { parseArgs, USAGE, type CliOptions } from './args';
 import { buildCliContext, CLI_VERSION, CliEnvError } from './context';
 import { runDiff } from './diff';
 import { runDoctor, runtimeInfo } from './doctor';
+import { runExport } from './export';
 import { colourEnabled, formatDiff, formatDoctor, formatInventory, makePaint } from './format';
 import { runInventory } from './inventory';
 
@@ -110,6 +111,15 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
         const { result, exitCode } = runDiff(ctx, { domains: opts.domains, all: opts.all, strict: opts.strict, cwd: io.cwd });
         out(result, () => formatDiff(result, paint));
         return exitCode;
+      }
+
+      case 'export': {
+        const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd });
+        // parseArgs guarantees exactly one --domain and a --format for export.
+        const result = await runExport(ctx, { domain: opts.domains[0], format: opts.format!, cwd: io.cwd });
+        // Human mode is the export text and nothing else, so `> schema.dbml` works.
+        out(result, () => result.content);
+        return EXIT.ok;
       }
 
       default:

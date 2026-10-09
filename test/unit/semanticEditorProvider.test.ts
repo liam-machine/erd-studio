@@ -771,6 +771,73 @@ describe('runDbtParse (#110)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Export Diagram from the canvas toolbar
+// ---------------------------------------------------------------------------
+
+describe('exportDiagram', () => {
+  /** Stand in for the real command (registered by activate()) and record its argument. */
+  function captureExportCommand() {
+    const calls: unknown[][] = [];
+    const real = vscode.commands.executeCommand;
+    vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) => {
+      if (command === 'erdStudio.exportDiagram') { calls.push(args); return undefined; }
+      return real(command, ...args);
+    }) as never);
+    return calls;
+  }
+
+  it('runs erdStudio.exportDiagram with the panel\'s domain file', async () => {
+    const { panel, file } = await openShowcase(root);
+    const calls = captureExportCommand();
+
+    await panel._simulateMessage({ type: 'exportDiagram' });
+
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect((calls[0][0] as { fsPath: string }).fsPath).toBe(file);
+  });
+
+  it('is allowed on the read-only physical stage (it always exports the logical design)', async () => {
+    const { panel, file } = await openShowcase(root);
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await waitForType(panel, 'stageData');
+    const calls = captureExportCommand();
+
+    await panel._simulateMessage({ type: 'exportDiagram' });
+
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect((calls[0][0] as { fsPath: string }).fsPath).toBe(file);
+    expect(lastError(panel)).not.toBe(PHYSICAL_READ_ONLY_MESSAGE);
+  });
+
+  it('refuses a payload and runs nothing', async () => {
+    const { panel } = await openShowcase(root);
+    const calls = captureExportCommand();
+
+    await panel._simulateMessage({ type: 'exportDiagram', payload: { format: 'dbml' } });
+
+    await waitForError(panel, /Export takes no payload/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('activeDomainPath names the focused canvas only', async () => {
+    const { provider, file } = await openShowcase(root);
+    const tabGroups = vscode.window.tabGroups as unknown as { activeTabGroup: { activeTab?: unknown } };
+    const saved = tabGroups.activeTabGroup.activeTab;
+    try {
+      tabGroups.activeTabGroup.activeTab = undefined;
+      expect(provider.activeDomainPath()).toBeUndefined();
+      tabGroups.activeTabGroup.activeTab = { input: new vscode.TabInputCustom(vscode.Uri.file(file), DOMAIN_EDITOR_VIEW_TYPE) };
+      expect(provider.activeDomainPath()).toBe(file);
+      // A custom editor this provider has no panel for is not a canvas.
+      tabGroups.activeTabGroup.activeTab = { input: new vscode.TabInputCustom(vscode.Uri.file(path.join(root, 'x.json')), 'other') };
+      expect(provider.activeDomainPath()).toBeUndefined();
+    } finally {
+      tabGroups.activeTabGroup.activeTab = saved;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // #113 — the logical stage's "Run dbt parse" hint
 // ---------------------------------------------------------------------------
 

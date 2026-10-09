@@ -753,6 +753,17 @@
   opacity: 1;
 }
 
+/* A glyph-only corner button (Export), the size of the overflow trigger, so it
+   costs the labelled corner as little width as possible. */
+.toolbar__corner-button--icon {
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
 /* The collapsed form. */
 .toolbar__corner-menu {
   position: relative;
