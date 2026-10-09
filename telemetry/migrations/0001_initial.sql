@@ -1,9 +1,10 @@
--- ERD Studio usage telemetry — D1 schema (contract v1), current shape.
+-- ERD Studio usage telemetry: the contract v1 table, as first deployed.
 --
--- REFERENCE ONLY: do not apply this file. The database is built by
--- migrations/, applied with `wrangler d1 migrations apply` (see README.md).
--- This is what those migrations add up to, in one place to read;
--- test/schema.test.mjs fails when the two disagree.
+-- Applied by `wrangler d1 migrations apply erd-studio-telemetry --remote`,
+-- which records each file in the `d1_migrations` table and applies it once
+-- (deploy.yml runs it before every Worker deploy). Wrangler tracks files by
+-- name only, so never change the SQL of an applied migration: add the next
+-- number instead, and update schema.sql, which shows the result.
 --
 -- One row per install per UTC day. No IP, user-agent, geo or header is ever
 -- stored; `received_day` is the date the Worker received the row, and the daily
@@ -28,16 +29,6 @@ CREATE TABLE IF NOT EXISTS heartbeats (
   catalog INTEGER NOT NULL,
   features TEXT NOT NULL,        -- JSON object
   errors TEXT NOT NULL,          -- JSON object
-  -- Added for extension 1.6.3 (migrations/0002_host_assistants_retention.sql).
-  -- NULL on rows from older clients.
-  host TEXT,
-  remote TEXT,
-  dev INTEGER,
-  assistants TEXT,               -- JSON array
-  harnesses TEXT,                -- JSON array
-  active_days_28 TEXT,
-  canvas_days_28 TEXT,
-  first_canvas TEXT,
   PRIMARY KEY (install_id, day)
 );
 CREATE INDEX IF NOT EXISTS idx_heartbeats_day ON heartbeats(day);

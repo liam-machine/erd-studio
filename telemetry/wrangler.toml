@@ -1,7 +1,9 @@
 # ERD Studio — usage telemetry collector.
 #
-# Deployed by hand (see README.md). This directory is not part of the extension
-# build and is excluded from the VSIX by the repo's .vscodeignore.
+# Deployed by .github/workflows/deploy.yml when a merge to main changes this
+# directory: D1 migrations first, then this Worker, then (if anything else
+# changed) the extension. Manual fallback in README.md. This directory is not
+# part of the extension build and is excluded from the VSIX by .vscodeignore.
 
 name = "erd-studio-telemetry"
 main = "src/index.js"
@@ -37,12 +39,14 @@ crons = ["17 3 * * *"]
 # Bindings
 # ---------------------------------------------------------------------------
 
-# Create with `npx wrangler d1 create erd-studio-telemetry`, paste the printed
-# database_id below, then apply schema.sql (see README.md).
+# Create with `npx wrangler d1 create erd-studio-telemetry` and paste the
+# printed database_id below. The tables come from migrations/, applied once each
+# by `wrangler d1 migrations apply`, which records them in `d1_migrations`.
 [[d1_databases]]
 binding = "DB"
 database_name = "erd-studio-telemetry"
 database_id = "58f599b8-709f-47bf-9164-057cfdd06050"
+migrations_dir = "migrations"
 
 # ---------------------------------------------------------------------------
 # Variables
