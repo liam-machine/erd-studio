@@ -130,3 +130,33 @@ jobs:
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
         working-directory: mcp-server
+
+  # The telemetry Worker (telemetry/) deploys automatically from deploy.yml, so
+  # its checks gate the PR. No npm install and no Cloudflare credentials: the
+  # dry run bundles and validates wrangler.toml, and the migrations are applied
+  # to a throwaway local D1 — the same path a brand-new database takes. Runs on
+  # every PR (about a minute, beside the longer jobs) so it is never "skipped".
+  telemetry:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: telemetry
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm test
+      - run: npm run check
+
+      - name: Validate the Worker config (dry run, no credentials)
+        run: npx --yes wrangler@4 deploy --dry-run --outdir "${RUNNER_TEMP}/telemetry-dry-run"
+
+      - name: Apply the migrations to a fresh local D1
+        run: npx --yes wrangler@4 d1 migrations apply erd-studio-telemetry --local --persist-to "${RUNNER_TEMP}/telemetry-d1"

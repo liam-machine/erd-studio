@@ -50,8 +50,8 @@ behalf (its `telemetry.json` lists every field):
    numbers only; the tests capture every log line and search it for canaries.
 
 If you change what is collected, change the contract in the extension, this
-Worker, `schema.sql`, the extension's `telemetry.json` and the local archive
-together.
+Worker, a new migration plus `schema.sql`, the extension's `telemetry.json` and
+the local archive together.
 
 ---
 
@@ -75,45 +75,91 @@ together.
 
 ## Deploy
 
+### Automatically, on merge to `main`
+
+`.github/workflows/deploy.yml` deploys this Worker whenever `telemetry/`
+(anything but `*.md`) on `main` differs from the commit it last deployed, which
+the `telemetry-worker-deployed` tag records. Comparing with the tag rather than
+with one PR means a run GitHub cancelled, or a deploy that failed, is picked up
+by the next merge. The `telemetry-worker` job:
+
+1. runs `npm test && npm run check`;
+2. applies the D1 migrations: `wrangler d1 migrations apply erd-studio-telemetry --remote`
+   runs each file in `migrations/` once and records it in the `d1_migrations`
+   table, so a new column exists before the Worker that writes it;
+3. runs `wrangler deploy`, which also re-applies the custom domains, the cron
+   and `[vars]`;
+4. moves the tag.
+
+The extension release (`deploy` job) runs only after that job succeeded or had
+nothing to do, so **a failed Worker deploy blocks the release**, and a merge
+that changes only `telemetry/` (plus docs) deploys the Worker and releases no
+extension. "Worker before the extension that sends new keys or bigger
+heartbeats" therefore holds by itself — as long as the Worker change is merged
+in the same PR as the extension change, or before it.
+
+Every PR also runs the `telemetry` job in `ci.yml`: the tests, a
+`wrangler deploy --dry-run` that validates `wrangler.toml`, and the migrations
+against a throwaway local D1. Neither needs credentials.
+
+**Repository secrets** (Settings → Secrets and variables → Actions). A missing
+one fails the job with its name, and so blocks the release; it is never
+skipped.
+
+- `CLOUDFLARE_ACCOUNT_ID` — the account that holds the Worker and the database.
+- `CLOUDFLARE_API_TOKEN` — a custom API token limited to that account, with:
+  - Account › **Workers Scripts** › Edit (upload, cron, observability);
+  - Account › **D1** › Edit (the migrations);
+  - Zone › **Workers Routes** › Edit, on the zones `w2solutions.ai` **and**
+    `liam-is-an.ai`: every deploy re-applies both custom domains in
+    `wrangler.toml` (wrangler `PUT`s `…/workers/scripts/<name>/domains/records`),
+    and that needs Workers Routes write on each affected zone.
+
+### One-time: baseline the live database
+
+Until migrations were tracked, `schema.sql` and `0002` were applied by hand, so
+the live database has no `d1_migrations` table and the first automated run
+would re-run `0002` and fail with `duplicate column name: host` (blocking the
+release, changing nothing). Before merging the change that introduced tracked
+migrations, run this once from `telemetry/`:
+
+```bash
+npx --yes wrangler@4 d1 execute erd-studio-telemetry --remote --command "CREATE TABLE IF NOT EXISTS d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL); INSERT OR IGNORE INTO d1_migrations (name) SELECT '0001_initial.sql' WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'heartbeats'); INSERT OR IGNORE INTO d1_migrations (name) SELECT '0002_host_assistants_retention.sql' WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'heartbeats' AND sql LIKE '%first_canvas%'); SELECT id, name, applied_at FROM d1_migrations ORDER BY id;"
+npx --yes wrangler@4 d1 migrations list erd-studio-telemetry --remote   # ✅ No migrations to apply!
+```
+
+The table is wrangler 4's own (`CREATE TABLE IF NOT EXISTS`, same shape), and
+each file is marked applied only if its change is already in the database, so
+the command is safe to repeat and does nothing harmful on a database in any
+other state: whatever it does not mark stays pending for the workflow.
+
+### Adding a migration
+
+`npx --yes wrangler@4 d1 migrations create erd-studio-telemetry <what_it_does>`
+creates the next `NNNN_<what_it_does>.sql`. Keep it additive (the old Worker
+serves between the migration and the deploy), update `schema.sql` to match —
+`test/schema.test.mjs` fails until you do, and also when the Worker writes a
+column no migration creates — and never change the SQL of a migration that has
+been applied: wrangler tracks files by name only. A change that only adds
+`features` / `errors` keys needs no migration (they are JSON text columns).
+
+### First setup, or deploying by hand
+
+A brand-new database needs only its id; the migrations build the tables.
+
 ```bash
 cd telemetry
-
-# 1. Authenticate (opens a browser, stores the token locally).
-npx wrangler login
-
-# 2. Create the database, then paste the printed database_id into
-#    wrangler.toml (d1_databases[0].database_id, replacing REPLACE_WITH_D1_ID).
+npx wrangler login                         # opens a browser, stores a token locally
 npx wrangler d1 create erd-studio-telemetry
-
-# 3. Create the table and indexes.
-npx wrangler d1 execute erd-studio-telemetry --remote --file schema.sql
-
-# 4. Deploy. This also registers the custom domain and the retention cron.
-npx wrangler deploy
+# paste the printed database_id into wrangler.toml (d1_databases[0].database_id)
+npm test && npm run check
+npm run migrate                            # wrangler d1 migrations apply … --remote
+npm run deploy                             # also the custom domains and the cron
 ```
 
-### Upgrading an existing database
-
-`schema.sql` creates a fresh table with every column. An existing database gets
-new columns from `migrations/`, applied once each, **before** deploying the
-Worker that writes them (a Worker binding a column that does not exist fails
-every insert with a 503):
-
-```bash
-npx wrangler d1 execute erd-studio-telemetry --remote --file migrations/0002_host_assistants_retention.sql
-npm test && npm run deploy
-```
-
-The same order applies to a release that only adds `features` or `errors`
-keys (no migration then): `npm test && npm run deploy` here first, because
-an older Worker drops every key it does not list.
-
-Deploy the Worker **before** the extension release that sends the new fields.
-An older Worker would still accept the new heartbeats (it drops unknown
-top-level and feature keys) but the new data would be lost. The body cap was
-raised from 2 KB to 4 KB for the longer feature list, and from 4 KB to 8 KB
-with the relationship keys (#133) — an older Worker would 413 a very busy
-day's heartbeat outright.
+The same last three commands are the manual fallback when the workflow cannot
+run. A manual deploy does not move the `telemetry-worker-deployed` tag, so the
+next merge redeploys the same Worker, which is harmless.
 
 The custom domain `erd-studio-telemetry.w2solutions.ai` needs the
 `w2solutions.ai` zone on the same Cloudflare account; `wrangler deploy` creates
@@ -133,11 +179,12 @@ curl -si -X POST https://erd-studio-telemetry.w2solutions.ai/v1/heartbeat \
 `wrangler.toml`'s `[vars]` is the source of truth for `KILL_SWITCH`; every
 `wrangler deploy` re-applies it over the dashboard value.
 
-- **Durable** — set `KILL_SWITCH = "on"` in `wrangler.toml` and
-  `npx wrangler deploy`.
+- **Durable** — set `KILL_SWITCH = "on"` in `wrangler.toml` and merge it to
+  `main` (the workflow deploys it), or `npm run deploy`.
 - **Fast** — dashboard → Workers & Pages → `erd-studio-telemetry` → Settings →
   Variables → `KILL_SWITCH = on`. Mirror it into `wrangler.toml` straight away
-  or the next deploy undoes it.
+  or the next deploy undoes it — including the automatic one after any merge
+  that touches `telemetry/`.
 - **Stop collecting and delete everything** — `npx wrangler delete` removes the
   Worker; `npx wrangler d1 delete erd-studio-telemetry` removes the data.
 
@@ -362,9 +409,11 @@ exist.
 ## Local development
 
 ```bash
-npx wrangler d1 execute erd-studio-telemetry --local --file schema.sql
+npx wrangler d1 migrations apply erd-studio-telemetry --local
 npx wrangler dev            # http://127.0.0.1:8787, local D1 simulation
 ```
+
+Local state lives in `.wrangler/` (gitignored).
 
 ## Checks
 
@@ -380,9 +429,12 @@ cover routing, the kill switch, the body cap (including a streamed body with no
 column binding. The last group checks the privacy promises across the whole
 run: no IP, user-agent, country or other header value is ever bound to SQL,
 and no payload, header or install id ever appears in a log line.
+`test/schema.test.mjs` holds `schema.sql`, `migrations/` and the Worker's
+`INSERT` to the same columns.
 
 They are invisible to the repo's vitest suite (whose `include` is
-`test/unit/**` at the root) and nothing at the root runs them.
+`test/unit/**` at the root); `ci.yml`'s `telemetry` job runs them on every PR,
+and `deploy.yml` before every Worker deploy.
 `telemetry/tsconfig.json` is local to this directory and not referenced by the
 root build. `npm run compile`, `npm run build` and `npm test` at the repo root
 must stay green in a clone that has never touched this directory.
