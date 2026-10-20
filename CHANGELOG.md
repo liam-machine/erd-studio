@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased — 1.7.0
+## 1.7.0 — 2026-10-20
 
 ### Added
 - **Move your project to the new file naming** ([#182](https://github.com/liam-machine/erd-studio/issues/182), the last part of [#162](https://github.com/liam-machine/erd-studio/issues/162)). ERD Studio's screens say *table* and *subject area*; now the files can too. **ERD Studio: Migrate to the New File Naming** (also in the Table Library's **…** menu) shows everything it will change, then does it in one step that **Edit > Undo**, straight away, puts back:
