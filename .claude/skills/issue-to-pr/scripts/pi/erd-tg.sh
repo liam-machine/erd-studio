@@ -20,13 +20,14 @@ unset WAYLAND_DISPLAY
 cd "$ERD" || exit 1
 
 # The token stays in the plugin's .env, which it reads itself: claude's environment never has it.
+# Alerts start with 🤖, like run.sh's notifications, so Liam can tell them from the session's replies.
 alert() {
   local token chat
   token=$(sed -n 's/^TELEGRAM_BOT_TOKEN=//p' "$TELEGRAM_STATE_DIR/.env" 2> /dev/null)
   chat=$(sed -n 's/^TELEGRAM_CHAT_ID=//p' "$HOME/.config/issue-bot/env" 2> /dev/null)
   [ -n "$token" ] && [ -n "$chat" ] || return 0
   printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$token" \
-    | curl -sS -m 20 -o /dev/null -K - --data-urlencode "chat_id=$chat" --data-urlencode "text=$1" || true
+    | curl -sS -m 20 -o /dev/null -K - --data-urlencode "chat_id=$chat" --data-urlencode "text=🤖 $1" || true
 }
 
 # The instructions come from develop, like run.sh, so a merged change reaches the next start.
