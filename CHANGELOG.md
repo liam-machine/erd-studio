@@ -8,6 +8,16 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+- **Move Relationships to Table Library says what went wrong, whose problem it is, and what to do next** ([#204](https://github.com/liam-machine/erd-studio/issues/204)). Its errors no longer show the raw error. A folder ERD Studio isn't allowed to write to, or a full disk, is said in plain words, with **Try Again**. Files that could not be put back after a failed write come with **Open Source Control**. Unsaved edits in a file the move would change get **Show File** and **Save and Try Again**, and a file that changed while the dialog was open gets **Open File**. Anything else is ERD Studio's own problem: the message says so, says whether anything changed, and offers **Send Feedback** with the error already filled in, paths removed.
+- **Warnings about table files and projects offer the next step** ([#205](https://github.com/liam-machine/erd-studio/issues/205)).
+  - A table file that could not be deleted is named, with a note that nothing was deleted, plus **Try Again** and **Reveal in Explorer**. Before, it said only *"Failed to delete table file(s)."*
+  - A diagram outside every dbt project offers **Open as Text** and **Select dbt Project…**.
+  - A table defined twice, or with a file in both `logical-models/` and `tables/`, offers **Open Both Files**.
+  - **No dbt project found** offers **Open Folder…** as well as **Open Settings**.
+
 ## 1.7.0 — 2026-10-20
 
 ### Added

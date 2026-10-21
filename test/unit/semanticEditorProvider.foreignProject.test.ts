@@ -102,6 +102,24 @@ describe('opening a domain file from another dbt project', () => {
     await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.selectDbtProject', other));
   });
 
+  it('a file in no dbt project offers Open as Text and Select dbt Project, not a dead end (#205)', async () => {
+    const stray = path.join(root, 'stray');
+    fs.cpSync(path.join(FIXTURE_ROOT, '.erd-studio'), path.join(stray, '.erd-studio'), { recursive: true });
+    const file = path.join(stray, '.erd-studio', 'silver', 'showcase.json');
+    warn.mockResolvedValueOnce('Open as Text' as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+
+    const panel = await openIn(buildProvider(active), file);
+
+    expect(panel.webview.html).toContain('belongs to no dbt project');
+    expect(warn).toHaveBeenCalledWith(
+      "ERD Studio: showcase.json isn't inside a dbt project, so ERD Studio can't draw it with finance-dbt's dbt data.",
+      'Open as Text',
+      'Select dbt Project…',
+    );
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: file }), 'default'));
+  });
+
   it("still opens this project's own domain files normally", async () => {
     const panel = await openIn(buildProvider(active), path.join(active, '.erd-studio', 'silver', 'showcase.json'));
 

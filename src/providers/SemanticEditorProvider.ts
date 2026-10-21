@@ -73,7 +73,7 @@ import { findVenvActivate } from '../services/dbtEnv';
 import { runDbtParse } from '../commands/runDbtParse';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
 import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
-import { describeJsonMistake, projectRelative } from '../services/commandErrors';
+import { SEND_FEEDBACK_BUTTON, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative } from '../services/commandErrors';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
@@ -499,6 +499,28 @@ interface NamingMigrationHooks {
 /** A backwards group as the turn-round offer matches it again after the toast (#163): its links and cardinality. */
 function backwardsGroupId(members: readonly Relationship[]): string {
   return `${members[0]?.cardinality}\u0002${members.map(linkKey).sort().join('\u0001')}`;
+}
+
+/** Buttons on the canvas's file and project warnings (#205). */
+export const OPEN_AS_TEXT_BUTTON = 'Open as Text';
+export const SELECT_DBT_PROJECT_BUTTON = 'Select dbt Project…';
+export const OPEN_BOTH_FILES_BUTTON = 'Open Both Files';
+
+/** Open the copy that is used and, beside it, the copy that is ignored. */
+async function openBothFiles(used: string, ignored: string): Promise<void> {
+  await vscode.window.showTextDocument(vscode.Uri.file(used), { preview: false });
+  await vscode.window.showTextDocument(vscode.Uri.file(ignored), { preview: false, viewColumn: vscode.ViewColumn.Beside });
+}
+
+/**
+ * The error when Delete Table File(s) could not delete them (#205).
+ * `applyEdit` gives no reason, so the likely ones are named, not claimed,
+ * and the edit is all or nothing, so no file was deleted.
+ */
+export function tableFileDeleteFailedMessage(shownPaths: readonly string[]): string {
+  const what = shownPaths.length === 1 ? shownPaths[0] : `${shownPaths.length} table files`;
+  return `ERD Studio couldn't delete ${what}, so no table file was deleted. ` +
+    `Another program may have ${shownPaths.length === 1 ? 'it' : 'one of them'} open, or the folder may be read-only.`;
 }
 
 /** Error posted to the webview when a mutation is attempted while viewing the physical stage. */
@@ -976,9 +998,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     const name = path.basename(filePath);
     if (!owner) {
+      // Not a dead end (#205): the file still opens as text, and another project can be picked.
       void vscode.window.showWarningMessage(
-        `ERD Studio: ${name} is not inside a dbt project, so it cannot be opened with ${current}'s data.`,
-      );
+        `ERD Studio: ${name} isn't inside a dbt project, so ERD Studio can't draw it with ${current}'s dbt data.`,
+        OPEN_AS_TEXT_BUTTON,
+        SELECT_DBT_PROJECT_BUTTON,
+      ).then(choice => {
+        if (choice === OPEN_AS_TEXT_BUTTON) {
+          void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), 'default');
+        } else if (choice === SELECT_DBT_PROJECT_BUTTON) {
+          void vscode.commands.executeCommand('erdStudio.selectDbtProject');
+        }
+      });
       return;
     }
     const switchProject = (): void => {
@@ -1939,9 +1970,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           // The move reports its own failures; anything that escapes it is
           // still the user's to see, never only a console line.
           telemetry.error('relMoveFailed');
-          void vscode.window.showErrorMessage(
-            `Move Relationships to Table Library failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
+          console.error('[SemanticEditorProvider] Move Relationships to Table Library failed:', err);
+          // Never the raw exception (#204): the move never started, and the failure is ours.
+          const title = 'Move Relationships to Table Library';
+          const doing = 'while starting the move';
+          const choice = await vscode.window.showErrorMessage(oursMessage(title, doing, 'nothing was changed'), SEND_FEEDBACK_BUTTON);
+          if (choice === SEND_FEEDBACK_BUTTON) {
+            void vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill(title, doing, err));
+          }
         }
       } else if (choice === "Don't Ask Again") {
         telemetry.feature('relMoveDeclined');
@@ -2604,11 +2640,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.duplicateWarningsShown.add(key);
       // In both libraries (#162): a project half-way between the v5 and v6
       // naming. Reported, never resolved here — the v6 file is not written.
-      if (entry.library && !this.tableLibraryService.isTableNamingFile(entry.shadowedBy)) {
+      const shadowedBy = entry.shadowedBy;
+      if (entry.library && !this.tableLibraryService.isTableNamingFile(shadowedBy)) {
         void vscode.window.showWarningMessage(
           `"${entry.name}" has a file in both the old and the new table folder. ${domain.layer}/${domain.domain} uses ` +
-          `${rel(entry.shadowedBy)}; ${rel(entry.filePath)} is ignored. Keep one of them.`,
-        );
+          `${rel(entry.shadowedBy)}; ${rel(entry.filePath)} is ignored. Delete the copy you don't want.`,
+          OPEN_BOTH_FILES_BUTTON,
+        ).then((choice) => {
+          if (choice === OPEN_BOTH_FILES_BUTTON) void openBothFiles(shadowedBy, entry.filePath);
+        });
         continue;
       }
       const meantThisCopy = entry.folder === domain.layer;
@@ -2618,9 +2658,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           : `; ${rel(entry.filePath)} is ignored.`);
       // The fix rewrites files, so it is offered only inside logical-models/.
       const fixable = !entry.library;
-      void vscode.window.showWarningMessage(message, ...(fixable ? ['Fix…'] : [])).then((choice) => {
+      void vscode.window.showWarningMessage(
+        fixable ? message : `${message} Rename or delete one copy.`,
+        ...(fixable ? ['Fix…'] : []),
+        OPEN_BOTH_FILES_BUTTON,
+      ).then((choice) => {
         if (choice === 'Fix…') {
           void vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', entry.filePath);
+        } else if (choice === OPEN_BOTH_FILES_BUTTON) {
+          void openBothFiles(shadowedBy, entry.filePath);
         }
       });
     }
@@ -3999,26 +4045,30 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             .showInformationMessage(prompt, deleteLabel, keepLabel)
             .then(async (choice) => {
               if (choice !== deleteLabel) return;
-              // Delete through a WorkspaceEdit so VS Code snapshots the files
-              // and the deletion is undoable, rather than a bare unlink.
-              const deleteEdit = new vscode.WorkspaceEdit();
               // Captured before the delete: afterwards the folder is unknowable.
-              const singlePath = fileIsSingle ? this.libraryRelativePath(filesToOffer[0]) : '';
-              for (const name of filesToOffer) {
-                deleteEdit.deleteFile(
-                  vscode.Uri.file(this.tableLibraryService.tablePath(name)),
-                  { ignoreIfNotExists: true },
+              const filePaths = filesToOffer.map((name) => this.tableLibraryService.tablePath(name));
+              const shownPaths = filesToOffer.map((name) => this.libraryRelativePath(name));
+              const deleteFiles = async (): Promise<void> => {
+                // Delete through a WorkspaceEdit so VS Code snapshots the files
+                // and the deletion is undoable, rather than a bare unlink.
+                const deleteEdit = new vscode.WorkspaceEdit();
+                for (const filePath of filePaths) {
+                  deleteEdit.deleteFile(vscode.Uri.file(filePath), { ignoreIfNotExists: true });
+                }
+                if (await vscode.workspace.applyEdit(deleteEdit)) {
+                  vscode.window.showInformationMessage(fileIsSingle ? `Deleted ${shownPaths[0]}` : `Deleted ${filesToOffer.length} table files`);
+                  return;
+                }
+                // applyEdit gives no reason, so none is guessed (#205); the edit is all or nothing.
+                const choice = await vscode.window.showErrorMessage(
+                  tableFileDeleteFailedMessage(shownPaths),
+                  'Try Again',
+                  ...(fileIsSingle ? ['Reveal in Explorer'] : []),
                 );
-              }
-              const deleted = await vscode.workspace.applyEdit(deleteEdit);
-              if (!deleted) {
-                void vscode.window.showErrorMessage('Failed to delete table file(s).');
-                return;
-              }
-              const summary = fileIsSingle
-                ? `Deleted ${singlePath}`
-                : `Deleted ${filesToOffer.length} table files`;
-              vscode.window.showInformationMessage(summary);
+                if (choice === 'Try Again') await deleteFiles();
+                if (choice === 'Reveal in Explorer') await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(filePaths[0]));
+              };
+              await deleteFiles();
             });
         }
         return;
