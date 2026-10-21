@@ -360,10 +360,10 @@ describe('a mixed project (#181)', () => {
     const toast = warn.mock.calls.map(([m]) => m as string).find((m) => m.includes('old and the new table folder'));
     expect(toast).toBe(
       '"DIM_TASK" has a file in both the old and the new table folder. silver/showcase uses logical-models/dim_task.yml; '
-      + 'tables/DIM_TASK.yml is ignored. Keep one of them.',
+      + "tables/DIM_TASK.yml is ignored. Delete the copy you don't want.",
     );
-    // No "Fix…": that fix rewrites files, and the v6 one is not written.
-    expect(warn.mock.calls.find(([m]) => (m as string).includes('old and the new'))!.slice(1)).toEqual([]);
+    // No "Fix…": that fix rewrites files, and the v6 one is not written. Open Both Files is the way to them (#205).
+    expect(warn.mock.calls.find(([m]) => (m as string).includes('old and the new'))!.slice(1)).toEqual(['Open Both Files']);
   });
 });
 

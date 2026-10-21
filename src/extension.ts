@@ -215,7 +215,7 @@ async function selectDbtProject(
 ): Promise<void> {
   const resolution = resolveWorkspaceProject(context);
   if (resolution.candidates.length === 0) {
-    void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE);
+    void showNoProjectWarning();
     return;
   }
 
@@ -373,6 +373,16 @@ const NO_PROJECT_MESSAGE =
   'ERD Studio: No dbt project found. Open a folder containing dbt_project.yml, ' +
   'or set erdStudio.projectPath to the folder that holds your diagrams (it need not be a dbt project).';
 
+/** "No dbt project found", with a button for each way out the message names (#205). */
+export async function showNoProjectWarning(): Promise<void> {
+  const choice = await vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Folder…', 'Open Settings');
+  if (choice === 'Open Folder…') {
+    void vscode.commands.executeCommand('vscode.openFolder');
+  } else if (choice === 'Open Settings') {
+    void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
+  }
+}
+
 /**
  * Commands added after the `dbtSemantic.*` → `erdStudio.*` rename. They never
  * had a legacy id, so no user keybinding can reference one — registering an
@@ -418,13 +428,6 @@ export const PRE_REGISTERED_COMMANDS = new Set([
  * message instead of "command not found" / a blank editor error.
  */
 function registerFallbackCommands(context: vscode.ExtensionContext): void {
-  const showNoProject = async (): Promise<void> => {
-    const choice = await vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Settings');
-    if (choice === 'Open Settings') {
-      void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
-    }
-  };
-
   const contributed = (context.extension.packageJSON as {
     contributes?: { commands?: Array<{ command: string }> };
   }).contributes?.commands ?? [];
@@ -433,11 +436,11 @@ function registerFallbackCommands(context: vscode.ExtensionContext): void {
     // PRE_REGISTERED_COMMANDS are registered by activate() before this fallback
     // runs and work without a project; registering again would throw ("already exists").
     if (!command.startsWith('erdStudio.') || PRE_REGISTERED_COMMANDS.has(command)) { continue; }
-    context.subscriptions.push(vscode.commands.registerCommand(command, showNoProject));
+    context.subscriptions.push(vscode.commands.registerCommand(command, showNoProjectWarning));
     // Post-rename commands never had a dbtSemantic.* id — see NO_LEGACY_ALIAS.
     if (NO_LEGACY_ALIAS.has(command)) { continue; }
     context.subscriptions.push(
-      vscode.commands.registerCommand(command.replace(/^erdStudio\./, 'dbtSemantic.'), showNoProject),
+      vscode.commands.registerCommand(command.replace(/^erdStudio\./, 'dbtSemantic.'), showNoProjectWarning),
     );
   }
 

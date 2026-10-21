@@ -821,7 +821,23 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
         '"fct_order" is defined twice. silver/orders uses logical-models/fct_order.yml, ' +
         'not the silver copy logical-models/silver/fct_order.yml, which is ignored.',
       );
-      expect(calls[0][1]).toBe('Fix…');
+      expect(calls[0].slice(1)).toEqual(['Fix…', 'Open Both Files']);
+    });
+
+    it('Open Both Files opens the copy in use and the ignored copy beside it (#205)', async () => {
+      const dir = path.join(h.tableLibraryService.getTablesDir(), 'silver');
+      fs.mkdirSync(dir, { recursive: true });
+      const ignored = path.join(dir, 'fct_order.yml');
+      fs.writeFileSync(ignored, 'name: fct_order\n');
+      vi.spyOn(vscode.window, 'showWarningMessage').mockImplementation((async (m: string) =>
+        (String(m).includes('is defined twice') ? 'Open Both Files' : undefined)) as never);
+      const show = vi.spyOn(vscode.window, 'showTextDocument');
+
+      await h.send({ type: 'ready' });
+
+      await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(2));
+      expect(String((show.mock.calls[0][0] as vscode.Uri).fsPath)).toBe(path.join(h.tableLibraryService.getTablesDir(), 'fct_order.yml'));
+      expect(String((show.mock.calls[1][0] as vscode.Uri).fsPath)).toBe(ignored);
     });
 
     it('does not warn about a duplicated name the domain does not use', async () => {

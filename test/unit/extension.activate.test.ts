@@ -164,7 +164,7 @@ describe('activate() without a dbt project', () => {
     expect(count('dbtSemantic.drawFromDbt')).toBe(0);
 
     await vscode.commands.executeCommand('erdStudio.drawFromDbt');
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('No dbt project found'), 'Open Settings');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('No dbt project found'), 'Open Folder…', 'Open Settings');
   });
 
   it('Export Diagram gets the no-project stub and no legacy alias', async () => {
@@ -175,7 +175,7 @@ describe('activate() without a dbt project', () => {
     expect(count('dbtSemantic.exportDiagram')).toBe(0);
 
     await vscode.commands.executeCommand('erdStudio.exportDiagram');
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('No dbt project found'), 'Open Settings');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('No dbt project found'), 'Open Folder…', 'Open Settings');
   });
 
   it('registers a stub domain editor and no tree views (early return)', async () => {

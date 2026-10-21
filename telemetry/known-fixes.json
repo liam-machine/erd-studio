@@ -14,5 +14,17 @@
     "code": "sampleCloneFailed",
     "fixedIn": "1.6.5",
     "summary": "Try the Sample Project on a machine without Git now offers a Download ZIP button instead of failing."
+  },
+  {
+    "code": "domainLoadJson",
+    "fixedIn": "1.7.0",
+    "summary": "A diagram file with a JSON mistake now shows the line and what is wrong, with Open at Line, and files starting with a BOM open.",
+    "issue": 186
+  },
+  {
+    "code": "drawWriteFailed",
+    "fixedIn": "1.7.0",
+    "summary": "A Draw from dbt that fails part-way now removes the diagram file it wrote and restores any table file it changed.",
+    "issue": 189
   }
 ]

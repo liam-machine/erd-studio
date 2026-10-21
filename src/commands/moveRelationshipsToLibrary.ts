@@ -28,6 +28,18 @@ import * as vscode from 'vscode';
 
 import { VALID_CARDINALITIES, linkKey, normaliseCompositeKey, normaliseRelationshipRole, normaliseSubjectAreaDocument, parseTableText } from '@erd-studio/core';
 import { dirtyFiles } from '../providers/dirtyDocuments';
+import { saveDocumentByUri } from '../providers/documentSave';
+import {
+  OPEN_FILE_BUTTON,
+  SEND_FEEDBACK_BUTTON,
+  classifyWriteFailure,
+  failedPath,
+  feedbackPrefill,
+  oursMessage,
+  projectRelative,
+  showErrorWithActions as showErrorWith,
+  type ErrorActions,
+} from '../services/commandErrors';
 import {
   applyMoveToTable,
   describeConflictDefinition,
@@ -125,40 +137,120 @@ export function writeFileAtomic(filePath: string, text: string): void {
   }
 }
 
-const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+/** The buttons the move's errors offer (#204). */
+export const TRY_AGAIN_BUTTON = 'Try Again';
+export const SHOW_FILE_BUTTON = 'Show File';
+export const SAVE_AND_TRY_AGAIN_BUTTON = 'Save and Try Again';
+export const OPEN_SOURCE_CONTROL_BUTTON = 'Open Source Control';
+export const RELOAD_WINDOW_BUTTON = 'Reload Window';
+
+/**
+ * The move stopped before writing anything, because of what is in the user's
+ * files (one changed while the dialog was open, or no longer reads as a
+ * table). Its message is the user's sentence; `filePath` is the file to open.
+ */
+class MoveStopped extends Error {
+  constructor(message: string, readonly filePath?: string) {
+    super(message);
+    this.name = 'MoveStopped';
+  }
+}
+
+/**
+ * Show an error with its buttons, and run the one the user picks. Never
+ * awaited: the command resolves while the toast is still up. A button that
+ * fails says so, rather than seeming to do nothing.
+ */
+function showErrorWithActions(message: string, actions: ErrorActions): void {
+  showErrorWith((m, ...items) => vscode.window.showErrorMessage(m, ...items), message, actions, (choice, err) => {
+    console.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+    const doing = `while running ${choice}`;
+    showErrorWithActions(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
+  });
+}
+
+/** Send Feedback, prefilled with the redacted failure: for a failure that is ours. */
+function sendFeedback(doing: string, err: unknown): () => unknown {
+  return () => vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill(TITLE, doing, err));
+}
+
+const openFile = (filePath: string) => () => vscode.window.showTextDocument(vscode.Uri.file(filePath));
+const openSourceControl = () => vscode.commands.executeCommand('workbench.view.scm');
 
 /**
  * Refuse when any of `filePaths` is open with unsaved edits — the user's work
  * in progress; writing under it would leave VS Code holding a copy that no
  * longer matches disk. Returns true (and has told the user) when refused.
  */
-function refuseIfDirty(filePaths: Iterable<string>, relPath: (filePath: string) => string): boolean {
-  const dirty = dirtyFiles(filePaths).map(relPath);
-  if (dirty.length === 0) return false;
+function refuseIfDirty(filePaths: Iterable<string>, relPath: (filePath: string) => string, retry: () => Promise<void>): boolean {
+  const dirtyPaths = dirtyFiles(filePaths);
+  if (dirtyPaths.length === 0) return false;
   telemetry.error('relMoveDirtyFiles');
+  const dirty = dirtyPaths.map(relPath);
   const shown = dirty.slice(0, 5).join(', ') + (dirty.length > 5 ? ` and ${dirty.length - 5} more` : '');
-  void vscode.window.showErrorMessage(
+  const saveAndRetry = async (): Promise<void> => {
+    for (const [i, filePath] of dirtyPaths.entries()) {
+      if (!(await saveDocumentByUri(vscode.Uri.file(filePath)))) {
+        // Nothing to retry: the move would stop on the same file.
+        showErrorWithActions(
+          `${TITLE}: ERD Studio couldn't save ${dirty[i]}. Save or revert it yourself, then run the move again. Nothing was changed.`,
+          { [SHOW_FILE_BUTTON]: openFile(filePath) },
+        );
+        return;
+      }
+    }
+    await retry();
+  };
+  showErrorWithActions(
     `${TITLE}: ${dirty.length === 1 ? 'a file it would change has' : `${dirty.length} files it would change have`} unsaved edits — ${shown}. ` +
     'Save or revert these first, then run the move again. Nothing was changed.',
+    {
+      ...(dirtyPaths.length === 1 ? { [SHOW_FILE_BUTTON]: openFile(dirtyPaths[0]) } : {}),
+      [SAVE_AND_TRY_AGAIN_BUTTON]: saveAndRetry,
+    },
   );
   return true;
 }
 
 /**
  * The command. Never throws: anything unexpected is shown as an error and
- * counted, so neither the palette nor the canvas offer can swallow it.
+ * counted, so neither the palette nor the canvas offer can swallow it. The
+ * message never carries the raw exception (#204): a stop caused by the user's
+ * files says which file, and anything else is ERD Studio's, with Send Feedback.
  */
 export async function moveRelationshipsToLibrary(deps: MoveRelationshipsDeps): Promise<void> {
+  const progress = { saved: false };
+  const retry = (): Promise<void> => moveRelationshipsToLibrary(deps);
   try {
-    await runMove(deps);
+    await runMove(deps, progress, retry);
   } catch (err) {
     telemetry.error('relMoveFailed');
     console.error('[moveRelationshipsToLibrary] failed:', err);
-    void vscode.window.showErrorMessage(`${TITLE} failed: ${errorText(err)}`);
+    if (err instanceof MoveStopped) {
+      showErrorWithActions(`${TITLE}: ${err.message}`, {
+        ...(err.filePath ? { [OPEN_FILE_BUTTON]: openFile(err.filePath) } : {}),
+        [TRY_AGAIN_BUTTON]: retry,
+      });
+      return;
+    }
+    if (progress.saved) {
+      // Every file is written; only what follows the writes failed.
+      const doing = 'after saving the moved relationships';
+      showErrorWithActions(oursMessage(TITLE, doing, 'open diagrams may not show the move until you reload the window'), {
+        [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err),
+        [RELOAD_WINDOW_BUTTON]: () => vscode.commands.executeCommand('workbench.action.reloadWindow'),
+      });
+      return;
+    }
+    const doing = 'while planning the move';
+    showErrorWithActions(oursMessage(TITLE, doing, 'nothing was changed'), {
+      [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err),
+      [TRY_AGAIN_BUTTON]: retry,
+    });
   }
 }
 
-async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
+async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }, retry: () => Promise<void>): Promise<void> {
   const { workspaceRoot, semanticDir, subjectAreaService, tableLibraryService } = deps;
   const writeFile = deps.writeFile ?? writeFileAtomic;
   telemetry.feature('relMoveStarted');
@@ -228,7 +320,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
       .filter((d) => plan.removeFromDomains.has(d.label) || plan.conflicts.some((c) => c.definitions.some((def) => def.domains.includes(d.label))))
       .map((d) => d.filePath),
   ];
-  if (refuseIfDirty(candidates, relPath)) return;
+  if (refuseIfDirty(candidates, relPath, retry)) return;
 
   const onlyRehome = plan.removeFromDomains.size === 0 && plan.conflicts.length === 0;
   const choice = await vscode.window.showInformationMessage(
@@ -297,10 +389,10 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     const filePath = tableLibraryService.tablePath(name);
     const original = fs.readFileSync(filePath, 'utf-8');
     if (relationshipsRewriteLoses(original)) {
-      throw new Error(`${relPath(filePath)} changed while the dialog was open (its relationships list now has comments, YAML anchors or entries it cannot read). Nothing was changed.`);
+      throw new MoveStopped(`${relPath(filePath)} changed while the dialog was open (its relationships list now has comments, YAML anchors or entries it cannot read). Nothing was changed.`, filePath);
     }
     const model = parseTableText(original, name);
-    if (!model) throw new Error(`${relPath(filePath)} could not be read as a table file.`);
+    if (!model) throw new MoveStopped(`${relPath(filePath)} could not be read as a table file. Fix it, then try again. Nothing was changed.`, filePath);
     const copy: SemanticTable = { ...model, relationships: model.relationships ? [...model.relationships] : undefined };
     readModels.push(model);
     nextModels.push(copy);
@@ -328,7 +420,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     domainPaths.push(domain.filePath);
   }
 
-  if (refuseIfDirty(writes.map((w) => w.filePath), relPath)) return;
+  if (refuseIfDirty(writes.map((w) => w.filePath), relPath, retry)) return;
 
   // Self-check of the planned rewrite (#133 telemetry): recorded and logged, never blocking it.
   const broken = checkLibraryRewrite(readModels, nextModels, [...plan.toLibrary, ...plan.rehome.map((r) => r.to)]);
@@ -355,12 +447,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
       tableLibraryService.invalidateCache();
       telemetry.error('relMoveWriteFailed');
       if (unrestored.length > 0) telemetry.error('relMoveRestoreFailed');
-      void vscode.window.showErrorMessage(
-        `${TITLE}: could not write ${relPath(write.filePath)} (${errorText(err)}). ` +
-        (unrestored.length === 0
-          ? 'Every file was put back as it was; nothing was changed.'
-          : `These files could not be put back and are half moved: ${unrestored.join(', ')}. Restore them from source control.`),
-      );
+      showWriteFailure(err, relPath(write.filePath), unrestored, workspaceRoot, retry);
       return;
     }
     written.push(write);
@@ -369,6 +456,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     ownWrites.recordWrite(write.filePath);
   }
 
+  progress.saved = writes.length > 0;
   tableLibraryService.invalidateCache();
   try {
     await deps.onWritten(domainPaths);
@@ -393,4 +481,33 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     (left > 0 ? ` ${left} stayed in the diagram files; run this command again to settle ${left === 1 ? 'it' : 'them'}.` : '') +
     (unsettled > 0 ? ' Some were left as they are for you to fix by hand, as the preview listed.' : ''),
   );
+}
+
+/**
+ * A write that failed, after every file already written was put back (or
+ * not): a folder the user may not write to or a full disk in plain words,
+ * anything else as ERD Studio's problem (#204). Never the raw exception.
+ */
+function showWriteFailure(err: unknown, file: string, unrestored: string[], workspaceRoot: string, retry: () => Promise<void>): void {
+  const restored = unrestored.length === 0;
+  const outcome = restored
+    ? 'Every file was put back as it was; nothing was changed.'
+    : `These files could not be put back and are half moved: ${unrestored.join(', ')}. Restore them from source control.`;
+  const next: ErrorActions = restored
+    ? { [TRY_AGAIN_BUTTON]: retry }
+    : { [OPEN_SOURCE_CONTROL_BUTTON]: openSourceControl };
+  const failure = classifyWriteFailure(err);
+  if (failure === 'other') {
+    const doing = `while saving ${file}`;
+    showErrorWithActions(
+      oursMessage(TITLE, doing, restored ? 'nothing was changed' : `these files are half moved: ${unrestored.join(', ')}. Restore them from source control`),
+      { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err), ...next },
+    );
+    return;
+  }
+  const failedAt = failedPath(err);
+  const why = failure === 'permission'
+    ? `ERD Studio isn't allowed to write to ${failedAt ? `${projectRelative(workspaceRoot, path.dirname(failedAt))}/` : 'that folder'}. Check its permissions, then try again.`
+    : 'the disk is full. Free up some space, then try again.';
+  showErrorWithActions(`${TITLE} couldn't save ${file}: ${why} ${outcome}`, next);
 }

@@ -20,7 +20,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { SemanticEditorProvider, tableFileDeleteFailedMessage } from '../../src/providers/SemanticEditorProvider';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
@@ -509,6 +509,37 @@ describe('removeModels viewConfig cleanup (H35)', () => {
     expect(afterV4.logical.models.map((m: { name: string }) => m.name)).not.toContain('dim_project');
     expect(afterV4).not.toHaveProperty('viewConfig');
     expect(lastError(panel)).toBeUndefined();
+  });
+});
+
+describe('Delete Table File after a remove (#205)', () => {
+  it('a delete that fails names the file, says nothing was deleted, and offers Try Again and Reveal in Explorer', async () => {
+    const { panel } = await openShowcase();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
+      (String(m).includes('Delete the table file entirely') ? 'Delete Table File' : undefined)) as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    const applyEdit = vscode.workspace.applyEdit;
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      const ops = (edit as unknown as { _ops: Array<{ kind: string }> })._ops;
+      return ops.some((op) => op.kind === 'deleteFile') ? false : applyEdit(edit);
+    });
+
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_task'] } });
+
+    await vi.waitFor(() => expect(error).toHaveBeenCalled());
+    expect(error.mock.calls[0]).toEqual([
+      "ERD Studio couldn't delete logical-models/dim_task.yml, so no table file was deleted. " +
+      'Another program may have it open, or the folder may be read-only.',
+      'Try Again',
+      'Reveal in Explorer',
+    ]);
+  });
+
+  it('names the count, not a file, when several could not be deleted', () => {
+    expect(tableFileDeleteFailedMessage(['logical-models/a.yml', 'logical-models/b.yml'])).toBe(
+      "ERD Studio couldn't delete 2 table files, so no table file was deleted. " +
+      'Another program may have one of them open, or the folder may be read-only.',
+    );
   });
 });
 

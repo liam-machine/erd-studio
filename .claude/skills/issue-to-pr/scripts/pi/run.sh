@@ -57,13 +57,15 @@ log() { echo "$(date -Is) $*" >> "$BOT/logs/runner.log"; }
 # The token goes to curl as config on stdin, never on its command line.
 # Each message is also kept in state/notifications.log: Telegram doesn't pass the quoted text of
 # a reply on to the ERD Studio session (erd-tg.sh), so it reads what "merge it" refers to there.
+# 🤖 marks a message as automated: the session replies in the same chat and never starts with it.
 notify() {
   NOTIFIED=1
-  printf '%s\n%s\n\n' "$(date -Is)" "$1" >> "$BOT/state/notifications.log"
+  local text="🤖 $1"
+  printf '%s\n%s\n\n' "$(date -Is)" "$text" >> "$BOT/state/notifications.log"
   [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ] || return 0
   printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$TELEGRAM_BOT_TOKEN" \
     | curl -sS --fail -m 20 -o /dev/null -K - --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
-        --data-urlencode "text=$1" -d disable_web_page_preview=true 2>> "$BOT/logs/runner.log" \
+        --data-urlencode "text=$text" -d disable_web_page_preview=true 2>> "$BOT/logs/runner.log" \
     || log "telegram: could not send"
 }
 
