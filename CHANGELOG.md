@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.7.1 — 2026-10-21
 
 ### Changed
 - **Move Relationships to Table Library says what went wrong, whose problem it is, and what to do next** ([#204](https://github.com/liam-machine/erd-studio/issues/204)). Its errors no longer show the raw error. A folder ERD Studio isn't allowed to write to, or a full disk, is said in plain words, with **Try Again**. Files that could not be put back after a failed write come with **Open Source Control**. Unsaved edits in a file the move would change get **Show File** and **Save and Try Again**, and a file that changed while the dialog was open gets **Open File**. Anything else is ERD Studio's own problem: the message says so, says whether anything changed, and offers **Send Feedback** with the error already filled in, paths removed.
