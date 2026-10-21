@@ -190,6 +190,8 @@ function acceptModal() {
 }
 
 const messages = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map((c) => String(c[0]));
+/** The buttons of the one message `spy` showed. */
+const buttons = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls[0].slice(1).map(String);
 const SUCCESS = /^Moved \d+ relationships? into the Table Library/;
 
 describe('moveRelationshipsToLibrary — writes disk directly (#126)', () => {
@@ -280,6 +282,7 @@ describe('moveRelationshipsToLibrary — writes disk directly (#126)', () => {
     expect(messages(error)).toHaveLength(1);
     expect(messages(error)[0]).toContain('logical-models/model_03.yml');
     expect(messages(error)[0]).toContain('Save or revert these first, then run the move again');
+    expect(buttons(error)).toEqual(['Show File', 'Save and Try Again']);
     expect(telemetryError).toHaveBeenCalledWith('relMoveDirtyFiles');
     expect(messages(info).some((m) => SUCCESS.test(m))).toBe(false);
     for (const [filePath, text] of p.originals) expect(fs.readFileSync(filePath, 'utf-8')).toBe(text);
@@ -345,9 +348,11 @@ describe('moveRelationshipsToLibrary — writes disk directly (#126)', () => {
 
     expect(writes).toBeGreaterThan(10); // the failure came after many files were written…
     for (const [filePath, text] of p.originals) expect(fs.readFileSync(filePath, 'utf-8')).toBe(text); // …and all were put back
-    expect(messages(error)).toHaveLength(1);
-    expect(messages(error)[0]).toContain('could not write silver/domain_4.json');
-    expect(messages(error)[0]).toContain('Every file was put back as it was');
+    expect(messages(error)).toEqual([
+      "Move Relationships to Table Library couldn't save silver/domain_4.json: ERD Studio isn't allowed to write to that folder. " +
+      'Check its permissions, then try again. Every file was put back as it was; nothing was changed.',
+    ]);
+    expect(buttons(error)).toEqual(['Try Again']);
     expect(telemetryError).toHaveBeenCalledWith('relMoveWriteFailed');
     expect(messages(info).some((m) => SUCCESS.test(m))).toBe(false);
     expect(p.onWritten).not.toHaveBeenCalled();
@@ -360,8 +365,125 @@ describe('moveRelationshipsToLibrary — writes disk directly (#126)', () => {
 
     await expect(p.run()).resolves.toBeUndefined();
 
-    expect(messages(error)).toEqual(['Move Relationships to Table Library failed: disk on fire']);
+    expect(messages(error)).toEqual([
+      'Move Relationships to Table Library hit a problem in ERD Studio while planning the move, so nothing was changed. ' +
+      "This isn't something you did. Please send us a report.",
+    ]);
+    expect(buttons(error)).toEqual(['Send Feedback', 'Try Again']);
     expect(telemetryError).toHaveBeenCalledWith('relMoveFailed');
+  });
+
+  it('Send Feedback carries the raw error, with paths redacted, that the message leaves out (#204)', async () => {
+    vi.spyOn(p.subjectAreaService, 'listSubjectAreas').mockImplementation(() => { throw new Error(`cannot read ${p.root}/x.json`); });
+    vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue('Send Feedback' as never);
+    const command = vi.spyOn(vscode.commands, 'executeCommand');
+
+    await p.run();
+    await vi.waitFor(() => expect(command).toHaveBeenCalledWith('erdStudio.reportBug', expect.anything()));
+
+    const prefill = command.mock.calls.find((c) => c[0] === 'erdStudio.reportBug')![1] as { kind: string; description: string };
+    expect(prefill.kind).toBe('bug');
+    expect(prefill.description).toContain('cannot read');
+    expect(prefill.description).not.toContain(p.root);
+  });
+
+  it('says a full disk in plain words, never the raw error (#204)', async () => {
+    acceptModal();
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+    const failing = p.domainPaths[2];
+    const writeFile = (filePath: string, text: string) => {
+      if (filePath === failing && text !== p.originals.get(failing)) {
+        throw Object.assign(new Error(`ENOSPC: no space left on device, open '${filePath}'`), { code: 'ENOSPC', path: filePath });
+      }
+      writeFileAtomic(filePath, text);
+    };
+
+    await p.run(writeFile);
+
+    expect(messages(error)).toEqual([
+      "Move Relationships to Table Library couldn't save silver/domain_2.json: the disk is full. Free up some space, then try again. " +
+      'Every file was put back as it was; nothing was changed.',
+    ]);
+    expect(buttons(error)).toEqual(['Try Again']);
+    for (const [filePath, text] of p.originals) expect(fs.readFileSync(filePath, 'utf-8')).toBe(text);
+  });
+
+  it('names the folder relative to the project when a write is refused for permission (#204)', async () => {
+    acceptModal();
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+    const failing = p.domainPaths[2];
+    const writeFile = (filePath: string, text: string) => {
+      if (filePath === failing && text !== p.originals.get(failing)) {
+        throw Object.assign(new Error(`EACCES: permission denied, open '${filePath}'`), { code: 'EACCES', path: filePath });
+      }
+      writeFileAtomic(filePath, text);
+    };
+
+    await p.run(writeFile);
+
+    expect(messages(error)[0]).toContain(`ERD Studio isn't allowed to write to ${SEMANTIC_DIR}/silver/.`);
+    expect(messages(error)[0]).not.toContain(p.root);
+  });
+
+  it('calls an unexplained write failure ours, with Send Feedback (#204)', async () => {
+    acceptModal();
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+    const failing = p.domainPaths[2];
+    const writeFile = (filePath: string, text: string) => {
+      if (filePath === failing && text !== p.originals.get(failing)) throw new Error('something odd');
+      writeFileAtomic(filePath, text);
+    };
+
+    await p.run(writeFile);
+
+    expect(messages(error)).toEqual([
+      'Move Relationships to Table Library hit a problem in ERD Studio while saving silver/domain_2.json, so nothing was changed. ' +
+      "This isn't something you did. Please send us a report.",
+    ]);
+    expect(buttons(error)).toEqual(['Send Feedback', 'Try Again']);
+  });
+
+  it('offers Open Source Control when files could not be put back (#204)', async () => {
+    acceptModal();
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+    const telemetryError = vi.spyOn(telemetry, 'error');
+    const failing = p.domainPaths[4];
+    let failed = false;
+    const writeFile = (filePath: string, text: string) => {
+      if (filePath === failing && text !== p.originals.get(failing)) {
+        failed = true;
+        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      }
+      // Putting back the first file written fails too.
+      if (failed && filePath === p.modelPath(1)) throw new Error('locked');
+      writeFileAtomic(filePath, text);
+    };
+
+    await p.run(writeFile);
+
+    expect(messages(error)).toHaveLength(1);
+    expect(messages(error)[0]).toContain('These files could not be put back and are half moved: logical-models/model_01.yml. Restore them from source control.');
+    expect(buttons(error)).toEqual(['Open Source Control']);
+    expect(telemetryError).toHaveBeenCalledWith('relMoveRestoreFailed');
+  });
+
+  it('stops with Open File when a table file changes while the dialog is open (#204)', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) => {
+      const options = args[1] as { modal?: boolean } | undefined;
+      if (!(options && typeof options === 'object' && options.modal)) return undefined;
+      fs.writeFileSync(p.modelPath(3), '- not\n- a table\n');
+      return args[args.length - 1];
+    }) as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+
+    await p.run();
+
+    expect(messages(error)).toEqual([
+      'Move Relationships to Table Library: logical-models/model_03.yml changed while the dialog was open ' +
+      '(its relationships list now has comments, YAML anchors or entries it cannot read). Nothing was changed.',
+    ]);
+    expect(buttons(error)).toEqual(['Open File', 'Try Again']);
+    expect(p.onWritten).not.toHaveBeenCalled();
   });
 
   it('writes nothing when the modal is dismissed, and says the move bypasses undo', async () => {
