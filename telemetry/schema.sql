@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS heartbeats (
   active_days_28 TEXT,
   canvas_days_28 TEXT,
   first_canvas TEXT,
+  -- Added by migrations/0003_physical_tooling.sql. NULL when the client did not
+  -- look that day, or predates the fields.
+  physical_tools TEXT,           -- JSON array
+  platforms TEXT,                -- JSON array
   PRIMARY KEY (install_id, day)
 );
 CREATE INDEX IF NOT EXISTS idx_heartbeats_day ON heartbeats(day);
