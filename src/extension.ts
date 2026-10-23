@@ -24,7 +24,8 @@ import { YmlParserService } from './services/ymlParserService';
 import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
-import { manifestDisplayPath, readDbtProjectConfig, type DbtProjectConfig } from './services/dbtProjectConfig';
+import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type DbtProjectConfig } from './services/dbtProjectConfig';
+import { TOOLING_EXCLUDE, detectPhysicalTooling, type ToolingProbe } from './services/physicalTooling';
 import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
 import {
   manifestAppearanceFeature,
@@ -360,6 +361,53 @@ function recordDetectedAssistants(): void {
       telemetry.assistants(detectAiAssistants());
     } catch { /* telemetry must never break activation */ }
   }, 0);
+}
+
+/** workspaceState: the UTC day this workspace's physical tooling was last looked at. */
+const PHYSICAL_TOOLING_DAY_KEY = 'erdStudio.telemetry.physicalToolingDay';
+/** Long enough that the scan never competes with opening the first diagram. */
+const PHYSICAL_TOOLING_DELAY_MS = 15_000;
+
+/**
+ * Usage telemetry: how this workspace builds its physical tables, and on which
+ * platform, as fixed flags (`detectPhysicalTooling()`). Once per workspace per
+ * UTC day, and not at all while telemetry is off. It searches file names and
+ * reads the start of a few small files; it runs nothing and sends no path,
+ * name or content.
+ */
+function recordPhysicalTooling(context: vscode.ExtensionContext): void {
+  try {
+    if (!telemetry.enabled() || !vscode.workspace.workspaceFolders?.length) return;
+    const today = new Date().toISOString().slice(0, 10);
+    if (context.workspaceState.get<string>(PHYSICAL_TOOLING_DAY_KEY) === today) return;
+    setTimeout(() => {
+      void detectPhysicalTooling(hostToolingProbe()).then(found => {
+        telemetry.physicalTooling(found);
+        void context.workspaceState.update(PHYSICAL_TOOLING_DAY_KEY, today);
+      }, () => { /* telemetry must never break activation */ });
+    }, PHYSICAL_TOOLING_DELAY_MS);
+  } catch { /* telemetry must never break activation */ }
+}
+
+function hostToolingProbe(): ToolingProbe {
+  return {
+    find: async (include, max) =>
+      (await vscode.workspace.findFiles(include, TOOLING_EXCLUDE, max)).map(uri => uri.fsPath),
+    readHead: async (file, bytes) => {
+      const handle = await fs.promises.open(file, 'r');
+      try {
+        const buffer = Buffer.alloc(bytes);
+        const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+        return buffer.toString('utf8', 0, bytesRead);
+      } finally {
+        await handle.close();
+      }
+    },
+    manifestPathFor: dbtProjectFile => {
+      const root = path.dirname(dbtProjectFile);
+      return resolveManifestPath(root, readDbtProjectConfig(root));
+    },
+  };
 }
 
 function recordHarnessInstalls(results: HarnessInstallResult[]): void {
@@ -747,6 +795,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (!workspaceRoot) {
     telemetry.activation('no_project', false, 0);
     recordDetectedAssistants();
+    recordPhysicalTooling(context);
     // Register stub commands / editor so palette entries and the sidebar
     // welcome buttons explain the problem instead of "command not found".
     registerFallbackCommands(context);
@@ -1040,6 +1089,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length);
   recordDetectedAssistants();
+  recordPhysicalTooling(context);
 
   // Surface a broken layers.json once per distinct error. LayerService falls
   // back to default layers in memory but refuses to overwrite the file, so the
