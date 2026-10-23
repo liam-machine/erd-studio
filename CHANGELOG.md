@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.7.2 — 2026-10-23
 
 ### Changed
 - The anonymous daily usage report now also says how a project builds its database tables (dbt, SQLMesh, Dataform, a Databricks bundle, Microsoft Fabric, a Power BI project, a SQL database project, Flyway, Liquibase, Alembic, Prisma, Django, Rails, notebooks, `CREATE TABLE` scripts or DBML) and which data platform they live on (Databricks, Snowflake, BigQuery, Postgres, Fabric, SQL Server, …), each from a fixed list. It shows which tools the Physical view should learn to compare against next, beyond dbt. ERD Studio looks once a day at file names and for a fixed pattern at the start of a few small files. It never sends a file name, path or content, and never reads dbt's `profiles.yml`. Every value is listed in `telemetry.json`, and switching telemetry off stops it.
