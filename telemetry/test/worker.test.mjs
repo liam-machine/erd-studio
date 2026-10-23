@@ -37,6 +37,18 @@ const WORKER_ERROR_CODES = [
     .matchAll(/'([A-Za-z0-9]+)'/g),
 ].map((m) => m[1]);
 
+/** The Worker's PHYSICAL_TOOLS list, read the same way. */
+const WORKER_PHYSICAL_TOOLS = [
+  ...(/const PHYSICAL_TOOLS = \[([\s\S]*?)\];/.exec(readFileSync(new URL('../src/index.js', import.meta.url), 'utf8'))?.[1] ?? '')
+    .matchAll(/'([A-Za-z0-9]+)'/g),
+].map((m) => m[1]);
+
+/** The Worker's PLATFORMS list, read the same way. */
+const WORKER_PLATFORMS = [
+  ...(/const PLATFORMS = \[([\s\S]*?)\];/.exec(readFileSync(new URL('../src/index.js', import.meta.url), 'utf8'))?.[1] ?? '')
+    .matchAll(/'([A-Za-z0-9]+)'/g),
+].map((m) => m[1]);
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
@@ -388,7 +400,7 @@ describe('validation — acceptance and normalisation', () => {
     const flat = JSON.stringify(params);
     assert.ok(!flat.includes('secret-laptop'));
     assert.ok(!flat.includes('10.0.0.1'));
-    assert.equal(params.length, 27);
+    assert.equal(params.length, 29);
   });
 
   it('drops unknown feature and error keys, and zero counts', async () => {
@@ -475,6 +487,9 @@ describe('validation — acceptance and normalisation', () => {
       null,
       null,
       null,
+      // So are the physical tooling fields (migrations/0003).
+      null,
+      null,
     ]);
   });
 });
@@ -497,12 +512,12 @@ const NEW_FIELDS = {
 describe('optional 1.6.3 fields', () => {
   it('binds them after errors, arrays in canonical order', async () => {
     const params = await storedParams(heartbeat(NEW_FIELDS));
-    assert.deepEqual(params.slice(19), ['cursor', 'wsl', 0, '["claude","gemini"]', '["claude","agents"]', '4-7', '2-3', '0']);
+    assert.deepEqual(params.slice(19, 27), ['cursor', 'wsl', 0, '["claude","gemini"]', '["claude","agents"]', '4-7', '2-3', '0']);
   });
 
   it('stores dev as 1 and accepts empty arrays and never', async () => {
     const params = await storedParams(heartbeat({ ...NEW_FIELDS, dev: true, assistants: [], harnesses: [], firstCanvas: 'never' }));
-    assert.deepEqual(params.slice(19), ['cursor', 'wsl', 1, '[]', '[]', '4-7', '2-3', 'never']);
+    assert.deepEqual(params.slice(19, 27), ['cursor', 'wsl', 1, '[]', '[]', '4-7', '2-3', 'never']);
   });
 
   for (const [field, value] of [
@@ -542,6 +557,48 @@ describe('optional 1.6.3 fields', () => {
     assert.deepEqual(Object.keys(JSON.parse(params[17])), WORKER_FEATURES);
     assert.deepEqual(Object.keys(JSON.parse(params[18])), WORKER_ERROR_CODES);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Physical tooling (migrations/0003)
+// ---------------------------------------------------------------------------
+
+describe('optional physical tooling fields', () => {
+  it('binds them last, in canonical order and without duplicates', async () => {
+    const params = await storedParams(heartbeat({
+      ...NEW_FIELDS,
+      physicalTools: ['notebooks', 'dbt', 'fabric', 'dbt'],
+      platforms: ['snowflake', 'databricks'],
+    }));
+    assert.deepEqual(params.slice(27), ['["dbt","fabric","notebooks"]', '["databricks","snowflake"]']);
+  });
+
+  it('stores [] (looked, found nothing) apart from NULL (did not look)', async () => {
+    assert.deepEqual((await storedParams(heartbeat({ physicalTools: [], platforms: [] }))).slice(27), ['[]', '[]']);
+    assert.deepEqual((await storedParams(heartbeat({}))).slice(27), [null, null]);
+  });
+
+  it('accepts every value at once', async () => {
+    const params = await storedParams(heartbeat({ physicalTools: WORKER_PHYSICAL_TOOLS, platforms: WORKER_PLATFORMS }));
+    assert.deepEqual(JSON.parse(params[27]), WORKER_PHYSICAL_TOOLS);
+    assert.deepEqual(JSON.parse(params[28]), WORKER_PLATFORMS);
+  });
+
+  for (const [field, value] of [
+    ['physicalTools', ['dbt', 'terraform']],
+    ['physicalTools', 'dbt'],
+    ['physicalTools', ['src/models/dim_customer.sql']],
+    ['platforms', ['Databricks']],
+    ['platforms', ['snowflake', 42]],
+    ['platforms', { snowflake: true }],
+  ]) {
+    it(`refuses ${field} = ${JSON.stringify(value)} with 400 and no write`, async () => {
+      const env = makeEnv();
+      const response = await post(heartbeat({ [field]: value }), env);
+      assert.equal(response.status, 400);
+      assert.equal(env.DB.statements.length, 0);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -29,6 +29,7 @@ import {
   stampEnv,
   recordAssistants,
   recordHarnesses,
+  recordPhysicalTooling,
   heartbeatDue,
   nextDay,
   recordActivation,
@@ -51,6 +52,8 @@ import {
   type TelemetryStage,
   type TelemetryAssistant,
   type TelemetryHarness,
+  type TelemetryPhysicalTool,
+  type TelemetryPlatform,
 } from './telemetryPayload';
 import { invariantErrorCodes, surveyFeatures } from './relationshipHealth';
 import type { RelationshipInvariant, RelationshipSurvey } from './relationshipHealth';
@@ -302,6 +305,14 @@ export const telemetry = {
   /** ERD Studio harness targets installed, version-marked, in the open project. */
   harnesses(found: readonly TelemetryHarness[]): void {
     active?.update(s => recordHarnesses(s, found));
+  },
+  /** How the open workspace builds its physical tables (`detectPhysicalTooling()` flags). */
+  physicalTooling(found: { tools: readonly TelemetryPhysicalTool[]; platforms: readonly TelemetryPlatform[] }): void {
+    active?.update(s => recordPhysicalTooling(s, found));
+  },
+  /** Whether anything would be recorded now, so a caller can skip work whose only use is telemetry. */
+  enabled(): boolean {
+    return active?.enabled() === true;
   },
   stage(stage: TelemetryStage): void {
     active?.update(s => recordStage(s, stage));

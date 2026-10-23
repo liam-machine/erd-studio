@@ -133,6 +133,17 @@ const FIRST_CANVAS_VALUES = new Set(['never', '0', '1-7', '8-30', '31-90', '90+'
 /** Stored in this order, like STAGES. */
 const ASSISTANTS = ['claude', 'copilot', 'codex', 'gemini', 'cursor'];
 const HARNESSES = ['claude', 'agents', 'copilot', 'gemini', 'codex'];
+// Optional too (migrations/0003): how the workspace builds its physical tables,
+// and on which platform. Absent means no detection ran that day; [] means it
+// ran and found nothing.
+const PHYSICAL_TOOLS = [
+  'dbt', 'sqlmesh', 'dataform', 'databricksBundle', 'fabric', 'powerBi', 'sqlProject', 'flyway',
+  'liquibase', 'alembic', 'prisma', 'django', 'rails', 'notebooks', 'ddlScripts', 'dbml',
+];
+const PLATFORMS = [
+  'databricks', 'snowflake', 'bigquery', 'postgres', 'redshift', 'fabric', 'synapse', 'sqlserver',
+  'duckdb', 'spark', 'trino', 'athena', 'mysql', 'oracle', 'clickhouse', 'other',
+];
 
 /** Array fields keep this order when stored, whatever order the client sent. */
 const STAGES = ['logical', 'physical'];
@@ -351,9 +362,10 @@ const UPSERT_SQL = `INSERT INTO heartbeats (
   install_id, day, received_day, ext_version, vscode_major, os, tenure, activation,
   has_semantic_dir, domain_count, activations, canvas_opens, stages, schema_formats,
   model_count, manifest, catalog, features, errors,
-  host, remote, dev, assistants, harnesses, active_days_28, canvas_days_28, first_canvas
+  host, remote, dev, assistants, harnesses, active_days_28, canvas_days_28, first_canvas,
+  physical_tools, platforms
 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
+  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)
 ON CONFLICT(install_id, day) DO UPDATE SET
   received_day = excluded.received_day,
   ext_version = excluded.ext_version,
@@ -379,7 +391,9 @@ ON CONFLICT(install_id, day) DO UPDATE SET
   harnesses = excluded.harnesses,
   active_days_28 = excluded.active_days_28,
   canvas_days_28 = excluded.canvas_days_28,
-  first_canvas = excluded.first_canvas`;
+  first_canvas = excluded.first_canvas,
+  physical_tools = excluded.physical_tools,
+  platforms = excluded.platforms`;
 
 const RETENTION_SQL = `DELETE FROM heartbeats WHERE received_day < date('now', '-${RETENTION_DAYS} days')`;
 
@@ -512,6 +526,8 @@ async function handleHeartbeat(request, env) {
       heartbeat.activeDays28,
       heartbeat.canvasDays28,
       heartbeat.firstCanvas,
+      heartbeat.physicalTools === null ? null : JSON.stringify(heartbeat.physicalTools),
+      heartbeat.platforms === null ? null : JSON.stringify(heartbeat.platforms),
     )
     .run();
 
@@ -574,6 +590,9 @@ function validateHeartbeat(raw, now) {
   const assistants = b.assistants === undefined ? null : subsetOf(b.assistants, ASSISTANTS);
   const harnesses = b.harnesses === undefined ? null : subsetOf(b.harnesses, HARNESSES);
   if ((b.assistants !== undefined && !assistants) || (b.harnesses !== undefined && !harnesses)) return null;
+  const physicalTools = b.physicalTools === undefined ? null : subsetOf(b.physicalTools, PHYSICAL_TOOLS);
+  const platforms = b.platforms === undefined ? null : subsetOf(b.platforms, PLATFORMS);
+  if ((b.physicalTools !== undefined && !physicalTools) || (b.platforms !== undefined && !platforms)) return null;
 
   return {
     // Lower-cased so one install cannot appear as two rows by changing case.
@@ -603,6 +622,8 @@ function validateHeartbeat(raw, now) {
     activeDays28: /** @type {string | null} */ (activeDays28),
     canvasDays28: /** @type {string | null} */ (canvasDays28),
     firstCanvas: /** @type {string | null} */ (firstCanvas),
+    physicalTools,
+    platforms,
   };
 }
 
@@ -879,6 +900,8 @@ function errorName(err) {
  * @property {string | null} activeDays28
  * @property {string | null} canvasDays28
  * @property {string | null} firstCanvas
+ * @property {string[] | null} physicalTools
+ * @property {string[] | null} platforms
  */
 
 /**

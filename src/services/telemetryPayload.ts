@@ -351,6 +351,51 @@ export type TelemetryAssistant = (typeof ASSISTANTS)[number];
 export const HARNESSES = ['claude', 'agents', 'copilot', 'gemini', 'codex'] as const;
 export type TelemetryHarness = (typeof HARNESSES)[number];
 
+/**
+ * How the open workspace builds its physical tables, as found by
+ * `detectPhysicalTooling()` (`src/services/physicalTooling.ts`).
+ */
+export const PHYSICAL_TOOLS = [
+  'dbt',
+  'sqlmesh',
+  'dataform',
+  'databricksBundle',
+  'fabric',
+  'powerBi',
+  'sqlProject',
+  'flyway',
+  'liquibase',
+  'alembic',
+  'prisma',
+  'django',
+  'rails',
+  'notebooks',
+  'ddlScripts',
+  'dbml',
+] as const;
+export type TelemetryPhysicalTool = (typeof PHYSICAL_TOOLS)[number];
+
+/** The data platforms those tables live on, from the same detection. */
+export const PLATFORMS = [
+  'databricks',
+  'snowflake',
+  'bigquery',
+  'postgres',
+  'redshift',
+  'fabric',
+  'synapse',
+  'sqlserver',
+  'duckdb',
+  'spark',
+  'trino',
+  'athena',
+  'mysql',
+  'oracle',
+  'clickhouse',
+  'other',
+] as const;
+export type TelemetryPlatform = (typeof PLATFORMS)[number];
+
 /** How many of the last {@link RETENTION_WINDOW_DAYS} days something happened on. */
 export type RecentDaysBucket = '0' | '1' | '2-3' | '4-7' | '8-14' | '15-28';
 /** Days from first activation to the first canvas open, or `never` (yet). */
@@ -383,6 +428,15 @@ export interface DailyCounters {
   assistants?: TelemetryAssistant[];
   /** ERD Studio harness targets installed and version-marked in the open project today (union). */
   harnesses?: TelemetryHarness[];
+  /**
+   * How today's workspaces build their physical tables (union). Absent when no
+   * detection ran today, which is sent as absent — not as an empty list, which
+   * means "looked, found nothing". Not carried over by {@link nextDay}: it
+   * describes workspaces, and detection runs again on the next day's activation.
+   */
+  physicalTools?: TelemetryPhysicalTool[];
+  /** The data platforms found by the same detection (union), on the same terms. */
+  platforms?: TelemetryPlatform[];
 }
 
 /** The per-day environment facts, as stamped by {@link stampEnv}. */
@@ -446,6 +500,10 @@ export interface HeartbeatBody {
   activeDays28: RecentDaysBucket;
   canvasDays28: RecentDaysBucket;
   firstCanvas: FirstCanvasBucket;
+  /** Omitted when no detection ran that day. */
+  physicalTools?: TelemetryPhysicalTool[];
+  /** Omitted when no detection ran that day. */
+  platforms?: TelemetryPlatform[];
 }
 
 // ---------------------------------------------------------------------------
@@ -629,6 +687,18 @@ export function recordHarnesses(state: DailyCounters, found: readonly TelemetryH
   return { ...state, harnesses: unionIn(state.harnesses, found, HARNESSES) };
 }
 
+/** A finished detection of one workspace. Empty lists still mark the day as looked at. */
+export function recordPhysicalTooling(
+  state: DailyCounters,
+  found: { tools: readonly TelemetryPhysicalTool[]; platforms: readonly TelemetryPlatform[] },
+): DailyCounters {
+  return {
+    ...state,
+    physicalTools: unionIn(state.physicalTools, found.tools, PHYSICAL_TOOLS),
+    platforms: unionIn(state.platforms, found.platforms, PLATFORMS),
+  };
+}
+
 /** `a ∪ b`, restricted to `order` and in its order. */
 function unionIn<T extends string>(a: readonly T[] | undefined, b: readonly T[], order: readonly T[]): T[] {
   return order.filter(v => a?.includes(v) || b.includes(v));
@@ -798,6 +868,10 @@ export function buildHeartbeat(state: DailyCounters, env: HeartbeatEnv): Heartbe
     activeDays28: recentDaysBucket(recentDaysCount(env.activeDays, state.day)),
     canvasDays28: recentDaysBucket(recentDaysCount(env.canvasDays, state.day)),
     firstCanvas: firstCanvasBucket(env.firstSeenDay, env.firstCanvasDay, state.day),
+    ...(Array.isArray(state.physicalTools)
+      ? { physicalTools: PHYSICAL_TOOLS.filter(t => state.physicalTools?.includes(t)) }
+      : {}),
+    ...(Array.isArray(state.platforms) ? { platforms: PLATFORMS.filter(p => state.platforms?.includes(p)) } : {}),
   };
 }
 

@@ -19,6 +19,8 @@ import {
   FEATURES,
   HARNESSES,
   HOSTS,
+  PHYSICAL_TOOLS,
+  PLATFORMS,
   REMOTES,
   RETENTION_WINDOW_DAYS,
   firstCanvasBucket,
@@ -28,6 +30,7 @@ import {
   recentDaysCount,
   recordAssistants,
   recordHarnesses,
+  recordPhysicalTooling,
   rememberDay,
   remoteBucket,
   stampEnv,
@@ -291,6 +294,7 @@ describe('buildHeartbeat', () => {
     for (const f of FEATURES) s = repeat(s, 150, x => recordFeature(x, f));
     for (const e of ERROR_CODES) s = repeat(s, 150, x => recordError(x, e));
     s = recordHarnesses(recordAssistants(s, ASSISTANTS), HARNESSES);
+    s = recordPhysicalTooling(s, { tools: PHYSICAL_TOOLS, platforms: PLATFORMS });
     s = stampEnv(s, { extVersion: '10.10.10', vscodeVersion: '1.999.9', host: 'vscodeInsiders', remote: 'codespaces', dev: true });
     expect(new TextEncoder().encode(JSON.stringify(buildHeartbeat(s, ENV))).byteLength).toBeLessThan(limit);
   });
@@ -323,6 +327,7 @@ describe('nothing identifying reaches the heartbeat', () => {
       s = recordError(s, sneak as TelemetryErrorCode);
       s = recordAssistants(s, [sneak]);
       s = recordHarnesses(s, [sneak]);
+      s = recordPhysicalTooling(s, { tools: [sneak], platforms: [sneak] });
       s = stampEnv(s, { extVersion: secret, vscodeVersion: secret, host: hostBucket(secret), remote: remoteBucket(secret, false), dev: false });
     }
     // Stored state must also survive an env that carries junk around the id.
@@ -365,6 +370,8 @@ describe('allowlists agree with the Worker', () => {
     expect(workerSet('FIRST_CANVAS_VALUES')).toEqual(['never', '0', '1-7', '8-30', '31-90', '90+']);
     expect(workerList('ASSISTANTS')).toEqual([...ASSISTANTS]);
     expect(workerList('HARNESSES')).toEqual([...HARNESSES]);
+    expect(workerList('PHYSICAL_TOOLS')).toEqual([...PHYSICAL_TOOLS]);
+    expect(workerList('PLATFORMS')).toEqual([...PLATFORMS]);
   });
 
   it('counts the onboarding flows', () => {
@@ -443,6 +450,14 @@ describe('allowlists agree with the Worker', () => {
   it('telemetry.json documents every error key', () => {
     const doc = fs.readFileSync(path.join(__dirname, '../../telemetry.json'), 'utf8');
     for (const e of ERROR_CODES) expect(doc).toContain(e);
+  });
+
+  it('telemetry.json lists exactly the physical tool and platform values', () => {
+    const fields = JSON.parse(fs.readFileSync(path.join(__dirname, '../../telemetry.json'), 'utf8')).events['liamwynne.erd-studio/heartbeat'];
+    const listed = (field: string): string[] =>
+      (/\[([^\]]*)\]/.exec(fields[field].comment)?.[1] ?? '').split(',').map((v: string) => v.trim());
+    expect(listed('physicalTools')).toEqual([...PHYSICAL_TOOLS]);
+    expect(listed('platforms')).toEqual([...PLATFORMS]);
   });
 });
 
@@ -581,5 +596,38 @@ describe('environment, assistants and retention (1.6.3)', () => {
     expect(layoutFeature(5000, true)).toBe('layout1to5s');
     expect(layoutFeature(5001, true)).toBe('layoutOver5s');
     expect(layoutFeature(10, false)).toBe('layoutFailed');
+  });
+});
+
+describe('physical tooling', () => {
+  const day = (): DailyCounters => recordActivation(emptyCounters('2026-09-24'), {
+    outcome: 'project_found', hasSemanticDir: true, domainCount: 1,
+  });
+
+  it('is left out of the body until a detection has run that day', () => {
+    const body = buildHeartbeat(day(), ENV);
+    expect('physicalTools' in body).toBe(false);
+    expect('platforms' in body).toBe(false);
+  });
+
+  it('sends empty lists when a detection ran and found nothing', () => {
+    const body = buildHeartbeat(recordPhysicalTooling(day(), { tools: [], platforms: [] }), ENV);
+    expect(body.physicalTools).toEqual([]);
+    expect(body.platforms).toEqual([]);
+  });
+
+  it('unions the workspaces looked at that day, in allowlist order', () => {
+    let s = recordPhysicalTooling(day(), { tools: ['notebooks', 'dbt'], platforms: ['snowflake'] });
+    s = recordPhysicalTooling(s, { tools: ['fabric', 'dbt'], platforms: ['fabric', 'databricks'] });
+    const body = buildHeartbeat(s, ENV);
+    expect(body.physicalTools).toEqual(['dbt', 'fabric', 'notebooks']);
+    expect(body.platforms).toEqual(['databricks', 'snowflake', 'fabric']);
+  });
+
+  it('does not carry over to the next day: it describes workspaces, not the machine', () => {
+    const s = recordPhysicalTooling(day(), { tools: ['dbt'], platforms: ['postgres'] });
+    const next = nextDay(s, '2026-09-25');
+    expect(next.physicalTools).toBeUndefined();
+    expect(next.platforms).toBeUndefined();
   });
 });
