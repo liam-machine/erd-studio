@@ -111,6 +111,10 @@ const EXPECTED_FILES = [
   'logs.json',
   // The diagram export goldens, owned by packages/core/test/unit/exportDiagram.golden.test.ts.
   ...Object.keys(SUBJECT_AREA_CASES).flatMap((c) => [`${c}.dbml`, `${c}.mmd`]),
+  // The rich DBML goldens and their layout files, owned by exportDiagram.golden.test.ts and exportDbmlRich.test.ts.
+  ...Object.keys(SUBJECT_AREA_CASES).flatMap((c) => [`${c}.rich.dbml`, `${c}.dbdiagram`]),
+  'rich-features.rich.dbml',
+  'rich-features.dbdiagram',
 ].sort();
 
 const LINE_COLUMN = / \(line \d+ column \d+\)/g;

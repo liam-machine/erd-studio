@@ -9,7 +9,9 @@
  * persists it — the draft is a starting point the user asked for and edits.
  *
  * The scopes and the draft come from the pure `src/services/dbtDraft.ts`;
- * the picker is `src/providers/dbtDraftPicker.ts`. Every service is injected
+ * the picker is `src/providers/dbtDraftPicker.ts`; the files are written, all
+ * or nothing, by `writeNewSubjectArea` (`src/services/newSubjectAreaWriter.ts`),
+ * which Import DBML shares. Every service is injected
  * so `activate()` wires the real ones and the refreshes stay in extension.ts.
  */
 
@@ -35,25 +37,23 @@ import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import {
   OPEN_FILE_BUTTON,
   SEND_FEEDBACK_BUTTON,
-  classifyWriteFailure,
-  failedPath,
   feedbackPrefill,
   oursMessage,
-  projectRelative,
   showErrorWithActions as showErrorWith,
   type ErrorActions,
 } from '../services/commandErrors';
-import { ownWrites } from '../services/ownWriteTracker';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../services/recoveryService';
 import { telemetry } from '../services/telemetryService';
 import type { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
+import type { TableLibraryService } from '../services/logicalModelService';
 import {
-  DuplicateKeyWriteRefused,
-  RelationshipsRewriteRefused,
-  TableNamingWriteRefused,
-  type TableLibraryService,
-} from '../services/logicalModelService';
+  environmentWriteProblem,
+  isRefusedWrite,
+  writeNewSubjectArea,
+  writeOutcome,
+  type RefusedWrite,
+} from '../services/newSubjectAreaWriter';
 import type { CatalogData } from '../types/catalog';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
@@ -286,80 +286,39 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     return undefined;
   }
 
-  // Writes start here. A project with no ERD folder yet gets the default
-  // layers.json first, exactly as Set Up Semantic Domains Directory writes it.
-  const written: string[] = [];
-  let domainWritten = false;
-  // What each existing library file held before the draw changed it, to put back on failure.
-  const before = new Map<string, string>();
-  // Asked before any table file lands: the diagram is written in the naming the project writes (#182).
-  const tableNaming = tableLibraryService.writesTableNaming();
-  // Folders the draw creates, removed again if it fails (a new project's layers.json with them).
-  const semanticRoot = path.join(workspaceRoot, semanticDir);
-  const createdRoot = !fs.existsSync(semanticRoot);
-  const createdLayerDir = !fs.existsSync(layerDir);
-  try {
-    if (createdRoot) {
-      await layerService.saveConfig(layerService.getAllLayers());
-    }
-    fs.mkdirSync(layerDir, { recursive: true });
-
-    for (const model of draft.newModels) {
-      tableLibraryService.saveTable(model, folder);
-      written.push(model.name);
-    }
-
-    const doc = buildDraftSubjectAreaDocument({
+  // Writes start here: every file, or none (`writeNewSubjectArea`). A project
+  // with no ERD folder yet gets the default layers.json first, exactly as Set
+  // Up Semantic Domains Directory writes it.
+  const outcome = await writeNewSubjectArea({
+    workspaceRoot,
+    semanticDir,
+    domainPath,
+    newTables: draft.newModels,
+    folder,
+    changedTables: routed.changed,
+    documentText: (tableNaming) => serializeDraftSubjectAreaDocument(buildDraftSubjectAreaDocument({
       domain: slug,
       layer: chosenLayer,
       description: `Drawn from dbt: ${pick.scope.label}.`,
       modelNames: draft.modelNames,
       relationships: routed.kept,
-    });
-    fs.writeFileSync(domainPath, serializeDraftSubjectAreaDocument(doc, tableNaming), { encoding: 'utf-8', flag: 'wx' });
-    domainWritten = true;
-    ownWrites.recordWrite(domainPath);
-    // Existing library models that gained a relationship, once the diagram is on disk.
-    for (const model of routed.changed) {
-      if (draft.newModels.includes(model)) continue;
-      const modelPath = tableLibraryService.tablePath(model.name);
-      if (fs.existsSync(modelPath)) before.set(modelPath, fs.readFileSync(modelPath, 'utf-8'));
-      tableLibraryService.saveTable(model);
-    }
-  } catch (err) {
-    // Leave nothing behind: no orphan model files, no diagram naming models
-    // that were just removed, no library file half way through the draw.
-    let undone = true;
-    for (const modelName of written) {
-      try { tableLibraryService.deleteTable(modelName); } catch { undone = false; }
-    }
-    if (domainWritten) {
-      try { fs.unlinkSync(domainPath); ownWrites.recordDelete(domainPath); } catch { undone = false; }
-    }
-    for (const [modelPath, text] of before) {
-      try { fs.writeFileSync(modelPath, text, 'utf-8'); ownWrites.recordWrite(modelPath); } catch { undone = false; }
-    }
-    if (undone && createdRoot) {
-      try { fs.rmSync(semanticRoot, { recursive: true, force: true }); } catch { undone = false; }
-    } else if (undone && createdLayerDir) {
-      try { fs.rmdirSync(layerDir); } catch { /* not empty, or never made: leave it */ }
-    }
-    // EEXIST from the diagram's own exclusive write: the name was taken since it was checked.
-    const exists = !domainWritten && err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST'
-      && failedPath(err) === domainPath;
-    if (exists) {
+    }), tableNaming),
+  }, { layerService, tableLibraryService });
+  if (!outcome.ok) {
+    const { error: err, undone } = outcome;
+    if (outcome.nameTaken) {
       nameTaken();
       return undefined;
     }
-    const outcome = undone ? 'Nothing was changed.' : `Some files in ${semanticDir}/ may already have changed.`;
+    const result = writeOutcome(undone, semanticDir);
     // A refusal is explained, not a failure, so it is not counted (as on the canvas).
     if (isRefusedWrite(err)) {
-      showRefusal(err, outcome);
+      showRefusal(err, result);
       return undefined;
     }
     telemetry.error('drawWriteFailed');
-    const failure = classifyWriteFailure(err);
-    if (failure === 'other') {
+    const why = environmentWriteProblem(err, workspaceRoot, `${semanticDir}/${chosenLayer}`);
+    if (!why) {
       const doing = 'while saving the diagram';
       const ours = undone ? 'nothing was changed' : `some files in ${semanticDir}/ may already have changed`;
       showErrorWithActions(oursMessage(TITLE, doing, ours), {
@@ -368,14 +327,10 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
       });
       return undefined;
     }
-    const failedAt = failedPath(err);
-    const failedFolder = failedAt ? projectRelative(workspaceRoot, path.dirname(failedAt)) : `${semanticDir}/${chosenLayer}`;
-    const why = failure === 'permission'
-      ? `ERD Studio isn't allowed to write to ${failedFolder}/. Check the folder's permissions, then try again.`
-      : 'the disk is full. Free up some space, then try again.';
-    showErrorWithActions(`${TITLE} couldn't save the diagram: ${why} ${outcome}`, { [TRY_AGAIN_BUTTON]: tryAgain });
+    showErrorWithActions(`${TITLE} couldn't save the diagram: ${why} ${result}`, { [TRY_AGAIN_BUTTON]: tryAgain });
     return undefined;
   }
+  const written = outcome.written;
 
   deps.onWritten({ domainPath, modelNames: written });
   telemetry.feature('drawFromDbt');
@@ -385,14 +340,6 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   const notice = describeDraftNotice(draft);
   if (notice) { void vscode.window.showInformationMessage(notice); }
   return { domainPath, draft };
-}
-
-/** A write refused because of what is in the user's file, which names file and line. */
-type RefusedWrite = DuplicateKeyWriteRefused | RelationshipsRewriteRefused | TableNamingWriteRefused;
-
-function isRefusedWrite(err: unknown): err is RefusedWrite {
-  return err instanceof DuplicateKeyWriteRefused || err instanceof RelationshipsRewriteRefused
-    || err instanceof TableNamingWriteRefused;
 }
 
 /** The refusal's own sentence, with Open File when it knows the file. */

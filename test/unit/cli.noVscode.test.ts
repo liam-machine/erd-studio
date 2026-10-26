@@ -39,5 +39,7 @@ describe('CLI bundle', () => {
     expect(inputs.some((i) => /(^|\/)vscode(\/|$)/.test(i))).toBe(false);
     // Self-contained: no worker file is needed at run time.
     expect(inputs.some((i) => i.includes('manifestWorker'))).toBe(false);
+    // Export needs no DBML parser: only the extension's Import DBML… bundles one.
+    expect(inputs.filter((i) => /@dbml|dbml-parse/.test(i))).toEqual([]);
   });
 });

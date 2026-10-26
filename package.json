@@ -95,8 +95,19 @@
         "icon": "$(wand)"
       },
       {
+        "command": "erdStudio.importDbml",
+        "title": "Import DBML…",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.exportDiagram",
         "title": "Export Diagram…",
+        "category": "ERD Studio",
+        "icon": "$(export)"
+      },
+      {
+        "command": "erdStudio.exportAllDiagrams",
+        "title": "Export All Diagrams…",
         "category": "ERD Studio",
         "icon": "$(export)"
       },
@@ -332,7 +343,7 @@
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
+        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\nAlready have a DBML file, from dbdiagram.io or another tool? [Import DBML](command:erdStudio.importDbml)\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
         "when": "erdStudio.hasDbtProject"
       },
       {
@@ -497,6 +508,11 @@
           "command": "erdStudio.drawFromDbt",
           "when": "view == erdStudio.domainTree && erdStudio.hasDbtProject",
           "group": "navigation@0"
+        },
+        {
+          "command": "erdStudio.importDbml",
+          "when": "view == erdStudio.domainTree && erdStudio.hasDbtProject",
+          "group": "1_create@1"
         },
         {
           "command": "erdStudio.installCodingHarness",

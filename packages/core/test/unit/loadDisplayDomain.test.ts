@@ -116,6 +116,33 @@ describe('mapWithLimit limits', () => {
 });
 
 describe('loadDisplaySubjectArea', () => {
+  it('keeps a meta key named __proto__ as an own entry, on a model and a column', async () => {
+    // The model file reader keeps it (`setMetaEntry`); the copy each listing
+    // gets used to drop it (a text value) or make it the meta's prototype (a map).
+    const { result } = load({
+      [SUBJECT_AREA]: v5(['dim_a']),
+      '.erd-studio/logical-models/dim_a.yml': [
+        'name: dim_a',
+        'meta:',
+        '  __proto__: not a prototype',
+        '  owner: me',
+        'columns:',
+        '  - name: id',
+        '    dataType: INT',
+        '    meta:',
+        '      __proto__: { polluted: yes }',
+        '',
+      ].join('\n'),
+    });
+    const [model] = (await result).models;
+    expect(Object.getOwnPropertyNames(model.meta)).toEqual(['__proto__', 'owner']);
+    expect(Object.getOwnPropertyDescriptor(model.meta, '__proto__')?.value).toBe('not a prototype');
+    const meta = model.columns[0].meta!;
+    expect(Object.getPrototypeOf(meta)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(meta, '__proto__')?.value).toEqual({ polluted: 'yes' });
+    expect('polluted' in meta).toBe(false);
+  });
+
   it('reads the domain, then layers.json, then each model once, all inside the semantic dir', async () => {
     const { reads, result } = load({
       [SUBJECT_AREA]: v5(['dim_a', 'fct_b']),

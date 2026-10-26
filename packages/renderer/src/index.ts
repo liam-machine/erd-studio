@@ -35,17 +35,26 @@ export type {
   LayerConfig,
 } from '@erd-studio/core';
 
-// One-way text exports of a diagram (Mermaid erDiagram, DBML), re-exported
-// from @erd-studio/core so a page that renders with this package can offer
-// them without depending on core directly.
+// Text exports of a diagram (Mermaid erDiagram, portable DBML, rich DBML and
+// its dbdiagram layout file), re-exported from @erd-studio/core so a page
+// that renders with this package can offer them without depending on core
+// directly.
 export {
   toMermaid,
   toDbml,
+  toDbmlRich,
+  DBML_RICH_EXPORT_HEADER,
+  type DbmlRichOptions,
   exportDiagram,
   diagramExportFileName,
   DIAGRAM_EXPORT_FORMATS,
   DIAGRAM_EXPORT_FILE_EXTENSIONS,
   type DiagramExportFormat,
+  toDbdiagramLayout,
+  serializeDbdiagramLayout,
+  dbdiagramLayoutFileName,
+  type DbdiagramLayout,
+  type DbdiagramTablePosition,
 } from '@erd-studio/core';
 
 export type {

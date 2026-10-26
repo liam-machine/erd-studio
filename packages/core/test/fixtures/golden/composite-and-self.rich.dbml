@@ -1,0 +1,41 @@
+// erd-studio dbml-export v2 (DBML 9.1+)
+// Table positions: vault.dbdiagram, next to this file (`dbdiagram push` reads it).
+// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
+// Not exported: sticky-note positions and sizes, the canvas layout options.
+
+Project vault {
+  Note: 'A composite foreign key, an entry with a lone compositeKey, and two self-references (one spelled in another case)'
+}
+
+Table pit_customer {
+  pit_customer_hk binary [pk]
+  customer_hk binary
+  as_of_date date
+  snapshot_hk binary
+}
+
+Table sat_customer {
+  customer_hk binary
+  load_date timestamp
+  name string
+  indexes {
+    (customer_hk, load_date) [pk]
+  }
+}
+
+Table employee {
+  employee_id int [pk]
+  manager_id int
+  mentor_id int
+}
+
+TableGroup gold [color: #d4a800, note: 'Layer: Gold'] {
+  pit_customer
+  sat_customer
+  employee
+}
+
+Ref "as of": pit_customer.(customer_hk, as_of_date) >? sat_customer.(customer_hk, load_date)
+Ref: pit_customer.snapshot_hk >? sat_customer.customer_hk
+Ref manager: employee.manager_id >? employee.employee_id
+Ref: employee.mentor_id >? employee.employee_id

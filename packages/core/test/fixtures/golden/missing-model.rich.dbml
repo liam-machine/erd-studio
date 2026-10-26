@@ -1,0 +1,37 @@
+// erd-studio dbml-export v2 (DBML 9.1+)
+// Table positions: partial.dbdiagram, next to this file (`dbdiagram push` reads it).
+// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
+// Not exported: sticky-note positions and sizes, the canvas layout options.
+
+Project partial {
+  Note: 'A domain whose model references do not all resolve'
+}
+
+Table silver.dim_customer {
+  customer_key INT [pk, note: 'Surrogate key']
+  customer_name VARCHAR [note: 'Display name']
+  Note: 'Customers'
+}
+
+Table dim_missing {
+  _erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']
+}
+
+// broken: its table file could not be read (yamlIndent, line 5); exported with no columns
+Table broken {
+  _erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']
+}
+
+Table nameless {
+  _erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']
+}
+
+TableGroup silver [color: #a0a0a0, note: 'Layer: Silver'] {
+  silver.dim_customer
+  dim_missing
+  broken
+  nameless
+}
+
+// Not exported: dim_missing.customer_key -> dim_customer.customer_key (dim_missing has no column customer_key).
+// Not exported: broken.customer_key -> dim_customer.customer_key (broken has no column customer_key).

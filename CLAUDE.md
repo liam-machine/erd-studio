@@ -17,6 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Send Feedback (dialog, AI analysis tiers, consent, redaction, My Reports) | `docs/dev/feedback.md` |
 | Usage telemetry (extension side and the Worker) | `telemetry/README.md` |
 | Getting Started panel, CLI launcher, the `erd-studio` CLI | `docs/dev/onboarding-and-cli.md` |
+| Rich DBML export, the `.dbdiagram` layout file, Export All Diagrams, Import DBML (parser pin, property names, `meta.dbml`) | `docs/dev/dbml.md` |
 | `SCHEMA_CONTENT`, harness generators, the `/erd-studio-setup` skill | `src/harness/CLAUDE.md` |
 | Releases, package publishing, manual publish | `docs/dev/releasing.md` |
 | Rendering the webview in Chrome | `docs/dev/webview-preview.md` |

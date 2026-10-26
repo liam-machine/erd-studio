@@ -1,0 +1,31 @@
+// erd-studio dbml-export v2 (DBML 9.1+)
+// Table positions: orders.dbdiagram, next to this file (`dbdiagram push` reads it).
+// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
+// Not exported: sticky-note positions and sizes, the canvas layout options.
+
+Project orders {
+  Note: 'A model file that spells column types data_type (#144)'
+}
+
+Table silver.fct_order {
+  order_id INT [pk, note: 'Order identifier']
+  customer_id INT [foreign_key: 'true']
+  amount "DECIMAL(18,2)"
+  status VARCHAR
+  "note" unknown
+  placed_at unknown [note: 'No type at all']
+  Note: 'Orders, with column types spelled the way dbt\'s schema.yml spells them'
+}
+
+Table silver.dim_customer {
+  customer_id INT [pk]
+  customer_name VARCHAR
+  Note: 'Customers, spelled the ERD Studio way'
+}
+
+TableGroup silver [color: #a0a0a0, note: 'Layer: Silver'] {
+  silver.fct_order
+  silver.dim_customer
+}
+
+Ref: silver.fct_order.customer_id >? silver.dim_customer.customer_id

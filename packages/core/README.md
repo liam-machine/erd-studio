@@ -7,7 +7,7 @@ It holds:
 - the TypeScript types for the on-disk domain format (schema v5 plus `logical-models/*.yml` and `logical-models/{layer}/*.yml`, and schema v6's `tables/` naming, read into the same in-memory shape), the layer configuration, the display-ready `DisplaySubjectArea` the canvas renders, the cross-stage discrepancy report, and the edit messages the canvas posts to its host;
 - the pure pipeline the extension host uses to turn those files into a `DisplaySubjectArea`: `parseSubjectAreaJson`, `validateSubjectAreaDocument`, `buildUnifiedSubjectArea`, `toLogicalStage`, `parseTableText`, `parseLayersText` / `validateLayersConfig`, `computeMissingPositions` and `toDisplaySubjectArea`;
 - `loadDisplaySubjectArea`, which does all of that in one call over any async `readFile`;
-- one-way exporters that turn a `DisplaySubjectArea` into [Mermaid](https://mermaid.js.org) `erDiagram` or [DBML](https://dbml.dbdiagram.io) text: `toMermaid`, `toDbml`, `exportDiagram` and `diagramExportFileName`.
+- exporters that turn a `DisplaySubjectArea` into [Mermaid](https://mermaid.js.org) `erDiagram` or [DBML](https://dbml.dbdiagram.io) text: `toMermaid`, `toDbml`, `toDbmlRich` (ERD Studio's fields as DBML custom properties) with its dbdiagram layout file (`toDbdiagramLayout`, `serializeDbdiagramLayout`, `readDbdiagramLayout`), `exportDiagram` and `diagramExportFileName`.
 
 The package has no Node, `vscode`, React or React Flow dependency (its only dependency is `yaml`), so it runs in a browser, in Node and in bundlers alike.
 
@@ -55,15 +55,15 @@ Each occurrence of a model is its own object, but occurrences share the parsed s
 
 ## Exporting a diagram
 
-`toMermaid` and `toDbml` turn a `DisplaySubjectArea` into text that other tools read: Mermaid `erDiagram` (which GitHub, GitLab and many wikis draw) and DBML (dbdiagram.io and other DBML tools). `exportDiagram` picks one by name, and `diagramExportFileName` suggests a safe file name.
+`toMermaid`, `toDbml` and `toDbmlRich` turn a `DisplaySubjectArea` into text that other tools read: Mermaid `erDiagram` (which GitHub, GitLab and many wikis draw), portable DBML (every DBML tool) and rich DBML (dbdiagram.io, dbdocs and DBML 9.1+ tools, and ERD Studio's own DBML import). `exportDiagram` picks one by name, and `diagramExportFileName` suggests a safe file name.
 
 ```ts
 import {
   loadDisplaySubjectArea,
   exportDiagram,
   diagramExportFileName,
-  DIAGRAM_EXPORT_FORMATS,          // ['mermaid', 'dbml']
-  DIAGRAM_EXPORT_FILE_EXTENSIONS,  // { mermaid: 'mmd', dbml: 'dbml' }
+  DIAGRAM_EXPORT_FORMATS,          // ['mermaid', 'dbml', 'dbml-rich']
+  DIAGRAM_EXPORT_FILE_EXTENSIONS,  // { mermaid: 'mmd', dbml: 'dbml', 'dbml-rich': 'dbml' }
   type DiagramExportFormat,
 } from '@erd-studio/core';
 
@@ -73,13 +73,32 @@ const text = exportDiagram(domain, format);          // or toDbml(domain) / toMe
 const fileName = diagramExportFileName(domain, format); // e.g. 'sales.dbml'
 ```
 
-- **One way.** ERD Studio's own files stay the only storage; nothing reads an export back in.
+- **ERD Studio's own files stay the only storage.** Mermaid and portable DBML are one way; rich DBML is the format ERD Studio's DBML import reads back (below).
 - **Pass the logical stage.** The functions accept any `DisplaySubjectArea`, but ERD Studio's hosts export the logical (design) stage, which `loadDisplaySubjectArea` returns.
 - **A stable contract.** The same domain always gives the same text. Each export carries a versioned header (`// erd-studio dbml-export v1` as DBML's first line; `%% erd-studio mermaid-export v1` right after Mermaid's `erDiagram` line) and comment lines naming what it leaves out. Diagram positions are never exported.
 - **ERD Studio's modelling fields go along.** In DBML they are readable lines in the notes: a table's `Note` holds `Role: …`, `Grain: …`, `Warehouse table (alias): …`, the description, the rationale (`Purpose: …`) and `Meta – key: value` lines; a column's note holds its description followed by `(natural key; SCD type 2; semi-additive; foreign key; meta key: value)`; a relationship role is the Ref's name. In Mermaid they are key markers (`PK`, `FK`, `UK`), attribute comments and `%%` lines. A model's `alias` is never DBML's `Table x as y`, whose names must be unique.
 - **Opens in old and new tools.** The DBML uses no custom properties (they need `@dbml/parse` 9.1 or later, and every older DBML parser rejects the whole file) and no standalone `Note` blocks; the tests read every export with `@dbml/parse` 10.2.0 and the `@dbml/core` 3.13.4, 2.6.1 and 2.4.2 parsers many DBML tools still embed, and require all four to read the same thing. `@dbml/core` 2.4.2 (June 2022) is the oldest DBML parser the export supports: older releases reject schema-qualified table names or many-to-many `<>` Refs. The old and new parsers disagree about a backslash before another backslash or before `'` in a note, so such a backslash is followed by a space, with a comment saying so. Every Mermaid export parses in Mermaid 10.0.0, the oldest 10.x, and in 12.0.0.
 - **Tolerant input.** Any optional field may be missing, as in a domain built by an older core. What a format cannot hold becomes a comment saying why, never an exception: a relationship to a model or column that is not in the domain, or a link already exported the other way round, in both formats; a model with no columns or a `loadError` in DBML, which has no table without columns (Mermaid draws it as an empty entity with a comment). `exportDiagram` throws only for an unknown format.
 - **No new dependency.** The exporters are plain functions; the parsers the tests check them with are dev dependencies only.
+
+### Rich DBML and the dbdiagram layout
+
+`toDbmlRich(domain)` (format `'dbml-rich'`) writes the same tables and relationships as `toDbml`, with ERD Studio's fields as DBML custom properties instead of note lines, so dbdiagram.io and dbdocs show them as real fields and ERD Studio's import reads them back. Its positions go in a second file, dbdiagram's own `<name>.dbdiagram`, beside the `.dbml`; `dbdiagram push sales.dbml` then opens the diagram where it was on the canvas.
+
+```ts
+import { toDbmlRich, serializeDbdiagramLayout, dbdiagramLayoutFileName, diagramExportFileName } from '@erd-studio/core';
+
+const files = {
+  [diagramExportFileName(domain, 'dbml-rich')]: toDbmlRich(domain),   // 'sales.dbml'
+  [dbdiagramLayoutFileName(domain)]: serializeDbdiagramLayout(domain), // 'sales.dbdiagram'
+};
+```
+
+- **Needs a DBML 9.1+ parser.** Custom properties arrived in `@dbml/parse` 9.1; older parsers reject the file, which is why `toDbml` stays notes-only. The tests read every rich export with `@dbml/parse` 9.1.1, 10.3.1 and 11.0.0, which must agree, with no error or warning.
+- **Properties.** Table: `role`, `grain`, `alias`, `schema: 'public'` (only for that schema: DBML reads `Table public.x` as a table with no schema), `rationale_<snake_case key>` (`rationale_scd_strategy`). Column: `natural_key: 'true'`, `scd_type: '2'`, `additive_type: 'semi-additive'`, `foreign_key: 'true'` (the model file's own flag, or a foreign-key badge no exported Ref explains). Meta: `meta_<key>` for a text value under a lower-case identifier key, and every other entry (a yes/no, null, list, map, or any other key) as JSON in one `meta_json`, so it round-trips exactly (the text entries come back first). Values are always quoted strings (typed values need DBML 11). The names are exported as constants (`DBML_RICH_TABLE_PROPERTIES`, `DBML_RICH_COLUMN_PROPERTIES`, …); an importer also accepts each with an `erd_` prefix.
+- **Refs from the foreign key.** A many-to-one or one-to-many is written from its foreign-key end (`Ref: fct.customer_key >? dim.customer_key`), a one-to-one as `-?` with the foreign-key column marked `unique`, a many-to-many as `<>`. ERD Studio does not record nullability, so a `?` marks every end that is not primary-key columns as possibly null (DBML 9+ reads a bare `>` as NOT NULL). A composite foreign key is one Ref.
+- **Everything else.** The subject area is the `Project`, the layer a `TableGroup` of every table (with the layer colour), sticky notes `Note sticky_<n> [color: #hex, linked_table: '…']` blocks, and a table without columns gets a placeholder column marked `erd_placeholder`, which import drops. The header (`// erd-studio dbml-export v2 (DBML 9.1+)`) names the layout file; pass `{ layoutFileName }` when you save under another name.
+- **The layout file.** `toDbdiagramLayout(domain)` is the `.dbdiagram` JSON (version `"3.0.0"`): `defaultView.tablePositions` names each table as the DBML does (`schemaName: "public"` for one without a schema), in canvas pixels. Sticky-note positions are not written. `readDbdiagramLayout(text)` is the tolerant reader an import uses: it never throws, and lists what it could not read in `problems`.
 
 ## Development
 

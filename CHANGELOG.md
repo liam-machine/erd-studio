@@ -10,6 +10,13 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ## Unreleased
 
+### Added
+- **Move your diagrams to dbdiagram.io, with their layout.** **Export Diagram…** has a third choice, **DBML for dbdiagram.io**. It writes ERD Studio's fields (role, grain, warehouse name, rationale, natural keys, SCD and additive types, metadata) as DBML properties that dbdiagram.io and dbdocs show on each table and column, and **Save As…** puts a `.dbdiagram` file beside the `.dbml` with your table positions. `dbdiagram push sales.dbml --name "Sales"` (dbdiagram.io's own tool, under your own account) then opens the diagram where you left it. ERD Studio never connects to dbdiagram.io itself. The plain **DBML** choice is unchanged, for tools that read older DBML.
+- **Export All Diagrams…** writes every diagram into a folder you choose, one file each (Mermaid, DBML or DBML for dbdiagram.io, with each `.dbdiagram` beside its `.dbml`). It asks once before replacing files already there, and a diagram it can't read is skipped and named at the end.
+- **Import DBML…** turns a DBML file into a new diagram: one ERD Studio exported, or one from dbdiagram.io or any other DBML tool. Find it in the Command Palette, the Subject Areas view's **…** menu and the empty sidebar; it needs no dbt and no AI. It places the tables from the `.dbdiagram` file beside the `.dbml` when there is one, suggests a layer and a name from the file, and shows what it will create before writing anything. Tables already in your Table Library are used as they are, never overwritten. DBML settings ERD Studio has no field for (not null, defaults, checks, indexes, enum values, …) are kept in the table's or column's metadata under `dbml`, so the next export carries them back out. A file that isn't valid DBML gets a message naming its first problems by line, and **Open File** goes to the first one.
+- **`erd-studio export`** takes `--format dbml-rich` (DBML for dbdiagram.io), `--format dbml-layout` (its `.dbdiagram` layout file) and `--all` (every diagram, as a JSON list of file names and contents). It still only prints, and never writes a file.
+- [Leaving ERD Studio](docs/leaving-erd-studio.md): how to move every diagram to dbdiagram.io and back, and what goes with it. The AI helper files (harness v33) point your assistant at **Import DBML…**, the new export and the CLI formats, and tell it to keep the `dbml` metadata.
+
 ### Fixed
 - MCP server dependencies: `zod` moved from 3 to 4, and its other dependencies were refreshed, to clear newly published security advisories (`zod`, `body-parser`, `hono`, `fast-uri`, `ip-address`). No change to what the MCP server does. The extension itself is unaffected.
 

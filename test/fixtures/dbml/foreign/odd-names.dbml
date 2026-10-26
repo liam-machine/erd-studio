@@ -1,0 +1,32 @@
+// Names ERD Studio can't use as they are, and names that clash.
+
+Table "Order Items" {
+  "item id" int [pk]
+  "unit-price" decimal
+  "Unit Price" decimal
+}
+
+Table silver.date {
+  date_key int [pk]
+}
+
+Table gold.date {
+  date_key int [pk]
+}
+
+Table Users {
+  id int [pk]
+}
+
+Table users {
+  id int [pk]
+  "2fa" boolean
+}
+
+Table "2024_sales" {
+  id int [pk]
+  "order item" int [ref: > "Order Items"."item id"]
+}
+
+Ref "sale date": "2024_sales".id - silver.date.date_key
+Ref: Users.id <> users.id

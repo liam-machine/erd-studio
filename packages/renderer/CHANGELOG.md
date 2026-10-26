@@ -2,6 +2,11 @@
 
 All notable changes to `@erd-studio/renderer`. While `0.x`, a breaking change bumps the minor version.
 
+## Unreleased
+
+### Added
+- Re-exports core's rich DBML export and its dbdiagram layout file: `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `toDbdiagramLayout`, `serializeDbdiagramLayout`, `dbdiagramLayoutFileName` and the `DbmlRichOptions`, `DbdiagramLayout` and `DbdiagramTablePosition` types. `DIAGRAM_EXPORT_FORMATS` (re-exported) now ends with `'dbml-rich'`, so a page that offers every format offers it too.
+
 ## 0.3.0
 
 ### Changed

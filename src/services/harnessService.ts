@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '32';
+export const HARNESS_VERSION = '33';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -388,7 +388,7 @@ Without that section, add or change only the keys the user asks for, and never c
 
 When the user asks you to create a new model — or materially add columns to an existing one — from an external source (planning doc, DDL, staging SQL, CSV, notebook, or another YAML), follow this protocol. It exists to prevent silent column truncation.
 
-**Does NOT apply to:** renaming a column, changing a single flag, or executing an \`.erd-studio/.sync-plan.json\` (see SYNC.md for that workflow).
+**Does NOT apply to:** renaming a column, changing a single flag, or executing an \`.erd-studio/.sync-plan.json\` (see SYNC.md for that workflow). A **DBML file** (\`.dbml\`) has its own command — see "DBML: import and export" below.
 
 ### Step 1 — Read the source fully, then enumerate
 Before listing anything, confirm you have read the source **in full**. For files longer than 2000 lines, page through with \`Read\` using \`offset\`/\`limit\` until you reach the end of the file. A partial read is a silent-truncation trap before you even start — the columns you never saw cannot appear in your output.
@@ -430,6 +430,18 @@ Report in this exact form:
 Every entry in "in source but not in YAML" must have a specific reason. A class-level reason already declared in Step 2 (e.g. "excluding audit columns") is sufficient — you don't need to restate it per column. But an unexplained entry, or a vague reason like "not needed", means **stop and tell the user** that a column may have been dropped unintentionally. Do not claim the task is complete.
 
 **Rule of thumb:** if your reconcile message doesn't name specific columns on both sides, you skipped a step.
+
+---
+
+## DBML: import and export
+
+ERD Studio's YAML and JSON files stay the only storage. DBML (the format dbdiagram.io, dbdocs and other tools read) is a way in and a way out, never a second copy to keep in step.
+
+- **A DBML file in** — from dbdiagram.io, dbdocs, another tool, or an ERD Studio export: point the user at **ERD Studio: Import DBML…** (Command Palette, or the Subject Areas view's **…** menu). It needs no dbt and no AI. It creates a **new** subject area, uses tables the Table Library already has as they are (never overwriting them), places the tables from the \`<name>.dbdiagram\` layout file beside the \`.dbml\` when there is one, and shows what it will create before writing anything. Prefer it to converting the file yourself; if the user asks you to do it by hand anyway, follow "Building Models from External Sources" above.
+- **Diagrams out** — **ERD Studio: Export Diagram…** (one subject area) or **ERD Studio: Export All Diagrams…** (every one, into a folder), with the choice **DBML for dbdiagram.io**: \`<name>.dbml\` with ERD Studio's fields as DBML custom properties (\`role\`, \`grain\`, \`scd_type\`, \`natural_key\`, \`meta_*\`, …), plus \`<name>.dbdiagram\` beside it holding the table positions. The plain **DBML** choice is the portable, notes-only form any DBML tool opens.
+- **From the CLI** (stdout only; it never writes a file): \`erd-studio export --domain <path> --format dbml-rich\` prints the \`.dbml\`, \`--format dbml-layout\` its \`.dbdiagram\`, and \`--all\` in place of \`--domain\` prints every subject area as a JSON list of \`{ fileName, content }\`. When the user asks you to save them, write each \`content\` to its \`fileName\` with your own file tools, so the writes stay visible.
+- **dbdiagram.io** — \`dbdiagram push <name>.dbml --name "<Name>"\` (dbdiagram's own CLI: \`npm install -g dbdiagram\`, then \`dbdiagram auth login\`) uploads the diagram with the \`.dbdiagram\` positions next to it. It sends the data model to dbdiagram.io under the user's account: run it only when the user asks, and show the command first. ERD Studio itself never contacts dbdiagram.io.
+- **\`meta.dbml\`** — an imported table or column may carry a \`dbml\` key in its \`meta\`: what the DBML file said that ERD Studio has no field for (\`not_null\`, \`unique\`, \`default\`, \`increment\`, \`checks\`, \`enum\`, \`indexes\`, \`header_color\`, the original \`name\` when it had to change, another tool's own \`properties\`). Keep it exactly as it is — the next DBML export carries it back out — and write or change it only when the user asks.
 
 ---
 

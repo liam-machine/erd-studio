@@ -143,6 +143,10 @@ If you open a diagram that belongs to a different dbt project than the one ERD S
 
 Every file ERD Studio writes is plain JSON or YAML, and the extension ships a JSON Schema for each one. Open a subject area with **Open With… → Text Editor**, or open a table's `.yml`, and you get completion for every supported property, a description on hover, and a warning on a misspelt property or an invalid value (`modelRole`, `cardinality`, `scdType`…). JSON files work out of the box. For the table `.yml` files, install Red Hat's [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml). The schemas and how to use them in other editors are in the [file format reference](docs/semantic-domain-json-reference.md#editor-support-json-schemas). The [glossary](docs/glossary.md) matches the words on screen (table, subject area) to the names in the files (`tables/` and `logical.tables`, or `logical-models/` and `logical.models` in a project that has not moved to the new file naming).
 
+### Moving to dbdiagram.io and back
+
+Your data model is never locked in. **ERD Studio: Export All Diagrams…** with **DBML for dbdiagram.io** writes every diagram as [DBML](https://dbml.dbdiagram.io/docs), with grain, roles, keys, SCD types, metadata and your table positions, ready for `dbdiagram push`. **ERD Studio: Import DBML…** turns a DBML file, from dbdiagram.io or any other tool, into a new diagram. [Leaving ERD Studio](docs/leaving-erd-studio.md) has the steps, and what goes with it and what doesn't.
+
 ### Not using dbt?
 
 Use ERD Studio for your **logical data model**: design tables, relationships, and business rules without installing or running dbt.

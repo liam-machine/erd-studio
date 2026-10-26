@@ -16,7 +16,16 @@ export const DBML_RICH_TABLE_PROPERTIES = Object.freeze({
   role: 'role',
   grain: 'grain',
   alias: 'alias',
+  /**
+   * The schema `public`, written also as this property: DBML reads
+   * `Table public.x` as a table with no schema (`public` is its default),
+   * so without it a model in `public` would come back with none.
+   */
+  schema: 'schema',
 } as const);
+
+/** The schema DBML gives a table that names none, and so reads `public.x` as `x`. */
+export const DBML_DEFAULT_SCHEMA = 'public';
 
 /** Column properties. Flags are written as `'true'` and only when set. */
 export const DBML_RICH_COLUMN_PROPERTIES = Object.freeze({
@@ -81,11 +90,64 @@ export function bareDbmlProperty(property: string): string {
     : property;
 }
 
-/** The hex each sticky-note colour is exported as (DBML colours must be hex), and read back from. */
+/**
+ * The hex each sticky-note colour is exported as (DBML colours must be hex),
+ * and read back from: the swatches of the canvas's colour picker
+ * (`ANNOTATION_COLORS` in `@erd-studio/renderer`), so a note looks the same
+ * colour in dbdiagram as its swatch does in ERD Studio.
+ */
 export const DBML_RICH_STICKY_COLOURS: Readonly<Record<AnnotationColor, string>> = Object.freeze({
-  yellow: '#fef08a',
-  blue: '#bfdbfe',
-  green: '#bbf7d0',
-  pink: '#fbcfe8',
-  orange: '#fed7aa',
+  yellow: '#f59e0b',
+  blue: '#3b82f6',
+  green: '#22c55e',
+  pink: '#ec4899',
+  orange: '#f97316',
 });
+
+/** The note backgrounds the canvas paints in a light theme, also read back exactly. */
+const STICKY_BACKGROUNDS: Readonly<Record<AnnotationColor, string>> = {
+  yellow: '#fef3c7',
+  blue: '#dbeafe',
+  green: '#dcfce7',
+  pink: '#fce7f3',
+  orange: '#fed7aa',
+};
+
+function rgbOf(hex: string): [number, number, number] | undefined {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return undefined;
+  const digits = m[1].length === 3 ? [...m[1]].map((d) => d + d).join('') : m[1];
+  return [0, 2, 4].map((i) => parseInt(digits.slice(i, i + 2), 16)) as [number, number, number];
+}
+
+/**
+ * The sticky-note colour a DBML `Note` colour stands for: an exact swatch (or
+ * canvas background) by name, else the swatch nearest to it, so a note
+ * coloured in another tool keeps roughly its colour. `undefined` when `hex`
+ * is not a `#rgb` / `#rrggbb` colour.
+ */
+export function stickyColourOfHex(hex: string): AnnotationColor | undefined {
+  if (typeof hex !== 'string') return undefined;
+  const rgb = rgbOf(hex);
+  if (!rgb) return undefined;
+  const colours = Object.keys(DBML_RICH_STICKY_COLOURS) as AnnotationColor[];
+  const same = (a: [number, number, number], b: string): boolean => {
+    const other = rgbOf(b)!;
+    return a.every((v, i) => v === other[i]);
+  };
+  const exact = colours.find((c) => same(rgb, DBML_RICH_STICKY_COLOURS[c]) || same(rgb, STICKY_BACKGROUNDS[c]));
+  if (exact) return exact;
+  let best: AnnotationColor = colours[0];
+  let bestDistance = Infinity;
+  for (const colour of colours) {
+    for (const candidate of [DBML_RICH_STICKY_COLOURS[colour], STICKY_BACKGROUNDS[colour]]) {
+      const other = rgbOf(candidate)!;
+      const distance = other.reduce((sum, v, i) => sum + (v - rgb[i]) ** 2, 0);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = colour;
+      }
+    }
+  }
+  return best;
+}

@@ -14,7 +14,7 @@ import * as path from 'path';
 
 import type { DiscrepancyReport } from '../types/discrepancy';
 import { redactPaths } from '../types/feedback';
-import type { Cardinality, Relationship, UnifiedSubjectArea } from '../types/semantic';
+import type { Cardinality, Relationship, SubjectAreaSummary, UnifiedSubjectArea } from '../types/semantic';
 import { detectSubjectAreaFormat } from '../types/semantic';
 import type { SyncPlan } from '../types/syncPlan';
 import { SubjectAreaFileError } from '../services/domainService';
@@ -586,6 +586,31 @@ function unreadableTables(ctx: CliContext, unified: UnifiedSubjectArea): Unreada
 }
 
 /**
+ * Every domain under the semantic dir, for `--all` (`diff` and `export`).
+ * `--all` over nothing must never read as a result: a wrong or omitted
+ * `--semantic-dir` (the CLI cannot see VS Code settings) would otherwise
+ * hand the skill a verified match — or an empty export — over zero domains.
+ * So no folder is `no-semantic-dir` and no domain is `no-domains` (exit 3).
+ */
+export function listAllSubjectAreas(ctx: CliContext): SubjectAreaSummary[] {
+  const semanticRoot = path.join(ctx.root, ctx.semanticDir);
+  if (!fs.existsSync(semanticRoot)) {
+    throw new CliEnvError(
+      'no-semantic-dir',
+      `No ${ctx.semanticDir}/ folder in this project — check --semantic-dir (it must match the erdStudio.semanticDir setting).`,
+    );
+  }
+  const summaries = ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir);
+  if (summaries.length === 0) {
+    throw new CliEnvError(
+      'no-domains',
+      `No subject area files under ${ctx.semanticDir}/ — check --semantic-dir (it must match the erdStudio.semanticDir setting).`,
+    );
+  }
+  return summaries;
+}
+
+/**
  * Run the diff. `--domain` files that cannot be compared are a `CliEnvError`
  * (exit 3); under `--all` each failure is recorded on its own domain entry so
  * one broken file does not hide the rest.
@@ -594,24 +619,7 @@ export function runDiff(ctx: CliContext, opts: DiffOptions): { result: DiffResul
   const domains: SubjectAreaDiff[] = [];
 
   if (opts.all) {
-    // `--all` over nothing must never read as "clean": a wrong or omitted
-    // `--semantic-dir` (the CLI cannot see VS Code settings) would otherwise
-    // hand the skill a verified match over zero domains.
-    const semanticRoot = path.join(ctx.root, ctx.semanticDir);
-    if (!fs.existsSync(semanticRoot)) {
-      throw new CliEnvError(
-        'no-semantic-dir',
-        `No ${ctx.semanticDir}/ folder in this project — check --semantic-dir (it must match the erdStudio.semanticDir setting).`,
-      );
-    }
-    const summaries = ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir);
-    if (summaries.length === 0) {
-      throw new CliEnvError(
-        'no-domains',
-        `No subject area files under ${ctx.semanticDir}/ — check --semantic-dir (it must match the erdStudio.semanticDir setting).`,
-      );
-    }
-    for (const summary of summaries) {
+    for (const summary of listAllSubjectAreas(ctx)) {
       try {
         domains.push(diffSubjectArea(ctx, summary.filePath, opts.strict === true));
       } catch (err) {

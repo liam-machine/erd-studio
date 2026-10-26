@@ -1,11 +1,15 @@
 /**
- * `erd-studio export` — a domain's logical (design) diagram as Mermaid or DBML.
+ * `erd-studio export` — a domain's logical (design) diagram as Mermaid, DBML
+ * or rich DBML (`dbml-rich`, for dbdiagram.io), or the rich export's
+ * `.dbdiagram` layout file (`dbml-layout`); with `--all`, every domain.
  *
- * The text comes from `exportSubjectAreaFile` (`src/services/diagramExport.ts`),
- * the one host entry point the palette command and the canvas also call, so
- * the CLI, the extension and the Confluence app print the same bytes. The
- * dbt key evidence is passed the way `computeSubjectAreaDiff` passes it, so a link
- * stored twice is exported from the copy the canvas draws.
+ * The text comes from `exportSubjectAreaFile` / `exportSubjectAreaFiles`
+ * (`src/services/diagramExport.ts`), the host entry points the palette
+ * commands and the canvas also call, so the CLI, the extension and the
+ * Confluence app print the same bytes — and `--all` gives the same file
+ * names **Export All Diagrams…** writes. The dbt key evidence is passed the
+ * way `computeSubjectAreaDiff` passes it, so a link stored twice is exported
+ * from the copy the canvas draws.
  *
  * Read-only like every subcommand: the text goes to stdout and nothing is
  * written — `> schema.dbml` is the user's own redirect, never an `--out`.
@@ -13,15 +17,21 @@
 
 import type { DiagramExportFormat } from '@erd-studio/core';
 
-import { exportSubjectAreaFile } from '../services/diagramExport';
+import { exportSubjectAreaFile, exportSubjectAreaFiles } from '../services/diagramExport';
 import { dbtKeyIndexOf } from '../services/stageDisplay';
+import type { CliExportFormat } from './args';
 import { CliEnvError, relPath, type CliContext } from './context';
-import { describeSubjectAreaError, resolveSubjectAreaPath } from './diff';
+import { describeSubjectAreaError, listAllSubjectAreas, resolveSubjectAreaPath } from './diff';
+
+/** The diagram format a CLI format reads: `dbml-layout` is part of a `dbml-rich` export. */
+function diagramFormatOf(format: CliExportFormat): DiagramExportFormat {
+  return format === 'dbml-layout' ? 'dbml-rich' : format;
+}
 
 export interface ExportOptions {
   /** The `--domain` argument, resolved like `diff --domain`. */
   domain: string;
-  format: DiagramExportFormat;
+  format: CliExportFormat;
   cwd?: string;
 }
 
@@ -30,8 +40,8 @@ export interface ExportResult {
   cliVersion: string;
   /** The domain file, project-relative. */
   domain: string;
-  format: DiagramExportFormat;
-  /** A safe file name for the text, e.g. `showcase.dbml`. */
+  format: CliExportFormat;
+  /** A safe file name for the text, e.g. `showcase.dbml` (`showcase.dbdiagram` for `dbml-layout`). */
   fileName: string;
   /** The export text, ending in a newline. */
   content: string;
@@ -44,18 +54,66 @@ export interface ExportResult {
 export async function runExport(ctx: CliContext, opts: ExportOptions): Promise<ExportResult> {
   const file = resolveSubjectAreaPath(ctx, opts.domain, opts.cwd);
   try {
-    const exported = await exportSubjectAreaFile(ctx.subjectAreaService, file, opts.format, {
+    const layoutOnly = opts.format === 'dbml-layout';
+    const exported = await exportSubjectAreaFile(ctx.subjectAreaService, file, diagramFormatOf(opts.format), {
       dbtKeyIndex: dbtKeyIndexOf(ctx.ymlData, ctx.manifest),
+      layers: ctx.layerService,
     });
+    const printed = layoutOnly ? exported.layout! : exported;
     return {
       cliVersion: ctx.envelope.cliVersion,
       domain: relPath(ctx.root, file),
       format: opts.format,
-      fileName: exported.fileName,
-      content: exported.content,
+      fileName: printed.fileName,
+      content: printed.content,
     };
   } catch (err) {
     const { code, message } = describeSubjectAreaError(ctx, file, err);
     throw new CliEnvError(code, message);
   }
+}
+
+/** One file of `export --all`: what the human-mode list holds. */
+export interface ExportedFileEntry {
+  fileName: string;
+  content: string;
+}
+
+/** `export --all --json`. Paths are project-relative with forward slashes. */
+export interface ExportAllResult {
+  cliVersion: string;
+  format: CliExportFormat;
+  /** By layer, then domain file; with `dbml-rich` each `.dbml` is followed by its `.dbdiagram`. */
+  files: Array<ExportedFileEntry & { domain: string }>;
+  /** Domains that could not be read, with `diff --all`'s per-domain error codes. */
+  skipped: Array<{ domain: string; error: { code: string; message: string } }>;
+}
+
+/**
+ * Export every domain under the semantic dir: one file each, named as
+ * **Export All Diagrams…** names them (`<layer>-<name>` when two layers hold
+ * the same name). `dbml-rich` adds each `.dbdiagram`; `dbml-layout` lists
+ * only those. A domain that cannot be read is skipped and reported, not
+ * fatal; no semantic dir or no domains is a `CliEnvError` (exit 3).
+ */
+export async function runExportAll(ctx: CliContext, opts: { format: CliExportFormat }): Promise<ExportAllResult> {
+  const summaries = listAllSubjectAreas(ctx);
+  const layoutOnly = opts.format === 'dbml-layout';
+  const exported = await exportSubjectAreaFiles(
+    ctx.subjectAreaService,
+    summaries.map((s) => s.filePath),
+    diagramFormatOf(opts.format),
+    { dbtKeyIndex: dbtKeyIndexOf(ctx.ymlData, ctx.manifest), layers: ctx.layerService },
+  );
+  return {
+    cliVersion: ctx.envelope.cliVersion,
+    format: opts.format,
+    files: exported.files
+      .filter((f) => !layoutOnly || f.kind === 'layout')
+      .map((f) => ({ domain: relPath(ctx.root, f.domainPath), fileName: f.fileName, content: f.content })),
+    skipped: exported.skipped.map((s) => ({
+      domain: relPath(ctx.root, s.domainPath),
+      error: describeSubjectAreaError(ctx, s.domainPath, s.error),
+    })),
+  };
 }

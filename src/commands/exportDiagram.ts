@@ -1,6 +1,6 @@
 /**
  * **Export Diagram…** (`erdStudio.exportDiagram`) — a domain's logical
- * (design) stage as Mermaid or DBML text, one way out. Nothing about how ERD
+ * (design) stage as Mermaid, DBML or DBML for dbdiagram.io (`dbml-rich`). Nothing about how ERD
  * Studio stores a diagram changes: the text comes from `@erd-studio/core`'s
  * `exportDiagram` through `exportSubjectAreaFile` (`src/services/diagramExport.ts`),
  * the same read the `erd-studio export` CLI and the canvas's logical stage
@@ -16,7 +16,11 @@
  *
  * Writes no ERD Studio file. Save As… writes only the file the user named in
  * the save dialog, through `workspace.fs` — an export, not a domain write, so
- * it is not an `applySubjectAreaEdit` and records no own write.
+ * it is not an `applySubjectAreaEdit` and records no own write. For DBML for
+ * dbdiagram.io it also writes the layout file beside it (`<same name>.dbdiagram`,
+ * which `dbdiagram push` reads), asking first when that file already exists:
+ * the user did not name it, so it is never replaced silently. Copy and Open
+ * give the DBML alone, its header naming no layout file.
  *
  * Every vscode call goes through `ExportDiagramUi`, so the flow is unit-tested
  * with plain fakes; `vscodeExportUi()` is the real one `activate()` uses.
@@ -42,16 +46,25 @@ import {
 } from '../services/commandErrors';
 import { telemetry } from '../services/telemetryService';
 import { openTableFileAt } from './openModelFile';
-import type { SubjectAreaExport } from '../services/diagramExport';
+import { DBDIAGRAM_LAYOUT_EXTENSION, type SubjectAreaExport } from '../services/diagramExport';
 
 export const EXPORT_DIAGRAM_COMMAND = 'erdStudio.exportDiagram';
 
 /** Every title says which stage is exported: the canvas also offers it on the physical stage. */
 export const EXPORT_TITLE = 'Export Diagram (logical design)';
 
-export const FORMAT_LABELS: Readonly<Record<DiagramExportFormat, string>> = { mermaid: 'Mermaid', dbml: 'DBML' };
+export const FORMAT_LABELS: Readonly<Record<DiagramExportFormat, string>> = {
+  mermaid: 'Mermaid',
+  dbml: 'DBML',
+  'dbml-rich': 'DBML for dbdiagram.io',
+};
 
-/** The format QuickPick, in `DIAGRAM_EXPORT_FORMATS` order. */
+/**
+ * The format QuickPick, in `DIAGRAM_EXPORT_FORMATS` order. The two DBML
+ * choices say what each keeps, so the difference reads at a glance: plain
+ * DBML works everywhere; the dbdiagram.io one keeps ERD Studio's fields and
+ * the table positions but needs a newer DBML reader.
+ */
 export const FORMAT_ITEMS: ReadonlyArray<vscode.QuickPickItem & { format: DiagramExportFormat }> = [
   {
     label: 'Mermaid',
@@ -62,10 +75,23 @@ export const FORMAT_ITEMS: ReadonlyArray<vscode.QuickPickItem & { format: Diagra
   {
     label: 'DBML',
     description: `.${DIAGRAM_EXPORT_FILE_EXTENSIONS.dbml}`,
-    detail: 'Opens in dbdiagram.io and other DBML tools',
+    detail: "Opens in any DBML tool. ERD Studio's fields go in notes; no table positions",
     format: 'dbml',
   },
+  {
+    label: FORMAT_LABELS['dbml-rich'],
+    description: `.${DIAGRAM_EXPORT_FILE_EXTENSIONS['dbml-rich']} + .${DBDIAGRAM_LAYOUT_EXTENSION}`,
+    detail: "Keeps ERD Studio's fields and the table positions. Needs DBML 9.1 or later, as dbdiagram.io and dbdocs read",
+    format: 'dbml-rich',
+  },
 ];
+
+/** The usage counter each format's export adds to. */
+export const FORMAT_FEATURES = {
+  mermaid: 'exportMermaid',
+  dbml: 'exportDbml',
+  'dbml-rich': 'exportDbmlRich',
+} as const satisfies Readonly<Record<DiagramExportFormat, string>>;
 
 export type ExportAction = 'copy' | 'open' | 'save';
 
@@ -76,13 +102,22 @@ export const ACTION_ITEMS: ReadonlyArray<vscode.QuickPickItem & { action: Export
 ];
 
 /** The language id an untitled export opens with, when the editor knows it. */
-const LANGUAGE_IDS: Readonly<Record<DiagramExportFormat, string>> = { mermaid: 'mermaid', dbml: 'dbml' };
+const LANGUAGE_IDS: Readonly<Record<DiagramExportFormat, string>> = { mermaid: 'mermaid', dbml: 'dbml', 'dbml-rich': 'dbml' };
 
 export const MERMAID_COPIED_MESSAGE =
   'Copied the diagram as Mermaid. On GitHub or GitLab, paste it inside a ```mermaid code block to see it drawn.';
 export const DBML_COPIED_MESSAGE =
   'Copied the diagram as DBML. Paste it into dbdiagram.io or any other DBML tool.';
+export const DBML_RICH_COPIED_MESSAGE =
+  'Copied the diagram as DBML for dbdiagram.io. Paste it into dbdiagram.io or any tool that reads DBML 9.1 or later. ' +
+  'The clipboard holds no table positions: use Save As… to keep them in a .dbdiagram file.';
+export const DBML_RICH_OPENED_MESSAGE =
+  'Opened the diagram as DBML for dbdiagram.io, without table positions. Use Save As… to keep them in a .dbdiagram file beside the .dbml.';
 export const NO_DIAGRAMS_MESSAGE = 'There are no diagrams to export yet.';
+
+/** The layout file's question's buttons (the modal adds Cancel). */
+export const REPLACE_LAYOUT_BUTTON = 'Replace';
+export const KEEP_LAYOUT_BUTTON = 'Save .dbml Only';
 
 export { OPEN_FILE_BUTTON };
 export const CHOOSE_ANOTHER_LOCATION_BUTTON = 'Choose Another Location';
@@ -98,6 +133,8 @@ export interface ExportDiagramUi {
   /** Open `content` as an untitled document in `language` and show it. */
   openUntitled(content: string, language: string): Promise<void>;
   showSaveDialog(options: vscode.SaveDialogOptions): Promise<vscode.Uri | undefined>;
+  /** Whether a file (or anything) is at `uri`. */
+  fileExists(uri: vscode.Uri): Promise<boolean>;
   writeFile(uri: vscode.Uri, content: string): Promise<void>;
   /** Show a saved export in an editor. */
   openFile(uri: vscode.Uri): Promise<void>;
@@ -106,6 +143,8 @@ export interface ExportDiagramUi {
   /** Open Send Feedback (`erdStudio.reportBug`) with this prefill. */
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
   showInformationMessage(message: string, ...items: string[]): Promise<string | undefined>;
+  /** A modal warning (VS Code adds Cancel): the button picked, undefined when cancelled. */
+  showModalWarning(message: string, detail: string, ...items: string[]): Promise<string | undefined>;
   /** Resolves the button picked; the flow never awaits it. */
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
 }
@@ -133,6 +172,8 @@ export interface ExportDiagramResult {
   fileName: string;
   /** Save As… only. */
   savedTo?: string;
+  /** Save As… of DBML for dbdiagram.io, when its layout file was written. */
+  layoutSavedTo?: string;
 }
 
 /**
@@ -267,27 +308,59 @@ async function runExportDiagram(
 
   switch (action) {
     case 'copy': {
-      await ui.writeClipboard(exported.content);
-      void ui.showInformationMessage(format === 'mermaid' ? MERMAID_COPIED_MESSAGE : DBML_COPIED_MESSAGE);
+      await ui.writeClipboard(textWithoutLayout(exported));
+      void ui.showInformationMessage(COPIED_MESSAGES[format]);
       break;
     }
     case 'open': {
       const known = await ui.getLanguages().catch(() => [] as string[]);
       const language = known.includes(LANGUAGE_IDS[format]) ? LANGUAGE_IDS[format] : 'plaintext';
-      await ui.openUntitled(exported.content, language);
+      await ui.openUntitled(textWithoutLayout(exported), language);
+      if (exported.layout) { void ui.showInformationMessage(DBML_RICH_OPENED_MESSAGE); }
       break;
     }
     case 'save': {
       const folder = deps.defaultSaveFolder ?? path.dirname(domainPath);
-      const savedTo = await saveAs(ui, format, exported, vscode.Uri.file(path.join(folder, exported.fileName)));
-      if (!savedTo) { return cancelled(); }
-      result.savedTo = savedTo;
+      const saved = await saveAs(ui, format, exported, vscode.Uri.file(path.join(folder, exported.fileName)));
+      if (!saved) { return cancelled(); }
+      result.savedTo = saved.savedTo;
+      if (saved.layoutSavedTo) { result.layoutSavedTo = saved.layoutSavedTo; }
       break;
     }
   }
 
-  telemetry.feature(format === 'mermaid' ? 'exportMermaid' : 'exportDbml');
+  telemetry.feature(FORMAT_FEATURES[format]);
   return result;
+}
+
+const COPIED_MESSAGES: Readonly<Record<DiagramExportFormat, string>> = {
+  mermaid: MERMAID_COPIED_MESSAGE,
+  dbml: DBML_COPIED_MESSAGE,
+  'dbml-rich': DBML_RICH_COPIED_MESSAGE,
+};
+
+/** The text for the clipboard or an untitled editor: nothing sits beside it, so a rich export's header names no layout file. */
+function textWithoutLayout(exported: SubjectAreaExport): string {
+  return exported.layout ? exported.layout.dbmlWithLayoutFileName('') : exported.content;
+}
+
+/** Where Save As… put the export. */
+interface Saved {
+  savedTo: string;
+  /** The layout file written beside a rich DBML export; undefined when the user kept the one there. */
+  layoutSavedTo?: string;
+}
+
+/**
+ * The layout file for a rich DBML export saved as `target`: the same name
+ * with `.dbdiagram` (what `dbdiagram push` looks for). A target that is
+ * itself named `.dbdiagram` gets `.dbdiagram` added rather than being
+ * overwritten by its own layout.
+ */
+export function layoutUriFor(target: vscode.Uri): vscode.Uri {
+  const parsed = path.parse(target.fsPath);
+  const beside = path.join(parsed.dir, `${parsed.name}.${DBDIAGRAM_LAYOUT_EXTENSION}`);
+  return vscode.Uri.file(beside.toLowerCase() === target.fsPath.toLowerCase() ? `${target.fsPath}.${DBDIAGRAM_LAYOUT_EXTENSION}` : beside);
 }
 
 /**
@@ -300,7 +373,7 @@ async function saveAs(
   format: DiagramExportFormat,
   exported: SubjectAreaExport,
   startAt: vscode.Uri,
-): Promise<string | undefined> {
+): Promise<Saved | undefined> {
   const target = await ui.showSaveDialog({
     title: `${EXPORT_TITLE}: Save ${FORMAT_LABELS[format]}`,
     defaultUri: startAt,
@@ -308,22 +381,78 @@ async function saveAs(
     saveLabel: 'Export',
   });
   if (!target) { return undefined; }
-  try {
-    await ui.writeFile(target, exported.content);
-  } catch (err) {
-    throw new ExportFailure(saveFailure(ui, target, err, () => retrySave(ui, format, exported, target)));
+  const name = path.basename(target.fsPath);
+
+  // The layout file goes beside the .dbml under the same name. The save
+  // dialog asked about the file the user named; this one they did not, so
+  // ask before replacing it — before anything is written.
+  let layoutTarget: vscode.Uri | undefined;
+  let content = exported.content;
+  if (exported.layout) {
+    layoutTarget = layoutUriFor(target);
+    const layoutName = path.basename(layoutTarget.fsPath);
+    if (await ui.fileExists(layoutTarget).catch(() => false)) {
+      const choice = await ui.showModalWarning(
+        `${layoutName} already exists. Replace it?`,
+        `It holds the table positions dbdiagram.io uses for ${name}. Replacing it gives it this diagram's positions.`,
+        REPLACE_LAYOUT_BUTTON,
+        KEEP_LAYOUT_BUTTON,
+      );
+      if (choice === undefined) { return undefined; }
+      if (choice === KEEP_LAYOUT_BUTTON) { layoutTarget = undefined; }
+    }
+    // The header names the layout file by the name it has beside this .dbml.
+    content = exported.layout.dbmlWithLayoutFileName(layoutName);
   }
-  void ui.showInformationMessage(`Exported ${path.basename(target.fsPath)}.`, 'Open').then((choice) => {
+
+  const retry = () => retrySave(ui, format, exported, target);
+  try {
+    await ui.writeFile(target, content);
+  } catch (err) {
+    throw new ExportFailure(saveFailure(ui, target, err, retry));
+  }
+  if (layoutTarget && exported.layout) {
+    try {
+      await ui.writeFile(layoutTarget, exported.layout.content);
+    } catch (err) {
+      throw new ExportFailure(layoutSaveFailure(ui, name, layoutTarget, err, retry));
+    }
+  }
+
+  const message = !exported.layout
+    ? `Exported ${name}.`
+    : layoutTarget
+      ? `Exported ${name} and its table positions, ${path.basename(layoutTarget.fsPath)}.`
+      : `Exported ${name}. ${path.basename(layoutUriFor(target).fsPath)} was left as it was.`;
+  void ui.showInformationMessage(message, 'Open').then((choice) => {
     if (choice === 'Open') { void ui.openFile(target); }
   });
-  return target.fsPath;
+  return { savedTo: target.fsPath, ...(layoutTarget ? { layoutSavedTo: layoutTarget.fsPath } : {}) };
+}
+
+/** The .dbml was saved but its layout file was not: say both, so the user knows what is on disk. */
+function layoutSaveFailure(ui: ExportDiagramUi, savedName: string, layoutTarget: vscode.Uri, err: unknown, chooseAgain: () => unknown): ShownFailure {
+  const layoutName = path.basename(layoutTarget.fsPath);
+  const failure = classifyWriteFailure(err);
+  if (failure === 'other') {
+    const doing = 'while saving the table positions';
+    return {
+      message: oursMessage(COMMAND_NAME, doing, `${savedName} was saved without ${layoutName}`),
+      actions: { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(COMMAND_NAME, doing, err)) },
+    };
+  }
+  const why = failure === 'permission' ? "ERD Studio isn't allowed to write it" : 'the disk is full';
+  return {
+    message: `Saved ${savedName}, but couldn't save its table positions, ${layoutName}: ${why}.`,
+    actions: { [CHOOSE_ANOTHER_LOCATION_BUTTON]: chooseAgain },
+  };
 }
 
 /** Choose Another Location: the save step again, counted and shown as the first one was. */
 async function retrySave(ui: ExportDiagramUi, format: DiagramExportFormat, exported: SubjectAreaExport, previous: vscode.Uri): Promise<void> {
   try {
     if (await saveAs(ui, format, exported, previous)) {
-      telemetry.feature(format === 'mermaid' ? 'exportMermaid' : 'exportDbml');
+      telemetry.feature(FORMAT_FEATURES[format]);
     } else {
       cancelled();
     }
@@ -349,11 +478,13 @@ export function vscodeExportUi(): ExportDiagramUi {
       await vscode.window.showTextDocument(doc, { preview: false });
     },
     showSaveDialog: async (options) => vscode.window.showSaveDialog(options),
+    fileExists: async (uri) => vscode.workspace.fs.stat(uri).then(() => true, () => false),
     writeFile: async (uri, content) => { await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content)); },
     openFile: async (uri) => { await vscode.window.showTextDocument(uri, { preview: false }); },
     openFileAt: (filePath, line, column) => openTableFileAt(filePath, line, column),
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
     showInformationMessage: async (message, ...items) => vscode.window.showInformationMessage(message, ...items),
+    showModalWarning: async (message, detail, ...items) => vscode.window.showWarningMessage(message, { modal: true, detail }, ...items),
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
   };
 }

@@ -1,0 +1,21 @@
+{
+  "version": "3.0.0",
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "relationshipMode": "All",
+    "tablePositions": [
+      { "name": "fct_order", "schemaName": "gold", "x": 400, "y": 120 },
+      { "name": "dim_customer", "schemaName": "gold", "x": 0, "y": 0 },
+      { "name": "dim_passport", "schemaName": "gold", "x": -320, "y": 40.5 },
+      { "name": "dim_date", "schemaName": "gold", "x": 800, "y": -60 },
+      { "name": "fct_shipment", "schemaName": "gold", "x": 400, "y": 520 },
+      { "name": "empty_stub", "schemaName": "gold", "x": 900, "y": 500 }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": []
+  },
+  "views": {}
+}
