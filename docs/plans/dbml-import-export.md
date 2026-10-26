@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-26
 **Prompted by:** @gbrueckl's customer is wary of ERD Studio's "proprietary nature": if development stops, are their models stranded? Gerhard suggested DBML and keeping layout separate from the model.
-**Builds on:** [2026-10-09 storage formats spec](2026-10-09-serialization-formats-dbml-design.md) (v1 export shipped; storage decisions 1–4 stand).
+**Builds on:** the v1 Mermaid / DBML export (`packages/core/src/exportDbml.ts`, shipped 2026-10-09).
 **Status:** Plan — not started.
 
 ## Goal
@@ -17,15 +17,15 @@ dbdiagram push silver.dbml --name "Silver"   # picks up silver.dbdiagram (positi
 
 ## Non-goals
 
-- **No change to storage.** YAML + JSON stay canonical (2026-10-09 decisions 1–4).
-- **No DBML mirror file** written on save (decision 4). Teams can still pipe `erd-studio export` in CI.
+- **No change to storage.** YAML + JSON stay canonical: no DBML storage, no pluggable storage format.
+- **No DBML mirror file** written on save (two sources of truth, merge conflicts in a generated file). Teams can still pipe `erd-studio export` in CI.
 - **ERD Studio never talks to dbdiagram's servers.** We write files; the user runs dbdiagram's own CLI under their own account.
 - **No writing CLI subcommand, no `--out`.** The CLI stays read-only (stdout only).
 - **v1 DBML export is not changed.** It stays the portable, notes-only format (parser floor `@dbml/core` 2.4.2).
 
 ## Decisions
 
-1. **Two DBML export formats.** `dbml` (v1, unchanged, maximum portability) and a new **`dbml-rich`** (v2): ERD fields as DBML custom properties, readable as real fields and filters in dbdiagram/dbdocs. v2 needs a DBML **9.1+** parser — the reason v1 dropped custom properties on 2026-10-09 still holds for v1.
+1. **Two DBML export formats.** `dbml` (v1, unchanged, maximum portability) and a new **`dbml-rich`** (v2): ERD fields as DBML custom properties, readable as real fields and filters in dbdiagram/dbdocs. v2 needs a DBML **9.1+** parser — v1 stays notes-only because parsers older than 9.1 reject custom properties.
 2. **Custom property values are always quoted strings** (`scd_type: '2'`, never `2`). Unquoted typed values exist only from DBML 11.0 and break every 9.x/10.x reader; quoted strings parse in 9.1 → 11.0.
 3. **Refs use the optional form** `>?` / `?<` / `-?`. Since DBML 9, a bare `>` asserts the FK is NOT NULL, which ERD Studio doesn't record (a bare `>` gives an info diagnostic per FK in dbdiagram). One-to-one FK columns get `unique`.
 4. **One flattened `.dbml` per subject area** (no `use` imports) — the only multi-tool-safe shape. "Export all" writes one file per subject area.
@@ -103,8 +103,8 @@ dbdiagram push silver.dbml --name "Silver"   # picks up silver.dbdiagram (positi
 ### Phase 4 — docs, harness, telemetry, release
 
 - [ ] Telemetry FEATURES (additive; Worker + `telemetry.json` deployed first): `exportDbmlRich`, `exportAll`, `importDbml`, `importDbmlLayout`, `importDbmlCancelled`; error `importDbmlFailed`. No names or paths.
-- [ ] Harness: point assistants at **Import DBML…** in `SCHEMA_CONTENT` (closes the 2026-10-09 "DBML import guidance" item); bump `HARNESS_VERSION`; regenerate the fixture harness files in the same PR.
-- [ ] Docs: a "Leaving ERD Studio" page (export all → `dbdiagram push`), update the 2026-10-09 spec's open items, README mention, CHANGELOG under `## Unreleased`.
+- [ ] Harness: point assistants at **Import DBML…** in `SCHEMA_CONTENT`; bump `HARNESS_VERSION`; regenerate the fixture harness files in the same PR.
+- [ ] Docs: a "Leaving ERD Studio" page (export all → `dbdiagram push`), README mention, CHANGELOG under `## Unreleased`.
 - [ ] Ship as patch releases (export first, import second). Packages: additive → automatic PATCH.
 
 ## Open questions for Liam
