@@ -91,7 +91,7 @@ What to expect:
 
 - **A new diagram every time.** Import never changes an existing diagram.
 - **Tables already in your Table Library are used as they are**, never overwritten, matching names regardless of case. So if you changed one of those tables in dbdiagram.io, import into a project that doesn't have that table yet, or delete it from the Table Library first, to take the dbdiagram.io version.
-- **Names ERD Studio can't use are fixed.** A table called `Order Items` becomes `Order_Items`, keeping the original as its warehouse name where it can. Two tables with the same name in different schemas become `schema_name`. The summary lists each change.
+- **Names ERD Studio can't use are fixed.** A table called `Order Items` becomes `Order_Items`, and two tables called `date` in the `silver` and `gold` schemas become `silver_date` and `gold_date`. The original name is kept as the table's warehouse name (`alias`) when it is a valid one, as `date` is here; otherwise, as for `Order Items`, it is kept under `dbml` in the table's metadata (`meta.dbml.name`). The summary lists each change.
 - **DBML settings ERD Studio has no field for are kept.** Not null, unique, defaults, increments, checks, enum values, indexes, header colours and another tool's own properties are saved under `dbml` in the table's or column's metadata (`meta`), so the next export carries them back out.
 - **Some things are left out**, and the summary lists them: sample rows (`Records`), a relationship's `delete` / `update` actions, colour and `inactive` flag, the project's database type, table groups other than the layer, and diagram views.
 

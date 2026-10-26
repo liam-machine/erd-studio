@@ -37,7 +37,7 @@
  * | the model file's foreign-key flag   | `foreign_key: 'true'` — also on a column the badge marks as a foreign key when no exported Ref says so |
  * | column meta                         | as table meta                                                           |
  * | many-to-one / one-to-many           | `Ref: fk.col >? pk.col` — always from the foreign-key (many) end, so a one-to-many is written with its ends swapped |
- * | one-to-one                          | `Ref: fk.col -? pk.col`, and the FK column gets `unique` (a composite one an `indexes { (x, y) [unique] }`) unless it is already the table's key |
+ * | one-to-one                          | `Ref: pk.col ?- fk.col` — key end first, since DBML reads a one-to-one's second end as the foreign key — and the FK column gets `unique` (a composite one an `indexes { (x, y) [unique] }`) unless it is already the table's key |
  * | many-to-many                        | `Ref: from.col <> to.col`, with `?` as below                            |
  * | `?` on a Ref                        | a `?` next to the operator marks the end across from it as possibly null (`>?`: the FK may be null). ERD Studio does not record nullability, so every end that is not primary-key columns gets one (DBML 9+ reads a bare `>` as NOT NULL) |
  * | composite foreign key               | one `Ref: a.(x, y) >? b.(u, v)`                                         |
@@ -263,11 +263,18 @@ function tableBlock(model: ExportTable, facts: RefFacts): string[] {
   return lines;
 }
 
-/** A Ref as written: the foreign-key end first. */
+/**
+ * A Ref as written. A `>` Ref starts at its foreign-key (many) end; a `-` Ref
+ * starts at its key end, because DBML reads the second end of a one-to-one as
+ * the foreign key (`users.id - user_infos.user_id`), and so does every DBML
+ * tool that turns one into SQL.
+ */
 interface RefPlan {
   link: ExportLink;
   left: { model: ExportTable; columns: string[] };
   right: { model: ExportTable; columns: string[] };
+  /** The foreign-key end: `left`, except for a one-to-one. */
+  fk: { model: ExportTable; columns: string[] };
   operator: '>' | '-' | '<>';
 }
 
@@ -276,13 +283,13 @@ function refPlan(link: ExportLink): RefPlan {
   const to = { model: link.to, columns: link.toColumns };
   switch (link.cardinality) {
     case 'one-to-many':
-      return { link, left: to, right: from, operator: '>' };
+      return { link, left: to, right: from, fk: to, operator: '>' };
     case 'one-to-one':
-      return { link, left: from, right: to, operator: '-' };
+      return { link, left: to, right: from, fk: from, operator: '-' };
     case 'many-to-many':
-      return { link, left: from, right: to, operator: '<>' };
+      return { link, left: from, right: to, fk: from, operator: '<>' };
     default:
-      return { link, left: from, right: to, operator: '>' };
+      return { link, left: from, right: to, fk: from, operator: '>' };
   }
 }
 
@@ -384,12 +391,12 @@ export function toDbmlRich(area: DisplaySubjectArea, options: DbmlRichOptions = 
     }
     endpoints.add(key);
     refItems.push({ kind: 'ref', plan });
-    // The left end is where core puts the FK badge (`foreignKeyEnd`), a
+    // The FK end is where core puts the FK badge (`foreignKeyEnd`), a
     // many-to-many's included, and where import puts the relationship's FK.
-    for (const c of plan.left.columns) facts.fkCovered.add(columnKey(plan.left.model, c));
+    for (const c of plan.fk.columns) facts.fkCovered.add(columnKey(plan.fk.model, c));
     if (plan.operator === '<>') continue;
     if (plan.operator === '-') {
-      const fk = plan.left;
+      const { fk } = plan;
       const pkColumns = fk.model.columns.filter((c) => c.isPrimaryKey).map((c) => c.name);
       if (fk.columns.length === 1) {
         facts.uniqueColumns.add(columnKey(fk.model, fk.columns[0]));

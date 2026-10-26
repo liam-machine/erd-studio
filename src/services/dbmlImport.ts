@@ -24,7 +24,7 @@
  * | `pk`, `indexes { (a, b) [pk] }` | `isPrimaryKey` |
  * | `natural_key`, `scd_type`, `additive_type`, `foreign_key` | the column flags |
  * | column `note` | column description |
- * | `Ref`, and `[ref: …]` on a column | a relationship stored from its FK (many) side; a composite one is one entry per column pair sharing `compositeKey`; the ref's name is its role; `?` (optional) is not kept |
+ * | `Ref`, and `[ref: …]` on a column | a relationship stored from its FK (many) side — of a one-to-one, the column that declared it, else the second end as DBML reads it; a composite one is one entry per column pair sharing `compositeKey`, imported whole or not at all; the ref's name is its role; `?` (optional) is not kept |
  * | `Note name [color]` and its layout | an annotation; `linked_table` links it to a table (in ERD Studio's own export, even one not in the diagram, as the diagram had it) |
  * | the placeholder column (`erd_placeholder`) | dropped: the table has no columns |
  *
@@ -35,9 +35,9 @@
  *
  * - column: `not_null`, `unique` (not the `unique` an exported one-to-one
  *   adds to its FK column), `increment`, `default` (an expression in
- *   backticks), `checks`, `enum` (an enum type's values), `name` (the
- *   original name, when it had to change), `properties` (custom properties
- *   that are not ERD Studio's);
+ *   backticks), `checks`, `enum` (an enum type's values; `{ name, note }`
+ *   for one with a note), `name` (the original name, when it had to
+ *   change), `properties` (custom properties that are not ERD Studio's);
  * - table: `indexes` (every index but the primary key), `checks`,
  *   `header_color`, `alias` (the DBML alias, `Table users as U`), `name` (the
  *   original name, when it had to change and cannot be the warehouse
@@ -45,8 +45,11 @@
  *
  * Dropped, and listed in the report: Records (sample rows), a ref's
  * `delete` / `update` / `color` / `inactive`, the project's `database_type`
- * and other settings, table groups other than the layer's, dependency
- * arrows, diagram views, and a sticky note's own properties.
+ * and other settings, table groups other than the layer's, an enum no new
+ * column has, dependency arrows, diagram views, and a sticky note's own
+ * properties. A property set both plain and with the `erd_` prefix is read
+ * from the prefixed one; the plain one is the team's own, kept in
+ * `meta.dbml.properties`.
  *
  * Names: a table name must match `TABLE_NAME_PATTERN` and a column name
  * `COLUMN_NAME_PATTERN`; one that does not becomes the nearest name that does
@@ -65,6 +68,7 @@ import {
   DBML_RICH_META_PREFIX,
   DBML_RICH_NOTE_PROPERTIES,
   DBML_RICH_PLACEHOLDER_PROPERTY,
+  DBML_RICH_PROPERTY_PREFIX,
   DBML_RICH_TABLE_PROPERTIES,
   MAX_COMPOSITE_PAIRS,
   bareDbmlProperty,
@@ -95,7 +99,7 @@ import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN } from '../types/naming';
 import { isValidTableRole } from '../providers/payloadValidation';
 import { buildDraftSubjectAreaDocument, toSubjectAreaSlug } from './dbtDraft';
 import { libraryRelationshipsOf, nextCompositeKey, routeToLibrary } from './libraryRelationships';
-import type { DbmlField, DbmlModel, DbmlRefEnd, DbmlTable } from './dbmlImportParse';
+import type { DbmlEnum, DbmlEnumValue, DbmlField, DbmlModel, DbmlProperties, DbmlRefEnd, DbmlTable } from './dbmlImportParse';
 
 /** The `meta` key that holds what DBML says and ERD Studio has no field for. */
 export const DBML_META_KEY = 'dbml';
@@ -192,10 +196,27 @@ export interface DbmlImportReused {
   missingColumns: string[];
 }
 
+/** What kind of thing an import leaves out: the summary gives each kind one line. */
+export type DbmlImportDroppedKind =
+  | 'table-group'
+  | 'database-type'
+  | 'project-setting'
+  | 'records'
+  | 'enum'
+  | 'dependencies'
+  | 'diagram-views'
+  | 'reference'
+  | 'reference-settings'
+  | 'sticky-note';
+
 /** Something in the file the import does not keep, and why. */
 export interface DbmlImportDropped {
+  kind: DbmlImportDroppedKind;
+  /** The whole description (`Table group people (2 tables)`). */
   what: string;
   why: string;
+  /** Its short name, for a summary line that lists several of a kind (`people`; a reference's settings). */
+  item: string;
 }
 
 export interface DbmlImportReport {
@@ -419,16 +440,10 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
 
   const names = planTableNames(model.tables, ctx);
   const planned: PlannedTable[] = model.tables.map((dbml, i) => planTable(dbml, names[i], input.library, ctx));
-  applyEnums(model, planned);
+  applyEnums(model, planned, ctx);
 
-  const relationships = planRelationships(model, tableLookup(planned), ctx);
-  // An exported one-to-one marks its FK column `unique` (a composite one with a
-  // unique index), which the relationship already says: that is not kept in meta.
-  dropOneToOneUniques(planned, relationships);
-
+  let relationships = planRelationships(model, tableLookup(planned), ctx);
   const newTables = planned.filter((p) => p.table).map((p) => p.table!);
-  report.keptInMeta = newTables.reduce((n, t) => n + (hasDbmlMeta(t.meta) ? 1 : 0)
-    + (t.columns ?? []).filter((c) => hasDbmlMeta(c.meta)).length, 0);
 
   // Relationships: to the library files of their FK tables, or the subject area file.
   let domainRelationships: Relationship[] = relationships;
@@ -450,13 +465,43 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
         const m = libraryCopy(n);
         return !!m && libraryRelationshipsOf(m).some((r) => sameLink(r, rel));
       })));
-    const routed = routeToLibrary(relationships, newTables, libraryCopy, input.diagramCopies ?? []);
-    domainRelationships = routed.kept;
+    // A composite goes whole into one file or not at all: core reads a group
+    // from one file, and fewer pairs than the reference has are not one. It is
+    // left out where the library already stores some of its pairs (which stay
+    // as the library has them), and stays here where another diagram keeps a
+    // copy of one.
+    const held = new Set((input.diagramCopies ?? []).map(linkKey));
+    const left = new Set<Relationship>();
+    const keptHere = new Set<Relationship>();
+    for (const members of compositeGroupsOf(relationships)) {
+      const already = members.filter((m) => stored.has(m));
+      if (already.length > 0 && already.length < members.length) {
+        for (const m of members) left.add(m);
+        const what = describeComposite(members);
+        report.dropped.push({
+          kind: 'reference',
+          what,
+          item: what.replace(/^Reference /, ''),
+          why: `your Table Library already stores ${already.map(describeLink).join(' and ')} on its own, so the composite was not imported.`,
+        });
+      } else if (members.some((m) => held.has(linkKey(m)))) {
+        for (const m of members) keptHere.add(m);
+      }
+    }
+    relationships = relationships.filter((r) => !left.has(r));
+    const routed = routeToLibrary(relationships.filter((r) => !keptHere.has(r)), newTables, libraryCopy, input.diagramCopies ?? []);
+    const kept = new Set([...keptHere, ...routed.kept]);
+    domainRelationships = relationships.filter((r) => kept.has(r));
     changedLibraryTables = routed.changed.filter((m) => !newTables.includes(m));
-    const kept = new Set(routed.kept);
     report.relationshipsAlreadyInLibrary = relationships.filter((r) => !kept.has(r) && stored.has(r)).length;
     report.relationshipsInLibrary = relationships.filter((r) => !kept.has(r) && !stored.has(r)).length;
   }
+
+  // An exported one-to-one marks its FK column `unique` (a composite one with a
+  // unique index), which the relationship already says: that is not kept in meta.
+  dropOneToOneUniques(planned, relationships);
+  report.keptInMeta = newTables.reduce((n, t) => n + (hasDbmlMeta(t.meta) ? 1 : 0)
+    + (t.columns ?? []).filter((c) => hasDbmlMeta(c.meta)).length, 0);
   report.relationships = relationships.length;
 
   const viewConfig = planViewConfig(model, planned, input.layout, ctx);
@@ -563,32 +608,37 @@ function hasDbmlMeta(meta: Meta | undefined): boolean {
  * Each table's imported name: its own when valid and unique; the nearest
  * valid name otherwise; `{schema}_{name}` when another table in the file has
  * the same name in another schema or case; then `_2`, `_3`… for what is left.
+ * A name kept as the file writes it is handed out first, so a renamed table
+ * (`"dim-customer"` → `dim_customer`) never takes the name of a table the
+ * file really calls that.
  */
 function planTableNames(tables: readonly DbmlTable[], ctx: Context): string[] {
-  const bases = tables.map((t) => sanitiseDbmlTableName(t.name));
-  const groups = new Map<string, number[]>();
-  bases.forEach((b, i) => groups.set(lower(b), [...(groups.get(lower(b)) ?? []), i]));
-  const candidates = bases.map((base, i) => {
-    const group = groups.get(lower(base))!;
-    const schema = tables[i].schema;
-    return group.length > 1 && schema ? sanitiseDbmlTableName(`${schema}_${base}`) : base;
+  const groups = new Map<string, number>();
+  for (const t of tables) groups.set(lower(t.name), (groups.get(lower(t.name)) ?? 0) + 1);
+  const sameName = (t: DbmlTable): boolean => groups.get(lower(t.name))! > 1;
+  const candidates = tables.map((t) => {
+    const base = sanitiseDbmlTableName(t.name);
+    return sameName(t) && t.schema ? sanitiseDbmlTableName(`${t.schema}_${base}`) : base;
   });
   const used = new Set<string>();
-  return candidates.map((candidate, i) => {
-    const name = freeName(candidate, used);
-    const original = tables[i].name;
-    if (name !== original) {
-      const sameName = groups.get(lower(bases[i]))!.length > 1;
-      ctx.report.renamed.push({
-        kind: 'table',
-        table: name,
-        from: dbmlTableLabel(tables[i]),
-        to: name,
-        reason: sameName ? 'same-name' : 'invalid-name',
-      });
-    }
-    return name;
+  const names: string[] = new Array(tables.length);
+  // Names as the file writes them first, then the changed ones, each in file order.
+  for (const keptAsWritten of [true, false]) {
+    candidates.forEach((candidate, i) => {
+      if ((candidate === tables[i].name) === keptAsWritten) names[i] = freeName(candidate, used);
+    });
+  }
+  names.forEach((name, i) => {
+    if (name === tables[i].name) return;
+    ctx.report.renamed.push({
+      kind: 'table',
+      table: name,
+      from: dbmlTableLabel(tables[i]),
+      to: name,
+      reason: sameName(tables[i]) ? 'same-name' : 'invalid-name',
+    });
   });
+  return names;
 }
 
 function isPlaceholder(field: DbmlField): boolean {
@@ -625,6 +675,36 @@ function withDbmlMeta(meta: Meta, extras: Record<string, MetaValue>): Meta {
 /** The properties ERD Studio reads off a table or column that are not its own: kept under `meta.dbml.properties`. */
 type Unknown = Record<string, string>;
 
+/** Whether a bare property name (`meta_owner`) is one of the `meta_` properties. */
+const isMetaProperty = (bare: string): boolean =>
+  bare === DBML_RICH_META_JSON_PROPERTY || (bare.startsWith(DBML_RICH_META_PREFIX) && bare.length > DBML_RICH_META_PREFIX.length);
+
+const TABLE_PROPERTY_NAMES: ReadonlySet<string> = new Set(Object.values(DBML_RICH_TABLE_PROPERTIES));
+const COLUMN_PROPERTY_NAMES: ReadonlySet<string> = new Set(Object.values(DBML_RICH_COLUMN_PROPERTIES));
+const readsTableProperty = (bare: string): boolean =>
+  TABLE_PROPERTY_NAMES.has(bare) || rationaleKeyOf(bare) !== undefined || isMetaProperty(bare);
+const readsColumnProperty = (bare: string): boolean => COLUMN_PROPERTY_NAMES.has(bare) || isMetaProperty(bare);
+
+/**
+ * The plain property names ERD Studio reads that the file also writes with
+ * the `erd_` prefix (`grain` beside `erd_grain`). The prefix is there for a
+ * team whose own properties use the plain name, so the prefixed one is read
+ * and the plain one is the team's own, kept in `meta.dbml.properties`,
+ * whichever comes first.
+ */
+function shadowedByPrefix(properties: DbmlProperties, reads: (bare: string) => boolean): Set<string> {
+  const shadowed = new Set<string>();
+  for (const key of Object.keys(properties)) {
+    const bare = bareDbmlProperty(key);
+    if (bare !== key && Object.hasOwn(properties, bare) && reads(bare)) shadowed.add(bare);
+  }
+  return shadowed;
+}
+
+function shadowedNote(label: string, key: string): string {
+  return `${label}: both ${key} and ${DBML_RICH_PROPERTY_PREFIX}${key} are set. ERD Studio read ${DBML_RICH_PROPERTY_PREFIX}${key}; ${key} was kept in meta.${DBML_META_KEY}.`;
+}
+
 function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ctx: Context): PlannedTable {
   const libraryName = library.findTableName(name);
   const columns = new Map<string, string>();
@@ -658,10 +738,14 @@ function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ct
   const tableUnknown: Unknown = {};
   let meta: Meta = {};
   const rationale: Rationale = {};
+  const shadowed = shadowedByPrefix(dbml.properties, readsTableProperty);
   for (const [key, value] of Object.entries(dbml.properties)) {
     const bare = bareDbmlProperty(key);
     const rationaleKey = rationaleKeyOf(key);
-    if (bare === DBML_RICH_TABLE_PROPERTIES.role) {
+    if (shadowed.has(key)) {
+      setMetaEntry(tableUnknown, key, value);
+      ctx.report.notes.push(shadowedNote(label, key));
+    } else if (bare === DBML_RICH_TABLE_PROPERTIES.role) {
       // A table file keeps any role text it holds, so ERD Studio's own export
       // carries one back as it is; another tool's `role` must be one of ours.
       if (isValidTableRole(value) || (ctx.erdStudioExport && value.trim() !== '')) table.modelRole = value as TableRole;
@@ -756,9 +840,13 @@ function planColumn(field: DbmlField, name: string, label: string, ctx: Context)
   const column: ColumnDef = { name, dataType: field.type, description: field.note };
   const unknown: Unknown = {};
   let meta: Meta = {};
+  const shadowed = shadowedByPrefix(field.properties, readsColumnProperty);
   for (const [key, value] of Object.entries(field.properties)) {
     const bare = bareDbmlProperty(key);
-    if (bare === DBML_RICH_COLUMN_PROPERTIES.naturalKey) {
+    if (shadowed.has(key)) {
+      setMetaEntry(unknown, key, value);
+      ctx.report.notes.push(shadowedNote(label, key));
+    } else if (bare === DBML_RICH_COLUMN_PROPERTIES.naturalKey) {
       if (isTrue(value)) column.isNaturalKey = true;
     } else if (bare === DBML_RICH_COLUMN_PROPERTIES.foreignKey) {
       if (isTrue(value)) column.isForeignKey = true;
@@ -803,23 +891,45 @@ function planColumn(field: DbmlField, name: string, label: string, ctx: Context)
   return column;
 }
 
-/** Enum values for columns of an enum type (`meta.dbml.enum`), once every table is planned. */
-function applyEnums(model: DbmlModel, planned: readonly PlannedTable[]): void {
+/**
+ * Enum values for columns of an enum type (`meta.dbml.enum`: each value's
+ * name, or `{ name, note }` for one with a note), once every table is
+ * planned. A type name without a schema is one in `public`, as DBML reads it.
+ * An enum no new column has is reported: its values are kept nowhere else.
+ */
+function applyEnums(model: DbmlModel, planned: readonly PlannedTable[], ctx: Context): void {
   if (model.enums.length === 0) return;
-  const byType = new Map<string, string[]>();
+  const byType = new Map<string, DbmlEnum>();
   for (const e of model.enums) {
-    byType.set(e.schema ? `${e.schema}.${e.name}` : e.name, e.values);
-    if (!e.schema || e.schema === 'public') byType.set(e.name, e.values);
+    byType.set(e.schema ? `${e.schema}.${e.name}` : e.name, e);
+    if (!e.schema || e.schema === 'public') byType.set(e.name, e);
   }
+  const used = new Set<DbmlEnum>();
   for (const p of planned) {
     if (!p.table) continue;
     for (const field of p.dbml.fields) {
-      const values = byType.get(field.type) ?? byType.get(field.type.replace(/^public\./, ''));
-      if (!values) continue;
+      const found = byType.get(field.type) ?? byType.get(field.type.replace(/^public\./, ''));
+      if (!found) continue;
       const column = p.table.columns?.find((c) => c.name === p.columns.get(field.name));
-      if (column) column.meta = withDbmlMeta(column.meta ?? {}, { enum: [...values] });
+      if (!column) continue;
+      column.meta = withDbmlMeta(column.meta ?? {}, { enum: found.values.map(enumValue) });
+      used.add(found);
     }
   }
+  for (const e of model.enums) {
+    if (used.has(e)) continue;
+    const label = e.schema ? `${e.schema}.${e.name}` : e.name;
+    ctx.report.dropped.push({
+      kind: 'enum',
+      what: `Enum ${label} (${plural(e.values.length, 'value')})`,
+      item: label,
+      why: 'ERD Studio keeps an enum\'s values on the columns of its type, and no table this import creates has one.',
+    });
+  }
+}
+
+function enumValue(value: DbmlEnumValue): MetaValue {
+  return value.note ? { name: value.name, note: value.note } : value.name;
 }
 
 /** Finds a planned table from a DBML reference (schema and name as the file writes them). */
@@ -843,7 +953,7 @@ function isOptional(relation: string): boolean {
 
 function planRelationships(model: DbmlModel, lookup: TableLookup, ctx: Context): Relationship[] {
   const out: Relationship[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, Seen>();
   // compositeKey names used per from-table: its library entries, then this import's.
   const compositeKeys = new Map<string, Array<Pick<TableRelationship, 'compositeKey'>>>();
   const entriesOf = (p: PlannedTable): Array<Pick<TableRelationship, 'compositeKey'>> => {
@@ -851,21 +961,23 @@ function planRelationships(model: DbmlModel, lookup: TableLookup, ctx: Context):
     if (!compositeKeys.has(key)) compositeKeys.set(key, [...(p.library?.relationships ?? [])]);
     return compositeKeys.get(key)!;
   };
+  const dropReference = (what: string, why: string): void => {
+    ctx.report.dropped.push({ kind: 'reference', what, item: what.replace(/^Reference /, ''), why });
+  };
 
   for (const ref of model.refs) {
     const what = describeRef(ref.ends, ref.name);
     const ends = ref.ends.map((end) => resolveEnd(end, lookup)) as [ResolvedEnd | string, ResolvedEnd | string];
     const problem = ends.find((e): e is string => typeof e === 'string');
     if (problem) {
-      ctx.report.dropped.push({ what, why: problem });
+      dropReference(what, problem);
       continue;
     }
     const [a, b] = ends as [ResolvedEnd, ResolvedEnd];
     if (a.columns.length !== b.columns.length || a.columns.length === 0) {
-      ctx.report.dropped.push({ what, why: 'its two ends name different numbers of columns.' });
+      dropReference(what, 'its two ends name different numbers of columns.');
       continue;
     }
-    if (isOptional(ref.ends[0].relation) || isOptional(ref.ends[1].relation)) ctx.report.optionalRefs++;
 
     const manyA = isMany(ref.ends[0].relation);
     const manyB = isMany(ref.ends[1].relation);
@@ -880,63 +992,111 @@ function planRelationships(model: DbmlModel, lookup: TableLookup, ctx: Context):
       if (ref.declaredAt === 1) [from, to] = [b, a];
     } else {
       cardinality = 'one-to-one';
-      // The column that declared the ref holds the key; in ERD Studio's own
-      // export, the first end (it writes every Ref from its foreign-key end,
-      // whatever the keys say); else the end that is not its table's whole
-      // key; else the first.
-      const wholeKeyA = isWholeKey(a);
-      const wholeKeyB = isWholeKey(b);
+      // The column that declared the ref holds the key. Otherwise the second
+      // end, as DBML reads a one-to-one (`users.id - user_infos.user_id`) and
+      // ERD Studio's own export writes one, whatever the keys say; in another
+      // tool's file, the first end when only the second is its table's whole
+      // key (`badge_id - badges.id`).
+      const onlySecondIsKey = !isWholeKey(a) && isWholeKey(b);
       if (ref.declaredAt !== undefined) {
         if (ref.declaredAt === 1) [from, to] = [b, a];
-      } else if (!ctx.erdStudioExport && wholeKeyA && !wholeKeyB) {
+      } else if (ctx.erdStudioExport || !onlySecondIsKey) {
         [from, to] = [b, a];
       }
     }
 
+    const role = normaliseRelationshipRole(ref.name ?? undefined);
+    const rels: Relationship[] = from.columns.map((column, i) => ({
+      fromModel: from.table.name,
+      fromColumn: column,
+      toModel: to.table.name,
+      toColumn: to.columns[i],
+      cardinality,
+      ...(role ? { role } : {}),
+    }));
+    const keys = rels.map(linkKey);
+    if (new Set(keys).size < keys.length) {
+      dropReference(what, 'it joins the same columns more than once.');
+      continue;
+    }
+    const composite = rels.length > 1 && rels.length <= MAX_COMPOSITE_PAIRS;
+    if (composite) {
+      // A composite is all or nothing (a group of fewer pairs is not one): it
+      // takes the place of single references over some of its columns, and is
+      // left out where another composite already joins one of them.
+      const earlier = [...new Set(keys.map((k) => seen.get(k)).filter((s): s is Seen => s !== undefined))];
+      if (earlier.some((s) => s.composite)) {
+        dropReference(what, 'another composite reference already joins some of the same columns.');
+        continue;
+      }
+      for (const s of earlier) {
+        out.splice(out.indexOf(s.rel), 1);
+        dropReference(s.what, `${what.replace(/^Reference/, 'the composite reference')} joins the same columns, so it was imported as part of that one.`);
+      }
+      const entries = entriesOf(from.table);
+      const compositeKey = nextCompositeKey(entries, to.table.name);
+      entries.push({ compositeKey });
+      for (const rel of rels) rel.compositeKey = compositeKey;
+    } else if (rels.length > MAX_COMPOSITE_PAIRS) {
+      ctx.report.notes.push(`${what} joins more than ${MAX_COMPOSITE_PAIRS} column pairs, so it was imported as ${rels.length} separate relationships.`);
+    }
+
+    // A single reference, or a pair of one too wide to be a composite, may repeat an earlier one.
+    const repeated = composite ? 0 : keys.filter((k) => seen.has(k)).length;
+    rels.forEach((rel, i) => {
+      if (seen.has(keys[i]) && !composite) return;
+      seen.set(keys[i], { rel, what, composite });
+      out.push(rel);
+    });
+    if (repeated === rels.length) {
+      dropReference(what, 'another reference already joins the same columns.');
+      continue;
+    }
+    if (repeated > 0) dropReference(what, `another reference already joins ${repeated} of its column pairs; the rest were imported.`);
+    if (isOptional(ref.ends[0].relation) || isOptional(ref.ends[1].relation)) ctx.report.optionalRefs++;
     const settings = [
       ref.onDelete ? `delete: ${ref.onDelete}` : '',
       ref.onUpdate ? `update: ${ref.onUpdate}` : '',
       ref.color ? `color: ${ref.color}` : '',
       ref.inactive ? 'inactive' : '',
-    ].filter(Boolean);
-    if (settings.length > 0) {
-      ctx.report.dropped.push({
-        what: `${what}: ${settings.join(', ')}`,
-        why: 'ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationship itself was imported.',
-      });
-    }
-
-    const role = normaliseRelationshipRole(ref.name ?? undefined);
-    const pairs = from.columns.map((column, i) => ({ fromColumn: column, toColumn: to.columns[i] }));
-    let compositeKey: string | undefined;
-    if (pairs.length > 1 && pairs.length <= MAX_COMPOSITE_PAIRS) {
-      const entries = entriesOf(from.table);
-      compositeKey = nextCompositeKey(entries, to.table.name);
-      entries.push({ compositeKey });
-    } else if (pairs.length > MAX_COMPOSITE_PAIRS) {
-      ctx.report.notes.push(`${what} joins more than ${MAX_COMPOSITE_PAIRS} column pairs, so it was imported as ${pairs.length} separate relationships.`);
-    }
-    for (const pair of pairs) {
-      const rel: Relationship = {
-        fromModel: from.table.name,
-        fromColumn: pair.fromColumn,
-        toModel: to.table.name,
-        toColumn: pair.toColumn,
-        cardinality,
-        ...(role ? { role } : {}),
-        ...(compositeKey ? { compositeKey } : {}),
-      };
-      const key = linkKey(rel);
-      if (seen.has(key)) {
-        ctx.report.dropped.push({ what, why: 'another reference already joins the same columns.' });
-        continue;
-      }
-      seen.add(key);
-      out.push(rel);
-    }
+    ].filter(Boolean).join(', ');
+    if (settings) ctx.report.dropped.push({ kind: 'reference-settings', what: `${what} (${settings})`, item: settings, why: REF_SETTINGS_WHY });
   }
   return out;
 }
+
+/** Each composite's members, by from-table and `compositeKey`. */
+function compositeGroupsOf(relationships: readonly Relationship[]): Relationship[][] {
+  const groups = new Map<string, Relationship[]>();
+  for (const rel of relationships) {
+    if (!rel.compositeKey) continue;
+    const key = `${lower(rel.fromModel)}\u0000${lower(rel.compositeKey)}`;
+    groups.set(key, [...(groups.get(key) ?? []), rel]);
+  }
+  return [...groups.values()];
+}
+
+/** `a.x – b.y`, in imported names. */
+function describeLink(rel: Relationship): string {
+  return `${rel.fromModel}.${rel.fromColumn} – ${rel.toModel}.${rel.toColumn}`;
+}
+
+/** `Reference a.(x, y) – b.(u, v)`, in imported names. */
+function describeComposite(members: readonly Relationship[]): string {
+  const columns = (pick: (r: Relationship) => string): string => members.map(pick).join(', ');
+  return `Reference ${members[0].fromModel}.(${columns((r) => r.fromColumn)}) – ${members[0].toModel}.(${columns((r) => r.toColumn)})`;
+}
+
+/** A relationship planned, with the reference it came from. */
+interface Seen {
+  rel: Relationship;
+  /** The reference, as the report names it. */
+  what: string;
+  /** It is one pair of a composite. */
+  composite: boolean;
+}
+
+const REF_SETTINGS_WHY = 'ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationships were imported.';
 
 interface ResolvedEnd {
   table: PlannedTable;
@@ -994,7 +1154,8 @@ function planViewConfig(model: DbmlModel, planned: readonly PlannedTable[], layo
     const tables = layout?.tables ?? [];
     const at = tables.find((t) => t.name === p.dbml.name && schemaOf(t.schemaName) === schema)
       ?? tables.find((t) => lower(t.name) === lower(p.dbml.name) && lower(schemaOf(t.schemaName)) === lower(schema));
-    if (at && finite(at.x) && finite(at.y) && !(p.name in positions)) {
+    // Own entries only: a table may be called `constructor` or `toString`.
+    if (at && finite(at.x) && finite(at.y) && !Object.hasOwn(positions, p.name)) {
       positions[p.name] = { x: at.x, y: at.y };
       ctx.report.positioned++;
     } else {
@@ -1040,9 +1201,21 @@ function planAnnotations(
         // ERD Studio's own note keeps a link to a table not in the diagram, as the
         // diagram had it (it draws once that table is added).
         else if (ctx.erdStudioExport && value.trim() !== '') annotation.linkedModel = value;
-        else ctx.report.dropped.push({ what: `Sticky note ${note.name}'s link to ${value}`, why: `${value} is not a table in the file.` });
+        else {
+          ctx.report.dropped.push({
+            kind: 'sticky-note',
+            what: `Sticky note ${note.name}'s link to ${value}`,
+            item: `${note.name}'s link to ${value}`,
+            why: `${value} is not a table in the file.`,
+          });
+        }
       } else {
-        ctx.report.dropped.push({ what: `Sticky note ${note.name}: ${key}`, why: 'ERD Studio sticky notes have no custom properties.' });
+        ctx.report.dropped.push({
+          kind: 'sticky-note',
+          what: `Sticky note ${note.name}'s property ${key}`,
+          item: `${key} on ${note.name}`,
+          why: 'ERD Studio sticky notes have no custom properties.',
+        });
       }
     }
     ctx.report.stickyNotes++;
@@ -1067,29 +1240,34 @@ function reportFileExtras(model: DbmlModel, layer: string, ctx: Context): void {
   for (const records of model.records) {
     const table = records.schema ? `${records.schema}.${records.table}` : records.table;
     dropped.push({
-      what: `Records for ${table} (${records.rows} ${records.rows === 1 ? 'row' : 'rows'})`,
+      kind: 'records',
+      what: `Records for ${table} (${plural(records.rows, 'row')})`,
+      item: table,
       why: 'ERD Studio does not keep sample data.',
     });
   }
   for (const [key, value] of Object.entries(model.project?.properties ?? {})) {
-    dropped.push({
-      what: `Project setting ${key}: ${value}`,
-      why: key === 'database_type' ? 'ERD Studio does not record the database type.' : 'ERD Studio subject areas have no project settings.',
-    });
+    dropped.push(key === 'database_type'
+      ? { kind: 'database-type', what: `The database type (${value})`, item: value, why: 'ERD Studio does not record the database type.' }
+      : { kind: 'project-setting', what: `Project setting ${key} (${value})`, item: key, why: 'ERD Studio subject areas have no project settings.' });
   }
   for (const group of model.tableGroups) {
     // ERD Studio's export writes the layer as a group; a group named after the chosen layer is that.
     if (lower(group.name) === lower(layer)) continue;
     dropped.push({
-      what: `Table group ${group.name} (${group.tables.length} ${group.tables.length === 1 ? 'table' : 'tables'})`,
-      why: 'ERD Studio has no table groups; its tables were imported.',
+      kind: 'table-group',
+      what: `Table group ${group.name} (${plural(group.tables.length, 'table')})`,
+      item: group.name,
+      why: 'ERD Studio has no table groups. The tables were imported.',
     });
   }
   if (model.dependencies > 0) {
-    dropped.push({ what: `${model.dependencies} dependency ${model.dependencies === 1 ? 'arrow' : 'arrows'}`, why: 'ERD Studio draws relationships, not dependencies.' });
+    const what = plural(model.dependencies, 'dependency arrow');
+    dropped.push({ kind: 'dependencies', what, item: what, why: 'ERD Studio draws relationships, not dependencies.' });
   }
   if (model.diagramViews > 0) {
-    dropped.push({ what: `${model.diagramViews} diagram ${model.diagramViews === 1 ? 'view' : 'views'}`, why: 'Each ERD Studio subject area is one view.' });
+    const what = plural(model.diagramViews, 'diagram view');
+    dropped.push({ kind: 'diagram-views', what, item: what, why: 'Each ERD Studio subject area is one view.' });
   }
 }
 
@@ -1159,16 +1337,83 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: { layerLab
     lines.push(`• DBML settings ERD Studio has no field for (not null, defaults, indexes, …) are kept in the meta of ${plural(report.keptInMeta, 'table or column', 'tables and columns')}, under "${DBML_META_KEY}".`);
   }
   if (report.renamed.length > 0) {
-    const shown = report.renamed.slice(0, 4).map((r) => (r.kind === 'column' ? `${r.table}.${r.from} → ${r.to}` : `${r.from} → ${r.to}`));
-    const more = report.renamed.length > 4 ? ` and ${report.renamed.length - 4} more` : '';
-    lines.push(`• Renamed to names ERD Studio can use: ${shown.join(', ')}${more}.`);
+    const renames = renameEntries(report.renamed);
+    const more = renames.length > 4 ? ` and ${renames.length - 4} more` : '';
+    lines.push(`• Renamed to names ERD Studio can use: ${renames.slice(0, 4).join(', ')}${more}.`);
   }
   for (const note of report.notes.slice(0, 3)) lines.push(`• ${note}`);
   if (report.notes.length > 3) lines.push(`• And ${plural(report.notes.length - 3, 'more note')}.`);
   if (report.dropped.length > 0) {
     lines.push('Left out:');
-    for (const d of report.dropped.slice(0, 5)) lines.push(`• ${d.what}: ${d.why}`);
-    if (report.dropped.length > 5) lines.push(`• And ${plural(report.dropped.length - 5, 'more thing')}.`);
+    const groups = droppedGroups(report.dropped);
+    for (const items of groups.slice(0, DROPPED_LINES)) {
+      lines.push(items.length === 1 ? `• ${items[0].what}: ${items[0].why}` : `• ${droppedGroupLabel(items)}: ${items[0].why}`);
+    }
+    const rest = groups.slice(DROPPED_LINES).reduce((n, items) => n + items.length, 0);
+    if (rest > 0) lines.push(`• And ${plural(rest, 'more thing')}.`);
   }
   return lines.join('\n');
+}
+
+/** Renames as the summary names them: a column renamed the same way in several tables once. */
+function renameEntries(renamed: readonly DbmlImportRename[]): string[] {
+  const columns = new Map<string, DbmlImportRename[]>();
+  for (const r of renamed) {
+    if (r.kind !== 'column') continue;
+    const key = `${r.from}\u0000${r.to}`;
+    columns.set(key, [...(columns.get(key) ?? []), r]);
+  }
+  const out: string[] = [];
+  const shown = new Set<string>();
+  for (const r of renamed) {
+    if (r.kind === 'table') {
+      out.push(`${r.from} → ${r.to}`);
+      continue;
+    }
+    const key = `${r.from}\u0000${r.to}`;
+    if (shown.has(key)) continue;
+    shown.add(key);
+    const same = columns.get(key)!;
+    out.push(same.length > 1 ? `${r.from} → ${r.to} (in ${plural(same.length, 'table')})` : `${r.table}.${r.from} → ${r.to}`);
+  }
+  return out;
+}
+
+/** How many lines the summary gives what was left out; the rest are counted. */
+const DROPPED_LINES = 8;
+
+/** The order the summary lists what was left out in: the file's own settings, then references, then sticky notes. */
+const DROPPED_ORDER: readonly DbmlImportDroppedKind[] = [
+  'table-group', 'database-type', 'project-setting', 'records', 'enum', 'dependencies', 'diagram-views',
+  'reference', 'reference-settings', 'sticky-note',
+];
+
+/** What was left out, one group per kind and reason, in {@link DROPPED_ORDER} and then file order. */
+function droppedGroups(dropped: readonly DbmlImportDropped[]): DbmlImportDropped[][] {
+  const groups = new Map<string, DbmlImportDropped[]>();
+  const rank = (d: DbmlImportDropped): number => {
+    const at = DROPPED_ORDER.indexOf(d.kind);
+    return at === -1 ? DROPPED_ORDER.length : at;
+  };
+  for (const d of [...dropped].sort((a, b) => rank(a) - rank(b))) {
+    const key = `${d.kind}\u0000${d.why}`;
+    groups.set(key, [...(groups.get(key) ?? []), d]);
+  }
+  return [...groups.values()];
+}
+
+/** One line's name for several things of one kind: `2 table groups (a, b)`. */
+function droppedGroupLabel(items: readonly DbmlImportDropped[]): string {
+  const n = items.length;
+  const examples = someOf([...new Set(items.map((d) => d.item))], 3);
+  switch (items[0].kind) {
+    case 'reference-settings': return `Settings on ${n} references (${examples})`;
+    case 'records': return `Records for ${n} tables (${examples})`;
+    case 'table-group': return `${plural(n, 'table group')} (${examples})`;
+    case 'project-setting': return `${plural(n, 'project setting')} (${examples})`;
+    case 'enum': return `${plural(n, 'enum')} (${examples})`;
+    case 'reference': return `${plural(n, 'reference')} (${examples})`;
+    case 'sticky-note': return `${plural(n, 'sticky note setting')} (${examples})`;
+    default: return `${plural(n, 'thing')} (${examples})`;
+  }
 }

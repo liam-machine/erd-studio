@@ -1399,14 +1399,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // After Draw from dbt or Import DBML writes a new diagram and its tables.
   // Every file was recorded as an own write, so the watchers stay quiet;
   // issue their refreshes here, as createDomain does.
-  const refreshAfterNewSubjectArea = ({ domainPath, modelNames }: { domainPath: string; modelNames: string[] }): void => {
+  const refreshAfterNewSubjectArea = ({ domainPath, modelNames, changedModelNames }: {
+    domainPath: string; modelNames: string[]; changedModelNames: string[];
+  }): void => {
     layerService.invalidateCache();
     treeProvider.invalidateSubjectArea(domainPath);
     treeProvider.refresh();
-    if (modelNames.length > 0) { tableLibraryProvider.refresh(); }
+    if (modelNames.length > 0 || changedModelNames.length > 0) { tableLibraryProvider.refresh(); }
     // A new table file may be one an open diagram already references
-    // (a placeholder until now); the table watcher skipped the own write.
-    for (const name of modelNames) { void editorProvider.refreshSubjectAreasReferencingTable(name); }
+    // (a placeholder until now), and an existing one that gained a library
+    // relationship is drawn in every open diagram holding both ends; the
+    // table watcher skipped both own writes.
+    for (const name of [...modelNames, ...changedModelNames]) { void editorProvider.refreshSubjectAreasReferencingTable(name); }
     layerDecorationProvider.refresh();
     decorationProvider.refresh();
     refreshContextKeys();

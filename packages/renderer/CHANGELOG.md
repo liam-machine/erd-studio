@@ -2,10 +2,13 @@
 
 All notable changes to `@erd-studio/renderer`. While `0.x`, a breaking change bumps the minor version.
 
-## Unreleased
+## 0.4.0
 
 ### Added
-- Re-exports core's rich DBML export and its dbdiagram layout file: `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `toDbdiagramLayout`, `serializeDbdiagramLayout`, `dbdiagramLayoutFileName` and the `DbmlRichOptions`, `DbdiagramLayout` and `DbdiagramTablePosition` types. `DIAGRAM_EXPORT_FORMATS` (re-exported) now ends with `'dbml-rich'`, so a page that offers every format offers it too.
+- Re-exports core's rich DBML export and its dbdiagram layout file: `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `toDbdiagramLayout`, `serializeDbdiagramLayout`, `dbdiagramLayoutFileName` and the `DbmlRichOptions`, `DbdiagramLayout` and `DbdiagramTablePosition` types.
+
+### Changed (breaking)
+- Pins `@erd-studio/core` 0.4.0. The re-exported `DiagramExportFormat` gains `'dbml-rich'` and `DIAGRAM_EXPORT_FORMATS` now ends with it, so a page that offers every format offers it too, and a `Record<DiagramExportFormat, …>` (a label or hint per format) or an exhaustive `switch` over it needs a case.
 
 ## 0.3.0
 

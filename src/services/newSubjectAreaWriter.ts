@@ -67,6 +67,11 @@ export type NewSubjectAreaWriteResult =
     ok: true;
     /** The new tables' names, as saved. */
     written: string[];
+    /**
+     * The existing library tables saved with a new relationship, by name.
+     * Their writes were own writes too, so the caller refreshes what shows them.
+     */
+    changed: string[];
   }
   | {
     ok: false;
@@ -86,6 +91,7 @@ export async function writeNewSubjectArea(
   const { domainPath } = write;
   const layerDir = path.dirname(domainPath);
   const written: string[] = [];
+  const changed: string[] = [];
   let domainWritten = false;
   // What each existing library file held before the write changed it, to put back on failure.
   const before = new Map<string, string>();
@@ -115,6 +121,7 @@ export async function writeNewSubjectArea(
       const tablePath = tableLibraryService.tablePath(table.name);
       if (fs.existsSync(tablePath)) before.set(tablePath, fs.readFileSync(tablePath, 'utf-8'));
       tableLibraryService.saveTable(table);
+      changed.push(table.name);
     }
   } catch (error) {
     // Leave nothing behind: no orphan table files, no subject area naming
@@ -139,7 +146,7 @@ export async function writeNewSubjectArea(
       && error.code === 'EEXIST' && failedPath(error) === domainPath;
     return { ok: false, error, undone, nameTaken };
   }
-  return { ok: true, written };
+  return { ok: true, written, changed };
 }
 
 /** A write refused because of what is in the user's file, which names file and line. */

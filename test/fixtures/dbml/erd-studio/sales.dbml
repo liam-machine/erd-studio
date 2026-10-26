@@ -75,7 +75,7 @@ TableGroup gold [color: #f59e0b, note: 'Layer: Gold'] {
 Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key
 Ref "ship date": gold.fct_order.ship_date_key >? gold.dim_date.date_key
 Ref "order date": gold.fct_order.order_date_key >? gold.dim_date.date_key
-Ref: gold.dim_customer.passport_key -? gold.dim_passport.passport_key
+Ref: gold.dim_passport.passport_key ?- gold.dim_customer.passport_key
 Ref: gold.fct_shipment.(order_id, line_no) >? gold.fct_order.(order_id, line_no)
 Ref: gold.bridge_tag.tag_id <> gold.dim_customer.customer_key
 

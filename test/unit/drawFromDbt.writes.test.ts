@@ -110,6 +110,20 @@ describe('Draw from dbt — model files it rewrites', () => {
     expect(text.replace(/\r\n/g, '')).not.toMatch(/\n/);
   });
 
+  it('hands the changed library table on for a refresh, as well as the new one', async () => {
+    const written: Array<Parameters<DrawFromDbtDeps['onWritten']>[0]> = [];
+
+    await drawFromDbt({ ...deps(), onWritten: (w) => { written.push(w); } });
+
+    // fct_order's save was an own write, so the watcher skips it: open
+    // diagrams holding both ends are refreshed from onWritten instead.
+    expect(written).toEqual([{
+      domainPath: path.join(tmp, '.erd-studio', 'silver', 'orders.json'),
+      modelNames: ['dim_customer'],
+      changedModelNames: ['fct_order'],
+    }]);
+  });
+
   it('says it is ERD Studio\'s problem when it cannot read the library to plan the diagram, and writes nothing', async () => {
     const error = vi.spyOn(vscode.window, 'showErrorMessage');
     const d = deps();

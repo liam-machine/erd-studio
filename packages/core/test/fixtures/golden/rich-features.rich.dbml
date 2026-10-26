@@ -77,7 +77,7 @@ TableGroup gold [color: #d4a800, note: 'Layer: Gold'] {
 
 Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key
 Ref "ship date": gold.fct_order.ship_date_key >? dim_date.date_key
-Ref: gold.customer_profile.customer_key - gold.dim_customer.customer_key
+Ref: gold.dim_customer.customer_key - gold.customer_profile.customer_key
 Ref: gold.bridge_tag.tag_key > gold.dim_tag.tag_key
 Ref "segment tags": gold.dim_customer.segment ?<>? gold.dim_tag.tag_name
 

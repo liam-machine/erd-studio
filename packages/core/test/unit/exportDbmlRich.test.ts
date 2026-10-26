@@ -27,6 +27,7 @@ import { RATIONALE_KEYS } from '../../src/logicalModel';
 import type { DisplayRelationship, DisplaySubjectArea } from '../../src/types/display';
 import type { AnnotationColor, Meta } from '../../src/types/semantic';
 import { oneLine } from '../../src/exportShared';
+import { exporter as dbmlCoreExporter } from 'dbml-core-v3';
 import { col, deepFreeze, parseDbmlRich, readDbmlRich, rel, subjectArea, tableDef } from '../exportParsers';
 import type { RichDbmlReading } from '../exportParsers';
 
@@ -382,13 +383,40 @@ describe('toDbmlRich: relationships', () => {
     expect(toDbmlRich(area)).toContain('Ref: a.b_id >? b.id');
   });
 
-  it('writes a one-to-one as -? and makes its foreign-key column unique', () => {
+  it('writes a one-to-one key end first, as ?-, and makes its foreign-key column unique', () => {
     const area = pair('one-to-one');
-    expect(toDbmlRich(area)).toContain('Ref: a.b_id -? b.id');
+    expect(toDbmlRich(area)).toContain('Ref: b.id ?- a.b_id');
     const r = read(area);
     expect(field(r, 'a', 'b_id').unique).toBe(true);
     expect(field(r, 'a', 'id').unique).toBe(false);
-    expect(r.refs[0].ends.map((e) => e[3])).toEqual(['1', '0..1']);
+    expect(r.refs[0].ends.map((e) => e[3])).toEqual(['0..1', '1']);
+  });
+
+  it("writes a one-to-one so DBML's SQL export puts the foreign key where ERD Studio has it", () => {
+    // DBML reads a one-to-one's second end as the foreign key. @dbml/core
+    // 3.13.4 predates `?`, so it reads the Refs with the marks taken out.
+    const area = subjectArea(
+      [
+        tableDef('b', [col('id', 'int', { isPrimaryKey: true })]),
+        tableDef('a', [col('id', 'int', { isPrimaryKey: true }), col('b_id')]),
+        tableDef('c', [col('x'), col('y')]),
+        tableDef('d', [col('u', 'int', { isPrimaryKey: true }), col('v', 'int', { isPrimaryKey: true })]),
+      ],
+      [
+        rel('a.b_id', 'b.id', 'one-to-one'),
+        rel('c.x', 'd.u', 'one-to-one', { compositeKey: 'k' }),
+        rel('c.y', 'd.v', 'one-to-one', { compositeKey: 'k' }),
+      ],
+    );
+    const refs = toDbmlRich(area)
+      .split('\n')
+      .filter((line) => line.startsWith('Ref'))
+      .map((line) => line.replace(/\?/g, ''));
+    const tables = 'Table b {\n  id int [pk]\n}\nTable a {\n  id int [pk]\n  b_id int [unique]\n}\n'
+      + 'Table c {\n  x int\n  y int\n  indexes {\n    (x, y) [unique]\n  }\n}\nTable d {\n  u int\n  v int\n  indexes {\n    (u, v) [pk]\n  }\n}\n';
+    const sql = dbmlCoreExporter.export(`${tables}${refs.join('\n')}\n`, 'postgres');
+    expect(sql).toContain('ALTER TABLE "a" ADD FOREIGN KEY ("b_id") REFERENCES "b" ("id");');
+    expect(sql).toContain('ALTER TABLE "c" ADD FOREIGN KEY ("x", "y") REFERENCES "d" ("u", "v");');
   });
 
   it('writes a one-to-one on a shared primary key as a bare -, adding nothing', () => {
@@ -396,7 +424,7 @@ describe('toDbmlRich: relationships', () => {
       [tableDef('a', [col('id', 'int', { isPrimaryKey: true })]), tableDef('b', [col('id', 'int', { isPrimaryKey: true })])],
       [rel('a.id', 'b.id', 'one-to-one')],
     );
-    expect(toDbmlRich(area)).toContain('Ref: a.id - b.id');
+    expect(toDbmlRich(area)).toContain('Ref: b.id - a.id');
     expect(field(read(area), 'a', 'id')).toMatchObject({ pk: true, unique: false });
   });
 
@@ -415,8 +443,8 @@ describe('toDbmlRich: relationships', () => {
       ],
     );
     const text = toDbmlRich(area);
-    expect(text).toContain('Ref: a.(x, y) -? b.(u, v)');
-    expect(text).toContain('Ref: c.(u, v) - b.(u, v)');
+    expect(text).toContain('Ref: b.(u, v) ?- a.(x, y)');
+    expect(text).toContain('Ref: b.(u, v) - c.(u, v)');
     const r = read(area);
     expect(table(r, 'a').indexes).toEqual([{ pk: false, unique: true, columns: ['x', 'y'] }]);
     expect(table(r, 'c').indexes).toEqual([{ pk: true, unique: false, columns: ['u', 'v'] }]);
@@ -714,7 +742,7 @@ describe('toDbmlRich: every feature together', () => {
     expect(r.refs.map((ref) => [ref.name, ...ref.ends.map((e) => `${e[0]}.${e[1]}.(${e[2].join(',')}) ${e[3]}`)])).toEqual([
       [null, 'gold.fct_order.(customer_key) *', 'gold.dim_customer.(customer_key) 0..1'],
       ['ship date', 'gold.fct_order.(ship_date_key) *', 'public.dim_date.(date_key) 0..1'],
-      [null, 'gold.customer_profile.(customer_key) 1', 'gold.dim_customer.(customer_key) 1'],
+      [null, 'gold.dim_customer.(customer_key) 1', 'gold.customer_profile.(customer_key) 1'],
       [null, 'gold.bridge_tag.(tag_key) *', 'gold.dim_tag.(tag_key) 1'],
       ['segment tags', 'gold.dim_customer.(segment) 0..*', 'gold.dim_tag.(tag_name) 0..*'],
     ]);

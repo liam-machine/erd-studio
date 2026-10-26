@@ -89,8 +89,12 @@ export interface DrawFromDbtDeps {
   loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData; catalog?: CatalogData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
   validateDomainName: (value: string, layer: string) => string | undefined;
-  /** Every file is written; refresh the tree, model library, context keys and selectors. */
-  onWritten: (written: { domainPath: string; modelNames: string[] }) => void;
+  /**
+   * Every file is written; refresh the tree, Table Library, context keys and
+   * selectors. `modelNames` are the new tables; `changedModelNames` the
+   * existing library tables that gained a relationship.
+   */
+  onWritten: (written: { domainPath: string; modelNames: string[]; changedModelNames: string[] }) => void;
 }
 
 /**
@@ -332,7 +336,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   }
   const written = outcome.written;
 
-  deps.onWritten({ domainPath, modelNames: written });
+  deps.onWritten({ domainPath, modelNames: written, changedModelNames: outcome.changed });
   telemetry.feature('drawFromDbt');
 
   await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE);

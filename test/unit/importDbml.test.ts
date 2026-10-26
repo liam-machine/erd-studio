@@ -161,7 +161,7 @@ let inbox: string;
 let layerService: LayerService;
 let subjectAreaService: SubjectAreaService;
 let lms: TableLibraryService;
-let written: Array<{ domainPath: string; modelNames: string[] }>;
+let written: Array<{ domainPath: string; modelNames: string[]; changedModelNames: string[] }>;
 let feature: ReturnType<typeof vi.spyOn>;
 let error: ReturnType<typeof vi.spyOn>;
 
@@ -275,7 +275,7 @@ describe('Import DBML — a file from another tool', () => {
     // No layout: an empty viewConfig, so the canvas lays it out on first open.
     expect(doc.viewConfig).toEqual({});
     expect(ui.openedDiagrams).toEqual([domainPath]);
-    expect(written).toEqual([{ domainPath, modelNames: ['customers', 'orders'] }]);
+    expect(written).toEqual([{ domainPath, modelNames: ['customers', 'orders'], changedModelNames: [] }]);
     expect(features()).toEqual(['importDbml']);
     expect(errorNames()).toEqual([]);
   });
@@ -444,6 +444,9 @@ describe('Import DBML — ERD Studio\'s own rich export', () => {
 
     expect(readJson(result!.domainPath).viewConfig).toEqual({});
     expect(ui.confirms[0].detail).toContain('shop.dbdiagram: The layout file is not JSON.');
+    // Nothing came from it, so the import did not use a layout.
+    expect(result!.layoutPath).toBeUndefined();
+    expect(features()).toEqual(['importDbml']);
   });
 });
 
@@ -686,6 +689,24 @@ describe('Import DBML — where relationships go', () => {
     // Only the new table is reported as written; the library file was edited in place.
     expect(fs.readFileSync(erd('logical-models', 'orders.yml'), 'utf-8').startsWith(ordersYml.trimEnd().split('\n')[0])).toBe(true);
     expect(written[0].modelNames).toEqual(['customers']);
+    // The changed library file is handed on too: its write was an own write,
+    // so open diagrams showing orders are refreshed from here, not the watcher.
+    expect(written[0].changedModelNames).toEqual(['orders']);
+  });
+
+  it('a file whose tables are all in the library already: reports the changed library tables to refresh', async () => {
+    makeProject('v5');
+    fs.writeFileSync(erd('logical-models', 'customers.yml'), 'name: customers\ncolumns:\n  - name: id\n    dataType: int\n    description: ""\n');
+    fs.writeFileSync(erd('logical-models', 'orders.yml'), 'name: orders\ncolumns:\n  - name: id\n    dataType: int\n    description: ""\n  - name: customer_id\n    dataType: int\n    description: ""\n');
+    const file = dbmlFile('shop.dbml', SHOP_DBML);
+
+    const result = await importDbml(deps(fakeUi({ file, layer: 'silver' })));
+
+    expect(result!.plan.newTables).toEqual([]);
+    expect(lms.getTable('orders')?.relationships).toEqual([
+      expect.objectContaining({ fromColumn: 'customer_id', toModel: 'customers', toColumn: 'id' }),
+    ]);
+    expect(written).toEqual([{ domainPath: result!.domainPath, modelNames: [], changedModelNames: ['orders'] }]);
   });
 
   it('refuses, naming the file, when a library file it would change is open with unsaved edits, and writes nothing', async () => {
@@ -894,6 +915,27 @@ describe('Import DBML — helpers', () => {
       "Import DBML: a.dbml isn't valid DBML, so nothing was imported. Line 2: Expected }. Line 4: Unknown column. Line 9: x. And 2 more problems.",
     );
     expect(describeInvalidDbml('a.dbml', [d(1, 'a'), d(2, 'b'), d(3, 'c'), d(4, 'd')])).toMatch(/And 1 more problem\.$/);
+  });
+
+  it('names a problem the parser repeats on one line once, and counts only distinct problems', () => {
+    const d = (line: number, column: number, message: string) => ({ line, column, message });
+    expect(describeInvalidDbml('a.dbml', [d(2, 10, 'Bad'), d(2, 15, 'Bad'), d(2, 20, 'Bad.'), d(5, 8, 'Missing'), d(5, 9, 'Missing')])).toBe(
+      "Import DBML: a.dbml isn't valid DBML, so nothing was imported. Line 2: Bad. Line 5: Missing.",
+    );
+  });
+
+  it('several columns on one line: each problem once, and a hint that names the fix', async () => {
+    makeProject('v5');
+    const file = dbmlFile('bad.dbml', 'Table t {\n  id int [pk] name varchar\n  x int\n}\nRef: t.zz > t.id\n');
+    const ui = fakeUi({ file });
+
+    await expect(importDbml(deps(ui))).resolves.toBeUndefined();
+
+    const message = ui.errors[0].message;
+    expect(message.match(/Line 2: /g)).toHaveLength(1);
+    expect(message).toMatch(/Line 5: Column 'zz' does not exist/);
+    expect(message).not.toMatch(/more problem/);
+    expect(message).toMatch(/Each column goes on a line of its own\.$/);
   });
 });
 

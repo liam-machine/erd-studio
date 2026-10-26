@@ -171,7 +171,7 @@ describe('an ERD Studio rich export, row by row', () => {
   it('the layer\'s TableGroup is not reported as dropped', () => {
     expect(salesPlan().report.dropped).toEqual([]);
     expect(salesPlan({ layer: 'silver' }).report.dropped).toEqual([
-      { what: 'Table group gold (7 tables)', why: 'ERD Studio has no table groups; its tables were imported.' },
+      { kind: 'table-group', what: 'Table group gold (7 tables)', item: 'gold', why: 'ERD Studio has no table groups. The tables were imported.' },
     ]);
   });
 
@@ -333,6 +333,21 @@ describe('an ERD Studio rich export, row by row', () => {
     expect(p.report).toMatchObject({ positioned: 6, unpositioned: 1, layoutRead: true, layoutProblems: [] });
   });
 
+  it('a table named after an object member (constructor, toString) still gets its position', () => {
+    const text = 'Table constructor {\n  id int [pk]\n}\nTable toString {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n}\n';
+    const layout = {
+      tables: [
+        { name: 'constructor', schemaName: 'public', x: 1, y: 2 },
+        { name: 'toString', schemaName: 'public', x: 3, y: 4 },
+        { name: 'orders', schemaName: 'public', x: 5, y: 6 },
+      ],
+      stickies: [],
+    };
+    const p = plan(text, { layout });
+    expect(p.document.viewConfig.positions).toEqual({ constructor: { x: 1, y: 2 }, toString: { x: 3, y: 4 }, orders: { x: 5, y: 6 } });
+    expect(p.report).toMatchObject({ positioned: 3, unpositioned: 0 });
+  });
+
   it('sticky notes → annotations: colours read back, linked_table linked, placed above the diagram when the layout has none', () => {
     const p = salesPlan();
     expect(p.document.viewConfig.annotations).toEqual([
@@ -383,6 +398,31 @@ describe('an ERD Studio rich export, row by row', () => {
       meta: { owner: 'me', n: '1' },
     });
     expect(p.document.viewConfig.annotations![0].linkedModel).toBe('t');
+  });
+
+  it('a property set both plain and with erd_ is read from erd_; the plain one is the team\'s own, kept in meta.dbml', () => {
+    // Was: whichever came last won and the other value was lost without a word.
+    const text = [
+      'Table t [grain: \'theirs\', erd_grain: \'ours\', erd_alias: \'y\', alias: \'x\', meta_owner: \'team\', erd_meta_owner: \'erd\'] {',
+      '  id int [scd_type: \'2\', erd_scd_type: \'1\', erd_natural_key: \'true\', natural_key: \'no\']',
+      '}',
+    ].join('\n');
+    const p = plan(text);
+    const t = tableOf(p, 't');
+    expect(t).toMatchObject({ grain: 'ours', alias: 'y' });
+    expect(t.meta).toEqual({ owner: 'erd', dbml: { properties: { grain: 'theirs', alias: 'x', meta_owner: 'team' } } });
+    expect(columnOf(t, 'id')).toMatchObject({ scdType: 1, isNaturalKey: true, meta: { dbml: { properties: { scd_type: '2', natural_key: 'no' } } } });
+    expect(p.report.notes).toEqual([
+      't: both grain and erd_grain are set. ERD Studio read erd_grain; grain was kept in meta.dbml.',
+      't: both alias and erd_alias are set. ERD Studio read erd_alias; alias was kept in meta.dbml.',
+      't: both meta_owner and erd_meta_owner are set. ERD Studio read erd_meta_owner; meta_owner was kept in meta.dbml.',
+      't.id: both scd_type and erd_scd_type are set. ERD Studio read erd_scd_type; scd_type was kept in meta.dbml.',
+      't.id: both natural_key and erd_natural_key are set. ERD Studio read erd_natural_key; natural_key was kept in meta.dbml.',
+    ]);
+    // A property ERD Studio does not read keeps both spellings, with no note.
+    const own = plan('Table t [team: \'a\', erd_team: \'b\'] {\n  id int\n}\n');
+    expect(tableOf(own, 't').meta).toEqual({ dbml: { properties: { team: 'a', erd_team: 'b' } } });
+    expect(own.report.notes).toEqual([]);
   });
 
   it('reads the same plan from 11.0\'s typed metadata', () => {
@@ -487,11 +527,35 @@ describe('foreign DBML (dbdiagram syntax)', () => {
 
   it('enum types keep their values in meta.dbml.enum, the type name as the data type', () => {
     const p = ecommerce();
+    // A value's note is kept with it.
+    const values = [{ name: 'created', note: 'Waiting to be processed' }, 'running', 'done', 'failure'];
     expect(columnOf(tableOf(p, 'products'), 'status')).toEqual({
       name: 'status', dataType: 'order_status', description: '',
-      meta: { dbml: { default: 'created', enum: ['created', 'running', 'done', 'failure'] } },
+      meta: { dbml: { default: 'created', enum: values } },
     });
-    expect(columnOf(tableOf(p, 'orders'), 'status').meta).toEqual({ dbml: { enum: ['created', 'running', 'done', 'failure'] } });
+    expect(columnOf(tableOf(p, 'orders'), 'status').meta).toEqual({ dbml: { enum: values } });
+  });
+
+  it('an enum no new column has is reported, not lost without a word', () => {
+    // A bare type name is an enum in public, as DBML reads it: blog.post_status is not used.
+    const text = [
+      'Enum unused_enum {\n  x\n  y\n}',
+      'Enum blog.post_status {\n  draft [note: \'not live\']\n  live\n}',
+      'Enum order_status {\n  pending [note: \'Waiting for payment\']\n  shipped\n}',
+      'Table orders {\n  status order_status\n}',
+      'Table blog.posts {\n  status post_status\n}',
+    ].join('\n');
+    const p = plan(text);
+    expect(columnOf(tableOf(p, 'orders'), 'status').meta).toEqual({ dbml: { enum: [{ name: 'pending', note: 'Waiting for payment' }, 'shipped'] } });
+    expect(columnOf(tableOf(p, 'posts'), 'status').meta).toBeUndefined();
+    const why = 'ERD Studio keeps an enum\'s values on the columns of its type, and no table this import creates has one.';
+    expect(p.report.dropped).toEqual([
+      { kind: 'enum', what: 'Enum unused_enum (2 values)', item: 'unused_enum', why },
+      { kind: 'enum', what: 'Enum blog.post_status (2 values)', item: 'blog.post_status', why },
+    ]);
+    // One used only by a table the library already has is not kept either.
+    const reused = plan(text, { library: library([{ name: 'orders', columns: [{ name: 'status', dataType: 'order_status', description: '' }] }]) });
+    expect(reused.report.dropped.map((d) => d.item)).toEqual(['unused_enum', 'blog.post_status', 'order_status']);
   });
 
   it('inline refs, block refs, a DBML alias and a composite ref → relationships', () => {
@@ -511,17 +575,17 @@ describe('foreign DBML (dbdiagram syntax)', () => {
   });
 
   it('reports what is dropped: Records, ref settings, inactive, the database type', () => {
+    const why = 'ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationships were imported.';
     expect(ecommerce().report.dropped).toEqual([
       {
-        what: 'Reference "fk_merchant" ecommerce.products.(merchant_id, country_code) – ecommerce.merchants.(id, country_code): delete: cascade, update: no action, color: #79AD51',
-        why: 'ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationship itself was imported.',
+        kind: 'reference-settings',
+        what: 'Reference "fk_merchant" ecommerce.products.(merchant_id, country_code) – ecommerce.merchants.(id, country_code) (delete: cascade, update: no action, color: #79AD51)',
+        item: 'delete: cascade, update: no action, color: #79AD51',
+        why,
       },
-      {
-        what: 'Reference order_items.product_id – ecommerce.products.id: inactive',
-        why: 'ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationship itself was imported.',
-      },
-      { what: 'Records for countries (2 rows)', why: 'ERD Studio does not keep sample data.' },
-      { what: 'Project setting database_type: PostgreSQL', why: 'ERD Studio does not record the database type.' },
+      { kind: 'reference-settings', what: 'Reference order_items.product_id – ecommerce.products.id (inactive)', item: 'inactive', why },
+      { kind: 'records', what: 'Records for countries (2 rows)', item: 'countries', why: 'ERD Studio does not keep sample data.' },
+      { kind: 'database-type', what: 'The database type (PostgreSQL)', item: 'PostgreSQL', why: 'ERD Studio does not record the database type.' },
     ]);
   });
 
@@ -580,10 +644,34 @@ describe('foreign DBML (dbdiagram syntax)', () => {
       ]);
     });
 
-    it('relationships use the new names; a one-to-one between two keys is stored from its first end', () => {
+    it('a renamed table never takes the name of a table the file really calls that', () => {
+      // Was: "dim-customer" took dim_customer, so the library's dim_customer was
+      // bound to the wrong table and the file's own became a duplicate.
+      const text = [
+        'Table "dim-customer" {\n  legacy_code varchar\n}',
+        'Table dim_customer {\n  customer_id int [pk]\n  name varchar\n}',
+        'Table fct_sales {\n  customer_id int [ref: > dim_customer.customer_id]\n}',
+      ].join('\n');
+      const fresh = plan(text);
+      expect(fresh.modelNames).toEqual(['dim_customer_2', 'dim_customer', 'fct_sales']);
+      expect(fresh.report.renamed).toEqual([
+        { kind: 'table', table: 'dim_customer_2', from: 'dim-customer', to: 'dim_customer_2', reason: 'invalid-name' },
+      ]);
+      const customer: SemanticTable = {
+        name: 'dim_customer',
+        columns: [{ name: 'customer_id', dataType: 'int', description: '', isPrimaryKey: true }, { name: 'name', dataType: 'varchar', description: '' }],
+      };
+      const p = plan(text, { library: library([customer]) });
+      expect(p.reusedTables).toEqual(['dim_customer']);
+      expect(p.report.reusedTables).toEqual([{ name: 'dim_customer', dbmlName: 'dim_customer', missingColumns: [] }]);
+      expect(p.newTables.map((t) => t.name)).toEqual(['dim_customer_2', 'fct_sales']);
+      expect(p.relationships.map(ends)).toEqual(['fct_sales.customer_id -> dim_customer.customer_id many-to-one']);
+    });
+
+    it('relationships use the new names; a one-to-one between two keys is stored from its second end', () => {
       expect(odd().relationships.map((r) => `${ends(r)}${r.role ? ` (${r.role})` : ''}`)).toEqual([
         't_2024_sales.order_item -> Order_Items.item_id many-to-one',
-        't_2024_sales.id -> silver_date.date_key one-to-one (sale date)',
+        'silver_date.date_key -> t_2024_sales.id one-to-one (sale date)',
         'Users.id -> users_2.id many-to-many',
       ]);
     });
@@ -603,10 +691,22 @@ describe('foreign DBML (dbdiagram syntax)', () => {
     expect(inlineManyToMany.relationships.map(ends)).toEqual(['b.a_id -> a.id many-to-many']);
   });
 
-  it('in ERD Studio\'s own export, a one-to-one is stored from its first end, whatever the keys say', () => {
+  it('a one-to-one the keys do not decide is stored from its second end, the foreign key as DBML reads it', () => {
+    // Was stored from the first end, so the shared-key 1:1 came in backwards.
+    const sharedKey = 'Table users {\n  id int [pk]\n}\nTable user_profiles {\n  user_id int [pk]\n  bio text\n}\n';
+    expect(plan(`${sharedKey}Ref: users.id - user_profiles.user_id\n`).relationships.map(ends))
+      .toEqual(['user_profiles.user_id -> users.id one-to-one']);
+    expect(plan(`${sharedKey}Ref {\n  users.id - user_profiles.user_id\n}\n`).relationships.map(ends))
+      .toEqual(['user_profiles.user_id -> users.id one-to-one']);
+    const noKeys = 'Table a {\n  x int\n}\nTable b {\n  y int\n}\nRef: a.x - b.y\n';
+    expect(plan(noKeys).relationships.map(ends)).toEqual(['b.y -> a.x one-to-one']);
+  });
+
+  it('in ERD Studio\'s own export, a one-to-one is stored from its second end, whatever the keys say', () => {
     // Round-trip bug: one stored from a key to a column that is not one came
-    // back turned round. The export writes every Ref from its FK end.
-    const text = 'Table a {\n  id int [pk]\n}\nTable b {\n  id int [pk]\n  a_id int\n}\nRef: a.id -? b.a_id\n';
+    // back turned round. The export writes a one-to-one key end first, so its
+    // second end is the FK, as DBML reads it.
+    const text = 'Table a {\n  id int [pk]\n}\nTable b {\n  id int [pk]\n  a_id int\n}\nRef: b.a_id -? a.id\n';
     expect(plan(`${DBML_RICH_EXPORT_HEADER}\n${text}`).relationships.map(ends)).toEqual(['a.id -> b.a_id one-to-one']);
     expect(plan(text).relationships.map(ends)).toEqual(['b.a_id -> a.id one-to-one']);
   });
@@ -619,7 +719,7 @@ describe('foreign DBML (dbdiagram syntax)', () => {
   it('groups other than the layer, and sticky notes without a layout or colour', () => {
     const p = plan(fixture('foreign/sticky-groups.dbml'), { layer: 'silver' });
     expect(p.report.dropped).toEqual([
-      { what: 'Table group people (2 tables)', why: 'ERD Studio has no table groups; its tables were imported.' },
+      { kind: 'table-group', what: 'Table group people (2 tables)', item: 'people', why: 'ERD Studio has no table groups. The tables were imported.' },
     ]);
     const notes = p.document.viewConfig.annotations!;
     expect(notes.map((n) => [n.id, n.x, n.y, n.color ?? null])).toEqual([
@@ -633,8 +733,8 @@ describe('foreign DBML (dbdiagram syntax)', () => {
     const p = plan('Table a {\n  id int\n}\nNote n [linked_table: \'nowhere\', owner: \'me\'] {\n  \'x\'\n}\n');
     expect(p.document.viewConfig.annotations![0]).not.toHaveProperty('linkedModel');
     expect(p.report.dropped).toEqual([
-      { what: 'Sticky note n\'s link to nowhere', why: 'nowhere is not a table in the file.' },
-      { what: 'Sticky note n: owner', why: 'ERD Studio sticky notes have no custom properties.' },
+      { kind: 'sticky-note', what: 'Sticky note n\'s link to nowhere', item: 'n\'s link to nowhere', why: 'nowhere is not a table in the file.' },
+      { kind: 'sticky-note', what: 'Sticky note n\'s property owner', item: 'owner on n', why: 'ERD Studio sticky notes have no custom properties.' },
     ]);
   });
 
@@ -660,9 +760,49 @@ describe('foreign DBML (dbdiagram syntax)', () => {
     const m: DbmlModel = { ...model('Table a {\n  id int\n}\n'), dependencies: 2, diagramViews: 1 };
     const p = planDbmlImport({ model: m, layer: 'gold', subjectAreaName: 'x', library: library(), libraryRelationships: false });
     expect(p.report.dropped).toEqual([
-      { what: '2 dependency arrows', why: 'ERD Studio draws relationships, not dependencies.' },
-      { what: '1 diagram view', why: 'Each ERD Studio subject area is one view.' },
+      { kind: 'dependencies', what: '2 dependency arrows', item: '2 dependency arrows', why: 'ERD Studio draws relationships, not dependencies.' },
+      { kind: 'diagram-views', what: '1 diagram view', item: '1 diagram view', why: 'Each ERD Studio subject area is one view.' },
     ]);
+  });
+
+  describe('a composite ref is imported whole or not at all', () => {
+    const tables = 'Table a {\n  x int\n  y int\n}\nTable b {\n  u int\n  v int\n  indexes {\n    (u, v) [pk]\n  }\n}\n';
+
+    it('it takes the place of an earlier single ref over one of its pairs', () => {
+      // Was: half imported, a one-pair group with a compositeKey, reported as dropped.
+      const p = plan(`${tables}Ref: a.x > b.u\nRef: a.(x, y) > b.(u, v)\n`);
+      expect(p.relationships.map((r) => [ends(r), r.compositeKey ?? null])).toEqual([
+        ['a.x -> b.u many-to-one', 'fk_b'],
+        ['a.y -> b.v many-to-one', 'fk_b'],
+      ]);
+      expect(p.report.dropped).toEqual([{
+        kind: 'reference',
+        what: 'Reference a.x – b.u',
+        item: 'a.x – b.u',
+        why: 'the composite reference a.(x, y) – b.(u, v) joins the same columns, so it was imported as part of that one.',
+      }]);
+    });
+
+    it('it is left out, whole, beside another composite over some of its columns', () => {
+      const p = plan(`${tables.replace('  y int\n', '  y int\n  z int\n').replace('  v int\n', '  v int\n  w int\n')}`
+        + 'Ref: a.(x, y) > b.(u, v)\nRef: a.(x, z) > b.(u, w)\n');
+      expect(p.relationships.map((r) => [ends(r), r.compositeKey ?? null])).toEqual([
+        ['a.x -> b.u many-to-one', 'fk_b'],
+        ['a.y -> b.v many-to-one', 'fk_b'],
+      ]);
+      expect(p.report.dropped).toEqual([{
+        kind: 'reference',
+        what: 'Reference a.(x, z) – b.(u, w)',
+        item: 'a.(x, z) – b.(u, w)',
+        why: 'another composite reference already joins some of the same columns.',
+      }]);
+    });
+
+    it('a single ref after it is the one left out', () => {
+      const p = plan(`${tables}Ref: a.(x, y) > b.(u, v)\nRef: a.x > b.u\n`);
+      expect(p.relationships.map((r) => r.compositeKey)).toEqual(['fk_b', 'fk_b']);
+      expect(p.report.dropped.map((d) => d.why)).toEqual(['another reference already joins the same columns.']);
+    });
   });
 
   it('a composite ref of more than eight pairs is imported as separate relationships', () => {
@@ -753,7 +893,9 @@ describe('collisions with an existing Table Library', () => {
     expect(p.relationships.map(ends)).toContain('bridge_tag.tag_id -> DIM_CUSTOMER.Customer_Key many-to-many');
     expect(p.relationships.some((r) => r.fromColumn === 'passport_key')).toBe(false);
     expect(p.report.dropped).toEqual([{
-      what: 'Reference gold.dim_customer.passport_key – gold.dim_passport.passport_key',
+      kind: 'reference',
+      what: 'Reference gold.dim_passport.passport_key – gold.dim_customer.passport_key',
+      item: 'gold.dim_passport.passport_key – gold.dim_customer.passport_key',
       why: 'DIM_CUSTOMER is already in your Table Library and has no column passport_key; the library\'s table is used as it is.',
     }]);
   });
@@ -844,6 +986,40 @@ describe('where relationships are stored', () => {
     // bridge_tag <> dim_customer is stored on the new bridge_tag; dim_customer is untouched.
     expect(tableOf(p, 'bridge_tag').relationships).toHaveLength(1);
     expect(describeDbmlImportPlan(p)).toContain('1 is already in your Table Library and kept as it has them.');
+  });
+
+  it('library storage: a composite the library already stores part of is left out whole', () => {
+    // Was: the pair the library lacked went in alone, a one-pair group.
+    const a: SemanticTable = {
+      name: 'a',
+      columns: [{ name: 'x', dataType: 'int', description: '' }, { name: 'y', dataType: 'int', description: '' }],
+      relationships: [{ fromColumn: 'x', toModel: 'b', toColumn: 'u', cardinality: 'many-to-one' }],
+    };
+    const text = 'Table a {\n  x int\n  y int\n}\nTable b {\n  u int\n  v int\n}\nRef: a.(x, y) > b.(u, v)\n';
+    const p = plan(text, { libraryRelationships: true, library: library([a]) });
+    expect(p.relationships).toEqual([]);
+    expect(p.changedLibraryTables).toEqual([]);
+    expect(tableOf(p, 'b').relationships).toBeUndefined();
+    expect(p.document.logical.relationships).toEqual([]);
+    expect(p.report).toMatchObject({ relationships: 0, relationshipsInLibrary: 0, relationshipsAlreadyInLibrary: 0 });
+    expect(p.report.dropped).toEqual([{
+      kind: 'reference',
+      what: 'Reference a.(x, y) – b.(u, v)',
+      item: 'a.(x, y) – b.(u, v)',
+      why: 'your Table Library already stores a.x – b.u on its own, so the composite was not imported.',
+    }]);
+  });
+
+  it('library storage: a composite another diagram keeps one pair of stays whole in this subject area', () => {
+    const text = 'Table a {\n  x int\n  y int\n}\nTable b {\n  u int\n  v int\n}\nRef: a.(x, y) > b.(u, v)\n';
+    const copy: Relationship = { fromModel: 'a', fromColumn: 'x', toModel: 'b', toColumn: 'u', cardinality: 'many-to-one' };
+    const p = plan(text, { libraryRelationships: true, diagramCopies: [copy] });
+    expect(p.document.logical.relationships.map((r) => [ends(r), r.compositeKey])).toEqual([
+      ['a.x -> b.u many-to-one', 'fk_b'],
+      ['a.y -> b.v many-to-one', 'fk_b'],
+    ]);
+    expect(tableOf(p, 'a').relationships).toBeUndefined();
+    expect(p.report).toMatchObject({ relationships: 2, relationshipsInLibrary: 0 });
   });
 
   it('library storage: a link another diagram draws from its own copy stays in this subject area', () => {
@@ -945,8 +1121,12 @@ describe('describeDbmlImportPlan', () => {
     expect(text).toContain('• 1 reference is optional (?). ERD Studio doesn\'t record that, so they are imported as plain relationships.');
     expect(text).toContain('• No layout file: the diagram is laid out automatically when it opens.');
     expect(text).toMatch(/• DBML settings ERD Studio has no field for \(not null, defaults, indexes, …\) are kept in the meta of \d+ tables and columns, under "dbml"\./);
-    expect(text).toContain('Left out:\n• Reference "fk_merchant"');
-    expect(text).toContain('• Records for countries (2 rows): ERD Studio does not keep sample data.');
+    expect(text).toContain([
+      'Left out:',
+      '• The database type (PostgreSQL): ERD Studio does not record the database type.',
+      '• Records for countries (2 rows): ERD Studio does not keep sample data.',
+      '• Settings on 2 references (delete: cascade, update: no action, color: #79AD51, inactive): ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationships were imported.',
+    ].join('\n'));
     const odd = describeDbmlImportPlan(plan(fixture('foreign/odd-names.dbml'), { layer: 'silver' }));
     expect(odd).toContain('• Renamed to names ERD Studio can use: Order Items → Order_Items, silver.date → silver_date, gold.date → gold_date, users → users_2 and 5 more.');
   });
@@ -961,7 +1141,30 @@ describe('describeDbmlImportPlan', () => {
   it('caps long lists', () => {
     const tables = Array.from({ length: 8 }, (_, i) => `Table t${i} {\n  id int\n}\nRecords t${i}(id) {\n  1\n}`).join('\n');
     const text = describeDbmlImportPlan(plan(tables));
-    expect(text).toContain('• And 3 more things.');
-    expect(text.split('\n').filter((l) => l.startsWith('• Records')).length).toBe(5);
+    expect(text).toContain('Left out:\n• Records for 8 tables (t0, t1, t2 and 5 more): ERD Studio does not keep sample data.');
+    expect(text.split('\n').filter((l) => l.startsWith('• Records')).length).toBe(1);
+  });
+
+  it('gives each kind of loss one line, so many references never hide the table groups or the database type', () => {
+    // Was five copies of the same reference line and "And 37 more things."
+    const tables = Array.from({ length: 12 }, (_, i) => [
+      `Table app.t${i} {\n  id int [pk]\n  "parent id" int\n}`,
+      i > 0 ? `Ref: app.t${i}."parent id" > app.t${i - 1}.id [delete: cascade]` : '',
+    ].join('\n')).join('\n');
+    const text = [
+      'Project shop {\n  database_type: \'PostgreSQL\'\n}',
+      tables,
+      'TableGroup grp1 {\n  app.t0\n}',
+      'TableGroup grp2 {\n  app.t1\n}',
+    ].join('\n');
+    const lines = describeDbmlImportPlan(plan(text)).split('\n');
+    expect(lines.slice(lines.indexOf('Left out:'))).toEqual([
+      'Left out:',
+      '• 2 table groups (grp1, grp2): ERD Studio has no table groups. The tables were imported.',
+      '• The database type (PostgreSQL): ERD Studio does not record the database type.',
+      '• Settings on 11 references (delete: cascade): ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationships were imported.',
+    ]);
+    // The same column rename in every table is named once.
+    expect(lines).toContain('• Renamed to names ERD Studio can use: parent id → parent_id (in 12 tables).');
   });
 });

@@ -84,6 +84,8 @@ export { OPEN_FILE_BUTTON };
 
 /** How many of a file's DBML problems the message names; the rest are counted. */
 const DIAGNOSTICS_SHOWN = 3;
+/** @dbml/parse's message for several columns on one line (`id int [pk] name varchar`). */
+const SEVERAL_FIELDS_ON_ONE_LINE = /These fields must be some inline settings/i;
 
 /** Every vscode call the flow makes, injectable for tests. */
 export interface ImportDbmlUi {
@@ -124,8 +126,12 @@ export interface ImportDbmlDeps {
   >;
   /** `createDomain`'s rule for a new subject area name in `layer` (undefined = valid). */
   validateDomainName: (value: string, layer: string) => string | undefined;
-  /** Every file is written; refresh the tree, Table Library, context keys and selectors. */
-  onWritten: (written: { domainPath: string; modelNames: string[] }) => void;
+  /**
+   * Every file is written; refresh the tree, Table Library, context keys and
+   * selectors. `modelNames` are the new tables; `changedModelNames` the
+   * existing library tables that gained a relationship.
+   */
+  onWritten: (written: { domainPath: string; modelNames: string[]; changedModelNames: string[] }) => void;
   ui?: ImportDbmlUi;
 }
 
@@ -175,11 +181,16 @@ export function dbdiagramLayoutPathFor(dbmlPath: string): string {
  * failure of ours.
  */
 export function describeInvalidDbml(fileName: string, diagnostics: readonly DbmlDiagnostic[]): string {
-  const shown = diagnostics.slice(0, DIAGNOSTICS_SHOWN)
-    .map((d) => `Line ${d.line}: ${d.message.trim().replace(/\.$/, '')}.`);
-  const more = diagnostics.length - shown.length;
+  // The parser reports one mistake once per stray token (same line, same
+  // message, another column): name each problem once.
+  const problems = [...new Set(diagnostics.map((d) => `Line ${d.line}: ${d.message.trim().replace(/\.$/, '')}.`))];
+  const shown = problems.slice(0, DIAGNOSTICS_SHOWN);
+  const more = problems.length - shown.length;
   const tail = more > 0 ? ` And ${more} more ${more === 1 ? 'problem' : 'problems'}.` : '';
-  return `${TITLE}: ${fileName} isn't valid DBML, so nothing was imported. ${shown.join(' ')}${tail}`;
+  const hint = diagnostics.some((d) => SEVERAL_FIELDS_ON_ONE_LINE.test(d.message))
+    ? ' Each column goes on a line of its own.'
+    : '';
+  return `${TITLE}: ${fileName} isn't valid DBML, so nothing was imported. ${shown.join(' ')}${tail}${hint}`;
 }
 
 async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: ImportDbmlResume): Promise<ImportDbmlResult | undefined> {
@@ -238,7 +249,10 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   if (await ui.exists(layoutPath).catch(() => false)) {
     try {
       layout = readDbdiagramLayout(await ui.readFile(layoutPath));
-      layoutUsed = true;
+      // readDbdiagramLayout never throws: a file it could not make sense of
+      // comes back empty with a problem, which the dry run names; only a
+      // layout that yielded something counts as used.
+      layoutUsed = layout.tables.length > 0 || layout.stickies.length > 0;
     } catch (err) {
       console.error(`[ERD Studio] ${TITLE}: could not read the layout file:`, err);
       layout = { tables: [], stickies: [], problems: ['The layout file could not be read.'] };
@@ -401,7 +415,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     return undefined;
   }
 
-  deps.onWritten({ domainPath, modelNames: outcome.written });
+  deps.onWritten({ domainPath, modelNames: outcome.written, changedModelNames: outcome.changed });
   telemetry.feature('importDbml');
   if (layoutUsed) telemetry.feature('importDbmlLayout');
 

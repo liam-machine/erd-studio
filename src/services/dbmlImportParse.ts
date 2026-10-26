@@ -111,10 +111,16 @@ export interface DbmlRef {
   line: number;
 }
 
+export interface DbmlEnumValue {
+  name: string;
+  /** The value's own note (`running_low [note: 'less than 20']`), when it has one. */
+  note?: string;
+}
+
 export interface DbmlEnum {
   name: string;
   schema: string | null;
-  values: string[];
+  values: DbmlEnumValue[];
 }
 
 export interface DbmlTableGroup {
@@ -573,7 +579,12 @@ export function normaliseRawDbml(raw: Loose, options: { erdStudioExport?: boolea
     enums: list(raw.enums).map((e) => ({
       name: text(e.name) ?? '',
       schema: text(e.schemaName),
-      values: list(e.values).map((v) => text(v.name)).filter((v): v is string => v !== null),
+      values: list(e.values).flatMap((v): DbmlEnumValue[] => {
+        const name = text(v.name);
+        if (name === null) return [];
+        const note = noteText(v.note);
+        return [note ? { name, note } : { name }];
+      }),
     })),
     tableGroups: list(raw.tableGroups).map((g) => ({
       name: text(g.name) ?? '',

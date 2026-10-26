@@ -251,7 +251,11 @@ describe.each(PARSERS)('readDbml with %s', (_label, parser) => {
 
   it('reads enums, records, the project and its settings', () => {
     const model = read(fixture('foreign/ecommerce.dbml'), parser);
-    expect(model.enums).toEqual([{ name: 'order_status', schema: null, values: ['created', 'running', 'done', 'failure'] }]);
+    expect(model.enums).toEqual([{
+      name: 'order_status',
+      schema: null,
+      values: [{ name: 'created', note: 'Waiting to be processed' }, { name: 'running' }, { name: 'done' }, { name: 'failure' }],
+    }]);
     expect(model.records).toEqual([{ schema: null, table: 'countries', rows: 2 }]);
     expect(model.project).toEqual({
       name: 'ecommerce',
