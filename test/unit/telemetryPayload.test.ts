@@ -419,7 +419,8 @@ describe('allowlists agree with the Worker', () => {
   });
 
   it('appends the Export Diagram keys at the very end: completions, the cancel and the empty project as features, a failure as an error', () => {
-    expect(FEATURES.slice(-4)).toEqual(['exportMermaid', 'exportDbml', 'exportCancelled', 'exportNoDiagrams']);
+    expect(FEATURES.indexOf('exportNoDiagrams')).toBe(FEATURES.indexOf('exportMermaid') + 3);
+    expect(FEATURES.indexOf('exportDbmlRich')).toBe(FEATURES.indexOf('exportNoDiagrams') + 1);
     expect(ERROR_CODES.indexOf('domainLoadEmpty')).toBe(ERROR_CODES.indexOf('exportFailed') + 1);
     let s = emptyCounters('2026-10-09');
     s = recordFeature(s, 'exportMermaid');
@@ -433,13 +434,27 @@ describe('allowlists agree with the Worker', () => {
   });
 
   it('appends the domain-file split at the very end, as errors beside domainLoad', () => {
-    expect(ERROR_CODES.slice(-2)).toEqual(['domainLoadEmpty', 'domainLoadConflict']);
+    expect(ERROR_CODES.indexOf('domainLoadConflict')).toBe(ERROR_CODES.indexOf('domainLoadEmpty') + 1);
+    expect(ERROR_CODES.indexOf('importDbmlFailed')).toBe(ERROR_CODES.indexOf('domainLoadConflict') + 1);
     let s = emptyCounters('2026-10-19');
     s = recordError(s, 'domainLoad');
     s = recordError(s, 'domainLoadEmpty');
     s = recordError(s, 'domainLoad');
     s = recordError(s, 'domainLoadConflict');
     expect(buildHeartbeat(s, ENV).errors).toEqual({ domainLoad: 2, domainLoadEmpty: 1, domainLoadConflict: 1 });
+  });
+
+  it('appends the DBML round-trip keys at the very end: exports, imports and a cancel as features, a failed import as an error', () => {
+    expect(FEATURES.slice(-6)).toEqual(['exportDbmlRich', 'exportAll', 'importDbml', 'importDbmlLayout', 'importDbmlCancelled', 'importDbmlInvalid']);
+    expect(ERROR_CODES.slice(-1)).toEqual(['importDbmlFailed']);
+    let s = emptyCounters('2026-10-26');
+    s = recordFeature(s, 'exportDbmlRich');
+    s = recordFeature(s, 'importDbml');
+    s = recordFeature(s, 'importDbmlInvalid');
+    s = recordError(s, 'importDbmlFailed');
+    const body = buildHeartbeat(s, ENV);
+    expect(body.features).toEqual({ exportDbmlRich: 1, importDbml: 1, importDbmlInvalid: 1 });
+    expect(body.errors).toEqual({ importDbmlFailed: 1 });
   });
 
   it('telemetry.json documents every feature key', () => {

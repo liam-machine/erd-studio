@@ -192,6 +192,16 @@ export const FEATURES = [
   'exportCancelled',
   // A project state, not a cancel: run with no canvas focused and no diagram to pick.
   'exportNoDiagrams',
+  // DBML round trip: the rich export (with its .dbdiagram layout), Export All
+  // Diagrams…, and Import DBML… — a completed import, one that also read a
+  // layout file, a cancel at any step, and a file DBML could not read (the
+  // user's file, not a failure of ours). A failure is `importDbmlFailed`.
+  'exportDbmlRich',
+  'exportAll',
+  'importDbml',
+  'importDbmlLayout',
+  'importDbmlCancelled',
+  'importDbmlInvalid',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -298,6 +308,7 @@ export const ERROR_CODES = [
   // empty through every re-read, or it holds unresolved git conflict markers.
   'domainLoadEmpty',
   'domainLoadConflict',
+  'importDbmlFailed',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
