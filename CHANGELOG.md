@@ -8,6 +8,11 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+- MCP server dependencies: `zod` moved from 3 to 4, and its other dependencies were refreshed, to clear newly published security advisories (`zod`, `body-parser`, `hono`, `fast-uri`, `ip-address`). No change to what the MCP server does. The extension itself is unaffected.
+
 ## 1.7.2 — 2026-10-23
 
 ### Changed
