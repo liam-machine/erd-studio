@@ -11,7 +11,7 @@ Source and render pipeline for the one-minute getting-started tour (at most 65 s
 
 `video/getting-started.vtt` is the same captions as WebVTT, kept as a source artefact for review and for uploading next to the video elsewhere. It is not shipped.
 
-Style reference: `/Users/liamwynne/GIT/LIAM/erd-studio/docs/assets/erd-studio-linkedin.mp4`. It lives only in the main checkout and is untracked, so do not copy it here. Colour tokens come from it and from `scripts/social-preview.html`.
+Style reference: `docs/assets/erd-studio-linkedin.mp4` (thumbnail beside it). Colour tokens come from it and from `scripts/social-preview.html`.
 
 ## Prerequisites
 
