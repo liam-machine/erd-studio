@@ -148,7 +148,7 @@ import { describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat, getRawSu
 import { telemetry } from '../services/telemetryService';
 import { saveDocument, saveDocumentByUri } from './documentSave';
 import { dirtyFiles } from './dirtyDocuments';
-import { subjectAreaLoadErrorCode, layoutFeature, type SubjectAreaLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
+import { subjectAreaLoadErrorCode, layoutFeature, saveFailureCode, type SaveFailure, type SubjectAreaLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
 import { openTableFileAt } from '../commands/openModelFile';
 import {
   buildDbtDraft,
@@ -2463,7 +2463,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // A save that fails is reported, never ignored: the edit is applied in
       // memory, so without a word the file would sit open and unsaved (#126).
       const unsaved: string[] = [];
-      if (await saveDocument(document)) {
+      const saveFailures = new Set<SaveFailure>();
+      const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
+      let modelFileUnsaved = false;
+      if (await saveDocument(document, onSaveFailure)) {
         // Own writes are recorded only once the bytes are on disk — the tracker
         // stats the file — so the logical-model / semantic watchers can tell
         // this save apart from an external edit and skip the extra refresh.
@@ -2485,14 +2488,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         ourPaths.add(modelDoc.uri.fsPath);
         // Re-fetched by URI: VS Code may have disposed the handle opened
         // before the edit, and the edit then landed in a fresh copy (#126).
-        if (await saveDocumentByUri(modelDoc.uri)) {
+        if (await saveDocumentByUri(modelDoc.uri, onSaveFailure)) {
           this.ownWriteTracker.recordWrite(modelDoc.uri.fsPath);
         } else {
           unsaved.push(modelDoc.uri.fsPath);
+          if (modelDocs.includes(modelDoc)) modelFileUnsaved = true;
         }
       }
       if (unsaved.length > 0) {
         telemetry.error('saveFailed');
+        for (const reason of saveFailures) telemetry.error(saveFailureCode(reason));
+        if (modelFileUnsaved) telemetry.error('saveFailedModelFile');
         options.onUnsaved?.();
         webview?.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
       }

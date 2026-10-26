@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ASSISTANTS,
   ERROR_CODES,
+  saveFailureCode,
   FEATURES,
   HARNESSES,
   HOSTS,
@@ -433,13 +434,30 @@ describe('allowlists agree with the Worker', () => {
   });
 
   it('appends the domain-file split at the very end, as errors beside domainLoad', () => {
-    expect(ERROR_CODES.slice(-2)).toEqual(['domainLoadEmpty', 'domainLoadConflict']);
+    expect(ERROR_CODES.indexOf('domainLoadConflict')).toBe(ERROR_CODES.indexOf('domainLoadEmpty') + 1);
+    expect(ERROR_CODES.indexOf('saveFailedRefused')).toBe(ERROR_CODES.indexOf('domainLoadConflict') + 1);
     let s = emptyCounters('2026-10-19');
     s = recordError(s, 'domainLoad');
     s = recordError(s, 'domainLoadEmpty');
     s = recordError(s, 'domainLoad');
     s = recordError(s, 'domainLoadConflict');
     expect(buildHeartbeat(s, ENV).errors).toEqual({ domainLoad: 2, domainLoadEmpty: 1, domainLoadConflict: 1 });
+  });
+
+  it('appends the saveFailed split at the very end, as errors beside saveFailed', () => {
+    expect(ERROR_CODES.slice(-4)).toEqual(['saveFailedRefused', 'saveFailedThrew', 'saveFailedModelFile', 'saveFailedRename']);
+    expect(saveFailureCode('refused')).toBe('saveFailedRefused');
+    expect(saveFailureCode('threw')).toBe('saveFailedThrew');
+    let s = emptyCounters('2026-10-26');
+    s = recordError(s, 'saveFailed');
+    s = recordError(s, saveFailureCode('refused'));
+    s = recordError(s, 'saveFailedModelFile');
+    s = recordError(s, 'saveFailed');
+    s = recordError(s, saveFailureCode('threw'));
+    s = recordError(s, 'saveFailedRename');
+    expect(buildHeartbeat(s, ENV).errors).toEqual({
+      saveFailed: 2, saveFailedRefused: 1, saveFailedThrew: 1, saveFailedModelFile: 1, saveFailedRename: 1,
+    });
   });
 
   it('telemetry.json documents every feature key', () => {

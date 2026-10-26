@@ -10,6 +10,9 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ## Unreleased
 
+### Changed
+- The anonymous daily usage report now says why a diagram edit could not save a file: the editor refused the save (usually because the file changed on disk), or saving failed outright; whether a table file was among the unsaved files; and whether it was the duplicate-table rename. Each is a fixed key listed in `telemetry.json`; no file name or path is sent.
+
 ### Fixed
 - MCP server dependencies: `zod` moved from 3 to 4, and its other dependencies were refreshed, to clear newly published security advisories (`zod`, `body-parser`, `hono`, `fast-uri`, `ip-address`). No change to what the MCP server does. The extension itself is unaffected.
 

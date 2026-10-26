@@ -351,6 +351,11 @@ const ERROR_CODES = [
   'exportFailed',
   'domainLoadEmpty',
   'domainLoadConflict',
+  // Why a saveFailed save failed, which file kind, and the rename path.
+  'saveFailedRefused',
+  'saveFailedThrew',
+  'saveFailedModelFile',
+  'saveFailedRename',
 ];
 
 /**

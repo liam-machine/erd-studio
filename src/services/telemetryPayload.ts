@@ -298,6 +298,16 @@ export const ERROR_CODES = [
   // empty through every re-read, or it holds unresolved git conflict markers.
   'domainLoadEmpty',
   'domainLoadConflict',
+  // Why a save counted as `saveFailed` failed, recorded beside it (which stays
+  // the total): VS Code refused it and the file is still unsaved (typically
+  // changed on disk since VS Code read it), or saving threw (a closed
+  // document, a file system error). `saveFailedModelFile`: a model file was
+  // among the unsaved (otherwise only diagram files were). `saveFailedRename`:
+  // the failure came from the duplicate-model rename, not a canvas edit.
+  'saveFailedRefused',
+  'saveFailedThrew',
+  'saveFailedModelFile',
+  'saveFailedRename',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
@@ -789,6 +799,19 @@ const SUBJECT_AREA_LOAD_ERROR_CODES: Record<SubjectAreaLoadFailure, TelemetryErr
 /** The error sub-code counted for a canvas load failure of `kind`; recorded alongside `domainLoad`. */
 export function subjectAreaLoadErrorCode(kind: SubjectAreaLoadFailure): TelemetryErrorCode {
   return SUBJECT_AREA_LOAD_ERROR_CODES[kind] ?? 'domainLoadInternal';
+}
+
+/** Why a save failed (see saveDocument in src/providers/documentSave.ts). */
+export type SaveFailure = 'refused' | 'threw';
+
+const SAVE_FAILURE_CODES: Record<SaveFailure, TelemetryErrorCode> = {
+  refused: 'saveFailedRefused',
+  threw: 'saveFailedThrew',
+};
+
+/** The error sub-code counted for a save that failed for `reason`; recorded alongside `saveFailed`. */
+export function saveFailureCode(reason: SaveFailure): TelemetryErrorCode {
+  return SAVE_FAILURE_CODES[reason] ?? 'saveFailedThrew';
 }
 
 /** The feature key for an auto layout that took `ms` milliseconds, or failed. */
