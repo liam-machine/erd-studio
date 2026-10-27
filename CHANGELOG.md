@@ -10,6 +10,9 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ## Unreleased
 
+### Changed
+- **Migrate to the New File Naming and Turn Round say whose problem a failure is, and offer the next step** ([#219](https://github.com/liam-machine/erd-studio/issues/219)). Their errors no longer show the raw error. Unsaved edits in a file the migration would change get **Show File** and **Save and Try Again**. A project that changed while the dialog was open gets **Try Again**. A file move VS Code doesn't accept is explained (usually a file another program has open, or a folder you can't write to), with **Try Again** and **Send Feedback**. A folder ERD Studio isn't allowed to create is said in plain words. A migrated file that didn't save gets **Save All** and **Show File**. Anything else is ERD Studio's own problem: the message says so, says whether anything changed, and offers **Send Feedback** with the error already filled in, paths removed. A Turn Round that fails for the same reason does the same, in a notification; one refused because of your files (an unsaved table file, say) still says why.
+
 ### Fixed
 - README: removed the out-of-date "Not using dbt?" workaround (a placeholder `dbt_project.yml` is no longer needed; set `erdStudio.projectPath` instead), replaced a **Set Up ERD Studio** button that does not exist with the real command, and corrected what the Physical view needs and how to install the AI coding harness.
 - MCP server dependencies: `zod` moved from 3 to 4, and its other dependencies were refreshed, to clear newly published security advisories (`zod`, `body-parser`, `hono`, `fast-uri`, `ip-address`). No change to what the MCP server does. The extension itself is unaffected.

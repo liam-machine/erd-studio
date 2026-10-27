@@ -683,6 +683,11 @@ export function _failMockSave(fsPath: string): void {
   _failingSaves.add(path.resolve(fsPath));
 }
 
+/** Let the document at `fsPath` save again after `_failMockSave`. */
+export function _unfailMockSave(fsPath: string): void {
+  _failingSaves.delete(path.resolve(fsPath));
+}
+
 /**
  * Dispose the open document at `fsPath`, as VS Code does with documents an
  * extension opened but nobody is showing: the old object's save() rejects
