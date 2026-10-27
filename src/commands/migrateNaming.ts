@@ -39,6 +39,7 @@ import {
   classifyWriteFailure,
   feedbackPrefill,
   oursMessage,
+  projectRelative,
   showErrorWithActions as showErrorWith,
   type ErrorActions,
 } from '../services/commandErrors';
@@ -120,8 +121,12 @@ export type MigrateNamingOutcome = 'migrated' | 'nothing' | 'refused' | 'cancell
  * awaited: the command resolves while the toast is still up. A button that
  * fails says so, rather than seeming to do nothing.
  */
-function showErrorWithActions(message: string, actions: ErrorActions): void {
-  showErrorWith((m, ...items) => vscode.window.showErrorMessage(m, ...items), message, actions, (choice, err) => {
+function showErrorWithActions(
+  message: string,
+  actions: ErrorActions,
+  show: (message: string, ...items: string[]) => PromiseLike<string | undefined> = (m, ...items) => vscode.window.showErrorMessage(m, ...items),
+): void {
+  showErrorWith(show, message, actions, (choice, err) => {
     console.error(`[ERD Studio] ${MIGRATE_NAMING_TITLE}: "${choice}" failed:`, err);
     const doing = `while running ${choice}`;
     showErrorWithActions(oursMessage(MIGRATE_NAMING_TITLE, doing, 'nothing more was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
@@ -138,6 +143,34 @@ const showFile = (filePath: string) => () => vscode.window.showTextDocument(vsco
 /** "a.yml, b.json and 3 more": at most five names. */
 function listFiles(names: readonly string[]): string {
   return `${names.slice(0, 5).join(', ')}${names.length > 5 ? ` and ${names.length - 5} more` : ''}`;
+}
+
+/** How far a run got, for what its failure says. */
+interface MigrationProgress {
+  /** The v4 → v5 step converted files (it writes them one by one, and cannot be undone). */
+  v5Converted: boolean;
+  /** VS Code applied the file moves. */
+  applied: boolean;
+  /** A migrated subject area did not save. */
+  unsaved: boolean;
+}
+
+/** What a run that stopped before the file moves left behind, lower case: the v4 step's files, when it ran. */
+function nothingChanged(progress: MigrationProgress): string {
+  return progress.v5Converted
+    ? 'the v4 subject areas were converted to the Table Library, but nothing else was changed'
+    : 'nothing was changed';
+}
+
+/** `nothingChanged` starting a sentence. */
+function nothingChangedCapitalised(progress: MigrationProgress): string {
+  const text = nothingChanged(progress);
+  return `${text[0].toUpperCase()}${text.slice(1)}`;
+}
+
+/** `nothingChanged` as a sentence of its own. */
+function nothingChangedSentence(progress: MigrationProgress): string {
+  return `${nothingChangedCapitalised(progress)}.`;
 }
 
 /** Remove the folders this run made, deepest first. */
@@ -181,7 +214,7 @@ function confirmDetail(plan: NamingMigrationPlan, version: string): string {
  * ERD Studio's problem, with Send Feedback, never as the raw exception (#219).
  */
 export async function migrateToTableNaming(deps: MigrateNamingDeps): Promise<MigrateNamingOutcome> {
-  const progress = { applied: false, unsaved: false };
+  const progress: MigrationProgress = { v5Converted: false, applied: false, unsaved: false };
   const retry = (): Promise<MigrateNamingOutcome> => migrateToTableNaming(deps);
   try {
     return await runMigration(deps, progress, retry);
@@ -202,7 +235,7 @@ export async function migrateToTableNaming(deps: MigrateNamingDeps): Promise<Mig
       showErrorWithActions(
         `${MIGRATE_NAMING_TITLE}: ${failure === 'permission'
           ? `ERD Studio isn't allowed to create the ${TABLES_DIR}/ folder in ${deps.semanticDir}/. Check the folder's permissions, then try again.`
-          : `the disk is full, so ERD Studio couldn't create the ${TABLES_DIR}/ folder. Free some space, then try again.`} Nothing was changed.`,
+          : `the disk is full, so ERD Studio couldn't create the ${TABLES_DIR}/ folder. Free some space, then try again.`} ${nothingChangedSentence(progress)}`,
         { [TRY_AGAIN_BUTTON]: retry },
       );
       return 'failed';
@@ -219,8 +252,8 @@ export async function migrateToTableNaming(deps: MigrateNamingDeps): Promise<Mig
       });
       return 'migrated';
     }
-    const doing = 'while planning the migration';
-    showErrorWithActions(oursMessage(MIGRATE_NAMING_TITLE, doing, 'nothing was changed'), {
+    const doing = err instanceof FolderNotCreated ? `while creating the ${TABLES_DIR}/ folders` : 'while planning the migration';
+    showErrorWithActions(oursMessage(MIGRATE_NAMING_TITLE, doing, nothingChanged(progress)), {
       [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, cause),
       [TRY_AGAIN_BUTTON]: retry,
     });
@@ -236,7 +269,7 @@ export function planProjectNamingMigration(deps: Pick<MigrateNamingDeps, 'worksp
 
 async function runMigration(
   deps: MigrateNamingDeps,
-  progress: { applied: boolean; unsaved: boolean },
+  progress: MigrationProgress,
   retry: () => Promise<MigrateNamingOutcome>,
 ): Promise<MigrateNamingOutcome> {
   const semanticRoot = path.join(deps.workspaceRoot, deps.semanticDir);
@@ -247,10 +280,11 @@ async function runMigration(
   if (plan.v4SubjectAreas.length > 0 && plan.refusals.length === 1 && deps.migrateToV5) {
     const migrateToV5 = deps.migrateToV5;
     if (!(await migrateToV5().catch((err: unknown) => { throw new V5StepFailed(err); }))) return 'cancelled';
+    progress.v5Converted = true;
     plan = planProjectNamingMigration(deps);
   }
   if (plan.refusals.length > 0) {
-    void vscode.window.showWarningMessage(`${MIGRATE_NAMING_TITLE}: nothing was changed.`, { modal: true, detail: describeNamingMigration(plan) });
+    void vscode.window.showWarningMessage(`${MIGRATE_NAMING_TITLE}: ${nothingChanged(progress)}.`, { modal: true, detail: describeNamingMigration(plan) });
     return 'refused';
   }
   if (namingMigrationIsEmpty(plan)) {
@@ -259,7 +293,7 @@ async function runMigration(
   }
 
   const touched = [...plan.moves.flatMap((m) => [abs(m.from), abs(m.to)]), ...plan.rewrites.map((r) => abs(r.path))];
-  const relPath = (p: string): string => path.relative(deps.workspaceRoot, p).split(path.sep).join('/');
+  const relPath = (p: string): string => projectRelative(deps.workspaceRoot, p);
   const dirtyPaths = dirtyFiles(touched);
   if (dirtyPaths.length > 0) {
     const dirty = dirtyPaths.map(relPath);
@@ -268,7 +302,7 @@ async function runMigration(
         if (!(await saveDocumentByUri(vscode.Uri.file(filePath)))) {
           // Nothing to retry: the migration would stop on the same file.
           showErrorWithActions(
-            `${MIGRATE_NAMING_TITLE}: ERD Studio couldn't save ${dirty[i]}. Save or revert it yourself, then migrate. Nothing was changed.`,
+            `${MIGRATE_NAMING_TITLE}: ERD Studio couldn't save ${dirty[i]}. Save or revert it yourself, then migrate. ${nothingChangedSentence(progress)}`,
             { [SHOW_FILE_BUTTON]: showFile(filePath) },
           );
           return;
@@ -278,7 +312,7 @@ async function runMigration(
     };
     showErrorWithActions(
       `${MIGRATE_NAMING_TITLE}: ${listFiles(dirty)} ` +
-        `${dirty.length === 1 ? 'has' : 'have'} unsaved edits. Save or revert ${dirty.length === 1 ? 'it' : 'them'}, then migrate. Nothing was changed.`,
+        `${dirty.length === 1 ? 'has' : 'have'} unsaved edits. Save or revert ${dirty.length === 1 ? 'it' : 'them'}, then migrate. ${nothingChangedSentence(progress)}`,
       { [SHOW_FILE_BUTTON]: showFile(dirtyPaths[0]), [SAVE_AND_TRY_AGAIN_BUTTON]: saveAndRetry },
     );
     return 'refused';
@@ -296,13 +330,10 @@ async function runMigration(
   const again = planProjectNamingMigration(deps);
   if (again.refusals.length > 0 || describeNamingMigration(again) !== describeNamingMigration(plan)
     || dirtyFiles(touched).length > 0) {
-    showErrorWith(
-      (m, ...items) => vscode.window.showWarningMessage(m, ...items),
-      `${MIGRATE_NAMING_TITLE}: the project changed while the dialog was open. Nothing was changed; run it again.`,
+    showErrorWithActions(
+      `${MIGRATE_NAMING_TITLE}: the project changed while the dialog was open. ${nothingChangedCapitalised(progress)}; run it again.`,
       { [TRY_AGAIN_BUTTON]: retry },
-      (choice, err) => {
-        console.error(`[ERD Studio] ${MIGRATE_NAMING_TITLE}: "${choice}" failed:`, err);
-      },
+      (m, ...items) => vscode.window.showWarningMessage(m, ...items),
     );
     return 'cancelled';
   }
@@ -343,11 +374,16 @@ async function runMigration(
   }
 
   // Released (once) before the canvases redraw, or if anything throws first.
-  const held = deps.holdRefreshes?.();
+  let held: (() => void) | undefined;
   let released = false;
   const release = (): void => { if (!released) { released = true; held?.(); } };
   try {
+    held = deps.holdRefreshes?.();
     return await applyMigration(deps, plan, edit, docs, newFolders, semanticRoot, abs, release, progress, retry);
+  } catch (err) {
+    // Nothing landed: the folders made for it go again, or an empty `tables/` would read as a layer folder.
+    if (!progress.applied) removeFolders(newFolders);
+    throw err;
   } finally {
     release();
   }
@@ -363,7 +399,7 @@ async function applyMigration(
   semanticRoot: string,
   abs: (rel: string) => string,
   release: () => void,
-  progress: { applied: boolean; unsaved: boolean },
+  progress: MigrationProgress,
   retry: () => Promise<MigrateNamingOutcome>,
 ): Promise<MigrateNamingOutcome> {
   const touched = [...plan.moves.flatMap((m) => [abs(m.from), abs(m.to)]), ...plan.rewrites.map((r) => abs(r.path))];
@@ -371,7 +407,7 @@ async function applyMigration(
     removeFolders(newFolders);
     telemetry.error('editRejected');
     showErrorWithActions(
-      `${MIGRATE_NAMING_TITLE}: VS Code didn't accept the file moves, so nothing was changed. ` +
+      `${MIGRATE_NAMING_TITLE}: VS Code didn't accept the file moves, so ${nothingChanged(progress)}. ` +
         "This is usually a file another program has open or a folder you can't write to.",
       {
         [TRY_AGAIN_BUTTON]: retry,
@@ -425,7 +461,7 @@ async function applyMigration(
  * Show File opens the first. Edit > Undo is still the way back.
  */
 function showUnsaved(deps: Pick<MigrateNamingDeps, 'workspaceRoot'>, unsaved: readonly vscode.Uri[]): void {
-  const shown = (uris: readonly vscode.Uri[]): string => listFiles(uris.map((u) => path.relative(deps.workspaceRoot, u.fsPath).split(path.sep).join('/')));
+  const shown = (uris: readonly vscode.Uri[]): string => listFiles(uris.map((u) => projectRelative(deps.workspaceRoot, u.fsPath)));
   const saveAll = async (): Promise<void> => {
     const still: vscode.Uri[] = [];
     for (const uri of unsaved) {

@@ -216,6 +216,34 @@ describe('Migrate to the New File Naming: failures (#219)', () => {
     expect(telemetryError).toHaveBeenCalledWith('editRejected');
   });
 
+  it('a throw before the edit applies leaves no empty tables/ folder behind', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(MIGRATE_NAMING_BUTTON as never);
+    const holdRefreshes = (): (() => void) => { throw new Error('hold failed'); };
+
+    expect(await migrateToTableNaming(deps({ holdRefreshes }))).toBe('failed');
+
+    expect(fs.existsSync(path.join(erd, 'tables'))).toBe(false);
+    expect(fs.existsSync(path.join(erd, 'logical-models', 'dim_task.yml'))).toBe(true);
+  });
+
+  it('after the v4 step converted files, a later stop does not say nothing was changed', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(MIGRATE_NAMING_BUTTON as never);
+    fs.writeFileSync(path.join(erd, 'gold', 'inline.json'), JSON.stringify({
+      schemaVersion: 4, domain: 'inline', layer: 'gold', description: '',
+      logical: { models: [{ name: 'dim_inline', columns: [{ name: 'k', dataType: 'INT', isPrimaryKey: true }] }], relationships: [] },
+    }, null, 2) + '\n');
+    // Stands in for the v4 step: the file is no longer v4 afterwards.
+    const migrateToV5 = vi.fn(async (): Promise<boolean> => { fs.rmSync(path.join(erd, 'gold', 'inline.json')); return true; });
+    vscode._mockWorkspaceState.applyEditResult = false;
+
+    expect(await migrateToTableNaming(deps({ migrateToV5 }))).toBe('failed');
+
+    expect(toasts(error)[0].message).toBe(
+      `${TITLE}: VS Code didn't accept the file moves, so the v4 subject areas were converted to the Table Library, but nothing else was changed. ` +
+        "This is usually a file another program has open or a folder you can't write to.",
+    );
+  });
+
   it('a subject area that did not save: counted as saveFailed, and Save All saves it', async () => {
     vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(MIGRATE_NAMING_BUTTON as never);
     const showcase = path.join(erd, 'silver', 'showcase.json');
