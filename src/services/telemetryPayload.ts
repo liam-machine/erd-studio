@@ -298,6 +298,20 @@ export const ERROR_CODES = [
   // empty through every re-read, or it holds unresolved git conflict markers.
   'domainLoadEmpty',
   'domainLoadConflict',
+  // Why a save counted as `saveFailed` failed, recorded beside it (which stays
+  // the total): VS Code refused it and the file is still unsaved (typically
+  // changed on disk since VS Code read it), save() threw (typically a closed
+  // document: ours to fix), or re-opening the document to save it threw
+  // (typically the file system: the user's). `saveFailedModelFile`: a model
+  // file was among the unsaved (otherwise only diagram files were).
+  // `saveFailedRename` / `saveFailedUndoRedo`: the failure came from the
+  // duplicate-model rename or an undo/redo flush, not a canvas edit.
+  'saveFailedRefused',
+  'saveFailedThrew',
+  'saveFailedModelFile',
+  'saveFailedRename',
+  'saveFailedReopen',
+  'saveFailedUndoRedo',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
@@ -789,6 +803,35 @@ const SUBJECT_AREA_LOAD_ERROR_CODES: Record<SubjectAreaLoadFailure, TelemetryErr
 /** The error sub-code counted for a canvas load failure of `kind`; recorded alongside `domainLoad`. */
 export function subjectAreaLoadErrorCode(kind: SubjectAreaLoadFailure): TelemetryErrorCode {
   return SUBJECT_AREA_LOAD_ERROR_CODES[kind] ?? 'domainLoadInternal';
+}
+
+/** Why a save failed (see saveDocument in src/providers/documentSave.ts). */
+export type SaveFailure = 'refused' | 'threw' | 'reopenFailed';
+
+/** The error sub-code counted for a save that failed for `reason`; recorded alongside `saveFailed`. */
+export function saveFailureCode(reason: SaveFailure): TelemetryErrorCode {
+  // Exhaustive, so a new reason fails to compile until it has its own code.
+  switch (reason) {
+    case 'refused': return 'saveFailedRefused';
+    case 'threw': return 'saveFailedThrew';
+    case 'reopenFailed': return 'saveFailedReopen';
+  }
+}
+
+/**
+ * Every error code to record for one failed save step: `saveFailed` (the
+ * total), one per distinct reason, and where it happened.
+ */
+export function saveFailureCodes(
+  reasons: Iterable<SaveFailure>,
+  where: { modelFile?: boolean; rename?: boolean; undoRedo?: boolean } = {},
+): TelemetryErrorCode[] {
+  const codes: TelemetryErrorCode[] = ['saveFailed'];
+  for (const reason of new Set(reasons)) codes.push(saveFailureCode(reason));
+  if (where.modelFile) codes.push('saveFailedModelFile');
+  if (where.rename) codes.push('saveFailedRename');
+  if (where.undoRedo) codes.push('saveFailedUndoRedo');
+  return codes;
 }
 
 /** The feature key for an auto layout that took `ms` milliseconds, or failed. */

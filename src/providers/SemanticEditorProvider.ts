@@ -148,7 +148,7 @@ import { describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat, getRawSu
 import { telemetry } from '../services/telemetryService';
 import { saveDocument, saveDocumentByUri } from './documentSave';
 import { dirtyFiles } from './dirtyDocuments';
-import { subjectAreaLoadErrorCode, layoutFeature, type SubjectAreaLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
+import { subjectAreaLoadErrorCode, layoutFeature, saveFailureCodes, type SaveFailure, type SubjectAreaLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
 import { openTableFileAt } from '../commands/openModelFile';
 import {
   buildDbtDraft,
@@ -2311,20 +2311,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * domain are saved (`editedTablePaths`). A logical-models/*.yml the user has
    * open in another tab with unsaved hand edits is never force-saved — those
    * bytes are theirs to keep or discard.
+   *
+   * Returns the paths that could not be saved.
    */
-  private async saveDirtyTableDocuments(panelKey: string): Promise<void> {
+  private async saveDirtyTableDocuments(panelKey: string, onFailure: (reason: SaveFailure) => void): Promise<string[]> {
     const ourPaths = this.editedTablePaths.get(panelKey);
-    if (!ourPaths || ourPaths.size === 0) return;
+    if (!ourPaths || ourPaths.size === 0) return [];
+    const unsaved: string[] = [];
     for (const doc of vscode.workspace.textDocuments) {
       if (!doc.isDirty) continue;
       if (!ourPaths.has(doc.uri.fsPath)) continue;
-      try {
-        await doc.save();
+      if (await saveDocument(doc, onFailure)) {
         this.ownWriteTracker.recordWrite(doc.uri.fsPath);
-      } catch (err) {
-        console.error(`[SemanticEditorProvider] Failed to save ${doc.uri.fsPath} after undo/redo:`, err);
+      } else {
+        unsaved.push(doc.uri.fsPath);
       }
     }
+    return unsaved;
   }
 
   /**
@@ -2359,9 +2362,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Cmd+Z on a canvas whose file was deleted outside ERD Studio rewinds the
     // document in memory only; saving it would recreate the file (#161).
     if (!fs.existsSync(document.uri.fsPath)) return;
-    await document.save();
-    this.ownWriteTracker.recordWrite(document.uri.fsPath);
-    await this.saveDirtyTableDocuments(panelKey);
+    // A save that fails is reported, never ignored, as after a canvas edit (#126).
+    const saveFailures = new Set<SaveFailure>();
+    const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
+    const unsaved: string[] = [];
+    if (await saveDocument(document, onSaveFailure)) {
+      this.ownWriteTracker.recordWrite(document.uri.fsPath);
+    } else {
+      unsaved.push(document.uri.fsPath);
+    }
+    const unsavedTables = await this.saveDirtyTableDocuments(panelKey, onSaveFailure);
+    unsaved.push(...unsavedTables);
+    if (unsaved.length > 0) {
+      const modelFile = unsavedTables.some((p) => /\.ya?ml$/i.test(p));
+      for (const code of saveFailureCodes(saveFailures, { modelFile, undoRedo: true })) telemetry.error(code);
+      void webview.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
+    }
     this.tableLibraryService.invalidateCache();
     await this.sendSubjectAreaData(document, webview, panelKey);
     this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: true });
@@ -2488,7 +2504,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // A save that fails is reported, never ignored: the edit is applied in
       // memory, so without a word the file would sit open and unsaved (#126).
       const unsaved: string[] = [];
-      if (await saveDocument(document)) {
+      const saveFailures = new Set<SaveFailure>();
+      const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
+      let modelFileUnsaved = false;
+      if (await saveDocument(document, onSaveFailure)) {
         // Own writes are recorded only once the bytes are on disk — the tracker
         // stats the file — so the logical-model / semantic watchers can tell
         // this save apart from an external edit and skip the extra refresh.
@@ -2503,21 +2522,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.ownWriteTracker.recordDelete(filePath);
       }
       const ourPaths = this.editedTablePaths.get(panelKey) ?? new Set<string>();
-      for (const modelDoc of [...modelDocs, ...otherDomainDocs]) {
+      for (const [index, modelDoc] of [...modelDocs, ...otherDomainDocs].entries()) {
         // Remember which yml (and other domain) documents WE edited for this
         // domain, so an undo/redo only ever flushes those (never a buffer the
         // user is hand-editing in another tab).
         ourPaths.add(modelDoc.uri.fsPath);
         // Re-fetched by URI: VS Code may have disposed the handle opened
         // before the edit, and the edit then landed in a fresh copy (#126).
-        if (await saveDocumentByUri(modelDoc.uri)) {
+        if (await saveDocumentByUri(modelDoc.uri, onSaveFailure)) {
           this.ownWriteTracker.recordWrite(modelDoc.uri.fsPath);
         } else {
           unsaved.push(modelDoc.uri.fsPath);
+          if (index < modelDocs.length) modelFileUnsaved = true;
         }
       }
       if (unsaved.length > 0) {
-        telemetry.error('saveFailed');
+        for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
         options.onUnsaved?.();
         webview?.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
       }
