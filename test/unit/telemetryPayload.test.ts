@@ -17,6 +17,7 @@ import {
   ASSISTANTS,
   ERROR_CODES,
   saveFailureCode,
+  saveFailureCodes,
   FEATURES,
   HARNESSES,
   HOSTS,
@@ -433,7 +434,7 @@ describe('allowlists agree with the Worker', () => {
     expect(body.errors).toEqual({ exportFailed: 1 });
   });
 
-  it('appends the domain-file split at the very end, as errors beside domainLoad', () => {
+  it('appends the domain-file split after domainLoadEmpty, as errors beside domainLoad', () => {
     expect(ERROR_CODES.indexOf('domainLoadConflict')).toBe(ERROR_CODES.indexOf('domainLoadEmpty') + 1);
     expect(ERROR_CODES.indexOf('saveFailedRefused')).toBe(ERROR_CODES.indexOf('domainLoadConflict') + 1);
     let s = emptyCounters('2026-10-19');
@@ -445,9 +446,12 @@ describe('allowlists agree with the Worker', () => {
   });
 
   it('appends the saveFailed split at the very end, as errors beside saveFailed', () => {
-    expect(ERROR_CODES.slice(-4)).toEqual(['saveFailedRefused', 'saveFailedThrew', 'saveFailedModelFile', 'saveFailedRename']);
+    expect(ERROR_CODES.slice(-6)).toEqual([
+      'saveFailedRefused', 'saveFailedThrew', 'saveFailedModelFile', 'saveFailedRename', 'saveFailedReopen', 'saveFailedUndoRedo',
+    ]);
     expect(saveFailureCode('refused')).toBe('saveFailedRefused');
     expect(saveFailureCode('threw')).toBe('saveFailedThrew');
+    expect(saveFailureCode('reopenFailed')).toBe('saveFailedReopen');
     let s = emptyCounters('2026-10-26');
     s = recordError(s, 'saveFailed');
     s = recordError(s, saveFailureCode('refused'));
@@ -458,6 +462,17 @@ describe('allowlists agree with the Worker', () => {
     expect(buildHeartbeat(s, ENV).errors).toEqual({
       saveFailed: 2, saveFailedRefused: 1, saveFailedThrew: 1, saveFailedModelFile: 1, saveFailedRename: 1,
     });
+  });
+
+  it('saveFailureCodes lists the total, each distinct reason once, then where', () => {
+    expect(saveFailureCodes([])).toEqual(['saveFailed']);
+    expect(saveFailureCodes(['refused', 'refused', 'reopenFailed'], { modelFile: true })).toEqual([
+      'saveFailed', 'saveFailedRefused', 'saveFailedReopen', 'saveFailedModelFile',
+    ]);
+    expect(saveFailureCodes(['threw'], { rename: true })).toEqual(['saveFailed', 'saveFailedThrew', 'saveFailedRename']);
+    expect(saveFailureCodes(new Set(['refused'] as const), { undoRedo: true })).toEqual([
+      'saveFailed', 'saveFailedRefused', 'saveFailedUndoRedo',
+    ]);
   });
 
   it('telemetry.json documents every feature key', () => {

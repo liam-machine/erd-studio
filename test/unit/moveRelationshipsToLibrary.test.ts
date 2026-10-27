@@ -593,7 +593,7 @@ describe('canvas edits save the documents they edited (#126 hardening)', () => {
     expect(fs.readFileSync(modelPath, 'utf-8')).not.toMatch(/^relationships:/m);
   });
 
-  it('records a save that threw as saveFailedThrew, beside saveFailed', async () => {
+  it('records a document it could not re-open to save as saveFailedReopen, beside saveFailed', async () => {
     const canvas = await openCanvas();
     const modelPath = tableLibraryService.tablePath('fct_order');
     const openTextDocument = vscode.workspace.openTextDocument;
@@ -613,8 +613,38 @@ describe('canvas edits save the documents they edited (#126 hardening)', () => {
 
     expect(canvas.errors()).toHaveLength(1);
     expect(telemetryError).toHaveBeenCalledWith('saveFailed');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailedReopen');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailedModelFile');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedThrew');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedRefused');
+  });
+
+  it('records a save() that threw (e.g. a closed document) as saveFailedThrew, not saveFailedReopen', async () => {
+    const canvas = await openCanvas();
+    const modelPath = tableLibraryService.tablePath('fct_order');
+    const openTextDocument = vscode.workspace.openTextDocument;
+    const applyEdit = vscode.workspace.applyEdit;
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      const ok = await applyEdit(edit);
+      // Re-opening works, but the document it returns rejects its save.
+      vi.spyOn(vscode.workspace, 'openTextDocument').mockImplementation(async (uri: any) => {
+        const doc = await openTextDocument(uri);
+        if (path.resolve(uri.fsPath ?? uri) === path.resolve(modelPath)) {
+          vi.spyOn(doc, 'save').mockRejectedValue(new Error('Document has been closed'));
+        }
+        return doc;
+      });
+      return ok;
+    });
+    const telemetryError = vi.spyOn(telemetry, 'error');
+
+    await canvas.addRelationship();
+
+    expect(canvas.errors()).toHaveLength(1);
+    expect(telemetryError).toHaveBeenCalledWith('saveFailed');
     expect(telemetryError).toHaveBeenCalledWith('saveFailedThrew');
     expect(telemetryError).toHaveBeenCalledWith('saveFailedModelFile');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedReopen');
     expect(telemetryError).not.toHaveBeenCalledWith('saveFailedRefused');
   });
 });

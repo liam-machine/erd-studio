@@ -48,7 +48,7 @@ import { ReportTrackingService } from './services/reportTrackingService';
 import { TelemetryService, telemetry } from './services/telemetryService';
 import { startKnownFixes } from './services/knownFixesService';
 import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
-import { saveFailureCode, tableFileErrorCode, type SaveFailure } from './services/telemetryPayload';
+import { saveFailureCodes, tableFileErrorCode, type SaveFailure } from './services/telemetryPayload';
 import { notifyTableFileError, shouldWarnAboutTableFile } from './commands/openModelFile';
 import { MyReportsTreeProvider, type MyReportNode } from './providers/MyReportsTreeProvider';
 import type { FeedbackKind } from './types/feedback';
@@ -1666,9 +1666,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         treeProvider.invalidateSubjectArea(doc.uri.fsPath);
       }
       if (unsaved.length > 0) {
-        telemetry.error('saveFailed');
-        for (const reason of saveFailures) telemetry.error(saveFailureCode(reason));
-        telemetry.error('saveFailedRename');
+        for (const code of saveFailureCodes(saveFailures, { rename: true })) telemetry.error(code);
         void vscode.window.showErrorMessage(
           `Could not save ${unsaved.join(', ')} — the rename is open in the editor but not on disk. Save the file from its tab, or revert it.`,
         );

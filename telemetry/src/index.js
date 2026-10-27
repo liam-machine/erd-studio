@@ -351,11 +351,13 @@ const ERROR_CODES = [
   'exportFailed',
   'domainLoadEmpty',
   'domainLoadConflict',
-  // Why a saveFailed save failed, which file kind, and the rename path.
+  // Why a saveFailed save failed, which file kind, and the rename / undo-redo paths.
   'saveFailedRefused',
   'saveFailedThrew',
   'saveFailedModelFile',
   'saveFailedRename',
+  'saveFailedReopen',
+  'saveFailedUndoRedo',
 ];
 
 /**

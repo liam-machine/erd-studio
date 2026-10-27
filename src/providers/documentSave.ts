@@ -16,7 +16,8 @@
  *
  * `onFailure`, when given, is told why a failed save failed: `refused` (save()
  * resolved false and the document is still dirty, e.g. the file changed on
- * disk) or `threw` (save(), or re-opening the document, threw).
+ * disk), `threw` (save() threw, e.g. a closed document) or `reopenFailed`
+ * (re-opening the document by URI threw, e.g. a file system error).
  */
 
 import * as vscode from 'vscode';
@@ -28,7 +29,7 @@ export async function saveDocumentByUri(uri: vscode.Uri, onFailure?: (reason: Sa
     doc = await vscode.workspace.openTextDocument(uri);
   } catch (err) {
     console.error(`[saveDocumentByUri] could not save ${uri.fsPath}:`, err);
-    onFailure?.('threw');
+    onFailure?.('reopenFailed');
     return false;
   }
   return saveDocument(doc, onFailure);
