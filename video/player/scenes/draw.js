@@ -31,7 +31,7 @@ export default {
     const enterAt = typedEnd + 0.2;
     const qpOut = enterAt + 0.2;
 
-    const done = t >= doneAt ? ['openProject', 'draw'] : ['openProject'];
+    const done = t >= doneAt ? ['draw'] : [];
     const glow = 1 - 0.6 * seg(t, doneAt, doneAt + 0.5);
     let body = explorerSide({ hot: 1 });
     body += `<div class="abs" style="left:${ED}px;top:0;right:0;bottom:0">${walkthrough({ done, glow, press: seg(t, click, click + 0.4) })}</div>`;

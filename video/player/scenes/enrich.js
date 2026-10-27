@@ -26,7 +26,7 @@ export default {
     const sendAt = typeEnd + 0.25;
     const replyAt = sendAt + 0.45;
 
-    const done = t >= doneAt ? ['openProject', 'draw', 'enrich'] : ['openProject', 'draw'];
+    const done = t >= doneAt ? ['draw', 'enrich'] : ['draw'];
     let body = `<div class="abs" style="left:${ACT}px;top:0;right:0;bottom:0">${walkthrough({ open: 'enrich', done, wide: true, glow: easeOut(seg(t, glowAt, glowAt + 0.4)), press: seg(t, clickAt, clickAt + 0.4) })}</div>`;
     body += activityBar('erd');
     let html = editorWindow({ tabs: [{ label: 'orders.json' }, { label: 'Welcome', on: true }], body });

@@ -54,33 +54,61 @@ export function explorerSide({ hot = 0, op = 1 } = {}) {
 export const EXTENSION = {
   name: 'ERD Studio',
   publisher: 'liamwynne',
-  description: 'Visual ERD designer for dbt: draw your models on a canvas, keep the design as YAML in your repo, compare it with dbt.',
+  description: 'Logical data modeling in Git: draw ERDs in VS Code, saved as plain YAML your AI assistant can read. DBML import and export, no lock-in. Compare with dbt.',
 };
 
 // ---------- the walkthrough (package.json contributes.walkthroughs, id erdStudio.getStarted) ----------
-// VS Code renders a step's command link that sits on its own line as a button; `text` is the
-// rest of the description.
+// Every step, in order, with its real `when` clause; a window shows only the steps whose clause
+// holds there. VS Code renders a step's command link that sits on its own line as a button;
+// `text` is the rest of the description (set only for the steps a scene opens).
 export const WALKTHROUGH = {
   title: 'Get started with ERD Studio',
-  description: 'Draw your dbt project as an ERD in a minute, then enrich it with your AI assistant.',
+  description: 'Design your data model in Git — from scratch, from DBML or from dbt — then let your AI assistant fill in the detail.',
   steps: [
-    { id: 'watch', title: 'Watch the one-minute tour', svg: 'watch' },
-    { id: 'sample', title: 'No dbt project? Try the sample', text: 'A small dbt project to try ERD Studio on.', button: 'Try the sample project', svg: 'sample' },
-    { id: 'openProject', title: 'Open your dbt project', svg: 'open-project' },
+    { id: 'watch', when: 'erdStudio.hasDbtProject', title: 'Watch the one-minute tour', svg: 'watch' },
+    { id: 'openProject', when: 'workspaceFolderCount == 0', title: 'Open the folder your data model lives in', svg: 'open-project' },
+    { id: 'newDiagram', when: '!erdStudio.hasDbtProject', title: 'Draw your first data model — no dbt needed', svg: 'new-diagram' },
     {
-      id: 'draw', title: 'Draw your dbt project — no AI needed', svg: 'draw', button: 'Draw from dbt',
+      id: 'draw', when: 'erdStudio.hasDbtProject', title: 'Draw your dbt project — no AI needed', svg: 'draw', button: 'Draw from dbt',
       text: 'Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.',
     },
+    { id: 'importDbml', title: 'Start from a DBML file', svg: 'import-dbml' },
     {
       id: 'enrich', title: 'Enrich it with your AI assistant', svg: 'enrich', button: 'Set Up My AI Helper',
       text: "Add grain, keys, rationale and your team's modelling style. This installs a guide for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; then type /erd-studio-setup in your assistant.",
     },
+    {
+      id: 'sample', when: '!erdStudio.hasDbtProject', title: 'Using dbt? Try the sample project', svg: 'sample', button: 'Try the sample project',
+      text: 'A small dbt project to compare a design with what dbt built.',
+    },
   ],
 };
 
+// The two windows the video shows: the tour runs in the jaffle-shop dbt project; the sample scene
+// is a folder without dbt (the sample step is offered only there).
+export const DBT_PROJECT = { 'erdStudio.hasDbtProject': true, workspaceFolderCount: 1 };
+export const PLAIN_FOLDER = { 'erdStudio.hasDbtProject': false, workspaceFolderCount: 1 };
+
+/** Evaluates the walkthrough's `when` clauses: `key`, `!key` and `key == n`. Anything else throws. */
+export function whenHolds(when, ctx) {
+  if (when === undefined) return true;
+  let m;
+  if ((m = when.match(/^(!?)([\w.]+)$/))) {
+    if (!(m[2] in ctx)) throw new Error(`unknown context key ${m[2]}`);
+    return Boolean(ctx[m[2]]) !== (m[1] === '!');
+  }
+  if ((m = when.match(/^([\w.]+) == (\d+)$/))) {
+    if (!(m[1] in ctx)) throw new Error(`unknown context key ${m[1]}`);
+    return ctx[m[1]] === Number(m[2]);
+  }
+  throw new Error(`unsupported when clause: ${when}`);
+}
+/** The steps a window with this context shows, in order. */
+export const visibleSteps = (ctx = DBT_PROJECT) => WALKTHROUGH.steps.filter((s) => whenHolds(s.when, ctx));
+
 // The step images are the real media/walkthrough/*.svg files, inlined (an <img> could not use the
 // page's fonts, and the video uses OFL fonts only). Fetched once, before the first frame.
-const SVG_NAMES = ['watch', 'sample', 'open-project', 'draw', 'enrich'];
+const SVG_NAMES = WALKTHROUGH.steps.map((s) => s.svg);
 export const WALK_SVG = Object.fromEntries(await Promise.all(SVG_NAMES.map(async (n) => {
   const txt = await (await fetch(`/media/walkthrough/${n}.svg`, { cache: 'no-store' })).text();
   return [n, txt.replace(/font-family="[^"]*"/, 'font-family="Inter, sans-serif"')];
@@ -93,14 +121,16 @@ export const walkSvg = (name, w) =>
  * Geometry of the walkthrough page, in coordinates relative to its own left edge / the body top.
  * `wide` (no side bar) gives the step column and the image more room.
  */
-export function wtGeom({ wide = false, open = 'draw' } = {}) {
+export function wtGeom({ wide = false, open = 'draw', ctx = DBT_PROJECT } = {}) {
   const W = wide ? BODY.w - ACT : BODY.w - ACT - SIDE;
   const g = { W, SX: 48, SW: wide ? 760 : 640, ROW: 48, STEPS_Y: 104, INDENT: 52, TEXT_W: wide ? 680 : 560, TEXT_LH: 28, BTN_H: 46 };
   g.IMG_X = g.SX + g.SW + 44;
   g.IMG_W = Math.min(W - g.IMG_X - 48, wide ? 760 : 520);
-  const idx = WALKTHROUGH.steps.findIndex((s) => s.id === open);
+  const steps = visibleSteps(ctx);
+  const idx = steps.findIndex((s) => s.id === open);
+  if (idx < 0) throw new Error(`walkthrough step ${open} is not shown in this window`);
   g.OPEN_Y = g.STEPS_Y + idx * g.ROW;
-  const step = WALKTHROUGH.steps[idx];
+  const step = steps[idx];
   const perLine = g.TEXT_W / 9.6;                      // ~characters per line at 19 px Inter
   g.TEXT_LINES = step?.text ? Math.ceil(step.text.length / perLine) : 0;
   g.BTN_Y = 54 + g.TEXT_LINES * g.TEXT_LH + 14;         // relative to the open step's top
@@ -117,14 +147,15 @@ const openDot = (size) => `<span style="width:${size}px;height:${size}px;border-
  * @param o.open   id of the expanded step   @param o.done  completed step ids
  * @param o.glow   0..1 highlight on the open step   @param o.press 0..1 click on its button
  * @param o.img    0..1 opacity of the step's image
+ * @param o.ctx    the window's context keys (DBT_PROJECT or PLAIN_FOLDER): which steps show
  */
-export function walkthrough({ open = 'draw', done = ['openProject'], glow = 0, press = 0, wide = false, img = 1 } = {}) {
-  const g = wtGeom({ wide, open });
+export function walkthrough({ open = 'draw', done = [], glow = 0, press = 0, wide = false, img = 1, ctx = DBT_PROJECT } = {}) {
+  const g = wtGeom({ wide, open, ctx });
   let h = `<div class="abs" style="left:0;top:0;width:${g.W}px;bottom:0;background:var(--card)"></div>`;
   h += `<div class="abs" style="left:${g.SX}px;top:18px;font-size:32px;font-weight:800;letter-spacing:-.01em;white-space:nowrap">${WALKTHROUGH.title}</div>`;
   h += `<div class="abs" style="left:${g.SX}px;top:62px;font-size:20px;color:var(--text-2);white-space:nowrap">${WALKTHROUGH.description}</div>`;
   let y = g.STEPS_Y;
-  for (const s of WALKTHROUGH.steps) {
+  for (const s of visibleSteps(ctx)) {
     const dot = done.includes(s.id) ? doneDot(26) : openDot(26);
     if (s.id === open) {
       const bw = `rgba(55,148,255,${(0.3 + 0.7 * glow).toFixed(2)})`;
@@ -148,8 +179,8 @@ export function walkthrough({ open = 'draw', done = ['openProject'], glow = 0, p
   return h;
 }
 /** Frame-space centre of the open step's button. `left` = the walkthrough's left edge in body px. */
-export function walkButton({ wide = false, open = 'draw', left = ACT + SIDE } = {}) {
-  const g = wtGeom({ wide, open });
+export function walkButton({ wide = false, open = 'draw', left = ACT + SIDE, ctx = DBT_PROJECT } = {}) {
+  const g = wtGeom({ wide, open, ctx });
   const step = WALKTHROUGH.steps.find((s) => s.id === open);
   const w = 22 * 2 + step.button.length * 11.2;
   return { x: BODY.x + left + g.SX + g.INDENT + w / 2, y: BODY.y + g.OPEN_Y + g.BTN_Y + g.BTN_H / 2 };

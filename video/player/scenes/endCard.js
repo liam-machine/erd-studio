@@ -3,9 +3,9 @@
 import { appear, appIcon, ICON } from '../lib.js';
 import { EXTENSION, WALKTHROUGH } from '../editor.js';
 
-// The chips name the real steps: the extension, the walkthrough's "Open your dbt project" and
-// the Draw from dbt button.
-export const STEPS = ['Install ERD Studio', 'Open your dbt project', 'Draw from dbt'];
+// The chips name the real steps: the extension, the walkthrough's open-a-folder step and the
+// Draw from dbt button.
+export const STEPS = ['Install ERD Studio', 'Open the folder your data model lives in', 'Draw from dbt'];
 
 export default {
   render(t) {
