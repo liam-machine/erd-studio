@@ -328,7 +328,8 @@ function jsonEqual(a: unknown, b: unknown): boolean {
  *
  * - `oldText` `null` (no file): created only when there is at least one
  *   position or sticky layout.
- * - Both lists deep-equal to what is there: `null`, no write.
+ * - Both lists deep-equal to what is there: `null`, no write. A missing
+ *   list, or a missing `defaultView`, counts as an empty list.
  * - `oldText` that is not a JSON object: throws {@link DbdiagramLayoutRefused}.
  *
  * Pure, parser-free and deterministic.
@@ -377,11 +378,21 @@ export function editDiagramLayout(
   }
   const file = parsed as Record<string, unknown>;
   const existingView = file.defaultView;
-  const view: Record<string, unknown> =
-    existingView && typeof existingView === 'object' && !Array.isArray(existingView)
-      ? (existingView as Record<string, unknown>)
-      : { detailLevel: 'All', relationshipMode: 'All', tablePositions: [], tableGroupCollapseStates: [], stickyNoteLayouts: [], referencePaths: [] };
-  if (view === existingView && jsonEqual(view.tablePositions, tablePositions) && jsonEqual(view.stickyNoteLayouts, stickyNoteLayouts)) {
+  const hasView = !!existingView && typeof existingView === 'object' && !Array.isArray(existingView);
+  // A missing list (or a missing defaultView) holds nothing: comparing it as
+  // `[]` keeps a no-op edit a no-op (D7), so an older or hand-written layout
+  // file is not reformatted by an edit that changed no position or note.
+  if ((existingView === undefined || existingView === null) && tablePositions.length === 0 && stickyNoteLayouts.length === 0) {
+    return null;
+  }
+  const view: Record<string, unknown> = hasView
+    ? (existingView as Record<string, unknown>)
+    : { detailLevel: 'All', relationshipMode: 'All', tablePositions: [], tableGroupCollapseStates: [], stickyNoteLayouts: [], referencePaths: [] };
+  if (
+    hasView &&
+    jsonEqual(view.tablePositions === undefined ? [] : view.tablePositions, tablePositions) &&
+    jsonEqual(view.stickyNoteLayouts === undefined ? [] : view.stickyNoteLayouts, stickyNoteLayouts)
+  ) {
     return null;
   }
   view.tablePositions = tablePositions;

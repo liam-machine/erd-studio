@@ -20,7 +20,7 @@ import type { SyncPlan } from '../types/syncPlan';
 import { SubjectAreaFileError } from '../services/domainService';
 import type { TableFileError, TableFileErrorKind } from '../services/logicalModelService';
 import { usesLibraryRelationships } from '../services/libraryRelationships';
-import { canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship } from '@erd-studio/core';
+import { DBML_TABLE_QUOTE_HINT_CODES, canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship } from '@erd-studio/core';
 import type { ColumnPair } from '@erd-studio/core';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
@@ -89,7 +89,9 @@ export interface UnreadableTableFile {
 /**
  * One-line advice per failure kind, for the fix text and the human output.
  * `at that line` in a DBML hint becomes the line when one is known
- * ({@link unreadableHint}).
+ * ({@link unreadableHint}). A DBML hint is refined by the error's code
+ * ({@link kindHint}): the quote advice only for an unquoted value
+ * (`DBML_TABLE_QUOTE_HINT_CODES`), and a `structure:<rule>` its own fix.
  */
 export const TABLE_FILE_HINTS: Record<TableFileErrorKind, string> = {
   yamlScalar: 'wrap the value in double quotes',
@@ -99,13 +101,32 @@ export const TABLE_FILE_HINTS: Record<TableFileErrorKind, string> = {
   yamlOther: 'check the YAML syntax there',
   read: 'the file could not be read — check it exists and is readable',
   dbmlSyntax: 'fix the DBML at that line',
-  dbmlInvalid: "fix the DBML at that line — quote every custom value, as in grain: 'One row per order line'",
-  dbmlStructure: 'a table file holds one Table and no use/Ref lines',
+  dbmlInvalid: 'fix the DBML at that line',
+  dbmlStructure: 'a table file holds exactly one Table, named as its file, and no Project, TableGroup or Note',
 };
 
-/** The hint for `kind`, with a DBML hint's `at that line` made `at line N` when the line is known. */
-function kindHint(kind: TableFileErrorKind, line: number | undefined): string {
-  const hint = TABLE_FILE_HINTS[kind];
+/** The quote advice, appended to a `dbmlInvalid` hint only for the codes of an unquoted value. */
+const DBML_QUOTE_ADVICE = "quote the value, as in grain: 'One row per order line'";
+
+/** The fix for each of ERD Studio's own table-file rules (`structure:<rule>` codes). */
+const DBML_STRUCTURE_HINTS: Readonly<Record<string, string>> = {
+  'structure:notOneTable': 'a table file holds exactly one Table — move any other Table to its own file',
+  'structure:nameMismatch': 'name the Table as its file (or rename the file to the Table\'s name)',
+  'structure:unsupportedElement': 'a table file holds one Table and nothing else — remove the Project, TableGroup, Note or other block',
+};
+
+/**
+ * The hint for `kind` and `code`, with a DBML hint's `at that line` made
+ * `at line N` when the line is known. A `dbmlStructure` with a parser
+ * (binding) code is fixed where the parser points.
+ */
+function kindHint(kind: TableFileErrorKind, line: number | undefined, code?: string): string {
+  let hint = TABLE_FILE_HINTS[kind];
+  if (kind === 'dbmlInvalid' && code !== undefined && DBML_TABLE_QUOTE_HINT_CODES.has(code)) {
+    hint = `${hint} — ${DBML_QUOTE_ADVICE}`;
+  } else if (kind === 'dbmlStructure' && code !== undefined) {
+    hint = DBML_STRUCTURE_HINTS[code] ?? (code.startsWith('structure:') ? hint : TABLE_FILE_HINTS.dbmlInvalid);
+  }
   return line !== undefined ? hint.replace('at that line', `at line ${line}`) : hint;
 }
 
@@ -115,7 +136,7 @@ function kindHint(kind: TableFileErrorKind, line: number | undefined): string {
  * of a conflict to keep is the user's call — it is usually a teammate's work —
  * so the conflict advice asks the assistant to show it, not to resolve it.
  */
-export function unreadableHint(u: Pick<UnreadableTableFile, 'kind' | 'mergeConflict' | 'readable' | 'key' | 'line'>): string {
+export function unreadableHint(u: Pick<UnreadableTableFile, 'kind' | 'mergeConflict' | 'readable' | 'key' | 'line' | 'code'>): string {
   if (u.readable) {
     return `${u.key ? `\`${u.key}\`` : 'a key'} is written twice in one block — the last copy is what loads; `
       + 'delete the other copy (ERD Studio will not change this file until you do)';
@@ -123,7 +144,7 @@ export function unreadableHint(u: Pick<UnreadableTableFile, 'kind' | 'mergeConfl
   return u.mergeConflict
     ? 'unresolved git merge conflict — git left two versions there: show the user the file and line and ask which side '
       + "to keep (don't pick a side or run git commands yourself)"
-    : kindHint(u.kind, u.line);
+    : kindHint(u.kind, u.line, u.code);
 }
 
 /** The terminal line's advice for a conflicted file: short, and it picks no side. */
@@ -158,7 +179,7 @@ export function describeUnreadable(u: UnreadableTableFile, rerun: 'doctor' | 'di
   if (u.readable) { return `${where}: ${unreadableHint(u)}`; }
   const format = u.kind.startsWith('dbml') ? 'DBML' : 'YAML';
   const what = u.kind === 'read' ? 'could not be read' : `${format} error${u.code ? ` (${u.code})` : ''}`;
-  return u.kind === 'read' ? `${where}: ${TABLE_FILE_HINTS.read}` : `${where}: ${what} — ${kindHint(u.kind, u.line)}`;
+  return u.kind === 'read' ? `${where}: ${TABLE_FILE_HINTS.read}` : `${where}: ${what} — ${kindHint(u.kind, u.line, u.code)}`;
 }
 
 export interface SubjectAreaDiff {

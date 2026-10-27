@@ -758,6 +758,24 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       }
     });
 
+    it('an edit names a DBML error for a .dbml table file, and YAML kinds keep their text', async () => {
+      // Broken on disk, so the table is unavailable; the error is then reported as a .dbml file's.
+      const file = breakFctOrder();
+      const spy = vi.spyOn(h.tableLibraryService, 'getTableFileError').mockImplementation((name: string) =>
+        name === 'fct_order' ? { name, filePath: file.replace(/\.yml$/, '.dbml'), kind: 'dbmlSyntax', line: 3, code: '1001', message: 'm' } : null);
+      try {
+        await h.send({ type: 'updateModelDescription', payload: { modelName: 'fct_order', description: 'x' } });
+        expect(h.errors()).toEqual([`Failed to update description: Can't edit "fct_order": its file has a DBML error on line 3.`]);
+        spy.mockImplementation((name: string) =>
+          name === 'fct_order' ? { name, filePath: file, kind: 'yamlScalar', line: 3, message: 'm' } : null);
+        await h.send({ type: 'updateModelDescription', payload: { modelName: 'fct_order', description: 'x' } });
+        expect(h.errors()).toEqual([`Failed to update description: Can't edit "fct_order": its file has a YAML error on line 3.`]);
+        expect(_appliedEdits).toHaveLength(0);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     it('the domain payload carries loadError for the broken model', async () => {
       breakFctOrder();
       await h.send({ type: 'ready' });

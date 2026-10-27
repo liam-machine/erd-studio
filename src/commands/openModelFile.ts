@@ -7,6 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { DBML_TABLE_QUOTE_HINT_CODES } from '@erd-studio/core';
 import type { TableFileError, TableFileErrorKind } from '../services/logicalModelService';
 
 /** Open `filePath`, placing the cursor at the 1-based `line` / `column` when given. */
@@ -22,8 +23,19 @@ export async function openTableFileAt(filePath: string, line?: number, column?: 
   await vscode.window.showTextDocument(document, options);
 }
 
-/** The one tip the notification gives, tailored to what went wrong. */
-export function tableFileErrorTip(kind: TableFileErrorKind, mergeConflict?: boolean): string {
+/** The tip for each of ERD Studio's own DBML table-file rules (`structure:<rule>` codes). */
+const DBML_STRUCTURE_TIPS: Readonly<Record<string, string>> = {
+  'structure:notOneTable': 'Tip: a table file holds exactly one Table. Move any other Table to its own file.',
+  'structure:nameMismatch': "Tip: name the Table as its file, or rename the file to the Table's name.",
+  'structure:unsupportedElement': 'Tip: a table file holds one Table and nothing else. Remove the Project, TableGroup, Note or other block.',
+};
+
+/**
+ * The one tip the notification gives, tailored to what went wrong. For a DBML
+ * table file the `code` decides: the quote advice only for an unquoted value
+ * (`DBML_TABLE_QUOTE_HINT_CODES`), and each `structure:<rule>` its own fix.
+ */
+export function tableFileErrorTip(kind: TableFileErrorKind, mergeConflict?: boolean, code?: string): string {
   if (mergeConflict) {
     return 'Tip: keep one side of each conflict, save, then git add the file.';
   }
@@ -39,9 +51,14 @@ export function tableFileErrorTip(kind: TableFileErrorKind, mergeConflict?: bool
     case 'dbmlSyntax':
       return 'Tip: check the DBML syntax on that line (a missing bracket, quote or brace).';
     case 'dbmlInvalid':
-      return "Tip: quote every custom value, as in grain: 'One row per order line'.";
+      return code !== undefined && DBML_TABLE_QUOTE_HINT_CODES.has(code)
+        ? "Tip: quote the value, as in grain: 'One row per order line'."
+        : 'Tip: fix the DBML on that line.';
     case 'dbmlStructure':
-      return 'Tip: a table file holds one Table and nothing else: move Ref and use lines to the folder\'s _relationships.dbml.';
+      if (code !== undefined && DBML_STRUCTURE_TIPS[code]) return DBML_STRUCTURE_TIPS[code];
+      return code !== undefined && !code.startsWith('structure:')
+        ? 'Tip: fix the DBML on that line.'
+        : 'Tip: a table file holds exactly one Table, named as its file, and no Project, TableGroup or Note.';
     case 'yamlScalar':
     case 'yamlOther':
     default:
@@ -51,7 +68,7 @@ export function tableFileErrorTip(kind: TableFileErrorKind, mergeConflict?: bool
 
 /** The notification text for a model file that exists but cannot be read. */
 export function tableFileErrorNotice(
-  error: Pick<TableFileError, 'filePath' | 'kind' | 'line' | 'mergeConflict' | 'readable' | 'key'>,
+  error: Pick<TableFileError, 'filePath' | 'kind' | 'line' | 'mergeConflict' | 'readable' | 'key' | 'code'>,
 ): string {
   const base = path.basename(error.filePath);
   if (error.readable) {
@@ -61,7 +78,7 @@ export function tableFileErrorNotice(
     return `${base}: ${what} in the same block${where}. ERD Studio uses the last one, ` +
       "but can't change this table until you remove the other copy.";
   }
-  const tip = tableFileErrorTip(error.kind, error.mergeConflict);
+  const tip = tableFileErrorTip(error.kind, error.mergeConflict, error.code);
   if (error.kind === 'read') {
     return `${base} couldn't be read and can't be shown on the diagram. ${tip}`;
   }

@@ -8,8 +8,9 @@
  *
  * It applies exactly the normalisations of §2.8 and nothing else:
  *
- * - description, column note and sticky-note text: the indent every line
- *   shares and leading white space dropped (DBML trims both);
+ * - description, column note and sticky-note text: leading white space
+ *   dropped (`dbmlNoteText`, the writer's own rule, so DBML's shared-indent
+ *   trim never applies to text ERD Studio writes);
  * - positions (and sticky-note boxes) rounded to two decimals;
  * - relationship ends respelled to the real table and column spelling;
  * - a library `one-to-many` stored canonically (many-to-one, ends swapped);
@@ -19,7 +20,8 @@
  * - and, with `convert: true` only, the Convert rows: a link stored twice
  *   kept once, a composite group's role taken from its first member,
  *   dangling relationships dropped, annotation ids ignored, and relationships
- *   held in a diagram file attached to their owner in a Unified shape.
+ *   held in a diagram file moved to their owner in a Unified shape (the
+ *   diagram's own list left empty, as a DBML diagram holds no Refs, D5).
  *
  * It accepts the Display shape (`models`, `relationships`) and the Unified
  * shape (`logical.models`, each table's own `relationships`, and
@@ -29,6 +31,7 @@
 
 import { DBML_SCHEMA_VERSION } from './types/semantic.js';
 import { canonicalRelationship, linkKey, nextCompositeKey } from './relationships.js';
+import { dbmlNoteText } from './dbmlText.js';
 import type { Relationship } from './types/semantic.js';
 
 /** Options for {@link normaliseForStorageEquivalence}. */
@@ -49,19 +52,14 @@ function round(value: number): number {
 }
 
 /**
- * Note text as DBML reads it back: the indent every non-blank line shares
- * removed, then leading white space dropped (`dbmlNoteText`). Idempotent.
+ * Note text as ERD Studio's DBML writer stores it and DBML reads it back:
+ * leading white space dropped (`dbmlNoteText`, §2.8). The writer emits
+ * `dbmlString(dbmlNoteText(text))`, so the first line has no indent and the
+ * parser's shared-indent trim never applies; an indent the other lines keep
+ * is kept. Idempotent.
  */
 export function storageNoteText(value: string): string {
-  const lines = value.split('\n');
-  let indent: number | undefined;
-  for (const line of lines) {
-    if (line.trim() === '') continue;
-    const own = /^[ \t]*/.exec(line)![0].length;
-    indent = indent === undefined ? own : Math.min(indent, own);
-  }
-  const dedented = indent ? lines.map((line) => (line.trim() === '' ? line.replace(/^[ \t]*/, '') : line.slice(indent))).join('\n') : value;
-  return dedented.replace(/^\s+/, '');
+  return dbmlNoteText(value);
 }
 
 function normaliseText(holder: Json, key: string): void {
@@ -262,14 +260,19 @@ export function normaliseForStorageEquivalence<T>(area: T, options: StorageEquiv
       const { fromModel, ...rest } = rel;
       if (typeof fromModel === 'string') movedToOwners.push({ owner: fromModel, rel: rest });
     }
+    // A converted (DBML) diagram holds no Refs (D5): its own list is empty.
+    logical.relationships = [];
   }
   for (const { owner, rel } of movedToOwners) {
     const target = ownLists.find((l) => lower(l.owner) === lower(owner))?.model
       ?? (Array.isArray(models) ? (models as unknown[]).find((m): m is Json => isObject(m) && typeof m.name === 'string' && lower(m.name) === lower(owner)) : undefined);
     if (!target) continue;
     const list = Array.isArray(target.relationships) ? (target.relationships as Json[]) : [];
-    const key = linkKey(endsOf(rel, owner));
-    if (list.some((r) => linkKey(endsOf(r, owner)) === key)) continue;
+    // A link stored twice is kept once only when comparing a Convert result (§2.8).
+    if (convert) {
+      const key = linkKey(endsOf(rel, owner));
+      if (list.some((r) => linkKey(endsOf(r, owner)) === key)) continue;
+    }
     list.push(rel);
     target.relationships = list;
     if (!ownLists.some((l) => l.model === target)) ownLists.push({ model: target, owner });

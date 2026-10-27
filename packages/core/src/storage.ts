@@ -67,11 +67,18 @@ export function isLibraryFolderName(name: string): boolean {
 
 /**
  * Whether `name` is the reserved relationships-file stem `_relationships`,
- * in any case. A new `.dbml` table may not take it; an existing YAML table
+ * as `sameName` compares names (case-insensitive, surrounding white space
+ * ignored), so a create path that trims a name after validating it cannot
+ * slip past. A new `.dbml` table may not take it; an existing YAML table
  * called that stays a table.
  */
 export function isReservedTableName(name: string): boolean {
-  return typeof name === 'string' && name.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM;
+  return typeof name === 'string' && name.trim().toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM;
+}
+
+/** Whether a listed file stem, exactly as listed (any case, never trimmed), is the relationships file's. */
+function isRelationshipsStem(stem: string): boolean {
+  return stem.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM;
 }
 
 /** `name` without its final extension, and the extension (with its dot), or `''` when it has none. */
@@ -133,7 +140,7 @@ export function classifySemanticFile(relPath: string, options: ClassifySemanticF
   if (segments[0] === TABLES_DIR && !options.tablesDirIsLayer) {
     if (!inLibraryShape) return other;
     if (ext === '.dbml') {
-      return isReservedTableName(stem)
+      return isRelationshipsStem(stem)
         ? { kind: 'relationships', storage: 'dbml', ...folderPart }
         : { kind: 'table', storage: 'dbml', ...folderPart, name: stem };
     }
@@ -152,14 +159,14 @@ export function classifySemanticFile(relPath: string, options: ClassifySemanticF
   // diagrams (doctor's tablesLayerConflict names them).
   if (layer === TABLES_DIR) return other;
   if (ext === '.dbml') {
-    if (isReservedTableName(stem)) return other;
+    if (isRelationshipsStem(stem)) return other;
     if (options.firstLine !== undefined && options.firstLine.replace(/^﻿/, '').startsWith(ERD_STUDIO_DBML_HEADER_PREFIX)) {
       return other;
     }
     return { kind: 'diagram', storage: 'dbml', layer, name: stem };
   }
   if (ext === '.dbdiagram') {
-    return isReservedTableName(stem) ? other : { kind: 'layout', layer, name: stem };
+    return isRelationshipsStem(stem) ? other : { kind: 'layout', layer, name: stem };
   }
   return other;
 }

@@ -525,6 +525,19 @@ describe('TableLibraryTreeProvider: a model file that needs fixing (#164)', () =
     expect(item.description).toBe('(YAML error — line 4)');
   });
 
+  it('calls a .dbml table file\'s error a DBML error, and keeps the YAML and unreadable wording', () => {
+    const provider = providerWith({
+      dim_customer: { kind: 'dbmlSyntax', line: 3, filePath: `${DIR}/dim_customer.dbml` },
+      fct_orders: { kind: 'dbmlStructure', code: 'structure:notOneTable', filePath: `${DIR}/fct_orders.dbml` },
+    });
+    const item = itemFor(provider, 'dim_customer');
+    expect((item.iconPath as ThemeIcon).id).toBe('error');
+    expect(item.description).toBe('(DBML error — line 3)');
+    expect(itemFor(provider, 'fct_orders').description).toBe('(DBML error)');
+    expect(itemFor(providerWith({ dim_customer: { kind: 'yamlIndent', line: 3 } }), 'dim_customer').description).toBe('(YAML error — line 3)');
+    expect(itemFor(providerWith({ dim_customer: { kind: 'read' } }), 'dim_customer').description).toBe('(can\'t be read)');
+  });
+
   it('leaves a clean file as it was', () => {
     const provider = providerWith({ dim_customer: { kind: 'yamlScalar', line: 4 } });
     const item = itemFor(provider, 'fct_orders');

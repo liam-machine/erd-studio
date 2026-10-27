@@ -9,7 +9,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { normaliseForStorageEquivalence as norm, storageNoteText } from '../../src/storageEquivalence';
-import { dbmlNoteText } from '../../src/dbmlText';
+import { dbmlNoteText, dbmlString } from '../../src/dbmlText';
+import { parseDbmlRich } from '../exportParsers';
 
 type Area = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -73,7 +74,7 @@ describe('normaliseForStorageEquivalence: each §2.8 row in isolation', () => {
     expect(out).not.toBe(a);
   });
 
-  it('note text: leading white space and a shared indent (descriptions, column notes, sticky notes)', () => {
+  it('note text: leading white space (descriptions, column notes, sticky notes), as dbmlNoteText', () => {
     const a = display();
     const b = display();
     b.description = '  Sales';
@@ -81,14 +82,18 @@ describe('normaliseForStorageEquivalence: each §2.8 row in isolation', () => {
     b.models[0].columns[1].description = '  Buyer';
     b.viewConfig.annotations[0].text = '   Check the grain';
     same(a, b);
-    a.description = '- bullet\n- bullet2';
+    // The writer stores dbmlNoteText(text), so the first line loses its indent
+    // and the other lines keep theirs: DBML's shared-indent trim never applies.
+    a.description = '- bullet\n  - bullet2';
     b.description = '  - bullet\n  - bullet2';
     same(a, b);
-    expect(storageNoteText('  - bullet\n  - bullet2')).toBe('- bullet\n- bullet2');
-    // It agrees with the writer's dbmlNoteText on a one-line text, and is idempotent.
-    for (const text of ['  x', 'x  ', '\n\n x', '  a\n    b', '']) {
+    a.description = '- bullet\n- bullet2';
+    differ(a, b);
+    expect(storageNoteText('  - bullet\n  - bullet2')).toBe('- bullet\n  - bullet2');
+    expect(storageNoteText('\tSee:\n\tfinance')).toBe('See:\n\tfinance');
+    for (const text of ['  x', 'x  ', '\n\n x', '  a\n    b', '', '  - bullet\n  - bullet2']) {
       expect(storageNoteText(storageNoteText(text))).toBe(storageNoteText(text));
-      if (!text.includes('\n')) expect(storageNoteText(text)).toBe(dbmlNoteText(text));
+      expect(storageNoteText(text)).toBe(dbmlNoteText(text));
     }
     // Trailing white space is not dropped.
     b.description = 'Sales ';
@@ -148,6 +153,29 @@ describe('normaliseForStorageEquivalence: each §2.8 row in isolation', () => {
     a.schemaVersion = 4;
     same(a, b);
     expect(norm(a).schemaVersion).toBe(7);
+  });
+});
+
+describe('normaliseForStorageEquivalence: note text through a real DBML round trip', () => {
+  /** `text` written as the writer writes a note (`dbmlString(dbmlNoteText(text))`) and read back by every 9.1+ parser. */
+  const roundTrips = (text: string): Array<[string, string]> =>
+    parseDbmlRich(`Table t {\n  id int\n  Note: ${dbmlString(dbmlNoteText(text))}\n}\n`).map(({ parser, db, diagnostics }) => {
+      expect(db, `${parser}: ${JSON.stringify(diagnostics)}`).not.toBeNull();
+      const note = db.tables[0].note;
+      return [parser, typeof note === 'string' ? note : note.value];
+    });
+
+  it('compares a written-and-read note equal to the text it was written from', () => {
+    const texts = ['  - bullet\n  - bullet2', '\tSee:\n\tfinance', 'a\n    b\n    c', '  one line', '\n\n  - a\n  - b', 'plain'];
+    for (const text of texts) {
+      for (const [version, read] of roundTrips(text)) {
+        const a = display();
+        const b = display();
+        a.description = text;
+        b.description = read;
+        expect(norm(b), `${version}: ${JSON.stringify(text)} read back as ${JSON.stringify(read)}`).toEqual(norm(a));
+      }
+    }
   });
 });
 
@@ -230,22 +258,54 @@ describe('normaliseForStorageEquivalence: the Convert-only rows', () => {
     same(display(), b, true);
   });
 
-  it('in a Unified shape, a diagram file\'s own relationships are attached to their owner', () => {
-    const library = {
+  it('in a Unified shape, a diagram file\'s own relationships move to their owner and the diagram holds none', () => {
+    const rel = { fromColumn: 'b_id', toModel: 'b', toColumn: 'id', cardinality: 'many-to-one' };
+    // Before Convert: the relationship lives only in the diagram file.
+    const before = {
       schemaVersion: 5, domain: 'd', layer: 'gold', description: '',
       logical: {
         models: [
-          { name: 'a', columns: [{ name: 'b_id', dataType: 'int', description: '' }], relationships: [{ fromColumn: 'b_id', toModel: 'b', toColumn: 'id', cardinality: 'many-to-one' }] },
+          { name: 'a', columns: [{ name: 'b_id', dataType: 'int', description: '' }] },
           { name: 'b', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] },
         ],
-        relationships: [{ fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id', cardinality: 'many-to-one' }],
+        relationships: [{ fromModel: 'a', ...rel }],
       },
       viewConfig: {},
     };
-    const diagramHeld = JSON.parse(JSON.stringify(library));
-    delete diagramHeld.logical.models[0].relationships;
-    same(library, diagramHeld, true);
-    differ(library, diagramHeld, false);
+    // After Convert, read back from DBML: the owner holds it, the diagram holds no Refs (D5).
+    const after = JSON.parse(JSON.stringify(before));
+    after.logical.models[0].relationships = [{ ...rel }];
+    after.logical.relationships = [];
+    same(before, after, true);
+    differ(before, after, false);
+    expect((norm(before, { convert: true }) as Area).logical.relationships).toEqual([]);
+    expect((norm(before, { convert: true }) as Area).logical.models[0].relationships).toEqual([rel]);
+  });
+});
+
+describe('normaliseForStorageEquivalence: a link stored twice across the two ends\' files', () => {
+  const unified = (twice: boolean): Area => ({
+    schemaVersion: 5, domain: 'd', layer: 'gold', description: '',
+    logical: {
+      models: [
+        { name: 'fct', columns: [{ name: 'dim_id', dataType: 'int', description: '' }], relationships: [{ fromColumn: 'dim_id', toModel: 'dim', toColumn: 'id', cardinality: 'many-to-one' }] },
+        {
+          name: 'dim', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }],
+          relationships: twice ? [{ fromColumn: 'id', toModel: 'fct', toColumn: 'dim_id', cardinality: 'one-to-many' }] : [],
+        },
+      ],
+      relationships: [],
+    },
+    viewConfig: {},
+  });
+
+  it('differs without convert (a writer that double-stores a link is caught)', () => {
+    differ(unified(false), unified(true));
+    expect((norm(unified(true)) as Area).logical.models[0].relationships).toHaveLength(2);
+  });
+
+  it('is kept once with convert', () => {
+    same(unified(false), unified(true), true);
   });
 });
 

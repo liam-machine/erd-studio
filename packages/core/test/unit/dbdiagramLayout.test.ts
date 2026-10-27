@@ -300,6 +300,22 @@ describe('editDiagramLayout (a DBML diagram\'s layout file)', () => {
     expect(editDiagramLayout(moved, { ...positions, fct_order: { x: 500, y: 200 } }, stickies)).toBeNull();
   });
 
+  it('counts a missing list or a missing defaultView as empty, so a no-op edit writes nothing', () => {
+    const noStickies = '{"version":"3.0.0","defaultView":{"tablePositions":[{"name":"a","schemaName":"public","x":1,"y":2}]}}';
+    expect(editDiagramLayout(noStickies, { a: { x: 1, y: 2 } }, [])).toBeNull();
+    const noPositions = '{"version":"3.0.0","defaultView":{"stickyNoteLayouts":[{"name":"n1","x":5,"y":6}]}}';
+    expect(editDiagramLayout(noPositions, {}, [{ name: 'n1', x: 5, y: 6 }])).toBeNull();
+    expect(editDiagramLayout('{"version":"3.0.0","defaultView":{}}', {}, [])).toBeNull();
+    expect(editDiagramLayout('{"version":"3.0.0"}', {}, [])).toBeNull();
+    expect(editDiagramLayout('{"version":"3.0.0","defaultView":null}', {}, [])).toBeNull();
+    // A real change still writes, and the missing list is then written empty.
+    const moved = JSON.parse(editDiagramLayout(noStickies, { a: { x: 3, y: 2 } }, [])!);
+    expect(moved.defaultView.tablePositions).toEqual([{ name: 'a', schemaName: 'public', x: 3, y: 2 }]);
+    expect(moved.defaultView.stickyNoteLayouts).toEqual([]);
+    const placed = JSON.parse(editDiagramLayout('{"version":"3.0.0"}', { a: { x: 1, y: 2 } }, [])!);
+    expect(placed.defaultView.tablePositions).toEqual([{ name: 'a', schemaName: 'public', x: 1, y: 2 }]);
+  });
+
   it('keeps every key it does not own, as parsed', () => {
     const edited = editDiagramLayout(pulledLayout, positions, stickies)!;
     const before = JSON.parse(pulledLayout);

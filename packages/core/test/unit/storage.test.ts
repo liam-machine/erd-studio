@@ -192,6 +192,10 @@ describe('the reserved name', () => {
     expect(isReservedTableName('_relationships')).toBe(true);
     expect(isReservedTableName('_Relationships')).toBe(true);
     expect(isReservedTableName('_RELATIONSHIPS')).toBe(true);
+    // As sameName compares: surrounding white space is ignored.
+    for (const padded of [' _relationships ', '_relationships ', ' _Relationships', '\t_relationships\n']) {
+      expect(isReservedTableName(padded)).toBe(true);
+    }
     for (const name of ['relationships', '_relationships_x', '_x', '__relationships', '_relationship']) {
       expect(isReservedTableName(name)).toBe(false);
     }
