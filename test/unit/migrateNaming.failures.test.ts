@@ -135,6 +135,7 @@ describe('Migrate to the New File Naming: failures (#219)', () => {
       }]);
       expect(fs.existsSync(path.join(erd, 'tables'))).toBe(false);
       expect(fs.existsSync(path.join(erd, 'logical-models', 'dim_task.yml'))).toBe(true);
+      expect(telemetryError).not.toHaveBeenCalledWith('migrationFailed');
     },
   );
 
@@ -231,6 +232,17 @@ describe('Migrate to the New File Naming: failures (#219)', () => {
     await settle();
     expect(JSON.parse(fs.readFileSync(showcase, 'utf-8'))).toHaveProperty('subjectArea');
     expect(error).toHaveBeenCalledTimes(1);
+  });
+
+  it('a save that fails and then a refresh that throws: the unsaved warning still shows, and no Reload Window', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(MIGRATE_NAMING_BUTTON as never);
+    vscode._failMockSave(path.join(erd, 'silver', 'showcase.json'));
+    const onMigrated = vi.fn(async () => { throw new Error('refresh failed'); });
+
+    expect(await migrateToTableNaming(deps({ onMigrated }))).toBe('migrated');
+
+    expect(toasts(error).map((t) => t.buttons)).toEqual([['Save All', 'Show File'], ['Send Feedback']]);
+    expect(telemetryError).toHaveBeenCalledWith('saveFailed');
   });
 
   it('Save All that still fails says so, with Show File', async () => {

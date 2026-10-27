@@ -181,7 +181,7 @@ function confirmDetail(plan: NamingMigrationPlan, version: string): string {
  * ERD Studio's problem, with Send Feedback, never as the raw exception (#219).
  */
 export async function migrateToTableNaming(deps: MigrateNamingDeps): Promise<MigrateNamingOutcome> {
-  const progress = { applied: false };
+  const progress = { applied: false, unsaved: false };
   const retry = (): Promise<MigrateNamingOutcome> => migrateToTableNaming(deps);
   try {
     return await runMigration(deps, progress, retry);
@@ -196,9 +196,9 @@ export async function migrateToTableNaming(deps: MigrateNamingDeps): Promise<Mig
       });
       return 'failed';
     }
-    telemetry.error('migrationFailed');
     const failure = err instanceof FolderNotCreated ? classifyWriteFailure(err.cause) : 'other';
     if (failure !== 'other') {
+      // The user's folder or disk, not ERD Studio: not counted as a failure of ours.
       showErrorWithActions(
         `${MIGRATE_NAMING_TITLE}: ${failure === 'permission'
           ? `ERD Studio isn't allowed to create the ${TABLES_DIR}/ folder in ${deps.semanticDir}/. Check the folder's permissions, then try again.`
@@ -207,13 +207,15 @@ export async function migrateToTableNaming(deps: MigrateNamingDeps): Promise<Mig
       );
       return 'failed';
     }
+    telemetry.error('migrationFailed');
     const cause = err instanceof FolderNotCreated ? err.cause : err;
     if (progress.applied) {
-      // Every file has moved; only the refresh that follows failed.
+      // Every file has moved; only the refresh that follows failed. A reload
+      // would drop the undo step, and any unsaved subject area with it.
       const doing = 'after moving the files';
       showErrorWithActions(oursMessage(MIGRATE_NAMING_TITLE, doing, 'open diagrams may not show the new naming until you reload the window'), {
         [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, cause),
-        [RELOAD_WINDOW_BUTTON]: () => vscode.commands.executeCommand('workbench.action.reloadWindow'),
+        ...(progress.unsaved ? {} : { [RELOAD_WINDOW_BUTTON]: () => vscode.commands.executeCommand('workbench.action.reloadWindow') }),
       });
       return 'migrated';
     }
@@ -234,7 +236,7 @@ export function planProjectNamingMigration(deps: Pick<MigrateNamingDeps, 'worksp
 
 async function runMigration(
   deps: MigrateNamingDeps,
-  progress: { applied: boolean },
+  progress: { applied: boolean; unsaved: boolean },
   retry: () => Promise<MigrateNamingOutcome>,
 ): Promise<MigrateNamingOutcome> {
   const semanticRoot = path.join(deps.workspaceRoot, deps.semanticDir);
@@ -361,7 +363,7 @@ async function applyMigration(
   semanticRoot: string,
   abs: (rel: string) => string,
   release: () => void,
-  progress: { applied: boolean },
+  progress: { applied: boolean; unsaved: boolean },
   retry: () => Promise<MigrateNamingOutcome>,
 ): Promise<MigrateNamingOutcome> {
   const touched = [...plan.moves.flatMap((m) => [abs(m.from), abs(m.to)]), ...plan.rewrites.map((r) => abs(r.path))];
@@ -399,12 +401,15 @@ async function applyMigration(
 
   saveMigratedOnUndo(docs.map((d) => d.uri.fsPath), newFolders);
   deps.tableLibraryService.invalidateCache();
-  release();
-  await deps.onMigrated(touched);
+  // Said before the refresh, so a refresh that throws cannot hide it.
   if (unsaved.length > 0) {
+    progress.unsaved = true;
     telemetry.error('saveFailed');
     showUnsaved(deps, unsaved);
-  } else {
+  }
+  release();
+  await deps.onMigrated(touched);
+  if (unsaved.length === 0) {
     const parts = [
       plan.moves.length > 0 ? `${plan.moves.length} table file${plan.moves.length === 1 ? '' : 's'} moved to ${TABLES_DIR}/` : '',
       plan.rewrites.length > 0 ? `${plan.rewrites.length} subject area${plan.rewrites.length === 1 ? '' : 's'} updated` : '',
