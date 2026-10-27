@@ -22,6 +22,13 @@ export const SEND_FEEDBACK_BUTTON = 'Send Feedback';
 /** The button that opens the user's file at the problem. */
 export const OPEN_FILE_BUTTON = 'Open File';
 
+/** The buttons the commands' errors share (#204, #219), so each says the same thing. */
+export const TRY_AGAIN_BUTTON = 'Try Again';
+export const SHOW_FILE_BUTTON = 'Show File';
+export const SAVE_AND_TRY_AGAIN_BUTTON = 'Save and Try Again';
+export const SAVE_ALL_BUTTON = 'Save All';
+export const RELOAD_WINDOW_BUTTON = 'Reload Window';
+
 /** A failure's buttons, by label, and what each one does. */
 export type ErrorActions = Readonly<Record<string, () => unknown>>;
 
