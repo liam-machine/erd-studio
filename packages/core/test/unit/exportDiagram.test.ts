@@ -145,7 +145,8 @@ describe('diagram export API', () => {
     // The pin itself is a runtime dependency (D13); 9.1.1 and 10.3.1 are test aliases.
     expect(pkgAll.dependencies['@dbml/parse']).toBe('11.0.0');
     expect(pkg.devDependencies['@dbml/parse']).toBeUndefined();
-    expect(pkg.devDependencies['dbml-parse-v11']).toBeUndefined();
+    // Exactly the two older-release aliases: no alias of the pin itself.
+    expect(Object.keys(pkg.devDependencies).filter((name) => name.startsWith('dbml-parse-')).sort()).toEqual(['dbml-parse-v10', 'dbml-parse-v9']);
     const parsers: Record<string, string> = {
       'dbml-parse-v9': 'npm:@dbml/parse@9.1.1',
       'dbml-parse-v10': 'npm:@dbml/parse@10.3.1',
