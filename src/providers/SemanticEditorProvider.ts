@@ -2120,12 +2120,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         cardinality: members[0].cardinality === 'many-to-one' ? 'one-to-many' : 'many-to-one',
       }));
       await this.queueEdit(panelKey, async () => {
+        const version = document.version;
         try {
-          await this.commitRelationshipWrite(document, webview, ops, 'logical', 'Failed to turn relationships round.');
+          await this.commitRelationshipWrite(
+            document, webview, ops, 'logical',
+            "Couldn't turn the relationships round: VS Code didn't accept the change, so nothing was changed.",
+          );
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
           this.recordRelationshipFailure(err);
-          webview.postMessage({ type: 'error', payload: { message: `Failed to turn relationships round: ${message}` } });
+          if (isExplainedRefusal(err)) {
+            // A refusal already says, in plain words, what in the user's files stopped it.
+            const message = err instanceof Error ? err.message : String(err);
+            webview.postMessage({ type: 'error', payload: { message: `Couldn't turn the relationships round: ${message}` } });
+            return;
+          }
+          // Anything else is ours (#219): never the raw exception, which goes to the log and the report.
+          console.error('[SemanticEditorProvider] Turn round failed:', err);
+          const applied = document.version !== version;
+          const doing = applied ? 'after turning the relationships round' : 'while turning the relationships round';
+          // Not awaited: the edit queue must not wait on the toast.
+          void Promise.resolve(vscode.window.showErrorMessage(
+            applied
+              ? 'Turning the relationships round hit a problem in ERD Studio, not in your diagram. The change was made; Edit > Undo puts it back.'
+              : "Couldn't turn the relationships round: that's a problem in ERD Studio, not your diagram. Nothing was changed.",
+            SEND_FEEDBACK_BUTTON,
+          )).then((choice) => {
+            if (choice === SEND_FEEDBACK_BUTTON) void vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill('Turn Round', doing, err));
+          });
         }
       });
     } catch (err) {
