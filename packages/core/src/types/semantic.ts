@@ -270,9 +270,22 @@ export interface TableLoadError {
    * The parser's code, never its message: a YAML error code (`BAD_INDENT`), a
    * DBML diagnostic code as text (`'3025'`), or `'structure:<rule>'` for one
    * of ERD Studio's own DBML table-file rules (`notOneTable`, `nameMismatch`,
-   * `unsupportedElement`). Optional, and absent from older cores.
+   * `unsupportedElement`, `metadataTarget`). Optional, and absent from older cores.
    */
   code?: string;
+  /**
+   * For `structure:metadataTarget` only: the table or column a `Metadata`
+   * block names that the file does not declare, so the message can name it.
+   * Optional, and absent from older cores.
+   */
+  target?: DbmlMetadataTarget;
+}
+
+/** What a `Metadata Table <name>` or `Metadata Column <table>.<name>` block targets (D25). */
+export interface DbmlMetadataTarget {
+  element: 'table' | 'column';
+  /** The table's or column's name as the block spells it (a column without its table). */
+  name: string;
 }
 
 /**

@@ -14,6 +14,7 @@ import type {
   Layer,
   TableLoadError,
   TableLoadErrorKind,
+  DbmlMetadataTarget,
   NodePosition,
   Relationship,
   SemanticSubjectArea,
@@ -31,7 +32,7 @@ import {
   reverseRelationship,
 } from './relationships.js';
 import { keyEvidence } from './keyEvidence.js';
-import type { DbtKeyIndex } from './keyEvidence.js';
+import type { DbtKeyIndex, KeyedTable } from './keyEvidence.js';
 import { findConflictMarkers } from './mergeConflict.js';
 
 /**
@@ -711,9 +712,10 @@ const YAML_ERROR_KINDS: Readonly<Record<string, TableLoadErrorKind>> = {
  * storage spec): it holds exactly one Table (`notOneTable`), the Table is
  * named as the file (`nameMismatch`, case aside), and it declares nothing a
  * table file may not (`unsupportedElement`: a Project, TableGroup, top-level
- * Note, TablePartial, Records or DiagramView).
+ * Note, TablePartial, Records or DiagramView), and a `Metadata` block names
+ * a table or column the file declares (`metadataTarget`, D25).
  */
-export type DbmlTableStructureRule = 'notOneTable' | 'nameMismatch' | 'unsupportedElement';
+export type DbmlTableStructureRule = 'notOneTable' | 'nameMismatch' | 'unsupportedElement' | 'metadataTarget';
 
 /**
  * What a DBML diagnostic code means, by its range, the same in `@dbml/parse`
@@ -762,15 +764,18 @@ export class TableDbmlError extends Error {
   readonly line?: number;
   readonly column?: number;
   readonly mergeConflict: boolean;
+  /** For the `metadataTarget` rule: the missing table or column. */
+  readonly target?: DbmlMetadataTarget;
 
   constructor(
     message: string,
-    options: { dbmlCode?: number; rule?: DbmlTableStructureRule; line?: number; column?: number; mergeConflict?: boolean } = {},
+    options: { dbmlCode?: number; rule?: DbmlTableStructureRule; line?: number; column?: number; mergeConflict?: boolean; target?: DbmlMetadataTarget } = {},
   ) {
     super(message);
     this.name = 'TableDbmlError';
     if (options.dbmlCode !== undefined) this.dbmlCode = options.dbmlCode;
     if (options.rule !== undefined) this.rule = options.rule;
+    if (options.target !== undefined) this.target = options.target;
     if (options.line !== undefined) this.line = options.line;
     if (options.column !== undefined) this.column = options.column;
     this.mergeConflict = options.mergeConflict === true;
@@ -785,7 +790,7 @@ export class TableDbmlError extends Error {
  * `dbmlInvalid`) with the code as text.
  */
 export function classifyDbmlTableError(error: {
-  dbmlCode?: number; rule?: DbmlTableStructureRule; line?: number; column?: number; mergeConflict?: boolean;
+  dbmlCode?: number; rule?: DbmlTableStructureRule; line?: number; column?: number; mergeConflict?: boolean; target?: DbmlMetadataTarget;
 }): TableLoadError & { column?: number } {
   const at = {
     ...(error.line !== undefined ? { line: error.line } : {}),
@@ -795,7 +800,10 @@ export function classifyDbmlTableError(error: {
     return { kind: 'dbmlSyntax', ...(error.line !== undefined ? { line: error.line } : {}), mergeConflict: true };
   }
   if (error.rule !== undefined) {
-    return { kind: 'dbmlStructure', ...at, code: `structure:${error.rule}` };
+    return {
+      kind: 'dbmlStructure', ...at, code: `structure:${error.rule}`,
+      ...(error.rule === 'metadataTarget' && error.target !== undefined ? { target: { ...error.target } } : {}),
+    };
   }
   if (typeof error.dbmlCode === 'number' && Number.isFinite(error.dbmlCode)) {
     const errorClass = dbmlErrorClassOf(error.dbmlCode);
@@ -872,6 +880,10 @@ function describeDbmlTableLoadError(error: TableLoadError): string {
     case 'dbmlSyntax':
       return `table file has a DBML syntax error${onLine}`;
     case 'dbmlStructure':
+      if (error.code === 'structure:metadataTarget') {
+        const named = error.target ? `${error.target.element} '${error.target.name}'` : 'a table or column';
+        return `table file has a Metadata block${onLine} that targets ${named}, which this table does not have; rename or remove the block`;
+      }
       return `table file must hold exactly one Table that needs no other file${error.line !== undefined ? ` (line ${error.line})` : ''}`;
     default:
       if (error.code !== undefined && DBML_TABLE_QUOTE_HINT_CODES.has(error.code)) {
@@ -884,6 +896,33 @@ function describeDbmlTableLoadError(error: TableLoadError): string {
 /** Identity of a relationship: its four endpoints, compared without case. */
 export function relationshipKey(rel: Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>): string {
   return [rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()).join('\u0000');
+}
+
+/**
+ * How a copy of a link stored twice ranks against its other copies: the
+ * lowest rank is the one drawn, whatever the file or entry order (#133).
+ * First a copy in its home (not one-to-many), then one not leaving its
+ * model's whole key (`keyEvidence`: flags, else dbt's tests — choosing
+ * between copies changes no data, so this needs no evidence about the other
+ * end), then the lowest model name, then the lowest content, then `index`.
+ * `fromTable` is the from-model as read (or undefined when it is unknown).
+ * Shared by {@link mergeLibraryRelationships} and the DBML relationships
+ * reader (`attachRelationships`), which dedupe the same way.
+ */
+export function libraryCopyRank(
+  rel: Relationship,
+  fromTable: KeyedTable | undefined,
+  index: number,
+  dbt?: DbtKeyIndex,
+): string {
+  return [
+    `${rel.cardinality === 'one-to-many' ? 1 : 0}${keyEvidence(fromTable ?? { name: rel.fromModel }, rel.fromColumn, dbt) === 'whole-key' ? 1 : 0}`,
+    ...[rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()),
+    // A copy with a role (or a composite key) before its unlabelled twin: the label is information.
+    rel.cardinality, rel.role ? `0${rel.role}` : '1', rel.compositeKey ? `0${rel.compositeKey}` : '1',
+    // Spelling only splits copies that differ in case; then the index splits identical ones.
+    rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn, String(index).padStart(6, '0'),
+  ].join('\u0000');
 }
 
 /**
@@ -909,19 +948,7 @@ export function mergeLibraryRelationships(
 ): Relationship[] {
   const byName = new Map(models.map((m) => [m.name.toLowerCase(), m]));
   const modelOf = (name: string): SemanticTable | undefined => byName.get(name.toLowerCase());
-  // A link stored twice is drawn from the same copy whatever the file or
-  // entry order (#133): one in its home (not one-to-many), then one not
-  // leaving its model's whole key (`keyEvidence`: flags, else dbt's tests —
-  // choosing between copies changes no data, so this needs no evidence about
-  // the other end), then the lowest model name, then the lowest content.
-  const rankOf = (rel: Relationship, index: number): string => [
-    `${rel.cardinality === 'one-to-many' ? 1 : 0}${keyEvidence(modelOf(rel.fromModel) ?? { name: rel.fromModel }, rel.fromColumn, dbt) === 'whole-key' ? 1 : 0}`,
-    ...[rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()),
-    // A copy with a role (or a composite key) before its unlabelled twin: the label is information.
-    rel.cardinality, rel.role ? `0${rel.role}` : '1', rel.compositeKey ? `0${rel.compositeKey}` : '1',
-    // Spelling only splits copies that differ in case; then the index splits identical ones.
-    rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn, String(index).padStart(6, '0'),
-  ].join('\u0000');
+  const rankOf = (rel: Relationship, index: number): string => libraryCopyRank(rel, modelOf(rel.fromModel), index, dbt);
   type Held = { rel: Relationship; rank: string; at: GroupSource };
   const keep = (map: Map<string, Held>, rel: Relationship, rank: string, at: GroupSource): void => {
     const key = linkKey(rel);

@@ -28,6 +28,7 @@ const DBML_STRUCTURE_TIPS: Readonly<Record<string, string>> = {
   'structure:notOneTable': 'Tip: a table file holds exactly one Table. Move any other Table to its own file.',
   'structure:nameMismatch': "Tip: name the Table as its file, or rename the file to the Table's name.",
   'structure:unsupportedElement': 'Tip: a table file holds one Table and nothing else. Remove the Project, TableGroup, Note or other block.',
+  'structure:metadataTarget': 'Tip: a Metadata block names a table or column this file does not declare. Rename or remove the block.',
 };
 
 /**
