@@ -1,6 +1,6 @@
 /**
- * Open a `logical-models` file in a text editor, with the cursor on the line
- * its YAML error was reported on. Shared by the canvas's `openModelFile`
+ * Open a table file (`.yml` or `.dbml`) in a text editor, with the cursor on
+ * the line its YAML or DBML error was reported on. Shared by the canvas's `openModelFile`
  * message and the one-per-broken-file warning notification. Writes nothing.
  */
 
@@ -36,6 +36,12 @@ export function tableFileErrorTip(kind: TableFileErrorKind, mergeConflict?: bool
       return 'Tip: the file must be one YAML document — no --- separators or ``` code fences.';
     case 'read':
       return 'Tip: check the file still exists and that VS Code can read it.';
+    case 'dbmlSyntax':
+      return 'Tip: check the DBML syntax on that line (a missing bracket, quote or brace).';
+    case 'dbmlInvalid':
+      return "Tip: quote every custom value, as in grain: 'One row per order line'.";
+    case 'dbmlStructure':
+      return 'Tip: a table file holds one Table and nothing else: move Ref and use lines to the folder\'s _relationships.dbml.';
     case 'yamlScalar':
     case 'yamlOther':
     default:
@@ -63,7 +69,8 @@ export function tableFileErrorNotice(
   if (error.mergeConflict) {
     return `${base} has an unresolved git merge conflict${where} and can't be shown on the diagram. ${tip}`;
   }
-  return `${base} has a YAML error${where} and can't be shown on the diagram. ${tip}`;
+  const format = error.kind.startsWith('dbml') ? 'DBML' : 'YAML';
+  return `${base} has a ${format} error${where} and can't be shown on the diagram. ${tip}`;
 }
 
 /**

@@ -237,7 +237,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
         'The diagram uses the last one, but ERD Studio can\'t change this table until the other copy is removed.';
     } else {
       item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('list.errorForeground'));
-      item.description = error.mergeConflict ? `(merge conflict${at})` : error.kind === 'read' ? '(can\'t be read)' : `(YAML error${at})`;
+      item.description = error.mergeConflict ? `(merge conflict${at})` : error.kind === 'read' ? '(can\'t be read)' : `(${error.kind.startsWith('dbml') ? 'DBML' : 'YAML'} error${at})`;
       item.tooltip = 'This file can\'t be read, so the table is missing from every diagram. Open it to fix it.';
     }
     item.resourceUri = vscode.Uri.file(element.filePath);

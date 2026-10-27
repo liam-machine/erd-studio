@@ -52,7 +52,7 @@ describe('a relationship stored in a model file (#126)', () => {
     const warn = vi.fn();
     const own = [{ ...TO_CUSTOMER, cardinality: 'one-to-one' as const }];
     expect(relationshipsOf(['fct_order', 'dim_customer'], own, warn)).toEqual([TO_CUSTOMER]);
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/logical-models\/ defines it as many-to-one/));
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/the table library defines it as many-to-one/));
   });
 
   it('keeps the domain file\'s own relationships first and in order', () => {

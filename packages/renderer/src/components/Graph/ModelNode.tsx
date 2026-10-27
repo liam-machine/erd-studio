@@ -556,9 +556,12 @@ function describeLoadError(error: TableLoadError): string {
       ? `Unresolved git merge conflict on line ${error.line} — ERD Studio can't read this file.`
       : "Unresolved git merge conflict — ERD Studio can't read this file.";
   }
+  // A `.dbml` table file (native DBML storage); an older core never sends
+  // these kinds, so its nodes read exactly as before.
+  const format = typeof error.kind === 'string' && error.kind.startsWith('dbml') ? 'DBML' : 'YAML';
   return error.line !== undefined
-    ? `YAML error on line ${error.line} — ERD Studio can't read this file.`
-    : "YAML error — ERD Studio can't read this file.";
+    ? `${format} error on line ${error.line} — ERD Studio can't read this file.`
+    : `${format} error — ERD Studio can't read this file.`;
 }
 
 /** The node's one line for a model read from a file that needs fixing (#164). */

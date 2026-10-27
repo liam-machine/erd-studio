@@ -39,7 +39,7 @@
  */
 
 import type { DisplaySubjectArea } from './types/display.js';
-import type { NodePosition } from './types/semantic.js';
+import type { Annotation, NodePosition } from './types/semantic.js';
 import { prepareSubjectArea } from './exportShared.js';
 import { exportFileBase } from './exportFileName.js';
 
@@ -257,4 +257,185 @@ function readInto(reading: DbdiagramLayoutReading, text: string): void {
   if (unreadableStickies > 0) {
     reading.problems.push(`${plural(unreadableStickies, 'sticky-note layout was', 'sticky-note layouts were')} not in a shape ERD Studio reads, so ${unreadableStickies === 1 ? 'it was' : 'they were'} skipped.`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Native DBML storage: a diagram's layout file
+// ---------------------------------------------------------------------------
+
+/**
+ * A layout file ERD Studio will not rewrite: its text is not a JSON object.
+ * It is read with a warning (nothing placed from it) and never regenerated;
+ * the user fixes or deletes it.
+ */
+export class DbdiagramLayoutRefused extends Error {
+  constructor(message = 'The layout file is not a JSON object. Fix it or delete it first: ERD Studio never rewrites a file it cannot read.') {
+    super(message);
+    this.name = 'DbdiagramLayoutRefused';
+  }
+}
+
+/** A sticky note's layout in a diagram's layout file, from its annotation: the size only when set and positive. */
+export function stickyLayoutsOf(annotations: ReadonlyArray<Pick<Annotation, 'id' | 'x' | 'y' | 'width' | 'height'>> | undefined): DbdiagramStickyLayout[] {
+  const out: DbdiagramStickyLayout[] = [];
+  for (const annotation of annotations ?? []) {
+    if (!annotation || typeof annotation.id !== 'string' || annotation.id === '') continue;
+    if (!isFiniteNumber(annotation.x) || !isFiniteNumber(annotation.y)) continue;
+    out.push({
+      name: annotation.id,
+      x: round(annotation.x),
+      y: round(annotation.y),
+      ...(isFiniteNumber(annotation.width) && annotation.width > 0 ? { width: round(annotation.width) } : {}),
+      ...(isFiniteNumber(annotation.height) && annotation.height > 0 ? { height: round(annotation.height) } : {}),
+    });
+  }
+  return out;
+}
+
+/** The `tablePositions` of `positions`, in its order: `schemaName` `"public"` (names are unqualified), x and y to two decimals. */
+function tablePositionsOf(positions: Record<string, NodePosition>): DbdiagramTablePosition[] {
+  const out: DbdiagramTablePosition[] = [];
+  for (const [name, position] of Object.entries(positions ?? {})) {
+    if (!position || !isFiniteNumber(position.x) || !isFiniteNumber(position.y)) continue;
+    out.push({ name, schemaName: DBDIAGRAM_DEFAULT_SCHEMA, x: round(position.x), y: round(position.y) });
+  }
+  return out;
+}
+
+/** Structural equality of two JSON values (key order ignored). */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => jsonEqual(v, b[i]));
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const ka = Object.keys(a as Record<string, unknown>);
+    const kb = Object.keys(b as Record<string, unknown>);
+    if (ka.length !== kb.length) return false;
+    return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && jsonEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+  }
+  return false;
+}
+
+/**
+ * The new text of a DBML diagram's layout file (`<name>.dbdiagram`), or
+ * `null` when nothing needs writing. ERD Studio owns two lists in it,
+ * `defaultView.tablePositions` and `defaultView.stickyNoteLayouts`; every
+ * other key and value is kept as parsed, and the text is written as
+ * two-space JSON with a final line break (its canonical form, so a file ERD
+ * Studio wrote round-trips byte for byte).
+ *
+ * - `oldText` `null` (no file): created only when there is at least one
+ *   position or sticky layout.
+ * - Both lists deep-equal to what is there: `null`, no write.
+ * - `oldText` that is not a JSON object: throws {@link DbdiagramLayoutRefused}.
+ *
+ * Pure, parser-free and deterministic.
+ */
+export function editDiagramLayout(
+  oldText: string | null,
+  positions: Record<string, NodePosition>,
+  stickies: readonly DbdiagramStickyLayout[],
+): string | null {
+  const tablePositions = tablePositionsOf(positions);
+  const stickyNoteLayouts = stickies.map((s) => ({
+    name: s.name,
+    x: round(s.x),
+    y: round(s.y),
+    ...(isFiniteNumber(s.width) && s.width > 0 ? { width: round(s.width) } : {}),
+    ...(isFiniteNumber(s.height) && s.height > 0 ? { height: round(s.height) } : {}),
+  }));
+
+  if (oldText === null) {
+    if (tablePositions.length === 0 && stickyNoteLayouts.length === 0) return null;
+    const fresh: DbdiagramLayout = {
+      version: DBDIAGRAM_LAYOUT_VERSION,
+      gridEnabling: false,
+      currentViewName: null,
+      defaultView: {
+        detailLevel: 'All',
+        relationshipMode: 'All',
+        tablePositions,
+        tableGroupCollapseStates: [],
+        stickyNoteLayouts,
+        referencePaths: [],
+      },
+      views: {},
+    };
+    return JSON.stringify(fresh, null, 2) + '\n';
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(oldText.replace(/^﻿/, ''));
+  } catch {
+    throw new DbdiagramLayoutRefused();
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new DbdiagramLayoutRefused();
+  }
+  const file = parsed as Record<string, unknown>;
+  const existingView = file.defaultView;
+  const view: Record<string, unknown> =
+    existingView && typeof existingView === 'object' && !Array.isArray(existingView)
+      ? (existingView as Record<string, unknown>)
+      : { detailLevel: 'All', relationshipMode: 'All', tablePositions: [], tableGroupCollapseStates: [], stickyNoteLayouts: [], referencePaths: [] };
+  if (view === existingView && jsonEqual(view.tablePositions, tablePositions) && jsonEqual(view.stickyNoteLayouts, stickyNoteLayouts)) {
+    return null;
+  }
+  view.tablePositions = tablePositions;
+  view.stickyNoteLayouts = stickyNoteLayouts;
+  file.defaultView = view;
+  return JSON.stringify(file, null, 2) + '\n';
+}
+
+/** Where {@link placeUnlaidNotes} assumes a table's right edge is: the canvas's default node width. */
+const UNLAID_TABLE_WIDTH = 280;
+/** The canvas's default sticky-note size, for a note whose layout gives none. */
+const UNLAID_NOTE_WIDTH = 160;
+const UNLAID_NOTE_HEIGHT = 80;
+/** The gap between the column of placed notes and everything left of it, and between notes. */
+const UNLAID_NOTE_GAP = 40;
+
+/**
+ * Places for the sticky notes a DBML diagram declares but its layout file
+ * does not place (an assistant added a `Note`), so they never stack on the
+ * origin: one column to the right of every laid-out table position and note,
+ * 40 px apart, in file order, starting level with the highest laid-out item.
+ * Deterministic and parser-free; it never writes (the next layout write
+ * persists whatever the canvas holds).
+ *
+ * @param noteIds  every Note in file order; ids already in `stickies` keep their layout and get no entry
+ * @returns a place for each unlaid id
+ */
+export function placeUnlaidNotes(
+  noteIds: readonly string[],
+  positions: Record<string, NodePosition>,
+  stickies: readonly DbdiagramStickyLayout[],
+): Record<string, NodePosition> {
+  const laid = new Set(stickies.map((s) => s.name));
+  const pending = noteIds.filter((id, i) => !laid.has(id) && noteIds.indexOf(id) === i);
+  const placed: Record<string, NodePosition> = {};
+  if (pending.length === 0) return placed;
+
+  let right = -Infinity;
+  let top = Infinity;
+  for (const position of Object.values(positions ?? {})) {
+    if (!position || !isFiniteNumber(position.x) || !isFiniteNumber(position.y)) continue;
+    right = Math.max(right, position.x + UNLAID_TABLE_WIDTH);
+    top = Math.min(top, position.y);
+  }
+  for (const sticky of stickies) {
+    if (!isFiniteNumber(sticky.x) || !isFiniteNumber(sticky.y)) continue;
+    right = Math.max(right, sticky.x + (isFiniteNumber(sticky.width) && sticky.width > 0 ? sticky.width : UNLAID_NOTE_WIDTH));
+    top = Math.min(top, sticky.y);
+  }
+  const x = right === -Infinity ? 0 : round(right + UNLAID_NOTE_GAP);
+  let y = top === Infinity ? 0 : round(top);
+  for (const id of pending) {
+    placed[id] = { x, y };
+    y = round(y + UNLAID_NOTE_HEIGHT + UNLAID_NOTE_GAP);
+  }
+  return placed;
 }

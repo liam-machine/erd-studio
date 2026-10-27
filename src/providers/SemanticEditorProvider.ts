@@ -216,6 +216,7 @@ export function classifySubjectAreaLoadFailure(err: unknown): SubjectAreaLoadFai
     if (err.reason === 'unreadable') return 'unreadable';
     if (err.reason === 'empty') return 'empty';
     if (err.mergeConflict) return 'conflict';
+    if (err.reason === 'invalid-dbml') return 'dbml';
     return 'json';
   }
   if (err instanceof SubjectAreaValidationError) return 'invalid';
@@ -1922,7 +1923,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (error.kind === 'read') return `Can't edit "${modelName}": its file could not be read.`;
       return error.mergeConflict
         ? `Can't edit "${modelName}": its file has an unresolved git merge conflict${where}.`
-        : `Can't edit "${modelName}": its file has a YAML error${where}.`;
+        : `Can't edit "${modelName}": its file has a ${error.kind.startsWith('dbml') ? 'DBML' : 'YAML'} error${where}.`;
     }
     return `Table "${modelName}" not found in the Table Library.`;
   }

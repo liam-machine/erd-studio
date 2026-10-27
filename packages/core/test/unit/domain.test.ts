@@ -6,7 +6,13 @@ import {
   NON_SUBJECT_AREA_DIRS,
   VALID_CARDINALITIES,
   buildUnifiedSubjectArea,
+  DBML_DIAGRAM_QUOTE_HINT_CODES,
+  DBML_QUOTE_HINT,
+  DBML_TABLE_QUOTE_HINT_CODES,
+  TableDbmlError,
+  classifyDbmlTableError,
   classifyTableLoadError,
+  dbmlErrorClassOf,
   describeTableLoadError,
   parseSubjectAreaJson,
   locateJsonSyntaxError,
@@ -17,6 +23,7 @@ import {
   type LayerLookup,
 } from '../../src/domain';
 import type { SemanticTable, UnifiedSubjectArea } from '../../src/types/semantic';
+import { CURRENT_JSON_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION, DBML_SCHEMA_VERSION } from '../../src/types/semantic';
 import { toDisplaySubjectArea } from '../../src/displayDomain';
 
 const FILE = '/proj/.erd-studio/silver/sales.json';
@@ -355,7 +362,7 @@ describe('buildUnifiedSubjectArea', () => {
     const u = build({ schemaVersion: 5, logical: { models: ['dim_a', 'gone', 'dim_a'] } }, { getModel, warn });
     expect(u.logical.models).toEqual([dimA, { name: 'gone', columns: [] }, dimA]);
     expect(getModel.mock.calls.map((c) => c[0])).toEqual(['dim_a', 'gone', 'dim_a']);
-    expect(warn).toHaveBeenCalledWith('Model "gone" not found in logical-models/');
+    expect(warn).toHaveBeenCalledWith('Model "gone" not found in the table library');
   });
 
   it('names a known load error in the warning and carries it on the placeholder (#110)', () => {
@@ -371,7 +378,7 @@ describe('buildUnifiedSubjectArea', () => {
     ]);
     expect(warn.mock.calls.map((c) => c[0])).toEqual([
       'Model "broken": logical-models file has a YAML error on line 4',
-      'Model "gone" not found in logical-models/',
+      'Model "gone" not found in the table library',
     ]);
     expect(warn.mock.calls.map((c) => c[0]).join('\n')).not.toContain('"broken" not found');
 
@@ -560,5 +567,95 @@ describe('composite foreign keys are drawn when they form one (#133 L2)', () => 
     const sorted = (rels: typeof a) => rels.map((r) => JSON.stringify(r)).sort();
     expect(sorted(b)).toEqual(sorted(a));
     expect(a.map((r) => [r.compositeKey, r.role])).toEqual([['FK_Sat', 'r'], ['FK_Sat', 'r']]);
+  });
+});
+
+describe('native DBML storage: versions, the invalid-dbml reason and DBML table-file errors', () => {
+  it('a JSON file declaring schemaVersion 7 (a DBML version) is still refused, word for word as before', () => {
+    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+    expect(CURRENT_JSON_SCHEMA_VERSION).toBe(6);
+    expect(DBML_SCHEMA_VERSION).toBe(7);
+    for (const version of [7, 8]) {
+      expect(() => validateSubjectAreaDocument({ schemaVersion: version, logical: { models: [] } }, FILE)).toThrow(
+        `Subject area file ${FILE} has schemaVersion ${version} but this extension only supports up to version 6. Please update the extension.`,
+      );
+    }
+  });
+
+  it("'invalid-dbml' is transient unless the file holds merge conflicts", () => {
+    expect(new SubjectAreaFileError('invalid-dbml', FILE, 'm').transient).toBe(true);
+    const conflict = new SubjectAreaFileError('invalid-dbml', FILE, 'm', { mergeConflict: true, line: 3 });
+    expect(conflict.transient).toBe(false);
+    expect(conflict.mergeConflict).toBe(true);
+    const located = new SubjectAreaFileError('invalid-dbml', FILE, 'm', { line: 4, column: 7 });
+    expect([located.line, located.column]).toEqual([4, 7]);
+  });
+
+  it('dbmlErrorClassOf maps a code by its range', () => {
+    expect(dbmlErrorClassOf(1000)).toBe('syntax');
+    expect(dbmlErrorClassOf(1999)).toBe('syntax');
+    expect(dbmlErrorClassOf(3025)).toBe('invalid');
+    expect(dbmlErrorClassOf(4000)).toBe('binding');
+    expect(dbmlErrorClassOf(4001)).toBe('binding');
+    expect(dbmlErrorClassOf(5001)).toBe('interpreter');
+    expect(dbmlErrorClassOf(2000)).toBe('invalid');
+  });
+
+  it('classifyTableLoadError classifies a TableDbmlError by its code or rule, never its message', () => {
+    const at = { line: 4, column: 9 };
+    expect(classifyTableLoadError(new TableDbmlError('quote me', { dbmlCode: 1001, ...at }))).toEqual({ kind: 'dbmlSyntax', ...at, code: '1001' });
+    expect(classifyTableLoadError(new TableDbmlError('x', { dbmlCode: 3025, ...at }))).toEqual({ kind: 'dbmlInvalid', ...at, code: '3025' });
+    expect(classifyTableLoadError(new TableDbmlError('x', { dbmlCode: 5001 }))).toEqual({ kind: 'dbmlInvalid', code: '5001' });
+    expect(classifyTableLoadError(new TableDbmlError('x', { dbmlCode: 4000, line: 2 }))).toEqual({ kind: 'dbmlStructure', line: 2, code: '4000' });
+    expect(classifyTableLoadError(new TableDbmlError('x', { rule: 'notOneTable' }))).toEqual({ kind: 'dbmlStructure', code: 'structure:notOneTable' });
+    expect(classifyTableLoadError(new TableDbmlError('x', { rule: 'nameMismatch', line: 1, column: 7 }))).toEqual({
+      kind: 'dbmlStructure', line: 1, column: 7, code: 'structure:nameMismatch',
+    });
+    expect(classifyTableLoadError(new TableDbmlError('x', { rule: 'unsupportedElement' })).code).toBe('structure:unsupportedElement');
+    expect(classifyTableLoadError(new TableDbmlError('x', { mergeConflict: true, line: 6, column: 1 }))).toEqual({
+      kind: 'dbmlSyntax', line: 6, mergeConflict: true,
+    });
+    expect(classifyTableLoadError(new TableDbmlError('x'))).toEqual({ kind: 'dbmlInvalid' });
+    // The same answer from the plain classifier a reader can call without throwing.
+    expect(classifyDbmlTableError({ dbmlCode: 3075, line: 1 })).toEqual({ kind: 'dbmlInvalid', line: 1, code: '3075' });
+    // YAML errors are classified as before.
+    expect(classifyTableLoadError(Object.assign(new Error('x'), { code: 'TAB_AS_INDENT', linePos: [{ line: 3, col: 1 }] })))
+      .toEqual({ kind: 'yamlIndent', line: 3, column: 1, code: 'TAB_AS_INDENT' });
+  });
+
+  it('describeTableLoadError words each DBML kind, with the quote hint for 3025 and 3075 only', () => {
+    expect(describeTableLoadError({ kind: 'dbmlSyntax', line: 4 })).toBe('table file has a DBML syntax error on line 4');
+    expect(describeTableLoadError({ kind: 'dbmlSyntax' })).toBe('table file has a DBML syntax error');
+    expect(describeTableLoadError({ kind: 'dbmlSyntax', line: 6, mergeConflict: true })).toBe('table file has an unresolved git merge conflict on line 6');
+    expect(describeTableLoadError({ kind: 'dbmlInvalid', line: 2, code: '3025' }))
+      .toBe("table file has an unquoted value on line 2; quote it, as in grain: 'One row per order line'");
+    expect(describeTableLoadError({ kind: 'dbmlInvalid', code: '3075' }))
+      .toBe("table file has an unquoted value; quote it, as in grain: 'One row per order line'");
+    // 3073 is a TablePartial error in the pinned parser: no quote hint.
+    expect(describeTableLoadError({ kind: 'dbmlInvalid', line: 2, code: '3073' })).toBe('table file is not valid DBML (3073) on line 2');
+    expect(describeTableLoadError({ kind: 'dbmlInvalid' })).toBe('table file is not valid DBML');
+    expect(describeTableLoadError({ kind: 'dbmlStructure', code: 'structure:notOneTable' }))
+      .toBe('table file must hold exactly one Table that needs no other file');
+    expect(DBML_TABLE_QUOTE_HINT_CODES.has('3073')).toBe(false);
+    expect([...DBML_DIAGRAM_QUOTE_HINT_CODES].sort()).toEqual(['3051', '3063']);
+    expect(DBML_QUOTE_HINT).toContain("grain: 'One row per order line'");
+    // The YAML wording does not change.
+    expect(describeTableLoadError({ kind: 'yamlScalar', line: 5 })).toBe('logical-models file has a YAML error on line 5');
+    expect(describeTableLoadError({ kind: 'yamlOther', line: 5, mergeConflict: true }))
+      .toBe('logical-models file has an unresolved git merge conflict on line 5');
+  });
+
+  it('the relationship-mismatch warning names the table library, not a folder', () => {
+    const warn = vi.fn();
+    const models: SemanticTable[] = [
+      { name: 'a', columns: [{ name: 'b_id', dataType: 'int', description: '' }], relationships: [{ fromColumn: 'b_id', toModel: 'b', toColumn: 'id', cardinality: 'one-to-one' }] },
+      { name: 'b', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] },
+    ];
+    build(
+      { schemaVersion: 5, domain: 'd', layer: 'silver', logical: { models: ['a', 'b'], relationships: [{ fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id', cardinality: 'many-to-one' }] } },
+      { getModel: (name) => models.find((m) => m.name === name) ?? null, warn },
+    );
+    expect(warn.mock.calls.flat().join('\n')).toContain('but the table library defines it as one-to-one');
+    expect(warn.mock.calls.flat().join('\n')).not.toContain('logical-models/');
   });
 });

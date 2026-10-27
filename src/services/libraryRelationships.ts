@@ -13,7 +13,7 @@
 
 import {
   canonicalRelationship, compositeGroupProblem, contradictsKeys, contradictsKeysOf, keyedRelationship, linkKey,
-  mergeLibraryRelationships, normaliseRelationshipRole, relationshipKey, respellRelationship, reverseRelationship, sameLink,
+  mergeLibraryRelationships, nextCompositeKey, normaliseRelationshipRole, relationshipKey, respellRelationship, reverseRelationship, sameLink,
 } from '@erd-studio/core';
 import type { ColumnPair, DbtKeyIndex, KeyedTable } from '@erd-studio/core';
 import type { TableRelationship, Relationship, SemanticTable } from '../types/semantic';
@@ -223,17 +223,8 @@ export function expandToGroups(
   return out;
 }
 
-/**
- * A new composite's name in a file (#133 L2): `fk_<toModel>`, lowercased,
- * then `_2`, `_3`, … while the file already uses it. Depends only on the
- * file's entries.
- */
-export function nextCompositeKey(fileEntries: ReadonlyArray<Pick<TableRelationship, 'compositeKey'>>, toModel: string): string {
-  const used = new Set(fileEntries.map((e) => e.compositeKey?.toLowerCase()).filter((k): k is string => !!k));
-  const base = `fk_${toModel}`.toLowerCase();
-  if (!used.has(base)) return base;
-  for (let n = 2; ; n++) if (!used.has(`${base}_${n}`)) return `${base}_${n}`;
-}
+/** A new composite's name in a file (#133 L2): moved to core, re-exported here. */
+export { nextCompositeKey };
 
 /**
  * Follow a column rename: the model's own relationships leaving that column,

@@ -77,9 +77,11 @@ import {
   DBML_RICH_STICKY_COLOURS,
   DBML_RICH_STICKY_PREFIX,
   DBML_RICH_TABLE_PROPERTIES,
+  DBML_STORAGE_PLACEHOLDER_NOTE,
   rationaleProperty,
 } from './dbmlRichProperties.js';
 import { dbdiagramLayoutFileName } from './dbdiagramLayout.js';
+import { dbmlColumnType as columnType, dbmlName as ident, dbmlNoteText as noteText, dbmlString as str } from './dbmlText.js';
 
 /** The first line of every rich DBML export. */
 export const DBML_RICH_EXPORT_HEADER = '// erd-studio dbml-export v2 (DBML 9.1+)';
@@ -94,39 +96,8 @@ export interface DbmlRichOptions {
   layoutFileName?: string;
 }
 
-const PLAIN_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/** Words DBML reads as keywords somewhere; quoted as names so no parser version has to guess. */
-const KEYWORDS: ReadonlySet<string> = new Set([
-  'project', 'table', 'tablegroup', 'tablepartial', 'ref', 'note', 'enum', 'indexes', 'checks', 'records',
-  'as', 'pk', 'null', 'not', 'unique', 'increment', 'default', 'true', 'false', 'primary', 'key',
-]);
-
 /** A meta key DBML can carry as `meta_<key>`: DBML lower-cases property names, so only lower-case ones read back exactly. */
 const META_KEY = /^[a-z_][a-z0-9_]*$/;
-
-/** `value` as a DBML string every 9.1+ parser reads back exactly: single-quoted on one line, else triple-quoted. */
-function str(value: string): string {
-  const escaped = value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-  return /[\r\n]/.test(value) ? `'''${escaped}'''` : `'${escaped}'`;
-}
-
-/** Note text: DBML drops white space at the start of a note (and an indent every line shares), so drop it here too. */
-function noteText(value: string): string {
-  return value.replace(/^\s+/, '');
-}
-
-/** A DBML name: bare when it is a plain identifier and no keyword, else double-quoted with `\"` / `\\` escapes. */
-function ident(value: string): string {
-  if (PLAIN_IDENTIFIER.test(value) && !KEYWORDS.has(value.toLowerCase())) return value;
-  const escaped = value
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r')
-    .replace(/\t/g, '\\t');
-  return `"${escaped}"`;
-}
 
 function tableName(model: ExportTable): string {
   return model.schema ? `${ident(model.schema)}.${ident(model.name)}` : ident(model.name);
@@ -135,10 +106,6 @@ function tableName(model: ExportTable): string {
 /** How DBML tells tables apart: an unqualified table is in schema `public`. */
 function tableKey(model: ExportTable): string {
   return `${model.schema || 'public'}\u0000${model.name}`;
-}
-
-function columnType(dataType: string): string {
-  return dataType === '' ? '""' : ident(dataType);
 }
 
 const columnKey = (model: ExportTable, column: string): string => `${tableKey(model)}\u0000${column}`;
@@ -226,7 +193,7 @@ function columnLine(model: ExportTable, column: ExportColumn, singlePk: boolean,
   return lines;
 }
 
-const PLACEHOLDER_NOTE = 'ERD Studio: this table has no columns yet, and DBML needs one';
+const PLACEHOLDER_NOTE = DBML_STORAGE_PLACEHOLDER_NOTE;
 
 function tableBlock(model: ExportTable, facts: RefFacts): string[] {
   const lines: string[] = [];

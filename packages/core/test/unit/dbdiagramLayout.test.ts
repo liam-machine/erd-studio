@@ -12,8 +12,12 @@ import * as path from 'path';
 
 import {
   DBDIAGRAM_LAYOUT_VERSION,
+  DbdiagramLayoutRefused,
   dbdiagramLayoutFileName,
+  editDiagramLayout,
+  placeUnlaidNotes,
   readDbdiagramLayout,
+  stickyLayoutsOf,
   serializeDbdiagramLayout,
   toDbdiagramLayout,
 } from '../../src/dbdiagramLayout';
@@ -260,5 +264,129 @@ describe('readDbdiagramLayout', () => {
 
   it('accepts a byte-order mark', () => {
     expect(readDbdiagramLayout('\uFEFF' + pulledLayout).problems).toEqual([]);
+  });
+});
+
+describe('editDiagramLayout (a DBML diagram\'s layout file)', () => {
+  const positions = { fct_order: { x: 400, y: 200.123 }, dim_customer: { x: 40, y: 40 } };
+  const stickies = [
+    { name: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', x: 720, y: 40, width: 220, height: 120 },
+    { name: '9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f', x: 720, y: 200 },
+  ];
+
+  it('creates a file only when there is something to place', () => {
+    expect(editDiagramLayout(null, {}, [])).toBeNull();
+    const created = editDiagramLayout(null, positions, stickies)!;
+    expect(created.endsWith('}\n')).toBe(true);
+    const parsed = JSON.parse(created);
+    expect(parsed.version).toBe(DBDIAGRAM_LAYOUT_VERSION);
+    expect(parsed.defaultView.tablePositions).toEqual([
+      { name: 'fct_order', schemaName: 'public', x: 400, y: 200.12 },
+      { name: 'dim_customer', schemaName: 'public', x: 40, y: 40 },
+    ]);
+    expect(parsed.defaultView.stickyNoteLayouts).toEqual(stickies);
+    expect(editDiagramLayout(null, {}, [stickies[1]])).not.toBeNull();
+  });
+
+  it('returns null when both lists are unchanged, and a file it wrote round-trips byte for byte', () => {
+    const created = editDiagramLayout(null, positions, stickies)!;
+    expect(editDiagramLayout(created, positions, stickies)).toBeNull();
+    // Reformatted by hand but the same lists: still no write.
+    expect(editDiagramLayout(JSON.stringify(JSON.parse(created)), positions, stickies)).toBeNull();
+    // Sub-pixel noise beyond two decimals is no change.
+    expect(editDiagramLayout(created, { ...positions, fct_order: { x: 400.001, y: 200.1249 } }, stickies)).toBeNull();
+    const moved = editDiagramLayout(created, { ...positions, fct_order: { x: 500, y: 200 } }, stickies)!;
+    expect(JSON.parse(moved).defaultView.tablePositions[0]).toEqual({ name: 'fct_order', schemaName: 'public', x: 500, y: 200 });
+    expect(editDiagramLayout(moved, { ...positions, fct_order: { x: 500, y: 200 } }, stickies)).toBeNull();
+  });
+
+  it('keeps every key it does not own, as parsed', () => {
+    const edited = editDiagramLayout(pulledLayout, positions, stickies)!;
+    const before = JSON.parse(pulledLayout);
+    const after = JSON.parse(edited);
+    expect(after.defaultView.tablePositions).toHaveLength(2);
+    expect(after.defaultView.stickyNoteLayouts).toEqual(stickies);
+    delete before.defaultView.tablePositions;
+    delete before.defaultView.stickyNoteLayouts;
+    delete after.defaultView.tablePositions;
+    delete after.defaultView.stickyNoteLayouts;
+    expect(after).toEqual(before);
+    const custom = JSON.stringify({ version: '3.0.0', team: { owner: 'x' }, defaultView: { detailLevel: 'Keys', extra: [1, 2] } });
+    const out = JSON.parse(editDiagramLayout(custom, positions, [])!);
+    expect(out.team).toEqual({ owner: 'x' });
+    expect(out.defaultView.detailLevel).toBe('Keys');
+    expect(out.defaultView.extra).toEqual([1, 2]);
+    expect(out.defaultView.stickyNoteLayouts).toEqual([]);
+  });
+
+  it('refuses a file that is not a JSON object, never regenerating it', () => {
+    for (const bad of ['{not json', '[]', '"x"', '42', 'null', '']) {
+      expect(() => editDiagramLayout(bad, positions, stickies)).toThrow(DbdiagramLayoutRefused);
+    }
+  });
+
+  it('accepts a byte-order mark on the old text', () => {
+    const created = editDiagramLayout(null, positions, stickies)!;
+    expect(editDiagramLayout('﻿' + created, positions, stickies)).toBeNull();
+  });
+
+  it('read(edit(x)) gives back the positions and the sticky layouts', () => {
+    const text = editDiagramLayout(null, positions, stickies)!;
+    const reading = readDbdiagramLayout(text);
+    expect(reading.problems).toEqual([]);
+    expect(Object.fromEntries(reading.tables.map((t) => [t.name, { x: t.x, y: t.y }]))).toEqual({
+      fct_order: { x: 400, y: 200.12 },
+      dim_customer: { x: 40, y: 40 },
+    });
+    expect(reading.stickies).toEqual(stickies);
+  });
+
+  it('stickyLayoutsOf writes a size only when it is set and positive', () => {
+    expect(stickyLayoutsOf([
+      { id: 'a', x: 1.234, y: 2, width: 200, height: 0 },
+      { id: 'b', x: 3, y: 4 },
+      { id: 'c', x: 5, y: 6, width: -1, height: 90.555 },
+    ])).toEqual([
+      { name: 'a', x: 1.23, y: 2, width: 200 },
+      { name: 'b', x: 3, y: 4 },
+      { name: 'c', x: 5, y: 6, height: 90.56 },
+    ]);
+    expect(stickyLayoutsOf(undefined)).toEqual([]);
+  });
+});
+
+describe('placeUnlaidNotes', () => {
+  const positions = { a: { x: 0, y: 100 }, b: { x: 600, y: 300 } };
+  const laid = [{ name: 'n1', x: 900, y: 50, width: 200 }];
+
+  it('places only notes without a layout, in one column right of everything, 40 px apart, in file order', () => {
+    const placed = placeUnlaidNotes(['n1', 'n2', 'n3'], positions, laid);
+    expect(Object.keys(placed)).toEqual(['n2', 'n3']);
+    // Right edge: max(600 + 280, 900 + 200) = 1100, plus the 40 px gap.
+    expect(placed.n2).toEqual({ x: 1140, y: 50 });
+    expect(placed.n3).toEqual({ x: 1140, y: 50 + 80 + 40 });
+  });
+
+  it('is deterministic', () => {
+    expect(placeUnlaidNotes(['x', 'y'], positions, laid)).toEqual(placeUnlaidNotes(['x', 'y'], positions, laid));
+  });
+
+  it('never overlaps a laid-out table or note', () => {
+    const placed = placeUnlaidNotes(['p', 'q', 'r', 's'], positions, laid);
+    const boxes = [
+      ...Object.values(positions).map((p) => ({ x: p.x, y: p.y, w: 280, h: 200 })),
+      ...laid.map((l) => ({ x: l.x, y: l.y, w: l.width ?? 160, h: 80 })),
+    ];
+    for (const note of Object.values(placed)) {
+      for (const box of boxes) {
+        const apart = note.x >= box.x + box.w || note.x + 160 <= box.x || note.y >= box.y + box.h || note.y + 80 <= box.y;
+        expect(apart).toBe(true);
+      }
+    }
+  });
+
+  it('starts at the origin on an empty canvas, and places a repeated id once', () => {
+    expect(placeUnlaidNotes(['a', 'a', 'b'], {}, [])).toEqual({ a: { x: 0, y: 0 }, b: { x: 0, y: 120 } });
+    expect(placeUnlaidNotes([], positions, laid)).toEqual({});
   });
 });

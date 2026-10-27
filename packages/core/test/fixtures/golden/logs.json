@@ -56,16 +56,16 @@
   "library-relationships.host": [],
   "library-relationships.unified": [],
   "missing-model.host": [
-    "warn: [DomainService] Model \"dim_missing\" not found in logical-models/",
+    "warn: [DomainService] Model \"dim_missing\" not found in the table library",
     "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
     "warn: [DomainService] Model \"broken\": logical-models file has a YAML error on line 5",
-    "warn: [DomainService] Model \"nameless\" not found in logical-models/"
+    "warn: [DomainService] Model \"nameless\" not found in the table library"
   ],
   "missing-model.unified": [
-    "warn: [DomainService] Model \"dim_missing\" not found in logical-models/",
+    "warn: [DomainService] Model \"dim_missing\" not found in the table library",
     "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
     "warn: [DomainService] Model \"broken\": logical-models file has a YAML error on line 5",
-    "warn: [DomainService] Model \"nameless\" not found in logical-models/"
+    "warn: [DomainService] Model \"nameless\" not found in the table library"
   ],
   "missing-positions.host": [],
   "missing-positions.persist": [],

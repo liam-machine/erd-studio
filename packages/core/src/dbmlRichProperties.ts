@@ -68,6 +68,50 @@ export const DBML_RICH_META_JSON_PROPERTY = 'meta_json';
 export const DBML_RICH_PLACEHOLDER_COLUMN = '_erd_no_columns';
 export const DBML_RICH_PLACEHOLDER_PROPERTY = 'erd_placeholder';
 
+/**
+ * The note on the placeholder column: shared by the rich export and native
+ * DBML storage, which both give a table with no columns that one column.
+ */
+export const DBML_STORAGE_PLACEHOLDER_NOTE = 'ERD Studio: this table has no columns yet, and DBML needs one';
+
+/**
+ * The first line of ERD Studio's rich export starts with this
+ * (`DBML_RICH_EXPORT_HEADER` is the whole line). A `.dbml` in a layer folder
+ * whose first line starts with it is an export someone saved there, not a
+ * diagram (`classifySemanticFile`).
+ */
+export const ERD_STUDIO_DBML_HEADER_PREFIX = '// erd-studio dbml-export';
+
+// ---------------------------------------------------------------------------
+// Native DBML storage (ERD Studio 2.0)
+// ---------------------------------------------------------------------------
+
+/**
+ * A DBML diagram's Project keys (native DBML storage). Every value is a
+ * quoted string: Project custom keys must be quoted in every DBML parser.
+ */
+export const DBML_DIAGRAM_PROPERTIES = Object.freeze({
+  /** The diagram's schema version, `'7'` (`DBML_SCHEMA_VERSION`); 7 when missing. */
+  schemaVersion: 'erd_schema_version',
+  modelFolder: 'erd_model_folder',
+  /** `viewConfig.showFkEdges`: `'true'` / `'false'`. */
+  showFkEdges: 'erd_show_fk_edges',
+  /** `viewConfig.layoutOptions`, as JSON of the `Record<string, string>`. */
+  layoutOptions: 'erd_layout_options',
+  /** `stubColumns`, as a JSON array of strings. */
+  stubColumns: 'erd_stub_columns',
+} as const);
+
+/** The stem reserved for a library folder's relationships file, in any case. */
+export const DBML_RELATIONSHIPS_FILE_STEM = '_relationships';
+
+/** One per library folder: `tables/_relationships.dbml`, `tables/<folder>/_relationships.dbml`. */
+export const DBML_RELATIONSHIPS_FILE_NAME = `${DBML_RELATIONSHIPS_FILE_STEM}.dbml`;
+
+/** The first line of a relationships file, written only when the writer creates it and never required on read. */
+export const DBML_RELATIONSHIPS_FILE_HEADER =
+  '// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.';
+
 /** The property for one rationale key: `scdStrategy` → `rationale_scd_strategy`. */
 export function rationaleProperty(key: keyof Rationale): string {
   return DBML_RICH_RATIONALE_PREFIX + key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);

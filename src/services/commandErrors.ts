@@ -165,12 +165,24 @@ export function describeDiagramFileProblem(err: unknown, filePath: string, shown
         return { reason: 'ERD Studio could not read it. Check that the file is not locked or blocked by permissions', openable: false };
       case 'empty':
         return { reason: 'it has no content', openable: true };
-      case 'invalid-json': {
+      case 'invalid-json':
+      case 'invalid-dbml': {
         if (err.mergeConflict) {
           return {
             reason: `it has unresolved git merge conflicts${err.line !== undefined ? `, first at line ${err.line}` : ''}. Keep one side of each conflict, then try again`,
             openable: true,
             ...(err.line !== undefined ? { line: err.line } : {}),
+          };
+        }
+        if (err.reason === 'invalid-dbml') {
+          const where = err.line !== undefined
+            ? ` at line ${err.line}${err.column !== undefined ? `, column ${err.column}` : ''}`
+            : '';
+          return {
+            reason: where ? `there is a DBML mistake${where}` : 'it is not valid DBML',
+            openable: true,
+            ...(err.line !== undefined ? { line: err.line } : {}),
+            ...(err.column !== undefined ? { column: err.column } : {}),
           };
         }
         const at = jsonMistakeAt(err);

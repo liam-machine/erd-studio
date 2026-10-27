@@ -3,7 +3,7 @@
  * of domain files and `logical-models/*.yml`.
  */
 
-import type { Relationship } from './types/semantic.js';
+import type { Relationship, TableRelationship } from './types/semantic.js';
 import { keyEvidenceOf } from './keyEvidence.js';
 import type { DbtKeyIndex, KeyedTable } from './keyEvidence.js';
 
@@ -267,4 +267,18 @@ export function compositeGroupProblem(members: readonly Relationship[]): string 
 /** A composite's column pairs, in the members' order and direction. */
 export function pairsOf(members: readonly Relationship[]): ColumnPair[] {
   return members.map((m) => ({ fromColumn: m.fromColumn, toColumn: m.toColumn }));
+}
+
+/**
+ * A new composite's name in a file (#133 L2): `fk_<toModel>`, lowercased,
+ * then `_2`, `_3`, … while the file already uses it. Depends only on the
+ * file's entries. Shared by the extension's relationship planner and the
+ * DBML relationships reader, which derives a composite Ref's key with it in
+ * file order.
+ */
+export function nextCompositeKey(fileEntries: ReadonlyArray<Pick<TableRelationship, 'compositeKey'>>, toModel: string): string {
+  const used = new Set(fileEntries.map((e) => e.compositeKey?.toLowerCase()).filter((k): k is string => !!k));
+  const base = `fk_${toModel}`.toLowerCase();
+  if (!used.has(base)) return base;
+  for (let n = 2; ; n++) if (!used.has(`${base}_${n}`)) return `${base}_${n}`;
 }

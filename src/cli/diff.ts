@@ -71,7 +71,7 @@ export interface UnreadableTableFile {
   kind: TableFileErrorKind;
   line?: number;
   column?: number;
-  /** The `yaml` library's error code, e.g. `BLOCK_AS_IMPLICIT_KEY`. */
+  /** The parser's code: the `yaml` library's (`BLOCK_AS_IMPLICIT_KEY`) or a DBML diagnostic's (`3025`, `structure:notOneTable`). */
   code?: string;
   /** The file holds unresolved git merge conflicts (#145); `line` is the first `<<<<<<<`. */
   mergeConflict?: true;
@@ -86,15 +86,28 @@ export interface UnreadableTableFile {
   message: string;
 }
 
-/** One-line advice per failure kind, for the fix text and the human output. */
-export const TABLE_YAML_HINTS: Record<TableFileErrorKind, string> = {
+/**
+ * One-line advice per failure kind, for the fix text and the human output.
+ * `at that line` in a DBML hint becomes the line when one is known
+ * ({@link unreadableHint}).
+ */
+export const TABLE_FILE_HINTS: Record<TableFileErrorKind, string> = {
   yamlScalar: 'wrap the value in double quotes',
   yamlIndent: 'indent with spaces, never tabs',
   yamlDuplicateKey: 'a key appears twice — keep one',
   yamlStructure: 'one YAML document per file — remove any `---` separator or code fence',
   yamlOther: 'check the YAML syntax there',
   read: 'the file could not be read — check it exists and is readable',
+  dbmlSyntax: 'fix the DBML at that line',
+  dbmlInvalid: "fix the DBML at that line — quote every custom value, as in grain: 'One row per order line'",
+  dbmlStructure: 'a table file holds one Table and no use/Ref lines',
 };
+
+/** The hint for `kind`, with a DBML hint's `at that line` made `at line N` when the line is known. */
+function kindHint(kind: TableFileErrorKind, line: number | undefined): string {
+  const hint = TABLE_FILE_HINTS[kind];
+  return line !== undefined ? hint.replace('at that line', `at line ${line}`) : hint;
+}
 
 /**
  * The advice an AI assistant reads for an unreadable model file (doctor's
@@ -102,7 +115,7 @@ export const TABLE_YAML_HINTS: Record<TableFileErrorKind, string> = {
  * of a conflict to keep is the user's call — it is usually a teammate's work —
  * so the conflict advice asks the assistant to show it, not to resolve it.
  */
-export function unreadableHint(u: Pick<UnreadableTableFile, 'kind' | 'mergeConflict' | 'readable' | 'key'>): string {
+export function unreadableHint(u: Pick<UnreadableTableFile, 'kind' | 'mergeConflict' | 'readable' | 'key' | 'line'>): string {
   if (u.readable) {
     return `${u.key ? `\`${u.key}\`` : 'a key'} is written twice in one block — the last copy is what loads; `
       + 'delete the other copy (ERD Studio will not change this file until you do)';
@@ -110,7 +123,7 @@ export function unreadableHint(u: Pick<UnreadableTableFile, 'kind' | 'mergeConfl
   return u.mergeConflict
     ? 'unresolved git merge conflict — git left two versions there: show the user the file and line and ask which side '
       + "to keep (don't pick a side or run git commands yourself)"
-    : TABLE_YAML_HINTS[u.kind];
+    : kindHint(u.kind, u.line);
 }
 
 /** The terminal line's advice for a conflicted file: short, and it picks no side. */
@@ -143,8 +156,9 @@ export function describeUnreadable(u: UnreadableTableFile, rerun: 'doctor' | 'di
   const where = `${path.posix.basename(u.file)}${u.line !== undefined ? ` line ${u.line}` : ''}`;
   if (u.mergeConflict) { return `${where}: ${mergeConflictHumanHint(rerun)}`; }
   if (u.readable) { return `${where}: ${unreadableHint(u)}`; }
-  const what = u.kind === 'read' ? 'could not be read' : `YAML error${u.code ? ` (${u.code})` : ''}`;
-  return u.kind === 'read' ? `${where}: ${TABLE_YAML_HINTS.read}` : `${where}: ${what} — ${TABLE_YAML_HINTS[u.kind]}`;
+  const format = u.kind.startsWith('dbml') ? 'DBML' : 'YAML';
+  const what = u.kind === 'read' ? 'could not be read' : `${format} error${u.code ? ` (${u.code})` : ''}`;
+  return u.kind === 'read' ? `${where}: ${TABLE_FILE_HINTS.read}` : `${where}: ${what} — ${kindHint(u.kind, u.line)}`;
 }
 
 export interface SubjectAreaDiff {

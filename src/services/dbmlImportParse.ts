@@ -24,6 +24,7 @@
  */
 
 import { Compiler, DEFAULT_ENTRY, MemoryProjectLayout } from '@dbml/parse';
+import { ERD_STUDIO_DBML_HEADER_PREFIX } from '@erd-studio/core';
 
 // ---------------------------------------------------------------------------
 // The normalised model
@@ -191,9 +192,10 @@ const PINNED_PARSER: DbmlParserModule = { Compiler, MemoryProjectLayout, DEFAULT
 
 /**
  * The first line of ERD Studio's rich export starts with this
- * (`DBML_RICH_EXPORT_HEADER` in `@erd-studio/core` is the whole line).
+ * (`DBML_RICH_EXPORT_HEADER` in `@erd-studio/core` is the whole line). It
+ * lives in core, where the file classifier reads it too.
  */
-export const ERD_STUDIO_DBML_HEADER_PREFIX = '// erd-studio dbml-export';
+export { ERD_STUDIO_DBML_HEADER_PREFIX };
 
 // ---------------------------------------------------------------------------
 // Reading

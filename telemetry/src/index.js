@@ -287,6 +287,15 @@ const FEATURES = [
   'logicalOnlyProject',
   'exampleDiagram',
   'blankDiagram',
+  // Native DBML storage (2.0).
+  'dbmlProject',
+  'convertToDbml',
+  'convertToDbmlOffered',
+  'convertToDbmlDeclined',
+  'convertToDbmlNotNow',
+  'convertToDbmlCancelled',
+  'convertToDbmlRefused',
+  'dbmlForeignFormatWarned',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -369,6 +378,13 @@ const ERROR_CODES = [
   'saveFailedUndoRedo',
   // Import DBML… failed while writing the new diagram.
   'importDbmlFailed',
+  // Native DBML storage (2.0): a .dbml table file or diagram DBML could not
+  // read, and Convert Project to DBML failed while writing.
+  'modelFileDbmlSyntax',
+  'modelFileDbmlInvalid',
+  'modelFileDbmlStructure',
+  'domainLoadDbml',
+  'convertToDbmlFailed',
 ];
 
 /**
