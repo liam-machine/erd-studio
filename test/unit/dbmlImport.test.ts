@@ -986,6 +986,8 @@ describe('where relationships are stored', () => {
     // bridge_tag <> dim_customer is stored on the new bridge_tag; dim_customer is untouched.
     expect(tableOf(p, 'bridge_tag').relationships).toHaveLength(1);
     expect(describeDbmlImportPlan(p)).toContain('1 is already in your Table Library and kept as it has them.');
+    // Only 6 of the 7 are written; the summary must not say all 7 are.
+    expect(describeDbmlImportPlan(p)).toContain("7 relationships (6 saved in the tables' files).");
   });
 
   it('library storage: a composite the library already stores part of is left out whole', () => {
@@ -1166,5 +1168,49 @@ describe('describeDbmlImportPlan', () => {
     ]);
     // The same column rename in every table is named once.
     expect(lines).toContain('• Renamed to names ERD Studio can use: parent id → parent_id (in 12 tables).');
+  });
+});
+
+describe('review fixes (#216)', () => {
+  const linkOf = (p: DbmlImportPlan) => p.relationships.map((r) => `${r.fromModel}.${r.fromColumn} -> ${r.toModel}.${r.toColumn}`);
+
+  it('ERD Studio\'s plain (v1) export writes a one-to-one FK end first, and the import keeps it that way', () => {
+    const tables = 'Table users {\n  id int [pk]\n}\nTable user_info {\n  user_id int\n}\n';
+    expect(linkOf(plan(`// erd-studio dbml-export v1\n${tables}Ref: user_info.user_id - users.id\n`)))
+      .toEqual(['user_info.user_id -> users.id']);
+    // A shared primary key (both ends are keys) too, where the key heuristic cannot decide.
+    const shared = 'Table users {\n  id int [pk]\n}\nTable user_info {\n  user_id int [pk]\n}\n';
+    expect(linkOf(plan(`// erd-studio dbml-export v1\n${shared}Ref: user_info.user_id - users.id\n`)))
+      .toEqual(['user_info.user_id -> users.id']);
+    // The rich (v2) export writes it the DBML way round: the second end is the FK.
+    expect(linkOf(plan(`${DBML_RICH_EXPORT_HEADER}\n${tables}Ref: users.id - user_info.user_id\n`)))
+      .toEqual(['user_info.user_id -> users.id']);
+  });
+
+  it('a cleaned-up column name never takes a valid column\'s own name', () => {
+    const p = plan('Table t {\n  "order-id" int\n  order_id int [pk]\n}\nTable o {\n  id int [pk]\n  t_order int\n}\nRef: o.t_order > t.order_id\n');
+    const t = tableOf(p, 't');
+    expect(t.columns!.map((c) => [c.name, c.isPrimaryKey === true])).toEqual([['order_id_2', false], ['order_id', true]]);
+    expect(p.report.renamed).toContainEqual(expect.objectContaining({ kind: 'column', from: 'order-id', to: 'order_id_2' }));
+    expect(linkOf(p)).toEqual(['o.t_order -> t.order_id']);
+  });
+
+  it('a table name the import made up is never matched to an unrelated library table', () => {
+    const unrelated: SemanticTable = { name: 'sales_orders', columns: [{ name: 'something_else', dataType: 'int', description: '' }] };
+    const p = plan(
+      'Table sales.orders {\n  id int [pk]\n  total int\n}\nTable crm.orders {\n  id int [pk]\n}\nTable line {\n  order_id int\n}\nRef: line.order_id > sales.orders.id\n',
+      { library: library([unrelated]) },
+    );
+    expect(p.report.reusedTables).toEqual([]);
+    const sales = p.newTables.find((m) => m.schema === 'sales')!;
+    expect(sales.name).not.toBe('sales_orders');
+    expect(sales.columns!.map((c) => c.name)).toEqual(['id', 'total']);
+    expect(linkOf(p)).toEqual([`line.order_id -> ${sales.name}.id`]);
+  });
+
+  it('a name the file wrote is still the library\'s table', () => {
+    const existing: SemanticTable = { name: 'orders', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] };
+    const p = plan('Table orders {\n  id int [pk]\n}\n', { library: library([existing]) });
+    expect(p.report.reusedTables.map((r) => r.name)).toEqual(['orders']);
   });
 });

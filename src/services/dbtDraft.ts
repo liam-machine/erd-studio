@@ -692,7 +692,7 @@ export function buildDraftSubjectAreaDocument(input: {
  * The file text, formatted as `createDomain` writes it: under the v5 keys,
  * or in the v6 naming (#182) for a project that writes it.
  */
-export function serializeDraftSubjectAreaDocument(doc: DraftSubjectAreaDocument, tableNaming = false): string {
+export function serializeDraftSubjectAreaDocument(doc: DraftSubjectAreaDocument | object, tableNaming = false): string {
   return JSON.stringify(tableNaming ? toTableNamingDocument({ ...doc }) : doc, null, 2) + '\n';
 }
 
@@ -731,7 +731,12 @@ export function suggestSubjectAreaName(scope: DraftScope | undefined, taken: Ite
   }
   if (!base) { base = 'dbt-draft'; }
 
-  const used = new Set(taken);
+  return freeSubjectAreaSlug(base, taken);
+}
+
+/** `base`, or `base-2`, `base-3`… (kept within the slug length): the first not in `taken`, ignoring case. */
+export function freeSubjectAreaSlug(base: string, taken: Iterable<string>): string {
+  const used = new Set([...taken].map((n) => n.toLowerCase()));
   if (!used.has(base)) { return base; }
   for (let n = 2; ; n++) {
     const suffix = `-${n}`;

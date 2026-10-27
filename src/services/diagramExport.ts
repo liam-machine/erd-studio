@@ -100,8 +100,9 @@ export async function exportSubjectAreaFile(
   const unified = subjectAreaService.getSubjectArea(domainPath, options.dbtKeyIndex ? { dbtKeyIndex: options.dbtKeyIndex } : {});
   // A model with no stored position is placed as the canvas places it on
   // open (and as core's loader does), so the layout file has every table.
-  // Only the export's own copy of the view: nothing is written.
-  const computed = computeMissingPositions(unified);
+  // Only the export's own copy of the view: nothing is written. Only the rich
+  // DBML export writes positions (its layout file), so only it places them.
+  const computed = format === 'dbml-rich' ? computeMissingPositions(unified) : undefined;
   const viewConfig = computed
     ? { ...unified.viewConfig, positions: { ...(unified.viewConfig.positions ?? {}), ...computed } }
     : unified.viewConfig;

@@ -41,7 +41,7 @@ import {
   type DbmlImportLayout,
   type DbmlImportPlan,
 } from '../services/dbmlImport';
-import { readDbml, type DbmlDiagnostic } from '../services/dbmlImportParse';
+import type { DbmlDiagnostic } from '../services/dbmlImportParse';
 import {
   OPEN_FILE_BUTTON,
   SEND_FEEDBACK_BUTTON,
@@ -226,6 +226,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     return undefined;
   }
 
+  // Loaded on first use: the parser is a third of the bundle, and only this command needs it.
+  const { readDbml } = await import('../services/dbmlImportParse');
   const read = readDbml(text);
   if (!read.ok) {
     telemetry.feature('importDbmlInvalid');

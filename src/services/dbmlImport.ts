@@ -80,7 +80,6 @@ import {
   sameLink,
   setMetaEntry,
   stickyColourOfHex,
-  toTableNamingDocument,
 } from '@erd-studio/core';
 import type {
   Annotation,
@@ -96,8 +95,9 @@ import type {
   ViewConfig,
 } from '../types/semantic';
 import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN } from '../types/naming';
+import { normaliseName } from './nameUtils';
 import { isValidTableRole } from '../providers/payloadValidation';
-import { buildDraftSubjectAreaDocument, toSubjectAreaSlug } from './dbtDraft';
+import { buildDraftSubjectAreaDocument, freeSubjectAreaSlug, serializeDraftSubjectAreaDocument, toSubjectAreaSlug } from './dbtDraft';
 import { libraryRelationshipsOf, nextCompositeKey, routeToLibrary } from './libraryRelationships';
 import type { DbmlEnum, DbmlEnumValue, DbmlField, DbmlModel, DbmlProperties, DbmlRefEnd, DbmlTable } from './dbmlImportParse';
 
@@ -107,7 +107,6 @@ export const DBML_META_KEY = 'dbml';
 /** A subject area name the suggestion falls back to. */
 export const DBML_IMPORT_DEFAULT_NAME = 'dbml-import';
 
-const SLUG_MAX = 64;
 
 // ---------------------------------------------------------------------------
 // Inputs
@@ -335,13 +334,7 @@ export function suggestDbmlSubjectAreaName(model: DbmlModel, fileName?: string, 
   const base = toSubjectAreaSlug(model.project?.name ?? '')
     || toSubjectAreaSlug(baseNameOf(fileName ?? ''))
     || DBML_IMPORT_DEFAULT_NAME;
-  const used = new Set([...taken].map((n) => n.toLowerCase()));
-  if (!used.has(base)) return base;
-  for (let n = 2; ; n++) {
-    const suffix = `-${n}`;
-    const candidate = base.slice(0, SLUG_MAX - suffix.length) + suffix;
-    if (!used.has(candidate)) return candidate;
-  }
+  return freeSubjectAreaSlug(base, taken);
 }
 
 /** `a/b/silver.dbml` → `silver`. */
@@ -370,13 +363,17 @@ export function sanitiseDbmlColumnName(name: string): string {
   return out || 'column';
 }
 
-const lower = (s: string): string => s.toLowerCase();
+/** A real number (not NaN or ±Infinity). */
+const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 
-/** `name`, or `name_2`, `name_3`… — the first not in `used` (lowercased); adds it. */
-function freeName(name: string, used: Set<string>): string {
+/**
+ * `name`, or `name_2`, `name_3`… — the first not in `used` (normalised) and
+ * not `taken`; adds it to `used`.
+ */
+function freeName(name: string, used: Set<string>, taken: (candidate: string) => boolean = () => false): string {
   let candidate = name;
-  for (let n = 2; used.has(lower(candidate)); n++) candidate = `${name}_${n}`;
-  used.add(lower(candidate));
+  for (let n = 2; used.has(normaliseName(candidate)) || taken(candidate); n++) candidate = `${name}_${n}`;
+  used.add(normaliseName(candidate));
   return candidate;
 }
 
@@ -409,6 +406,8 @@ interface Context {
   report: DbmlImportReport;
   /** The file is ERD Studio's own export, so its `role` is a role whatever it says. */
   erdStudioExport: boolean;
+  /** ERD Studio's plain (v1) export: a one-to-one's first end is the FK. */
+  erdStudioPlainExport: boolean;
 }
 
 /**
@@ -436,9 +435,9 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
     layoutRead: input.layout !== undefined,
     layoutProblems: [...(input.layout?.problems ?? [])],
   };
-  const ctx: Context = { report, erdStudioExport: model.erdStudioExport };
+  const ctx: Context = { report, erdStudioExport: model.erdStudioExport, erdStudioPlainExport: model.erdStudioPlainExport === true };
 
-  const names = planTableNames(model.tables, ctx);
+  const names = planTableNames(model.tables, input.library, ctx);
   const planned: PlannedTable[] = model.tables.map((dbml, i) => planTable(dbml, names[i], input.library, ctx));
   applyEnums(model, planned, ctx);
 
@@ -451,9 +450,9 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
   if (input.libraryRelationships && relationships.length > 0) {
     const copies = new Map<string, SemanticTable | null>();
     const libraryCopy = (name: string): SemanticTable | null => {
-      const key = lower(name);
+      const key = normaliseName(name);
       if (!copies.has(key)) {
-        const found = planned.find((p) => p.reused && lower(p.name) === key);
+        const found = planned.find((p) => p.reused && normaliseName(p.name) === key);
         const source = found ? found.library ?? null : input.library.getTable(name);
         copies.set(key, source ? structuredClone(source) : null);
       }
@@ -548,7 +547,7 @@ function dropOneToOneUniques(planned: readonly PlannedTable[], relationships: re
   const groups = new Map<string, Relationship[]>();
   for (const rel of relationships) {
     if (rel.cardinality !== 'one-to-one') continue;
-    const key = `${lower(rel.fromModel)}\u0000${rel.compositeKey ?? `${lower(rel.fromColumn)}\u0001${lower(rel.toModel)}`}`;
+    const key = `${normaliseName(rel.fromModel)}\u0000${rel.compositeKey ?? `${normaliseName(rel.fromColumn)}\u0001${normaliseName(rel.toModel)}`}`;
     groups.set(key, [...(groups.get(key) ?? []), rel]);
   }
   for (const members of groups.values()) {
@@ -566,11 +565,11 @@ function dropOneToOneUniques(planned: readonly PlannedTable[], relationships: re
     }
     const extras = dbmlMetaOf(table.meta);
     if (!extras || !Array.isArray(extras.indexes)) continue;
-    const wanted = members.map((m) => lower(m.fromColumn)).sort().join('\u0000');
+    const wanted = members.map((m) => normaliseName(m.fromColumn)).sort().join('\u0000');
     const at = extras.indexes.findIndex((i) => {
       if (!i || typeof i !== 'object' || Array.isArray(i)) return false;
       const keys = Object.keys(i).sort().join(',');
-      const cols = Array.isArray(i.columns) ? i.columns.map((c) => lower(String(c))).sort().join('\u0000') : '';
+      const cols = Array.isArray(i.columns) ? i.columns.map((c) => normaliseName(String(c))).sort().join('\u0000') : '';
       return keys === 'columns,unique' && i.unique === true && cols === wanted;
     });
     if (at === -1) continue;
@@ -612,10 +611,10 @@ function hasDbmlMeta(meta: Meta | undefined): boolean {
  * (`"dim-customer"` → `dim_customer`) never takes the name of a table the
  * file really calls that.
  */
-function planTableNames(tables: readonly DbmlTable[], ctx: Context): string[] {
+function planTableNames(tables: readonly DbmlTable[], library: DbmlImportLibrary, ctx: Context): string[] {
   const groups = new Map<string, number>();
-  for (const t of tables) groups.set(lower(t.name), (groups.get(lower(t.name)) ?? 0) + 1);
-  const sameName = (t: DbmlTable): boolean => groups.get(lower(t.name))! > 1;
+  for (const t of tables) groups.set(normaliseName(t.name), (groups.get(normaliseName(t.name)) ?? 0) + 1);
+  const sameName = (t: DbmlTable): boolean => groups.get(normaliseName(t.name))! > 1;
   const candidates = tables.map((t) => {
     const base = sanitiseDbmlTableName(t.name);
     return sameName(t) && t.schema ? sanitiseDbmlTableName(`${t.schema}_${base}`) : base;
@@ -625,7 +624,10 @@ function planTableNames(tables: readonly DbmlTable[], ctx: Context): string[] {
   // Names as the file writes them first, then the changed ones, each in file order.
   for (const keptAsWritten of [true, false]) {
     candidates.forEach((candidate, i) => {
-      if ((candidate === tables[i].name) === keptAsWritten) names[i] = freeName(candidate, used);
+      // Only a name the file wrote may be a library table (planTable reuses it);
+      // a name made up here steers clear of the library instead.
+      const madeUp = (n: string): boolean => n !== tables[i].name && library.findTableName(n) !== null;
+      if ((candidate === tables[i].name) === keptAsWritten) names[i] = freeName(candidate, used, madeUp);
     });
   }
   names.forEach((name, i) => {
@@ -706,7 +708,8 @@ function shadowedNote(label: string, key: string): string {
 }
 
 function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ctx: Context): PlannedTable {
-  const libraryName = library.findTableName(name);
+  // A name the file wrote is the library's table; one the import made up never is (planTableNames).
+  const libraryName = name === dbml.name ? library.findTableName(name) : null;
   const columns = new Map<string, string>();
   const primaryKey = new Set<string>();
   const label = dbmlTableLabel(dbml);
@@ -719,10 +722,10 @@ function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ct
       if (isPlaceholder(field)) continue;
       const wanted = sanitiseDbmlColumnName(field.name);
       if (!libraryTable) { columns.set(field.name, wanted); continue; }
-      const existing = libraryTable.columns?.find((c) => lower(c.name) === lower(wanted));
+      const existing = libraryTable.columns?.find((c) => normaliseName(c.name) === normaliseName(wanted));
       if (existing) columns.set(field.name, existing.name);
     }
-    for (const c of libraryTable?.columns ?? []) if (c.isPrimaryKey) primaryKey.add(lower(c.name));
+    for (const c of libraryTable?.columns ?? []) if (c.isPrimaryKey) primaryKey.add(normaliseName(c.name));
     return { dbml, name: libraryName, library: libraryTable, reused: true, columns, primaryKey };
   }
 
@@ -791,8 +794,17 @@ function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ct
   if (dbml.headerColor) tableExtras.header_color = dbml.headerColor;
 
   if (dbml.note) table.description = dbml.note;
+  // Names as the file writes them first, then the changed ones, as for tables
+  // (planTableNames): a cleaned-up `order-id` never takes `order_id`'s own name.
+  const columnNames = new Map<DbmlField, string>();
+  for (const keptAsWritten of [true, false]) {
+    for (const field of kept) {
+      const candidate = sanitiseDbmlColumnName(field.name);
+      if ((candidate === field.name) === keptAsWritten) columnNames.set(field, freeName(candidate, used));
+    }
+  }
   table.columns = kept.map((field) => {
-    const columnName = freeName(sanitiseDbmlColumnName(field.name), used);
+    const columnName = columnNames.get(field)!;
     columns.set(field.name, columnName);
     if (columnName !== field.name) {
       const valid = sanitiseDbmlColumnName(field.name) === field.name;
@@ -801,7 +813,7 @@ function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ct
     const column = planColumn(field, columnName, `${label}.${field.name}`, ctx);
     if (field.pk || pkIndexColumns.has(field.name)) {
       column.isPrimaryKey = true;
-      primaryKey.add(lower(columnName));
+      primaryKey.add(normaliseName(columnName));
     }
     return column;
   });
@@ -939,7 +951,7 @@ function tableLookup(planned: readonly PlannedTable[]): TableLookup {
   const schemaKey = (schema: string | null): string => (schema === null || schema === 'public' ? '' : schema);
   return (schema, name) =>
     planned.find((p) => p.dbml.name === name && schemaKey(p.dbml.schema) === schemaKey(schema))
-    ?? planned.find((p) => lower(p.dbml.name) === lower(name) && lower(schemaKey(p.dbml.schema)) === lower(schemaKey(schema)));
+    ?? planned.find((p) => normaliseName(p.dbml.name) === normaliseName(name) && normaliseName(schemaKey(p.dbml.schema)) === normaliseName(schemaKey(schema)));
 }
 
 /** Whether a ref end's relation is "many" (`*`, `1..*`) rather than "one" (`1`, `0..1`). */
@@ -957,7 +969,7 @@ function planRelationships(model: DbmlModel, lookup: TableLookup, ctx: Context):
   // compositeKey names used per from-table: its library entries, then this import's.
   const compositeKeys = new Map<string, Array<Pick<TableRelationship, 'compositeKey'>>>();
   const entriesOf = (p: PlannedTable): Array<Pick<TableRelationship, 'compositeKey'>> => {
-    const key = lower(p.name);
+    const key = normaliseName(p.name);
     if (!compositeKeys.has(key)) compositeKeys.set(key, [...(p.library?.relationships ?? [])]);
     return compositeKeys.get(key)!;
   };
@@ -992,14 +1004,17 @@ function planRelationships(model: DbmlModel, lookup: TableLookup, ctx: Context):
       if (ref.declaredAt === 1) [from, to] = [b, a];
     } else {
       cardinality = 'one-to-one';
-      // The column that declared the ref holds the key. Otherwise the second
-      // end, as DBML reads a one-to-one (`users.id - user_infos.user_id`) and
-      // ERD Studio's own export writes one, whatever the keys say; in another
+      // The column that declared the ref holds the key. Otherwise ERD Studio's
+      // plain export wrote the FK end first (`from.col - to.col`), so keep it;
+      // its rich export and DBML itself read the second end as the FK
+      // (`users.id - user_infos.user_id`), whatever the keys say; in another
       // tool's file, the first end when only the second is its table's whole
       // key (`badge_id - badges.id`).
       const onlySecondIsKey = !isWholeKey(a) && isWholeKey(b);
       if (ref.declaredAt !== undefined) {
         if (ref.declaredAt === 1) [from, to] = [b, a];
+      } else if (ctx.erdStudioPlainExport) {
+        // Already FK first.
       } else if (ctx.erdStudioExport || !onlySecondIsKey) {
         [from, to] = [b, a];
       }
@@ -1070,7 +1085,7 @@ function compositeGroupsOf(relationships: readonly Relationship[]): Relationship
   const groups = new Map<string, Relationship[]>();
   for (const rel of relationships) {
     if (!rel.compositeKey) continue;
-    const key = `${lower(rel.fromModel)}\u0000${lower(rel.compositeKey)}`;
+    const key = `${normaliseName(rel.fromModel)}\u0000${normaliseName(rel.compositeKey)}`;
     groups.set(key, [...(groups.get(key) ?? []), rel]);
   }
   return [...groups.values()];
@@ -1112,7 +1127,7 @@ function resolveEnd(end: DbmlRefEnd, lookup: TableLookup): ResolvedEnd | string 
   const columns: string[] = [];
   for (const column of end.columns) {
     const name = table.columns.get(column)
-      ?? [...table.columns].find(([dbmlName]) => lower(dbmlName) === lower(column))?.[1];
+      ?? [...table.columns].find(([dbmlName]) => normaliseName(dbmlName) === normaliseName(column))?.[1];
     if (name === undefined) {
       return table.reused
         ? `${table.name} is already in your Table Library and has no column ${column}; the library's table is used as it is.`
@@ -1126,7 +1141,7 @@ function resolveEnd(end: DbmlRefEnd, lookup: TableLookup): ResolvedEnd | string 
 /** Whether an end's columns are its table's whole primary key. */
 function isWholeKey(end: ResolvedEnd): boolean {
   const pk = end.table.primaryKey;
-  return pk.size > 0 && pk.size === end.columns.length && end.columns.every((c) => pk.has(lower(c)));
+  return pk.size > 0 && pk.size === end.columns.length && end.columns.every((c) => pk.has(normaliseName(c)));
 }
 
 function describeRef(ends: readonly [DbmlRefEnd, DbmlRefEnd], name: string | null): string {
@@ -1147,13 +1162,12 @@ const STICKY_ABOVE = 200;
 function planViewConfig(model: DbmlModel, planned: readonly PlannedTable[], layout: DbmlImportLayout | undefined, ctx: Context): ViewConfig {
   const viewConfig: ViewConfig = {};
   const positions: Record<string, NodePosition> = {};
-  const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
   const schemaOf = (s: string | null): string => (s === null || s === '' ? 'public' : s);
   for (const p of planned) {
     const schema = schemaOf(p.dbml.schema);
     const tables = layout?.tables ?? [];
     const at = tables.find((t) => t.name === p.dbml.name && schemaOf(t.schemaName) === schema)
-      ?? tables.find((t) => lower(t.name) === lower(p.dbml.name) && lower(schemaOf(t.schemaName)) === lower(schema));
+      ?? tables.find((t) => normaliseName(t.name) === normaliseName(p.dbml.name) && normaliseName(schemaOf(t.schemaName)) === normaliseName(schema));
     // Own entries only: a table may be called `constructor` or `toString`.
     if (at && finite(at.x) && finite(at.y) && !Object.hasOwn(positions, p.name)) {
       positions[p.name] = { x: at.x, y: at.y };
@@ -1184,8 +1198,7 @@ function planAnnotations(
   return model.notes.map((note) => {
     const id = freeName(`dbml-${sanitiseDbmlColumnName(note.name)}`, ids);
     const stickies = layout?.stickies ?? [];
-    const at = stickies.find((s) => s.name === note.name) ?? stickies.find((s) => lower(s.name) === lower(note.name));
-    const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+    const at = stickies.find((s) => s.name === note.name) ?? stickies.find((s) => normaliseName(s.name) === normaliseName(note.name));
     const annotation: Annotation = at && finite(at.x) && finite(at.y)
       ? { id, text: note.content, x: at.x, y: at.y }
       : { id, text: note.content, x: originX + STICKY_GAP * unplaced++, y: originY };
@@ -1227,7 +1240,7 @@ function planAnnotations(
 function findTableByLabel(planned: readonly PlannedTable[], value: string): PlannedTable | undefined {
   const matches = (p: PlannedTable, same: (a: string, b: string) => boolean): boolean =>
     same(dbmlTableLabel(p.dbml), value) || same(p.dbml.name, value) || same(p.name, value);
-  return planned.find((p) => matches(p, (a, b) => a === b)) ?? planned.find((p) => matches(p, (a, b) => lower(a) === lower(b)));
+  return planned.find((p) => matches(p, (a, b) => a === b)) ?? planned.find((p) => matches(p, (a, b) => normaliseName(a) === normaliseName(b)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1253,7 +1266,7 @@ function reportFileExtras(model: DbmlModel, layer: string, ctx: Context): void {
   }
   for (const group of model.tableGroups) {
     // ERD Studio's export writes the layer as a group; a group named after the chosen layer is that.
-    if (lower(group.name) === lower(layer)) continue;
+    if (normaliseName(group.name) === normaliseName(layer)) continue;
     dropped.push({
       kind: 'table-group',
       what: `Table group ${group.name} (${plural(group.tables.length, 'table')})`,
@@ -1281,7 +1294,7 @@ function reportFileExtras(model: DbmlModel, layer: string, ctx: Context): void {
  * (`TableLibraryService.writesTableNaming()`).
  */
 export function serializeDbmlImportDocument(doc: DbmlImportSubjectAreaDocument, tableNaming = false): string {
-  return JSON.stringify(tableNaming ? toTableNamingDocument({ ...doc }) : doc, null, 2) + '\n';
+  return serializeDraftSubjectAreaDocument(doc, tableNaming);
 }
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -1309,7 +1322,9 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: { layerLab
   }
   if (report.relationships > 0) {
     const where = report.relationshipsInLibrary > 0
-      ? (report.relationshipsInLibrary === report.relationships - report.relationshipsAlreadyInLibrary
+      // "All saved in the tables' files" only when every one is: links the
+      // library already stores are counted in `relationships` but not written.
+      ? (report.relationshipsInLibrary === report.relationships
         ? ' saved in the tables\' files'
         : ` (${report.relationshipsInLibrary} saved in the tables' files)`)
       : '';

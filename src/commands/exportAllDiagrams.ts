@@ -231,10 +231,9 @@ async function chooseFolderAndWrite(
   const shownFolder = folderShown(deps, folder);
   const targets = exported.files.map((file) => ({ file, uri: vscode.Uri.file(path.join(folder, file.fileName)) }));
 
-  const existing: string[] = [];
-  for (const { file, uri } of targets) {
-    if (await ui.fileExists(uri).catch(() => false)) existing.push(file.fileName);
-  }
+  // Independent checks, run together (one round trip each on a remote workspace).
+  const found = await Promise.all(targets.map(({ uri }) => ui.fileExists(uri).catch(() => false)));
+  const existing = targets.filter((_, i) => found[i]).map(({ file }) => file.fileName);
   if (existing.length > 0) {
     const choice = await ui.showModalWarning(
       existing.length === 1

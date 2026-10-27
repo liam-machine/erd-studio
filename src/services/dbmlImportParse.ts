@@ -147,8 +147,14 @@ export interface DbmlProject {
 
 /** What a DBML file says, in the shape the import planner reads. */
 export interface DbmlModel {
-  /** True when the file starts with ERD Studio's own rich-export header. */
+  /** True when the file starts with an ERD Studio export header (plain or rich). */
   erdStudioExport: boolean;
+  /**
+   * True for ERD Studio's plain (v1) export, which writes a one-to-one with
+   * the FK end first (`from.col - to.col`); the rich (v2) export writes it
+   * the DBML way round, key end first. Optional: absent reads as false.
+   */
+  erdStudioPlainExport?: boolean;
   project: DbmlProject | null;
   tables: DbmlTable[];
   refs: DbmlRef[];
@@ -215,13 +221,25 @@ export function readDbml(text: string, parser: DbmlParserModule = PINNED_PARSER)
   if (!isObject(raw)) {
     return { ok: false, diagnostics: [{ line: 1, column: 1, message: 'The DBML parser returned nothing for this file.' }] };
   }
-  return { ok: true, model: normaliseRawDbml(raw, { erdStudioExport: isErdStudioExport(text) }) };
+  return {
+    ok: true,
+    model: normaliseRawDbml(raw, { erdStudioExport: isErdStudioExport(text), erdStudioPlainExport: isErdStudioPlainExport(text) }),
+  };
 }
 
-/** Whether `text` is ERD Studio's own rich export (its first non-blank line is the header). */
+/** The first non-blank line of `text`, trimmed. */
+function firstLine(text: string): string | undefined {
+  return text.replace(/^﻿/, '').split(/\r?\n/).find((l) => l.trim() !== '')?.trim();
+}
+
+/** Whether `text` is one of ERD Studio's own exports, plain or rich (its first non-blank line is the header). */
 export function isErdStudioExport(text: string): boolean {
-  const first = text.replace(/^﻿/, '').split(/\r?\n/).find((l) => l.trim() !== '');
-  return first !== undefined && first.trim().startsWith(ERD_STUDIO_DBML_HEADER_PREFIX);
+  return firstLine(text)?.startsWith(ERD_STUDIO_DBML_HEADER_PREFIX) === true;
+}
+
+/** Whether `text` is ERD Studio's plain (v1) export, `DBML_EXPORT_HEADER` in `@erd-studio/core`. */
+export function isErdStudioPlainExport(text: string): boolean {
+  return firstLine(text)?.startsWith(`${ERD_STUDIO_DBML_HEADER_PREFIX} v1`) === true;
 }
 
 function diagnosticOf(error: unknown, text: string): DbmlDiagnostic {
@@ -456,7 +474,7 @@ const endKey = (schema: string | null, table: string, columns: readonly string[]
  * The raw model `rawDb` returns (any 9.x–11.x shape) as a {@link DbmlModel}.
  * Exported for tests; {@link readDbml} is the entry point.
  */
-export function normaliseRawDbml(raw: Loose, options: { erdStudioExport?: boolean } = {}): DbmlModel {
+export function normaliseRawDbml(raw: Loose, options: { erdStudioExport?: boolean; erdStudioPlainExport?: boolean } = {}): DbmlModel {
   const partials = new Map<string, PartialDef>();
   for (const p of list(raw.tablePartials)) {
     if (typeof p.name !== 'string') continue;
@@ -573,6 +591,7 @@ export function normaliseRawDbml(raw: Loose, options: { erdStudioExport?: boolea
 
   return {
     erdStudioExport: options.erdStudioExport === true,
+    erdStudioPlainExport: options.erdStudioPlainExport === true,
     project,
     tables,
     refs,
