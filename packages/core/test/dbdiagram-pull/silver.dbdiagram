@@ -1,0 +1,158 @@
+{
+  "version": "3.0.0",
+  "darkMode": true,
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "relationshipMode": "All",
+    "tablePositions": [
+      {
+        "name": "fct_task_event",
+        "schemaName": "silver",
+        "x": 1015.04296875,
+        "y": 278
+      },
+      {
+        "name": "dim_task",
+        "schemaName": "silver",
+        "x": -202.669921875,
+        "y": 159
+      },
+      {
+        "name": "dim_project",
+        "schemaName": "silver",
+        "x": -657,
+        "y": 340
+      },
+      {
+        "name": "dim_customer",
+        "schemaName": "silver",
+        "x": -381,
+        "y": 659
+      },
+      {
+        "name": "dim_date",
+        "schemaName": "silver",
+        "x": -310,
+        "y": -101
+      },
+      {
+        "name": "fct_order",
+        "schemaName": "public",
+        "x": 540.330078125,
+        "y": 557
+      }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": [
+      {
+        "firstFieldNames": [
+          "task_key"
+        ],
+        "firstTableName": "fct_task_event",
+        "firstSchemaName": "silver",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "task_key"
+        ],
+        "secondTableName": "dim_task",
+        "secondSchemaName": "silver",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "project_key"
+        ],
+        "firstTableName": "dim_task",
+        "firstSchemaName": "silver",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "project_key"
+        ],
+        "secondTableName": "dim_project",
+        "secondSchemaName": "silver",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "project_key"
+        ],
+        "firstTableName": "fct_task_event",
+        "firstSchemaName": "silver",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "project_key"
+        ],
+        "secondTableName": "dim_project",
+        "secondSchemaName": "silver",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "parent_project_key"
+        ],
+        "firstTableName": "dim_project",
+        "firstSchemaName": "silver",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "project_key"
+        ],
+        "secondTableName": "dim_project",
+        "secondSchemaName": "silver",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "project_key"
+        ],
+        "firstTableName": "fct_order",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "project_key"
+        ],
+        "secondTableName": "dim_project",
+        "secondSchemaName": "silver",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "customer_key"
+        ],
+        "firstTableName": "fct_task_event",
+        "firstSchemaName": "silver",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "customer_key"
+        ],
+        "secondTableName": "dim_customer",
+        "secondSchemaName": "silver",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "customer_key"
+        ],
+        "firstTableName": "fct_order",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "customer_key"
+        ],
+        "secondTableName": "dim_customer",
+        "secondSchemaName": "silver",
+        "secondRelation": "1",
+        "checkPoints": []
+      }
+    ]
+  },
+  "views": {}
+}

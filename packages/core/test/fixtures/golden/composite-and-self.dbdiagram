@@ -1,0 +1,33 @@
+{
+  "version": "3.0.0",
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "relationshipMode": "All",
+    "tablePositions": [
+      {
+        "name": "pit_customer",
+        "schemaName": "public",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "name": "sat_customer",
+        "schemaName": "public",
+        "x": 400,
+        "y": 40
+      },
+      {
+        "name": "employee",
+        "schemaName": "public",
+        "x": 40,
+        "y": 360
+      }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": []
+  },
+  "views": {}
+}

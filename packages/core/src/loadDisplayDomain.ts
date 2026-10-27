@@ -412,6 +412,9 @@ function tablePositions(
  * A deep copy of plain JSON-shaped data (objects, arrays, primitives), as
  * `structuredClone` would make it, except that strings are shared rather than
  * copied. A parsed model's strings can be long, and repeated through aliases.
+ * Every key is copied as an own property: a `meta` key may be any text,
+ * `__proto__` included (see `setMetaEntry`), and plain assignment would drop
+ * that one (or, for a map value, make it the copy's prototype).
  */
 function copyPlain<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -420,7 +423,7 @@ function copyPlain<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
     const copy: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      copy[key] = copyPlain(item);
+      Object.defineProperty(copy, key, { value: copyPlain(item), enumerable: true, writable: true, configurable: true });
     }
     return copy as T;
   }

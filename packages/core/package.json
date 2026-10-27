@@ -1,6 +1,6 @@
 {
   "name": "@erd-studio/core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "ERD Studio domain model: types and the pure raw-files -> DisplaySubjectArea pipeline.",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -35,11 +35,13 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@dbml/parse": "10.2.0",
+    "@dbml/parse": "10.3.1",
     "@types/node": "^20.17.0",
     "dbml-core-v2": "npm:@dbml/core@2.6.1",
     "dbml-core-v24": "npm:@dbml/core@2.4.2",
     "dbml-core-v3": "npm:@dbml/core@3.13.4",
+    "dbml-parse-v11": "npm:@dbml/parse@11.0.0",
+    "dbml-parse-v9": "npm:@dbml/parse@9.1.1",
     "esbuild": "^0.24.0",
     "jsdom": "25.0.1",
     "mermaid": "10.0.0",

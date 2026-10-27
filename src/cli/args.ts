@@ -14,8 +14,17 @@ export type CliCommand = 'doctor' | 'inventory' | 'diff' | 'export' | 'version' 
 
 export const CLI_COMMANDS: readonly CliCommand[] = ['doctor', 'inventory', 'diff', 'export', 'version', 'help'];
 
-/** `mermaid|dbml` — the export formats as the usage text and its errors spell them. */
-const FORMAT_CHOICES = DIAGRAM_EXPORT_FORMATS.join('|');
+/**
+ * What `export --format` takes: every diagram format, plus `dbml-layout` —
+ * the `.dbdiagram` layout file of a `dbml-rich` export (its table
+ * positions, as dbdiagram's own CLI reads them), printed on its own.
+ */
+export type CliExportFormat = DiagramExportFormat | 'dbml-layout';
+
+export const CLI_EXPORT_FORMATS: readonly CliExportFormat[] = [...DIAGRAM_EXPORT_FORMATS, 'dbml-layout'];
+
+/** `mermaid|dbml|dbml-rich|dbml-layout` — the export formats as the usage text and its errors spell them. */
+const FORMAT_CHOICES = CLI_EXPORT_FORMATS.join('|');
 
 export interface CliOptions {
   command: CliCommand;
@@ -37,14 +46,14 @@ export interface CliOptions {
   summary: boolean;
   /** inventory: restrict to these model names. */
   models?: string[];
-  /** diff: domain files (repeatable); export: exactly one. */
+  /** diff: domain files (repeatable); export: exactly one (or `--all`). */
   domains: string[];
-  /** diff: every domain under the semantic dir. */
+  /** diff, export: every domain under the semantic dir. */
   all: boolean;
   /** diff: advisory rows block too. */
   strict: boolean;
   /** export: the text format to print. */
-  format?: DiagramExportFormat;
+  format?: CliExportFormat;
 }
 
 export class CliUsageError extends Error {
@@ -70,7 +79,7 @@ const FLAGS: Record<string, FlagSpec> = {
   '--summary': { takesValue: false, commands: ['inventory'] },
   '--models': { takesValue: true, commands: ['inventory'] },
   '--domain': { takesValue: true, commands: ['diff', 'export'] },
-  '--all': { takesValue: false, commands: ['diff'] },
+  '--all': { takesValue: false, commands: ['diff', 'export'] },
   '--strict': { takesValue: false, commands: ['diff'] },
   '--format': { takesValue: true, commands: ['export'] },
 };
@@ -168,13 +177,13 @@ export function parseArgs(argv: readonly string[]): CliOptions {
       case '--strict': opts.strict = true; break;
       case '--format': {
         const format = value!.trim().toLowerCase();
-        if (!(DIAGRAM_EXPORT_FORMATS as readonly string[]).includes(format)) {
+        if (!(CLI_EXPORT_FORMATS as readonly string[]).includes(format)) {
           throw new CliUsageError(`Unknown --format "${value}". Expected one of: ${FORMAT_CHOICES}.`);
         }
         if (opts.format !== undefined && opts.format !== format) {
           throw new CliUsageError('Use --format once.');
         }
-        opts.format = format as DiagramExportFormat;
+        opts.format = format as CliExportFormat;
         break;
       }
       default: break;
@@ -188,8 +197,11 @@ export function parseArgs(argv: readonly string[]): CliOptions {
     throw new CliUsageError('Use either --domain or --all, not both.');
   }
   if (opts.command === 'export') {
-    if (opts.domains.length === 0) {
-      throw new CliUsageError(`export needs --domain <path> and --format ${FORMAT_CHOICES}.`);
+    if (opts.domains.length > 0 && opts.all) {
+      throw new CliUsageError('Use either --domain or --all, not both.');
+    }
+    if (opts.domains.length === 0 && !opts.all) {
+      throw new CliUsageError(`export needs --domain <path> (or --all) and --format ${FORMAT_CHOICES}.`);
     }
     if (opts.domains.length > 1) {
       throw new CliUsageError('export takes one --domain (it prints one diagram).');
@@ -216,7 +228,7 @@ Usage:
   erd-studio doctor    [--json] [--no-dbt] [--dbt <path>] [--trust-venv]
   erd-studio inventory [--json] [--summary] [--models a,b,c]
   erd-studio diff      [--json] (--domain <path> | --all) [--strict]
-  erd-studio export    [--json] --domain <path> --format ${FORMAT_CHOICES}
+  erd-studio export    [--json] (--domain <path> | --all) --format ${FORMAT_CHOICES}
   erd-studio version
 
 Shared options:
@@ -228,6 +240,12 @@ Shared options:
 
 export prints a subject area's logical (design) diagram on stdout and writes no file:
   erd-studio export --domain .erd-studio/gold/sales.json --format dbml > sales.dbml
+  dbml         DBML any tool reads; ERD Studio's fields go in notes
+  dbml-rich    DBML for dbdiagram.io: ERD Studio's fields as properties (DBML 9.1+)
+  dbml-layout  the table positions for dbml-rich, as dbdiagram's .dbdiagram file:
+               erd-studio export --domain <path> --format dbml-layout > sales.dbdiagram
+  --all        every subject area, as a JSON list of { fileName, content }
+               (dbml-rich lists each .dbml followed by its .dbdiagram)
 
-Exit codes: 0 ok · 1 diff found drift · 2 usage error · 3 project/subject area problem · 4 internal error
+Exit codes: 0 ok · 1 diff found drift, or export --all skipped a subject area · 2 usage error · 3 project/subject area problem · 4 internal error
 `;

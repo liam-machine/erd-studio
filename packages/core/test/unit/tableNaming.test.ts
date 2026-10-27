@@ -25,7 +25,8 @@ import {
 import { SubjectAreaValidationError, normaliseSubjectAreaDocument, validateSubjectAreaDocument } from '../../src/domain';
 import { parseTableText } from '../../src/logicalModel';
 import { loadDisplaySubjectArea } from '../../src/loadDisplayDomain';
-import { DIAGRAM_EXPORT_FILE_EXTENSIONS, DIAGRAM_EXPORT_FORMATS, exportDiagram } from '../../src/exportDiagram';
+import { DIAGRAM_EXPORT_FORMATS, exportDiagram } from '../../src/exportDiagram';
+import { goldenFileName } from '../exportParsers';
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const GOLDEN_DIR = path.join(FIXTURES, 'golden');
@@ -248,7 +249,7 @@ describe('loadDisplaySubjectArea on the v6 and mixed fixtures', () => {
 
     it.each(DIAGRAM_EXPORT_FORMATS)(`exports the ${golden} %s golden byte for byte`, async (format) => {
       const text = exportDiagram(await load(), format);
-      expect(text).toBe(fs.readFileSync(path.join(GOLDEN_DIR, `${golden}.${DIAGRAM_EXPORT_FILE_EXTENSIONS[format]}`), 'utf-8'));
+      expect(text).toBe(fs.readFileSync(path.join(GOLDEN_DIR, goldenFileName(golden, format)), 'utf-8'));
     });
   });
 });

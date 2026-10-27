@@ -1,0 +1,44 @@
+// erd-studio dbml-export v2 (DBML 9.1+)
+// Table positions: orders.dbdiagram, next to this file (`dbdiagram push` reads it).
+// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
+// Not exported: sticky-note positions and sizes, the canvas layout options.
+
+Project orders {
+  Note: 'Raw order capture, still in the inline v4 format'
+}
+
+Table bronze.raw_orders [
+  role: 'fact',
+  grain: 'One row per order line',
+  rationale_purpose: 'Keeps the shop feed untouched for replay',
+  rationale_measures: 'line_amount is additive'
+] {
+  order_line_id BIGINT [pk, note: 'Line identifier from the shop']
+  customer_ref VARCHAR [note: 'Customer reference, joined without a declared key']
+  shop_payload ""
+  line_amount "DECIMAL(12,2)" [note: 'Line total', additive_type: 'additive']
+  order_number VARCHAR [note: 'Business order number', natural_key: 'true']
+  Note: 'Orders as they land from the shop API'
+}
+
+Table raw_customers {
+  customer_ref VARCHAR [pk, note: 'Customer reference', scd_type: '2']
+  email VARCHAR [note: 'Contact address']
+}
+
+Table raw_refunds {
+  _erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']
+}
+
+TableGroup bronze [color: #cd7f32, note: 'Layer: Bronze'] {
+  bronze.raw_orders
+  raw_customers
+  raw_refunds
+}
+
+Ref: bronze.raw_orders.customer_ref >? raw_customers.customer_ref
+// Not exported: raw_refunds.order_line_id -> raw_orders.order_line_id (raw_refunds has no column order_line_id).
+
+Note sticky_1 [color: #f59e0b] {
+  'Replay source'
+}

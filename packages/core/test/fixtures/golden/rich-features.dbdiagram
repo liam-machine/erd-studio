@@ -1,0 +1,39 @@
+{
+  "version": "3.0.0",
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "relationshipMode": "All",
+    "tablePositions": [
+      {
+        "name": "fct_order",
+        "schemaName": "gold",
+        "x": 400,
+        "y": 200.46
+      },
+      {
+        "name": "dim_customer",
+        "schemaName": "gold",
+        "x": 40,
+        "y": 60
+      },
+      {
+        "name": "dim_date",
+        "schemaName": "public",
+        "x": -20.5,
+        "y": 400
+      },
+      {
+        "name": "planned",
+        "schemaName": "public",
+        "x": 900,
+        "y": 0
+      }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": []
+  },
+  "views": {}
+}

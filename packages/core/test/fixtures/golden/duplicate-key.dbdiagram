@@ -1,0 +1,27 @@
+{
+  "version": "3.0.0",
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "relationshipMode": "All",
+    "tablePositions": [
+      {
+        "name": "fct_order",
+        "schemaName": "public",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "name": "dim_customer",
+        "schemaName": "public",
+        "x": 400,
+        "y": 0
+      }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": []
+  },
+  "views": {}
+}

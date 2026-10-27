@@ -14,22 +14,30 @@ import {
   diagramExportFileName,
   exportDiagram,
   toDbml,
+  toDbmlRich,
   toMermaid,
   type DiagramExportFormat,
 } from '../../src/exportDiagram';
+import { dbdiagramLayoutFileName, readDbdiagramLayout, serializeDbdiagramLayout, toDbdiagramLayout } from '../../src/dbdiagramLayout';
 import { RATIONALE_KEYS } from '../../src/logicalModel';
 import { RATIONALE_LABELS } from '../../src/exportShared';
 import type { DisplaySubjectArea } from '../../src/types/display';
-import { DBML_PARSERS, MERMAID_PARSERS, col, subjectArea, tableDef, rel } from '../exportParsers';
+import { DBML_PARSERS, MERMAID_PARSERS, RICH_DBML_PARSERS, col, subjectArea, tableDef, rel } from '../exportParsers';
 
 describe('diagram export API', () => {
   it('is exported from the package entry', () => {
     expect(core.toDbml).toBe(toDbml);
     expect(core.toMermaid).toBe(toMermaid);
+    expect(core.toDbmlRich).toBe(toDbmlRich);
     expect(core.exportDiagram).toBe(exportDiagram);
     expect(core.diagramExportFileName).toBe(diagramExportFileName);
-    expect(core.DIAGRAM_EXPORT_FORMATS).toEqual(['mermaid', 'dbml']);
-    expect(core.DIAGRAM_EXPORT_FILE_EXTENSIONS).toEqual({ mermaid: 'mmd', dbml: 'dbml' });
+    expect(core.toDbdiagramLayout).toBe(toDbdiagramLayout);
+    expect(core.serializeDbdiagramLayout).toBe(serializeDbdiagramLayout);
+    expect(core.dbdiagramLayoutFileName).toBe(dbdiagramLayoutFileName);
+    expect(core.readDbdiagramLayout).toBe(readDbdiagramLayout);
+    expect(core.DBML_RICH_EXPORT_HEADER).toMatch(/^\/\/ erd-studio dbml-export v2/);
+    expect(core.DIAGRAM_EXPORT_FORMATS).toEqual(['mermaid', 'dbml', 'dbml-rich']);
+    expect(core.DIAGRAM_EXPORT_FILE_EXTENSIONS).toEqual({ mermaid: 'mmd', dbml: 'dbml', 'dbml-rich': 'dbml' });
   });
 
   it('keeps its constants frozen', () => {
@@ -41,6 +49,8 @@ describe('diagram export API', () => {
     const d = subjectArea([tableDef('a', [col('id')]), tableDef('b', [col('a_id')])], [rel('b.a_id', 'a.id')]);
     expect(exportDiagram(d, 'dbml')).toBe(toDbml(d));
     expect(exportDiagram(d, 'mermaid')).toBe(toMermaid(d));
+    expect(exportDiagram(d, 'dbml-rich')).toBe(toDbmlRich(d));
+    expect(exportDiagram(d, 'dbml-rich')).toBe(toDbmlRich(d, { layoutFileName: dbdiagramLayoutFileName(d) }));
     expect(() => exportDiagram(d, 'svg' as DiagramExportFormat)).toThrow('Unknown diagram export format: svg');
   });
 
@@ -74,6 +84,7 @@ describe('diagram export API', () => {
   it.each([
     ['showcase', 'dbml', 'showcase.dbml'],
     ['showcase', 'mermaid', 'showcase.mmd'],
+    ['showcase', 'dbml-rich', 'showcase.dbml'],
     ['customer 360', 'dbml', 'customer 360.dbml'],
     ['a/b\\c:d*e?f"g<h>i|j', 'mermaid', 'a-b-c-d-e-f-g-h-i-j.mmd'],
     ['line\nbreak', 'dbml', 'line-break.dbml'],
@@ -90,6 +101,15 @@ describe('diagram export API', () => {
   ] as const)('names the export of %j as %s → %s', (name, format, expected) => {
     expect(diagramExportFileName({ domain: name }, format)).toBe(expected);
   });
+
+  it.each(['showcase', 'customer 360', 'a/b\\c:d', '..hidden..', '', 'CON', 'con.txt', 'x'.repeat(300), '日本'])(
+    'names the layout file of %j with the base of its rich DBML export',
+    (name) => {
+      const dbml = diagramExportFileName({ domain: name }, 'dbml-rich');
+      expect(dbml.endsWith('.dbml')).toBe(true);
+      expect(dbdiagramLayoutFileName({ domain: name })).toBe(`${dbml.slice(0, -'.dbml'.length)}.dbdiagram`);
+    },
+  );
 
   it('caps the file name length and tolerates a missing name', () => {
     expect(diagramExportFileName({ domain: 'x'.repeat(300) }, 'dbml')).toBe(`${'x'.repeat(100)}.dbml`);
@@ -122,7 +142,9 @@ describe('diagram export API', () => {
       devDependencies: Record<string, string>;
     };
     const parsers: Record<string, string> = {
-      '@dbml/parse': '10.2.0',
+      '@dbml/parse': '10.3.1',
+      'dbml-parse-v9': 'npm:@dbml/parse@9.1.1',
+      'dbml-parse-v11': 'npm:@dbml/parse@11.0.0',
       'dbml-core-v3': 'npm:@dbml/core@3.13.4',
       'dbml-core-v2': 'npm:@dbml/core@2.6.1',
       'dbml-core-v24': 'npm:@dbml/core@2.4.2',
@@ -139,12 +161,17 @@ describe('diagram export API', () => {
       `@dbml/core ${versionOf(parsers['dbml-core-v2'])}`,
       `@dbml/core ${versionOf(parsers['dbml-core-v24'])}`,
     ]);
+    expect(RICH_DBML_PARSERS).toEqual([
+      `@dbml/parse ${versionOf(parsers['dbml-parse-v9'])}`,
+      `@dbml/parse ${parsers['@dbml/parse']}`,
+      `@dbml/parse ${versionOf(parsers['dbml-parse-v11'])}`,
+    ]);
     expect(MERMAID_PARSERS).toEqual([`mermaid ${parsers.mermaid}`, `mermaid ${versionOf(parsers['mermaid-current'])}`]);
   });
 
   it('imports nothing outside core in the export sources', () => {
     const src = path.resolve(__dirname, '../../src');
-    for (const file of ['exportDiagram.ts', 'exportDbml.ts', 'exportMermaid.ts', 'exportShared.ts']) {
+    for (const file of ['exportDiagram.ts', 'exportDbml.ts', 'exportDbmlRich.ts', 'exportMermaid.ts', 'exportShared.ts', 'exportFileName.ts', 'dbdiagramLayout.ts', 'dbmlRichProperties.ts']) {
       const text = fs.readFileSync(path.join(src, file), 'utf-8');
       const specs = [...text.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
       expect(specs.filter((s) => !s.startsWith('./')), file).toEqual([]);

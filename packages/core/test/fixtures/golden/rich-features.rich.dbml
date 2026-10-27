@@ -1,0 +1,91 @@
+// erd-studio dbml-export v2 (DBML 9.1+)
+// Table positions: sales.dbdiagram, next to this file (`dbdiagram push` reads it).
+// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
+// Not exported: sticky-note positions and sizes, the canvas layout options.
+
+Project sales {
+  Note: 'Sales — orders and customers'
+}
+
+Table gold.fct_order [
+  role: 'transaction-fact',
+  grain: 'One row per order',
+  alias: 'orders',
+  rationale_purpose: 'Revenue reporting',
+  rationale_measures: 'amount is additive',
+  meta_owner: 'sales-eng',
+  meta_tier: '1',
+  meta_json: '{"pii":false,"tags":["finance","daily"]}'
+] {
+  order_id BIGINT [pk, note: 'Order id from the source', natural_key: 'true']
+  customer_key INT [note: 'FK to dim_customer', foreign_key: 'true']
+  ship_date_key INT
+  amount "DECIMAL(18,2)" [additive_type: 'additive', meta_unit: 'EUR', meta_json: '{"precision":{"scale":"2"}}']
+  promo_code ""
+  Note: '''The team\'s orders
+
+Second paragraph'''
+}
+
+Table gold.dim_customer [
+  role: 'conformed-dim',
+  grain: 'One row per customer version',
+  rationale_scd_strategy: 'Type 2 on segment'
+] {
+  customer_key INT [pk, scd_type: '0']
+  customer_id VARCHAR [natural_key: 'true', scd_type: '0']
+  segment VARCHAR [scd_type: '2']
+}
+
+Table dim_date [role: 'conformed-dim'] {
+  date_key INT [pk]
+  calendar_date DATE [natural_key: 'true']
+}
+
+Table gold.customer_profile {
+  customer_key INT [pk]
+  bio TEXT
+}
+
+Table gold.bridge_tag [role: 'factless-fact'] {
+  tag_key INT
+  order_id BIGINT
+  indexes {
+    (tag_key, order_id) [pk]
+  }
+}
+
+Table gold.dim_tag {
+  tag_key INT [pk]
+  tag_name VARCHAR
+}
+
+Table planned {
+  _erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']
+  Note: 'Designed later'
+}
+
+TableGroup gold [color: #d4a800, note: 'Layer: Gold'] {
+  gold.fct_order
+  gold.dim_customer
+  dim_date
+  gold.customer_profile
+  gold.bridge_tag
+  gold.dim_tag
+  planned
+}
+
+Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key
+Ref "ship date": gold.fct_order.ship_date_key >? dim_date.date_key
+Ref: gold.dim_customer.customer_key - gold.customer_profile.customer_key
+Ref: gold.bridge_tag.tag_key > gold.dim_tag.tag_key
+Ref "segment tags": gold.dim_customer.segment ?<>? gold.dim_tag.tag_name
+
+Note sticky_1 [color: #f59e0b, linked_table: 'fct_order'] {
+  'Check the grain with finance'
+}
+
+Note sticky_2 [color: #3b82f6] {
+  '''Open questions:
+- promo codes?'''
+}

@@ -421,7 +421,8 @@ describe('allowlists agree with the Worker', () => {
   });
 
   it('appends the Export Diagram keys at the very end: completions, the cancel and the empty project as features, a failure as an error', () => {
-    expect(FEATURES.slice(-4)).toEqual(['exportMermaid', 'exportDbml', 'exportCancelled', 'exportNoDiagrams']);
+    expect(FEATURES.indexOf('exportNoDiagrams')).toBe(FEATURES.indexOf('exportMermaid') + 3);
+    expect(FEATURES.indexOf('exportDbmlRich')).toBe(FEATURES.indexOf('exportNoDiagrams') + 1);
     expect(ERROR_CODES.indexOf('domainLoadEmpty')).toBe(ERROR_CODES.indexOf('exportFailed') + 1);
     let s = emptyCounters('2026-10-09');
     s = recordFeature(s, 'exportMermaid');
@@ -445,8 +446,22 @@ describe('allowlists agree with the Worker', () => {
     expect(buildHeartbeat(s, ENV).errors).toEqual({ domainLoad: 2, domainLoadEmpty: 1, domainLoadConflict: 1 });
   });
 
-  it('appends the saveFailed split at the very end, as errors beside saveFailed', () => {
-    expect(ERROR_CODES.slice(-6)).toEqual([
+  it('appends the DBML round-trip keys at the very end: exports, imports and a cancel as features, a failed import as an error', () => {
+    expect(FEATURES.slice(-6)).toEqual(['exportDbmlRich', 'exportAll', 'importDbml', 'importDbmlLayout', 'importDbmlCancelled', 'importDbmlInvalid']);
+    expect(ERROR_CODES.slice(-1)).toEqual(['importDbmlFailed']);
+    let s = emptyCounters('2026-10-26');
+    s = recordFeature(s, 'exportDbmlRich');
+    s = recordFeature(s, 'importDbml');
+    s = recordFeature(s, 'importDbmlInvalid');
+    s = recordError(s, 'importDbmlFailed');
+    const body = buildHeartbeat(s, ENV);
+    expect(body.features).toEqual({ exportDbmlRich: 1, importDbml: 1, importDbmlInvalid: 1 });
+    expect(body.errors).toEqual({ importDbmlFailed: 1 });
+  });
+
+  it('appends the saveFailed split as one run after domainLoadConflict, as errors beside saveFailed', () => {
+    const at = ERROR_CODES.indexOf('saveFailedRefused');
+    expect(ERROR_CODES.slice(at, at + 6)).toEqual([
       'saveFailedRefused', 'saveFailedThrew', 'saveFailedModelFile', 'saveFailedRename', 'saveFailedReopen', 'saveFailedUndoRedo',
     ]);
     expect(saveFailureCode('refused')).toBe('saveFailedRefused');

@@ -1,0 +1,27 @@
+// erd-studio dbml-export v2 (DBML 9.1+)
+// Table positions: orders.dbdiagram, next to this file (`dbdiagram push` reads it).
+// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
+// Not exported: sticky-note positions and sizes, the canvas layout options.
+
+Project orders {
+  Note: 'A model file with a key written twice, read as PyYAML reads it (#164)'
+}
+
+Table fct_order {
+  order_id integer [pk]
+  customer_id integer
+  Note: 'One row per order'
+}
+
+Table dim_customer {
+  customer_id integer [pk]
+  email varchar [note: 'Primary contact email']
+  Note: 'One row per customer'
+}
+
+TableGroup silver [color: #a0a0a0, note: 'Layer: Silver'] {
+  fct_order
+  dim_customer
+}
+
+Ref: fct_order.customer_id >? dim_customer.customer_id

@@ -2,13 +2,18 @@
 
 All notable changes to `@erd-studio/core`. While `0.x`, a breaking change bumps the minor version.
 
-## Unreleased
+## 0.4.0
 
 ### Added
+- **Rich DBML export and its dbdiagram layout file.** `toDbmlRich(area, { layoutFileName? })`, and the new `'dbml-rich'` format of `exportDiagram` / `DIAGRAM_EXPORT_FORMATS` (saved as `.dbml`), write ERD Studio's fields as DBML custom properties (`role`, `grain`, `alias`, `schema` for the schema `public` (which DBML reads as no schema), `rationale_*`, `natural_key`, `scd_type`, `additive_type`, `foreign_key`, `meta_*` / `meta_json`), Refs from the foreign-key end (a one-to-one from its key end, since DBML and its SQL export read a one-to-one's second end as the foreign key) with `?` on every end that may be null, the layer as a `TableGroup` and sticky notes as `Note` blocks, behind the header `DBML_RICH_EXPORT_HEADER`. They need a DBML 9.1+ parser; the output is pinned by `<fixture>.rich.dbml` goldens read by `@dbml/parse` 9.1.1, 10.3.1 and 11.0.0. `toDbdiagramLayout` / `serializeDbdiagramLayout` write the positions as dbdiagram's `<name>.dbdiagram` (`dbdiagramLayoutFileName`), which `dbdiagram push` reads, and `readDbdiagramLayout` reads one back without ever throwing. The property names are `dbmlRichProperties.ts`'s constants, shared with ERD Studio's DBML import, plus `stickyColourOfHex`. `toDbml` and `toMermaid` are unchanged.
 - **Where a domain file's JSON goes wrong** ([#186](https://github.com/liam-machine/erd-studio/issues/186)). A plain `'invalid-json'` `SubjectAreaFileError` (not a merge conflict) now carries optional `line` and `column` (1-based) and `syntaxProblem` (`'trailing-comma' | 'missing-comma' | 'truncated' | 'unexpected'`) when the mistake can be located, pointing where a person would put the fix (the trailing comma itself, the end of the value a comma is missing after) rather than where the parser stopped. `locateJsonSyntaxError(raw, parserMessage)` is the pure helper behind it; it works out the position from the text itself, so it is the same in every engine. `line` used to be set only for a merge conflict, so read it together with `mergeConflict`. `message` is unchanged.
+
+### Changed (breaking)
+- `DiagramExportFormat` gains `'dbml-rich'` and `DIAGRAM_EXPORT_FORMATS` a third entry: an exhaustive `switch` or a `Record<DiagramExportFormat, …>` over it needs a case, and a picker built from `DIAGRAM_EXPORT_FORMATS` offers it. `DIAGRAM_EXPORT_FILE_EXTENSIONS` maps both `dbml` and `'dbml-rich'` to `dbml`, so a `.dbml` file name no longer names one format.
 
 ### Fixed
 - `parseSubjectAreaJson` (and so `loadDisplaySubjectArea`) reads a domain file that starts with a byte order mark, which used to be rejected as invalid JSON.
+- `loadDisplaySubjectArea` keeps a `meta` key named `__proto__` on a model or column. The model file reader kept it, but the copy each listing gets dropped a text value and turned a map value into the meta's prototype.
 
 ## 0.3.0
 

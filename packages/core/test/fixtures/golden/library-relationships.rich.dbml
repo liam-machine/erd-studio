@@ -1,0 +1,50 @@
+// erd-studio dbml-export v2 (DBML 9.1+)
+// Table positions: sales.dbdiagram, next to this file (`dbdiagram push` reads it).
+// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
+// Not exported: sticky-note positions and sizes, the canvas layout options.
+
+Project sales {
+  Note: 'Relationships in the model library in the shapes released extensions wrote, plus a domain-file copy that disagrees'
+}
+
+Table gold.fct_order [
+  role: 'fact',
+  alias: 'orders'
+] {
+  order_line_id BIGINT [pk]
+  customer_key INT
+  order_date_key INT [foreign_key: 'true']
+  product_key INT
+  amount "DECIMAL(18,2)" [additive_type: 'additive']
+  Note: 'One row per order line'
+}
+
+Table gold.dim_customer [
+  role: 'dimension',
+  alias: 'customer'
+] {
+  customer_key INT [pk]
+  customer_name VARCHAR
+}
+
+Table gold.dim_date [role: 'dimension'] {
+  date_key INT [pk]
+  calendar_date DATE
+}
+
+Table gold.dim_product [role: 'dimension'] {
+  product_key INT [pk, foreign_key: 'true']
+  product_name VARCHAR
+}
+
+TableGroup gold [color: #d4a800, note: 'Layer: Gold'] {
+  gold.fct_order
+  gold.dim_customer
+  gold.dim_date
+  gold.dim_product
+}
+
+Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key
+Ref: gold.fct_order.order_date_key >? gold.dim_date.date_key
+// This starts at dim_product's key (product_key), so it was probably drawn backwards.
+Ref: gold.dim_product.product_key ?> gold.fct_order.product_key

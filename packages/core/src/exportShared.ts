@@ -1,9 +1,10 @@
 /**
- * The traversal both diagram exporters share (`exportDbml.ts`,
- * `exportMermaid.ts`): one tolerant pass over a `DisplaySubjectArea` that settles
+ * The traversal the diagram exporters share (`exportDbml.ts`,
+ * `exportDbmlRich.ts`, `exportMermaid.ts`, and the `.dbdiagram` layout in
+ * `dbdiagramLayout.ts`): one tolerant pass over a `DisplaySubjectArea` that settles
  * which models, columns and relationships an export describes, in what order,
- * and why anything was left out. The two formats differ only in syntax, so
- * they always describe the same relationships.
+ * and why anything was left out. The formats differ only in syntax and in how
+ * much of each model they carry, so they always describe the same relationships.
  *
  * The input may come from an older core (a cached `DisplaySubjectArea`), so every
  * optional field may be absent and the required ones may still be malformed:
@@ -39,6 +40,8 @@ export interface ExportMeta {
   text: Array<readonly [string, string]>;
   /** Keys whose value is a list, a map or empty — named, never exported. */
   other: string[];
+  /** Every entry as the map holds it, in key order (the rich DBML export writes them all). */
+  entries: Array<readonly [string, unknown]>;
 }
 
 export interface ExportColumn {
@@ -47,6 +50,8 @@ export interface ExportColumn {
   description: string;
   isPrimaryKey: boolean;
   isForeignKey: boolean;
+  /** The model file's own foreign-key flag (`DisplayColumn.isForeignKeyDeclared`); `isForeignKey` is the badge. */
+  isForeignKeyDeclared: boolean;
   isNaturalKey: boolean;
   scdType?: number;
   additiveType?: string;
@@ -63,6 +68,8 @@ export interface ExportTable {
   modelRole?: string;
   /** Non-empty rationale entries as `[label, text]`, in `RATIONALE_LABELS` order. */
   rationale: Array<readonly [string, string]>;
+  /** The same entries keyed by rationale key, in the same order. */
+  rationaleEntries: Array<readonly [keyof Rationale, string]>;
   meta: ExportMeta;
   loadError?: { kind: string; line?: number };
   columns: ExportColumn[];
@@ -91,6 +98,8 @@ export type LinkItem = { kind: 'link'; link: ExportLink } | { kind: 'skipped'; t
 export interface ExportSticky {
   text: string;
   linkedModel?: string;
+  /** The note's colour as stored (`AnnotationColor`), when it has one. */
+  color?: string;
 }
 
 export interface PreparedSubjectArea {
@@ -119,9 +128,10 @@ export function oneLine(value: string): string {
 const lower = (s: string): string => s.toLowerCase();
 
 function readMeta(value: unknown): ExportMeta {
-  const meta: ExportMeta = { text: [], other: [] };
+  const meta: ExportMeta = { text: [], other: [], entries: [] };
   if (!value || typeof value !== 'object' || Array.isArray(value)) return meta;
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    meta.entries.push([key, entry]);
     if (typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') {
       meta.text.push([key, String(entry)]);
     } else {
@@ -138,6 +148,7 @@ function readColumn(raw: Record<string, unknown>, name: string): ExportColumn {
     description: text(raw.description),
     isPrimaryKey: raw.isPrimaryKey === true,
     isForeignKey: raw.isForeignKey === true,
+    isForeignKeyDeclared: raw.isForeignKeyDeclared === true,
     isNaturalKey: raw.isNaturalKey === true,
     meta: readMeta(raw.meta),
   };
@@ -153,6 +164,7 @@ function readTable(raw: Record<string, unknown>, name: string): ExportTable {
     schema: text(raw.schema).trim(),
     description: text(raw.description),
     rationale: [],
+    rationaleEntries: [],
     meta: readMeta(raw.meta),
     columns: [],
     skippedColumns: [],
@@ -166,7 +178,10 @@ function readTable(raw: Record<string, unknown>, name: string): ExportTable {
   const rationale = raw.rationale && typeof raw.rationale === 'object' ? (raw.rationale as Record<string, unknown>) : {};
   for (const [key, label] of RATIONALE_LABELS) {
     const value = text(rationale[key]);
-    if (value.trim()) model.rationale.push([label, value]);
+    if (value.trim()) {
+      model.rationale.push([label, value]);
+      model.rationaleEntries.push([key, value]);
+    }
   }
   if (raw.loadError && typeof raw.loadError === 'object') {
     const error = raw.loadError as Record<string, unknown>;
@@ -389,7 +404,8 @@ export function prepareSubjectArea(domain: DisplaySubjectArea): PreparedSubjectA
     const body = text(raw.text);
     if (!body.trim()) continue;
     const linked = text(raw.linkedModel).trim();
-    stickies.push(linked ? { text: body, linkedModel: linked } : { text: body });
+    const color = text(raw.color).trim();
+    stickies.push({ text: body, ...(linked ? { linkedModel: linked } : {}), ...(color ? { color } : {}) });
   }
 
   return {

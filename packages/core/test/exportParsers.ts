@@ -12,6 +12,13 @@
  *   can assert that every parser reads the same thing. They are imported
  *   statically, so they load while vitest collects the file, outside any
  *   test's timeout; the first read then costs only ~15 ms.
+ * - Rich DBML (`toDbmlRich`, custom properties): `@dbml/parse` 9.1.1 (the
+ *   first with custom properties), 10.3.1 (the extension's import parser)
+ *   and 11.0.0 (aliased as `dbml-parse-v9` / `dbml-parse-v11`).
+ *   `readDbmlRich` reads with all three, through each one's
+ *   `DBMLDiagnosticsProvider`, so warnings and lint infos count too, into
+ *   one shape (11.0 gives a custom property as `{ value, type }`, the others
+ *   as a plain string), and requires them to agree.
  * - Mermaid: `mermaid-current` (the current release) reads the diagram;
  *   `mermaid` is pinned to 10.0.0, the oldest 10.x, and must accept it too
  *   (`parseMermaidOldest`). Mermaid needs a DOM, so a test file that calls
@@ -31,14 +38,27 @@
  * Shared helpers, not a test file.
  */
 
-import { Compiler, DEFAULT_ENTRY, MemoryProjectLayout } from '@dbml/parse';
+import { Compiler, DBMLDiagnosticsProvider, DEFAULT_ENTRY, MemoryProjectLayout } from '@dbml/parse';
+import * as DbmlParseV9 from 'dbml-parse-v9';
+import * as DbmlParseV11 from 'dbml-parse-v11';
 import { Parser as ParserV2 } from 'dbml-core-v2';
 import { Parser as ParserV24 } from 'dbml-core-v24';
 import { Parser as ParserV3 } from 'dbml-core-v3';
 import type { DisplayColumn, DisplaySubjectArea, DisplayTable, DisplayRelationship } from '../src/types/display';
+import { DIAGRAM_EXPORT_FILE_EXTENSIONS, type DiagramExportFormat } from '../src/exportDiagram';
 
 /** The parser versions the tests run, for messages and docs. */
-export const DBML_PARSERS = ['@dbml/parse 10.2.0', '@dbml/core 3.13.4', '@dbml/core 2.6.1', '@dbml/core 2.4.2'] as const;
+export const DBML_PARSERS = ['@dbml/parse 10.3.1', '@dbml/core 3.13.4', '@dbml/core 2.6.1', '@dbml/core 2.4.2'] as const;
+/** The parsers rich DBML (custom properties) is held to: every `@dbml/parse` major since custom properties arrived. */
+export const RICH_DBML_PARSERS = ['@dbml/parse 9.1.1', '@dbml/parse 10.3.1', '@dbml/parse 11.0.0'] as const;
+
+/**
+ * A fixture's golden file for `format`: `<fixture>.mmd`, `<fixture>.dbml`, or
+ * `<fixture>.rich.dbml` for rich DBML (both DBML formats save as `.dbml`).
+ */
+export function goldenFileName(fixture: string, format: DiagramExportFormat): string {
+  return format === 'dbml-rich' ? `${fixture}.rich.dbml` : `${fixture}.${DIAGRAM_EXPORT_FILE_EXTENSIONS[format]}`;
+}
 export const MERMAID_PARSERS = ['mermaid 10.0.0', 'mermaid 12.0.0'] as const;
 
 // ---------------------------------------------------------------------------
@@ -153,6 +173,138 @@ export function readDbmlEverywhere(text: string): DbmlReading {
     }
   }
   return current;
+}
+
+// ---------------------------------------------------------------------------
+// Rich DBML (DBML 9.1+, custom properties)
+// ---------------------------------------------------------------------------
+
+/** One parser's diagnostic: `error`, `warning` or a lint `info`. */
+export interface DbmlDiagnostic {
+  type: 'error' | 'warning' | 'info';
+  line: number;
+  text: string;
+}
+
+/** What one 9.1+ parser made of a rich DBML text. */
+export interface RichDbmlParse {
+  parser: (typeof RICH_DBML_PARSERS)[number];
+  diagnostics: DbmlDiagnostic[];
+  /** The raw database, or `null` when it has errors. */
+  db: Loose;
+}
+
+const RICH_PARSER_MODULES: ReadonlyArray<readonly [(typeof RICH_DBML_PARSERS)[number], Loose]> = [
+  ['@dbml/parse 9.1.1', DbmlParseV9],
+  ['@dbml/parse 10.3.1', { Compiler, DBMLDiagnosticsProvider, DEFAULT_ENTRY, MemoryProjectLayout }],
+  ['@dbml/parse 11.0.0', DbmlParseV11],
+];
+
+/** `text` through each of {@link RICH_DBML_PARSERS}, with every diagnostic (errors, warnings and lint infos). */
+export function parseDbmlRich(text: string): RichDbmlParse[] {
+  return RICH_PARSER_MODULES.map(([parser, P]) => {
+    const layout = new P.MemoryProjectLayout();
+    layout.setSource(P.DEFAULT_ENTRY, text);
+    const compiler = new P.Compiler(layout);
+    const hasErrors = compiler.parse.errors(P.DEFAULT_ENTRY).length > 0;
+    const db = hasErrors ? null : compiler.parse.rawDb(P.DEFAULT_ENTRY);
+    const diagnostics: DbmlDiagnostic[] = new P.DBMLDiagnosticsProvider(compiler)
+      .provideDiagnostics(P.DEFAULT_ENTRY)
+      .map((d: Loose) => ({ type: d.type, line: d.startRow, text: d.text }));
+    return { parser, diagnostics, db };
+  });
+}
+
+/** A custom property's value whichever parser read it: a string (9.x / 10.x) or `{ value, type }` (11.0). */
+function propertyValue(value: Loose): string | null {
+  const raw = value && typeof value === 'object' && 'value' in value ? value.value : value;
+  return typeof raw === 'string' ? raw : raw === undefined || raw === null ? null : String(raw);
+}
+
+function propertiesOf(metadata: Loose): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(metadata && typeof metadata === 'object' ? metadata : {})) {
+    const v = propertyValue(value);
+    if (v !== null) out[key] = v;
+  }
+  return out;
+}
+
+/** What a rich DBML file means, in one shape whichever 9.1+ parser read it. */
+export interface RichDbmlReading {
+  project: { name: string | null; note: string | null } | null;
+  tables: Array<{
+    schema: string;
+    name: string;
+    note: string | null;
+    properties: Record<string, string>;
+    fields: Array<{ name: string; type: string; pk: boolean; unique: boolean; note: string | null; properties: Record<string, string> }>;
+    indexes: Array<{ pk: boolean; unique: boolean; columns: string[] }>;
+  }>;
+  refs: Array<{ name: string | null; ends: Array<[string, string, string[], string]> }>;
+  groups: Array<{ name: string; color: string | null; note: string | null; tables: string[] }>;
+  notes: Array<{ name: string; content: string; color: string | null; properties: Record<string, string> }>;
+}
+
+function readRich(db: Loose): RichDbmlReading {
+  const hasProject = db.project && (db.project.name != null || db.project.note != null);
+  return {
+    project: hasProject ? { name: db.project.name ?? null, note: noteOf(db.project.note) } : null,
+    tables: db.tables.map((t: Loose) => ({
+      schema: schemaOf(t.schemaName),
+      name: t.name,
+      note: noteOf(t.note),
+      properties: propertiesOf(t.metadata),
+      fields: t.fields.map((f: Loose) => ({
+        name: f.name,
+        type: f.type.type_name,
+        pk: f.pk === true,
+        unique: f.unique === true,
+        note: noteOf(f.note),
+        properties: propertiesOf(f.metadata),
+      })),
+      indexes: (t.indexes ?? []).map((i: Loose) => ({ pk: i.pk === true, unique: i.unique === true, columns: i.columns.map((c: Loose) => c.value) })),
+    })),
+    refs: db.refs.map((r: Loose) => ({ name: r.name ?? null, ends: endsOf(r.endpoints) })),
+    groups: (db.tableGroups ?? []).map((g: Loose) => ({
+      name: g.name,
+      color: g.color ?? null,
+      note: noteOf(g.note),
+      tables: g.tables.map((t: Loose) => `${schemaOf(t.schemaName)}.${t.name}`),
+    })),
+    notes: (db.notes ?? []).map((n: Loose) => ({ name: n.name, content: n.content, color: n.color ?? null, properties: propertiesOf(n.metadata) })),
+  };
+}
+
+/**
+ * The lint infos a rich export may still draw, because they describe the
+ * model rather than the export: a Ref to columns that are not a key, or a
+ * many end on a key. Never one about NULL — the `?` markers exist so there
+ * is none.
+ */
+export const MODEL_LINT_INFOS = [/should be unique or primary key/, /should have a composite unique index/, /is unique but operator .* allows many/];
+
+/**
+ * `text` read by all three 9.1+ parsers. Throws, naming the parser, on any
+ * error or warning, on a lint info other than {@link MODEL_LINT_INFOS} (or
+ * any info at all with `{ infos: 'none' }`), and when the parsers read it
+ * differently; returns the shared reading.
+ */
+export function readDbmlRich(text: string, options: { infos?: 'model' | 'none' } = {}): RichDbmlReading {
+  let first: { parser: string; reading: RichDbmlReading; json: string } | undefined;
+  for (const { parser, diagnostics, db } of parseDbmlRich(text)) {
+    const refused = diagnostics.filter(
+      (d) => d.type !== 'info' || options.infos === 'none' || !MODEL_LINT_INFOS.some((pattern) => pattern.test(d.text)),
+    );
+    if (refused.length > 0 || !db) {
+      throw new Error(`${parser}: ${refused.map((d) => `${d.type} ${d.line + 1}: ${d.text}`).join('; ') || 'no database'}`);
+    }
+    const reading = readRich(db);
+    const json = JSON.stringify(reading);
+    if (!first) first = { parser, reading, json };
+    else if (json !== first.json) throw new Error(`${parser} reads this DBML differently from ${first.parser}:\n${json}\n${first.json}`);
+  }
+  return first!.reading;
 }
 
 // ---------------------------------------------------------------------------

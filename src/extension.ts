@@ -72,8 +72,10 @@ import { readManifestMtime } from './services/manifestStaleness';
 import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
 import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
+import { IMPORT_DBML_COMMAND, importDbml } from './commands/importDbml';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
-import { exportSubjectAreaFile } from './services/diagramExport';
+import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
+import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
 import { saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles } from './providers/dirtyDocuments';
@@ -445,6 +447,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.trySampleProject',
   'erdStudio.setupAiHelper',
   'erdStudio.drawFromDbt',
+  'erdStudio.importDbml',
   'erdStudio.setFeedbackApiKey',
   'erdStudio.clearFeedbackApiKey',
   'erdStudio.refreshMyReports',
@@ -454,6 +457,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.resolveDuplicateModel',
   'erdStudio.moveRelationshipsToLibrary',
   'erdStudio.exportDiagram',
+  'erdStudio.exportAllDiagrams',
   'erdStudio.migrateToTableNaming',
 ]);
 
@@ -1392,6 +1396,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     currentVersion,
   );
 
+  // After Draw from dbt or Import DBML writes a new diagram and its tables.
+  // Every file was recorded as an own write, so the watchers stay quiet;
+  // issue their refreshes here, as createDomain does.
+  const refreshAfterNewSubjectArea = ({ domainPath, modelNames, changedModelNames }: {
+    domainPath: string; modelNames: string[]; changedModelNames: string[];
+  }): void => {
+    layerService.invalidateCache();
+    treeProvider.invalidateSubjectArea(domainPath);
+    treeProvider.refresh();
+    if (modelNames.length > 0 || changedModelNames.length > 0) { tableLibraryProvider.refresh(); }
+    // A new table file may be one an open diagram already references
+    // (a placeholder until now), and an existing one that gained a library
+    // relationship is drawn in every open diagram holding both ends; the
+    // table watcher skipped both own writes.
+    for (const name of [...modelNames, ...changedModelNames]) { void editorProvider.refreshSubjectAreasReferencingTable(name); }
+    layerDecorationProvider.refresh();
+    decorationProvider.refresh();
+    refreshContextKeys();
+    selectorsService.scheduleRegenerate();
+  };
+
   context.subscriptions.push(
     { dispose() { clearTimeout(manifestRetryTimeout); } },
     configChangedSubscription,
@@ -1745,7 +1770,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               await manifestService.loadManifest(workspaceRoot).catch(() => undefined),
             ))
             .catch(() => undefined);
-          return exportSubjectAreaFile(subjectAreaService, domainPath, format, dbtKeyIndex ? { dbtKeyIndex } : {});
+          return exportSubjectAreaFile(subjectAreaService, domainPath, format, { layers: layerService, ...(dbtKeyIndex ? { dbtKeyIndex } : {}) });
         },
         activeDomainPath: () => editorProvider.activeSubjectAreaPath(),
         hasDiagrams: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
@@ -1753,6 +1778,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         defaultSaveFolder: workspaceRoot,
         projectRoot: workspaceRoot,
       }, arg)),
+    // Export every domain's logical design into a folder the user picks, one
+    // file each (plus its .dbdiagram for DBML for dbdiagram.io).
+    vscode.commands.registerCommand(EXPORT_ALL_DIAGRAMS_COMMAND, () =>
+      exportAllDiagramsCommand({
+        listSubjectAreas: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir),
+        exportAll: async (domainPaths, format) => {
+          // dbt's key evidence once for the whole run, as Export Diagram reads it.
+          const dbtKeyIndex = await Promise.resolve()
+            .then(async () => dbtKeyIndexOf(
+              await ymlParserService.loadYmlData(workspaceRoot, undefined),
+              await manifestService.loadManifest(workspaceRoot).catch(() => undefined),
+            ))
+            .catch(() => undefined);
+          return exportSubjectAreaFiles(subjectAreaService, domainPaths, format, { layers: layerService, ...(dbtKeyIndex ? { dbtKeyIndex } : {}) });
+        },
+        defaultFolder: workspaceRoot,
+        projectRoot: workspaceRoot,
+      })),
     vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, async () => {
       const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
       await drawFromDbt({
@@ -1770,21 +1813,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return { ymlData, manifest: manifestService.isMissing ? undefined : manifest, catalog };
         },
         validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
-        onWritten: ({ domainPath, modelNames }) => {
-          // Every file was recorded as an own write, so the watchers stay
-          // quiet; issue their refreshes here, as createDomain does.
-          layerService.invalidateCache();
-          treeProvider.invalidateSubjectArea(domainPath);
-          treeProvider.refresh();
-          if (modelNames.length > 0) { tableLibraryProvider.refresh(); }
-          // A new model file may be one an open diagram already references
-          // (a placeholder until now); the model watcher skipped the own write.
-          for (const name of modelNames) { void editorProvider.refreshSubjectAreasReferencingTable(name); }
-          layerDecorationProvider.refresh();
-          decorationProvider.refresh();
-          refreshContextKeys();
-          selectorsService.scheduleRegenerate();
-        },
+        onWritten: refreshAfterNewSubjectArea,
+      });
+    }),
+    // Import a DBML file (ERD Studio's own rich export, dbdiagram.io's, any
+    // tool's) as a new subject area. Needs no dbt artifacts.
+    vscode.commands.registerCommand(IMPORT_DBML_COMMAND, async () => {
+      const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+      await importDbml({
+        workspaceRoot,
+        semanticDir,
+        layerService,
+        subjectAreaService,
+        tableLibraryService,
+        validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
+        onWritten: refreshAfterNewSubjectArea,
       });
     }),
     vscode.commands.registerCommand(

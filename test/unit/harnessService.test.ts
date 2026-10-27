@@ -778,8 +778,30 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 32 (write the file naming doctor reports, #182)', () => {
-      expect(HARNESS_VERSION).toBe('32');
+    it('is 33 (DBML import and export)', () => {
+      expect(HARNESS_VERSION).toBe('33');
+    });
+
+    it('points assistants at Import DBML…, the dbdiagram.io export and the CLI formats, and keeps meta.dbml', () => {
+      const content = service.generateContent('claude');
+      expect(content).toContain('## DBML: import and export');
+      expect(content).toContain('**ERD Studio: Import DBML…**');
+      expect(content).toContain('**ERD Studio: Export All Diagrams…**');
+      expect(content).toContain('**DBML for dbdiagram.io**');
+      for (const flag of ['--format dbml-rich', '--format dbml-layout', '`--all`']) {
+        expect(content, flag).toContain(flag);
+      }
+      // The CLI stays read-only: the assistant writes the files itself.
+      expect(content).toContain('stdout only; it never writes a file');
+      // Pushing uploads the model to a third party: only on request.
+      expect(content).toContain('run it only when the user asks');
+      expect(content).toContain('Keep it exactly as it is');
+      // The external-sources protocol sends a DBML file to the command.
+      expect(content).toContain('A **DBML file** (`.dbml`) has its own command');
+      // Every target that carries the schema guide gets the section.
+      for (const id of ['agents', 'copilot', 'gemini', 'codex'] as const) {
+        expect(service.generateContent(id), id).toContain('## DBML: import and export');
+      }
     });
 
     it('tells assistants to write the naming doctor reports, and never to move files between the two folders (#182)', () => {

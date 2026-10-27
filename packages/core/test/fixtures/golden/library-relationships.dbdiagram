@@ -1,0 +1,39 @@
+{
+  "version": "3.0.0",
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "relationshipMode": "All",
+    "tablePositions": [
+      {
+        "name": "fct_order",
+        "schemaName": "gold",
+        "x": 400,
+        "y": 200
+      },
+      {
+        "name": "dim_customer",
+        "schemaName": "gold",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "name": "dim_date",
+        "schemaName": "gold",
+        "x": 40,
+        "y": 360
+      },
+      {
+        "name": "dim_product",
+        "schemaName": "gold",
+        "x": 760,
+        "y": 200
+      }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": []
+  },
+  "views": {}
+}

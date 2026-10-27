@@ -278,6 +278,12 @@ const FEATURES = [
   'exportDbml',
   'exportCancelled',
   'exportNoDiagrams',
+  'exportDbmlRich',
+  'exportAll',
+  'importDbml',
+  'importDbmlLayout',
+  'importDbmlCancelled',
+  'importDbmlInvalid',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -358,6 +364,8 @@ const ERROR_CODES = [
   'saveFailedRename',
   'saveFailedReopen',
   'saveFailedUndoRedo',
+  // Import DBML… failed while writing the new diagram.
+  'importDbmlFailed',
 ];
 
 /**

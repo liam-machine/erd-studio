@@ -38,3 +38,5 @@ export * from './meta.js';
 export * from './displayDomain.js';
 export * from './loadDisplayDomain.js';
 export * from './exportDiagram.js';
+export * from './dbdiagramLayout.js';
+export * from './dbmlRichProperties.js';
