@@ -2,11 +2,11 @@
  * Read a `.dbml` diagram (§2.5 of the native DBML storage spec) into the v5
  * subject-area object the rest of core reads, beside its DBML schema version
  * (D8). Tolerant (D6): every `use` line, every `Table`, `Ref`, `TableGroup`,
- * `Enum`, `TablePartial`, `Records` and `DiagramView`, every repeated Note
- * name and every Project after the first is blanked out (offsets and line
- * breaks kept) before the rest is compiled on its own, so a deleted table
- * file or a hand-written construct never makes a diagram unreadable. Only a
- * syntax error, or an error left after blanking, does.
+ * `Enum`, `TablePartial`, `Records`, `DiagramView` and `Metadata` block,
+ * every repeated Note name and every Project after the first is blanked out
+ * (offsets and line breaks kept) before the rest is compiled on its own, so a
+ * deleted table file or a hand-written construct never makes a diagram
+ * unreadable. Only a syntax error, or an error left after blanking, does.
  */
 
 import type { Annotation, AnnotationColor, NodePosition } from '../types/semantic.js';
@@ -47,6 +47,15 @@ import {
 
 /** Elements a diagram may declare but ERD Studio never reads from it: blanked, warned about and kept. */
 const DECLARED_ELEMENTS: ReadonlySet<string> = new Set(['table', 'ref', 'tablegroup', 'enum', 'tablepartial', 'records', 'diagramview']);
+
+/**
+ * `Metadata Table t { … }` / `Metadata Column t.c { … }` (DBML 9.1+, D25):
+ * valid in a diagram when other DBML tools read the project, but its target
+ * is an imported table, which is blanked with the `use` lines, so it would
+ * be a binding error. Blanked, warned about and kept, like the elements
+ * above; ERD Studio reads table properties from the table file only.
+ */
+const METADATA_ELEMENT = 'metadata';
 
 /** The diagram-quote hint: the example is an error in every parser (Project keys must be quoted). */
 const DIAGRAM_QUOTE_HINT = "Quote the value, as in erd_schema_version: '7'.";
@@ -202,7 +211,11 @@ export function parseSubjectAreaDbml(
       const folder = libraryFolderOf(resolved);
       if (folder !== undefined) useFolders.add(folder);
       const specified = specifiedTables(node);
-      const misnamed = specified.find((n) => n !== name);
+      // DBML names are case-sensitive, but a table file may declare its name
+      // in another case than its stem (D2), and the specifier spells the
+      // declared name: only a different name is a mismatch. A path whose case
+      // differs from the file on disk needs a listing (host, doctor; §3.4).
+      const misnamed = specified.find((n) => n.toLowerCase() !== name.toLowerCase());
       if (folder === undefined) {
         warnings.push(`Line ${line}: the use line for ${name} points at '${importPath}', not at a table file in ${TABLES_DIR}/ (usePathMismatch); the table is still read by name`);
       } else if (misnamed !== undefined) {
@@ -218,6 +231,11 @@ export function parseSubjectAreaDbml(
       blanks.push({ start: node.start, end: node.end });
       if (lower === 'table') declaredTables++;
       warnings.push(`Line ${line}: a ${type} is declared in the diagram file; ERD Studio shows only tables from the library through use lines, and keeps it as written`);
+      continue;
+    }
+    if (lower === METADATA_ELEMENT) {
+      blanks.push({ start: node.start, end: node.end });
+      warnings.push(`Line ${line}: a Metadata block is declared in the diagram file; ERD Studio reads table properties only from the table file, and keeps it as written`);
       continue;
     }
     if (lower === 'project') {
@@ -251,8 +269,9 @@ export function parseSubjectAreaDbml(
   }
   const db = remaining.length === 0 ? compiled.rawDb() : undefined;
   if (remaining.length > 0 && !db) {
-    // Binding errors leave no rawDb: read what the file says without them.
-    // (Only constructs ERD Studio does not know can cause one after blanking.)
+    // Binding errors leave no rawDb, so there is nothing to read. Every
+    // construct that names a table (D25's Metadata blocks included) is
+    // blanked above, so only one ERD Studio does not know can cause it.
     throw invalidDbml(filePath, remaining[0]);
   }
 

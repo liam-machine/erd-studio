@@ -46,5 +46,6 @@ export * from './dbdiagramLayout.js';
 export * from './dbmlRichProperties.js';
 export * from './dbmlText.js';
 export * from './storage.js';
-export * from './storageEquivalence.js';
+// Named: the module's row-by-row helpers are internal (the twin-golden tests).
+export { normaliseForStorageEquivalence, storageNoteText, type StorageEquivalenceOptions } from './storageEquivalence.js';
 export * from './dbmlAttach.js';

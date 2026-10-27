@@ -8,7 +8,14 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { normaliseForStorageEquivalence as norm, storageNoteText } from '../../src/storageEquivalence';
+import {
+  normaliseForStorageEquivalence as norm,
+  normaliseStorageRows,
+  storageNoteText,
+  STORAGE_EQUIVALENCE_CONVERT_ROWS,
+  STORAGE_EQUIVALENCE_ROWS,
+  type StorageEquivalenceRow,
+} from '../../src/storageEquivalence';
 import { dbmlNoteText, dbmlString } from '../../src/dbmlText';
 import { parseDbmlRich } from '../exportParsers';
 
@@ -171,6 +178,45 @@ describe('normaliseForStorageEquivalence: each §2.8 row in isolation', () => {
     a.schemaVersion = 4;
     same(a, b);
     expect(norm(a).schemaVersion).toBe(7);
+  });
+});
+
+describe('normaliseStorageRows: one row at a time (the twin goldens\' per-case check)', () => {
+  /** A difference only `row` normalises away. */
+  const CASES: Array<[StorageEquivalenceRow, (b: Area) => void]> = [
+    ['noteText', (b) => { b.description = '  Sales'; }],
+    ['positions', (b) => { b.viewConfig.positions.fct_order = { x: 400.001, y: 200 }; }],
+    ['emptyAnnotations', (b) => { b.viewConfig.annotations = []; }],
+    ['respelling', (b) => { b.relationships[0] = { ...b.relationships[0], toModel: 'Dim_Customer', toColumn: 'CUSTOMER_ID' }; }],
+    ['oneToMany', (b) => { b.relationships[0] = { fromModel: 'dim_customer', fromColumn: 'customer_id', toModel: 'fct_order', toColumn: 'customer_id', cardinality: 'one-to-many', role: 'buyer' }; }],
+    ['loneCompositeKey', (b) => { b.relationships[0].compositeKey = 'fk_lonely'; }],
+    ['compositeKeyNames', (b) => { b.relationships[1].compositeKey = 'region_fk'; b.relationships[2].compositeKey = 'region_fk'; }],
+    ['schemaVersion', (b) => { b.schemaVersion = 7; }],
+    ['relationshipOrder', (b) => { b.relationships = [b.relationships[1], b.relationships[2], b.relationships[0]]; }],
+  ];
+
+  it('every non-Convert row has a case', () => {
+    expect(CASES.map(([row]) => row).sort()).toEqual([...STORAGE_EQUIVALENCE_ROWS].sort());
+  });
+
+  it.each(CASES)('%s: that row alone removes the difference, and every other row together does not', (row, mutate) => {
+    const a = display();
+    if (row === 'emptyAnnotations') delete a.viewConfig.annotations;
+    const b = display();
+    if (row === 'emptyAnnotations') delete b.viewConfig.annotations;
+    mutate(b);
+    expect(normaliseStorageRows(a, [row])).toEqual(normaliseStorageRows(b, [row]));
+    const others = [...STORAGE_EQUIVALENCE_ROWS, ...STORAGE_EQUIVALENCE_CONVERT_ROWS].filter((r) => r !== row);
+    expect(normaliseStorageRows(a, others)).not.toEqual(normaliseStorageRows(b, others));
+  });
+
+  it('with every row, it is the comparator (with and without convert)', () => {
+    const b = display();
+    b.relationships[0].compositeKey = 'fk_lonely';
+    b.description = '  Sales';
+    expect(normaliseStorageRows(b, STORAGE_EQUIVALENCE_ROWS)).toEqual(norm(b));
+    expect(normaliseStorageRows(b, [...STORAGE_EQUIVALENCE_ROWS, ...STORAGE_EQUIVALENCE_CONVERT_ROWS])).toEqual(norm(b, { convert: true }));
+    expect(normaliseStorageRows(b, [])).toEqual(b);
   });
 });
 

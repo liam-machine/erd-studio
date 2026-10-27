@@ -94,11 +94,18 @@ function at(location: DbmlRefLocation): string {
  *
  * A dangling end (a target with no table, or a column it does not have) is
  * kept in the owner's list, as written.
+ *
+ * `options.partial` says `tables` holds only some of the library (core's
+ * loader reads a diagram's members, not every table file): a Ref whose owner
+ * it does not have is skipped without a word, since the owner may be a DBML
+ * table that is simply not on this diagram, or one whose file did not read
+ * (that table carries its own load error). A YAML owner is still orphaned.
+ * The host, which passes the whole library, leaves it unset.
  */
 export function attachRelationships(
   readings: ReadonlyArray<{ path: string; folder?: string; reading: DbmlRelationshipsReading }>,
   tables: (name: string) => DbmlAttachTable | undefined,
-  options: { dbt?: DbtKeyIndex } = {},
+  options: { dbt?: DbtKeyIndex; partial?: boolean } = {},
 ): DbmlAttachResult {
   const result: DbmlAttachResult = { byOwner: new Map(), misplaced: [], orphaned: [], duplicates: [], warnings: [] };
   interface Candidate { rel: Relationship; unit: number; at: DbmlRefLocation; rank: string; owner: string }
@@ -130,6 +137,7 @@ export function attachRelationships(
         owner: ownerEntry?.table.name ?? rels[0].fromModel,
         target: targetEntry?.table.name ?? rels[0].toModel,
       };
+      if (!ownerEntry && options.partial) continue;
       if (!ownerEntry || ownerEntry.storage !== 'dbml') {
         result.orphaned.push(location);
         result.warnings.push(ownerEntry

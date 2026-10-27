@@ -27,12 +27,6 @@ const TABLES: DbmlAttachTable[] = [
 const lookup = dbmlTableLookup(TABLES);
 
 const read = (text: string): DbmlRelationshipsReading => readRelationshipsDbml(text);
-const one = (text: string) => {
-  const reading = read(text);
-  expect(reading.readable).toBe(true);
-  expect(reading.refs).toHaveLength(1);
-  return reading.refs[0];
-};
 
 const GOLD = `// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
 use { table dim_date } from '../dim_date.dbml'
@@ -70,39 +64,48 @@ describe('readRelationshipsDbml', () => {
     }
   });
 
-  it.each([
-    ['>', 'Ref: a.x > b.y', ['a', 'x', 'b', 'y', 'many-to-one']],
-    ['>?', 'Ref: a.x >? b.y', ['a', 'x', 'b', 'y', 'many-to-one']],
-    ['<', 'Ref: a.x < b.y', ['b', 'y', 'a', 'x', 'many-to-one']],
-    ['<?', 'Ref: a.x <? b.y', ['b', 'y', 'a', 'x', 'many-to-one']],
-    ['<>', 'Ref: a.x <> b.y', ['a', 'x', 'b', 'y', 'many-to-many']],
-    ['<>?', 'Ref: a.x <>? b.y', ['a', 'x', 'b', 'y', 'many-to-many']],
-    ['?- (marks the right end)', 'Ref: a.x ?- b.y', ['b', 'y', 'a', 'x', 'one-to-one']],
-    ['-? (marks the left end)', 'Ref: a.x -? b.y', ['a', 'x', 'b', 'y', 'one-to-one']],
-  ])('the operator %s', (_label, text, [fromModel, fromColumn, toModel, toColumn, cardinality]) => {
-    const ref = one(text);
-    expect(ref.relationships[0]).toEqual({ fromModel, fromColumn, toModel, toColumn, cardinality });
-    expect(ref.owner).toBe(fromModel);
-  });
+  describe.each(STORAGE_PARSERS)('in %s', (_parserLabel, parser) => {
+    const oneWith = (text: string) => {
+      const reading = readRelationshipsDbml(text, parser);
+      expect(reading.readable).toBe(true);
+      expect(reading.refs).toHaveLength(1);
+      return reading.refs[0];
+    };
 
-  it('a bare or doubly marked `-` is left to the keys, read with the second end as the foreign key', () => {
-    for (const text of ['Ref: a.x - b.y', 'Ref: a.x ?-? b.y']) {
-      const ref = one(text);
-      expect(ref.oneToOneDirection).toBe('keys');
-      expect(ref.relationships[0]).toMatchObject({ fromModel: 'b', fromColumn: 'y', toModel: 'a', toColumn: 'x' });
-    }
-  });
+    it.each([
+      ['>', 'Ref: a.x > b.y', ['a', 'x', 'b', 'y', 'many-to-one']],
+      ['>?', 'Ref: a.x >? b.y', ['a', 'x', 'b', 'y', 'many-to-one']],
+      ['<', 'Ref: a.x < b.y', ['b', 'y', 'a', 'x', 'many-to-one']],
+      ['<?', 'Ref: a.x <? b.y', ['b', 'y', 'a', 'x', 'many-to-one']],
+      ['<>', 'Ref: a.x <> b.y', ['a', 'x', 'b', 'y', 'many-to-many']],
+      ['<>?', 'Ref: a.x <>? b.y', ['a', 'x', 'b', 'y', 'many-to-many']],
+      ['?- (marks the right end)', 'Ref: a.x ?- b.y', ['b', 'y', 'a', 'x', 'one-to-one']],
+      ['-? (marks the left end)', 'Ref: a.x -? b.y', ['a', 'x', 'b', 'y', 'one-to-one']],
+    ])('the operator %s', (_label, text, [fromModel, fromColumn, toModel, toColumn, cardinality]) => {
+      const ref = oneWith(text);
+      expect(ref.relationships[0]).toEqual({ fromModel, fromColumn, toModel, toColumn, cardinality });
+      expect(ref.owner).toBe(fromModel);
+    });
 
-  it('reads the block form, schema-qualified ends, quoted names and duplicate names', () => {
-    const reading = read(`Ref fk { gold.fct_order.customer_key > gold.dim_customer.customer_key }
+    it('a bare or doubly marked `-` is left to the keys, read with the second end as the foreign key', () => {
+      for (const text of ['Ref: a.x - b.y', 'Ref: a.x ?-? b.y']) {
+        const ref = oneWith(text);
+        expect(ref.oneToOneDirection).toBe('keys');
+        expect(ref.relationships[0]).toMatchObject({ fromModel: 'b', fromColumn: 'y', toModel: 'a', toColumn: 'x' });
+      }
+    });
+
+    it('reads the block form, schema-qualified ends, quoted names and duplicate names', () => {
+      const reading = readRelationshipsDbml(`Ref fk { gold.fct_order.customer_key > gold.dim_customer.customer_key }
 Ref "fk": "order line".x > "dim x".y
 Ref "fk": a.b > c.d
-`);
-    expect(reading.refs.map((r) => [r.owner, r.target, r.relationships[0].role])).toEqual([
-      ['fct_order', 'dim_customer', 'fk'],
-      ['order line', 'dim x', 'fk'],
-      ['a', 'c', 'fk'],
-    ]);
+`, parser);
+      expect(reading.refs.map((r) => [r.owner, r.target, r.relationships[0].role])).toEqual([
+        ['fct_order', 'dim_customer', 'fk'],
+        ['order line', 'dim x', 'fk'],
+        ['a', 'c', 'fk'],
+      ]);
+    });
   });
 
   it('skips a Ref it cannot read with a problem, and reads the rest', () => {
@@ -219,6 +222,17 @@ describe('attachRelationships', () => {
     expect(result.byOwner.size).toBe(0);
     expect(result.orphaned.map((o) => o.owner)).toEqual(['yaml_fact', 'nobody']);
     expect(result.warnings).toHaveLength(2);
+  });
+
+  it('partial: a Ref whose owner the lookup does not hold is skipped without a warning; a YAML owner is still orphaned', () => {
+    // Core's loader holds only a diagram's members; the owner may be a DBML table off the diagram.
+    const tables = dbmlTableLookup([...TABLES, { table: { name: 'yaml_fact', columns: [col('customer_key')] }, folder: 'gold', storage: 'yaml' }]);
+    const text = 'Ref: yaml_fact.customer_key > dim_customer.customer_key\nRef: not_on_diagram.x > dim_customer.customer_key\nRef: fct_order.customer_key >? dim_customer.customer_key\n';
+    const result = attachRelationships([{ path: 'tables/gold/_relationships.dbml', reading: read(text) }], tables, { partial: true });
+    expect(result.orphaned.map((o) => o.owner)).toEqual(['yaml_fact']);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('a YAML table');
+    expect([...result.byOwner.keys()]).toEqual(['fct_order']);
   });
 
   it('the same link in two files, or twice in one, is attached once, with a warning naming both places', () => {

@@ -290,22 +290,16 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     return text;
   };
 
-  // 0b. A `.dbml` table or relationships file is not a diagram (§4.4). Core
-  // cannot list directories, so `tables/` is the library unless layers.json
-  // lists a `tables` layer.
+  // 0b. A `.dbml` table or relationships file is not a diagram (§4.4). No
+  // `.dbml` under `tables/` is ever a diagram: with DBML evidence there,
+  // `tables/` is either the library (a table file) or a YAML project's
+  // listed layer (its `.dbml` files are `other`), the two answers
+  // `classifySemanticFile` gives (§3.3, §3.5). So core needs no listing.
   const isDbml = isDbmlPath(domainPath);
-  let layersText: string | null | undefined;
-  let layersRead = false;
   if (isDbml) {
     const stem = fileName.slice(0, -'.dbml'.length);
-    if (stem.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM || lastSegment(prefix) === TABLES_DIR) {
+    if (stem.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM || lastSegment(prefix) === TABLES_DIR || parentDirName === TABLES_DIR) {
       throw notADiagram(domainPath);
-    }
-    if (parentDirName === TABLES_DIR) {
-      layersText = await readLayersText();
-      layersRead = true;
-      const listed = parseLayersText(layersText, () => {}).some((l) => l.id === TABLES_DIR);
-      if (!listed) throw notADiagram(domainPath);
     }
     if (!dbml) {
       throw new SubjectAreaValidationError(
@@ -340,8 +334,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
   const { obj, format } = validateSubjectAreaDocument(document, domainPath);
 
   // 4-5. Layers, from the semantic dir the domain sits in.
-  if (!layersRead) layersText = await readLayersText();
-  const layers = parseLayersText(layersText, warn);
+  const layers = parseLayersText(await readLayersText(), warn);
   const layerLookup: LayerLookup = {
     hasLayer: (id) => layers.some((l) => l.id === id),
     getValidLayerIds: () => layers.map((l) => l.id),
@@ -426,7 +419,9 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
             ...(entry.dbmlAlias !== undefined ? { dbmlAlias: entry.dbmlAlias } : {}),
           });
         }
-        const attached = attachRelationships(readings, dbmlTableLookup(entries));
+        // Only the members were read, so a Ref whose owner is off this
+        // diagram (or did not read) is no orphan here (§2.4: `partial`).
+        const attached = attachRelationships(readings, dbmlTableLookup(entries), { partial: true });
         for (const message of attached.warnings) warn(message);
         for (const [name, entry] of parsed) {
           if (!entry.model || !found.has(name)) continue;

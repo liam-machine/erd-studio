@@ -19,7 +19,7 @@ import * as path from 'path';
 
 import { loadDisplaySubjectArea } from '../../src/loadDisplayDomain';
 import { SubjectAreaFileError, SubjectAreaValidationError } from '../../src/domain';
-import { normaliseForStorageEquivalence } from '../../src/storageEquivalence';
+import { normaliseForStorageEquivalence, normaliseStorageRows, type StorageEquivalenceRow } from '../../src/storageEquivalence';
 import { dbmlStorageReader } from '../../src/dbml/index';
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
@@ -59,46 +59,48 @@ const ERROR_CASES: Record<string, string> = {
 
 /**
  * The DBML twins (packages/core/test/fixtures/dbml/<case>): the same projects
- * stored as native DBML. Each draws what its YAML case's golden draws, once
- * both go through the one storage comparator (D24), which applies only the
- * §2.8 rows. `rows` names the rows a case exercises, each with its reason; a
- * row a case does not list changes nothing in it.
+ * stored as native DBML. Each draws what its YAML case's golden draws once
+ * both go through **only the §2.8 rows it lists** (§9.2: a row a case does
+ * not list must not change that case), and each listed row is needed (drop
+ * it and the two differ). The full comparator (D24) agrees as well.
+ *
+ * These compare the Display shape. Rows that touch only the Unified shape
+ * (composite-and-self's lone `fk_lonely` key and raw Ref spellings, the
+ * library-relationships domain copy) show there, with the host, in S4.
  */
-const DBML_TWIN_CASES: Record<string, { domainPath: string; rows: string[] }> = {
+const DBML_TWIN_CASES: Record<string, { domainPath: string; rows: Partial<Record<StorageEquivalenceRow, string>> }> = {
   showcase: {
     domainPath: '.erd-studio/silver/showcase.dbml',
-    rows: [
-      'relationship order: the diagram file held the relationships in its own order; a relationships file keeps its Refs sorted',
-      'schemaVersion: the YAML case is 5, a DBML diagram is 7',
-    ],
+    rows: {
+      relationshipOrder: 'the diagram file held the relationships in its own order; a relationships file keeps its Refs sorted',
+      emptyAnnotations: 'the JSON file holds "annotations": []; a diagram with no Note blocks reads back with no list',
+      schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+    },
   },
   'composite-and-self': {
     domainPath: '.erd-studio/gold/vault.dbml',
-    rows: [
-      'compositeKey names: derived again on read (fk_sat_customer), so compared by sequence',
-      'a lone compositeKey (fk_lonely): written as a plain one-column Ref',
-      'raw Ref spellings: Mentor_ID / Employee / EMPLOYEE_ID are written respelled',
-      'schemaVersion: the YAML case is 5, a DBML diagram is 7',
-    ],
+    rows: {
+      schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+    },
   },
   'missing-positions': {
     domainPath: '.erd-studio/silver/showcase.dbml',
-    rows: [
-      'relationship order: the diagram file held the relationships in its own order; a relationships file keeps its Refs sorted',
-      'schemaVersion: the YAML case is 5, a DBML diagram is 7',
-    ],
+    rows: {
+      relationshipOrder: 'the diagram file held the relationships in its own order; a relationships file keeps its Refs sorted',
+      emptyAnnotations: 'the JSON file holds "annotations": []; a diagram with no Note blocks reads back with no list',
+      schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+    },
   },
   'missing-model': {
     domainPath: '.erd-studio/silver/partial.dbml',
-    rows: ['schemaVersion: the YAML case is 5, a DBML diagram is 7'],
+    rows: { schemaVersion: 'the YAML case is 5, a DBML diagram is 7' },
   },
   'library-relationships': {
     domainPath: '.erd-studio/gold/sales.dbml',
-    rows: [
-      'a library one-to-many (1.6.6 / 1.6.7): stored canonically, as fct_order many-to-one',
-      'a link stored twice (fct_order.yml and dim_date.yml): one Ref, the copy the ranking draws',
-      'schemaVersion: the YAML case is 5, a DBML diagram is 7',
-    ],
+    rows: {
+      oneToMany: 'a library one-to-many (1.6.6 / 1.6.7) is stored canonically, as fct_order many-to-one',
+      schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+    },
   },
 };
 
@@ -192,7 +194,8 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
   });
 
   describe.each(Object.entries(DBML_TWIN_CASES))('the DBML twin of %s', (name, { domainPath, rows }) => {
-    it(`draws what the YAML golden draws, through the storage comparator (${rows.length} §2.8 rows)`, async () => {
+    const listed = Object.keys(rows) as StorageEquivalenceRow[];
+    const read = async (): Promise<{ twin: Record<string, unknown>; expected: Record<string, unknown> }> => {
       const domain = await loadDisplaySubjectArea({
         domainPath,
         readFile: fsReadFile(path.join(FIXTURES, 'dbml', name)),
@@ -206,8 +209,19 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
       delete expected.manifestModels;
       delete expected.existingModels;
       DBML_TWIN_EXCEPTIONS[name]?.(expected);
-      expect(normaliseForStorageEquivalence(JSON.parse(JSON.stringify(domain))))
-        .toEqual(normaliseForStorageEquivalence(expected));
+      return { twin: JSON.parse(JSON.stringify(domain)), expected };
+    };
+
+    it(`draws what the YAML golden draws through only its listed §2.8 rows (${listed.join(', ')})`, async () => {
+      const { twin, expected } = await read();
+      expect(normaliseStorageRows(twin, listed)).toEqual(normaliseStorageRows(expected, listed));
+      expect(normaliseForStorageEquivalence(twin)).toEqual(normaliseForStorageEquivalence(expected));
+    });
+
+    it.each(listed)('needs the row it lists: %s', async (row) => {
+      const { twin, expected } = await read();
+      const without = listed.filter((r) => r !== row);
+      expect(normaliseStorageRows(twin, without)).not.toEqual(normaliseStorageRows(expected, without));
     });
   });
 });

@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { parseTableDbml } from '../../src/dbml/readTable';
+import { VIRTUAL_PATH } from '../../src/dbml/parser';
 import type { DbmlTableReading } from '../../src/types/dbmlStorage';
 import { describeTableLoadError, DBML_QUOTE_HINT } from '../../src/domain';
 import { PARSER_PINNED, PARSER_V10, PARSER_V9, STORAGE_PARSERS } from '../dbmlParsers';
@@ -205,8 +206,10 @@ Ref: fct_order.customer_key > dim_customer.customer_key
     expect(ok(parseTableDbml('﻿Table t {\n  id int\n}\n', 't', parser)).table.name).toBe('t');
   });
 
-  it('a path with a space is irrelevant: every read compiles under a fixed virtual path (10.3.1 and the pin)', () => {
-    // 10.3.1 drops imported tables under a path with a space; a single file under the fixed path is never affected.
+  it('every read compiles under the fixed, space-free virtual path, never the file\'s own path', () => {
+    // parseTableDbml takes no path; the multi-file case (a library folder
+    // whose name holds a space) is in dbmlCompileProject.test.ts.
+    expect(VIRTUAL_PATH).toBe('/erd-studio/file.dbml');
     for (const parser of [PARSER_V10, PARSER_PINNED]) {
       expect(ok(parseTableDbml('Table t {\n  id int\n}\n', 't', parser)).table.columns).toHaveLength(1);
     }

@@ -45,6 +45,40 @@ export interface StorageEquivalenceOptions {
   convert?: boolean;
 }
 
+/**
+ * One §2.8 row, by id. Internal (not re-exported from the package entry):
+ * the twin-golden tests compare each case through only the rows it lists,
+ * so a row a case does not list cannot hide a change in it (§9.2).
+ */
+export type StorageEquivalenceRow =
+  | 'noteText'
+  | 'positions'
+  | 'emptyAnnotations'
+  | 'respelling'
+  | 'oneToMany'
+  | 'loneCompositeKey'
+  | 'compositeKeyNames'
+  | 'schemaVersion'
+  | 'relationshipOrder'
+  | 'convertLinkStoredTwice'
+  | 'convertCompositeRole'
+  | 'convertDangling'
+  | 'convertAnnotationIds'
+  | 'convertDiagramRelationships';
+
+/** The rows every comparison applies. Internal. */
+export const STORAGE_EQUIVALENCE_ROWS: readonly StorageEquivalenceRow[] = [
+  'noteText', 'positions', 'emptyAnnotations', 'respelling', 'oneToMany',
+  'loneCompositeKey', 'compositeKeyNames', 'schemaVersion', 'relationshipOrder',
+];
+
+/** The Convert-only rows (`convert: true`). Internal. */
+export const STORAGE_EQUIVALENCE_CONVERT_ROWS: readonly StorageEquivalenceRow[] = [
+  'convertLinkStoredTwice', 'convertCompositeRole', 'convertDangling', 'convertAnnotationIds', 'convertDiagramRelationships',
+];
+
+type Rows = ReadonlySet<StorageEquivalenceRow>;
+
 type Json = Record<string, unknown>;
 
 const isObject = (value: unknown): value is Json => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -140,7 +174,7 @@ function endsOf(rel: Json, owner: string | undefined): { fromModel: string; from
  * `nextCompositeKey` sequence in list order. With `convert`, a group's role
  * becomes its first member's.
  */
-function normaliseCompositeKeys(entries: Json[], ownerOf: (rel: Json) => string, convert: boolean): void {
+function normaliseCompositeKeys(entries: Json[], ownerOf: (rel: Json) => string, rows: Rows): void {
   const byOwner = new Map<string, Json[]>();
   for (const rel of entries) {
     const key = lower(ownerOf(rel));
@@ -153,9 +187,11 @@ function normaliseCompositeKeys(entries: Json[], ownerOf: (rel: Json) => string,
     for (const rel of list) {
       if (typeof rel.compositeKey === 'string') counts.set(lower(rel.compositeKey), (counts.get(lower(rel.compositeKey)) ?? 0) + 1);
     }
-    for (const rel of list) {
-      if (typeof rel.compositeKey === 'string' && counts.get(lower(rel.compositeKey)) === 1) delete rel.compositeKey;
-      else if (rel.compositeKey !== undefined && typeof rel.compositeKey !== 'string') delete rel.compositeKey;
+    if (rows.has('loneCompositeKey')) {
+      for (const rel of list) {
+        if (typeof rel.compositeKey === 'string' && counts.get(lower(rel.compositeKey)) === 1) delete rel.compositeKey;
+        else if (rel.compositeKey !== undefined && typeof rel.compositeKey !== 'string') delete rel.compositeKey;
+      }
     }
     const renamed = new Map<string, string>();
     const assigned: Array<{ compositeKey?: string }> = [];
@@ -170,8 +206,8 @@ function normaliseCompositeKeys(entries: Json[], ownerOf: (rel: Json) => string,
         assigned.push({ compositeKey: next });
         firstRole.set(next, rel.role);
       }
-      rel.compositeKey = next;
-      if (convert) {
+      if (rows.has('compositeKeyNames')) rel.compositeKey = next;
+      if (rows.has('convertCompositeRole')) {
         const role = firstRole.get(next);
         if (role === undefined) delete rel.role;
         else rel.role = role;
@@ -210,7 +246,7 @@ function normaliseList(
   list: unknown,
   owner: string | undefined,
   tables: readonly SpelledTable[],
-  convert: boolean,
+  rows: Rows,
 ): { entries: Json[]; moved: Array<{ owner: string; rel: Json }> } {
   const entries: Json[] = [];
   const moved: Array<{ owner: string; rel: Json }> = [];
@@ -218,12 +254,14 @@ function normaliseList(
   for (const item of Array.isArray(list) ? list : []) {
     if (!isObject(item)) continue;
     const copy = { ...item };
-    respell(copy, owner, tables);
-    const turned = canonical(copy, owner);
-    if (convert) {
-      const ends = endsOf(turned.rel, turned.owner);
+    if (rows.has('respelling')) respell(copy, owner, tables);
+    const turned = rows.has('oneToMany') ? canonical(copy, owner) : { rel: copy, owner };
+    const ends = endsOf(turned.rel, turned.owner);
+    if (rows.has('convertDangling')) {
       const to = findTable(tables, ends.toModel);
       if (!to || findColumn(to, ends.toColumn) === undefined) continue;
+    }
+    if (rows.has('convertLinkStoredTwice')) {
       const key = linkKey(ends);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -244,12 +282,27 @@ function normaliseList(
  * Convert-only rows.
  */
 export function normaliseForStorageEquivalence<T>(area: T, options: StorageEquivalenceOptions = {}): T {
-  if (!isObject(area)) return area;
-  const convert = options.convert === true;
-  const copy = JSON.parse(JSON.stringify(area)) as Json;
+  const rows = options.convert === true
+    ? [...STORAGE_EQUIVALENCE_ROWS, ...STORAGE_EQUIVALENCE_CONVERT_ROWS]
+    : STORAGE_EQUIVALENCE_ROWS;
+  return normaliseStorageRows(area, rows);
+}
 
-  if (isFiniteNumber(copy.schemaVersion)) copy.schemaVersion = DBML_SCHEMA_VERSION;
-  normaliseText(copy, 'description');
+/**
+ * `area` with only `rows` of §2.8 applied: a deep copy. Internal (the twin
+ * goldens' per-case check); {@link normaliseForStorageEquivalence} is this
+ * with every row.
+ */
+export function normaliseStorageRows<T>(area: T, rowList: readonly StorageEquivalenceRow[]): T {
+  if (!isObject(area)) return area;
+  const rows: Rows = new Set(rowList);
+  const copy = JSON.parse(JSON.stringify(area)) as Json;
+  const text = (holder: Json, key: string): void => {
+    if (rows.has('noteText')) normaliseText(holder, key);
+  };
+
+  if (rows.has('schemaVersion') && isFiniteNumber(copy.schemaVersion)) copy.schemaVersion = DBML_SCHEMA_VERSION;
+  text(copy, 'description');
 
   const logical = isObject(copy.logical) ? copy.logical : undefined;
   const models: unknown = Array.isArray(copy.models) ? copy.models : logical?.models;
@@ -259,15 +312,15 @@ export function normaliseForStorageEquivalence<T>(area: T, options: StorageEquiv
   const ownLists: Array<{ model: Json; owner: string }> = [];
   for (const model of Array.isArray(models) ? models : []) {
     if (!isObject(model)) continue;
-    normaliseText(model, 'description');
+    text(model, 'description');
     for (const column of Array.isArray(model.columns) ? model.columns : []) {
-      if (isObject(column)) normaliseText(column, 'description');
+      if (isObject(column)) text(column, 'description');
     }
     if (typeof model.name === 'string' && Array.isArray(model.relationships)) ownLists.push({ model, owner: model.name });
   }
   const movedToOwners: Array<{ owner: string; rel: Json }> = [];
   for (const { model, owner } of ownLists) {
-    const { entries, moved } = normaliseList(model.relationships, owner, tables, convert);
+    const { entries, moved } = normaliseList(model.relationships, owner, tables, rows);
     model.relationships = entries;
     movedToOwners.push(...moved);
   }
@@ -277,16 +330,16 @@ export function normaliseForStorageEquivalence<T>(area: T, options: StorageEquiv
   if (Array.isArray(copy.relationships)) flatHolders.push(copy);
   if (logical && Array.isArray(logical.relationships)) flatHolders.push(logical);
   for (const holder of flatHolders) {
-    const { entries } = normaliseList(holder.relationships, undefined, tables, convert);
+    const { entries } = normaliseList(holder.relationships, undefined, tables, rows);
     holder.relationships = entries;
-    sortRelationships(entries, (rel) => String(rel.fromModel ?? ''));
-    normaliseCompositeKeys(entries, (rel) => String(rel.fromModel ?? ''), convert);
+    if (rows.has('relationshipOrder')) sortRelationships(entries, (rel) => String(rel.fromModel ?? ''));
+    normaliseCompositeKeys(entries, (rel) => String(rel.fromModel ?? ''), rows);
   }
 
   // Relationships a table list now holds for another owner (a one-to-many
   // read canonically), and, with convert, a diagram file's own relationships
   // (Unified) moved to the library: attached to their owner's list.
-  if (logical && convert && Array.isArray(logical.relationships)) {
+  if (logical && rows.has('convertDiagramRelationships') && Array.isArray(logical.relationships)) {
     for (const rel of logical.relationships as Json[]) {
       const { fromModel, ...rest } = rel;
       if (typeof fromModel === 'string') movedToOwners.push({ owner: fromModel, rel: rest });
@@ -300,7 +353,7 @@ export function normaliseForStorageEquivalence<T>(area: T, options: StorageEquiv
     if (!target) continue;
     const list = Array.isArray(target.relationships) ? (target.relationships as Json[]) : [];
     // A link stored twice is kept once only when comparing a Convert result (§2.8).
-    if (convert) {
+    if (rows.has('convertLinkStoredTwice')) {
       const key = linkKey(endsOf(rel, owner));
       if (list.some((r) => linkKey(endsOf(r, owner)) === key)) continue;
     }
@@ -309,30 +362,32 @@ export function normaliseForStorageEquivalence<T>(area: T, options: StorageEquiv
     if (!ownLists.some((l) => l.model === target)) ownLists.push({ model: target, owner });
   }
   for (const { model, owner } of ownLists) {
-    sortRelationships(model.relationships as Json[], () => owner);
-    normaliseCompositeKeys(model.relationships as Json[], () => owner, convert);
+    if (rows.has('relationshipOrder')) sortRelationships(model.relationships as Json[], () => owner);
+    normaliseCompositeKeys(model.relationships as Json[], () => owner, rows);
   }
 
   // Positions and sticky notes.
   const viewConfig = isObject(copy.viewConfig) ? copy.viewConfig : undefined;
-  if (viewConfig && isObject(viewConfig.positions)) {
+  if (viewConfig && rows.has('positions') && isObject(viewConfig.positions)) {
     for (const position of Object.values(viewConfig.positions)) {
       if (!isObject(position)) continue;
       if (isFiniteNumber(position.x)) position.x = round(position.x);
       if (isFiniteNumber(position.y)) position.y = round(position.y);
     }
   }
-  if (viewConfig && Array.isArray(viewConfig.annotations) && viewConfig.annotations.length === 0) {
+  if (viewConfig && rows.has('emptyAnnotations') && Array.isArray(viewConfig.annotations) && viewConfig.annotations.length === 0) {
     delete viewConfig.annotations;
   }
   if (viewConfig && Array.isArray(viewConfig.annotations)) {
     for (const annotation of viewConfig.annotations) {
       if (!isObject(annotation)) continue;
-      normaliseText(annotation, 'text');
-      for (const key of ['x', 'y', 'width', 'height']) {
-        if (isFiniteNumber(annotation[key])) annotation[key] = round(annotation[key] as number);
+      text(annotation, 'text');
+      if (rows.has('positions')) {
+        for (const key of ['x', 'y', 'width', 'height']) {
+          if (isFiniteNumber(annotation[key])) annotation[key] = round(annotation[key] as number);
+        }
       }
-      if (convert) delete annotation.id;
+      if (rows.has('convertAnnotationIds')) delete annotation.id;
     }
   }
   return copy as T;

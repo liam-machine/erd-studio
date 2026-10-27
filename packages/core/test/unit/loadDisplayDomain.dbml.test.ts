@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { FileTooLargeError, TooManyTablesError, loadDisplaySubjectArea, type LoadDisplaySubjectAreaOptions } from '../../src/loadDisplayDomain';
 import { SubjectAreaValidationError } from '../../src/domain';
 import { dbmlStorageReader } from '../../src/dbml/index';
+import { classifySemanticFile } from '../../src/storage';
 
 type Files = Record<string, string>;
 
@@ -89,11 +90,18 @@ describe('loadDisplaySubjectArea: DBML diagrams', () => {
     );
   });
 
-  it('reads tables/x.dbml as a diagram when layers.json lists a tables layer', async () => {
+  it('refuses tables/x.dbml even when layers.json lists a tables layer: no §3.3 row makes it a diagram', async () => {
+    // With DBML evidence in tables/, a listed `tables` is either the library
+    // (x.dbml is a table) or a YAML project's layer (its .dbml files are
+    // `other`), the single classifier's two answers.
     const layers = JSON.stringify({ schemaVersion: 1, layers: [{ id: 'tables', label: 'Tables', abbreviation: 'TBL', color: '#a0a0a0', creatable: true, order: 0 }] });
     const files = { '.erd-studio/layers.json': layers, '.erd-studio/tables/t.dbml': "Project t {\n  erd_schema_version: '7'\n}\n" };
-    const domain = await load(files, { domainPath: '.erd-studio/tables/t.dbml' }).promise;
-    expect(domain.layer).toBe('tables');
+    for (const tablesDirIsLayer of [false, true]) {
+      expect(classifySemanticFile('tables/t.dbml', { tablesDirIsLayer }).kind).not.toBe('diagram');
+    }
+    const { promise, reads } = load(files, { domainPath: '.erd-studio/tables/t.dbml' });
+    await expect(promise).rejects.toThrow('.erd-studio/tables/t.dbml is a DBML table or relationships file, not a diagram. Open a diagram in a layer folder.');
+    expect(reads).toEqual([]);
   });
 
   it('probes in the shared order: logical-models/ first, then each tables/ folder with .dbml before .yml', async () => {
@@ -127,6 +135,18 @@ describe('loadDisplaySubjectArea: DBML diagrams', () => {
     expect(domain.models.find((m) => m.name === 'dim_customer')!.columns.map((c) => c.name)).toEqual(['from_logical_models']);
     // A DBML member that resolves to a .yml is drawn, with a warning (D20).
     expect(warnings.some((w) => w.includes('"dim_customer" is a YAML table'))).toBe(true);
+  });
+
+  it('a Ref whose owner is a library table off this diagram is not drawn and raises no warning', async () => {
+    // fct_payment lives in tables/finance but is not a member: core read only
+    // the members, so it cannot call the Ref orphaned (§2.4).
+    const files = project({
+      '.erd-studio/tables/finance/fct_payment.dbml': 'Table fct_payment {\n  id int [pk]\n  customer_key int\n}\n',
+      '.erd-studio/tables/finance/_relationships.dbml': "use { table fct_order } from './fct_order.dbml'\nuse { table fct_payment } from './fct_payment.dbml'\nuse { table dim_customer } from './dim_customer.dbml'\n\nRef: fct_order.customer_key >? dim_customer.customer_key\nRef: fct_payment.customer_key >? dim_customer.customer_key\n",
+    });
+    const { promise, warnings } = load(files);
+    expect(links(await promise)).toEqual(['fct_order.customer_key>dim_customer.customer_key']);
+    expect(warnings.filter((w) => w.includes('fct_payment'))).toEqual([]);
   });
 
   it('draws a misplaced Ref from a probe-set folder\'s file, with a warning', async () => {

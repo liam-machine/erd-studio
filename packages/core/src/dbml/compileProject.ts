@@ -25,8 +25,9 @@ function relativeTo(absolute: string | undefined, fallback: string): string {
  * Compile each of `entries` with every file of `files` visible to its `use`
  * lines. `files` maps posix paths relative to the semantic dir to their text
  * (a leading byte-order mark is dropped). The result holds every
- * diagnostic, keyed by the relative path of the file it is in (an entry
- * with none is present with `[]`).
+ * diagnostic once, keyed by the relative path of the file it is in (an entry
+ * with none is present with `[]`); a file two entries reach reports each of
+ * its diagnostics once.
  */
 export function compileDbmlProject(
   files: Readonly<Record<string, string>>,
@@ -43,11 +44,11 @@ export function compileDbmlProject(
   }
   const compiler = new parser.Compiler(layout);
   const result: Record<string, DbmlDiagnostic[]> = {};
+  const seen = new Set<string>();
   for (const entry of entries) {
     const clean = entry.replace(/^\/+/, '');
     result[clean] ??= [];
     const errors = (compiler.parse.errors(parser.Filepath.from(`${VIRTUAL_ROOT}${clean}`)) ?? []) as unknown[];
-    const seen = new Set<string>();
     for (const error of errors) {
       const e = error as { filepath?: { absolute?: string }; nodeOrToken?: { filepath?: { absolute?: string } } };
       const file = relativeTo(e.filepath?.absolute ?? e.nodeOrToken?.filepath?.absolute, clean);

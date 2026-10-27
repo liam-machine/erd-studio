@@ -100,15 +100,25 @@ use { table _x } from '../tables/_x.dbml'
     expect(reading.warnings).toEqual([]);
   });
 
-  it('a member is its path\'s stem: semantic-dir-relative, wrong-folder and wrong-case paths warn usePathMismatch', () => {
+  it('a member is its path\'s stem: semantic-dir-relative and wrong-folder paths, and a specifier naming another table, warn usePathMismatch', () => {
     const reading = parseSubjectAreaDbml(`use { table fct_order } from 'tables/gold/fct_order.dbml'
 use { table dim_date } from './dim_date.dbml'
-use { table dim_customer } from '../tables/gold/Dim_Customer.dbml'
+use { table dim_account } from '../tables/gold/dim_customer.dbml'
 use { table ok } from '../tables/gold/ok.dbml'
 `, PATH, null);
-    expect(reading.members).toEqual(['fct_order', 'dim_date', 'Dim_Customer', 'ok']);
+    expect(reading.members).toEqual(['fct_order', 'dim_date', 'dim_customer', 'ok']);
     expect(reading.warnings.filter((w) => w.includes('usePathMismatch')).map((w) => w.slice(0, 7))).toEqual(['Line 1:', 'Line 2:', 'Line 3:']);
-    expect(reading.uses!.map((u) => u.resolved)).toEqual(['gold/tables/gold/fct_order.dbml', 'gold/dim_date.dbml', 'tables/gold/Dim_Customer.dbml', 'tables/gold/ok.dbml']);
+    expect(reading.uses!.map((u) => u.resolved)).toEqual(['gold/tables/gold/fct_order.dbml', 'gold/dim_date.dbml', 'tables/gold/dim_customer.dbml', 'tables/gold/ok.dbml']);
+  });
+
+  it('a specifier that spells the stem in another case is no mismatch (D2: the file declares Dim_Date); the stem is the member', () => {
+    // A path whose case differs from the file on disk needs a directory
+    // listing, so core cannot see it; the host and doctor report it (§3.4).
+    const reading = parseSubjectAreaDbml(`use { table Dim_Date } from '../tables/dim_date.dbml'
+use { table dim_customer } from '../tables/gold/Dim_Customer.dbml'
+`, PATH, null);
+    expect(reading.members).toEqual(['dim_date', 'Dim_Customer']);
+    expect(reading.warnings).toEqual([]);
   });
 
   it('ignores a use line whose stem is not a safe table name, with a warning', () => {
@@ -175,6 +185,35 @@ Note N {
     expect(reading.obj.description).toBe('first');
     expect((reading.obj.viewConfig as { annotations: Array<{ text: string }> }).annotations.map((a) => a.text)).toEqual(['one']);
     expect(reading.warnings).toHaveLength(2);
+  });
+
+  it.each(STORAGE_PARSERS)('a Metadata block (D25) is blanked, warned about and kept; the diagram still reads (%s)', (_label, parser) => {
+    // Valid DBML when other tools compile the project (its target is the
+    // imported table), but a [4000] once the use lines are blanked.
+    const text = `Project d {
+  Note: 'with metadata'
+  erd_schema_version: '7'
+}
+use { table fct } from '../tables/fct.dbml'
+Metadata Table fct {
+  note: 'set in the diagram'
+}
+Metadata Column fct.id {
+  note: 'the key'
+}
+Note n {
+  'kept'
+}
+`;
+    const reading = parseSubjectAreaDbml(text, PATH, null, parser);
+    expect(reading.members).toEqual(['fct']);
+    expect(reading.writable).toBe(true);
+    expect(reading.obj.description).toBe('with metadata');
+    expect((reading.obj.viewConfig as { annotations: Array<{ text: string }> }).annotations.map((a) => a.text)).toEqual(['kept']);
+    expect(reading.warnings).toEqual([
+      'Line 6: a Metadata block is declared in the diagram file; ERD Studio reads table properties only from the table file, and keeps it as written',
+      'Line 9: a Metadata block is declared in the diagram file; ERD Studio reads table properties only from the table file, and keeps it as written',
+    ]);
   });
 
   it('Tables declared and no table use lines: holdsOwnTables, the import-banner condition', () => {
