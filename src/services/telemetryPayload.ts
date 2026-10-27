@@ -202,6 +202,12 @@ export const FEATURES = [
   'importDbmlLayout',
   'importDbmlCancelled',
   'importDbmlInvalid',
+  // Logical-only mode (a folder without dbt_project.yml): activation resolved
+  // such a root (once a day, featureOnce); Open Example Diagram wrote the
+  // example; New Diagram created a diagram in such a project.
+  'logicalOnlyProject',
+  'exampleDiagram',
+  'blankDiagram',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

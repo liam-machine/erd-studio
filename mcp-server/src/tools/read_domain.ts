@@ -16,7 +16,7 @@ export const read_domain = {
     inputSchema: {
       project_path: z
         .string()
-        .describe('Absolute path to the dbt project root.'),
+        .describe('Absolute path to the dbt project root, or a folder holding .erd-studio/ with no dbt project.'),
       layer: z
         .string()
         .describe('Layer name (e.g. "silver", "gold").'),

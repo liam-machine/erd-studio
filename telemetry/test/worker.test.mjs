@@ -421,6 +421,13 @@ describe('validation — acceptance and normalisation', () => {
     assert.equal(params[17], '{"drawFromDbt":1,"addFromDbt":3,"emptyCanvas":2}');
   });
 
+  it('keeps the logical-only feature keys', async () => {
+    const params = await storedParams(
+      heartbeat({ features: { logicalOnlyProject: 1, exampleDiagram: 2, blankDiagram: 3 } }),
+    );
+    assert.equal(params[17], '{"logicalOnlyProject":1,"exampleDiagram":2,"blankDiagram":3}');
+  });
+
   it('treats omitted features and errors as empty', async () => {
     const body = heartbeat();
     delete body.features;

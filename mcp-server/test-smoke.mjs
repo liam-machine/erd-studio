@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_PATH = path.resolve(__dirname, '../test/fixtures/dbt-project');
+// A logical-only project: .erd-studio/ and no dbt_project.yml.
+const LOGICAL_PATH = path.resolve(__dirname, '../test/fixtures/logical-only');
 const SERVER = path.resolve(__dirname, 'dist/index.js');
 
 // Build a temporary "uninitialized" project — has dbt_project.yml but no .erd-studio/
@@ -160,6 +162,33 @@ async function main() {
   } else {
     fail('uninitialized fallback missing tip');
     console.log(uninitText.slice(0, 300));
+  }
+
+  // 10. A logical-only folder (no dbt_project.yml) opens; the manifest lists nothing
+  console.log('\n--- logical-only project ---');
+  const lom = await rpc('tools/call', {
+    name: 'list_models',
+    arguments: { project_path: LOGICAL_PATH },
+  });
+  const lomText = lom.result?.content?.[0]?.text || '';
+  if (!lom.result?.isError && lomText.includes('customer')) {
+    console.log('✅ list_models reads a logical-only project');
+  } else {
+    fail('list_models on a logical-only project');
+    console.log(lomText.slice(0, 300));
+  }
+  const lomm = await rpc('tools/call', {
+    name: 'list_manifest_models',
+    arguments: { project_path: LOGICAL_PATH },
+  });
+  const lommText = lomm.result?.content?.[0]?.text || '';
+  let lommJson = null;
+  try { lommJson = JSON.parse(lommText); } catch { /* reported below */ }
+  if (lommJson && lommJson.total === 0 && typeof lommJson.tip === 'string') {
+    console.log('✅ list_manifest_models on a logical-only project lists nothing, with a tip');
+  } else {
+    fail('list_manifest_models on a logical-only project');
+    console.log(lommText.slice(0, 300));
   }
 
   // Cleanup

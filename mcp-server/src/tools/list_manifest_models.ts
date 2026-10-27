@@ -13,7 +13,7 @@ export const list_manifest_models = {
     inputSchema: {
       project_path: z
         .string()
-        .describe('Absolute path to the dbt project root.'),
+        .describe('Absolute path to the dbt project root, or a folder holding .erd-studio/ with no dbt project.'),
       name_contains: z
         .string()
         .optional()
@@ -31,7 +31,7 @@ export const list_manifest_models = {
     project_path: string;
     name_contains?: string;
   }) {
-    const { manifestService, projectPath } = buildServices(project_path);
+    const { manifestService, projectPath, hasDbt } = buildServices(project_path);
     const manifest = await manifestService.loadManifest(projectPath);
 
     const filter = name_contains?.toLowerCase();
@@ -48,6 +48,10 @@ export const list_manifest_models = {
             {
               count: matched.length,
               total: allModels.length,
+              ...(hasDbt ? {} : {
+                tip: 'This folder is not a dbt project (no dbt_project.yml), so there is no manifest to list. ' +
+                  'The design is in list_models / read_domain.',
+              }),
               models: matched.map(([name, info]) => ({
                 name,
                 schema: info.schema ?? null,

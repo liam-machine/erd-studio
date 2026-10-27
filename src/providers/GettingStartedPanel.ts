@@ -9,9 +9,10 @@
  * bundle. Project-specific behaviour is injected through `GettingStartedDeps`.
  * The page has three states (`GettingStartedPageMode`): no folder open
  * (`workspaceRoot: null`: "Open the folder your data model lives in"), a
- * folder without dbt (`logicalOnly`: New diagram, Import DBML, the AI cards
- * and "Using dbt? Open its folder to compare"), and a dbt project (Draw from
- * dbt and the guided setup). The video autoplays only in the dbt state.
+ * folder without dbt (`logicalOnly`: New diagram, Open Example Diagram,
+ * Import DBML, the AI cards with the guided setup's no-dbt wording, and
+ * "Using dbt? Open its folder to compare"), and a dbt project (Draw from dbt
+ * and the guided setup). The video autoplays only in the dbt state.
  *
  * Also home to the host-side pieces the panel and `erdStudio.setupAiHelper`
  * share: AI assistant detection (installed extensions, a PATH scan and the
@@ -69,6 +70,8 @@ export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
 export const CREATE_DOMAIN_COMMAND = 'erdStudio.createDomain';
 /** The logical-only page's "Have a DBML file?" button. */
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
+/** The logical-only page's "New to data modelling?" link: the built-in example. */
+export const OPEN_EXAMPLE_DIAGRAM_COMMAND = 'erdStudio.openExampleDiagram';
 export const GETTING_STARTED_TITLE = 'Welcome to ERD Studio';
 
 /** Shipped media, relative to the extension root (spec addendum V4/V5). */
@@ -408,7 +411,7 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
     const folder = path.basename(opts.dbtRoot);
     if (opts.clipboardText === SETUP_PROMPT) {
       void vscode.window.showInformationMessage(
-        `${lead}Skill not listed? Claude Code must run in your dbt project folder, ${folder}; restart it if it was already open.`,
+        `${lead}Skill not listed? Claude Code must run in your project folder, ${folder}; restart it if it was already open.`,
       );
       return;
     }
@@ -501,7 +504,7 @@ export interface SetupAiHelperDeps {
   launcherOptions: CliLauncherOptions;
   /** Detected assistants: which skill folders to install (`recommendedSkillTargets`) and whom the message names. */
   assistants: readonly AiAssistantId[];
-  /** The root has no dbt_project.yml: the success message must not send the user to the dbt-only guided setup. */
+  /** The root has no dbt_project.yml: the success message says the guided setup designs the model with the user. */
   logicalOnly?: boolean;
   /** The Replace / Keep mine modal; undefined when dismissed. */
   confirmReplace(unmanaged: string[], targets: SkillHarnessTarget[]): Promise<ReplaceChoice>;
@@ -842,6 +845,10 @@ export class GettingStartedPanel {
         break;
       case 'importDbml':
         await vscode.commands.executeCommand(IMPORT_DBML_COMMAND);
+        await this.postStatus();
+        break;
+      case 'openExample':
+        await vscode.commands.executeCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND);
         await this.postStatus();
         break;
       case 'openExternal':

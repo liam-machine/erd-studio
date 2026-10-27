@@ -101,6 +101,8 @@ export type GettingStartedToHost =
   | { type: 'createDomain' }
   /** Logical-only state: runs `erdStudio.importDbml` (pick a .dbml file, confirm, get a diagram). No payload. */
   | { type: 'importDbml' }
+  /** Logical-only state: runs `erdStudio.openExampleDiagram` (the built-in coffee-shop example, through Import DBML's confirm). No payload. */
+  | { type: 'openExample' }
   | { type: 'openExternal'; target: GettingStartedExternalTarget }
   /** Runs `erdStudio.trySampleProject` (confirm, then clone the fixed sample repo). No payload. */
   | { type: 'trySample' }
@@ -118,7 +120,7 @@ export type GettingStartedToHostType = GettingStartedToHost['type'];
 /** Every host-bound type, for the validator and the "every type is handled" test. */
 export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] = [
   'ready', 'refreshStatus', 'setupAiHelper', 'copyPrompt', 'openClaude', 'openCopilotChat', 'openDomain', 'drawFromDbt',
-  'createDomain', 'importDbml', 'openExternal', 'trySample', 'openFolder', 'videoError',
+  'createDomain', 'importDbml', 'openExample', 'openExternal', 'trySample', 'openFolder', 'videoError',
 ];
 
 /** How Claude Code was found. `cli` wins when both are present (it can take the prompt as an argument). */
@@ -228,6 +230,7 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
     case 'drawFromDbt':
     case 'createDomain':
     case 'importDbml':
+    case 'openExample':
     case 'trySample':
     case 'openFolder':
       return true;
@@ -254,6 +257,15 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
 // ---------------------------------------------------------------------------
 
 export const SETUP_PROMPT = '/erd-studio-setup';
+
+/**
+ * The guided-setup card's text on the logical-only page (a folder without
+ * dbt_project.yml): the setup's no-dbt route designs the model with you.
+ */
+export const LOGICAL_SETUP_TEXT =
+  'Your assistant asks what your business does and designs a first diagram with you — tables, keys, grain and ' +
+  'how they connect — or builds on a DBML import or the tables you already have, then checks the files, ' +
+  'explaining each step. No dbt needed.';
 
 /**
  * "Found 42 dbt models · medallion layout · manifest 3 days old" — each part
@@ -320,31 +332,21 @@ export function promptFor(
 
 /**
  * The message after a successful setup, naming the assistants it was installed for.
- * `logicalOnly` (a folder without dbt_project.yml): the guided setup needs a
- * dbt project today, so the message points at asking the assistant directly
- * instead of at `/erd-studio-setup` or the Welcome panel's (hidden) guide card.
+ * `logicalOnly` (a folder without dbt_project.yml): the guided setup has a
+ * no-dbt route, so the message still points at it, saying what it is for
+ * there (designing the model with the assistant) rather than reading dbt.
  */
 export function setupReadyMessage(assistants: readonly AiAssistantId[], opts: { logicalOnly?: boolean } = {}): string {
-  if (opts.logicalOnly) {
-    const ask = 'design or change your diagrams';
-    if (assistants.length === 0) {
-      return `AI helper ready for ${joinNames(AI_ASSISTANTS.map((a) => a.name))}. Install one, then ask it to ${ask}.`;
-    }
-    if (assistants.length === 1) {
-      return `AI helper ready for ${assistantInfo(assistants[0]).name}: ask it to ${ask} (restart it if it's already open).`;
-    }
-    return `AI helper ready for ${joinNames(assistantNames(assistants))}. Ask any of them to ${ask} ` +
-      "(restart your assistant if it's already open).";
-  }
+  const purpose = opts.logicalOnly ? ' to design your data model with you' : '';
   if (assistants.length === 0) {
     return `AI helper ready for ${joinNames(AI_ASSISTANTS.map((a) => a.name))}. ` +
-      'Install one, then start the guided setup (the Welcome panel shows what to type).';
+      `Install one, then start the guided setup${purpose} (the Welcome panel shows what to type).`;
   }
   if (assistants.length === 1) {
-    return `AI helper ready for ${assistantInfo(assistants[0]).name}: ${startLine(assistants[0])} there ` +
+    return `AI helper ready for ${assistantInfo(assistants[0]).name}: ${startLine(assistants[0])} there${purpose} ` +
       "(restart it if it's already open).";
   }
-  return `AI helper ready for ${joinNames(assistantNames(assistants))}. Start the guided setup in any of them ` +
+  return `AI helper ready for ${joinNames(assistantNames(assistants))}. Start the guided setup in any of them${purpose} ` +
     "(the Welcome panel shows what to type; restart your assistant if it's already open).";
 }
 
@@ -882,8 +884,8 @@ const SCRIPT = `
     // An assistant but no guide installed yet: hide the launch rows, or "Open
     // Claude Code" would start /erd-studio-setup in a project without the skill.
     setState('start', found === 'none' ? 'none' : s.helper === 'missing' ? 'notready' : 'some');
-    // The guided setup builds a design from dbt, so it waits for a dbt project.
-    var start = showStep('start', !logical);
+    // The guided setup has a dbt route and a no-dbt one: it shows in both.
+    var start = showStep('start', true);
     // A diagram first: "Open your diagrams" leads once there is one, else Draw from
     // dbt does (New diagram and Import DBML without dbt).
     var open = setState('open', s.domainCount > 0 ? 'some' : 'none');
@@ -1086,6 +1088,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
           <div class="gs-step__actions" data-when="more" hidden>
             <button class="gs-btn" type="button" data-action="createDomain">New diagram</button>
           </div>
+          <p class="gs-step__hint">New to data modelling? <button class="gs-link" type="button" data-action="openExample">Open Example Diagram</button>: a small coffee-shop star schema to explore and change.</p>
         </div>
       </section>
 
@@ -1143,7 +1146,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         <span class="gs-step__num">3</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Set up my AI helper</h3>
-          <p class="gs-step__text" data-when="missing ready update unmanaged" hidden><span ${only('unknown', 'nofolder', 'dbt')}>Adds the <code>/erd-studio-setup</code> guide and ERD Studio's file-format rules for </span><span ${only('logical')}>Adds ERD Studio's file-format rules for </span><strong class="gs-helper-for"></strong><span class="gs-helper-later" hidden> (so it's ready whichever you install)</span><span ${only('unknown', 'nofolder', 'dbt')}>, plus a small checking tool your assistant uses behind the scenes.</span><span ${only('logical')}>, so what your assistant writes opens on the canvas. It also adds the <code>/erd-studio-setup</code> guide and a small checking tool, which need a dbt project today.</span></p>
+          <p class="gs-step__text" data-when="missing ready update unmanaged" hidden><span ${only('unknown', 'nofolder', 'dbt')}>Adds the <code>/erd-studio-setup</code> guide and ERD Studio's file-format rules for </span><span ${only('logical')}>Adds ERD Studio's file-format rules for </span><strong class="gs-helper-for"></strong><span class="gs-helper-later" hidden> (so it's ready whichever you install)</span><span ${only('unknown', 'nofolder', 'dbt')}>, plus a small checking tool your assistant uses behind the scenes.</span><span ${only('logical')}>, so what your assistant writes opens on the canvas. It also adds the <code>/erd-studio-setup</code> guide and a small checking tool your assistant uses behind the scenes.</span></p>
           <div class="gs-step__actions" data-when="missing ready update unmanaged" hidden>
             <button class="gs-btn gs-btn--primary" type="button" data-action="setupAiHelper"><span class="gs-setup-label">Set up my AI helper</span></button>
           </div>
@@ -1154,17 +1157,17 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         </div>
       </section>
 
-      <section class="gs-step" data-step="start" data-state="loading"${hiddenUnless(mode !== 'logical')}>
+      <section class="gs-step" data-step="start" data-state="loading">
         <span class="gs-step__num">4</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Start the guided setup</h3>
-          <p class="gs-step__text" data-when="some none notready" hidden>Your assistant checks your dbt setup, fills in keys, grain and rationale, works out how your project is modelled and checks with you, then checks the result against dbt, explaining each step.</p>
+          <p class="gs-step__text" data-when="some none notready" hidden><span ${only('unknown', 'nofolder', 'dbt')}>Your assistant checks your dbt setup, fills in keys, grain and rationale, works out how your project is modelled and checks with you, then checks the result against dbt, explaining each step.</span><span ${only('logical')}>${escapeHtml(LOGICAL_SETUP_TEXT)}</span></p>
           <div class="gs-launch" data-when="some" hidden>
             ${launchRows}
           </div>
           <p class="gs-step__hint" data-when="none" hidden>Install an assistant (see Your AI assistant above) and press Re-check to see exactly what to type.</p>
           <p class="gs-step__hint" data-when="notready" hidden>First press <strong>Set up my AI helper</strong> above: it installs the guide your assistant runs.</p>
-          <p class="gs-step__hint" data-when="some" hidden>Start your assistant in your dbt project folder: <code class="gs-project-path"></code><span class="gs-nested-hint" hidden>. It's a subfolder here: start a terminal assistant in that folder (Claude Code's Copy includes the <code>cd</code>), or open that folder itself (File &rarr; Open Folder&hellip;) for a chat panel inside the editor.</span></p>
+          <p class="gs-step__hint" data-when="some" hidden>Start your assistant in your <span ${only('unknown', 'nofolder', 'dbt')}>dbt </span>project folder: <code class="gs-project-path"></code><span class="gs-nested-hint" hidden>. It's a subfolder here: start a terminal assistant in that folder (Claude Code's Copy includes the <code>cd</code>), or open that folder itself (File &rarr; Open Folder&hellip;) for a chat panel inside the editor.</span></p>
           <p class="gs-step__hint" data-when="some" hidden>Guide not showing up? Restart your assistant from <code class="gs-project-name"></code>.</p>
         </div>
       </section>

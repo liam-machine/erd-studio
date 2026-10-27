@@ -108,22 +108,26 @@ export function formatDiff(r: DiffResult, p: Paint): string {
 export function formatDoctor(r: DoctorResult, p: Paint): string {
   const ok = (b: boolean) => (b ? p.green('✓') : p.yellow('–'));
   const lines: string[] = [];
-  if (!r.project.found) {
-    lines.push(`${ok(false)} No dbt project found (looked for dbt_project.yml near ${r.projectRoot})`);
+  if (r.skippedChecks) {
+    lines.push(`${ok(true)} ERD Studio project at ${r.projectRoot}`);
+    lines.push(`${p.dim('–')} dbt, profiles.yml, manifest and catalog: skipped — not a dbt project`);
+  } else if (!r.project.found) {
+    lines.push(`${ok(false)} No dbt project or ${r.semanticDir}/ folder found (looked near ${r.projectRoot})`);
     return lines.join('\n') + '\n';
+  } else {
+    lines.push(`${ok(true)} dbt project ${r.project.name ?? '(unnamed)'} at ${r.projectRoot}`);
+    lines.push(r.dbt.found
+      ? `${ok(true)} dbt ${r.dbt.version ?? ''} (${r.dbt.flavour}) — ${r.dbt.source}`
+      : r.dbt.untrustedVenvDbt
+        ? `${ok(false)} dbt at ${r.dbt.untrustedVenvDbt} not run yet (confirm it, then pass --trust-venv)`
+        : `${ok(false)} dbt ${r.dbt.checked ? 'not found' : 'not checked (--no-dbt)'}`);
+    if (r.profiles.required) {
+      lines.push(`${ok(r.profiles.found)} profiles.yml ${r.profiles.path ?? 'not found'}`);
+    }
+    lines.push(`${ok(r.artifacts.manifest.status === 'ok')} manifest ${r.artifacts.manifest.status}`
+      + (r.artifacts.manifest.models !== null ? ` (${plural(r.artifacts.manifest.models, 'model')})` : ''));
+    lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
   }
-  lines.push(`${ok(true)} dbt project ${r.project.name ?? '(unnamed)'} at ${r.projectRoot}`);
-  lines.push(r.dbt.found
-    ? `${ok(true)} dbt ${r.dbt.version ?? ''} (${r.dbt.flavour}) — ${r.dbt.source}`
-    : r.dbt.untrustedVenvDbt
-      ? `${ok(false)} dbt at ${r.dbt.untrustedVenvDbt} not run yet (confirm it, then pass --trust-venv)`
-      : `${ok(false)} dbt ${r.dbt.checked ? 'not found' : 'not checked (--no-dbt)'}`);
-  if (r.profiles.required) {
-    lines.push(`${ok(r.profiles.found)} profiles.yml ${r.profiles.path ?? 'not found'}`);
-  }
-  lines.push(`${ok(r.artifacts.manifest.status === 'ok')} manifest ${r.artifacts.manifest.status}`
-    + (r.artifacts.manifest.models !== null ? ` (${plural(r.artifacts.manifest.models, 'model')})` : ''));
-  lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
   lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'subject area')}, ${plural(r.erd.logicalModels, 'table')}`
     + (r.erd.semanticDirExists ? ` — file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}` : ''));
   const migration = r.erd.namingMigration;
@@ -171,7 +175,18 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   return lines.join('\n') + '\n';
 }
 
+/** inventory in a logical-only folder: the designed tables, by name. */
+function formatLogicalInventory(r: InventoryResult, p: Paint): string {
+  const lines = [`Not a dbt project: ${plural(r.logicalTables.length, 'table')} in ${plural(r.domains.length, 'subject area')} (your ERD Studio files)`];
+  for (const t of r.logicalTables) {
+    const where = t.domains.length > 0 ? p.dim(` — in ${t.domains.join(', ')}`) : p.dim(' — in no subject area');
+    lines.push(`    ${t.name}  ${t.unreadable ? p.red('does not parse') : plural(t.columnCount, 'column')}${where}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
 export function formatInventory(r: InventoryResult, p: Paint): string {
+  if (r.dbtProject === false) { return formatLogicalInventory(r, p); }
   const lines = [`${plural(r.models.length, 'model')}, ${plural(r.relationships.length, 'relationship')} (manifest ${r.inputs.manifest}, catalog ${r.inputs.catalog})`];
   let folder: string | null = null;
   for (const m of r.models) {

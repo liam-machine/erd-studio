@@ -610,12 +610,19 @@ export function listAllSubjectAreas(ctx: CliContext): SubjectAreaSummary[] {
   return summaries;
 }
 
+/** `diff` in a logical-only folder (no dbt_project.yml): exit 3, `not-dbt-project`. */
+export const DIFF_NEEDS_DBT_MESSAGE =
+  'diff compares your design with what dbt built, so it needs a dbt project — this folder has no dbt_project.yml. '
+  + 'Run it from the folder that holds dbt_project.yml, or pass --project <dir>. doctor, inventory and export work without one.';
+
 /**
- * Run the diff. `--domain` files that cannot be compared are a `CliEnvError`
+ * Run the diff. A logical-only project has nothing to compare with: a
+ * `CliEnvError` (`not-dbt-project`, exit 3). `--domain` files that cannot be compared are a `CliEnvError`
  * (exit 3); under `--all` each failure is recorded on its own domain entry so
  * one broken file does not hide the rest.
  */
 export function runDiff(ctx: CliContext, opts: DiffOptions): { result: DiffResult; exitCode: 0 | 1 } {
+  if (!ctx.hasDbt) { throw new CliEnvError('not-dbt-project', DIFF_NEEDS_DBT_MESSAGE); }
   const domains: SubjectAreaDiff[] = [];
 
   if (opts.all) {

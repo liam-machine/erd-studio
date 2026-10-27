@@ -35,7 +35,7 @@ ERD Studio's YAML and JSON stay the only storage. DBML is a way out (the rich ex
 - **Import always creates a new subject area.** Library tables are reused, never overwritten, in the library's spelling. `isForeignKey` comes only from the `foreign_key` property, never from Refs. What DBML has and ERD Studio does not goes under `meta.dbml` (documented in `docs/semantic-domain-json-reference.md`); the rest is dropped and listed in the report.
 - **ERD Studio's own export is read more trustingly** (its header, `ERD_STUDIO_DBML_HEADER_PREFIX`): any role text is kept, a one-to-one Ref's second end is the FK (the export writes it key end first, as DBML reads it, even when the keys say otherwise), and a sticky note linked to a table not in the diagram keeps the link. A foreign file gets only known roles, a key heuristic for one-to-one direction, and a dropped dangling link.
 - **Import accepts each property with an `erd_` prefix** (`erd_grain`) as well as plain; export writes plain names.
-- **Telemetry**: `exportDbmlRich`, `exportAll`, `importDbml`, `importDbmlLayout`, `importDbmlCancelled`, `importDbmlInvalid` (the user's file is not valid DBML) and the error `importDbmlFailed`. Nothing else, and never a name or path.
+- **Telemetry**: `exportDbmlRich`, `exportAll`, `importDbml`, `importDbmlLayout`, `importDbmlCancelled`, `importDbmlInvalid` (the user's file is not valid DBML) and the error `importDbmlFailed`. Nothing else, and never a name or path. Open Example Diagram runs the same flow with `source: 'example'`: a finished run counts `exampleDiagram` instead of `importDbml` (retries included, since `source` travels in `deps`) and a cancel counts nothing; only `importDbmlFailed` is shared.
 
 ## Tests
 

@@ -32,7 +32,7 @@ export interface AiAssistantInfo {
   cliNames: readonly string[];
 }
 
-export const GEMINI_SETUP_SENTENCE = 'Set up ERD Studio for this dbt project';
+export const GEMINI_SETUP_SENTENCE = 'Set up ERD Studio for this project';
 
 /** Display order everywhere: Claude Code first (recommended), then the others. */
 export const AI_ASSISTANTS: readonly AiAssistantInfo[] = [
@@ -40,7 +40,7 @@ export const AI_ASSISTANTS: readonly AiAssistantInfo[] = [
     id: 'claude',
     name: 'Claude Code',
     prompt: '/erd-studio-setup',
-    where: 'Type it in Claude Code, started in your dbt project folder.',
+    where: 'Type it in Claude Code, started in your project folder.',
     extensionIds: ['anthropic.claude-code'],
     cliNames: ['claude'],
   },

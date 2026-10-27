@@ -1,18 +1,18 @@
 ---
 name: erd-studio-setup
 description: >-
-  Friendly, step-by-step setup for ERD Studio in an existing dbt project, for people who may be
-  new to dbt or data modelling. By default a quick start: checks the dbt CLI, draws one business
-  area as an ERD Studio logical model that mirrors dbt, checks it with the ERD Studio diff until
-  logical matches physical and opens the canvas within minutes - then offers to detect and apply
-  the team's modelling style (medallion or staging/marts layers; Kimball, Data Vault, One Big
-  Table or Activity Schema tables). Enriches diagrams that already exist (such as a Draw from dbt
-  draft) with keys, grain, roles, rationale and dbt's metadata instead of rebuilding them. Full
-  guided setup on request.
+  Friendly, step-by-step ERD Studio setup for people new to dbt or data modelling. In a dbt
+  project, by default a quick start: checks the dbt CLI, draws one business area as an ERD Studio
+  logical model that mirrors dbt, checks it with the ERD Studio diff and opens the canvas within
+  minutes - then offers to detect and apply the team's modelling style (medallion or
+  staging/marts layers; Kimball, Data Vault and more). Enriches diagrams that already exist (such
+  as a Draw from dbt draft) with keys, grain, roles, rationale and metadata instead of rebuilding
+  them; full setup on request. Without dbt, designs a first diagram from a description of the
+  business, or enriches a DBML import.
   Use when the user runs /erd-studio-setup or $erd-studio-setup, is new to ERD Studio, or asks to
-  "set up ERD Studio", "create a logical model from my dbt project", "model my dbt project the
-  Kimball way" or "sync my logical model with dbt" - even if they only want a diagram of their
-  dbt models or do not know where to start.
+  "set up ERD Studio", "design a data model", "create a logical model from my dbt project" or
+  "model my dbt project the Kimball way" - even if they only want a diagram of their dbt models
+  or do not know where to start.
 argument-hint: "[business area, e.g. orders]"
 allowed-tools:
   - Read
@@ -36,9 +36,9 @@ allowed-tools:
 
 # ERD Studio guided setup
 
-You are walking someone through setting up ERD Studio on a dbt project they already have. Many
-are new to dbt, data modelling or AI coding assistants. The goal is that they finish with a
-working diagram **and** understand what just happened, so they can keep going on their own.
+You are walking someone through setting up ERD Studio on their dbt project (or, in a folder with
+no dbt, the **Without dbt** route). Many are new to dbt, data modelling or AI coding assistants.
+The goal: they finish with a working diagram **and** understand it, so they can keep going alone.
 
 The first result, within minutes, is one ERD Studio *domain* that mirrors the dbt project, has
 been checked against it with the ERD Studio diff, and is open on the canvas. The design work —
@@ -98,7 +98,7 @@ user to type a command that belongs to a different one.
 | Claude Code | `/erd-studio-setup` | Invoke the `/erd-studio` skill |
 | GitHub Copilot (VS Code agent mode, Copilot CLI) | `/erd-studio-setup` | Read the schema skill file |
 | OpenAI Codex | `$erd-studio-setup` (or pick it from `/skills`) | Read the schema skill file |
-| Gemini CLI | A sentence such as "Set up ERD Studio for this dbt project" — it has no per-skill command, and may ask to activate the skill (say yes) | Activate the `erd-studio` skill (the user says yes to the prompt) |
+| Gemini CLI | A sentence such as "Set up ERD Studio for this project" — it has no per-skill command, and may ask to activate the skill (say yes) | Activate the `erd-studio` skill (the user says yes to the prompt) |
 | Cursor | `/erd-studio-setup` | Read the schema skill file |
 
 - **The schema skill file** is `SKILL.md` in `.claude/skills/erd-studio/` or
@@ -167,7 +167,9 @@ If no route to the helper works, carry on in **canvas-fallback mode**
 
 ## Stage 0 — Say hello and pick the route
 
-Greet the user and explain, in about five short lines:
+**First, look for dbt:** Glob `dbt_project.yml` here and up to three folders down (skip `dbt_packages/`),
+and in each parent up to the nearest folder holding `.erd-studio/`. None → the **Without dbt** route: follow
+`references/without-dbt.md` from its start instead of Stages 0–6, never suggesting dbt. Otherwise greet the user in about five lines:
 
 - ERD Studio shows data two ways. **Physical** is what really exists in the dbt project — it is
   read-only and ERD Studio works it out for itself. **Logical** is the design: the tables, their
@@ -247,14 +249,12 @@ Then work through doctor's `nextSteps`, which are already in the right order:
 
 Run exactly the command in doctor's `dbt.commands` (it has the right path, e.g. `.venv/bin/dbt
 parse`), never an activate-then-run pair: each command runs in a fresh shell, so it would not stick.
-
 Only ever run `dbt --version`, `debug`, `deps`, `parse`, `docs generate` and `compile
 --write-catalog` here — never `dbt run`, `build`, `seed` or `snapshot`, which change warehouse data.
 
-If a command fails, quote the one key error line, look it up in
-`references/dbt-setup.md` → "Common errors", explain it, and offer (a) the fix or (b) carrying on
-without that file. Afterwards re-run doctor — introduce it like any other command ("Checking
-again now that the manifest is built.") — and report what you have as short ✓ / – lines:
+If a command fails, quote its key error line, look it up in `references/dbt-setup.md` → "Common
+errors", explain it, and offer the fix or carrying on without that file. Then re-run doctor, said
+like any other command ("Checking again now the manifest is built."), and report as ✓ / – lines:
 
 ```
 ✓ dbt Core 1.9 (in .venv)
@@ -293,7 +293,6 @@ works best: a small diagram is easy to check.
 
 Explain one rule now, as it surprises people: **lines are only drawn between tables in the same
 domain.** Keep a fact and its dimensions together; a shared one (`dim_customer`) can be in each.
-
 Mention in one line any `skipped` models in the chosen area (a name ERD Studio does not accept, or
 disabled in dbt): they cannot be used.
 
@@ -489,6 +488,7 @@ Read these when the stage calls for them — not all up front:
 
 | File | Read it when |
 |---|---|
+| `references/without-dbt.md` | The project has no `dbt_project.yml`: the whole Without dbt route |
 | `references/dbt-explained.md` | You are about to use a term the user may not know |
 | `references/dbt-setup.md` | Installing dbt, writing `profiles.yml`, a dbt command failed |
 | `references/modelling-approaches.md` | Stage 3b (the modelling style), Stage 4 (applying it), the Stage 5 review |

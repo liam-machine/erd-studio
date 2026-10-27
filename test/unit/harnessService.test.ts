@@ -778,8 +778,23 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 33 (DBML import and export)', () => {
-      expect(HARNESS_VERSION).toBe('33');
+    it('is 34 (the setup skill\'s Without dbt route; logical-only projects in the schema guide)', () => {
+      expect(HARNESS_VERSION).toBe('34');
+    });
+
+    it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {
+      for (const target of ['claude', 'agents', 'copilot', 'gemini', 'codex'] as const) {
+        const content = service.generateContent(target);
+        expect(content, target).toContain('**A folder without `dbt_project.yml` is logical-only.**');
+        expect(content, target).toContain('Never tell the user they need dbt, and never run dbt there');
+        // The CLI's own spelling of the refusal and of doctor's flag.
+        expect(content, target).toContain('`erd-studio diff` exits with `not-dbt-project`');
+        expect(content, target).toContain('reporting `dbtProject: false`');
+        expect(content, target).toContain('the project is new, so use v6');
+      }
+      const cli = (name: string): string => fs.readFileSync(path.resolve(__dirname, '../../src/cli', name), 'utf-8');
+      expect(cli('diff.ts')).toContain("'not-dbt-project'");
+      expect(cli('context.ts')).toContain('dbtProject: boolean');
     });
 
     it('points assistants at Import DBML…, the dbdiagram.io export and the CLI formats, and keeps meta.dbml', () => {

@@ -54,7 +54,7 @@ describe('harnessAssets', () => {
     expect(listed).toEqual(onDisk);
   });
 
-  it('lists SKILL.md and the six references, each backed by a real source file', () => {
+  it('lists SKILL.md and the eight references, each backed by a real source file', () => {
     expect(CLAUDE_SETUP_SKILL_FILES.map((a) => a.relativePath)).toEqual([
       'SKILL.md',
       'references/dbt-explained.md',
@@ -64,6 +64,7 @@ describe('harnessAssets', () => {
       'references/building-the-model.md',
       'references/verify-and-fix.md',
       'references/troubleshooting.md',
+      'references/without-dbt.md',
     ]);
     for (const asset of CLAUDE_SETUP_SKILL_FILES) {
       const onDisk = fs.readFileSync(path.join(SOURCE_DIR, asset.relativePath), 'utf-8');
@@ -451,5 +452,105 @@ describe('setup skill: merge conflicts are the user\'s to settle (#150)', () => 
   it('pre-approves no git command', () => {
     const tools = frontmatter(skill.content)['allowed-tools'] as string[];
     expect(tools.filter((t) => /^Bash\(git\b/.test(t))).toEqual([]);
+  });
+});
+
+describe('setup skill: the Without dbt route', () => {
+  const body = (): string => splitFrontmatter(skill.content)!.body;
+  const ref = (name: string): string =>
+    CLAUDE_SETUP_SKILL_FILES.find((a) => a.relativePath === `references/${name}`)!.content;
+  const route = (): string => ref('without-dbt.md');
+  /** Line breaks folded, so a phrase reads the same wherever the source wraps it. */
+  const flat = (text: string): string => text.replace(/\s+/g, ' ');
+  const cli = (name: string): string => fs.readFileSync(path.resolve(__dirname, '../../src/cli', name), 'utf-8');
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as {
+    contributes: { commands: { command: string; title: string; category?: string }[] };
+  };
+  const title = (command: string): string | undefined => pkg.contributes.commands.find((c) => c.command === command)?.title;
+
+  it('checks for dbt_project.yml before the dbt greeting and hands the whole walkthrough to the reference', () => {
+    const check = body().indexOf('**First, look for dbt:** Glob `dbt_project.yml`');
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(body().indexOf('- ERD Studio shows data two ways.'));
+    expect(flat(body())).toContain(
+      'None → the **Without dbt** route: follow `references/without-dbt.md` from its start instead of Stages 0–6, never suggesting dbt.',
+    );
+    expect(body()).toContain('| `references/without-dbt.md` | The project has no `dbt_project.yml`: the whole Without dbt route |');
+    expect(frontmatter(skill.content).description as string).toContain('Without dbt, designs a first diagram');
+  });
+
+  it('points only at reference files the skill ships', () => {
+    const shipped = new Set(CLAUDE_SETUP_SKILL_FILES.map((a) => a.relativePath));
+    for (const text of [body(), route()]) {
+      for (const [mention] of text.matchAll(/references\/[a-z-]+\.md/g)) {
+        expect(shipped.has(mention), mention).toBe(true);
+      }
+    }
+  });
+
+  it('runs only the helper commands that work without dbt: never diff, never dbt', () => {
+    const subcommands = [...route().matchAll(/erd-studio(?:\.cmd)? ([a-z]+)/g)].map((m) => m[1]);
+    expect(subcommands.length).toBeGreaterThan(0);
+    for (const sub of subcommands) {
+      expect(['doctor', 'export'], sub).toContain(sub);
+    }
+    expect(route()).not.toMatch(/\bdbt (parse|deps|debug|docs|compile|run|build|seed|snapshot|--version)\b/);
+    expect(route()).toContain('**Never run `diff`.**');
+    expect(route()).toContain('never run a `dbt` command');
+    // The one mention of installing dbt is the rule against suggesting it.
+    expect(route().match(/install(?:ing)? dbt/gi)).toEqual(['install dbt']);
+    expect(route()).toContain('**Never tell the user to install dbt**');
+  });
+
+  it("reads doctor's logical-only signals by the CLI's own spelling", () => {
+    expect(cli('context.ts')).toContain('dbtProject: boolean');
+    expect(cli('doctor.ts')).toContain("skippedChecks?: { reason: 'not-dbt-project'");
+    expect(flat(route())).toContain('reports `dbtProject: false` and `skippedChecks` with reason `not-dbt-project`');
+    // project.found is false in a logical-only folder: the route must not send the user looking for dbt.
+    expect(flat(route())).toContain('do not ask which folder holds a dbt project');
+    // Doctor runs in step 1 even in an empty folder (it exits 0 there), so a missing or stale
+    // helper shows up before the design work, not after every file is written.
+    expect(flat(route())).toContain('every time, even in an empty folder');
+    expect(flat(route())).not.toContain('skip doctor until step 5');
+    expect(cli('doctor.ts')).toContain('semanticDirExists');
+    expect(flat(route())).toContain('**`erd.semanticDirExists: false`** → there is nothing to check yet');
+    expect(cli('doctor.ts')).toContain("id: 'turn-round-relationships'");
+    for (const id of ['`fix-model-yaml`', '`resolve-merge-conflicts`', '`turn-round-relationships`', '`erd.naming`']) {
+      expect(route(), id).toContain(id);
+    }
+  });
+
+  it('offers a description, a DBML file or the existing tables, and designs with keys, grain and relationships', () => {
+    const text = flat(route());
+    for (const start of ['**Enrich what is there**', '**From a DBML file**', '**From a description**']) {
+      expect(text, start).toContain(start);
+    }
+    for (const field of ['isPrimaryKey: true', 'isNaturalKey: true', 'isForeignKey: true', '`many-to-one`', '`grain`', 'rationale.purpose']) {
+      expect(text, field).toContain(field);
+    }
+    // A new design states the intended design, so the dbt route's as-built rule is lifted explicitly.
+    expect(text).toContain("the dbt route's \"describe what dbt does today\" rule and its Target-design backlog do not apply");
+    expect(text).toContain('A table that already has a file is **referenced by name, never rewritten**');
+    expect(text).toContain('Never rename a table or column, change a type, or remove anything without asking');
+  });
+
+  it('names the commands as they are contributed', () => {
+    expect(title('erdStudio.importDbml')).toBe('Import DBML…');
+    expect(route()).toContain('**ERD Studio: Import DBML…**');
+    expect(title('erdStudio.exportDiagram')).toBe('Export Diagram…');
+    expect(route()).toContain('**ERD Studio: Export Diagram…**');
+    expect(title('erdStudio.openExampleDiagram')).toBe('Open Example Diagram');
+    expect(route()).toContain('**ERD Studio: Open Example Diagram**');
+  });
+
+  it("follows the product's wording rules", () => {
+    const text = flat(route());
+    expect(text).toContain('DBML is an open format');
+    expect(text).not.toMatch(/open standard|open[- ]source|lossless|round[- ]trip|sync(?:s|ing)? with dbdiagram/i);
+    expect(text).not.toMatch(/\bharness\b/i);
+    expect(text).toContain('the commands call a diagram a *subject area*');
+    // No Physical tab, Diff or sync plan in a folder without dbt — only the one "Using dbt?" line.
+    expect(text).toContain('"Using dbt? Open its folder to compare your design with what dbt built."');
+    expect(text).not.toContain('⊕ Sync');
   });
 });

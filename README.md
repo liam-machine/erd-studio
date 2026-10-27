@@ -40,6 +40,7 @@
 2. Make your first diagram:
    - **From scratch:** click **New Diagram** in the ERD Studio sidebar, choose a layer and a name, then use **+ Add → New Design Table** and **+ Add → New Relationship** on the canvas. (The commands call a diagram a *subject area*, so in the Command Palette it is **ERD Studio: New Subject Area**.)
    - **From DBML:** click **Import DBML** in the sidebar (or run **ERD Studio: Import DBML…**) and pick a `.dbml` file. You see what it will create before anything is written. A `.dbdiagram` layout file beside it keeps your tables in place.
+   - **From an example:** run **ERD Studio: Open Example Diagram** for a coffee-shop model.
 3. Commit the `.erd-studio/` folder. That's your data model.
 
 To export, click **⤓** on the canvas toolbar or run **ERD Studio: Export All Diagrams…** ([what each format carries](docs/leaving-erd-studio.md)).
@@ -74,7 +75,7 @@ Run **ERD Studio: Set Up My AI Helper** (also on the Welcome tab). It finds the 
 
 > Propose a star schema for orders in ERD Studio, with grain, keys and design rationale. Let me review the diagram before we write any SQL.
 
-Its changes are file edits you review like any other. The helper also adds a guided setup (`/erd-studio-setup`) that builds the design from dbt; it needs a dbt project today. See [AI assistants](docs/ai-assistants.md).
+Its changes are file edits you review like any other. The helper also adds a guided setup (`/erd-studio-setup`) that designs a first diagram with you, or builds one from dbt. See [AI assistants](docs/ai-assistants.md).
 
 ## Using dbt?
 

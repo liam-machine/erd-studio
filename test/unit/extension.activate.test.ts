@@ -280,6 +280,19 @@ describe('activate() with a dbt project', () => {
     openWorkspace(root);
   });
 
+  it('usage telemetry: a dbt project is not a logical-only one, and New Diagram there is no blank start', async () => {
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    const feature = vi.spyOn(telemetry, 'feature');
+    await activate(context);
+    expect(featureOnce).not.toHaveBeenCalledWith('logicalOnlyProject');
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value?: string }>) =>
+      items.find((i) => i.value === 'gold') ?? items[0]) as never);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('telemetry-check').mockResolvedValueOnce('');
+    await vscode.commands.executeCommand('erdStudio.createDomain');
+    expect(feature).toHaveBeenCalledWith('domainCreated');
+    expect(feature).not.toHaveBeenCalledWith('blankDiagram');
+  });
+
   it('selectors.yml regeneration finds its unsaved tab when VS Code spells the path in another case', async () => {
     const { SelectorsService } = await import('../../src/services/selectorsService');
     let service: { hooks?: { isFileDirtyInEditor?: (filePath: string) => boolean } } | undefined;
@@ -637,14 +650,61 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(listTree(ws)).toEqual([]);
   });
 
-  it('Set Up My AI Helper: the success toast sends nobody to the dbt-only guided setup', async () => {
+  it('Set Up My AI Helper works in a plain folder: installs the guide and offers to start its no-dbt route', async () => {
     await activate(context);
     await vscode.commands.executeCommand('erdStudio.setupAiHelper');
     const calls = info.mock.calls.filter((c) => String(c[0]).startsWith('AI helper ready'));
     expect(calls).toHaveLength(1);
-    // The message alone: Open Claude Code / Copy prompt would start /erd-studio-setup.
-    expect(calls[0]).toHaveLength(1);
-    expect(String(calls[0][0])).not.toMatch(/erd-studio-setup|Guide not showing|guided setup/);
+    // The guided setup has a no-dbt route now, so the toast points at it, with the Copy button.
+    expect(String(calls[0][0])).toContain('to design your data model with you');
+    expect(String(calls[0][0])).toContain('Guide not showing? Start your assistant from plain.');
+    expect(calls[0]).toContain('Copy prompt');
+    expect(fs.existsSync(path.join(ws, '.claude', 'skills', 'erd-studio-setup', 'SKILL.md'))).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('Open Example Diagram: the coffee-shop example through Import DBML\'s confirm, into a plain folder', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    await activate(context);
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
+    info.mockImplementation((async (_message: string, ...items: unknown[]) =>
+      (items.includes('Import') ? 'Import' : undefined)) as never);
+    const real = vscode.commands.executeCommand;
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) =>
+      real(command, ...args)) as never);
+
+    await vscode.commands.executeCommand('erdStudio.openExampleDiagram');
+
+    expect(input).toHaveBeenCalledTimes(1);
+    expect(pick).not.toHaveBeenCalled(); // the default layers have gold
+    const confirm = info.mock.calls.find((c) => c.includes('Import'))!;
+    expect(confirm[0]).toBe('Import 6 tables into a new diagram "coffee-shop" in the Gold layer.');
+    const domainPath = path.join(ws, '.erd-studio', 'gold', 'coffee-shop.json');
+    expect(fs.existsSync(domainPath)).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.erd-studio', 'layers.json'))).toBe(true);
+    expect(fs.existsSync(path.join(ws, 'coffee-shop.dbml'))).toBe(false); // nothing but the diagram's own files
+    const opened = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
+    expect((opened[0][1] as { fsPath: string }).fsPath).toBe(domainPath);
+    expect(feature).toHaveBeenCalledWith('exampleDiagram');
+  });
+
+  it('Open Example Diagram cancelled at the dry run writes nothing', async () => {
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
+    await vscode.commands.executeCommand('erdStudio.openExampleDiagram');
+    expect(listTree(ws)).toEqual([]);
+  });
+
+  it('usage telemetry: a non-dbt root once a day, and a New Diagram there counts as a blank start', async () => {
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    const feature = vi.spyOn(telemetry, 'feature');
+    await activate(context);
+    expect(featureOnce).toHaveBeenCalledWith('logicalOnlyProject');
+    pick.mockImplementation((async (items: Array<{ value: string }>) => items.find((i) => i.value === 'gold')) as never);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('orders').mockResolvedValueOnce('');
+    await vscode.commands.executeCommand('erdStudio.createDomain');
+    expect(feature).toHaveBeenCalledWith('domainCreated');
+    expect(feature).toHaveBeenCalledWith('blankDiagram');
   });
 
   it('the Welcome panel shows its logical-only page', async () => {
@@ -1331,10 +1391,12 @@ describe('Welcome panel: first run', () => {
       sample: '!erdStudio.hasDbtProject',
     });
     expect(step('openProject').completionEvents).toEqual(['onContext:erdStudio.hasProject']);
-    expect(step('newDiagram').completionEvents).toEqual(['onCommand:erdStudio.createDomain']);
+    expect(step('newDiagram').completionEvents).toEqual(['onCommand:erdStudio.createDomain', 'onCommand:erdStudio.openExampleDiagram']);
     expect(step('importDbml').completionEvents).toEqual(['onCommand:erdStudio.importDbml']);
     expect(step('sample').completionEvents).toEqual(['onCommand:erdStudio.trySampleProject']);
     expect(step('newDiagram').description).toContain('(command:erdStudio.createDomain)');
+    // The example is a second button in the same step, not a step of its own.
+    expect(step('newDiagram').description).toContain('[Open Example Diagram](command:erdStudio.openExampleDiagram)');
     expect(step('importDbml').description).toContain('(command:erdStudio.importDbml)');
     expect(step('draw').description).toContain('(command:erdStudio.drawFromDbt)');
     expect(step('sample').description).toContain('(command:erdStudio.trySampleProject)');

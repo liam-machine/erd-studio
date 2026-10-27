@@ -1,7 +1,13 @@
 /**
- * Shared bootstrap for the `erd-studio` CLI: find the dbt project, wire the
+ * Shared bootstrap for the `erd-studio` CLI: find the project, wire the
  * services the way `extension.ts` does, and load the three dbt inputs
  * (schema yml + source files, manifest, catalog) once.
+ *
+ * The project is a dbt project, or — logical-only, like the extension in a
+ * folder with no dbt project — a folder that holds the ERD Studio folder but
+ * no `dbt_project.yml`. There the dbt services are built disabled: they read
+ * nothing (not even a `models/` folder that happens to exist) and every dbt
+ * input is empty, so only the logical files are read.
  *
  * Everything here is read-only (spec D5) and free of `vscode` — this module
  * is bundled into `dist/cli.js`.
@@ -15,7 +21,7 @@ import { redactPaths } from '../types/feedback';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import { CatalogService } from '../services/catalogService';
-import { findDbtProjectDir } from '../services/dbtEnv';
+import { findDbtProjectCandidates, hasDbtProjectFile } from '../services/projectDiscovery';
 import { readDbtProjectConfig, resolveCatalogPath, resolveManifestPath, type DbtProjectConfig } from '../services/dbtProjectConfig';
 import { SubjectAreaService } from '../services/domainService';
 import { LayerService } from '../services/layerService';
@@ -23,6 +29,7 @@ import { TableLibraryService } from '../services/logicalModelService';
 import { checkManifestStalenessFs } from '../services/manifestStaleness';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
+import { DEFAULT_CLI_SEMANTIC_DIR } from './args';
 
 /** The version baked into dist/cli.js; package.json's when run from source (tests). */
 export const CLI_VERSION: string = typeof __ERD_CLI_VERSION__ === 'string' ? __ERD_CLI_VERSION__ : '0.0.0-dev';
@@ -30,10 +37,19 @@ export const CLI_VERSION: string = typeof __ERD_CLI_VERSION__ === 'string' ? __E
 /** Top-level fields of every JSON result. */
 export interface Envelope {
   cliVersion: string;
-  /** Absolute dbt project root (the folder holding dbt_project.yml). */
+  /**
+   * Absolute project root: the folder holding dbt_project.yml, or — when
+   * `dbtProject` is false — the folder holding the ERD Studio folder.
+   */
   projectRoot: string;
   /** ERD data dir, relative to `projectRoot`. */
   semanticDir: string;
+  /**
+   * True when `projectRoot` holds dbt_project.yml. False for a logical-only
+   * folder (its ERD Studio files are read; nothing dbt is read or run) and
+   * when doctor found no project at all.
+   */
+  dbtProject: boolean;
 }
 
 export type ArtifactStatus = 'ok' | 'missing' | 'stale' | 'unreadable';
@@ -69,6 +85,8 @@ export interface CliContext {
   envelope: Envelope;
   root: string;
   semanticDir: string;
+  /** `root` holds dbt_project.yml. False: logical-only, every dbt input below is empty. */
+  hasDbt: boolean;
   dbtConfig: DbtProjectConfig;
   layerService: LayerService;
   tableLibraryService: TableLibraryService;
@@ -80,37 +98,75 @@ export interface CliContext {
   catalogInfo: CatalogInputInfo;
 }
 
+function holdsSemanticDir(dir: string, semanticDir: string): boolean {
+  try {
+    return fs.statSync(path.join(dir, semanticDir)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
- * The dbt project root. An explicit `--project` must be the folder holding
- * `dbt_project.yml` — searching around a path the user named could land on
- * an unrelated project above it. Without one, the current directory, then
- * its ancestors, then up to three levels below it (`findDbtProjectDir`, the
- * extension's own search). Null when there is none.
+ * The project root. An explicit `--project` must be a folder that holds
+ * `dbt_project.yml` or — a logical-only project — the ERD Studio folder
+ * (`semanticDir`); searching around a path the user named could land
+ * on an unrelated project above it.
+ *
+ * Without one, the folder the extension would run on: walk up from the
+ * current directory to the nearest folder holding `dbt_project.yml` or the
+ * ERD Studio folder, whichever comes first, so a design folder nested in a
+ * dbt repo is its own (logical-only) root, as the extension opens it, and
+ * never the dbt project above it. A design folder that is the current
+ * directory still gives way to a dbt project up to three levels below it
+ * (any dbt project beats a plain folder, as in the extension's search).
+ * With no such folder at or above it — or only one above it — a dbt
+ * project up to three levels below the current directory comes next
+ * (`findDbtProjectCandidates`, the extension's own search), then that
+ * design folder above. Null when there is none.
  */
-export function resolveProjectRoot(project: string | undefined, cwd: string = process.cwd()): string | null {
+export function resolveProjectRoot(
+  project: string | undefined,
+  cwd: string = process.cwd(),
+  semanticDir: string = DEFAULT_CLI_SEMANTIC_DIR,
+): string | null {
   if (project) {
     const dir = path.resolve(cwd, project);
-    return fs.existsSync(path.join(dir, 'dbt_project.yml')) ? dir : null;
+    return hasDbtProjectFile(dir) || holdsSemanticDir(dir, semanticDir) ? dir : null;
   }
-  return findDbtProjectDir(cwd);
+  const origin = path.resolve(cwd);
+  let designRoot: string | null = null;
+  for (let dir = origin; ; dir = path.dirname(dir)) {
+    if (hasDbtProjectFile(dir)) { return dir; }
+    if (holdsSemanticDir(dir, semanticDir)) { designRoot = dir; break; }
+    if (path.dirname(dir) === dir) { break; }
+  }
+  // Below the current directory (it holds no dbt_project.yml, or the walk would have returned it).
+  const below = findDbtProjectCandidates([origin])[0];
+  return below ?? designRoot;
 }
 
 /** Like `resolveProjectRoot`, but a missing project is a `CliEnvError`. */
-export function requireProjectRoot(project: string | undefined, cwd: string = process.cwd()): string {
-  const root = resolveProjectRoot(project, cwd);
+export function requireProjectRoot(
+  project: string | undefined,
+  cwd: string = process.cwd(),
+  semanticDir: string = DEFAULT_CLI_SEMANTIC_DIR,
+): string {
+  const root = resolveProjectRoot(project, cwd, semanticDir);
   if (!root) {
     throw new CliEnvError(
       'no-project',
       project
-        ? `No dbt_project.yml found in ${redactPaths(relPath(cwd, path.resolve(cwd, project)))} (--project must be the folder that holds it).`
-        : 'No dbt_project.yml found in this folder, above it, or up to three folders below it. Run this from your dbt project folder, or pass --project <dir>.',
+        ? `No dbt_project.yml or ${semanticDir}/ folder found in ${redactPaths(relPath(cwd, path.resolve(cwd, project)))} `
+          + '(--project must be the folder that holds one).'
+        : `No dbt project or ${semanticDir}/ folder found here: looked for dbt_project.yml in this folder, above it and up to three `
+          + `folders below it, and for ${semanticDir}/ in this folder and above it. Run this from your project folder, or pass --project <dir>.`,
     );
   }
   return root;
 }
 
-export function makeEnvelope(root: string, semanticDir: string): Envelope {
-  return { cliVersion: CLI_VERSION, projectRoot: root, semanticDir };
+export function makeEnvelope(root: string, semanticDir: string, dbtProject: boolean): Envelope {
+  return { cliVersion: CLI_VERSION, projectRoot: root, semanticDir, dbtProject };
 }
 
 /** `file` relative to `root` with forward slashes (absolute, forward-slashed, when outside it). */
@@ -192,8 +248,9 @@ function iso(ms: number | null): string | null {
  * manifest parsed in-process (spec D6).
  */
 export async function buildCliContext(opts: { project?: string; semanticDir: string; cwd?: string }): Promise<CliContext> {
-  const root = requireProjectRoot(opts.project, opts.cwd);
   const semanticDir = opts.semanticDir;
+  const root = requireProjectRoot(opts.project, opts.cwd, semanticDir);
+  const hasDbt = hasDbtProjectFile(root);
   const dbtConfig = readDbtProjectConfig(root);
 
   const layerService = new LayerService(root, semanticDir);
@@ -201,19 +258,21 @@ export async function buildCliContext(opts: { project?: string; semanticDir: str
   const subjectAreaService = new SubjectAreaService(layerService);
   subjectAreaService.setTableLibraryService(tableLibraryService);
 
-  const manifestService = new ManifestService({ dbtConfig, parseInProcess: true });
-  const catalogService = new CatalogService({ dbtConfig });
+  // Logical-only: built disabled, so nothing dbt is read (the extension's own switch).
+  const manifestService = new ManifestService({ dbtConfig, parseInProcess: true, enabled: hasDbt });
+  const catalogService = new CatalogService({ dbtConfig, enabled: hasDbt });
   const [manifest, ymlData, catalog] = await Promise.all([
     manifestService.loadManifest(root),
-    new YmlParserService({ dbtConfig }).loadYmlData(root, undefined),
+    new YmlParserService({ dbtConfig, enabled: hasDbt }).loadYmlData(root, undefined),
     catalogService.loadCatalog(root),
   ]);
 
   const manifestPath = resolveManifestPath(root, dbtConfig);
-  const manifestMtime = mtimeMs(manifestPath);
+  // A logical-only folder has no artifacts to look at: both read as missing.
+  const manifestMtime = hasDbt ? mtimeMs(manifestPath) : null;
   let manifestStatus: ArtifactStatus;
   let newestSourceChange: string | null = null;
-  if (manifestService.isMissing || manifestMtime === null) {
+  if (!hasDbt || manifestService.isMissing || manifestMtime === null) {
     manifestStatus = 'missing';
   } else if (manifestService.isStale) {
     // The parse failed and nothing was known before it: dbt mid-write, or a broken file.
@@ -225,7 +284,7 @@ export async function buildCliContext(opts: { project?: string; semanticDir: str
   }
 
   const catalogPath = resolveCatalogPath(root, dbtConfig);
-  const catalogMtime = mtimeMs(catalogPath);
+  const catalogMtime = hasDbt ? mtimeMs(catalogPath) : null;
   let catalogStatus: CatalogStatus;
   if (catalogMtime === null) {
     catalogStatus = 'missing';
@@ -239,9 +298,10 @@ export async function buildCliContext(opts: { project?: string; semanticDir: str
   }
 
   return {
-    envelope: makeEnvelope(root, semanticDir),
+    envelope: makeEnvelope(root, semanticDir, hasDbt),
     root,
     semanticDir,
+    hasDbt,
     dbtConfig,
     layerService,
     tableLibraryService,

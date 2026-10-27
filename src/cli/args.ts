@@ -28,7 +28,7 @@ const FORMAT_CHOICES = CLI_EXPORT_FORMATS.join('|');
 
 export interface CliOptions {
   command: CliCommand;
-  /** `--project <dir>`: the dbt project (or a folder near it). */
+  /** `--project <dir>`: the dbt project folder, or a folder holding the ERD Studio folder (logical-only). */
   project?: string;
   /** `--semantic-dir <rel>`: ERD data dir relative to the project root. */
   semanticDir: string;
@@ -232,7 +232,8 @@ Usage:
   erd-studio version
 
 Shared options:
-  --project <dir>       dbt project folder (default: found from the current folder)
+  --project <dir>       dbt project folder, or a folder with no dbt project that holds
+                        .erd-studio (default: found from the current folder)
   --semantic-dir <rel>  ERD Studio data folder inside the project (default .erd-studio)
   --json                machine-readable output on stdout
   --quiet               no human-readable output (exit code only)
@@ -246,6 +247,10 @@ export prints a subject area's logical (design) diagram on stdout and writes no 
                erd-studio export --domain <path> --format dbml-layout > sales.dbdiagram
   --all        every subject area, as a JSON list of { fileName, content }
                (dbml-rich lists each .dbml followed by its .dbdiagram)
+
+Without a dbt project (a folder holding only .erd-studio), doctor checks your ERD Studio
+files and skips the dbt checks; inventory and export read your ERD Studio files; diff
+needs a dbt project.
 
 Exit codes: 0 ok · 1 diff found drift, or export --all skipped a subject area · 2 usage error · 3 project/subject area problem · 4 internal error
 `;
