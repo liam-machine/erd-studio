@@ -11,6 +11,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 ## Unreleased
 
 ### Fixed
+- README: removed the out-of-date "Not using dbt?" workaround (a placeholder `dbt_project.yml` is no longer needed; set `erdStudio.projectPath` instead), replaced a **Set Up ERD Studio** button that does not exist with the real command, and corrected what the Physical view needs and how to install the AI coding harness.
 - MCP server dependencies: `zod` moved from 3 to 4, and its other dependencies were refreshed, to clear newly published security advisories (`zod`, `body-parser`, `hono`, `fast-uri`, `ip-address`). No change to what the MCP server does. The extension itself is unaffected.
 
 ## 1.7.2 — 2026-10-23
