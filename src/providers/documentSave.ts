@@ -13,26 +13,38 @@
  * result must be checked. It also resolves `false` for a document that was not
  * dirty, which is not a failure — so a save counts as failed only when the
  * document is still dirty afterwards.
+ *
+ * `onFailure`, when given, is told why a failed save failed: `refused` (save()
+ * resolved false and the document is still dirty, e.g. the file changed on
+ * disk), `threw` (save() threw, e.g. a closed document) or `reopenFailed`
+ * (re-opening the document by URI threw, e.g. a file system error).
  */
 
 import * as vscode from 'vscode';
+import type { SaveFailure } from '../services/telemetryPayload';
 
-export async function saveDocumentByUri(uri: vscode.Uri): Promise<boolean> {
+export async function saveDocumentByUri(uri: vscode.Uri, onFailure?: (reason: SaveFailure) => void): Promise<boolean> {
+  let doc: vscode.TextDocument;
   try {
-    return await saveDocument(await vscode.workspace.openTextDocument(uri));
+    doc = await vscode.workspace.openTextDocument(uri);
   } catch (err) {
     console.error(`[saveDocumentByUri] could not save ${uri.fsPath}:`, err);
+    onFailure?.('reopenFailed');
     return false;
   }
+  return saveDocument(doc, onFailure);
 }
 
 /** Save `doc`; true when its bytes are on disk afterwards (see above). Never throws. */
-export async function saveDocument(doc: vscode.TextDocument): Promise<boolean> {
+export async function saveDocument(doc: vscode.TextDocument, onFailure?: (reason: SaveFailure) => void): Promise<boolean> {
   try {
     const saved = await doc.save();
-    return saved || !doc.isDirty;
+    if (saved || !doc.isDirty) return true;
+    onFailure?.('refused');
+    return false;
   } catch (err) {
     console.error(`[saveDocument] could not save ${doc.uri.fsPath}:`, err);
+    onFailure?.('threw');
     return false;
   }
 }

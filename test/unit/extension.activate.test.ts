@@ -34,6 +34,7 @@ import {
 import { GETTING_STARTED_VIEW_TYPE, GettingStartedPanel } from '../../src/providers/GettingStartedPanel';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { telemetry } from '../../src/services/telemetryService';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
@@ -693,6 +694,33 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
     expect(error).toHaveBeenCalledWith('VS Code rejected the rename; nothing was changed.');
     expect(fs.existsSync(ignored())).toBe(true);
     expect(readJson(path.join(erd(), 'silver', 'calendar.json')).logical.models).toContain('date');
+  });
+
+  it('reports and counts a repointed diagram it could not save as a rename save failure', async () => {
+    await activate(context);
+    answer('Rename');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vscode._failMockSave(path.join(erd(), 'silver', 'calendar.json'));
+    const telemetryError = vi.spyOn(telemetry, 'error');
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('Could not save .erd-studio/silver/calendar.json'));
+    expect(telemetryError).toHaveBeenCalledWith('saveFailed');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailedRefused');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailedRename');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedModelFile');
+  });
+
+  it('records no save failure when the rename saves cleanly', async () => {
+    await activate(context);
+    answer('Rename');
+    const telemetryError = vi.spyOn(telemetry, 'error');
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailed');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedRename');
   });
 
   it('says so when there is no duplicate to fix', async () => {

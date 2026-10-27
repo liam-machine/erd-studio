@@ -24,7 +24,9 @@ import {
   _mockDocuments,
   _clearMockFileWatchers,
   _mockFileWatchers,
+  _failMockSave,
 } from '../__mocks__/vscode';
+import { telemetry } from '../../src/services/telemetryService';
 import { SemanticEditorProvider, PHYSICAL_READ_ONLY_MESSAGE } from '../../src/providers/SemanticEditorProvider';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
@@ -925,6 +927,31 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect(ourDoc.isDirty).toBe(false);
       expect(userDoc.isDirty).toBe(true);
       expect(fs.readFileSync(customerPath, 'utf-8')).toBe(onDisk);
+    });
+
+    it('reports and counts a model file the undo could not save, and never records it as written', async () => {
+      await h.send({
+        type: 'addColumn',
+        payload: { modelName: 'fct_order', column: { name: 'order_date', dataType: 'date', description: '' } },
+      });
+      const modelPath = ymlPath(h, 'fct_order');
+      const ymlDoc = _mockDocuments.get(vscode.Uri.file(modelPath).toString())!;
+      ymlDoc._setText(h.tableLibraryService.serializeTable(FCT_ORDER));
+      _failMockSave(modelPath);
+      const recordWrite = vi.spyOn(h.ownWrites, 'recordWrite');
+      const telemetryError = vi.spyOn(telemetry, 'error');
+      h.panel._postedMessages.length = 0;
+
+      await h.send({ type: 'undo' });
+
+      expect(ymlDoc.isDirty).toBe(true);
+      expect(recordWrite).not.toHaveBeenCalledWith(modelPath);
+      expect(telemetryError).toHaveBeenCalledWith('saveFailed');
+      expect(telemetryError).toHaveBeenCalledWith('saveFailedRefused');
+      expect(telemetryError).toHaveBeenCalledWith('saveFailedModelFile');
+      expect(telemetryError).toHaveBeenCalledWith('saveFailedUndoRedo');
+      const errors = h.panel._postedMessages.filter((m) => (m as { type: string }).type === 'error');
+      expect(JSON.stringify(errors)).toContain('Could not save');
     });
   });
 

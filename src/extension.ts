@@ -48,7 +48,7 @@ import { ReportTrackingService } from './services/reportTrackingService';
 import { TelemetryService, telemetry } from './services/telemetryService';
 import { startKnownFixes } from './services/knownFixesService';
 import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
-import { tableFileErrorCode } from './services/telemetryPayload';
+import { saveFailureCodes, tableFileErrorCode, type SaveFailure } from './services/telemetryPayload';
 import { notifyTableFileError, shouldWarnAboutTableFile } from './commands/openModelFile';
 import { MyReportsTreeProvider, type MyReportNode } from './providers/MyReportsTreeProvider';
 import type { FeedbackKind } from './types/feedback';
@@ -1681,8 +1681,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // Re-fetched by URI and checked (#126): a handle opened before the edit
       // may have been disposed, and a save can fail without throwing.
       const unsaved: string[] = [];
+      const saveFailures = new Set<SaveFailure>();
       for (const doc of domainDocs) {
-        if (await saveDocumentByUri(doc.uri)) {
+        if (await saveDocumentByUri(doc.uri, (reason) => saveFailures.add(reason))) {
           ownWrites.recordWrite(doc.uri.fsPath);
         } else {
           unsaved.push(path.relative(workspaceRoot, doc.uri.fsPath).split(path.sep).join('/'));
@@ -1690,7 +1691,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         treeProvider.invalidateSubjectArea(doc.uri.fsPath);
       }
       if (unsaved.length > 0) {
-        telemetry.error('saveFailed');
+        for (const code of saveFailureCodes(saveFailures, { rename: true })) telemetry.error(code);
         void vscode.window.showErrorMessage(
           `Could not save ${unsaved.join(', ')} — the rename is open in the editor but not on disk. Save the file from its tab, or revert it.`,
         );
