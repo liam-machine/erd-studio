@@ -58,6 +58,7 @@ Parser facts verified for this spec, all under `@dbml/parse` 9.1.1, 10.3.1 and 1
 | D22 | **Convert Project to DBML** is a pure planner, `planDbmlConversion`, with a describer shared by the modal and `doctor`, one WorkspaceEdit of creates, replaces and deletes, and refusals instead of guesses. It finishes mixed and half-converted projects (a target that already holds exactly the planned bytes is a resume, not a refusal). It moves relationships held in diagram files into the library. YAML comments and unknown keys are carried as `//` comment blocks and listed in the notes. Anything it cannot write as valid DBML (a dangling Ref, a double-stored link, a duplicate Note id) is handled by a named rule and a note, and a self-check failure is a named refusal. | It follows the `namingMigration` skeleton. Nothing the user wrote disappears without being named. |
 | D23 | Every WorkspaceEdit that creates or deletes files is applied by **one helper, `applyFileWrites`** (§5.3): creates first (relationships files before table files), then replaces, then deletes. When `applyEdit` returns `false`, the helper reconciles: it deletes every planned create whose bytes are on disk as planned, re-creates every deleted file from the text it read, and puts every replaced document back with a text-only edit. | VS Code keeps the steps that ran before a failing resource step (verified in its API docs), and `migrateNaming.ts:383-385` wrongly assumes "Nothing landed". Ordering creates first means a half-applied edit never leaves a table without its relationships file. |
 | D24 | **One storage-equivalence comparator**, `normaliseForStorageEquivalence(display)` in core (`packages/core/src/storageEquivalence.ts`, parser-free), applies exactly the §2.8 normalisations. The DBML-twin goldens, Law 3, Convert's self-check and `scripts/e2e-dbml.mjs` all compare through it. | Four places would otherwise each invent their own tolerance and disagree. |
+| D25 | **`Metadata` blocks** (`Metadata Table t { … }`, `Metadata Column t.c { … }`, DBML 9.1+) are never written by ERD Studio and never used as sidecar files, but a hand-written table file may contain them. The reader needs nothing new (rawDb already merges block values over inline ones). The **writer edits a property where it is set**: if a property being changed is set by a `Metadata` block in the same file, the splice edits (or removes) that block entry in place instead of the inline setting, so the edit sticks. Built-ins a block can set (`note`, `headercolor`) follow the same rule. A block whose target is missing gives the precise load error of §4.7. | A block value silently overrides an inline one (precedence: inline < imported-file blocks < current-file blocks, later wins), so an inline-only splice would look like an edit that does not stick. Liam, 2026-10-28; sidecar metadata files rejected (cross-file all-or-nothing breakage, two homes for one value, invisible to dbdiagram/dbdocs). |
 
 ---
 
@@ -896,6 +897,15 @@ It diffs `before` against `after`:
 
 The layout file is handled separately by `editDiagramLayout(oldLayoutText, after.viewConfig.positions ?? {}, stickyLayoutsOf(after.viewConfig.annotations ?? []))`.
 
+#### 4.5.x `Metadata` blocks in a table file (D25)
+
+- **Detection.** While locating a property to edit, the table writer also walks the file's AST for `Metadata Table <this table>` and `Metadata Column <this table>.<col>` blocks (case-insensitive name match, as everywhere). The effective source of a property is the **last** block entry in the file that sets it, else the inline setting.
+- **Edit.** A changed value is spliced into the winning block entry (quoted, as every written value). A cleared value removes the block entry (and an inline duplicate, if both exist, so nothing resurfaces). A block left empty is kept as written (never deleted; the user wrote it). An inline setting shadowed by a block is never edited on its own.
+- **Renames.** Renaming a column or table updates the `Metadata Column t.c` / `Metadata Table t` target in the same file, so the block keeps pointing at it (a stale target is a [4000] that blanks the whole table).
+- **Deletes.** Deleting a column removes `Metadata Column t.c` blocks targeting it.
+- **Other files.** Blocks in another file that targets this table through `use` are not edited; the edit is refused with `DbmlEditRefused` naming that file and line ("<prop> is set by a Metadata block in <file>:<line>; edit it there"). ERD Studio never writes such files.
+- **Built-ins.** `note` and `headercolor` set by a block follow the same rules as custom properties.
+
 ### 4.6 Library write planner (host, pure)
 
 `src/services/dbmlLibraryWrites.ts`:
@@ -966,6 +976,8 @@ This planner only **places** tables and Refs in files. It never decides orientat
 - **`DbmlEditRefused`** maps to `EditRefused` in the provider, so the message is shown as the existing toast. In commands it is shown as a modal with the file name and an Open File button.
 
 ---
+
+- **Metadata target missing (D25).** A [4000] "cannot find metadata target element" maps to a precise `describeTableLoadError` message naming the missing table or column ("A Metadata block on line N targets column 'x', which this table does not have; rename or remove the block"), not the generic DBML error; `doctor` reports it as a warning-level problem with that text.
 
 ## 5. Host integration
 
@@ -1718,6 +1730,8 @@ All of these run in `npm test` unless marked otherwise. Run every multi-parser c
   - a **seeded generator** (no new dependency: a small mulberry32 PRNG, about 300 cases per run, the seed printed on failure) builds random `SemanticTable`s and relationship lists and random edits over them, and checks Laws 1–5.
 - **`dbmlMultiParser.test.ts`:** every text any writer test produces from an input that parses in all three (or from `null`), collected through a helper, is compiled multi-file with its `use` targets under 9.1.1, 10.3.1 and 11.0.0 with **zero** errors and warnings.
 
+- **Metadata blocks (D25):** for a table file with `Metadata Table` / `Metadata Column` blocks (before and after the Table, triple-quoted values): editing a block-set property changes the block entry and the re-read value equals the edit in 9.1.1, 10.3.1 and 11.0.0; clearing removes the entry; an inline duplicate shadowed by a block is removed on clear; column and table renames retarget the blocks; column delete removes its blocks; a no-op save is byte-identical; a block in another file refuses with `DbmlEditRefused`; `note`/`headercolor` via block.
+
 ### 9.4 Host: read (S4)
 
 - **`logicalModelService.dbml.test.ts`:**
@@ -1846,6 +1860,8 @@ Every stage ends with `npm run compile` and `npm test` green. The YAML/JSON beha
   - `npm pack --dry-run -w @erd-studio/core` lists `dist/dbml/`.
 - **Depends on:** S1.
 
+- **D25 (added 2026-10-28):** map the Metadata-target-missing [4000] to the precise load error of §4.7 and cover it in the reader tests.
+
 ### S3: Core DBML writers (the splicer)
 
 - **Goal:** pure writers for table, relationships and diagram files that obey Laws 1–5 on hand-written files, cut by `start`/`fullEnd`, keep BOMs, write selective `use` lines and FK-marked operators, and touch derived blocks only when their inputs change.
@@ -1856,6 +1872,8 @@ Every stage ends with `npm run compile` and `npm test` green. The YAML/JSON beha
   - `npm run compile && npm test`;
   - `npx vitest run packages/core/test/unit/dbmlCodecLaws.test.ts packages/core/test/unit/dbmlMultiParser.test.ts`, three times with different seeds (`DBML_LAW_SEED=1|2|3`).
 - **Depends on:** S2.
+
+- **D25 (added 2026-10-28):** the writer handles `Metadata` blocks per §4.5.x, with the §9.3 Metadata tests.
 
 ### S4: Host read integration (extension and CLI reads)
 
@@ -1966,6 +1984,8 @@ Every stage ends with `npm run compile` and `npm test` green. The YAML/JSON beha
   - `npx @vscode/vsce ls --no-dependencies | wc -l` ≤ 60.
 - **Depends on:** S7.
 
+- **D25 (added 2026-10-28):** `SCHEMA_CONTENT` (and the DBML companion) tells AI helpers to put properties inline and not to write `Metadata` blocks; `doctor` surfaces the Metadata-target error as a warning.
+
 ### S9: Docs, UI copy and release notes
 
 - **Goal:** everything that describes storage says DBML, and the release is described as 2.0.0.
@@ -2027,3 +2047,5 @@ Three reviews (compat-data-loss, architecture-feasibility, product-ai-cli) were 
 - **product-ai-cli 1, "a 2.0 watcher check" scope**: accepted as a toast only. The extension never converts or deletes the file an older helper wrote; Convert (mixed wording, §6.4) and the harness update are the fixes.
 
 **Revision after Liam's answers (2026-10-28).** Liam answered the three open questions: parser pin **11.0.0**, FK-end `?` marks as the default, selective `use` lines as the default. The spec was made consistent with 11.0.0 everywhere (D13, D17, D18, Goal 6, §2.2, §4.1, §4.3, §4.5 Law 5, §4.7, §6.1, §7.1, §7.3, §7.6, §8.1–§8.3, §9, S1, S2, both appendices). Verified with scratch probes against this worktree's `dbml-parse-v11` (11.0.0), `@dbml/parse` (10.3.1) and `dbml-parse-v9` (9.1.1): 11.0.0 accepts unquoted numbers and booleans (including `TRUE`, `-2`, `1.50`, `1e3`) on Tables, columns and Notes as `{value, type: 'number'|'bool'}` and still rejects unquoted words, phrases and `null`; Project custom keys stay plain strings and must be quoted in all three; the value-error codes are `3025`/`3075`/`3051`/`3063` in 10.3.1 and 11.0.0 but `3025`/`3073`/`3049`/`3061` in 9.1.1, and `3073` is a TablePartial error in 10.3.1 and 11.0.0 (read from each package's error-code enum); 11.0.0's `filepath` JSON is `{root, segments}` while `Filepath#absolute` works in all three; the `use` AST and every offset are identical in all three; 11.0.0 keeps tables under a path with a space, where 10.3.1 returns `tables: []` with no error; an attribute token spans `key: value`, so a typed literal's text is recoverable; the 28 `.dbml` fixtures and goldens and the coffee-shop example parse with no errors in all three; the two parsers bundle to about 433 KB and 435 KB minified, each with the marker string 3 times (so §4.1 rule 5 no longer says "occurs once").
+
+- 2026-10-28 (orchestrator, Liam's decision): added D25 — `Metadata` blocks in hand-written table files are edited in place by the writer (§4.5.x), with a precise load error for a missing target (§4.7), tests (§9.3) and a SCHEMA_CONTENT line (S8). Sidecar metadata files rejected. Source: peer-session probe of 9.1.1/10.3.1/11.0.0.
