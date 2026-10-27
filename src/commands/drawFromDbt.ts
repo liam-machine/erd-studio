@@ -35,6 +35,8 @@ import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import {
   OPEN_FILE_BUTTON,
   SEND_FEEDBACK_BUTTON,
+  SHOW_FILE_BUTTON,
+  TRY_AGAIN_BUTTON,
   classifyWriteFailure,
   failedPath,
   feedbackPrefill,
@@ -106,9 +108,7 @@ export interface DrawFromDbtResume {
 }
 
 export const ADD_LAYER_BUTTON = 'Add Layer';
-export const SHOW_FILE_BUTTON = 'Show File';
-export { OPEN_FILE_BUTTON };
-export const TRY_AGAIN_BUTTON = 'Try Again';
+export { OPEN_FILE_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
 export const OPEN_IT_BUTTON = 'Open It';
 export const CHOOSE_ANOTHER_NAME_BUTTON = 'Choose Another Name';
 

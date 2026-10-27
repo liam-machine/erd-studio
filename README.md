@@ -69,7 +69,7 @@ Edit on the canvas and those same files update. Edit them yourself or with AI an
 
 ### Reading your dbt project
 
-The **Physical** view, the green canvas above, has no file of its own. It reads three files, and only the first is required: your **schema YAMLs**, always on disk, so the view works before you have ever run dbt; **`manifest.json`** after a `dbt run`; and **`catalog.json`** after `dbt docs generate` — the only one of the three that has seen your warehouse.
+The **Physical** view, the green canvas above, has no file of its own. It reads three files, and only the first is required: your **schema YAMLs**, always on disk, so the view works before you have ever run dbt; **`manifest.json`**, written by `dbt compile`, `dbt run` or `dbt build`; and **`catalog.json`** after `dbt docs generate` — the only one of the three that has seen your warehouse.
 
 Each table shows where its shape came from, so a `varchar` on the canvas is never a guess: types are read from the warehouse when the catalog is there, otherwise from the `data_type:` you wrote, otherwise left blank rather than invented. A greyed-out table means it is genuinely not in your dbt project, not that you have not run dbt lately. And the edges are the tests you already run — `relationships` for the links, `unique` for the cardinality — so the canvas shows what dbt enforces rather than a second copy that can drift. Nothing is ever written to disk.
 
@@ -77,7 +77,7 @@ dbt is the only stack ERD Studio can read today. If you model somewhere else, [c
 
 ## Get started
 
-Requires **VS Code 1.85+** and a project containing `dbt_project.yml` (see [logical-only setup](#not-using-dbt)). The Physical view needs nothing beyond your dbt schema YAMLs, and gets richer once `manifest.json` and `catalog.json` exist.
+Requires **VS Code 1.85+** and a dbt project (or see [diagrams without dbt](#diagrams-without-dbt)). The Physical view needs nothing beyond your dbt schema YAMLs, and gets richer once `manifest.json` and `catalog.json` exist.
 
 **Your first diagram, no AI needed:**
 
@@ -117,9 +117,9 @@ The guide is an [Agent Skill](https://agentskills.io): Claude Code reads it from
 
 **Or design from scratch:**
 
-1. Click the **ERD Studio** icon in the Activity Bar, choose **Set Up ERD Studio**, and follow the prompts to create your first subject area (a diagram).
+1. Run **ERD Studio: Set Up Subject Areas Directory** from the Command Palette and follow the prompts to create your first subject area (a diagram). After that, each layer in the **ERD Studio** sidebar has a **New Subject Area...** row.
 2. Design tables on the canvas, or add existing dbt models. If you use dbt, switch between **Logical** and **Physical** to compare your design with it.
-3. To work with AI, run **ERD Studio: Install AI Coding Harness** from the Command Palette. It adds project instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini, or Codex's `AGENTS.md`.
+3. To work with AI, run **ERD Studio: Install AI Coding Harness** from the Command Palette, or click the robot icon in the ERD Studio sidebar's title bar. Pick the assistants you use: it adds instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini's style guide, or Codex's `AGENTS.md`.
 
 Then try asking your assistant:
 
@@ -135,21 +135,13 @@ To choose the project for everyone who opens the workspace, set `erdStudio.proje
 
 ### Diagrams without dbt
 
-ERD Studio doesn't need a dbt project. Set `erdStudio.projectPath` to any folder, and ERD Studio keeps its `.erd-studio` data there, whether or not the folder has a `dbt_project.yml`. You can design logical tables, relationships and notes as usual. Without dbt there is no manifest to compare against, so the Physical stage stays empty. When the setting is empty, ERD Studio looks for a dbt project as before.
+ERD Studio doesn't need a dbt project. Set `erdStudio.projectPath` to any folder, and ERD Studio keeps its `.erd-studio` data there, whether or not the folder has a `dbt_project.yml`. You can design logical tables, relationships and notes as usual. Without a dbt project there is nothing to compare against, so the Physical stage stays empty and nothing needs installing or running. When the setting is empty, ERD Studio looks for a dbt project as before.
 
 If you open a diagram that belongs to a different dbt project than the one ERD Studio has open, ERD Studio doesn't draw it against the wrong project's data. It offers to switch projects instead.
 
 ### Editing the files by hand
 
-Every file ERD Studio writes is plain JSON or YAML, and the extension ships a JSON Schema for each one. Open a subject area with **Open With… → Text Editor**, or open a table's `.yml`, and you get completion for every supported property, a description on hover, and a warning on a misspelt property or an invalid value (`modelRole`, `cardinality`, `scdType`…). JSON files work out of the box. For the table `.yml` files, install Red Hat's [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml). The schemas and how to use them in other editors are in the [file format reference](docs/semantic-domain-json-reference.md#editor-support-json-schemas). The [glossary](docs/glossary.md) matches the words on screen (table, subject area) to the names in the files (`tables/` and `logical.tables`, or `logical-models/` and `logical.models` in a project that has not moved to the new file naming).
-
-### Not using dbt?
-
-Use ERD Studio for your **logical data model**: design tables, relationships, and business rules without installing or running dbt.
-
-For now, add a `dbt_project.yml` file containing `name: logical_models` to your project root and reload VS Code. The extension still uses that file to recognise the project; no dbt build or warehouse connection is needed for logical modelling.
-
-Physical comparison needs dbt, so the canvas stays on the Logical stage — everything else works unchanged.
+Every file ERD Studio writes is plain JSON or YAML, and the extension ships a JSON Schema for each one. Open a subject area with **Open With… → Text Editor**, or open a table's `.yml`, and you get completion for every supported property, a description on hover, and a warning on a misspelt property or an invalid value (`tableRole`, `cardinality`, `scdType`…). JSON files work out of the box. For the table `.yml` files, install Red Hat's [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml). The schemas and how to use them in other editors are in the [file format reference](docs/semantic-domain-json-reference.md#editor-support-json-schemas). The [glossary](docs/glossary.md) matches the words on screen (table, subject area) to the names in the files (`tables/` and `logical.tables`, or `logical-models/` and `logical.models` in a project that has not moved to the new file naming).
 
 ## Star history
 

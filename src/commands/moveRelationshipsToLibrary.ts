@@ -31,7 +31,11 @@ import { dirtyFiles } from '../providers/dirtyDocuments';
 import { saveDocumentByUri } from '../providers/documentSave';
 import {
   OPEN_FILE_BUTTON,
+  RELOAD_WINDOW_BUTTON,
+  SAVE_AND_TRY_AGAIN_BUTTON,
   SEND_FEEDBACK_BUTTON,
+  SHOW_FILE_BUTTON,
+  TRY_AGAIN_BUTTON,
   classifyWriteFailure,
   failedPath,
   feedbackPrefill,
@@ -137,12 +141,9 @@ export function writeFileAtomic(filePath: string, text: string): void {
   }
 }
 
-/** The buttons the move's errors offer (#204). */
-export const TRY_AGAIN_BUTTON = 'Try Again';
-export const SHOW_FILE_BUTTON = 'Show File';
-export const SAVE_AND_TRY_AGAIN_BUTTON = 'Save and Try Again';
+/** The buttons the move's errors offer (#204); the shared ones live in commandErrors. */
+export { TRY_AGAIN_BUTTON, SHOW_FILE_BUTTON, SAVE_AND_TRY_AGAIN_BUTTON, RELOAD_WINDOW_BUTTON };
 export const OPEN_SOURCE_CONTROL_BUTTON = 'Open Source Control';
-export const RELOAD_WINDOW_BUTTON = 'Reload Window';
 
 /**
  * The move stopped before writing anything, because of what is in the user's
