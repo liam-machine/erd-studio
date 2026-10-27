@@ -126,13 +126,13 @@ describe('diagram export API', () => {
     expect(RATIONALE_LABELS.map(([key]) => key)).toEqual([...RATIONALE_KEYS]);
   });
 
-  it('adds no runtime dependency: core still depends on yaml alone', () => {
+  it('depends at runtime on yaml and the pinned DBML parser alone (the parser only behind @erd-studio/core/dbml)', () => {
     const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as {
       dependencies?: Record<string, string>;
       peerDependencies?: Record<string, string>;
       optionalDependencies?: Record<string, string>;
     };
-    expect(Object.keys(pkg.dependencies ?? {})).toEqual(['yaml']);
+    expect(pkg.dependencies).toEqual({ '@dbml/parse': '11.0.0', yaml: '^2.9.0' });
     expect(pkg.peerDependencies).toBeUndefined();
     expect(pkg.optionalDependencies).toBeUndefined();
   });
@@ -141,10 +141,14 @@ describe('diagram export API', () => {
     const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as {
       devDependencies: Record<string, string>;
     };
+    const pkgAll = pkg as { devDependencies: Record<string, string>; dependencies: Record<string, string> };
+    // The pin itself is a runtime dependency (D13); 9.1.1 and 10.3.1 are test aliases.
+    expect(pkgAll.dependencies['@dbml/parse']).toBe('11.0.0');
+    expect(pkg.devDependencies['@dbml/parse']).toBeUndefined();
+    expect(pkg.devDependencies['dbml-parse-v11']).toBeUndefined();
     const parsers: Record<string, string> = {
-      '@dbml/parse': '10.3.1',
       'dbml-parse-v9': 'npm:@dbml/parse@9.1.1',
-      'dbml-parse-v11': 'npm:@dbml/parse@11.0.0',
+      'dbml-parse-v10': 'npm:@dbml/parse@10.3.1',
       'dbml-core-v3': 'npm:@dbml/core@3.13.4',
       'dbml-core-v2': 'npm:@dbml/core@2.6.1',
       'dbml-core-v24': 'npm:@dbml/core@2.4.2',
@@ -155,16 +159,17 @@ describe('diagram export API', () => {
     for (const [name, version] of Object.entries(parsers)) expect(pkg.devDependencies[name], name).toBe(version);
     // The labels the harness reports name the same versions.
     const versionOf = (spec: string): string => spec.replace(/^npm:.+@/, '');
+    const pinned = pkgAll.dependencies['@dbml/parse'];
     expect(DBML_PARSERS).toEqual([
-      `@dbml/parse ${parsers['@dbml/parse']}`,
+      `@dbml/parse ${pinned}`,
       `@dbml/core ${versionOf(parsers['dbml-core-v3'])}`,
       `@dbml/core ${versionOf(parsers['dbml-core-v2'])}`,
       `@dbml/core ${versionOf(parsers['dbml-core-v24'])}`,
     ]);
     expect(RICH_DBML_PARSERS).toEqual([
       `@dbml/parse ${versionOf(parsers['dbml-parse-v9'])}`,
-      `@dbml/parse ${parsers['@dbml/parse']}`,
-      `@dbml/parse ${versionOf(parsers['dbml-parse-v11'])}`,
+      `@dbml/parse ${versionOf(parsers['dbml-parse-v10'])}`,
+      `@dbml/parse ${pinned}`,
     ]);
     expect(MERMAID_PARSERS).toEqual([`mermaid ${parsers.mermaid}`, `mermaid ${versionOf(parsers['mermaid-current'])}`]);
   });

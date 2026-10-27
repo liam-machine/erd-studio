@@ -22,8 +22,8 @@ ERD Studio's YAML and JSON stay the only storage. DBML is a way out (the rich ex
 
 ## Parser
 
-- `@dbml/parse` **10.3.1**, exact pin, a root `dependency`, bundled into `dist/extension.js` only (about 430 KB). It is never in `dist/cli.js` (`test/unit/cli.noVscode.test.ts` asserts it) and never a runtime dependency of `@erd-studio/core`, whose only runtime dependency stays `yaml`. The VSIX is packed with `--no-dependencies`, so nothing ships from `node_modules`.
-- Tests read every rich export with 9.1.1 (`dbml-parse-v9`), 10.3.1 and 11.0.0 (`dbml-parse-v11`), core devDependencies hoisted to the root. The helpers are in `packages/core/test/exportParsers.ts` (`parseDbmlRich`, `readDbmlRich`, `RICH_DBML_PARSERS`, `MODEL_LINT_INFOS`). The v1 `toDbml` floor is still `@dbml/core` 2.4.2, and v1 is unchanged.
+- `@dbml/parse` **11.0.0**, exact pin, a root `dependency` and a **runtime dependency of `@erd-studio/core`** (the same exact pin, so the bundles hold one copy), imported only under `packages/core/src/dbml/` and exposed as the subpath `@erd-studio/core/dbml`; the main entry stays parser-free. Bundled into `dist/extension.js` (about 435 KB). It is not yet in `dist/cli.js` (`test/unit/cli.noVscode.test.ts` asserts it until the CLI reads DBML storage). The VSIX is packed with `--no-dependencies`, so nothing ships from `node_modules`.
+- Tests read every rich export with 9.1.1 (`dbml-parse-v9`), 10.3.1 (`dbml-parse-v10`) and the pinned 11.0.0, the aliases core devDependencies hoisted to the root. The helpers are in `packages/core/test/exportParsers.ts` (`parseDbmlRich`, `readDbmlRich`, `RICH_DBML_PARSERS`, `MODEL_LINT_INFOS`). The v1 `toDbml` floor is still `@dbml/core` 2.4.2, and v1 is unchanged.
 
 ## Rules
 

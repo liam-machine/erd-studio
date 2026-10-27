@@ -2,8 +2,9 @@
  * Read a DBML file into one plain shape for **Import DBML…** — the reading
  * half of the import; the pure planner is `src/services/dbmlImport.ts`.
  *
- * The parser is `@dbml/parse` (the one dbdiagram.io runs), bundled into
- * `dist/extension.js` only. Its raw model is close to what the import needs,
+ * The parser is the pinned `@dbml/parse` 11.0.0 (the one dbdiagram.io runs),
+ * bundled into `dist/extension.js` (one copy, shared with
+ * `@erd-studio/core/dbml`). Its raw model is close to what the import needs,
  * but not quite, so this module evens it out:
  *
  *  - custom-property values come as a plain string up to 10.x and as
@@ -175,8 +176,8 @@ export type ReadDbmlResult =
 
 /**
  * The parts of an `@dbml/parse` module the reader uses. Tests pass the 9.x and
- * 11.x releases (`dbml-parse-v9`, `dbml-parse-v11`) to read the same text with
- * each; the extension always uses the pinned `@dbml/parse`.
+ * 10.x releases (`dbml-parse-v9`, `dbml-parse-v10`) to read the same text with
+ * each; the extension always uses the pinned `@dbml/parse` 11.0.0.
  */
 export interface DbmlParserModule {
   // The parser's classes are typed per release; the reader only relies on this much.

@@ -1,16 +1,16 @@
 /**
  * readDbml — the DBML reading half of Import DBML (src/services/dbmlImportParse.ts).
  *
- * Every reading test runs with the pinned `@dbml/parse` 10.3.1 (what the
- * extension bundles) and, where the raw model differs, with 9.1.1 and 11.0.0
- * (`dbml-parse-v9`, `dbml-parse-v11`): 11.0 writes custom properties as
+ * Every reading test runs with the pinned `@dbml/parse` 11.0.0 (what the
+ * extension bundles) and, where the raw model differs, with 9.1.1 and 10.3.1
+ * (`dbml-parse-v9`, `dbml-parse-v10`): 11.0 writes custom properties as
  * `{ value, type, token }` and the normaliser must read both shapes.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as v9 from 'dbml-parse-v9';
-import * as v11 from 'dbml-parse-v11';
+import * as v10 from 'dbml-parse-v10';
 import { describe, expect, it } from 'vitest';
 
 import { DBML_RICH_EXPORT_HEADER } from '@erd-studio/core';
@@ -29,9 +29,9 @@ const FIXTURES = path.resolve(__dirname, '../fixtures/dbml');
 const fixture = (rel: string): string => fs.readFileSync(path.join(FIXTURES, rel), 'utf-8');
 
 const PARSERS: Array<[string, DbmlParserModule | undefined]> = [
-  ['@dbml/parse 10.3.1', undefined],
   ['@dbml/parse 9.1.1', v9 as unknown as DbmlParserModule],
-  ['@dbml/parse 11.0.0', v11 as unknown as DbmlParserModule],
+  ['@dbml/parse 10.3.1', v10 as unknown as DbmlParserModule],
+  ['@dbml/parse 11.0.0', undefined],
 ];
 
 function read(text: string, parser?: DbmlParserModule): DbmlModel {
@@ -79,8 +79,18 @@ describe('readDbml: diagnostics', () => {
     expect(result.diagnostics[0]).toEqual({ line: 3, column: 1, message: expect.any(String) });
   });
 
+  it('reports a custom property every parser refuses (an unquoted word) at its line', () => {
+    for (const [, parser] of PARSERS) {
+      const result = readDbml('Table a [n: two] {\n  id int\n}\n', parser);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.diagnostics[0].line).toBe(1);
+      expect(result.diagnostics[0].message).toMatch(/must be a string/);
+    }
+  });
+
   it('reports a custom property 10.x refuses (an unquoted number) at its line', () => {
-    const result = readDbml('Table a [n: 2] {\n  id int\n}\n');
+    const result = readDbml('Table a [n: 2] {\n  id int\n}\n', v10 as unknown as DbmlParserModule);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.diagnostics[0].line).toBe(1);
@@ -88,7 +98,7 @@ describe('readDbml: diagnostics', () => {
   });
 
   it('never throws, even for a parser that does', () => {
-    const broken = { ...v11, Compiler: class { constructor() { throw new Error('boom'); } } } as unknown as DbmlParserModule;
+    const broken = { ...v10, Compiler: class { constructor() { throw new Error('boom'); } } } as unknown as DbmlParserModule;
     const result = readDbml('Table a { id int }', broken);
     expect(result).toEqual({ ok: false, diagnostics: [{ line: 1, column: 1, message: 'The DBML parser stopped: boom' }] });
   });
@@ -303,16 +313,16 @@ describe.each(PARSERS)('readDbml with %s', (_label, parser) => {
 
 describe('readDbml: 11.0 typed values', () => {
   it('reads unquoted numbers and booleans 11.0 allows as text', () => {
-    const model = read('Table docs [n: 2, flag: true] {\n  id int [pk, weight: 3.5]\n}\n', v11 as unknown as DbmlParserModule);
+    const model = read('Table docs [n: 2, flag: true] {\n  id int [pk, weight: 3.5]\n}\n');
     expect(model.tables[0].properties).toEqual({ n: '2', flag: 'true' });
     expect(model.tables[0].fields[0].properties).toEqual({ weight: '3.5' });
   });
 
   it('reads 10.x and 11.0 output of the same file into the same model', () => {
     const text = fixture('erd-studio/sales.dbml');
-    expect(read(text, v11 as unknown as DbmlParserModule)).toEqual(read(text));
+    expect(read(text)).toEqual(read(text, v10 as unknown as DbmlParserModule));
     const foreign = fixture('foreign/ecommerce.dbml');
-    expect(read(foreign, v11 as unknown as DbmlParserModule)).toEqual(read(foreign));
+    expect(read(foreign)).toEqual(read(foreign, v10 as unknown as DbmlParserModule));
   });
 });
 

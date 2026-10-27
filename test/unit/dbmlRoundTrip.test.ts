@@ -65,7 +65,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as v9 from 'dbml-parse-v9';
-import * as v11 from 'dbml-parse-v11';
+import * as v10 from 'dbml-parse-v10';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
@@ -124,8 +124,8 @@ function dbtProjectCases(): Record<string, string> {
 
 const PARSERS: Array<[string, DbmlParserModule | undefined]> = [
   ['@dbml/parse 9.1.1', v9 as unknown as DbmlParserModule],
-  ['@dbml/parse 10.3.1', undefined],
-  ['@dbml/parse 11.0.0', v11 as unknown as DbmlParserModule],
+  ['@dbml/parse 10.3.1', v10 as unknown as DbmlParserModule],
+  ['@dbml/parse 11.0.0', undefined],
 ];
 
 // ---------------------------------------------------------------------------

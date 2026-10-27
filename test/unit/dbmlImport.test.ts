@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import * as v11 from 'dbml-parse-v11';
+import * as v10 from 'dbml-parse-v10';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { DBML_RICH_EXPORT_HEADER, detectSubjectAreaFormat, readDbdiagramLayout, validateSubjectAreaDocument } from '@erd-studio/core';
@@ -425,17 +425,17 @@ describe('an ERD Studio rich export, row by row', () => {
     expect(own.report.notes).toEqual([]);
   });
 
-  it('reads the same plan from 11.0\'s typed metadata', () => {
+  it('reads the same plan from 10.x\'s string metadata as from 11.0\'s typed metadata', () => {
     const text = fixture('erd-studio/sales.dbml');
-    const fromV11 = planDbmlImport({
-      model: model(text, v11 as unknown as DbmlParserModule),
+    const fromV10 = planDbmlImport({
+      model: model(text, v10 as unknown as DbmlParserModule),
       layout: salesLayout(),
       layer: 'gold',
       subjectAreaName: 'imported',
       library: library(),
       libraryRelationships: false,
     });
-    expect(fromV11).toEqual(salesPlan({ fileName: undefined }));
+    expect(fromV10).toEqual(salesPlan({ fileName: undefined }));
   });
 
   it('values ERD Studio does not recognise are kept in meta.dbml.properties and noted', () => {

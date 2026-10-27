@@ -749,7 +749,7 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
-    "@dbml/parse": "10.3.1",
+    "@dbml/parse": "11.0.0",
     "@erd-studio/core": "0.4.0",
     "@erd-studio/renderer": "0.4.0",
     "@xyflow/react": "^12.4.0",
