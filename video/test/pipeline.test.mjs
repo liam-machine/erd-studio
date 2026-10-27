@@ -126,6 +126,7 @@ test('the extension listing and the walkthrough mock use the real package.json c
   assert.deepEqual(WALKTHROUGH.steps.map((s) => s.id), wt.steps.map((s) => s.id));
   for (const step of WALKTHROUGH.steps) {
     const real = wt.steps.find((s) => s.id === step.id);
+    assert.equal(step.when, real.when, `step when ${step.id}`);
     assert.equal(step.title, real.title, `step title ${step.id}`);
     assert.equal(`media/walkthrough/${step.svg}.svg`, real.media.svg, `step image ${step.id}`);
     if (step.text) {
@@ -135,6 +136,18 @@ test('the extension listing and the walkthrough mock use the real package.json c
       assert.equal(step.button, link.match(/^\[([^\]]+)\]\(command:/)[1], `step button ${step.id}`);
     }
   }
+  // Which steps each window shows, from the real `when` clauses: the tour runs in a dbt project,
+  // the sample scene in a folder without dbt. Every scene opens a step its window shows.
+  const shown = (ctx) => wt.steps.filter((s) => editor.whenHolds(s.when, ctx)).map((s) => s.id);
+  assert.deepEqual(shown(editor.DBT_PROJECT), ['watch', 'draw', 'importDbml', 'enrich']);
+  assert.deepEqual(editor.visibleSteps(editor.DBT_PROJECT).map((s) => s.id), shown(editor.DBT_PROJECT));
+  assert.deepEqual(shown(editor.PLAIN_FOLDER), ['newDiagram', 'importDbml', 'enrich', 'sample']);
+  assert.deepEqual(editor.visibleSteps(editor.PLAIN_FOLDER).map((s) => s.id), shown(editor.PLAIN_FOLDER));
+  assert.doesNotThrow(() => editor.walkthrough({ open: 'draw' }));
+  assert.doesNotThrow(() => editor.walkthrough({ open: 'enrich', wide: true }));
+  assert.doesNotThrow(() => editor.walkthrough({ open: 'sample', wide: true, ctx: editor.PLAIN_FOLDER }));
+  assert.throws(() => editor.walkthrough({ open: 'sample' }), /not shown in this window/);
+  assert.throws(() => editor.whenHolds('erdStudio.hasDbtProject && foo', editor.DBT_PROJECT), /unsupported/);
   const draw = wt.steps.find((s) => s.id === 'draw');
   assert.match(draw.description, /\(command:erdStudio\.drawFromDbt\)/);
   const cmd = (id) => pkg.contributes.commands.find((c) => c.command === id);
@@ -199,7 +212,7 @@ test('the enrich scene types the real setup command and replies in the skill\'s 
   const said = REPLY.replace(/<\/?b>/g, '**').replace('(4 models)', '(8 models)');
   assert.ok(skill.includes(said), 'the enrich route\'s opening line');
   const line = script.scenes.find((s) => s.module === 'enrich').lines.find((l) => l.beat === 'setup');
-  assert.ok(line.caption.includes(PROMPT) && line.caption.includes(editor.WALKTHROUGH.steps.at(-1).button));
+  assert.ok(line.caption.includes(PROMPT) && line.caption.includes(editor.WALKTHROUGH.steps.find((s) => s.id === 'enrich').button));
 });
 
 test('the sample scene uses the real confirm message', async () => {
@@ -209,7 +222,7 @@ test('the sample scene uses the real confirm message', async () => {
   assert.ok(expr, 'SAMPLE_CONFIRM_MESSAGE found');
   assert.equal(CONFIRM, new Function(`return ${expr};`)(), 'confirm message');
   assert.ok(host.includes(`SAMPLE_DOWNLOAD_ACTION = '${DOWNLOAD}'`), 'Download action');
-  assert.ok(sceneSrc('sample').includes("open: 'sample'"), 'shows the walkthrough\'s sample step');
+  assert.ok(sceneSrc('sample').includes("open: 'sample', ctx: PLAIN_FOLDER"), 'shows the walkthrough\'s sample step, in a folder without dbt');
 });
 
 test('the end card names the real steps', async () => {

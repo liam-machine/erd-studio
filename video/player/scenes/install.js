@@ -2,8 +2,8 @@
 // One VS Code window: the Extensions view with ERD Studio's listing (the pointer clicks Install
 // on "Install ERD Studio", and its icon joins the activity bar); on "…open your dbt project" the
 // side bar becomes the Explorer of the jaffle-shop project with dbt_project.yml lit; on `guide`
-// the Welcome editor slides in with the real walkthrough, "Open your dbt project" ticked and
-// "Draw your dbt project — no AI needed" open as the next step. The draw scene continues from
+// the Welcome editor slides in with the real walkthrough as a dbt project shows it (watch, draw,
+// importDbml, enrich) and "Draw your dbt project — no AI needed" open. The draw scene continues from
 // this exact frame.
 import { appear, appIcon, easeOut, ICON, path, pointer, seg, spinner } from '../lib.js';
 import { ACT, BODY, EXTENSION, SIDE, activityBar, editorWindow, explorerSide, walkthrough } from '../editor.js';

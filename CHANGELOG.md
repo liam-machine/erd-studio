@@ -32,6 +32,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - The anonymous daily usage report now says why a diagram edit could not save a file: the editor refused the save (usually because the file changed on disk), the file could not be re-opened to save it, or saving failed outright; whether a table file was among the unsaved files; and whether it was the duplicate-table rename or an undo/redo. Each is a fixed key listed in `telemetry.json`; no file name or path is sent.
 - The walkthrough's **Enrich it with your AI assistant** step no longer says the guided setup needs a dbt project, and the sentence to type in Gemini CLI is now *Set up ERD Studio for this project*.
 - The anonymous daily usage report now also says whether ERD Studio opened a folder without dbt, whether **Open Example Diagram** was used, and whether **New Diagram** was used in a folder without dbt. Opening the example is counted as the example, not as an **Import DBML…**. Each is a fixed key listed in `telemetry.json`; no name or path is sent.
+- The one-minute getting-started video on the Welcome tab shows the current **Get started with ERD Studio** walkthrough: its new description and steps (**Start from a DBML file**, and **Using dbt? Try the sample project** in a folder without dbt) and the current Marketplace description. The narration is unchanged.
 - An undo or redo on the canvas that cannot save a file now says so, as any other canvas edit does, instead of leaving the file silently unsaved.
 
 ### Fixed
