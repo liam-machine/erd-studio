@@ -26,6 +26,7 @@ import modellingApproaches from '../harness/claude/erd-studio-setup/references/m
 import metadata from '../harness/claude/erd-studio-setup/references/metadata.md';
 import verifyAndFix from '../harness/claude/erd-studio-setup/references/verify-and-fix.md';
 import troubleshooting from '../harness/claude/erd-studio-setup/references/troubleshooting.md';
+import withoutDbt from '../harness/claude/erd-studio-setup/references/without-dbt.md';
 
 export interface HarnessAsset {
   /** Path relative to the skill directory, POSIX separators. */
@@ -56,6 +57,7 @@ export const CLAUDE_SETUP_SKILL_FILES: readonly HarnessAsset[] = [
   { relativePath: 'references/building-the-model.md', content: buildingTheModel, versioned: false },
   { relativePath: 'references/verify-and-fix.md', content: verifyAndFix, versioned: false },
   { relativePath: 'references/troubleshooting.md', content: troubleshooting, versioned: false },
+  { relativePath: 'references/without-dbt.md', content: withoutDbt, versioned: false },
 ];
 
 /** Alias: the files are the same for every target; only SKILL.md's frontmatter differs. */

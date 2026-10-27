@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '33';
+export const HARNESS_VERSION = '34';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -139,7 +139,7 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 
 ## File naming: v5 or v6 — use the one \`erd-studio doctor\` reports
 
-A project's files use one of two namings for the same format. **Before writing any \`.erd-studio\` file, run \`erd-studio doctor --json\` and read \`erd.naming\`**, then write every file in that naming:
+A project's files use one of two namings for the same format. **Before writing any \`.erd-studio\` file, run \`erd-studio doctor --json\` and read \`erd.naming\`**, then write every file in that naming (doctor works in a folder without dbt too, reporting \`dbtProject: false\`; when it finds no project at all — no \`dbt_project.yml\` and no \`.erd-studio/\` yet — the project is new, so use v6):
 
 | What | v5 naming (\`naming: v5\`) | v6 naming (\`naming: v6\` or \`mixed\`, and a new project) |
 |------|------|------|
@@ -558,6 +558,8 @@ relationships:
 ---
 
 ## Physical Stage (Read-Only)
+
+**A folder without \`dbt_project.yml\` is logical-only.** ERD Studio works there as a logical data modelling tool: the canvas shows no Physical tab and no ⊕ Diff, there is no sync plan, and \`erd-studio diff\` exits with \`not-dbt-project\` (\`doctor\` and \`export\` still work). The \`.erd-studio\` files are the whole model. Never tell the user they need dbt, and never run dbt there; if they use dbt elsewhere, opening that folder adds the Physical view.
 
 The physical stage has **no files on disk**. It is derived at runtime from the dbt project itself — source files, schema \`.yml\` files, \`{target-path}/manifest.json\` and \`{target-path}/catalog.json\`. None of those four is required, and in particular a project that has never been compiled still renders real models.
 

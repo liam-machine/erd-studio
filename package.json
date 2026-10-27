@@ -103,6 +103,11 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.openExampleDiagram",
+        "title": "Open Example Diagram",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.exportDiagram",
         "title": "Export Diagram…",
         "category": "ERD Studio",
@@ -347,7 +352,7 @@
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nSaved as YAML and JSON in .erd-studio/, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nUsing dbt? Open its folder to compare your design with what dbt built.\n\n[Get started](command:erdStudio.showGettingStarted)",
+        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nSaved as YAML and JSON in .erd-studio/, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nNew to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)\n\nUsing dbt? Open its folder to compare your design with what dbt built.\n\n[Get started](command:erdStudio.showGettingStarted)",
         "when": "erdStudio.hasProject && !erdStudio.hasDbtProject"
       },
       {
@@ -400,14 +405,15 @@
           {
             "id": "newDiagram",
             "title": "Draw your first data model — no dbt needed",
-            "description": "Start a blank diagram and add tables on the canvas. Each table is a YAML file in .erd-studio/ that you commit and review like code.\n[New Diagram](command:erdStudio.createDomain)",
+            "description": "Start a blank diagram and add tables on the canvas. Each table is a YAML file in .erd-studio/ that you commit and review like code.\n[New Diagram](command:erdStudio.createDomain)\nNew to data modelling? Start from a small coffee-shop star schema instead.\n[Open Example Diagram](command:erdStudio.openExampleDiagram)",
             "when": "!erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/new-diagram.svg",
               "altText": "A new diagram with its first table, saved as YAML and JSON files in .erd-studio."
             },
             "completionEvents": [
-              "onCommand:erdStudio.createDomain"
+              "onCommand:erdStudio.createDomain",
+              "onCommand:erdStudio.openExampleDiagram"
             ]
           },
           {
@@ -438,7 +444,7 @@
           {
             "id": "enrich",
             "title": "Enrich it with your AI assistant",
-            "description": "Add grain, keys, rationale and your team's modelling style. This installs a guide for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; then type /erd-studio-setup in your assistant (needs a dbt project today).\n[Set Up My AI Helper](command:erdStudio.setupAiHelper)",
+            "description": "Add grain, keys, rationale and your team's modelling style. This installs a guide for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; then type /erd-studio-setup in your assistant.\n[Set Up My AI Helper](command:erdStudio.setupAiHelper)",
             "media": {
               "svg": "media/walkthrough/enrich.svg",
               "altText": "A table with key badges, typed columns and a grain note."

@@ -30,6 +30,8 @@ line, then get back to the task. If the user wants more, expand in your own word
 | Term | Say this |
 |---|---|
 | **ERD** | Entity-relationship diagram: boxes for tables, lines for how they connect. |
+| **logical data model** | The design of your data — the tables, their columns and keys, and how they connect — kept as plain files you can review like code, whether or not anything has been built yet. |
+| **subject area** | What ERD Studio's commands call a diagram (this guide also says *domain*). |
 | **logical vs physical** | *Physical* is what really exists in the dbt project, worked out by ERD Studio and read-only. *Logical* is your design — the tables, keys and connections you mean to have. |
 | **domain** | One focused diagram of related tables for one business area, like "orders". Saved as `.erd-studio/<layer>/<domain>.json`. |
 | **layer** | A folder for organising diagrams, usually a stage of the warehouse such as silver (cleaned) or gold (ready for reporting). |

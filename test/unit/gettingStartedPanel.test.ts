@@ -51,6 +51,7 @@ import {
   DRAW_FROM_DBT_COMMAND,
   CREATE_DOMAIN_COMMAND,
   IMPORT_DBML_COMMAND,
+  OPEN_EXAMPLE_DIAGRAM_COMMAND,
   computeProjectSummary,
   pageModeForDeps,
   trySampleProject,
@@ -190,7 +191,7 @@ describe('buildGettingStartedHtml', () => {
       ['claude', '/erd-studio-setup'],
       ['copilot', '/erd-studio-setup'],
       ['codex', '$erd-studio-setup'],
-      ['gemini', 'Set up ERD Studio for this dbt project'],
+      ['gemini', 'Set up ERD Studio for this project'],
       ['cursor', '/erd-studio-setup'],
     ]) {
       expect(html).toContain(`<li class="gs-chip" data-assistant-row="${id}" hidden>`);
@@ -423,7 +424,7 @@ describe('panel script', () => {
     }
   });
 
-  it('logical-only: leads with New diagram and Import DBML, keeps the AI cards, hides the dbt steps and offers "Using dbt?"', () => {
+  it('logical-only: leads with New diagram, the example and Import DBML, keeps the AI cards and the guided setup, hides the dbt steps and offers "Using dbt?"', () => {
     const { dom, posted, send, visible, doc } = runPanelScript(buildGettingStartedHtml(HTML_INPUT));
     try {
       const summary = { modelCount: 3, layering: null, manifest: { state: 'unknown' as const }, line: 'Found 3 dbt models' };
@@ -432,10 +433,13 @@ describe('panel script', () => {
       expect(doc.querySelector('.gs')?.getAttribute('data-project')).toBe('true');
       expect(visible('.gs-hero__sub')).toEqual(["Design your data model in your repo; compare it with dbt when you're ready."]);
       const shown = [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
-      expect(shown).toEqual(['new', 'dbml', 'assistant', 'helper']);
-      expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4']);
+      expect(shown).toEqual(['new', 'dbml', 'assistant', 'helper', 'start']);
+      expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4', '5']);
       expect(visible('[data-step="new"] .gs-step__title')).toEqual(['Draw your first diagram']);
       expect(visible('[data-step="new"] .gs-btn--primary')).toEqual(['New diagram']);
+      expect(visible('[data-step="new"] .gs-step__hint')).toEqual([
+        'New to data modelling? Open Example Diagram: a small coffee-shop star schema to explore and change.',
+      ]);
       expect(visible('[data-step="dbml"] .gs-step__title')).toEqual(['Have a DBML file?']);
       expect(visible('[data-step="dbml"] .gs-btn')).toEqual(['Import DBML\u2026']);
       expect(visible('[data-step="dbml"] .gs-step__text').join()).toContain('an open format, no lock-in');
@@ -443,25 +447,47 @@ describe('panel script', () => {
       expect(visible('.gs-section-intro').join()).not.toContain('dbt');
       expect(visible('.gs-sample-link')).toEqual([]);
       expect(visible('.gs-summary')).toEqual([]);
-      // It says what it installs, and that the guide and checking tool need dbt today.
+      // It says what it installs, and no longer that the guide needs dbt.
       expect(visible('[data-step="helper"] .gs-step__text span').join('')).toContain(
-        'It also adds the /erd-studio-setup guide and a small checking tool, which need a dbt project today.',
+        'It also adds the /erd-studio-setup guide and a small checking tool your assistant uses behind the scenes.',
       );
+      expect(visible('[data-step="helper"] .gs-step__text span').join('')).not.toContain('dbt');
+      // The guided setup card, with its no-dbt text: design it with your assistant, no dbt wording.
+      expect(visible('[data-step="start"] .gs-step__title')).toEqual(['Start the guided setup']);
+      expect(visible('[data-step="start"] .gs-step__text span')).toEqual([
+        'Your assistant asks what your business does and designs a first diagram with you — tables, keys, grain and how they connect — or builds on a DBML import or the tables you already have, then checks the files, explaining each step. No dbt needed.',
+      ]);
+      expect(visible('[data-step="start"] .gs-step__hint').join(' ')).not.toContain('dbt');
+      // With an assistant and the helper installed: where to start it, without "dbt project folder".
+      send({ type: 'status', payload: { ...STATUS, logicalOnly: true, assistants: ['claude'], claude: 'cli', helper: 'ready' } });
+      const shownText = (sel: string) => [...doc.querySelectorAll<HTMLElement>(sel)]
+        .filter((el) => el.closest('[hidden]') === null)
+        .map((el) => {
+          const copy = el.cloneNode(true) as HTMLElement;
+          copy.querySelectorAll('[hidden]').forEach((h) => h.remove());
+          return (copy.textContent ?? '').replace(/\s+/g, ' ').trim();
+        });
+      expect(shownText('[data-step="start"] .gs-step__hint')[0]).toBe('Start your assistant in your project folder: jaffle_shop');
+      expect(shownText('[data-step="start"] .gs-step__hint').join(' ')).not.toContain('dbt');
+      send({ type: 'status', payload: { ...STATUS, logicalOnly: true, summary } });
       expect(visible('[data-step="assistant"] .gs-step__text span').join('')).not.toContain('tested with');
       expect(visible('.gs-usedbt .gs-sample__title')).toEqual(['Using dbt?']);
       expect(visible('.gs-usedbt .gs-sample__text').join()).toContain('Open its folder to compare your design with what dbt built');
 
       const click = (sel: string) => (doc.querySelector(sel) as HTMLElement).click();
       click('[data-step="new"] [data-when="first"] [data-action="createDomain"]');
+      click('[data-step="new"] [data-action="openExample"]');
       click('[data-step="dbml"] [data-action="importDbml"]');
       click('.gs-usedbt [data-action="openFolder"]');
       click('.gs-usedbt [data-action="trySample"]');
-      expect(posted.slice(1)).toEqual([{ type: 'createDomain' }, { type: 'importDbml' }, { type: 'openFolder' }, { type: 'trySample' }]);
+      expect(posted.slice(1)).toEqual([
+        { type: 'createDomain' }, { type: 'openExample' }, { type: 'importDbml' }, { type: 'openFolder' }, { type: 'trySample' },
+      ]);
 
       // With a diagram: "Open your diagrams" leads and New diagram drops to a secondary button.
       send({ type: 'status', payload: { ...STATUS, logicalOnly: true, domainCount: 2 } });
       const withDiagrams = [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
-      expect(withDiagrams).toEqual(['open', 'new', 'dbml', 'assistant', 'helper']);
+      expect(withDiagrams).toEqual(['open', 'new', 'dbml', 'assistant', 'helper', 'start']);
       expect(visible('[data-step="open"] .gs-step__text span')).toEqual(['You have 2 diagrams.', 'Open one to keep designing.']);
       expect(visible('[data-step="new"] .gs-step__title')).toEqual(['Draw another diagram']);
       expect(visible('[data-step="new"] .gs-btn--primary')).toEqual([]);
@@ -504,7 +530,7 @@ describe('panel script', () => {
     expect(logical).toContain('<main class="gs" data-project="unknown" data-mode="logical">');
     expect(logical).toContain('<section class="gs-step" data-step="new" data-state="loading">');
     expect(logical).toContain('<section class="gs-step" data-step="draw" data-state="loading" hidden>');
-    expect(logical).toContain('<section class="gs-step" data-step="start" data-state="loading" hidden>');
+    expect(logical).toContain('<section class="gs-step" data-step="start" data-state="loading">');
     const dbt = buildGettingStartedHtml({ ...HTML_INPUT, mode: 'dbt' });
     expect(dbt).toContain('<section class="gs-step" data-step="new" data-state="loading" hidden>');
     expect(dbt).toContain('<section class="gs-step" data-step="draw" data-state="loading">');
@@ -593,6 +619,7 @@ describe('isGettingStartedToHost', () => {
     expect(isGettingStartedToHost({ type: 'drawFromDbt' })).toBe(true);
     expect(isGettingStartedToHost({ type: 'createDomain' })).toBe(true);
     expect(isGettingStartedToHost({ type: 'importDbml' })).toBe(true);
+    expect(isGettingStartedToHost({ type: 'openExample' })).toBe(true);
     expect(isGettingStartedToHost({ type: 'openExternal', target: 'sampleCodespaces' })).toBe(true);
   });
 
@@ -713,32 +740,28 @@ describe('pure helpers', () => {
     expect(promptFor('claude', '/w/dbt', '/w', 'darwin')).toBe(`cd '/w/dbt' && claude "/erd-studio-setup"`);
     expect(promptFor('copilot', '/w/dbt', '/w', 'darwin')).toBe('/erd-studio-setup');
     expect(promptFor('codex', '/w', '/w', 'darwin')).toBe('$erd-studio-setup');
-    expect(promptFor('gemini', '/w', '/w', 'darwin')).toBe('Set up ERD Studio for this dbt project');
+    expect(promptFor('gemini', '/w', '/w', 'darwin')).toBe('Set up ERD Studio for this project');
     expect(promptFor('cursor', '/w', '/w', 'darwin')).toBe('/erd-studio-setup');
   });
 
   it('setupReadyMessage names the assistants it installed for', () => {
     expect(setupReadyMessage(['claude'])).toBe("AI helper ready for Claude Code: run /erd-studio-setup there (restart it if it's already open).");
     expect(setupReadyMessage(['codex'])).toContain('run $erd-studio-setup there');
-    expect(setupReadyMessage(['gemini'])).toContain('ask “Set up ERD Studio for this dbt project”');
+    expect(setupReadyMessage(['gemini'])).toContain('ask “Set up ERD Studio for this project”');
     expect(setupReadyMessage(['claude', 'copilot', 'cursor'])).toContain('AI helper ready for Claude Code, GitHub Copilot and Cursor.');
     expect(setupReadyMessage([])).toContain('Claude Code, GitHub Copilot, Codex, Gemini CLI and Cursor');
     expect(SETUP_READY_MESSAGE).toBe(setupReadyMessage(['claude']));
   });
 
-  it('setupReadyMessage without dbt never points at the dbt-only guided setup', () => {
-    const messages = [
-      setupReadyMessage(['claude'], { logicalOnly: true }),
-      setupReadyMessage(['codex'], { logicalOnly: true }),
-      setupReadyMessage(['gemini'], { logicalOnly: true }),
-      setupReadyMessage(['claude', 'copilot'], { logicalOnly: true }),
-      setupReadyMessage([], { logicalOnly: true }),
-    ];
-    expect(messages[0]).toBe("AI helper ready for Claude Code: ask it to design or change your diagrams (restart it if it's already open).");
-    expect(messages[3]).toContain('AI helper ready for Claude Code and GitHub Copilot. Ask any of them to design or change your diagrams');
-    for (const message of messages) {
-      expect(message).not.toMatch(/erd-studio-setup|guided setup|Welcome panel|dbt/);
-    }
+  it('setupReadyMessage without dbt points at the guided setup, for designing the model with you', () => {
+    expect(setupReadyMessage(['claude'], { logicalOnly: true })).toBe(
+      "AI helper ready for Claude Code: run /erd-studio-setup there to design your data model with you (restart it if it's already open).",
+    );
+    expect(setupReadyMessage(['codex'], { logicalOnly: true })).toContain('run $erd-studio-setup there to design your data model with you');
+    expect(setupReadyMessage(['claude', 'copilot'], { logicalOnly: true })).toContain(
+      'AI helper ready for Claude Code and GitHub Copilot. Start the guided setup in any of them to design your data model with you',
+    );
+    expect(setupReadyMessage([], { logicalOnly: true })).toContain('then start the guided setup to design your data model with you');
   });
 
   it('copyText copies the bare prompt at the root and the whole start line from a subfolder', () => {
@@ -939,7 +962,7 @@ describe('runSetupAiHelper', () => {
     });
   });
 
-  it('logical-only: the success message names no guided setup', async () => {
+  it('logical-only: the success message is the logical-only wording', async () => {
     const { deps } = setupDeps();
     const outcome = await runSetupAiHelper({ ...deps, logicalOnly: true });
     expect(outcome.ok).toBe(true);
@@ -1228,6 +1251,8 @@ describe('GettingStartedPanel', () => {
     vscode.commands.registerCommand(CREATE_DOMAIN_COMMAND, createDomain);
     const importDbml = vi.fn();
     vscode.commands.registerCommand(IMPORT_DBML_COMMAND, importDbml);
+    const openExample = vi.fn();
+    vscode.commands.registerCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND, openExample);
 
     const messages: Record<string, unknown> = {
       openExternal: { type: 'openExternal', target: 'dbtInstallDocs' },
@@ -1247,10 +1272,13 @@ describe('GettingStartedPanel', () => {
     expect(createDomain).toHaveBeenCalledWith(); // no argument from the webview
     expect(importDbml).toHaveBeenCalledTimes(1);
     expect(importDbml).toHaveBeenCalledWith();
+    expect(OPEN_EXAMPLE_DIAGRAM_COMMAND).toBe('erdStudio.openExampleDiagram');
+    expect(openExample).toHaveBeenCalledTimes(1);
+    expect(openExample).toHaveBeenCalledWith();
 
     // ready, refreshStatus, after setupAiHelper, before openClaude / openCopilotChat, after drawFromDbt,
-    // after createDomain, after importDbml
-    expect(deps.getStatus).toHaveBeenCalledTimes(8);
+    // after createDomain, after importDbml, after openExample
+    expect(deps.getStatus).toHaveBeenCalledTimes(9);
     expect(deps.runSetup).toHaveBeenCalledTimes(1);
     expect(clip).toHaveBeenCalledWith('COPY-ME:claude'); // copyPrompt without an assistant means Claude Code
     expect(clip).toHaveBeenCalledWith(SETUP_PROMPT); // openCopilotChat (no chat command here → docs page)

@@ -13,7 +13,7 @@ export const read_model = {
     inputSchema: {
       project_path: z
         .string()
-        .describe('Absolute path to the dbt project root.'),
+        .describe('Absolute path to the dbt project root, or a folder holding .erd-studio/ with no dbt project.'),
       model_name: z
         .string()
         .describe('Logical model name (filename without .yml; the file may be at the top of logical-models/ or tables/, or in a layer folder).'),

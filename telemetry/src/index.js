@@ -284,6 +284,9 @@ const FEATURES = [
   'importDbmlLayout',
   'importDbmlCancelled',
   'importDbmlInvalid',
+  'logicalOnlyProject',
+  'exampleDiagram',
+  'blankDiagram',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

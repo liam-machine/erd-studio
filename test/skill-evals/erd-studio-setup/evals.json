@@ -220,7 +220,7 @@
       "harness": "gemini-cli",
       "fixture": "test/fixtures/dbt-project",
       "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Install the skills into .agents/skills/ only. Run in Gemini CLI (approve the skill activation prompt).",
-      "prompt": "Set up ERD Studio for this dbt project",
+      "prompt": "Set up ERD Studio for this project",
       "expected_output": "Gemini CLI activates the erd-studio-setup skill from its description, reads the schema skill file from .agents/skills/erd-studio/, and completes the walkthrough without referring to slash commands.",
       "files": [],
       "expectations": [

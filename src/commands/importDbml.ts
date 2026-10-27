@@ -133,6 +133,13 @@ export interface ImportDbmlDeps {
    */
   onWritten: (written: { domainPath: string; modelNames: string[]; changedModelNames: string[] }) => void;
   ui?: ImportDbmlUi;
+  /**
+   * `'example'` when Open Example Diagram supplies the DBML: a finished run
+   * counts `exampleDiagram` instead of `importDbml`, and a cancel counts
+   * nothing, so the Import DBML counts stay the user's own files. It travels
+   * with `deps`, so Try Again and Choose Another Name keep it. Default `'file'`.
+   */
+  source?: 'file' | 'example';
 }
 
 /**
@@ -195,7 +202,11 @@ export function describeInvalidDbml(fileName: string, diagnostics: readonly Dbml
 
 async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: ImportDbmlResume): Promise<ImportDbmlResult | undefined> {
   const { workspaceRoot, semanticDir, layerService, subjectAreaService, tableLibraryService } = deps;
-  const cancelled = (): undefined => { telemetry.feature('importDbmlCancelled'); return undefined; };
+  const fromExample = deps.source === 'example';
+  const cancelled = (): undefined => {
+    if (!fromExample) telemetry.feature('importDbmlCancelled');
+    return undefined;
+  };
 
   /** Show an error with its buttons, and run the one the user picks. Never awaited. */
   const showError = (message: string, actions: ErrorActions = {}): void => {
@@ -230,7 +241,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   const { readDbml } = await import('../services/dbmlImportParse');
   const read = readDbml(text);
   if (!read.ok) {
-    telemetry.feature('importDbmlInvalid');
+    if (!fromExample) telemetry.feature('importDbmlInvalid');
     const first = read.diagnostics[0];
     showError(describeInvalidDbml(fileName, read.diagnostics), {
       [OPEN_FILE_BUTTON]: () => ui.openFileAt(filePath, first?.line, first?.column),
@@ -418,8 +429,12 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   }
 
   deps.onWritten({ domainPath, modelNames: outcome.written, changedModelNames: outcome.changed });
-  telemetry.feature('importDbml');
-  if (layoutUsed) telemetry.feature('importDbmlLayout');
+  if (fromExample) {
+    telemetry.feature('exampleDiagram');
+  } else {
+    telemetry.feature('importDbml');
+    if (layoutUsed) telemetry.feature('importDbmlLayout');
+  }
 
   await ui.openDiagram(domainPath);
   return { domainPath, plan, ...(layoutUsed ? { layoutPath } : {}) };

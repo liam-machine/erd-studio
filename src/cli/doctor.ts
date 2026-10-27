@@ -4,6 +4,10 @@
  * profiles.yml, how fresh are manifest.json and catalog.json, what is
  * already in the ERD Studio folder, and is the Claude harness current.
  *
+ * In a logical-only folder (the ERD Studio folder, no dbt_project.yml) the
+ * logical-file checks run as usual and the dbt checks are skipped and said
+ * to be (`skippedChecks`): nothing is probed, and no dbt step is suggested.
+ *
  * Runs `dbt --version` at most (never `dbt parse` or `docs generate`), and
  * writes nothing.
  */
@@ -42,6 +46,7 @@ import {
   type ProfilesInfo,
 } from '../services/dbtEnv';
 import { HARNESS_VERSION, HarnessService } from '../services/harnessService';
+import { hasDbtProjectFile } from '../services/projectDiscovery';
 import {
   buildCliContext,
   makeEnvelope,
@@ -66,8 +71,19 @@ export interface NextStep {
   command: string | null;
 }
 
+/** The dbt checks doctor reports on; all of them are skipped in a logical-only folder. */
+export type DbtCheckId = 'dbt' | 'profiles' | 'artifacts' | 'projectFiles' | 'deps';
+
+export const DBT_CHECK_IDS: readonly DbtCheckId[] = ['dbt', 'profiles', 'artifacts', 'projectFiles', 'deps'];
+
 export interface DoctorResult extends Envelope {
   runtime: { kind: 'node' | 'electron'; version: string };
+  /**
+   * Present only in a logical-only folder (`dbtProject: false` with the ERD
+   * Studio folder found): the dbt checks that did not run, and why. Their
+   * blocks below keep their shape, holding the "nothing found" values.
+   */
+  skippedChecks?: { reason: 'not-dbt-project'; checks: DbtCheckId[] };
   project: { found: boolean; name: string | null; profile: string | null; modelPaths: string[]; targetPath: string };
   dbt: {
     found: boolean;
@@ -363,6 +379,8 @@ function backwardsRelationshipsOf(ctx: CliContext, domainFiles: string[]): Backw
 function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boolean; installPath: string; invocation: string | null }): NextStep[] {
   const steps: NextStep[] = [];
   const { dbt, profiles, artifacts } = r;
+  // Logical-only: no dbt step at all — never tell someone without dbt to install it.
+  const dbtChecked = !r.skippedChecks;
 
   if (dbt.untrustedVenvDbt) {
     steps.push({
@@ -424,7 +442,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: null,
     });
   }
-  if (dbt.checked && !dbt.found && !dbt.untrustedVenvDbt) {
+  if (dbtChecked && dbt.checked && !dbt.found && !dbt.untrustedVenvDbt) {
     steps.push({
       id: 'install-dbt',
       title: 'Install dbt (optional)',
@@ -448,7 +466,9 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: deps.invocation ? `${deps.invocation} deps` : null,
     });
   }
-  if (artifacts.manifest.status === 'missing' || artifacts.manifest.status === 'unreadable') {
+  if (!dbtChecked) {
+    // Nothing dbt to build or refresh.
+  } else if (artifacts.manifest.status === 'missing' || artifacts.manifest.status === 'unreadable') {
     steps.push({
       id: 'run-parse',
       title: 'Build the manifest',
@@ -465,7 +485,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: dbt.commands.parse,
     });
   }
-  if (artifacts.catalog.status !== 'ok') {
+  if (dbtChecked && artifacts.catalog.status !== 'ok') {
     const cloud = dbt.flavour === 'cloud-cli';
     steps.push({
       id: 'run-catalog',
@@ -486,7 +506,11 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       title: `Fix ${namingMix.length === 1 ? 'a subject area file that mixes' : `${namingMix.length} subject area files that mix`} the old and new key names`,
       why: `${namingMix.map((i) => i.file).join(', ')}: ${namingMix.length === 1 ? 'it uses' : 'each uses'} the v6 names ("logical.tables", "subjectArea") `
         + 'without "schemaVersion": 6, or beside the v5 names, so it cannot load. Use one set: the v5 names with schemaVersion 5, '
-        + 'or the v6 names with schemaVersion 6. `erd-studio diff` names what is wrong in each.',
+        + 'or the v6 names with schemaVersion 6. '
+        // diff needs a dbt project; export reads the file the same way and names the problem anywhere.
+        + (dbtChecked
+          ? '`erd-studio diff` names what is wrong in each.'
+          : '`erd-studio export --domain <file> --format dbml` names what is wrong in each.'),
       command: null,
     });
   }
@@ -519,20 +543,27 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
     });
   }
   if (steps.length === 0) {
-    steps.push({ id: 'ready', title: 'Ready', why: 'Everything ERD Studio uses is in place.', command: null });
+    steps.push({
+      id: 'ready',
+      title: 'Ready',
+      why: dbtChecked
+        ? 'Everything ERD Studio uses is in place.'
+        : 'Your ERD Studio files are in place. This folder is not a dbt project, so the dbt checks were skipped.',
+      command: null,
+    });
   }
   return steps;
 }
 
 export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
-  const root = resolveProjectRoot(opts.project, opts.cwd);
+  const root = resolveProjectRoot(opts.project, opts.cwd, opts.semanticDir);
   const harnessVersion = HARNESS_VERSION;
 
   if (!root) {
     // Not an error for doctor: saying so is its job. inventory/diff exit 3 instead.
     const cwdRoot = path.resolve(opts.cwd ?? process.cwd(), opts.project ?? '.');
     const base: Omit<DoctorResult, 'nextSteps'> = {
-      ...makeEnvelope(cwdRoot, opts.semanticDir),
+      ...makeEnvelope(cwdRoot, opts.semanticDir, false),
       runtime: runtimeInfo(),
       project: { found: false, name: null, profile: null, modelPaths: [], targetPath: 'target' },
       dbt: {
@@ -556,10 +587,12 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
     return { ...base, nextSteps: [] };
   }
 
+  // Logical-only (no dbt_project.yml): dbt is never probed.
   const [ctx, probed] = await Promise.all([
     buildCliContext({ project: root, semanticDir: opts.semanticDir, cwd: opts.cwd }),
-    probe(root, opts),
+    hasDbtProjectFile(root) ? probe(root, opts) : Promise.resolve(null),
   ]);
+  if (!ctx.hasDbt || !probed) { return logicalOnlyDoctor(ctx, opts); }
   const identity = readDbtProjectIdentity(root);
   const found = probed.result;
   const invocation = found ? dbtInvocation(found.candidate, root) : null;
@@ -625,4 +658,34 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
 
   const deps = detectDepsStatus(root, identity.packagesInstallPath);
   return { ...base, nextSteps: nextStepsFor(base, { needsDeps: deps.needsDeps, installPath: deps.installPath, invocation }) };
+}
+
+/**
+ * doctor in a logical-only folder: the ERD Studio checks and the skills, as
+ * in a dbt project; every dbt check skipped (`skippedChecks`) — dbt is never
+ * probed, not even without `--no-dbt` — with its block holding the "nothing
+ * found" values, so the JSON keeps one shape.
+ */
+function logicalOnlyDoctor(ctx: CliContext, opts: DoctorOptions): DoctorResult {
+  const harness = new HarnessService(opts.semanticDir).harnessStatus(ctx.root);
+  const base: Omit<DoctorResult, 'nextSteps'> = {
+    ...ctx.envelope,
+    runtime: runtimeInfo(),
+    skippedChecks: { reason: 'not-dbt-project', checks: [...DBT_CHECK_IDS] },
+    project: { found: false, name: null, profile: null, modelPaths: [], targetPath: 'target' },
+    dbt: {
+      found: false, source: null, executable: null, venvDir: null, flavour: null, version: null,
+      rawVersionOutput: null, commands: { parse: null, catalog: null, debug: null }, checked: false,
+      untrustedVenvDbt: null,
+    },
+    profiles: { required: false, found: false, path: null, searched: [], profileDefined: null },
+    artifacts: {
+      manifest: { ...ctx.manifestInfo, path: displayPath(ctx.manifestInfo.path, ctx.root, opts.homeDir) },
+      catalog: { ...ctx.catalogInfo, path: displayPath(ctx.catalogInfo.path, ctx.root, opts.homeDir) },
+    },
+    projectFiles: { schemaYmlFiles: 0, sourceFiles: 0, modelsDiscovered: 0 },
+    erd: erdSummary(ctx),
+    harness: { schemaSkill: harness.claude.schemaSkill, setupSkill: harness.claude.setupSkill, version: HARNESS_VERSION },
+  };
+  return { ...base, nextSteps: nextStepsFor(base, { needsDeps: false, installPath: '', invocation: null }) };
 }

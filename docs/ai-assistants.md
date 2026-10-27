@@ -14,17 +14,31 @@ Then ask for what you want, for example:
 
 > Read the diagram in .erd-studio/silver/orders.json and list any table with no grain statement.
 
-## The guided setup for a dbt project
+## The guided setup
 
-The helper also installs a guided setup that builds your design from dbt, and the Welcome tab shows exactly what to type in each assistant. The guided setup needs a dbt project today: in a folder without one, ask your assistant for the design directly, as in the examples above. Start your assistant in your dbt project folder and type:
+The helper also installs a guided setup, and the Welcome tab shows exactly what to type in each assistant. Start your assistant in your project folder and type:
 
 | Assistant | Type |
 |---|---|
 | Claude Code | `/erd-studio-setup` |
 | GitHub Copilot (Agent mode, or the Copilot CLI) | `/erd-studio-setup` |
 | Codex | `$erd-studio-setup` (or pick it from `/skills`) |
-| Gemini CLI | *Set up ERD Studio for this dbt project* |
+| Gemini CLI | *Set up ERD Studio for this project* |
 | Cursor | `/erd-studio-setup` |
+
+It looks for a `dbt_project.yml` first and takes one of two routes.
+
+### Without dbt
+
+In a folder with no dbt project, the guide designs a first diagram with you and never asks you to install dbt. It picks a starting point:
+
+- **From a description:** it asks what your business does, then proposes the tables, their keys, grain and relationships, with the reasons for each. It suggests a modelling style that fits (a Kimball star schema for reporting, say) or follows the one you describe, plays the rules back to you and saves them in `.erd-studio/modelling-approach.md` so later AI edits follow them too.
+- **From a DBML file:** it asks you to run **ERD Studio: Import DBML…** (no AI involved; you see what it will create before anything is written), then fills in the detail.
+- **From the tables you already have:** it adds keys, grain, roles and rationale to the diagrams in `.erd-studio/` instead of rebuilding them.
+
+It then writes the files, checks them with the `erd-studio` helper, and tells you how to open the diagram. Want to see a finished one first? Run **ERD Studio: Open Example Diagram** for a small coffee-shop model.
+
+### With a dbt project
 
 The guide:
 
@@ -34,7 +48,7 @@ The guide:
 - builds the logical tables from your dbt project, applying those rules;
 - compares them with the Physical stage, and fixes the differences until the two match.
 
-It uses a small read-only `erd-studio` helper that ERD Studio installs in `~/.erd-studio-cli`. Your assistant still asks before it edits any file.
+Both routes use a small read-only `erd-studio` helper that ERD Studio installs in `~/.erd-studio-cli`. Your assistant still asks before it edits any file.
 
 ## Where the instructions go
 
@@ -44,4 +58,6 @@ To choose exactly which files are added, run **ERD Studio: Install AI Coding Har
 
 ## The `erd-studio` helper
 
-The helper only ever reads and prints; it never writes a file, so every change your assistant makes is a visible edit. Like the guided setup, it needs a dbt project today: it looks for a `dbt_project.yml` and stops without one. Its commands are `doctor` (checks the project and suggests next steps), `inventory`, `diff` (design against dbt), `export` (Mermaid or DBML, see [DBML import and export](leaving-erd-studio.md#without-vs-code)) and `version`.
+The helper only ever reads and prints; it never writes a file, so every change your assistant makes is a visible edit. Its commands are `doctor` (checks the project and suggests next steps), `inventory`, `diff` (design against dbt), `export` (Mermaid or DBML, see [DBML import and export](leaving-erd-studio.md#without-vs-code)) and `version`.
+
+It works in a folder without dbt too, as long as the folder has an `.erd-studio` folder: `doctor` checks your ERD Studio files and says it skipped the dbt checks, `inventory` lists the tables you've designed, and `export` works as usual. Only `diff` needs a dbt project, since it compares your design with what dbt built.

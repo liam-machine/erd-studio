@@ -79,6 +79,7 @@ import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus
 import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND, importDbml } from './commands/importDbml';
+import { OPEN_EXAMPLE_DIAGRAM_COMMAND, openExampleDiagram } from './commands/openExampleDiagram';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
 import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
 import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
@@ -464,6 +465,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.setupAiHelper',
   'erdStudio.drawFromDbt',
   'erdStudio.importDbml',
+  'erdStudio.openExampleDiagram',
   'erdStudio.setFeedbackApiKey',
   'erdStudio.clearFeedbackApiKey',
   'erdStudio.refreshMyReports',
@@ -1124,6 +1126,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await vscode.commands.executeCommand('erdStudio.openDomain', target);
   };
   telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length);
+  // A presence flag, once a day: activation resolved a root without dbt_project.yml.
+  if (!hasDbt) { telemetry.featureOnce('logicalOnlyProject'); }
   recordDetectedAssistants();
   recordPhysicalTooling(context);
 
@@ -1867,6 +1871,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         onWritten: refreshAfterNewSubjectArea,
       });
     }),
+    // A ready-made coffee-shop star schema, through the same Import DBML flow
+    // (name, dry run, Import). Works in any folder; an empty window gets the
+    // fallback "Open a folder first".
+    vscode.commands.registerCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND, async () => {
+      const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+      await openExampleDiagram({
+        workspaceRoot,
+        semanticDir,
+        layerService,
+        subjectAreaService,
+        tableLibraryService,
+        validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
+        onWritten: refreshAfterNewSubjectArea,
+      });
+    }),
     vscode.commands.registerCommand(
       'erdStudio.createDomain',
       async (layerArg?: Layer) => {
@@ -1980,6 +1999,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             : domainData;
           fs.writeFileSync(filePath, JSON.stringify(fileData, null, 2) + '\n', { encoding: 'utf-8', flag: 'wx' });
           telemetry.feature('domainCreated');
+          // A blank start in a folder without dbt (logical-only mode).
+          if (!hasDbt) { telemetry.feature('blankDiagram'); }
         } catch (err) {
           subjectAreasCreatedHere.delete(filePath);
           if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
@@ -2753,12 +2774,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (outcome.message !== SETUP_CANCELLED_MESSAGE) {
           void vscode.window.showErrorMessage(`ERD Studio: ${outcome.message}`);
         }
-        return;
-      }
-      // Without dbt the guided setup can't run yet, and every button below
-      // starts it: the message (which says what to ask instead) is the whole toast.
-      if (!hasDbt) {
-        void vscode.window.showInformationMessage(outcome.message);
         return;
       }
       // Offer an Open button for each assistant the editor can open, and one

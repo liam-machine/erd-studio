@@ -13,7 +13,7 @@ export const list_domains = {
     inputSchema: {
       project_path: z
         .string()
-        .describe('Absolute path to the dbt project root (directory containing dbt_project.yml).'),
+        .describe('Absolute path to the dbt project root (directory containing dbt_project.yml), or a folder holding .erd-studio/ with no dbt project.'),
       layer: z
         .string()
         .optional()

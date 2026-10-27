@@ -91,7 +91,7 @@ read `.agents/skills/` (Copilot and Cursor also read `.claude/skills/`). Usual c
    assistant it detects. If it still does not detect theirs (an assistant installed where VS Code
    cannot see it), run **ERD Studio: Install AI Coding Harness** instead and tick
    "Agent Skills — GitHub Copilot, Codex, Gemini CLI, Cursor".
-4. Gemini CLI has no per-skill command — ask it in a sentence: "Set up ERD Studio for this dbt
+4. Gemini CLI has no per-skill command — ask it in a sentence: "Set up ERD Studio for this
    project."
 
 ## Windows
@@ -194,9 +194,14 @@ and remove the old entry. Leave any the user says were drawn that way on purpose
 **Seen as:** doctor reports `project.found: false`, or a project name the user does not
 recognise.
 
-The helper looks for `dbt_project.yml` in the current folder, its parents, then a few levels
-down. In a repository with several dbt projects, ask which one and pass `--project <folder>` on
+The helper looks for `dbt_project.yml` in the current folder and its parents — stopping at
+the first folder that holds `.erd-studio/`, which is then the project when no dbt project is
+found — then a few levels down. In a repository with several dbt projects, ask which one and pass `--project <folder>` on
 every helper command from then on.
+
+With no dbt project anywhere, it uses the nearest folder holding `.erd-studio/` (this one or
+above) and reports `dbtProject: false` with `skippedChecks`: that is a folder without dbt, not a
+wrong project — follow `references/without-dbt.md`.
 
 ## The project is very large
 

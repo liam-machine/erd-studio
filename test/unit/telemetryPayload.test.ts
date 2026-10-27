@@ -447,7 +447,8 @@ describe('allowlists agree with the Worker', () => {
   });
 
   it('appends the DBML round-trip keys at the very end: exports, imports and a cancel as features, a failed import as an error', () => {
-    expect(FEATURES.slice(-6)).toEqual(['exportDbmlRich', 'exportAll', 'importDbml', 'importDbmlLayout', 'importDbmlCancelled', 'importDbmlInvalid']);
+    const at = FEATURES.indexOf('exportDbmlRich');
+    expect(FEATURES.slice(at, at + 6)).toEqual(['exportDbmlRich', 'exportAll', 'importDbml', 'importDbmlLayout', 'importDbmlCancelled', 'importDbmlInvalid']);
     expect(ERROR_CODES.slice(-1)).toEqual(['importDbmlFailed']);
     let s = emptyCounters('2026-10-26');
     s = recordFeature(s, 'exportDbmlRich');
@@ -457,6 +458,18 @@ describe('allowlists agree with the Worker', () => {
     const body = buildHeartbeat(s, ENV);
     expect(body.features).toEqual({ exportDbmlRich: 1, importDbml: 1, importDbmlInvalid: 1 });
     expect(body.errors).toEqual({ importDbmlFailed: 1 });
+  });
+
+  it('appends the logical-only keys at the very end, after the DBML round trip: presence once a day, starts counted', () => {
+    expect(FEATURES.slice(-3)).toEqual(['logicalOnlyProject', 'exampleDiagram', 'blankDiagram']);
+    expect(FEATURES.indexOf('logicalOnlyProject')).toBe(FEATURES.indexOf('importDbmlInvalid') + 1);
+    let s = emptyCounters('2026-10-27');
+    s = recordFeatureOnce(s, 'logicalOnlyProject');
+    s = recordFeatureOnce(s, 'logicalOnlyProject');
+    s = recordFeature(s, 'exampleDiagram');
+    s = recordFeature(s, 'blankDiagram');
+    s = recordFeature(s, 'blankDiagram');
+    expect(buildHeartbeat(s, ENV).features).toEqual({ logicalOnlyProject: 1, exampleDiagram: 1, blankDiagram: 2 });
   });
 
   it('appends the saveFailed split as one run after domainLoadConflict, as errors beside saveFailed', () => {
