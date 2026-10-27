@@ -47,6 +47,8 @@ export function AddExistingTableDialog() {
   const existingModels = useEditorStore((s) => s.existingModels);
   const manifestModels = useEditorStore((s) => s.manifestModels);
   const modelFolder = useEditorStore((s) => s.domain?.modelFolder);
+  // No dbt project: the only source is the Table Library, so no dbt advice.
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
   // The host adds several at once only into a v5 domain (`addExistingModels`).
   const canPickMany = useEditorStore((s) => (s.domain?.schemaVersion ?? 5) >= 5);
   const send = useSend();
@@ -213,7 +215,11 @@ export function AddExistingTableDialog() {
           <div className="add-existing-model-dialog__empty">
             <p>No tables available to add.</p>
             <p className="add-existing-model-dialog__empty-hint">
-              {modelFolder ? (
+              {logicalOnly ? (
+                <>
+                  Tables you create in any diagram are saved to the Table Library and can be added here.
+                </>
+              ) : modelFolder ? (
                 <>
                   No dbt models found in <code>{modelFolder}/</code>. Add <code>.yml</code> schema files to your dbt project or run <code>dbt compile</code>.
                 </>

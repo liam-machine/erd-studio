@@ -120,7 +120,7 @@ import type { ReportTrackingService } from '../services/reportTrackingService';
 import type { CatalogService } from '../services/catalogService';
 import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
-import { findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
+import { ADD_FROM_DBT_NEEDS_DBT_MESSAGE, findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
 import type {
   AddRelationshipMessage,
   AnalyzeFeedbackMessage,
@@ -644,6 +644,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** @see catalogService */
   setCatalogService(catalogService: CatalogService | undefined): void {
     this.catalogService = catalogService;
+  }
+
+  /**
+   * Logical-only mode: the open root has no dbt_project.yml, so there is no
+   * Physical stage to show or compare against. Set once by activate(), same
+   * pattern as the other setters. While true, every logical payload carries
+   * `logicalOnly: true`, a physical switch is answered with the logical stage,
+   * a Diff request is answered with no report, and Add Tables from dbt
+   * explains itself instead of listing models.
+   */
+  private logicalOnly = false;
+
+  /** @see logicalOnly */
+  setLogicalOnly(logicalOnly: boolean): void {
+    this.logicalOnly = logicalOnly;
+  }
+
+  /** `{ logicalOnly: true }` for a logical payload in logical-only mode, else nothing (absent = Physical available). */
+  private logicalOnlyFlag(): { logicalOnly?: true } {
+    return this.logicalOnly ? { logicalOnly: true } : {};
   }
 
   /**
@@ -1351,6 +1371,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // above has already refused it there. The QuickPick runs outside
             // the edit queue (it can stay open for a while); the edit itself
             // is queued and re-reads the document.
+            if (this.logicalOnly) {
+              // No dbt project: nothing to list. The webview hides the button;
+              // a stale or hand-sent message still gets an answer.
+              void vscode.window.showInformationMessage(ADD_FROM_DBT_NEEDS_DBT_MESSAGE);
+              break;
+            }
             const payloadError = validateAddModelsFromDbtPayload((message as { payload?: unknown }).payload);
             if (payloadError) {
               this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add tables from dbt: ${payloadError}` } });
@@ -2852,6 +2878,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       const key = panelKey ?? document.uri.toString();
       const panel = this.openPanels.get(key);
+      // Logical-only: there is no Physical stage to restore into.
+      if (panel && this.logicalOnly) { panel.activeStage = 'logical'; }
       const activeStage = panel?.activeStage ?? 'logical';
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
@@ -2903,6 +2931,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           welcomeDismissed,
           ...(autoLayout ? { autoLayout: true } : {}),
           ...this.manifestHintFlag(),
+          ...this.logicalOnlyFlag(),
         });
         if (options.persistPositions) {
           this.recordCanvasOpen(document, 'logical', displayDomain.models.length, catalog !== undefined);
@@ -2940,6 +2969,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * and only for logical payloads.
    */
   private manifestHintFlag(): { manifestMissing?: true } {
+    if (this.logicalOnly) return {};
     if (!this.manifestService.isMissing) return {};
     // A folder that is not a dbt project (#111) will never have a manifest.
     if (!hasDbtProjectFile(this.workspaceRoot)) return {};
@@ -2956,10 +2986,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // Loaded a moment ago, so this cannot really fail; v5 is the only other loadable format.
     }
     telemetry.canvasOpened(stage, format, modelCount);
-    telemetry.manifest(this.manifestService.isMissing ? 'missing' : this.manifestService.isStale ? 'stale' : 'ok');
-    // #113: where a missing manifest is met (once per day).
-    if (this.manifestService.isMissing) {
-      telemetry.featureOnce(stage === 'logical' ? 'manifestMissingCanvas' : 'manifestMissingPhysical');
+    // Without dbt the manifest service is disabled and reports neither missing
+    // nor stale: recording that as 'ok' would count a plain folder as a fresh
+    // manifest. The day's manifest state stays 'unknown' instead.
+    if (!this.logicalOnly) {
+      telemetry.manifest(this.manifestService.isMissing ? 'missing' : this.manifestService.isStale ? 'stale' : 'ok');
+      // #113: where a missing manifest is met (once per day).
+      if (this.manifestService.isMissing) {
+        telemetry.featureOnce(stage === 'logical' ? 'manifestMissingCanvas' : 'manifestMissingPhysical');
+      }
     }
     telemetry.catalog(hasCatalog);
     if (stage === 'logical') this.recordRelationshipState(document);
@@ -5124,6 +5159,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const panel = this.openPanels.get(panelKey);
       if (!panel) return;
 
+      // Logical-only: no Physical stage. A physical request (a stale webview,
+      // Alt+2, a tree "open in physical") is answered with the logical stage,
+      // echoing requestId so the webview accepts the reply.
+      if (this.logicalOnly) { targetStage = 'logical'; }
+
       // Update tracked stage
       panel.activeStage = targetStage;
 
@@ -5156,7 +5196,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // Logical — extract from unified file
         const domain = this.subjectAreaService.getSubjectAreaStage(document.uri.fsPath, { dbtKeyIndex });
         const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
-        this.post(webview, { type: 'stageData', payload: displayDomain, ...reply, ...this.manifestHintFlag() });
+        this.post(webview, { type: 'stageData', payload: displayDomain, ...reply, ...this.manifestHintFlag(), ...this.logicalOnlyFlag() });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -5177,7 +5217,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     payload: { enabled: boolean; compareAgainst?: Stage },
   ): Promise<void> {
-    if (!payload.enabled || !payload.compareAgainst) {
+    // Logical-only: nothing to compare against, and no staleness check.
+    if (!payload.enabled || !payload.compareAgainst || this.logicalOnly) {
       const panelEntry = this.openPanels.get(panelKey);
       if (panelEntry) {
         panelEntry.lastDiscrepancyReport = null;

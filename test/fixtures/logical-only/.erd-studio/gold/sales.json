@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 6,
+  "subjectArea": "sales",
+  "layer": "gold",
+  "description": "A diagram in a folder with no dbt project (logical-only mode)",
+  "logical": {
+    "tables": [
+      "customer"
+    ],
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {
+      "customer": {
+        "x": 40,
+        "y": 40
+      }
+    }
+  }
+}

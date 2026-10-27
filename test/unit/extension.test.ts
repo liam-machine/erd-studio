@@ -42,9 +42,9 @@ describe('resolveDbtProjectRoot', () => {
     expect(resolveDbtProjectRoot([], '')).toBeUndefined();
   });
 
-  it('returns undefined when nothing contains dbt_project.yml', () => {
+  it('opens the folder itself (logical-only) when nothing contains dbt_project.yml', () => {
     fs.mkdirSync(path.join(root, 'src'));
-    expect(resolveDbtProjectRoot([root], '')).toBeUndefined();
+    expect(resolveDbtProjectRoot([root], '')).toBe(root);
   });
 
   it('returns the workspace folder itself when it holds dbt_project.yml', () => {
@@ -84,7 +84,9 @@ describe('resolveDbtProjectRoot', () => {
     for (const skip of ['node_modules', 'dbt_packages', '.git', 'target', '.venv']) {
       makeDbtProject(path.join(skip, 'pkg'));
     }
-    expect(resolveDbtProjectRoot([root], '')).toBeUndefined();
+    // No dbt project found below the skipped folders: the folder itself opens, logical-only.
+    expect(findDbtProjectCandidates([root])).toEqual([]);
+    expect(resolveDbtProjectRoot([root], '')).toBe(root);
 
     const real = makeDbtProject('real');
     expect(resolveDbtProjectRoot([root], '')).toBe(real);
@@ -92,7 +94,9 @@ describe('resolveDbtProjectRoot', () => {
 
   it('does not search deeper than the depth limit', () => {
     makeDbtProject('l1/l2/l3/l4/project');
-    expect(resolveDbtProjectRoot([root], '')).toBeUndefined();
+    // Too deep to be found: the folder itself opens, logical-only.
+    expect(findDbtProjectCandidates([root])).toEqual([]);
+    expect(resolveDbtProjectRoot([root], '')).toBe(root);
     const d3 = makeDbtProject('x1/x2/project3');
     expect(resolveDbtProjectRoot([root], '')).toBe(d3);
   });

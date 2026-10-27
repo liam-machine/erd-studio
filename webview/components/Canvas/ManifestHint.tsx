@@ -26,9 +26,12 @@ export const ManifestHint: React.FC = () => {
   const manifestMissing = useEditorStore((s) => s.manifestMissing);
   const dismissed = useEditorStore((s) => s.manifestHintDismissed);
   const dismiss = useEditorStore((s) => s.dismissManifestHint);
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
   const send = useSend();
 
-  if (!manifestMissing || dismissed) { return null; }
+  // No dbt project, nothing for `dbt parse` to do (the host never sets the
+  // flag then either; this keeps the two from disagreeing).
+  if (!manifestMissing || dismissed || logicalOnly) { return null; }
   if (domain?.stage !== 'logical' || domain.models.length === 0) { return null; }
 
   const onDismiss = () => {

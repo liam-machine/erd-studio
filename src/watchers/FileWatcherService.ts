@@ -10,6 +10,10 @@
  *   physical stage refresh (onDbtYmlChanged)
  * - dbt_project.yml (project configuration) → reload prompt only when path config changes
  *
+ * The dbt-only watchers (artifacts, dbt sources, dbt_project.yml) are not
+ * created when the root has no dbt_project.yml (`{ dbt: false }`,
+ * logical-only mode): a plain folder's `models/` or `target/` is not dbt's.
+ *
  * All change events are debounced by 300ms to prevent rapid-fire triggers
  * during batch operations (e.g., git checkout, dbt compile). Delete events for
  * domain files are additionally coalesced into a single onSemanticFileDeleted
@@ -45,6 +49,15 @@ import {
 } from '../services/dbtProjectConfig';
 
 const DEBOUNCE_DELAY_MS = 300;
+
+export interface FileWatcherOptions {
+  /**
+   * False when the root has no dbt_project.yml (logical-only mode): only the
+   * semantic-dir watchers are created, never the manifest / catalog, dbt
+   * source or dbt_project.yml ones. Defaults to true.
+   */
+  dbt?: boolean;
+}
 
 /**
  * Top-level dbt_project.yml keys whose value feeds a watcher glob. Includes the
@@ -139,15 +152,17 @@ export class FileWatcherService implements vscode.Disposable {
     private readonly semanticDir: string = '.erd-studio',
     dbtConfig?: DbtProjectConfig,
     private readonly ownWriteTracker: OwnWriteTracker = ownWrites,
+    options: FileWatcherOptions = {},
   ) {
+    const watchDbt = options.dbt !== false;
     this.dbtConfig = dbtConfig ?? readDbtProjectConfig(workspaceRoot);
     this.semanticRoot = path.join(workspaceRoot, semanticDir);
-    this.lastProjectPaths = this.readProjectPaths();
-    this.setupArtifactWatcher();
+    this.lastProjectPaths = watchDbt ? this.readProjectPaths() : '';
+    if (watchDbt) { this.setupArtifactWatcher(); }
     this.setupSemanticWatcher();
-    this.setupProjectConfigWatcher();
+    if (watchDbt) { this.setupProjectConfigWatcher(); }
     this.setupTableWatcher();
-    this.setupDbtSourceWatcher();
+    if (watchDbt) { this.setupDbtSourceWatcher(); }
   }
 
   /**

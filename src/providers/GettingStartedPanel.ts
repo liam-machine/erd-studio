@@ -6,9 +6,12 @@
  *
  * A singleton, independent of the domain canvas: it has its own protocol
  * (`src/types/gettingStarted.ts`) and its own self-contained HTML — no React
- * bundle. Project-specific behaviour is injected through `GettingStartedDeps`
- * so the panel also opens with no dbt project (`workspaceRoot: null`), where
- * the steps collapse to "Open a folder containing dbt_project.yml".
+ * bundle. Project-specific behaviour is injected through `GettingStartedDeps`.
+ * The page has three states (`GettingStartedPageMode`): no folder open
+ * (`workspaceRoot: null`: "Open the folder your data model lives in"), a
+ * folder without dbt (`logicalOnly`: New diagram, Import DBML, the AI cards
+ * and "Using dbt? Open its folder to compare"), and a dbt project (Draw from
+ * dbt and the guided setup). The video autoplays only in the dbt state.
  *
  * Also home to the host-side pieces the panel and `erdStudio.setupAiHelper`
  * share: AI assistant detection (installed extensions, a PATH scan and the
@@ -31,10 +34,12 @@ import {
   SETUP_PROMPT,
   buildGettingStartedHtml,
   describeWrittenFiles,
+  gettingStartedPageMode,
   formatProjectSummary,
   isGettingStartedToHost,
   setupReadyMessage,
   type ClaudeAvailability,
+  type GettingStartedPageMode,
   type GettingStartedStatus,
   type GettingStartedToHost,
   type GettingStartedToWebview,
@@ -60,6 +65,10 @@ import { detectConventions, type ConventionModel } from '../cli/conventions';
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
 /** The no-AI first diagram (`extension.ts`): the Welcome panel's lead button runs it. */
 export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
+/** The logical-only page's lead button: a blank diagram, no dbt needed. */
+export const CREATE_DOMAIN_COMMAND = 'erdStudio.createDomain';
+/** The logical-only page's "Have a DBML file?" button. */
+export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
 export const GETTING_STARTED_TITLE = 'Welcome to ERD Studio';
 
 /** Shipped media, relative to the extension root (spec addendum V4/V5). */
@@ -492,6 +501,8 @@ export interface SetupAiHelperDeps {
   launcherOptions: CliLauncherOptions;
   /** Detected assistants: which skill folders to install (`recommendedSkillTargets`) and whom the message names. */
   assistants: readonly AiAssistantId[];
+  /** The root has no dbt_project.yml: the success message must not send the user to the dbt-only guided setup. */
+  logicalOnly?: boolean;
   /** The Replace / Keep mine modal; undefined when dismissed. */
   confirmReplace(unmanaged: string[], targets: SkillHarnessTarget[]): Promise<ReplaceChoice>;
 }
@@ -581,8 +592,8 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
       ok: true,
       filesWritten,
       message: result.status === 'unchanged' && filesWritten.length === 0
-        ? `Everything was already up to date. ${setupReadyMessage(assistants)}`
-        : setupReadyMessage(assistants),
+        ? `Everything was already up to date. ${setupReadyMessage(assistants, { logicalOnly: deps.logicalOnly })}`
+        : setupReadyMessage(assistants, { logicalOnly: deps.logicalOnly }),
     };
   } catch (err) {
     telemetry.error('setupFailed');
@@ -612,9 +623,22 @@ export interface GettingStartedDeps {
   openCanvas(): Promise<void>;
   /**
    * The one-line project summary (`computeProjectSummary`). Optional: without
-   * it, or when it throws, the line is simply not shown.
+   * it, or when it throws, the line is simply not shown. Never asked for in
+   * the logical-only state (it describes dbt models).
    */
   getProjectSummary?(): Promise<ProjectSummary | null>;
+  /**
+   * The open folder has no `dbt_project.yml` (contract 9): the page shows its
+   * logical-only state. Used as the status's `logicalOnly` when `getStatus()`
+   * does not set it, and to pick the first page before any status arrives.
+   * Absent: a dbt project, as before logical-only mode.
+   */
+  logicalOnly?: boolean;
+}
+
+/** The page the panel expects from its deps alone (a `status` can still change it). */
+export function pageModeForDeps(deps: Pick<GettingStartedDeps, 'workspaceRoot' | 'logicalOnly'>): GettingStartedPageMode {
+  return gettingStartedPageMode({ hasProject: deps.workspaceRoot !== null, logicalOnly: deps.logicalOnly });
 }
 
 export class GettingStartedPanel {
@@ -661,7 +685,7 @@ export class GettingStartedPanel {
     deps: GettingStartedDeps,
   ) {
     this.deps = deps;
-    panel.webview.html = GettingStartedPanel.renderHtml(panel.webview, extensionUri);
+    panel.webview.html = GettingStartedPanel.renderHtml(panel.webview, extensionUri, pageModeForDeps(deps));
     this.disposables.push(
       panel.webview.onDidReceiveMessage((message: unknown) => {
         void this.handleMessage(message).catch((err) => {
@@ -673,7 +697,7 @@ export class GettingStartedPanel {
     );
   }
 
-  private static renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+  private static renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri, mode: GettingStartedPageMode): string {
     const media = (file: string): string | null => {
       const uri = vscode.Uri.joinPath(extensionUri, ...GETTING_STARTED_MEDIA.dir, file);
       return fs.existsSync(uri.fsPath) ? webview.asWebviewUri(uri).toString() : null;
@@ -685,6 +709,7 @@ export class GettingStartedPanel {
       posterUri: media(GETTING_STARTED_MEDIA.poster),
       cues: GETTING_STARTED_CUES,
       transcript: GETTING_STARTED_TRANSCRIPT,
+      mode,
     });
   }
 
@@ -698,15 +723,19 @@ export class GettingStartedPanel {
     // fresh status postSetupResult sends when it ends is the one that counts.
     const current = (): boolean => seq === this.statusSeq && this.setupsRunning === 0;
     try {
-      const status = await this.deps.getStatus();
+      const fetched = await this.deps.getStatus();
       if (!current()) { return; }
+      const status: GettingStartedStatus = {
+        ...fetched,
+        logicalOnly: fetched.hasProject && (fetched.logicalOnly ?? this.deps.logicalOnly === true),
+      };
       // The cards go out at once; the summary line can need a manifest parse
       // (seconds on a large project), so it follows in a second status when
       // there is one, rather than holding the whole panel back. That second
       // message is dropped if a newer postStatus (or a setup) started while
       // the summary was being worked out — its `status` would be stale.
       this.post({ type: 'status', payload: { ...status, summary: null } });
-      if (!status.hasProject) { return; }
+      if (gettingStartedPageMode(status) !== 'dbt') { return; }
       const summary = await this.projectSummary();
       if (summary && current()) { this.post({ type: 'status', payload: { ...status, summary } }); }
     } catch (err) {
@@ -804,6 +833,15 @@ export class GettingStartedPanel {
         telemetry.feature('welcomeDrawFromDbt');
         await vscode.commands.executeCommand(DRAW_FROM_DBT_COMMAND);
         // The draft opens in its own tab; this one should now lead with "Open your diagrams".
+        await this.postStatus();
+        break;
+      case 'createDomain':
+        await vscode.commands.executeCommand(CREATE_DOMAIN_COMMAND);
+        // The new diagram opens in its own tab; this one should now lead with "Open your diagrams".
+        await this.postStatus();
+        break;
+      case 'importDbml':
+        await vscode.commands.executeCommand(IMPORT_DBML_COMMAND);
         await this.postStatus();
         break;
       case 'openExternal':

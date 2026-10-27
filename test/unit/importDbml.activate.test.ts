@@ -81,14 +81,41 @@ afterEach(async () => {
 });
 
 describe('erdStudio.importDbml in activate()', () => {
-  it('without a project: the no-project stub, and no legacy alias', async () => {
+  it('in an empty window: the no-project stub, and no legacy alias', async () => {
     const warn = vi.mocked(vscode.window.showWarningMessage);
     await activate(context);
 
     expect(count('erdStudio.importDbml')).toBe(1);
     expect(count('dbtSemantic.importDbml')).toBe(0);
     await vscode.commands.executeCommand('erdStudio.importDbml');
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('No dbt project found'), 'Open Folder…', 'Open Settings');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Open a folder first'), 'Open Folder…', 'Open Settings');
+  });
+
+  it('in a plain folder (no dbt_project.yml, no .erd-studio): makes layers.json and the diagram in tables/', async () => {
+    const plain = path.join(root, 'plain');
+    fs.mkdirSync(plain);
+    vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(plain), name: 'plain', index: 0 }];
+    await activate(context);
+
+    const dbml = path.join(inbox, 'shop.dbml');
+    fs.writeFileSync(dbml, 'Table shop_customer {\n  id int [pk]\n}\n');
+    vi.spyOn(vscode.window, 'showOpenDialog').mockResolvedValue([vscode.Uri.file(dbml)] as never);
+    vi.spyOn(vscode.workspace.fs, 'readFile').mockImplementation((async (uri: vscode.Uri) => fs.readFileSync(uri.fsPath)) as never);
+    vi.spyOn(vscode.workspace.fs, 'stat').mockImplementation((async (uri: vscode.Uri) => {
+      if (!fs.existsSync(uri.fsPath)) throw new Error('FileNotFound');
+      return { type: 1, ctime: 0, mtime: 0, size: 0 };
+    }) as never);
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ id?: string }>) =>
+      items.find((i) => i.id === 'gold')) as never);
+    vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o?: { value?: string }) => o?.value) as never);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+      (typeof args[1] === 'object' && (args[1] as { modal?: boolean }).modal ? 'Import' : undefined)) as never);
+
+    await vscode.commands.executeCommand('erdStudio.importDbml');
+
+    expect(fs.existsSync(path.join(plain, '.erd-studio', 'layers.json'))).toBe(true);
+    const doc = JSON.parse(fs.readFileSync(path.join(plain, '.erd-studio', 'gold', 'shop.json'), 'utf-8'));
+    expect(doc.logical.tables).toEqual(['shop_customer']);
   });
 
   it('with a project: picks the file, reads it and its layout through workspace.fs, writes the diagram and opens it', async () => {

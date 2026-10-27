@@ -1,7 +1,7 @@
 {
   "name": "erd-studio",
   "displayName": "ERD Studio",
-  "description": "Visual ERD designer for dbt: draw your tables on a canvas, keep the design as YAML in your repo, compare it with dbt.",
+  "description": "Logical data modeling in Git: draw ERDs in VS Code, saved as plain YAML your AI assistant can read. DBML import and export, no lock-in. Compare with dbt.",
   "version": "1.7.2",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
@@ -18,15 +18,20 @@
   },
   "pricing": "Free",
   "keywords": [
-    "dbt",
-    "dbt-core",
-    "dbt model",
     "ERD",
-    "erd diagram",
-    "entity relationship diagram",
-    "database diagram",
+    "DBML",
+    "dbdiagram",
+    "logical data model",
     "data model",
     "data modeling",
+    "data model as code",
+    "entity relationship diagram",
+    "erd diagram",
+    "database diagram",
+    "schema design",
+    "database design",
+    "dbt",
+    "dbt-core",
     "dimensional modeling",
     "kimball",
     "star schema",
@@ -35,9 +40,6 @@
     "analytics engineering",
     "snowflake",
     "databricks",
-    "duckdb",
-    "semantic layer",
-    "visualization",
     "AI",
     "claude",
     "copilot",
@@ -52,7 +54,8 @@
     "Other"
   ],
   "activationEvents": [
-    "workspaceContains:**/dbt_project.yml"
+    "workspaceContains:**/dbt_project.yml",
+    "workspaceContains:.erd-studio"
   ],
   "main": "./dist/extension.js",
   "workspaces": [
@@ -114,7 +117,8 @@
       {
         "command": "erdStudio.createDomain",
         "title": "New Subject Area",
-        "category": "ERD Studio"
+        "category": "ERD Studio",
+        "icon": "$(add)"
       },
       {
         "command": "erdStudio.setupSemanticDirectory",
@@ -338,12 +342,17 @@
     "viewsWelcome": [
       {
         "view": "erdStudio.domainTree",
-        "contents": "No dbt project in this folder yet.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video, a sample project to try, and how to open your own.",
-        "when": "!erdStudio.hasDbtProject"
+        "contents": "Design your data model as plain files in a Git repo.\n\n[Open Folder](command:workbench.action.files.openFolder)\n\nAny folder works. If it holds a dbt project, ERD Studio also shows what dbt built.",
+        "when": "workspaceFolderCount == 0"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\nAlready have a DBML file, from dbdiagram.io or another tool? [Import DBML](command:erdStudio.importDbml)\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
+        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nSaved as YAML and JSON in .erd-studio/, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nUsing dbt? Open its folder to compare your design with what dbt built.\n\n[Get started](command:erdStudio.showGettingStarted)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\nRather start blank? [New Diagram](command:erdStudio.createDomain)\n\nAlready have a DBML file, from dbdiagram.io or another tool? [Import DBML](command:erdStudio.importDbml) Export back to DBML or Mermaid any time — an open format, no lock-in.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
         "when": "erdStudio.hasDbtProject"
       },
       {
@@ -353,19 +362,20 @@
       },
       {
         "view": "erdStudio.modelLibrary",
-        "contents": "No tables found.\n\nTables are stored as YAML files in .erd-studio/logical-models/, grouped into one folder per layer.\n\nAdd tables to a subject area using the ERD editor to create them here."
+        "contents": "No tables found.\n\nTables are stored as one YAML file each under .erd-studio/.\n\nAdd tables to a subject area using the ERD editor to create them here."
       }
     ],
     "walkthroughs": [
       {
         "id": "erdStudio.getStarted",
         "title": "Get started with ERD Studio",
-        "description": "Draw your dbt project as an ERD in a minute, then enrich it with your AI assistant.",
+        "description": "Design your data model in Git — from scratch, from DBML or from dbt — then let your AI assistant fill in the detail.",
         "steps": [
           {
             "id": "watch",
             "title": "Watch the one-minute tour",
             "description": "A one-minute video: draw your dbt project with Draw from dbt, explore the diagram, and compare it with what dbt built. No AI needed.\n[Watch the video](command:erdStudio.showGettingStarted)",
+            "when": "erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/watch.svg",
               "altText": "A video player showing a small ERD diagram."
@@ -375,33 +385,36 @@
             ]
           },
           {
-            "id": "sample",
-            "title": "No dbt project? Try the sample",
-            "description": "A small dbt project to try ERD Studio on.\n[Try the sample project](command:erdStudio.trySampleProject)",
-            "media": {
-              "svg": "media/walkthrough/sample.svg",
-              "altText": "A sample dbt project folder and the star schema diagram drawn from it."
-            },
-            "completionEvents": [
-              "onCommand:erdStudio.trySampleProject"
-            ]
-          },
-          {
             "id": "openProject",
-            "title": "Open your dbt project",
-            "description": "Open the folder that holds dbt_project.yml. ERD Studio finds it by itself.\n[Open Folder](command:workbench.action.files.openFolder)",
+            "title": "Open the folder your data model lives in",
+            "description": "Any folder works: ERD Studio keeps your design in .erd-studio/ next to your code. If the folder holds a dbt project, ERD Studio finds it by itself and also shows what dbt built.\n[Open Folder](command:workbench.action.files.openFolder)",
+            "when": "workspaceFolderCount == 0",
             "media": {
               "svg": "media/walkthrough/open-project.svg",
               "altText": "A project file list with dbt_project.yml highlighted."
             },
             "completionEvents": [
-              "onContext:erdStudio.hasDbtProject"
+              "onContext:erdStudio.hasProject"
+            ]
+          },
+          {
+            "id": "newDiagram",
+            "title": "Draw your first data model — no dbt needed",
+            "description": "Start a blank diagram and add tables on the canvas. Each table is a YAML file in .erd-studio/ that you commit and review like code.\n[New Diagram](command:erdStudio.createDomain)",
+            "when": "!erdStudio.hasDbtProject",
+            "media": {
+              "svg": "media/walkthrough/new-diagram.svg",
+              "altText": "A new diagram with its first table, saved as YAML and JSON files in .erd-studio."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.createDomain"
             ]
           },
           {
             "id": "draw",
             "title": "Draw your dbt project — no AI needed",
             "description": "Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.\n[Draw from dbt](command:erdStudio.drawFromDbt)",
+            "when": "erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/draw.svg",
               "altText": "dbt models picked from a list and drawn as a diagram with relationships."
@@ -411,15 +424,40 @@
             ]
           },
           {
+            "id": "importDbml",
+            "title": "Start from a DBML file",
+            "description": "From dbdiagram.io or any DBML tool. Export back to DBML or Mermaid any time: an open format, no lock-in.\n[Import DBML…](command:erdStudio.importDbml)",
+            "media": {
+              "svg": "media/walkthrough/import-dbml.svg",
+              "altText": "A DBML file turned into a diagram, with DBML and Mermaid export."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.importDbml"
+            ]
+          },
+          {
             "id": "enrich",
             "title": "Enrich it with your AI assistant",
-            "description": "Add grain, keys, rationale and your team's modelling style. This installs a guide for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; then type /erd-studio-setup in your assistant.\n[Set Up My AI Helper](command:erdStudio.setupAiHelper)",
+            "description": "Add grain, keys, rationale and your team's modelling style. This installs a guide for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; then type /erd-studio-setup in your assistant (needs a dbt project today).\n[Set Up My AI Helper](command:erdStudio.setupAiHelper)",
             "media": {
               "svg": "media/walkthrough/enrich.svg",
               "altText": "A table with key badges, typed columns and a grain note."
             },
             "completionEvents": [
               "onCommand:erdStudio.setupAiHelper"
+            ]
+          },
+          {
+            "id": "sample",
+            "title": "Using dbt? Try the sample project",
+            "description": "A small dbt project to compare a design with what dbt built.\n[Try the sample project](command:erdStudio.trySampleProject)",
+            "when": "!erdStudio.hasDbtProject",
+            "media": {
+              "svg": "media/walkthrough/sample.svg",
+              "altText": "A sample dbt project folder and the star schema diagram drawn from it."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.trySampleProject"
             ]
           }
         ]
@@ -510,8 +548,13 @@
           "group": "navigation@0"
         },
         {
+          "command": "erdStudio.createDomain",
+          "when": "view == erdStudio.domainTree && erdStudio.hasProject",
+          "group": "navigation@0"
+        },
+        {
           "command": "erdStudio.importDbml",
-          "when": "view == erdStudio.domainTree && erdStudio.hasDbtProject",
+          "when": "view == erdStudio.domainTree && erdStudio.hasProject",
           "group": "1_create@1"
         },
         {
@@ -543,6 +586,32 @@
           "command": "erdStudio.refreshMyReports",
           "when": "view == erdStudio.myReports",
           "group": "navigation@0"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "erdStudio.importDbml",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.drawFromDbt",
+          "when": "erdStudio.hasDbtProject"
+        },
+        {
+          "command": "erdStudio.syncDomainTags",
+          "when": "erdStudio.hasDbtProject"
+        },
+        {
+          "command": "erdStudio.selectDbtProject",
+          "when": "erdStudio.hasDbtProject"
+        },
+        {
+          "command": "erdStudio.refreshManifest",
+          "when": "erdStudio.hasDbtProject"
+        },
+        {
+          "command": "erdStudio.stripLegacyDomainTags",
+          "when": "erdStudio.hasDbtProject"
         }
       ]
     },

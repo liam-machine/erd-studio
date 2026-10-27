@@ -954,16 +954,23 @@ describe('Import DBML — contributed', () => {
     });
     expect(NO_LEGACY_ALIAS.has(IMPORT_DBML_COMMAND)).toBe(true);
     expect(PRE_REGISTERED_COMMANDS.has(IMPORT_DBML_COMMAND)).toBe(false);
-    // Not hidden from the palette.
-    expect((pkg.contributes.menus.commandPalette ?? []).some((m) => m.command === IMPORT_DBML_COMMAND)).toBe(false);
+    // In the palette whenever a folder is open (a dbt project or not).
+    expect((pkg.contributes.menus.commandPalette ?? []).filter((m) => m.command === IMPORT_DBML_COMMAND))
+      .toEqual([{ command: IMPORT_DBML_COMMAND, when: 'erdStudio.hasProject' }]);
   });
 
-  it('is in the Subject Areas view\'s title menu and its "No diagrams yet" welcome, next to Draw from dbt', () => {
+  it('is in the Subject Areas view\'s title menu and both "No diagrams yet" welcomes (with and without dbt)', () => {
     expect(pkg.contributes.menus['view/title']).toContainEqual({
-      command: IMPORT_DBML_COMMAND, when: 'view == erdStudio.domainTree && erdStudio.hasDbtProject', group: '1_create@1',
+      command: IMPORT_DBML_COMMAND, when: 'view == erdStudio.domainTree && erdStudio.hasProject', group: '1_create@1',
     });
-    const welcome = pkg.contributes.viewsWelcome.find((v) => v.contents.startsWith('No diagrams yet.'))!;
-    expect(welcome.contents).toContain('(command:erdStudio.drawFromDbt)');
-    expect(welcome.contents).toContain('[Import DBML](command:erdStudio.importDbml)');
+    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject')!;
+    expect(dbt.contents.startsWith('No diagrams yet.')).toBe(true);
+    expect(dbt.contents).toContain('(command:erdStudio.drawFromDbt)');
+    expect(dbt.contents).toContain('[New Diagram](command:erdStudio.createDomain)');
+    expect(dbt.contents).toContain('[Import DBML](command:erdStudio.importDbml)');
+    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject')!;
+    expect(plain.contents.startsWith('No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)')).toBe(true);
+    expect(plain.contents).toContain('[Import DBML](command:erdStudio.importDbml)');
+    expect(plain.contents).not.toContain('erdStudio.drawFromDbt');
   });
 });

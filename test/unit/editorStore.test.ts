@@ -292,6 +292,52 @@ describe('editorStore discrepancy and sync', () => {
   });
 });
 
+describe('editorStore logical-only mode (no dbt project)', () => {
+  it('starts off, so an older host that never sends the flag keeps the Physical stage', () => {
+    expect(state().logicalOnly).toBe(false);
+  });
+
+  it('turning it on drops Diff, the report and every piece of sync state', () => {
+    state().setDomain(subjectArea('logical'));
+    startSyncSession();
+
+    state().setLogicalOnly(true);
+
+    const s = state();
+    expect(s.logicalOnly).toBe(true);
+    expect(s.discrepancyVisible).toBe(false);
+    expect(s.discrepancyCompareStage).toBeNull();
+    expect(s.discrepancyReport).toBeNull();
+    expect(s.syncMode).toBe(false);
+    expect(s.syncSelections).toEqual({});
+    expect(s.manifestStale).toBe(false);
+    expect(s.syncPlanGenerated).toBeNull();
+  });
+
+  it('closes the "Two Stages" modal without dismissing it', () => {
+    state().setWelcomeModalOpen(true);
+    state().setLogicalOnly(true);
+    expect(state().welcomeModalOpen).toBe(false);
+  });
+
+  it('turning it off touches nothing else', () => {
+    state().setLogicalOnly(true);
+    startSyncSession();
+    state().setLogicalOnly(false);
+    const s = state();
+    expect(s.logicalOnly).toBe(false);
+    expect(s.discrepancyVisible).toBe(true);
+    expect(s.syncMode).toBe(true);
+  });
+
+  it('setDomain leaves it alone (it also runs locally after a drag)', () => {
+    state().setLogicalOnly(true);
+    state().setDomain(subjectArea('logical'));
+    state().setDomain(subjectArea('logical', { description: 'reloaded' }));
+    expect(state().logicalOnly).toBe(true);
+  });
+});
+
 describe('editorStore column expansion', () => {
   it('expandAll / toggle / expandNew / collapseAll / setExpandedNodes', () => {
     const s = state();

@@ -210,7 +210,12 @@ function EditorCanvas() {
           // Follows every payload: one without the flag (dbt has since run)
           // hides the logical "Run dbt parse" hint.
           useEditorStore.getState().setManifestMissing(msg.manifestMissing === true);
-          if (!msg.welcomeDismissed) {
+          // No dbt project: no Physical tab, no Diff. Absent means today's
+          // behaviour, so an older host keeps both.
+          useEditorStore.getState().setLogicalOnly(msg.logicalOnly === true);
+          // "The Two Stages" explains a tab the user cannot see, so it waits
+          // (undismissed) until they open a dbt project.
+          if (!msg.welcomeDismissed && msg.logicalOnly !== true) {
             useEditorStore.getState().setWelcomeModalOpen(true);
           }
           break;
@@ -222,6 +227,7 @@ function EditorCanvas() {
           // Stage replies never ask for the first-open layout.
           useEditorStore.getState().setPendingAutoLayout(false);
           useEditorStore.getState().setManifestMissing(msg.manifestMissing === true);
+          useEditorStore.getState().setLogicalOnly(msg.logicalOnly === true);
           break;
         case 'discrepancyReport':
           setDiscrepancyReport(msg.payload);

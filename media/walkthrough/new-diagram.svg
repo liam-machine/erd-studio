@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" width="480" height="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <style>
+    .ew-bg{fill:var(--vscode-editor-background,#1e1e1e)}
+    .ew-card{fill:var(--vscode-editorWidget-background,#252526);stroke:var(--vscode-panel-border,#555555);stroke-width:1.5}
+    .ew-fg{fill:var(--vscode-foreground,#cccccc)}
+    .ew-muted{fill:var(--vscode-descriptionForeground,#999999)}
+    .ew-btn{fill:var(--vscode-button-background,#0e639c)}
+    .ew-btnfg{fill:var(--vscode-button-foreground,#ffffff)}
+    .ew-folder{fill:var(--vscode-textLink-foreground,#3794ff);fill-opacity:0.18;stroke:var(--vscode-textLink-foreground,#3794ff);stroke-width:1.5}
+  </style>
+  <!-- the files the diagram is saved as -->
+  <rect x="16" y="40" width="150" height="220" rx="8" class="ew-card"/>
+  <g transform="translate(28 56)">
+    <path d="M0 4a2 2 0 0 1 2-2h6l3 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" class="ew-folder"/>
+    <text x="30" y="15" font-size="11" font-weight="600" class="ew-fg">.erd-studio/</text>
+  </g>
+  <g font-size="10" class="ew-muted">
+    <g transform="translate(40 90)">
+      <path d="M0 2a2 2 0 0 1 2-2h8l4 4v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="22" y="11">layers.json</text>
+    </g>
+    <g transform="translate(40 118)">
+      <path d="M0 2a2 2 0 0 1 2-2h8l4 4v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="#60a5fa" stroke-width="1.2"/>
+      <text x="22" y="11" class="ew-fg">gold/sales.json</text>
+    </g>
+    <g transform="translate(40 146)">
+      <path d="M0 2a2 2 0 0 1 2-2h8l4 4v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="#60a5fa" stroke-width="1.2"/>
+      <text x="22" y="11" class="ew-fg">tables/customer.yml</text>
+    </g>
+  </g>
+  <!-- a git commit marker -->
+  <g transform="translate(40 196)">
+    <line x1="0" y1="10" x2="110" y2="10" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2" stroke-dasharray="3 3"/>
+    <circle cx="16" cy="10" r="6" class="ew-bg" stroke="#22c55e" stroke-width="2"/>
+    <text x="30" y="30" font-size="10" class="ew-muted">commit and review</text>
+  </g>
+  <!-- canvas -->
+  <rect x="182" y="24" width="282" height="252" rx="10" class="ew-bg" stroke="#60a5fa" stroke-width="1.5"/>
+  <g fill="var(--vscode-descriptionForeground,#999999)" opacity="0.35">
+    <circle cx="202" cy="44" r="1"/><circle cx="222" cy="44" r="1"/><circle cx="242" cy="44" r="1"/><circle cx="202" cy="64" r="1"/><circle cx="444" cy="256" r="1"/><circle cx="424" cy="256" r="1"/><circle cx="444" cy="236" r="1"/>
+  </g>
+  <!-- the first table -->
+  <g font-size="9" font-weight="600" class="ew-fg">
+    <g transform="translate(214 70)">
+      <rect width="112" height="66" rx="4" class="ew-card" stroke="#60a5fa" stroke-width="2"/>
+      <path d="M0 4a4 4 0 0 1 4-4h104a4 4 0 0 1 4 4v12H0z" fill="#60a5fa" fill-opacity="0.3"/>
+      <text x="8" y="11">customer</text>
+      <text x="8" y="30" font-size="8" fill="#f59e0b">PK</text>
+      <rect x="24" y="25" width="52" height="4" rx="2" class="ew-muted"/>
+      <rect x="24" y="39" width="66" height="4" rx="2" class="ew-muted"/>
+      <rect x="24" y="53" width="44" height="4" rx="2" class="ew-muted"/>
+    </g>
+  </g>
+  <!-- placeholder for the next table -->
+  <g transform="translate(340 168)">
+    <rect width="104" height="60" rx="4" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <path d="M52 20 V40 M42 30 H62" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="2" stroke-linecap="round"/>
+  </g>
+  <!-- New table button -->
+  <g transform="translate(214 222)">
+    <rect width="104" height="28" rx="14" class="ew-btn"/>
+    <path d="M18 14 H28 M23 9 V19" fill="none" stroke="var(--vscode-button-foreground,#ffffff)" stroke-width="2" stroke-linecap="round"/>
+    <text x="36" y="18" font-size="11" font-weight="600" class="ew-btnfg">New table</text>
+  </g>
+</svg>

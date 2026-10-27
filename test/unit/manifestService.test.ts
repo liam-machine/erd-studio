@@ -574,3 +574,27 @@ describe('ManifestService', () => {
     });
   });
 });
+
+describe('ManifestService — disabled (logical-only, no dbt_project.yml)', () => {
+  it('answers an empty, non-missing manifest without reading the disk or reporting a failure', async () => {
+    const failures: string[] = [];
+    const service = new ManifestService({ enabled: false, onLoadFailure: f => failures.push(f) });
+    // A real manifest is on disk here; a disabled service still ignores it.
+    const data = await service.loadManifest(FIXTURE_PROJECT_PATH);
+    expect(data.models.size).toBe(0);
+    expect(data.relationshipTests).toEqual([]);
+    expect(service.isMissing).toBe(false);
+    expect(service.isStale).toBe(false);
+    expect(service.getModelNames()).toEqual([]);
+    // A folder with no manifest at all is not "missing" either.
+    service.invalidate();
+    await service.loadManifest(path.resolve(FIXTURES_DIR, 'logical-only'));
+    expect(service.isMissing).toBe(false);
+    expect(failures).toEqual([]);
+  });
+
+  it('defaults to enabled', async () => {
+    const data = await new ManifestService({}).loadManifest(FIXTURE_PROJECT_PATH);
+    expect(data.models.size).toBe(4);
+  });
+});
