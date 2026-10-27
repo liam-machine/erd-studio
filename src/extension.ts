@@ -974,7 +974,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Ensure selectors.yml exists and is up to date at activation time so a
   // fresh `git clone` with pre-existing domain files gets a valid selector
   // set before the user makes any edits. Debounced so activation isn't
-  // blocked on disk I/O.
+  // blocked on disk I/O. A root without dbt_project.yml is never written to
+  // (regenerate() returns 'not-dbt-project').
   selectorsService.scheduleRegenerate();
 
   // Check for v4 → v5 migration (non-blocking)
@@ -2116,6 +2117,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             } else if (result.status === 'noop') {
               void vscode.window.showInformationMessage(
                 'No subject areas with tables found — selectors.yml was not created.',
+              );
+            } else if (result.status === 'not-dbt-project') {
+              void vscode.window.showInformationMessage(
+                'This folder is not a dbt project, so there is no selectors.yml to generate.',
               );
             }
             // For 'skipped': the onSkipped hook has already shown the

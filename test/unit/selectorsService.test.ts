@@ -59,6 +59,8 @@ describe('SelectorsService', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'selectors-svc-'));
+    // selectors.yml is a dbt file: every case below runs in a dbt project root.
+    fs.writeFileSync(path.join(tmpDir, 'dbt_project.yml'), 'name: test_project\n', 'utf-8');
   });
 
   afterEach(() => {
@@ -889,5 +891,77 @@ describe('SelectorsService', () => {
     const names = parsed.selectors.map((s) => s.name);
     expect(names).toContain('my_user');
     expect(names).toContain('domain_silver_d');
+  });
+});
+
+describe('SelectorsService in a folder that is not a dbt project (#111)', () => {
+  let tmpDir: string;
+  const domains: FakeSubjectArea[] = [
+    { domain: 'customer-360', layer: 'silver', filePath: '/dummy/silver/customer-360.json', models: ['dim_customer', 'fct_orders'] },
+  ];
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'selectors-plain-'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('writes nothing, even with subject areas that have tables', () => {
+    const onWritten = vi.fn();
+    const onSkipped = vi.fn();
+    const isFileDirtyInEditor = vi.fn(() => false);
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', {
+      onWritten, onSkipped, isFileDirtyInEditor,
+    });
+
+    const result = svc.regenerate();
+
+    expect(result).toEqual({ status: 'not-dbt-project', filePath: path.join(tmpDir, 'selectors.yml') });
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
+    expect(onWritten).not.toHaveBeenCalled();
+    expect(onSkipped).not.toHaveBeenCalled();
+  });
+
+  it('leaves an existing selectors.yml untouched, even a malformed one', () => {
+    const content = 'selectors: [unclosed\n';
+    writeSelectors(tmpDir, content);
+    const onSkipped = vi.fn();
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', { onSkipped });
+
+    expect(svc.regenerate().status).toBe('not-dbt-project');
+    expect(fs.readFileSync(path.join(tmpDir, 'selectors.yml'), 'utf-8')).toBe(content);
+    expect(onSkipped).not.toHaveBeenCalled();
+  });
+
+  it('scheduleRegenerate (activation and post-edit path) writes nothing', () => {
+    vi.useFakeTimers();
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+
+    svc.scheduleRegenerate();
+    vi.runAllTimers();
+
+    expect(fs.existsSync(path.join(tmpDir, 'selectors.yml'))).toBe(false);
+  });
+
+  it('a dbt_project.yml directory does not count as a dbt project', () => {
+    fs.mkdirSync(path.join(tmpDir, 'dbt_project.yml'));
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+
+    expect(svc.regenerate().status).toBe('not-dbt-project');
+    expect(fs.existsSync(path.join(tmpDir, 'selectors.yml'))).toBe(false);
+  });
+
+  it('writes as before once the folder becomes a dbt project', () => {
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    expect(svc.regenerate().status).toBe('not-dbt-project');
+
+    fs.writeFileSync(path.join(tmpDir, 'dbt_project.yml'), 'name: now_dbt\n', 'utf-8');
+
+    const result = svc.regenerate();
+    expect(result.status).toBe('written');
+    expect(readSelectors(tmpDir).selectors.map((s) => s.name)).toEqual(['domain_silver_customer_360']);
   });
 });

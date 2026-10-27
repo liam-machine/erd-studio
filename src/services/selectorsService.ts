@@ -34,6 +34,12 @@
  * surface a notification telling the user how to fix the issue and how to
  * trigger a resync. This is deliberately conservative — we'd rather drift
  * out-of-sync (recoverable, visible) than overwrite user work (irrecoverable).
+ *
+ * Not-a-dbt-project policy: `selectors.yml` is a dbt file, so when the
+ * workspace root has no `dbt_project.yml` (a plain folder opened through
+ * `erdStudio.projectPath`, #111) the service never writes — not on
+ * activation, not after an edit, not from the manual command. It returns a
+ * `'not-dbt-project'` result and the host explains instead of writing.
  */
 
 import * as fs from 'fs';
@@ -42,6 +48,7 @@ import { Document, parseDocument, isSeq, isMap } from 'yaml';
 import type { YAMLMap, YAMLSeq, Node, Scalar } from 'yaml';
 
 import type { SubjectAreaService } from './domainService';
+import { hasDbtProjectFile } from './projectDiscovery';
 
 const SELECTORS_FILENAME = 'selectors.yml';
 const GENERATED_PREFIX = 'domain_';
@@ -74,7 +81,9 @@ export type RegenerateResult =
   | { status: 'written'; selectorsWritten: number; modelsReferenced: number; filePath: string }
   | { status: 'skipped'; reason: SkipReason; filePath: string; detail: string }
   /** Nothing to write and no file on disk — the workspace was left untouched. */
-  | { status: 'noop'; filePath: string };
+  | { status: 'noop'; filePath: string }
+  /** The workspace root has no `dbt_project.yml`, so there is no dbt project to write a selectors.yml for. Nothing was touched. */
+  | { status: 'not-dbt-project'; filePath: string };
 
 export interface SelectorsServiceHooks {
   /**
@@ -162,6 +171,9 @@ export class SelectorsService {
    *     not exist. Nothing is written so merely opening a dbt repo with the
    *     extension installed never dirties its git status. (An existing file
    *     is still regenerated so stale `domain_*` selectors get removed.)
+   *   - `'not-dbt-project'`: the workspace root has no `dbt_project.yml`.
+   *     Nothing is read or written (not even an existing selectors.yml);
+   *     checked on every call, so adding a dbt project later just works.
    *
    * Skip conditions (any of these):
    *   - `selectors.yml` is open in an editor with unsaved edits
@@ -171,6 +183,11 @@ export class SelectorsService {
    */
   regenerate(): RegenerateResult {
     const filePath = path.join(this.workspaceRoot, SELECTORS_FILENAME);
+
+    // selectors.yml belongs to a dbt project: a plain folder never gets one.
+    if (!hasDbtProjectFile(this.workspaceRoot)) {
+      return { status: 'not-dbt-project', filePath };
+    }
 
     // Skip #1: open with unsaved edits.
     if (this.hooks?.isFileDirtyInEditor?.(filePath)) {

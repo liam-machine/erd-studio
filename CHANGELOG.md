@@ -23,6 +23,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - An undo or redo on the canvas that cannot save a file now says so, as any other canvas edit does, instead of leaving the file silently unsaved.
 
 ### Fixed
+- ERD Studio no longer writes a dbt `selectors.yml` into a folder that isn't a dbt project. With `erdStudio.projectPath` pointing at a plain folder (one with no `dbt_project.yml`) that already held diagrams, opening VS Code or editing a diagram created `selectors.yml` there. Now nothing is written, and **Regenerate dbt selectors.yml** says the folder is not a dbt project instead. dbt projects work as before.
 - README: removed the out-of-date "Not using dbt?" workaround (a placeholder `dbt_project.yml` is no longer needed; set `erdStudio.projectPath` instead), replaced a **Set Up ERD Studio** button that does not exist with the real command, and corrected what the Physical view needs and how to install the AI coding harness.
 - MCP server dependencies: `zod` moved from 3 to 4, and its other dependencies were refreshed, to clear newly published security advisories (`zod`, `body-parser`, `hono`, `fast-uri`, `ip-address`). No change to what the MCP server does. The extension itself is unaffected.
 

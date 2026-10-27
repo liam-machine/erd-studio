@@ -762,6 +762,53 @@ describe('activate() project-root resolution', () => {
   });
 });
 
+describe('selectors.yml is a dbt file (#111)', () => {
+  // The fixture's diagrams (subject areas with tables), in a folder with or without dbt_project.yml.
+  function project(dir: string, withDbt: boolean): void {
+    fs.cpSync(path.join(FIXTURE_ROOT, '.erd-studio'), path.join(dir, '.erd-studio'), { recursive: true });
+    if (withDbt) { fs.copyFileSync(path.join(FIXTURE_ROOT, 'dbt_project.yml'), path.join(dir, 'dbt_project.yml')); }
+  }
+
+  it('activation in a plain folder named by erdStudio.projectPath writes no selectors.yml', async () => {
+    const plain = path.join(root, 'plain');
+    project(plain, false);
+    openWorkspace(root);
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: 'plain' });
+
+    await activate(context);
+    vi.advanceTimersByTime(1000); // past the 250 ms regenerate debounce
+
+    expect(fs.existsSync(path.join(plain, 'selectors.yml'))).toBe(false);
+    expect(fs.existsSync(path.join(root, 'selectors.yml'))).toBe(false);
+  });
+
+  it('Regenerate dbt selectors.yml explains instead of writing in a plain folder', async () => {
+    const plain = path.join(root, 'plain');
+    project(plain, false);
+    openWorkspace(root);
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: 'plain' });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+    await activate(context);
+    await vscode.commands.executeCommand('erdStudio.syncDomainTags');
+
+    expect(info).toHaveBeenCalledWith('This folder is not a dbt project, so there is no selectors.yml to generate.');
+    expect(fs.existsSync(path.join(plain, 'selectors.yml'))).toBe(false);
+  });
+
+  it('activation in a dbt project still writes selectors.yml for its diagrams', async () => {
+    const dbt = path.join(root, 'dbt');
+    project(dbt, true);
+    openWorkspace(dbt);
+
+    await activate(context);
+    vi.advanceTimersByTime(1000); // past the 250 ms regenerate debounce
+
+    const written = fs.readFileSync(path.join(dbt, 'selectors.yml'), 'utf-8');
+    expect(written).toContain('Managed by ERD Studio.');
+  });
+});
+
 describe('Select dbt Project… (#82)', () => {
   type Pick = { label: string; projectRoot?: string };
   let a: string;
