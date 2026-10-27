@@ -52,6 +52,47 @@ Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
 Ref: gold.dim_customer.customer_key - customer_profile.customer_key
 `;
 
+/** A composite Ref with settings and a trailing comment. */
+const COMPOSITE_REF = `use { table dim_region } from './dim_region.dbml'
+use { table fct_order } from './fct_order.dbml'
+
+Ref: fct_order.(region_code, country_code) > dim_region.(region_code, country_code) [delete: cascade] // keep
+`;
+
+/** A block-form Ref with a comment inside. */
+const BLOCK_REF = `use { table gold.dim_customer } from './dim_customer.dbml'
+use { table fct_order } from './fct_order.dbml'
+
+Ref fk {
+  // explain
+  fct_order.Customer_Key > gold.dim_customer.customer_key [delete: cascade]
+}
+`;
+
+/** A bare \`-\` written foreign key first. */
+const FK_FIRST = `use { table fct_order } from './fct_order.dbml'
+use { table gold.dim_customer } from './dim_customer.dbml'
+
+Ref: fct_order.Customer_Key - gold.dim_customer.customer_key
+`;
+
+/** Two sorted Refs; renaming bridge to zz_bridge puts its Ref last. */
+const SORTED_FOR_RENAME = `use { table bridge } from './bridge.dbml'
+use { table customer_profile } from './customer_profile.dbml'
+use { table dim_date } from '../dim_date.dbml'
+
+Ref: bridge.a_key >? dim_date.date_key // a tail
+Ref: customer_profile.customer_key >? dim_date.date_key
+`;
+
+/** The library with \`bridge\` renamed to \`zz_bridge\`. */
+const BRIDGE_RENAMED: Readonly<Record<string, string>> = (() => {
+  const out: Record<string, string> = { ...LIBRARY };
+  delete out['tables/gold/bridge.dbml'];
+  out['tables/gold/zz_bridge.dbml'] = LIBRARY['tables/gold/bridge.dbml'].replace('Table bridge', 'Table zz_bridge');
+  return out;
+})();
+
 const M21 = (fromColumn: string, toModel: string, toColumn: string, extra: Partial<TableRelationship> = {}): TableRelationship =>
   ({ fromColumn, toModel, toColumn, cardinality: 'many-to-one', ...extra });
 
@@ -78,6 +119,20 @@ function relCase(name: string, text: string | null, edit: () => EditInput, check
 function changed(text: string, owner: string, change: (list: TableRelationship[]) => TableRelationship[], library = LIBRARY): EditInput {
   const list = currentOwners(text, library).get(owner.toLowerCase()) ?? [];
   return { owners: new Map([[owner.toLowerCase(), { name: owner, relationships: change(list.map((r) => ({ ...r }))) }]]) };
+}
+
+/** The Law 2/3 edit: fct_order's list with dim_date dropped, a composite and a one-to-one with a role. */
+function lawOwners(): Map<string, { name: string; relationships: TableRelationship[] }> {
+  const owners = currentOwners(HAND_WRITTEN);
+  return new Map([['fct_order', {
+    name: 'fct_order',
+    relationships: [
+      ...owners.get('fct_order')!.filter((r) => r.toModel !== 'dim_date'),
+      M21('region_code', 'dim_region', 'region_code', { compositeKey: 'k' }),
+      M21('country_code', 'dim_region', 'country_code', { compositeKey: 'k' }),
+      { fromColumn: 'order_date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'one-to-one', role: 'order date' },
+    ],
+  }]]);
 }
 
 /** What the written file means: each owner's relationships, comparable. */
@@ -307,6 +362,113 @@ Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
     },
     check: (o) => {
       expect(o.output).toContain('Ref: fct_order_line.ship_date_key >? dim_date.date_key [delete: cascade] // moved\n');
+    },
+  },
+  // --- Round 1 review: link identity, moves, block form, owner keys -------------------
+  relCase('a composite listed with its pairs in another order is the same Ref: its bytes stay', COMPOSITE_REF, () => {
+    const list = currentOwners(COMPOSITE_REF).get('fct_order')!;
+    return { owners: new Map([['fct_order', { name: 'fct_order', relationships: [...list].reverse() }]]) };
+  }, (out) => {
+    expect(out).toBe(COMPOSITE_REF);
+  }),
+  relCase('…and a cardinality change on it keeps the file\'s pair order, settings and comment', COMPOSITE_REF, () => {
+    const list = currentOwners(COMPOSITE_REF).get('fct_order')!;
+    return { owners: new Map([['fct_order', { name: 'fct_order', relationships: [...list].reverse().map((r) => ({ ...r, cardinality: 'many-to-many' as const })) }]]) };
+  }, (out) => {
+    expect(out).toBe(COMPOSITE_REF.replace(') > dim_region.', ') <>? dim_region.'));
+  }),
+  {
+    name: 'a Ref regenerated with a renamed end moves to its sorted place, with its trailing comment',
+    run: (): WriterOutcome => {
+      const output = relEdit(SORTED_FOR_RENAME, {
+        owners: new Map([['zz_bridge', { name: 'zz_bridge', relationships: [M21('a_key', 'dim_date', 'date_key', { role: 'r' })] }]]),
+        renamedOwners: new Map([['bridge', 'zz_bridge']]),
+        pathChanged: new Set(['bridge']),
+      }, BRIDGE_RENAMED);
+      return { path: REL_PATH, output, context: { ...BRIDGE_RENAMED }, parsers: ['9.1.1', '10.3.1', '11.0.0'] };
+    },
+    check: (o) => {
+      expect(o.output).toBe(`use { table zz_bridge } from './zz_bridge.dbml'
+use { table customer_profile } from './customer_profile.dbml'
+use { table dim_date } from '../dim_date.dbml'
+
+Ref: customer_profile.customer_key >? dim_date.date_key
+Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
+`);
+    },
+  },
+  relCase('a block-form Ref whose cardinality changes keeps its block and the comments in it', BLOCK_REF, () => changed(BLOCK_REF, 'fct_order', (list) =>
+    list.map((r) => ({ ...r, cardinality: 'many-to-many' as const }))), (out) => {
+    expect(out).toBe(BLOCK_REF.replace('fct_order.Customer_Key > gold.dim_customer', 'fct_order.Customer_Key <>? gold.dim_customer'));
+  }),
+  relCase('…and a role change on it splices only its name', BLOCK_REF, () => changed(BLOCK_REF, 'fct_order', (list) =>
+    list.map((r) => ({ ...r, role: 'the customer' }))), (out) => {
+    expect(out).toBe(BLOCK_REF.replace('Ref fk {', 'Ref "the customer" {').replace(' > gold.', ' >? gold.'));
+  }),
+  relCase('…or removes it', BLOCK_REF, () => changed(BLOCK_REF, 'fct_order', (list) =>
+    list.map((r) => { const { role: _role, ...rest } = r; return rest; })), (out) => {
+    expect(out).toBe(BLOCK_REF.replace('Ref fk {', 'Ref {').replace(' > gold.', ' >? gold.'));
+  }),
+  {
+    name: 'a renamed owner keyed by its old name is read through renamedOwners',
+    run: (): WriterOutcome => {
+      const owners = currentOwners(HAND_WRITTEN);
+      const output = relEdit(HAND_WRITTEN, {
+        owners: new Map([['fct_order', { name: 'fct_order_line', relationships: owners.get('fct_order')! }]]),
+        renamedOwners: new Map([['fct_order', 'fct_order_line']]),
+        pathChanged: new Set(['fct_order']),
+      }, RENAMED_LIBRARY);
+      return { path: REL_PATH, output, context: { ...RENAMED_LIBRARY }, parsers: ['9.1.1', '10.3.1', '11.0.0'] };
+    },
+    check: (o) => {
+      expect(o.output).toBe(HAND_WRITTEN
+        .replace("use { table fct_order } from './fct_order.dbml'", "use { table fct_order_line } from './fct_order_line.dbml'")
+        .replace('Ref: fct_order.Customer_Key', 'Ref: fct_order_line.Customer_Key')
+        .replace('Ref "ship date": fct_order.ship_date_key', 'Ref "ship date": fct_order_line.ship_date_key'));
+    },
+  },
+  relCase('a listed owner\'s one-to-many record matches the Ref stored from the other end', HAND_WRITTEN, () => ({
+    owners: new Map([['dim_date', { name: 'dim_date', relationships: [{ fromColumn: 'date_key', toModel: 'fct_order', toColumn: 'ship_date_key', cardinality: 'one-to-many', role: 'ship date' }] }]]),
+  }), (out) => {
+    expect(out).toBe(HAND_WRITTEN);
+  }),
+  {
+    name: 'a bare `-` whose foreign key is its first end keeps its bytes when the resolver gives no keys',
+    run: (): WriterOutcome => {
+      const resolve = relationshipsResolver(libraryOf(LIBRARY));
+      const output = editRelationshipsDbml(FK_FIRST, {
+        filePath: REL_PATH,
+        owners: new Map([['fct_order', { name: 'fct_order', relationships: [{ fromColumn: 'Customer_Key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'one-to-one' }] }]]),
+        resolve: (name) => { const t = resolve(name); if (!t) return t; const { primaryKey: _pk, ...rest } = t; return rest; },
+      });
+      return { path: REL_PATH, input: FK_FIRST, output, context: { ...LIBRARY } };
+    },
+    check: (o) => { expect(o.output).toBe(FK_FIRST); },
+  },
+
+  // --- Laws and file shapes -------------------------------------------------------
+  {
+    name: 'reads back as the relationships it was given (Law 3) and is idempotent (Law 2)',
+    run: (): WriterOutcome => ({ path: REL_PATH, input: HAND_WRITTEN, output: relEdit(HAND_WRITTEN, { owners: lawOwners() }), context: { ...LIBRARY } }),
+    check: (o) => {
+      const desired = lawOwners();
+      expect(comparableRelationships(currentOwners(o.output).get('fct_order'))).toEqual(comparableRelationships(desired.get('fct_order')!.relationships));
+      expect(relEdit(o.output, { owners: desired })).toBe(o.output);
+      // Owners the edit did not list read as before.
+      expect(meaning(o.output).customer_profile).toEqual(meaning(HAND_WRITTEN).customer_profile);
+    },
+  },
+  {
+    name: 'a byte-order mark and CRLF line endings are kept',
+    run: (): WriterOutcome => {
+      const crlf = `﻿${HAND_WRITTEN.replace(/\n/g, '\r\n')}`;
+      const output = relEdit(crlf, { owners: new Map([['bridge', { name: 'bridge', relationships: [M21('a_key', 'dim_date', 'date_key')] }]]) });
+      return { path: REL_PATH, input: crlf, output, context: { ...LIBRARY } };
+    },
+    check: (o) => {
+      expect(o.output.startsWith('﻿')).toBe(true);
+      expect(o.output.replace(/\r\n/g, '')).not.toContain('\n');
+      expect(o.output).toContain('Ref: bridge.a_key >? dim_date.date_key\r\n');
     },
   },
 ];

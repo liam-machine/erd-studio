@@ -52,6 +52,7 @@ import {
   eolOf,
   indentAt,
   nextLineStart,
+  refuseOverlaps,
   renderListPlan,
   sliceWithEdits,
   startsItsLine,
@@ -200,7 +201,11 @@ export interface ForeignDbmlMetadata {
 
 /** Options for {@link editTableDbml}. */
 export interface EditTableDbmlOptions {
-  /** The edit renames the table (its name changes on purpose); the name is spliced either way. */
+  /**
+   * The edit renames the table: `desired.name` is spliced into the Table
+   * name. Without it, a name that differs from the declared one only in case
+   * keeps the declared spelling, and any other difference is refused.
+   */
   rename?: boolean;
   /** The file, as messages name it (default `<stem>.dbml`). */
   file?: string;
@@ -361,10 +366,21 @@ function refuse(file: string, message: string, line?: number): never {
  * change to a property another file's Metadata block sets.
  */
 export function editTableDbml(oldText: string, desired: SemanticTable, options: EditTableDbmlOptions = {}): string {
+  return refuseOverlaps(options.file ?? `${options.fileStem ?? desired.name}.dbml`, () => editTable(oldText, desired, options));
+}
+
+function editTable(oldText: string, desired: SemanticTable, options: EditTableDbmlOptions): string {
   const parser = options.parser ?? PINNED_PARSER;
   const hadBom = oldText.charCodeAt(0) === 0xfeff;
   const text = stripBom(oldText);
-  const compiled = compileOne(text, parser);
+  let compiled: ReturnType<typeof compileOne>;
+  try {
+    compiled = compileOne(text, parser);
+  } catch (err) {
+    // The reader reports a parser that throws as "The DBML parser stopped"; the writer refuses the same way.
+    const file = options.file ?? `${options.fileStem ?? desired.name}.dbml`;
+    refuse(file, `Fix the DBML in ${file} first (the DBML parser stopped: ${err instanceof Error ? err.message : String(err)}). ERD Studio never rewrites a file it cannot read.`);
+  }
   const tableNodes = topLevel(compiled.ast).filter((n) => elementType(n)?.toLowerCase() === 'table');
   const declared = tableNodes.length > 0 ? plainNames(tableNodes[0].name) : null;
   const stem = options.fileStem ?? (declared && declared.length > 0 ? declared[declared.length - 1] : desired.name);
@@ -526,14 +542,16 @@ export function editTableDbml(oldText: string, desired: SemanticTable, options: 
   };
 
   // --- Table name ----------------------------------------------------------
-  if (desired.name !== reading.declaredName) {
+  // Spliced only on a rename; a case-only difference without one keeps the file's spelling.
+  const renaming = desired.name !== reading.declaredName && options.rename === true;
+  if (desired.name !== reading.declaredName && !renaming && desired.name.toLowerCase() !== reading.declaredName.toLowerCase()) {
+    refuse(file, `${file} declares Table ${reading.declaredName}, not ${desired.name}; a rename must say so.`);
+  }
+  if (renaming) {
     const leaves = nameLeaves(tableNode.name);
     const last = leaves[leaves.length - 1];
     if (last) edits.push({ start: last.start, end: last.end, text: dbmlName(desired.name) });
-    for (const block of blocks) {
-      const leaf = block.kind === 'table' ? block.leaves[block.leaves.length - 1] : block.leaves[block.leaves.length - 2];
-      if (leaf) edits.push({ start: leaf.start, end: leaf.end, text: dbmlName(desired.name) });
-    }
+    // The Metadata blocks are retargeted below, once the blocks of removed columns are known.
   }
 
   // --- Table properties ------------------------------------------------------
@@ -691,6 +709,14 @@ export function editTableDbml(oldText: string, desired: SemanticTable, options: 
       edits.push(cutEdit(text, block.node));
     }
   }
+  // A table rename retargets every Metadata block that stays (a cut one goes whole).
+  if (renaming) {
+    for (const block of blocks) {
+      if (removedNodes.has(block.node)) continue;
+      const leaf = block.kind === 'table' ? block.leaves[block.leaves.length - 1] : block.leaves[block.leaves.length - 2];
+      if (leaf) edits.push({ start: leaf.start, end: leaf.end, text: dbmlName(desired.name) });
+    }
+  }
 
   // Index lines: the primary key when its set changed, renamed columns, and lines naming a removed column.
   const { blocks: indexBlocks, lines: indexLines } = indexLinesOf(tableNode);
@@ -823,6 +849,11 @@ export function editTableDbml(oldText: string, desired: SemanticTable, options: 
     const body: AstNode[] = Array.isArray(tableNode.body?.body) ? tableNode.body.body : [];
     const strays = body.filter((n) => n?.kind !== '<function-application>' && n.start >= regionStart && n.end <= regionEnd);
     const withEol = (s: string): string => (s.endsWith('\n') ? s : s + eol);
+    // A late insert inside the region (a new indexes block before a body Note among the columns)
+    // is emitted with the region, before the element it was anchored to.
+    const inside = (e: TextEdit): boolean => e.start === e.end && e.start > regionStart && e.start < regionEnd;
+    const pending = lateEdits.filter(inside).sort((a, b) => a.start - b.start);
+    for (const e of pending) lateEdits.splice(lateEdits.indexOf(e), 1);
     const pieces: string[] = [];
     desiredColumns.forEach((_, di) => {
       const ci = matchOf.get(di);
@@ -842,6 +873,7 @@ export function editTableDbml(oldText: string, desired: SemanticTable, options: 
     });
     for (const stray of strays) {
       const span = blockOf(stray);
+      while (pending.length > 0 && pending[0].start <= stray.start) pieces.push(withEol(pending.shift()!.text));
       pieces.push(withEol(text.slice(span.start, span.end)));
       // Edits inside a stray (an indexes line, the Note) are applied to it here.
       const inside = edits.filter((e) => e.start >= span.start && e.end <= span.end);
@@ -850,6 +882,7 @@ export function editTableDbml(oldText: string, desired: SemanticTable, options: 
         for (const e of inside) edits.splice(edits.indexOf(e), 1);
       }
     }
+    for (const e of pending) pieces.push(withEol(e.text));
     let region = pieces.join('');
     if (!text.slice(regionStart, regionEnd).endsWith('\n') && region.endsWith(eol)) region = region.slice(0, -eol.length);
     edits.push({ start: regionStart, end: regionEnd, text: region });

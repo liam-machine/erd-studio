@@ -6,35 +6,20 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { editTableDbml, renderNewTableDbml } from '../../src/dbml/writeTable';
+import { editTableDbml } from '../../src/dbml/writeTable';
 import { DbmlEditRefused } from '../../src/dbml/errors';
-import { FCT_ORDER, METADATA_TABLE, NEW_TABLE_CASES, TABLE_CASES, edited } from '../dbmlWriterCases/tableCases';
-import { clone, readTable } from '../dbmlWriterSupport';
+import { applyTextEdits, refuseOverlaps } from '../../src/dbml/splice';
+import * as DbmlParse from '@dbml/parse';
+import { METADATA_TABLE, NEW_TABLE_CASES, TABLE_CASES } from '../dbmlWriterCases/tableCases';
+import { clone, projectDiagnostics, readTable } from '../dbmlWriterSupport';
 import { parseTableDbml } from '../../src/dbml/readTable';
 import { STORAGE_PARSERS } from '../dbmlParsers';
 
 describe('editTableDbml', () => {
   for (const c of TABLE_CASES) it(c.name, () => c.check(c.run()));
-
-  it('a no-op is byte-identical (Law 1)', () => {
-    expect(edited(FCT_ORDER, () => undefined)).toBe(FCT_ORDER);
-  });
-
-  it('is idempotent (Law 2)', () => {
-    const change = (t: Parameters<Parameters<typeof edited>[1]>[0]): void => {
-      t.grain = 'g2';
-      t.columns!.splice(2, 1);
-      t.columns!.push({ name: 'z', dataType: 'int', description: 'zz', isNaturalKey: true });
-      t.columns![0].isPrimaryKey = false;
-      t.columns![1].isPrimaryKey = true;
-      t.meta = { owner: 'o', n: ['1', true, null] };
-    };
-    const once = edited(FCT_ORDER, change);
-    const desired = clone(readTable(FCT_ORDER, 'fct_order').table);
-    change(desired);
-    expect(editTableDbml(once, desired)).toBe(once);
-  });
 });
+
+const BARE_TABLE = 'Table fct_order {\n  id int [pk]\n}\n';
 
 describe('editTableDbml refusals', () => {
   const refusal = (fn: () => unknown): DbmlEditRefused => {
@@ -75,10 +60,23 @@ describe('editTableDbml refusals', () => {
     expect(err.message).toBe("tables/gold/fct_order.dbml names its schema in the Table name (`Table gold.fct_order`). Change it there, or remove the qualifier and use `[schema: 'gold']`.");
   });
 
-  it('a schema-qualified name with a schema property edits the property', () => {
-    const text = "Table gold.fct_order [schema: 'gold'] {\n  id int\n}\n";
-    const table = readTable(text, 'fct_order').table;
-    expect(editTableDbml(text, { ...table, schema: 'silver' })).toBe("Table gold.fct_order [schema: 'silver'] {\n  id int\n}\n");
+  it('a name that differs from the declared one is refused unless the edit is a rename', () => {
+    const table = readTable(BARE_TABLE, 'fct_order').table;
+    const err = refusal(() => editTableDbml(BARE_TABLE, { ...table, name: 'fct_line' }, { file: 'tables/fct_order.dbml' }));
+    expect(err.message).toBe('tables/fct_order.dbml declares Table fct_order, not fct_line; a rename must say so.');
+    expect(editTableDbml(BARE_TABLE, { ...table, name: 'fct_line' }, { rename: true })).toBe(BARE_TABLE.replace('fct_order', 'fct_line'));
+  });
+
+  it('a parser that throws is refused like a file that does not read', () => {
+    const throwing = { ...DbmlParse, Compiler: class { constructor() { throw new Error('boom'); } } };
+    const err = refusal(() => editTableDbml(BARE_TABLE, { name: 'fct_order', columns: [] }, { file: 'tables/fct_order.dbml', parser: throwing }));
+    expect(err.message).toBe('Fix the DBML in tables/fct_order.dbml first (the DBML parser stopped: boom). ERD Studio never rewrites a file it cannot read.');
+  });
+
+  it('an overlap of a writer\'s own edits is refused, never thrown as an unexpected error', () => {
+    const err = refusal(() => refuseOverlaps('tables/x.dbml', () => applyTextEdits('abc', [{ start: 0, end: 2, text: '' }, { start: 1, end: 3, text: '' }])));
+    expect(err.message).toBe('ERD Studio could not apply this change to tables/x.dbml safely, so nothing was written. Make the change in the file by hand.');
+    expect(err.file).toBe('tables/x.dbml');
   });
 
   it('a property a Metadata block in another file sets is refused (D25)', () => {
@@ -109,29 +107,14 @@ describe('Metadata blocks (D25) read back the same in every parser', () => {
     expect(reading.table.columns![0].meta).toEqual({ owner: 'z' });
     // Clearing removes the block entry and the shadowed inline value: nothing resurfaces.
     delete desired.grain;
-    const cleared = parseTableDbml(editTableDbml(out, desired, { parser }), 'fct_order', parser);
+    const clearedText = editTableDbml(out, desired, { parser });
+    const cleared = parseTableDbml(clearedText, 'fct_order', parser);
     expect(cleared.ok && cleared.table.grain).toBeUndefined();
+    // Law 5: both outputs compile with no error or warning in every parser.
+    for (const text of [out, clearedText]) expect(projectDiagnostics({ 'tables/fct_order.dbml': text })).toEqual([]);
   });
 });
 
 describe('renderNewTableDbml', () => {
   for (const c of NEW_TABLE_CASES) it(c.name, () => c.check(c.run()));
-
-  it('reads back as the table it was given', () => {
-    const table = {
-      name: 'dim_customer',
-      schema: 'silver',
-      alias: 'customers',
-      modelRole: 'conformed-dim' as const,
-      rationale: { scdStrategy: 'Type 2 on segment' },
-      description: 'Customers\n  - indented bullet',
-      meta: { tags: ['a', 'b'], owner: 'crm', 'Odd Key': 'x' },
-      columns: [
-        { name: 'customer_key', dataType: 'INT', description: 'Surrogate', isPrimaryKey: true, scdType: 0 as const },
-        { name: 'segment', dataType: 'VARCHAR', description: '', scdType: 2 as const, isNaturalKey: true },
-      ],
-    };
-    const read = readTable(renderNewTableDbml(table), 'dim_customer').table;
-    expect(read).toEqual(table);
-  });
 });

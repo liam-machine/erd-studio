@@ -10,6 +10,7 @@ import { expect } from 'vitest';
 import { parseSubjectAreaDbml } from '../../src/dbml/readDiagram';
 import { editSubjectAreaDbml, renderNewSubjectAreaDbml, type SubjectAreaDbmlEdit } from '../../src/dbml/writeDiagram';
 import { relationshipsFilePathOf } from '../../src/storage';
+import { detectSubjectAreaFormat } from '../../src/types/semantic';
 import { clone, diagramResolver, libraryOf, type WriterCase, type WriterOutcome } from '../dbmlWriterSupport';
 import { LIBRARY } from './relationshipsCases';
 
@@ -74,6 +75,16 @@ export function diagramEdit(
   const after = clone(before);
   change(after);
   return editSubjectAreaDbml(text, { filePath: path, before, after, ...lookups(options.library ?? DIAGRAM_LIBRARY, options.yaml), ...options.extra });
+}
+
+/** The Law 2/3 edit: a rename, a description, a member change, a flag and Notes edited and added. */
+function lawChange(a: Obj): void {
+  a.domain = 'sales_v2';
+  a.description = '  Indented first line is dropped';
+  a.logical.models = ['dim_date', 'fct_order'];
+  a.viewConfig.showFkEdges = true;
+  a.viewConfig.annotations[0].text = 'edited';
+  a.viewConfig.annotations.push({ id: 'n2', text: 'two', x: 0, y: 0, linkedModel: 'dim_date' });
 }
 
 function diagramCase(
@@ -168,6 +179,26 @@ export const DIAGRAM_CASES: WriterCase[] = [
   }, (out) => {
     expect(out).toContain("use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\nuse * from");
   }),
+  diagramCase('a new member order keeps each line\'s trailing comment and the comment lines above', SALES
+    .replace("'../tables/gold/fct_order.dbml'", "'../tables/gold/fct_order.dbml' // the facts")
+    .replace("use { table gold.dim_customer }", "// customers\nuse { table gold.dim_customer }"), (a) => {
+    a.logical.models.reverse();
+  }, (out) => {
+    expect(out).toContain("// customers\nuse { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table fct_order } from '../tables/gold/fct_order.dbml' // the facts\nuse * from");
+  }),
+  diagramCase('a member whose table was deleted (pathChanged, no file now) loses its line, even with nothing else changed', SALES, () => undefined, (out) => {
+    expect(out).toBe(SALES.replace("use { table fct_order } from '../tables/gold/fct_order.dbml'\n", ''));
+  }, {
+    library: (() => {
+      const lib: Record<string, string> = { ...DIAGRAM_LIBRARY };
+      delete lib['tables/gold/fct_order.dbml'];
+      lib['tables/gold/_relationships.dbml'] = "use { table gold.dim_customer } from './dim_customer.dbml'\n";
+      return lib;
+    })(),
+    extra: { pathChanged: new Set(['fct_order']) },
+    // The input compiled clean against the library before the delete.
+    parsers: ['9.1.1', '10.3.1', '11.0.0'],
+  }),
   diagramCase('a member whose table moved is rewritten (pathChanged)', SALES, () => undefined, (out) => {
     expect(out).toBe(SALES.replace("use { table fct_order } from '../tables/gold/fct_order.dbml'", "use { table fct_order } from '../tables/fct_order.dbml'"));
   }, {
@@ -260,6 +291,36 @@ use { table fct_order } from '../tables/gold/fct_order.dbml'
     // The cut rule takes the Note's lines; the blank line above it stays.
     expect(out).toBe(SALES.replace(/Note "3f2b[^]*$/, ''));
   }),
+  {
+    name: 'reads back as the object it was given (Law 3) and is idempotent (Law 2)',
+    run: (): WriterOutcome => ({ path: DIAGRAM_PATH, input: SALES, output: diagramEdit(SALES, lawChange), context: { ...DIAGRAM_LIBRARY } }),
+    check: (o) => {
+      const after = clone(readDiagram(SALES));
+      lawChange(after);
+      expect(editSubjectAreaDbml(o.output, { filePath: DIAGRAM_PATH, before: readDiagram(o.output), after, ...lookups(DIAGRAM_LIBRARY) })).toBe(o.output);
+      const read = readDiagram(o.output);
+      expect(read.domain).toBe('sales_v2');
+      expect(read.description).toBe('Indented first line is dropped');
+      expect(read.logical.models).toEqual(['dim_date', 'fct_order']);
+      expect(read.viewConfig.showFkEdges).toBe(true);
+      expect(read.viewConfig.annotations.map((n: { id: string; text: string }) => [n.id, n.text])).toEqual([
+        ['3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', 'edited'], ['n2', 'two'],
+      ]);
+      expect(detectSubjectAreaFormat(read)).toBe('v5');
+    },
+  },
+  {
+    name: 'a byte-order mark and CRLF line endings are kept',
+    run: (): WriterOutcome => {
+      const crlf = `﻿${SALES.replace(/\n/g, '\r\n')}`;
+      return { path: DIAGRAM_PATH, input: crlf, output: diagramEdit(crlf, (a) => { a.logical.models.push('dim_date'); a.description = 'x'; }), context: { ...DIAGRAM_LIBRARY } };
+    },
+    check: (o) => {
+      expect(o.output.startsWith('﻿')).toBe(true);
+      expect(o.output.replace(/\r\n/g, '')).not.toContain('\n');
+      expect(o.output).toContain("use { table dim_date } from '../tables/dim_date.dbml'\r\n");
+    },
+  },
 ];
 
 /** New-file cases: `renderNewSubjectAreaDbml`. */

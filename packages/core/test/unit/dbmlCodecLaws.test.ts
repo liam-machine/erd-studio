@@ -9,7 +9,9 @@
  * 3. round trip: what the output reads as equals `x`, through
  *    `normaliseForStorageEquivalence` (D24) on top of the reader's own
  *    normalisations;
- * 4. preservation: comment lines survive;
+ * 4. preservation: every comment (whole-line, trailing and block comments) and
+ *    every construct ERD Studio does not model survives, apart from those
+ *    inside the cut span of a node the edit removes;
  * 5. parses: when the input compiled clean (or is a new file), the output
  *    compiles clean with its `use` targets in 9.1.1, 10.3.1 and 11.0.0.
  *
@@ -26,9 +28,15 @@ import { editTableDbml, renderNewTableDbml } from '../../src/dbml/writeTable';
 import { editRelationshipsDbml } from '../../src/dbml/writeRelationships';
 import { editSubjectAreaDbml, renderNewSubjectAreaDbml } from '../../src/dbml/writeDiagram';
 import { normaliseForStorageEquivalence } from '../../src/storageEquivalence';
-import { dbmlNoteText } from '../../src/dbmlText';
+import { dbmlName, dbmlNoteText } from '../../src/dbmlText';
 import { readMeta } from '../../src/meta';
 import { relationshipsFilePathOf } from '../../src/storage';
+import { readRelationshipsDbml } from '../../src/dbml/readRelationships';
+import { compileOne, elementType, isUseDeclaration, plainNames, topLevel, type AstNode } from '../../src/dbml/parser';
+import { cutSpan } from '../../src/dbml/splice';
+import { DbmlEditRefused } from '../../src/dbml/errors';
+import { DBML_RICH_PLACEHOLDER_COLUMN } from '../../src/dbmlRichProperties';
+import { parseTableText } from '../../src/logicalModel';
 import type { Annotation, AnnotationColor, ColumnDef, SemanticTable, TableRelationship } from '../../src/types/semantic';
 import {
   DIAGNOSTIC_PARSERS,
@@ -103,18 +111,148 @@ function normDiagram(obj: Record<string, any>): unknown { // eslint-disable-line
   });
 }
 
-function commentLines(text: string): string[] {
-  return text.split(/\r?\n/).filter((l) => /^\s*\/\//.test(l)).map((l) => l.trim());
+// ---------------------------------------------------------------------------
+// Law 4: comments and unknown constructs outside removed nodes survive
+// ---------------------------------------------------------------------------
+
+type Span = { start: number; end: number };
+
+/** Every comment token of a DBML text (`// …` to the end of its line, `/* … *\/`), skipping strings. */
+function commentTokens(text: string): Array<Span & { text: string }> {
+  const out: Array<Span & { text: string }> = [];
+  let i = 0;
+  const skipQuoted = (quote: string): void => {
+    i += quote.length;
+    while (i < text.length && !text.startsWith(quote, i)) i += text[i] === '\\' ? 2 : 1;
+    i += quote.length;
+  };
+  while (i < text.length) {
+    if (text.startsWith("'''", i)) skipQuoted("'''");
+    else if (text[i] === "'" || text[i] === '"' || text[i] === '`') skipQuoted(text[i]);
+    else if (text.startsWith('//', i)) {
+      let end = text.indexOf('\n', i);
+      if (end < 0) end = text.length;
+      out.push({ start: i, end, text: text.slice(i, end).replace(/\r$/, '').trimEnd() });
+      i = end;
+    } else if (text.startsWith('/*', i)) {
+      const close = text.indexOf('*/', i + 2);
+      const end = close < 0 ? text.length : close + 2;
+      out.push({ start: i, end, text: text.slice(i, end) });
+      i = end;
+    } else i++;
+  }
+  return out;
 }
 
-function expectCommentsKept(before: string, after: string): void {
-  const remaining = commentLines(after);
-  for (const line of commentLines(before)) {
-    const at = remaining.indexOf(line);
-    expect(at, `comment line lost: ${line}`).toBeGreaterThanOrEqual(0);
+const within = (spans: readonly Span[], at: number): boolean => spans.some((r) => at >= r.start && at < r.end);
+
+/**
+ * Law 4: every comment token of `before` that lies outside the `removed`
+ * spans (the cut spans of the nodes the edit deletes) is still in `after`,
+ * as often as it was; and so is every `kept` construct ERD Studio does not
+ * model, wherever it lies outside them.
+ */
+function expectPreserved(before: string, after: string, removed: readonly Span[] = [], kept: readonly string[] = KEPT_CONSTRUCTS): void {
+  const remaining = commentTokens(after).map((t) => t.text);
+  for (const token of commentTokens(before)) {
+    if (within(removed, token.start)) continue;
+    const at = remaining.indexOf(token.text);
+    expect(at, `comment lost: ${token.text}\n--- before:\n${before}\n--- after:\n${after}`).toBeGreaterThanOrEqual(0);
     remaining.splice(at, 1);
   }
+  for (const construct of kept) {
+    const at = before.indexOf(construct);
+    if (at < 0 || within(removed, at)) continue;
+    expect(after, `construct lost: ${construct}`).toContain(construct);
+  }
 }
+
+/** The cut span of a Table body's column nodes, by name (lower-case). */
+function columnSpans(text: string): Map<string, Span[]> {
+  const out = new Map<string, Span[]>();
+  const table = topLevel(compileOne(text).ast).find((n) => elementType(n)?.toLowerCase() === 'table');
+  const body: AstNode[] = Array.isArray(table?.body?.body) ? table!.body.body : [];
+  for (const node of body) {
+    if (node?.kind !== '<function-application>') continue;
+    const name = plainNames(node.callee)?.[0];
+    if (name !== undefined) out.set(name.toLowerCase(), [...(out.get(name.toLowerCase()) ?? []), cutSpan(text, node)]);
+  }
+  return out;
+}
+
+/**
+ * What a table edit removes: the columns not in `desired` (the one-for-one
+ * swap at the same index is a rename, which keeps its line), their
+ * `Metadata Column` blocks, and the placeholder line once columns exist.
+ */
+function tableRemovedSpans(text: string, current: SemanticTable, desired: SemanticTable): Span[] {
+  const want = new Set((desired.columns ?? []).map((c) => c.name.toLowerCase()));
+  const have = (current.columns ?? []).map((c) => c.name.toLowerCase());
+  let gone = have.filter((n) => !want.has(n));
+  const added = (desired.columns ?? []).map((c) => c.name.toLowerCase()).filter((n) => !have.includes(n));
+  if (gone.length === 1 && added.length === 1 && have.indexOf(gone[0]) === (desired.columns ?? []).findIndex((c) => c.name.toLowerCase() === added[0])) gone = [];
+  const spans = columnSpans(text);
+  const out: Span[] = gone.flatMap((n) => spans.get(n) ?? []);
+  if ((desired.columns ?? []).length > 0) out.push(...(spans.get(DBML_RICH_PLACEHOLDER_COLUMN) ?? []));
+  for (const node of topLevel(compileOne(text).ast)) {
+    if (elementType(node)?.toLowerCase() !== 'metadata') continue;
+    const names = (plainNames(node.name) ?? []).map((n) => n.toLowerCase());
+    if (String(node.targetKind?.value ?? '').toLowerCase() === 'column' && gone.includes(names[names.length - 1])) out.push(cutSpan(text, node));
+  }
+  return out;
+}
+
+/** The two column sets a Ref joins, either way round (lower-case). */
+function refEndpoints(rels: readonly { fromModel: string; fromColumn: string; toModel: string; toColumn: string }[]): string {
+  const end = (t: string, cols: string[]): string => `${t.toLowerCase()}.${cols.map((c) => c.toLowerCase()).sort().join(',')}`;
+  return [end(rels[0].fromModel, rels.map((r) => r.fromColumn)), end(rels[0].toModel, rels.map((r) => r.toColumn))].sort().join('|');
+}
+
+/** What a relationships edit removes: the Refs whose link is gone, and the use lines whose path is gone. */
+function relationshipsRemovedSpans(text: string, out: string): Span[] {
+  const kept = new Set(readRelationshipsDbml(out).refs.map((r) => refEndpoints(r.relationships)));
+  const nodes = new Map(topLevel(compileOne(text).ast).map((n) => [n.start as number, n]));
+  const spans: Span[] = [];
+  for (const ref of readRelationshipsDbml(text).refs) {
+    const node = nodes.get(ref.start);
+    if (node && !kept.has(refEndpoints(ref.relationships))) spans.push(cutSpan(text, node));
+  }
+  for (const node of topLevel(compileOne(text).ast)) {
+    if (isUseDeclaration(node) && !out.includes(`'${String(node.importPath?.value ?? '')}'`)) spans.push(cutSpan(text, node));
+  }
+  return spans;
+}
+
+/** What a diagram edit removes: the use lines of members (and relationships files) it drops, and its Notes that are gone. */
+function diagramRemovedSpans(text: string, out: string, after: Record<string, any>): Span[] { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const members = new Set((after.logical?.models ?? []).map((m: string) => m.toLowerCase()));
+  const notes = new Set((after.viewConfig?.annotations ?? []).map((a: Annotation) => a.id));
+  const spans: Span[] = [];
+  for (const node of topLevel(compileOne(text).ast)) {
+    if (isUseDeclaration(node)) {
+      const path = String(node.importPath?.value ?? '');
+      const stem = (path.split('/').pop() ?? '').replace(/\.dbml$/i, '').toLowerCase();
+      if (stem === '_relationships' ? !out.includes(`'${path}'`) : !members.has(stem)) spans.push(cutSpan(text, node));
+    } else if (elementType(node)?.toLowerCase() === 'note' && !notes.has(String(node.name?.expression?.literal?.value ?? node.name?.expression?.variable?.value ?? ''))) {
+      spans.push(cutSpan(text, node));
+    }
+  }
+  return spans;
+}
+
+/** Constructs ERD Studio does not model, in the law fixtures: an edit that does not remove their node keeps them. */
+const KEPT_CONSTRUCTS: readonly string[] = [
+  'Enum order_status {\n  new\n  shipped\n}',
+  "[not null, default: 'new'",
+  "(customer_key, status) [unique, name: 'cust_status']",
+  "Metadata Column fct_order.status {\n  note: 'Set by a Metadata block'\n}",
+  "database_type: 'Snowflake'",
+  "use * from './nothing_here_but_harmless.dbml'",
+  "[delete: cascade] // shipping",
+  'scd_type: 2',
+  'meta_count: 3',
+  'headercolor: #3498db',
+];
 
 function cleanIn(files: Record<string, string>, entry: string): string[] {
   return ALL.filter((v) => projectDiagnostics(files, [entry], [v]).length === 0);
@@ -186,6 +324,14 @@ Metadata Column fct_order.status {
 }
 `,
   'tables/dim_date.dbml': '// Calendar.\n\nTable dim_date {\n  date_key int [pk]\n}\n',
+  // 11.0-only typed values (§2.2): this file compiles in 11.0.0 alone, so Law 5 holds it to 11.0.0.
+  'tables/typed.dbml': `// Typed values, as 11.0 allows them.
+Table typed [erd_role: 'reference', meta_count: 3, headercolor: #3498db] {
+  id int [pk, natural_key: true] /* the key */
+  v int [scd_type: 2] // typed
+  w varchar
+}
+`,
   'tables/gold/_relationships.dbml': `// Written by hand: unsorted, with an extra use line.
 use { table fct_order } from './fct_order.dbml'
 use { table gold.dim_customer } from './dim_customer.dbml'
@@ -257,7 +403,7 @@ describe('the laws over every DBML fixture', () => {
           const out = editTableDbml(text, desired);
           expect(normTable(readOk(out, desired.name))).toEqual(normTable(desired)); // Law 3
           expect(editTableDbml(out, desired)).toBe(out); // Law 2
-          expectCommentsKept(text, out); // Law 4
+          expectPreserved(text, out, tableRemovedSpans(text, reading.table, desired)); // Law 4
           expect(projectDiagnostics({ [file]: out }, [file], baseline)).toEqual([]); // Law 5
         }
       });
@@ -287,7 +433,7 @@ describe('the laws over every DBML fixture', () => {
           const read = ownersOfFile({ ...project.files, [file]: out }, file, library);
           expect(comparableRelationships(read.get(owner.name.toLowerCase()))).toEqual(comparableRelationships(relationships)); // Law 3
           expect(editRelationshipsDbml(out, { filePath: file, owners: desired, resolve })).toBe(out); // Law 2
-          expectCommentsKept(text, out); // Law 4
+          expectPreserved(text, out, relationshipsRemovedSpans(text, out)); // Law 4
           expect(projectDiagnostics({ ...project.files, [file]: out }, [file], baseline)).toEqual([]); // Law 5
         }
       });
@@ -312,10 +458,38 @@ describe('the laws over every DBML fixture', () => {
         const out = editSubjectAreaDbml(text, { filePath: file, before, after, ...lookups });
         expect(normDiagram(parseSubjectAreaDbml(out, file, null).obj)).toEqual(normDiagram(after)); // Law 3
         expect(editSubjectAreaDbml(out, { filePath: file, before: parseSubjectAreaDbml(out, file, null).obj, after, ...lookups })).toBe(out); // Law 2
-        expectCommentsKept(text, out); // Law 4
+        expectPreserved(text, out, diagramRemovedSpans(text, out, after)); // Law 4
         expect(projectDiagnostics({ ...project.files, [file]: out }, [file], baseline)).toEqual([]); // Law 5
       });
     }
+  }
+});
+
+describe('renderNewTableDbml over every fixture table', () => {
+  // §4.5: read(renderNewTableDbml(t)) ≅ t for every fixture table (the YAML libraries, as Convert will meet them).
+  const root = path.resolve(__dirname, '../fixtures');
+  const tables = walk(root)
+    .filter((f) => /\.ya?ml$/.test(f) && /[\\/]\.erd-studio[\\/](logical-models|tables)[\\/]/.test(f))
+    .flatMap((f) => {
+      let table: SemanticTable | null = null;
+      try {
+        table = parseTableText(fs.readFileSync(f, 'utf8'), path.basename(f).replace(/\.ya?ml$/, ''));
+      } catch {
+        return []; // a fixture that is broken on purpose
+      }
+      return table && table.name ? [[path.relative(root, f), table] as const] : [];
+    });
+
+  it('finds the fixture tables', () => {
+    expect(tables.length).toBeGreaterThanOrEqual(30);
+  });
+
+  for (const [file, table] of tables) {
+    it(`${file} reads back as itself and compiles in every parser`, () => {
+      const out = renderNewTableDbml(table);
+      expect(normTable(readOk(out, table.name))).toEqual(normTable(table));
+      expect(projectDiagnostics({ [`tables/${table.name}.dbml`]: out })).toEqual([]);
+    });
   }
 });
 
@@ -374,20 +548,41 @@ function randomTable(rng: Rng, name: string): SemanticTable {
   return t;
 }
 
-/** Hand-written touches: a header comment, comment lines above columns, trailing comments. */
-function decorate(rng: Rng, text: string): string {
+/**
+ * Hand-written touches on a table file: a header comment, comment lines
+ * above columns, trailing `//` and block comments, the body Note moved among
+ * the columns, and Metadata blocks (with a comment inside) for the table and
+ * a column.
+ */
+function decorate(rng: Rng, text: string, table: SemanticTable): string {
   const lines = text.split('\n');
   const out: string[] = [];
   if (chance(rng, 0.5)) out.push('// A header comment', '');
   let inString = false;
+  const columnLines: number[] = [];
   lines.forEach((line, i) => {
     const wasInString = inString;
     if ((line.match(/'''/g) ?? []).length % 2 === 1) inString = !inString;
     const isColumn = !wasInString && /^ {2}[^ /}]/.test(line) && !/^ {2}(indexes|Note:)/.test(line) && i > 0 && !lines.slice(0, i).every((l) => !l.endsWith('{'));
     if (isColumn && chance(rng, 0.3)) out.push(`  // about line ${i}`);
-    out.push(isColumn && !inString && chance(rng, 0.2) ? `${line} // tail ${i}` : line);
+    const r = rng();
+    out.push(isColumn && !inString && r < 0.15 ? `${line} // tail ${i}` : isColumn && !inString && r < 0.25 ? `${line} /* block ${i} */` : line);
+    if (isColumn && !inString) columnLines.push(out.length - 1);
   });
-  return out.join('\n');
+  // A body Note among the columns (after the first), where hand-written files often have it.
+  const noteAt = out.findIndex((l) => /^ {2}Note: /.test(l) && (l.match(/'''/g) ?? []).length !== 1);
+  if (noteAt >= 0 && columnLines.length >= 2 && chance(rng, 0.5)) {
+    const [line] = out.splice(noteAt, 1);
+    out.splice(columnLines[0] + 1, 0, line);
+  }
+  let result = out.join('\n');
+  const columns = table.columns ?? [];
+  if (columns.length > 0 && chance(rng, 0.3)) {
+    const column = pick(rng, columns);
+    result += `\nMetadata Column ${dbmlName(table.name)}.${dbmlName(column.name)} {\n  // set by a block\n  meta_from_block: 'column'\n}\n`;
+  }
+  if (chance(rng, 0.2)) result += `\nMetadata Table ${dbmlName(table.name)} {\n  // a block entry\n  meta_from_block: 'table'\n}\n`;
+  return result;
 }
 
 function mutateTable(rng: Rng, t: SemanticTable): SemanticTable {
@@ -395,7 +590,7 @@ function mutateTable(rng: Rng, t: SemanticTable): SemanticTable {
   const cols = d.columns ?? [];
   const ops = Math.max(1, Math.floor(rng() * 4));
   for (let i = 0; i < ops; i++) {
-    switch (Math.floor(rng() * 11)) {
+    switch (Math.floor(rng() * 12)) {
       case 0: d.grain = chance(rng, 0.3) ? undefined : randomText(rng); break;
       case 1: d.description = chance(rng, 0.3) ? undefined : randomText(rng); break;
       case 2: d.meta = randomMeta(rng); break;
@@ -406,6 +601,7 @@ function mutateTable(rng: Rng, t: SemanticTable): SemanticTable {
       case 7: if (cols.length) { const c = pick(rng, cols); Object.assign(c, randomColumn(rng, c.name), { isPrimaryKey: c.isPrimaryKey }); } break;
       case 8: if (cols.length) { const c = pick(rng, cols); const unused = COLUMN_NAMES.filter((n) => !cols.some((x) => x.name.toLowerCase() === n.toLowerCase())); if (unused.length) c.name = `${pick(rng, unused)}`; } break;
       case 9: d.modelRole = chance(rng, 0.3) ? undefined : pick(rng, ['transaction-fact', 'conformed-dim'] as const); d.alias = chance(rng, 0.5) ? undefined : 'renamed_alias'; break;
+      case 10: d.name = pick(rng, TABLE_NAMES.filter((n) => n.toLowerCase() !== d.name.toLowerCase())); break; // a table rename
       default: d.rationale = chance(rng, 0.3) ? undefined : { design: randomText(rng) }; break;
     }
   }
@@ -446,6 +642,48 @@ function randomRelationships(rng: Rng, owner: string, others: readonly string[])
   return out;
 }
 
+/**
+ * Hand-written touches on a relationships file: comment lines above Refs,
+ * trailing comments on Refs and use lines, and block-form Refs with a
+ * comment inside.
+ */
+function decorateRelationships(rng: Rng, text: string): string {
+  return text.split('\n').flatMap((line, i) => {
+    if (/^Ref/.test(line)) {
+      const out: string[] = [];
+      if (chance(rng, 0.3)) out.push(`// about Ref ${i}`);
+      const m = /^(Ref(?: [^:{]+?)?): (.*)$/.exec(line);
+      if (m && chance(rng, 0.25)) {
+        out.push(`${m[1]} {`, `  // inside ${i}`, `  ${m[2]}${chance(rng, 0.5) ? ` // inner tail ${i}` : ''}`, '}');
+        return out;
+      }
+      out.push(chance(rng, 0.3) ? `${line} // tail ${i}` : line);
+      return out;
+    }
+    if (/^use /.test(line) && chance(rng, 0.2)) return [`${line} // use ${i}`];
+    return [line];
+  }).join('\n');
+}
+
+/** A composite's entries in reverse order (the same link, listed another way). */
+function reverseComposites(list: TableRelationship[]): TableRelationship[] {
+  const groups = new Map<string, TableRelationship[]>();
+  for (const r of list) if (r.compositeKey) groups.set(r.compositeKey, [...(groups.get(r.compositeKey) ?? []), r]);
+  const next = new Map([...groups].map(([k, members]) => [k, [...members].reverse()]));
+  return list.map((r) => (r.compositeKey ? next.get(r.compositeKey)!.shift()! : r));
+}
+
+/** Hand-written touches on a diagram: comment lines above and trailing comments on use lines and Notes. */
+function decorateDiagram(rng: Rng, text: string): string {
+  return text.split('\n').flatMap((line, i) => {
+    if (!/^(use |Note )/.test(line)) return [line];
+    const out: string[] = [];
+    if (chance(rng, 0.3)) out.push(`// about line ${i}`);
+    out.push(chance(rng, 0.3) ? `${line} // tail ${i}` : line);
+    return out;
+  }).join('\n');
+}
+
 describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
   /** The texts of the case being run, shown when it fails. */
   let trail: string[] = [];
@@ -463,7 +701,7 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         const created = renderNewTableDbml(table);
         expect(normTable(readOk(created, name))).toEqual(normTable(table));
         trail = [];
-        const t = decorate(rng, created);
+        const t = decorate(rng, created, table);
         note('input', t);
         const file = `tables/${name}.dbml`;
         expect(projectDiagnostics({ [file]: t }, [file])).toEqual([]);
@@ -471,12 +709,12 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         expect(editTableDbml(t, read)).toBe(t); // Law 1
         const desired = mutateTable(rng, read);
         note('desired', desired);
-        const out = editTableDbml(t, desired);
+        const out = editTableDbml(t, desired, { rename: true });
         note('output', out);
-        expect(normTable(readOk(out, name))).toEqual(normTable(desired)); // Law 3
-        expect(editTableDbml(out, desired)).toBe(out); // Law 2
-        expect(editTableDbml(out, readOk(out, name))).toBe(out); // Law 1 on the output
-        expectCommentsKept(t.split('\n').filter((l) => !/\/\/ tail/.test(l)).join('\n'), out); // Law 4 (whole-line comments)
+        expect(normTable(readOk(out, desired.name))).toEqual(normTable(desired)); // Law 3
+        expect(editTableDbml(out, desired, { rename: true })).toBe(out); // Law 2
+        expect(editTableDbml(out, readOk(out, desired.name))).toBe(out); // Law 1 on the output
+        expectPreserved(t, out, tableRemovedSpans(t, read, desired)); // Law 4
         expect(projectDiagnostics({ [file]: out }, [file])).toEqual([]); // Law 5
       } catch (err) {
         fail('table', i, err);
@@ -484,9 +722,12 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
     }
   });
 
-  it('relationships: create, edit (Laws 1–5)', () => {
+  it('relationships: create, decorate, edit (Laws 1–5)', () => {
     const rng = mulberry32(SEED + 1000);
-    for (let i = 0; i < 90; i++) {
+    const CASES = 90;
+    let ran = 0;
+    let refused = 0;
+    for (let i = 0; i < CASES; i++) {
       try {
         const library = randomLibrary(rng);
         const lib = libraryOf(library);
@@ -495,14 +736,18 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         const owners = ['fct_order', 'dim_customer', 'bridge'];
         const others = ['fct_order', 'dim_customer', 'dim_date', 'bridge'];
         const first = new Map(owners.map((o) => [o, { name: o, relationships: randomRelationships(rng, o, others) }]));
-        let created: string;
+        let written: string;
         try {
-          created = editRelationshipsDbml(null, { filePath: file, owners: first, resolve });
-        } catch {
+          written = editRelationshipsDbml(null, { filePath: file, owners: first, resolve });
+        } catch (err) {
+          if (!(err instanceof DbmlEditRefused)) throw err;
+          refused++;
           continue; // a random draw two owners joining the same columns is refused, as it should be
         }
         trail = [];
-        note('created', created);
+        note('written', written);
+        const created = decorateRelationships(rng, written);
+        note('decorated', created);
         const files = { ...library, [file]: created };
         expect(projectDiagnostics(files, [file])).toEqual([]);
         const read = ownersOf(files, lib);
@@ -522,29 +767,36 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
             const unitOf = (r: TableRelationship): string => r.compositeKey ?? `${r.fromColumn}>${r.toModel}.${r.toColumn}`;
             const decisions = new Map<string, { keep: boolean; role: boolean }>();
             for (const r of list) if (!decisions.has(unitOf(r))) decisions.set(unitOf(r), { keep: chance(rng, 0.7), role: chance(rng, 0.4) });
-            return list.filter((r) => decisions.get(unitOf(r))!.keep).map((r) => (decisions.get(unitOf(r))!.role ? { ...r, role: 'changed role' } : r));
+            const kept = list.filter((r) => decisions.get(unitOf(r))!.keep).map((r) => (decisions.get(unitOf(r))!.role ? { ...r, role: 'changed role' } : r));
+            return chance(rng, 0.4) ? reverseComposites(kept) : kept; // the same composites, listed another way
           })();
         next.set(target, { name: target, relationships: changed });
         let out: string;
         note('desired', [...next.values()]);
         try {
           out = editRelationshipsDbml(created, { filePath: file, owners: next, resolve });
-        } catch {
+        } catch (err) {
+          if (!(err instanceof DbmlEditRefused)) throw err;
+          refused++;
           continue;
         }
         note('output', out);
         const back = ownersOf({ ...library, [file]: out }, lib);
         for (const o of owners) expect(comparableRelationships(back.get(o))).toEqual(comparableRelationships(next.get(o)!.relationships)); // Law 3
         expect(editRelationshipsDbml(out, { filePath: file, owners: next, resolve })).toBe(out); // Law 2
-        expectCommentsKept(created, out); // Law 4
+        expectPreserved(created, out, relationshipsRemovedSpans(created, out)); // Law 4
         expect(projectDiagnostics({ ...library, [file]: out }, [file])).toEqual([]); // Law 5
+        ran++;
       } catch (err) {
         fail('relationships', i, err);
       }
     }
+    // Only the refusals the generator can draw on purpose are skipped; nearly every case runs.
+    expect(refused + ran).toBe(CASES);
+    expect(ran).toBeGreaterThanOrEqual(70);
   });
 
-  it('diagrams: create, edit (Laws 1–5)', () => {
+  it('diagrams: create, decorate, edit (Laws 1–5)', () => {
     const rng = mulberry32(SEED + 2000);
     const COLOURS: AnnotationColor[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
     for (let i = 0; i < 90; i++) {
@@ -576,7 +828,7 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
           ...(chance(rng, 0.4) && members.length ? { linkedModel: pick(rng, members) } : {}),
           };
         };
-        const created = renderNewSubjectAreaDbml({
+        const written = renderNewSubjectAreaDbml({
           filePath: file,
           domain: pick(rng, ['sales', 'My Sales', 'note']),
           description: chance(rng, 0.6) ? randomText(rng) : '',
@@ -589,7 +841,9 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
           annotations: Array.from({ length: Math.floor(rng() * 3) }, (_, k) => makeNote(k)),
         });
         trail = [];
-        note('created', created);
+        note('written', written);
+        const created = decorateDiagram(rng, written);
+        note('decorated', created);
         const files = { ...library, [file]: created };
         expect(projectDiagnostics(files, [file])).toEqual([]);
         const before = parseSubjectAreaDbml(created, file, null).obj as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -612,6 +866,7 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         expect(normDiagram(readBack)).toEqual(normDiagram(after)); // Law 3
         expect(editSubjectAreaDbml(out, { filePath: file, before: readBack, after, ...lookups })).toBe(out); // Law 2
         expect(editSubjectAreaDbml(out, { filePath: file, before: readBack, after: readBack, ...lookups })).toBe(out); // Law 1 on the output
+        expectPreserved(created, out, diagramRemovedSpans(created, out, after)); // Law 4
         expect(projectDiagnostics({ ...library, [file]: out }, [file])).toEqual([]); // Law 5
       } catch (err) {
         fail('diagram', i, err);

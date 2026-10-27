@@ -9,45 +9,11 @@ import { describe, it, expect } from 'vitest';
 
 import { DbmlEditRefused } from '../../src/dbml/errors';
 import { editSubjectAreaDbml } from '../../src/dbml/writeDiagram';
-import { detectSubjectAreaFormat } from '../../src/types/semantic';
 import { DIAGRAM_CASES, DIAGRAM_LIBRARY, DIAGRAM_PATH, NEW_DIAGRAM_CASES, SALES, diagramEdit, lookups, readDiagram } from '../dbmlWriterCases/diagramCases';
 import { clone } from '../dbmlWriterSupport';
 
 describe('editSubjectAreaDbml', () => {
   for (const c of DIAGRAM_CASES) it(c.name, () => c.check(c.run()));
-
-  it('reads back as the object it was given (Law 3) and is idempotent (Law 2)', () => {
-    const change = (a: Record<string, any>): void => { // eslint-disable-line @typescript-eslint/no-explicit-any
-      a.domain = 'sales_v2';
-      a.description = '  Indented first line is dropped';
-      a.logical.models = ['dim_date', 'fct_order'];
-      a.viewConfig.showFkEdges = true;
-      a.viewConfig.annotations[0].text = 'edited';
-      a.viewConfig.annotations.push({ id: 'n2', text: 'two', x: 0, y: 0, linkedModel: 'dim_date' });
-    };
-    const once = diagramEdit(SALES, change);
-    const before = readDiagram(SALES);
-    const after = clone(before);
-    change(after);
-    expect(editSubjectAreaDbml(once, { filePath: DIAGRAM_PATH, before: readDiagram(once), after, ...lookups(DIAGRAM_LIBRARY) })).toBe(once);
-    const read = readDiagram(once);
-    expect(read.domain).toBe('sales_v2');
-    expect(read.description).toBe('Indented first line is dropped');
-    expect(read.logical.models).toEqual(['dim_date', 'fct_order']);
-    expect(read.viewConfig.showFkEdges).toBe(true);
-    expect(read.viewConfig.annotations.map((n: { id: string; text: string }) => [n.id, n.text])).toEqual([
-      ['3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', 'edited'], ['n2', 'two'],
-    ]);
-    expect(detectSubjectAreaFormat(read)).toBe('v5');
-  });
-
-  it('a byte-order mark and CRLF line endings are kept', () => {
-    const crlf = `﻿${SALES.replace(/\n/g, '\r\n')}`;
-    const out = diagramEdit(crlf, (a) => { a.logical.models.push('dim_date'); a.description = 'x'; });
-    expect(out.startsWith('﻿')).toBe(true);
-    expect(out.replace(/\r\n/g, '')).not.toContain('\n');
-    expect(out).toContain("use { table dim_date } from '../tables/dim_date.dbml'\r\n");
-  });
 });
 
 describe('editSubjectAreaDbml refusals', () => {
@@ -84,6 +50,16 @@ describe('editSubjectAreaDbml refusals', () => {
     expect(refused(SALES, (a) => { a.logical.models.push('nowhere'); })).toMatch(/no table file/);
     expect(refused(SALES, (a) => { a.logical.models.push('yml_t'); }, { yml_t: 'logical-models/yml_t.yml' }))
       .toMatch(/YAML table\. Convert the project to DBML first \(ERD Studio: Convert Project to DBML\)/);
+  });
+
+  it('a `before` that is not what the text reads as (a stale snapshot)', () => {
+    const before = readDiagram(SALES);
+    const stale = clone(before);
+    stale.logical.models = ['dim_customer', 'fct_order'];
+    const after = clone(stale);
+    after.logical.models = ['dim_customer'];
+    expect(() => editSubjectAreaDbml(SALES, { filePath: DIAGRAM_PATH, before: stale, after, ...lookups(DIAGRAM_LIBRARY) }))
+      .toThrow(/could not line up the use lines of gold\/sales\.dbml with its members \(the diagram changed since it was read\)/);
   });
 
   it('a file that does not parse', () => {

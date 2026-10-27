@@ -19,13 +19,23 @@ export function edited(text: string, change: (t: SemanticTable) => void, stem = 
 
 const path = (stem: string): string => `tables/${stem}.dbml`;
 
-function tableCase(name: string, stem: string, input: string, change: (t: SemanticTable) => void, check: (output: string) => void, parsers?: readonly string[]): WriterCase {
+function tableCase(
+  name: string,
+  stem: string,
+  input: string,
+  change: (t: SemanticTable) => void,
+  check: (output: string) => void,
+  parsers?: readonly string[],
+  options: Parameters<typeof editTableDbml>[2] = {},
+): WriterCase {
   return {
     name,
-    run: (): WriterOutcome => ({ path: path(stem), input, output: edited(input, change, stem), ...(parsers ? { parsers } : {}) }),
+    run: (): WriterOutcome => ({ path: path(stem), input, output: edited(input, change, stem, options), ...(parsers ? { parsers } : {}) }),
     check: (o) => check(o.output),
   };
 }
+
+const RENAME = { rename: true } as const;
 
 /** The spec's §2.2 example, with a header comment and comments on columns. */
 export const FCT_ORDER = `// Order lines from the shop. Hand-written comments like this one survive every save.
@@ -77,7 +87,23 @@ const COMPOSITE = `Table fct_order {
 }
 `;
 
+/** The Law 2 edit: settings, a removed and a new column, the key moved and new meta. */
+function lawTwoChange(t: SemanticTable): void {
+  t.grain = 'g2';
+  t.columns!.splice(2, 1);
+  t.columns!.push({ name: 'z', dataType: 'int', description: 'zz', isNaturalKey: true });
+  t.columns![0].isPrimaryKey = false;
+  t.columns![1].isPrimaryKey = true;
+  t.meta = { owner: 'o', n: ['1', true, null] };
+}
+
 export const TABLE_CASES: WriterCase[] = [
+  tableCase('a no-op is byte-identical (Law 1)', 'fct_order', FCT_ORDER, () => undefined, (out) => { expect(out).toBe(FCT_ORDER); }),
+  tableCase('is idempotent (Law 2)', 'fct_order', FCT_ORDER, lawTwoChange, (out) => {
+    const desired = clone(readTable(FCT_ORDER, 'fct_order').table);
+    lawTwoChange(desired);
+    expect(editTableDbml(out, desired)).toBe(out);
+  }),
   // --- Table settings -------------------------------------------------------
   tableCase('a changed setting splices its value only', 'fct_order', FCT_ORDER, (t) => { t.grain = 'One row per order'; }, (out) => {
     expect(out).toBe(FCT_ORDER.replace("grain: 'One row per order line'", "grain: 'One row per order'"));
@@ -252,6 +278,32 @@ export const TABLE_CASES: WriterCase[] = [
   }, (out) => {
     expect(out).toBe('Table fct_order {\n  a int\n  b int\n  indexes {\n    a [unique]\n    (a, b) [pk]\n  }\n}\n');
   }),
+  tableCase('reordering columns while going to a composite key puts the indexes block before a body Note among the columns', 'fct_order',
+    "Table fct_order {\n  a int [pk]\n  Note: 'n'\n  b int\n}\n", (t) => {
+      t.columns!.reverse();
+      for (const c of t.columns!) c.isPrimaryKey = true;
+    }, (out) => {
+      expect(out).toBe("Table fct_order {\n  b int\n  a int\n  indexes {\n    (b, a) [pk]\n  }\n  Note: 'n'\n}\n");
+    }),
+  tableCase('removing a column cuts the index lines that name it, with their comments, and keeps an expression index', 'fct_order',
+    "Table fct_order {\n  a int [pk]\n  b int\n  c int\n  indexes {\n    c [unique] // c alone\n    (b, c) [name: 'bc'] // b and c\n    `lower(b)` [name: 'expr']\n    b\n  }\n}\n", (t) => {
+      t.columns!.pop();
+    }, (out) => {
+      expect(out).toBe("Table fct_order {\n  a int [pk]\n  b int\n  indexes {\n    `lower(b)` [name: 'expr']\n    b\n  }\n}\n");
+    }),
+  // A one-line settings list with a block comment is spliced element by element (Law 4).
+  tableCase('a one-line settings list keeps a block comment when a value in it changes', 'fct_order',
+    "Table fct_order {\n  id int [pk, /* keep me */ note: 'a']\n}\n", (t) => { t.columns![0].description = 'b'; }, (out) => {
+      expect(out).toBe("Table fct_order {\n  id int [pk, /* keep me */ note: 'b']\n}\n");
+    }),
+  tableCase('…and when a setting is removed from it or added to it', 'fct_order',
+    "Table fct_order {\n  id int [pk, /* keep me */ note: 'a']\n  v int [/* first */ note: 'x', pk]\n}\n", (t) => {
+      t.columns![0].isPrimaryKey = false;
+      t.columns![0].isNaturalKey = true;
+      t.columns![1].description = '';
+    }, (out) => {
+      expect(out).toBe("Table fct_order {\n  id int [ /* keep me */ note: 'a', natural_key: 'true']\n  v int [/* first */  pk]\n}\n");
+    }),
   tableCase('renaming a column that an index names renames it there too', 'fct_order', COMPOSITE, (t) => { t.columns![1].name = 'b2'; }, (out) => {
     expect(out).toBe(COMPOSITE.replace('  b int', '  b2 int').replace('(a, b) [pk]', '(a, b2) [pk]'));
   }),
@@ -272,6 +324,17 @@ export const TABLE_CASES: WriterCase[] = [
     t.name = 'fct_order_line';
   }, (out) => {
     expect(out).toBe("Table gold.fct_order_line as FO {\n  id int\n}\nMetadata Table gold.fct_order_line {\n  grain: 'g'\n}\n");
+  }, undefined, RENAME),
+  tableCase('a name that differs only in case keeps the declared spelling when the edit is not a rename', 'fct_order', BARE, (t) => {
+    t.name = 'FCT_ORDER';
+    t.grain = 'g';
+  }, (out) => {
+    expect(out).toBe(BARE.replace('Table fct_order {', "Table fct_order [grain: 'g'] {"));
+  }),
+  tableCase('a schema-qualified name with a schema property edits the property', 'fct_order', "Table gold.fct_order [schema: 'gold'] {\n  id int\n}\n", (t) => {
+    t.schema = 'silver';
+  }, (out) => {
+    expect(out).toBe("Table gold.fct_order [schema: 'silver'] {\n  id int\n}\n");
   }),
   tableCase('keywords, upper case, digit-leading and odd names are quoted', 'fct_order', BARE, (t) => {
     t.columns!.push(
@@ -362,7 +425,14 @@ export const TABLE_CASES: WriterCase[] = [
     expect(out).toContain('Metadata Column fct_line.line_id {');
     expect(out).toContain('Metadata Table fct_line {');
     expect(readTable(out, 'fct_line').table.columns![0].description).toBe('multi\nline');
-  }),
+  }, undefined, RENAME),
+  tableCase('a table rename that also removes a column cuts its Metadata Column block and retargets the rest', 'fct_order',
+    "Table fct_order {\n  a int\n  b int\n}\nMetadata Table fct_order {\n  grain: 'g'\n}\nMetadata Column fct_order.b {\n  note: 'n'\n}\n", (t) => {
+      t.name = 'fct_line';
+      t.columns!.pop();
+    }, (out) => {
+      expect(out).toBe("Table fct_line {\n  a int\n}\nMetadata Table fct_line {\n  grain: 'g'\n}\n");
+    }, undefined, RENAME),
   tableCase('deleting a column removes its Metadata Column blocks', 'fct_order', METADATA_TABLE(), (t) => {
     t.columns!.shift();
   }, (out) => {
@@ -396,8 +466,28 @@ line'''
 `;
 }
 
+/** A table with every kind of value, for the read-back of a new file. */
+const READ_BACK_TABLE: SemanticTable = {
+  name: 'dim_customer',
+  schema: 'silver',
+  alias: 'customers',
+  modelRole: 'conformed-dim',
+  rationale: { scdStrategy: 'Type 2 on segment' },
+  description: 'Customers\n  - indented bullet',
+  meta: { tags: ['a', 'b'], owner: 'crm', 'Odd Key': 'x' },
+  columns: [
+    { name: 'customer_key', dataType: 'INT', description: 'Surrogate', isPrimaryKey: true, scdType: 0 },
+    { name: 'segment', dataType: 'VARCHAR', description: '', scdType: 2, isNaturalKey: true },
+  ],
+};
+
 /** New-file cases: `renderNewTableDbml` and its read-back. */
 export const NEW_TABLE_CASES: WriterCase[] = [
+  {
+    name: 'a new table reads back as the table it was given',
+    run: () => ({ path: 'tables/dim_customer.dbml', input: null, output: renderNewTableDbml(READ_BACK_TABLE) }),
+    check: (o) => { expect(readTable(o.output, 'dim_customer').table).toEqual(READ_BACK_TABLE); },
+  },
   {
     name: 'a new table follows the §2.2 layout',
     run: () => ({

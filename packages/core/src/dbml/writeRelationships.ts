@@ -17,6 +17,7 @@ import type { Cardinality, Relationship, TableRelationship } from '../types/sema
 import { DBML_RELATIONSHIPS_FILE_HEADER, DBML_RELATIONSHIPS_FILE_STEM } from '../dbmlRichProperties.js';
 import { dbmlName } from '../dbmlText.js';
 import { canonicalRelationship } from '../relationships.js';
+import { reverseBareOneToOne } from '../dbmlAttach.js';
 import { TABLES_DIR } from '../logicalModel.js';
 import { dirnamePosix, normalisePosix, relativePosix, resolvePosix } from '../storage.js';
 import { DbmlEditRefused } from './errors.js';
@@ -33,7 +34,7 @@ import {
   type AstNode,
 } from './parser.js';
 import { readRelationshipsDbml } from './readRelationships.js';
-import { applyTextEdits, attachedStart, cutEdit, eolOf, headerEnd, type TextEdit } from './splice.js';
+import { applyTextEdits, attachedStart, cutEdit, eolOf, headerEnd, lineEndOf, refuseOverlaps, type TextEdit } from './splice.js';
 
 /** One relationship unit: a Ref line (a composite is one unit), canonical (`from` is the foreign-key table). */
 export interface RefUnit {
@@ -57,18 +58,13 @@ export interface DbmlResolvedTable {
   path: string;
   storage: 'yaml' | 'dbml';
   /**
-   * Its primary-key columns (any case). Given, a bare `-` Ref in the file is
-   * oriented by keys exactly as `attachRelationships` reads it (§2.3); without
-   * it, the second end is read as the foreign key.
+   * Its primary-key columns (any case). Given for both ends, a bare `-` Ref in
+   * the file is oriented by keys exactly as `attachRelationships` reads it
+   * (§2.3, the shared `reverseBareOneToOne`). Without it the writer tries
+   * both orientations against the desired units, so a Ref that is not
+   * changing keeps its bytes either way.
    */
   primaryKey?: readonly string[];
-}
-
-/** Whether `columns` are exactly the key `key` (without case). */
-function isWholeKey(key: readonly string[], columns: readonly string[]): boolean {
-  const k = new Set(key.map(lower));
-  const c = new Set(columns.map(lower));
-  return k.size > 0 && k.size === c.size && [...c].every((x) => k.has(x));
 }
 
 /** What {@link editRelationshipsDbml} changes in one relationships file. */
@@ -77,8 +73,12 @@ export interface RelationshipsFileEdit {
   filePath: string;
   /**
    * Owners whose complete list for THIS file this edit sets, keyed
-   * lower-case. `null` drops every Ref it owns here. Owners not listed keep
-   * their Refs byte for byte.
+   * lower-case by their name after the edit (a key that is a renamed
+   * owner's old name, or another spelling `resolve` maps, is read through
+   * `renamedOwners` and `resolve` too). `null` drops every Ref it owns here.
+   * Owners not listed keep their Refs byte for byte, apart from a Ref a
+   * listed owner's list describes from the other end (a `one-to-many`
+   * record), which is matched like the owner's own.
    */
   owners: ReadonlyMap<string, { name: string; relationships: readonly TableRelationship[] } | null>;
   /** Table renames done in this edit: old lower-case name → new name (Refs naming them are re-spelled). */
@@ -107,9 +107,14 @@ export function refUnitSortKey(unit: RefUnit): string {
   return [lower(unit.from), lower(unit.to), unit.fromColumns.map(lower).join(','), unit.toColumns.map(lower).join(',')].join('\u0000');
 }
 
-/** Ends and columns, without case: what "the same Ref" means apart from cardinality and role. */
+/**
+ * Ends and column pairs, without case and in any pair order: what "the same
+ * Ref" means apart from cardinality and role. A composite listed with its
+ * pairs in another order is the same link (core's `linkKey` is order-free too).
+ */
 function endsKey(unit: RefUnit): string {
-  return refUnitSortKey(unit);
+  const pairs = unit.fromColumns.map((c, i) => `${lower(c)}>${lower(unit.toColumns[i] ?? '')}`).sort();
+  return [lower(unit.from), lower(unit.to), pairs.join(',')].join('\u0000');
 }
 
 function identityKey(unit: RefUnit): string {
@@ -255,6 +260,10 @@ function endParts(expr: AstNode | undefined): { table: string; columns: string[]
  * is a YAML table (D20).
  */
 export function editRelationshipsDbml(oldText: string | null, edit: RelationshipsFileEdit): string {
+  return refuseOverlaps(edit.filePath, () => editRelationships(oldText, edit));
+}
+
+function editRelationships(oldText: string | null, edit: RelationshipsFileEdit): string {
   const parser = edit.parser ?? PINNED_PARSER;
   const file = edit.filePath;
   const renamed = new Map<string, string>();
@@ -270,15 +279,16 @@ export function editRelationshipsDbml(oldText: string | null, edit: Relationship
     const spelled = columns.map((c) => dbmlName(columnSpelling(table, c)));
     return spelled.length === 1 ? `${reference}.${spelled[0]}` : `${reference}.(${spelled.join(', ')})`;
   };
-  /** The Ref line for a unit (§2.3 operators, the foreign-key end marked possibly null, D18). */
-  const refText = (unit: RefUnit, rest = ''): string => {
+  /** A unit's ends and operator (§2.3 operators, the foreign-key end marked possibly null, D18). */
+  const refBody = (unit: RefUnit): string => {
     const from = endText(unit.from, unit.fromColumns);
     const to = endText(unit.to, unit.toColumns);
-    const body = unit.cardinality === 'one-to-one' ? `${to} ?- ${from}`
+    return unit.cardinality === 'one-to-one' ? `${to} ?- ${from}`
       : unit.cardinality === 'many-to-many' ? `${from} <>? ${to}`
         : `${from} >? ${to}`;
-    return `${unit.role !== undefined ? `Ref ${dbmlName(unit.role)}` : 'Ref'}: ${body}${rest}`;
   };
+  /** The Ref line for a unit. */
+  const refText = (unit: RefUnit, rest = ''): string => `${unit.role !== undefined ? `Ref ${dbmlName(unit.role)}` : 'Ref'}: ${refBody(unit)}${rest}`;
   const checkUnit = (unit: RefUnit, line?: number): void => {
     const sameColumns = lower(unit.from) === lower(unit.to)
       && unit.fromColumns.length === unit.toColumns.length
@@ -296,7 +306,8 @@ export function editRelationshipsDbml(oldText: string | null, edit: Relationship
   const text = oldText === null ? '' : stripBom(oldText);
   const eol = oldText === null ? '\n' : eolOf(text);
   let ast: AstNode | undefined;
-  const current: Array<{ ref: RefNode; unit: RefUnit; spelledNames: string[] }> = [];
+  /** Each Ref in the file: its unit as read and, for a bare `-` whose orientation the keys cannot settle, the other way round. */
+  const current: Array<{ ref: RefNode; unit: RefUnit; spelledNames: string[]; alt?: { unit: RefUnit; spelledNames: string[] } }> = [];
   if (oldText !== null) {
     const reading = readRelationshipsDbml(text, parser);
     if (!reading.readable) {
@@ -312,29 +323,36 @@ export function editRelationshipsDbml(oldText: string | null, edit: Relationship
       const node = refNodes.get(stored.start);
       if (!node) continue;
       let rels = stored.relationships;
+      const reversed = rels.map((r) => ({ ...r, fromModel: r.toModel, fromColumn: r.toColumn, toModel: r.fromModel, toColumn: r.fromColumn }));
+      let undecided = false;
       if (stored.oneToOneDirection === 'keys') {
-        // A bare `-`: oriented by keys exactly as attachRelationships reads it (the first end is the
-        // foreign key only when the second end alone is its table's whole primary key).
+        // A bare `-`: oriented by keys exactly as attachRelationships reads it (the shared rule). When a
+        // table's key is not given, both orientations are tried against the desired units below.
         const fromKey = edit.resolve(canonical(rels[0].fromModel))?.primaryKey;
         const toKey = edit.resolve(canonical(rels[0].toModel))?.primaryKey;
-        if (fromKey && toKey && isWholeKey(fromKey, rels.map((r) => r.fromColumn)) && !isWholeKey(toKey, rels.map((r) => r.toColumn))) {
-          rels = rels.map((r) => ({ ...r, fromModel: r.toModel, fromColumn: r.toColumn, toModel: r.fromModel, toColumn: r.fromColumn }));
-        }
+        if (fromKey === undefined || toKey === undefined) undecided = true;
+        else if (reverseBareOneToOne(fromKey, rels.map((r) => r.fromColumn), toKey, rels.map((r) => r.toColumn))) rels = reversed;
       }
-      const unit: RefUnit = {
-        from: canonical(rels[0].fromModel),
-        to: canonical(rels[0].toModel),
-        fromColumns: rels.map((r) => r.fromColumn),
-        toColumns: rels.map((r) => r.toColumn),
-        cardinality: rels[0].cardinality,
-        ...(rels[0].role !== undefined ? { role: rels[0].role } : {}),
-      };
-      current.push({ ref: refNodeOf(node), unit, spelledNames: [rels[0].fromModel, rels[0].toModel] });
+      const unitOf = (list: typeof rels): RefUnit => ({
+        from: canonical(list[0].fromModel),
+        to: canonical(list[0].toModel),
+        fromColumns: list.map((r) => r.fromColumn),
+        toColumns: list.map((r) => r.toColumn),
+        cardinality: list[0].cardinality,
+        ...(list[0].role !== undefined ? { role: list[0].role } : {}),
+      });
+      current.push({
+        ref: refNodeOf(node),
+        unit: unitOf(rels),
+        spelledNames: [rels[0].fromModel, rels[0].toModel],
+        ...(undecided ? { alt: { unit: unitOf(reversed), spelledNames: [reversed[0].fromModel, reversed[0].toModel] } } : {}),
+      });
     }
   }
 
   // --- Desired units -----------------------------------------------------------
-  const listed = new Set([...edit.owners.keys()].map(lower));
+  // Owners as named after the edit, however the caller keyed them.
+  const listed = new Set([...edit.owners.keys()].map((k) => lower(canonical(k))));
   const desired: RefUnit[] = [];
   for (const [, entry] of edit.owners) {
     if (entry) desired.push(...relationshipUnits(entry.name, entry.relationships).map((u) => ({ ...u, from: canonical(u.from), to: canonical(u.to) })));
@@ -349,51 +367,73 @@ export function editRelationshipsDbml(oldText: string | null, edit: Relationship
   // --- Match current Refs to desired units ---------------------------------------
   const edits: TextEdit[] = [];
   const matched = new Set<RefUnit>();
-  type Kept = { unit: RefUnit; ref: RefNode; mode: 'keep' | 'respell' | 'regenerate'; desired?: RefUnit };
+  type Kept = {
+    unit: RefUnit;
+    ref: RefNode;
+    mode: 'keep' | 'respell' | 'regenerate';
+    desired?: RefUnit;
+    /** The table names as the file spells them (from, to). */
+    spelledNames: string[];
+    /** An end of it was renamed in this edit. */
+    renamed: boolean;
+    /** Its role as the file has it (a regenerated block-form Ref splices its name only when this differs). */
+    readRole?: string;
+  };
   const kept: Kept[] = [];
   const cut: Array<{ unit: RefUnit; ref: RefNode; spelledNames: string[] }> = [];
   const touched = new Set<string>();
   const renamedEnd = (names: readonly string[]): boolean => names.some((n) => renamed.has(lower(n)));
+  const unmatched = (test: (d: RefUnit) => boolean): RefUnit | undefined => desired.find((d) => !matched.has(d) && test(d));
 
-  for (const c of current) {
-    const isListed = listed.has(lower(c.unit.from));
+  for (const entry of current) {
+    // A bare `-` whose orientation is not settled reads the way a desired unit has it, if one does.
+    let { unit, spelledNames } = entry;
+    if (entry.alt && !unmatched((d) => endsKey(d) === endsKey(unit)) && unmatched((d) => endsKey(d) === endsKey(entry.alt!.unit))) {
+      ({ unit, spelledNames } = entry.alt);
+    }
+    const c = { ref: entry.ref, unit, spelledNames };
     const respell = renamedEnd(c.spelledNames);
-    if (!isListed) {
-      kept.push({ unit: c.unit, ref: c.ref, mode: respell ? 'respell' : 'keep' });
-      if (respell) for (const n of [...c.spelledNames, c.unit.from, c.unit.to]) touched.add(lower(n));
+    const touch = (...names: string[]): void => { for (const n of [...c.spelledNames, ...names]) touched.add(lower(n)); };
+    const identical = unmatched((d) => identityKey(d) === identityKey(c.unit));
+    if (identical) {
+      // The same link, cardinality and role: its bytes stay (re-spelled only where an end was renamed).
+      matched.add(identical);
+      kept.push({ unit: c.unit, ref: c.ref, mode: respell ? 'respell' : 'keep', desired: identical, spelledNames: c.spelledNames, renamed: respell });
+      if (respell) touch(c.unit.from, c.unit.to);
       continue;
     }
-    const candidates = [c.unit];
-    let found: { want: RefUnit; read: RefUnit } | undefined;
-    for (const read of candidates) {
-      const want = desired.find((d) => !matched.has(d) && identityKey(d) === identityKey(read));
-      if (want) { found = { want, read }; break; }
-    }
-    if (found) {
-      matched.add(found.want);
-      kept.push({ unit: found.read, ref: c.ref, mode: respell ? 'respell' : 'keep', desired: found.want });
-      if (respell) for (const n of [...c.spelledNames, c.unit.from, c.unit.to]) touched.add(lower(n));
+    const same = unmatched((d) => endsKey(d) === endsKey(c.unit));
+    if (same) {
+      // Same ends and pairs, another cardinality or role: rewritten in place, in the file's own pair order.
+      matched.add(same);
+      const unit2: RefUnit = { ...same, fromColumns: [...c.unit.fromColumns], toColumns: [...c.unit.toColumns] };
+      kept.push({ unit: unit2, ref: c.ref, mode: 'regenerate', desired: same, spelledNames: c.spelledNames, renamed: respell, ...(c.unit.role !== undefined ? { readRole: c.unit.role } : {}) });
+      touch(same.from, same.to);
       continue;
     }
-    for (const read of candidates) {
-      const want = desired.find((d) => !matched.has(d) && endsKey(d) === endsKey(read));
-      if (want) { found = { want, read }; break; }
-    }
-    if (found) {
-      matched.add(found.want);
-      kept.push({ unit: found.want, ref: c.ref, mode: 'regenerate', desired: found.want });
-      for (const n of [...c.spelledNames, found.want.from, found.want.to]) touched.add(lower(n));
+    if (!listed.has(lower(c.unit.from))) {
+      kept.push({ unit: c.unit, ref: c.ref, mode: respell ? 'respell' : 'keep', spelledNames: c.spelledNames, renamed: respell });
+      if (respell) touch(c.unit.from, c.unit.to);
       continue;
     }
     cut.push({ unit: c.unit, ref: c.ref, spelledNames: c.spelledNames });
-    for (const n of [...c.spelledNames, c.unit.from, c.unit.to]) touched.add(lower(n));
+    touch(c.unit.from, c.unit.to);
   }
   const inserted = desired.filter((d) => !matched.has(d));
   for (const unit of inserted) for (const n of [unit.from, unit.to]) touched.add(lower(n));
 
   // --- Refusals ---------------------------------------------------------------------
   for (const k of kept) if (k.mode === 'regenerate') checkUnit(k.unit, undefined);
-  for (const unit of inserted) checkUnit(unit);
+  for (const unit of inserted) {
+    checkUnit(unit);
+    // A new Ref to a table with no file would not compile, and a relationships file that does not
+    // compile is read as holding nothing (Law 5). A Ref already in the file, or carried in, stays as it is.
+    if (incomingByKey.has(identityKey(unit))) continue;
+    const missing = [unit.from, unit.to].find((end) => edit.resolve(end) === undefined);
+    if (missing !== undefined) {
+      refuse(file, `The relationship ${unit.from}.(${unit.fromColumns.join(', ')}) → ${unit.to}.(${unit.toColumns.join(', ')}) names ${missing}, which has no table file, so it cannot be written to ${file}.`);
+    }
+  }
   {
     const seen = new Map<string, RefUnit>();
     for (const unit of [...kept.map((k) => k.unit), ...inserted]) {
@@ -424,24 +464,51 @@ export function editRelationshipsDbml(oldText: string | null, edit: Relationship
     }
     return applyTextEdits(text.slice(k.ref.node.start, k.ref.node.end), spans);
   };
-  const lineText = (k: Kept): string => (k.mode === 'regenerate' ? refText(k.unit, restOf(k.ref)) : respelled(k));
+  /**
+   * A regenerated Ref. A one-line Ref is written anew with its settings kept; a block-form Ref
+   * (`Ref name {\n  // …\n  a.x > b.y [settings]\n}`) keeps its block and comments, and only its
+   * ends, operator and name are spliced.
+   */
+  const regenerated = (k: Kept): string => {
+    const node = k.ref.node;
+    const callee = k.ref.application?.callee;
+    if (!(k.ref.application && node.body !== k.ref.application && callee)) return refText(k.unit, restOf(k.ref));
+    const base = node.start as number;
+    const spans: TextEdit[] = [{ start: callee.start - base, end: callee.end - base, text: refBody(k.unit) }];
+    if ((k.unit.role ?? '') !== (k.readRole ?? '')) {
+      const name = node.name as AstNode | undefined;
+      const type = node.type as AstNode;
+      if (k.unit.role === undefined) {
+        if (name) spans.push({ start: type.end - base, end: name.end - base, text: '' });
+      } else if (name) {
+        spans.push({ start: name.start - base, end: name.end - base, text: dbmlName(k.unit.role) });
+      } else {
+        spans.push({ start: type.end - base, end: type.end - base, text: ` ${dbmlName(k.unit.role)}` });
+      }
+    }
+    return applyTextEdits(text.slice(node.start, node.end), spans);
+  };
+  const lineText = (k: Kept): string => (k.mode === 'regenerate' ? regenerated(k) : respelled(k));
+  /** A moving Ref's text with its own trailing comment, which the cut takes from its old place. */
+  const movedText = (k: Kept): string => {
+    const end = k.ref.node.end as number;
+    const tail = text.slice(end, lineEndOf(text, end));
+    return `${lineText(k)}${/^[ \t]*(\/\/|\/\*)/.test(tail) ? tail : ''}`;
+  };
 
-  // A Ref re-spelled for a rename moves only when its new sort key puts it out of order with its
-  // neighbours where its old key did not (§4.5 step 2); every other kept Ref stays where it is.
+  // A Ref re-spelled (or regenerated) with a renamed end moves only when its new sort key puts it out
+  // of order with its neighbours where its old key did not (§4.5 step 2); every other kept Ref stays.
   const moving: Array<{ unit: RefUnit; text: string }> = [];
   const staying: Kept[] = [];
   const inFileOrder = kept.slice().sort((a, b) => a.ref.node.start - b.ref.node.start);
-  const keyBefore = (k: Kept): string => {
-    const before = current.find((c) => c.ref === k.ref)!;
-    return refUnitSortKey({ ...k.unit, from: before.spelledNames[0], to: before.spelledNames[1] });
-  };
+  const keyBefore = (k: Kept): string => refUnitSortKey({ ...k.unit, from: k.spelledNames[0], to: k.spelledNames[1] });
   const sign = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
   for (const [i, k] of inFileOrder.entries()) {
-    if (k.mode === 'respell') {
+    if (k.renamed && k.mode !== 'keep') {
       const neighbours = [inFileOrder[i - 1], inFileOrder[i + 1]].filter((n): n is Kept => n !== undefined);
       const outOfOrder = neighbours.some((n) => sign(keyBefore(k), keyBefore(n)) !== sign(refUnitSortKey(k.unit), refUnitSortKey(n.unit)));
       if (outOfOrder) {
-        moving.push({ unit: k.unit, text: lineText(k) });
+        moving.push({ unit: k.unit, text: movedText(k) });
         edits.push(cutEdit(text, k.ref.node));
         continue;
       }

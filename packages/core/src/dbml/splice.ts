@@ -9,6 +9,7 @@
  * strip it before parsing and put it back after).
  */
 
+import { DbmlEditRefused } from './errors.js';
 import type { AstNode } from './parser.js';
 import { lineAt, lineStartOf } from './parser.js';
 
@@ -43,6 +44,23 @@ export function applyTextEdits(text: string, edits: readonly TextEdit[]): string
     at = edit.end;
   }
   return out + text.slice(at);
+}
+
+/**
+ * Run a writer so that an overlap of its edits (a writer bug two valid edits
+ * can still meet) is refused as a {@link DbmlEditRefused} naming `file`: the
+ * host shows it as a message and writes nothing, instead of failing with an
+ * unexpected error.
+ */
+export function refuseOverlaps<T>(file: string, write: () => T): T {
+  try {
+    return write();
+  } catch (err) {
+    if (err instanceof Error && !(err instanceof DbmlEditRefused) && err.message.startsWith('DBML writer: overlapping')) {
+      throw new DbmlEditRefused(file, `ERD Studio could not apply this change to ${file} safely, so nothing was written. Make the change in the file by hand.`);
+    }
+    throw err;
+  }
 }
 
 /** `\r\n` when the file holds any, else `\n` (§2.2: the EOL comes from the file). */
@@ -220,7 +238,9 @@ export function renderListPlan(text: string, plan: ListPlan, eol: string): TextE
   }
   gaps.push(text.slice(at, (list.listCloseBracket?.start ?? list.end - 1) as number));
   const multiLine = gaps.some((g) => g.includes('\n'));
-  if (!multiLine) {
+  // A one-line list is rebuilt from its elements unless a `/* … */` comment sits between them (Law 4):
+  // then it is spliced element by element, as a multi-line list is.
+  if (!multiLine && !gaps.some((g) => g.includes('/*'))) {
     const parts: string[] = [];
     elements.forEach((_, i) => { if (kept[i]) parts.push(elementText(i)); });
     parts.push(...added);
@@ -256,7 +276,13 @@ export function renderListPlan(text: string, plan: ListPlan, eol: string): TextE
     const close = list.listCloseBracket as AstNode;
     const indent = elements.length > 0 ? indentAt(text, elements[0].start) : '  ';
     if (lastKept >= 0 && !commas[lastKept]) edits.push({ start: elements[lastKept].end, end: elements[lastKept].end, text: ',' });
-    if (startsItsLine(text, close.start)) {
+    if (!multiLine) {
+      // One line: after the last kept element (and its comma), or straight after `[`.
+      const comma = lastKept >= 0 ? commas[lastKept] : undefined;
+      const at = lastKept < 0 ? (list.listOpenBracket?.end ?? list.start + 1) as number : comma ? comma.end : elements[lastKept].end;
+      const lead = lastKept < 0 ? '' : ' ';
+      edits.push({ start: at, end: at, text: `${lead}${added.join(', ')}${lastKept < 0 && keptCount === 0 && elements.length > 0 ? ' ' : ''}` });
+    } else if (startsItsLine(text, close.start)) {
       const at = text.lastIndexOf('\n', close.start - 1) + 1;
       edits.push({ start: at, end: at, text: added.map((a, i) => `${indent}${a}${i < added.length - 1 ? ',' : ''}${eol}`).join('') });
     } else {

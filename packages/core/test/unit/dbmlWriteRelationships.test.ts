@@ -16,39 +16,12 @@ import {
   LIBRARY,
   RELATIONSHIPS_CASES,
   currentOwners,
-  meaning,
   relEdit,
 } from '../dbmlWriterCases/relationshipsCases';
-import { comparableRelationships, libraryOf, relationshipsResolver } from '../dbmlWriterSupport';
+import { libraryOf, relationshipsResolver } from '../dbmlWriterSupport';
 
 describe('editRelationshipsDbml', () => {
   for (const c of RELATIONSHIPS_CASES) it(c.name, () => c.check(c.run()));
-
-  it('reads back as the relationships it was given (Law 3) and is idempotent (Law 2)', () => {
-    const owners = currentOwners(HAND_WRITTEN);
-    const desired = new Map([['fct_order', {
-      name: 'fct_order',
-      relationships: [
-        ...owners.get('fct_order')!.filter((r) => r.toModel !== 'dim_date'),
-        { fromColumn: 'region_code', toModel: 'dim_region', toColumn: 'region_code', cardinality: 'many-to-one' as const, compositeKey: 'k' },
-        { fromColumn: 'country_code', toModel: 'dim_region', toColumn: 'country_code', cardinality: 'many-to-one' as const, compositeKey: 'k' },
-        { fromColumn: 'order_date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'one-to-one' as const, role: 'order date' },
-      ],
-    }]]);
-    const once = relEdit(HAND_WRITTEN, { owners: desired });
-    expect(comparableRelationships(currentOwners(once).get('fct_order'))).toEqual(comparableRelationships(desired.get('fct_order')!.relationships));
-    expect(relEdit(once, { owners: desired })).toBe(once);
-    // Owners the edit did not list read as before.
-    expect(meaning(once).customer_profile).toEqual(meaning(HAND_WRITTEN).customer_profile);
-  });
-
-  it('a byte-order mark and CRLF line endings are kept', () => {
-    const crlf = `﻿${HAND_WRITTEN.replace(/\n/g, '\r\n')}`;
-    const out = relEdit(crlf, { owners: new Map([['bridge', { name: 'bridge', relationships: [{ fromColumn: 'a_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' }] }]]) });
-    expect(out.startsWith('﻿')).toBe(true);
-    expect(out.replace(/\r\n/g, '')).not.toContain('\n');
-    expect(out).toContain('Ref: bridge.a_key >? dim_date.date_key\r\n');
-  });
 
   it('groups composite entries into one unit and canonicalises one-to-many', () => {
     expect(relationshipUnits('a', [
@@ -89,8 +62,12 @@ describe('editRelationshipsDbml refusals', () => {
       }
       return undefined;
     })();
-    // No such table at all: a dangling Ref is written with its in-memory spelling, not refused.
-    expect(err).toBeUndefined();
+    // No such table at all: a new Ref to it would not compile, so it is refused too.
+    expect(err).toBeInstanceOf(DbmlEditRefused);
+    expect(err!.message).toBe('The relationship fct_order.(order_id) → yml_table.(id) names yml_table, which has no table file, so it cannot be written to tables/gold/_relationships.dbml.');
+    // A dangling Ref already in the file is kept as it is.
+    const dangling = `${HAND_WRITTEN}Ref: fct_order.order_id > nowhere.id\n`;
+    expect(relEdit(dangling, owner([...currentOwners(dangling).get('fct_order')!]))).toBe(dangling);
     expect(() => editRelationshipsDbml(HAND_WRITTEN, {
       filePath: 'tables/gold/_relationships.dbml',
       resolve: relationshipsResolver(libraryOf(LIBRARY, { yml_table: 'tables/yml_table.yml' })),

@@ -27,6 +27,7 @@ import {
   attributeName,
   compileOne,
   elementType,
+  lineStartOf,
   plainNames,
   stripBom,
   topLevel,
@@ -37,8 +38,11 @@ import {
   applyTextEdits,
   attachedStart,
   cutEdit,
+  cutSpan,
   eolOf,
   headerEnd,
+  lineEndOf,
+  refuseOverlaps,
   renderListPlan,
   type ListPlan,
   type TextEdit,
@@ -227,6 +231,10 @@ function annotationsOf(obj: Json): Annotation[] {
  * DBML table (D20).
  */
 export function editSubjectAreaDbml(oldText: string, edit: SubjectAreaDbmlEdit): string {
+  return refuseOverlaps(edit.filePath, () => editSubjectArea(oldText, edit));
+}
+
+function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   const parser = edit.parser ?? PINNED_PARSER;
   const file = edit.filePath;
   const hadBom = oldText.charCodeAt(0) === 0xfeff;
@@ -361,22 +369,29 @@ export function editSubjectAreaDbml(oldText: string, edit: SubjectAreaDbmlEdit):
     }
     return tableUseLine(table.reference, file, table.path);
   };
-  /** A retained line, rewritten when its table's path changed or its target is gone; else its own bytes. */
+  /**
+   * A retained line, rewritten when its table's path changed or its target is gone; else its own
+   * bytes. Null when its table was deleted in this edit (in `pathChanged` with no file now): the
+   * line is cut, so no other DBML tool meets an import of a file that is gone (D16).
+   */
   const retainedText = (oldIndex: number): string | null => {
     const use = memberUses[oldIndex];
-    if (!use) return null;
     const own = text.slice(use.node.start, use.node.end);
     const name = oldMembers[oldIndex];
     const table = edit.resolveTable(name);
     if (pathChanged.has(lower(name)) || pathChanged.has(lower(use.stem))) {
+      if (!table && !edit.fileExists(use.resolved)) return null;
       return table && table.storage === 'dbml' ? tableUseLine(table.reference, file, table.path) : own;
     }
     // A stale path (its file is gone) is repointed by any edit that changes something; a no-op stays one (Law 1).
     if (changing && !edit.fileExists(use.resolved) && table && table.storage === 'dbml') return tableUseLine(table.reference, file, table.path);
     return own;
   };
-  if (memberUses.length !== oldMembers.length) {
-    refuse(file, `ERD Studio could not line up the use lines of ${file} with its members; edit the file by hand.`);
+  // `before` must be what the text reads as: members are paired with their use lines by position.
+  if (memberUses.length !== oldMembers.length
+    || reading.members.length !== oldMembers.length
+    || reading.members.some((m, i) => lower(m) !== lower(oldMembers[i]))) {
+    refuse(file, `ERD Studio could not line up the use lines of ${file} with its members (the diagram changed since it was read); reload it and try again.`);
   }
   const lastTableUse = memberUses[memberUses.length - 1];
   const afterUses = (): number => {
@@ -385,10 +400,28 @@ export function editSubjectAreaDbml(oldText: string, edit: SubjectAreaDbmlEdit):
     return -1;
   };
   if (reordered) {
-    const lines = newMembers.map((name, k) => (oldIndexOf[k] !== undefined ? retainedText(oldIndexOf[k]!)! : newLineFor(name)));
-    const first = memberUses[0];
-    edits.push({ start: first.node.start, end: first.node.end, text: lines.join(eol) });
-    for (const use of memberUses.slice(1)) edits.push(cutEdit(text, use.node));
+    // Each line moves with the comment lines directly above it and its own trailing comment.
+    const tailOf = (node: AstNode): string => {
+      const tail = text.slice(node.end, lineEndOf(text, node.end));
+      return /^[ \t]*(\/\/|\/\*)/.test(tail) ? tail : '';
+    };
+    const aboveOf = (node: AstNode): string => text.slice(attachedStart(text, node), lineStartOf(text, node.start));
+    const lines = newMembers.flatMap((name, k) => {
+      const i = oldIndexOf[k];
+      if (i === undefined) return [newLineFor(name)];
+      const node = memberUses[i].node;
+      const out = retainedText(i);
+      // A deleted member's line goes; the comment lines above it stay (the cut rule).
+      if (out === null) return aboveOf(node) === '' ? [] : [aboveOf(node).replace(/\r?\n$/, '')];
+      return [`${aboveOf(node)}${out}${tailOf(node)}`];
+    });
+    // A line that goes (a member removed) leaves the comment lines above it where they are.
+    const startOf = (i: number): number => (taken.has(i) ? attachedStart(text, memberUses[i].node) : cutSpan(text, memberUses[i].node).start);
+    const first = memberUses[0].node;
+    const firstEnd = !taken.has(0) || tailOf(first) ? lineEndOf(text, first.end) : first.end;
+    if (lines.length > 0) edits.push({ start: startOf(0), end: firstEnd, text: lines.join(eol) });
+    else edits.push({ start: startOf(0), end: cutSpan(text, first).end, text: '' });
+    memberUses.slice(1).forEach((use, k) => edits.push({ start: startOf(k + 1), end: cutSpan(text, use.node).end, text: '' }));
   } else {
     oldMembers.forEach((_, i) => {
       const use = memberUses[i];
@@ -397,7 +430,8 @@ export function editSubjectAreaDbml(oldText: string, edit: SubjectAreaDbmlEdit):
         return;
       }
       const out = retainedText(i);
-      if (out !== null && out !== text.slice(use.node.start, use.node.end)) edits.push({ start: use.node.start, end: use.node.end, text: out });
+      if (out === null) edits.push(cutEdit(text, use.node));
+      else if (out !== text.slice(use.node.start, use.node.end)) edits.push({ start: use.node.start, end: use.node.end, text: out });
     });
     newMembers.forEach((name, k) => {
       if (oldIndexOf[k] !== undefined) return;

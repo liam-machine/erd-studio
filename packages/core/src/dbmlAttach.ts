@@ -51,12 +51,34 @@ export function relationshipsFileFolder(path: string): string {
   return segments.length >= 3 && segments[segments.length - 3] === TABLES_DIR ? segments[segments.length - 2] : '';
 }
 
-/** Whether `columns` are exactly `table`'s primary-key columns (by flag, without case). */
-function isWholePrimaryKey(entry: DbmlAttachTable | undefined, columns: readonly string[]): boolean {
-  if (!entry) return false;
-  const pk = new Set((entry.table.columns ?? []).filter((c) => c?.isPrimaryKey).map((c) => lower(String(c.name))));
+/** Whether `columns` are exactly the key `key` (without case); an empty key is no key. */
+function isWholeKey(key: readonly string[], columns: readonly string[]): boolean {
+  const k = new Set(key.map(lower));
   const cols = new Set(columns.map(lower));
-  return pk.size > 0 && pk.size === cols.size && [...cols].every((c) => pk.has(c));
+  return k.size > 0 && k.size === cols.size && [...cols].every((c) => k.has(c));
+}
+
+/**
+ * The §2.3 rule for a bare `-` Ref (`oneToOneDirection: 'keys'`), read with
+ * its second end as the foreign key (`from`): whether to reverse it, so its
+ * first end is the foreign key. Only when both tables' primary keys are
+ * known, the read `from` columns are exactly their table's whole key and the
+ * read `to` columns are not. The one rule the reader's attach step and the
+ * relationships writer share.
+ */
+export function reverseBareOneToOne(
+  fromKey: readonly string[] | undefined,
+  fromColumns: readonly string[],
+  toKey: readonly string[] | undefined,
+  toColumns: readonly string[],
+): boolean {
+  return fromKey !== undefined && toKey !== undefined && isWholeKey(fromKey, fromColumns) && !isWholeKey(toKey, toColumns);
+}
+
+/** A table's primary-key columns (by flag), or undefined when there is no table. */
+function primaryKeyOf(entry: DbmlAttachTable | undefined): string[] | undefined {
+  if (!entry) return undefined;
+  return (entry.table.columns ?? []).filter((c) => c?.isPrimaryKey).map((c) => String(c.name));
 }
 
 /** A column's real spelling in `entry` (exact first, then without case), or `column` as written. */
@@ -121,11 +143,10 @@ export function attachRelationships(
       let rels = ref.relationships;
       if (ref.oneToOneDirection === 'keys') {
         // Read with the second end as the foreign key; the first is, only when the second alone is a whole key.
-        const fromEnd = tables(rels[0].fromModel);
-        const toEnd = tables(rels[0].toModel);
-        if (fromEnd && toEnd
-          && isWholePrimaryKey(fromEnd, rels.map((r) => r.fromColumn))
-          && !isWholePrimaryKey(toEnd, rels.map((r) => r.toColumn))) {
+        if (reverseBareOneToOne(
+          primaryKeyOf(tables(rels[0].fromModel)), rels.map((r) => r.fromColumn),
+          primaryKeyOf(tables(rels[0].toModel)), rels.map((r) => r.toColumn),
+        )) {
           rels = rels.map((r) => reverseRelationship(r));
         }
       }
