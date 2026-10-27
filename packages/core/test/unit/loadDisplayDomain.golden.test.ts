@@ -19,6 +19,8 @@ import * as path from 'path';
 
 import { loadDisplaySubjectArea } from '../../src/loadDisplayDomain';
 import { SubjectAreaFileError, SubjectAreaValidationError } from '../../src/domain';
+import { normaliseForStorageEquivalence } from '../../src/storageEquivalence';
+import { dbmlStorageReader } from '../../src/dbml/index';
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const GOLDEN_DIR = path.join(FIXTURES, 'golden');
@@ -46,6 +48,75 @@ const ERROR_CASES: Record<string, string> = {
   empty: '.erd-studio/silver/empty.json',
   invalid: '.erd-studio/silver/invalid.json',
   badlayer: '.erd-studio/platinum/badlayer.json',
+  // Native DBML storage (S2): a DBML diagram that does not parse, one from a
+  // newer schema, one with git conflict markers, and a table file passed as
+  // the diagram. Read with the DBML readers.
+  'dbml-syntax': '.erd-studio/silver/dbml-syntax.dbml',
+  'dbml-future': '.erd-studio/silver/dbml-future.dbml',
+  'dbml-conflict': '.erd-studio/silver/dbml-conflict.dbml',
+  'dbml-not-a-diagram': '.erd-studio/tables/dim_customer.dbml',
+};
+
+/**
+ * The DBML twins (packages/core/test/fixtures/dbml/<case>): the same projects
+ * stored as native DBML. Each draws what its YAML case's golden draws, once
+ * both go through the one storage comparator (D24), which applies only the
+ * §2.8 rows. `rows` names the rows a case exercises, each with its reason; a
+ * row a case does not list changes nothing in it.
+ */
+const DBML_TWIN_CASES: Record<string, { domainPath: string; rows: string[] }> = {
+  showcase: {
+    domainPath: '.erd-studio/silver/showcase.dbml',
+    rows: [
+      'relationship order: the diagram file held the relationships in its own order; a relationships file keeps its Refs sorted',
+      'schemaVersion: the YAML case is 5, a DBML diagram is 7',
+    ],
+  },
+  'composite-and-self': {
+    domainPath: '.erd-studio/gold/vault.dbml',
+    rows: [
+      'compositeKey names: derived again on read (fk_sat_customer), so compared by sequence',
+      'a lone compositeKey (fk_lonely): written as a plain one-column Ref',
+      'raw Ref spellings: Mentor_ID / Employee / EMPLOYEE_ID are written respelled',
+      'schemaVersion: the YAML case is 5, a DBML diagram is 7',
+    ],
+  },
+  'missing-positions': {
+    domainPath: '.erd-studio/silver/showcase.dbml',
+    rows: [
+      'relationship order: the diagram file held the relationships in its own order; a relationships file keeps its Refs sorted',
+      'schemaVersion: the YAML case is 5, a DBML diagram is 7',
+    ],
+  },
+  'missing-model': {
+    domainPath: '.erd-studio/silver/partial.dbml',
+    rows: ['schemaVersion: the YAML case is 5, a DBML diagram is 7'],
+  },
+  'library-relationships': {
+    domainPath: '.erd-studio/gold/sales.dbml',
+    rows: [
+      'a library one-to-many (1.6.6 / 1.6.7): stored canonically, as fct_order many-to-one',
+      'a link stored twice (fct_order.yml and dim_date.yml): one Ref, the copy the ranking draws',
+      'schemaVersion: the YAML case is 5, a DBML diagram is 7',
+    ],
+  },
+};
+
+/**
+ * What a twin cannot hold, beyond the §2.8 rows, applied to the YAML golden
+ * before the comparison, each with its one-line reason.
+ */
+const DBML_TWIN_EXCEPTIONS: Record<string, (expected: Record<string, unknown>) => void> = {
+  // A Ref is drawn only from a readable DBML owner (§2.4): dim_missing has no
+  // file and broken.dbml does not parse, so the diagram file's two
+  // relationships from them have no DBML home; and broken's load error is a
+  // DBML one (kind, line and code), not YAML's.
+  'missing-model': (expected) => {
+    expected.relationships = [];
+    const models = expected.models as Array<Record<string, unknown>>;
+    const broken = models.find((m) => m.name === 'broken')!;
+    broken.loadError = { kind: 'dbmlSyntax', line: 5, code: '1005' };
+  },
 };
 
 const LINE_COLUMN = / \(line \d+ column \d+\)/g;
@@ -92,6 +163,7 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
       const golden = readGolden(`errors.${name}.host.json`).payload as {
         message: string; kind?: string; fileProblem?: 'empty' | 'syntax'; line?: number; column?: number;
       };
+      const isDbml = domainPath.endsWith('.dbml');
       let caught: unknown;
       try {
         await loadDisplaySubjectArea({
@@ -99,6 +171,7 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
           readFile: fsReadFile(path.join(FIXTURES, 'errors')),
           readOnly: false,
           warn: () => {},
+          ...(isDbml ? { dbml: dbmlStorageReader } : {}),
         });
       } catch (err) {
         caught = err;
@@ -109,12 +182,32 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
       // core's reason and location, so those are what must agree.
       if (golden.fileProblem) {
         const err = caught as SubjectAreaFileError;
-        expect(err.reason).toBe(golden.fileProblem === 'empty' ? 'empty' : 'invalid-json');
+        expect(err.reason).toBe(golden.fileProblem === 'empty' ? 'empty' : isDbml ? 'invalid-dbml' : 'invalid-json');
         expect({ line: err.line, column: err.column }).toEqual({ line: golden.line, column: golden.column });
         return;
       }
       const message = (caught as Error).message.replace(LINE_COLUMN, '');
       expect(message).toBe(golden.message.split('<root>/').join(''));
+    });
+  });
+
+  describe.each(Object.entries(DBML_TWIN_CASES))('the DBML twin of %s', (name, { domainPath, rows }) => {
+    it(`draws what the YAML golden draws, through the storage comparator (${rows.length} §2.8 rows)`, async () => {
+      const domain = await loadDisplaySubjectArea({
+        domainPath,
+        readFile: fsReadFile(path.join(FIXTURES, 'dbml', name)),
+        readOnly: false,
+        warn: () => {},
+        dbml: dbmlStorageReader,
+      });
+      expect(domain.schemaVersion).toBe(7);
+      const expected = { ...readGolden(`${name}.host.json`).payload };
+      delete expected.templates;
+      delete expected.manifestModels;
+      delete expected.existingModels;
+      DBML_TWIN_EXCEPTIONS[name]?.(expected);
+      expect(normaliseForStorageEquivalence(JSON.parse(JSON.stringify(domain))))
+        .toEqual(normaliseForStorageEquivalence(expected));
     });
   });
 });

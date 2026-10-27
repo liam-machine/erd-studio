@@ -9,6 +9,7 @@ const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 
 // Exact-match regexes, so e.g. `@erd-studio/renderer/styles.css` is not caught.
 const alias = [
   { find: 'vscode', replacement: path.resolve(__dirname, 'test/__mocks__/vscode.ts') },
+  { find: /^@erd-studio\/core\/dbml$/, replacement: path.resolve(__dirname, 'packages/core/src/dbml/index.ts') },
   { find: /^@erd-studio\/core$/, replacement: path.resolve(__dirname, 'packages/core/src/index.ts') },
   { find: /^@erd-studio\/renderer$/, replacement: path.resolve(__dirname, 'packages/renderer/src/index.ts') },
   {

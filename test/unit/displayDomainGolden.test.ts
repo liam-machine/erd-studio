@@ -108,6 +108,13 @@ const EXPECTED_FILES = [
   'dbt-project.stage-physical.json',
   'dbt-project.physical.host.json',
   ...Object.keys(ERROR_CASES).map((c) => `errors.${c}.host.json`),
+  // Native DBML storage's error goldens: held by core's loader
+  // (packages/core/test/unit/loadDisplayDomain.golden.test.ts) until the host
+  // reads DBML diagrams (S4), which adds them to ERROR_CASES above.
+  'errors.dbml-syntax.host.json',
+  'errors.dbml-future.host.json',
+  'errors.dbml-conflict.host.json',
+  'errors.dbml-not-a-diagram.host.json',
   'logs.json',
   // The diagram export goldens, owned by packages/core/test/unit/exportDiagram.golden.test.ts.
   ...Object.keys(SUBJECT_AREA_CASES).flatMap((c) => [`${c}.dbml`, `${c}.mmd`]),

@@ -767,7 +767,8 @@ describe('DBML round trip: rich export → import → the same diagram', () => {
   it('covers every core fixture project that loads', () => {
     const projects = fs
       .readdirSync(CORE_FIXTURES, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && d.name !== 'golden' && d.name !== 'errors' && !d.name.startsWith('naming-'))
+      // dbml/: the native DBML twins of these projects, held to their goldens through the storage comparator.
+      .filter((d) => d.isDirectory() && d.name !== 'golden' && d.name !== 'errors' && d.name !== 'dbml' && !d.name.startsWith('naming-'))
       .map((d) => d.name)
       .sort();
     expect(Object.keys(CORE_CASES).sort()).toEqual(projects);

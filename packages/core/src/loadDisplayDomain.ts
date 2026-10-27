@@ -30,6 +30,7 @@
 import type { DisplaySubjectArea } from './types/display.js';
 import type { SubjectAreaFormat, TableLoadError, NodePosition, SemanticTable } from './types/semantic.js';
 import { usesTableLibrary } from './types/semantic.js';
+import type { DbmlAttachTable, DbmlRelationshipsReading, DbmlStorageReader } from './types/dbmlStorage.js';
 import type { LayerConfig } from './types/layer.js';
 import {
   SubjectAreaFileError,
@@ -43,7 +44,10 @@ import {
   type LayerLookup,
 } from './domain.js';
 import { LAYERS_CONFIG_FILE, parseLayersText } from './layers.js';
-import { TABLE_LIBRARY_DIRS, YamlCharLimitError, YamlNodeLimitError, isSafeTableName, parseTableTextWithUsage } from './logicalModel.js';
+import { TABLES_DIR, YamlCharLimitError, YamlNodeLimitError, isSafeTableName, parseTableTextWithUsage } from './logicalModel.js';
+import { DBML_RELATIONSHIPS_FILE_NAME, DBML_RELATIONSHIPS_FILE_STEM } from './dbmlRichProperties.js';
+import { layoutFilePathOf, tableFileCandidates } from './storage.js';
+import { attachRelationships, dbmlTableLookup } from './dbmlAttach.js';
 import { computeMissingPositions, toDisplaySubjectArea } from './displayDomain.js';
 import { checkLimit } from './limits.js';
 
@@ -158,6 +162,22 @@ export interface LoadDisplaySubjectAreaOptions {
   ignoreStrayPositions?: boolean;
   /** Receives repair warnings. Default console.warn. */
   warn?: (message: string) => void;
+  /**
+   * The DBML readers, `dbmlStorageReader` from `@erd-studio/core/dbml`.
+   * Required to read a `.dbml` diagram (without it one throws a
+   * `SubjectAreaValidationError` saying so). With it, a JSON diagram also
+   * finds tables stored as `.dbml` in `tables/` and draws their
+   * relationships; without it, JSON loading is exactly what it was.
+   * `maxYamlChars` limits a `.dbml` table file as written; `maxYamlNodes`
+   * does not apply to DBML.
+   */
+  dbml?: DbmlStorageReader;
+  /**
+   * Longest relationships file (`tables/[<folder>/]_relationships.dbml`), in
+   * characters. A longer one is not read: its relationships are not drawn,
+   * with a warning. Default unlimited.
+   */
+  maxRelationshipsChars?: number;
 }
 
 /** Split a domain path into its semantic-dir prefix (with trailing separator), parent dir and file name. */
@@ -180,6 +200,32 @@ function splitSubjectAreaPath(domainPath: string): { prefix: string; parentDirNa
 /** The file name without `.json`, as `path.basename(file, '.json')` gives it. */
 function stripJsonExtension(fileName: string): string {
   return fileName.endsWith('.json') && fileName !== '.json' ? fileName.slice(0, -'.json'.length) : fileName;
+}
+
+/** Whether `path` names a `.dbml` file (any case). */
+function isDbmlPath(path: string): boolean {
+  return path.toLowerCase().endsWith('.dbml');
+}
+
+/** The last segment of a prefix such as `.erd-studio/tables/` (`tables`), or `''`. */
+function lastSegment(prefix: string): string {
+  const segments = prefix.split(/[\\/]/).filter((s) => s !== '');
+  return segments[segments.length - 1] ?? '';
+}
+
+function notADiagram(domainPath: string): SubjectAreaValidationError {
+  return new SubjectAreaValidationError(
+    `${domainPath} is a DBML table or relationships file, not a diagram. Open a diagram in a layer folder.`,
+  );
+}
+
+/** One table file found for a listed name, before it is turned into the model the domain shows. */
+interface FoundTable {
+  /** The path read. */
+  path: string;
+  text: string;
+  /** The library folder of a `tables/` file (`''` at the top), else undefined. */
+  folder?: string;
 }
 
 /**
@@ -217,6 +263,8 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     maxYamlNodes = Infinity,
     maxDomainChars = Infinity,
     maxYamlChars = Infinity,
+    maxRelationshipsChars = Infinity,
+    dbml,
   } = options;
   const warn = options.warn ?? ((message: string) => console.warn(message));
 
@@ -226,9 +274,45 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
   checkLimit('loadDisplaySubjectArea', 'maxYamlNodes', maxYamlNodes);
   checkLimit('loadDisplaySubjectArea', 'maxDomainChars', maxDomainChars);
   checkLimit('loadDisplaySubjectArea', 'maxYamlChars', maxYamlChars);
+  checkLimit('loadDisplaySubjectArea', 'maxRelationshipsChars', maxRelationshipsChars);
   const ignoreStrayPositions =
     options.ignoreStrayPositions ??
-    [maxModels, maxYamlNodes, maxDomainChars, maxYamlChars].some((limit) => limit !== Infinity);
+    [maxModels, maxYamlNodes, maxDomainChars, maxYamlChars, maxRelationshipsChars].some((limit) => limit !== Infinity);
+
+  const { prefix, parentDirName, fileName } = splitSubjectAreaPath(domainPath);
+  const layersPath = `${prefix}${LAYERS_CONFIG_FILE}`;
+  const readLayersText = async (): Promise<string | null | undefined> => {
+    const text = await readFile(layersPath);
+    if (text !== null && text !== undefined && text.length > maxDomainChars) {
+      warn(`${layersPath} is ${text.length} characters long; at most ${maxDomainChars} are read. Using the default layers`);
+      return null;
+    }
+    return text;
+  };
+
+  // 0b. A `.dbml` table or relationships file is not a diagram (§4.4). Core
+  // cannot list directories, so `tables/` is the library unless layers.json
+  // lists a `tables` layer.
+  const isDbml = isDbmlPath(domainPath);
+  let layersText: string | null | undefined;
+  let layersRead = false;
+  if (isDbml) {
+    const stem = fileName.slice(0, -'.dbml'.length);
+    if (stem.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM || lastSegment(prefix) === TABLES_DIR) {
+      throw notADiagram(domainPath);
+    }
+    if (parentDirName === TABLES_DIR) {
+      layersText = await readLayersText();
+      layersRead = true;
+      const listed = parseLayersText(layersText, () => {}).some((l) => l.id === TABLES_DIR);
+      if (!listed) throw notADiagram(domainPath);
+    }
+    if (!dbml) {
+      throw new SubjectAreaValidationError(
+        `${domainPath} is a DBML diagram; pass dbml: dbmlStorageReader from '@erd-studio/core/dbml' to read it.`,
+      );
+    }
+  }
 
   // 1-3. The domain file itself.
   const domainText = await readFile(domainPath);
@@ -238,16 +322,25 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
   if (domainText.length > maxDomainChars) {
     throw new FileTooLargeError(domainPath, domainText.length, maxDomainChars);
   }
-  const { obj, format } = validateSubjectAreaDocument(parseSubjectAreaJson(domainText, domainPath), domainPath);
+  let reading: ReturnType<DbmlStorageReader['parseSubjectArea']> | undefined;
+  let document: unknown;
+  if (isDbml && dbml) {
+    const layoutPath = layoutFilePathOf(domainPath);
+    let layoutText = await readFile(layoutPath);
+    if (layoutText !== null && layoutText !== undefined && layoutText.length > maxDomainChars) {
+      warn(`${layoutPath} is ${layoutText.length} characters long; at most ${maxDomainChars} are read. The diagram is placed without it`);
+      layoutText = null;
+    }
+    reading = dbml.parseSubjectArea(domainText, domainPath, layoutText ?? null);
+    for (const message of reading.warnings) warn(`${domainPath}: ${message}`);
+    document = reading.obj;
+  } else {
+    document = parseSubjectAreaJson(domainText, domainPath);
+  }
+  const { obj, format } = validateSubjectAreaDocument(document, domainPath);
 
   // 4-5. Layers, from the semantic dir the domain sits in.
-  const { prefix, parentDirName, fileName } = splitSubjectAreaPath(domainPath);
-  const layersPath = `${prefix}${LAYERS_CONFIG_FILE}`;
-  let layersText = await readFile(layersPath);
-  if (layersText !== null && layersText !== undefined && layersText.length > maxDomainChars) {
-    warn(`${layersPath} is ${layersText.length} characters long; at most ${maxDomainChars} are read. Using the default layers`);
-    layersText = null;
-  }
+  if (!layersRead) layersText = await readLayersText();
   const layers = parseLayersText(layersText, warn);
   const layerLookup: LayerLookup = {
     hasLayer: (id) => layers.some((l) => l.id === id),
@@ -273,17 +366,75 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
       .filter((name) => modelNameFilter(name));
     // Alphabetical, like the extension's TableLibraryService, so a name that
     // (wrongly) exists in two folders resolves to the same file in both hosts.
-    const folders = [...new Set([domainLayer, ...layers.map((l) => l.id)])].sort((a, b) => a.localeCompare(b));
-    // `logical-models/` then `tables/` (#162), each top level first.
-    const candidates = TABLE_LIBRARY_DIRS.flatMap((dir) => ['', ...folders.map((f) => `${f}/`)].map((sub) => `${prefix}${dir}/${sub}`));
+    // A DBML diagram adds the library folders its `use` lines name (§3.4).
+    // (`''`, the top of the library, is always probed first.)
+    const folders = [...new Set([domainLayer, ...layers.map((l) => l.id), ...(reading?.useFolders ?? [])])]
+      .filter((f) => f !== '')
+      .sort((a, b) => a.localeCompare(b));
+    // `logical-models/` then `tables/` (#162), each top level first; with the
+    // DBML readers, a `tables/` folder's `.dbml` before its `.yml` (§3.4).
+    const found = new Map<string, FoundTable>();
     await mapWithLimit(names, maxParallelReads, async (name) => {
       // One lane probes one candidate at a time, so maxParallelReads holds.
+      const candidates = tableFileCandidates(prefix, name, folders, { dbml: dbml !== undefined });
       let text: string | null | undefined;
+      let path = '';
       for (let i = 0; (text === null || text === undefined) && i < candidates.length; i++) {
-        text = await readFile(`${candidates[i]}${name}.yml`);
+        path = candidates[i];
+        text = await readFile(path);
+      }
+      if (text === null || text === undefined) {
+        parsed.set(name, NO_TABLE);
+        return;
+      }
+      if (dbml && isDbmlPath(path)) {
+        const folder = path.slice(`${prefix}${TABLES_DIR}/`.length).split('/').slice(0, -1)[0] ?? '';
+        found.set(name, { path, text, folder });
+        parsed.set(name, parseDbmlTable(name, text, dbml, maxYamlChars, warn));
+        return;
+      }
+      if (reading) {
+        warn(`Table "${name}" is a YAML table (${path}); the DBML diagram shows it, but ERD Studio: Convert Project to DBML before editing its relationships`);
       }
       parsed.set(name, parseTable(name, text, maxYamlChars, maxYamlNodes, warn));
     });
+
+    // 7b. DBML relationships: every relationships file in the probe set,
+    // attached to the DBML tables read (§2.4, §4.4 step 6).
+    if (dbml && (reading !== undefined || found.size > 0)) {
+      const relPaths = ['', ...folders].map((f) => `${prefix}${TABLES_DIR}/${f === '' ? '' : `${f}/`}${DBML_RELATIONSHIPS_FILE_NAME}`);
+      const readings = (await mapWithLimit(relPaths, maxParallelReads, async (path, i) => {
+        const text = await readFile(path);
+        if (text === null || text === undefined) return undefined;
+        if (text.length > maxRelationshipsChars) {
+          warn(`${path} is larger than the limit; its relationships are not drawn (${text.length} characters; at most ${maxRelationshipsChars} are read)`);
+          return undefined;
+        }
+        const relReading: DbmlRelationshipsReading = dbml.readRelationships(text);
+        for (const problem of relReading.problems) warn(`${path}: ${problem.message}`);
+        return { path, folder: i === 0 ? '' : folders[i - 1], reading: relReading };
+      })).filter((r): r is NonNullable<typeof r> => r !== undefined);
+      if (readings.length > 0) {
+        const entries: DbmlAttachTable[] = [];
+        for (const [name, entry] of parsed) {
+          if (!entry.model) continue;
+          const dbmlFile = found.get(name);
+          entries.push({
+            table: entry.model,
+            folder: dbmlFile?.folder ?? '',
+            storage: dbmlFile ? 'dbml' : 'yaml',
+            ...(entry.dbmlAlias !== undefined ? { dbmlAlias: entry.dbmlAlias } : {}),
+          });
+        }
+        const attached = attachRelationships(readings, dbmlTableLookup(entries));
+        for (const message of attached.warnings) warn(message);
+        for (const [name, entry] of parsed) {
+          if (!entry.model || !found.has(name)) continue;
+          const relationships = attached.byOwner.get(entry.model.name.toLowerCase());
+          if (relationships && relationships.length > 0) entry.model.relationships = relationships;
+        }
+      }
+    }
   }
 
   // 8-10 build what the file describes. The inline models of a v4 domain
@@ -313,6 +464,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
       readOnly,
       ignoreStrayPositions,
       warn: callerWarn,
+      ...(reading ? { schemaVersion: reading.schemaVersion, domainNameFallback: fileName.slice(0, -'.dbml'.length) } : {}),
     });
   } catch (err) {
     if (err instanceof TypeError && !callerErrors.has(err)) {
@@ -339,6 +491,10 @@ function buildDisplaySubjectArea(
     readOnly: boolean;
     ignoreStrayPositions: boolean;
     warn: (message: string) => void;
+    /** A DBML diagram's own version (D8), applied to the Unified and Display `schemaVersion` only. */
+    schemaVersion?: number;
+    /** The name when the file names none (a DBML diagram's stem). */
+    domainNameFallback?: string;
   },
 ): DisplaySubjectArea {
   const { domainPath, fileName, parentDirName, layers, layerLookup, parsed, readOnly, ignoreStrayPositions, warn } = ctx;
@@ -350,7 +506,7 @@ function buildDisplaySubjectArea(
   const listed = new Map<string, number>();
   const unified = buildUnifiedSubjectArea(obj, format, {
     filePath: domainPath,
-    domainNameFallback: stripJsonExtension(fileName),
+    domainNameFallback: ctx.domainNameFallback ?? stripJsonExtension(fileName),
     parentDirName,
     layers: layerLookup,
     getModel: (name) => {
@@ -371,6 +527,7 @@ function buildDisplaySubjectArea(
     getModelError: (name) => parsed.get(name)?.loadError ?? null,
     warn,
   });
+  if (ctx.schemaVersion !== undefined) unified.schemaVersion = ctx.schemaVersion;
 
   // 9. Positions for models that have none.
   const computed = computeMissingPositions(
@@ -438,6 +595,8 @@ interface ParsedTable {
   copies: number;
   /** Set when the file exists but fails to parse (never for a budget refusal). */
   loadError?: TableLoadError;
+  /** A `.dbml` table's DBML alias (`Table fct_order as FO`), which Ref ends may use. */
+  dbmlAlias?: string;
 }
 
 const NO_TABLE: ParsedTable = { model: null, copies: 0 };
@@ -470,4 +629,36 @@ function parseTable(
     const { kind, line, mergeConflict } = classifyTableLoadError(err);
     return { ...NO_TABLE, loadError: { kind, ...(line !== undefined ? { line } : {}), ...(mergeConflict ? { mergeConflict } : {}) } };
   }
+}
+
+/** Parse one `.dbml` table file's text, charging it (as written) to the character budget. */
+function parseDbmlTable(
+  name: string,
+  text: string,
+  dbml: DbmlStorageReader,
+  maxChars: number,
+  warn: (message: string) => void,
+): ParsedTable {
+  if (text.length > maxChars) {
+    warn(`Model "${name}" is ${text.length} characters long; at most ${maxChars} are read`);
+    return NO_TABLE;
+  }
+  const reading = dbml.parseTable(text, name);
+  if (!reading.ok) {
+    warn(`Failed to read model "${name}": ${reading.error.message}`);
+    const { kind, line, mergeConflict, code, target } = reading.error;
+    return {
+      ...NO_TABLE,
+      loadError: {
+        kind,
+        ...(line !== undefined ? { line } : {}),
+        ...(mergeConflict ? { mergeConflict } : {}),
+        ...(code !== undefined ? { code } : {}),
+        ...(target !== undefined ? { target } : {}),
+      },
+    };
+  }
+  for (const problem of reading.problems) warn(`Model "${name}": ${problem.message}`);
+  const copies = maxChars === Infinity || text.length === 0 ? Infinity : Math.floor(maxChars / text.length);
+  return { model: reading.table, copies, ...(reading.alias !== undefined ? { dbmlAlias: reading.alias } : {}) };
 }

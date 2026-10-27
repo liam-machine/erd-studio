@@ -145,6 +145,24 @@ describe('normaliseForStorageEquivalence: each §2.8 row in isolation', () => {
     same(a, b);
   });
 
+  it('relationship order: every list in a relationships file\'s sort order, a composite group moving as one', () => {
+    const b = display();
+    b.relationships = [b.relationships[1], b.relationships[2], b.relationships[0]];
+    same(display(), b);
+    // The members of a composite keep their order inside the group.
+    const swapped = display();
+    swapped.relationships = [swapped.relationships[0], swapped.relationships[2], swapped.relationships[1]];
+    differ(display(), swapped);
+  });
+
+  it('an empty sticky-note list is the same as none', () => {
+    const a = display();
+    a.viewConfig.annotations = [];
+    const b = display();
+    delete b.viewConfig.annotations;
+    same(a, b);
+  });
+
   it('schemaVersion is overridden', () => {
     const a = display();
     const b = display();

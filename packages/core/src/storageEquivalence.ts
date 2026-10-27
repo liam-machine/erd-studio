@@ -11,12 +11,17 @@
  * - description, column note and sticky-note text: leading white space
  *   dropped (`dbmlNoteText`, the writer's own rule, so DBML's shared-indent
  *   trim never applies to text ERD Studio writes);
- * - positions (and sticky-note boxes) rounded to two decimals;
+ * - positions (and sticky-note boxes) rounded to two decimals, and an empty
+ *   sticky-note list the same as none (a diagram with no Note blocks reads
+ *   back with no list);
  * - relationship ends respelled to the real table and column spelling;
  * - a library `one-to-many` stored canonically (many-to-one, ends swapped);
  * - a one-member composite group's key dropped, and every composite key
  *   renamed to the `nextCompositeKey` sequence in its owner's order;
  * - `schemaVersion` overridden (4/5/6 → 7);
+ * - every relationship list in one order: by from table, to table, from
+ *   column and to column (case-insensitive), as a relationships file keeps
+ *   its Refs sorted (§4.5), so the drawn order of a link carries no meaning;
  * - and, with `convert: true` only, the Convert rows: a link stored twice
  *   kept once, a composite group's role taken from its first member,
  *   dangling relationships dropped, annotation ids ignored, and relationships
@@ -175,6 +180,31 @@ function normaliseCompositeKeys(entries: Json[], ownerOf: (rel: Json) => string,
   }
 }
 
+/**
+ * `entries` in the order a relationships file keeps its Refs (§4.5 sort
+ * key): from table, to table, from column, to column, without case. A
+ * composite group is one Ref: it moves as a unit, at its first member's key,
+ * with its members in their order. Stable, so entries that tie keep their
+ * order. `ownerOf` gives an entry's from table.
+ */
+function sortRelationships(entries: Json[], ownerOf: (rel: Json) => string): void {
+  const keyOf = (rel: Json): string =>
+    [ownerOf(rel), rel.toModel, rel.fromColumn, rel.toColumn].map((part) => lower(String(part ?? ''))).join('\u0000');
+  const groupKeys = new Map<string, string>();
+  const keyed = entries.map((rel, index) => {
+    let key = keyOf(rel);
+    if (typeof rel.compositeKey === 'string') {
+      const group = `${lower(ownerOf(rel))}\u0000${lower(rel.compositeKey)}`;
+      const first = groupKeys.get(group);
+      if (first === undefined) groupKeys.set(group, key);
+      else key = first;
+    }
+    return { rel, index, key };
+  });
+  keyed.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.index - b.index));
+  keyed.forEach(({ rel }, i) => { entries[i] = rel; });
+}
+
 /** A relationship list normalised in place order: respelled, canonical, deduped (convert) and dangling dropped (convert). */
 function normaliseList(
   list: unknown,
@@ -249,6 +279,7 @@ export function normaliseForStorageEquivalence<T>(area: T, options: StorageEquiv
   for (const holder of flatHolders) {
     const { entries } = normaliseList(holder.relationships, undefined, tables, convert);
     holder.relationships = entries;
+    sortRelationships(entries, (rel) => String(rel.fromModel ?? ''));
     normaliseCompositeKeys(entries, (rel) => String(rel.fromModel ?? ''), convert);
   }
 
@@ -278,6 +309,7 @@ export function normaliseForStorageEquivalence<T>(area: T, options: StorageEquiv
     if (!ownLists.some((l) => l.model === target)) ownLists.push({ model: target, owner });
   }
   for (const { model, owner } of ownLists) {
+    sortRelationships(model.relationships as Json[], () => owner);
     normaliseCompositeKeys(model.relationships as Json[], () => owner, convert);
   }
 
@@ -289,6 +321,9 @@ export function normaliseForStorageEquivalence<T>(area: T, options: StorageEquiv
       if (isFiniteNumber(position.x)) position.x = round(position.x);
       if (isFiniteNumber(position.y)) position.y = round(position.y);
     }
+  }
+  if (viewConfig && Array.isArray(viewConfig.annotations) && viewConfig.annotations.length === 0) {
+    delete viewConfig.annotations;
   }
   if (viewConfig && Array.isArray(viewConfig.annotations)) {
     for (const annotation of viewConfig.annotations) {

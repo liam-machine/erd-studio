@@ -1,0 +1,7 @@
+Table dim_product [
+  schema: 'gold',
+  role: 'dimension'
+] {
+  product_key INT [pk, foreign_key: 'true']
+  product_name VARCHAR
+}

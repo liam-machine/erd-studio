@@ -1,0 +1,9 @@
+Project vault {
+  Note: 'A composite foreign key, an entry with a lone compositeKey, and two self-references (one spelled in another case)'
+  erd_schema_version: '7'
+}
+
+use { table pit_customer } from '../tables/gold/pit_customer.dbml'
+use { table sat_customer } from '../tables/gold/sat_customer.dbml'
+use { table employee } from '../tables/gold/employee.dbml'
+use * from '../tables/gold/_relationships.dbml'

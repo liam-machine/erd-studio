@@ -1,0 +1,39 @@
+{
+  "version": "3.0.0",
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "relationshipMode": "All",
+    "tablePositions": [
+      {
+        "name": "dim_customer",
+        "schemaName": "public",
+        "x": 40,
+        "y": 60
+      },
+      {
+        "name": "dim_project",
+        "schemaName": "public",
+        "x": 980,
+        "y": 60
+      },
+      {
+        "name": "dim_task",
+        "schemaName": "public",
+        "x": 1026,
+        "y": 586
+      },
+      {
+        "name": "fct_task_event",
+        "schemaName": "public",
+        "x": 438,
+        "y": 544
+      }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": []
+  },
+  "views": {}
+}

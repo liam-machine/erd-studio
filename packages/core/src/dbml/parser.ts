@@ -1,5 +1,5 @@
 /**
- * The one wrapper around `@dbml/parse` (internal: never exported from the
+ * The one wrapper around the DBML parser (internal: never exported from the
  * subpath). Every reader compiles one file at a time under a fixed virtual
  * path, never the real one, so a read never depends on where the project
  * lives (10.3.1, which the tests feed, drops the tables of an imported file
@@ -21,7 +21,7 @@ import type { DbmlParserModule } from './parserModule.js';
 export type AstNode = Record<string, any>;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-/** The pinned `@dbml/parse` (11.0.0). */
+/** The pinned DBML parser (11.0.0). */
 export const PINNED_PARSER: DbmlParserModule = { Compiler, MemoryProjectLayout, Filepath };
 
 /** Where a single file is compiled: fixed, and free of spaces. */

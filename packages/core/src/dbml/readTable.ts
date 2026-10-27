@@ -16,7 +16,6 @@ import {
   DBML_RICH_PLACEHOLDER_COLUMN,
   DBML_RICH_PLACEHOLDER_PROPERTY,
   DBML_RICH_TABLE_PROPERTIES,
-  DBML_RICH_PROPERTY_PREFIX,
   bareDbmlProperty,
   rationaleKeyOf,
 } from '../dbmlRichProperties.js';
@@ -36,7 +35,6 @@ import {
   isUseDeclaration,
   lineAt,
   lineStartOf,
-  nameFragments,
   plainNames,
   propertyText,
   stripBom,
@@ -166,7 +164,7 @@ function noteText(value: unknown): string {
  *
  * Never throws for bad DBML: a file that cannot be read comes back as
  * `{ ok: false }` with the `TableLoadError` the canvas shows and a message
- * for logs. `parser` is the pinned `@dbml/parse` unless a test passes another.
+ * for logs. `parser` is the pinned DBML parser unless a test passes another.
  */
 export function parseTableDbml(rawText: string, fileStem: string, parser: DbmlParserModule = PINNED_PARSER): DbmlTableReading {
   const text = stripBom(rawText);
@@ -383,9 +381,3 @@ function mapTable(raw: AstNode, name: string, qualifier: string | undefined, tex
   table.columns = columns;
   return table;
 }
-
-/** The prefix `erd_` property names may carry; re-exported for the writers. */
-export const DBML_PROPERTY_PREFIX = DBML_RICH_PROPERTY_PREFIX;
-
-// `nameFragments` is used by the other readers; keep the import list honest here.
-void nameFragments;

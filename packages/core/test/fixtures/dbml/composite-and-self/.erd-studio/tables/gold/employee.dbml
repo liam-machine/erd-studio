@@ -1,0 +1,5 @@
+Table employee {
+  employee_id int [pk]
+  manager_id int
+  mentor_id int
+}

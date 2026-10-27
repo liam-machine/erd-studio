@@ -1,0 +1,8 @@
+Table dim_customer [
+  schema: 'gold',
+  role: 'dimension',
+  alias: 'customer'
+] {
+  customer_key INT [pk]
+  customer_name VARCHAR
+}

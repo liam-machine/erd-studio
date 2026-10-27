@@ -1,0 +1,6 @@
+Project dbml_future {
+  Note: 'Written by a newer ERD Studio'
+  erd_schema_version: '8'
+}
+
+use { table dim_customer } from '../tables/dim_customer.dbml'

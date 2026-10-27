@@ -16,6 +16,7 @@ export * from './types/layer.js';
 export * from './types/display.js';
 export * from './types/discrepancy.js';
 export * from './types/canvasMessages.js';
+export * from './types/dbmlStorage.js';
 
 export * from './positions.js';
 export * from './domain.js';
@@ -46,3 +47,4 @@ export * from './dbmlRichProperties.js';
 export * from './dbmlText.js';
 export * from './storage.js';
 export * from './storageEquivalence.js';
+export * from './dbmlAttach.js';

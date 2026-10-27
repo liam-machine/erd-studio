@@ -12,6 +12,7 @@
     "isolatedModules": true,
     "allowImportingTsExtensions": false,
     "paths": {
+      "@erd-studio/core/dbml": ["../packages/core/src/dbml/index.ts"],
       "@erd-studio/core": ["../packages/core/src/index.ts"]
     }
   },

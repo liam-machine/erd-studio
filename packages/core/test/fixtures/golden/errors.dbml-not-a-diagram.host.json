@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "<root>/.erd-studio/tables/dim_customer.dbml is a DBML table or relationships file, not a diagram. Open a diagram in a layer folder."
+  }
+}

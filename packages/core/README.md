@@ -9,7 +9,7 @@ It holds:
 - `loadDisplaySubjectArea`, which does all of that in one call over any async `readFile`;
 - exporters that turn a `DisplaySubjectArea` into [Mermaid](https://mermaid.js.org) `erDiagram` or [DBML](https://dbml.dbdiagram.io) text: `toMermaid`, `toDbml`, `toDbmlRich` (ERD Studio's fields as DBML custom properties) with its dbdiagram layout file (`toDbdiagramLayout`, `serializeDbdiagramLayout`, `readDbdiagramLayout`), `exportDiagram` and `diagramExportFileName`.
 
-The package has no Node, `vscode`, React or React Flow dependency (its only dependency is `yaml`), so it runs in a browser, in Node and in bundlers alike.
+The package has no Node, `vscode`, React or React Flow dependency (its dependencies are `yaml` and, for the `@erd-studio/core/dbml` subpath only, `@dbml/parse`), so it runs in a browser, in Node and in bundlers alike.
 
 The on-disk contract is documented in [`docs/semantic-domain-json-reference.md`](https://github.com/liam-machine/erd-studio/blob/main/docs/semantic-domain-json-reference.md).
 
@@ -52,6 +52,24 @@ A `readFile` rejection is passed through unchanged. For files you do not control
 Every limit is off by default. The four-class contract above holds for input within the limits: with them all off, input large enough to exhaust the JavaScript engine (for example a domain listing on the order of 100,000 positions) can fail with the engine's own `RangeError` in the extension's placement code. Set every limit for files you do not control. A numeric limit must be a number of at least 0, or `Infinity` for none (`maxParallelReads`: a whole number of at least 1); anything else, `NaN` included, rejects with a `TypeError` before any file is read.
 
 Each occurrence of a model is its own object, but occurrences share the parsed strings. The result keeps `undefined` values; serialise it (for example `JSON.parse(JSON.stringify(domain))`) if you need them dropped. Serialising writes out every occurrence's text, so the serialised size grows with the number of times the domain lists a model (within `maxYamlNodes` and `maxYamlChars` when they are set).
+
+### Native DBML storage: the `@erd-studio/core/dbml` subpath
+
+A project can store its tables, relationships and diagrams as DBML, an open format (`tables/[<folder>/]<name>.dbml`, `tables/[<folder>/]_relationships.dbml`, `<layer>/<name>.dbml` with its layout in `<layer>/<name>.dbdiagram`). The readers need `@dbml/parse`, so they live behind a subpath and the main entry stays parser-free (a webview or renderer bundle never pays for the parser):
+
+```ts
+import { loadDisplaySubjectArea } from '@erd-studio/core';
+import { dbmlStorageReader } from '@erd-studio/core/dbml';
+
+const domain = await loadDisplaySubjectArea({
+  domainPath: '.erd-studio/gold/sales.dbml',
+  readFile: async (path) => fetchText(path),
+  readOnly: true,
+  dbml: dbmlStorageReader,
+});
+```
+
+Without `dbml`, a `.dbml` diagram rejects with a `SubjectAreaValidationError` saying to pass it, and a DBML table or relationships file passed as `domainPath` is refused as not a diagram. With it, a JSON diagram also finds tables stored as `.dbml` and draws their relationships. A DBML diagram that does not parse is a `SubjectAreaFileError` with `reason: 'invalid-dbml'` (transient, with `line` and `column`; with `mergeConflict: true` and not transient for git conflict markers). `maxYamlChars` limits a `.dbml` table file as written (`maxYamlNodes` does not apply to DBML), and `maxRelationshipsChars` limits each relationships file: a longer one is not read, and its relationships are not drawn. The subpath also exports the readers on their own (`parseTableDbml`, `readRelationshipsDbml`, `parseSubjectAreaDbml`, `subjectAreaMembersDbml`), `compileDbmlProject` (a multi-file compile, as other DBML tools read the project) and `DbmlEditRefused`; every export is typed with this package's own types.
 
 ## Exporting a diagram
 
