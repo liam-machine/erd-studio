@@ -24,7 +24,7 @@ function setSubjectArea(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  Object.assign(storeState, { newModelDialogOpen: false, setNewModelDialogOpen: setNewTableDialogOpen });
+  Object.assign(storeState, { newModelDialogOpen: false, setNewModelDialogOpen: setNewTableDialogOpen, logicalOnly: false });
   setSubjectArea();
 });
 
@@ -83,6 +83,38 @@ describe('EmptyCanvas', () => {
     storeState.domain = null;
     const { container } = render(<EmptyCanvas />);
     expect(container.innerHTML).toBe('');
+  });
+
+  it('keeps "Add tables from dbt" as the primary action in a dbt project', () => {
+    const { getByRole } = render(<EmptyCanvas />);
+    expect(getByRole('button', { name: 'Add tables from dbt' }).className).toContain('empty-canvas__button--primary');
+    expect(getByRole('button', { name: 'New table' }).className).not.toContain('empty-canvas__button--primary');
+  });
+
+  describe('without a dbt project (logicalOnly)', () => {
+    beforeEach(() => { storeState.logicalOnly = true; });
+
+    it('drops "Add tables from dbt" and says each table is a YAML file', () => {
+      const { queryByRole, getByText } = render(<EmptyCanvas />);
+      expect(queryByRole('button', { name: 'Add tables from dbt' })).toBeNull();
+      expect(getByText('Add your first table. Each one is a YAML file you can commit.')).toBeTruthy();
+      expect(document.body.textContent).not.toContain('dbt');
+    });
+
+    it('makes "New table" the primary action, opening the New Design Table dialog', () => {
+      const { getByRole } = render(<EmptyCanvas />);
+      const button = getByRole('button', { name: 'New table' });
+      expect(button.className).toContain('empty-canvas__button--primary');
+      fireEvent.click(button);
+      expect(setNewTableDialogOpen).toHaveBeenCalledWith(true);
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('still offers the AI route through the Welcome panel', () => {
+      const { getByRole } = render(<EmptyCanvas />);
+      fireEvent.click(getByRole('button', { name: 'set it up in the Welcome panel' }));
+      expect(send).toHaveBeenCalledWith({ type: 'openGettingStarted' });
+    });
   });
 
   it('steps aside while the New Design Model dialog is open', () => {

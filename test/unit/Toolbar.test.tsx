@@ -9,8 +9,10 @@
  *  - The corner actions stay labelled while they fit, and collapse to one
  *    overflow button only when they would actually overlap the top-centre
  *    toolbar — the collision that used to happen on a narrow window
+ *  - Without a dbt project (`logicalOnly`) the stage tabs, Diff and the
+ *    manifest refresh are not rendered
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, fireEvent, act } from '@testing-library/react';
 
 // ---------------------------------------------------------------------------
@@ -46,7 +48,7 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 vi.mock('../../webview/components/Toolbar/StageTabs', () => ({
-  StageTabs: () => null,
+  StageTabs: () => <div data-testid="stage-tabs" />,
 }));
 
 vi.mock('../../webview/lib/elkLayout', async (importOriginal) => {
@@ -90,6 +92,7 @@ const mockStoreState: Record<string, unknown> = {
   setDiscrepancyCompareStage: noop,
   setToastMessage: vi.fn(),
   setFeedbackDialogOpen: vi.fn(),
+  logicalOnly: false,
 };
 
 vi.mock('../../webview/store/editorStore', () => ({
@@ -241,6 +244,46 @@ describe('Toolbar layout-dirty button', () => {
  * edge and natural width. `layout()` stubs `getBoundingClientRect` per element
  * class, which is what the component actually reads.
  */
+describe('logical-only mode (no dbt project)', () => {
+  const diffButton = () => screen.queryByRole('button', { name: /toggle cross-stage comparison/i });
+  const refreshButton = () => screen.queryByRole('button', { name: /refresh manifest data/i });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStoreState.logicalOnly = false;
+  });
+
+  afterEach(() => {
+    mockStoreState.logicalOnly = false;
+  });
+
+  it('shows the stage tabs, Diff and the manifest refresh in a dbt project', () => {
+    render(<Toolbar {...defaultProps} />);
+    expect(screen.getByTestId('stage-tabs')).toBeTruthy();
+    expect(diffButton()).toBeTruthy();
+    expect(refreshButton()).toBeTruthy();
+  });
+
+  it('hides the stage tabs, Diff (and with it Sync) and the manifest refresh', () => {
+    mockStoreState.logicalOnly = true;
+    render(<Toolbar {...defaultProps} />);
+    expect(screen.queryByTestId('stage-tabs')).toBeNull();
+    expect(diffButton()).toBeNull();
+    expect(screen.queryByText(/Diff/)).toBeNull();
+    expect(refreshButton()).toBeNull();
+    expect(mockPostMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps editing, layout and Export, with the open-formats tooltip', () => {
+    mockStoreState.logicalOnly = true;
+    render(<Toolbar {...defaultProps} />);
+    expect(screen.getByRole('button', { name: /add table or relationship/i })).toBeTruthy();
+    expect(layoutButton()).toBeTruthy();
+    const exportButton = screen.getByRole('button', { name: /export diagram as mermaid or dbml/i });
+    expect(exportButton.getAttribute('title')).toBe('Export as DBML or Mermaid — open formats, no lock-in');
+  });
+});
+
 describe('the top-right corner actions', () => {
   /** Width of the corner in its labelled form, as a real browser reports it. */
   const EXPANDED_WIDTH = 200;
@@ -351,7 +394,7 @@ describe('the top-right corner actions', () => {
     render(<Toolbar {...defaultProps} />);
     const button = screen.getByRole('button', { name: /export diagram as mermaid or dbml/i });
     expect(button.className).toBe('toolbar__corner-button toolbar__corner-button--icon');
-    expect(button.getAttribute('title')).toBe('Export as Mermaid or DBML');
+    expect(button.getAttribute('title')).toBe('Export as DBML or Mermaid — open formats, no lock-in');
 
     fireEvent.click(button);
 

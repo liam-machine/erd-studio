@@ -29,6 +29,7 @@ afterEach(() => {
   cleanup();
   send.mockClear();
   setWelcomeModalOpen.mockClear();
+  storeState.logicalOnly = false;
 });
 
 describe('WelcomeModal', () => {
@@ -44,5 +45,14 @@ describe('WelcomeModal', () => {
     fireEvent.click(getByText('Get Started'));
     expect(send).toHaveBeenCalledWith({ type: 'dismissWelcome' });
     expect(setWelcomeModalOpen).toHaveBeenCalledWith(false);
+  });
+
+  it('renders nothing without a dbt project (logicalOnly), and is never marked dismissed', () => {
+    storeState.logicalOnly = true;
+    const { container } = render(<WelcomeModal />);
+    expect(container.innerHTML).toBe('');
+    // Not shown is not dismissed: it still greets the user in a dbt project.
+    expect(send).not.toHaveBeenCalled();
+    expect(setWelcomeModalOpen).not.toHaveBeenCalled();
   });
 });

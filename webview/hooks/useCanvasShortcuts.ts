@@ -214,8 +214,9 @@ export function useCanvasShortcuts(): void {
       }
 
       // Alt+1/2: Switch stage tabs. Matched on e.code (Digit1/Digit2) because
-      // macOS maps Option+1/2 to '¡'/'™' at the e.key level.
-      const targetStage = altStageShortcut(e);
+      // macOS maps Option+1/2 to '¡'/'™' at the e.key level. Without a dbt
+      // project there is no Physical stage, so Alt+2 does nothing.
+      const targetStage = altStageShortcut(e, s.logicalOnly);
       if (targetStage) {
         e.preventDefault();
         if (domain && domain.stage !== targetStage) {

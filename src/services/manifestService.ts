@@ -70,6 +70,13 @@ export interface ManifestServiceOptions {
    * host counts these for usage telemetry; other callers leave it unset.
    */
   onLoadFailure?: (failure: ManifestLoadFailure) => void;
+  /**
+   * False when the open root has no `dbt_project.yml` (logical-only mode):
+   * every load answers an empty, non-missing manifest without touching the
+   * disk, and `onLoadFailure` is never told — there is no manifest to miss.
+   * Defaults to true.
+   */
+  enabled?: boolean;
 }
 
 /** Reconstruct Maps and Sets from the worker's plain-object result. */
@@ -110,6 +117,7 @@ export class ManifestService {
   private readonly parseTimeoutMs: number;
   private readonly parseInProcess: boolean;
   private readonly onLoadFailure?: (failure: ManifestLoadFailure) => void;
+  private readonly enabled: boolean;
 
   constructor(options: ManifestServiceOptions = {}) {
     const defaults = defaultDbtProjectConfig();
@@ -123,6 +131,7 @@ export class ManifestService {
     this.parseTimeoutMs = options.parseTimeoutMs ?? DEFAULT_PARSE_TIMEOUT_MS;
     this.parseInProcess = options.parseInProcess === true;
     this.onLoadFailure = options.onLoadFailure;
+    this.enabled = options.enabled !== false;
   }
 
   /**
@@ -164,6 +173,12 @@ export class ManifestService {
    */
   async loadManifest(projectPath: string): Promise<ManifestData> {
     if (this.cache) {
+      return this.cache;
+    }
+
+    // Logical-only (no dbt_project.yml): nothing to read and nothing missing.
+    if (!this.enabled) {
+      this.cache = this.emptyManifest();
       return this.cache;
     }
 

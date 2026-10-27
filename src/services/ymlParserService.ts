@@ -62,6 +62,13 @@ export interface YmlParserServiceOptions {
    */
   dbtConfig?: Pick<DbtProjectConfig, 'modelPaths'> &
     Partial<Pick<DbtProjectConfig, 'seedPaths' | 'snapshotPaths'>>;
+  /**
+   * False when the open root has no `dbt_project.yml` (logical-only mode):
+   * every load answers empty data and never walks `models/` — a plain folder
+   * may hold a `models/` directory that has nothing to do with dbt.
+   * Defaults to true.
+   */
+  enabled?: boolean;
 }
 
 /**
@@ -77,6 +84,19 @@ const RELATIONSHIP_TEST_KEYS = [
   'dbt_utils.relationships_where',
 ] as const;
 
+/** What a disabled service answers: no models, tests, source files or docs. */
+function emptyYmlData(): YmlData {
+  return {
+    models: new Map(),
+    relationshipTests: [],
+    uniqueColumns: new Map(),
+    compositeUniqueGroups: new Map(),
+    sourceFiles: new Map(),
+    resourceDocs: new Map(),
+    compositeForeignKeys: [],
+  };
+}
+
 export class YmlParserService {
   private cache: YmlData | null = null;
   private loadPromise: Promise<YmlData> | null = null;
@@ -91,6 +111,8 @@ export class YmlParserService {
   /** Snapshot directories — walked for source files only, never for schema files. */
   private readonly snapshotPaths: string[];
 
+  private readonly enabled: boolean;
+
   constructor(options: YmlParserServiceOptions = {}) {
     const defaults = defaultDbtProjectConfig();
     const configured = options.dbtConfig?.modelPaths ?? [];
@@ -101,6 +123,8 @@ export class YmlParserService {
 
     const snapshots = options.dbtConfig?.snapshotPaths ?? [];
     this.snapshotPaths = snapshots.length > 0 ? [...snapshots] : defaults.snapshotPaths;
+
+    this.enabled = options.enabled !== false;
   }
 
   /**
@@ -118,6 +142,12 @@ export class YmlParserService {
     if (this.loadPromise) {
       const result = await this.loadPromise;
       return modelFolder ? this.filterByFolder(result, projectPath, modelFolder) : result;
+    }
+
+    // Logical-only (no dbt_project.yml): never walk the folder.
+    if (!this.enabled) {
+      this.cache = emptyYmlData();
+      return this.cache;
     }
 
     const currentLoadId = ++this.loadId;

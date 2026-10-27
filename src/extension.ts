@@ -19,7 +19,13 @@ import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { TABLES_DIR, TableLibraryService } from './services/logicalModelService';
 import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
-import { hasErdStudioData, resolveDbtProject, samePath, type DbtProjectResolution } from './services/projectDiscovery';
+import {
+  DRAW_FROM_DBT_NEEDS_DBT_MESSAGE,
+  hasErdStudioData,
+  resolveDbtProject,
+  samePath,
+  type DbtProjectResolution,
+} from './services/projectDiscovery';
 import { YmlParserService } from './services/ymlParserService';
 import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
@@ -175,7 +181,8 @@ function workspaceFolderPaths(): string[] {
 
 /**
  * Resolve the project for this window: `erdStudio.projectPath`, then the
- * picked project, then auto-detection. See `resolveDbtProject`.
+ * picked project, then dbt auto-detection, then (logical-only) the first
+ * folder holding ERD data, then the first folder. See `resolveDbtProject`.
  */
 function resolveWorkspaceProject(context: vscode.ExtensionContext): DbtProjectResolution {
   return resolveDbtProject(workspaceFolderPaths(), {
@@ -218,7 +225,9 @@ async function selectDbtProject(
 ): Promise<void> {
   const resolution = resolveWorkspaceProject(context);
   if (resolution.candidates.length === 0) {
-    void showNoProjectWarning();
+    // A window always has a root here (the command is registered only then),
+    // so no candidates means a plain folder: there is no dbt project to pick.
+    void vscode.window.showInformationMessage(NEEDS_DBT_PROJECT_MESSAGE);
     return;
   }
 
@@ -419,11 +428,18 @@ function recordHarnessInstalls(results: HarnessInstallResult[]): void {
   }
 }
 
-const NO_PROJECT_MESSAGE =
-  'ERD Studio: No dbt project found. Open a folder containing dbt_project.yml, ' +
-  'or set erdStudio.projectPath to the folder that holds your diagrams (it need not be a dbt project).';
+/**
+ * The empty window's message: any folder now opens (logical-only without
+ * dbt), so the only "no project" left is no folder at all.
+ */
+export const NO_PROJECT_MESSAGE =
+  'ERD Studio: Open a folder first. Any folder works; a dbt project also gets the Physical view.';
 
-/** "No dbt project found", with a button for each way out the message names (#205). */
+/** A dbt-only command run in a folder without dbt_project.yml (logical-only mode). */
+export const NEEDS_DBT_PROJECT_MESSAGE =
+  'ERD Studio: this folder is not a dbt project. Open the folder that holds dbt_project.yml to compare your design with what dbt built.';
+
+/** "Open a folder first", with a button for each way out (#205). */
 export async function showNoProjectWarning(): Promise<void> {
   const choice = await vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Folder…', 'Open Settings');
   if (choice === 'Open Folder…') {
@@ -475,9 +491,10 @@ export const PRE_REGISTERED_COMMANDS = new Set([
 /**
  * Register every contributed command (and its legacy dbtSemantic.* alias)
  * with a handler that explains why ERD Studio is inactive, plus a stub
- * custom editor for domain files. Used when no dbt project could be found so
- * the palette, sidebar welcome buttons and domain JSON files show a helpful
- * message instead of "command not found" / a blank editor error.
+ * custom editor for domain files. Used only in an empty window (any folder
+ * opens, logical-only without dbt) so the palette, sidebar welcome buttons
+ * and domain JSON files show a helpful message instead of "command not
+ * found" / a blank editor error.
  */
 function registerFallbackCommands(context: vscode.ExtensionContext): void {
   const contributed = (context.extension.packageJSON as {
@@ -693,7 +710,7 @@ async function sendFeedbackWithoutCanvas(
   }
 }
 
-/** Welcome panel deps before a dbt project is found: the video plays, the steps ask for a folder. */
+/** Welcome panel deps in an empty window: the steps ask for a folder. */
 function noProjectGettingStartedDeps(): GettingStartedDeps {
   return {
     workspaceRoot: null,
@@ -775,7 +792,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // "Watch Getting Started Video" works without a project too: the panel
-  // plays the video and asks for a dbt folder. The project path fills in
+  // asks for a folder. The project path fills in
   // gettingStartedDeps below (late-bound, like editorProviderForFeedback).
   let gettingStartedDeps: GettingStartedDeps | undefined;
   context.subscriptions.push(
@@ -794,8 +811,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const projectResolution = resolveWorkspaceProject(context);
   const workspaceRoot = projectResolution.root;
-  // Picks which sidebar welcome text shows (package.json viewsWelcome).
-  void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', Boolean(workspaceRoot));
+  // Logical-only mode: a root without dbt_project.yml (any folder now opens).
+  // No Physical stage, no dbt services or watchers, nothing written unasked.
+  const hasDbt = projectResolution.hasDbt;
+  // Pick which sidebar welcome text shows (package.json viewsWelcome):
+  // hasProject = a folder is open; hasDbtProject = it holds dbt_project.yml.
+  void vscode.commands.executeCommand('setContext', 'erdStudio.hasProject', Boolean(workspaceRoot));
+  void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', hasDbt);
   if (!workspaceRoot) {
     telemetry.activation('no_project', false, 0);
     recordDetectedAssistants();
@@ -803,18 +825,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Register stub commands / editor so palette entries and the sidebar
     // welcome buttons explain the problem instead of "command not found".
     registerFallbackCommands(context);
-    // A fresh install first activated without a dbt project (usually by
+    // A fresh install first activated in an empty window (usually by
     // clicking the ERD Studio icon) still starts on the Get Started
-    // walkthrough: the video, the sample project and how to open one.
+    // walkthrough: the video, the sample project and how to open a folder.
     const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
     if (pending && !context.globalState.get<boolean>(GETTING_STARTED_NO_PROJECT_SHOWN_KEY) && !gettingStartedAutoOpened) {
       gettingStartedAutoOpened = true;
       await context.globalState.update(GETTING_STARTED_NO_PROJECT_SHOWN_KEY, true);
       await openWalkthrough(() => GettingStartedPanel.createOrShow(context, noProjectGettingStartedDeps()));
     }
-    // No toast for the ordinary case: a window without dbt_project.yml is
-    // normal (the extension activates on any of its commands), and the
-    // sidebar's welcome view already says how to open a project. An explicit
+    // No toast for the ordinary case: an empty window is normal (the
+    // extension activates on any of its commands), and the sidebar's welcome
+    // view already says how to open a folder. An explicit
     // erdStudio.projectPath that points nowhere is a mistake, though, and is
     // still reported.
     if (projectResolution.invalidSetting !== undefined) {
@@ -831,7 +853,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return;
   }
 
-  console.log(`ERD Studio: Found dbt project at ${workspaceRoot}`);
+  console.log(hasDbt
+    ? `ERD Studio: Found dbt project at ${workspaceRoot}`
+    : `ERD Studio: Opened ${workspaceRoot} (no dbt_project.yml: logical-only)`);
 
   const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
 
@@ -898,7 +922,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // seen missing again, so a manifest with no canvas to reload it (isMissing
   // then stays true) is not counted again on every later change (#113).
   let manifestAppearanceCounted = false;
-  const manifestService = new ManifestService({ dbtConfig, onLoadFailure: f => {
+  // Without dbt_project.yml the three dbt readers answer empty and never read
+  // the folder (a plain folder's models/ or target/ is not dbt's).
+  const manifestService = new ManifestService({ dbtConfig, enabled: hasDbt, onLoadFailure: f => {
     const code = manifestFailureCode(f);
     if (code) { telemetry.error(code); }
     if (f === 'missing') {
@@ -906,11 +932,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       recordManifestMissingReasons(workspaceRoot, dbtConfig);
     }
   } });
-  const ymlParserService = new YmlParserService({ dbtConfig });
+  const ymlParserService = new YmlParserService({ dbtConfig, enabled: hasDbt });
   // target/catalog.json — present only after `dbt docs generate`, and the only
   // source of the types the warehouse actually has. Shares the one dbtConfig
   // read above; never re-read dbt_project.yml for a second consumer.
-  const catalogService = new CatalogService({ dbtConfig, onReadFailure: () => telemetry.error('catalogUnreadable') });
+  const catalogService = new CatalogService({ dbtConfig, enabled: hasDbt, onReadFailure: () => telemetry.error('catalogUnreadable') });
   const templateService = new TemplateService();
   // Status bar item shown while selectors.yml is out of sync (skipped writes).
   // Hidden as soon as a regenerate succeeds.
@@ -974,9 +1000,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Ensure selectors.yml exists and is up to date at activation time so a
   // fresh `git clone` with pre-existing domain files gets a valid selector
   // set before the user makes any edits. Debounced so activation isn't
-  // blocked on disk I/O. A root without dbt_project.yml is never written to
-  // (regenerate() returns 'not-dbt-project').
-  selectorsService.scheduleRegenerate();
+  // blocked on disk I/O. Never in a folder without dbt_project.yml:
+  // selectors.yml is a dbt file, and activation there writes nothing. The
+  // guard is belt-and-braces: regenerate() itself returns 'not-dbt-project'
+  // for a root without dbt_project.yml, which covers every post-edit caller.
+  if (hasDbt) { selectorsService.scheduleRegenerate(); }
 
   // Check for v4 → v5 migration (non-blocking)
   const migrationService = new MigrationService(workspaceRoot, layerService, tableLibraryService, semanticDir);
@@ -1027,6 +1055,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   trackingServiceForFeedback = trackingService;
   editorProvider.setReportTracking(trackingService);
   editorProvider.setCatalogService(catalogService);
+  editorProvider.setLogicalOnly(!hasDbt);
 
   const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
@@ -1083,8 +1112,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const openCanvas = async (): Promise<void> => {
     const domains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
     if (domains.length === 0) {
+      // A plain folder goes straight to New Diagram, which makes the ERD
+      // folder itself (setup's extra layer folders are for dbt projects).
       await vscode.commands.executeCommand(
-        fs.existsSync(fullSemanticDirPath) ? 'erdStudio.createDomain' : 'erdStudio.setupSemanticDirectory',
+        fs.existsSync(fullSemanticDirPath) || !hasDbt ? 'erdStudio.createDomain' : 'erdStudio.setupSemanticDirectory',
       );
       return;
     }
@@ -1123,7 +1154,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // -------------------------------------------------------------------------
   // File watchers
   // -------------------------------------------------------------------------
-  const fileWatcherService = new FileWatcherService(workspaceRoot, semanticDir, dbtConfig);
+  // No manifest / catalog / dbt source / dbt_project.yml watchers without dbt.
+  const fileWatcherService = new FileWatcherService(workspaceRoot, semanticDir, dbtConfig, undefined, { dbt: hasDbt });
 
   // Manifest changed → refresh open editors
   let manifestRetryTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -1798,6 +1830,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         projectRoot: workspaceRoot,
       })),
     vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, async () => {
+      if (!hasDbt) {
+        void vscode.window.showInformationMessage(DRAW_FROM_DBT_NEEDS_DBT_MESSAGE);
+        return;
+      }
       const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
       await drawFromDbt({
         workspaceRoot,
@@ -1900,11 +1936,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const layerDir = path.join(workspaceRoot, semanticDir, layer);
         const filePath = path.join(layerDir, `${slug}.json`);
 
+        // A folder with no ERD data yet (a plain folder, or a dbt project
+        // never set up): New Diagram is the explicit action that makes the
+        // ERD folder, with the default layers.json first, as Draw from dbt and
+        // Import DBML do. Removed again if the diagram cannot be written.
+        const createdSemanticDir = !fs.existsSync(fullSemanticDirPath);
+        const undoSemanticDir = (): void => {
+          if (!createdSemanticDir) { return; }
+          try { fs.rmSync(fullSemanticDirPath, { recursive: true, force: true }); } catch { /* leave it */ }
+          layerService.invalidateCache();
+        };
         try {
+          if (createdSemanticDir) {
+            await layerService.saveConfig(layerService.getAllLayers());
+            layerService.invalidateCache();
+          }
           if (!fs.existsSync(layerDir)) {
             fs.mkdirSync(layerDir, { recursive: true });
           }
         } catch (err) {
+          undoSemanticDir();
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to create directory: ${msg}`);
           return;
@@ -1935,6 +1986,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             void vscode.window.showErrorMessage(`Subject area "${slug}" already exists in the ${layer} layer`);
             return;
           }
+          undoSemanticDir();
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to create subject area file: ${msg}`);
           return;
@@ -1942,6 +1994,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         // Step 6: Refresh tree, regenerate selectors.yml, and auto-open domain.
         // The semantic dir may have just been created — reveal the title buttons.
+        if (createdSemanticDir) {
+          layerDecorationProvider.refresh();
+          decorationProvider.refresh();
+        }
         refreshContextKeys();
         treeProvider.refresh();
         selectorsService.scheduleRegenerate();
@@ -2064,6 +2120,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     ),
     vscode.commands.registerCommand('erdStudio.refreshManifest', async () => {
+      if (!hasDbt) {
+        void vscode.window.showInformationMessage(NEEDS_DBT_PROJECT_MESSAGE);
+        return;
+      }
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -2135,6 +2195,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // One-shot cleanup: strip legacy `domain:*` tags from every model YAML
     // left behind by the old SchemaTagService. Safe to run repeatedly.
     vscode.commands.registerCommand('erdStudio.stripLegacyDomainTags', async () => {
+      // It rewrites dbt schema files under models/: never in a plain folder.
+      if (!hasDbt) {
+        void vscode.window.showInformationMessage(NEEDS_DBT_PROJECT_MESSAGE);
+        return;
+      }
       const confirm = await vscode.window.showWarningMessage(
         'This will scan every .yml file under your dbt model-paths (default `models/`) and remove any `domain:*` tag from `config.tags` or top-level `tags` on each dbt model. ' +
           'Review and commit the changes as a single PR. Continue?',
@@ -2604,6 +2669,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const relative = projectWorkspaceFolder ? path.relative(projectWorkspaceFolder, workspaceRoot) : '';
     return {
       hasProject: true,
+      logicalOnly: !hasDbt,
       harness,
       cli,
       helper: deriveAiHelperState(harness, cli, assistants),
@@ -2628,6 +2694,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       launcher: cliLauncher,
       launcherOptions,
       assistants: detectAiAssistants(),
+      logicalOnly: !hasDbt,
       confirmReplace: async (unmanaged, targets) => {
         const REPLACE = 'Replace';
         const KEEP = 'Keep mine';
@@ -2653,6 +2720,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   gettingStartedDeps = {
     workspaceRoot,
     semanticDir,
+    // The panel's logical-only page: New diagram / Import DBML, no dbt steps.
+    logicalOnly: !hasDbt,
     runSetup,
     getStatus: getGettingStartedStatus,
     clipboardText: setupClipboardText,
@@ -2661,7 +2730,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // One text line above the Welcome panel's cards ("12 dbt models · medallion
     // layout · manifest 2 days old"). Reads what the canvas already caches;
     // a missing manifest is fine and is reported as such, never an error.
-    getProjectSummary: async () => {
+    // None in a folder without dbt: there are no dbt models to summarise.
+    getProjectSummary: !hasDbt ? undefined : async () => {
       const ymlData = await ymlParserService.loadYmlData(workspaceRoot);
       const loaded = await manifestService.loadManifest(workspaceRoot);
       const manifest = manifestService.isMissing ? undefined : loaded;
@@ -2683,6 +2753,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (outcome.message !== SETUP_CANCELLED_MESSAGE) {
           void vscode.window.showErrorMessage(`ERD Studio: ${outcome.message}`);
         }
+        return;
+      }
+      // Without dbt the guided setup can't run yet, and every button below
+      // starts it: the message (which says what to ask instead) is the whole toast.
+      if (!hasDbt) {
+        void vscode.window.showInformationMessage(outcome.message);
         return;
       }
       // Offer an Open button for each assistant the editor can open, and one
@@ -2718,6 +2794,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // walkthrough opens so a crash cannot loop.
   let suppressHarnessQuickPick = false;
   let firstRunNoticeShown = false;
+  // A plain folder (no dbt_project.yml, no ERD folder yet) is where someone
+  // merely clicked the ERD Studio icon: no notice, no QuickPick, no prompt —
+  // the sidebar's welcome view is the whole offer there. Deferred flags stay
+  // unset, so they come in a folder that has something to work on.
+  const quietActivation = !hasDbt && !fs.existsSync(fullSemanticDirPath);
   {
     const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
     const shown = context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY) === true;
@@ -2731,16 +2812,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     } else if (pending && shown) {
       // Another window got there first.
       await context.globalState.update(GETTING_STARTED_PENDING_KEY, undefined);
-    } else if (!pending && !shown) {
+    } else if (!pending && !shown && !quietActivation) {
       await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
       firstRunNoticeShown = true;
+      // Without dbt the guided setup and the dbt video don't apply: the notice
+      // offers the Welcome page's logical-only start instead.
+      const OPEN = hasDbt ? 'Watch' : 'Open Welcome';
       void vscode.window.showInformationMessage(
-        'ERD Studio: new short getting-started video and a guided setup for your AI assistant ' +
-          '(Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor).',
-        'Watch',
+        hasDbt
+          ? 'ERD Studio: new short getting-started video and a guided setup for your AI assistant ' +
+            '(Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor).'
+          : 'ERD Studio: a new Welcome page: draw a diagram, import DBML, and set up your AI assistant ' +
+            '(Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) to work on the same files.',
+        OPEN,
         'Not now',
       ).then((choice) => {
-        if (choice === 'Watch') { void vscode.commands.executeCommand('erdStudio.showGettingStarted'); }
+        if (choice === OPEN) { void vscode.commands.executeCommand('erdStudio.showGettingStarted'); }
       });
     }
   }
@@ -2794,6 +2881,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
     } else if (
       !suppressHarnessQuickPick &&
+      // Offered where there is a dbt project or ERD data to describe, never
+      // to a plain folder that has neither (logical-only, nothing yet).
+      !quietActivation &&
       installedCount === 0 &&
       !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)
     ) {

@@ -168,6 +168,15 @@ export interface EditorState extends CanvasState {
   manifestMissing: boolean;
   /** The user closed the "Run dbt parse" hint; the host persists it too. */
   manifestHintDismissed: boolean;
+  /**
+   * The open project has no `dbt_project.yml`, so there is no Physical stage
+   * to show (the host's `logicalOnly` envelope flag). The Toolbar hides the
+   * stage tabs, Diff (and with it Sync) and the manifest refresh; Alt+2, the
+   * first-open "Two Stages" modal and the dbt wording in the empty states go
+   * too. Follows every `domainLoaded` / `stageData`, like `manifestMissing`,
+   * and is deliberately NOT touched by `setDomain`.
+   */
+  logicalOnly: boolean;
 }
 
 export interface EditorActions extends CanvasActions {
@@ -190,6 +199,12 @@ export interface EditorActions extends CanvasActions {
   setManifestMissing: (missing: boolean) => void;
   /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
   dismissManifestHint: () => void;
+  /**
+   * Store the `logicalOnly` flag of the latest host payload. Turning it on
+   * also drops any Diff / discrepancy and sync state (there is nothing to
+   * compare against) and closes the "Two Stages" modal without dismissing it.
+   */
+  setLogicalOnly: (logicalOnly: boolean) => void;
   setError: (
     error: string | null,
     kind?: ErrorMessage['payload']['kind'],
@@ -310,6 +325,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   physicalSourceNoticeDismissed: false,
   manifestMissing: false,
   manifestHintDismissed: false,
+  logicalOnly: false,
 
   // Actions
   setViewport: (viewport) => set({ viewport }),
@@ -325,6 +341,18 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   dismissPhysicalSourceNotice: () => set({ physicalSourceNoticeDismissed: true }),
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
   dismissManifestHint: () => set({ manifestHintDismissed: true }),
+  setLogicalOnly: (logicalOnly) => set(
+    logicalOnly
+      ? {
+          logicalOnly: true,
+          discrepancyVisible: false, discrepancyCompareStage: null, discrepancyReport: null,
+          syncMode: false, syncSelections: {}, manifestStale: false, syncPlanGenerated: null,
+          // Closed, never dismissed: the host persists nothing, so the modal
+          // still greets this user the first time they open a dbt project.
+          welcomeModalOpen: false,
+        }
+      : { logicalOnly: false },
+  ),
   setError: (error, kind, mergeConflict, fileProblem) => set((state) => {
     // The "deleted or renamed" screen (#161) stands until a fresh domain
     // arrives: a later host error (a refused edit, a failed physical refresh)

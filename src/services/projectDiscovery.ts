@@ -12,7 +12,17 @@
  *      `workspaceState` so a personal choice never lands in a settings file
  *      a team commits;
  *   3. auto-detection: the first dbt project that already holds ERD data,
- *      else the first dbt project found.
+ *      else the first dbt project found;
+ *   4. no dbt project anywhere (logical-only mode): the first workspace
+ *      folder that already holds ERD data (`.erd-studio`, or the legacy
+ *      `erd-studio/`);
+ *   5. else the first workspace folder — any folder works, and nothing is
+ *      written there until the user asks for a diagram.
+ *
+ * Any dbt project still beats a plain folder with ERD data, and the picker,
+ * `candidates`, `autoRoot` and the multi-project context key stay dbt-only.
+ * `hasDbt` says whether the chosen root holds `dbt_project.yml`; without it
+ * the host runs logical-only (no Physical stage, no dbt services).
  *
  * Pure (no vscode import) so it is unit-testable and safe to share with the
  * editor provider.
@@ -28,6 +38,14 @@ const DBT_SEARCH_SKIP_DIRS = new Set(['node_modules', 'dbt_packages', '.git', 't
 
 /** Maximum directory depth (below a workspace folder) searched for dbt_project.yml. */
 const DBT_SEARCH_MAX_DEPTH = 3;
+
+/** Draw from dbt in a folder with no dbt_project.yml (logical-only mode). */
+export const DRAW_FROM_DBT_NEEDS_DBT_MESSAGE =
+  'Draw from dbt needs a dbt project. Open the folder that holds dbt_project.yml, or start with New Diagram / Import DBML.';
+
+/** The canvas's Add Tables from dbt in a folder with no dbt_project.yml (logical-only mode). */
+export const ADD_FROM_DBT_NEEDS_DBT_MESSAGE =
+  'Adding tables from dbt needs a dbt project. Open the folder that holds dbt_project.yml to compare your design with what dbt built.';
 
 export function hasDbtProjectFile(dir: string): boolean {
   try {
@@ -110,13 +128,21 @@ export function autoDetectProject(candidates: readonly string[], semanticDir: st
   return candidates.find(c => hasErdStudioData(c, semanticDir)) ?? candidates[0];
 }
 
-export type DbtProjectSource = 'setting' | 'picked' | 'auto';
+/**
+ * Which rule chose the root: `setting` (erdStudio.projectPath), `picked`
+ * (Select dbt Project…), `auto` (a detected dbt project), `erdData` (no dbt
+ * project; the first workspace folder holding ERD data) or `folder` (no dbt
+ * project and no ERD data; the first workspace folder).
+ */
+export type DbtProjectSource = 'setting' | 'picked' | 'auto' | 'erdData' | 'folder';
 
 export interface DbtProjectResolution {
-  /** The project to open, or undefined when the workspace holds none. */
+  /** The project to open, or undefined when the window has no folder (and no valid projectPath). */
   root: string | undefined;
   /** Which rule chose `root`. */
   source: DbtProjectSource;
+  /** Whether `root` holds `dbt_project.yml`. False for a plain folder (logical-only) and for no root. */
+  hasDbt: boolean;
   /** Every dbt project in the workspace, in auto-detection order. */
   candidates: string[];
   /** Where auto-detection alone would land — what the picker's "Auto-detect" row means. */
@@ -132,7 +158,8 @@ export interface DbtProjectResolution {
  * `projectPath` may be absolute or relative to any workspace folder (the
  * first folder that resolves wins), and need not be a dbt project (#111). `picked` is honoured only while it is
  * still one of the workspace's dbt projects, so a removed folder quietly
- * falls back to auto-detection.
+ * falls back to auto-detection. With no dbt project in the workspace, the
+ * first folder holding ERD data opens, else the first folder (logical-only).
  */
 export function resolveDbtProject(
   folderPaths: readonly string[],
@@ -154,21 +181,34 @@ export function resolveDbtProject(
     // wherever the setting points, and without dbt_project.yml it simply has
     // no manifest to compare against.
     const hit = tries.find(hasDbtProjectFile) ?? tries.find(isDirectory);
-    if (hit) { return { root: hit, source: 'setting', candidates, autoRoot }; }
+    if (hit) { return { root: hit, source: 'setting', hasDbt: hasDbtProjectFile(hit), candidates, autoRoot }; }
     invalidSetting = configured;
   }
 
   if (opts.picked && candidates.includes(opts.picked)) {
-    return { root: opts.picked, source: 'picked', candidates, autoRoot, invalidSetting };
+    return { root: opts.picked, source: 'picked', hasDbt: true, candidates, autoRoot, invalidSetting };
   }
 
-  return { root: autoRoot, source: 'auto', candidates, autoRoot, invalidSetting };
+  if (autoRoot) {
+    return { root: autoRoot, source: 'auto', hasDbt: true, candidates, autoRoot, invalidSetting };
+  }
+
+  // No dbt project anywhere: logical-only. A folder that already holds ERD
+  // data first, then simply the first folder. Only the workspace folders
+  // themselves are considered — no search below them.
+  const withData = folderPaths.find(folder => hasErdStudioData(folder, semanticDir));
+  if (withData) {
+    return { root: withData, source: 'erdData', hasDbt: false, candidates, autoRoot, invalidSetting };
+  }
+  const first = folderPaths.find(isDirectory);
+  return { root: first, source: first ? 'folder' : 'auto', hasDbt: false, candidates, autoRoot, invalidSetting };
 }
 
 /**
- * Resolve the dbt project root from the workspace folder paths and the
+ * Resolve the project root from the workspace folder paths and the
  * `erdStudio.projectPath` setting. Thin wrapper over {@link resolveDbtProject}
- * for callers that only need the path.
+ * for callers that only need the path — which may be a plain folder when the
+ * workspace holds no dbt project.
  */
 export function resolveDbtProjectRoot(
   folderPaths: readonly string[],

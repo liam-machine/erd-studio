@@ -84,9 +84,78 @@ describe('resolveDbtProject', () => {
     expect(resolveDbtProject([a], { projectPath: file })).toMatchObject({ root: a, source: 'auto', invalidSetting: file });
   });
 
-  it('returns no root for a workspace without dbt projects', () => {
-    fs.mkdirSync(path.join(root, 'docs'));
-    expect(resolveDbtProject([path.join(root, 'docs')])).toMatchObject({ root: undefined, candidates: [] });
+  it('reports hasDbt for a dbt root and for a projectPath plain folder (#111)', () => {
+    const a = dbt('a', true);
+    expect(resolveDbtProject([a])).toMatchObject({ root: a, source: 'auto', hasDbt: true });
+    const diagrams = path.join(root, 'diagrams');
+    fs.mkdirSync(diagrams);
+    expect(resolveDbtProject([a], { projectPath: diagrams })).toMatchObject({ root: diagrams, source: 'setting', hasDbt: false });
+  });
+});
+
+describe('resolveDbtProject — logical-only roots', () => {
+  function folder(rel: string, withErd: false | '.erd-studio' | 'erd-studio' = false): string {
+    const dir = path.join(root, rel);
+    fs.mkdirSync(dir, { recursive: true });
+    if (withErd) { fs.mkdirSync(path.join(dir, withErd)); }
+    return dir;
+  }
+
+  it('a plain folder with no dbt project opens as the root, source folder', () => {
+    const docs = folder('docs');
+    expect(resolveDbtProject([docs])).toMatchObject({
+      root: docs, source: 'folder', hasDbt: false, candidates: [], autoRoot: undefined,
+    });
+  });
+
+  it('a folder holding .erd-studio beats the first folder', () => {
+    const first = folder('first');
+    const second = folder('second', '.erd-studio');
+    expect(resolveDbtProject([first, second])).toMatchObject({ root: second, source: 'erdData', hasDbt: false });
+  });
+
+  it('the legacy erd-studio/ folder counts as ERD data too', () => {
+    const first = folder('first');
+    const legacy = folder('legacy', 'erd-studio');
+    fs.writeFileSync(path.join(legacy, 'erd-studio', 'layers.json'), '{}');
+    expect(resolveDbtProject([first, legacy])).toMatchObject({ root: legacy, source: 'erdData' });
+  });
+
+  it('a configured semanticDir is what counts as ERD data', () => {
+    const first = folder('first', '.erd-studio');
+    const custom = folder('custom');
+    fs.mkdirSync(path.join(custom, 'diagrams'));
+    expect(resolveDbtProject([first, custom], { semanticDir: 'diagrams' })).toMatchObject({ root: custom, source: 'erdData' });
+  });
+
+  it('any dbt project beats a folder with .erd-studio', () => {
+    const plain = folder('plain', '.erd-studio');
+    const project = dbt('project');
+    expect(resolveDbtProject([plain, project])).toMatchObject({ root: project, source: 'auto', hasDbt: true, candidates: [project] });
+  });
+
+  it('a nested dbt project beats a workspace folder with .erd-studio', () => {
+    const ws = folder('ws', '.erd-studio');
+    const nested = dbt('ws/analytics');
+    expect(resolveDbtProject([ws])).toMatchObject({ root: nested, source: 'auto', hasDbt: true });
+  });
+
+  it('no folders → no root (the empty-window branch)', () => {
+    const r = resolveDbtProject([]);
+    expect(r.root).toBeUndefined();
+    expect(r.hasDbt).toBe(false);
+  });
+
+  it('an invalid projectPath falls back to the plain folder and is still reported', () => {
+    const docs = folder('docs');
+    expect(resolveDbtProject([docs], { projectPath: path.join(root, 'nowhere') })).toMatchObject({
+      root: docs, source: 'folder', invalidSetting: path.join(root, 'nowhere'),
+    });
+  });
+
+  it('the logical-only fixture opens as erdData, with its decoy models/ ignored', () => {
+    const fixture = path.resolve(__dirname, '../fixtures/logical-only');
+    expect(resolveDbtProject([fixture])).toMatchObject({ root: fixture, source: 'erdData', hasDbt: false, candidates: [] });
   });
 });
 

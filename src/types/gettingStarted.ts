@@ -97,6 +97,10 @@ export type GettingStartedToHost =
   | { type: 'openDomain' }
   /** Runs `erdStudio.drawFromDbt` (pick a dbt folder, get a laid-out logical draft). No payload, no AI. */
   | { type: 'drawFromDbt' }
+  /** Logical-only state: runs `erdStudio.createDomain` (a blank diagram; no dbt needed). No payload. */
+  | { type: 'createDomain' }
+  /** Logical-only state: runs `erdStudio.importDbml` (pick a .dbml file, confirm, get a diagram). No payload. */
+  | { type: 'importDbml' }
   | { type: 'openExternal'; target: GettingStartedExternalTarget }
   /** Runs `erdStudio.trySampleProject` (confirm, then clone the fixed sample repo). No payload. */
   | { type: 'trySample' }
@@ -114,7 +118,7 @@ export type GettingStartedToHostType = GettingStartedToHost['type'];
 /** Every host-bound type, for the validator and the "every type is handled" test. */
 export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] = [
   'ready', 'refreshStatus', 'setupAiHelper', 'copyPrompt', 'openClaude', 'openCopilotChat', 'openDomain', 'drawFromDbt',
-  'openExternal', 'trySample', 'openFolder', 'videoError',
+  'createDomain', 'importDbml', 'openExternal', 'trySample', 'openFolder', 'videoError',
 ];
 
 /** How Claude Code was found. `cli` wins when both are present (it can take the prompt as an argument). */
@@ -133,7 +137,16 @@ export interface SkillFolderState {
 export type GettingStartedHarness = Record<SkillHarnessTarget, SkillFolderState>;
 
 export interface GettingStartedStatus {
+  /** A folder is open (the empty window is the only `false`): see `GettingStartedPageMode`. */
   hasProject: boolean;
+  /**
+   * The open folder has no `dbt_project.yml`: the page leads with New diagram
+   * and Import DBML, and "Using dbt? Open its folder to compare" replaces the
+   * dbt steps. Optional and additive: absent means a dbt project (the page as
+   * it was before logical-only mode). The panel host fills it from
+   * `GettingStartedDeps.logicalOnly` when `getStatus()` leaves it out.
+   */
+  logicalOnly?: boolean;
   harness: GettingStartedHarness;
   cli: 'missing' | 'ready' | 'stale';
   /** Derived from `harness` + `cli` + `assistants` by `deriveAiHelperState()`. */
@@ -183,6 +196,19 @@ export interface SetupOutcome {
   message: string;
 }
 
+/**
+ * Which of the panel's three pages shows: `nofolder` (empty window: open a
+ * folder), `logical` (a folder without dbt: design from scratch or DBML) or
+ * `dbt` (a dbt project: Draw from dbt and the guided setup).
+ */
+export type GettingStartedPageMode = 'nofolder' | 'logical' | 'dbt';
+
+/** The page a status describes. */
+export function gettingStartedPageMode(s: Pick<GettingStartedStatus, 'hasProject' | 'logicalOnly'>): GettingStartedPageMode {
+  if (!s.hasProject) { return 'nofolder'; }
+  return s.logicalOnly ? 'logical' : 'dbt';
+}
+
 export type GettingStartedToWebview =
   | { type: 'status'; payload: GettingStartedStatus }
   | { type: 'setupResult'; payload: SetupOutcome & { groups: SetupFileGroup[] } };
@@ -200,6 +226,8 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
     case 'openCopilotChat':
     case 'openDomain':
     case 'drawFromDbt':
+    case 'createDomain':
+    case 'importDbml':
     case 'trySample':
     case 'openFolder':
       return true;
@@ -290,8 +318,24 @@ export function promptFor(
   return assistantInfo(assistant).prompt;
 }
 
-/** The message after a successful setup, naming the assistants it was installed for. */
-export function setupReadyMessage(assistants: readonly AiAssistantId[]): string {
+/**
+ * The message after a successful setup, naming the assistants it was installed for.
+ * `logicalOnly` (a folder without dbt_project.yml): the guided setup needs a
+ * dbt project today, so the message points at asking the assistant directly
+ * instead of at `/erd-studio-setup` or the Welcome panel's (hidden) guide card.
+ */
+export function setupReadyMessage(assistants: readonly AiAssistantId[], opts: { logicalOnly?: boolean } = {}): string {
+  if (opts.logicalOnly) {
+    const ask = 'design or change your diagrams';
+    if (assistants.length === 0) {
+      return `AI helper ready for ${joinNames(AI_ASSISTANTS.map((a) => a.name))}. Install one, then ask it to ${ask}.`;
+    }
+    if (assistants.length === 1) {
+      return `AI helper ready for ${assistantInfo(assistants[0]).name}: ask it to ${ask} (restart it if it's already open).`;
+    }
+    return `AI helper ready for ${joinNames(assistantNames(assistants))}. Ask any of them to ${ask} ` +
+      "(restart your assistant if it's already open).";
+  }
   if (assistants.length === 0) {
     return `AI helper ready for ${joinNames(AI_ASSISTANTS.map((a) => a.name))}. ` +
       'Install one, then start the guided setup (the Welcome panel shows what to type).';
@@ -416,6 +460,13 @@ export interface GettingStartedHtmlInput {
   transcript: string;
   /** Offer "Open in Codespaces" on the sample card. Defaults to `SAMPLE_CODESPACES_LIVE`. */
   codespaces?: boolean;
+  /**
+   * The page the host expects before the first `status` arrives (from its
+   * deps), so the headline does not flash and the video's autoplay is decided
+   * at once. Omitted: the page waits for the first status. A `status` always
+   * wins.
+   */
+  mode?: GettingStartedPageMode;
 }
 
 export function buildGettingStartedCsp(cspSource: string, nonce: string): string {
@@ -450,6 +501,7 @@ const ICON_SOUND = '<svg class="gs-icon" viewBox="0 0 16 16" aria-hidden="true">
 const ICON_EXTERNAL = '<svg class="gs-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 2h5v5h-1V3.7L7.4 9.3l-.7-.7L12.3 3H9zM3 4h4v1H4v7h7V9h1v4H3z"/></svg>';
 const ICON_COPY = '<svg class="gs-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 1h8l2 2v9H5zm1 1v9h8V3.4L12.6 2zM2 5h2v1H3v8h7v-1h1v2H2z"/></svg>';
 const ICON_CHAT = '<svg class="gs-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h12v9H6l-3 3v-3H2zm1 1v7h1v1.6L5.6 10H13V3z"/></svg>';
+const ICON_PLAY = '<svg class="gs-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>';
 const ICON_TERMINAL = '<svg class="gs-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2h14v12H1zm1 1v10h12V3zm1.6 2.3.7-.7L7.7 8l-3.4 3.4-.7-.7L6.3 8zM8 10h4v1H8z"/></svg>';
 
 const STYLE = `
@@ -483,16 +535,16 @@ body {
   font-family: var(--vscode-font-family); font-size: clamp(13px, 2.1vw, 20px); line-height: 1.35;
   color: #fff; background: rgba(0, 0, 0, .72);
 }
-.gs-video__sound {
+.gs-video__sound, .gs-video__tour {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   display: inline-flex; align-items: center; gap: 9px;
   padding: 12px 22px; border: 0; border-radius: 999px; cursor: pointer;
   background: var(--vscode-button-background); color: var(--vscode-button-foreground);
   font: inherit; font-size: 15px; font-weight: 600; box-shadow: 0 6px 28px rgba(0, 0, 0, .55);
 }
-.gs-video__sound[hidden] { display: none; }
-.gs-video__sound:hover { background: var(--vscode-button-hoverBackground); }
-.gs-video__sound .gs-icon { width: 16px; height: 16px; }
+.gs-video__sound[hidden], .gs-video__tour[hidden] { display: none; }
+.gs-video__sound:hover, .gs-video__tour:hover { background: var(--vscode-button-hoverBackground); }
+.gs-video__sound .gs-icon, .gs-video__tour .gs-icon { width: 16px; height: 16px; }
 .gs-video__fallback {
   position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
   gap: 12px; padding: 24px; text-align: center; color: #e9ecef;
@@ -504,7 +556,8 @@ body {
 }
 .gs-video__fallback-text { margin: 0; font-size: 15px; font-weight: 600; }
 .gs-video--fallback .gs-video__player,
-.gs-video--fallback .gs-video__sound { display: none; }
+.gs-video--fallback .gs-video__sound,
+.gs-video--fallback .gs-video__tour { display: none; }
 .gs-video--fallback .gs-video__fallback { display: flex; }
 
 .gs-transcript { margin: 10px 2px 0; color: var(--vscode-descriptionForeground); }
@@ -533,7 +586,7 @@ body {
 .gs-step__status--ok { color: var(--vscode-testing-iconPassed, #2f8a48); }
 .gs-step__status--warn { color: var(--vscode-editorWarning-foreground); }
 .gs-step__hint { margin: 10px 0 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.gs-step__hint code, .gs-step__text code, .gs-result code, .gs-noproject code {
+.gs-step__hint code, .gs-step__text code, .gs-result code, .gs-noproject code, .gs-sample__text code {
   font-family: var(--vscode-editor-font-family); font-size: .95em; padding: 1px 5px; border-radius: 3px;
   background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, .15));
 }
@@ -603,12 +656,12 @@ body {
   .gs-launch__actions { justify-content: flex-start; }
 }
 
-.gs-noproject, .gs-sample {
+.gs-noproject, .gs-sample, .gs-usedbt {
   margin: 14px 0 0; padding: 16px 18px; border-radius: 8px;
   background: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent));
 }
-.gs-noproject { margin-top: 26px; }
+.gs-noproject, .gs-usedbt { margin-top: 26px; }
 .gs-sample__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: var(--vscode-foreground); }
 .gs-sample__text { margin: 0 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
 .gs-sample-link { margin: 0 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground); }
@@ -639,7 +692,11 @@ const SCRIPT = `
   var frame = document.querySelector('.gs-video');
   var video = document.querySelector('.gs-video__player');
   var sound = document.querySelector('.gs-video__sound');
+  var tour = document.querySelector('.gs-video__tour');
   var fellBack = false;
+  var started = false;
+  var startWithSound = function () {};
+  var offerTour = function () {};
 
   function post(msg) { vscode.postMessage(msg); }
   function $(sel) { return document.querySelector(sel); }
@@ -652,6 +709,7 @@ const SCRIPT = `
     if (fellBack) { return; }
     fellBack = true;
     frame.classList.add('gs-video--fallback');
+    if (tour) { tour.hidden = true; }
     if (video) { try { video.pause(); } catch (e) { /* ignore */ } }
     post({ type: 'videoError', code: code });
   }
@@ -683,9 +741,25 @@ const SCRIPT = `
       var q = video.play();
       if (q && q.catch) { q.catch(function () { /* the viewer can press play */ }); }
     }
-    video.muted = false;
-    var first = video.play();
-    if (first && first.catch) { first.catch(startMuted); }
+    // The video is a dbt tour: it plays by itself only on the dbt page. Without a
+    // folder, or in a folder without dbt, the poster waits behind "Watch the
+    // one-minute dbt tour" until the viewer asks for it.
+    startWithSound = function () {
+      if (started || fellBack) { return; }
+      started = true;
+      if (tour) { tour.hidden = true; }
+      video.muted = false;
+      var first = video.play();
+      if (first && first.catch) { first.catch(startMuted); }
+    };
+    offerTour = function () {
+      if (!started && !fellBack && tour) { tour.hidden = false; }
+    };
+    video.addEventListener('play', function () {
+      started = true;
+      if (tour) { tour.hidden = true; }
+    });
+    if (tour) { tour.addEventListener('click', startWithSound); }
 
     sound.addEventListener('click', function () {
       video.muted = false;
@@ -772,7 +846,26 @@ const SCRIPT = `
     return out.slice(0, -1).join(', ') + ' and ' + out[out.length - 1];
   }
 
+  // The page's three states. Elements naming modes in data-modes show only in those.
+  function applyMode(mode) {
+    root.setAttribute('data-mode', mode);
+    var els = document.querySelectorAll('[data-modes]');
+    for (var i = 0; i < els.length; i++) {
+      els[i].hidden = els[i].getAttribute('data-modes').split(' ').indexOf(mode) < 0;
+    }
+    if (mode === 'dbt') { startWithSound(); } else if (mode !== 'unknown') { offerTour(); }
+  }
+
+  function showStep(step, show) {
+    var el = document.querySelector('.gs-step[data-step="' + step + '"]');
+    if (el) { el.hidden = !show; }
+    return el;
+  }
+
   function renderStatus(s) {
+    var mode = !s.hasProject ? 'nofolder' : s.logicalOnly ? 'logical' : 'dbt';
+    var logical = mode === 'logical';
+    applyMode(mode);
     root.setAttribute('data-project', s.hasProject ? 'true' : 'false');
     var found = s.assistants.length > 0 ? 'found' : 'none';
     var assistant = setState('assistant', found);
@@ -789,13 +882,19 @@ const SCRIPT = `
     // An assistant but no guide installed yet: hide the launch rows, or "Open
     // Claude Code" would start /erd-studio-setup in a project without the skill.
     setState('start', found === 'none' ? 'none' : s.helper === 'missing' ? 'notready' : 'some');
-    var start = $('.gs-step[data-step="start"]');
-    // A diagram first: "Open your diagrams" leads once there is one, else Draw from dbt does.
+    // The guided setup builds a design from dbt, so it waits for a dbt project.
+    var start = showStep('start', !logical);
+    // A diagram first: "Open your diagrams" leads once there is one, else Draw from
+    // dbt does (New diagram and Import DBML without dbt).
     var open = setState('open', s.domainCount > 0 ? 'some' : 'none');
     if (open) { open.hidden = s.domainCount === 0; }
     setState('draw', s.domainCount > 0 ? 'more' : 'first');
+    showStep('draw', !logical);
+    setState('new', s.domainCount > 0 ? 'more' : 'first');
+    showStep('new', logical);
+    showStep('dbml', logical);
     var summary = $('.gs-summary');
-    var line = s.hasProject && s.summary && s.summary.line ? s.summary.line : '';
+    var line = mode === 'dbt' && s.summary && s.summary.line ? s.summary.line : '';
     if (summary) { summary.textContent = line; summary.hidden = line === ''; }
     numberSteps();
     var btns = document.querySelectorAll('[data-action="setupAiHelper"]');
@@ -855,6 +954,7 @@ const SCRIPT = `
     else if (m.type === 'setupResult') { renderResult(m.payload); }
   });
 
+  applyMode(data.mode);
   post({ type: 'ready' });
 })();
 `;
@@ -883,6 +983,12 @@ function launchRow(id: AiAssistantId): string {
  */
 export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string {
   const { cspSource, nonce, videoUri, posterUri } = input;
+  const mode: GettingStartedPageMode | 'unknown' = input.mode ?? 'unknown';
+  /** `data-modes` for an element shown only on these pages, hidden up front when this is not one of them. */
+  const only = (...modes: Array<GettingStartedPageMode | 'unknown'>): string =>
+    `data-modes="${modes.join(' ')}"${modes.includes(mode) ? '' : ' hidden'}`;
+  /** `hidden` for a step card that the first status may still reveal. */
+  const hiddenUnless = (show: boolean): string => (show ? '' : ' hidden');
   const codespacesButton = (input.codespaces ?? SAMPLE_CODESPACES_LIVE)
     ? `<button class="gs-btn" type="button" data-action="openExternal" data-target="sampleCodespaces">${ICON_EXTERNAL}Open in Codespaces</button>
       <span class="gs-sample__note">Runs in your browser &mdash; nothing to install.</span>`
@@ -893,7 +999,8 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     ? `<video class="gs-video__player" controls playsinline preload="auto"${poster}>
         <source src="${escapeHtml(videoUri)}" type="video/mp4">
       </video>
-      <button class="gs-video__sound" type="button" hidden>${ICON_SOUND}<span>Turn on sound</span></button>`
+      <button class="gs-video__sound" type="button" hidden>${ICON_SOUND}<span>Turn on sound</span></button>
+      <button class="gs-video__tour" type="button" hidden>${ICON_PLAY}<span>Watch the one-minute dbt tour</span></button>`
     : '';
   const fallbackPoster = posterUri ? `<img class="gs-video__poster" src="${escapeHtml(posterUri)}" alt="">` : '';
   const chips = AI_ASSISTANTS.map((a) =>
@@ -913,11 +1020,13 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 <style nonce="${n}">${STYLE}</style>
 </head>
 <body>
-<main class="gs" data-project="unknown">
+<main class="gs" data-project="unknown" data-mode="${mode}">
   <header class="gs-hero">
     <p class="gs-hero__kicker">ERD Studio</p>
     <h1 class="gs-hero__title">Welcome to ERD Studio</h1>
-    <p class="gs-hero__sub">Turn the dbt project you already have into a data model you can see.</p>
+    <p class="gs-hero__sub" ${only('unknown', 'nofolder')}>Design your data model in Git. Let your AI build from it.</p>
+    <p class="gs-hero__sub" ${only('logical')}>Design your data model in your repo; compare it with dbt when you're ready.</p>
+    <p class="gs-hero__sub" ${only('dbt')}>Turn the dbt project you already have into a data model you can see.</p>
   </header>
 
   <section class="gs-video${videoUri ? '' : ' gs-video--fallback'}" aria-label="Getting-started video">
@@ -935,13 +1044,13 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     <p class="gs-transcript__text">${escapeHtml(input.transcript)}</p>
   </details>
 
-  <section class="gs-noproject" aria-label="Open your dbt project">
-    <h2 class="gs-sample__title">Have a dbt project?</h2>
-    <p class="gs-sample__text">Open the folder that contains its <code>dbt_project.yml</code>. This page opens again there with the setup steps.</p>
+  <section class="gs-noproject" aria-label="Open a folder">
+    <h2 class="gs-sample__title">Open the folder your data model lives in</h2>
+    <p class="gs-sample__text">Any folder works: your design is saved as plain YAML and JSON in <code>.erd-studio/</code>, next to your code. If the folder holds a dbt project (<code>dbt_project.yml</code>), ERD Studio also shows what dbt built.</p>
     <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">Open a folder&hellip;</button>
   </section>
   <section class="gs-sample" aria-label="Try the sample project">
-    <h2 class="gs-sample__title">No dbt project yet? Try the sample</h2>
+    <h2 class="gs-sample__title">Using dbt? Try the sample project</h2>
     <p class="gs-sample__text">A small Kimball-style dbt project with fake coffee-shop data &mdash; runs on your computer, no account needed.</p>
     <div class="gs-sample__actions">
       <button class="gs-btn gs-btn--primary" type="button" data-action="trySample">Try the sample project</button>
@@ -952,20 +1061,46 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
   <div class="gs-steps-wrap">
     <p class="gs-summary" role="status" hidden></p>
     <h2 class="gs-section-title">Your diagram</h2>
-    <p class="gs-sample-link"><button class="gs-link" type="button" data-action="trySample">New to this? Try it on the sample project first</button></p>
+    <p class="gs-sample-link" ${only('unknown', 'dbt')}><button class="gs-link" type="button" data-action="trySample">New to this? Try it on the sample project first</button></p>
     <div class="gs-steps">
       <section class="gs-step" data-step="open" data-state="loading" hidden>
         <span class="gs-step__num">1</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Open your diagrams</h3>
-          <p class="gs-step__text"><span class="gs-domain-count"></span> Open one to see your diagram, and switch between Logical and Physical.</p>
+          <p class="gs-step__text"><span class="gs-domain-count"></span> <span ${only('unknown', 'nofolder', 'dbt')}>Open one to see your diagram, and switch between Logical and Physical.</span><span ${only('logical')}>Open one to keep designing.</span></p>
           <div class="gs-step__actions">
             <button class="gs-btn gs-btn--primary" type="button" data-action="openDomain">Open your diagrams</button>
           </div>
         </div>
       </section>
 
-      <section class="gs-step" data-step="draw" data-state="loading">
+      <section class="gs-step" data-step="new" data-state="loading"${hiddenUnless(mode === 'logical')}>
+        <span class="gs-step__num">1</span>
+        <div class="gs-step__body">
+          <h3 class="gs-step__title" data-when="first">Draw your first diagram</h3>
+          <h3 class="gs-step__title" data-when="more" hidden>Draw another diagram</h3>
+          <p class="gs-step__text">Add tables on a blank canvas. Each table is a YAML file in <code>.erd-studio/</code> that you commit and review like code. No dbt needed.</p>
+          <div class="gs-step__actions" data-when="first">
+            <button class="gs-btn gs-btn--primary" type="button" data-action="createDomain">New diagram</button>
+          </div>
+          <div class="gs-step__actions" data-when="more" hidden>
+            <button class="gs-btn" type="button" data-action="createDomain">New diagram</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="gs-step" data-step="dbml" data-state="loading"${hiddenUnless(mode === 'logical')}>
+        <span class="gs-step__num">2</span>
+        <div class="gs-step__body">
+          <h3 class="gs-step__title">Have a DBML file?</h3>
+          <p class="gs-step__text">Import one from dbdiagram.io or any DBML tool. Export back to DBML or Mermaid any time: an open format, no lock-in.</p>
+          <div class="gs-step__actions">
+            <button class="gs-btn" type="button" data-action="importDbml">Import DBML&hellip;</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="gs-step" data-step="draw" data-state="loading"${hiddenUnless(mode !== 'logical')}>
         <span class="gs-step__num">1</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title" data-when="first">Draw your dbt project &mdash; no AI needed</h3>
@@ -983,17 +1118,18 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     </div>
 
     <h2 class="gs-section-title">Enrich with your AI assistant (optional)</h2>
-    <p class="gs-section-intro">Your assistant adds what dbt doesn't record: keys, grain, rationale and your team's modelling style.</p>
+    <p class="gs-section-intro" ${only('unknown', 'nofolder', 'dbt')}>Your assistant adds what dbt doesn't record: keys, grain, rationale and your team's modelling style.</p>
+    <p class="gs-section-intro" ${only('logical')}>Your assistant reads and writes the same files as the canvas: ask it for tables, keys, grain and rationale, and review its edits like any other change.</p>
     <div class="gs-steps">
       <section class="gs-step" data-step="assistant" data-state="loading">
         <span class="gs-step__num">2</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Your AI assistant</h3>
-          <p class="gs-step__text" data-when="found" hidden>The guided setup runs inside your AI coding assistant. Found on this computer:</p>
+          <p class="gs-step__text" data-when="found" hidden><span ${only('unknown', 'nofolder', 'dbt')}>The guided setup runs inside your AI coding assistant.</span><span ${only('logical')}>ERD Studio works with the AI coding assistant you already use.</span> Found on this computer:</p>
           <ul class="gs-chips" data-when="found" hidden>
             ${chips}
           </ul>
-          <p class="gs-step__text" data-when="none" hidden>The guided setup runs inside an AI coding assistant, and none was found on this computer. Install one, then press Re-check. Claude Code is recommended: it's the one the guide is tested with.</p>
+          <p class="gs-step__text" data-when="none" hidden><span ${only('unknown', 'nofolder', 'dbt')}>The guided setup runs inside an AI coding assistant, and none</span><span ${only('logical')}>ERD Studio works with the AI coding assistant you already use, and none</span> was found on this computer. Install one, then press Re-check.<span ${only('unknown', 'nofolder', 'dbt')}> Claude Code is recommended: it's the one the guide is tested with.</span></p>
           <div class="gs-step__actions" data-when="none" hidden>
             <button class="gs-btn gs-btn--primary" type="button" data-action="openExternal" data-target="claudeCodeDocs">${ICON_EXTERNAL}Get Claude Code</button>
             <button class="gs-btn" type="button" data-action="refreshStatus">Re-check</button>
@@ -1007,7 +1143,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         <span class="gs-step__num">3</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Set up my AI helper</h3>
-          <p class="gs-step__text" data-when="missing ready update unmanaged" hidden>Adds the <code>/erd-studio-setup</code> guide and ERD Studio's file-format rules for <strong class="gs-helper-for"></strong><span class="gs-helper-later" hidden> (so it's ready whichever you install)</span>, plus a small checking tool your assistant uses behind the scenes.</p>
+          <p class="gs-step__text" data-when="missing ready update unmanaged" hidden><span ${only('unknown', 'nofolder', 'dbt')}>Adds the <code>/erd-studio-setup</code> guide and ERD Studio's file-format rules for </span><span ${only('logical')}>Adds ERD Studio's file-format rules for </span><strong class="gs-helper-for"></strong><span class="gs-helper-later" hidden> (so it's ready whichever you install)</span><span ${only('unknown', 'nofolder', 'dbt')}>, plus a small checking tool your assistant uses behind the scenes.</span><span ${only('logical')}>, so what your assistant writes opens on the canvas. It also adds the <code>/erd-studio-setup</code> guide and a small checking tool, which need a dbt project today.</span></p>
           <div class="gs-step__actions" data-when="missing ready update unmanaged" hidden>
             <button class="gs-btn gs-btn--primary" type="button" data-action="setupAiHelper"><span class="gs-setup-label">Set up my AI helper</span></button>
           </div>
@@ -1018,7 +1154,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         </div>
       </section>
 
-      <section class="gs-step" data-step="start" data-state="loading">
+      <section class="gs-step" data-step="start" data-state="loading"${hiddenUnless(mode !== 'logical')}>
         <span class="gs-step__num">4</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Start the guided setup</h3>
@@ -1033,6 +1169,15 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         </div>
       </section>
     </div>
+
+    <section class="gs-usedbt" aria-label="Using dbt?" ${only('logical')}>
+      <h2 class="gs-sample__title">Using dbt?</h2>
+      <p class="gs-sample__text">Open its folder to compare your design with what dbt built: ERD Studio reads the dbt project and shows it as a read-only Physical view next to your Logical design.</p>
+      <div class="gs-sample__actions">
+        <button class="gs-btn" type="button" data-action="openFolder">Open a folder&hellip;</button>
+        <button class="gs-link" type="button" data-action="trySample">Or try the sample dbt project</button>
+      </div>
+    </section>
   </div>
 
   <footer class="gs-footer">
@@ -1043,6 +1188,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 <script type="application/json" id="gs-data" nonce="${n}">${inlineJson({
   cues: input.cues,
   assistants: AI_ASSISTANTS.map((a) => ({ id: a.id, name: a.name })),
+  mode,
 })}</script>
 <script nonce="${n}">${SCRIPT}</script>
 </body>

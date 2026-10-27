@@ -39,13 +39,17 @@ export function isLegendToggleShortcut(e: Pick<KeyboardEvent, 'shiftKey' | 'key'
  * Uses `e.code` (physical key) rather than `e.key` because macOS translates
  * Option+1 / Option+2 into '¡' / '™' at the `key` level, which made the
  * shortcut dead on Mac. `code` stays 'Digit1' / 'Digit2' on every platform.
+ *
+ * `logicalOnly` (no dbt project, so no Physical tab): Alt+2 is not a
+ * shortcut at all — it returns null and the key is left alone.
  */
 export function altStageShortcut(
   e: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'code'>,
+  logicalOnly = false,
 ): Stage | null {
   if (!e.altKey || e.ctrlKey || e.metaKey) return null;
   if (e.code === 'Digit1' || e.code === 'Numpad1') return 'logical';
-  if (e.code === 'Digit2' || e.code === 'Numpad2') return 'physical';
+  if (e.code === 'Digit2' || e.code === 'Numpad2') return logicalOnly ? null : 'physical';
   return null;
 }
 

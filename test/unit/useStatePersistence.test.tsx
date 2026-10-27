@@ -109,6 +109,30 @@ describe('useStatePersistence restore', () => {
     expect(mockVsCode.postMessage).not.toHaveBeenCalled();
   });
 
+  it('does not restore Diff or ask for a report without a dbt project (logicalOnly)', () => {
+    mockVsCode.getState.mockReturnValue({
+      selectedNode: null,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      detailPanelOpen: false,
+      expandedNodes: [],
+      allExpanded: false,
+      discrepancyVisible: true,
+      discrepancyCompareStage: 'physical',
+      syncMode: true,
+      syncSelections: { 'model:a': 'logical' },
+    } satisfies PersistedState);
+    useEditorStore.setState({ domain: subjectArea, logicalOnly: true });
+
+    renderHook(() => useStatePersistence());
+
+    const s = useEditorStore.getState();
+    expect(s.discrepancyVisible).toBe(false);
+    expect(s.discrepancyCompareStage).toBeNull();
+    expect(s.syncMode).toBe(false);
+    expect(s.syncSelections).toEqual({});
+    expect(mockVsCode.postMessage).not.toHaveBeenCalled();
+  });
+
   it('tolerates legacy state blobs without the new fields', () => {
     mockVsCode.getState.mockReturnValue({
       selectedNode: null,

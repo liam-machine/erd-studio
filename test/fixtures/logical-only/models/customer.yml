@@ -1,0 +1,17 @@
+# Decoy: looks like a dbt schema file, but this folder has no dbt_project.yml,
+# so ERD Studio must never read it (logical-only mode walks no models/).
+version: 2
+
+models:
+  - name: customer
+    description: Decoy dbt model that must not appear in a Physical stage.
+    columns:
+      - name: customer_id
+        data_tests:
+          - unique
+          - not_null
+      - name: decoy_only_column
+        data_tests:
+          - relationships:
+              to: ref('orders')
+              field: customer_id

@@ -90,6 +90,12 @@ describe('altStageShortcut', () => {
     expect(altStageShortcut(e2)).toBe('physical');
   });
 
+  it('logical-only (no dbt project): Alt+2 is not a shortcut, Alt+1 still is', () => {
+    expect(altStageShortcut({ ...base, code: 'Digit2' }, true)).toBeNull();
+    expect(altStageShortcut({ ...base, code: 'Numpad2' }, true)).toBeNull();
+    expect(altStageShortcut({ ...base, code: 'Digit1' }, true)).toBe('logical');
+  });
+
   it('accepts numpad digits', () => {
     expect(altStageShortcut({ ...base, code: 'Numpad1' })).toBe('logical');
     expect(altStageShortcut({ ...base, code: 'Numpad2' })).toBe('physical');

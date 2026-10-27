@@ -9,6 +9,8 @@
  *
  * Stage tabs sit above the controls in a stacked two-row layout, all within
  * a single top-center Panel to avoid overlap when the sidebar narrows the editor.
+ * Without a dbt project (`logicalOnly`) there is no Physical stage: the tabs,
+ * Diff (and with it Sync) and the manifest refresh are not rendered at all.
  *
  * Uses React Flow's zoom/pan APIs and the editor store for domain data.
  */
@@ -90,6 +92,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
   const registerAutoLayout = useEditorStore((s) => s.registerAutoLayout);
   const setToastMessage = useEditorStore((s) => s.setToastMessage);
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -322,7 +325,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
   /** Get comparison options for the active stage. */
   const discrepancyOptions = useMemo((): { stage: Stage; label: string }[] => {
-    if (!domain) return [];
+    // No dbt project, nothing to compare against: no Diff control at all.
+    if (!domain || logicalOnly) return [];
     switch (domain.stage) {
       case 'physical':
         return [{ stage: 'logical', label: 'Compare to Logical' }];
@@ -331,7 +335,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       default:
         return [];
     }
-  }, [domain]);
+  }, [domain, logicalOnly]);
 
   const handleDiscrepancySelect = useCallback(
     (compareAgainst: Stage) => {
@@ -568,7 +572,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const isReadOnly = domain.readOnly;
   const exportTitle = domain.stage === 'physical'
     ? 'Export the logical design as Mermaid or DBML (the physical stage is not exported)'
-    : 'Export as Mermaid or DBML';
+    : 'Export as DBML or Mermaid — open formats, no lock-in';
 
   // Use layerConfig for dynamic abbreviation and color, with fallbacks
   const layerAbbrev = domain.layerConfig?.abbreviation
@@ -807,16 +811,18 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
             )}
           </div>
 
-          {/* Refresh Manifest */}
-          <button
-            className="toolbar__button toolbar__button--tooltip"
-            onClick={handleRefreshManifest}
-            disabled={isRefreshing}
-            data-tooltip="Refresh"
-            aria-label="Refresh manifest data"
-          >
-            {isRefreshing ? <span className="toolbar__spinner" /> : '↻'}
-          </button>
+          {/* Refresh Manifest — dbt data only, so not without a dbt project */}
+          {!logicalOnly && (
+            <button
+              className="toolbar__button toolbar__button--tooltip"
+              onClick={handleRefreshManifest}
+              disabled={isRefreshing}
+              data-tooltip="Refresh"
+              aria-label="Refresh manifest data"
+            >
+              {isRefreshing ? <span className="toolbar__spinner" /> : '↻'}
+            </button>
+          )}
         </div>
 
         {/* Search (F402) */}
@@ -973,8 +979,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         )}
         </div>
 
-        {/* Row 2: Stage tabs (attached below toolbar) */}
-        <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />
+        {/* Row 2: Stage tabs (attached below toolbar) — a lone Logical tab says nothing */}
+        {!logicalOnly && <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />}
       </Panel>
 
       {/*

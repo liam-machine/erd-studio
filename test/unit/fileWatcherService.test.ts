@@ -49,6 +49,18 @@ describe('FileWatcherService', () => {
     it('creates five file system watchers', () => {
       expect(_mockFileWatchers).toHaveLength(5);
     });
+
+    it('without dbt (logical-only) creates only the semantic-dir watchers', () => {
+      _clearMockFileWatchers();
+      const logicalOnly = new FileWatcherService('/test/workspace', '.erd-studio', undefined, undefined, { dbt: false });
+      const patterns = _mockFileWatchers.map(w => (w._pattern as vscode.RelativePattern).pattern);
+      expect(patterns).toEqual([
+        '.erd-studio/**/*.json',
+        '.erd-studio/{logical-models,tables}/**/*.yml',
+      ]);
+      expect(patterns.some(p => p.includes('manifest') || p.includes('dbt_project') || p.startsWith('{models'))).toBe(false);
+      logicalOnly.dispose();
+    });
   });
 
   describe('manifest watcher', () => {

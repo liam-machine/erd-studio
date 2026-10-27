@@ -51,6 +51,12 @@ export interface CatalogServiceOptions {
    * these for usage telemetry.
    */
   onReadFailure?: () => void;
+  /**
+   * False when the open root has no `dbt_project.yml` (logical-only mode):
+   * every load answers "no catalog" without touching the disk, and
+   * `onReadFailure` is never told. Defaults to true.
+   */
+  enabled?: boolean;
 }
 
 export class CatalogService {
@@ -63,6 +69,7 @@ export class CatalogService {
   private readonly dbtConfig: DbtProjectConfig;
   private readonly maxBytes: number;
   private readonly onReadFailure?: () => void;
+  private readonly enabled: boolean;
 
   /** Zero-arg construction must work, mirroring `new ManifestService()`. */
   constructor(options: CatalogServiceOptions = {}) {
@@ -75,6 +82,7 @@ export class CatalogService {
     };
     this.maxBytes = options.maxBytes ?? DEFAULT_CATALOG_MAX_BYTES;
     this.onReadFailure = options.onReadFailure;
+    this.enabled = options.enabled !== false;
   }
 
   /** Absolute path of the catalog this service reads for `projectPath`. */
@@ -90,6 +98,10 @@ export class CatalogService {
   async loadCatalog(projectPath: string): Promise<CatalogData | undefined> {
     if (this.loaded) {
       return this.cache;
+    }
+    // Logical-only (no dbt_project.yml): there is no catalog to read.
+    if (!this.enabled) {
+      return undefined;
     }
     if (this.loadPromise) {
       return this.loadPromise;

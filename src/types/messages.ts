@@ -120,6 +120,8 @@ export interface DomainLoadedMessage {
    * physical payload — the physical stage has its own notice.
    */
   manifestMissing?: boolean;
+  /** The open project has no dbt_project.yml: the webview hides the Physical tab, Diff and refresh (absent = Physical available). */
+  logicalOnly?: true;
 }
 
 /**
@@ -180,6 +182,8 @@ export interface StageDataMessage {
   requestId?: number;
   /** Same contract as `DomainLoadedMessage.manifestMissing`. */
   manifestMissing?: boolean;
+  /** Same contract as `DomainLoadedMessage.logicalOnly`. */
+  logicalOnly?: true;
 }
 
 /**

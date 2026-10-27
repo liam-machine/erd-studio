@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**ERD Studio** (package `erd-studio`, publisher `liamwynne`) is a VS Code extension that draws entity-relationship diagrams for dbt projects. A **logical** stage is the editable design; a **physical** stage is derived at runtime from the dbt project and is read-only. The repo ships three things: the extension, a read-only `erd-studio` CLI (`dist/cli.js`), and two npm packages (`@erd-studio/core`, `@erd-studio/renderer`) consumed by the paid **ERD Studio for Confluence** app.
+**ERD Studio** (package `erd-studio`, publisher `liamwynne`) is a VS Code extension for logical data modelling in Git: entity-relationship diagrams saved as plain YAML/JSON that the user's own AI assistant can read and write, with DBML import and export. A **logical** stage is the editable design and works in any folder; when the open folder is a dbt project, a **physical** stage is derived at runtime from it and is read-only (without `dbt_project.yml` the editor is logical-only and the Physical tab is hidden). The repo ships three things: the extension, a read-only `erd-studio` CLI (`dist/cli.js`), and two npm packages (`@erd-studio/core`, `@erd-studio/renderer`) consumed by the paid **ERD Studio for Confluence** app.
 
 ## Read before touching
 
@@ -17,6 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Send Feedback (dialog, AI analysis tiers, consent, redaction, My Reports) | `docs/dev/feedback.md` |
 | Usage telemetry (extension side and the Worker) | `telemetry/README.md` |
 | Getting Started panel, CLI launcher, the `erd-studio` CLI | `docs/dev/onboarding-and-cli.md` |
+| The README or a user guide (`docs/dbt.md`, `docs/ai-assistants.md`, `docs/project-folder.md`), Marketplace copy, walkthrough or welcome-view text | the wording rules in `docs/dev/onboarding-and-cli.md` |
 | Rich DBML export, the `.dbdiagram` layout file, Export All Diagrams, Import DBML (parser pin, property names, `meta.dbml`) | `docs/dev/dbml.md` |
 | `SCHEMA_CONTENT`, harness generators, the `/erd-studio-setup` skill | `src/harness/CLAUDE.md` |
 | Releases, package publishing, manual publish | `docs/dev/releasing.md` |

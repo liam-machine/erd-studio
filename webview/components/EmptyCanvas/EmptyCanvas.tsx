@@ -10,6 +10,9 @@
  * may not be installed yet, and each assistant invokes it differently — the
  * panel knows both.
  *
+ * Without a dbt project (`logicalOnly`) there is nothing to pull in: the card
+ * drops "Add tables from dbt" and makes "New table" the primary action.
+ *
  * Only the card takes pointer events; the overlay around it lets drags and
  * wheel zooms through to the canvas. It disappears as soon as the domain has a
  * model, on the physical stage and for a read-only domain.
@@ -25,6 +28,7 @@ export const EmptyCanvas: React.FC = () => {
   const domain = useEditorStore((s) => s.domain);
   const newModelDialogOpen = useEditorStore((s) => s.newModelDialogOpen);
   const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
   const send = useSend();
 
   if (!domain || domain.stage !== 'logical' || domain.readOnly || domain.models.length > 0) {
@@ -37,18 +41,24 @@ export const EmptyCanvas: React.FC = () => {
     <div className="empty-canvas">
       <section className="empty-canvas__card" aria-labelledby="empty-canvas-title">
         <h2 id="empty-canvas-title" className="empty-canvas__title">This diagram is empty</h2>
-        <p className="empty-canvas__body">Start from your dbt project, or add a table by hand.</p>
+        <p className="empty-canvas__body">
+          {logicalOnly
+            ? 'Add your first table. Each one is a YAML file you can commit.'
+            : 'Start from your dbt project, or add a table by hand.'}
+        </p>
         <div className="empty-canvas__actions">
+          {!logicalOnly && (
+            <button
+              type="button"
+              className="empty-canvas__button empty-canvas__button--primary"
+              onClick={() => send({ type: 'addModelsFromDbt' })}
+            >
+              Add tables from dbt
+            </button>
+          )}
           <button
             type="button"
-            className="empty-canvas__button empty-canvas__button--primary"
-            onClick={() => send({ type: 'addModelsFromDbt' })}
-          >
-            Add tables from dbt
-          </button>
-          <button
-            type="button"
-            className="empty-canvas__button"
+            className={`empty-canvas__button${logicalOnly ? ' empty-canvas__button--primary' : ''}`}
             onClick={() => setNewModelDialogOpen(true)}
           >
             New table

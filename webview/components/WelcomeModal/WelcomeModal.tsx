@@ -5,6 +5,11 @@
  * globalState so it only ever shows once across all panels and sessions.
  * The extension sends `welcomeDismissed` on the `domainLoaded` message;
  * App.tsx opens this modal when that flag is false.
+ *
+ * Not without a dbt project (`logicalOnly`): the modal is about the two
+ * stages, and there is no Physical one to switch to. It renders nothing and
+ * is never marked dismissed, so it still appears the first time the user
+ * opens a dbt project.
  */
 
 import { useCallback } from 'react';
@@ -22,6 +27,7 @@ export function WelcomeModal() {
   const send = useSend();
   const welcomeModalOpen = useEditorStore((s) => s.welcomeModalOpen);
   const setWelcomeModalOpen = useEditorStore((s) => s.setWelcomeModalOpen);
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
 
   // Handle "Get Started" button — tell extension to persist dismissal in globalState
   const handleGetStarted = useCallback(() => {
@@ -35,7 +41,7 @@ export function WelcomeModal() {
     send({ type: 'openGettingStarted' });
   }, [send]);
 
-  if (!welcomeModalOpen) {
+  if (!welcomeModalOpen || logicalOnly) {
     return null;
   }
 

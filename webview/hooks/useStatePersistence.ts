@@ -215,7 +215,11 @@ export function useStatePersistence(): {
     // extension host, which re-runs the comparison and posts `discrepancyReport`.
     // Order matters: setDiscrepancyVisible(false) clears sync state, so the
     // overlay must be enabled before sync mode / selections are restored.
-    if (restored.discrepancyVisible && restored.discrepancyCompareStage) {
+    // Not without a dbt project: there is nothing to compare against.
+    if (
+      restored.discrepancyVisible && restored.discrepancyCompareStage &&
+      !useEditorStore.getState().logicalOnly
+    ) {
       const compareAgainst = restored.discrepancyCompareStage;
       setDiscrepancyCompareStage(compareAgainst);
       setDiscrepancyVisible(true);

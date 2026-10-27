@@ -15,8 +15,12 @@ const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'
 /** Keys whose values are ids, conditions or paths, not words. */
 const NOT_WORDS = new Set(['command', 'id', 'when', 'url', 'fileMatch', 'view', 'viewType', 'filenamePattern', 'icon', 'image', 'markdown', 'svg', 'group', 'enablement', 'completionEvents']);
 
-/** The literal dbt `domain:*` tag the command strips is its name, not a diagram. */
-const ALLOWED = [/\bLegacy Domain Tags\b/g, /\bdbt models?\b/gi, /\bdbt Model\b/g];
+/**
+ * The literal dbt `domain:*` tag the command strips is its name, not a diagram.
+ * "Data model" is the whole design (the logical-first copy: "Design your data
+ * model in Git"), never one table.
+ */
+const ALLOWED = [/\bLegacy Domain Tags\b/g, /\bdbt models?\b/gi, /\bdbt Model\b/g, /\bdata models?\b/gi];
 
 function userText(node: unknown, at: string, out: Array<[string, string]>): void {
   if (typeof node === 'string') { out.push([at, node]); return; }
