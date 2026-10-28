@@ -87,3 +87,36 @@ describe('one DBML parser copy per bundle', () => {
   }, 60_000);
 });
 
+/**
+ * The webview never bundles the DBML parser (§4.1 bundle rule 4): it imports
+ * neither `@erd-studio/core/dbml` nor anything that does, so `dist/webview.js`
+ * holds no `@dbml/parse` code. The import rule is checked in
+ * `packagesBoundary.test.ts`; this catches a transitive value import (through
+ * `src/types` or a host module) that the import rule cannot see. Bundled in
+ * memory as `esbuild.js` builds it (browser IIFE, CSS beside it), with the
+ * ELK worker define stubbed.
+ */
+describe('webview bundle', () => {
+  it('holds no @dbml/parse code', async () => {
+    const result = await build({
+      entryPoints: [path.join(ROOT, 'webview/index.tsx')],
+      bundle: true,
+      write: false,
+      outdir: path.join(ROOT, 'dist', '.webview-bundle-test'),
+      format: 'iife',
+      platform: 'browser',
+      target: ['es2020', 'chrome114'],
+      jsx: 'automatic',
+      loader: { '.css': 'css', '.svg': 'dataurl', '.png': 'dataurl' },
+      define: { 'process.env.NODE_ENV': '"production"', __ELK_WORKER_CODE__: '""' },
+      metafile: true,
+      logLevel: 'silent',
+    });
+    const inputs = Object.keys(result.metafile!.inputs);
+    expect(inputs.some((i) => i.includes('webview/index.tsx'))).toBe(true);
+    expect(inputs.filter((i) => /@dbml|dbml-parse/.test(i))).toEqual([]);
+    const js = result.outputFiles!.filter((f) => f.path.endsWith('.js')).map((f) => f.text).join('\n');
+    expect(js.length).toBeGreaterThan(0);
+    expect(js.split('UNEXPECTED_ELEMENT_DECLARATION').length - 1).toBe(0);
+  }, 60_000);
+});
