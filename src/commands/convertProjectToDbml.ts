@@ -8,6 +8,10 @@
  * then deletes, D23), which puts back whatever landed when VS Code refuses
  * part of it. Edit > Undo straight after (while VS Code stays open) puts
  * every file back; a replaced file's undo is saved too, so the disk follows.
+ * VS Code undoes a WorkspaceEdit only from an editor showing one of its
+ * files (from the Explorer, or with no editor, Undo does nothing), so
+ * Convert always leaves one in front: the converted canvases it reopens,
+ * else the first converted diagram, else the first new `.dbml` file.
  *
  * It copies `migrateNaming.ts` step by step, and like it never shows the raw
  * exception (#219): a failure the user can act on offers the next step; any
@@ -57,7 +61,8 @@ export const CONVERT_TEAMMATES_LINE =
 export const CONVERT_GIT_LINE =
   'Git will show the converted files as new files, because their content changes completely, so their history does not follow them. Commit your work first.';
 export const CONVERT_RESUME_LINE = 'An earlier conversion stopped part way; this finishes it.';
-export const CONVERT_UNDO_LINE = 'Undo: Edit > Undo while VS Code stays open, or restore from source control.';
+export const CONVERT_UNDO_LINE =
+  'Undo: Edit > Undo straight after, with the diagram Convert opens (or any converted file) in front, while VS Code stays open; or restore from source control.';
 
 export interface ConvertProjectDeps {
   workspaceRoot: string;
@@ -329,8 +334,11 @@ async function runConversion(
       try { if (fs.readdirSync(folder).length === 0) fs.rmdirSync(folder); } catch { /* already gone, or not empty */ }
     }
 
-    // 11. Canvases of converted diagrams: closed, and their .dbml reopened in the canvas.
-    await reopenConvertedCanvases(canvasTabs);
+    // 11. Canvases of converted diagrams: closed, and their .dbml reopened in the
+    // canvas; with none open, the first converted diagram (or new file) is
+    // opened, so Edit > Undo has an editor of the edit to undo from.
+    const reopened = await reopenConvertedCanvases(canvasTabs);
+    const undoFrom = reopened ? 'diagram' : await openUndoTarget(plan, abs);
 
     // 12. Refresh.
     deps.tableLibraryService.invalidateCache();
@@ -349,7 +357,7 @@ async function runConversion(
       const s = plan.summary;
       void vscode.window.showInformationMessage(
         `Converted to DBML: ${s.tables} table${s.tables === 1 ? '' : 's'}, ${s.diagrams} diagram${s.diagrams === 1 ? '' : 's'}. ` +
-          'Edit > Undo, straight away, puts every file back.',
+          convertedUndoSentence(undoFrom),
       );
     }
     return 'converted';
@@ -381,8 +389,46 @@ function convertedCanvasTabs(plan: DbmlConversionPlan, abs: (rel: string) => str
   return out;
 }
 
-/** Close each converted diagram's tab that is still open, and open its `.dbml` with the canvas instead. */
-async function reopenConvertedCanvases(tabs: ReadonlyArray<{ tab: vscode.Tab; target: string }>): Promise<void> {
+/** The toast's undo sentence: undo works from an editor of the edit's files, so it names the one Convert left in front. */
+export function convertedUndoSentence(undoFrom: 'diagram' | 'file' | undefined): string {
+  return undoFrom
+    ? `Edit > Undo, straight away, with this ${undoFrom} in front, puts every file back.`
+    : 'Edit > Undo, straight away, with a converted file open in front, puts every file back.';
+}
+
+/**
+ * With no converted canvas reopened: open the first diagram the edit
+ * created (in the canvas), else the first `.dbml` file it created (as text),
+ * so the editor in front is one Edit > Undo can undo the conversion from.
+ * Which it opened, or undefined when it opened nothing. Never throws.
+ */
+async function openUndoTarget(plan: DbmlConversionPlan, abs: (rel: string) => string): Promise<'diagram' | 'file' | undefined> {
+  const created = new Set(plan.creates.map((c) => c.path));
+  const diagram = plan.deletes
+    .filter((d) => d.endsWith('.json'))
+    .map((d) => `${d.slice(0, -'.json'.length)}.dbml`)
+    .find((d) => created.has(d));
+  try {
+    if (diagram) {
+      await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(abs(diagram)), CANVAS_VIEW_TYPE);
+      return 'diagram';
+    }
+    const file = plan.creates.find((c) => c.path.endsWith('.dbml'));
+    if (file) {
+      await vscode.window.showTextDocument(vscode.Uri.file(abs(file.path)));
+      return 'file';
+    }
+  } catch (err) {
+    console.warn('[convertProjectToDbml] could not open a converted file:', err);
+  }
+  return undefined;
+}
+
+/**
+ * Close each converted diagram's tab that is still open, and open its `.dbml`
+ * with the canvas instead. True when it opened at least one.
+ */
+async function reopenConvertedCanvases(tabs: ReadonlyArray<{ tab: vscode.Tab; target: string }>): Promise<boolean> {
   const reopen: string[] = [];
   for (const { tab, target } of tabs) {
     const stillOpen = (vscode.window.tabGroups?.all ?? []).some((g) => g.tabs.includes(tab));
@@ -393,11 +439,14 @@ async function reopenConvertedCanvases(tabs: ReadonlyArray<{ tab: vscode.Tab; ta
     }
     if (!reopen.includes(target)) reopen.push(target);
   }
+  let opened = false;
   for (const target of reopen) {
     try {
       await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(target), CANVAS_VIEW_TYPE);
+      opened = true;
     } catch (err) {
       console.warn(`[convertProjectToDbml] could not reopen ${target}:`, err);
     }
   }
+  return opened;
 }

@@ -19,6 +19,7 @@ import {
   CONVERT_TEAMMATES_LINE,
   CONVERT_TO_DBML_BUTTON,
   CONVERT_UNDO_LINE,
+  convertedUndoSentence,
   convertProjectToDbml,
   planProjectDbmlConversion,
   type ConvertProjectDeps,
@@ -114,7 +115,7 @@ describe('convertProjectToDbml', () => {
     expect(fs.existsSync(path.join(erd, 'logical-models'))).toBe(false);
     expect(d.onConverted).toHaveBeenCalledTimes(1);
     expect(feature).toHaveBeenCalledWith('convertToDbml');
-    expect(info.mock.calls.at(-1)![0]).toMatch(/^Converted to DBML: 3 tables, 1 diagram\. Edit > Undo, straight away, puts every file back\.$/);
+    expect(info.mock.calls.at(-1)![0]).toBe('Converted to DBML: 3 tables, 1 diagram. Edit > Undo, straight away, with this diagram in front, puts every file back.');
 
     info.mockClear();
     expect(await convertProjectToDbml(deps())).toBe('nothing');
@@ -268,6 +269,37 @@ describe('convertProjectToDbml', () => {
     const openWith = exec.mock.calls.find((c) => c[0] === 'vscode.openWith')!;
     expect((openWith[1] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'vault.dbml'));
     expect(openWith[2]).toBe('erdStudio.domainEditor');
+  });
+
+  it('with no canvas open, opens the converted diagram in the canvas, so Edit > Undo has an editor of the edit to undo from', async () => {
+    useFixture('composite-and-self');
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined as never);
+    const info = answerConvert();
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    const opens = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
+    expect(opens).toHaveLength(1);
+    expect((opens[0][1] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'vault.dbml'));
+    expect(opens[0][2]).toBe('erdStudio.domainEditor');
+    expect(info.mock.calls.at(-1)![0]).toContain('Edit > Undo, straight away, with this diagram in front, puts every file back.');
+  });
+
+  it('a project with no JSON diagram: opens its first new .dbml file as text instead, and the toast says "file"', async () => {
+    useFixture('composite-and-self');
+    fs.rmSync(path.join(erd, 'gold', 'vault.json'));
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined as never);
+    const show = vi.spyOn(vscode.window, 'showTextDocument').mockResolvedValue(undefined as never);
+    const info = answerConvert();
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    expect(exec.mock.calls.filter((c) => c[0] === 'vscode.openWith')).toEqual([]);
+    expect(show).toHaveBeenCalledTimes(1);
+    expect((show.mock.calls[0][0] as vscode.Uri).fsPath).toMatch(/\.dbml$/);
+    expect(fs.existsSync((show.mock.calls[0][0] as vscode.Uri).fsPath)).toBe(true);
+    expect(info.mock.calls.at(-1)![0]).toContain('with this file in front');
+  });
+
+  it('when nothing could be opened, the toast still says undo needs a converted file in front', async () => {
+    expect(convertedUndoSentence(undefined)).toBe('Edit > Undo, straight away, with a converted file open in front, puts every file back.');
+    expect(CONVERT_UNDO_LINE).toContain('with the diagram Convert opens (or any converted file) in front');
   });
 
   it('reopens the .dbml even when VS Code closed the deleted diagram\'s tab itself', async () => {
