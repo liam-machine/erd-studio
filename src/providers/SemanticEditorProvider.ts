@@ -186,6 +186,8 @@ import {
 import type { RelationshipWriteInput, RelationshipWriteOp } from '../services/libraryRelationships';
 import { auditRelationshipWrite, surveyLibrary } from '../services/relationshipHealth';
 import { namingMigrationIsEmpty } from '../services/namingMigration';
+import { dbmlConversionIsEmpty } from '../services/dbmlConversion';
+import type { DbmlConversionPlan } from '../services/dbmlConversion';
 import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
@@ -493,6 +495,20 @@ export const RELATIONSHIP_BACKWARDS_DECLINED_KEY = 'erdStudio.relationshipBackwa
  */
 export const NAMING_MIGRATION_DECLINED_KEY = 'erdStudio.namingMigrationDeclined';
 
+/**
+ * workspaceState key: "Don't Ask Again" on the offer to convert the project
+ * to DBML (native DBML storage, §6.4). Per workspace.
+ */
+export const DBML_CONVERSION_DECLINED_KEY = 'erdStudio.dbmlConversionDeclined';
+
+/** What the canvas needs to offer Convert Project to DBML (§6.4), wired by the extension. */
+interface DbmlConversionHooks {
+  /** The conversion's plan for the project as it is on disk. */
+  plan: () => Promise<DbmlConversionPlan>;
+  /** Run the command, with its own modal; true when it converted. */
+  run: () => Promise<boolean>;
+}
+
 /** What the canvas needs to offer the naming migration (#182), wired by the extension. */
 interface NamingMigrationHooks {
   /** The migration's plan for the project as it is on disk. */
@@ -588,6 +604,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private relationshipMoveOffered = false;
   /** The naming migration's offer (#182): at most once per session, before the relationship offers. */
   private namingMigrationOffered = false;
+  private dbmlConversionOffered = false;
+  /** The DBML offer was eligible this session: the naming offer is then never made (§6.4). */
+  private dbmlConversionEligible = false;
+  private dbmlConversion: DbmlConversionHooks | undefined;
   private namingMigration: NamingMigrationHooks | undefined;
   private relationshipBackwardsOffered = false;
   /** Each document's logical relationships flagged `keysContradict` when its canvas last loaded (#163). */
@@ -2106,11 +2126,59 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * diagram's relationships drawn backwards (#163).
    */
   private async offerRelationshipPrompts(document: vscode.TextDocument, webview: vscode.Webview, panelKey: string): Promise<void> {
-    // At most one prompt per canvas open (#182): the naming migration's, when
-    // it is made, leaves #126's and #163's offers for a later open.
+    // At most one prompt per canvas open (#182): the DBML conversion's (§6.4)
+    // first, then the naming migration's; either, when it is made, leaves
+    // #126's and #163's offers for a later open.
+    if (await this.maybeOfferDbmlConversion()) return;
     if (await this.maybeOfferNamingMigration()) return;
     if (await this.maybeOfferRelationshipMove()) return;
     await this.maybeOfferTurnRound(document, webview, panelKey);
+  }
+
+  /** Wire Convert Project to DBML's offer (§6.4); the extension calls it once. */
+  setDbmlConversion(plan: DbmlConversionHooks['plan'], run: DbmlConversionHooks['run']): void {
+    this.dbmlConversion = { plan, run };
+  }
+
+  /**
+   * Offer, once a session, to convert a YAML or mixed project to DBML
+   * (§6.4). Nothing is written without the user's choice: Convert… runs the
+   * command, whose modal shows the whole plan. Not made when the conversion
+   * would be refused (the command says why when it is run), when there is
+   * nothing to convert, or after "Don't Ask Again". True when it was shown.
+   */
+  private async maybeOfferDbmlConversion(): Promise<boolean> {
+    const hooks = this.dbmlConversion;
+    if (!hooks || this.dbmlConversionOffered) return false;
+    this.dbmlConversionOffered = true;
+    try {
+      if (this.context.workspaceState?.get<boolean>(DBML_CONVERSION_DECLINED_KEY)) return false;
+      const storage = this.tableLibraryService.projectStorage();
+      if (storage === 'dbml') return false;
+      const plan = await hooks.plan();
+      if (plan.refusals.length > 0 || (dbmlConversionIsEmpty(plan) && plan.v4SubjectAreas.length === 0)) return false;
+      this.dbmlConversionEligible = true;
+      telemetry.feature('convertToDbmlOffered');
+      const files = plan.deletes.length;
+      const message = storage === 'mixed'
+        ? `This project is stored as DBML, but ${files} file${files === 1 ? ' is' : 's are'} YAML or JSON (probably written by an AI helper set up before 2.0). ` +
+          "Convert them to DBML? (You'll see the full list first.)"
+        : 'This project is stored as YAML and JSON. ERD Studio 2.0 stores projects as DBML, an open format. Everyone who opens it will need ' +
+          "ERD Studio 2.0 or later afterwards. Convert now? (You'll see the full list of changes first.)";
+      const choice = await vscode.window.showInformationMessage(message, 'Convert…', 'Not Now', "Don't Ask Again");
+      if (choice === 'Convert…') {
+        await hooks.run();
+      } else if (choice === "Don't Ask Again") {
+        telemetry.feature('convertToDbmlDeclined');
+        await this.context.workspaceState?.update(DBML_CONVERSION_DECLINED_KEY, true);
+      } else {
+        telemetry.feature('convertToDbmlNotNow');
+      }
+      return true;
+    } catch (err) {
+      console.warn('[SemanticEditorProvider] DBML conversion offer skipped:', err);
+      return false;
+    }
   }
 
   /** Wire the naming migration's offer (#182); the extension calls it once. */
@@ -2146,6 +2214,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async maybeOfferNamingMigration(): Promise<boolean> {
     const hooks = this.namingMigration;
     if (!hooks || this.namingMigrationOffered) return false;
+    // Never in a session where the DBML conversion was offered (§6.4).
+    if (this.dbmlConversionEligible) return false;
     this.namingMigrationOffered = true;
     try {
       if (this.context.workspaceState?.get<boolean>(NAMING_MIGRATION_DECLINED_KEY)) return false;

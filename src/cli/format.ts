@@ -142,6 +142,13 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
         .filter(Boolean).join(' and ')
       + (migration.refusals.length > 0 ? ` (not yet: ${migration.refusals.join(' ')})` : ''));
   }
+  const conversion = r.erd.dbmlConversion;
+  if (conversion && (conversion.tables + conversion.diagrams > 0 || conversion.refusals.length > 0 || conversion.v4SubjectAreas.length > 0)) {
+    lines.push(`${p.yellow('!')} "Convert Project to DBML" in VS Code would write `
+      + `${plural(conversion.tables, 'table')}, ${plural(conversion.diagrams, 'diagram')} and ${plural(conversion.relationships, 'relationship')} as DBML`
+      + (conversion.v4SubjectAreas.length > 0 ? ` (after the v4 → v5 step for ${conversion.v4SubjectAreas.join(', ')})` : '')
+      + (conversion.refusals.length > 0 ? ` (not yet: ${conversion.refusals.join(' ')})` : ''));
+  }
   for (const c of r.erd.namingConflicts ?? []) {
     lines.push(`${p.red('✗')} ${c.name} is in both ${c.kept} and ${c.ignored} — ${c.kept} is used; keep one`);
   }

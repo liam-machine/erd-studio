@@ -1,3 +1,6 @@
+// Kept from logical-models/gold/dim_customer.yml by Convert Project to DBML:
+// # ERD Studio 1.6.6 / 1.6.7 stored a line drawn from a dimension to a fact on
+// # the "one" side, as one-to-many. Still read: drawn as fct_order → dim_customer.
 Table dim_customer [
   schema: 'gold',
   role: 'dimension',

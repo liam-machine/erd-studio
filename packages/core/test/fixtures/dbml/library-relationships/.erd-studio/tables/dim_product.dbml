@@ -1,3 +1,7 @@
+// Kept from logical-models/dim_product.yml by Convert Project to DBML:
+// # Top level of the library (a flat file next to the layer folder), holding the
+// # 1.6.7 backwards many-to-one alone — the fact has no copy — with the
+// # isForeignKey that 1.6.7's Draw from dbt left on the primary key.
 Table dim_product [
   schema: 'gold',
   role: 'dimension'

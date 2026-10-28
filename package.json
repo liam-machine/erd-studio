@@ -197,6 +197,11 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.convertProjectToDbml",
+        "title": "Convert Project to DBML",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.deleteLogicalModel",
         "title": "Delete Table",
         "category": "ERD Studio"
@@ -560,6 +565,11 @@
           "group": "1_organise@2"
         },
         {
+          "command": "erdStudio.convertProjectToDbml",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage != dbml",
+          "group": "1_organise@3"
+        },
+        {
           "command": "erdStudio.drawFromDbt",
           "when": "view == erdStudio.domainTree && erdStudio.hasDbtProject",
           "group": "navigation@0"
@@ -613,6 +623,10 @@
         {
           "command": "erdStudio.migrateToTableNaming",
           "when": "erdStudio.storage != dbml"
+        },
+        {
+          "command": "erdStudio.convertProjectToDbml",
+          "when": "erdStudio.hasProject && erdStudio.storage != dbml"
         },
         {
           "command": "erdStudio.importDbml",

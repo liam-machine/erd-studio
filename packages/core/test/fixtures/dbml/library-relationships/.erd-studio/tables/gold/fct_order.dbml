@@ -1,3 +1,7 @@
+// Kept from logical-models/gold/fct_order.yml by Convert Project to DBML:
+// # The fact. It carries its own copy of the order-date link (ERD Studio 1.6.7
+// # also left a backwards copy in dim_date.yml), and nothing for the customer or
+// # product links: those were written on the dimensions' side.
 Table fct_order [
   schema: 'gold',
   role: 'fact',

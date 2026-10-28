@@ -49,6 +49,7 @@ import { layoutFilePathOf, normaliseSubjectAreaDocument, parseTableText, toTable
 import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
+import { convertProjectToDbml, planProjectDbmlConversion } from './commands/convertProjectToDbml';
 import { projectNamingOf } from './services/projectNaming';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE, hasOpenSubjectAreaCanvas, saveAllAndReload } from './services/recoveryService';
 import { submitFeedback } from './services/feedbackService';
@@ -369,6 +370,13 @@ const HARNESS_INSTALL_FEATURES: Record<HarnessTarget['id'], TelemetryFeature> = 
 const subjectAreasCreatedHere = new Set<string>();
 
 /**
+ * The `.yml` and `.json` files Convert Project to DBML deleted this session:
+ * an Edit > Undo brings them back, which is not an AI helper writing YAML
+ * into the DBML project (the foreign-format toast skips them).
+ */
+const convertedSourcesHere = new Set<string>();
+
+/**
  * Usage telemetry: which AI assistants this machine has. Deferred so the PATH
  * scan never sits on the activation path; it reads the file system only and
  * never runs an assistant.
@@ -484,6 +492,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.exportDiagram',
   'erdStudio.exportAllDiagrams',
   'erdStudio.migrateToTableNaming',
+  'erdStudio.convertProjectToDbml',
 ]);
 
 /**
@@ -1314,6 +1323,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // tracker and mark it here instead (the change event below consumes the
     // mark, after this one): ERD Studio's own file is never blamed on a helper.
     if (foreignFormatWarned || knownStorage !== 'dbml' || subjectAreasCreatedHere.has(uri.fsPath)) return;
+    // A file Convert Project to DBML deleted, back after Edit > Undo: not a helper's.
+    if (convertedSourcesHere.has(path.resolve(uri.fsPath))) return;
     foreignFormatWarned = true;
     telemetry.featureOnce('dbmlForeignFormatWarned');
     const shown = path.relative(workspaceRoot, uri.fsPath).split(path.sep).join('/');
@@ -1541,6 +1552,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => projectNamingOf(path.join(workspaceRoot, semanticDir), tableLibraryService),
     async () => (await migrateNaming()) === 'migrated',
     currentVersion,
+  );
+
+  /** "Convert Project to DBML" (native DBML storage, §6.2): YAML/JSON → DBML, prompted. */
+  const convertToDbml = () => convertProjectToDbml({
+    workspaceRoot,
+    semanticDir,
+    tableLibraryService,
+    migrateToV5,
+    holdRefreshes: () => editorProvider.holdRefreshes(),
+    onConverted: async (paths) => {
+      for (const p of paths) {
+        if (p.endsWith('.yml') || p.endsWith('.json')) convertedSourcesHere.add(path.resolve(p));
+      }
+      for (const p of paths) treeProvider.invalidateSubjectArea(p);
+      layerService.invalidateCache();
+      refreshContextKeys();
+      tableLibraryProvider.refresh();
+      treeProvider.refresh();
+      selectorsService.scheduleRegenerate();
+      await editorProvider.refreshAllOpenSubjectAreas();
+    },
+  });
+  editorProvider.setDbmlConversion(
+    () => planProjectDbmlConversion({ workspaceRoot, semanticDir, tableLibraryService }),
+    async () => (await convertToDbml()) === 'converted',
   );
 
   // After Draw from dbt or Import DBML writes a new diagram and its tables.
@@ -2627,6 +2663,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (await migrateToV5()) await migrateNaming();
     }),
     vscode.commands.registerCommand('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
+    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => { await convertToDbml(); }),
 
     // F408: Set up semantic directory for new projects
     vscode.commands.registerCommand(

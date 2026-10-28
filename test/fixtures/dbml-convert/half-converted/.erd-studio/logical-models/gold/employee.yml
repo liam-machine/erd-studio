@@ -1,0 +1,20 @@
+# Two self-references; the second is spelled in another case.
+name: employee
+columns:
+  - name: employee_id
+    dataType: int
+    isPrimaryKey: true
+  - name: manager_id
+    dataType: int
+  - name: mentor_id
+    dataType: int
+relationships:
+  - fromColumn: manager_id
+    toModel: employee
+    toColumn: employee_id
+    cardinality: many-to-one
+    role: manager
+  - fromColumn: Mentor_ID
+    toModel: Employee
+    toColumn: EMPLOYEE_ID
+    cardinality: many-to-one

@@ -1,0 +1,4 @@
+Table dim_customer [schema: 'gold'] {
+  customer_key INT [pk]
+  customer_name VARCHAR
+}

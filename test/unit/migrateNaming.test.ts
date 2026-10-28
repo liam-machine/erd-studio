@@ -167,6 +167,20 @@ describe('migrateToTableNaming (#182)', () => {
     expect(fs.existsSync(path.join(erd, 'tables'))).toBe(false);
   });
 
+  it('puts back what landed when VS Code applies only part of the edit (applyFileWrites reconciles)', async () => {
+    const before = snapshot();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(MIGRATE_NAMING_BUTTON as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    // The first three operations land (a rewrite and two file operations), then one fails; the reconcile runs normally.
+    vscode._mockWorkspaceState.applyEditPrefixes.push(3, 'ok');
+    expect(await migrateToTableNaming(deps())).toBe('failed');
+    expect(vscode._appliedEdits).toHaveLength(2);
+    // Nothing is left half-moved: every file is back, and no empty tables/ is left to read as a layer.
+    expect(snapshot()).toEqual(before);
+    expect(fs.existsSync(path.join(erd, 'tables'))).toBe(false);
+    expect(error.mock.calls[0][0]).toMatch(/didn't accept the file moves, so nothing was changed/);
+  });
+
   it('refuses, saying why, a project with a layer called tables', async () => {
     const layers = JSON.parse(fs.readFileSync(path.join(erd, 'layers.json'), 'utf-8'));
     layers.layers.push({ ...layers.layers[0], id: 'tables', label: 'Tables' });

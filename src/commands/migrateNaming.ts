@@ -27,6 +27,7 @@ import * as vscode from 'vscode';
 
 import { LOGICAL_MODELS_DIR, TABLES_DIR } from '@erd-studio/core';
 
+import { applyFileWrites } from '../providers/applyFileWrites';
 import { dirtyFiles } from '../providers/dirtyDocuments';
 import { saveDocumentByUri } from '../providers/documentSave';
 import {
@@ -44,6 +45,7 @@ import {
   type ErrorActions,
 } from '../services/commandErrors';
 import type { SubjectAreaService } from '../services/domainService';
+import type { FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
 import { describeNamingMigration, namingMigrationIsEmpty, planNamingMigration } from '../services/namingMigration';
 import type { NamingMigrationPlan } from '../services/namingMigration';
@@ -339,24 +341,24 @@ async function runMigration(
   }
   plan = again;
 
-  const edit = new vscode.WorkspaceEdit();
+  // One WorkspaceEdit, applied by `applyFileWrites` (D23 of the native DBML
+  // storage spec): a table file moves by a rename, or by a create holding its
+  // new text and a delete; a subject area file by a text edit, never a delete
+  // and a create of the same path (VS Code cannot undo that pair: it
+  // re-creates the file before deleting it).
+  const writes: FileWrite[] = [];
+  const renames: Array<{ from: string; to: string }> = [];
   for (const move of plan.moves) {
     const to = abs(move.to);
     if (move.text === undefined) {
-      edit.renameFile(vscode.Uri.file(abs(move.from)), vscode.Uri.file(to), { overwrite: false });
+      renames.push({ from: abs(move.from), to });
     } else {
-      edit.createFile(vscode.Uri.file(to), { overwrite: false, contents: Buffer.from(move.text, 'utf-8') });
-      edit.deleteFile(vscode.Uri.file(abs(move.from)), { ignoreIfNotExists: false });
+      writes.push({ kind: 'create', path: to, text: move.text }, { kind: 'delete', path: abs(move.from) });
     }
   }
-  const docs: vscode.TextDocument[] = [];
   for (const rewrite of plan.rewrites) {
-    // A text edit, never a delete and a create of the same path: VS Code
-    // cannot undo that pair (it re-creates the file before deleting it).
-    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(abs(rewrite.path)));
     // VS Code keeps a BOM out of the document's text (and writes it back on save).
-    edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), rewrite.text.replace(/^\uFEFF/, ''));
-    docs.push(doc);
+    writes.push({ kind: 'replace', path: abs(rewrite.path), text: rewrite.text.replace(/^\uFEFF/, '') });
   }
 
   // The target folders are made only now, once nothing above can throw, so a
@@ -379,9 +381,10 @@ async function runMigration(
   const release = (): void => { if (!released) { released = true; held?.(); } };
   try {
     held = deps.holdRefreshes?.();
-    return await applyMigration(deps, plan, edit, docs, newFolders, semanticRoot, abs, release, progress, retry);
+    return await applyMigration(deps, plan, { writes, renames }, newFolders, semanticRoot, abs, release, progress, retry);
   } catch (err) {
-    // Nothing landed: the folders made for it go again, or an empty `tables/` would read as a layer folder.
+    // Not applied (applyFileWrites reconciled anything that landed): the folders
+    // made for it go again, or an empty `tables/` would read as a layer folder.
     if (!progress.applied) removeFolders(newFolders);
     throw err;
   } finally {
@@ -393,8 +396,7 @@ async function runMigration(
 async function applyMigration(
   deps: MigrateNamingDeps,
   plan: NamingMigrationPlan,
-  edit: vscode.WorkspaceEdit,
-  docs: vscode.TextDocument[],
+  edit: { writes: FileWrite[]; renames: Array<{ from: string; to: string }> },
   newFolders: Set<string>,
   semanticRoot: string,
   abs: (rel: string) => string,
@@ -403,9 +405,14 @@ async function applyMigration(
   retry: () => Promise<MigrateNamingOutcome>,
 ): Promise<MigrateNamingOutcome> {
   const touched = [...plan.moves.flatMap((m) => [abs(m.from), abs(m.to)]), ...plan.rewrites.map((r) => abs(r.path))];
-  if (!(await vscode.workspace.applyEdit(edit))) {
+  const applied = await applyFileWrites(edit.writes, { renames: edit.renames });
+  if (!applied.ok) {
+    // applyFileWrites put back whatever landed (VS Code keeps the steps that
+    // ran before a failing file operation), so "nothing was changed" is true
+    // unless it could not: its modal then names the files.
     removeFolders(newFolders);
     telemetry.error('editRejected');
+    if (applied.unrestored.length > 0) return 'failed';
     showErrorWithActions(
       `${MIGRATE_NAMING_TITLE}: VS Code didn't accept the file moves, so ${nothingChanged(progress)}. ` +
         "This is usually a file another program has open or a folder you can't write to.",
@@ -416,12 +423,13 @@ async function applyMigration(
     );
     return 'failed';
   }
+  const docs = applied.replaced;
   progress.applied = true;
   // Own writes only once the bytes are on disk, so the watchers skip them.
   const unsaved: vscode.Uri[] = [];
-  for (const doc of docs) {
-    if (await saveDocumentByUri(doc.uri)) ownWrites.recordWrite(doc.uri.fsPath);
-    else unsaved.push(doc.uri);
+  for (const uri of docs) {
+    if (await saveDocumentByUri(uri)) ownWrites.recordWrite(uri.fsPath);
+    else unsaved.push(uri);
   }
   for (const move of plan.moves) {
     ownWrites.recordWrite(abs(move.to));
@@ -435,7 +443,7 @@ async function applyMigration(
   const v5Root = path.join(semanticRoot, LOGICAL_MODELS_DIR);
   try { if (fs.readdirSync(v5Root).length === 0) fs.rmdirSync(v5Root); } catch { /* already gone */ }
 
-  saveMigratedOnUndo(docs.map((d) => d.uri.fsPath), newFolders);
+  saveMigratedOnUndo(docs.map((u) => u.fsPath), newFolders);
   deps.tableLibraryService.invalidateCache();
   // Said before the refresh, so a refresh that throws cannot hide it.
   if (unsaved.length > 0) {

@@ -187,6 +187,7 @@ describe('normaliseStorageRows: one row at a time (the twin goldens\' per-case c
     ['noteText', (b) => { b.description = '  Sales'; }],
     ['positions', (b) => { b.viewConfig.positions.fct_order = { x: 400.001, y: 200 }; }],
     ['emptyAnnotations', (b) => { b.viewConfig.annotations = []; }],
+    ['emptyPositions', (b) => { b.viewConfig.positions = {}; }],
     ['respelling', (b) => { b.relationships[0] = { ...b.relationships[0], toModel: 'Dim_Customer', toColumn: 'CUSTOMER_ID' }; }],
     ['oneToMany', (b) => { b.relationships[0] = { fromModel: 'dim_customer', fromColumn: 'customer_id', toModel: 'fct_order', toColumn: 'customer_id', cardinality: 'one-to-many', role: 'buyer' }; }],
     ['loneCompositeKey', (b) => { b.relationships[0].compositeKey = 'fk_lonely'; }],
@@ -202,8 +203,10 @@ describe('normaliseStorageRows: one row at a time (the twin goldens\' per-case c
   it.each(CASES)('%s: that row alone removes the difference, and every other row together does not', (row, mutate) => {
     const a = display();
     if (row === 'emptyAnnotations') delete a.viewConfig.annotations;
+    if (row === 'emptyPositions') delete (a.viewConfig as { positions?: unknown }).positions;
     const b = display();
     if (row === 'emptyAnnotations') delete b.viewConfig.annotations;
+    if (row === 'emptyPositions') delete (b.viewConfig as { positions?: unknown }).positions;
     mutate(b);
     expect(normaliseStorageRows(a, [row])).toEqual(normaliseStorageRows(b, [row]));
     const others = [...STORAGE_EQUIVALENCE_ROWS, ...STORAGE_EQUIVALENCE_CONVERT_ROWS].filter((r) => r !== row);

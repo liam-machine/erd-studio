@@ -11,9 +11,10 @@
  * - description, column note and sticky-note text: leading white space
  *   dropped (`dbmlNoteText`, the writer's own rule, so DBML's shared-indent
  *   trim never applies to text ERD Studio writes);
- * - positions (and sticky-note boxes) rounded to two decimals, and an empty
+ * - positions (and sticky-note boxes) rounded to two decimals, an empty
  *   sticky-note list the same as none (a diagram with no Note blocks reads
- *   back with no list);
+ *   back with no list), and an empty positions map the same as none (a
+ *   diagram with no layout file reads back with `{}`);
  * - relationship ends respelled to the real table and column spelling;
  * - a library `one-to-many` stored canonically (many-to-one, ends swapped);
  * - a one-member composite group's key dropped, and every composite key
@@ -54,6 +55,7 @@ export type StorageEquivalenceRow =
   | 'noteText'
   | 'positions'
   | 'emptyAnnotations'
+  | 'emptyPositions'
   | 'respelling'
   | 'oneToMany'
   | 'loneCompositeKey'
@@ -68,7 +70,7 @@ export type StorageEquivalenceRow =
 
 /** The rows every comparison applies. Internal. */
 export const STORAGE_EQUIVALENCE_ROWS: readonly StorageEquivalenceRow[] = [
-  'noteText', 'positions', 'emptyAnnotations', 'respelling', 'oneToMany',
+  'noteText', 'positions', 'emptyAnnotations', 'emptyPositions', 'respelling', 'oneToMany',
   'loneCompositeKey', 'compositeKeyNames', 'schemaVersion', 'relationshipOrder',
 ];
 
@@ -377,6 +379,9 @@ export function normaliseStorageRows<T>(area: T, rowList: readonly StorageEquiva
   }
   if (viewConfig && rows.has('emptyAnnotations') && Array.isArray(viewConfig.annotations) && viewConfig.annotations.length === 0) {
     delete viewConfig.annotations;
+  }
+  if (viewConfig && rows.has('emptyPositions') && isObject(viewConfig.positions) && Object.keys(viewConfig.positions).length === 0) {
+    delete viewConfig.positions;
   }
   if (viewConfig && Array.isArray(viewConfig.annotations)) {
     for (const annotation of viewConfig.annotations) {

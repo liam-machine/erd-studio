@@ -1,0 +1,5 @@
+// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
+use { table dim_customer } from './dim_customer.dbml'
+use { table fct_order } from './fct_order.dbml'
+
+Ref: fct_order.customer_key >? dim_customer.customer_key
