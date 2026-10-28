@@ -3,7 +3,8 @@
  * docs/plans/native-dbml-storage.md).
  *
  * Stores a YAML/JSON (or mixed, or half-converted) project as DBML, as
- * `planDbmlConversion` plans it: prompted, with the whole plan in the modal;
+ * `planDbmlConversion` plans it: prompted, with the whole plan (or what stops
+ * it) as a scrollable list in the Convert to DBML panel (`ConvertToDbmlPanel`);
  * one WorkspaceEdit applied by `applyFileWrites` (creates, then replaces,
  * then deletes, D23), which puts back whatever landed when VS Code refuses
  * part of it. Edit > Undo straight after (while VS Code stays open) puts
@@ -25,6 +26,7 @@ import * as vscode from 'vscode';
 import { LOGICAL_MODELS_DIR } from '@erd-studio/core';
 
 import { applyFileWrites } from '../providers/applyFileWrites';
+import { ConvertToDbmlPanel, type ConvertPanelChoice } from '../providers/ConvertToDbmlPanel';
 import { dirtyFiles } from '../providers/dirtyDocuments';
 import { saveDocumentByUri } from '../providers/documentSave';
 import {
@@ -40,6 +42,7 @@ import {
 } from '../services/commandErrors';
 import { dbmlConversionIsEmpty, describeDbmlConversion, planDbmlConversion } from '../services/dbmlConversion';
 import type { DbmlConversionPlan } from '../services/dbmlConversion';
+import { buildConvertReview } from '../services/dbmlConversionReview';
 import { readDbmlConversionInput } from '../services/dbmlConversionFiles';
 import type { FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
@@ -48,13 +51,12 @@ import { telemetry } from '../services/telemetryService';
 
 export const CONVERT_TO_DBML_TITLE = 'Convert Project to DBML';
 
-/** The one convert button, in the modal. */
-export const CONVERT_TO_DBML_BUTTON = 'Convert';
-
 /** The custom editor's view type, for reopening converted diagrams. */
 const CANVAS_VIEW_TYPE = 'erdStudio.domainEditor';
 
-/** The modal's fixed lines (§6.2 step 6). */
+/** The panel's fixed lines (§6.2 step 6). */
+export const CONVERT_WHAT_LINE =
+  'Convert writes the tables, relationships and diagrams below as DBML files and removes the YAML and JSON files they came from, in one edit.';
 export const CONVERT_TEAMMATES_LINE =
   'Everyone who opens this project needs ERD Studio 2.0 or later. Older versions show no diagrams, and AI helper files from before 2.0 ' +
   'write YAML: update them afterwards (ERD Studio: Set Up My AI Helper).';
@@ -121,16 +123,32 @@ export async function planProjectDbmlConversion(deps: Pick<ConvertProjectDeps, '
   return planDbmlConversion(readDbmlConversionInput(deps.workspaceRoot, deps.semanticDir));
 }
 
-/** The modal's detail (§6.2 step 6). */
-export function convertConfirmDetail(plan: DbmlConversionPlan): string {
+/** The review's header lines (§6.2 step 6). */
+export function convertIntroLines(plan: DbmlConversionPlan): string[] {
   return [
-    describeDbmlConversion(plan),
-    '',
+    CONVERT_WHAT_LINE,
     CONVERT_TEAMMATES_LINE,
     CONVERT_GIT_LINE,
     ...(plan.resumed.length > 0 ? [CONVERT_RESUME_LINE] : []),
     CONVERT_UNDO_LINE,
-  ].join('\n');
+  ];
+}
+
+/**
+ * Show the plan, or its refusals, in the Convert to DBML panel and wait for
+ * the user's choice. Paths are shown project-relative; a refusal opens only a
+ * file that is on disk under the semantic dir.
+ */
+function showConvertPanel(deps: Pick<ConvertProjectDeps, 'workspaceRoot' | 'semanticDir'>, plan: DbmlConversionPlan, nothingChanged: string): Promise<ConvertPanelChoice> {
+  const semanticRoot = path.join(deps.workspaceRoot, deps.semanticDir);
+  const abs = (rel: string): string => path.join(semanticRoot, ...rel.split('/'));
+  const { view, locations } = buildConvertReview(plan, {
+    display: (rel) => projectRelative(deps.workspaceRoot, abs(rel)),
+    exists: (rel) => fs.existsSync(abs(rel)),
+    introLines: convertIntroLines(plan),
+    nothingChanged,
+  });
+  return ConvertToDbmlPanel.show({ view, locations, semanticRoot });
 }
 
 /** The v4 step threw: it has counted and logged its own failure. */
@@ -148,6 +166,7 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
   try {
     return await runConversion(deps, progress, retry);
   } catch (err) {
+    ConvertToDbmlPanel.closeIfIdle();
     console.error('[convertProjectToDbml] failed:', err);
     // A conversion that landed counts as one, even when a later step (the refresh) threw.
     if (progress.applied) { if (!progress.counted) telemetry.feature('convertToDbml'); }
@@ -169,6 +188,10 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
       ...(progress.applied ? {} : { [TRY_AGAIN_BUTTON]: retry }),
     });
     return progress.applied ? 'converted' : 'failed';
+  } finally {
+    // Whatever ended the run (a toast, a refusal by name, nothing to do), a
+    // panel no run is waiting on closes.
+    ConvertToDbmlPanel.closeIfIdle();
   }
 }
 
@@ -186,13 +209,16 @@ async function runConversion(
   // 1. Read and plan.
   let plan = await planProjectDbmlConversion(deps);
 
+  // What stops it, in the panel: Check Again plans again; Close (or closing the tab) ends the run.
+  const refused = async (): Promise<ConvertProjectOutcome> => {
+    telemetry.feature('convertToDbmlRefused');
+    const choice = await showConvertPanel(deps, plan, nothingChanged());
+    return choice === 'checkAgain' ? retry() : 'refused';
+  };
+
   // 2. v4 diagrams go through the v5 migration first (its own prompt), then straight on here.
   if (plan.v4SubjectAreas.length > 0) {
-    if (!deps.migrateToV5) {
-      void vscode.window.showWarningMessage(`${CONVERT_TO_DBML_TITLE}: ${nothingChanged()}`, { modal: true, detail: describeDbmlConversion(plan) });
-      telemetry.feature('convertToDbmlRefused');
-      return 'refused';
-    }
+    if (!deps.migrateToV5) return refused();
     const migrateToV5 = deps.migrateToV5;
     if (!(await migrateToV5().catch((err: unknown) => { throw new V5StepFailed(err); }))) {
       telemetry.feature('convertToDbmlCancelled');
@@ -200,19 +226,11 @@ async function runConversion(
     }
     progress.v5Converted = true;
     plan = await planProjectDbmlConversion(deps);
-    if (plan.v4SubjectAreas.length > 0) {
-      void vscode.window.showWarningMessage(`${CONVERT_TO_DBML_TITLE}: ${nothingChanged()}`, { modal: true, detail: describeDbmlConversion(plan) });
-      telemetry.feature('convertToDbmlRefused');
-      return 'refused';
-    }
+    if (plan.v4SubjectAreas.length > 0) return refused();
   }
 
-  // 3. Refusals: the modal lists them.
-  if (plan.refusals.length > 0) {
-    void vscode.window.showWarningMessage(`${CONVERT_TO_DBML_TITLE}: ${nothingChanged()}`, { modal: true, detail: describeDbmlConversion(plan) });
-    telemetry.feature('convertToDbmlRefused');
-    return 'refused';
-  }
+  // 3. Refusals: the panel lists them, each with Open at its file and line.
+  if (plan.refusals.length > 0) return refused();
 
   // 4. Nothing to convert.
   if (dbmlConversionIsEmpty(plan)) {
@@ -251,22 +269,20 @@ async function runConversion(
     return 'refused';
   }
 
-  // 6. The modal, with the whole plan.
-  const choice = await vscode.window.showInformationMessage(
-    'Convert this project to DBML?',
-    { modal: true, detail: convertConfirmDetail(plan) },
-    CONVERT_TO_DBML_BUTTON,
-  );
-  if (choice !== CONVERT_TO_DBML_BUTTON) {
+  // 6. The panel, with the whole plan as a scrollable list. A newer run that
+  // took the panel over (the command run again) ends this one uncounted.
+  const choice = await showConvertPanel(deps, plan, nothingChanged());
+  if (choice === 'superseded') return 'cancelled';
+  if (choice !== 'convert') {
     telemetry.feature('convertToDbmlCancelled');
     return 'cancelled';
   }
 
-  // 7. The dialog may have waited: plan again from the files as they are now (#219).
+  // 7. The panel may have waited: plan again from the files as they are now (#219).
   const again = await planProjectDbmlConversion(deps);
   if (again.refusals.length > 0 || describeDbmlConversion(again) !== describeDbmlConversion(plan) || dirtyFiles(touched(again)).length > 0) {
     showErrorWithActions(
-      `${CONVERT_TO_DBML_TITLE}: the project changed while the dialog was open. ${nothingChanged()} Run it again.`,
+      `${CONVERT_TO_DBML_TITLE}: the project changed while the preview was open. ${nothingChanged()} Run it again.`,
       { [TRY_AGAIN_BUTTON]: retry },
       (m, ...items) => vscode.window.showWarningMessage(m, ...items),
     );
@@ -300,6 +316,9 @@ async function runConversion(
   const canvasTabs = convertedCanvasTabs(plan, abs);
   try {
     const applied = await applyFileWrites(writes, { ensureDir });
+    // Convert has finished with the panel: close it before anything opens, so
+    // the editor Convert leaves in front is the one Undo works from.
+    ConvertToDbmlPanel.closeIfIdle();
     if (!applied.ok) {
       removeNewFolders();
       telemetry.error('convertToDbmlFailed');

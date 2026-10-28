@@ -507,6 +507,10 @@ export const NAMING_MIGRATION_DECLINED_KEY = 'erdStudio.namingMigrationDeclined'
  * to DBML (native DBML storage, §6.4). Per workspace.
  */
 export const DBML_CONVERSION_DECLINED_KEY = 'erdStudio.dbmlConversionDeclined';
+/** The Convert offer's dialog (§6.4): its title and its two buttons (VS Code adds Cancel, which is Not Now). */
+export const DBML_CONVERSION_OFFER_TITLE = 'Convert this project to DBML?';
+export const DBML_CONVERSION_OFFER_CONVERT = 'Convert…';
+export const DBML_CONVERSION_OFFER_DECLINE = "Don't Ask Again";
 
 /** What the canvas needs to offer Convert Project to DBML (§6.4), wired by the extension. */
 interface DbmlConversionHooks {
@@ -2158,8 +2162,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Offer, once a session, to convert a YAML or mixed project to DBML
-   * (§6.4). Nothing is written without the user's choice: Convert… runs the
-   * command, whose modal shows the whole plan. Not made when the conversion
+   * (§6.4), in a modal dialog. Nothing is written without the user's choice:
+   * Convert… runs the command, whose panel lists the whole plan. Not made when the conversion
    * would be refused (the command says why when it is run), when there is
    * nothing to convert, or after "Don't Ask Again". True when it was shown.
    */
@@ -2181,10 +2185,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           "Convert them to DBML? (You'll see the full list first.)"
         : 'This project is stored as YAML and JSON. ERD Studio 2.0 stores projects as DBML, an open format. Everyone who opens it will need ' +
           "ERD Studio 2.0 or later afterwards. Convert now? (You'll see the full list of changes first.)";
-      const choice = await vscode.window.showInformationMessage(message, 'Convert…', 'Not Now', "Don't Ask Again");
-      if (choice === 'Convert…') {
+      // A dialog the user must answer (after pre-release 1.9.0): VS Code adds
+      // its own Cancel, and Cancel, Escape or closing it is Not Now.
+      const choice = await vscode.window.showInformationMessage(
+        DBML_CONVERSION_OFFER_TITLE,
+        { modal: true, detail: message },
+        DBML_CONVERSION_OFFER_CONVERT,
+        DBML_CONVERSION_OFFER_DECLINE,
+      );
+      if (choice === DBML_CONVERSION_OFFER_CONVERT) {
         await hooks.run();
-      } else if (choice === "Don't Ask Again") {
+      } else if (choice === DBML_CONVERSION_OFFER_DECLINE) {
         telemetry.feature('convertToDbmlDeclined');
         await this.context.workspaceState?.update(DBML_CONVERSION_DECLINED_KEY, true);
       } else {

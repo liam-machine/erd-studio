@@ -607,7 +607,7 @@ export function isLibraryFolderName(name: string): boolean;                 // n
 
 | Reader | What happens |
 |---|---|
-| Extension ≤ 1.7.x | Selector `*/*.json` only, so no `.dbml` opens as a canvas, the Subject Areas view lists no DBML diagrams, and the Table Library lists no `.dbml` tables (it lists `.yml` only). `hasTablesLibrary` is false for a DBML `tables/`, so its first-run layer prompt (only without `layers.json`) and **Initialize Layer Config** can offer `tables` as a layer and write it into `layers.json`. 2.0 then still treats `tables/` as the library and reports `tablesLayerConflict` (§3.3). Its **Update All** of the AI helper files would put the v34 text back (it calls a newer marker "outdated", `harnessService.ts:1001`); 2.0's `doctor` then raises `update-harness` again. Convert's offer and modal tell the user that everyone needs 2.0 (§6.2). |
+| Extension ≤ 1.7.x | Selector `*/*.json` only, so no `.dbml` opens as a canvas, the Subject Areas view lists no DBML diagrams, and the Table Library lists no `.dbml` tables (it lists `.yml` only). `hasTablesLibrary` is false for a DBML `tables/`, so its first-run layer prompt (only without `layers.json`) and **Initialize Layer Config** can offer `tables` as a layer and write it into `layers.json`. 2.0 then still treats `tables/` as the library and reports `tablesLayerConflict` (§3.3). Its **Update All** of the AI helper files would put the v34 text back (it calls a newer marker "outdated", `harnessService.ts:1001`); 2.0's `doctor` then raises `update-harness` again. Convert's offer and panel tell the user that everyone needs 2.0 (§6.2). |
 | Harness v34 assistants | Their schema skill reads only `erd.naming` (it never reads `nextSteps`) and says "create new table files in `tables/`" as YAML (`harnessService.ts:142`, `:157-158`), so they may write v6 YAML into the project, making it `mixed`. 2.0 still reads those files. `doctor` 2.0 raises `update-harness` for **every** outdated harness target (§7.1), and the 2.0 extension shows a toast when a `.yml` table or `.json` diagram that ERD Studio did not write appears in a DBML project (§5.4). |
 | CLI ≤ 1.7.x | `listSubjectAreas` ignores `.dbml` and `doctor` reports no diagrams. It is read-only, so it is harmless. |
 | `@erd-studio/core` ≤ 0.3.0 | `loadDisplaySubjectArea` on a `.dbml` path throws `SubjectAreaFileError('invalid-json', transient)`. This is a breaking note in the core changelog, and the Confluence app must bump (§1). |
@@ -1273,18 +1273,18 @@ The command copies `migrateNaming.ts` step by step:
 
 1. Read the input and plan.
 2. v4 present → confirm and chain `migrateToV5`, then re-read.
-3. Refusals → a modal listing them, and stop. Telemetry `convertToDbmlRefused`.
+3. Refusals → the Convert to DBML panel lists them (each with **Open** at its file and line, **Check Again** plans again, **Close** stops). Telemetry `convertToDbmlRefused`.
 4. Nothing to convert (storage already `dbml` and no creates, replaces or deletes) → "This project is already stored as DBML."
 5. Dirty files → refuse by name.
-6. Modal confirm with `describeDbmlConversion`. It includes:
+6. Confirm in the **Convert to DBML** panel (an editor tab; after pre-release 1.9.0 feedback it replaced the modal, whose detail could not scroll): a header, counts, then the plan as a scrollable list of collapsible sections (tables, relationships files, diagrams with their `.dbdiagram` layout files, files removed, moved relationships, notes), paths project-relative in a monospace font, with sticky Convert and Cancel. The header includes:
    - "Everyone who opens this project needs ERD Studio 2.0 or later. Older versions show no diagrams, and AI helper files from before 2.0 write YAML: update them afterwards (ERD Studio: Set Up My AI Helper)." (the naming migration's teammate warning, `SemanticEditorProvider.ts:2078-2080`, is the precedent);
    - "Git will show the converted files as new files, because their content changes completely, so their history does not follow them. Commit your work first.";
    - "Relationships kept in diagram files move to the table library and will also show in these diagrams: …";
    - when `resumed` is non-empty: "An earlier conversion stopped part way; this finishes it.";
    - "Undo: Edit > Undo while VS Code stays open, or restore from source control."
 
-   Cancel → telemetry `convertToDbmlCancelled`.
-7. Re-plan after the dialog and compare `describe` (#219 pattern).
+   Cancel (or closing the tab) → telemetry `convertToDbmlCancelled`. Convert is disabled after its first click; the panel closes when Convert finishes.
+7. Re-plan after the panel and compare `describe` (#219 pattern).
 8. Build the writes: creates (relationships files first, then tables, then diagrams, then layout files), then replaces, then deletes (D23). Create folders only once the writes are built.
 9. `holdRefreshes`, then **`applyFileWrites`** (§5.3), which reconciles on `false` (deletes the creates that landed, re-creates the deletes, puts back replaced documents) so a failed run leaves the project as it was; when even the reconcile fails, its modal names the files and `doctor`'s `finish-dbml-conversion` step (§6.5) picks the run up again. Record ownWrites after it applies. The bug in `migrateNaming.ts:383-385` ("Nothing landed") is fixed the same way in this PR, since it shares the helper.
 10. Remove emptied `logical-models/` (and its folders). `tables/` is kept.
@@ -1301,7 +1301,7 @@ They become library Refs owned by their FK table (`canonicalRelationship`), in t
 `maybeOfferDbmlConversion` (provider) is wired by `setDbmlConversion` (`extension.ts`, beside `setNamingMigration :1429`).
 
 - **When it shows:** on a canvas open, when storage is `yaml` or `mixed`, no refusal exists, and the workspaceState key `erdStudio.dbmlConversionDeclined` is unset.
-- **What it shows:** a non-modal notification with [Convert…] [Not now] [Don't ask again]:
+- **What it shows:** a modal dialog (after pre-release 1.9.0 feedback; it was a non-modal notification) titled "Convert this project to DBML?" with [Convert…] [Don't Ask Again] and VS Code's own Cancel, which (like Escape or closing it) is Not now; the text is its detail:
   - `yaml`: "This project is stored as YAML and JSON. ERD Studio 2.0 stores projects as DBML, an open format. Everyone who opens it will need ERD Studio 2.0 or later afterwards. Convert now? (You'll see the full list of changes first.)";
   - `mixed`: "This project is stored as DBML, but N files are YAML or JSON (probably written by an AI helper set up before 2.0). Convert them to DBML? (You'll see the full list first.)".
 - **Ordering:** it shows **before** the naming offer, and the naming offer is not shown in a session where the DBML offer was eligible. There is one prompt per canvas open.
@@ -2266,3 +2266,8 @@ Three reviews (compat-data-loss, architecture-feasibility, product-ai-cli) were 
   - **Rename Subject Area (JSON and DBML) issues the watcher's side effects itself** (`afterSubjectAreaRename` in `extension.ts`): its own writes are skipped by the watcher, so it now refreshes the Table Library, the open canvases' file presence and the context keys, and drops its `subjectAreasCreatedHere` mark (also on a failed apply), which nothing would otherwise consume. Test in `extension.activate.test.ts` (checked to fail without the fix).
   - **§4.5.x "Other files"** and the §9.3 Metadata line now say the cross-file refusal is not computed in 2.0 (the S5 note): the edit is written inline and `doctor`'s `foreignMetadata` is the only signal.
   - **CHANGELOG**: Fixed lines for the D23 paths (Give Duplicate Its Own Name, Rename Subject Area, Delete Table File put back a partial apply; Give Duplicate refuses a diagram with unsaved edits; Rename no longer shows the "Subject area file deleted" toast), the `foreignMetadata` wording and the Table Library refresh after a rename.
+- 2026-10-28 (after pre-release 1.9.0 feedback): Liam tried 1.9.0 on a real project (100+ files) and asked for two changes to Convert Project to DBML.
+  - **The offer is a dialog the user must answer** (§6.4): `showInformationMessage(title, { modal: true, detail }, 'Convert…', "Don't Ask Again")`; VS Code adds Cancel, and Cancel, Escape or closing it is Not now (`convertToDbmlNotNow`). Once a session, the same eligibility and the same yaml / mixed wording.
+  - **The plan is a scrollable list** (§6.2 steps 3 and 6): the modal's detail could not scroll and was unreadable for a real project. The **Convert to DBML** panel (`src/providers/ConvertToDbmlPanel.ts`, pure half `src/services/dbmlConversionReview.ts`) shows a header, counts and collapsible sections with sticky Convert / Cancel; Convert runs the existing apply path unchanged (same re-plan check, one `applyFileWrites`, same undo, toasts and telemetry), is disabled after its first click, and the panel closes before Convert opens the editor Undo works from. One panel at a time: running the command again reveals it with a fresh plan, and the earlier run ends uncounted.
+  - **Refusals go in the same panel**, each naming its file and line with **Open** (an index into the host's list, never a path from the webview; the file must exist under the semantic dir) and **Check Again**, which plans again in the same panel; notes stay below. The refusals are plain strings, so `locateDbmlRefusal` reads the first existing file and the line they name; `refusalLocation` is for `RefusedWrite` errors and does not apply. The plan's v4 diagrams are listed there too.
+  - The panel's messages are its own validated union (`isConvertPanelToHost`), not part of the canvas protocol, so `src/types/messages.ts` is unchanged. `erd-studio doctor`'s text preview (`describeDbmlConversion`) is unchanged.

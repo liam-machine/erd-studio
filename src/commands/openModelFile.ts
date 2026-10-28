@@ -12,10 +12,10 @@ import type { TableFileError, TableFileErrorKind } from '../services/logicalMode
 import { OPEN_FILE_BUTTON, projectRelative, showErrorWithActions } from '../services/commandErrors';
 import { refusalLocation, type RefusedWrite } from '../services/newSubjectAreaWriter';
 
-/** Open `filePath`, placing the cursor at the 1-based `line` / `column` when given. */
-export async function openTableFileAt(filePath: string, line?: number, column?: number): Promise<void> {
+/** Open `filePath`, placing the cursor at the 1-based `line` / `column` when given (in `viewColumn`, else the active one). */
+export async function openTableFileAt(filePath: string, line?: number, column?: number, viewColumn?: vscode.ViewColumn): Promise<void> {
   const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
-  const options: vscode.TextDocumentShowOptions = { preview: false };
+  const options: vscode.TextDocumentShowOptions = { preview: false, ...(viewColumn !== undefined ? { viewColumn } : {}) };
   if (line !== undefined && line >= 1) {
     const lineIndex = Math.min(line - 1, Math.max(document.lineCount - 1, 0));
     const character = column !== undefined && column >= 1 ? column - 1 : 0;

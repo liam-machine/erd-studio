@@ -1,7 +1,7 @@
 /**
  * ERD Studio: Convert Project to DBML (native DBML storage §6.2, §6.4, §9.6)
  * on the real services and the stateful vscode mock: the v4 chain, the
- * refusal modal, unsaved files, a project that changes under the dialog, the
+ * refusals in the Convert to DBML panel (Open, Check Again), unsaved files, a project that changes under the dialog, the
  * teammate and git-history lines, one applyFileWrites edit, the reconcile
  * after VS Code applies only part of it, the folder clean-up, the reopened
  * canvas tabs, the telemetry of every outcome, and the canvas offer.
@@ -17,14 +17,22 @@ import {
   CONVERT_GIT_LINE,
   CONVERT_RESUME_LINE,
   CONVERT_TEAMMATES_LINE,
-  CONVERT_TO_DBML_BUTTON,
   CONVERT_UNDO_LINE,
+  CONVERT_WHAT_LINE,
   convertedUndoSentence,
   convertProjectToDbml,
   planProjectDbmlConversion,
   type ConvertProjectDeps,
 } from '../../src/commands/convertProjectToDbml';
-import { DBML_CONVERSION_DECLINED_KEY, SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { ConvertToDbmlPanel } from '../../src/providers/ConvertToDbmlPanel';
+import {
+  DBML_CONVERSION_DECLINED_KEY,
+  DBML_CONVERSION_OFFER_CONVERT,
+  DBML_CONVERSION_OFFER_DECLINE,
+  DBML_CONVERSION_OFFER_TITLE,
+  SemanticEditorProvider,
+} from '../../src/providers/SemanticEditorProvider';
+import type { ConvertReviewView } from '../../src/services/dbmlConversionReview';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
@@ -64,10 +72,28 @@ function deps(overrides: Partial<ConvertProjectDeps> = {}): ConvertProjectDeps &
   } as ConvertProjectDeps & { onConverted: ReturnType<typeof vi.fn> };
 }
 
-/** Answer the modal with Convert; any other information message with `other`. */
+/**
+ * Answer the Convert to DBML panel each time a run shows it: the real panel
+ * opens (on the mock webview), then `respond` acts as the user would.
+ * Returns the views shown and the panels they were shown in.
+ */
+function answerPanel(respond: (panel: vscode.MockWebviewPanel, view: ConvertReviewView) => unknown) {
+  const real = ConvertToDbmlPanel.show.bind(ConvertToDbmlPanel);
+  const shown: Array<{ view: ConvertReviewView; panel: vscode.MockWebviewPanel; html: string }> = [];
+  vi.spyOn(ConvertToDbmlPanel, 'show').mockImplementation((content) => {
+    const choice = real(content);
+    const panel = vscode.window._webviewPanels.at(-1)!;
+    shown.push({ view: content.view, panel, html: panel.webview.html });
+    setTimeout(() => { void respond(panel, content.view); }, 0);
+    return choice;
+  });
+  return shown;
+}
+
+/** Click Convert in the panel; answer any information message with `other`. */
 function answerConvert(other: string | undefined = undefined) {
-  return vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation(async (...args: unknown[]) =>
-    (args.includes(CONVERT_TO_DBML_BUTTON) ? CONVERT_TO_DBML_BUTTON : other) as never);
+  answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+  return vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation(async () => other as never);
 }
 
 function useFixture(name: string): void {
@@ -78,6 +104,7 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-convert-'));
   erd = path.join(root, '.erd-studio');
   vscode._resetMockWorkspace();
+  vscode._resetMockWebviewPanels();
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   feature = vi.spyOn(telemetry, 'feature');
@@ -86,29 +113,39 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  ConvertToDbmlPanel.close();
   vi.restoreAllMocks();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 describe('convertProjectToDbml', () => {
-  it('asks once, with the teammate, git-history and undo lines, then writes the plan in one edit, and a second run has nothing to do', async () => {
+  it('asks once, in the panel, with the teammate, git-history and undo lines, then writes the plan in one edit, and a second run has nothing to do', async () => {
     useFixture('composite-and-self');
     const d = deps();
-    const info = answerConvert();
+    const plan = await planProjectDbmlConversion(d);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const apply = vi.spyOn(vscode.workspace, 'applyEdit');
+    const shown = answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
 
     expect(await convertProjectToDbml(d)).toBe('converted');
 
-    const dialog = info.mock.calls.find((c) => c.includes(CONVERT_TO_DBML_BUTTON))!;
-    expect(dialog[0]).toBe('Convert this project to DBML?');
-    const detail = (dialog[1] as { modal: boolean; detail: string }).detail;
-    expect((dialog[1] as { modal: boolean }).modal).toBe(true);
-    expect(detail).toContain(CONVERT_TEAMMATES_LINE);
-    expect(detail).toContain('Everyone who opens this project needs ERD Studio 2.0 or later.');
-    expect(detail).toContain(CONVERT_GIT_LINE);
-    expect(detail).toContain(CONVERT_UNDO_LINE);
-    expect(detail).not.toContain(CONVERT_RESUME_LINE);
-    expect(detail).toContain('• create tables/gold/_relationships.dbml');
-    // One WorkspaceEdit: one undo step.
+    // The panel, not a modal: one editor tab titled Convert to DBML, closed when Convert finishes.
+    expect(info.mock.calls.some((c) => typeof c[1] === 'object' && (c[1] as { modal?: boolean })?.modal)).toBe(false);
+    expect(shown).toHaveLength(1);
+    const { view, panel, html } = shown[0];
+    expect(panel.title).toBe('Convert to DBML');
+    expect(panel._disposed).toBe(true);
+    expect(view.mode).toBe('review');
+    expect(view.heading).toBe('Convert this project to DBML?');
+    expect(view.intro).toEqual([CONVERT_WHAT_LINE, CONVERT_TEAMMATES_LINE, CONVERT_GIT_LINE, CONVERT_UNDO_LINE]);
+    expect(html).toContain('Everyone who opens this project needs ERD Studio 2.0 or later.');
+    expect(html).not.toContain('An earlier conversion stopped part way');
+    // Every path of the plan is listed, project-relative.
+    for (const p of [...plan.creates.map((c) => c.path), ...plan.replaces.map((r) => r.path), ...plan.deletes]) {
+      expect(html).toContain(`<code class="cdb-item__path">.erd-studio/${p}</code>`);
+    }
+    // One WorkspaceEdit: one undo step, applied once.
+    expect(apply).toHaveBeenCalledTimes(1);
     expect(vscode._appliedEdits).toHaveLength(1);
     // The project is now exactly its DBML twin, and logical-models/ is gone.
     expect(snapshot()).toEqual(snapshot(TWIN));
@@ -123,17 +160,60 @@ describe('convertProjectToDbml', () => {
     expect(vscode._appliedEdits).toHaveLength(1);
   });
 
-  it('refuses with a modal listing the refusals, writes nothing, and counts it', async () => {
+  it('refuses in the panel, listing the refusals with no Convert button, writes nothing, and counts it', async () => {
     useFixture('library-relationships');
     const before = snapshot();
     const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
+    const shown = answerPanel((panel) => panel._simulateMessage({ type: 'cancel' }));
     expect(await convertProjectToDbml(deps())).toBe('refused');
-    expect(warn.mock.calls[0][0]).toBe('Convert Project to DBML: Nothing was changed.');
-    expect((warn.mock.calls[0][1] as { modal: boolean; detail: string })).toMatchObject({ modal: true });
-    expect((warn.mock.calls[0][1] as { detail: string }).detail).toMatch(/^Can't convert yet:\n• gold\/sales\.json defines the relationship/);
+    expect(warn).not.toHaveBeenCalled();
+    const { view, html, panel } = shown[0];
+    expect(view.mode).toBe('refused');
+    expect(view.heading).toBe("Can't convert yet");
+    expect(view.sections[0].items[0].text).toMatch(/^gold\/sales\.json defines the relationship/);
+    expect(view.sections[0].items[0].path).toBe('.erd-studio/gold/sales.json');
+    expect(html).not.toContain('data-action="convert"');
+    expect(html).toContain('data-action="checkAgain"');
+    expect(panel._disposed).toBe(true);
     expect(feature).toHaveBeenCalledWith('convertToDbmlRefused');
     expect(vscode._appliedEdits).toHaveLength(0);
     expect(snapshot()).toEqual(before);
+  });
+
+  it('a refusal\'s Open opens its file at its line from the host\'s own list; Check Again plans again and then offers Convert', async () => {
+    useFixture('composite-and-self');
+    const broken = path.join(erd, 'logical-models', 'gold', 'employee.yml');
+    const good = fs.readFileSync(broken, 'utf-8');
+    fs.writeFileSync(broken, `${good}name: twice\n`);
+    const show = vi.spyOn(vscode.window, 'showTextDocument').mockResolvedValue(undefined as never);
+    let step = 0;
+    const shown = answerPanel(async (panel) => {
+      step += 1;
+      if (step === 1) {
+        await panel._simulateMessage({ type: 'open', index: 0 });
+        // A path from the webview is never accepted, nor an index past the list.
+        await panel._simulateMessage({ type: 'open', path: '/etc/passwd' });
+        await panel._simulateMessage({ type: 'open', index: 1 });
+        fs.writeFileSync(broken, good);
+        await panel._simulateMessage({ type: 'checkAgain' });
+      } else {
+        await panel._simulateMessage({ type: 'cancel' });
+      }
+    });
+    expect(await convertProjectToDbml(deps())).toBe('cancelled');
+    expect(shown.map((x) => x.view.mode)).toEqual(['refused', 'review']);
+    // Check Again reused the one panel.
+    expect(vscode.window._webviewPanels).toHaveLength(1);
+    const item = shown[0].view.sections[0].items[0];
+    expect(item).toMatchObject({ path: '.erd-studio/logical-models/gold/employee.yml', open: 0 });
+    expect(item.line).toBeGreaterThan(1);
+    expect(show).toHaveBeenCalledTimes(1);
+    const shownDoc = show.mock.calls[0][0] as unknown as { uri: vscode.Uri };
+    expect(shownDoc.uri.fsPath).toBe(broken);
+    expect((show.mock.calls[0][1] as { selection: vscode.Range }).selection.start.line).toBe(item.line! - 1);
+    expect(feature).toHaveBeenCalledWith('convertToDbmlRefused');
+    expect(feature).toHaveBeenCalledWith('convertToDbmlCancelled');
+    expect(vscode._appliedEdits).toHaveLength(0);
   });
 
   it('chains the v4 → v5 step first, then plans again', async () => {
@@ -164,39 +244,69 @@ describe('convertProjectToDbml', () => {
     doc._setText('name: employee\n');
     vscode.workspace.textDocuments = [doc as never];
     const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
-    const info = answerConvert();
+    const shown = answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
     expect(await convertProjectToDbml(deps())).toBe('refused');
     expect(error.mock.calls[0][0]).toBe(
       'Convert Project to DBML: .erd-studio/logical-models/gold/employee.yml has unsaved edits. Save or revert it, then convert. Nothing was changed.',
     );
     expect(error.mock.calls[0].slice(1)).toEqual(['Show File', 'Save and Try Again']);
-    expect(info.mock.calls.some((c) => c.includes(CONVERT_TO_DBML_BUTTON))).toBe(false);
+    expect(shown).toEqual([]);
     expect(snapshot()).toEqual(before);
   });
 
-  it('stops when the project changed while the modal was open', async () => {
+  it('stops when the project changed while the panel was open', async () => {
     useFixture('composite-and-self');
-    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation(async (...args: unknown[]) => {
-      if (!args.includes(CONVERT_TO_DBML_BUTTON)) return undefined as never;
+    answerPanel((panel) => {
       fs.writeFileSync(path.join(erd, 'logical-models', 'gold', 'added.yml'), 'name: added\ncolumns:\n  - name: id\n    dataType: INT\n');
-      return CONVERT_TO_DBML_BUTTON as never;
+      return panel._simulateMessage({ type: 'convert' });
     });
     const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
     const before = snapshot();
     expect(await convertProjectToDbml(deps())).toBe('cancelled');
-    expect(warn.mock.calls[0][0]).toBe('Convert Project to DBML: the project changed while the dialog was open. Nothing was changed. Run it again.');
+    expect(warn.mock.calls[0][0]).toBe('Convert Project to DBML: the project changed while the preview was open. Nothing was changed. Run it again.');
     expect(vscode._appliedEdits).toHaveLength(0);
     before.set('logical-models/gold/added.yml', 'name: added\ncolumns:\n  - name: id\n    dataType: INT\n');
     expect(snapshot()).toEqual(before);
   });
 
-  it('Cancel writes nothing and is counted', async () => {
+  it.each([
+    ['Cancel', (panel: vscode.MockWebviewPanel) => panel._simulateMessage({ type: 'cancel' })],
+    ['closing the tab', (panel: vscode.MockWebviewPanel) => panel.dispose()],
+  ])('%s writes nothing and is counted as cancelled', async (_label, respond) => {
     useFixture('composite-and-self');
     const before = snapshot();
-    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const shown = answerPanel(respond);
     expect(await convertProjectToDbml(deps())).toBe('cancelled');
     expect(feature).toHaveBeenCalledWith('convertToDbmlCancelled');
+    expect(shown[0].panel._disposed).toBe(true);
+    expect(ConvertToDbmlPanel.currentPanel).toBeUndefined();
+    expect(vscode._appliedEdits).toHaveLength(0);
     expect(snapshot()).toEqual(before);
+  });
+
+  it('Convert clicked twice applies once; a second run while the panel is open reuses it', async () => {
+    useFixture('composite-and-self');
+    const apply = vi.spyOn(vscode.workspace, 'applyEdit');
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    let runs = 0;
+    const shown = answerPanel(async (panel) => {
+      runs += 1;
+      if (runs === 1) {
+        // The command is run again from the palette while the panel waits: one panel, revealed.
+        void convertProjectToDbml(deps());
+        return;
+      }
+      await Promise.all([panel._simulateMessage({ type: 'convert' }), panel._simulateMessage({ type: 'convert' })]);
+    });
+    const first = convertProjectToDbml(deps());
+    expect(await first).toBe('cancelled');
+    await vi.waitFor(() => expect(feature).toHaveBeenCalledWith('convertToDbml'));
+    expect(vscode.window._webviewPanels).toHaveLength(1);
+    expect(shown).toHaveLength(2);
+    expect(shown[1].panel._reveals).toHaveLength(1);
+    expect(apply).toHaveBeenCalledTimes(1);
+    // The superseded run is not counted as a cancel.
+    expect(feature).not.toHaveBeenCalledWith('convertToDbmlCancelled');
   });
 
   it('VS Code applying only part of the edit: applyFileWrites puts it all back, and the failure is counted', async () => {
@@ -368,18 +478,20 @@ describe('convertProjectToDbml', () => {
     expect((exec.mock.calls.find((c) => c[0] === 'vscode.openWith')![1] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'vault.dbml'));
   });
 
-  it('a half-applied earlier run: the modal says this finishes it, and the result is the twin', async () => {
+  it('a half-applied earlier run: the panel says this finishes it, and the result is the twin', async () => {
     fs.cpSync(path.resolve(__dirname, '../fixtures/dbml-convert/half-converted/.erd-studio'), erd, { recursive: true });
-    const info = answerConvert();
+    const shown = answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
     expect(await convertProjectToDbml(deps())).toBe('converted');
-    const detail = (info.mock.calls.find((c) => c.includes(CONVERT_TO_DBML_BUTTON))![1] as { detail: string }).detail;
-    expect(detail).toContain(CONVERT_RESUME_LINE);
+    expect(shown[0].view.intro).toContain(CONVERT_RESUME_LINE);
+    expect(shown[0].view.sections.map((x) => x.id)).toContain('resumed');
     expect(snapshot()).toEqual(snapshot(TWIN));
   });
 });
 
 describe('the canvas offer (§6.4)', () => {
   const YAML_OFFER = 'This project is stored as YAML and JSON. ERD Studio 2.0 stores projects as DBML, an open format.';
+  /** The offer's dialogs among the information messages. */
+  const offers = (info: { mock: { calls: unknown[][] } }): unknown[][] => info.mock.calls.filter((c) => c[0] === DBML_CONVERSION_OFFER_TITLE);
   const NAMING_OFFER = 'ERD Studio now says "table" and "subject area"';
 
   function openWith(state: Map<string, unknown>) {
@@ -423,13 +535,19 @@ describe('the canvas offer (§6.4)', () => {
   it('is made once a session on a YAML project, before (and instead of) the naming offer, and writes nothing until asked', async () => {
     useFixture('composite-and-self');
     const before = snapshot();
-    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Not Now' as never);
+    // Cancel (VS Code's own button), Escape or closing the dialog: undefined, which is Not Now.
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
     const { open, run, namingRun } = openWith(new Map());
     await open('gold/vault.json');
-    const calls = info.mock.calls.map((c) => String(c[0]));
-    expect(calls).toEqual([expect.stringMatching(new RegExp(`^${YAML_OFFER.replace(/[.()]/g, '\\$&')}`))]);
-    expect(calls[0]).toContain('Everyone who opens it will need ERD Studio 2.0 or later afterwards.');
-    expect(info.mock.calls[0].slice(1)).toEqual(['Convert…', 'Not Now', "Don't Ask Again"]);
+    expect(info.mock.calls).toHaveLength(1);
+    expect(info.mock.calls[0][0]).toBe('Convert this project to DBML?');
+    // A modal the user must answer, with the explanation as its detail and exactly two buttons of its own.
+    const options = info.mock.calls[0][1] as { modal: boolean; detail: string };
+    expect(options.modal).toBe(true);
+    expect(options.detail.startsWith(YAML_OFFER)).toBe(true);
+    expect(options.detail).toContain('Everyone who opens it will need ERD Studio 2.0 or later afterwards.');
+    expect(info.mock.calls[0].slice(2)).toEqual(['Convert…', "Don't Ask Again"]);
+    expect([DBML_CONVERSION_OFFER_CONVERT, DBML_CONVERSION_OFFER_DECLINE]).toEqual(['Convert…', "Don't Ask Again"]);
     expect(feature).toHaveBeenCalledWith('convertToDbmlOffered');
     expect(feature).toHaveBeenCalledWith('convertToDbmlNotNow');
     expect(run).not.toHaveBeenCalled();
@@ -438,7 +556,8 @@ describe('the canvas offer (§6.4)', () => {
     // The next open: neither offer again (the naming offer is never made in a session the DBML offer was eligible).
     info.mockClear();
     await open('gold/vault.json');
-    expect(info.mock.calls.map((c) => String(c[0])).filter((c) => c.startsWith(YAML_OFFER) || c.startsWith(NAMING_OFFER))).toEqual([]);
+    expect(offers(info)).toEqual([]);
+    expect(info.mock.calls.map((c) => String(c[0])).filter((c) => c.startsWith(NAMING_OFFER))).toEqual([]);
     expect(namingRun).not.toHaveBeenCalled();
   });
 
@@ -456,17 +575,17 @@ describe('the canvas offer (§6.4)', () => {
     expect(feature).toHaveBeenCalledWith('convertToDbmlDeclined');
     info.mockClear();
     await openWith(state).open('gold/vault.json');
-    expect(info.mock.calls.map((c) => String(c[0])).filter((c) => c.startsWith(YAML_OFFER))).toEqual([]);
+    expect(offers(info)).toEqual([]);
   });
 
   it('uses the mixed wording in a mixed project', async () => {
     fs.cpSync(path.resolve(__dirname, '../fixtures/dbml-convert/mixed/.erd-studio'), erd, { recursive: true });
-    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Not Now' as never);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
     await openWith(new Map()).open('gold/sales.dbml');
-    expect(info.mock.calls.map((c) => String(c[0]))).toContain(
+    expect(offers(info).map((c) => (c[1] as { modal: boolean; detail: string }))).toContainEqual(expect.objectContaining({ modal: true, detail:
       'This project is stored as DBML, but 3 files are YAML or JSON (probably written by an AI helper set up before 2.0). ' +
-        "Convert them to DBML? (You'll see the full list first.)",
-    );
+        "Convert them to DBML? (You'll see the full list first.)" }));
+    expect(feature).toHaveBeenCalledWith('convertToDbmlNotNow');
   });
 
   it('is not made when the conversion would be refused, and the naming offer is then still made', async () => {
@@ -474,7 +593,7 @@ describe('the canvas offer (§6.4)', () => {
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Not Now' as never);
     await openWith(new Map()).open('gold/sales.json');
     const calls = info.mock.calls.map((c) => String(c[0]));
-    expect(calls.filter((c) => c.startsWith(YAML_OFFER))).toEqual([]);
+    expect(offers(info)).toEqual([]);
     expect(calls.filter((c) => c.startsWith(NAMING_OFFER))).toHaveLength(1);
     expect(feature).not.toHaveBeenCalledWith('convertToDbmlOffered');
   });
