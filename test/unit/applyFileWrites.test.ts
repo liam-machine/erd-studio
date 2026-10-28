@@ -125,6 +125,18 @@ describe('a partial apply (D23)', () => {
     expect(options).toEqual({ modal: true });
   });
 
+  it('a create that failed because its file was already there leaves that file alone (only what the edit made is undone)', async () => {
+    const doc = primary();
+    // The planned bytes, already on disk: createFile (overwrite: false) fails on it, after the relationships file landed.
+    write('tables/gold/new.dbml', 'Table new {\n  id INT\n}\n');
+    const beforeDisk = disk();
+    const result = await applyFileWrites(plannedWrites(), { primary: { document: doc as unknown as vscode.TextDocument, text: 'Project sales {}\n' } });
+    expect(result.ok).toBe(false);
+    expect(result.unrestored).toEqual([]);
+    expect(disk()).toEqual(beforeDisk);
+    expect(disk()['tables/gold/new.dbml']).toBe('Table new {\n  id INT\n}\n');
+  });
+
   it('nothing applied (the whole edit refused) needs no reconcile', async () => {
     const doc = primary();
     const beforeDisk = disk();

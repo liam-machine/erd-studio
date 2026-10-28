@@ -83,6 +83,7 @@ import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewTablePositions, findOpenPosition } from '../services/positionService';
 import {
+  DbdiagramLayoutRefused,
   classifySemanticFile,
   computeMissingPositions,
   diagramPathOfLayout,
@@ -178,7 +179,6 @@ import {
   renameTableInSubjectAreaRelationships,
   renameTableInRelationships,
   routeToLibrary,
-  dropRelationshipsTo,
   sharedRelationshipCount,
   usesLibraryRelationships,
 } from '../services/libraryRelationships';
@@ -383,6 +383,9 @@ class EditRefused extends Error {
     this.name = 'EditRefused';
   }
 }
+
+/** What an edit VS Code did not apply says when the caller gives no label of its own (§5.3 step 7). */
+const EDIT_NOT_APPLIED_MESSAGE = 'The edit could not be applied; nothing was changed.';
 
 /** A refusal the user was told about in plain words, which usage telemetry does not count as a failure. */
 function isExplainedRefusal(err: unknown): boolean {
@@ -2017,12 +2020,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     added: readonly Relationship[],
     newModels: readonly SemanticTable[],
-  ): { kept: Relationship[]; saves: SemanticTable[] } {
+  ): { kept: Relationship[]; saves: SemanticTable[]; unstored?: string } {
     if (this.isDbmlDocument(document)) {
-      // A DBML diagram holds no relationships (D5): every one goes to the library.
+      // A DBML diagram holds no relationships (D5): every one goes to the
+      // library. One whose many-side table cannot be read has nowhere to go:
+      // the edit says so (`unstored`) rather than drop it without a word.
       const { kept, changed } = routeToLibrary(added, newModels, (name) => this.tableLibraryService.getTable(name), []);
-      if (kept.length > 0) console.warn(`[SemanticEditorProvider] ${kept.length} relationship(s) name a table with no file; not stored`);
-      return { kept: [], saves: [...newModels, ...changed.filter((m) => !newModels.includes(m))] };
+      const unstored = kept.length === 0 ? undefined
+        : `Not stored, because a table's file could not be read: ${kept.slice(0, 3).map((r) => `${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn}`).join(', ')}${kept.length > 3 ? ` and ${kept.length - 3} more` : ''}.`;
+      return { kept: [], saves: [...newModels, ...changed.filter((m) => !newModels.includes(m))], ...(unstored ? { unstored } : {}) };
     }
     if (added.length === 0 || !this.relationshipsInLibrary(this.tableLibraryService.listTables())) {
       return { kept: [...added], saves: [...newModels] };
@@ -2696,12 +2702,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return this.subjectAreaService.listSubjectAreas(this.workspaceRoot, semanticDir).filter((s) => !samePath(s.filePath, currentPath));
   }
 
-  /** A file's text: an open document's (unsaved edits included), else the disk's; null when there is none. */
+  /** A file's text: an open document's (unsaved edits included), else the disk's without a byte-order mark; null when there is none. */
   private openOrDiskText(filePath: string): string | null {
     const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && samePath(d.uri.fsPath, filePath));
     if (doc) return doc.getText();
     try {
-      return fs.readFileSync(filePath, 'utf-8');
+      // A byte-order mark is the document's encoding, not its text: VS Code
+      // keeps it on save, so a text with one would be written with two (D7).
+      return fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
     } catch {
       return null;
     }
@@ -2804,8 +2812,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       });
       if (!applied.ok) {
         telemetry.error('editRejected');
-        if (errorLabel && webview) {
-          webview.postMessage({ type: 'error', payload: { message: errorLabel } });
+        // Put back: the caller's label, else the plain refusal (§5.3 step 7).
+        // Not put back: the reconcile's modal already lists the files, and a
+        // toast saying nothing changed would contradict it.
+        if (webview && applied.unrestored.length === 0) {
+          webview.postMessage({ type: 'error', payload: { message: errorLabel ?? EDIT_NOT_APPLIED_MESSAGE } });
         }
         return false;
       }
@@ -2888,10 +2899,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     currentPath: string,
     rewrite: (parsed: Record<string, unknown>) => boolean,
     resolver: SubjectAreaResolver,
+    /** Only DBML diagrams: JSON ones are neither parsed nor dirty-checked. */
+    options: { dbmlOnly?: boolean } = {},
   ): FileWrite[] {
     const out: FileWrite[] = [];
     for (const summary of this.listOtherSubjectAreas(currentPath)) {
       if (summary.storage !== 'dbml') {
+        if (options.dbmlOnly) continue;
         for (const { filePath, text } of this.rewriteOtherSubjectAreas(currentPath, rewrite, [summary])) {
           out.push({ kind: 'replace', path: filePath, text });
         }
@@ -3506,7 +3520,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<boolean> {
     // Merge computed positions into the document. No webview refresh — the
     // caller (sendSubjectAreaData) is about to send the payload itself.
-    return this.applySubjectAreaEdit(
+    const save = (): Promise<boolean> => this.applySubjectAreaEdit(
       document,
       (_section, parsed) => {
         const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
@@ -3516,6 +3530,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       },
       { refreshWebview: false, stage: 'logical' },
     );
+    if (!this.isDbmlDocument(document)) return save();
+    // A DBML diagram's save writes its layout file, which can be refused (the
+    // diagram is read-only, the layout is open with unsaved changes or does
+    // not read). A refresh path never fails on a write: the canvas still
+    // loads with the computed positions, and the next open asks again.
+    try {
+      if (this.parseSubjectAreaFile(document).writable === false) return false;
+      return await save();
+    } catch (err) {
+      if (err instanceof EditRefused || err instanceof DbmlEditRefused || err instanceof DbdiagramLayoutRefused) {
+        console.warn(`[SemanticEditorProvider] Positions for ${path.basename(document.uri.fsPath)} not saved: ${err.message}`);
+        return false;
+      }
+      throw err;
+    }
   }
 
   /**
@@ -3671,12 +3700,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this subject area.` } });
           return;
         }
-        // A table added through a DBML diagram is a new `.dbml` file (D20), never named like the relationships file.
-        const reserved = this.isDbmlDocument(document) ? validateNewDbmlTableName(model.name) : null;
-        if (reserved) {
-          webview.postMessage({ type: 'error', payload: { message: `Failed to add table: ${reserved}` } });
-          return;
-        }
+        // A new table's name follows the authoring rule (a letter first), so it
+        // is never `_relationships` (§2.1); the planner refuses that name for
+        // every other caller.
         // The model library is shared across domains — never overwrite a
         // logical-models/{name}.yml that another domain may depend on. Case is
         // ignored: `DimDate` next to `dimdate.yml` is one file on macOS/Windows.
@@ -4383,12 +4409,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview.postMessage({ type: 'error', payload: { message: this.tableUnavailableMessage(payload.oldName) } });
           return;
         }
-        // A DBML table's new file name may not be the relationships file's (§2.1).
-        const reserved = this.tableLibraryService.tableStorage(payload.oldName) === 'dbml' ? validateNewDbmlTableName(trimmedNew) : null;
-        if (reserved) {
-          webview.postMessage({ type: 'error', payload: { message: reserved } });
-          return;
-        }
+        // The new name follows the authoring rule (a letter first), so it is
+        // never `_relationships` (§2.1); the planner refuses it for any other caller.
         const renamedModel: import('../types/semantic').SemanticTable = { ...existingModel, name: trimmedNew };
         // Library relationships that point at the model — its own self-references
         // and every other model's — follow the rename (#126).
@@ -4644,13 +4666,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
-  /** What deleting DBML tables also removes, for the Delete Table File prompt (D16). */
-  private describeDbmlDeleteCascade(names: readonly string[]): string {
+  /**
+   * What deleting DBML tables also removes, for the Delete Table prompts
+   * (D16): the relationships the cascade drops (the deleted tables' own and
+   * other DBML owners' to them; a YAML owner keeps its own) and the DBML
+   * diagrams that list them. `other` words them for the canvas, whose own
+   * diagram has just dropped them.
+   */
+  describeDbmlDeleteCascade(names: readonly string[], other = true): string {
     const lowerNames = new Set(names.map((n) => n.toLowerCase()));
     let relationships = 0;
     for (const model of this.tableLibraryService.listTables()) {
+      const deleted = lowerNames.has(model.name.toLowerCase());
+      if (!deleted && this.tableLibraryService.tableStorage(model.name) !== 'dbml') continue;
       for (const rel of model.relationships ?? []) {
-        if (lowerNames.has(model.name.toLowerCase()) || lowerNames.has(rel.toModel.toLowerCase())) relationships++;
+        if (deleted || lowerNames.has(rel.toModel.toLowerCase())) relationships++;
       }
     }
     let diagrams = 0;
@@ -4660,31 +4690,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (members.some((m) => lowerNames.has(m.toLowerCase()))) diagrams++;
     }
     const rels = `${relationships} relationship${relationships === 1 ? '' : 's'}`;
-    const places = `${diagrams} other diagram${diagrams === 1 ? '' : 's'}`;
+    const places = `${diagrams} ${other ? 'other ' : ''}diagram${diagrams === 1 ? '' : 's'}`;
     return ` This removes the table's file, its ${rels} and its place in ${places}.`;
   }
 
   /**
-   * Delete Table File for tables that include DBML ones (D16): the files,
+   * Delete Table (File) for tables that include DBML ones (D16): the files,
    * the Refs they own, other DBML owners' Refs to them, and every `use` line
-   * naming them (relationships files and diagrams, with their positions and
-   * sticky-note links), as ONE WorkspaceEdit (its own undo step). Returns
-   * false when VS Code did not apply it (reconciled by applyFileWrites).
+   * naming them (relationships files and DBML diagrams, with their positions
+   * and sticky-note links), as ONE WorkspaceEdit (its own undo step). JSON
+   * diagrams are neither read nor written: they name tables, and a deleted
+   * one shows as a placeholder there, as for a YAML table. Returns false when
+   * VS Code did not apply it (reconciled by applyFileWrites). A file that
+   * could not be saved afterwards is reported, never ignored.
    */
-  private async deleteTablesWithCascade(names: readonly string[]): Promise<boolean> {
+  async deleteTablesWithCascade(names: readonly string[]): Promise<boolean> {
     const lowerNames = new Set(names.map((n) => n.toLowerCase()));
     const readText = (filePath: string): string | null => this.openOrDiskText(filePath);
-    // Other DBML owners lose their relationships to the deleted tables.
-    const saves: SemanticTable[] = [];
-    for (const model of this.tableLibraryService.listTables()) {
-      if (lowerNames.has(model.name.toLowerCase()) || this.tableLibraryService.tableStorage(model.name) !== 'dbml') continue;
-      let copy = model;
-      for (const name of names) copy = dropRelationshipsTo([copy], name)[0] ?? copy;
-      if (copy !== model) saves.push(copy);
-    }
     let writes: FileWrite[];
     try {
-      const lib = this.tableLibraryService.planTableWrites({ delete: [...names], save: saves.map((model) => ({ model })) }, undefined, { readText });
+      const lib = this.tableLibraryService.planTableWrites(this.tableLibraryService.dbmlDeleteCascadeOps(names), undefined, { readText });
       const plan = lib.plan ?? this.tableLibraryService.planTableWrites(undefined, undefined, { dbml: true, readText }).plan!;
       const resolver = this.resolverOf(plan);
       const diagrams = this.rewriteOtherSubjectAreaWrites('', (parsed) => {
@@ -4695,8 +4720,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         logical.models = models.filter((m) => !(typeof m === 'string' && removed.has(m)));
         pruneViewConfigForRemovedTables(parsed, removed);
         return true;
-      }, resolver);
-      writes = [...lib.writes, ...diagrams.filter((w) => w.path.toLowerCase().endsWith('.dbml') || w.path.toLowerCase().endsWith('.dbdiagram'))];
+      }, resolver, { dbmlOnly: true });
+      writes = [...lib.writes, ...diagrams];
     } catch (err) {
       throw this.refusalOf(err);
     }
@@ -4706,11 +4731,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
     const applied = await applyFileWrites(writes, {});
     if (!applied.ok) return false;
+    const unsaved: string[] = [];
+    const saveFailures = new Set<SaveFailure>();
+    let modelFileUnsaved = false;
     for (const uri of applied.replaced) {
-      if (await saveDocumentByUri(uri)) this.ownWriteTracker.recordWrite(uri.fsPath);
+      if (await saveDocumentByUri(uri, (reason) => saveFailures.add(reason))) {
+        this.ownWriteTracker.recordWrite(uri.fsPath);
+      } else {
+        unsaved.push(uri.fsPath);
+        if (this.isLibraryPath(uri.fsPath)) modelFileUnsaved = true;
+      }
     }
     for (const filePath of applied.created) this.ownWriteTracker.recordWrite(filePath);
     for (const filePath of applied.deleted) this.ownWriteTracker.recordDelete(filePath);
+    if (unsaved.length > 0) {
+      for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
+      void vscode.window.showErrorMessage(this.describeUnsaved(unsaved));
+    }
     this.tableLibraryService.invalidateCache();
     await this.refreshAllOpenSubjectAreas();
     for (const uri of applied.replaced) this._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: true });
@@ -5098,6 +5135,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         if (success) {
           this.selectorsService.scheduleRegenerate();
+          if (routed.unstored) void vscode.window.showInformationMessage(`Added ${payload.modelName}. ${routed.unstored}`);
         } else {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to add table to subject area.' } });
         }
@@ -5389,10 +5427,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           onSuccess: () => {
             if (fromDbt) telemetry.feature('addFromDbt');
             this.selectorsService.scheduleRegenerate();
-            if (skippedNote) {
+            const note = [skippedNote, routed.unstored].filter(Boolean).join(' ');
+            if (note) {
               const added = draft.modelNames.length;
               void vscode.window.showInformationMessage(
-                `Added ${added} table${added === 1 ? '' : 's'}${from}. ${skippedNote}`,
+                `Added ${added} table${added === 1 ? '' : 's'}${from}. ${note}`,
               );
             }
           },

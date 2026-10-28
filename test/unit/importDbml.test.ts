@@ -673,6 +673,24 @@ describe('Import DBML — where relationships go', () => {
     expect(readJson(result!.domainPath).logical.relationships).toEqual([]);
   });
 
+  it('a library that holds DBML keeps them in the library, even when a diagram file holds some (native DBML, §5.1)', async () => {
+    makeProject('v6');
+    fs.writeFileSync(erd('tables', 'dim_other.dbml'), 'Table dim_other {\n  id INT [pk]\n}\n');
+    fs.mkdirSync(erd('silver'), { recursive: true });
+    fs.writeFileSync(erd('silver', 'legacy.json'), `${JSON.stringify({
+      schemaVersion: 5, domain: 'legacy', layer: 'silver',
+      logical: { models: ['a', 'b'], relationships: [{ fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id', cardinality: 'many-to-one' }] },
+      viewConfig: {},
+    }, null, 2)}\n`);
+    const file = dbmlFile('shop.dbml', SHOP_DBML);
+    const result = await importDbml(deps(fakeUi({ file, layer: 'gold' })));
+
+    expect(readJson(result!.domainPath).logical.relationships).toEqual([]);
+    expect(lms.getTable('orders')?.relationships).toEqual([
+      expect.objectContaining({ fromColumn: 'customer_id', toModel: 'customers', toColumn: 'id', cardinality: 'many-to-one' }),
+    ]);
+  });
+
   it('adds the relationship to an existing library table, after the subject area is written', async () => {
     makeProject('v5');
     const ordersYml = 'name: orders\ncolumns:\n  - name: id\n    dataType: int\n    description: ""\n  - name: customer_id\n    dataType: int\n    description: ""\n';

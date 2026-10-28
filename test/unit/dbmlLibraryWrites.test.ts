@@ -173,6 +173,42 @@ describe('each op kind: one write per file', () => {
   });
 });
 
+describe('folders and relationships files as the disk spells them', () => {
+  /** base() with the gold folder's relationships file named `_Relationships.dbml`. */
+  const caseVariant = (): Record<string, string> => {
+    const files = base();
+    files['tables/gold/_Relationships.dbml'] = files['tables/gold/_relationships.dbml'];
+    delete files['tables/gold/_relationships.dbml'];
+    return files;
+  };
+
+  it('a relationships file named in another case is the folder\'s file: edited in place, never a second one created', () => {
+    const files = caseVariant();
+    const model = modelOf(files, 'fct_order');
+    model.relationships = [...(model.relationships ?? []).filter((r) => r.toModel !== 'dim_customer'), { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'one-to-one' }];
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }] });
+    expect(pathsOf(plan.writes)).toEqual(['replace tables/gold/_Relationships.dbml']);
+    expect(plan.createdRelationshipsFiles).toEqual([]);
+    expect(plan.relationshipsFilesFor(['fct_order'])).toEqual(['tables/gold/_Relationships.dbml']);
+    const after = apply(files, plan.writes);
+    // Its other Refs stay where they were.
+    expect(after['tables/gold/_Relationships.dbml']).toContain('Ref: fct_order.date_key >? dim_date.date_key [delete: cascade] // keep me');
+    expect(after['tables/gold/_Relationships.dbml']).toContain('Ref: dim_customer.customer_key ?- fct_order.customer_key');
+  });
+
+  it('a new table in that folder is placed there too, with no new relationships file', () => {
+    const files = caseVariant();
+    const model: SemanticTable = {
+      name: 'fct_visit',
+      columns: [{ name: 'id', dataType: 'INT', description: '', isPrimaryKey: true }, { name: 'date_key', dataType: 'INT', description: '' }],
+      relationships: [{ fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' }],
+    };
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }], newTableFolder: 'GOLD' });
+    expect(pathsOf(plan.writes)).toEqual(['create tables/gold/fct_visit.dbml', 'replace tables/gold/_Relationships.dbml']);
+    expect(plan.createdRelationshipsFiles).toEqual([]);
+  });
+});
+
 describe('the rename ops shape (§4.6 step 0)', () => {
   it('save [{model, fromName: old}] + delete [old] is one rename: the owner\'s Refs are re-spelled, never dropped', () => {
     const files = base();
@@ -246,6 +282,16 @@ describe('refusals', () => {
     const model = modelOf(files, 'fct_order');
     model.relationships = [...(model.relationships ?? []), { fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' }];
     expect(() => planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }] })).toThrow(/holds the relationship .* twice/);
+  });
+
+  it('the reserved name `_relationships` (§2.1): a new table, a rename target, in any case', () => {
+    const files = base();
+    const fresh: SemanticTable = { name: '_relationships', columns: [{ name: 'id', dataType: 'INT', description: '' }] };
+    expect(() => planDbmlLibraryWrites(snapshotOf(files), { save: [{ model: fresh }], newTableFolder: 'gold' }))
+      .toThrow('‘_relationships’ is the name of the relationships file; choose another table name.');
+    const renamed = { ...modelOf(files, 'dim_customer'), name: '_Relationships' };
+    expect(() => planDbmlLibraryWrites(snapshotOf(files), { save: [{ model: renamed, fromName: 'dim_customer' }] }))
+      .toThrow(DbmlEditRefused);
   });
 
   it('a relationship from a DBML table to a YAML table (D20)', () => {

@@ -123,7 +123,7 @@ export interface ImportDbmlDeps {
     TableLibraryService,
     'findTableNameIgnoringCase' | 'getTable' | 'saveTable' | 'serializeTable' | 'groupsByFolder' | 'deleteTable'
       | 'listTables' | 'hasUnreadableRelationships' | 'tablePath' | 'getTablesDir' | 'writesTableNaming'
-  >;
+  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites'>>;
   /** `createDomain`'s rule for a new subject area name in `layer` (undefined = valid). */
   validateDomainName: (value: string, layer: string) => string | undefined;
   /**
@@ -337,6 +337,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
       tableLibraryService.listTables(),
       subjectAreaService.countSubjectAreaFileRelationships(workspaceRoot, semanticDir),
       tableLibraryService.hasUnreadableRelationships(),
+      // A DBML table's relationships can only live in the library (D5, §5.1).
+      tableLibraryService.hasDbmlLibrary?.() ?? false,
     );
     plan = planDbmlImport({
       model,

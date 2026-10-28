@@ -11,7 +11,7 @@
  */
 
 import type { Cardinality, ColumnDef, TableRole, Stage } from '../types/semantic';
-import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN, TABLE_NAME_RULE, findDuplicateNames } from '../types/naming';
+import { COLUMN_NAME_PATTERN, RESERVED_TABLE_NAME_MESSAGE, TABLE_NAME_PATTERN, TABLE_NAME_RULE, findDuplicateNames } from '../types/naming';
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
 import { ADD_EXISTING_TABLES_LIMIT } from '../types/messages';
 import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, isReservedTableName, isValidTableAlias } from '@erd-studio/core';
@@ -56,7 +56,7 @@ export function validateTableNameSafety(name: unknown): string | null {
  * {@link validateTableNameSafety}.
  */
 /** The refusal for a new DBML table named like the relationships file (§2.1). */
-export const RESERVED_TABLE_NAME_MESSAGE = '‘_relationships’ is the name of the relationships file; choose another table name.';
+export { RESERVED_TABLE_NAME_MESSAGE };
 
 /**
  * Validate the name of a table about to be CREATED as a `.dbml` file in

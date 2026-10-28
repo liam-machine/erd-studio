@@ -38,6 +38,7 @@ import type { YmlParserService } from '../../src/services/ymlParserService';
 import type { TemplateService } from '../../src/services/templateService';
 import type { SemanticTable } from '../../src/types/semantic';
 import { projectDiagnostics } from '../../packages/core/test/dbmlWriterSupport';
+import { TABLE_NAME_RULE } from '../../src/types/naming';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const NATIVE = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native');
@@ -46,7 +47,7 @@ let root: string;
 const at = (rel: string): string => path.join(root, '.erd-studio', rel);
 const relOf = (abs: string): string => path.relative(path.join(root, '.erd-studio'), abs).split(path.sep).join('/');
 
-function buildProvider(tracker: OwnWriteTracker): { provider: SemanticEditorProvider; tables: TableLibraryService } {
+function buildProvider(tracker: OwnWriteTracker, options: { offers?: boolean } = {}): { provider: SemanticEditorProvider; tables: TableLibraryService } {
   const layerService = new LayerService(root, '.erd-studio');
   const subjectAreaService = new SubjectAreaService(layerService);
   const tables = new TableLibraryService(root, '.erd-studio');
@@ -56,7 +57,8 @@ function buildProvider(tracker: OwnWriteTracker): { provider: SemanticEditorProv
     globalStorageUri: vscode.Uri.file(path.join(root, '.global-storage')),
     extension: { packageJSON: { version: '0.0.0-test' } },
     globalState: { get: () => true, update: async () => {} },
-    workspaceState: { get: () => true, update: async () => {} },
+    // `true` answers every "Don't Ask Again" key, so no offer is made unless a test asks for them.
+    workspaceState: { get: () => !options.offers, update: async () => {} },
     subscriptions: [],
   } as unknown as import('vscode').ExtensionContext;
   const empty = { models: new Map(), relationshipTests: [], uniqueColumns: new Map(), compositeUniqueGroups: new Map(), disabledModels: new Set() };
@@ -240,7 +242,8 @@ describe('table edits (applyTableEdit): the table file is spliced, the diagram k
 describe('relationship edits: always in the library (D5), in the owner\'s folder file', () => {
   it('addRelationship', async () => {
     const r = await run({ type: 'addRelationship', payload: { fromModel: 'customer_profile', fromColumn: 'loyalty_tier', toModel: 'dim_region', toColumn: 'region_name', cardinality: 'many-to-one' } });
-    expectWrote(r, ['gold/sales.dbml', 'tables/gold/_relationships.dbml', ...r.written.filter((p) => p === 'tables/gold/customer_profile.dbml')]);
+    // The relationships file only: the column is no key, and the table file holds no Ref (D3).
+    expectWrote(r, ['gold/sales.dbml', 'tables/gold/_relationships.dbml']);
     expect(r.after['gold/sales.dbml']).toBe(r.before['gold/sales.dbml']);
     expect(r.after['tables/gold/_relationships.dbml']).toContain('Ref: customer_profile.loyalty_tier >? dim_region.region_name');
     expect(table('customer_profile').relationships?.some((rel) => rel.fromColumn === 'loyalty_tier')).toBe(true);
@@ -342,6 +345,18 @@ describe('adding, renaming and removing tables', () => {
     expect(r.after['tables/_relationships.dbml']).toContain('Ref "previous day": dim_day.previous_date_key > dim_day.date_key');
     const before = new Set(diagnosticsOf(r.before));
     expect(diagnosticsOf(r.after).filter((d) => !before.has(d))).toEqual([]);
+  });
+
+  it('removeModels of a folder\'s last member: its relationships file\'s use line goes too', async () => {
+    const r = await run({ type: 'removeModels', payload: { modelNames: ['dim_date'] } });
+    expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml']);
+    expect(r.after['gold/sales.dbml']).not.toContain("use { table dim_date }");
+    // No member is left at the top of tables/, so its relationships file is no longer imported;
+    // the gold folder's still is.
+    expect(r.after['gold/sales.dbml']).not.toContain("use * from '../tables/_relationships.dbml'");
+    expect(r.after['gold/sales.dbml']).toContain("use * from '../tables/gold/_relationships.dbml'");
+    expect(r.after['gold/sales.dbdiagram']).not.toContain('"dim_date"');
+    expect('tables/dim_date.dbml' in r.after).toBe(true);
   });
 
   it('removeModels: the use line and the position go; the table file stays', async () => {
@@ -466,10 +481,18 @@ describe('refusals (D20, §2.1)', () => {
     expect(_appliedEdits).toHaveLength(0);
   });
 
-  it('a DBML table may not be renamed to _relationships', async () => {
+  it('a DBML table may not be renamed to _relationships: the authoring rule (a letter first) refuses it', async () => {
     const r = await run({ type: 'renameModel', payload: { oldName: 'bridge_empty', newName: '_relationships' } });
-    // The authoring rule (a letter first) or the reserved name refuses it; either way nothing is written.
-    expect(r.errors.length).toBeGreaterThan(0);
+    // A typed name always starts with a letter, so it can never be the reserved
+    // one; the planner refuses it for every other caller (dbmlLibraryWrites.test.ts).
+    expect(r.errors).toEqual([expect.stringContaining(TABLE_NAME_RULE)]);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(r.after).toEqual(r.before);
+  });
+
+  it('a new table may not be named _relationships: the authoring rule refuses it', async () => {
+    const r = await run({ type: 'addModel', payload: { name: '_relationships', description: '', columns: [{ name: 'id', dataType: 'INT', description: '' }] } });
+    expect(r.errors).toEqual([expect.stringContaining(TABLE_NAME_RULE)]);
     expect(_appliedEdits).toHaveLength(0);
     expect(r.after).toEqual(r.before);
   });
@@ -486,5 +509,173 @@ describe('a partial apply is put back (D23)', () => {
     expect(r.errors.length).toBeGreaterThan(0);
     expect(_appliedEdits).toHaveLength(2);
     expect(r.after).toEqual(r.before);
+  });
+});
+
+describe('Turn Round (commitRelationshipWrite) on a DBML diagram', () => {
+  it('stores a backwards many-to-one the right way round: it moves to its new owner\'s folder file, as one edit', async () => {
+    // Drawn from dim_date's key, so the canvas flags it as backwards; stored
+    // where that (wrong) owner lives, at the top of tables/.
+    const gold = at('tables/gold/_relationships.dbml');
+    fs.writeFileSync(gold, fs.readFileSync(gold, 'utf-8').replace('Ref "ship date": fct_order.ship_date_key >? dim_date.date_key\n', ''));
+    const top = at('tables/_relationships.dbml');
+    fs.writeFileSync(top, fs.readFileSync(top, 'utf-8')
+      .replace("use { table dim_date } from './dim_date.dbml'\n", "use { table dim_date } from './dim_date.dbml'\nuse { table fct_order } from './gold/fct_order.dbml'\n")
+      .concat('Ref "ship date": dim_date.date_key > fct_order.ship_date_key\n'));
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (text: string) =>
+      (String(text).includes('drawn backwards') ? 'Turn Round' : undefined)) as never);
+    const tracker = new OwnWriteTracker();
+    const { provider } = buildProvider(tracker, { offers: true });
+    const document = createMockTextDocument(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8'), { persist: true });
+    (vscode.workspace.textDocuments as unknown[]).push(document);
+    const panel = createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(document as unknown as vscode.TextDocument, panel as unknown as vscode.WebviewPanel, {} as vscode.CancellationToken);
+    const before = snapshot();
+    await panel._simulateMessage({ type: 'ready' });
+    await vi.waitFor(() => expect(table('fct_order').relationships?.some((r) => r.fromColumn === 'ship_date_key' && r.toModel === 'dim_date')).toBe(true));
+    await vi.waitFor(() => expect(snapshot()['tables/gold/_relationships.dbml']).toContain('Ref "ship date": fct_order.ship_date_key >? dim_date.date_key'));
+
+    expect(_appliedEdits).toHaveLength(1);
+    const written = [...new Set(_appliedEdits[0]._ops.map((op) => relOf((op as { uri: { fsPath: string } }).uri.fsPath)))].sort();
+    expect(written).toEqual(['gold/sales.dbml', 'tables/_relationships.dbml', 'tables/gold/_relationships.dbml']);
+    const after = snapshot();
+    expect(after['gold/sales.dbml']).toBe(before['gold/sales.dbml']);
+    expect(after['tables/_relationships.dbml']).not.toContain('dim_date.date_key > fct_order');
+    expect(table('dim_date').relationships?.some((r) => r.toModel === 'fct_order') ?? false).toBe(false);
+    expect(panel._postedMessages.filter((m) => (m as { type: string }).type === 'error')).toEqual([]);
+    const diagnostics = new Set(diagnosticsOf(before));
+    expect(diagnosticsOf(after).filter((d) => !diagnostics.has(d))).toEqual([]);
+  });
+});
+
+describe('the ready load\'s position save (autoPositionNewTables, §5.3)', () => {
+  /** sales.dbdiagram without bridge_empty's position: a partially positioned diagram. */
+  const dropPosition = (): void => {
+    const layout = JSON.parse(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8'));
+    layout.defaultView.tablePositions = layout.defaultView.tablePositions.filter((p: { name: string }) => p.name !== 'bridge_empty');
+    fs.writeFileSync(at('gold/sales.dbdiagram'), `${JSON.stringify(layout, null, 2)}\n`);
+  };
+  async function openAndReady(prepare?: () => void): Promise<{ r: Run; posted: Array<{ type: string; payload?: unknown }> }> {
+    const tracker = new OwnWriteTracker();
+    const recorded: string[] = [];
+    vi.spyOn(tracker, 'recordWrite').mockImplementation((p: string) => { recorded.push(relOf(p)); });
+    vi.spyOn(tracker, 'recordDelete').mockImplementation((p: string) => { recorded.push(relOf(p)); });
+    const { provider } = buildProvider(tracker);
+    const document = createMockTextDocument(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8'), { persist: true });
+    (vscode.workspace.textDocuments as unknown[]).push(document);
+    const panel = createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(document as unknown as vscode.TextDocument, panel as unknown as vscode.WebviewPanel, {} as vscode.CancellationToken);
+    prepare?.();
+    _appliedEdits.length = 0;
+    panel._postedMessages.length = 0;
+    const before = snapshot();
+    await panel._simulateMessage({ type: 'ready' });
+    const posted = panel._postedMessages as Array<{ type: string; payload?: unknown }>;
+    const errors = posted.filter((m) => m.type === 'error').map((m) => (m.payload as { message: string }).message);
+    const written = [...new Set(_appliedEdits.flatMap((e) => e._ops.map((op) => relOf((op as { uri: { fsPath: string } }).uri.fsPath))))].sort();
+    return { r: { errors, written, before, after: snapshot(), provider, tracker, recorded }, posted };
+  }
+
+  it('a partially positioned diagram: only the layout changes, the .dbml keeps its bytes', async () => {
+    dropPosition();
+    const { r, posted } = await openAndReady();
+    expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml']);
+    expect(r.after['gold/sales.dbml']).toBe(r.before['gold/sales.dbml']);
+    expect(r.after['gold/sales.dbdiagram']).toContain('"name": "bridge_empty"');
+    expect(posted.some((m) => m.type === 'domainLoaded')).toBe(true);
+  });
+
+  it.each([
+    ['the diagram is read-only (a second Project)', () => {
+      fs.appendFileSync(at('gold/sales.dbml'), "\nProject other {\n  Note: 'x'\n}\n");
+    }, undefined],
+    ['its layout file is open with unsaved changes', undefined, () => {
+      const doc = createMockTextDocument(at('gold/sales.dbdiagram'), fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8'));
+      doc._setText(`${doc.getText()} `);
+      (vscode.workspace.textDocuments as unknown[]).push(doc);
+    }],
+    ['its layout file is not a JSON object', () => {
+      fs.writeFileSync(at('gold/sales.dbdiagram'), '[]\n');
+    }, undefined],
+  ] as const)('%s: nothing is written, and the canvas still loads with the computed positions', async (_label, onDisk, whileOpen) => {
+    dropPosition();
+    (onDisk as (() => void) | undefined)?.();
+    const { r, posted } = await openAndReady(whileOpen as (() => void) | undefined);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(r.after).toEqual(r.before);
+    expect(r.errors).toEqual([]);
+    const domain = posted.find((m) => m.type === 'domainLoaded') as { payload: { viewConfig: { positions: Record<string, unknown> } } } | undefined;
+    expect(domain).toBeDefined();
+    expect(Object.keys(domain!.payload.viewConfig.positions)).toContain('bridge_empty');
+  });
+});
+
+describe('Delete Table (File): the D16 cascade', () => {
+  beforeEach(() => {
+    // A YAML table with a relationship to the DBML dim_date, and a JSON diagram showing both.
+    fs.writeFileSync(at('tables/gold/fct_y.yml'), [
+      'name: fct_y', 'columns:', '  - name: id', '    dataType: INT', '    isPrimaryKey: true', '  - name: date_key', '    dataType: INT',
+      'relationships:', '  - fromColumn: date_key', '    toModel: dim_date', '    toColumn: date_key', '    cardinality: many-to-one', '',
+    ].join('\n'));
+    fs.writeFileSync(at('gold/mixed.json'), `${JSON.stringify({
+      schemaVersion: 5, domain: 'mixed', layer: 'gold',
+      logical: { models: ['fct_y', 'dim_date'], relationships: [] }, viewConfig: {},
+    }, null, 2)}\n`);
+  });
+
+  it('deletes a DBML table a YAML table points at: DBML Refs and use lines go, the yml and JSON diagrams are left alone', async () => {
+    const { provider } = buildProvider(new OwnWriteTracker());
+    // A JSON diagram open with unsaved changes is never written, so it does not refuse the delete.
+    const json = createMockTextDocument(at('gold/mixed.json'), fs.readFileSync(at('gold/mixed.json'), 'utf-8'));
+    json._setText(`${json.getText()} `);
+    (vscode.workspace.textDocuments as unknown[]).push(json);
+    // The prompt counts what the cascade removes: dim_date's own Ref and fct_order's two; fct_y keeps its own.
+    expect(provider.describeDbmlDeleteCascade(['dim_date'], false))
+      .toBe(" This removes the table's file, its 3 relationships and its place in 2 diagrams.");
+    const before = snapshot();
+    expect(await provider.deleteTablesWithCascade(['dim_date'])).toBe(true);
+    const after = snapshot();
+    expect('tables/dim_date.dbml' in after).toBe(false);
+    expect(after['tables/gold/fct_y.yml']).toBe(before['tables/gold/fct_y.yml']);
+    expect(after['gold/mixed.json']).toBe(before['gold/mixed.json']);
+    for (const diagram of ['gold/sales.dbml', 'silver/staging.dbml']) {
+      expect(after[diagram]).not.toContain('dim_date');
+      expect(after[diagram]).not.toContain("use * from '../tables/_relationships.dbml'");
+    }
+    expect(after['tables/gold/_relationships.dbml']).not.toContain('dim_date');
+    expect(after['tables/_relationships.dbml']).not.toMatch(/^Ref/m);
+    const diagnostics = new Set(diagnosticsOf(before));
+    expect(diagnosticsOf(after).filter((d) => !diagnostics.has(d))).toEqual([]);
+  });
+
+  it('the fs Delete Table (TableLibraryService.deleteTable) with a YAML owner deletes too, leaving the yml as it is', () => {
+    const before = snapshot();
+    library().deleteTable('dim_date');
+    const after = snapshot();
+    expect('tables/dim_date.dbml' in after).toBe(false);
+    expect(after['tables/gold/fct_y.yml']).toBe(before['tables/gold/fct_y.yml']);
+    expect(after['tables/gold/_relationships.dbml']).not.toContain('dim_date');
+  });
+
+  it('a file that could not be saved afterwards is reported by name', async () => {
+    const { _failMockSave } = await import('../__mocks__/vscode');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockImplementation((async () => undefined) as never);
+    const { provider } = buildProvider(new OwnWriteTracker());
+    _failMockSave(at('tables/gold/_relationships.dbml'));
+    expect(await provider.deleteTablesWithCascade(['dim_date'])).toBe(true);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('Could not save .erd-studio/tables/gold/_relationships.dbml'));
+  });
+});
+
+describe('another diagram with a byte-order mark (D7)', () => {
+  it('is re-rendered without one: VS Code keeps the BOM as the encoding, so the text never carries a second', async () => {
+    fs.writeFileSync(at('silver/staging.dbml'), `﻿${fs.readFileSync(at('silver/staging.dbml'), 'utf-8')}`);
+    const r = await run({ type: 'renameModel', payload: { oldName: 'dim_date', newName: 'dim_day' } });
+    expect(r.errors).toEqual([]);
+    const ops = _appliedEdits[0]._ops.filter((op) => relOf((op as { uri: { fsPath: string } }).uri.fsPath) === 'silver/staging.dbml');
+    expect(ops).toHaveLength(1);
+    const text = (ops[0] as { newText: string }).newText;
+    expect(text.startsWith('﻿')).toBe(false);
+    expect(text).toContain("use { table dim_day } from '../tables/dim_day.dbml'");
   });
 });

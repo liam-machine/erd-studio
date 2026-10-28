@@ -21,6 +21,13 @@ export const TABLE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
 export const TABLE_NAME_RULE =
   'Table name must start with a letter and use only letters, numbers, and underscores.';
 
+/**
+ * Why a new or renamed `.dbml` table may not be called `_relationships` (any
+ * case): it is the name of each library folder's relationships file (§2.1 of
+ * docs/plans/native-dbml-storage.md).
+ */
+export const RESERVED_TABLE_NAME_MESSAGE = '‘_relationships’ is the name of the relationships file; choose another table name.';
+
 /** A column name: letters (either case), digits, and underscores. */
 export const COLUMN_NAME_PATTERN = /^[A-Za-z0-9_]+$/;
 

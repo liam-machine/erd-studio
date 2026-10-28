@@ -59,7 +59,9 @@ export interface NewSubjectAreaWrite {
 
 export interface NewSubjectAreaWriteServices {
   layerService: Pick<LayerService, 'getAllLayers' | 'saveConfig'>;
-  tableLibraryService: Pick<TableLibraryService, 'saveTable' | 'deleteTable' | 'tablePath' | 'writesTableNaming'>;
+  tableLibraryService: Pick<TableLibraryService, 'saveTable' | 'deleteTable' | 'tablePath' | 'writesTableNaming'>
+    /** Every file a save writes (a DBML table's relationships files too), to snapshot before it. */
+    & Partial<Pick<TableLibraryService, 'planTableWrites'>>;
 }
 
 export type NewSubjectAreaWriteResult =
@@ -93,8 +95,9 @@ export async function writeNewSubjectArea(
   const written: string[] = [];
   const changed: string[] = [];
   let domainWritten = false;
-  // What each existing library file held before the write changed it, to put back on failure.
-  const before = new Map<string, string>();
+  // What each library file held before the write changed it (null: it was
+  // not there), to put back on failure.
+  const before = new Map<string, string | null>();
   // Asked before any table file lands: the subject area is written in the naming the project writes (#182).
   const tableNaming = tableLibraryService.writesTableNaming();
   // Folders the write creates, removed again if it fails (a new project's layers.json with them).
@@ -118,8 +121,15 @@ export async function writeNewSubjectArea(
     // Existing library tables that gained a relationship, once the subject area is on disk.
     for (const table of write.changedTables) {
       if (write.newTables.includes(table)) continue;
-      const tablePath = tableLibraryService.tablePath(table.name);
-      if (fs.existsSync(tablePath)) before.set(tablePath, fs.readFileSync(tablePath, 'utf-8'));
+      // A DBML table's save also writes its folder's relationships file (and
+      // moves misplaced Refs home): snapshot every file the save plans.
+      const paths = tableLibraryService.planTableWrites
+        ? tableLibraryService.planTableWrites({ save: [{ model: table }] }).writes.map((w) => w.path)
+        : [tableLibraryService.tablePath(table.name)];
+      for (const filePath of paths) {
+        if (before.has(filePath)) continue;
+        before.set(filePath, fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : null);
+      }
       tableLibraryService.saveTable(table);
       changed.push(table.name);
     }
@@ -133,8 +143,16 @@ export async function writeNewSubjectArea(
     if (domainWritten) {
       try { fs.unlinkSync(domainPath); ownWrites.recordDelete(domainPath); } catch { undone = false; }
     }
-    for (const [tablePath, text] of before) {
-      try { fs.writeFileSync(tablePath, text, 'utf-8'); ownWrites.recordWrite(tablePath); } catch { undone = false; }
+    for (const [filePath, text] of before) {
+      try {
+        if (text !== null) {
+          fs.writeFileSync(filePath, text, 'utf-8');
+          ownWrites.recordWrite(filePath);
+        } else if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          ownWrites.recordDelete(filePath);
+        }
+      } catch { undone = false; }
     }
     if (undone && createdRoot) {
       try { fs.rmSync(semanticRoot, { recursive: true, force: true }); } catch { undone = false; }

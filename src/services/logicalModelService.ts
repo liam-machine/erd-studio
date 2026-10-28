@@ -1003,7 +1003,11 @@ export class TableLibraryService {
   relationshipsFileFor(tableName: string): string | undefined {
     try {
       const filePath = this.findTableFile(tableName);
-      return filePath !== null && isDbmlFile(filePath) ? path.join(path.dirname(filePath), DBML_RELATIONSHIPS_FILE_NAME) : undefined;
+      if (filePath === null || !isDbmlFile(filePath)) return undefined;
+      // The folder's relationships file as listed (any case, `_Relationships.dbml`), else the name a new one gets.
+      const dir = path.dirname(filePath);
+      return this.listRelationshipsFiles().find((f) => path.dirname(f).toLowerCase() === dir.toLowerCase())
+        ?? path.join(dir, DBML_RELATIONSHIPS_FILE_NAME);
     } catch {
       return undefined;
     }
@@ -1132,7 +1136,9 @@ export class TableLibraryService {
     }
     const anyDbml = dbmlOps.save!.length > 0 || dbmlOps.delete!.length > 0;
     if (!anyDbml && !options.dbml) return { writes };
-    const folder = layerFolder && (TABLE_FOLDER_PATTERN.test(layerFolder) || this.listFoldersOf(this.v6TablesDir).includes(layerFolder)) ? layerFolder : '';
+    // A folder already on disk is used as it is spelled there (`Gold` for the layer `gold`).
+    const listedFolder = layerFolder ? this.listFoldersOf(this.v6TablesDir).find((f) => f.toLowerCase() === layerFolder.toLowerCase()) : undefined;
+    const folder = listedFolder ?? (layerFolder && TABLE_FOLDER_PATTERN.test(layerFolder) ? layerFolder : '');
     const plan = planDbmlLibraryWrites(this.dbmlSnapshot(options.readText), { ...dbmlOps, newTableFolder: folder });
     for (const w of plan.writes) writes.push({ ...w, path: this.semanticAbsolute(w.path) } as FileWrite);
     return { writes, plan };
@@ -1598,8 +1604,10 @@ export class TableLibraryService {
   deleteTable(name: string): void {
     const filePath = this.tablePath(name);
     if (isDbmlFile(filePath)) {
-      // D16: the file, the Refs it owns, other owners' Refs to it and the use lines naming it, in one go.
-      this.applyDbmlOps({ delete: [name], save: dropRelationshipsTo(this.listTables(), name).map((model) => ({ model })) });
+      // D16: the file, the Refs it owns and other DBML owners' Refs to it, in
+      // one go. A YAML table's relationship to it stays in its yml, as a YAML
+      // delete leaves it (the planner writes DBML tables only).
+      this.applyDbmlOps(this.dbmlDeleteCascadeOps([name]));
       return;
     }
     if (fs.existsSync(filePath)) {
@@ -1607,6 +1615,25 @@ export class TableLibraryService {
       this.ownWriteTracker.recordDelete(filePath);
     }
     this.cache.delete(filePath);
+  }
+
+  /**
+   * The library half of Delete Table for DBML tables (D16), shared by the
+   * canvas and every other caller so they cannot disagree: delete the
+   * tables, and save each other DBML owner without its relationships to
+   * them. A YAML owner keeps its relationship in its yml (the planner writes
+   * DBML tables only), as deleting a YAML table leaves it today.
+   */
+  dbmlDeleteCascadeOps(names: readonly string[]): { delete: string[]; save: Array<{ model: SemanticTable }> } {
+    const gone = new Set(names.map((n) => n.toLowerCase()));
+    const saves: SemanticTable[] = [];
+    for (const model of this.listTables()) {
+      if (gone.has(model.name.toLowerCase()) || this.tableStorage(model.name) !== 'dbml') continue;
+      let copy = model;
+      for (const name of names) copy = dropRelationshipsTo([copy], name)[0] ?? copy;
+      if (copy !== model) saves.push(copy);
+    }
+    return { delete: [...names], save: saves.map((model) => ({ model })) };
   }
 
   /**

@@ -86,7 +86,7 @@ export interface DrawFromDbtDeps {
   tableLibraryService: Pick<
     TableLibraryService,
     'tableExists' | 'saveTable' | 'serializeTable' | 'groupsByFolder' | 'deleteTable' | 'listTables' | 'getTable' | 'hasUnreadableRelationships' | 'tablePath' | 'getTablesDir' | 'writesTableNaming'
-  >;
+  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites'>>;
   /** Schema yml, manifest and catalog; each may be undefined (no yml, never compiled, no `dbt docs generate`). */
   loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData; catalog?: CatalogData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
@@ -255,6 +255,8 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
       tableLibraryService.listTables(),
       subjectAreaService.countSubjectAreaFileRelationships(workspaceRoot, semanticDir),
       tableLibraryService.hasUnreadableRelationships(),
+      // A DBML table's relationships can only live in the library (D5, §5.1).
+      tableLibraryService.hasDbmlLibrary?.() ?? false,
     )
       ? routeToLibrary(draft.relationships, draft.newModels, (n) => tableLibraryService.getTable(n),
         drawnDiagramCopies(readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir)))

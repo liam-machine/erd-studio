@@ -365,6 +365,36 @@ describe('DBML table writes outside the editor (S5: planDbmlLibraryWrites + writ
     expect(lib.getTable('fct_x')?.relationships).toBeUndefined();
   });
 
+  it('deleteTable in a mixed project: a YAML table\'s relationship to it stays in its yml; DBML owners lose theirs', () => {
+    write('tables/dim_date.dbml', dbmlTable('dim_date'));
+    write('tables/fct_x.dbml', dbmlTable('fct_x', '  id INT [pk]\n  date_id INT'));
+    write('tables/_relationships.dbml', `${HEADER}use { table dim_date } from './dim_date.dbml'\nuse { table fct_x } from './fct_x.dbml'\n\nRef: fct_x.date_id >? dim_date.id\n`);
+    const yml = write('tables/fct_y.yml', 'name: fct_y\ncolumns:\n  - name: date_id\n    dataType: INT\nrelationships:\n  - fromColumn: date_id\n    toModel: dim_date\n    toColumn: id\n');
+    const ymlText = fs.readFileSync(yml, 'utf-8');
+    const lib = service();
+    lib.deleteTable('dim_date');
+    expect(fs.existsSync(path.join(semantic, 'tables/dim_date.dbml'))).toBe(false);
+    expect(fs.readFileSync(yml, 'utf-8')).toBe(ymlText);
+    expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8')).toBe(`${HEADER}\n`);
+  });
+
+  it('renameTable refuses the reserved name `_relationships` (§2.1), and writes nothing', () => {
+    write('tables/dim_date.dbml', dbmlTable('dim_date'));
+    const lib = service();
+    expect(() => lib.renameTable('dim_date', '_relationships')).toThrow('‘_relationships’ is the name of the relationships file');
+    expect(fs.readdirSync(path.join(semantic, 'tables'))).toEqual(['dim_date.dbml']);
+    expect(lib.listTables().map((t) => t.name)).toEqual(['dim_date']);
+  });
+
+  it('a folder\'s relationships file named in another case is its file: relationshipsFileFor and new tables follow the disk', () => {
+    write('tables/Gold/fct_order.dbml', dbmlTable('fct_order'));
+    write('tables/Gold/_Relationships.dbml', `${HEADER}\n`);
+    const lib = service();
+    expect(rel(lib.relationshipsFileFor('fct_order') ?? null)).toBe('tables/Gold/_Relationships.dbml');
+    const { writes } = lib.planTableWrites({ save: [{ model: { name: 'dim_new', columns: [{ name: 'id', dataType: 'INT', description: '' }] } }] }, 'gold', { dbml: true });
+    expect(writes.map((w) => `${w.kind} ${rel(w.path)}`)).toEqual(['create tables/Gold/dim_new.dbml']);
+  });
+
   it('pathForNewTable keeps today\'s rule (a .yml path) until the switch-over (S6)', () => {
     write('tables/dim_date.dbml', dbmlTable('dim_date'));
     expect(rel(service().pathForNewTable('dim_new'))).toBe('tables/dim_new.yml');

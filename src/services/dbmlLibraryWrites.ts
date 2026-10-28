@@ -23,6 +23,7 @@ import {
   attachRelationships,
   dbmlName,
   dbmlTableLookup,
+  isReservedTableName,
   linkKey,
   reverseBareOneToOne,
 } from '@erd-studio/core';
@@ -41,6 +42,7 @@ import type { DbmlResolvedTable, RefUnit, RelationshipsFileEdit } from '@erd-stu
 import type { FileWrite } from './fileWrites';
 import { mergeFileWrites } from './fileWrites';
 import type { Relationship, SemanticTable, TableRelationship } from '../types/semantic';
+import { RESERVED_TABLE_NAME_MESSAGE } from '../types/naming';
 
 /** A table the library lists (the winner of its name). */
 export interface DbmlSnapshotTable {
@@ -113,11 +115,6 @@ function dirOf(p: string): string {
   return at < 0 ? '' : p.slice(0, at);
 }
 
-/** The relationships file of a table file's folder. */
-function relationshipsFileOf(tablePath: string): string {
-  return `${dirOf(tablePath)}/${DBML_RELATIONSHIPS_FILE_NAME}`;
-}
-
 /** A table file's path in a library folder. */
 function tableFilePath(folder: string, name: string): string {
   return `${TABLES_PREFIX}${folder ? `${folder}/` : ''}${name}.dbml`;
@@ -182,6 +179,31 @@ function storedUnit(ref: DbmlStoredRef, lookup: (name: string) => DbmlAttachTabl
  * relationship from a DBML table to a YAML one (D20).
  */
 export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLibraryOps): DbmlLibraryWritePlan {
+  // --- Folders and relationships files as the disk spells them -------------------------------
+  // The library reads a relationships file named in any case
+  // (`_Relationships.dbml`): each folder's is the one the snapshot lists, so
+  // the planner edits that file and never creates a second one beside it.
+  const listedRelationshipsFile = new Map<string, string>();
+  for (const file of snapshot.relationshipsFiles.keys()) {
+    const dir = lower(dirOf(file));
+    if (!listedRelationshipsFile.has(dir)) listedRelationshipsFile.set(dir, file);
+  }
+  /** The relationships file of a table file's folder. */
+  const relationshipsFileOf = (tablePath: string): string =>
+    listedRelationshipsFile.get(lower(dirOf(tablePath))) ?? `${dirOf(tablePath)}/${DBML_RELATIONSHIPS_FILE_NAME}`;
+  /** A library folder spelled as the disk spells it, when the snapshot knows it. */
+  const listedFolders = new Map<string, string>();
+  for (const t of snapshot.tables.values()) if (t.storage === 'dbml' && t.folder) listedFolders.set(lower(t.folder), t.folder);
+  for (const file of snapshot.relationshipsFiles.keys()) {
+    const folder = dirOf(file).slice(TABLES_PREFIX.length);
+    if (dirOf(file).startsWith('tables/') && folder) listedFolders.set(lower(folder), folder);
+  }
+  const folderAsListed = (folder: string): string => listedFolders.get(lower(folder)) ?? folder;
+  /** §2.1: a new or renamed `.dbml` table may not take the relationships file's name. */
+  const refuseReserved = (name: string, where: string): void => {
+    if (isReservedTableName(name)) refuse(where, RESERVED_TABLE_NAME_MESSAGE);
+  };
+
   // --- 0. Normalise: a delete of a rename's old name is part of the rename ------------------
   const saves = (ops.save ?? []).map((s) => ({ ...s }));
   const renamedFrom = new Set(saves.filter((s) => s.fromName !== undefined && s.fromName !== s.model.name).map((s) => lower(s.fromName!)));
@@ -266,7 +288,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   }
 
   // Saves (edits, renames, new tables).
-  const newFolder = ops.newTableFolder ?? '';
+  const newFolder = folderAsListed(ops.newTableFolder ?? '');
   for (const { model, fromName } of saves) {
     const sourceKey = lower(fromName ?? model.name);
     const t = snapshot.tables.get(sourceKey);
@@ -274,6 +296,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     if (t && t.storage !== 'dbml') throw new Error(`planDbmlLibraryWrites: ${t.name} is not a DBML table`);
     let path: string;
     let text: string;
+    if (!t || renamed) refuseReserved(model.name, t ? t.path : tableFilePath(newFolder, model.name));
     if (!t) {
       path = tableFilePath(newFolder, model.name);
       if (snapshot.files.has(path)) refuse(path, `${path} already exists; choose another name.`);
@@ -311,7 +334,8 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     const t = snapshot.tables.get(key);
     if (!current || !t) continue;
     if (current.storage !== 'dbml') throw new Error(`planDbmlLibraryWrites: ${t.name} is not a DBML table`);
-    const path = tableFilePath(toFolder, stemOf(current.path));
+    refuseReserved(stemOf(current.path), current.path);
+    const path = tableFilePath(folderAsListed(toFolder), stemOf(current.path));
     if (path === current.path) continue;
     const pending = writes.findIndex((w) => w.path === current.path && w.kind !== 'delete');
     const text = pending >= 0 ? (writes[pending] as { text: string }).text : tableText(current.path);

@@ -36,6 +36,7 @@ import type { Relationship, TableRelationship } from '../../src/types/semantic';
 import { DBT, columnsOf, linkKey } from './relationshipStateSpace.model';
 import type { DbtSpec, SubjectAreaName, TableName, World } from './relationshipStateSpace.model';
 import { SEMANTIC_DIR } from './relationshipStateSpace.harness';
+import type { GWorld } from './relationshipStateSpace.universes';
 
 export const TABLE_PATHS: Record<TableName, string> = { dim: 'tables/dim.dbml', fct: 'tables/gold/fct.dbml' };
 export const RELATIONSHIPS_FILES: Record<TableName, string> = { dim: 'tables/_relationships.dbml', fct: 'tables/gold/_relationships.dbml' };
@@ -224,4 +225,125 @@ export function normaliseLibrary(w: World): string {
     }
   }
   return all.sort().join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// The GROUP and SELF universes (relationshipStateSpace.universes.ts, #133 L2, L3)
+// ---------------------------------------------------------------------------
+
+/** Where each table of a universe lives, and its folder's relationships file. */
+export interface GLayout { tablePaths: Record<string, string>; relationshipsFiles: Record<string, string> }
+
+/** GROUP: `dim` (keyed by the composite (k, k_x)) at the top of `tables/`, `fct` in `tables/gold/`. */
+export const GROUP_LAYOUT: GLayout = {
+  tablePaths: { dim: 'tables/dim.dbml', fct: 'tables/gold/fct.dbml' },
+  relationshipsFiles: { dim: 'tables/_relationships.dbml', fct: 'tables/gold/_relationships.dbml' },
+};
+
+/** SELF: `emp` in `tables/gold/`; its self-reference is a bare `emp.mgr > emp.id`-style Ref. */
+export const SELF_LAYOUT: GLayout = {
+  tablePaths: { emp: 'tables/gold/emp.dbml' },
+  relationshipsFiles: { emp: 'tables/gold/_relationships.dbml' },
+};
+
+/**
+ * A GROUP or SELF world as DBML can hold it (§2.8): no diagram copies (D5),
+ * every library entry on its foreign-key table, ends respelled lower-case,
+ * the composite key kept as the grouping. Null when a link would be stored
+ * twice (only Convert dedupes that).
+ */
+export function projectGWorld(w: GWorld): GWorld | null {
+  const lib: Record<string, TableRelationship[]> = Object.fromEntries(Object.keys(w.columns).map((m) => [m, []]));
+  const keys: string[] = [];
+  for (const owner of Object.keys(w.lib)) {
+    for (const entry of w.lib[owner]) {
+      const rel = canonicalRelationship({ fromModel: owner, ...entry } as Relationship);
+      const lowered: Relationship = {
+        ...rel,
+        fromModel: rel.fromModel.toLowerCase(), fromColumn: rel.fromColumn.toLowerCase(),
+        toModel: rel.toModel.toLowerCase(), toColumn: rel.toColumn.toLowerCase(),
+      };
+      keys.push(linkKey(lowered));
+      const { fromModel, ...stored } = lowered;
+      lib[fromModel].push(stored);
+    }
+  }
+  if (new Set(keys).size !== keys.length) return null;
+  return { columns: w.columns, lib, dom: { D1: [], D2: [], D3: [] }, domModels: w.domModels };
+}
+
+/** Write a projected GROUP or SELF world as a DBML project. Throws when the writer refuses it. */
+export function materialiseDbmlG(w: GWorld, layout: GLayout): DbmlProject {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-statespace-dbml-g-'));
+  const semantic = path.join(root, SEMANTIC_DIR);
+  try {
+    for (const name of Object.keys(w.columns)) {
+      const file = path.join(semantic, layout.tablePaths[name]);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, renderNewTableDbml({ name, columns: w.columns[name] }));
+    }
+    fs.writeFileSync(path.join(semantic, 'layers.json'), `${JSON.stringify({ schemaVersion: 1, layers: [
+      { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', creatable: true, order: 1 },
+    ] }, null, 2)}\n`);
+    const tableLibraryService = new TableLibraryService(root, SEMANTIC_DIR);
+    const saves = Object.keys(w.columns).filter((n) => w.lib[n].length > 0).map((name) => ({
+      model: { name, columns: w.columns[name], relationships: w.lib[name] },
+    }));
+    if (saves.length > 0) {
+      const plan = planDbmlLibraryWrites(tableLibraryService.dbmlSnapshot(), { save: saves });
+      writeFilesWithRollback(plan.writes.map((wr) => ({ ...wr, path: path.join(semantic, wr.path) })));
+    }
+    tableLibraryService.invalidateCache();
+    const diagramPath = (d: SubjectAreaName): string => path.join(semantic, 'silver', `${d}.dbml`);
+    fs.mkdirSync(path.join(semantic, 'silver'), { recursive: true });
+    for (const d of ['D1', 'D2', 'D3'] as const) {
+      const members = w.domModels[d];
+      const relationshipsFiles = [...new Set(members.map((m) => layout.relationshipsFiles[m]))].filter((f) => fs.existsSync(path.join(semantic, f)));
+      fs.writeFileSync(diagramPath(d), renderNewSubjectAreaDbml({
+        filePath: `silver/${d}.dbml`, domain: d,
+        members: members.map((name) => ({ name, path: layout.tablePaths[name] })),
+        relationshipsFiles,
+      }));
+      const positions = editDiagramLayout(null, Object.fromEntries(members.map((m, i) => [m, { x: i * 300, y: 0 }])), []);
+      if (positions) fs.writeFileSync(path.join(semantic, 'silver', `${d}.dbdiagram`), positions);
+    }
+    const subjectAreaService = new SubjectAreaService(new LayerService(root, SEMANTIC_DIR));
+    subjectAreaService.setTableLibraryService(tableLibraryService);
+    return { root, tableLibraryService, subjectAreaService, diagramPath };
+  } catch (err) {
+    fs.rmSync(root, { recursive: true, force: true });
+    throw err;
+  }
+}
+
+/** The library a fresh TableLibraryService reads back, in a GWorld. */
+export function readBackDbmlG(p: DbmlProject, w: GWorld): GWorld {
+  const lib = new TableLibraryService(p.root, SEMANTIC_DIR);
+  const out: GWorld = { columns: w.columns, lib: {}, dom: { D1: [], D2: [], D3: [] }, domModels: w.domModels };
+  for (const name of Object.keys(w.columns)) out.lib[name] = (lib.getTable(name)?.relationships ?? []).map((r) => ({ ...r }));
+  return out;
+}
+
+/**
+ * A GWorld's library modulo §2.8: entries canonicalised to their foreign-key
+ * table, ends lower-cased, `?` marks invisible, and a composite key only as
+ * the set of links it groups (a group of one pair, a partial, reads back as
+ * a single Ref: its key is dropped), sorted.
+ */
+export function normaliseLibraryG(w: GWorld): string {
+  const entries: Array<{ rel: Relationship; group: string | null }> = [];
+  for (const owner of Object.keys(w.lib)) {
+    const rels = w.lib[owner].map((e) => ({ fromModel: owner, ...e }) as Relationship);
+    for (const r of rels) {
+      const members = r.compositeKey
+        ? rels.filter((x) => x.compositeKey?.toLowerCase() === r.compositeKey!.toLowerCase() && x.toModel.toLowerCase() === r.toModel.toLowerCase())
+        : [];
+      const group = members.length >= 2 ? members.map((m) => linkKey(m)).sort().join('+') : null;
+      entries.push({ rel: canonicalRelationship(r), group });
+    }
+  }
+  return entries.map(({ rel, group }) => JSON.stringify([
+    rel.fromModel.toLowerCase(), rel.toModel.toLowerCase(), rel.fromColumn.toLowerCase(), rel.toColumn.toLowerCase(),
+    rel.cardinality, rel.role ?? null, group,
+  ])).sort().join('\n');
 }

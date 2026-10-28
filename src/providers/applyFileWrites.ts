@@ -65,10 +65,12 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
   const primaryPath = options.primary?.document.uri.fsPath;
   const ordered = orderFileWrites(mergeFileWrites(writes.filter((w) => !(primaryPath !== undefined && w.kind === 'replace' && samePath(w.path, primaryPath)))));
 
-  // What each replaced or deleted file held before, to put back after a failure.
+  // What each planned file held before (null: absent), to put back after a
+  // failure. Creates too: a create that failed because its file was already
+  // there must never have that file deleted by the reconcile.
   const prior = new Map<string, { text: string | null; dirty: boolean }>();
   if (options.primary) prior.set(options.primary.document.uri.fsPath, { text: options.primary.document.getText(), dirty: options.primary.document.isDirty });
-  for (const w of ordered) if (w.kind !== 'create' && !prior.has(w.path)) prior.set(w.path, currentText(w.path));
+  for (const w of ordered) if (!prior.has(w.path)) prior.set(w.path, currentText(w.path));
 
   const edit = new vscode.WorkspaceEdit();
   if (options.primary) edit.replace(options.primary.document.uri, fullRange(options.primary.document), options.primary.text);
@@ -102,7 +104,7 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
   let anything = false;
   const isBack = (w: FileWrite): boolean => {
     const now = currentText(w.path).text;
-    if (w.kind === 'create') return now === null || now !== w.text;
+    if (w.kind === 'create') return prior.get(w.path)?.text !== null || now === null || now !== w.text;
     if (w.kind === 'delete') return now !== null || prior.get(w.path)?.text === null;
     return now !== w.text;
   };
@@ -110,7 +112,8 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
     const uri = vscode.Uri.file(w.path);
     const now = currentText(w.path).text;
     if (w.kind === 'create') {
-      if (now !== null && now === w.text) {
+      // Only a file this edit made: one that was there before is the user's.
+      if (prior.get(w.path)?.text === null && now !== null && now === w.text) {
         undo.deleteFile(uri, { ignoreIfNotExists: true });
         anything = true;
       }

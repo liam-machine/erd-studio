@@ -1602,13 +1602,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.window.showErrorMessage('Delete Table: No table selected. Right-click a table in the Table Library.');
         return;
       }
+      // A DBML table goes with its relationships and every DBML diagram's use
+      // line and positions for it (D16), as one WorkspaceEdit: the canvas's
+      // Delete Table File cascade, so a diagram never imports a deleted file.
+      const dbml = tableLibraryService.tableStorage(node.name) === 'dbml';
       const confirm = await vscode.window.showWarningMessage(
-        `Delete table "${node.name}"? This removes the YAML file — subject area references are not cleaned up.`,
+        dbml
+          ? `Delete table "${node.name}"?${editorProvider.describeDbmlDeleteCascade([node.name], false)}`
+          : `Delete table "${node.name}"? This removes the YAML file — subject area references are not cleaned up.`,
         { modal: true },
         'Delete',
       );
       if (confirm === 'Delete') {
         try {
+          if (dbml) {
+            if (!(await editorProvider.deleteTablesWithCascade([node.name]))) {
+              void vscode.window.showErrorMessage(`Delete Table: VS Code did not apply the change, so "${node.name}" was not deleted.`);
+              return;
+            }
+            tableLibraryProvider.refresh();
+            return;
+          }
           tableLibraryService.deleteTable(node.name);
         } catch (err) {
           void vscode.window.showErrorMessage(`Delete Table: ${err instanceof Error ? err.message : String(err)}`);

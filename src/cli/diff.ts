@@ -589,6 +589,8 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
       ctx.tableLibraryService.listTables(),
       ctx.subjectAreaService.countSubjectAreaFileRelationships(ctx.root, ctx.semanticDir),
       ctx.tableLibraryService.hasUnreadableRelationships(),
+      // A DBML table's relationships can only live in the library (D5, §5.1).
+      ctx.tableLibraryService.hasDbmlLibrary(),
     ),
   };
   const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms, unreadableModelFiles, relationshipHome);
