@@ -27,7 +27,8 @@
  *   its Refs sorted (§4.5), so the drawn order of a link carries no meaning;
  * - and, with `convert: true` only, the Convert rows: a link stored twice
  *   kept once, a composite group's role taken from its first member,
- *   dangling relationships dropped (with the foreign-key badge only they
+ *   dangling relationships (either end's table or column gone) dropped
+ *   (with the foreign-key badge only they
  *   put on a column), annotation ids ignored, and relationships
  *   held in a diagram file moved to their owner in a Unified shape (the
  *   diagram's own list left empty, as a DBML diagram holds no Refs, D5).
@@ -270,8 +271,9 @@ function normaliseList(
     const ends = endsOf(turned.rel, turned.owner);
     if (rows.has('convertDangling')) {
       const to = findTable(tables, ends.toModel);
-      // Either end's table missing, or the target column gone (§2.8).
-      if (!to || findColumn(to, ends.toColumn) === undefined || !findTable(tables, ends.fromModel)) {
+      const from = findTable(tables, ends.fromModel);
+      // Either end's table missing, or either end's column gone (§2.8).
+      if (!to || findColumn(to, ends.toColumn) === undefined || !from || findColumn(from, ends.fromColumn) === undefined) {
         dangling.push({ model: String(ends.fromModel ?? ''), column: String(ends.fromColumn ?? '') });
         continue;
       }

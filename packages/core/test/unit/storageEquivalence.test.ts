@@ -327,7 +327,13 @@ describe('normaliseForStorageEquivalence: the Convert-only rows', () => {
     b.relationships.push({ fromModel: 'fct_order', fromColumn: 'order_id', toModel: 'dim_gone', toColumn: 'id', cardinality: 'many-to-one' });
     b.relationships.push({ fromModel: 'fct_order', fromColumn: 'order_id', toModel: 'dim_customer', toColumn: 'gone_column', cardinality: 'many-to-one' });
     b.relationships.push({ fromModel: 'fct_gone', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id', cardinality: 'many-to-one' });
+    // The from column gone (a column renamed without its relationship; S7 review, round 2).
+    b.relationships.push({ fromModel: 'fct_order', fromColumn: 'gone_column', toModel: 'dim_customer', toColumn: 'customer_id', cardinality: 'many-to-one' });
     same(display(), b, true);
+    // Without the Convert rows it is a difference.
+    const fromGone = display();
+    fromGone.relationships.push({ fromModel: 'fct_order', fromColumn: 'gone_column', toModel: 'dim_customer', toColumn: 'customer_id', cardinality: 'many-to-one' });
+    differ(display(), fromGone);
   });
 
   it('the foreign-key badge only a dangling relationship gave its column goes with it', () => {

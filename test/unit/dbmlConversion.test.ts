@@ -591,7 +591,7 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
     expect(created(plan, 'tables/_relationships.dbml')).toContain('// Ref: fct.dim_key >? dim.nope\n');
-    expect(plan.notes).toEqual([expect.stringMatching(/because dim has no column nope; it was not drawn before and is not drawn now, and fct\.dim_key loses the foreign-key mark it gave it \(unless its file says isForeignKey: true\)\.$/)]);
+    expect(plan.notes).toEqual([expect.stringMatching(/because dim has no column nope; a diagram that shows both tables drew it as a line between them, with no column to point at; it is not drawn now, and fct\.dim_key loses the foreign-key mark it gave it \(unless its file says isForeignKey: true\)\.$/)]);
     expectCompilesEverywhere(input, plan);
   });
 
@@ -600,7 +600,37 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     const plan = await planDbmlConversion(inputOf({ 'logical-models/dim.yml': DIM, 'logical-models/fct.yml': fct, 'gold/d.json': diagram('d', 'gold', ['fct', 'dim']) }));
     expect(plan.refusals).toEqual([]);
     expect(created(plan, 'tables/fct.dbml')).toContain("foreign_key: 'true'");
-    expect(plan.notes).toEqual([expect.stringMatching(/it was not drawn before and is not drawn now\.$/)]);
+    expect(plan.notes).toEqual([expect.stringMatching(/with no column to point at; it is not drawn now\.$/)]);
+  });
+
+  it('a dangling from column (renamed in the yml, not in its relationship) whose tables a diagram draws: no false self-check refusal (S7 review, round 2)', async () => {
+    const input = inputOf({
+      'logical-models/dim.yml': DIM,
+      'logical-models/fct.yml': yml('fct', ['k'], [{ fromColumn: 'gone', toModel: 'dim', toColumn: 'dim_key', cardinality: 'many-to-one' }]),
+      'gold/d.json': diagram('d', 'gold', ['fct', 'dim']),
+    });
+    const plan = await planDbmlConversion(input);
+    expect(plan.refusals).toEqual([]);
+    expect(created(plan, 'tables/_relationships.dbml')).toContain('// Kept by Convert Project to DBML: fct has no column gone, so this relationship is not active.\n// Ref: fct.gone >? dim.dim_key\n');
+    expect(plan.notes).toEqual([
+      'logical-models/fct.yml: the relationship fct.gone → dim.dim_key is written as a commented-out line in tables/_relationships.dbml, because fct has no column gone; '
+        + 'a diagram that shows both tables drew it as a line between them, with no column to point at; it is not drawn now.',
+    ]);
+    expectCompilesEverywhere(input, plan);
+  });
+
+  it('a dangling from column on a one-to-many and in a diagram file\'s own list: no false self-check refusal', async () => {
+    const input = inputOf({
+      'logical-models/dim.yml': yml('dim', [['dim_key', 'INT', true], 'label'], [{ fromColumn: 'dim_key', toModel: 'fct', toColumn: 'gone', cardinality: 'one-to-many' }]),
+      'logical-models/fct.yml': yml('fct', ['k', 'dim_key'], [{ fromColumn: 'dim_key', toModel: 'dim', toColumn: 'dim_key', cardinality: 'many-to-one' }]),
+      'gold/d.json': diagram('d', 'gold', ['fct', 'dim'], [{ fromModel: 'fct', fromColumn: 'old_key', toModel: 'dim', toColumn: 'dim_key', cardinality: 'many-to-one' }]),
+    });
+    const plan = await planDbmlConversion(input);
+    expect(plan.refusals).toEqual([]);
+    const text = created(plan, 'tables/_relationships.dbml')!;
+    expect(refLines(text)).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
+    expect(text).toContain('// Ref: fct.old_key >? dim.dim_key\n');
+    expectCompilesEverywhere(input, plan);
   });
 
   it('a composite with one dangling member, drawn in a diagram', async () => {

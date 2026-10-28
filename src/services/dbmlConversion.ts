@@ -655,11 +655,20 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
     const owner = tableOf(e.rel.fromModel);
     const to = tableOf(e.rel.toModel);
     const home = relationshipsFileOfFolder(owner?.folder ?? to?.folder ?? '');
-    const drop = (reason: string, badge?: string): null => {
+    /**
+     * `columnGone`: both tables have files but a column is gone. ERD Studio
+     * 1.x still drew that as a line between the two tables in a diagram that
+     * shows both (the line has no column to point at); a missing table was
+     * never drawn.
+     */
+    const drop = (reason: string, options: { badge?: string; columnGone?: boolean } = {}): null => {
       dangling.push({ file: home, reason, members: [e.rel] });
+      const drawn = options.columnGone
+        ? 'a diagram that shows both tables drew it as a line between them, with no column to point at; it is not drawn now'
+        : 'it was not drawn before and is not drawn now';
       notes.push(
         `${e.file}: the relationship ${describeEnds(e.rel.fromModel, [e.rel.fromColumn], e.rel.toModel, [e.rel.toColumn])} is written as a commented-out line in ${home}, because ${reason}; ` +
-          `it was not drawn before and is not drawn now${badge ? `, and ${badge} loses the foreign-key mark it gave it (unless its file says isForeignKey: true)` : ''}.`,
+          `${drawn}${options.badge ? `, and ${options.badge} loses the foreign-key mark it gave it (unless its file says isForeignKey: true)` : ''}.`,
       );
       return null;
     };
@@ -673,11 +682,11 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
     if (!owner) return drop(`${e.rel.fromModel} has no table file`);
     if (!to) return drop(`${e.rel.toModel} has no table file`);
     const fromColumn = columnOf(owner, e.rel.fromColumn);
-    if (fromColumn === undefined) return drop(`${owner.name} has no column ${e.rel.fromColumn}`);
+    if (fromColumn === undefined) return drop(`${owner.name} has no column ${e.rel.fromColumn}`, { columnGone: true });
     const toColumn = columnOf(to, e.rel.toColumn);
     if (toColumn === undefined) {
       const declared = (owner.model.columns ?? []).find((c) => c.name === fromColumn)?.isForeignKey === true;
-      return drop(`${to.name} has no column ${e.rel.toColumn}`, declared ? undefined : `${owner.name}.${fromColumn}`);
+      return drop(`${to.name} has no column ${e.rel.toColumn}`, { columnGone: true, ...(declared ? {} : { badge: `${owner.name}.${fromColumn}` }) });
     }
     const respelled = { ...e.rel, fromModel: owner.name, fromColumn, toModel: to.name, toColumn };
     if (respelled.fromColumn !== e.rel.fromColumn || respelled.toModel !== e.rel.toModel || respelled.toColumn !== e.rel.toColumn || respelled.fromModel !== e.rel.fromModel) {
