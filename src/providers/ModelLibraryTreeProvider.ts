@@ -108,7 +108,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       item.contextValue = 'logicalModelReadOnly';
       item.iconPath = new vscode.ThemeIcon('error');
       item.description = '(also in logical-models — ignored)';
-      item.tooltip = `"${element.name}" has a file in both the old and the new table folder. Subject areas use:\n${element.shadowedBy}\n\n` +
+      item.tooltip = `"${element.name}" has a file in both the old and the new table folder. Diagrams use:\n${element.shadowedBy}\n\n` +
         'This copy in tables/ is ignored. Keep one of the two files.';
       item.resourceUri = vscode.Uri.file(element.filePath);
       item.command = openTableCommand(item.resourceUri);
@@ -122,7 +122,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       item.contextValue = 'logicalModelDuplicate';
       item.iconPath = new vscode.ThemeIcon('error');
       item.description = '(duplicate — ignored)';
-      item.tooltip = `Another file already defines "${element.name}" and is the one subject areas use:\n${element.shadowedBy}\n\n` +
+      item.tooltip = `Another file already defines "${element.name}" and is the one diagrams use:\n${element.shadowedBy}\n\n` +
         'Table names are unique across all folders, as dbt model names are. Use "Give Duplicate Table Its Own Name" ' +
         `to make this copy "${element.folder ? `${element.folder}_` : ''}${element.name}" with the warehouse name (alias) "${element.name}".`;
       item.resourceUri = vscode.Uri.file(element.filePath);
@@ -142,10 +142,10 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
 
     if (isOrphan) {
       item.description = '(unused)';
-      item.tooltip = 'Not referenced by any subject area';
+      item.tooltip = 'Not used in any diagram';
     } else {
       const count = element.referencingDomains.length;
-      item.description = `${count} ${count === 1 ? 'subject area' : 'subject areas'}`;
+      item.description = `${count} ${count === 1 ? 'diagram' : 'diagrams'}`;
       item.tooltip = new vscode.MarkdownString(
         `**Referenced by:**\n${element.referencingDomains.map(d => `- ${d}`).join('\n')}`,
       );
@@ -198,13 +198,16 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     const byName = (a: TableLibraryTableNode, b: TableLibraryTableNode): number => a.name.localeCompare(b.name);
 
     const entries = this.tableLibraryService.listTableFiles();
-    const topLevel = entries.filter(e => e.folder === '' && !e.library).map(toNode).sort(byName);
+    // With `tables/` the only library (every DBML project, and YAML in the
+    // new naming) its top level is the list itself, not a "tables/" folder.
+    const onlyTables = entries.length > 0 && entries.every(e => e.library);
+    const topLevel = entries.filter(e => e.folder === '' && (!e.library || onlyTables)).map(toNode).sort(byName);
 
     // Folders of logical-models/, then of v6's tables/ (#181) — its top level
     // included — so the two libraries never merge into one folder.
     const grouped = new Map<string, TableLibraryTableNode[]>();
     for (const entry of entries) {
-      if (entry.folder === '' && !entry.library) continue;
+      if (entry.folder === '' && (!entry.library || onlyTables)) continue;
       const key = `${entry.library ?? ''}\0${entry.folder}`;
       const list = grouped.get(key) ?? [];
       list.push(toNode(entry));
@@ -230,7 +233,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       folder,
       filePath: library ? path.join(path.dirname(modelsDir), library, folder) : path.join(modelsDir, folder),
       children: grouped.get(key)!.sort(byName),
-      ...(library ? { library } : {}),
+      ...(library && !onlyTables ? { library } : {}),
     }));
     return [...folderNodes, ...topLevel];
   }
@@ -280,9 +283,10 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       : new vscode.ThemeIcon('folder');
     const count = element.children.length;
     item.description = `${count} ${count === 1 ? 'table' : 'tables'}`;
-    const where = `${element.library ?? 'logical-models'}/${element.folder ? `${element.folder}/` : ''}`;
+    // The folder as it is on disk (tables/… or logical-models/…), never a guess.
+    const where = `${path.relative(path.dirname(this.tableLibraryService.getTablesDir()), element.filePath).split(path.sep).join('/')}/`;
     if (element.library && element.folder) item.description += ` · ${element.library}/`;
-    item.tooltip = layer ? `${where} — tables created in ${layer.label} subject areas` : where;
+    item.tooltip = layer ? `${where} — tables created in ${layer.label} diagrams` : where;
     return item;
   }
 
