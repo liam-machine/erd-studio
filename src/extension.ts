@@ -591,6 +591,7 @@ async function applyLifecycleWrites(
   writes: readonly FileWrite[],
   libraryRoot: string,
   renames: ReadonlyArray<{ from: string; to: string }> = [],
+  onSaveFailure?: (reason: SaveFailure) => void,
 ): Promise<{ ok: boolean; unsaved: string[]; unrestored: string[] }> {
   const applied = await applyFileWrites(writes, {
     ensureDir: (filePath) => {
@@ -604,7 +605,7 @@ async function applyLifecycleWrites(
   if (!applied.ok) return { ok: false, unsaved: [], unrestored: applied.unrestored };
   const unsaved: string[] = [];
   for (const uri of applied.replaced) {
-    if (await saveDocumentByUri(uri)) ownWrites.recordWrite(uri.fsPath);
+    if (await saveDocumentByUri(uri, onSaveFailure)) ownWrites.recordWrite(uri.fsPath);
     else unsaved.push(uri.fsPath);
   }
   for (const filePath of applied.created) ownWrites.recordWrite(filePath);
@@ -1996,11 +1997,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
       if (choice !== 'Rename') return;
 
-      const edit = new vscode.WorkspaceEdit();
+      // One WorkspaceEdit through applyFileWrites (D23): a partial apply is
+      // put back before anything is said, and own writes are recorded after
+      // the bytes land.
       const yamlText = tableLibraryService.serializeTableAt({ ...model, name: newName, alias: plan.alias }, dup.filePath);
-      edit.createFile(vscode.Uri.file(newPath), { overwrite: false, contents: Buffer.from(yamlText, 'utf-8') });
-      edit.deleteFile(vscode.Uri.file(dup.filePath), { ignoreIfNotExists: true });
-      const domainDocs: vscode.TextDocument[] = [];
+      const writes: FileWrite[] = [
+        { kind: 'create', path: newPath, text: yamlText },
+        { kind: 'delete', path: dup.filePath },
+      ];
+      const repointedPaths: string[] = [];
       for (const ref of plan.repoint) {
         const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(ref.filePath));
         const text = doc.getText();
@@ -2011,36 +2016,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (!repointSubjectAreaTable(parsed, dup.name, newName)) continue;
         const fileObject = v6 ? toTableNamingDocument(parsed) : parsed;
         const next = rewriteJsonScalars(text, fileObject) ?? JSON.stringify(fileObject, null, 2) + '\n';
-        edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(text.length)), next);
-        domainDocs.push(doc);
+        writes.push({ kind: 'replace', path: doc.uri.fsPath, text: next });
+        repointedPaths.push(doc.uri.fsPath);
       }
-      if (!(await vscode.workspace.applyEdit(edit))) {
-        void vscode.window.showErrorMessage('VS Code rejected the rename; nothing was changed.');
+      const dirtyRepointed = dirtyFiles(writes.map((w) => w.path));
+      if (dirtyRepointed.length > 0) {
+        void vscode.window.showErrorMessage(`${path.relative(workspaceRoot, dirtyRepointed[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again. Nothing was changed.`);
         return;
       }
-      // Domain edits land in memory; a canvas never sits dirty, so save them.
-      // Every path is recorded as our own write, and the refreshes the
-      // watchers would have driven are issued directly below.
-      // Re-fetched by URI and checked (#126): a handle opened before the edit
-      // may have been disposed, and a save can fail without throwing.
-      const unsaved: string[] = [];
       const saveFailures = new Set<SaveFailure>();
-      for (const doc of domainDocs) {
-        if (await saveDocumentByUri(doc.uri, (reason) => saveFailures.add(reason))) {
-          ownWrites.recordWrite(doc.uri.fsPath);
-        } else {
-          unsaved.push(path.relative(workspaceRoot, doc.uri.fsPath).split(path.sep).join('/'));
-        }
-        treeProvider.invalidateSubjectArea(doc.uri.fsPath);
+      const result = await applyLifecycleWrites(writes, path.dirname(tableLibraryService.getTablesDir()), [], (reason) => saveFailures.add(reason));
+      if (!result.ok) {
+        // A file the reconcile could not put back is already named in its modal.
+        if (result.unrestored.length === 0) void vscode.window.showErrorMessage('VS Code rejected the rename; nothing was changed.');
+        return;
       }
-      if (unsaved.length > 0) {
+      // Domain edits land in memory; a canvas never sits dirty, so they were
+      // saved (re-fetched by URI and checked, #126) and recorded as our own
+      // writes; the refreshes the watchers would have driven are issued below.
+      for (const filePath of repointedPaths) treeProvider.invalidateSubjectArea(filePath);
+      if (result.unsaved.length > 0) {
         for (const code of saveFailureCodes(saveFailures, { rename: true })) telemetry.error(code);
         void vscode.window.showErrorMessage(
-          `Could not save ${unsaved.join(', ')} — the rename is open in the editor but not on disk. Save the file from its tab, or revert it.`,
+          `Could not save ${result.unsaved.map((p) => path.relative(workspaceRoot, p).split(path.sep).join('/')).join(', ')} — the rename is open in the editor but not on disk. Save the file from its tab, or revert it.`,
         );
       }
-      ownWrites.recordWrite(newPath);
-      ownWrites.recordDelete(dup.filePath);
       tableLibraryService.invalidateCache();
       tableLibraryProvider.refresh();
       treeProvider.refresh();
@@ -2048,7 +2048,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await editorProvider.refreshAllOpenSubjectAreas();
       void vscode.window.showInformationMessage(
         `${libPath(newPath)} is now its own table, "${newName}" (warehouse table: ${plan.alias}).` +
-        (domainDocs.length ? ` Repointed ${domainDocs.length} subject area${domainDocs.length === 1 ? '' : 's'}.` : ''),
+        (repointedPaths.length ? ` Repointed ${repointedPaths.length} subject area${repointedPaths.length === 1 ? '' : 's'}.` : ''),
       );
     }),
     // Store every domain file's relationships once, in their from-models'
@@ -2521,17 +2521,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const newFilePath = path.join(workspaceRoot, semanticDir, layer, `${newSlug}.json`);
         const newFileUri = vscode.Uri.file(newFilePath);
 
-        const edit = new vscode.WorkspaceEdit();
+        // One WorkspaceEdit through applyFileWrites (D23): a partial apply is
+        // put back, and own writes are recorded after the bytes land.
         subjectAreasCreatedHere.add(newFilePath);
-        edit.createFile(newFileUri, { overwrite: false, ignoreIfExists: false });
-        edit.insert(newFileUri, new vscode.Position(0, 0), renamedContent);
-        edit.deleteFile(oldFileUri, { ignoreIfNotExists: false });
-
-        const success = await vscode.workspace.applyEdit(edit);
-        if (!success) {
-          void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}" to "${newSlug}"`);
+        const applied = await applyFileWrites([
+          { kind: 'create', path: newFilePath, text: renamedContent },
+          { kind: 'delete', path: oldFilePath },
+        ]);
+        if (!applied.ok) {
+          // A file the reconcile could not put back is already named in its modal.
+          if (applied.unrestored.length === 0) void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}" to "${newSlug}". Nothing was changed.`);
           return;
         }
+        for (const filePath of applied.created) ownWrites.recordWrite(filePath);
+        for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
+        treeProvider.invalidateSubjectArea(oldFilePath);
+        treeProvider.refresh();
 
         // Auto-open renamed domain
         selectorsService.scheduleRegenerate();

@@ -1118,6 +1118,35 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
     expect(readJson(path.join(erd(), 'silver', 'calendar.json')).logical.models).toContain('date');
   });
 
+  it('a rename VS Code applies only part of is put back before it says nothing was changed (D23)', async () => {
+    const silverBefore = fs.readFileSync(path.join(erd(), 'silver', 'calendar.json'), 'utf-8');
+    const ignoredBefore = fs.readFileSync(ignored(), 'utf-8');
+    await activate(context);
+    answer('Rename');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    // The new file lands, then the edit fails; the reconcile applies.
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1);
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(error).toHaveBeenCalledWith('VS Code rejected the rename; nothing was changed.');
+    expect(fs.existsSync(path.join(lib(), 'silver', 'silver_date.yml'))).toBe(false);
+    expect(fs.readFileSync(ignored(), 'utf-8')).toBe(ignoredBefore);
+    expect(fs.readFileSync(path.join(erd(), 'silver', 'calendar.json'), 'utf-8')).toBe(silverBefore);
+  });
+
+  it('when the reconcile cannot put a file back either, only its modal speaks', async () => {
+    await activate(context);
+    answer('Rename');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*silver_date\.yml.*Restore these from source control\.$/), { modal: true });
+  });
+
   it('reports and counts a repointed diagram it could not save as a rename save failure', async () => {
     await activate(context);
     answer('Rename');
@@ -1153,6 +1182,52 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
     await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel');
 
     expect(info).toHaveBeenCalledWith('Every table file in the library has its own name.');
+  });
+});
+
+describe('erdStudio.renameDomain on a JSON diagram (D23: one edit through applyFileWrites)', () => {
+  const erd = (...p: string[]) => path.join(root, '.erd-studio', ...p);
+  const element = () => ({ type: 'domain', summary: { domain: 'bob', layer: 'silver', filePath: erd('silver', 'bob.json'), storage: 'json' } });
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+  });
+
+  it('renames the file, recording both halves as its own writes', async () => {
+    await activate(context);
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const written = vi.spyOn(ownWrites, 'recordWrite');
+    const deleted = vi.spyOn(ownWrites, 'recordDelete');
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('robert');
+    await vscode.commands.executeCommand('erdStudio.renameDomain', element());
+    expect(fs.existsSync(erd('silver', 'bob.json'))).toBe(false);
+    expect(JSON.parse(fs.readFileSync(erd('silver', 'robert.json'), 'utf-8')).domain).toBe('robert');
+    expect(written).toHaveBeenCalledWith(erd('silver', 'robert.json'));
+    expect(deleted).toHaveBeenCalledWith(erd('silver', 'bob.json'));
+  });
+
+  it('an edit VS Code applies only part of is put back before it says nothing was changed', async () => {
+    const before = fs.readFileSync(erd('silver', 'bob.json'), 'utf-8');
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('robert');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    // The new file lands, then the delete fails; the reconcile applies.
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1);
+    await vscode.commands.executeCommand('erdStudio.renameDomain', element());
+    expect(error).toHaveBeenCalledWith('Failed to rename subject area "bob" to "robert". Nothing was changed.');
+    expect(fs.existsSync(erd('silver', 'robert.json'))).toBe(false);
+    expect(fs.readFileSync(erd('silver', 'bob.json'), 'utf-8')).toBe(before);
+  });
+
+  it('when the reconcile cannot put a file back either, only its modal speaks', async () => {
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('robert');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
+    await vscode.commands.executeCommand('erdStudio.renameDomain', element());
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*robert\.json.*Restore these from source control\.$/), { modal: true });
   });
 });
 

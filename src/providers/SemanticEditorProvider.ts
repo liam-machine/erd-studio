@@ -4696,17 +4696,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                   if (again === 'Try Again') await deleteFiles();
                   return;
                 }
-                // Delete through a WorkspaceEdit so VS Code snapshots the files
-                // and the deletion is undoable, rather than a bare unlink.
-                const deleteEdit = new vscode.WorkspaceEdit();
-                for (const filePath of filePaths) {
-                  deleteEdit.deleteFile(vscode.Uri.file(filePath), { ignoreIfNotExists: true });
-                }
-                if (await vscode.workspace.applyEdit(deleteEdit)) {
+                // Delete through one WorkspaceEdit (applyFileWrites, D23) so VS Code
+                // snapshots the files and the deletion is undoable, rather than a
+                // bare unlink; a partial apply is put back before anything is said.
+                const deleted = await applyFileWrites(filePaths.map((filePath): FileWrite => ({ kind: 'delete', path: filePath })));
+                if (deleted.ok) {
                   vscode.window.showInformationMessage(fileIsSingle ? `Deleted ${shownPaths[0]}` : `Deleted ${filesToOffer.length} table files`);
                   return;
                 }
-                // applyEdit gives no reason, so none is guessed (#205); the edit is all or nothing.
+                // Files the reconcile could not put back are named in its modal; "nothing was deleted" would contradict it.
+                if (deleted.unrestored.length > 0) return;
+                // applyEdit gives no reason, so none is guessed (#205); the reconcile put every file back.
                 const choice = await vscode.window.showErrorMessage(
                   tableFileDeleteFailedMessage(shownPaths),
                   'Try Again',

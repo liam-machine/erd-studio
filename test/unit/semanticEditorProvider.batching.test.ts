@@ -535,6 +535,37 @@ describe('Delete Table File after a remove (#205)', () => {
     ]);
   });
 
+  it('a delete VS Code applies only part of is put back before it says nothing was deleted (D23)', async () => {
+    const { panel } = await openShowcase();
+    const lib = path.join(root, '.erd-studio', 'logical-models');
+    const before = ['dim_task', 'dim_project'].map((n) => fs.readFileSync(path.join(lib, `${n}.yml`), 'utf-8'));
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
+      (String(m).includes('Delete their table files entirely') ? 'Delete Table Files' : undefined)) as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    // The delete removes its first file and fails; the reconcile applies. (The diagram edit is the spy's.)
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1);
+
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_task', 'dim_project'] } });
+
+    await vi.waitFor(() => expect(error).toHaveBeenCalled());
+    expect(error.mock.calls[0]).toEqual([tableFileDeleteFailedMessage(['logical-models/dim_task.yml', 'logical-models/dim_project.yml']), 'Try Again']);
+    expect(['dim_task', 'dim_project'].map((n) => fs.readFileSync(path.join(lib, `${n}.yml`), 'utf-8'))).toEqual(before);
+  });
+
+  it('when the reconcile cannot put a file back either, only its modal speaks', async () => {
+    const { panel } = await openShowcase();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
+      (String(m).includes('Delete their table files entirely') ? 'Delete Table Files' : undefined)) as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
+
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_task', 'dim_project'] } });
+
+    await vi.waitFor(() => expect(error).toHaveBeenCalled());
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*dim_task\.yml.*Restore these from source control\.$/), { modal: true });
+  });
+
   it('names the count, not a file, when several could not be deleted', () => {
     expect(tableFileDeleteFailedMessage(['logical-models/a.yml', 'logical-models/b.yml'])).toBe(
       "ERD Studio couldn't delete 2 table files, so no table file was deleted. " +
