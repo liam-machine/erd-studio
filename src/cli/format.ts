@@ -146,7 +146,10 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   if (conversion && (conversion.tables + conversion.diagrams > 0 || conversion.refusals.length > 0 || conversion.v4SubjectAreas.length > 0)) {
     lines.push(`${p.yellow('!')} "Convert Project to DBML" in VS Code would write `
       + `${plural(conversion.tables, 'table')}, ${plural(conversion.diagrams, 'diagram')} and ${plural(conversion.relationships, 'relationship')} as DBML`
-      + (conversion.v4SubjectAreas.length > 0 ? ` (after the v4 → v5 step for ${conversion.v4SubjectAreas.join(', ')})` : '')
+      // The counts leave out a v4 file's inline tables and its diagram: the command converts them after its v4 → v5 step.
+      + (conversion.v4SubjectAreas.length > 0
+        ? `, after the v4 → v5 step for ${conversion.v4SubjectAreas.join(', ')}, which also adds ${conversion.v4SubjectAreas.length === 1 ? 'that file\'s' : 'those files\''} tables and ${conversion.v4SubjectAreas.length === 1 ? 'diagram' : 'diagrams'} (not counted here)`
+        : '')
       + (conversion.refusals.length > 0 ? ` (not yet: ${conversion.refusals.join(' ')})` : ''));
   }
   // The files it would leave as they are, each with its problem: what to fix (an empty or non-table .yml,

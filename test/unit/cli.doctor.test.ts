@@ -267,6 +267,22 @@ describe('doctor via main', () => {
     expect(clean.nextSteps.some((s) => s.id === 'fix-model-yaml')).toBe(false);
   });
 
+  it("says the Convert counts leave out a v4 file's tables and diagram, which the v4 → v5 step adds", async () => {
+    let out = '';
+    const root = copyFixture('dbt-project');
+    fs.writeFileSync(path.join(root, '.erd-studio/silver/legacy.json'), JSON.stringify({
+      schemaVersion: 4, domain: 'legacy', layer: 'silver',
+      logical: { models: [{ name: 'dim_zone', columns: [{ name: 'zone_key', dataType: 'INT', isPrimaryKey: true }] }], relationships: [] },
+    }));
+    await main(['doctor', '--project', root, '--no-dbt'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: root,
+      env: cleanEnv,
+    });
+    expect(out).toMatch(/"Convert Project to DBML" in VS Code would write \d+ tables?, \d+ diagrams? and \d+ relationships? as DBML, after the v4 → v5 step for silver\/legacy\.json, which also adds that file's tables and diagram \(not counted here\)/);
+  });
+
   it('lists a key written twice with its key and line, saying the model still loads (#164)', async () => {
     const root = copyFixture('dbt-project');
     fs.writeFileSync(
@@ -944,6 +960,23 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     // Warnings only: the project still compiles for every DBML tool, and nothing blocks.
     expect(r.erd.dbmlProblems.filter((p) => p.severity === 'error')).toEqual([]);
     expect(ids(r)).toEqual(['ready']);
+  });
+
+  it('a member whose YAML file holds another name is named as that YAML file, not as missing; a pending line to a YAML table points at Convert, not Add from dbt', async () => {
+    const r = await doctor(nativeWith({
+      'gold/sales.dbml': replace("  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n", "  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n  erd_unlinked_tables: 'dim_store_format'\n"),
+      // Convert leaves this file as YAML (its name: is not its filename); the loader still draws it for the member.
+      'tables/gold/dim_store_format.yml': () => 'name: dim_store_type\ncolumns:\n  - name: store_type_key\n    dataType: INT\n',
+      'tables/gold/_relationships.dbml': (text) => `${text}\n// erd-studio pending: Ref: fct_order.order_id >? dim_store_format.store_type_key\n`,
+    }));
+    expect(problem(r, 'unlinkedTable').map((p) => p.message)).toEqual([
+      'dim_store_format is on this diagram but is still a YAML table (tables/gold/dim_store_format.yml, which holds the table dim_store_type), so the diagram names it in erd_unlinked_tables instead of a use line. '
+        + 'Fix that file if needed, then run ERD Studio: Convert Project to DBML.',
+    ]);
+    const [pending] = problem(r, 'pendingRelationship');
+    expect(pending.message).toContain('dim_store_format is still a YAML table (tables/gold/dim_store_format.yml, which holds the table dim_store_type)');
+    expect(pending.message).toContain('(Convert Project to DBML converts a YAML table once its file is fixed)');
+    expect(pending.message).not.toContain('Add from dbt');
   });
 
   it('a project Convert left mixed: finish-dbml-conversion names each file left as it is, with its problem and line', async () => {

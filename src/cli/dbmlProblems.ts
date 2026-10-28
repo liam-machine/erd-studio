@@ -327,6 +327,22 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     for (const t of snapshot.tables.values()) if (t.dbmlAlias !== undefined && t.dbmlAlias.toLowerCase() === lower) return t;
     return undefined;
   };
+  /**
+   * A diagram member's table: by name, else the YAML file the loader probes for it (its file stem), which
+   * may hold another name (a `name:` that differs from the filename, left as YAML by Convert).
+   */
+  const memberTableOf = (name: string): ReturnType<typeof tableOf> => {
+    const byName = tableOf(name);
+    if (byName || !snapshot) return byName;
+    const lower = name.toLowerCase();
+    for (const t of snapshot.tables.values()) {
+      if (t.storage === 'yaml' && t.path.replace(/^.*\//, '').replace(/\.ya?ml$/i, '').toLowerCase() === lower) return t;
+    }
+    return undefined;
+  };
+  /** How a member's YAML table is named in a message: its own name, or the member with the name its file holds. */
+  const yamlTableLabel = (name: string, t: { name: string; path: string }): string =>
+    t.name.toLowerCase() === name.toLowerCase() ? `${t.name} is still a YAML table (${t.path})` : `${name} is still a YAML table (${t.path}, which holds the table ${t.name})`;
   // Whether a table's file reads (a file that reads with a repeated YAML key counts: it loads).
   const readsCleanly = (t: { name: string }): boolean => {
     try {
@@ -347,9 +363,9 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     const link = `${head.fromModel}.${cols(ref.relationships.map((r) => r.fromColumn))} → ${head.toModel}.${cols(ref.relationships.map((r) => r.toColumn))}`;
     const waits = [
       ...[head.fromModel, head.toModel].filter((n, i, all) => all.indexOf(n) === i).flatMap((name) => {
-        const t = tableOf(name);
+        const t = memberTableOf(name);
         if (!t) return [`${name} has no table file`];
-        if (t.storage === 'yaml') return [`${t.name} is still a YAML table (${t.path})`];
+        if (t.storage === 'yaml') return [yamlTableLabel(name, t)];
         return [];
       }),
       ...ref.relationships.flatMap((r) => [[head.fromModel, r.fromColumn], [head.toModel, r.toColumn]] as const)
@@ -359,11 +375,16 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
         })
         .map(([table, column]) => `${tableOf(table)!.name} has no column ${column}`),
     ];
+    // "Add from dbt" only helps a table with no file; a YAML one is finished by Convert.
+    const how = [
+      ...(waits.some((w) => w.endsWith('has no table file')) ? ['Add from dbt makes a missing table'] : []),
+      ...(waits.some((w) => w.includes('is still a YAML table')) ? ['Convert Project to DBML converts a YAML table once its file is fixed'] : []),
+    ];
     push({
       file: projectRel(rel), line: ref.line, code: 'pendingRelationship',
       message: waits.length > 0
         ? `The pending relationship ${link} is drawn by ERD Studio, but other DBML tools see only a comment: ${[...new Set(waits)].join('; ')}. `
-          + 'It becomes a live Ref once both ends have table files with those columns (Add from dbt makes the table). Keep the line as it is.'
+          + `It becomes a live Ref once both ends have table files with those columns${how.length > 0 ? ` (${how.join('; ')})` : ''}. Keep the line as it is.`
         : `The pending relationship ${link} can be a live Ref now: both ends have table files. Run ERD Studio: Convert Project to DBML to make it one.`,
     });
   };
@@ -559,13 +580,13 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     }
     // Members with no .dbml table file to use (D26), and the diagram's own pending relationships (D27).
     for (const name of reading.unlinked ?? []) {
-      const t = tableOf(name);
+      const t = memberTableOf(name);
       push({
         file: projectRel(f.rel), code: 'unlinkedTable',
         message: !t
           ? `${name} is on this diagram but has no table file, so it is drawn as missing (its name is in the Project's erd_unlinked_tables). Add it (Add from dbt), or remove it from the diagram.`
           : t.storage === 'yaml'
-            ? `${t.name} is on this diagram but is still a YAML table (${t.path}), so the diagram names it in erd_unlinked_tables instead of a use line. Fix that file if needed, then run ERD Studio: Convert Project to DBML.`
+            ? `${yamlTableLabel(name, t).replace(' is still a YAML table', ' is on this diagram but is still a YAML table')}, so the diagram names it in erd_unlinked_tables instead of a use line. Fix that file if needed, then run ERD Studio: Convert Project to DBML.`
             : `${t.name} has a table file now (${t.path}), but the diagram still names it in erd_unlinked_tables. ERD Studio moves it to a use line on its next edit of this diagram, or run ERD Studio: Convert Project to DBML.`,
       });
     }
