@@ -300,7 +300,7 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   // --- Refusals ----------------------------------------------------------------
   const afterLogical = isObject(after.logical) ? after.logical : {};
   // A DBML diagram's only relationships are its pending ones (D27): kept, or removed (their line cut); never added or changed.
-  const pendingRefs = readPendingRefs(text, parser, [], topLevel(compileOne(text, parser).ast));
+  const pendingRefs = readPendingRefs(text, parser, [], topLevel(compileOne(text, parser, undefined, { diagram: true }).ast));
   const relationshipIdentity = (r: Relationship): string =>
     [r.fromModel, r.fromColumn, r.toModel, r.toColumn, r.cardinality, r.role ?? ''].map((part) => lower(String(part ?? ''))).join('\u0000');
   const pendingIds = new Set(pendingRefs.flatMap((ref) => ref.relationships.map(relationshipIdentity)));
@@ -352,7 +352,7 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
     }
   }
 
-  const ast = compileOne(text, parser).ast;
+  const ast = compileOne(text, parser, undefined, { diagram: true }).ast;
   const nodes = topLevel(ast);
   const edits: TextEdit[] = [];
   const lateEdits: TextEdit[] = [];

@@ -31,7 +31,8 @@ import {
   toLogicalStage,
   validateSubjectAreaDocument,
 } from '@erd-studio/core';
-import { parseSubjectAreaDbml, subjectAreaMembersDbml } from '@erd-studio/core/dbml';
+import { subjectAreaMembersDbml } from '@erd-studio/core/dbml';
+import { readDbmlDiagram } from './dbmlDiagramReadings';
 import type { DbmlSubjectAreaReading, DbtKeyIndex, SubjectAreaFormat } from '@erd-studio/core';
 import type { SubjectAreaSummary, SemanticSubjectArea, UnifiedSubjectArea } from '../types/semantic';
 import type { DisplaySubjectArea, DisplayTable, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
@@ -284,6 +285,12 @@ export class SubjectAreaService {
    * canvas and the diff pass it; callers that only list or count need not.
    */
   getSubjectArea(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex } = {}): UnifiedSubjectArea {
+    // One check of the library index for the whole read, not one per table looked up.
+    const library = this.tableLibraryService;
+    return library ? library.withIndexSnapshot(() => this.readSubjectArea(filePath, options)) : this.readSubjectArea(filePath, options);
+  }
+
+  private readSubjectArea(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex }): UnifiedSubjectArea {
     if (!fs.existsSync(filePath)) {
       throw new SubjectAreaFileError('missing', filePath, `Subject area file not found: ${filePath}`);
     }
@@ -321,7 +328,11 @@ export class SubjectAreaService {
    * does not validate, or (DBML) has a syntax error.
    */
   countSubjectAreaTables(filePath: string): number {
-    const raw = fs.readFileSync(filePath, 'utf-8');
+    return this.countSubjectAreaTablesInText(fs.readFileSync(filePath, 'utf-8'), filePath);
+  }
+
+  /** {@link countSubjectAreaTables} over a diagram's text (an open document's). */
+  countSubjectAreaTablesInText(raw: string, filePath: string): number {
     if (subjectAreaStorageOf(filePath) === 'dbml') {
       const members = subjectAreaMembersDbml(raw);
       if (members === null) throw new SubjectAreaValidationError(`${filePath} has a DBML syntax error`);
@@ -362,9 +373,10 @@ export class SubjectAreaService {
         layout = null;
       }
     }
-    const reading = parseSubjectAreaDbml(raw, filePath, layout);
+    const reading = readDbmlDiagram(raw, filePath, layout ?? null);
     for (const warning of reading.warnings) console.warn(`[DomainService] ${filePath}: ${warning}`);
-    if (this.tableLibraryService) {
+    // Only a library that holds a YAML table can resolve a member to one.
+    if (this.tableLibraryService?.hasYamlTableFiles()) {
       for (const name of new Set(reading.members)) {
         if (this.tableLibraryService.tableStorage(name) === 'yaml') {
           console.warn(
@@ -379,6 +391,21 @@ export class SubjectAreaService {
 
   /** `buildUnifiedSubjectArea` with this host's library and layers. */
   private buildUnified(
+    obj: Record<string, unknown>,
+    format: SubjectAreaFormat,
+    filePath: string,
+    domainNameFallback: string,
+    options: { dbtKeyIndex?: DbtKeyIndex },
+  ): UnifiedSubjectArea {
+    // The diagram's own tables are read with only the relationships they own
+    // worked out (`readingTables`), not an attach over the whole library.
+    const library = this.tableLibraryService;
+    return library
+      ? library.readingTables(tableNamesOf(obj), () => this.buildUnifiedNow(obj, format, filePath, domainNameFallback, options))
+      : this.buildUnifiedNow(obj, format, filePath, domainNameFallback, options);
+  }
+
+  private buildUnifiedNow(
     obj: Record<string, unknown>,
     format: SubjectAreaFormat,
     filePath: string,
@@ -1137,4 +1164,12 @@ export function mergeCompositeGroups(
     merged.set(model, existing);
   }
   return merged;
+}
+
+/** The table names a validated diagram object's logical stage lists (v5 / v6 name strings; none for v4's inline tables). */
+function tableNamesOf(obj: Record<string, unknown>): string[] {
+  const logical = obj.logical;
+  if (!logical || typeof logical !== 'object' || Array.isArray(logical)) return [];
+  const models = (logical as { models?: unknown }).models;
+  return Array.isArray(models) ? models.filter((m): m is string => typeof m === 'string') : [];
 }

@@ -32,7 +32,8 @@ import {
   subjectAreaStorageOf,
   toTableNamingDocument,
 } from '@erd-studio/core';
-import { editSubjectAreaDbml, parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { editSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { readDbmlDiagram } from '../services/dbmlDiagramReadings';
 import type { DbmlDiagramTable } from '@erd-studio/core/dbml';
 import type { Annotation, NodePosition } from '@erd-studio/core';
 
@@ -162,7 +163,7 @@ const dbmlCodec: SubjectAreaCodec = {
   storage: 'dbml',
   parse(text, filePath, layoutText) {
     const layout = layoutText === undefined ? readLayoutText(filePath) : layoutText;
-    const reading = parseSubjectAreaDbml(text, filePath, layout);
+    const reading = readDbmlDiagram(text, filePath, layout ?? null);
     return {
       storage: 'dbml',
       parsed: reading.obj,

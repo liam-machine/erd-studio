@@ -121,7 +121,7 @@ function invalidDbml(filePath: string, d: ParserDiagnostic): SubjectAreaFileErro
 
 function compile(text: string, parser: DbmlParserModule, filePath: string): CompiledFile {
   try {
-    return compileOne(text, parser);
+    return compileOne(text, parser, undefined, { diagram: true });
   } catch (err) {
     throw new SubjectAreaFileError(
       'invalid-dbml',
@@ -462,7 +462,7 @@ export function subjectAreaMembersDbml(rawText: string, parser: DbmlParserModule
   const text = stripBom(rawText);
   let compiled: CompiledFile;
   try {
-    compiled = compileOne(text, parser);
+    compiled = compileOne(text, parser, undefined, { diagram: true });
   } catch {
     return null;
   }

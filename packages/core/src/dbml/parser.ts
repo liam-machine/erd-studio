@@ -118,9 +118,13 @@ export function diagnosticOf(error: unknown, text: string): ParserDiagnostic {
 }
 
 // A small cache of compiles, keyed by parser and text: the writers (S3)
-// re-read the text the reader just read.
+// re-read the text the reader just read. Diagrams have their own, so that
+// reading a diagram's hundreds of tables does not push the diagram itself
+// out before the edit that follows reads it again.
 const CACHE_SIZE = 32;
 const cache = new Map<string, CompiledFile>();
+const DIAGRAM_CACHE_SIZE = 8;
+const diagramCache = new Map<string, CompiledFile>();
 const parserIds = new WeakMap<object, number>();
 let nextParserId = 1;
 
@@ -136,13 +140,21 @@ function parserId(parser: DbmlParserModule): number {
 /**
  * Compile `text` on its own under `virtualPath`. Never throws for bad DBML
  * (the errors say what is wrong); a parser that throws is passed through.
+ * `diagram` keeps the compile in the diagrams' own cache.
  */
-export function compileOne(text: string, parser: DbmlParserModule = PINNED_PARSER, virtualPath: string = VIRTUAL_PATH): CompiledFile {
+export function compileOne(
+  text: string,
+  parser: DbmlParserModule = PINNED_PARSER,
+  virtualPath: string = VIRTUAL_PATH,
+  options: { diagram?: boolean } = {},
+): CompiledFile {
+  const store = options.diagram ? diagramCache : cache;
+  const size = options.diagram ? DIAGRAM_CACHE_SIZE : CACHE_SIZE;
   const key = `${parserId(parser)}\u0000${virtualPath}\u0000${text}`;
-  const cached = cache.get(key);
+  const cached = store.get(key);
   if (cached) {
-    cache.delete(key);
-    cache.set(key, cached);
+    store.delete(key);
+    store.set(key, cached);
     return cached;
   }
   const layout = new parser.MemoryProjectLayout();
@@ -160,8 +172,8 @@ export function compileOne(text: string, parser: DbmlParserModule = PINNED_PARSE
       return db;
     },
   };
-  cache.set(key, compiled);
-  if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value as string);
+  store.set(key, compiled);
+  if (store.size > size) store.delete(store.keys().next().value as string);
   return compiled;
 }
 

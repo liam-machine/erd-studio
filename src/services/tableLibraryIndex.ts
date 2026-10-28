@@ -195,6 +195,10 @@ export class TableLibraryIndex {
   private validation: { paths: string[]; sigs: string[]; racy: boolean } | undefined;
   /** How many times the index was built (tests and benchmarks). */
   builds = 0;
+  /** How deep {@link withSnapshot} calls are nested (0 = none running). */
+  private snapshotDepth = 0;
+  /** Inside a snapshot: the index was validated (or built) once already, so `get()` trusts it. */
+  private snapshotChecked = false;
 
   constructor(
     private readonly semanticRoot: string,
@@ -206,6 +210,26 @@ export class TableLibraryIndex {
   invalidate(): void {
     this.data = undefined;
     this.validation = undefined;
+    this.snapshotChecked = false;
+  }
+
+  /**
+   * Run `fn` against one validated index: the first lookup inside it checks
+   * the directories' signatures (or lists the library), and every later one
+   * trusts that answer until `fn` returns. For read-only work that makes
+   * hundreds of lookups in one go (opening a diagram resolves each table):
+   * one look at the disk instead of one per lookup. Nothing inside `fn` may
+   * write the library; `invalidate()` still drops the index at once.
+   */
+  withSnapshot<T>(fn: () => T): T {
+    if (this.snapshotDepth === 0) this.snapshotChecked = false;
+    this.snapshotDepth++;
+    try {
+      return fn();
+    } finally {
+      this.snapshotDepth--;
+      if (this.snapshotDepth === 0) this.snapshotChecked = false;
+    }
   }
 
   /** The last index built, without validating it (undefined when there is none). */
@@ -220,10 +244,12 @@ export class TableLibraryIndex {
 
   /** The index, rebuilt first when a directory it listed changed. */
   get(): TableLibraryIndexData {
-    if (this.data !== undefined && this.validation !== undefined && !this.validation.racy && this.signaturesHold()) {
-      return this.data;
-    }
-    return this.build();
+    if (this.snapshotChecked && this.data !== undefined) return this.data;
+    const data = this.data !== undefined && this.validation !== undefined && !this.validation.racy && this.signaturesHold()
+      ? this.data
+      : this.build();
+    if (this.snapshotDepth > 0) this.snapshotChecked = true;
+    return data;
   }
 
   /** Whether `filePath` is a table file the current index lists. */

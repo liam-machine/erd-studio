@@ -37,6 +37,7 @@ import { writeFilesWithRollback } from './fsFileWrites';
 import { planDbmlLibraryWrites } from './dbmlLibraryWrites';
 import type { DbmlLibraryOps, DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
 import { dropRelationshipsTo } from './libraryRelationships';
+import { memberAttachment } from './memberAttachment';
 import { TableLibraryIndex, foldersOf, hasDbmlEvidence, holdsTableFiles, isLayerFolder, layersListTables, listDir } from './tableLibraryIndex';
 
 /** Table file writes an editor edit bundles with its diagram change (one WorkspaceEdit). */
@@ -266,6 +267,19 @@ export interface TableFileEntry {
    * same name, which is then `shadowedBy` it (§3.4).
    */
   readonly storage: 'yaml' | 'dbml';
+}
+
+/** One table as the Add Existing Table dialog lists it ({@link TableLibraryService.tablePreviews}). */
+export interface TablePreview {
+  /** The table's name (as declared; the file name for a `pending` row). */
+  name: string;
+  /** Its file, absolute. */
+  filePath: string;
+  schema: string;
+  description: string;
+  columnCount: number;
+  /** The file has not been read yet: `schema` and `description` are empty and `columnCount` is 0. */
+  pending?: true;
 }
 
 /** A `.dbml` table file read through the cache: the reader's answer for its text. */
@@ -592,6 +606,12 @@ export class TableLibraryService {
    * object the cache holds, so an unchanged table is not re-fingerprinted.
    */
   private readonly attachFingerprints = new WeakMap<object, string>();
+  /**
+   * While {@link readingTables} runs: the tables being read (lower-case
+   * names) and, once worked out, the relationships they own
+   * ({@link scopedAttachment}).
+   */
+  private memberScope: { keys: ReadonlySet<string>; computed: boolean; attachment?: DbmlAttachResult } | undefined;
 
   constructor(
     workspaceRoot: string,
@@ -871,7 +891,7 @@ export class TableLibraryService {
     if (reading === null) return null;
     if (!reading.ok) throw dbmlReadingError(reading.error);
     const model = structuredClone(reading.table);
-    if (options.relationships !== false) this.attachOwned(model, this.libraryAttachment());
+    if (options.relationships !== false) this.attachOwned(model, this.attachmentFor(model.name));
     return model;
   }
 
@@ -940,6 +960,94 @@ export class TableLibraryService {
     this.relationshipsCache.set(filePath, { signature, reading });
     this.logDbmlProblems(filePath, signature, reading.problems);
     return reading;
+  }
+
+  /**
+   * Run `fn`, which only reads, with `members` (a diagram's tables) in view:
+   * the library index is checked once rather than on every lookup
+   * (`TableLibraryIndex.withSnapshot`), and a member's relationships come
+   * from the Refs that name the members ({@link scopedAttachment}) instead of
+   * an attach over the whole library, so opening a diagram reads its own
+   * tables, not every table file. Nothing inside `fn` may write.
+   */
+  readingTables<T>(members: Iterable<string>, fn: () => T): T {
+    const outer = this.memberScope;
+    this.memberScope = { keys: new Set([...members].map((m) => m.toLowerCase())), computed: false };
+    try {
+      return this.index.withSnapshot(fn);
+    } finally {
+      this.memberScope = outer;
+    }
+  }
+
+  /** Run `fn`, which only reads, against one check of the library index (see {@link readingTables}). */
+  withIndexSnapshot<T>(fn: () => T): T {
+    return this.index.withSnapshot(fn);
+  }
+
+  /** Whether any table file of the library is YAML (listed, not read). */
+  hasYamlTableFiles(): boolean {
+    return this.index.get().entries.some((e) => e.storage === 'yaml');
+  }
+
+  /** The attachment `name`'s relationships come from: the scoped one for a member being read, else the whole library's. */
+  private attachmentFor(name: string): DbmlAttachResult | undefined {
+    const scope = this.memberScope;
+    if (!scope || !scope.keys.has(name.toLowerCase())) return this.libraryAttachment();
+    if (!scope.computed) {
+      scope.attachment = this.scopedAttachment(scope.keys);
+      scope.computed = true;
+    }
+    return scope.attachment;
+  }
+
+  /**
+   * What the tables `keys` (lower-case names) own, as {@link libraryAttachment}
+   * would attach it, from the Refs that name them (`memberAttachment`):
+   * reads those tables and the other ends of their Refs, not the whole
+   * library. The whole library's attachment instead when its memo is still
+   * good (it costs a few stats then), when the library holds a YAML table (a
+   * yml's own `name:` may differ from its file name, so a name cannot be
+   * resolved from the listing), or when an end needs the whole library's
+   * lookup (a dangling end, an alias, a file that does not read).
+   */
+  private scopedAttachment(keys: ReadonlySet<string>): DbmlAttachResult | undefined {
+    const memo = this.attachMemo;
+    if (memo && memo.quickKey === this.attachQuickKey(memo.relFiles, memo.dirs)) return memo.result;
+    const relFiles = this.listRelationshipsFiles();
+    if (relFiles.length === 0) return undefined;
+    const entries = this.index.get().entries;
+    if (entries.some((e) => !e.shadowedBy && e.storage !== 'dbml')) return this.libraryAttachment();
+    const readings: Array<{ path: string; reading: DbmlRelationshipsReading }> = [];
+    for (const filePath of relFiles) {
+      const reading = this.readRelationshipsFile(filePath);
+      if (reading !== null) readings.push({ path: this.libraryRelativePath(filePath), reading });
+    }
+    // As `dbmlTableLookup` resolves a name over the whole library: the first
+    // unshadowed entry of that name (a `.dbml` stem equals its Table's name
+    // but for case, D2), when its file reads.
+    const byKey = new Map<string, TableFileEntry>();
+    for (const entry of entries) {
+      const key = entry.name.toLowerCase();
+      if (!entry.shadowedBy && !byKey.has(key)) byKey.set(key, entry);
+    }
+    const resolved = new Map<string, DbmlAttachTable | undefined>();
+    const resolve = (key: string): DbmlAttachTable | undefined => {
+      if (resolved.has(key)) return resolved.get(key);
+      const entry = byKey.get(key);
+      const reading = entry ? this.readDbmlTableFile(entry.filePath) : null;
+      const table: DbmlAttachTable | undefined = entry && reading?.ok && reading.table.name.toLowerCase() === key
+        ? {
+          table: { name: reading.table.name, columns: reading.table.columns },
+          folder: entry.folder,
+          storage: 'dbml',
+          ...(reading.alias !== undefined ? { dbmlAlias: reading.alias } : {}),
+        }
+        : undefined;
+      resolved.set(key, table);
+      return table;
+    };
+    return memberAttachment(readings, keys, resolve) ?? this.libraryAttachment();
   }
 
   /**
@@ -1484,6 +1592,90 @@ export class TableLibraryService {
       for (const model of dbmlModels) this.attachOwned(model, attachment);
     }
     return models;
+  }
+
+  /**
+   * What the Add Existing Table dialog shows of each table in the library
+   * (shadowed copies skipped, as {@link listTables} skips them), without
+   * attaching relationships or copying the cached tables. A file not read in
+   * its current version is read now — unless more than `readAtMost` are
+   * unread: then each of those is only its file name and path, `pending`, and
+   * none is read, so a diagram on a large library opens without reading
+   * every table file. A file that does not read is left out, as
+   * {@link listTables} leaves it out.
+   */
+  tablePreviews(options: { readAtMost?: number } = {}): TablePreview[] {
+    const entries = this.index.get().entries.filter((e) => !e.shadowedBy);
+    const unread = new Set(entries.filter((e) => !this.isReadNow(e.filePath)));
+    const readUnread = unread.size <= (options.readAtMost ?? Infinity);
+    const previews: TablePreview[] = [];
+    for (const entry of entries) {
+      if (!readUnread && unread.has(entry)) {
+        previews.push({ name: entry.name, filePath: entry.filePath, schema: '', description: '', columnCount: 0, pending: true });
+        continue;
+      }
+      let model: SemanticTable | null = null;
+      try {
+        if (entry.storage === 'dbml') {
+          const reading = this.readDbmlTableFile(entry.filePath);
+          model = reading?.ok ? reading.table : null;
+        } else {
+          model = this.readTableFile(entry.filePath, entry.name, { clone: false });
+        }
+      } catch {
+        model = null;
+      }
+      if (!model) continue;
+      previews.push({
+        name: model.name,
+        filePath: entry.filePath,
+        schema: model.schema ?? '',
+        description: model.description ?? '',
+        columnCount: (model.columns ?? []).length,
+      });
+    }
+    return previews;
+  }
+
+  /** The library's table files (shadowed copies skipped) not read in their current version. */
+  unreadTableFiles(): TableFileEntry[] {
+    return this.index.get().entries.filter((e) => !e.shadowedBy && !this.isReadNow(e.filePath));
+  }
+
+  /**
+   * Read one table file into the cache, as a lookup would, without
+   * relationships, a copy, or a report of a file that does not read (the
+   * read that needs the table reports it). Never throws. For background
+   * reads that make the next open of a diagram find its tables read.
+   */
+  warmTableFile(entry: Pick<TableFileEntry, 'filePath' | 'name' | 'storage'>): void {
+    try {
+      if (entry.storage === 'dbml') this.readDbmlTableFile(entry.filePath);
+      else this.readTableFile(entry.filePath, entry.name, { clone: false });
+    } catch {
+      // Reported by the read that needs it.
+    }
+  }
+
+  /**
+   * Work out every relationship of the library once (`libraryAttachment`),
+   * so the next edit of a table finds it worked out. Never throws.
+   */
+  warmLibraryAttachment(): void {
+    try {
+      if (this.index.get().entries.some((e) => e.storage === 'dbml')) this.libraryAttachment();
+    } catch {
+      // A relationships file that does not read is reported where it is used.
+    }
+  }
+
+  /** Whether `filePath` was read (or found unreadable) in its current version. */
+  private isReadNow(filePath: string): boolean {
+    const signature = fileSignature(filePath);
+    if (signature === null) return true;
+    return isDbmlFile(filePath)
+      ? this.dbmlCache.get(filePath)?.signature === signature
+      : this.yamlReadSignatures.get(filePath) === signature;
   }
 
   /**
