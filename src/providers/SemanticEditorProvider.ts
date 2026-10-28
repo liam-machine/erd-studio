@@ -2773,7 +2773,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       tableWrites = lib.writes;
       plan = lib.plan ?? this.tableLibraryService.planTableWrites(undefined, undefined, { dbml: true, readText }).plan!;
       const resolver = this.resolverOf(plan);
-      const [primary, ...layout] = codecFor(fsPath).render(file, text, fsPath, resolver);
+      // The diagram imports the relationships file of each member's folder: one this edit creates gets its use line.
+      const members = ((file.parsed.logical ?? {}) as { models?: unknown }).models;
+      const created = new Set(plan.createdRelationshipsFiles);
+      const refresh = file.storage === 'dbml' && Array.isArray(members)
+        && plan.relationshipsFilesFor(members.filter((m): m is string => typeof m === 'string')).some((f) => created.has(f));
+      const [primary, ...layout] = codecFor(fsPath).render(file, text, fsPath, refresh ? { ...resolver, refreshRelationshipsUses: true } : resolver);
       primaryText = primary.kind === 'delete' ? text : primary.text;
       const others = options.otherDomains ? this.rewriteOtherSubjectAreaWrites(fsPath, options.otherDomains, resolver) : [];
       const rewritten = new Set(others.map((w) => (w.path.toLowerCase().endsWith('.dbdiagram') ? diagramPathOfLayout(w.path) : w.path)));

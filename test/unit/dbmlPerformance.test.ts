@@ -8,8 +8,8 @@
  *
  * The read budgets hold from S4 (the attachment is computed once per pass
  * and memoised, never rebuilt per table). The relationship-edit budget
- * (plan + `editRelationshipsDbml`, ≤ 3 s) joins this file with the editor
- * pipeline's DBML writes in S5.
+ * (plan + `editRelationshipsDbml`, ≤ 3 s) joined with the editor pipeline's
+ * DBML writes in S5.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -78,5 +78,15 @@ describe(`a flat DBML library of ${TABLES} tables and ${TABLES * REFS_PER_TABLE}
 
     // A second listTables is linear, not one library pass per table.
     withinBudget('listTables (warm)', 2_000, () => lib.listTables());
+
+    // One relationship edit: the library planned (snapshot, attach, one
+    // editRelationshipsDbml over the 30,000-Ref file), the file written once.
+    const owner = lib.getTable('t42')!;
+    owner.relationships = owner.relationships!.slice(1);
+    const { writes } = withinBudget('one relationship edit (plan + editRelationshipsDbml)', 3_000, () =>
+      lib.planTableWrites({ save: [{ model: owner }] }));
+    expect(writes.map((w) => `${w.kind} ${path.basename(w.path)}`)).toEqual(['replace _relationships.dbml']);
+    const text = (writes[0] as { text: string }).text;
+    expect(text.split('\n').filter((l) => l.startsWith('Ref')).length).toBe(TABLES * REFS_PER_TABLE - 1);
   }, 120_000);
 });
