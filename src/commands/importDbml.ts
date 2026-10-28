@@ -30,7 +30,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { isReservedTableName, readDbdiagramLayout } from '@erd-studio/core';
+import { DBML_RELATIONSHIPS_FILE_NAME, isReservedTableName, layoutFilePathOf, readDbdiagramLayout } from '@erd-studio/core';
 import { DBML_CONVERT_FIRST_MESSAGE } from '@erd-studio/core/dbml';
 import { RESERVED_TABLE_NAME_MESSAGE } from '../types/naming';
 
@@ -339,6 +339,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   let plan: DbmlImportPlan;
   let folder: string | undefined;
   let dirty: string[];
+  /** Every file a DBML project's save writes (empty for a YAML project). */
+  let planned: string[] = [];
   try {
     folder = tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
     const libraryRelationships = dbml || usesLibraryRelationships(
@@ -373,7 +375,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         return undefined;
       }
     }
-    const planned = dbml && tableLibraryService.planTableWrites
+    planned = dbml && tableLibraryService.planTableWrites
       // Every file the DBML save writes (relationships files too); a refusal surfaces here, before any write.
       ? tableLibraryService.planTableWrites({ save: [...plan.newTables, ...plan.changedLibraryTables].map((model) => ({ model })) }, folder, { dbml: true })
         .writes.map((w) => w.path)
@@ -412,9 +414,19 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   }
 
   // 5. The dry run: what it creates, reuses and leaves out, before any write.
+  const semanticRoot = path.join(workspaceRoot, semanticDir);
   const [headline, ...details] = describeDbmlImportPlan(plan, {
     layerLabel,
     layoutFileName: layout ? path.basename(layoutPath) : undefined,
+    ...(dbml ? {
+      dbml: {
+        // Where the relationships go: the library's `_relationships.dbml` files this save writes.
+        relationshipsFiles: planned
+          .filter((p) => path.basename(p) === DBML_RELATIONSHIPS_FILE_NAME)
+          .map((p) => path.relative(semanticRoot, p).split(path.sep).join('/')),
+        layoutFileName: path.basename(layoutFilePathOf(domainPath)),
+      },
+    } : {}),
   }).split('\n');
   if (!await ui.confirm(headline, details.join('\n'), IMPORT_BUTTON)) return cancelled();
 

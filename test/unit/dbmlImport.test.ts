@@ -1118,6 +1118,26 @@ describe('describeDbmlImportPlan', () => {
     expect(text).toContain('saved in the tables\' files');
   });
 
+  it('in a DBML project, names the relationships files and the layout file instead of "the tables\' files"', () => {
+    const p = salesPlan({ libraryRelationships: true });
+    expect(p.report.relationshipsInLibrary).toBe(p.report.relationships);
+    const one = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['tables/gold/_relationships.dbml'], layoutFileName: 'imported.dbdiagram' } });
+    expect(one).toContain(`• ${p.report.relationships} relationships saved in tables/gold/_relationships.dbml.`);
+    expect(one).not.toContain('the tables\' files');
+    const many = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['tables/gold/_relationships.dbml', 'tables/silver/_relationships.dbml'], layoutFileName: 'imported.dbdiagram' } });
+    expect(many).toContain('saved in tables/gold/_relationships.dbml, tables/silver/_relationships.dbml.');
+    expect(describeDbmlImportPlan(p, { dbml: { relationshipsFiles: [], layoutFileName: 'imported.dbdiagram' } }))
+      .toContain('saved in the Table Library\'s relationships files.');
+    // The YAML wording is unchanged.
+    expect(describeDbmlImportPlan(p)).toContain(`• ${p.report.relationships} relationships saved in the tables' files.`);
+    // No layout: where the first open's layout is saved.
+    const foreign = plan(fixture('foreign/ecommerce.dbml'), { layer: 'silver' });
+    expect(describeDbmlImportPlan(foreign, { dbml: { relationshipsFiles: [], layoutFileName: 'ecommerce.dbdiagram' } }))
+      .toContain('• No layout file: the diagram is laid out automatically when it opens, and that layout is saved in ecommerce.dbdiagram.');
+    expect(describeDbmlImportPlan(salesPlan({ layout: readDbdiagramLayout('not json') }), { layoutFileName: 'sales.dbdiagram', dbml: { relationshipsFiles: [], layoutFileName: 'imported.dbdiagram' } }))
+      .toContain('• sales.dbdiagram has no positions for these tables: the diagram is laid out automatically when it opens, and that layout is saved in imported.dbdiagram.');
+  });
+
   it('summarises a foreign file: optional refs, meta, renames and what is left out', () => {
     const text = describeDbmlImportPlan(plan(fixture('foreign/ecommerce.dbml'), { layer: 'silver' }));
     expect(text).toContain('• 1 reference is optional (?). ERD Studio doesn\'t record that, so they are imported as plain relationships.');

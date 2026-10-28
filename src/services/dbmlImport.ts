@@ -1327,12 +1327,28 @@ function someOf(names: readonly string[], shown = 4): string {
   return names.length > shown ? `${head} and ${names.length - shown} more` : head;
 }
 
+/** What {@link describeDbmlImportPlan} needs to know beyond the plan. */
+export interface DescribeDbmlImportOptions {
+  /** The layer as the user sees it (default: its id). */
+  layerLabel?: string;
+  /** The source's layout file read, by name (default: "the layout file"). */
+  layoutFileName?: string;
+  /**
+   * A project that stores DBML: where its relationships are written, as the
+   * user sees the paths (`tables/silver/_relationships.dbml`), and the new
+   * diagram's own layout file (`stores.dbdiagram`). Absent for a YAML project,
+   * whose relationships go in the tables' own files and whose layout goes in
+   * the diagram file.
+   */
+  dbml?: { relationshipsFiles: readonly string[]; layoutFileName: string };
+}
+
 /**
  * The dry-run summary the command shows before writing: what is created,
  * what is reused, where the relationships go, the layout, and what was
  * renamed or left out. Plain text, one point per line.
  */
-export function describeDbmlImportPlan(plan: DbmlImportPlan, options: { layerLabel?: string; layoutFileName?: string } = {}): string {
+export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): string {
   const { report } = plan;
   const lines: string[] = [];
   const layer = options.layerLabel ?? plan.layer;
@@ -1344,12 +1360,16 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: { layerLab
       + (differ > 0 ? ` ${plural(differ, 'of them has', 'of them have')} columns the file has and the library does not; those are not added.` : ''));
   }
   if (report.relationships > 0) {
+    // A DBML project writes them to the library's relationships files, a YAML one to the tables' own files.
+    const home = options.dbml
+      ? (options.dbml.relationshipsFiles.length > 0 ? someOf(options.dbml.relationshipsFiles, 3) : 'the Table Library\'s relationships files')
+      : 'the tables\' files';
     const where = report.relationshipsInLibrary > 0
-      // "All saved in the tables' files" only when every one is: links the
-      // library already stores are counted in `relationships` but not written.
+      // "All saved in …" only when every one is: links the library already
+      // stores are counted in `relationships` but not written.
       ? (report.relationshipsInLibrary === report.relationships
-        ? ' saved in the tables\' files'
-        : ` (${report.relationshipsInLibrary} saved in the tables' files)`)
+        ? ` saved in ${home}`
+        : ` (${report.relationshipsInLibrary} saved in ${home})`)
       : '';
     const already = report.relationshipsAlreadyInLibrary > 0
       ? ` ${plural(report.relationshipsAlreadyInLibrary, 'is', 'are')} already in your Table Library and kept as it has them.`
@@ -1360,10 +1380,14 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: { layerLab
     lines.push(`• ${plural(report.optionalRefs, 'reference is', 'references are')} optional (?). ERD Studio doesn't record that, so they are imported as plain relationships.`);
   }
   const layoutName = options.layoutFileName ?? 'the layout file';
+  // Opening it lays it out and saves that layout, as for any new diagram: in a DBML project, to its own layout file.
+  const laidOut = options.dbml
+    ? `the diagram is laid out automatically when it opens, and that layout is saved in ${options.dbml.layoutFileName}.`
+    : 'the diagram is laid out automatically when it opens.';
   if (!report.layoutRead) {
-    lines.push('• No layout file: the diagram is laid out automatically when it opens.');
+    lines.push(`• No layout file: ${laidOut}`);
   } else if (report.positioned === 0) {
-    lines.push(`• ${layoutName} has no positions for these tables: the diagram is laid out automatically when it opens.`);
+    lines.push(`• ${layoutName} has no positions for these tables: ${laidOut}`);
   } else if (report.unpositioned > 0) {
     lines.push(`• Layout: ${report.positioned} of ${plan.modelNames.length} tables placed from ${layoutName}; the rest are placed when it opens.`);
   } else {

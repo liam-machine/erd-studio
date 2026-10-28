@@ -158,6 +158,26 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     compilesClean();
   });
 
+  it('Import DBML\'s preview names the relationships file and the layout file; with no source layout the import writes no .dbdiagram', async () => {
+    const inbox = path.join(root, 'inbox');
+    fs.mkdirSync(inbox);
+    fs.writeFileSync(path.join(inbox, 'shop.dbml'), 'Table customers {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n  customer_id int [ref: > customers.id]\n}\n');
+    await activate(context);
+    importFrom(path.join(inbox, 'shop.dbml'));
+    await vscode.commands.executeCommand('erdStudio.importDbml');
+    const modal = (vscode.window.showInformationMessage as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .find((c) => typeof c[1] === 'object' && (c[1] as { modal?: boolean }).modal)!;
+    const detail = (modal[1] as { detail: string }).detail;
+    expect(detail).toContain('• 1 relationship saved in tables/gold/_relationships.dbml.');
+    expect(detail).not.toContain('the tables\' files');
+    expect(detail).toContain('• No layout file: the diagram is laid out automatically when it opens, and that layout is saved in shop.dbdiagram.');
+    // The import itself writes no layout file: the first open's auto layout does, as a JSON diagram's first open writes its positions.
+    expect(files()).toEqual([
+      'gold/shop.dbml', 'layers.json',
+      'tables/gold/_relationships.dbml', 'tables/gold/customers.dbml', 'tables/gold/orders.dbml',
+    ]);
+  });
+
   it('Import DBML refuses a file with use lines, naming the export route, and writes nothing', async () => {
     const inbox = path.join(root, 'inbox');
     fs.mkdirSync(inbox);
