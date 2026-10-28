@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-type Step = { id?: string; uses?: string; with?: Record<string, string> };
+type Step = { id?: string; uses?: string; run?: string; with?: Record<string, string> };
 type Job = { needs?: string | string[]; if?: string; steps?: Step[] };
 type Workflow = {
   on: { pull_request: { 'paths-ignore': string[] } };
@@ -49,5 +49,19 @@ describe('deploy.yml', () => {
     expect(deploy.if).toContain("needs.changes.outputs.extension == 'true'");
     expect(deploy.if).toContain("needs.telemetry-worker.result == 'success' || needs.telemetry-worker.result == 'skipped'");
     expect(workflow.jobs['telemetry-worker'].needs).toBe('changes');
+  });
+
+  it('release tooling and the pre-release workflow never start a stable release', () => {
+    for (const path of ['.github/**', 'scripts/release.mjs', 'test/unit/release.test.ts', 'test/unit/prereleaseWorkflow.test.ts']) {
+      expect(ignored).toContain(path);
+    }
+  });
+
+  it('the stable GitHub Release is Latest and never a pre-release', () => {
+    const run = workflow.jobs.deploy.steps?.find((s) => /gh release create/.test(s.run ?? ''))?.run ?? '';
+    expect(run).toContain('gh release create "v${NEW_VERSION}"');
+    expect(run).toContain('--latest');
+    expect(run).not.toContain('--latest=false');
+    expect(run).not.toContain('--prerelease');
   });
 });

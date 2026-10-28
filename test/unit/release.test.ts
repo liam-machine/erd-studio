@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it, expect, vi } from 'vitest';
 import {
   parseVersion,
   compareVersions,
@@ -9,6 +12,13 @@ import {
   resolveReleaseVersion,
   updateChangelog,
   extractReleaseNotes,
+  isPreReleaseEntry,
+  marketplaceVersions,
+  publishedVersions,
+  checkPrereleaseVersion,
+  newestChangelogSection,
+  prereleaseNotes,
+  main,
   // @ts-expect-error — plain ESM helper without type declarations (used by deploy.yml)
 } from '../../scripts/release.mjs';
 
@@ -218,5 +228,257 @@ describe('release.mjs — extractReleaseNotes', () => {
   it('returns an empty string for a missing version or empty content', () => {
     expect(extractReleaseNotes(changelog, '9.9.9')).toBe('');
     expect(extractReleaseNotes('', '0.6.50')).toBe('');
+  });
+});
+
+// The shape `npx @vscode/vsce show liamwynne.erd-studio --json` really returns: each version
+// lists `properties` as `{ key, value }`, and a pre-release VSIX adds
+// `Microsoft.VisualStudio.Code.PreRelease = "true"` (vsce package --pre-release).
+const PRE = { key: 'Microsoft.VisualStudio.Code.PreRelease', value: 'true' };
+const ENGINE = { key: 'Microsoft.VisualStudio.Code.Engine', value: '^1.85.0' };
+const stable = (version: string) => ({ version, flags: 1, properties: [ENGINE] });
+const pre = (version: string) => ({ version, flags: 1, properties: [ENGINE, PRE] });
+const show = (...versions: object[]) => ({ versions, versionsTruncated: false });
+
+describe('release.mjs — Marketplace channels', () => {
+  it('recognises the pre-release property vsce writes', () => {
+    expect(isPreReleaseEntry(pre('1.9.0'))).toBe(true);
+    expect(isPreReleaseEntry(stable('1.7.2'))).toBe(false);
+    expect(isPreReleaseEntry({ version: '1.7.2' })).toBe(false);
+    expect(isPreReleaseEntry(null)).toBe(false);
+  });
+
+  it('accepts other plausible shapes defensively', () => {
+    expect(isPreReleaseEntry({ version: '1.9.0', preRelease: true })).toBe(true);
+    expect(isPreReleaseEntry({ version: '1.9.0', isPreRelease: 'true' })).toBe(true);
+    expect(isPreReleaseEntry({ version: '1.9.0', properties: { 'Microsoft.VisualStudio.Code.PreRelease': 'true' } })).toBe(true);
+    expect(isPreReleaseEntry({ version: '1.9.0', properties: [{ Id: 'Microsoft.VisualStudio.Code.PreRelease', Value: 'true' }] })).toBe(true);
+    // The key with no value still marks a pre-release (vsce show checks presence only).
+    expect(isPreReleaseEntry({ version: '1.9.0', properties: [{ key: 'Microsoft.VisualStudio.Code.PreRelease' }] })).toBe(true);
+    expect(isPreReleaseEntry({ version: '1.9.0', properties: [{ key: 'Microsoft.VisualStudio.Code.PreRelease', value: 'false' }] })).toBe(false);
+  });
+
+  it('lists every valid version with its channel', () => {
+    expect(marketplaceVersions(show(pre('1.9.0'), stable('1.7.2'), { version: 'junk' }))).toEqual([
+      { version: '1.9.0', preRelease: true },
+      { version: '1.7.2', preRelease: false },
+    ]);
+    expect(publishedVersions(show(pre('1.9.0'), stable('1.7.2')))).toEqual(['1.9.0', '1.7.2']);
+    expect(publishedVersions(null)).toEqual([]);
+  });
+
+  it('the latest marketplace version ignores pre-releases unless asked', () => {
+    const data = show(pre('1.9.1'), pre('1.9.0'), stable('1.7.2'), stable('1.7.1'));
+    expect(latestMarketplaceVersion(data)).toBe('1.7.2');
+    expect(latestMarketplaceVersion(data, { includePreReleases: true })).toBe('1.9.1');
+    expect(latestMarketplaceVersion(show(pre('1.9.0')))).toBeNull();
+  });
+});
+
+describe('release.mjs — the stable release ignores pre-releases', () => {
+  const published = ['1.9.1', '1.9.0', '1.7.2'];
+
+  it('patch-bumps from the latest stable, not from a pre-release', () => {
+    // The bug this guards: max(package.json, 1.9.0) + patch = 1.9.1 would ship 2.0 numbering to everyone.
+    expect(resolveReleaseVersion('1.7.2', '1.7.2', null, undefined, published)).toBe('1.7.3');
+  });
+
+  it('skips a patch number a pre-release already took', () => {
+    const notes: string[] = [];
+    expect(resolveReleaseVersion('1.7.2', '1.7.2', null, (m: string) => notes.push(m), ['1.7.3', '1.7.4'])).toBe('1.7.5');
+    expect(notes[0]).toMatch(/v1\.7\.3 is already on the Marketplace/);
+  });
+
+  it('releases a pin above every pre-release (promotion to stable)', () => {
+    expect(resolveReleaseVersion('1.7.2', '1.7.2', '2.0.0', undefined, published)).toBe('2.0.0');
+  });
+
+  it('refuses a pin a pre-release already took instead of shipping a patch', () => {
+    expect(() => resolveReleaseVersion('1.7.2', '1.7.2', '1.9.0', undefined, published)).toThrow(/already on the Marketplace as a pre-release/);
+  });
+
+  it('refuses a pin below a pre-release: pre-release users would never get it', () => {
+    expect(() => resolveReleaseVersion('1.7.2', '1.7.2', '1.8.0', undefined, published)).toThrow(/below pre-release v1\.9\.1/);
+  });
+
+  it('next-version refuses a pin when the Marketplace lookup failed', () => {
+    // vsce's --skip-duplicate ignores the channel, so an unchecked pin that a
+    // pre-release took would be committed to main and silently never published.
+    const dir = mkdtempSync(join(tmpdir(), 'release-'));
+    writeFileSync(join(dir, 'show.json'), '{}');
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ version: '1.7.2' }));
+    writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased — 1.9.0\n');
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const args = ['next-version', '--marketplace-json', join(dir, 'show.json'), '--package-json', join(dir, 'package.json'), '--changelog', join(dir, 'CHANGELOG.md')];
+      expect(main(args, {})).toBe(1);
+      expect(out).not.toHaveBeenCalled();
+      expect(err).toHaveBeenCalledWith(expect.stringMatching(/Marketplace lookup failed/));
+
+      // Without a pin (or with one not ahead of package.json) it still falls back to a patch.
+      writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased\n');
+      expect(main(args, {})).toBe(0);
+      expect(out).toHaveBeenCalledWith('1.7.3\n');
+      out.mockClear();
+      writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased — 1.7.0\n');
+      expect(main(args, {})).toBe(0);
+      expect(out).toHaveBeenCalledWith('1.7.3\n');
+    } finally {
+      out.mockRestore();
+      err.mockRestore();
+    }
+  });
+
+  it('next-version reads only stable Marketplace versions', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'release-'));
+    writeFileSync(join(dir, 'show.json'), JSON.stringify(show(pre('1.9.0'), stable('1.7.2'))));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ version: '1.7.2' }));
+    writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased\n');
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const args = ['next-version', '--marketplace-json', join(dir, 'show.json'), '--package-json', join(dir, 'package.json'), '--changelog', join(dir, 'CHANGELOG.md')];
+      expect(main(args, {})).toBe(0);
+      expect(out).toHaveBeenCalledWith('1.7.3\n');
+
+      writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased — 1.9.0\n');
+      out.mockClear();
+      expect(main(args, {})).toBe(1);
+      expect(out).not.toHaveBeenCalled();
+    } finally {
+      out.mockRestore();
+      err.mockRestore();
+    }
+  });
+});
+
+describe('release.mjs — checkPrereleaseVersion', () => {
+  const market = show(stable('1.7.2'), stable('1.7.1'));
+  const pinned = '# Changelog\n\n## Unreleased — 2.0.0\n\n### Added\n- DBML\n';
+  const check = (version: string, extra: Record<string, unknown> = {}) =>
+    checkPrereleaseVersion({ version, showJson: market, changelog: pinned, ...extra });
+
+  it('accepts the recommended scheme: 1.9.0, 1.9.1 … below a pinned 2.0.0', () => {
+    expect(check('1.9.0').errors).toEqual([]);
+    expect(check('1.8.0').errors).toEqual([]);
+    expect(check('1.9.1', { showJson: show(pre('1.9.0'), stable('1.7.2')) }).errors).toEqual([]);
+  });
+
+  it('requires a plain x.y.z', () => {
+    for (const bad of ['v1.9.0', '1.9', '1.9.0-beta.1', '', 'latest']) {
+      expect(check(bad).errors[0]).toMatch(/not a plain x\.y\.z/);
+    }
+  });
+
+  it('fails when the Marketplace could not be read', () => {
+    expect(check('1.9.0', { showJson: null }).errors[0]).toMatch(/Could not read the Marketplace/);
+    expect(check('1.9.0', { showJson: {} }).errors[0]).toMatch(/Could not read the Marketplace/);
+  });
+
+  it('must be above the latest stable and off its patch line', () => {
+    expect(check('1.7.0').errors.join()).toMatch(/not above the latest stable release v1\.7\.2/);
+    expect(check('1.7.9').errors.join()).toMatch(/stable 1\.7\.x patch line/);
+  });
+
+  it('must not already be on the Marketplace, in either channel', () => {
+    expect(check('1.7.2').errors.join()).toMatch(/already on the Marketplace as a STABLE release/);
+    const withPre = show(pre('1.9.0'), stable('1.7.2'));
+    expect(check('1.9.0', { showJson: withPre }).errors.join()).toMatch(/already on the Marketplace as a pre-release; use v1\.9\.1/);
+  });
+
+  it('a re-run of the same workflow run may find its own pre-release published', () => {
+    const withPre = show(pre('1.9.0'), stable('1.7.2'));
+    const sha = 'a'.repeat(40);
+    const result = check('1.9.0', { showJson: withPre, rerun: true, headCommit: sha, tagCommit: sha.toUpperCase() });
+    expect(result.errors).toEqual([]);
+    expect(result.notes.join()).toMatch(/re-run/);
+    // …but never a stable one.
+    expect(check('1.7.2', { rerun: true, headCommit: sha, tagCommit: sha }).errors.join()).toMatch(/STABLE/);
+  });
+
+  it('a re-run never adopts a published pre-release of another commit', () => {
+    const withPre = show(pre('1.9.0'), stable('1.7.2'));
+    const a = 'a'.repeat(40);
+    const b = 'b'.repeat(40);
+    // The branch moved since the first attempt published (or another run published it).
+    expect(check('1.9.0', { showJson: withPre, rerun: true, headCommit: b, tagCommit: a }).errors.join()).toMatch(
+      /tag marks aaaaaaa, not this run's commit bbbbbbb.*v1\.9\.1/,
+    );
+    // No tag, or no commit to compare: refuse rather than guess.
+    expect(check('1.9.0', { showJson: withPre, rerun: true, headCommit: b, tagCommit: '' }).errors.join()).toMatch(/does not exist/);
+    expect(check('1.9.0', { showJson: withPre, rerun: true }).errors.length).toBe(1);
+    // An unpublished version needs no tag, on any attempt.
+    expect(check('1.9.1', { showJson: withPre, rerun: true }).errors).toEqual([]);
+  });
+
+  it('must be above every other pre-release', () => {
+    const withPre = show(pre('1.9.2'), stable('1.7.2'));
+    expect(check('1.9.1', { showJson: withPre }).errors.join()).toMatch(/below the pre-release v1\.9\.2/);
+  });
+
+  it('must be below the version the ref pins for its stable release', () => {
+    expect(check('2.0.0').errors.join()).toMatch(/not below v2\.0\.0/);
+    expect(check('2.1.0').errors.join()).toMatch(/not below v2\.0\.0/);
+  });
+
+  it('without a pin it passes with a note', () => {
+    const result = check('1.9.0', { changelog: '# Changelog\n\n## Unreleased\n' });
+    expect(result.errors).toEqual([]);
+    expect(result.notes.join()).toMatch(/pins no version/);
+  });
+
+  it('a brand-new listing with no versions only checks the format and the pin', () => {
+    expect(check('0.1.0', { showJson: show() }).errors).toEqual([]);
+  });
+
+  it('the CLI exits 1 on an invalid version and 0 on a valid one', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'prerelease-'));
+    writeFileSync(join(dir, 'show.json'), JSON.stringify(market));
+    writeFileSync(join(dir, 'CHANGELOG.md'), pinned);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const run = (v: string, env = {}) =>
+        main(['check-prerelease', '--version', v, '--marketplace-json', join(dir, 'show.json'), '--changelog', join(dir, 'CHANGELOG.md')], env);
+      expect(run('1.9.0')).toBe(0);
+      expect(run('2.0.0', { GITHUB_ACTIONS: 'true' })).toBe(1);
+      expect(err).toHaveBeenCalledWith(expect.stringMatching(/^::error::/));
+      expect(main(['check-prerelease', '--version', '1.9.0', '--marketplace-json', join(dir, 'missing.json')], {})).toBe(1);
+
+      // --rerun passes only with a matching --head / --tag-commit (an empty tag commit is "no tag").
+      writeFileSync(join(dir, 'show.json'), JSON.stringify(show(pre('1.9.0'), stable('1.7.2'))));
+      const sha = 'c'.repeat(40);
+      const rerun = (tagCommit: string) =>
+        main(['check-prerelease', '--version', '1.9.0', '--marketplace-json', join(dir, 'show.json'), '--changelog', join(dir, 'CHANGELOG.md'), '--head', sha, '--tag-commit', tagCommit, '--rerun'], {});
+      expect(rerun(sha)).toBe(0);
+      expect(rerun('d'.repeat(40))).toBe(1);
+      expect(rerun('')).toBe(1);
+    } finally {
+      err.mockRestore();
+    }
+  });
+});
+
+describe('release.mjs — pre-release notes', () => {
+  const changelog = '# Changelog\n\nIntro.\n\n## Unreleased — 2.0.0\n\n### Added\n\n- DBML storage\n\n## 1.7.2 — 2026-10-23\n\n- Old\n';
+
+  it('reads the newest section', () => {
+    expect(newestChangelogSection(changelog)).toEqual({ heading: 'Unreleased — 2.0.0', body: '### Added\n\n- DBML storage' });
+    expect(newestChangelogSection('# Changelog\n')).toBeNull();
+  });
+
+  it('puts the opt-in header above the newest section', () => {
+    const notes = prereleaseNotes(changelog, '1.9.0');
+    expect(notes).toMatch(/v1\.9\.0 is an opt-in pre-release/);
+    expect(notes).toMatch(/Switch to Pre-Release Version/);
+    expect(notes).toMatch(/Switch to Release Version/);
+    expect(notes).toMatch(/teammates on the stable version, or by ERD Studio for Confluence/);
+    expect(notes).toContain('- DBML storage');
+    expect(notes).not.toContain('- Old');
+    expect(notes.indexOf('opt-in')).toBeLessThan(notes.indexOf('DBML storage'));
+  });
+
+  it('links the changelog when there is no section', () => {
+    expect(prereleaseNotes('', '1.9.0')).toMatch(/See \[CHANGELOG\.md\]/);
   });
 });
