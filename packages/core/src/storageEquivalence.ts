@@ -15,6 +15,8 @@
  *   sticky-note list the same as none (a diagram with no Note blocks reads
  *   back with no list), and an empty positions map the same as none (a
  *   diagram with no layout file reads back with `{}`);
+ * - an empty rationale map the same as none (a table file stores no empty
+ *   rationale);
  * - relationship ends respelled to the real table and column spelling;
  * - a library `one-to-many` stored canonically (many-to-one, ends swapped);
  * - a one-member composite group's key dropped, and every composite key
@@ -25,7 +27,8 @@
  *   its Refs sorted (§4.5), so the drawn order of a link carries no meaning;
  * - and, with `convert: true` only, the Convert rows: a link stored twice
  *   kept once, a composite group's role taken from its first member,
- *   dangling relationships dropped, annotation ids ignored, and relationships
+ *   dangling relationships dropped (with the foreign-key badge only they
+ *   put on a column), annotation ids ignored, and relationships
  *   held in a diagram file moved to their owner in a Unified shape (the
  *   diagram's own list left empty, as a DBML diagram holds no Refs, D5).
  *
@@ -56,6 +59,7 @@ export type StorageEquivalenceRow =
   | 'positions'
   | 'emptyAnnotations'
   | 'emptyPositions'
+  | 'emptyRationale'
   | 'respelling'
   | 'oneToMany'
   | 'loneCompositeKey'
@@ -70,7 +74,7 @@ export type StorageEquivalenceRow =
 
 /** The rows every comparison applies. Internal. */
 export const STORAGE_EQUIVALENCE_ROWS: readonly StorageEquivalenceRow[] = [
-  'noteText', 'positions', 'emptyAnnotations', 'emptyPositions', 'respelling', 'oneToMany',
+  'noteText', 'positions', 'emptyAnnotations', 'emptyPositions', 'emptyRationale', 'respelling', 'oneToMany',
   'loneCompositeKey', 'compositeKeyNames', 'schemaVersion', 'relationshipOrder',
 ];
 
@@ -243,15 +247,20 @@ function sortRelationships(entries: Json[], ownerOf: (rel: Json) => string): voi
   keyed.forEach(({ rel }, i) => { entries[i] = rel; });
 }
 
-/** A relationship list normalised in place order: respelled, canonical, deduped (convert) and dangling dropped (convert). */
+/**
+ * A relationship list normalised in place order: respelled, canonical, deduped
+ * (convert) and dangling dropped (convert). `dangling` lists the foreign-key
+ * end (the canonical `from` end) of each dangling relationship dropped.
+ */
 function normaliseList(
   list: unknown,
   owner: string | undefined,
   tables: readonly SpelledTable[],
   rows: Rows,
-): { entries: Json[]; moved: Array<{ owner: string; rel: Json }> } {
+): { entries: Json[]; moved: Array<{ owner: string; rel: Json }>; dangling: Array<{ model: string; column: string }> } {
   const entries: Json[] = [];
   const moved: Array<{ owner: string; rel: Json }> = [];
+  const dangling: Array<{ model: string; column: string }> = [];
   const seen = new Set<string>();
   for (const item of Array.isArray(list) ? list : []) {
     if (!isObject(item)) continue;
@@ -261,7 +270,11 @@ function normaliseList(
     const ends = endsOf(turned.rel, turned.owner);
     if (rows.has('convertDangling')) {
       const to = findTable(tables, ends.toModel);
-      if (!to || findColumn(to, ends.toColumn) === undefined) continue;
+      // Either end's table missing, or the target column gone (§2.8).
+      if (!to || findColumn(to, ends.toColumn) === undefined || !findTable(tables, ends.fromModel)) {
+        dangling.push({ model: String(ends.fromModel ?? ''), column: String(ends.fromColumn ?? '') });
+        continue;
+      }
     }
     if (rows.has('convertLinkStoredTwice')) {
       const key = linkKey(ends);
@@ -275,7 +288,19 @@ function normaliseList(
     }
     entries.push(turned.rel);
   }
-  return { entries, moved };
+  return { entries, moved, dangling };
+}
+
+/** Clear the foreign-key badge of each dangling end that nothing else gives one (see the caller). */
+function clearDanglingBadges(models: unknown, kept: readonly Json[], dangling: ReadonlyArray<{ model: string; column: string }>): void {
+  const keyOf = (model: string, column: string): string => `${lower(model)}\u0000${lower(column)}`;
+  const stillDrawn = new Set(kept.map((rel) => keyOf(String(rel.fromModel ?? ''), String(rel.fromColumn ?? ''))));
+  for (const end of dangling) {
+    if (stillDrawn.has(keyOf(end.model, end.column))) continue;
+    const model = (Array.isArray(models) ? models : []).find((m): m is Json => isObject(m) && typeof m.name === 'string' && lower(m.name) === lower(end.model));
+    const column = (model && Array.isArray(model.columns) ? model.columns : []).find((c): c is Json => isObject(c) && typeof c.name === 'string' && lower(c.name) === lower(end.column));
+    if (column && column.isForeignKey === true && column.isForeignKeyDeclared !== true) column.isForeignKey = false;
+  }
 }
 
 /**
@@ -315,6 +340,7 @@ export function normaliseStorageRows<T>(area: T, rowList: readonly StorageEquiva
   for (const model of Array.isArray(models) ? models : []) {
     if (!isObject(model)) continue;
     text(model, 'description');
+    if (rows.has('emptyRationale') && isObject(model.rationale) && Object.keys(model.rationale).length === 0) delete model.rationale;
     for (const column of Array.isArray(model.columns) ? model.columns : []) {
       if (isObject(column)) text(column, 'description');
     }
@@ -332,10 +358,15 @@ export function normaliseStorageRows<T>(area: T, rowList: readonly StorageEquiva
   if (Array.isArray(copy.relationships)) flatHolders.push(copy);
   if (logical && Array.isArray(logical.relationships)) flatHolders.push(logical);
   for (const holder of flatHolders) {
-    const { entries } = normaliseList(holder.relationships, undefined, tables, rows);
+    const { entries, dangling } = normaliseList(holder.relationships, undefined, tables, rows);
     holder.relationships = entries;
     if (rows.has('relationshipOrder')) sortRelationships(entries, (rel) => String(rel.fromModel ?? ''));
     normaliseCompositeKeys(entries, (rel) => String(rel.fromModel ?? ''), rows);
+    // The foreign-key badge only a dropped dangling relationship put on its
+    // column (Display shape) goes with it: a column that declares
+    // `isForeignKey`, or is the foreign-key end of a relationship still
+    // drawn, keeps it.
+    if (holder === copy && dangling.length > 0) clearDanglingBadges(models, entries, dangling);
   }
 
   // Relationships a table list now holds for another owner (a one-to-many

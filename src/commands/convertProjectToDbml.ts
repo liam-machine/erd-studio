@@ -138,13 +138,15 @@ class V5StepFailed extends Error {
 
 /** The command. Never throws: anything unexpected is counted and shown as ERD Studio's, with Send Feedback (#219). */
 export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<ConvertProjectOutcome> {
-  const progress = { v5Converted: false, applied: false };
+  const progress = { v5Converted: false, applied: false, counted: false };
   const retry = (): Promise<ConvertProjectOutcome> => convertProjectToDbml(deps);
   try {
     return await runConversion(deps, progress, retry);
   } catch (err) {
     console.error('[convertProjectToDbml] failed:', err);
-    telemetry.error('convertToDbmlFailed');
+    // A conversion that landed counts as one, even when a later step (the refresh) threw.
+    if (progress.applied) { if (!progress.counted) telemetry.feature('convertToDbml'); }
+    else telemetry.error('convertToDbmlFailed');
     if (err instanceof V5StepFailed) {
       const doing = 'while converting the v4 subject areas';
       showErrorWithActions(oursMessage(CONVERT_TO_DBML_TITLE, doing, 'some files may already be converted (source control shows which)'), {
@@ -167,7 +169,7 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
 
 async function runConversion(
   deps: ConvertProjectDeps,
-  progress: { v5Converted: boolean; applied: boolean },
+  progress: { v5Converted: boolean; applied: boolean; counted: boolean },
   retry: () => Promise<ConvertProjectOutcome>,
 ): Promise<ConvertProjectOutcome> {
   const semanticRoot = path.join(deps.workspaceRoot, deps.semanticDir);
@@ -335,6 +337,7 @@ async function runConversion(
     release();
     await deps.onConverted([...writes.map((w) => w.path)]);
     telemetry.feature('convertToDbml');
+    progress.counted = true;
     if (unsaved.length > 0) {
       telemetry.error('saveFailed');
       showErrorWithActions(

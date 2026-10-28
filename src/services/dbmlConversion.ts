@@ -44,6 +44,7 @@ import {
   parseSubjectAreaJson,
   parseTableText,
   stickyLayoutsOf,
+  subjectAreaViewConfig,
   validateSubjectAreaDocument,
 } from '@erd-studio/core';
 import type {
@@ -222,7 +223,20 @@ interface KeptLines {
   block: string[];
   comments: boolean;
   unknownKeys: string[];
+  /** Known keys holding a value ERD Studio does not read (it ignores them), e.g. `relationships[2]`, `rationale`. */
+  ignoredValues: string[];
   anchors: boolean;
+}
+
+const YAML_CARDINALITIES: ReadonlySet<string> = new Set(['many-to-one', 'one-to-one', 'one-to-many', 'many-to-many']);
+const isPlainMap = (v: unknown): v is Record<string, unknown> => isObject(v) && Object.getPrototypeOf(v) === Object.prototype;
+const nonEmptyString = (v: unknown): v is string => typeof v === 'string' && v !== '';
+
+/** Whether core's model-file reader takes this `relationships:` entry (`readRelationships`: three non-empty string ends). */
+function readsAsRelationship(entry: unknown): boolean {
+  if (!isObject(entry)) return false;
+  const toModel = typeof entry.toTable === 'string' ? entry.toTable : entry.toModel;
+  return nonEmptyString(entry.fromColumn) && nonEmptyString(toModel) && nonEmptyString(entry.toColumn);
 }
 
 /** Line index (0-based) of an offset. */
@@ -263,8 +277,14 @@ function yamlCommentOffsets(text: string): number[] {
   return out;
 }
 
-/** The lines of a YAML table file ERD Studio does not read: comments, unknown keys, anchors and aliases. */
-function keptYamlLines(oldPath: string, text: string): KeptLines {
+/**
+ * The lines of a YAML table file ERD Studio does not read: comments, unknown
+ * keys, anchors and aliases, and known keys whose value the reader ignores (a
+ * `relationships:` entry without its three ends, a `fromModel` naming another
+ * table, a cardinality it does not know, a `rationale` or `meta` that is not
+ * a map, a column entry that is not a map, an `scdType` that is not a number).
+ */
+function keptYamlLines(oldPath: string, text: string, tableName: string): KeptLines {
   const starts = lineStarts(text);
   const keep = new Set<number>();
   const keepRange = (from: number, to: number): void => {
@@ -275,8 +295,31 @@ function keptYamlLines(oldPath: string, text: string): KeptLines {
   const commentOffsets = yamlCommentOffsets(text);
   for (const offset of commentOffsets) keep.add(lineIndexAt(starts, offset));
   const unknownKeys: string[] = [];
+  const ignoredValues: string[] = [];
   let anchors = false;
   const doc = parseDocument(text);
+  const ignoredNode = (node: unknown, label: string): void => {
+    const range = isNode(node) ? node.range : undefined;
+    if (range) keepRange(range[0], range[1]);
+    ignoredValues.push(label);
+  };
+  const ignoredPair = (pair: Pair | undefined, label: string): void => {
+    const range = pair ? pairRange(pair) : null;
+    if (!range) return;
+    keepRange(range[0], range[1]);
+    ignoredValues.push(label);
+  };
+  /** A plain value (aliases expanded) of a node; undefined when it cannot be made. */
+  const plain = (node: unknown): unknown => {
+    try {
+      return isNode(node) ? node.toJS(doc, { maxAliasCount: -1 }) : node;
+    } catch {
+      return undefined;
+    }
+  };
+  const pairOf = (map: unknown, key: string): Pair | undefined =>
+    isMap(map) ? (map.items as Pair[]).find((p) => isScalar(p.key) && p.key.value === key) : undefined;
+  const present = (v: unknown): boolean => v !== undefined && v !== null;
   const pairRange = (pair: Pair): [number, number] | null => {
     const key = isNode(pair.key) ? pair.key.range : undefined;
     const value = isNode(pair.value) ? pair.value.range : undefined;
@@ -299,10 +342,47 @@ function keptYamlLines(oldPath: string, text: string): KeptLines {
     const get = (key: string): unknown => (root.items as Pair[]).find((p) => isScalar(p.key) && p.key.value === key)?.value;
     const rationale = get('rationale');
     if (isMap(rationale)) unknownIn(rationale, RATIONALE_KEY_SET, 'rationale.');
+    else if (present(plain(rationale)) && !isObject(plain(rationale))) ignoredPair(pairOf(root, 'rationale'), 'rationale');
+    const meta = plain(get('meta'));
+    if (present(meta) && !isPlainMap(meta)) ignoredPair(pairOf(root, 'meta'), 'meta');
     const columns = get('columns');
-    if (isSeq(columns)) for (const item of columns.items) unknownIn(item, COLUMN_KEYS, 'columns[].');
+    if (isSeq(columns)) {
+      columns.items.forEach((item, i) => {
+        if (!isObject(plain(item))) {
+          ignoredNode(item, `columns[${i}]`);
+          return;
+        }
+        unknownIn(item, COLUMN_KEYS, 'columns[].');
+        const scd = pairOf(item, 'scdType');
+        const scdValue = scd ? plain(scd.value) : undefined;
+        if (present(scdValue) && !Number.isFinite(Number(scdValue))) ignoredPair(scd, `columns[${i}].scdType`);
+        const columnMeta = plain(pairOf(item, 'meta')?.value);
+        if (present(columnMeta) && !isPlainMap(columnMeta)) ignoredPair(pairOf(item, 'meta'), `columns[${i}].meta`);
+      });
+    } else if (present(plain(columns))) {
+      ignoredPair(pairOf(root, 'columns'), 'columns');
+    }
     const relationships = get('relationships');
-    if (isSeq(relationships)) for (const item of relationships.items) unknownIn(item, RELATIONSHIP_KEYS, 'relationships[].');
+    if (isSeq(relationships)) {
+      relationships.items.forEach((item, i) => {
+        const entry = plain(item);
+        if (!readsAsRelationship(entry)) {
+          ignoredNode(item, `relationships[${i}]`);
+          return;
+        }
+        unknownIn(item, RELATIONSHIP_KEYS, 'relationships[].');
+        const from = (entry as Record<string, unknown>).fromTable ?? (entry as Record<string, unknown>).fromModel;
+        if (present(from) && (typeof from !== 'string' || lower(from) !== lower(tableName))) {
+          ignoredPair(pairOf(item, 'fromTable') ?? pairOf(item, 'fromModel'), `relationships[${i}].fromModel`);
+        }
+        const cardinality = (entry as Record<string, unknown>).cardinality;
+        if (present(cardinality) && !(typeof cardinality === 'string' && YAML_CARDINALITIES.has(cardinality))) {
+          ignoredPair(pairOf(item, 'cardinality'), `relationships[${i}].cardinality`);
+        }
+      });
+    } else if (present(plain(relationships))) {
+      ignoredPair(pairOf(root, 'relationships'), 'relationships');
+    }
   }
   visit(doc, {
     Node: (_key, node) => {
@@ -313,22 +393,41 @@ function keptYamlLines(oldPath: string, text: string): KeptLines {
       }
     },
   });
-  if (keep.size === 0) return { block: [], comments: false, unknownKeys: [], anchors: false };
+  if (keep.size === 0) return { block: [], comments: false, unknownKeys: [], ignoredValues: [], anchors: false };
   const lines = text.split('\n').map((l) => l.replace(/\r$/, ''));
   const block = [keptFromLine(oldPath), ...[...keep].sort((a, b) => a - b).map((i) => (lines[i] === '' ? '//' : `// ${lines[i]}`))];
-  return { block, comments: commentOffsets.length > 0, unknownKeys: [...new Set(unknownKeys)], anchors };
+  return { block, comments: commentOffsets.length > 0, unknownKeys: [...new Set(unknownKeys)], ignoredValues: [...new Set(ignoredValues)], anchors };
 }
 
 const DIAGRAM_TOP_KEYS = new Set(['schemaVersion', 'domain', 'subjectArea', 'layer', 'description', 'modelFolder', 'logical', 'viewConfig', 'stubColumns']);
 const DIAGRAM_LOGICAL_KEYS = new Set(['models', 'tables', 'relationships']);
 const DIAGRAM_VIEW_KEYS = new Set(['showFkEdges', 'layoutOptions', 'positions', 'annotations']);
 
-/** The keys of a JSON diagram a DBML diagram does not store, as `"key": <JSON>` comment lines. */
-function keptJsonLines(oldPath: string, raw: Record<string, unknown>): { block: string[]; keys: string[] } {
+/**
+ * The keys of a JSON diagram a DBML diagram does not store, as `"key": <JSON>`
+ * comment lines. `viewAt` is where the view config the loader reads is (the
+ * top level, or the stage-level `logical.viewConfig` older versions wrote):
+ * its known keys are stored, not kept. `ignored` adds entries the loader
+ * drops (a sticky note with no id or position, a malformed position).
+ */
+function keptJsonLines(
+  oldPath: string,
+  raw: Record<string, unknown>,
+  viewAt: 'viewConfig' | 'logical.viewConfig',
+  ignored: ReadonlyArray<[string, unknown]> = [],
+): { block: string[]; keys: string[] } {
   const kept: Array<[string, unknown]> = [];
   for (const [key, value] of Object.entries(raw)) if (!DIAGRAM_TOP_KEYS.has(key)) kept.push([key, value]);
-  if (isObject(raw.logical)) for (const [key, value] of Object.entries(raw.logical)) if (!DIAGRAM_LOGICAL_KEYS.has(key)) kept.push([`logical.${key}`, value]);
-  if (isObject(raw.viewConfig)) for (const [key, value] of Object.entries(raw.viewConfig)) if (!DIAGRAM_VIEW_KEYS.has(key)) kept.push([`viewConfig.${key}`, value]);
+  const logicalView = viewAt === 'logical.viewConfig';
+  if (isObject(raw.logical)) {
+    for (const [key, value] of Object.entries(raw.logical)) {
+      if (DIAGRAM_LOGICAL_KEYS.has(key) || (logicalView && key === 'viewConfig')) continue;
+      kept.push([`logical.${key}`, value]);
+    }
+  }
+  const view = logicalView ? (isObject(raw.logical) ? raw.logical.viewConfig : undefined) : raw.viewConfig;
+  if (isObject(view)) for (const [key, value] of Object.entries(view)) if (!DIAGRAM_VIEW_KEYS.has(key)) kept.push([`${viewAt}.${key}`, value]);
+  kept.push(...ignored);
   if (kept.length === 0) return { block: [], keys: [] };
   return {
     block: [keptFromLine(oldPath), ...kept.map(([key, value]) => `// ${JSON.stringify(key)}: ${JSON.stringify(value) ?? 'null'}`)],
@@ -431,13 +530,21 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
       refusals.push(`${f.path}: ‘_relationships’ is the name of the relationships file in a DBML project; give the table another name, then convert.`);
       continue;
     }
+    // DBML refuses two columns of one name ([3023]), compared exactly as written.
+    const columnNames = (model.columns ?? []).map((c) => c.name);
+    const twice = [...new Set(columnNames.filter((n, i) => columnNames.indexOf(n) !== i))];
+    if (twice.length > 0) {
+      refusals.push(`${f.path} lists the column${twice.length === 1 ? '' : 's'} ${twice.join(', ')} more than once, and a DBML table names each column once. Remove or rename the copy, then convert.`);
+      continue;
+    }
     const folder = cls.folder ?? '';
     const target = `${TABLES_DIR}/${folder ? `${folder}/` : ''}${model.name}.dbml`;
-    const kept = keptYamlLines(f.path, f.text);
+    const kept = keptYamlLines(f.path, f.text, model.name);
     const { relationships: _r, ...bare } = model;
     const text = [...kept.block, renderNewTableDbml(bare as SemanticTable)].join('\n');
     if (kept.comments) notes.push(`${f.path}: its comments are kept as // lines above the Table in ${target}; ERD Studio does not read them.`);
     if (kept.unknownKeys.length > 0) notes.push(`${f.path}: keys ERD Studio does not read (${kept.unknownKeys.join(', ')}) are kept as // lines above the Table in ${target}.`);
+    if (kept.ignoredValues.length > 0) notes.push(`${f.path}: values ERD Studio does not read (${kept.ignoredValues.join(', ')}) are kept as // lines above the Table in ${target}; they were not drawn before and are not drawn now.`);
     if (kept.anchors) notes.push(`${f.path}: its YAML anchors and aliases are written out in full; the lines that held them are kept as // lines above the Table in ${target}.`);
     const table: LibraryTable = { name: model.name, path: target, folder, model, converted: { source: f.path, text, resumed: false } };
     converted.push(table);
@@ -446,6 +553,8 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
   const existingDbml: LibraryTable[] = [];
   /** DBML table files that do not read: a refusal only when the plan needs them (§6.1). Lower-case stem → why. */
   const unreadableTables = new Map<string, string>();
+  /** DBML table files that read but the writer may not edit (`writable: false`): a refusal only when the plan must change one. */
+  const nonWritableTables = new Set<string>();
   for (const f of dbmlTables) {
     const cls = classifySemanticFile(f.path, { tablesDirIsLayer: false });
     const stem = cls.name ?? stemOf(f.path);
@@ -459,7 +568,7 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
       name: reading.table.name, path: f.path, folder: cls.folder ?? '', model: reading.table,
       dbml: { reference: reading.declaredReference, ...(reading.alias !== undefined ? { alias: reading.alias } : {}), text: f.text },
     };
-    if (!reading.writable) table.dbml = { ...table.dbml!, text: f.text };
+    if (!reading.writable) nonWritableTables.add(f.path);
     existingDbml.push(table);
     addName(reading.table.name, { path: f.path, text: f.text, storage: 'dbml' });
   }
@@ -522,6 +631,13 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
     const cols = (t.model.columns ?? []).map((c) => c.name);
     return cols.find((c) => c === column) ?? cols.find((c) => lower(c) === lower(column));
   };
+  const relationshipsFileOfFolder = (folder: string): string => {
+    const dir = folder ? `${TABLES_DIR}/${folder}` : TABLES_DIR;
+    const listed = [...relationshipsReadings.keys()].find((p) => lower(dirOf(p)) === lower(dir));
+    return listed ?? `${dir}/${DBML_RELATIONSHIPS_FILE_NAME}`;
+  };
+  /** Relationships files an earlier, half-applied run wrote: they hold what this run would write there (§6.1 step 7). */
+  const resumedRelationships = new Set<string>();
   const pool: PoolEntry[] = [];
   for (const t of library.values()) {
     if (t.converted) {
@@ -530,23 +646,21 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
       });
     }
     (attachment.byOwner.get(lower(t.name)) ?? []).forEach((entry, index) => {
-      pool.push({ rel: { ...entry, fromModel: t.name } as Relationship, file: `${t.folder ? `${TABLES_DIR}/${t.folder}` : TABLES_DIR}/${DBML_RELATIONSHIPS_FILE_NAME}`, index: 1000 + index, source: 'dbml' });
+      pool.push({ rel: { ...entry, fromModel: t.name } as Relationship, file: relationshipsFileOfFolder(t.folder), index: 1000 + index, source: 'dbml' });
     });
   }
   const dangling: Dangling[] = [];
-  const relationshipsFileOfFolder = (folder: string): string => {
-    const dir = folder ? `${TABLES_DIR}/${folder}` : TABLES_DIR;
-    const listed = [...relationshipsReadings.keys()].find((p) => lower(dirOf(p)) === lower(dir));
-    return listed ?? `${dir}/${DBML_RELATIONSHIPS_FILE_NAME}`;
-  };
   /** Respell an entry against the library; a dangling one is recorded and dropped (null). */
   const checkEntry = (e: PoolEntry): PoolEntry | null => {
     const owner = tableOf(e.rel.fromModel);
     const to = tableOf(e.rel.toModel);
     const home = relationshipsFileOfFolder(owner?.folder ?? to?.folder ?? '');
-    const drop = (reason: string): null => {
+    const drop = (reason: string, badge?: string): null => {
       dangling.push({ file: home, reason, members: [e.rel] });
-      notes.push(`${e.file}: the relationship ${describeEnds(e.rel.fromModel, [e.rel.fromColumn], e.rel.toModel, [e.rel.toColumn])} is written as a commented-out line in ${home}, because ${reason}; it was not drawn before and is not drawn now.`);
+      notes.push(
+        `${e.file}: the relationship ${describeEnds(e.rel.fromModel, [e.rel.fromColumn], e.rel.toModel, [e.rel.toColumn])} is written as a commented-out line in ${home}, because ${reason}; ` +
+          `it was not drawn before and is not drawn now${badge ? `, and ${badge} loses the foreign-key mark it gave it (unless its file says isForeignKey: true)` : ''}.`,
+      );
       return null;
     };
     for (const end of [e.rel.fromModel, e.rel.toModel]) {
@@ -561,7 +675,10 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
     const fromColumn = columnOf(owner, e.rel.fromColumn);
     if (fromColumn === undefined) return drop(`${owner.name} has no column ${e.rel.fromColumn}`);
     const toColumn = columnOf(to, e.rel.toColumn);
-    if (toColumn === undefined) return drop(`${to.name} has no column ${e.rel.toColumn}`);
+    if (toColumn === undefined) {
+      const declared = (owner.model.columns ?? []).find((c) => c.name === fromColumn)?.isForeignKey === true;
+      return drop(`${to.name} has no column ${e.rel.toColumn}`, declared ? undefined : `${owner.name}.${fromColumn}`);
+    }
     const respelled = { ...e.rel, fromModel: owner.name, fromColumn, toModel: to.name, toColumn };
     if (respelled.fromColumn !== e.rel.fromColumn || respelled.toModel !== e.rel.toModel || respelled.toColumn !== e.rel.toColumn || respelled.fromModel !== e.rel.fromModel) {
       notes.push(`${e.file}: ${describeEnds(e.rel.fromModel, [e.rel.fromColumn], e.rel.toModel, [e.rel.toColumn])} is written as ${describeEnds(respelled.fromModel, [respelled.fromColumn], respelled.toModel, [respelled.toColumn])}, the tables' and columns' own spelling (DBML compares names exactly).`);
@@ -591,7 +708,10 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
         const strip = ({ compositeKey: _k, ...rest }: Relationship): Relationship => rest as Relationship;
         return identity(strip(canonicalRelationship(a))) === identity(strip(canonicalRelationship(b)));
       };
-      if (winner.source !== e.source && (winner.source === 'dbml' || e.source === 'dbml') && sameEntry(winner.rel, e.rel)) continue;
+      if (winner.source !== e.source && (winner.source === 'dbml' || e.source === 'dbml') && sameEntry(winner.rel, e.rel)) {
+        if (winner.source === 'yaml' || e.source === 'yaml') resumedRelationships.add((winner.source === 'dbml' ? winner : e).file);
+        continue;
+      }
       notes.push(`${e.file}: the relationship ${describeEnds(e.rel.fromModel, [e.rel.fromColumn], e.rel.toModel, [e.rel.toColumn])} is stored twice (also in ${winner.file}); it is written once, as ${winner.file} has it, the copy ERD Studio already drew.`);
     }
     return list.filter((e) => kept.has(e));
@@ -796,11 +916,20 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
     libraryPlan = planDbmlLibraryWrites(snapshot, { save: saves });
   } catch (err) {
     if (err instanceof DbmlEditRefused) {
-      refusals.push(`Convert can't write the table library: ${err.message}`);
+      // A table Convert itself writes is named by the file it comes from.
+      const source = [...library.values()].find((t) => t.converted && lower(t.path) === lower(err.file))?.converted?.source;
+      refusals.push(source !== undefined
+        ? `Convert can't write ${source} as DBML: ${err.message.replace(/^Fix the DBML in \S+ first \((.*)\)\. ERD Studio never rewrites a file it cannot read\.$/, '$1')}. Fix ${source}, then convert.`
+        : `Convert can't write the table library: ${err.message}`);
       return plan;
     }
     throw err;
   }
+  for (const w of libraryPlan.writes) {
+    if (w.kind === 'create' || !nonWritableTables.has(w.path)) continue;
+    refusals.push(`${w.path} must change for the conversion, and ERD Studio can't edit it (it holds a use line, a Ref or an inline ref: setting, which belong in its folder's _relationships.dbml). Fix it, then convert.`);
+  }
+  if (refusals.length > 0) return withoutWrites(plan);
 
   const creates = new Map<string, string>();
   const replaces = new Map<string, string>();
@@ -825,14 +954,20 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
       needsUnreadable(unreadable[1], `a relationship Convert keeps there as a comment (${list.map((d) => d.reason).join('; ')})`);
       continue;
     }
-    const block = list.flatMap((d) => [
+    const base = creates.get(file) ?? replaces.get(file) ?? fileAt.get(file)?.text ?? null;
+    // A block already in the file (an earlier, half-applied run wrote it) is not written again.
+    const pairs = [...new Set(list.map((d) => [
       `// Kept by Convert Project to DBML: ${d.reason}, so this relationship is not active.`,
       `// ${refLine(d.members[0], d.members)}`,
-    ]);
-    const base = creates.get(file) ?? replaces.get(file) ?? fileAt.get(file)?.text ?? null;
+    ].join('\n')))];
+    const missing = base === null ? pairs : pairs.filter((pair) => !base.split(/\r?\n/).join('\n').includes(pair));
+    if (missing.length === 0) {
+      if (fileAt.has(file)) resumedRelationships.add(file);
+      continue;
+    }
     const text = base === null
-      ? `${DBML_RELATIONSHIPS_FILE_HEADER}\n\n${block.join('\n')}\n`
-      : `${base.replace(/\n*$/, '\n')}\n${block.join('\n')}\n`;
+      ? `${DBML_RELATIONSHIPS_FILE_HEADER}\n\n${missing.join('\n')}\n`
+      : `${base.replace(/\n*$/, '\n')}\n${missing.join('\n')}\n`;
     if (fileAt.has(file)) replaces.set(file, text);
     else creates.set(file, text);
   }
@@ -859,9 +994,25 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
   const diagramTargets = new Map<string, string>(); // lower target path → source json
   for (const d of jsonDiagrams) {
     const text = [] as string[];
-    const kept = keptJsonLines(d.file.path, d.raw);
-    if (kept.keys.length > 0) notes.push(`${d.file.path}: keys a DBML diagram does not store (${kept.keys.join(', ')}) are kept as // lines above the Project in ${d.target}.`);
     const logical = isObject(d.obj.logical) ? d.obj.logical : {};
+    // The view config as the loader reads it: the top level, else the stage-level one older versions wrote,
+    // with the positions and sticky notes it drops left out (they were never drawn).
+    const viewAt = d.obj.viewConfig !== undefined && d.obj.viewConfig !== null ? 'viewConfig' : 'logical.viewConfig';
+    const rawView = viewAt === 'viewConfig' ? d.obj.viewConfig : logical.viewConfig;
+    const view = subjectAreaViewConfig(d.obj);
+    const ignored: Array<[string, unknown]> = [];
+    if (isObject(rawView)) {
+      if (isObject(rawView.positions)) {
+        for (const [key, value] of Object.entries(rawView.positions)) if (!view.positions || !Object.prototype.hasOwnProperty.call(view.positions, key)) ignored.push([`${viewAt}.positions.${key}`, value]);
+      } else if (rawView.positions !== undefined) ignored.push([`${viewAt}.positions`, rawView.positions]);
+      if (Array.isArray(rawView.annotations)) {
+        rawView.annotations.forEach((a: unknown, i: number) => { if (!(view.annotations ?? []).includes(a as Annotation)) ignored.push([`${viewAt}.annotations[${i}]`, a]); });
+      } else if (rawView.annotations !== undefined) ignored.push([`${viewAt}.annotations`, rawView.annotations]);
+    }
+    const kept = keptJsonLines(d.file.path, d.raw, viewAt, ignored);
+    const unknown = kept.keys.filter((k) => !ignored.some(([i]) => i === k));
+    if (unknown.length > 0) notes.push(`${d.file.path}: keys a DBML diagram does not store (${unknown.join(', ')}) are kept as // lines above the Project in ${d.target}.`);
+    if (ignored.length > 0) notes.push(`${d.file.path}: positions and sticky notes ERD Studio does not draw (${ignored.map(([k]) => k).join(', ')}: no id, or no numeric x and y) are kept as // lines above the Project in ${d.target}.`);
     const names = Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
     const members: Array<{ name: string; reference: string; path: string }> = [];
     for (const name of names) {
@@ -875,11 +1026,17 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
         refusals.push(`${d.file.path} lists ${name}, which has no table file, and a DBML diagram names each table by its file. Add the table, or remove it from the diagram, then convert.`);
         continue;
       }
+      if (t.name !== name) {
+        refusals.push(
+          `${d.file.path} lists ${name}, but the table is named ${t.name}, and a DBML diagram names each table exactly. ` +
+            `Write ${t.name} in the diagram (its models list, and its positions if it has any), then convert.`,
+        );
+        continue;
+      }
       members.push({ name: t.name, reference: t.reference, path: t.path });
     }
-    const view = isObject(d.obj.viewConfig) ? d.obj.viewConfig : {};
     const seenIds = new Set<string>();
-    const annotations = (Array.isArray(view.annotations) ? (view.annotations as Annotation[]) : []).filter(isObject).map((a, i) => {
+    const annotations = (view.annotations ?? []).map((a, i) => {
       if (typeof a.id !== 'string' || !seenIds.has(lower(a.id))) {
         if (typeof a.id === 'string') seenIds.add(lower(a.id));
         return a;
@@ -903,7 +1060,7 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
       annotations,
     }));
     const diagramText = text.join('\n');
-    const positions = isObject(view.positions) ? (view.positions as Record<string, NodePosition>) : {};
+    const positions: Record<string, NodePosition> = view.positions ?? {};
     const layout = editDiagramLayout(null, positions, stickyLayoutsOf(annotations));
     const place = (target: string, body: string): void => {
       const there = fileAt.get(target) ?? fileAtLower.get(lower(target));
@@ -913,6 +1070,11 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
     };
     place(d.target, diagramText);
     if (layout !== null) place(layoutFilePathOf(d.target), layout);
+    else {
+      // No layout to write, and a stale one beside the target would be read as this diagram's.
+      const stale = fileAt.get(layoutFilePathOf(d.target)) ?? fileAtLower.get(lower(layoutFilePathOf(d.target)));
+      if (stale) refusals.push(`${stale.path} already exists, and ${d.file.path} has no positions or sticky notes to put in it, so the converted diagram would read that file's layout. Delete ${stale.path} (or move it), then convert.`);
+    }
     diagramTargets.set(lower(d.target), d.file.path);
     plan.deletes.push(d.file.path);
   }
@@ -946,6 +1108,7 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
   }
   if (refusals.length > 0) return withoutWrites(plan);
 
+  for (const p of resumedRelationships) if (fileAt.has(p) && !creates.has(p) && !replaces.has(p)) plan.resumed.push(p);
   plan.creates = orderCreates([...creates].map(([path, text]) => ({ path, text })));
   plan.replaces = [...replaces].map(([path, text]) => ({ path, text }));
   plan.deletes = [...new Set(plan.deletes)];
@@ -1071,8 +1234,10 @@ function orderCreates(creates: Array<{ path: string; text: string }>): Array<{ p
 /**
  * A diagram's display through core's loader over in-memory files, with every
  * library folder listed as a layer so the loader's probe finds every table
- * and relationships file wherever it is (the host's semantics, §3.4),
- * before and after alike. Null when it does not load.
+ * and relationships file wherever it is, and a path the listing holds in
+ * another case resolved to the listed file (the host's semantics, §3.4: it
+ * finds a table file by its stem without case), before and after alike.
+ * Null when it does not load.
  */
 async function displayOf(
   set: Readonly<Record<string, string>>,
@@ -1086,13 +1251,20 @@ async function displayOf(
     id, label: id, abbreviation: id.slice(0, 3).toUpperCase(), color: '#888888', creatable: false, order: 1000 + i,
   }));
   const layersText = JSON.stringify({ schemaVersion: 1, layers: [...layers, ...extra] });
+  const listed = new Map<string, string>();
+  for (const p of Object.keys(set).sort()) if (!listed.has(lower(p))) listed.set(lower(p), p);
+  const read = (p: string): string | null => {
+    if (Object.prototype.hasOwnProperty.call(set, p)) return set[p];
+    const other = listed.get(lower(p));
+    return other === undefined ? null : set[other];
+  };
   try {
     const display = await loadDisplaySubjectArea({
       domainPath,
       readOnly: true,
       dbml: dbmlStorageReader,
       warn: () => { /* compared, not shown */ },
-      readFile: async (p) => (p === 'layers.json' ? layersText : set[p] ?? null),
+      readFile: async (p) => (p === 'layers.json' ? layersText : read(p)),
     });
     return JSON.parse(JSON.stringify(display)) as Record<string, unknown>;
   } catch {

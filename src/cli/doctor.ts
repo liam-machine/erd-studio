@@ -340,8 +340,24 @@ async function dbmlConversionPreview(ctx: CliContext): Promise<{ preview: NonNul
 /** The erd summary with Convert's preview when storage is not `dbml`. */
 async function withDbmlConversion(ctx: CliContext, erd: DoctorResult['erd']): Promise<{ erd: DoctorResult['erd']; unfinished: boolean }> {
   if (!erd.semanticDirExists || erd.storage === 'dbml') return { erd, unfinished: false };
-  const { preview, unfinished } = await dbmlConversionPreview(ctx);
-  return { erd: { ...erd, dbmlConversion: preview }, unfinished };
+  try {
+    const { preview, unfinished } = await dbmlConversionPreview(ctx);
+    return { erd: { ...erd, dbmlConversion: preview }, unfinished };
+  } catch {
+    // ERD Studio's own failure while planning: a refusal in the preview, never a failed doctor run.
+    const refusal = 'ERD Studio could not plan the conversion of this project (an error in ERD Studio, not in your files). Please report it, with this doctor output.';
+    return {
+      erd: {
+        ...erd,
+        dbmlConversion: {
+          tables: 0, diagrams: 0, relationshipsFiles: 0, relationships: 0,
+          v4SubjectAreas: [], movedRelationships: [], refusals: [refusal], notes: [], resumed: [],
+          preview: `Can't convert yet:\n• ${refusal}`,
+        },
+      },
+      unfinished: false,
+    };
+  }
 }
 
 /** A DBML diagram's layout file text, or null when there is none. */

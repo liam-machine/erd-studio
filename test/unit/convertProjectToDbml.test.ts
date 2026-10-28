@@ -225,6 +225,19 @@ describe('convertProjectToDbml', () => {
     expect(error.mock.calls[0].slice(1)).toEqual(['Send Feedback', 'Try Again']);
   });
 
+  it('a failure after the edit applied counts the conversion, not a failure', async () => {
+    useFixture('composite-and-self');
+    answerConvert();
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    const onConverted = vi.fn(async () => { throw new Error('refresh failed at /secret/path'); });
+    expect(await convertProjectToDbml(deps({ onConverted }))).toBe('converted');
+    expect(feature).toHaveBeenCalledWith('convertToDbml');
+    expect(feature.mock.calls.filter((c) => c[0] === 'convertToDbml')).toHaveLength(1);
+    expect(telemetryError).not.toHaveBeenCalledWith('convertToDbmlFailed');
+    expect(snapshot()).toEqual(snapshot(TWIN));
+    expect(String(error.mock.calls[0][0])).not.toContain('/secret/path');
+  });
+
   it('a mixed project: replaced files are saved, and an undo of one is saved too', async () => {
     fs.cpSync(path.resolve(__dirname, '../fixtures/dbml-convert/mixed/.erd-studio'), erd, { recursive: true });
     const plan = await planProjectDbmlConversion(deps());

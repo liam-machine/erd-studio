@@ -170,6 +170,15 @@ describe('normaliseForStorageEquivalence: each §2.8 row in isolation', () => {
     same(a, b);
   });
 
+  it('an empty rationale map is the same as none, and a rationale with text is not', () => {
+    const a = display();
+    const b = display();
+    b.models[0].rationale = {};
+    same(a, b);
+    b.models[0].rationale = { grainReason: 'daily' };
+    differ(a, b);
+  });
+
   it('schemaVersion is overridden', () => {
     const a = display();
     const b = display();
@@ -188,6 +197,7 @@ describe('normaliseStorageRows: one row at a time (the twin goldens\' per-case c
     ['positions', (b) => { b.viewConfig.positions.fct_order = { x: 400.001, y: 200 }; }],
     ['emptyAnnotations', (b) => { b.viewConfig.annotations = []; }],
     ['emptyPositions', (b) => { b.viewConfig.positions = {}; }],
+    ['emptyRationale', (b) => { b.models[1].rationale = {}; }],
     ['respelling', (b) => { b.relationships[0] = { ...b.relationships[0], toModel: 'Dim_Customer', toColumn: 'CUSTOMER_ID' }; }],
     ['oneToMany', (b) => { b.relationships[0] = { fromModel: 'dim_customer', fromColumn: 'customer_id', toModel: 'fct_order', toColumn: 'customer_id', cardinality: 'one-to-many', role: 'buyer' }; }],
     ['loneCompositeKey', (b) => { b.relationships[0].compositeKey = 'fk_lonely'; }],
@@ -316,7 +326,30 @@ describe('normaliseForStorageEquivalence: the Convert-only rows', () => {
     const b = display();
     b.relationships.push({ fromModel: 'fct_order', fromColumn: 'order_id', toModel: 'dim_gone', toColumn: 'id', cardinality: 'many-to-one' });
     b.relationships.push({ fromModel: 'fct_order', fromColumn: 'order_id', toModel: 'dim_customer', toColumn: 'gone_column', cardinality: 'many-to-one' });
+    b.relationships.push({ fromModel: 'fct_gone', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id', cardinality: 'many-to-one' });
     same(display(), b, true);
+  });
+
+  it('the foreign-key badge only a dangling relationship gave its column goes with it', () => {
+    // Before: fct_order.order_id is marked a foreign key only by a relationship to a column that is gone.
+    const b = display();
+    b.models[0].columns[0].isForeignKey = true;
+    b.relationships.push({ fromModel: 'fct_order', fromColumn: 'order_id', toModel: 'dim_customer', toColumn: 'gone_column', cardinality: 'many-to-one' });
+    same(display(), b, true);
+    differ(display(), b);
+    // A declared foreign key keeps its badge.
+    const declared = display();
+    declared.models[0].columns[0].isForeignKey = true;
+    declared.models[0].columns[0].isForeignKeyDeclared = true;
+    const declaredDangling = JSON.parse(JSON.stringify(declared));
+    declaredDangling.relationships.push({ fromModel: 'fct_order', fromColumn: 'order_id', toModel: 'dim_customer', toColumn: 'gone_column', cardinality: 'many-to-one' });
+    same(declared, declaredDangling, true);
+    differ(display(), declaredDangling, true);
+    // A column that is also the foreign-key end of a live relationship keeps it too.
+    const live = display();
+    live.relationships.push({ fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_region', toColumn: 'gone_column', cardinality: 'many-to-one' });
+    same(display(), live, true);
+    expect(norm(live, { convert: true }).models[0].columns[1].isForeignKey).toBe(true);
   });
 
   it('annotation ids are ignored', () => {

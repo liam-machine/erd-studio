@@ -576,11 +576,7 @@ export function buildUnifiedSubjectArea(
   const emptyStage: StageData = { models: [], relationships: [] };
 
   // Global viewConfig — fall back to stage-level viewConfig for existing files
-  const globalViewConfig = parseViewConfig(
-    obj.viewConfig
-      ?? (obj.logical as Record<string, unknown> | undefined)?.viewConfig,
-    warn,
-  );
+  const globalViewConfig = subjectAreaViewConfig(obj, warn);
 
   // Parse stubColumns — optional string[] of model names with stub display
   const stubColumns = Array.isArray(obj.stubColumns)
@@ -1115,6 +1111,16 @@ function parseRelationships(value: unknown, filePath: string, warn: (message: st
     });
   }
   return relationships;
+}
+
+/**
+ * A validated domain document's view config, as the loader reads it: the
+ * top-level `viewConfig`, else the stage-level `logical.viewConfig` older
+ * versions wrote. Malformed positions and sticky notes (no string `id`, or no
+ * numeric `x`/`y`) are dropped, as the canvas never draws them.
+ */
+export function subjectAreaViewConfig(obj: Record<string, unknown>, warn: (message: string) => void = () => { /* silent */ }): ViewConfig {
+  return parseViewConfig(obj.viewConfig ?? (obj.logical as Record<string, unknown> | undefined)?.viewConfig, warn);
 }
 
 function parseViewConfig(value: unknown, warn: (message: string) => void): ViewConfig {
