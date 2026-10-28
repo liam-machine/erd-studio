@@ -136,6 +136,7 @@ Ref region: fct_order.(region_code, country_code) >? dim_region.(region_code, co
 - A self-reference is an ordinary Ref (`dim_customer.parent_customer_key >? dim_customer.customer_key`); a column pointing at itself is refused.
 - A Ref in another folder's file is *misplaced*: drawn, with a warning, and moved home by ERD Studio's next write to that table's relationships. A Ref whose foreign-key table has no `.dbml` file is *orphaned* and not drawn.
 - Settings on a Ref (`[delete: cascade]`, `[color: …]`) are kept.
+- **Pending relationships** (since 2.0): a whole-line comment `// erd-studio pending: Ref: fct_order.risk_key >? gld_fct_risk.risk_key`, after the Refs, is a relationship ERD Studio keeps and draws but cannot write as a live Ref yet: an end has no `.dbml` table file (none yet, or a table still in YAML) or no such column. A live Ref there would break the whole file in every DBML tool, so it is a comment, and other DBML tools do not show it. It belongs to its foreign-key table like a Ref. ERD Studio turns it into a live Ref, with its `use` line, on its next write to the file once both ends have table files with those columns (Add from dbt makes the table; Convert Project to DBML does it too). Keep these lines as they are; delete one to delete the relationship. `doctor`: `pendingRelationship` (a warning).
 - A relationships file is never deleted automatically. Once its last Ref goes it keeps its header and no `use` lines, because diagrams `use` it.
 
 ### Diagram file (`<layer>/<name>.dbml`)
@@ -159,12 +160,16 @@ Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_
 }
 ```
 
-1. **`Project <name>`**: the diagram's name, its description as `Note`, and ERD Studio's keys, each a quoted string: `erd_schema_version: '7'` (always), `erd_show_fk_edges` (`'true'` / `'false'`), `erd_layout_options` (JSON), `erd_model_folder`, `erd_stub_columns` (a JSON list). Other Project keys (`database_type`, a team's own) are kept. The layer is always the folder the file is in.
+1. **`Project <name>`**: the diagram's name, its description as `Note`, and ERD Studio's keys, each a quoted string: `erd_schema_version: '7'` (always), `erd_show_fk_edges` (`'true'` / `'false'`), `erd_layout_options` (JSON), `erd_model_folder`, `erd_stub_columns` (a JSON list), `erd_unlinked_tables` (below). Other Project keys (`database_type`, a team's own) are kept. The layer is always the folder the file is in.
 2. **Table `use` lines**: the diagram's tables, in order, one `use { table <name> } from '<path to the table file, relative to this diagram, with .dbml>'` each. The table is the **file name** of the path; ERD Studio finds it by name, so a wrong path draws the table anyway, with a `doctor` warning (`usePathMismatch`), and the next edit rewrites the line.
 3. **Relationships `use` lines**: `use * from '…/_relationships.dbml'` for every library folder holding one of the diagram's tables. They are for other DBML tools (ERD Studio draws every relationship whose two tables are in the diagram); a missing one is a warning (`missingRelationshipsUse`).
 4. **Sticky notes**: `Note "<id>" [color: <hex>, linked_table: '<table>'] { '<text>' }`, one per note.
 
-A diagram holds **no** Refs and no Tables. A Table, Ref, TableGroup, Enum or Metadata block written in a diagram is kept but not drawn (a warning). A `.dbml` in a layer folder that declares Tables and has no table `use` lines is a single-file DBML (a dbdiagram.io download or an export): the canvas offers **Import these tables…** and `doctor` raises `import-dbml-file`.
+**Tables on the diagram with no table file** (since 2.0): `erd_unlinked_tables: 'gld_fct_risk_child, gld_fct_risk_parent'` on the Project lists them, as one comma-separated string (DBML Project keys take no lists), after the `use` members. They are tables with no `.dbml` file to `use` yet: none at all (a dbt model not drawn yet), or one still stored as YAML. ERD Studio reads each by name, like any member: with no table file it is drawn as missing, at its position in the layout file, exactly as a JSON diagram draws a missing table; a YAML table is drawn from its file. When the table gets a `.dbml` file through ERD Studio (Add from dbt, New Table, Import, Convert), the name moves to a `use` line; removing the table from the diagram removes the name; the key is never written empty. Other DBML tools do not show these tables (a `use` line to a file that does not exist would break the diagram for them). `doctor`: `unlinkedTable` (a warning).
+
+**The diagram's own pending relationships** (since 2.0): `// erd-studio pending: Ref: …` lines after the `use` lines hold relationships the diagram itself drew whose foreign-key table has no `.dbml` file, so they cannot live in the library yet. ERD Studio draws them in this diagram only, as a JSON diagram drew its own relationships, and Convert Project to DBML moves each to the library once its table has a file. Keep them as they are.
+
+A diagram holds **no** Refs (only those pending lines) and no Tables. A Table, Ref, TableGroup, Enum or Metadata block written in a diagram is kept but not drawn (a warning). A `.dbml` in a layer folder that declares Tables and has no table `use` lines is a single-file DBML (a dbdiagram.io download or an export): the canvas offers **Import these tables…** and `doctor` raises `import-dbml-file`.
 
 ### Layout file (`<layer>/<name>.dbdiagram`)
 
@@ -194,7 +199,7 @@ Edit in place and never reformat a file: ERD Studio keeps whatever it does not c
 
 1. **Any parser error makes that file unreadable**, and only that file: a table file renders as a placeholder ("DBML error on line N"), a diagram opens on an error page, and a relationships file's broken Ref is skipped. Other DBML tools fail the whole project, so `doctor` lists every problem with its line.
 2. Quote every custom value (above).
-3. Every table a relationships file's Refs name needs a `use` line in that file; every table a diagram shows needs a table `use` line there.
+3. Every table a relationships file's Refs name needs a `use` line in that file; every table a diagram shows needs a table `use` line there, except one with no table file, which `erd_unlinked_tables` names instead. A relationship to a table with no file is a pending line, never a live Ref.
 4. A table name is unique across the library, and each link is one Ref, in one file.
 5. Every table has at least one column (the placeholder for an empty one).
 6. `erd_schema_version` above 7 is refused: "Please update the extension".
@@ -209,7 +214,7 @@ The project in [`test/fixtures/dbml-native/`](../test/fixtures/dbml-native) is a
 
 ## YAML/JSON projects (schema v4–v6, still read and edited)
 
-A project created before ERD Studio 2.0 keeps YAML tables and JSON diagrams. Everything below describes them, and ERD Studio still reads and edits every shape listed, including the "still read" notes. Run **ERD Studio: Convert Project to DBML** to move one over (a dry run first, refusals rather than guesses, one undoable edit, a preview in `erd-studio doctor`); never convert by hand.
+A project created before ERD Studio 2.0 keeps YAML tables and JSON diagrams. Everything below describes them, and ERD Studio still reads and edits every shape listed, including the "still read" notes. Run **ERD Studio: Convert Project to DBML** to move one over (a dry run first, one undoable edit, a preview in `erd-studio doctor`); never convert by hand. Convert never guesses: a file it cannot read or write as DBML stays exactly as it is (the project is then `mixed`) and is listed with its problem; running Convert again after fixing it finishes the job. A table a diagram lists that has no table file stays on the converted diagram (`erd_unlinked_tables`), drawn as missing as before.
 
 ### File Layout
 
