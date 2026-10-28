@@ -94,6 +94,12 @@ export interface DbmlLibraryOps {
    * so a Ref written against the table while it was YAML compiles after.
    */
   gainFile?: string[];
+  /**
+   * Convert only: a relationship that cannot be a live Ref yet (an end with
+   * no `.dbml` table file, a YAML end, or a missing column) is written as a
+   * pending line (D27) instead of being refused.
+   */
+  writePending?: boolean;
 }
 
 /** A table as the plan leaves it. */
@@ -112,6 +118,12 @@ export interface DbmlLibraryWritePlan {
   createdRelationshipsFiles: string[];
   /** Tables whose path changed (renamed or moved) or that were deleted: old lower-case name → new path, or null. */
   pathChanged: Map<string, string | null>;
+  /**
+   * Tables new in this plan (their real names): a diagram that lists one in
+   * `erd_unlinked_tables` (D26) moves it to a `use` line, and a pending line
+   * naming one becomes a live Ref (D27). Optional for older callers.
+   */
+  createdTables?: string[];
 }
 
 const lower = (s: string): string => s.toLowerCase();
@@ -240,6 +252,18 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       list.push({ owner: lower(read.unit.from), unit: read.unit, text: text.slice(ref.start, ref.fullEnd).replace(/\r?\n$/, '') });
     }
     stored.set(path, list);
+  }
+  /** Each relationships file's pending relationships (D27): the tables they name, lower-case. */
+  const pendingNames = new Map<string, Set<string>>();
+  for (const { path, reading } of readings) {
+    const names = new Set<string>();
+    for (const ref of reading.pending ?? []) {
+      for (const rel of ref.relationships.slice(0, 1)) {
+        names.add(lower(lookup(rel.fromModel)?.table.name ?? rel.fromModel));
+        names.add(lower(lookup(rel.toModel)?.table.name ?? rel.toModel));
+      }
+    }
+    if (names.size > 0) pendingNames.set(path, names);
   }
 
   // --- 1. The path overlay ------------------------------------------------------------------
@@ -418,9 +442,9 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     }
     if (entry && home) editFor(home).owners.set(key, entry);
   }
-  // D20: a relationship this plan writes from a DBML owner may name only DBML tables.
+  // D20: a relationship this plan writes from a DBML owner may name only DBML tables (Convert writes it pending, D27).
   for (const [key, entry] of affected) {
-    if (!entry) continue;
+    if (!entry || ops.writePending) continue;
     const before = new Set(relationshipUnits(entry.name, attachment.byOwner.get(oldNameOf.get(key) ?? key) ?? [])
       .map((u) => unitIdentity(withRenamedColumns({ ...u, to: renamedName(u.to) }))));
     for (const unit of relationshipUnits(entry.name, entry.relationships)) {
@@ -433,8 +457,10 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     }
   }
   // Files whose Refs name a renamed, moved or deleted table: their ends and use lines follow.
-  const changedNames = new Set<string>([...pathChanged.keys(), ...(ops.gainFile ?? []).map(lower)]);
-  const pathChangedAfter = new Set<string>((ops.gainFile ?? []).map((name) => lower(renamedName(name))));
+  // A table new in this plan gains its file too: a pending line naming it may turn live (D27).
+  const newTables = saves.filter((s) => !snapshot.tables.has(lower(s.fromName ?? s.model.name))).map((s) => s.model.name);
+  const changedNames = new Set<string>([...pathChanged.keys(), ...(ops.gainFile ?? []).map(lower), ...newTables.map(lower)]);
+  const pathChangedAfter = new Set<string>([...(ops.gainFile ?? []), ...newTables].map((name) => lower(renamedName(name))));
   for (const [oldKey, newPath] of pathChanged) {
     if (newPath === null) pathChangedAfter.add(oldKey);
     else pathChangedAfter.add(lower(renames.get(oldKey) ?? oldKey));
@@ -447,6 +473,20 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   for (const [file, refs] of stored) {
     if (refs.some((r) => changedNames.has(lower(r.unit.from)) || changedNames.has(lower(r.unit.to))
       || namesRenamedColumn(r.unit.from, r.unit.fromColumns) || namesRenamedColumn(r.unit.to, r.unit.toColumns))) editFor(file);
+  }
+  for (const [file, names] of pendingNames) {
+    if ([...names].some((n) => changedNames.has(n))) editFor(file);
+  }
+  // Convert: every file with a pending line that can be a live Ref now (both ends have .dbml files with those columns).
+  if (ops.writePending) {
+    for (const { path, reading } of readings) {
+      const ready = (reading.pending ?? []).some((ref) => ref.relationships.length > 0 && ref.relationships.every((r) => {
+        const from = resolveTable(r.fromModel);
+        const to = resolveTable(r.toModel);
+        return from?.storage === 'dbml' && to?.storage === 'dbml' && from.columns(r.fromColumn) !== undefined && to.columns(r.toColumn) !== undefined;
+      }));
+      if (ready) editFor(path);
+    }
   }
 
   // --- 5. Cross-file duplicates, on the library as it will be -------------------------------------
@@ -492,6 +532,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       ...(columnRenames.size > 0 ? { renamedColumns: columnRenames } : {}),
       ...(e.incoming.length > 0 ? { incoming: e.incoming } : {}),
       ...(pathChangedAfter.size > 0 ? { pathChanged: pathChangedAfter } : {}),
+      ...(ops.writePending ? { writePending: true } : {}),
       resolve: resolveForWriter,
     };
     const text = editRelationshipsDbml(oldText, fileEdit);
@@ -522,6 +563,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     fileExists,
     createdRelationshipsFiles,
     pathChanged,
+    createdTables: newTables,
   };
 
   function unitsKey(owner: string, list: readonly TableRelationship[]): string {

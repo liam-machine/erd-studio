@@ -3,10 +3,13 @@
  * (`packages/core/test/fixtures/dbml/<case>`) byte for byte (native DBML
  * storage §9.6): every twin file is either one the plan creates, with the
  * same bytes, or a file Convert leaves alone (`layers.json`), and the plan
- * writes nothing else. `library-relationships` refuses (its diagram copy
- * disagrees with the library), so its twin is compared against a variant
- * without that copy; `missing-model`'s twin is a reader tolerance case that
- * Convert cannot write, so Convert's own answer for it is asserted instead.
+ * writes nothing else. `library-relationships`' diagram copy disagrees with
+ * the library, so Convert leaves that diagram as JSON (D26/D27); its twin is
+ * compared against a variant without that copy. `missing-model`'s twin is a
+ * reader tolerance case (use lines for tables with no file); Convert's own
+ * output for it is the `missing-model-converted` twin: two YAML files left as
+ * they are, the missing members in erd_unlinked_tables, the diagram's
+ * relationships from them as pending lines.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -38,6 +41,7 @@ describe.each([
   ['showcase', path.join(CORE_FIXTURES, 'showcase')],
   ['missing-positions', path.join(CORE_FIXTURES, 'missing-positions')],
   ['library-relationships', path.join(VARIANTS, 'library-relationships-variant')],
+  ['missing-model-converted', path.join(CORE_FIXTURES, 'missing-model')],
 ])('Convert of the %s fixture', (twin, source) => {
   it('is its DBML twin, byte for byte', async () => {
     const input = readDbmlConversionInput(source, '.erd-studio');
@@ -58,11 +62,17 @@ describe.each([
   });
 });
 
-describe('fixtures Convert refuses', () => {
-  it('library-relationships: the diagram copy that disagrees with the library', async () => {
+describe('fixtures Convert leaves partly as they are', () => {
+  it('library-relationships: the diagram copy that disagrees with the library keeps its diagram as JSON; the tables convert', async () => {
     const plan = await planDbmlConversion(readDbmlConversionInput(path.join(CORE_FIXTURES, 'library-relationships'), '.erd-studio'));
-    expect(plan.refusals).toEqual([expect.stringMatching(/^gold\/sales\.json defines the relationship fct_order\.customer_key → dim_customer\.customer_key as one-to-one, but the table library defines it as many-to-one/)]);
-    expect([...plan.creates, ...plan.replaces, ...plan.deletes]).toEqual([]);
+    expect(plan.refusals).toEqual([]);
+    expect(plan.leftAsIs).toEqual([{
+      path: 'gold/sales.json',
+      problem: 'It defines the relationship fct_order.customer_key → dim_customer.customer_key as one-to-one, but the table library defines it as many-to-one. ' +
+        "Make them agree (or remove the diagram's copy).",
+    }]);
+    expect(plan.deletes).not.toContain('gold/sales.json');
+    expect(plan.deletes.some((d) => d.endsWith('.yml'))).toBe(true);
   });
 
   it('library-relationships: the variant differs from it only by that copy', () => {
@@ -78,12 +88,13 @@ describe('fixtures Convert refuses', () => {
     expect(others(path.join(VARIANTS, 'library-relationships-variant'))).toEqual(others(path.join(CORE_FIXTURES, 'library-relationships')));
   });
 
-  it('missing-model (excluded from the byte check): a table file that does not parse, and one with no name', async () => {
+  it('missing-model: the two YAML files it cannot read stay, named with their problems; the missing table stays on the diagram', async () => {
     const plan = await planDbmlConversion(readDbmlConversionInput(path.join(CORE_FIXTURES, 'missing-model'), '.erd-studio'));
-    expect(plan.refusals).toEqual([
-      expect.stringMatching(/^logical-models\/broken\.yml does not parse as YAML \(line 5\)/),
-      'logical-models/nameless.yml has no name: key, so it is not a table. Add one, or delete the file, then convert.',
+    expect(plan.refusals).toEqual([]);
+    expect(plan.leftAsIs).toEqual([
+      { path: 'logical-models/broken.yml', line: 5, problem: expect.stringMatching(/^It does not parse as YAML \(line 5\): /) },
+      { path: 'logical-models/nameless.yml', problem: 'It has no name: key, so ERD Studio does not read it as a table. Add one, or delete the file.' },
     ]);
-    expect([...plan.creates, ...plan.replaces, ...plan.deletes]).toEqual([]);
+    expect(plan.keptMissing).toEqual([{ diagram: 'silver/partial.dbml', tables: ['dim_missing'] }]);
   });
 });
