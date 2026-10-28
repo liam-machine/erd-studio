@@ -19,10 +19,10 @@ on the canvas.
 ## 1. Reading `diff --json`
 
 ```
-~/.erd-studio-cli/bin/erd-studio diff --domain .erd-studio/<layer>/<domain>.json --json --semantic-dir .erd-studio
+~/.erd-studio-cli/bin/erd-studio diff --domain .erd-studio/<layer>/<domain>.dbml --json --semantic-dir .erd-studio
 ```
 
-Exit code 0 means clean, 1 means differences were found (not a failure), 3 means the domain
+In a `yaml` project the diagram is the `.json` file. Exit code 0 means clean, 1 means differences were found (not a failure), 3 means the domain
 file or project could not be read (the JSON `error` says why).
 
 Top level:

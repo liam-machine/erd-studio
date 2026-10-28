@@ -1,6 +1,6 @@
 # Leaving ERD Studio (and coming back)
 
-Your data model is never stuck in ERD Studio. **Its files are already [DBML](https://dbml.dbdiagram.io/docs)**, the open format that [dbdiagram.io](https://dbdiagram.io), dbdocs and many other tools read, in your own repository: one `.dbml` file per table in `.erd-studio/tables/`, the relationships in `_relationships.dbml` files, and one `.dbml` file per diagram that lists its tables with `use` lines. Any DBML parser from 9.1 on (the one dbdiagram.io's own tools use) reads them as a multi-file project. (A project created before ERD Studio 2.0 is YAML and JSON until you run **ERD Studio: Convert Project to DBML**.)
+Your data model is never stuck in ERD Studio. **Its files are already [DBML](https://dbml.dbdiagram.io/docs)**, the open format that [dbdiagram.io](https://dbdiagram.io), dbdocs and many other tools read, in your own repository: one `.dbml` file per table in `.erd-studio/tables/`, the relationships in `_relationships.dbml` files, and one `.dbml` file per diagram that lists its tables with `use` lines. DBML parsers 9.1 and 11+ read them as a multi-file project (10.x too, unless a folder in the path has a space). (A project created before ERD Studio 2.0 is YAML and JSON until you run **ERD Studio: Convert Project to DBML**.)
 
 dbdiagram.io itself takes one self-contained file per diagram, not a folder of files that `use` each other. For that, **export** each diagram: the export keeps ERD Studio's modelling fields and your table positions, and ERD Studio can import it back.
 

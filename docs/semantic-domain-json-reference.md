@@ -99,7 +99,7 @@ Table bridge_empty {
 | additive type | `additive_type: 'additive'` / `'semi-additive'` / `'non-additive'` |
 | column `meta` | as table `meta` |
 
-Settings ERD Studio does not model (`not null`, `unique`, `increment`, `default`, `headercolor`, `check`, other `indexes`, Enums, comments, custom properties it does not know) are never read and are kept byte for byte. A `Metadata Table x { … }` / `Metadata Column x.c { … }` block (DBML 9.1+) in a table file is read like an inline setting and edited where it sets a value; ERD Studio never writes one, and a block whose target the file does not declare is a warning.
+Settings ERD Studio does not model (`not null`, `unique`, `increment`, `default`, `headercolor`, `check`, other `indexes`, Enums, comments, custom properties it does not know) are never read and are kept byte for byte. A `Metadata Table x { … }` / `Metadata Column x.c { … }` block (DBML 9.1+) in a table file is read like an inline setting and edited where it sets a value; ERD Studio never writes one, A block whose target the file does not declare makes the table unreadable ("A Metadata block on line N targets …"; the table shows as unreadable until you rename or remove the block); `doctor` lists it as a warning.
 
 ### Relationships file (`tables/[<folder>/]_relationships.dbml`)
 
@@ -819,11 +819,11 @@ holds no constraint or foreign-key information, so it contributes no edges.
 **Comparing without the canvas.** Nothing in this file format changes for tooling,
 but there is a headless equivalent of the canvas's **Compare**. The `erd-studio` helper
 (`dist/cli.js`, installed to `~/.erd-studio-cli/bin/erd-studio` by **ERD Studio: Set Up My
-AI Helper**) is read-only. `erd-studio diff --domain .erd-studio/{layer}/{domain}.json --json`,
+AI Helper**) is read-only. `erd-studio diff --domain .erd-studio/{layer}/{domain}.dbml --json` (the `.json` diagram in a YAML project),
 or `--all`, builds both stages exactly as described above and runs the same comparison
 as the canvas, because both call the same code. It reports each difference as a fix
 that brings the logical side in line with dbt, naming the file to change: the table's
-`logical-models/{name}.yml` for columns and types, and for relationships the FK table's yml or the subject area file, wherever the project keeps them. A relationship matches whichever end dbt tests it from. It exits `0` when there are no blocking differences and `1` when there are.
+`.dbml` file (`tables/…/{name}.dbml`) or `logical-models/{name}.yml` for columns and types, and for relationships the FK table's folder's `_relationships.dbml`, the FK table's yml or the subject area file, wherever the project keeps them. A relationship matches whichever end dbt tests it from. It exits `0` when there are no blocking differences and `1` when there are.
 A column that dbt has no type for yet is advisory, not blocking, unless you pass
 `--strict`. `erd-studio inventory --models a,b --json` prints the physical shape of the
 named dbt models, as a starting point for new table files. The `/erd-studio-setup` Claude Code

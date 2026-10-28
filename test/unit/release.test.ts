@@ -124,14 +124,20 @@ describe('release.mjs — changelog-pinned releases', () => {
     expect(rejected[0]).toMatch(/not ahead of v0\.6\.53; releasing v0\.6\.54/);
   });
 
-  it('accepts the native DBML storage release pin, 2.0.0, as the real CHANGELOG.md writes it', () => {
-    const changelog = fs.readFileSync(path.join(__dirname, '../../CHANGELOG.md'), 'utf8');
-    expect(changelog).toMatch(/^## Unreleased — 2\.0\.0$/m);
+  it('accepts the native DBML storage release pin, 2.0.0, as CHANGELOG.md writes it', () => {
+    // A copy of the heading, not the real file: the release renames it (deploy.yml), and a test
+    // tied to the pre-release state would fail on every run after 2.0.0 ships.
+    const changelog = '# Changelog\n\n## Unreleased — 2.0.0\n\n**ERD Studio 2.0 is a major release.**\n\n### Added\n- **ERD Studio: Convert Project to DBML** moves an existing YAML/JSON project to DBML.\n\n## 1.7.2 — 2026-10-23\n\n### Changed\n- Older note\n';
     expect(pinnedReleaseVersion(changelog)).toBe('2.0.0');
     expect(resolveReleaseVersion('1.7.2', '1.7.2', pinnedReleaseVersion(changelog))).toBe('2.0.0');
     const released = updateChangelog(changelog, { version: '2.0.0', date: '2026-11-01' });
     expect(released).toMatch(/^## 2\.0\.0 — 2026-11-01$/m);
     expect(extractReleaseNotes(released, '2.0.0')).toContain('Convert Project to DBML');
+  });
+
+  it('finds 2.0.0 in the real CHANGELOG.md, pinned before the release or released after it', () => {
+    const changelog = fs.readFileSync(path.join(__dirname, '../../CHANGELOG.md'), 'utf8');
+    expect(changelog).toMatch(/^## (Unreleased — 2\.0\.0|2\.0\.0 — \d{4}-\d{2}-\d{2})$/m);
   });
 
   it('renames a pinned Unreleased heading like any other', () => {

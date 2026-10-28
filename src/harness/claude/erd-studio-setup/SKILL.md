@@ -272,7 +272,7 @@ three lines: how many models, which folders, and how many ERD Studio already has
 
 Explain two terms, one line each:
 - A **domain** is one focused diagram of related tables for one business area — for example
-  "orders". It is saved as `.erd-studio/<layer>/<domain>.json`.
+  "orders". It is saved as `.erd-studio/<layer>/<domain>.dbml` (`.json` in a `yaml` project).
 - A **layer** is a folder for organising diagrams, usually matching a stage of the warehouse such
   as silver or gold. It can be changed later.
 
@@ -376,11 +376,11 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
      style, only what section 4 allows), **plus the metadata list's values from dbt**
      (`references/metadata.md` section 5). The approach never renames, adds or removes a column
      or a relationship: those come from dbt, and the diff checks them;
-   - the domain file, `.erd-studio/<layer>/<domain>.json`, listing the models and copying the
-     inventory `relationships` exactly.
+   - the diagram, `.erd-studio/<layer>/<domain>.dbml` (`.json` in a `yaml` project), listing the
+     models; the inventory `relationships` are copied exactly (DBML: into `_relationships.dbml`).
    Models that already have a model file (in any folder) are **referenced by name, never rewritten** —
    they may be someone's careful design and other domains may share them.
-7. Keep a list, **created this session**, of every model yml you wrote (Stage 5 needs it). Then
+7. Keep a list, **created this session**, of every model file you wrote (Stage 5 needs it). Then
    run `doctor` and fix each `fix-model-yaml` / `fix-dbml-file` file:line it lists first (usually a value to quote) —
    except a merge conflict, which is the user's to settle (Stage 1).
 8. Tell the user what you wrote in one or two lines ("Wrote 8 model files and the `orders`
@@ -391,7 +391,7 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
 Explain "drift" before showing any: *drift* is any difference between the logical design and what
 dbt actually has — a column one side has and the other does not, a different type, or a missing
 connection. Then say "Comparing your logical model with the dbt project — the same check as the
-**⊕ Diff** button on the canvas," and run `diff --domain .erd-studio/<layer>/<domain>.json`.
+**⊕ Diff** button on the canvas," and run `diff --domain` on the diagram file you wrote (`.dbml`, or `.json`).
 
 Then loop, following `references/verify-and-fix.md`, which maps every fix to its exact edit:
 
@@ -410,7 +410,7 @@ Then loop, following `references/verify-and-fix.md`, which maps every fix to its
   default: recommend **keep** instead, and just list the drift so they know it is there.
 - **`phantoms`** — models in the diagram that dbt does not have. Always ask (unless the backlog
   lists it as intentional): usually a typo or a model not built yet. Offer to rename it to the
-  real dbt name or remove it from this domain. Never delete a model file under `logical-models/`.
+  real dbt name or remove it from this domain. Never delete a table file in the library.
 - **`fix-model-yaml` / `fix-dbml-file`** first, always: the file does not parse — fix that line (DBML: `references/troubleshooting.md`), re-run the diff (a merge conflict: Stage 1). `resolve-format-conflicts`, `finish-dbml-conversion` and `import-dbml-file`: `references/troubleshooting.md`.
 - **`needsMigration`** — older file format; suggest **ERD Studio: Migrate to v5**, skip it now.
 - Re-run the diff after each round of edits. **Stop after 3 rounds.** List what remains using

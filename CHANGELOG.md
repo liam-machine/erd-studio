@@ -45,6 +45,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - The walkthrough's **Enrich it with your AI assistant** step no longer says the guided setup needs a dbt project, and the sentence to type in Gemini CLI is now *Set up ERD Studio for this project*.
 - The anonymous daily usage report now also says whether ERD Studio opened a folder without dbt, whether **Open Example Diagram** was used, and whether **New Diagram** was used in a folder without dbt. Opening the example is counted as the example, not as an **Import DBML…**. Each is a fixed key listed in `telemetry.json`; no name or path is sent.
 - The one-minute getting-started video on the Welcome tab shows the current **Get started with ERD Studio** walkthrough: its new description and steps (**Start from a DBML file**, and **Using dbt? Try the sample project** in a folder without dbt) and the current Marketplace description. The narration is unchanged.
+- The anonymous daily usage report now also says whether a DBML project was open, how the **Convert Project to DBML** offer and command went (used, offered, declined, cancelled, refused or failed), whether ERD Studio warned about a YAML or JSON file in a DBML project, and why a `.dbml` table or diagram could not be read (a syntax error, an invalid value or an unsupported structure). Each is a fixed key listed in `telemetry.json`; no name or path is sent.
 - An undo or redo on the canvas that cannot save a file now says so, as any other canvas edit does, instead of leaving the file silently unsaved.
 
 ### Fixed
