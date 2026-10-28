@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Design your data model in Git. Let your AI build from it.</strong><br />
-  A logical data modeling canvas for VS Code: plain YAML in your repo, DBML in and out, and a live comparison with your dbt project.
+  A logical data modeling canvas for VS Code: your model saved as DBML, an open format, in your repo, and a live comparison with your dbt project.
 </p>
 
 <p align="center">
@@ -22,16 +22,16 @@
   <sub>Free to use, source available under the <a href="https://github.com/liam-machine/erd-studio/blob/main/LICENSE">PolyForm Shield License</a>.</sub>
 </p>
 
-<!-- TODO: re-shoot as a logical-only hero: a folder with no dbt_project.yml, no Physical tab, the Explorer showing .erd-studio/tables/*.yml beside the canvas, ideally one frame of the Import DBML summary. The current GIF is a dbt project and cycles to the Physical stage and the discrepancy overlay, which a reader without dbt will never see. Rewrite the alt text with it. -->
+<!-- TODO: re-shoot as a logical-only hero: a folder with no dbt_project.yml, no Physical tab, the Explorer showing .erd-studio/tables/*.dbml beside the canvas, ideally one frame of the Import DBML summary. The current GIF is a dbt project and cycles to the Physical stage and the discrepancy overlay, which a reader without dbt will never see. Rewrite the alt text with it. -->
 <p align="center">
   <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/demo.gif" width="800" alt="ERD Studio open in VS Code, showing four views of the same star schema. Logical stage: dim_customer, dim_date, dim_project and dim_task around the fct_order and fct_task_event facts, each dimension showing a PK surrogate key and an NK business key. Detail panel: dim_customer's columns, role and relationships opened for editing. Physical stage: the same diagram in green, built from the dbt project with the warehouse's own column types. Discrepancy overlay: columns that exist only in the design struck through against those only in the warehouse." />
 </p>
 
 ## Why ERD Studio
 
-- **In your repo.** Plain YAML and JSON, reviewed in the same pull request as your code. No account, server or database.
+- **In your repo.** Plain DBML files, reviewed in the same pull request as your code. No account, server or database.
 - **Works with the AI you already use.** Claude Code, GitHub Copilot, Codex, Gemini CLI and Cursor read and write the same files. Review their proposals on the canvas before anyone writes SQL.
-- **No lock-in.** Import [DBML](https://dbml.dbdiagram.io/docs), the open-source schema language behind dbdiagram.io, from any DBML tool. Export to DBML (keys, grain and notes, with table positions in a `.dbdiagram` layout file) or Mermaid any time.
+- **No lock-in.** Your files are [DBML](https://dbml.dbdiagram.io/docs), the open-source schema language behind dbdiagram.io, which other DBML tools read as they are. Import DBML from any DBML tool, and export a single file for dbdiagram.io (keys, grain and notes, with table positions in a `.dbdiagram` layout file) or Mermaid any time.
 - **Checked against dbt.** A read-only **Physical** view shows what your dbt project has; **⊕ Diff** highlights every difference from your design and makes a sync plan your AI applies. More stacks later.
 
 ## Get started
@@ -51,23 +51,23 @@ To export, click **⤓** on the canvas toolbar or run **ERD Studio: Export All D
 .erd-studio/
 ├── layers.json
 ├── tables/
-│   ├── dim_customer.yml   ← one YAML per table, shared by every diagram
-│   └── fct_order.yml
+│   ├── dim_customer.dbml       ← one DBML file per table, shared by every diagram
+│   ├── fct_order.dbml
+│   └── _relationships.dbml     ← the relationships, one Ref line each
 └── silver/
-    └── orders.json        ← one JSON per diagram, with its layout
+    ├── orders.dbml             ← one file per diagram: the tables it shows
+    └── orders.dbdiagram        ← its layout (table positions)
 ```
 
-```yaml
-# .erd-studio/tables/fct_order.yml
-name: fct_order
-grain: "One row per order"
-columns:
-  - name: order_id
-    dataType: "INTEGER"
-    isPrimaryKey: true
+```dbml
+// .erd-studio/tables/fct_order.dbml
+Table fct_order [grain: 'One row per order'] {
+  order_id INTEGER [pk]
+  customer_id INTEGER [foreign_key: 'true']
+}
 ```
 
-Edit on the canvas or in the files, by hand or with AI, and the other follows. Every file has a JSON Schema for completion ([file format reference](docs/semantic-domain-json-reference.md)).
+Edit on the canvas or in the files, by hand or with AI, and the other follows: ERD Studio edits the files in place, so your comments and hand edits stay ([file format reference](docs/semantic-domain-json-reference.md)). A project from before ERD Studio 2.0 keeps its YAML and JSON files and works as before; run **ERD Studio: Convert Project to DBML** to move it over.
 
 ## Work with your AI assistant
 

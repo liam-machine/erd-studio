@@ -1,8 +1,10 @@
 /**
  * Exports of a diagram to open text formats: Mermaid `erDiagram`, portable
- * DBML and rich DBML. ERD Studio's own files (the model library and the
- * domain JSON) stay the only storage; Mermaid and portable DBML are one way,
- * and rich DBML is what ERD Studio's DBML import reads back.
+ * DBML and rich DBML, each one self-contained file for another tool. They are
+ * not storage: a project's own files are (split `.dbml` files under
+ * `@erd-studio/core/dbml` since ERD Studio 2.0, YAML and JSON before).
+ * Mermaid and portable DBML are one way, and rich DBML is what ERD Studio's
+ * DBML import reads back.
  *
  * Pure functions over a `DisplaySubjectArea`, with no dependency beyond core
  * itself, so every host — the extension, its CLI and any page that renders a

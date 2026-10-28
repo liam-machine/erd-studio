@@ -58,3 +58,34 @@ describe('package.json wording (#179)', () => {
     expect(views.find(v => v.id === 'erdStudio.modelLibrary')?.name).toBe('Table Library');
   });
 });
+
+describe('package.json storage wording (native DBML storage, 2.0)', () => {
+  const texts: Array<[string, string]> = [];
+  userText({ description: pkg.description, displayName: pkg.displayName }, 'package', texts);
+  userText(pkg.contributes, 'contributes', texts);
+
+  it('describes the storage as DBML, an open format, on the Marketplace', () => {
+    expect(pkg.description).toBe(
+      'Logical data modeling in Git: draw ERDs in VS Code, saved as DBML, an open format your AI assistant can read. Import from dbdiagram.io, compare with dbt.',
+    );
+    expect(pkg.keywords).toContain('dbml editor');
+    expect(pkg.keywords.length).toBeLessThanOrEqual(30);
+  });
+
+  it('never says "open standard", and never calls the storage YAML or JSON', () => {
+    expect(texts.filter(([, text]) => /open standard/i.test(text)).map(([at]) => at)).toEqual([]);
+    // Welcome views and walkthrough steps can show in a YAML project too, so they stay format-neutral
+    // ("Each table is a file in .erd-studio/") or say DBML; none of them says the storage is YAML or JSON.
+    const storageClaims = texts.filter(([at, text]) => /^contributes\.(viewsWelcome|walkthroughs)/.test(at) && /(YAML|JSON)/.test(text));
+    expect(storageClaims.map(([at, text]) => `${at}: ${text}`)).toEqual([]);
+  });
+
+  it('keeps "an open format, no lock-in" where DBML import and export are offered', () => {
+    const welcome = pkg.contributes.viewsWelcome as Array<{ contents: string; when?: string }>;
+    for (const entry of welcome.filter((w) => w.contents.includes('command:erdStudio.importDbml'))) {
+      expect(entry.contents).toContain('an open format, no lock-in');
+    }
+    const library = welcome.find((w) => w.contents.startsWith('No tables found.'));
+    expect(library?.contents).toContain('Each table is a file in .erd-studio/ you can commit.');
+  });
+});

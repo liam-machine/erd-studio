@@ -45,6 +45,15 @@ describe('redactPaths', () => {
     ['/home/jo/acme/.erd-studio/tables/gold/dim_customer.yml bad', '{project}/.erd-studio/tables/{table}.yml bad'],
     ['/home/jo/acme/.erd-studio/tables/dim_customer.yml bad', '{project}/.erd-studio/tables/{table}.yml bad'],
     ['/home/jo/acme/.erd-studio/tables/orders.json bad', '{project}/.erd-studio/{layer}/{domain}.json bad'],
+    // Native DBML storage (2.0): a diagram, its layout file, a table file and a
+    // relationships file (a fixed name, so it is kept), top level and in a folder.
+    ['/home/jo/acme/.erd-studio/gold/sales.dbml:3:1 bad', '{project}/.erd-studio/{layer}/{domain}.dbml:3:1 bad'],
+    ['/home/jo/acme/.erd-studio/gold/sales.dbdiagram is not JSON', '{project}/.erd-studio/{layer}/{domain}.dbdiagram is not JSON'],
+    ['/home/jo/acme/.erd-studio/tables/gold/fct_order.dbml bad', '{project}/.erd-studio/tables/{table}.dbml bad'],
+    ['/home/jo/acme/.erd-studio/tables/dim_date.dbml bad', '{project}/.erd-studio/tables/{table}.dbml bad'],
+    ['/home/jo/acme/.erd-studio/tables/gold/_relationships.dbml bad', '{project}/.erd-studio/tables/_relationships.dbml bad'],
+    ['/home/jo/acme/.erd-studio/tables/_relationships.dbml bad', '{project}/.erd-studio/tables/_relationships.dbml bad'],
+    ['C:\\Users\\Jo\\acme\\.erd-studio\\gold\\sales report.dbdiagram bad', '{project}/.erd-studio/{layer}/{domain}.dbdiagram bad'],
     ['/home/jo/acme/.erd-studio/layers.json failed', '{project}/.erd-studio/layers.json failed'],
     ['/home/jo/acme/erd-studio/gold/finance.json', '{project}/erd-studio/{layer}/{domain}.json'],
     [

@@ -443,6 +443,9 @@ describe('panel script', () => {
       expect(visible('[data-step="dbml"] .gs-step__title')).toEqual(['Have a DBML file?']);
       expect(visible('[data-step="dbml"] .gs-btn')).toEqual(['Import DBML\u2026']);
       expect(visible('[data-step="dbml"] .gs-step__text').join()).toContain('an open format, no lock-in');
+      // Native DBML storage (2.0): the step is format-neutral, since a YAML project from before 2.0 shows it too.
+      expect(visible('[data-step="new"] .gs-step__text').join()).toContain('Each table is a file in .erd-studio/');
+      expect(visible('[data-step="new"] .gs-step__text').join()).not.toMatch(/YAML|JSON/);
       // No dbt wording where it no longer applies; the summary describes dbt models, so it stays off.
       expect(visible('.gs-section-intro').join()).not.toContain('dbt');
       expect(visible('.gs-sample-link')).toEqual([]);

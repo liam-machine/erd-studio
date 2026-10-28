@@ -1050,7 +1050,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 
   <section class="gs-noproject" aria-label="Open a folder">
     <h2 class="gs-sample__title">Open the folder your data model lives in</h2>
-    <p class="gs-sample__text">Any folder works: your design is saved as plain YAML and JSON in <code>.erd-studio/</code>, next to your code. If the folder holds a dbt project (<code>dbt_project.yml</code>), ERD Studio also shows what dbt built.</p>
+    <p class="gs-sample__text">Any folder works: your design is saved as DBML, an open format, in <code>.erd-studio/</code>, next to your code. If the folder holds a dbt project (<code>dbt_project.yml</code>), ERD Studio also shows what dbt built.</p>
     <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">Open a folder&hellip;</button>
   </section>
   <section class="gs-sample" aria-label="Try the sample project">
@@ -1083,7 +1083,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         <div class="gs-step__body">
           <h3 class="gs-step__title" data-when="first">Draw your first diagram</h3>
           <h3 class="gs-step__title" data-when="more" hidden>Draw another diagram</h3>
-          <p class="gs-step__text">Add tables on a blank canvas. Each table is a YAML file in <code>.erd-studio/</code> that you commit and review like code. No dbt needed.</p>
+          <p class="gs-step__text">Add tables on a blank canvas. Each table is a file in <code>.erd-studio/</code> that you commit and review like code. No dbt needed.</p>
           <div class="gs-step__actions" data-when="first">
             <button class="gs-btn gs-btn--primary" type="button" data-action="createDomain">New diagram</button>
           </div>

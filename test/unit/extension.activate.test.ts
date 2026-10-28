@@ -1517,6 +1517,14 @@ describe('Welcome panel: first run', () => {
     expect(step('newDiagram').description).toContain('(command:erdStudio.createDomain)');
     // The example is a second button in the same step, not a step of its own.
     expect(step('newDiagram').description).toContain('[Open Example Diagram](command:erdStudio.openExampleDiagram)');
+    // Native DBML storage (2.0): format-neutral, because the step also shows in a YAML project from before 2.0;
+    // its picture shows a new project, which is DBML.
+    expect(step('newDiagram').description).toContain('Each table is a file in .erd-studio/');
+    expect(step('newDiagram').description).not.toMatch(/YAML|JSON/);
+    expect((step('newDiagram').media as { altText?: string }).altText).toContain('DBML');
+    const svg = fs.readFileSync(path.join(REPO_ROOT, step('newDiagram').media.svg), 'utf-8');
+    for (const file of ['sales.dbml', 'sales.dbdiagram', 'customer.dbml', '_relationships.dbml']) expect(svg).toContain(`>${file}</text>`);
+    expect(svg).not.toMatch(/\.yml<|sales\.json</);
     expect(step('importDbml').description).toContain('(command:erdStudio.importDbml)');
     expect(step('draw').description).toContain('(command:erdStudio.drawFromDbt)');
     expect(step('sample').description).toContain('(command:erdStudio.trySampleProject)');

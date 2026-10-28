@@ -7,8 +7,11 @@ All notable changes to `@erd-studio/renderer`. While `0.x`, a breaking change bu
 ### Added
 - Re-exports core's rich DBML export and its dbdiagram layout file: `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `toDbdiagramLayout`, `serializeDbdiagramLayout`, `dbdiagramLayoutFileName` and the `DbmlRichOptions`, `DbdiagramLayout` and `DbdiagramTablePosition` types.
 
+### Changed
+- A table whose file cannot be read says which format failed: "DBML error on line N" for a `.dbml` table file (ERD Studio 2.0's native DBML storage), and "YAML error on line N" as before for a `.yml` one. A `DisplaySubjectArea` from an older core never carries the DBML kinds, so its nodes read exactly as before.
+
 ### Changed (breaking)
-- Pins `@erd-studio/core` 0.4.0. The re-exported `DiagramExportFormat` gains `'dbml-rich'` and `DIAGRAM_EXPORT_FORMATS` now ends with it, so a page that offers every format offers it too, and a `Record<DiagramExportFormat, …>` (a label or hint per format) or an exhaustive `switch` over it needs a case.
+- Pins `@erd-studio/core` 0.4.0, whose `TableLoadErrorKind` gains three DBML kinds and whose `@dbml/parse` runtime dependency is loaded only by its `@erd-studio/core/dbml` subpath (the renderer never imports it). The re-exported `DiagramExportFormat` gains `'dbml-rich'` and `DIAGRAM_EXPORT_FORMATS` now ends with it, so a page that offers every format offers it too, and a `Record<DiagramExportFormat, …>` (a label or hint per format) or an exhaustive `switch` over it needs a case.
 
 ## 0.3.0
 

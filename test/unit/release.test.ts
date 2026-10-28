@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import {
   parseVersion,
   compareVersions,
@@ -120,6 +122,16 @@ describe('release.mjs — changelog-pinned releases', () => {
     const rejected: string[] = [];
     resolveReleaseVersion('0.6.53', '0.6.53', '0.6.53', (m: string) => rejected.push(m));
     expect(rejected[0]).toMatch(/not ahead of v0\.6\.53; releasing v0\.6\.54/);
+  });
+
+  it('accepts the native DBML storage release pin, 2.0.0, as the real CHANGELOG.md writes it', () => {
+    const changelog = fs.readFileSync(path.join(__dirname, '../../CHANGELOG.md'), 'utf8');
+    expect(changelog).toMatch(/^## Unreleased — 2\.0\.0$/m);
+    expect(pinnedReleaseVersion(changelog)).toBe('2.0.0');
+    expect(resolveReleaseVersion('1.7.2', '1.7.2', pinnedReleaseVersion(changelog))).toBe('2.0.0');
+    const released = updateChangelog(changelog, { version: '2.0.0', date: '2026-11-01' });
+    expect(released).toMatch(/^## 2\.0\.0 — 2026-11-01$/m);
+    expect(extractReleaseNotes(released, '2.0.0')).toContain('Convert Project to DBML');
   });
 
   it('renames a pinned Unreleased heading like any other', () => {

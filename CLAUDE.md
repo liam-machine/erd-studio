@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**ERD Studio** (package `erd-studio`, publisher `liamwynne`) is a VS Code extension for logical data modelling in Git: entity-relationship diagrams saved as plain YAML/JSON that the user's own AI assistant can read and write, with DBML import and export. A **logical** stage is the editable design and works in any folder; when the open folder is a dbt project, a **physical** stage is derived at runtime from it and is read-only (without `dbt_project.yml` the editor is logical-only and the Physical tab is hidden). The repo ships three things: the extension, a read-only `erd-studio` CLI (`dist/cli.js`), and two npm packages (`@erd-studio/core`, `@erd-studio/renderer`) consumed by the paid **ERD Studio for Confluence** app.
+**ERD Studio** (package `erd-studio`, publisher `liamwynne`) is a VS Code extension for logical data modelling in Git: entity-relationship diagrams stored as **DBML, an open format**, that the user's own AI assistant can read and write (projects from before 2.0 keep their YAML/JSON, still read and edited, and **Convert Project to DBML** moves one over), with DBML import and export. A **logical** stage is the editable design and works in any folder; when the open folder is a dbt project, a **physical** stage is derived at runtime from it and is read-only (without `dbt_project.yml` the editor is logical-only and the Physical tab is hidden). The repo ships three things: the extension, a read-only `erd-studio` CLI (`dist/cli.js`), and two npm packages (`@erd-studio/core`, `@erd-studio/renderer`) consumed by the paid **ERD Studio for Confluence** app.
 
 ## Read before touching
 
@@ -18,23 +18,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Usage telemetry (extension side and the Worker) | `telemetry/README.md` |
 | Getting Started panel, CLI launcher, the `erd-studio` CLI | `docs/dev/onboarding-and-cli.md` |
 | The README or a user guide (`docs/dbt.md`, `docs/ai-assistants.md`, `docs/project-folder.md`), Marketplace copy, walkthrough or welcome-view text | the wording rules in `docs/dev/onboarding-and-cli.md` |
-| Rich DBML export, the `.dbdiagram` layout file, Export All Diagrams, Import DBML (parser pin, property names, `meta.dbml`) | `docs/dev/dbml.md` |
+| DBML storage, import and export: `packages/core/src/dbml/`, the subject-area codec, `planDbmlLibraryWrites`, `applyFileWrites`, Convert Project to DBML, the rich export, the `.dbdiagram` layout file, Export All Diagrams, Import DBML (parser pin, property names, `meta.dbml`) | `docs/dev/dbml.md` |
+| Native DBML storage: the decisions (D1–D25), the normative format, the stages and their review log | `docs/plans/native-dbml-storage.md` |
 | `SCHEMA_CONTENT`, harness generators, the `/erd-studio-setup` skill | `src/harness/CLAUDE.md` |
 | Releases, package publishing, manual publish | `docs/dev/releasing.md` |
 | Rendering the webview in Chrome | `docs/dev/webview-preview.md` |
-| The on-disk file format (domain JSON, model yml, `layers.json`) | `docs/semantic-domain-json-reference.md` |
+| The on-disk file format (DBML tables, relationships and diagrams, the `.dbdiagram` layout; legacy domain JSON and model yml; `layers.json`) | `docs/semantic-domain-json-reference.md` |
 | `proxy/`, `telemetry/`, `video/` | their own `README.md` |
 
 `test/unit/claudeMdPointers.test.ts` fails if a path in this table stops existing — update the table when you move a doc.
 
 ## Directory structure
 
-ERD Studio uses a **central model store** (domain schema v5). Each model is one YAML file in `.erd-studio/logical-models/`, at the top level or exactly one folder down (by convention a layer folder). Domain JSON files at `.erd-studio/{layer}/{domain}.json` reference models **by name string** and hold relationships plus canvas layout. The custom editor activates for `**/.erd-studio/*/*.json` (and the pre-0.6.44 `**/erd-studio/*/*.json`, which activation renames). The base directory is the `erdStudio.semanticDir` setting (default `.erd-studio`).
+ERD Studio uses a **central table library** shared by every diagram. **New projects store it as DBML** (native DBML storage, ERD Studio 2.0, `CURRENT_SCHEMA_VERSION` 7; spec `docs/plans/native-dbml-storage.md`): one `.dbml` file per table in `.erd-studio/tables/`, at the top level or exactly one folder down; each folder's relationships as `Ref` lines in its `_relationships.dbml`; each diagram as `.erd-studio/{layer}/{name}.dbml` whose `use` lines name its tables, with its positions in a `.dbdiagram` file beside it. **Projects from before 2.0 keep YAML/JSON** (domain schema v4–v6, below), still read and fully edited; nothing converts unless the user runs `erdStudio.convertProjectToDbml`. The custom editor activates for `**/.erd-studio/*/*.json`, `**/.erd-studio/*/*.dbml` (a `file:` `.dbml` that is not a diagram is rerouted to the text editor) and the pre-0.6.44 `**/erd-studio/*/*.json` (which activation renames). The base directory is the `erdStudio.semanticDir` setting (default `.erd-studio`).
 
 ```
 .erd-studio/
-├── layers.json
-├── templates/
+├── layers.json                    ← JSON, unchanged
+├── templates/*.json               ← JSON, unchanged
+├── tables/                        ← the table library (never a layer in a DBML project)
+│   ├── dim_date.dbml              ← one Table per file, named exactly as the table
+│   ├── _relationships.dbml        ← Refs owned by top-level tables
+│   └── gold/                      ← optional folder, one level only
+│       ├── fct_order.dbml
+│       └── _relationships.dbml    ← Refs owned by tables in tables/gold/
+└── gold/
+    ├── sales.dbml                 ← diagram: Project + `use` lines + sticky Notes
+    └── sales.dbdiagram            ← its layout (positions); absent until something is placed
+```
+
+- **One detector each; never add a second.** `detectSubjectAreaFormat()` (`packages/core/src/types/semantic.ts`) for a JSON diagram, `detectProjectStorage()` (same file; host `projectStorageOf()` in `src/services/projectStorage.ts`) for what a project writes — `dbml` (also an empty project), `yaml` or `mixed`, decided by library evidence only — and `classifySemanticFile()` (`packages/core/src/storage.ts`) for what a path under the semantic dir is (diagram, table, relationships, layout, …).
+- **DBML rules** (D2–D5): table names are unqualified (`Table fct_order [schema: 'gold']`), the stem equals the declared name (compared without case on read), and `_relationships` is reserved only for new `.dbml` tables. A relationship belongs to its FK table and is one Ref in **that table's folder's** `_relationships.dbml`; a Ref found elsewhere is *misplaced* (drawn, warned, moved home by the next write to its owner). A diagram's members are the stems of its table `use` lines, resolved **by name** (`tableFileCandidates`), never by trusting the path. DBML diagrams hold no Refs: every relationship edit on one uses `home = 'library'`. In a mixed project a DBML diagram or DBML-owned Ref may name only DBML tables (D20).
+
+The legacy YAML/JSON layout (domain schema v5/v6): one model yml per table in `logical-models/` (or v6's `tables/`), domain JSON files at `{layer}/{domain}.json` referencing models by name and holding relationships plus canvas layout:
+
+```
+.erd-studio/
 ├── logical-models/          ← one YAML per model, shared across domains
 │   ├── dim_customer.yml     ← top level (flat libraries keep working)
 │   └── gold/fct_order.yml   ← optional per-layer folder (one level only)
@@ -43,9 +62,9 @@ ERD Studio uses a **central model store** (domain schema v5). Each model is one 
 ```
 
 - **A model's `name` is its identity everywhere** (domain `logical.models`, relationship endpoints, `viewConfig.positions` keys, physical matching) and is unique across the whole library, case-insensitively. Never make a folder part of it. `alias` is the warehouse table name (dbt's `alias`). Folders are organisational only and **opt-in per project** (`TableLibraryService.groupsByFolder()`); a flat library stays flat.
-- **Relationships are defined once, in the model library**, stored in the many (FK) side's file (`canonicalRelationship()`). Link identity is core's `linkKey` / `sameLink` only; direction comes from `orientLink`, and when nothing decides it the dialog asks — never default from drag order. **Every canvas relationship edit is planned by the pure `planRelationshipWrite`** (the exhaustive checker in `test/unit/relationshipStateSpace.*` calls the same function); never write a second planner. Composite FKs are one entry per column pair sharing `compositeKey`, never an array. Library storage is opt-in per project by what is on disk (`usesLibraryRelationships`). Details: `docs/dev/relationships.md`.
+- **Relationships are defined once, in the model library**, stored in the many (FK) side's file (`canonicalRelationship()`; in DBML, that table's folder `_relationships.dbml`). Link identity is core's `linkKey` / `sameLink` only; direction comes from `orientLink`, and when nothing decides it the dialog asks — never default from drag order. **Every canvas relationship edit is planned by the pure `planRelationshipWrite`** (the exhaustive checker in `test/unit/relationshipStateSpace.*` calls the same function); never write a second planner. Composite FKs are one entry per column pair sharing `compositeKey`, never an array. Library storage is opt-in per project by what is on disk (`usesLibraryRelationships`). Details: `docs/dev/relationships.md`.
 - **Format detection** is `detectSubjectAreaFormat()` (`packages/core/src/types/semantic.ts`) → `v6` | `v5` | `v4` (loads, prompts for `erdStudio.migrateToV5`) | `hybrid` / `legacy` (rejected). Never add a second detector.
-- **Schema v6, the table naming** (#181 reads it, #182 writes it): `tables/`, `logical.tables`, `subjectArea`, `fromTable`/`toTable`, `tableRole`, `linkedTable`. `validateSubjectAreaDocument` normalises a v6 file to the v5 keys (`normaliseSubjectAreaDocument`) and model yml is normalised by key in `parseTableText`, so nothing downstream branches on the naming; never add a second normaliser. **Writes go back through one boundary per file type**: `SemanticEditorProvider.parseSubjectAreaDocument` remembers a v6 document and `serialiseSubjectArea` writes it back with core's `toTableNamingDocument` (the order-preserving inverse); `TableLibraryService.renderTable` renames a `tables/` (or v6-keyed) yml's keys to v5 for the edit and back to v6 after. Every edit keeps its file's naming; new files follow `projectNamingOf()` (`src/services/projectNaming.ts`, core's `detectProjectNaming()` fed from disk — the single answer, shared by the canvas, commands, the offer and `doctor`): `v5` writes `logical-models/` and v5 keys, `v6` / `mixed` / no library yet write `tables/` and v6. `CURRENT_SCHEMA_VERSION` (6) is the read ceiling. The migration is the pure `planNamingMigration` (`src/services/namingMigration.ts`), applied by `erdStudio.migrateToTableNaming` as one `WorkspaceEdit` (yml moved by file operations only) and previewed by `doctor`; never write a second planner. `TableLibraryService` reads `logical-models/` then `tables/` (a name in both is a reported conflict); `tables/` is a layer folder, not the library, when `tablesDirIsLayer()`.
+- **Legacy YAML rule — schema v6, the table naming** (#181 reads it, #182 writes it): `tables/`, `logical.tables`, `subjectArea`, `fromTable`/`toTable`, `tableRole`, `linkedTable`. `validateSubjectAreaDocument` normalises a v6 file to the v5 keys (`normaliseSubjectAreaDocument`) and model yml is normalised by key in `parseTableText`, so nothing downstream branches on the naming; never add a second normaliser. **Writes go back through one boundary per file type**: `SemanticEditorProvider.parseSubjectAreaDocument` remembers a v6 document and `serialiseSubjectArea` writes it back with core's `toTableNamingDocument` (the order-preserving inverse); `TableLibraryService.renderTable` renames a `tables/` (or v6-keyed) yml's keys to v5 for the edit and back to v6 after. Every edit keeps its file's naming; new files follow `projectNamingOf()` (`src/services/projectNaming.ts`, core's `detectProjectNaming()` fed from disk — the single answer, shared by the canvas, commands, the offer and `doctor`): `v5` writes `logical-models/` and v5 keys, `v6` / `mixed` write `tables/` and v6 — in a project whose storage is `yaml`; a project with no library yet writes DBML. `CURRENT_JSON_SCHEMA_VERSION` (6) is the JSON read ceiling (`CURRENT_SCHEMA_VERSION`, 7, covers DBML's `erd_schema_version`). The migration is the pure `planNamingMigration` (`src/services/namingMigration.ts`), applied by `erdStudio.migrateToTableNaming` as one `WorkspaceEdit` (yml moved by file operations only) and previewed by `doctor`; never write a second planner. `TableLibraryService` reads `logical-models/` then `tables/` (a name in both is a reported conflict); `tables/` is a layer folder, not the library, when `tablesDirIsLayer()`.
 
 ## Build & test
 
@@ -85,14 +104,14 @@ Four esbuild targets (`esbuild.js`, each in both build and watch branches):
 
 | Stage | Colour | Purpose | Storage |
 |---|---|---|---|
-| **Logical** | Blue `#60a5fa` | Full design — columns, types, PK/FK/NK, SCD, grain, rationale | `logical-models/**.yml` + the domain file's `logical` section |
+| **Logical** | Blue `#60a5fa` | Full design — columns, types, PK/FK/NK, SCD, grain, rationale | DBML: `tables/**.dbml` + `_relationships.dbml` + the diagram's `.dbml` / `.dbdiagram`; legacy: `logical-models/**.yml` (or v6 `tables/**.yml`) + the domain file's `logical` section |
 | **Physical** | Green `#22c55e` | What exists in the dbt project (source files, schema yml, `manifest.json`, `catalog.json`); relationships derived from dbt relationship tests | Derived at runtime, **never persisted** |
 
 ### Data flow
 
 ```
-{layer}/{domain}.json ─┐
-logical-models/**.yml ─┴→ SubjectAreaService.getSubjectArea() ─→ UnifiedSubjectArea ─→ .logical → DisplaySubjectArea
+{layer}/{domain}.dbml|.json ─┐   (subjectAreaCodec: DBML or JSON)
+tables/**.dbml + _relationships.dbml, logical-models/**.yml ─┴→ SubjectAreaService.getSubjectArea() ─→ UnifiedSubjectArea ─→ .logical → DisplaySubjectArea
 schema .yml + source files ─→ YmlParserService ─┐                                         │
 manifest.json              ─→ ManifestService  ─┼→ buildPhysicalSubjectArea() ─→ DisplaySubjectArea │
 catalog.json               ─→ CatalogService   ─┘                                         │
@@ -105,10 +124,11 @@ The canvas and the CLI reach comparisons through the same pure cores — `buildL
 
 ### Edit pipeline
 
-- **Every canvas write to a domain file or a `logical-models/*.yml` goes through `applySubjectAreaEdit` / `applyTableEdit`** in `SemanticEditorProvider`: one `WorkspaceEdit`, one save, one undo step, nothing on disk unless `applyEdit` succeeds. Never `fs.writeFileSync` or hand-roll a `WorkspaceEdit` in a provider handler. (Direct `fs` writes elsewhere — `LayerService.saveConfig`, `HarnessService`, `MigrationService`, `moveRelationshipsToLibrary`, … — are not the editor path.)
+- **Every canvas write to a diagram file, a table file (`.dbml` or `.yml`) or a relationships file goes through `applySubjectAreaEdit` / `applyTableEdit`** in `SemanticEditorProvider`: one `WorkspaceEdit`, one save, one undo step, nothing on disk unless `applyEdit` succeeds. Never `fs.writeFileSync` or hand-roll a `WorkspaceEdit` in a provider handler. (Direct `fs` writes elsewhere — `LayerService.saveConfig`, `HarnessService`, `MigrationService`, `moveRelationshipsToLibrary`, … — are not the editor path.)
 - After `applyEdit`, save model documents with `saveDocumentByUri` (`src/providers/documentSave.ts`) and check the result: `save()` resolves `false` rather than throwing.
-- Any writer of a watched file (domain JSON, `layers.json`, `logical-models/*.yml`) records `ownWrites` **after** the bytes land.
-- Model yml writes edit the parsed YAML document in place, so comments, key order, unknown keys, number text and aliases survive. Never regenerate a file that parses.
+- Any writer of a watched file (a diagram `.json` / `.dbml` / `.dbdiagram`, `layers.json`, a table `.yml` / `.dbml`, a `_relationships.dbml`) records `ownWrites` **after** the bytes land.
+- **DBML writes splice by parser node offsets** (`packages/core/src/dbml/`); a no-op save is byte-identical; a file that does not parse is refused, never regenerated. `planDbmlLibraryWrites` (`src/services/dbmlLibraryWrites.ts`) only places tables and Refs in files — `planRelationshipWrite` still decides the relationships. Every edit that creates or deletes files goes through `applyFileWrites` (`src/providers/applyFileWrites.ts`), which reconciles when `applyEdit` returns `false`.
+- Model yml writes (legacy files) edit the parsed YAML document in place, so comments, key order, unknown keys, number text and aliases survive. Never regenerate a file that parses.
 - Refresh paths (watchers, external edits, stage switches) never write. Only the initial `ready` load persists auto-computed positions, and only for a partially positioned domain.
 - Compare model and column names with `sameName()` / `normaliseName()` (case-insensitive). Names match `TABLE_NAME_PATTERN` / `COLUMN_NAME_PATTERN` (`src/types/naming.ts`; the renderer keeps its own copies). Refuse a case-only model rename (the write-new + delete-old edit would delete the file on macOS/Windows). Add / Rename refuse a name already in the domain or the library in any case via `TableLibraryService.findTableNameIgnoringCase`, which lists files — never `existsSync`, which is case-sensitive on Linux.
 - `updateColumn` treats an omitted `scdType` / `additiveType` as "keep" and `null` as "clear".
@@ -125,9 +145,9 @@ The canvas and the CLI reach comparisons through the same pure cores — `buildL
 The Confluence app renders whatever is committed in a customer's repo — written by any extension version — and cannot run a migration. So:
 
 - **Every change under `packages/` ships automatically** to npm on merge to `main` and into the Confluence app. Every export, the `ErdCanvas` props, the `DisplaySubjectArea` shape, the `loadDisplaySubjectArea` options and its four error classes, and the README's `--vscode-*` list are a public contract. A breaking change is a pinned MINOR while `0.x`; say in the PR if the Confluence cache key needs a bump.
-- **Never drop a read path.** Core keeps loading v4 and v5, flat and foldered libraries, relationships in the domain file, the library or both, `one-to-many` records, and a missing `layers.json`. Format changes are additive on read.
+- **Never drop a read path.** Core keeps loading DBML projects (through the `@erd-studio/core/dbml` subpath's `dbmlStorageReader`), v4, v5 and v6, flat and foldered libraries, relationships in the domain file, the library or both, `one-to-many` records, and a missing `layers.json`. Format changes are additive on read.
 - **New fields are optional** (domain JSON, model yml, `layers.json`, `Display*` types) with a default that renders what an older file meant; the renderer must draw a `DisplaySubjectArea` from an older core. A field whose meaning changes gets a new name.
-- **Unknown keys are ignored, not rejected.** Only a newer `schemaVersion` may refuse a file.
+- **Unknown keys are ignored, not rejected.** Only a newer `schemaVersion` (or a DBML diagram's newer `erd_schema_version`) may refuse a file.
 - Before changing how a format is written, add a fixture and golden of the old shape under `packages/core/test/fixtures/`. Never delete an old-format golden; regenerate one (`UPDATE_GOLDEN=1`) only for an intended rendering change. Keep a "still read" note in `docs/semantic-domain-json-reference.md`.
 - The viewer path (`ErdCanvas` with `viewer`) makes no `CanvasHost` posts, touches no VS Code globals and shows no editing affordance. Write every viewer gate as `viewer ? … : <upstream>`.
 - Exporter output (Mermaid / DBML) is a contract that must parse in every pinned parser; a mapping change is a golden update plus a CHANGELOG line. Details in `packages/CLAUDE.md`.
@@ -155,7 +175,7 @@ The Confluence app renders whatever is committed in a customer's repo — writte
 
 ### Harness
 
-- **A schema change must update the harness:** changing the domain file schema (`packages/core/src/types/semantic.ts`, file layout, naming conventions) means updating `SCHEMA_CONTENT` (and the generators if needed) in `src/services/harnessService.ts`, **bumping `HARNESS_VERSION`**, and updating `docs/semantic-domain-json-reference.md`. Don't bump it for unrelated changes. Never silently overwrite a harness file that has no version marker. Never gitignore `.agents/`. Read `src/harness/CLAUDE.md` before editing `src/services/harnessService.ts` — it does not load on its own for files outside `src/harness/`.
+- **A schema change must update the harness:** changing the on-disk schema (`packages/core/src/types/semantic.ts`, the DBML codec under `packages/core/src/dbml/` and `dbmlRichProperties.ts`, file layout, naming conventions) means updating `SCHEMA_CONTENT` (and the generators if needed) in `src/services/harnessService.ts`, **bumping `HARNESS_VERSION`**, and updating `docs/semantic-domain-json-reference.md`. Don't bump it for unrelated changes. Never silently overwrite a harness file that has no version marker. Never gitignore `.agents/`. Read `src/harness/CLAUDE.md` before editing `src/services/harnessService.ts` — it does not load on its own for files outside `src/harness/`.
 
 ### Webview
 
@@ -174,7 +194,7 @@ The Confluence app renders whatever is committed in a customer's repo — writte
 
 Rules reviewers (human or AI) apply to every PR:
 
-- Domain/model writes go through `applySubjectAreaEdit` / `applyTableEdit` — reject hand-rolled `WorkspaceEdit`s or direct `fs` writes in the provider
+- Domain/model writes go through `applySubjectAreaEdit` / `applyTableEdit` (file creates and deletes through `applyFileWrites`) — reject hand-rolled `WorkspaceEdit`s or direct `fs` writes in the provider; DBML writes splice, never regenerate a file
 - Physical stage is derived at runtime: reject code that persists physical data, copies logical relationships into physical, or extends the physical allowlist with schema mutations
 - Message protocol changes update both directions in `src/types/messages.ts`, add payload validation, and wire both a sender and a handler
 - Schema changes update `SCHEMA_CONTENT`, bump `HARNESS_VERSION` and update the reference doc

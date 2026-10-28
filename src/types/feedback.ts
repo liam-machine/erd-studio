@@ -691,6 +691,9 @@ const KEPT_FILE_NAMES = new Set([
   '.sync-plan.json',
 ]);
 
+/** A DBML library folder's relationships file (`tables/[<folder>/]_relationships.dbml`): ERD Studio's fixed name. */
+const DBML_RELATIONSHIPS_FILE = '_relationships.dbml';
+
 /** The extension's own install folder, e.g. `liamwynne.erd-studio-1.0.7`. */
 const EXTENSION_DIR_PATTERN = /^liamwynne\.erd-studio-/i;
 
@@ -706,7 +709,7 @@ const SPACED_SEGMENT = String.raw`${SEGMENT}(?: +${SEGMENT})*`;
  * extension, so `sales report.json` is one file name but `/a/b was missing`
  * stops at `b`. Over-reach only ever swallows prose into a placeholder.
  */
-const LAST_SEGMENT = String.raw`(?:${SPACED_SEGMENT}\.[A-Za-z0-9]{1,8}(?![\w\\/])|${SEGMENT})`;
+const LAST_SEGMENT = String.raw`(?:${SPACED_SEGMENT}\.[A-Za-z0-9]{1,9}(?![\w\\/])|${SEGMENT})`;
 /**
  * A path may not start mid-word, mid-URL or straight after a placeholder —
  * the last is what makes {@link redactPaths} idempotent.
@@ -735,8 +738,9 @@ const LOCAL_PATH_PATTERN = new RegExp(
 const LOCAL_URL_PATTERN =
   /\b(?:file:\/\/[^\s/"'<>]*|https?:\/\/[^\s/"'<>]*vscode-(?:resource|cdn)[^\s/"'<>]*)(\/[^\s"'<>)]*)/gi;
 
+/** A file's extension, up to nine characters so a diagram's `.dbdiagram` layout file keeps its own. */
 function extensionOf(name: string): string {
-  const match = /\.([A-Za-z0-9]{1,8})$/.exec(name);
+  const match = /\.([A-Za-z0-9]{1,9})$/.exec(name);
   return match ? `.${match[1]}` : '';
 }
 
@@ -748,6 +752,8 @@ function describeSemanticPath(rest: string[]): string {
   if (rest.length === 1) return KEPT_FILE_NAMES.has(last.toLowerCase()) ? last : `{file}${ext}`;
   if (rest[0] === 'templates') return `templates/{template}${ext}`;
   if (rest[0] === 'logical-models') return `logical-models/{model}${ext}`;
+  // A DBML library folder's relationships file has a fixed name, so it is kept.
+  if (rest[0] === 'tables' && last.toLowerCase() === DBML_RELATIONSHIPS_FILE) return `tables/${DBML_RELATIONSHIPS_FILE}`;
   if (rest[0] === 'tables' && ext !== '.json') return `tables/{table}${ext}`;
   if (rest.length === 2) return `{layer}/{domain}${ext}`;
   return `{path}/{file}${ext}`;

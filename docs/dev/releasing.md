@@ -16,7 +16,8 @@ Every released artifact follows [SemVer 2.0](https://semver.org), `MAJOR.MINOR.P
 | `@erd-studio/core` | `packages/core/package.json` | `publish-packages.yml` on merge (patch); you, in the PR, only for a minor/major | `publish-packages.yml` (npm, trusted publishing) |
 | `@erd-studio/renderer` | `packages/renderer/package.json` | `publish-packages.yml` on merge (patch, and whenever core is released); you, in the PR, only for a minor/major | `publish-packages.yml` (npm, trusted publishing) |
 | Harness files | `HARNESS_VERSION` | you (see "Harness Versioning") | the extension |
-| Domain file format | `schemaVersion` / `CURRENT_SCHEMA_VERSION` | you, with a migration | the extension |
+| Domain file format | `schemaVersion` / `CURRENT_SCHEMA_VERSION` (the newest read in any format), `CURRENT_JSON_SCHEMA_VERSION` (JSON) | you, with a migration | the extension |
+| DBML diagram format | `erd_schema_version` on a diagram's `Project` / `DBML_SCHEMA_VERSION` (`packages/core/src/types/semantic.ts`) | you, with a migration; raise `CURRENT_SCHEMA_VERSION` with it | the extension |
 
 **Extension: every release is a PATCH bump unless Liam explicitly asks for a minor or major one.**
 - **PATCH is the default for everything, new features included.** Leave the heading as a bare `## Unreleased` and the workflow bumps the third number. Do **not** pin a version in the heading on your own judgement, however large or user-visible the change is.

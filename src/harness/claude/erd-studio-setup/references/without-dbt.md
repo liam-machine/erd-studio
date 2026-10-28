@@ -31,7 +31,8 @@ Checklist for this route (show it at each step boundary, as SKILL.md's "Show pro
 Greet the user in about four short lines:
 
 - ERD Studio keeps a *logical data model* — the tables, their keys and how they connect — as
-  plain YAML and JSON files in `.erd-studio/`, so it is reviewed and versioned like code.
+  plain text files in `.erd-studio/` (DBML, an open format; YAML and JSON in a project from before
+  ERD Studio 2.0), so it is reviewed and versioned like code.
 - You will design one diagram with them, write its files, check them, and open it on the canvas.
   Nothing outside `.erd-studio/` changes.
 - Want to see a finished one first? **ERD Studio: Open Example Diagram** (Command Palette) opens

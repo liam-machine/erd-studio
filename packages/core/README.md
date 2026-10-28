@@ -4,14 +4,15 @@ The ERD Studio domain model, shared by the [ERD Studio](https://github.com/liam-
 
 It holds:
 
-- the TypeScript types for the on-disk domain format (schema v5 plus `logical-models/*.yml` and `logical-models/{layer}/*.yml`, and schema v6's `tables/` naming, read into the same in-memory shape), the layer configuration, the display-ready `DisplaySubjectArea` the canvas renders, the cross-stage discrepancy report, and the edit messages the canvas posts to its host;
+- the TypeScript types for the on-disk format (ERD Studio 2.0's native DBML storage, `.dbml` files read through the `@erd-studio/core/dbml` subpath, and the older YAML/JSON projects: schema v5 plus `logical-models/*.yml` and `logical-models/{layer}/*.yml`, and schema v6's `tables/` naming, all read into the same in-memory shape), the layer configuration, the display-ready `DisplaySubjectArea` the canvas renders, the cross-stage discrepancy report, and the edit messages the canvas posts to its host;
 - the pure pipeline the extension host uses to turn those files into a `DisplaySubjectArea`: `parseSubjectAreaJson`, `validateSubjectAreaDocument`, `buildUnifiedSubjectArea`, `toLogicalStage`, `parseTableText`, `parseLayersText` / `validateLayersConfig`, `computeMissingPositions` and `toDisplaySubjectArea`;
-- `loadDisplaySubjectArea`, which does all of that in one call over any async `readFile`;
+- `loadDisplaySubjectArea`, which does all of that in one call over any async `readFile` (for a DBML project, with the subpath's `dbmlStorageReader`);
+- the parser-free half of DBML storage: `detectProjectStorage`, `classifySemanticFile` and the path helpers, `editDiagramLayout` for `.dbdiagram` layout files, and `normaliseForStorageEquivalence`;
 - exporters that turn a `DisplaySubjectArea` into [Mermaid](https://mermaid.js.org) `erDiagram` or [DBML](https://dbml.dbdiagram.io) text: `toMermaid`, `toDbml`, `toDbmlRich` (ERD Studio's fields as DBML custom properties) with its dbdiagram layout file (`toDbdiagramLayout`, `serializeDbdiagramLayout`, `readDbdiagramLayout`), `exportDiagram` and `diagramExportFileName`.
 
 The package has no Node, `vscode`, React or React Flow dependency (its dependencies are `yaml` and, for the `@erd-studio/core/dbml` subpath only, `@dbml/parse`), so it runs in a browser, in Node and in bundlers alike.
 
-The on-disk contract is documented in [`docs/semantic-domain-json-reference.md`](https://github.com/liam-machine/erd-studio/blob/main/docs/semantic-domain-json-reference.md).
+The on-disk contract (DBML projects first, then the YAML/JSON projects from before 2.0) is documented in the [file format reference](https://github.com/liam-machine/erd-studio/blob/main/docs/semantic-domain-json-reference.md).
 
 ```ts
 import { detectSubjectAreaFormat, type DisplaySubjectArea } from '@erd-studio/core';
@@ -21,13 +22,17 @@ import { detectSubjectAreaFormat, type DisplaySubjectArea } from '@erd-studio/co
 
 ```ts
 import { loadDisplaySubjectArea } from '@erd-studio/core';
+import { dbmlStorageReader } from '@erd-studio/core/dbml';
 
 const domain = await loadDisplaySubjectArea({
-  domainPath: '.erd-studio/silver/sales.json',   // {semanticDir}/{layer}/{domain}.json
+  domainPath: '.erd-studio/gold/sales.dbml',     // {semanticDir}/{layer}/{diagram}.dbml (or .json)
   readFile: async (path) => fetchText(path),       // resolve null when the file does not exist
   readOnly: true,
+  dbml: dbmlStorageReader,                         // needed for .dbml files; omit it to stay parser-free
 });
 ```
+
+A project from before ERD Studio 2.0 has `.json` diagrams and `.yml` tables; pass its `{layer}/{diagram}.json` the same way (with or without `dbml`). The rest of this section describes the YAML/JSON lookup; the DBML one is under [Native DBML storage](#native-dbml-storage-the-erd-studiocoredbml-subpath).
 
 `layers.json` and the `logical-models/` library are read from the same semantic directory as the domain file. A model file may sit at the top of the library or one folder down, in a folder named after a layer (`logical-models/gold/fct_order.yml`); names are unique across the library. Since `readFile` cannot list a directory, each model is found by probing `logical-models/{model}.yml`, then `logical-models/{layer}/{model}.yml` for every layer in `layers.json` (and the domain's own) in alphabetical order — the same order the extension uses — then the same under v6's `tables/`, taking the first file that exists — a flat v5 library costs one read per model, as before. A folder not named after a layer is only visible to hosts that can list directories (the extension). Each model file is read and parsed once, however often the domain lists it, with at most `maxParallelReads` (8) reads in flight. A model that is missing, unparseable or rejected renders as a placeholder, as it does in the extension.
 
@@ -91,13 +96,13 @@ const text = exportDiagram(domain, format);          // or toDbml(domain) / toMe
 const fileName = diagramExportFileName(domain, format); // e.g. 'sales.dbml'
 ```
 
-- **ERD Studio's own files stay the only storage.** Mermaid and portable DBML are one way; rich DBML is the format ERD Studio's DBML import reads back (below).
+- **Exports are not storage.** A project's own files (`.dbml` in ERD Studio 2.0, YAML/JSON before) are its storage; an export is a single self-contained file for another tool. Mermaid and portable DBML are one way; rich DBML is the format ERD Studio's DBML import reads back (below).
 - **Pass the logical stage.** The functions accept any `DisplaySubjectArea`, but ERD Studio's hosts export the logical (design) stage, which `loadDisplaySubjectArea` returns.
 - **A stable contract.** The same domain always gives the same text. Each export carries a versioned header (`// erd-studio dbml-export v1` as DBML's first line; `%% erd-studio mermaid-export v1` right after Mermaid's `erDiagram` line) and comment lines naming what it leaves out. Diagram positions are never exported.
 - **ERD Studio's modelling fields go along.** In DBML they are readable lines in the notes: a table's `Note` holds `Role: …`, `Grain: …`, `Warehouse table (alias): …`, the description, the rationale (`Purpose: …`) and `Meta – key: value` lines; a column's note holds its description followed by `(natural key; SCD type 2; semi-additive; foreign key; meta key: value)`; a relationship role is the Ref's name. In Mermaid they are key markers (`PK`, `FK`, `UK`), attribute comments and `%%` lines. A model's `alias` is never DBML's `Table x as y`, whose names must be unique.
-- **Opens in old and new tools.** The DBML uses no custom properties (they need `@dbml/parse` 9.1 or later, and every older DBML parser rejects the whole file) and no standalone `Note` blocks; the tests read every export with `@dbml/parse` 10.2.0 and the `@dbml/core` 3.13.4, 2.6.1 and 2.4.2 parsers many DBML tools still embed, and require all four to read the same thing. `@dbml/core` 2.4.2 (June 2022) is the oldest DBML parser the export supports: older releases reject schema-qualified table names or many-to-many `<>` Refs. The old and new parsers disagree about a backslash before another backslash or before `'` in a note, so such a backslash is followed by a space, with a comment saying so. Every Mermaid export parses in Mermaid 10.0.0, the oldest 10.x, and in 12.0.0.
+- **Opens in old and new tools.** The DBML uses no custom properties (they need `@dbml/parse` 9.1 or later, and every older DBML parser rejects the whole file) and no standalone `Note` blocks; the tests read every export with the pinned `@dbml/parse` (11.0.0) and the `@dbml/core` 3.13.4, 2.6.1 and 2.4.2 parsers many DBML tools still embed, and require all four to read the same thing. `@dbml/core` 2.4.2 (June 2022) is the oldest DBML parser the export supports: older releases reject schema-qualified table names or many-to-many `<>` Refs. The old and new parsers disagree about a backslash before another backslash or before `'` in a note, so such a backslash is followed by a space, with a comment saying so. Every Mermaid export parses in Mermaid 10.0.0, the oldest 10.x, and in 12.0.0.
 - **Tolerant input.** Any optional field may be missing, as in a domain built by an older core. What a format cannot hold becomes a comment saying why, never an exception: a relationship to a model or column that is not in the domain, or a link already exported the other way round, in both formats; a model with no columns or a `loadError` in DBML, which has no table without columns (Mermaid draws it as an empty entity with a comment). `exportDiagram` throws only for an unknown format.
-- **No new dependency.** The exporters are plain functions; the parsers the tests check them with are dev dependencies only.
+- **No parser at run time.** The exporters are plain functions in the main entry and never load `@dbml/parse` (only the `@erd-studio/core/dbml` subpath does); the older parsers the tests check them with are dev dependencies only.
 
 ### Rich DBML and the dbdiagram layout
 

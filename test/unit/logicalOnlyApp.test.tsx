@@ -75,7 +75,7 @@ describe('logical-only mode (no dbt project)', () => {
     expect(sent().some((m) => m.type === 'dismissWelcome')).toBe(false);
 
     expect(screen.queryByRole('button', { name: 'Add tables from dbt' })).toBeNull();
-    expect(screen.getByText('Add your first table. Each one is a YAML file you can commit.')).toBeTruthy();
+    expect(screen.getByText('Add your first table. Each one is a file you can commit.')).toBeTruthy();
   });
 
   it('stageData carries the flag too', () => {

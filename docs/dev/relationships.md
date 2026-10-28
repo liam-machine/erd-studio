@@ -1,6 +1,17 @@
 # Model library and relationships
 
-> Moved out of the root `CLAUDE.md` so it loads only when needed. Read before touching `logicalModelService.ts`, `libraryRelationships.ts`, `relationshipHealth.ts`, `orientLink` / `keyEvidence` in core, or the relationship dialogs. The on-disk contract is in `docs/semantic-domain-json-reference.md`.
+> Moved out of the root `CLAUDE.md` so it loads only when needed. Read before touching `logicalModelService.ts`, `libraryRelationships.ts`, `dbmlLibraryWrites.ts`, `relationshipHealth.ts`, `orientLink` / `keyEvidence` in core, or the relationship dialogs. The on-disk contract is in `docs/semantic-domain-json-reference.md`.
+
+## In a DBML project (2.0)
+
+Everything below holds in memory for every project: relationships hang off the FK-side `SemanticTable`, `canonicalRelationship` decides the owner, `linkKey` / `sameLink` is the identity, `orientLink` the direction and `planRelationshipWrite` the one planner. **Only the storage differs** (spec §2.3–§2.4, `docs/plans/native-dbml-storage.md`):
+
+- A relationship is one `Ref` line in the `_relationships.dbml` of its **owner's** library folder (`tables/_relationships.dbml` for a top-level table, `tables/<folder>/_relationships.dbml` otherwise); the owner is the canonical `fromModel`. A composite is one Ref (`a.(x, y) >? b.(u, v)`), split on read into entries sharing a `compositeKey` derived with core's `nextCompositeKey`. The role is the Ref's name.
+- The writer always marks the FK end possibly null (`from.fc >? to.tc`, `to.tc ?- from.fc` for a one-to-one, whose FK is the second end, and `from.fc <>? to.tc`), keeps Refs sorted, and keeps one `use { table x } from '…'` line per table the file's Refs name. The reader accepts every operator form; `?` only decides a one-to-one's direction.
+- The reader attaches every Ref from **any** relationships file to its owner (`attachRelationships`, core); one in another folder's file is *misplaced* (drawn, warned, moved home by the next write that touches the owner's relationships, name or folder). A Ref whose owner is a YAML table, or no table, is *orphaned*: not attached, reported by `doctor`.
+- `planRelationshipWrite` still chooses the owner table; `planDbmlLibraryWrites` (`src/services/dbmlLibraryWrites.ts`, pure) only maps owners to files and builds the edits with core's `editRelationshipsDbml`. It checks `linkKey` across **every** relationships file (`[5001]` in other DBML tools), and refuses a DBML-owned Ref to a YAML table (D20, "Convert the project to DBML first"). DBML diagrams hold no Refs (`home = 'library'` always), and a relationships file is never deleted automatically.
+- Delete Table cascades (D16): the file, the Refs it owns, other owners' Refs to it and every `use` line naming it, in one edit. Rename and Move rewrite Ref ends and `use` lines the same way.
+
 
 ## Model folders
 

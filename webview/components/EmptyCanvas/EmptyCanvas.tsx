@@ -43,7 +43,7 @@ export const EmptyCanvas: React.FC = () => {
         <h2 id="empty-canvas-title" className="empty-canvas__title">This diagram is empty</h2>
         <p className="empty-canvas__body">
           {logicalOnly
-            ? 'Add your first table. Each one is a YAML file you can commit.'
+            ? 'Add your first table. Each one is a file you can commit.'
             : 'Start from your dbt project, or add a table by hand.'}
         </p>
         <div className="empty-canvas__actions">

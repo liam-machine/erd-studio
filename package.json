@@ -1,7 +1,7 @@
 {
   "name": "erd-studio",
   "displayName": "ERD Studio",
-  "description": "Logical data modeling in Git: draw ERDs in VS Code, saved as plain YAML your AI assistant can read. DBML import and export, no lock-in. Compare with dbt.",
+  "description": "Logical data modeling in Git: draw ERDs in VS Code, saved as DBML, an open format your AI assistant can read. Import from dbdiagram.io, compare with dbt.",
   "version": "1.7.2",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
@@ -20,6 +20,7 @@
   "keywords": [
     "ERD",
     "DBML",
+    "dbml editor",
     "dbdiagram",
     "logical data model",
     "data model",
@@ -352,12 +353,12 @@
     "viewsWelcome": [
       {
         "view": "erdStudio.domainTree",
-        "contents": "Design your data model as plain files in a Git repo.\n\n[Open Folder](command:workbench.action.files.openFolder)\n\nAny folder works. If it holds a dbt project, ERD Studio also shows what dbt built.",
+        "contents": "Design your data model as DBML files in a Git repo: an open format, no lock-in.\n\n[Open Folder](command:workbench.action.files.openFolder)\n\nAny folder works. If it holds a dbt project, ERD Studio also shows what dbt built.",
         "when": "workspaceFolderCount == 0"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nSaved as YAML and JSON in .erd-studio/, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nNew to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)\n\nUsing dbt? Open its folder to compare your design with what dbt built.\n\n[Get started](command:erdStudio.showGettingStarted)",
+        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nNew to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)\n\nUsing dbt? Open its folder to compare your design with what dbt built.\n\n[Get started](command:erdStudio.showGettingStarted)",
         "when": "erdStudio.hasProject && !erdStudio.hasDbtProject"
       },
       {
@@ -372,7 +373,7 @@
       },
       {
         "view": "erdStudio.modelLibrary",
-        "contents": "No tables found.\n\nTables are stored as one YAML file each under .erd-studio/.\n\nAdd tables to a subject area using the ERD editor to create them here."
+        "contents": "No tables found.\n\nEach table is a file in .erd-studio/ you can commit.\n\nAdd tables to a subject area using the ERD editor to create them here."
       }
     ],
     "walkthroughs": [
@@ -410,11 +411,11 @@
           {
             "id": "newDiagram",
             "title": "Draw your first data model — no dbt needed",
-            "description": "Start a blank diagram and add tables on the canvas. Each table is a YAML file in .erd-studio/ that you commit and review like code.\n[New Diagram](command:erdStudio.createDomain)\nNew to data modelling? Start from a small coffee-shop star schema instead.\n[Open Example Diagram](command:erdStudio.openExampleDiagram)",
+            "description": "Start a blank diagram and add tables on the canvas. Each table is a file in .erd-studio/ you can commit and review like code.\n[New Diagram](command:erdStudio.createDomain)\nNew to data modelling? Start from a small coffee-shop star schema instead.\n[Open Example Diagram](command:erdStudio.openExampleDiagram)",
             "when": "!erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/new-diagram.svg",
-              "altText": "A new diagram with its first table, saved as YAML and JSON files in .erd-studio."
+              "altText": "A new diagram with its first table, saved as DBML files in .erd-studio."
             },
             "completionEvents": [
               "onCommand:erdStudio.createDomain",

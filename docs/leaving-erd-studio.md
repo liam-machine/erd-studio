@@ -1,8 +1,19 @@
 # Leaving ERD Studio (and coming back)
 
-Your data model is never stuck in ERD Studio. Its files are plain YAML and JSON in your own repository, and every diagram can be exported to [DBML](https://dbml.dbdiagram.io/docs), the open text format that [dbdiagram.io](https://dbdiagram.io), dbdocs and many other tools read. The export keeps ERD Studio's modelling fields and your table positions, and ERD Studio can import it back.
+Your data model is never stuck in ERD Studio. **Its files are already [DBML](https://dbml.dbdiagram.io/docs)**, the open format that [dbdiagram.io](https://dbdiagram.io), dbdocs and many other tools read, in your own repository: one `.dbml` file per table in `.erd-studio/tables/`, the relationships in `_relationships.dbml` files, and one `.dbml` file per diagram that lists its tables with `use` lines. Any DBML parser from 9.1 on (the one dbdiagram.io's own tools use) reads them as a multi-file project. (A project created before ERD Studio 2.0 is YAML and JSON until you run **ERD Studio: Convert Project to DBML**.)
+
+dbdiagram.io itself takes one self-contained file per diagram, not a folder of files that `use` each other. For that, **export** each diagram: the export keeps ERD Studio's modelling fields and your table positions, and ERD Studio can import it back.
 
 This page shows how to move every diagram to dbdiagram.io, what goes with it, and how to bring a DBML file into ERD Studio.
+
+## Your files, or an export?
+
+| | Your project's own `.dbml` files | An export (**DBML for dbdiagram.io**) |
+|---|---|---|
+| Shape | split: one file per table, per folder's relationships and per diagram, joined by `use` lines | one file per diagram, every table and relationship in it |
+| Read by | DBML parsers 9.1 and 11+ (10.x too, unless a folder in the path has a space), as a multi-file project | dbdiagram.io (`dbdiagram push`), dbdocs and any DBML 9.1+ tool |
+| Positions | the `.dbdiagram` file beside each diagram | the `.dbdiagram` file beside the export |
+| Edited by ERD Studio | yes: your hand edits and comments are kept | no: it is a copy |
 
 ## Move every diagram to dbdiagram.io
 
@@ -17,7 +28,7 @@ You get two files for each subject area (diagram), side by side:
 | `sales.dbml` | the tables, columns, keys and relationships, with ERD Studio's fields as DBML properties |
 | `sales.dbdiagram` | where each table sits on the canvas, in dbdiagram.io's own layout format |
 
-Each file is named after its subject area. When two layers have a subject area with the same name, the layer goes in front (`gold-sales.dbml`).
+Each file is named after its subject area. When two layers have a subject area with the same name, the layer goes in front (`gold-sales.dbml`). Save the export outside `.erd-studio/`: ERD Studio refuses a folder inside it, where the files are your diagrams' own storage.
 
 Then upload them with dbdiagram.io's own command-line tool, under your own dbdiagram.io account:
 
@@ -42,8 +53,8 @@ The plain **DBML** choice is for older DBML tools: it opens anywhere, but ERD St
 The read-only `erd-studio` helper (installed in `~/.erd-studio-cli` by **Set Up My AI Helper**) prints the same files:
 
 ```sh
-~/.erd-studio-cli/bin/erd-studio export --domain .erd-studio/silver/sales.json --format dbml-rich   > sales.dbml
-~/.erd-studio-cli/bin/erd-studio export --domain .erd-studio/silver/sales.json --format dbml-layout > sales.dbdiagram
+~/.erd-studio-cli/bin/erd-studio export --domain .erd-studio/silver/sales.dbml --format dbml-rich   > sales.dbml
+~/.erd-studio-cli/bin/erd-studio export --domain .erd-studio/silver/sales.dbml --format dbml-layout > sales.dbdiagram
 ```
 
 `--all` in place of `--domain` prints every subject area as a JSON list of `{ "fileName", "content" }`, the same files and names **Export All Diagrams…** writes. The helper only ever prints; it never writes a file.
@@ -72,7 +83,7 @@ dbdiagram.io and dbdocs show the properties on each table and column, rather tha
 - **Sticky-note positions and sizes.** The notes go, with their text and colour, but not where they sat. On import they are placed in a row above the tables.
 - **Some diagram settings**: the dbt folder filter for adding tables (`modelFolder`), which tables show only their key columns (`stubColumns`), and the canvas's display options.
 - **Whether a foreign key can be empty.** ERD Studio doesn't record it, so every relationship is written as possibly empty (the `?` in `>?`), and import ignores the `?`.
-- **The files' own formatting**: YAML comments and the order of keys. The values all come back.
+- **The files' own formatting**: comments, the order of settings and DBML settings ERD Studio does not use stay in your project's own files, but an export is written fresh. The values all come back.
 
 A few things come back written a little differently but mean the same: a one-to-many relationship comes back as the many-to-one it is, stored from the other table; a composite key's label is regenerated; and positions are rounded to two decimal places.
 
@@ -89,10 +100,11 @@ Nothing is written until you click **Import**, and if anything fails part-way ev
 
 What to expect:
 
-- **A new diagram every time.** Import never changes an existing diagram.
+- **A new diagram every time.** Import never changes an existing diagram. In a DBML project (2.0) it writes the new tables as `.dbml` files in `tables/`, their relationships into the `_relationships.dbml` of their folder, and the diagram as a `.dbml` with its `.dbdiagram`; in a project from before 2.0 it writes YAML and JSON, as before.
+- **One self-contained file.** A `.dbml` that `use`s other files is part of a multi-file project (another ERD Studio 2.0 project, say) and is refused: export a single-file DBML from it (in ERD Studio, **Export Diagram…** → **DBML for dbdiagram.io**) and import that.
 - **Tables already in your Table Library are used as they are**, never overwritten, matching names regardless of case. So if you changed one of those tables in dbdiagram.io, import into a project that doesn't have that table yet, or delete it from the Table Library first, to take the dbdiagram.io version.
 - **Names ERD Studio can't use are fixed.** A table called `Order Items` becomes `Order_Items`, and two tables called `date` in the `silver` and `gold` schemas become `silver_date` and `gold_date`. The original name is kept as the table's warehouse name (`alias`) when it is a valid one, as `date` is here; otherwise, as for `Order Items`, it is kept under `dbml` in the table's metadata (`meta.dbml.name`). The summary lists each change.
-- **DBML settings ERD Studio has no field for are kept.** Not null, unique, defaults, increments, checks, enum values, indexes, header colours and another tool's own properties are saved under `dbml` in the table's or column's metadata (`meta`), so the next export carries them back out.
+- **DBML settings ERD Studio has no field for are kept.** Not null, unique, defaults, increments, checks, enum values, indexes, header colours and another tool's own properties are saved under `dbml` in the table's or column's metadata (`meta`, a `meta_json` property in a `.dbml` table), so the next export carries them back out.
 - **Some things are left out**, and the summary lists them: sample rows (`Records`), a relationship's `delete` / `update` actions, colour and `inactive` flag, the project's database type, table groups other than the layer, and diagram views.
 
 Property names are read with or without an `erd_` prefix (`erd_grain` as well as `grain`), for teams whose own DBML already uses the plain name for something else.

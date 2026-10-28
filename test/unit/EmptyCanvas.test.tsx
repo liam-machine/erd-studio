@@ -94,10 +94,10 @@ describe('EmptyCanvas', () => {
   describe('without a dbt project (logicalOnly)', () => {
     beforeEach(() => { storeState.logicalOnly = true; });
 
-    it('drops "Add tables from dbt" and says each table is a YAML file', () => {
+    it('drops "Add tables from dbt" and says each table is a file you can commit', () => {
       const { queryByRole, getByText } = render(<EmptyCanvas />);
       expect(queryByRole('button', { name: 'Add tables from dbt' })).toBeNull();
-      expect(getByText('Add your first table. Each one is a YAML file you can commit.')).toBeTruthy();
+      expect(getByText('Add your first table. Each one is a file you can commit.')).toBeTruthy();
       expect(document.body.textContent).not.toContain('dbt');
     });
 
