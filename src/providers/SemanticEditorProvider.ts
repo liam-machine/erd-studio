@@ -2838,6 +2838,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       pathChanged.add(oldName.toLowerCase());
       if (newPath !== null) pathChanged.add(path.posix.basename(newPath).replace(/\.dbml$/i, '').toLowerCase());
     }
+    // A table new in this plan gains its file: a diagram listing it in erd_unlinked_tables gives it a use line (D26).
+    for (const name of plan.createdTables ?? []) pathChanged.add(name.toLowerCase());
     return {
       semanticRoot: path.dirname(this.tableLibraryService.getTablesDir()),
       resolveTable: (name) => plan.resolveTable(name),
@@ -3039,7 +3041,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * its own, so its `use` lines stay valid in the same WorkspaceEdit.
    */
   private settleDbmlDiagrams(currentPath: string, skip: ReadonlySet<string>, plan: DbmlLibraryWritePlan, resolver: SubjectAreaResolver): FileWrite[] {
-    if (plan.createdRelationshipsFiles.length === 0 && plan.pathChanged.size === 0) return [];
+    const createdTables = new Set((plan.createdTables ?? []).map((n) => n.toLowerCase()));
+    if (plan.createdRelationshipsFiles.length === 0 && plan.pathChanged.size === 0 && createdTables.size === 0) return [];
     const created = new Set(plan.createdRelationshipsFiles);
     const out: FileWrite[] = [];
     for (const summary of this.listOtherSubjectAreas(currentPath)) {
@@ -3054,7 +3057,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       const logical = (file.parsed.logical ?? {}) as { models?: unknown };
       const members = Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
-      const affected = members.some((m) => plan.pathChanged.has(m.toLowerCase())
+      const affected = members.some((m) => plan.pathChanged.has(m.toLowerCase()) || createdTables.has(m.toLowerCase())
         || plan.relationshipsFilesFor([m]).some((f) => created.has(f)));
       if (!affected) continue;
       try {
@@ -4426,9 +4429,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           (section.models as SemanticTable[])[inline] = marked;
         }
         if (plan.domainRelationships) {
-          // A DBML diagram's object never holds relationships; the writer refuses any.
-          if (home === 'library' && this.isDbmlDocument(document) && plan.domainRelationships.length > 0) {
-            throw new EditRefused('A DBML diagram holds no relationships; they live in the table library.');
+          // A DBML diagram's object holds only its pending relationships (D27), which an edit may keep or
+          // remove but never add or change; the writer refuses anything else.
+          if (home === 'library' && this.isDbmlDocument(document)) {
+            const identity = (r: Relationship): string => [r.fromModel, r.fromColumn, r.toModel, r.toColumn, r.cardinality, r.role ?? ''].map((p) => String(p ?? '').toLowerCase()).join('\u0000');
+            const held = new Set(((section.relationships ?? []) as Relationship[]).map(identity));
+            if (plan.domainRelationships.some((r) => !held.has(identity(r)))) {
+              throw new EditRefused('A DBML diagram holds no relationships; they live in the table library.');
+            }
           }
           section.relationships = plan.domainRelationships;
         }
@@ -5361,7 +5369,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         });
         return;
       }
-      const inDomain = (this.getStageSection(parsed, 'logical').models ?? []) as string[];
+      // A member with no table file (drawn as missing; D26 in a DBML diagram) can be made from dbt here:
+      // only the members that have one are already in.
+      const inDomain = ((this.getStageSection(parsed, 'logical').models ?? []) as string[])
+        .filter((name) => this.tableLibraryService.tableExists(name));
 
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
@@ -5457,7 +5468,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // Re-read inside the queue: an edit may have landed while the picker was open.
       const parsed = this.parseSubjectAreaDocument(document);
       const section = this.getStageSection(parsed, 'logical');
-      const existingNames = (section.models ?? []) as string[];
+      // A listed member with no table file is drawn as missing: picking it makes its file, and it stays listed once.
+      const existingNames = ((section.models ?? []) as string[]).filter((name) => this.tableLibraryService.tableExists(name));
       const draft = buildDbtDraft({
         modelNames,
         ymlData,
@@ -5498,7 +5510,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         (sec, p) => {
           const names = (sec.models ?? []) as string[];
           const wasEmpty = names.length === 0;
-          names.push(...draft.modelNames);
+          const listed = new Set(names.map(normaliseName));
+          names.push(...draft.modelNames.filter((name) => !listed.has(normaliseName(name))));
           sec.models = names;
           if (routed.kept.length > 0) {
             sec.relationships = [...((sec.relationships ?? []) as Relationship[]), ...routed.kept];
@@ -5514,9 +5527,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             for (const name of draft.modelNames) delete positions[name];
             if (vc.positions !== undefined) vc.positions = positions;
           } else {
+            // A member already listed (made from dbt where it was drawn as missing) keeps its place.
+            const unplaced = draft.modelNames.filter((name) => !Object.prototype.hasOwnProperty.call(positions, name));
             vc.positions = {
               ...positions,
-              ...computeNewTablePositions({ newModels: draft.modelNames, relationships, existingPositions: positions }),
+              ...computeNewTablePositions({ newModels: unplaced, relationships, existingPositions: positions }),
             };
           }
           p.viewConfig = vc;

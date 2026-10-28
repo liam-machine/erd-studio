@@ -36,6 +36,8 @@ export function dbmlResolverOf(plan: DbmlLibraryWritePlan): DbmlDiagramResolver 
     pathChanged.add(oldName.toLowerCase());
     if (newPath !== null) pathChanged.add(path.posix.basename(newPath).replace(/\.dbml$/i, '').toLowerCase());
   }
+  // A table new in this plan gains its file: a diagram listing it in erd_unlinked_tables gives it a use line (D26).
+  for (const name of plan.createdTables ?? []) pathChanged.add(name.toLowerCase());
   return {
     resolveTable: (name) => plan.resolveTable(name),
     relationshipsFilesFor: (names) => plan.relationshipsFilesFor(names),
@@ -94,7 +96,8 @@ export function settleDbmlDiagramWrites(input: SettleInput): FileWrite[] {
     const members = Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
     const beforeMembers = ((before.logical ?? {}) as { models?: unknown }).models;
     const all = [...members, ...(Array.isArray(beforeMembers) ? beforeMembers.filter((m): m is string => typeof m === 'string') : [])];
-    const affected = mutated || !input.mutatedOnly && all.some((m) => plan.pathChanged.has(m.toLowerCase())
+    const createdTables = new Set((plan.createdTables ?? []).map((n) => n.toLowerCase()));
+    const affected = mutated || !input.mutatedOnly && all.some((m) => plan.pathChanged.has(m.toLowerCase()) || createdTables.has(m.toLowerCase())
       || plan.relationshipsFilesFor([m]).some((f) => created.has(f)));
     if (!affected) continue;
     try {

@@ -707,3 +707,63 @@ describe('messages name the project\'s own table library', () => {
     expect(r.errors).toEqual(['Table "dim_nowhere" not found in your dbt .yml files, the manifest or the table library.']);
   });
 });
+
+describe('a diagram with a member with no table file and pending relationships (D26/D27): the canvas draws and edits it', () => {
+  const withMissing = (): void => {
+    fs.writeFileSync(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8')
+      .replace('  erd_layout_options', "  erd_unlinked_tables: 'gld_fct_risk_child'\n  erd_layout_options")
+      .concat('\n// erd-studio pending: Ref: gld_fct_risk_child.customer_key >? dim_customer.customer_key\n'));
+    fs.appendFileSync(at('tables/gold/_relationships.dbml'), '\n// erd-studio pending: Ref: fct_order.customer_key >? gld_fct_risk_child.customer_key\n');
+  };
+
+  it('draws the missing member as a placeholder and both pending relationships, like a JSON diagram', async () => {
+    withMissing();
+    const tracker = new OwnWriteTracker();
+    const { provider } = buildProvider(tracker);
+    const document = createMockTextDocument(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8'), { persist: true });
+    (vscode.workspace.textDocuments as unknown[]).push(document);
+    const panel = createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(document as unknown as vscode.TextDocument, panel as unknown as vscode.WebviewPanel, {} as vscode.CancellationToken);
+    await panel._simulateMessage({ type: 'ready' });
+    const loaded = panel._postedMessages.find((m) => (m as { type: string }).type === 'domainLoaded') as { payload: { models: Array<{ name: string; columns: unknown[] }>; relationships: Array<Record<string, string>> } };
+    expect(loaded.payload.models.at(-1)).toMatchObject({ name: 'gld_fct_risk_child', columns: [] });
+    expect(loaded.payload.relationships.filter((r) => /risk/.test(`${r.fromModel} ${r.toModel}`))).toEqual([
+      { fromModel: 'gld_fct_risk_child', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
+      { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'gld_fct_risk_child', toColumn: 'customer_key', cardinality: 'many-to-one' },
+    ]);
+  });
+
+  it('a relationship edit of the owner keeps its pending line; the diagram keeps its bytes', async () => {
+    withMissing();
+    const r = await run({ type: 'removeRelationship', payload: { fromModel: 'fct_order', fromColumn: 'order_date_key', toModel: 'dim_date', toColumn: 'date_key' } });
+    expectWrote(r, ['gold/sales.dbml', 'tables/gold/_relationships.dbml']);
+    expect(r.after['gold/sales.dbml']).toBe(r.before['gold/sales.dbml']);
+    expect(r.after['tables/gold/_relationships.dbml']).toContain('// erd-studio pending: Ref: fct_order.customer_key >? gld_fct_risk_child.customer_key\n');
+    expect(r.after['tables/gold/_relationships.dbml']).not.toContain('Ref "order date"');
+  });
+
+  it('removing the missing member drops it from erd_unlinked_tables (the key goes) and cuts the diagram\'s pending line with its relationship', async () => {
+    withMissing();
+    const r = await run({ type: 'removeModels', payload: { modelNames: ['gld_fct_risk_child'] } });
+    expect(r.errors).toEqual([]);
+    expect(r.after['gold/sales.dbml']).not.toContain('erd_unlinked_tables');
+    expect(r.after['gold/sales.dbml']).not.toContain('erd-studio pending');
+    expect(r.after['gold/sales.dbml'].endsWith("  ''\n}\n")).toBe(true);
+  });
+
+  it('a new table with that name, made in another diagram, gives it a use line here (the settle pass) and turns the pending Ref to it live', async () => {
+    withMissing();
+    const r = await run({ type: 'addModel', payload: { name: 'gld_fct_risk_child', description: '', columns: [{ name: 'customer_key', dataType: 'INT', description: '' }] } }, 'silver/staging.dbml');
+    expect(r.errors).toEqual([]);
+    expect(r.after['gold/sales.dbml']).not.toContain('erd_unlinked_tables');
+    expect(r.after['gold/sales.dbml']).toContain("use { table gld_fct_risk_child } from '../tables/silver/gld_fct_risk_child.dbml'");
+    const relationships = r.after['tables/gold/_relationships.dbml'];
+    expect(relationships).toContain('Ref: fct_order.customer_key >? gld_fct_risk_child.customer_key\n');
+    expect(relationships).not.toContain('// erd-studio pending: Ref: fct_order.customer_key');
+    expect(relationships).toContain("use { table gld_fct_risk_child } from '../silver/gld_fct_risk_child.dbml'");
+    // The diagram's own pending line (its owner had no file) stays until Convert moves it to the library.
+    expect(r.after['gold/sales.dbml']).toContain('// erd-studio pending: Ref: gld_fct_risk_child.customer_key >? dim_customer.customer_key');
+    const before = new Set(diagnosticsOf(r.before));
+    expect(diagnosticsOf(r.after).filter((d) => !before.has(d))).toEqual([]);
+  });
+});
