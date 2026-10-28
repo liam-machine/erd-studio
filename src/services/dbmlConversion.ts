@@ -471,6 +471,26 @@ function keptYamlLines(oldPath: string, text: string, tableName: string): KeptLi
     },
   });
   if (keep.size === 0) return { block: [], comments: false, unknownKeys: [], ignoredValues: [], anchors: false };
+  // A kept line inside a column or relationship entry keeps the entry's first line (`- name: x`) too,
+  // so the comment says which column (or relationship) it belonged to.
+  if (isMap(root)) {
+    for (const key of ['columns', 'relationships']) {
+      const list = (root.items as Pair[]).find((p) => isScalar(p.key) && p.key.value === key)?.value;
+      if (!isSeq(list)) continue;
+      for (const item of list.items) {
+        const range = isNode(item) ? item.range : undefined;
+        if (!range) continue;
+        const first = lineIndexAt(starts, range[0]);
+        const last = lineIndexAt(starts, Math.max(range[0], range[1] - 1));
+        for (let i = first + 1; i <= last; i++) {
+          if (keep.has(i)) {
+            keep.add(first);
+            break;
+          }
+        }
+      }
+    }
+  }
   const lines = text.split('\n').map((l) => l.replace(/\r$/, ''));
   const block = [keptFromLine(oldPath), ...[...keep].sort((a, b) => a - b).map((i) => (lines[i] === '' ? '//' : `// ${lines[i]}`))];
   return { block, comments: commentOffsets.length > 0, unknownKeys: [...new Set(unknownKeys)], ignoredValues: [...new Set(ignoredValues)], anchors };

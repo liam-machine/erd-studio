@@ -310,7 +310,7 @@ describe('planDbmlConversion: what ERD Studio does not read is kept as a // bloc
         '',
       ].join('\n'),
     }));
-    expect(created(plan, 'tables/fct.dbml')).toMatch(new RegExp(`^${keptFromLine('logical-models/fct.yml')}\\n// owner: data-team\\n//     tests:\\n//       - not_null\\n//     reviewed: yes\\nTable fct`));
+    expect(created(plan, 'tables/fct.dbml')).toMatch(new RegExp(`^${keptFromLine('logical-models/fct.yml')}\\n// owner: data-team\\n//   - name: dim_key\\n//     tests:\\n//       - not_null\\n//   - fromColumn: dim_key\\n//     reviewed: yes\\nTable fct`));
     expect(plan.notes).toContain('logical-models/fct.yml: keys ERD Studio does not read (owner, columns[].tests, relationships[].reviewed) are kept as // lines above the Table in tables/fct.dbml.');
   });
 
@@ -319,7 +319,10 @@ describe('planDbmlConversion: what ERD Studio does not read is kept as a // bloc
       'logical-models/dim.yml': 'name: dim\ncolumns:\n  - name: dim_key\n    dataType: &key INT\n    isPrimaryKey: true\n  - name: other_key\n    dataType: *key\n',
     }));
     const text = created(plan, 'tables/dim.dbml')!;
-    expect(text.split('\n').slice(0, 3)).toEqual([keptFromLine('logical-models/dim.yml'), '//     dataType: &key INT', '//     dataType: *key']);
+    // Each kept line comes with its column's first line, so the comment says which column held it.
+    expect(text.split('\n').slice(0, 5)).toEqual([
+      keptFromLine('logical-models/dim.yml'), '//   - name: dim_key', '//     dataType: &key INT', '//   - name: other_key', '//     dataType: *key',
+    ]);
     expect(text).toContain('  other_key INT\n');
     expect(plan.notes).toContain('logical-models/dim.yml: its YAML anchors and aliases are written out in full; the lines that held them are kept as // lines above the Table in tables/dim.dbml.');
   });
