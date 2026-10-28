@@ -55,6 +55,7 @@ import {
 import type {
   Annotation,
   DbmlAttachTable,
+  DbmlStorageReader,
   DbmlDiagnostic,
   DbmlRelationshipsReading,
   NodePosition,
@@ -79,6 +80,7 @@ import {
   subjectAreaMembersDbml,
 } from '@erd-studio/core/dbml';
 
+import { DbmlFileCompileMemo, compileDbmlFilesSeparately, withKeptFilepathKeys } from './dbmlFileCompile';
 import { planDbmlLibraryWrites } from './dbmlLibraryWrites';
 import type { DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
 import { planMoveToLibrary } from './libraryRelationships';
@@ -185,7 +187,11 @@ export function isDbmlSelfCheckRefusal(refusal: string): boolean {
 
 /** Test seams. */
 export interface DbmlConversionOptions {
-  /** The multi-file compile of the self-check (default: core's, with the pinned parser). */
+  /**
+   * The multi-file compile of the self-check: `compileDbmlProject`'s contract.
+   * Default: `compileDbmlFilesSeparately` (the same diagnostics, file by file,
+   * in time that grows with the project rather than its square).
+   */
   compile?: (files: Readonly<Record<string, string>>, entries: readonly string[]) => Record<string, DbmlDiagnostic[]>;
 }
 
@@ -344,6 +350,8 @@ function secondColumnLine(text: string, name: string): number | undefined {
 
 /** Every comment's offset in a YAML text, from the CST (never from a `#` inside a scalar). */
 function yamlCommentOffsets(text: string): number[] {
+  // A comment starts with `#`: a text without one has none (and skips the CST).
+  if (!text.includes('#')) return [];
   const out: number[] = [];
   const walk = (node: unknown): void => {
     if (!node || typeof node !== 'object') return;
@@ -1238,7 +1246,7 @@ async function planOnce(
     // names one (written against it while it was YAML) gets its use line, or the file would not compile;
     // a pending line naming one becomes a live Ref.
     const gainFile = [...library.values()].filter((t) => t.converted).map((t) => t.name);
-    libraryPlan = planDbmlLibraryWrites(snapshot, { save: saves, writePending: true, ...(gainFile.length > 0 ? { gainFile } : {}) });
+    libraryPlan = withKeptFilepathKeys(() => planDbmlLibraryWrites(snapshot, { save: saves, writePending: true, ...(gainFile.length > 0 ? { gainFile } : {}) }));
   } catch (err) {
     if (err instanceof DbmlEditRefused) {
       // A table Convert itself writes is left as YAML, named by the file it comes from.
@@ -1545,7 +1553,8 @@ async function planOnce(
   for (const p of plan.deletes) delete after[p];
   for (const c of plan.creates) after[c.path] = c.text;
   for (const r of plan.replaces) after[r.path] = r.text;
-  const compile = options.compile ?? ((fs, list) => compileDbmlProject(fs, list));
+  const compileMemo = new DbmlFileCompileMemo();
+  const compile = options.compile ?? ((fs, list) => compileDbmlFilesSeparately(fs, list, compileDbmlProject, compileMemo));
   const dbmlPaths = (set: Record<string, string>): string[] => Object.keys(set).filter((p) => lower(p).endsWith('.dbml'));
   const dbmlOnly = (set: Record<string, string>): Record<string, string> => Object.fromEntries(dbmlPaths(set).map((p) => [p, set[p]]));
   const diagnosticKey = (file: string, d: DbmlDiagnostic): string => `${file}\u0000${d.code}\u0000${d.message}`;
@@ -1581,10 +1590,12 @@ async function planOnce(
     ...[...library.values()].map((t) => t.folder),
     ...files.filter((f) => f.kind === 'table').map((f) => classifySemanticFile(f.path, { tablesDirIsLayer: false }).folder ?? ''),
   ].filter((f) => f !== ''))].sort();
+  // Every diagram reads the same tables and relationships files: each text is parsed once.
+  const reader = memoisedDbmlReader();
   for (const { from, to } of comparisons) {
-    const was = await displayOf(before, from, libraryFolders, input.layers);
+    const was = await displayOf(before, from, libraryFolders, input.layers, reader);
     if (was === null) continue;
-    const now = await displayOf(after, to, libraryFolders, input.layers);
+    const now = await displayOf(after, to, libraryFolders, input.layers, reader);
     if (now === null) {
       refusals.push(`Convert would write ${to} so that it no longer loads. ${DBML_SELF_CHECK_REFUSAL_END}`);
       return { plan: withoutWrites(plan), leaveMore: new Map() };
@@ -1799,11 +1810,37 @@ function orderCreates(creates: Array<{ path: string; text: string }>): Array<{ p
  * finds a table file by its stem without case), before and after alike.
  * Null when it does not load.
  */
+/**
+ * Core's DBML readers, each text read once: the self-check loads every
+ * diagram before and after, and they share their tables and relationships
+ * files. A reading is copied out, so a caller that changes one changes no other.
+ */
+export function memoisedDbmlReader(base: DbmlStorageReader = dbmlStorageReader): DbmlStorageReader {
+  const tables = new Map<string, ReturnType<DbmlStorageReader['parseTable']>>();
+  const relationships = new Map<string, ReturnType<DbmlStorageReader['readRelationships']>>();
+  return {
+    parseTable: (text, fileStem) => {
+      const key = `${fileStem}\u0000${text}`;
+      let reading = tables.get(key);
+      if (!reading) { reading = withKeptFilepathKeys(() => base.parseTable(text, fileStem)); tables.set(key, reading); }
+      return structuredClone(reading);
+    },
+    readRelationships: (text) => {
+      let reading = relationships.get(text);
+      if (!reading) { reading = withKeptFilepathKeys(() => base.readRelationships(text)); relationships.set(text, reading); }
+      return structuredClone(reading);
+    },
+    parseSubjectArea: (text, filePath, layoutText) => withKeptFilepathKeys(() => base.parseSubjectArea(text, filePath, layoutText)),
+    subjectAreaMembers: (text) => base.subjectAreaMembers(text),
+  };
+}
+
 async function displayOf(
   set: Readonly<Record<string, string>>,
   domainPath: string,
   libraryFolders: readonly string[],
   layerIds: readonly string[],
+  reader: DbmlStorageReader = dbmlStorageReader,
 ): Promise<Record<string, unknown> | null> {
   const layers = parseLayersText(set['layers.json'] ?? null, () => { /* the same either way */ });
   const known = new Set(layers.map((l) => l.id));
@@ -1822,7 +1859,7 @@ async function displayOf(
     const display = await loadDisplaySubjectArea({
       domainPath,
       readOnly: true,
-      dbml: dbmlStorageReader,
+      dbml: reader,
       warn: () => { /* compared, not shown */ },
       readFile: async (p) => (p === 'layers.json' ? layersText : read(p)),
     });
