@@ -29,8 +29,14 @@ on:
       # npm package release tooling (publish-packages.yml); nothing in the VSIX.
       - 'scripts/release-packages.mjs'
       - 'test/unit/releasePackages.test.ts'
+      # Extension release tooling (this workflow and prerelease.yml run it from
+      # the checkout); nothing in the VSIX.
+      - 'scripts/release.mjs'
+      - 'test/unit/release.test.ts'
       # Checks this workflow's own lists; nothing in the VSIX.
       - 'test/unit/deployWorkflow.test.ts'
+      # Checks prerelease.yml; nothing in the VSIX.
+      - 'test/unit/prereleaseWorkflow.test.ts'
       # A sibling project, never in the VSIX. A change to the src/services it
       # imports still triggers a release through src/.
       - 'mcp-server/**'
@@ -91,7 +97,10 @@ jobs:
               - '!.claude/**'
               - '!scripts/release-packages.mjs'
               - '!test/unit/releasePackages.test.ts'
+              - '!scripts/release.mjs'
+              - '!test/unit/release.test.ts'
               - '!test/unit/deployWorkflow.test.ts'
+              - '!test/unit/prereleaseWorkflow.test.ts'
               - '!mcp-server/**'
               - '!proxy/**'
               - '!telemetry/**'
@@ -252,9 +261,14 @@ jobs:
             echo "approved=no" >> "$GITHUB_OUTPUT"
           fi
 
-      # The next version is max(package.json, latest marketplace version) + patch,
-      # so a desynced repo (lost bump commit, rewritten history) can never fail
-      # with "version already exists".
+      # The next version is max(package.json, latest STABLE marketplace version)
+      # + patch, so a desynced repo (lost bump commit, rewritten history) can never
+      # fail with "version already exists". Pre-releases (prerelease.yml) are never
+      # the base: a 1.9.0 pre-release must not make the next stable patch 1.9.1.
+      # A patch number a pre-release took is skipped; a changelog pin one took, or
+      # one below a pre-release, fails here, before the bump is committed, and so
+      # does a pin when `vsce show` failed (it cannot be checked, and
+      # --skip-duplicate would quietly skip a pin that collides with a pre-release).
       - name: Determine next version
         run: |
           # A rerun after the bump was pushed must retry that exact release. A
@@ -372,7 +386,9 @@ jobs:
 
       # Only after a successful publish: a GitHub Release must never advertise a
       # version the marketplace does not have. `gh release create` also creates the
-      # tag, pointing at the bump commit this job just pushed.
+      # tag, pointing at the bump commit this job just pushed. --latest keeps the
+      # stable release the repo's "Latest" (pre-releases are prerelease-v* tags,
+      # created with --prerelease --latest=false by prerelease.yml).
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -394,6 +410,7 @@ jobs:
             gh release upload "v${NEW_VERSION}" "$ASSET" --clobber
           else
             gh release create "v${NEW_VERSION}" "$ASSET" \
+              --latest \
               --title "v${NEW_VERSION}" \
               --notes-file "$NOTES_FILE" \
               --target "$(git rev-parse HEAD)"
