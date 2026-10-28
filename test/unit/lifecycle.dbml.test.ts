@@ -13,16 +13,19 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { compileDbmlProject, parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { compileDbmlProject, parseSubjectAreaDbml, type DbmlParserModule } from '@erd-studio/core/dbml';
+import * as v9 from 'dbml-parse-v9';
+import * as v10 from 'dbml-parse-v10';
 import { LayerService } from '../../src/services/layerService';
 import { SubjectAreaService, subjectAreaTableNames } from '../../src/services/domainService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
-import { writeNewSubjectArea } from '../../src/services/newSubjectAreaWriter';
+import { UnsavedFilesRefused, writeNewSubjectArea } from '../../src/services/newSubjectAreaWriter';
 import { FileWriteRollbackFailed, type FileWriteIo } from '../../src/services/fsFileWrites';
 import { classifyWriteFailure, failedPath } from '../../src/services/commandErrors';
 import { buildDbtDraft } from '../../src/services/dbtDraft';
 import { firstUseDeclarationLine, readDbml, IMPORT_MULTI_FILE_MESSAGE } from '../../src/services/dbmlImportParse';
 import { dbmlImportRefusal } from '../../src/commands/importDbml';
+import { describeDbmlImportPlan, planDbmlImport } from '../../src/services/dbmlImport';
 import { newDbmlSubjectAreaText, planDbmlDuplicateRename, planDbmlSubjectAreaRename, planDbmlTableMoves, currentDbmlResolver } from '../../src/commands/dbmlLifecycle';
 import { exportDiagramCommand, exportInsideSemanticDirMessage, type ExportDiagramUi } from '../../src/commands/exportDiagram';
 import { exportAllDiagramsCommand, type ExportAllDiagramsUi } from '../../src/commands/exportAllDiagrams';
@@ -45,6 +48,19 @@ afterEach(() => {
 });
 
 const erd = (...p: string[]): string => path.join(tmp, '.erd-studio', ...p);
+
+/** Every file the writer creates parses with no errors in 9.1.1, 10.3.1 and 11.0.0 (§9). */
+const PARSERS: Array<[string, DbmlParserModule | undefined]> = [
+  ['9.1.1', v9 as unknown as DbmlParserModule],
+  ['10.3.1', v10 as unknown as DbmlParserModule],
+  ['11.0.0', undefined],
+];
+function expectCompilesInEveryParser(files: Record<string, string>, entries: readonly string[]): void {
+  for (const [label, parser] of PARSERS) {
+    expect({ parser: label, diagnostics: Object.values(compileDbmlProject(files, entries, parser)).flat() }).toEqual({ parser: label, diagnostics: [] });
+  }
+}
+const dbmlFiles = (): Record<string, string> => Object.fromEntries([...snapshot()].filter(([p]) => p.endsWith('.dbml')));
 
 /** Every file under the semantic dir, posix, with its bytes. */
 function snapshot(): Map<string, string> {
@@ -128,8 +144,7 @@ describe('writeNewSubjectArea for a .dbml diagram (§5.7)', () => {
     const text = fs.readFileSync(domainPath, 'utf-8');
     expect(subjectAreaTableNames(text, domainPath)).toEqual(['orders', 'customers']);
     expect(text).toContain("use * from '../tables/silver/_relationships.dbml'");
-    const diagnostics = compileDbmlProject(Object.fromEntries([...snapshot()].filter(([p]) => p.endsWith('.dbml'))), ['silver/shop.dbml']);
-    expect(Object.values(diagnostics).flat()).toEqual([]);
+    expectCompilesInEveryParser(dbmlFiles(), ['silver/shop.dbml']);
     // The canvas reads it back with its positions and the relationship from the library.
     s.tableLibraryService.invalidateCache();
     const area = s.subjectAreaService.getSubjectArea(domainPath);
@@ -153,6 +168,37 @@ describe('writeNewSubjectArea for a .dbml diagram (§5.7)', () => {
     }, s);
     expect(result.ok).toBe(true);
     expect(fs.readFileSync(erd('silver', 'one.dbml'), 'utf-8')).toContain("use * from '../tables/silver/_relationships.dbml'");
+    expectCompilesInEveryParser(dbmlFiles(), ['silver/one.dbml', 'silver/two.dbml']);
+  });
+
+  it('refuses, writing nothing, when a diagram the settle pass would re-render has unsaved edits', async () => {
+    const s = services();
+    await writeNewSubjectArea({
+      workspaceRoot: tmp, semanticDir: '.erd-studio', domainPath: erd('silver', 'one.dbml'), newTables: [CUSTOMERS], folder: 'silver', changedTables: [],
+      documentText: () => '', document: () => ({ domain: 'one', logical: { models: ['customers'] }, viewConfig: {} }),
+    }, s);
+    s.tableLibraryService.invalidateCache();
+    const before = snapshot();
+    const asked: string[][] = [];
+    // one.dbml is open with an unsaved member: its open text is what the settle reads.
+    const openText = `${fs.readFileSync(erd('silver', 'one.dbml'), 'utf-8')}// unsaved\n`;
+    const result = await writeNewSubjectArea({
+      workspaceRoot: tmp, semanticDir: '.erd-studio', domainPath: erd('silver', 'two.dbml'), newTables: [ORDERS], folder: 'silver', changedTables: [],
+      documentText: () => '', document: () => ({ domain: 'two', logical: { models: ['orders', 'customers'] }, viewConfig: {} }),
+    }, {
+      ...s,
+      readText: (p) => (path.resolve(p) === erd('silver', 'one.dbml') ? openText : (fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : null)),
+      dirtyFiles: (paths) => { asked.push([...paths]); return paths.filter((p) => path.resolve(p) === erd('silver', 'one.dbml')); },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(UnsavedFilesRefused);
+      expect((result.error as UnsavedFilesRefused).filePaths).toEqual([erd('silver', 'one.dbml')]);
+      expect(result.undone).toBe(true);
+    }
+    // Every planned path was checked, the settled diagram and the new relationships file included.
+    expect(asked[0]).toEqual(expect.arrayContaining([erd('silver', 'one.dbml'), erd('tables', 'silver', '_relationships.dbml'), erd('silver', 'two.dbml')]));
+    expect(snapshot()).toEqual(before);
   });
 
   /** An io that fails on the `n`-th rename (the atomic write's last step). */
@@ -277,6 +323,41 @@ describe('Draw from dbt and Import DBML in a DBML project (§5.7)', () => {
     // `use` inside a string, a Note or a block comment is not a declaration.
     expect(firstUseDeclarationLine("Table t [note: 'use * from x'] {\n  id int\n}\n/*\nuse x\n*/\nNote n {\n'''\nuse x\n'''\n}\n")).toBeUndefined();
     expect(firstUseDeclarationLine('Table user_use {\n  use_count int\n}\n')).toBeUndefined();
+    // No Markdown: a notification shows it as plain text.
+    expect(IMPORT_MULTI_FILE_MESSAGE).not.toMatch(/\*\*|`/);
+  });
+
+  it('Import accepts a column or an enum value named use (inside a body, use is not a declaration)', () => {
+    const column = 'Table t {\n  id int [pk]\n  use varchar\n}\n';
+    const enumValue = 'Enum kind {\n  use\n  other\n}\n';
+    const indexed = 'Table t {\n  use int\n  indexes {\n    (\n      use\n    )\n  }\n}\n';
+    for (const text of [column, enumValue, indexed]) {
+      expect(firstUseDeclarationLine(text)).toBeUndefined();
+      expect(readDbml(text)).toMatchObject({ ok: true });
+    }
+    // A top-level use after a body is still found.
+    expect(firstUseDeclarationLine(`${column}use { table a } from './a.dbml'\n`)).toBe(5);
+  });
+
+  it('Import into a DBML diagram names a relationship it cannot store, and does not count it', () => {
+    const read = readDbml('Table customers {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n  customer_id int [ref: > customers.id]\n}\n');
+    if (!read.ok) throw new Error('unreadable');
+    // orders is in the library but its file cannot be read: the relationship has no owner file.
+    const plan = (flag: boolean) => planDbmlImport({
+      model: read.model, layer: 'gold', subjectAreaName: 'shop',
+      library: { findTableName: (n) => (n === 'orders' ? 'orders' : null), getTable: () => null },
+      libraryRelationships: true,
+      ...(flag ? { diagramHoldsNoRelationships: true } : {}),
+    });
+    // A JSON diagram keeps it in the diagram, as before.
+    expect(plan(false).document.logical.relationships).toHaveLength(1);
+    const dbml = plan(true);
+    expect(dbml.document.logical.relationships).toEqual([]);
+    expect(dbml.report.relationships).toBe(0);
+    expect(dbml.report.dropped).toEqual([expect.objectContaining({
+      kind: 'reference', what: 'Reference orders.customer_id – customers.id', why: "not stored, because its table's file could not be read.",
+    })]);
+    expect(describeDbmlImportPlan(dbml)).toContain("• Reference orders.customer_id – customers.id: not stored, because its table's file could not be read.");
   });
 
   it('Import into a DBML project refuses to reuse a YAML table, and refuses a new table named _relationships', () => {
@@ -336,8 +417,7 @@ describe('the lifecycle planners (src/commands/dbmlLifecycle.ts)', () => {
       if (w.kind === 'delete') fs.rmSync(w.path);
       else { fs.mkdirSync(path.dirname(w.path), { recursive: true }); fs.writeFileSync(w.path, w.text); }
     }
-    const files = Object.fromEntries([...snapshot()].filter(([p]) => p.endsWith('.dbml')));
-    expect(Object.values(compileDbmlProject(files, ['gold/sales.dbml', 'silver/staging.dbml'])).flat()).toEqual([]);
+    expectCompilesInEveryParser(dbmlFiles(), ['gold/sales.dbml', 'silver/staging.dbml']);
   });
 
   it('Give Duplicate Its Own Name: the .dbml copy is renamed with its alias, and only the diagram that uses the copy is repointed', () => {
@@ -365,6 +445,41 @@ describe('the lifecycle planners (src/commands/dbmlLifecycle.ts)', () => {
     // The gold diagram, which uses the winner, and every Ref naming dim_date are left alone.
     expect(byPath.has('gold/sales.dbml')).toBe(false);
     expect([...byPath.keys()].some((p) => p.endsWith('_relationships.dbml'))).toBe(false);
+    // Applied, the project compiles in every parser.
+    for (const w of planned.writes) {
+      if (w.kind === 'delete') fs.rmSync(w.path);
+      else fs.writeFileSync(w.path, w.text);
+    }
+    expectCompilesInEveryParser(dbmlFiles(), ['gold/sales.dbml', 'silver/staging.dbml']);
+  });
+
+  it('Give Duplicate Its Own Name: a relationships file that imports the copy is repointed at the table the library uses', () => {
+    copyNative();
+    // A team merge: tables/gold/dim_date.dbml came first, so gold's relationships file imports it;
+    // then the top-level tables/dim_date.dbml arrived and wins (§3.4).
+    fs.writeFileSync(erd('tables', 'gold', 'dim_date.dbml'), 'Table dim_date {\n  date_key INT [pk]\n}\n');
+    const rels = erd('tables', 'gold', '_relationships.dbml');
+    const relsBefore = fs.readFileSync(rels, 'utf-8');
+    fs.writeFileSync(rels, relsBefore.replace("use { table dim_date } from '../dim_date.dbml'", "use { table dim_date } from './dim_date.dbml'"));
+    expectCompilesInEveryParser(dbmlFiles(), ['gold/sales.dbml']);
+    const { tableLibraryService, subjectAreaService } = services();
+    const entry = tableLibraryService.listTableFiles().find((e) => e.shadowedBy && e.name.toLowerCase() === 'dim_date')!;
+    const readText = (p: string): string | null => (fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : null);
+    const diagrams = subjectAreaService.listSubjectAreas(tmp, '.erd-studio').filter((d) => d.storage === 'dbml').map((d) => d.filePath);
+    const planned = planDbmlDuplicateRename({
+      tableLibraryService, copy: { filePath: entry.filePath, name: 'dim_date' }, newName: 'gold_dim_date', alias: 'dim_date', diagrams, readText,
+    });
+    expect(planned.repointed).toEqual([rels]);
+    const byPath = new Map(planned.writes.map((w) => [path.relative(erd(), w.path).split(path.sep).join('/'), w]));
+    // Only the use line changes: back to the winner, every Ref byte for byte.
+    expect((byPath.get('tables/gold/_relationships.dbml') as { text: string }).text).toBe(relsBefore);
+    for (const w of planned.writes) {
+      if (w.kind === 'delete') fs.rmSync(w.path);
+      else fs.writeFileSync(w.path, w.text);
+    }
+    expectCompilesInEveryParser(dbmlFiles(), ['gold/sales.dbml', 'silver/staging.dbml']);
+    const after = new TableLibraryService(tmp, '.erd-studio');
+    expect(after.getTable('fct_order')?.relationships?.filter((r) => r.toModel === 'dim_date')).toHaveLength(2);
   });
 });
 

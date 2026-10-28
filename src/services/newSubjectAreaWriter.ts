@@ -87,6 +87,26 @@ export interface NewSubjectAreaWriteServices {
   subjectAreaService?: Pick<SubjectAreaService, 'listSubjectAreas'>;
   /** The file operations of the DBML write (a test makes one fail). */
   io?: FileWriteIo;
+  /**
+   * A file's text for the DBML settle pass: an open document's (unsaved edits
+   * included), else the disk's without a byte-order mark; null when there is
+   * none. Default: the disk's.
+   */
+  readText?(filePath: string): string | null;
+  /**
+   * Those of `filePaths` open with unsaved edits (`dirtyFiles`). Every file
+   * the DBML write plans, the settled diagrams included, is checked before the
+   * first write; a dirty one refuses with {@link UnsavedFilesRefused}.
+   */
+  dirtyFiles?(filePaths: readonly string[]): string[];
+}
+
+/** A file the DBML write would change is open with unsaved edits; nothing was written. */
+export class UnsavedFilesRefused extends Error {
+  constructor(readonly filePaths: readonly string[]) {
+    super(`${filePaths.length} file(s) have unsaved changes.`);
+    this.name = 'UnsavedFilesRefused';
+  }
 }
 
 export type NewSubjectAreaWriteResult =
@@ -243,13 +263,13 @@ async function writeNewDbmlSubjectArea(
       annotations,
     });
     const layout = editDiagramLayout(null, view.positions ?? {}, stickyLayoutsOf(annotations));
-    const readText = (filePath: string): string | null => {
+    const readText = services.readText ?? ((filePath: string): string | null => {
       try {
         return fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
       } catch {
         return null;
       }
-    };
+    });
     const others = (services.subjectAreaService?.listSubjectAreas(write.workspaceRoot, write.semanticDir) ?? [])
       .filter((s) => s.storage === 'dbml' && path.resolve(s.filePath) !== path.resolve(domainPath))
       .map((s) => s.filePath);
@@ -259,6 +279,10 @@ async function writeNewDbmlSubjectArea(
       ...(layout !== null ? [{ kind: 'create' as const, path: layoutFilePathOf(domainPath), text: layout }] : []),
       ...settleDbmlDiagramWrites({ semanticRoot, diagrams: others, plan, readText }),
     ];
+    // Nothing is written under the user's unsaved edits: not a library file,
+    // and not another diagram the settle pass re-renders.
+    const dirty = services.dirtyFiles?.(writes.map((w) => w.path)) ?? [];
+    if (dirty.length > 0) throw new UnsavedFilesRefused(dirty);
   } catch (error) {
     let undone = true;
     if (createdRoot) {

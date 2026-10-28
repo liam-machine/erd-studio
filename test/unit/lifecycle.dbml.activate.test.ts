@@ -13,7 +13,9 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { activate, _resetFirstRunGuardForTests } from '../../src/extension';
-import { compileDbmlProject, parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { compileDbmlProject, parseSubjectAreaDbml, type DbmlParserModule } from '@erd-studio/core/dbml';
+import * as v9 from 'dbml-parse-v9';
+import * as v10 from 'dbml-parse-v10';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const DBML_NATIVE = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native');
@@ -52,11 +54,21 @@ function files(): string[] {
     .sort();
 }
 
-/** Every `.dbml` under the semantic dir compiles from each diagram, with no diagnostic. */
+/** Every `.dbml` under the semantic dir compiles from each diagram, with no diagnostic, in 9.1.1, 10.3.1 and 11.0.0. */
 function compilesClean(): void {
   const texts = Object.fromEntries(files().filter((f) => f.endsWith('.dbml')).map((f) => [f, fs.readFileSync(erd(f), 'utf-8')]));
   const diagrams = Object.keys(texts).filter((f) => !f.startsWith('tables/'));
-  expect(Object.values(compileDbmlProject(texts, diagrams)).flat()).toEqual([]);
+  const parsers: Array<[string, DbmlParserModule | undefined]> = [
+    ['9.1.1', v9 as unknown as DbmlParserModule], ['10.3.1', v10 as unknown as DbmlParserModule], ['11.0.0', undefined],
+  ];
+  for (const [label, parser] of parsers) {
+    expect({ parser: label, diagnostics: Object.values(compileDbmlProject(texts, diagrams, parser)).flat() }).toEqual({ parser: label, diagnostics: [] });
+  }
+}
+
+/** Every file under the semantic dir, with its bytes. */
+function bytes(): Map<string, string> {
+  return new Map(files().map((f) => [f, fs.readFileSync(erd(f)).toString('base64')]));
 }
 
 beforeEach(() => {
@@ -153,7 +165,7 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     await activate(context);
     importFrom(path.join(inbox, 'part.dbml'));
     await vscode.commands.executeCommand('erdStudio.importDbml');
-    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/^Import DBML: This DBML file imports other files \(`use`\)/), expect.anything());
+    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/^Import DBML: This DBML file imports other files \(use lines\)/), expect.anything());
     expect(files()).toEqual([]);
   });
 
@@ -228,14 +240,42 @@ describe('in a native DBML project', () => {
     compilesClean();
   });
 
-  it('Delete Subject Area deletes the .dbml and its .dbdiagram', async () => {
+  it('Rename Subject Area refuses, by name, when the layout file has unsaved edits, and writes nothing', async () => {
+    await activate(context);
+    const before = bytes();
+    const layoutDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(erd('gold', 'sales.dbdiagram')));
+    (layoutDoc as unknown as { _setText(t: string): void })._setText(`${layoutDoc.getText()} `);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
+    await vscode.commands.executeCommand('erdStudio.renameDomain', {
+      type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: erd('gold', 'sales.dbml'), storage: 'dbml' },
+    });
+    expect(errors).toHaveBeenCalledWith('Rename Subject Area: .erd-studio/gold/sales.dbdiagram has unsaved changes. Save or revert it, then try again. Nothing was changed.');
+    expect(bytes()).toEqual(before);
+  });
+
+  it('Rename Subject Area: when VS Code rejects the edit and the reconcile cannot put a file back, only the modal speaks', async () => {
+    await activate(context);
+    // The first edit lands its first step (the new diagram) and fails; the reconcile is rejected too.
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
+    await vscode.commands.executeCommand('erdStudio.renameDomain', {
+      type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: erd('gold', 'sales.dbml'), storage: 'dbml' },
+    });
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*Restore these from source control\.$/), { modal: true });
+  });
+
+  it('Delete Subject Area deletes the .dbml and its .dbdiagram, each recorded as an own delete', async () => {
     await activate(context);
     warn.mockResolvedValue('Delete' as never);
     const del = vi.spyOn(vscode.workspace.fs, 'delete').mockResolvedValue(undefined as never);
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const recorded = vi.spyOn(ownWrites, 'recordDelete');
     await vscode.commands.executeCommand('erdStudio.deleteDomain', {
       type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: erd('gold', 'sales.dbml'), storage: 'dbml' },
     });
     expect(del.mock.calls.map((c) => (c[0] as { fsPath: string }).fsPath)).toEqual([erd('gold', 'sales.dbml'), erd('gold', 'sales.dbdiagram')]);
+    expect(recorded.mock.calls.map((c) => c[0])).toEqual(expect.arrayContaining([erd('gold', 'sales.dbml'), erd('gold', 'sales.dbdiagram')]));
   });
 
   it('Delete Table runs the D16 cascade: the file, its Refs and every use line, as one edit, with the cascade in the prompt', async () => {
@@ -282,6 +322,61 @@ describe('in a native DBML project', () => {
     expect(fs.readFileSync(sales, 'utf-8')).toContain("use { table dim_only_gold } from '../tables/gold/dim_only_gold.dbml'");
     expect(info).toHaveBeenCalledWith('Moved 1 table file into layer folders.');
     compilesClean();
+  });
+
+  it('Organise in a mixed project moves .dbml and YAML tables in ONE edit, the YAML file renamed byte for byte', async () => {
+    fs.writeFileSync(erd('tables', 'dim_only_gold.dbml'), 'Table dim_only_gold {\n  id INT [pk]\n}\n');
+    fs.mkdirSync(erd('logical-models'), { recursive: true });
+    // A BOM, CRLF and a Latin-1 byte (0xE9) that is not UTF-8: a text round trip would change it.
+    const yamlBytes = Buffer.concat([Buffer.from('\uFEFFname: dim_yaml_gold\r\ndescription: caf', 'utf-8'), Buffer.from([0xe9]), Buffer.from('\r\ncolumns: []\r\n', 'utf-8')]);
+    fs.writeFileSync(erd('logical-models', 'dim_yaml_gold.yml'), yamlBytes);
+    fs.writeFileSync(erd('gold', 'mixed.json'), JSON.stringify({ schemaVersion: 5, domain: 'mixed', layer: 'gold', logical: { models: ['dim_yaml_gold', 'dim_only_gold'], relationships: [] } }));
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+      (args.includes('Move Files') ? 'Move Files' : undefined)) as never);
+    const applyEdit = vi.spyOn(vscode.workspace, 'applyEdit');
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+    expect(errors).not.toHaveBeenCalled();
+    expect(applyEdit).toHaveBeenCalledTimes(1);
+    const ops = (applyEdit.mock.calls[0][0] as unknown as { _ops: Array<{ kind: string }> })._ops.map((o) => o.kind);
+    expect(ops).toContain('renameFile');
+    expect(fs.existsSync(erd('tables', 'gold', 'dim_only_gold.dbml'))).toBe(true);
+    expect(fs.existsSync(erd('logical-models', 'dim_yaml_gold.yml'))).toBe(false);
+    expect(fs.readFileSync(erd('logical-models', 'gold', 'dim_yaml_gold.yml')).equals(yamlBytes)).toBe(true);
+    compilesClean();
+  });
+
+  it('Organise: when VS Code rejects the edit part way, every file is put back and it says nothing was changed', async () => {
+    fs.writeFileSync(erd('tables', 'dim_only_gold.dbml'), 'Table dim_only_gold {\n  id INT [pk]\n  date_key INT\n}\n');
+    fs.appendFileSync(erd('tables', '_relationships.dbml'), "use { table dim_only_gold } from './dim_only_gold.dbml'\nRef: dim_only_gold.date_key >? dim_date.date_key\n");
+    const sales = erd('gold', 'sales.dbml');
+    fs.writeFileSync(sales, fs.readFileSync(sales, 'utf-8').replace("use * from '../tables/_relationships.dbml'", "use { table dim_only_gold } from '../tables/dim_only_gold.dbml'\nuse * from '../tables/_relationships.dbml'"));
+    const before = bytes();
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+      (args.includes('Move Files') ? 'Move Files' : undefined)) as never);
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1);
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+    expect(errors).toHaveBeenCalledWith('Organise Table Library: VS Code rejected the file moves; nothing was changed.');
+    // Replaced documents are put back in memory and saved: disk matches the start.
+    for (const doc of vscode.workspace.textDocuments) if (doc.isDirty) await doc.save();
+    expect(bytes()).toEqual(before);
+  });
+
+  it('Give Duplicate Its Own Name: when VS Code rejects the edit, every file is put back and it says nothing was changed', async () => {
+    fs.writeFileSync(erd('tables', 'gold', 'dim_date.dbml'), 'Table dim_date {\n  date_key INT [pk]\n}\n');
+    const staging = erd('silver', 'staging.dbml');
+    fs.writeFileSync(staging, fs.readFileSync(staging, 'utf-8').replace("from '../tables/dim_date.dbml'", "from '../tables/gold/dim_date.dbml'"));
+    const before = bytes();
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+      (args.includes('Rename') ? 'Rename' : undefined)) as never);
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1);
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', erd('tables', 'gold', 'dim_date.dbml'));
+    expect(errors).toHaveBeenCalledWith('Could not rename tables/gold/dim_date.dbml; nothing was changed.');
+    for (const doc of vscode.workspace.textDocuments) if (doc.isDirty) await doc.save();
+    expect(bytes()).toEqual(before);
   });
 
   it('Give Duplicate Its Own Name renames a .dbml copy and repoints only the diagram that uses it', async () => {

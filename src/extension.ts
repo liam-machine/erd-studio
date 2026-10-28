@@ -91,7 +91,7 @@ import { currentDbmlResolver, newDbmlSubjectAreaText, planDbmlDuplicateRename, p
 import { applyFileWrites } from './providers/applyFileWrites';
 import type { FileWrite } from './services/fileWrites';
 import { saveDocumentByUri } from './providers/documentSave';
-import { dirtyFiles } from './providers/dirtyDocuments';
+import { dirtyFiles, openOrDiskText } from './providers/dirtyDocuments';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -571,31 +571,27 @@ export function mostRecentlyModified(domains: readonly SubjectAreaSummary[]): Su
   return best;
 }
 
-/** A file's text: an open document's (unsaved edits included), else the disk's without a byte-order mark; null when there is none. */
-function openOrDiskText(filePath: string): string | null {
-  const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && path.resolve(d.uri.fsPath) === path.resolve(filePath));
-  if (doc) return doc.getText();
-  try {
-    return fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Apply a lifecycle command's DBML writes (§5.7) as ONE WorkspaceEdit
  * (`applyFileWrites`), save every replaced document and record own writes
  * after the bytes land. Returns false when VS Code did not apply it
  * (`applyFileWrites` reconciled), or the files it could not save.
  */
-async function applyLifecycleWrites(writes: readonly FileWrite[], libraryRoot: string): Promise<{ ok: boolean; unsaved: string[] }> {
+async function applyLifecycleWrites(
+  writes: readonly FileWrite[],
+  libraryRoot: string,
+  renames: ReadonlyArray<{ from: string; to: string }> = [],
+): Promise<{ ok: boolean; unsaved: string[]; unrestored: string[] }> {
   const applied = await applyFileWrites(writes, {
     ensureDir: (filePath) => {
       const rel = path.relative(libraryRoot, filePath);
       if (!rel.startsWith('..') && !path.isAbsolute(rel)) fs.mkdirSync(path.dirname(filePath), { recursive: true });
     },
+    renames,
   });
-  if (!applied.ok) return { ok: false, unsaved: [] };
+  // The reconcile's modal already named any file it could not put back: the
+  // caller says "nothing was changed" only when `unrestored` is empty.
+  if (!applied.ok) return { ok: false, unsaved: [], unrestored: applied.unrestored };
   const unsaved: string[] = [];
   for (const uri of applied.replaced) {
     if (await saveDocumentByUri(uri)) ownWrites.recordWrite(uri.fsPath);
@@ -603,7 +599,11 @@ async function applyLifecycleWrites(writes: readonly FileWrite[], libraryRoot: s
   }
   for (const filePath of applied.created) ownWrites.recordWrite(filePath);
   for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
-  return { ok: true, unsaved };
+  for (const { from, to } of applied.renamed) {
+    ownWrites.recordWrite(to);
+    ownWrites.recordDelete(from);
+  }
+  return { ok: true, unsaved, unrestored: [] };
 }
 
 function findMatchingTabs(fileUri: vscode.Uri): vscode.Tab[] {
@@ -1713,10 +1713,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       // A `.dbml` table moves with its Refs and every `use` line that names it
       // (§5.7, §4.6 step 3): one WorkspaceEdit through applyFileWrites, YAML
-      // moves in it as a create of the same bytes plus a delete.
+      // moves in it as file renames (every byte kept, whatever the encoding).
       const dbmlMoves = plan.moves.filter((m) => m.from.toLowerCase().endsWith('.dbml'));
       if (dbmlMoves.length > 0) {
         let writes: FileWrite[];
+        const yamlRenames = plan.moves.filter((m) => !m.from.toLowerCase().endsWith('.dbml')).map((m) => ({ from: m.from, to: m.to }));
         try {
           const diagrams = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).filter((d) => d.storage === 'dbml').map((d) => d.filePath);
           writes = planDbmlTableMoves({
@@ -1725,22 +1726,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             diagrams,
             readText: openOrDiskText,
           });
-          for (const move of plan.moves) {
-            if (move.from.toLowerCase().endsWith('.dbml')) continue;
-            writes.push({ kind: 'create', path: move.to, text: fs.readFileSync(move.from, 'utf-8') }, { kind: 'delete', path: move.from });
-          }
         } catch (err) {
           void vscode.window.showErrorMessage(`Organise Table Library: ${err instanceof Error ? err.message : String(err)} Nothing was changed.`);
           return;
         }
-        const dirty = dirtyFiles(writes.map((w) => w.path));
+        const dirty = dirtyFiles([...writes.map((w) => w.path), ...yamlRenames.map((r) => r.from)]);
         if (dirty.length > 0) {
           void vscode.window.showErrorMessage(`Organise Table Library: ${path.relative(workspaceRoot, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again. Nothing was changed.`);
           return;
         }
-        const result = await applyLifecycleWrites(writes, path.dirname(modelsDir));
+        const result = await applyLifecycleWrites(writes, path.dirname(modelsDir), yamlRenames);
         if (!result.ok) {
-          void vscode.window.showErrorMessage('Organise Table Library: VS Code rejected the file moves; nothing was changed.');
+          if (result.unrestored.length === 0) void vscode.window.showErrorMessage('Organise Table Library: VS Code rejected the file moves; nothing was changed.');
           return;
         }
         for (const move of plan.moves) {
@@ -1873,7 +1870,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         const result = await applyLifecycleWrites(planned.writes, path.dirname(tableLibraryService.getTablesDir()));
         if (!result.ok) {
-          void vscode.window.showErrorMessage(`Could not rename ${libPath(dup.filePath)}; nothing was changed.`);
+          if (result.unrestored.length === 0) void vscode.window.showErrorMessage(`Could not rename ${libPath(dup.filePath)}; nothing was changed.`);
           return;
         }
         if (result.unsaved.length > 0) {
@@ -2406,12 +2403,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           }
           let writes: FileWrite[];
           try {
-            const read = (filePath: string): string | null => {
-              const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && path.resolve(d.uri.fsPath) === path.resolve(filePath));
-              if (doc) return doc.getText();
-              try { return fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, ''); } catch { return null; }
-            };
-            const text = read(oldFilePath);
+            const read = openOrDiskText;
+            // From disk: handleUnsavedChanges saved it, or the user chose to discard the open edits.
+            let text: string | null;
+            try { text = fs.readFileSync(oldFilePath, 'utf-8').replace(/^\uFEFF/, ''); } catch { text = null; }
             if (text === null) throw new Error(`${path.basename(oldFilePath)} could not be read.`);
             writes = planDbmlSubjectAreaRename({
               semanticRoot: fullSemanticDirPath,
@@ -2427,12 +2422,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}": ${msg}`);
             return;
           }
+          // The layout file moves too: never under its unsaved edits. (The
+          // diagram's own were settled by handleUnsavedChanges above.)
+          const dirty = dirtyFiles(writes.map((w) => w.path).filter((p) => path.resolve(p) !== path.resolve(oldFilePath)));
+          if (dirty.length > 0) {
+            void vscode.window.showErrorMessage(`Rename Subject Area: ${path.relative(workspaceRoot, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again. Nothing was changed.`);
+            return;
+          }
           const oldTabs = findMatchingTabs(oldFileUri);
           if (oldTabs.length > 0) { await vscode.window.tabGroups.close(oldTabs, true); }
           for (const w of writes) if (w.kind === 'create') subjectAreasCreatedHere.add(w.path);
           const applied = await applyFileWrites(writes);
           if (!applied.ok) {
-            void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}" to "${newSlug}"`);
+            // A file the reconcile could not put back is already named in its modal.
+            if (applied.unrestored.length === 0) void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}" to "${newSlug}"`);
             return;
           }
           for (const filePath of applied.created) ownWrites.recordWrite(filePath);

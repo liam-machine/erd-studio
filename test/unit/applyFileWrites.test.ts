@@ -147,3 +147,33 @@ describe('a partial apply (D23)', () => {
     expect(disk()).toEqual(beforeDisk);
   });
 });
+
+describe('file renames in the same edit (Organise in a mixed library)', () => {
+  const renames = (): Array<{ from: string; to: string }> => [{ from: at('logical-models/dim.yml'), to: at('logical-models/gold/dim.yml') }];
+  // Not UTF-8 (a Latin-1 byte): only a rename keeps it exactly.
+  const yamlBytes = Buffer.from([0x6e, 0x61, 0x6d, 0x65, 0x3a, 0x20, 0xe9, 0x0a]);
+
+  it('goes after the creates and replaces and before the deletes, and keeps every byte', async () => {
+    fs.mkdirSync(at('logical-models'), { recursive: true });
+    fs.writeFileSync(at('logical-models/dim.yml'), yamlBytes);
+    const result = await applyFileWrites(plannedWrites(), { renames: renames() });
+    expect(result.ok).toBe(true);
+    const ops = (_appliedEdits[0] as unknown as { _ops: Array<{ kind: string }> })._ops.map((op) => op.kind);
+    expect(ops.indexOf('renameFile')).toBeGreaterThan(ops.lastIndexOf('replace'));
+    expect(ops.indexOf('renameFile')).toBeLessThan(ops.indexOf('deleteFile'));
+    expect(result.renamed).toEqual(renames());
+    expect(fs.readFileSync(at('logical-models/gold/dim.yml')).equals(yamlBytes)).toBe(true);
+  });
+
+  it('a partial apply moves a landed rename back', async () => {
+    fs.mkdirSync(at('logical-models'), { recursive: true });
+    fs.writeFileSync(at('logical-models/dim.yml'), yamlBytes);
+    // creates (3) + replace (1) + the rename: stop right after the rename.
+    _mockWorkspaceState.applyEditPrefixes.push(5);
+    const result = await applyFileWrites(plannedWrites(), { renames: renames() });
+    expect(result.ok).toBe(false);
+    expect(result.unrestored).toEqual([]);
+    expect(fs.existsSync(at('logical-models/gold/dim.yml'))).toBe(false);
+    expect(fs.readFileSync(at('logical-models/dim.yml')).equals(yamlBytes)).toBe(true);
+  });
+});

@@ -14,7 +14,7 @@ import * as path from 'path';
 
 import { dbmlName, layoutFilePathOf } from '@erd-studio/core';
 import { sameName } from '../types/naming';
-import { editSubjectAreaDbml, editTableDbml, parseSubjectAreaDbml, parseTableDbml, renderNewSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { editRelationshipsDbml, editSubjectAreaDbml, editTableDbml, parseSubjectAreaDbml, parseTableDbml, renderNewSubjectAreaDbml } from '@erd-studio/core/dbml';
 
 import type { FileWrite } from '../services/fileWrites';
 import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
@@ -109,16 +109,30 @@ export function planDbmlTableMoves(input: {
   return [...writes, ...settleDbmlDiagramWrites({ semanticRoot, diagrams: input.diagrams, plan, readText: input.readText })];
 }
 
+/** Whether `text` has a `use` line whose path resolves (from `fileRel`) to `targetRel`, ignoring case; a cheap pre-filter. */
+function hasUseLineTo(text: string, fileRel: string, targetRel: string): boolean {
+  const target = targetRel.toLowerCase();
+  for (const match of text.matchAll(/^[ \t]*use\b[^\n]*?\bfrom[ \t]+(['"])([^'"\n]*)\1/gm)) {
+    let resolved = path.posix.normalize(path.posix.join(path.posix.dirname(fileRel), match[2]));
+    if (!/\.dbml$/i.test(resolved)) resolved += '.dbml';
+    if (resolved.toLowerCase() === target) return true;
+  }
+  return false;
+}
+
 /**
  * Give Duplicate Its Own Name for a `.dbml` copy (§5.7): the copy (not the
  * table the library uses) is renamed in place by `editTableDbml(copyText,
  * …, {rename: true})` with its alias set, the old copy deleted, and only the
  * DBML diagrams whose `use` line resolves to THAT copy's path are repointed
  * (members and layout keys). Refs naming the old spelling stay with the
- * remaining copy, which the library uses.
+ * remaining copy, which the library uses, so a relationships file whose
+ * `use` line imports the copy is re-pointed at that table (the planner's own
+ * relationships-file writer, `use` lines only): the deleted copy is never
+ * left imported.
  */
 export function planDbmlDuplicateRename(input: {
-  tableLibraryService: Pick<TableLibraryService, 'planDbmlLibraryOps' | 'getTablesDir'>;
+  tableLibraryService: Pick<TableLibraryService, 'planDbmlLibraryOps' | 'getTablesDir' | 'listRelationshipsFiles'>;
   copy: { filePath: string; name: string };
   newName: string;
   alias: string | undefined;
@@ -175,8 +189,25 @@ export function planDbmlDuplicateRename(input: {
     mutatedOnly: true,
     mutate: (_filePath, obj) => repointMember(obj, input.copy.name, input.newName),
   });
+  // Relationships files importing the copy: their `use` line for the name follows the table the library uses.
+  const relationshipsWrites: FileWrite[] = [];
+  for (const filePath of input.tableLibraryService.listRelationshipsFiles()) {
+    const text = input.readText(filePath);
+    const fileRel = relPosix(semanticRoot, filePath);
+    if (text === null || !hasUseLineTo(text, fileRel, copyRel)) continue;
+    const edited = editRelationshipsDbml(text, {
+      filePath: fileRel,
+      owners: new Map(),
+      pathChanged: new Set([input.copy.name.toLowerCase()]),
+      resolve: (name) => plan.resolveTable(name),
+    });
+    if (edited !== text) {
+      relationshipsWrites.push({ kind: 'replace', path: filePath, text: edited });
+      repointed.push(filePath);
+    }
+  }
   return {
-    writes: [{ kind: 'create', path: newPath, text: newText }, { kind: 'delete', path: input.copy.filePath }, ...settled],
+    writes: [{ kind: 'create', path: newPath, text: newText }, ...relationshipsWrites, { kind: 'delete', path: input.copy.filePath }, ...settled],
     repointed,
     newPath,
   };

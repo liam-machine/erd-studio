@@ -743,6 +743,17 @@ export function routeToLibrary(
   return { kept, changed: [...changed.values()] };
 }
 
+/**
+ * The sentence for relationships a DBML diagram cannot store (D5): `routeToLibrary`
+ * kept them because their many-side table's file could not be read. Undefined
+ * when there are none. Shared by the canvas and Draw from dbt.
+ */
+export function describeUnstoredRelationships(kept: readonly Relationship[]): string | undefined {
+  if (kept.length === 0) return undefined;
+  const named = kept.slice(0, 3).map((r) => `${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn}`).join(', ');
+  return `Not stored, because a table's file could not be read: ${named}${kept.length > 3 ? ` and ${kept.length - 3} more` : ''}.`;
+}
+
 /** One way a relationship is defined in some diagrams, as the move would store it. */
 export interface ConflictDefinition {
   /** On its many side (keys win), with its role. For a composite key, its first member. */

@@ -31,8 +31,8 @@ import {
 } from '../services/dbtDraft';
 import { pickDraftScope, type DraftScopePick } from '../providers/dbtDraftPicker';
 import { openTableFileAt } from './openModelFile';
-import { dirtyFiles } from '../providers/dirtyDocuments';
-import { drawnDiagramCopies, routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
+import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
+import { describeUnstoredRelationships, drawnDiagramCopies, routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import {
   OPEN_FILE_BUTTON,
@@ -55,6 +55,7 @@ import {
   refusalLocation,
   writeNewSubjectArea,
   writeOutcome,
+  UnsavedFilesRefused,
   type RefusedWrite,
 } from '../services/newSubjectAreaWriter';
 import { DbmlEditRefused } from '@erd-studio/core/dbml';
@@ -256,6 +257,8 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   let folder: string | undefined;
   let routed: { kept: DbtDraft['relationships']; changed: DbtDraft['newModels'] };
   let dirty: string[];
+  // Relationships a DBML diagram cannot store (their many-side table's file could not be read): named in the notice.
+  let unstored: DbtDraft['relationships'] = [];
   try {
     folder = tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
     // A DBML diagram holds no relationships (D5): every one goes to the library,
@@ -273,7 +276,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
           drawnDiagramCopies(readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir)))
         : { kept: draft.relationships, changed: [] };
     if (dbml && routed.kept.length > 0) {
-      console.warn(`[ERD Studio] ${TITLE}: ${routed.kept.length} relationship(s) not stored: a table's file could not be read.`);
+      unstored = routed.kept;
       routed = { kept: [], changed: routed.changed };
     }
     const planned = dbml && tableLibraryService.planTableWrites
@@ -303,13 +306,14 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     });
     return undefined;
   }
-  if (dirty.length > 0) {
-    const libraryRoot = path.dirname(tableLibraryService.getTablesDir());
-    const file = path.relative(libraryRoot, dirty[0]).split(path.sep).join('/');
-    const dirtyPath = dirty[0];
+  const showUnsaved = (dirtyPath: string): void => {
+    const file = path.relative(path.dirname(tableLibraryService.getTablesDir()), dirtyPath).split(path.sep).join('/');
     showErrorWithActions(`${TITLE}: ${file} has unsaved changes. Save or revert it, then try again. Nothing was changed.`, {
       [SHOW_FILE_BUTTON]: () => vscode.window.showTextDocument(vscode.Uri.file(dirtyPath)),
     });
+  };
+  if (dirty.length > 0) {
+    showUnsaved(dirty[0]);
     return undefined;
   }
 
@@ -337,11 +341,16 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
       modelNames: draft.modelNames,
       relationships: [],
     }) as unknown as Record<string, unknown>,
-  }, { layerService, tableLibraryService, subjectAreaService });
+  }, { layerService, tableLibraryService, subjectAreaService, readText: openOrDiskText, dirtyFiles });
   if (!outcome.ok) {
     const { error: err, undone } = outcome;
     if (outcome.nameTaken) {
       nameTaken();
+      return undefined;
+    }
+    // A file the write would change (another diagram it re-renders, §5.7) has unsaved edits.
+    if (err instanceof UnsavedFilesRefused) {
+      showUnsaved(err.filePaths[0]);
       return undefined;
     }
     const result = writeOutcome(undone, semanticDir);
@@ -371,7 +380,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
 
   await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE);
 
-  const notice = describeDraftNotice(draft);
+  const notice = [describeDraftNotice(draft), describeUnstoredRelationships(unstored)].filter(Boolean).join(' ');
   if (notice) { void vscode.window.showInformationMessage(notice); }
   return { domainPath, draft };
 }

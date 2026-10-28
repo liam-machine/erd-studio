@@ -5,7 +5,8 @@
  * Order: the primary document's full-range replace first (a text edit, so
  * the custom editor's undo groups the step under it), then every create
  * (relationships files before table files before layout files), then every
- * other replace, then every delete.
+ * other replace, then every file rename (`renames`, bytes kept), then every
+ * delete.
  *
  * VS Code's `applyEdit` is all-or-nothing only for text edits: an edit with
  * file creations or deletions keeps the steps that ran before the one that
@@ -32,6 +33,8 @@ export interface AppliedFileWrites {
   replaced: vscode.Uri[];
   created: string[];
   deleted: string[];
+  /** The `renames` the edit carried (each file moved byte for byte). */
+  renamed: Array<{ from: string; to: string }>;
   /** After a failure: files the reconcile could not put back (listed in the modal). */
   unrestored: string[];
 }
@@ -39,8 +42,14 @@ export interface AppliedFileWrites {
 export interface ApplyFileWritesOptions {
   /** The document whose full-range replace goes first (always, for undo grouping), and its new text. */
   primary?: { document: vscode.TextDocument; text: string };
-  /** Called before each create, to make its folder where only a plain mkdir is wrong (library paths). */
+  /** Called before each create (and each rename's target), to make its folder where only a plain mkdir is wrong (library paths). */
   ensureDir?(filePath: string): void;
+  /**
+   * Files moved as they are, in the same edit (after the creates and
+   * replaces, before the deletes): a file rename keeps every byte, whatever
+   * the file's encoding. The reconcile moves back any that landed.
+   */
+  renames?: ReadonlyArray<{ from: string; to: string }>;
 }
 
 const samePath = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
@@ -77,8 +86,18 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
   const replaced: vscode.Uri[] = [];
   const created: string[] = [];
   const deleted: string[] = [];
+  const renames = options.renames ?? [];
+  const renamed: Array<{ from: string; to: string }> = [];
+  const addRenames = (): void => {
+    for (const r of renames) {
+      options.ensureDir?.(r.to);
+      edit.renameFile(vscode.Uri.file(r.from), vscode.Uri.file(r.to), { overwrite: false });
+      renamed.push({ from: r.from, to: r.to });
+    }
+  };
   for (const w of ordered) {
     const uri = vscode.Uri.file(w.path);
+    if (w.kind === 'delete' && renamed.length < renames.length) addRenames();
     if (w.kind === 'create') {
       options.ensureDir?.(w.path);
       edit.createFile(uri, { overwrite: false, contents: Buffer.from(w.text, 'utf-8') });
@@ -93,7 +112,9 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
     }
   }
 
-  if (await vscode.workspace.applyEdit(edit)) return { ok: true, replaced, created, deleted, unrestored: [] };
+  if (renamed.length < renames.length) addRenames();
+
+  if (await vscode.workspace.applyEdit(edit)) return { ok: true, replaced, created, deleted, renamed, unrestored: [] };
 
   // --- Reconcile: put back whatever landed --------------------------------------------
   const planned = new Map<string, FileWrite>();
@@ -133,6 +154,14 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
       }
     }
   }
+  const exists = (p: string): boolean => fs.existsSync(p);
+  for (const r of renames) {
+    // Moved: move it back.
+    if (!exists(r.from) && exists(r.to)) {
+      undo.renameFile(vscode.Uri.file(r.to), vscode.Uri.file(r.from), { overwrite: false });
+      anything = true;
+    }
+  }
   let unrestored: string[] = [];
   if (anything) {
     const ok = await vscode.workspace.applyEdit(undo);
@@ -144,8 +173,11 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
         } catch { /* left open and dirty: the user sees it */ }
       }
     } else {
-      unrestored = [...planned.values()].filter((w) => !isBack(w)).map((w) => w.path);
-      if (unrestored.length === 0) unrestored = [...planned.keys()];
+      unrestored = [
+        ...[...planned.values()].filter((w) => !isBack(w)).map((w) => w.path),
+        ...renames.filter((r) => !exists(r.from)).map((r) => r.from),
+      ];
+      if (unrestored.length === 0) unrestored = [...planned.keys(), ...renames.map((r) => r.from)];
       const shown = unrestored.map((p) => vscode.workspace.asRelativePath?.(p) ?? p);
       void vscode.window.showErrorMessage(
         `ERD Studio could not apply the edit, and could not put back ${shown.join(', ')}. Restore these from source control.`,
@@ -153,5 +185,5 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
       );
     }
   }
-  return { ok: false, replaced, created, deleted, unrestored };
+  return { ok: false, replaced, created, deleted, renamed, unrestored };
 }

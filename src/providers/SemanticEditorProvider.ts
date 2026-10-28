@@ -178,6 +178,7 @@ import {
   renameColumnInRelationships,
   renameTableInSubjectAreaRelationships,
   renameTableInRelationships,
+  describeUnstoredRelationships,
   routeToLibrary,
   sharedRelationshipCount,
   usesLibraryRelationships,
@@ -2026,8 +2027,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // library. One whose many-side table cannot be read has nowhere to go:
       // the edit says so (`unstored`) rather than drop it without a word.
       const { kept, changed } = routeToLibrary(added, newModels, (name) => this.tableLibraryService.getTable(name), []);
-      const unstored = kept.length === 0 ? undefined
-        : `Not stored, because a table's file could not be read: ${kept.slice(0, 3).map((r) => `${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn}`).join(', ')}${kept.length > 3 ? ` and ${kept.length - 3} more` : ''}.`;
+      const unstored = describeUnstoredRelationships(kept);
       return { kept: [], saves: [...newModels, ...changed.filter((m) => !newModels.includes(m))], ...(unstored ? { unstored } : {}) };
     }
     if (added.length === 0 || !this.relationshipsInLibrary(this.tableLibraryService.listTables())) {

@@ -60,6 +60,7 @@ import {
   refusalLocation,
   writeNewSubjectArea,
   writeOutcome,
+  UnsavedFilesRefused,
   type RefusedWrite,
 } from '../services/newSubjectAreaWriter';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../services/recoveryService';
@@ -67,7 +68,7 @@ import { telemetry } from '../services/telemetryService';
 import type { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import type { TableLibraryService } from '../services/logicalModelService';
-import { dirtyFiles } from '../providers/dirtyDocuments';
+import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
 
@@ -362,6 +363,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
       diagramCopies: libraryRelationships && !dbml
         ? drawnDiagramCopies(readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir))
         : [],
+      // A DBML diagram holds no relationships (D5): one the library cannot take is named, not dropped silently.
+      ...(dbml ? { diagramHoldsNoRelationships: true } : {}),
     });
     if (dbml) {
       const refusal = dbmlImportRefusal(plan, (n) => tableLibraryService.tableStorage?.(n));
@@ -397,13 +400,14 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     });
     return undefined;
   }
-  if (dirty.length > 0) {
-    const libraryRoot = path.dirname(tableLibraryService.getTablesDir());
-    const file = path.relative(libraryRoot, dirty[0]).split(path.sep).join('/');
-    const dirtyPath = dirty[0];
+  const showUnsaved = (dirtyPath: string): void => {
+    const file = path.relative(path.dirname(tableLibraryService.getTablesDir()), dirtyPath).split(path.sep).join('/');
     showError(`${TITLE}: ${file} has unsaved changes. Save or revert it, then try again. Nothing was changed.`, {
       [SHOW_FILE_BUTTON]: () => ui.showFile(dirtyPath),
     });
+  };
+  if (dirty.length > 0) {
+    showUnsaved(dirty[0]);
     return undefined;
   }
 
@@ -425,11 +429,16 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     documentText: (tableNaming) => serializeDbmlImportDocument(plan.document, tableNaming),
     // The source layout's positions and sticky-note boxes go into the new `.dbdiagram`.
     document: () => ({ ...plan.document, logical: { ...plan.document.logical, relationships: [] } }) as unknown as Record<string, unknown>,
-  }, { layerService, tableLibraryService, subjectAreaService });
+  }, { layerService, tableLibraryService, subjectAreaService, readText: openOrDiskText, dirtyFiles });
   if (!outcome.ok) {
     const { error: err, undone } = outcome;
     if (outcome.nameTaken) {
       nameTaken();
+      return undefined;
+    }
+    // A file the write would change (another diagram it re-renders, §5.7) has unsaved edits.
+    if (err instanceof UnsavedFilesRefused) {
+      showUnsaved(err.filePaths[0]);
       return undefined;
     }
     const result = writeOutcome(undone, semanticDir);

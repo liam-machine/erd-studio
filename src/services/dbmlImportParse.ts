@@ -181,16 +181,21 @@ export type ReadDbmlResult =
  * multi-file project, so Import names the route that works instead.
  */
 export const IMPORT_MULTI_FILE_MESSAGE =
-  'This DBML file imports other files (`use`), so it is part of a multi-file project, such as another ERD Studio 2.0 project. ' +
-  'Import reads one self-contained file: open that project\'s diagram in ERD Studio and use **Export Diagram… → DBML (rich)**, then import the exported file.';
+  // Plain text: a VS Code notification renders no Markdown.
+  'This DBML file imports other files (use lines), so it is part of a multi-file project, such as another ERD Studio 2.0 project. ' +
+  'Import reads one self-contained file: open that project\'s diagram in ERD Studio and use Export Diagram… → DBML (rich), then import the exported file.';
 
 /**
  * The 1-based line of the first `use` declaration in `text` (a line whose
- * first token is `use`, outside a comment or a string), or undefined.
+ * first token is `use`, outside a comment or a string, at the top level:
+ * inside a `Table` or `Enum` body `use` is a column or value name), or
+ * undefined.
  */
 export function firstUseDeclarationLine(text: string): number | undefined {
   let line = 1;
   let atLineStart = true;
+  // Bracket depth outside comments and strings: `{`, `[` and `(` together.
+  let depth = 0;
   let i = 0;
   const n = text.length;
   while (i < n) {
@@ -224,7 +229,9 @@ export function firstUseDeclarationLine(text: string): number | undefined {
       atLineStart = false;
       continue;
     }
-    if (atLineStart && /^use(?=[\s{*'"])/.test(text.slice(i, i + 4))) return line;
+    if (atLineStart && depth === 0 && /^use(?=[\s{*'"])/.test(text.slice(i, i + 4))) return line;
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if ((c === '}' || c === ']' || c === ')') && depth > 0) depth--;
     atLineStart = false;
     i++;
   }

@@ -153,6 +153,13 @@ export interface PlanDbmlImportInput {
   libraryRelationships: boolean;
   /** `drawnDiagramCopies(...)` of the project's other diagrams: a link one keeps a copy of stays in this file (see `routeToLibrary`). */
   diagramCopies?: readonly Relationship[];
+  /**
+   * The new diagram can hold no relationships (a `.dbml` diagram, D5): a
+   * relationship the library cannot take (its foreign-key table's file could
+   * not be read) is left out and named in `report.dropped`, never kept in
+   * the document or counted. Needs `libraryRelationships`.
+   */
+  diagramHoldsNoRelationships?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +497,22 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
     relationships = relationships.filter((r) => !left.has(r));
     const routed = routeToLibrary(relationships.filter((r) => !keptHere.has(r)), newTables, libraryCopy, input.diagramCopies ?? []);
     const kept = new Set([...keptHere, ...routed.kept]);
+    if (input.diagramHoldsNoRelationships && kept.size > 0) {
+      // Nowhere to store them: named, not counted (the S5 rule for a DBML diagram).
+      const unstored = relationships.filter((r) => kept.has(r));
+      const groups = compositeGroupsOf(unstored);
+      const grouped = new Set(groups.flat());
+      const why = "not stored, because its table's file could not be read.";
+      for (const members of groups) {
+        const what = describeComposite(members);
+        report.dropped.push({ kind: 'reference', what, item: what.replace(/^Reference /, ''), why });
+      }
+      for (const rel of unstored.filter((r) => !grouped.has(r))) {
+        report.dropped.push({ kind: 'reference', what: `Reference ${describeLink(rel)}`, item: describeLink(rel), why });
+      }
+      relationships = relationships.filter((r) => !kept.has(r));
+      kept.clear();
+    }
     domainRelationships = relationships.filter((r) => kept.has(r));
     changedLibraryTables = routed.changed.filter((m) => !newTables.includes(m));
     report.relationshipsAlreadyInLibrary = relationships.filter((r) => !kept.has(r) && stored.has(r)).length;
