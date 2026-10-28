@@ -774,7 +774,8 @@ async function planOnce(
       addLeftTable(m.name, m.path);
       continue;
     }
-    if (byName.has(lower(m.name)) || byName.has(lower(stem))) continue;
+    // A table file of that name is there too (read or left): this copy was never read, and renaming it would clash.
+    if (byName.has(lower(m.name)) || byName.has(lower(stem)) || files.some((f) => f.kind === 'table' && [lower(stem), lower(m.name)].includes(lower(stemOf(f.path))))) continue;
     const file = m.path.slice(m.path.lastIndexOf('/') + 1);
     const caseOnly = lower(file).endsWith('.yml');
     leave(m.path, caseOnly

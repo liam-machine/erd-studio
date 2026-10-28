@@ -1346,11 +1346,15 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
       put('logical-models/gold/dim_b.YML', yml('dim_b', ['b_key']));
       // A dbt schema file named .yaml is not a table: never listed, as before.
       put('logical-models/gold/_models.yaml', 'version: 2\nmodels:\n  - name: dim_a\n');
+      // A .yaml copy beside the table's own .yml (here one Convert leaves) was never read: renaming it would clash.
+      put('logical-models/gold/dim_c.yml', 'name: dim_c\ncolumns:\n  - name: a\n\tdataType: INT\n');
+      put('logical-models/silver/dim_c.yaml', yml('dim_c', ['c_key']));
       put('gold/d.json', diagram('d', 'gold', ['dim', 'dim_a', 'dim_b']));
       const input = readDbmlConversionInput(root, '.erd-studio');
       expect(input.misnamedTables).toEqual([
         { path: 'logical-models/gold/dim_a.yaml', name: 'dim_a' },
         { path: 'logical-models/gold/dim_b.YML', name: 'dim_b' },
+        { path: 'logical-models/silver/dim_c.yaml', name: 'dim_c' },
       ]);
       const plan = await planDbmlConversion(input);
       expect(plan.refusals).toEqual([]);
@@ -1362,6 +1366,8 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
         'It is named dim_b.YML, and ERD Studio reads a table file only when its name ends in .yml, in lower case: the table library does not list it, '
           + 'and a diagram finds it only on a file system that ignores case. Rename it to dim_b.yml, then convert again.',
       );
+      expect(leftOf(plan, 'logical-models/silver/dim_c.yaml')).toBeUndefined();
+      expect(leftOf(plan, 'logical-models/gold/dim_c.yml')?.problem).toMatch(/indented with a tab/);
       // Not "create them later with Add from dbt": each has a file, under the wrong name.
       expect(plan.keptMissing).toEqual([]);
       expect(created(plan, 'gold/d.dbml')).toContain("erd_unlinked_tables: 'dim_a, dim_b'");
