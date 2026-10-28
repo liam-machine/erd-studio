@@ -173,7 +173,8 @@ step, but fix these warnings too in any file you wrote: `missingUse`, `missingRe
 `unquotedValue` (`natural_key: true` → `natural_key: 'true'`) and `usePathMismatch`. The message
 gives the exact line. ERD Studio reads on without the fix, but other DBML tools reject the file
 and every diagram that imports it. A `foreignMetadata` warning is a Metadata block outside the
-table's own file: move its properties into the table file as inline settings and remove the block.
+table's own file: do what its message says, moving its properties into the table file (as inline
+settings in a `.dbml` one) and removing the block.
 Other warnings are information.
 
 - **`fix-dbml-file`** — a `.dbml` file ERD Studio or other DBML tools cannot read. The usual cause

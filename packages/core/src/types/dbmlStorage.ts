@@ -144,6 +144,12 @@ export interface DbmlFileOutline {
    * column block, and its 1-based line. Optional: an older core leaves it unset.
    */
   metadata?: Array<{ table: string; column?: string; line: number }>;
+  /**
+   * The last name part of each `Table` the file itself declares (as written),
+   * so a `Metadata` block on one of them is not read as a block outside its
+   * table's file. Optional: an older core leaves it unset.
+   */
+  tables?: string[];
 }
 
 /** A diagnostic of {@link DbmlStorageReader}-adjacent multi-file compiles (`compileDbmlProject`). */

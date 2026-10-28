@@ -22,6 +22,7 @@ describe('outlineDbmlFile', () => {
       parses: true,
       enums: [],
       metadata: [],
+      tables: [],
       uses: [
         { path: '../dim_date.dbml', resolved: 'tables/dim_date.dbml', line: 2, wildcard: false, tables: ['dim_date'] },
         { path: './fct_order', resolved: 'tables/gold/fct_order.dbml', line: 3, wildcard: false, tables: ['fct_order'] },
@@ -54,8 +55,13 @@ describe('outlineDbmlFile', () => {
     ]);
   });
 
+  it('lists the Tables the file itself declares, by their last name part', () => {
+    const text = 'Table a {\n  id int [pk]\n}\n\nTable gold."b c" {\n  id int\n}\n\nMetadata Table a {\n  grain: \'x\'\n}\n';
+    expect(outlineDbmlFile(text, 'gold/pulled.dbml').tables).toEqual(['a', 'b c']);
+  });
+
   it('a file with a syntax error has no outline', () => {
-    expect(outlineDbmlFile('Table t {\n  id int\n', 'tables/t.dbml')).toEqual({ parses: false, uses: [], enums: [], metadata: [] });
+    expect(outlineDbmlFile('Table t {\n  id int\n', 'tables/t.dbml')).toEqual({ parses: false, uses: [], enums: [], metadata: [], tables: [] });
   });
 
   it('findConflictMarkers is exported from the main entry', () => {

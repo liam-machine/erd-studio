@@ -1207,6 +1207,19 @@ describe('erdStudio.renameDomain on a JSON diagram (D23: one edit through applyF
     expect(deleted).toHaveBeenCalledWith(erd('silver', 'bob.json'));
   });
 
+  it('refreshes the table library and open canvases itself, since the watcher skips its own writes', async () => {
+    await activate(context);
+    const { TableLibraryTreeProvider } = await import('../../src/providers/ModelLibraryTreeProvider');
+    const { SemanticEditorProvider } = await import('../../src/providers/SemanticEditorProvider');
+    const library = vi.spyOn(TableLibraryTreeProvider.prototype, 'refresh');
+    const presence = vi.spyOn(SemanticEditorProvider.prototype, 'syncSubjectAreaFilePresence');
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('robert');
+    await vscode.commands.executeCommand('erdStudio.renameDomain', element());
+    expect(fs.existsSync(erd('silver', 'robert.json'))).toBe(true);
+    expect(library).toHaveBeenCalled();
+    expect(presence).toHaveBeenCalled();
+  });
+
   it('an edit VS Code applies only part of is put back before it says nothing was changed', async () => {
     const before = fs.readFileSync(erd('silver', 'bob.json'), 'utf-8');
     await activate(context);

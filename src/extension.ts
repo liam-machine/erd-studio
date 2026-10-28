@@ -1321,9 +1321,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // once per session; the file is never converted or deleted.
   let foreignFormatWarned = false;
   const foreignFormatSubscription = fileWatcherService.onForeignFormatCreated(({ uri }) => {
-    // New Diagram and Rename write their `.json` outside the own-write
-    // tracker and mark it here instead (the change event below consumes the
-    // mark, after this one): ERD Studio's own file is never blamed on a helper.
+    // New Diagram writes its `.json` outside the own-write tracker and marks
+    // it here instead (the change event below consumes the mark, after this
+    // one; Rename records own writes, and drops its mark itself): ERD
+    // Studio's own file is never blamed on a helper.
     if (foreignFormatWarned || knownStorage !== 'dbml' || subjectAreasCreatedHere.has(uri.fsPath)) return;
     // A file Convert Project to DBML deleted, back after Edit > Undo: not a helper's.
     if (convertedSourcesHere.has(path.resolve(uri.fsPath))) return;
@@ -1361,8 +1362,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // document, so redrawing for it too would draw it twice.
     if (layout) void editorProvider.refreshSubjectAreaPanel(uri.fsPath);
     // A domain file ERD Studio did not write appeared: an AI assistant, a hand
-    // edit or a git pull. createDomain / renameDomain write outside the own-write
-    // tracker, so they mark their paths in subjectAreasCreatedHere instead.
+    // edit or a git pull. createDomain writes outside the own-write tracker,
+    // so it marks its path in subjectAreasCreatedHere instead.
     if (created && !subjectAreasCreatedHere.delete(uri.fsPath)) { telemetry.feature('domainCreatedExternal'); }
     // A canvas showing "deleted or renamed" whose file is back redraws (#161).
     editorProvider.syncSubjectAreaFilePresence();
@@ -1372,6 +1373,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // A pulled/created .erd-studio/ must reveal the view/title buttons without a reload
     refreshContextKeys();
   });
+
+  // Rename Subject Area records its created and deleted files as own writes,
+  // so the watcher skips them: the side effects its change and delete events
+  // drive are issued here instead, and the created-here marks it would have
+  // consumed are dropped (the own write already keeps the foreign-format
+  // warning quiet for these paths).
+  const afterSubjectAreaRename = (
+    oldFilePath: string,
+    created: readonly string[],
+    applied: { created: readonly string[]; deleted: readonly string[] },
+  ): void => {
+    for (const filePath of applied.created) ownWrites.recordWrite(filePath);
+    for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
+    for (const filePath of created) subjectAreasCreatedHere.delete(filePath);
+    editorProvider.syncSubjectAreaFilePresence();
+    treeProvider.invalidateSubjectArea(oldFilePath);
+    treeProvider.refresh();
+    tableLibraryProvider.refresh();
+    refreshContextKeys();
+  };
 
   // The editor wrote a domain (and possibly model files) itself. Those writes
   // are recorded as own writes so the watchers skip them (a watcher-driven
@@ -2484,17 +2505,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           }
           const oldTabs = findMatchingTabs(oldFileUri);
           if (oldTabs.length > 0) { await vscode.window.tabGroups.close(oldTabs, true); }
-          for (const w of writes) if (w.kind === 'create') subjectAreasCreatedHere.add(w.path);
+          const created = writes.filter((w) => w.kind === 'create').map((w) => w.path);
+          for (const p of created) subjectAreasCreatedHere.add(p);
           const applied = await applyFileWrites(writes);
           if (!applied.ok) {
+            for (const p of created) subjectAreasCreatedHere.delete(p);
             // A file the reconcile could not put back is already named in its modal.
             if (applied.unrestored.length === 0) void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}" to "${newSlug}"`);
             return;
           }
-          for (const filePath of applied.created) ownWrites.recordWrite(filePath);
-          for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
-          treeProvider.invalidateSubjectArea(oldFilePath);
-          treeProvider.refresh();
+          afterSubjectAreaRename(oldFilePath, created, applied);
           selectorsService.scheduleRegenerate();
           await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(newDbmlPath), SUBJECT_AREA_EDITOR_VIEW_TYPE);
           return;
@@ -2529,14 +2549,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           { kind: 'delete', path: oldFilePath },
         ]);
         if (!applied.ok) {
+          subjectAreasCreatedHere.delete(newFilePath);
           // A file the reconcile could not put back is already named in its modal.
           if (applied.unrestored.length === 0) void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}" to "${newSlug}". Nothing was changed.`);
           return;
         }
-        for (const filePath of applied.created) ownWrites.recordWrite(filePath);
-        for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
-        treeProvider.invalidateSubjectArea(oldFilePath);
-        treeProvider.refresh();
+        afterSubjectAreaRename(oldFilePath, [newFilePath], applied);
 
         // Auto-open renamed domain
         selectorsService.scheduleRegenerate();

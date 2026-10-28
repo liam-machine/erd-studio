@@ -856,6 +856,31 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(ids(r)).toEqual(['ready']);
   });
 
+  it('a Metadata block on a Table the same file declares is not foreignMetadata (a single-file DBML in a layer folder)', async () => {
+    const r = await doctor(nativeWith({
+      'gold/pulled.dbml': () => "Table a {\n  id int [pk]\n}\n\nMetadata Table a {\n  grain: 'x'\n}\n",
+    }));
+    expect(problem(r, 'foreignMetadata')).toEqual([]);
+    expect(problem(r, 'declaresOwnTables')).toEqual([expect.objectContaining({ file: '.erd-studio/gold/pulled.dbml' })]);
+    expect(r.erd.dbmlProblems.filter((p) => p.file === '.erd-studio/gold/pulled.dbml' && /Metadata/.test(p.message))).toEqual([]);
+  });
+
+  it('a Metadata block on a table with no table file says so, not "move them into its table file"', async () => {
+    const r = await doctor(nativeWith({ 'gold/sales.dbml': (t) => `${t}\nMetadata Table nowhere {\n  grain: 'x'\n}\n` }));
+    const [p] = problem(r, 'foreignMetadata');
+    expect(p.message).toBe('This Metadata block sets properties of nowhere, which has no table file; it is not read. Add the table, or remove the block.');
+  });
+
+  it('a Metadata block on a YAML table (a mixed project) words the fix for YAML', async () => {
+    const r = await doctor(nativeWith({
+      'tables/gold/fct_extra.yml': () => 'name: fct_extra\ncolumns:\n  - name: extra_key\n    dataType: INT\n',
+      'tables/gold/_relationships.dbml': (t) => `${t}\nMetadata Table fct_extra {\n  grain: 'x'\n}\n`,
+    }));
+    const [p] = problem(r, 'foreignMetadata');
+    expect(p.message).toContain('fct_extra is a YAML table: set them in tables/gold/fct_extra.yml');
+    expect(p.message).not.toMatch(/Move them into tables\/gold\/fct_extra\.yml as inline settings/);
+  });
+
   it("a relationships file's syntax error is reported once (the compile's, not the reader's copy too)", async () => {
     const r = await doctor(nativeWith({ 'tables/_relationships.dbml': (t) => `${t}Ref: dim_date.date_key >\n` }));
     expect(problem(r, 1002)).toEqual([expect.objectContaining({ file: '.erd-studio/tables/_relationships.dbml', line: 6, severity: 'error', message: 'Unexpected EOF' })]);

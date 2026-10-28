@@ -15,7 +15,7 @@ export function outlineDbmlFile(rawText: string, filePath: string): DbmlFileOutl
   const text = stripBom(rawText);
   const compiled = compileOne(text);
   if (compiled.errors.some((d) => d.errorClass === 'syntax') || !compiled.ast) {
-    return { parses: false, uses: [], enums: [], metadata: [] };
+    return { parses: false, uses: [], enums: [], metadata: [], tables: [] };
   }
   const uses = useLinesOf(compiled.ast, text, filePath).map((use) => ({
     path: use.importPath,
@@ -26,9 +26,13 @@ export function outlineDbmlFile(rawText: string, filePath: string): DbmlFileOutl
   }));
   const enums: DbmlFileOutline['enums'] = [];
   const metadata: NonNullable<DbmlFileOutline['metadata']> = [];
+  const tables: string[] = [];
   for (const node of topLevel(compiled.ast)) {
     const type = elementType(node)?.toLowerCase();
-    if (type === 'enum') {
+    if (type === 'table') {
+      const parts = plainNames(node.name);
+      if (parts && parts.length > 0) tables.push(parts[parts.length - 1]);
+    } else if (type === 'enum') {
       const parts = plainNames(node.name);
       if (!parts || parts.length === 0) continue;
       enums.push({ name: parts.join('.'), line: lineAt(text, node.start) });
@@ -43,5 +47,5 @@ export function outlineDbmlFile(rawText: string, filePath: string): DbmlFileOutl
       });
     }
   }
-  return { parses: true, uses, enums, metadata };
+  return { parses: true, uses, enums, metadata, tables };
 }

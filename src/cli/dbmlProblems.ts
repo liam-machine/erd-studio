@@ -425,21 +425,33 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
   // ── Metadata blocks outside a table's own file (D25) ─────────────────────
   // ERD Studio reads and edits a table's properties only in its table file;
   // another DBML tool applies such a block over them, so the two disagree.
-  /** `file\0line` of every block reported, so a diagram's reader warning for it is not repeated. */
+  /**
+   * `file\0line` of every block reported here, or skipped because the file
+   * declares its target Table itself, so a diagram's reader note on it is not repeated.
+   */
   const foreignMetadataLines = new Set<string>();
   for (const f of files) {
     if ((f.kind !== 'diagram' && f.kind !== 'relationships') || conflicted.has(f.rel)) continue;
-    for (const m of outline(f).metadata ?? []) {
+    const o = outline(f);
+    const ownTables = new Set((o.tables ?? []).map((n) => n.toLowerCase()));
+    for (const m of o.metadata ?? []) {
+      foreignMetadataLines.add(`${f.rel}\0${m.line}`);
+      // A block on a Table this file declares is inside that table's file (a
+      // single-file DBML, reported as declaresOwnTables / declaredInDiagram).
+      if (ownTables.has(m.table.toLowerCase())) continue;
       const t = tableOf(m.table);
       const target = `${t?.name ?? m.table}${m.column !== undefined ? `.${m.column}` : ''}`;
-      const home = t ? t.path : 'its table file';
-      foreignMetadataLines.add(`${f.rel}\0${m.line}`);
-      push({
-        file: projectRel(f.rel), line: m.line, code: 'foreignMetadata',
-        message: `This Metadata block sets properties of ${target} from outside its table file${t ? ` (${t.path})` : ''}. `
-          + 'ERD Studio reads and edits a table\'s properties only in its table file, so the canvas does not show these values, while other DBML tools apply them. '
-          + `Move them into ${home} as inline settings, and remove the block.`,
-      });
+      const ignored = 'ERD Studio reads and edits a table\'s properties only in its table file, so the canvas does not show these values, while other DBML tools apply them. ';
+      const message = !t
+        ? snapshot
+          ? `This Metadata block sets properties of ${target}, which has no table file; it is not read. Add the table, or remove the block.`
+          : `This Metadata block sets properties of ${target} from outside its table file. ${ignored}Move them into its table file as inline settings, and remove the block.`
+        : t.storage === 'yaml'
+          ? `This Metadata block sets properties of ${target} from outside its table file (${t.path}). ${ignored}`
+            + `${t.name} is a YAML table: set them in ${t.path} (or convert the project to DBML and set them in its table file as inline settings), and remove the block.`
+          : `This Metadata block sets properties of ${target} from outside its table file (${t.path}). ${ignored}`
+            + `Move them into ${t.path} as inline settings, and remove the block.`;
+      push({ file: projectRel(f.rel), line: m.line, code: 'foreignMetadata', message });
     }
   }
 
@@ -480,7 +492,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
       if (/\(usePathMismatch\)/.test(w) || /looks like a single-file DBML/.test(w) || /\[\d+\]$/.test(w)) continue;
       const code = /is declared in the diagram file/.test(w) ? 'declaredInDiagram' : 'diagramWarning';
       if (code === 'declaredInDiagram' && reading.holdsOwnTables) continue;
-      // A Metadata block is reported once, as foreignMetadata above.
+      // A Metadata block is reported once, as foreignMetadata above (or not at all, on a Table the file declares).
       if (line !== undefined && /a Metadata block/.test(w) && foreignMetadataLines.has(`${f.rel}\0${line}`)) continue;
       push({ file: projectRel(f.rel), ...(line !== undefined ? { line } : {}), code, message: w.replace(/^Line \d+: /, '') });
     }
