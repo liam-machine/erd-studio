@@ -10,7 +10,8 @@ name: Pre-release to VS Code Marketplace and Open VSX
 # dispatchable. Unlike deploy.yml it never commits, pushes or bumps a version
 # on any branch: the version is set only inside this run's checkout, and the
 # GitHub Release tag (prerelease-v<version>) is created through the API on the
-# released commit. It never publishes the npm packages and never deploys the
+# released commit, just before the first publish. A re-run only finishes a
+# release whose tag marks the commit it checked out. It never publishes the npm packages and never deploys the
 # telemetry Worker. Recipe and version scheme: docs/dev/releasing.md →
 # "Pre-releases (opt-in)". test/unit/prereleaseWorkflow.test.ts pins the
 # safety properties.
@@ -77,12 +78,29 @@ jobs:
       # Fail fast, before anything is built. A Marketplace lookup failure fails
       # here (unlike the stable deploy, which falls back): a pre-release number is
       # never guessed. A re-run of this same run (run_attempt > 1) may find its
-      # own pre-release already published and carries on (--skip-duplicate below).
+      # own pre-release already published and carries on (--skip-duplicate below),
+      # but only when the prerelease-v<version> tag marks the commit this attempt
+      # checked out: a re-run resolves a branch `ref` again, and its tip may have
+      # moved since the first attempt published.
       - name: Validate the version
         working-directory: ext
         env:
           RUN_ATTEMPT: ${{ github.run_attempt }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
+          TAG="prerelease-v${VERSION}"
+          HEAD_SHA=$(git rev-parse HEAD)
+          # The commit the tag marks (peeling an annotated tag), or empty when
+          # there is no such tag. Exported for the tagging step below.
+          TAG_REF=$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" --jq '.object.type + " " + .object.sha' 2>/dev/null || true)
+          case "$TAG_REF" in
+            "tag "*) TAG_COMMIT=$(gh api "repos/${GH_REPO}/git/tags/${TAG_REF#tag }" --jq .object.sha) ;;
+            "commit "*) TAG_COMMIT="${TAG_REF#commit }" ;;
+            *) TAG_COMMIT="" ;;
+          esac
+          echo "TAG_COMMIT=${TAG_COMMIT}" >> "$GITHUB_ENV"
+
           # Scratch files live under RUNNER_TEMP, never the checkout: anything
           # left in ext/ ships in the VSIX.
           SHOW_JSON="${RUNNER_TEMP}/marketplace.json"
@@ -99,6 +117,8 @@ jobs:
             --version "$VERSION" \
             --marketplace-json "$SHOW_JSON" \
             --changelog CHANGELOG.md \
+            --head "$HEAD_SHA" \
+            --tag-commit "$TAG_COMMIT" \
             "${RERUN[@]}"
           echo "Pre-releasing v${VERSION} from ${TARGET_REF} ($(git rev-parse --short HEAD))"
 
@@ -157,6 +177,33 @@ jobs:
         working-directory: ext
         run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
+      # Pin the release to this commit before anything is published, so a re-run
+      # (Validate above) can prove it is finishing the same release. Validation has
+      # already refused a published version whose tag marks another commit, so a
+      # tag on another commit here is left by a run that never published (a
+      # failed build, say): move it, unless a GitHub Release already uses it.
+      # Created through the API; nothing is pushed.
+      - name: Tag the release commit
+        working-directory: ext
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="prerelease-v${VERSION}"
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ -z "$TAG_COMMIT" ]; then
+            gh api "repos/${GH_REPO}/git/refs" -f "ref=refs/tags/${TAG}" -f "sha=${HEAD_SHA}" > /dev/null
+            echo "Tagged ${HEAD_SHA} as ${TAG}"
+          elif [ "$TAG_COMMIT" = "$HEAD_SHA" ]; then
+            echo "${TAG} already marks ${HEAD_SHA}"
+          elif gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::error::${TAG} marks ${TAG_COMMIT} and has a GitHub Release, but this run built ${HEAD_SHA}. Use a new version."
+            exit 1
+          else
+            echo "Moving ${TAG} from ${TAG_COMMIT} (a run that never published) to ${HEAD_SHA}"
+            gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/${TAG}" -f "sha=${HEAD_SHA}" -F force=true > /dev/null
+          fi
+
       # `vsce package` runs the vscode:prepublish hook (npm run package);
       # --pre-release marks the VSIX, and `vsce publish --pre-release` refuses a
       # VSIX that was not packaged that way.
@@ -213,8 +260,10 @@ jobs:
       # Only after a successful publish. The tag is prerelease-v<version>, never
       # v<version> (the stable deploy's tags), and the release is a GitHub
       # pre-release that is never "Latest": the repo's Latest release stays the
-      # stable one. `gh release create` makes the tag on the released commit
-      # through the API; nothing is pushed.
+      # stable one. The tag already marks the released commit (Tag the release
+      # commit), and --verify-tag refuses to create one elsewhere. On a re-run an
+      # existing release keeps the VSIX it has: a rebuild is never byte-identical
+      # to the one on the Marketplace, so it only fills in a missing asset.
       - name: Create GitHub pre-release
         working-directory: ext
         env:
@@ -233,13 +282,17 @@ jobs:
 
           ASSET="${RUNNER_TEMP}/erd-studio-${VERSION}.vsix"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "GitHub Release ${TAG} already exists; refreshing its VSIX"
-            gh release upload "$TAG" "$ASSET" --clobber
+            if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$(basename "$ASSET")"; then
+              echo "GitHub Release ${TAG} already exists with its VSIX; leaving it"
+            else
+              echo "GitHub Release ${TAG} already exists; attaching its VSIX"
+              gh release upload "$TAG" "$ASSET"
+            fi
           else
             gh release create "$TAG" "$ASSET" \
+              --verify-tag \
               --prerelease \
               --latest=false \
               --title "v${VERSION} (pre-release)" \
-              --notes-file "$NOTES_FILE" \
-              --target "$(git rev-parse HEAD)"
+              --notes-file "$NOTES_FILE"
           fi

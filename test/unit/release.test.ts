@@ -297,10 +297,37 @@ describe('release.mjs — the stable release ignores pre-releases', () => {
     expect(() => resolveReleaseVersion('1.7.2', '1.7.2', '1.9.0', undefined, published)).toThrow(/already on the Marketplace as a pre-release/);
   });
 
-  it('warns when a pin sits below a pre-release', () => {
-    const notes: string[] = [];
-    expect(resolveReleaseVersion('1.7.2', '1.7.2', '1.8.0', (m: string) => notes.push(m), published)).toBe('1.8.0');
-    expect(notes.some((m) => /below pre-release v1\.9\.1/.test(m))).toBe(true);
+  it('refuses a pin below a pre-release: pre-release users would never get it', () => {
+    expect(() => resolveReleaseVersion('1.7.2', '1.7.2', '1.8.0', undefined, published)).toThrow(/below pre-release v1\.9\.1/);
+  });
+
+  it('next-version refuses a pin when the Marketplace lookup failed', () => {
+    // vsce's --skip-duplicate ignores the channel, so an unchecked pin that a
+    // pre-release took would be committed to main and silently never published.
+    const dir = mkdtempSync(join(tmpdir(), 'release-'));
+    writeFileSync(join(dir, 'show.json'), '{}');
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ version: '1.7.2' }));
+    writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased — 1.9.0\n');
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const args = ['next-version', '--marketplace-json', join(dir, 'show.json'), '--package-json', join(dir, 'package.json'), '--changelog', join(dir, 'CHANGELOG.md')];
+      expect(main(args, {})).toBe(1);
+      expect(out).not.toHaveBeenCalled();
+      expect(err).toHaveBeenCalledWith(expect.stringMatching(/Marketplace lookup failed/));
+
+      // Without a pin (or with one not ahead of package.json) it still falls back to a patch.
+      writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased\n');
+      expect(main(args, {})).toBe(0);
+      expect(out).toHaveBeenCalledWith('1.7.3\n');
+      out.mockClear();
+      writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased — 1.7.0\n');
+      expect(main(args, {})).toBe(0);
+      expect(out).toHaveBeenCalledWith('1.7.3\n');
+    } finally {
+      out.mockRestore();
+      err.mockRestore();
+    }
   });
 
   it('next-version reads only stable Marketplace versions', () => {
@@ -362,11 +389,27 @@ describe('release.mjs — checkPrereleaseVersion', () => {
 
   it('a re-run of the same workflow run may find its own pre-release published', () => {
     const withPre = show(pre('1.9.0'), stable('1.7.2'));
-    const result = check('1.9.0', { showJson: withPre, rerun: true });
+    const sha = 'a'.repeat(40);
+    const result = check('1.9.0', { showJson: withPre, rerun: true, headCommit: sha, tagCommit: sha.toUpperCase() });
     expect(result.errors).toEqual([]);
     expect(result.notes.join()).toMatch(/re-run/);
     // …but never a stable one.
-    expect(check('1.7.2', { rerun: true }).errors.join()).toMatch(/STABLE/);
+    expect(check('1.7.2', { rerun: true, headCommit: sha, tagCommit: sha }).errors.join()).toMatch(/STABLE/);
+  });
+
+  it('a re-run never adopts a published pre-release of another commit', () => {
+    const withPre = show(pre('1.9.0'), stable('1.7.2'));
+    const a = 'a'.repeat(40);
+    const b = 'b'.repeat(40);
+    // The branch moved since the first attempt published (or another run published it).
+    expect(check('1.9.0', { showJson: withPre, rerun: true, headCommit: b, tagCommit: a }).errors.join()).toMatch(
+      /tag marks aaaaaaa, not this run's commit bbbbbbb.*v1\.9\.1/,
+    );
+    // No tag, or no commit to compare: refuse rather than guess.
+    expect(check('1.9.0', { showJson: withPre, rerun: true, headCommit: b, tagCommit: '' }).errors.join()).toMatch(/does not exist/);
+    expect(check('1.9.0', { showJson: withPre, rerun: true }).errors.length).toBe(1);
+    // An unpublished version needs no tag, on any attempt.
+    expect(check('1.9.1', { showJson: withPre, rerun: true }).errors).toEqual([]);
   });
 
   it('must be above every other pre-release', () => {
@@ -401,6 +444,15 @@ describe('release.mjs — checkPrereleaseVersion', () => {
       expect(run('2.0.0', { GITHUB_ACTIONS: 'true' })).toBe(1);
       expect(err).toHaveBeenCalledWith(expect.stringMatching(/^::error::/));
       expect(main(['check-prerelease', '--version', '1.9.0', '--marketplace-json', join(dir, 'missing.json')], {})).toBe(1);
+
+      // --rerun passes only with a matching --head / --tag-commit (an empty tag commit is "no tag").
+      writeFileSync(join(dir, 'show.json'), JSON.stringify(show(pre('1.9.0'), stable('1.7.2'))));
+      const sha = 'c'.repeat(40);
+      const rerun = (tagCommit: string) =>
+        main(['check-prerelease', '--version', '1.9.0', '--marketplace-json', join(dir, 'show.json'), '--changelog', join(dir, 'CHANGELOG.md'), '--head', sha, '--tag-commit', tagCommit, '--rerun'], {});
+      expect(rerun(sha)).toBe(0);
+      expect(rerun('d'.repeat(40))).toBe(1);
+      expect(rerun('')).toBe(1);
     } finally {
       err.mockRestore();
     }

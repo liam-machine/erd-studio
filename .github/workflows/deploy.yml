@@ -265,8 +265,10 @@ jobs:
       # + patch, so a desynced repo (lost bump commit, rewritten history) can never
       # fail with "version already exists". Pre-releases (prerelease.yml) are never
       # the base: a 1.9.0 pre-release must not make the next stable patch 1.9.1.
-      # A patch number a pre-release took is skipped; a changelog pin one took
-      # fails here, before the bump is committed.
+      # A patch number a pre-release took is skipped; a changelog pin one took, or
+      # one below a pre-release, fails here, before the bump is committed, and so
+      # does a pin when `vsce show` failed (it cannot be checked, and
+      # --skip-duplicate would quietly skip a pin that collides with a pre-release).
       - name: Determine next version
         run: |
           # A rerun after the bump was pushed must retry that exact release. A
