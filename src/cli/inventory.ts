@@ -21,8 +21,7 @@ import type { DisplaySubjectArea, PhysicalColumnSource } from '../types/display'
 import { sameName, TABLE_NAME_PATTERN } from '../types/naming';
 import { readMeta } from '@erd-studio/core';
 import type { Cardinality, Meta, UnifiedSubjectArea } from '../types/semantic';
-import { getRawSubjectAreaTableNames } from '../types/semantic';
-import { mergeCompositeGroups, mergeUniqueMaps } from '../services/domainService';
+import { mergeCompositeGroups, mergeUniqueMaps, subjectAreaTableNames } from '../services/domainService';
 import { normaliseName } from '../services/nameUtils';
 import { catalogNodeFor } from '../services/columnTypes';
 import { inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
@@ -225,9 +224,10 @@ export function listSubjectAreaFiles(ctx: CliContext): InventoryResult['domains'
   return ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir).map((d) => {
     let models: string[] = [];
     try {
-      models = getRawSubjectAreaTableNames(JSON.parse(fs.readFileSync(d.filePath, 'utf-8')));
+      // The one raw membership reader: a JSON file's models, a DBML diagram's `use` lines.
+      models = subjectAreaTableNames(fs.readFileSync(d.filePath, 'utf-8'), d.filePath) ?? [];
     } catch {
-      // Unreadable or invalid JSON: listed with no models; `diff` reports the error.
+      // Unreadable or invalid: listed with no models; `diff` reports the error.
     }
     return { file: relPath(ctx.root, d.filePath), layer: d.layer, domain: d.domain, models };
   });

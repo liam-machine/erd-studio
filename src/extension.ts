@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { SubjectAreaService, renameSubjectAreaInRaw } from './services/domainService';
+import { SubjectAreaService, renameSubjectAreaInRaw, subjectAreaTableNames } from './services/domainService';
 import { LayerService } from './services/layerService';
 import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, type SubjectAreaSummary, type Layer, type Stage, type UnifiedSubjectArea, type StageData } from './types/semantic';
 import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
@@ -16,7 +16,9 @@ import { FileWatcherService } from './watchers/FileWatcherService';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
-import { TABLES_DIR, TableLibraryService } from './services/logicalModelService';
+import { TABLES_DIR, TableLibraryService, tablesLayerConflict } from './services/logicalModelService';
+import { projectStorageOf } from './services/projectStorage';
+import type { ProjectStorage } from '@erd-studio/core';
 import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import {
@@ -31,7 +33,7 @@ import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
 import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type DbtProjectConfig } from './services/dbtProjectConfig';
-import { TOOLING_EXCLUDE, detectPhysicalTooling, type ToolingProbe } from './services/physicalTooling';
+import { detectPhysicalTooling, toolingExclude, type ToolingProbe } from './services/physicalTooling';
 import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
 import {
   manifestAppearanceFeature,
@@ -43,7 +45,7 @@ import { TableLibraryTreeProvider, type TableLibraryNode } from './providers/Mod
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateTableName } from './providers/payloadValidation';
-import { normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
+import { layoutFilePathOf, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
 import { projectNamingOf } from './services/projectNaming';
@@ -402,9 +404,10 @@ function recordPhysicalTooling(context: vscode.ExtensionContext): void {
 }
 
 function hostToolingProbe(): ToolingProbe {
+  const exclude = toolingExclude(getErdStudioSetting('semanticDir', '.erd-studio'));
   return {
     find: async (include, max) =>
-      (await vscode.workspace.findFiles(include, TOOLING_EXCLUDE, max)).map(uri => uri.fsPath),
+      (await vscode.workspace.findFiles(include, exclude, max)).map(uri => uri.fsPath),
     readHead: async (file, bytes) => {
       const handle = await fs.promises.open(file, 'r');
       try {
@@ -1086,13 +1089,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     diagramsStatus.show();
   };
 
+  // The project's storage as the context key last said it (§5.6): the
+  // foreign-format warning compares against it, since the file that triggers
+  // the warning itself makes the project `mixed`.
+  let knownStorage: ProjectStorage = 'yaml';
+  // `tablesLayerConflict` (§3.3) is shown once per session.
+  let tablesLayerConflictShown = false;
   const refreshContextKeys = (): void => {
-    void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
+    const hasSemanticDir = fs.existsSync(fullSemanticDirPath);
+    void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', hasSemanticDir);
+    knownStorage = projectStorageOf(tableLibraryService);
+    void vscode.commands.executeCommand('setContext', 'erdStudio.storage', knownStorage);
     // A project that writes the v6 naming (#182) makes `tables/` with its first
-    // table, so the view shows from setup on, not only once a table exists.
+    // table, so the view shows from setup on, not only once a table exists;
+    // so does a DBML project (its library is always `tables/`).
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir',
-      tableLibraryService.dirExists() || (fs.existsSync(fullSemanticDirPath) && tableLibraryService.writesTableNaming()));
+      tableLibraryService.dirExists() || (hasSemanticDir && (tableLibraryService.writesTableNaming() || knownStorage !== 'yaml')));
     refreshDiagramsStatus();
+    if (!tablesLayerConflictShown && hasSemanticDir) {
+      const conflict = tablesLayerConflict(fullSemanticDirPath);
+      if (conflict) {
+        tablesLayerConflictShown = true;
+        void vscode.window.showWarningMessage(`ERD Studio: ${conflict}`);
+      }
+    }
   };
   refreshContextKeys();
 
@@ -1235,8 +1255,54 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await editorProvider.refreshAllOpenSubjectAreas();
   });
 
+  // A DBML relationships file changed externally: its Refs may belong to any
+  // table (a misplaced Ref attaches wherever its owner is), so every open
+  // canvas is redrawn (§5.4). Never a table event.
+  const relationshipsChangedSubscription = fileWatcherService.onRelationshipsChanged(async () => {
+    tableLibraryService.invalidateRelationships();
+    await editorProvider.refreshAllOpenSubjectAreas();
+    treeProvider.refresh();
+    tableLibraryProvider.refresh();
+    refreshContextKeys();
+  });
+
+  // A `.yml` table or `.json` diagram ERD Studio did not write appeared in a
+  // DBML project: most likely an AI helper set up before 2.0 (§5.4). Said
+  // once per session; the file is never converted or deleted.
+  let foreignFormatWarned = false;
+  const foreignFormatSubscription = fileWatcherService.onForeignFormatCreated(({ uri }) => {
+    if (foreignFormatWarned || knownStorage !== 'dbml') return;
+    foreignFormatWarned = true;
+    telemetry.featureOnce('dbmlForeignFormatWarned');
+    const shown = path.relative(workspaceRoot, uri.fsPath).split(path.sep).join('/');
+    void vscode.window.showWarningMessage(
+      `A YAML/JSON file was just added to this DBML project (${shown}), probably by an AI helper set up before ERD Studio 2.0. ` +
+        'Update the AI helper files so it writes DBML?',
+      'Update AI Helper Files',
+      'Not Now',
+    ).then((choice) => {
+      if (choice !== 'Update AI Helper Files') return;
+      const harnessService = new HarnessService(semanticDir);
+      const results = harnessService.detectStale(workspaceRoot).map((target) => harnessService.install(workspaceRoot, target, true));
+      recordHarnessInstalls(results);
+      const failed = results.filter((r) => !r.success);
+      if (failed.length > 0) {
+        void vscode.window.showErrorMessage(
+          `ERD Studio: ${failed.length} AI helper file(s) could not be updated. Errors: ${failed.map((r) => `${r.target.id}: ${r.error}`).join('; ')}`,
+        );
+      } else {
+        void vscode.window.showInformationMessage(
+          results.length > 0 ? `ERD Studio: Updated ${results.length} AI helper file(s) to v${HARNESS_VERSION}.` : 'ERD Studio: The AI helper files are up to date.',
+        );
+      }
+    });
+  });
+
   // Semantic file changed externally → refresh tree view + model library
   const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri, created }) => {
+    // A DBML diagram's layout file lives beside it and is no open document of
+    // the canvas: its change arrives here as a change to the diagram (§5.4).
+    if (uri.fsPath.endsWith('.dbml')) void editorProvider.refreshSubjectAreaPanel(uri.fsPath);
     // A domain file ERD Studio did not write appeared: an AI assistant, a hand
     // edit or a git pull. createDomain / renameDomain write outside the own-write
     // tracker, so they mark their paths in subjectAreasCreatedHere instead.
@@ -1464,6 +1530,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     manifestChangedSubscription,
     catalogChangedSubscription,
     semanticChangedSubscription,
+    relationshipsChangedSubscription,
+    foreignFormatSubscription,
     editorWroteSubscription,
     semanticDeletedSubscription,
     layerConfigChangedSubscription,
@@ -1556,15 +1624,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const usage: SubjectAreaTableUsage[] = [];
       for (const summary of subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)) {
         try {
-          const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as unknown;
-          usage.push({ layer: summary.layer, modelNames: getRawSubjectAreaTableNames(raw) });
+          const names = subjectAreaTableNames(fs.readFileSync(summary.filePath, 'utf-8'), summary.filePath);
+          if (names) usage.push({ layer: summary.layer, modelNames: names });
         } catch {
           // An unreadable domain contributes no usage; its models stay put.
         }
       }
       const modelsDir = tableLibraryService.getTablesDir();
       const plan = planOrganizeByLayer(
-        tableLibraryService.listTableFiles(),
+        // `.dbml` tables are not moved yet: their relationships and `use` lines move with them (S6).
+        tableLibraryService.listTableFiles().filter((e) => e.storage === 'yaml'),
         usage,
         // Each file is organised within its own library: `logical-models/` or v6's `tables/` (#182).
         (name, layer, from) => TableLibraryService.isTableFolderName(layer)
@@ -1630,7 +1699,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const entries = tableLibraryService.listTableFiles();
       // A duplicate within one library (#182: `tables/` too). A `tables/` copy of a
       // name `logical-models/` also has is the migration's conflict, not fixed here (#181).
-      const duplicates = entries.filter((e) => e.shadowedBy && (!e.library || tableLibraryService.isTableNamingFile(e.shadowedBy)));
+      const duplicates = entries.filter((e) => e.shadowedBy && (!e.library || tableLibraryService.isTableNamingFile(e.shadowedBy))
+        // A `.dbml` copy is not renamed yet: its `use` lines and Refs move with it (S6).
+        && e.storage === 'yaml' && !e.shadowedBy.endsWith('.dbml'));
       const target = typeof arg === 'string' ? arg : arg?.type === 'model' ? arg.filePath : undefined;
       // Compare real paths: the tree hands over what the library listed, but a
       // warning or a caller may name the same file through a symlinked prefix.
@@ -1673,6 +1744,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const references: SubjectAreaReference[] = [];
       for (const summary of subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)) {
         try {
+          if (summary.storage === 'dbml') continue;
           const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as unknown;
           if (getRawSubjectAreaTableNames(raw).includes(dup.name)) {
             references.push({ filePath: summary.filePath, domain: summary.domain, layer: summary.layer });
@@ -1859,8 +1931,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     // Import a DBML file (ERD Studio's own rich export, dbdiagram.io's, any
     // tool's) as a new subject area. Needs no dbt artifacts.
-    vscode.commands.registerCommand(IMPORT_DBML_COMMAND, async () => {
+    // With a file URI (the canvas's "Import these tables…" banner over a
+    // single-file DBML in a layer folder, §2.5) that file is imported;
+    // without one the user picks a file.
+    vscode.commands.registerCommand(IMPORT_DBML_COMMAND, async (file?: unknown) => {
       const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+      const uri = file as { scheme?: unknown; fsPath?: unknown } | undefined;
+      const filePath = uri && typeof uri === 'object' && uri.scheme === 'file' && typeof uri.fsPath === 'string' ? uri.fsPath : undefined;
       await importDbml({
         workspaceRoot,
         semanticDir,
@@ -1869,7 +1946,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         tableLibraryService,
         validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
         onWritten: refreshAfterNewSubjectArea,
-      });
+      }, filePath !== undefined ? { filePath } : undefined);
     }),
     // A ready-made coffee-shop star schema, through the same Import DBML flow
     // (name, dry run, Import). Works in any folder; an empty window gets the
@@ -2064,6 +2141,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await vscode.workspace.fs.delete(fileUri);
           ownWrites.recordDelete(filePath);
           treeProvider.invalidateSubjectArea(filePath);
+          // A DBML diagram's layout file goes with it (§5.7).
+          const layoutPath = filePath.endsWith('.dbml') ? layoutFilePathOf(filePath) : undefined;
+          if (layoutPath !== undefined && fs.existsSync(layoutPath)) {
+            await vscode.workspace.fs.delete(vscode.Uri.file(layoutPath));
+            ownWrites.recordDelete(layoutPath);
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to delete subject area: ${msg}`);
@@ -2086,6 +2169,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const oldFilePath = element.summary.filePath;
         const oldFileUri = vscode.Uri.file(oldFilePath);
         const layer = element.summary.layer;
+        if (oldFilePath.endsWith('.dbml')) {
+          void vscode.window.showInformationMessage('Rename Subject Area: renaming a DBML diagram is not available yet in this build of ERD Studio.');
+          return;
+        }
 
         const shouldProceed = await handleUnsavedChanges(oldFileUri, oldDomainName, 'renaming');
         if (!shouldProceed) { return; }

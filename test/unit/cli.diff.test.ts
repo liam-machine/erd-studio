@@ -13,7 +13,8 @@ import type { InventoryResult } from '../../src/cli/inventory';
 import { computeSubjectAreaDiff } from '../../src/services/stageDiff';
 import { allSelections, buildSyncPlan } from '../../src/services/syncPlanBuilder';
 import type { SyncPlan } from '../../src/types/syncPlan';
-import type { Relationship } from '../../src/types/semantic';
+import type { Relationship, SemanticTable, TableRelationship } from '../../src/types/semantic';
+import { editRelationshipsDbml, renderNewSubjectAreaDbml, renderNewTableDbml } from '@erd-studio/core/dbml';
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const PROJECT = path.join(FIXTURES, 'dbt-project');
@@ -608,5 +609,100 @@ describe('the read winner sees dbt\'s key evidence in the CLI as on the canvas (
     const { result } = runDiff(ctx, { domains: ['.erd-studio/silver/orders.json'] });
     expect(result.domains[0].report).toEqual(canvas.report);
     expect(result.domains[0].fixes.filter((f) => f.relationship)).toEqual([]);
+  });
+});
+
+// Native DBML storage (S4): the same promise, with the logical model stored as
+// DBML — tables in tables/, relationships in tables/_relationships.dbml, the
+// diagram a .dbml naming them through `use` lines — and `--domain` a `.dbml`.
+describe('end to end on native DBML storage: inventory → DBML logical model → diff --domain x.dbml exits 0', () => {
+  it('dbt-project', async () => {
+    const root = copyProject('dbt-project');
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    const models = ['fct_order', 'dim_customer', 'dim_project', 'dim_task', 'fct_task_event', 'fct_sale', 'dim_region', 'dim_date'];
+    const inventory = JSON.parse((await run(['inventory', '--models', models.join(','), '--json'], root)).out) as InventoryResult;
+    const semantic = path.join(root, '.erd-studio');
+    fs.mkdirSync(path.join(semantic, 'tables'), { recursive: true });
+    fs.mkdirSync(path.join(semantic, 'silver'), { recursive: true });
+
+    const tables = new Map<string, SemanticTable>();
+    for (const m of inventory.models) {
+      const pk = new Set(m.keyCandidates.unique.length > 0 ? m.keyCandidates.unique : (m.keyCandidates.compositeUnique[0] ?? []));
+      const fk = new Set(m.foreignKeys);
+      const table: SemanticTable = {
+        name: m.name,
+        description: m.description || `${m.name} (draft)`,
+        columns: m.columns!.map((c) => ({
+          name: c.name,
+          dataType: c.dataType || 'STRING',
+          description: c.description || '(draft)',
+          ...(pk.has(c.name) ? { isPrimaryKey: true } : {}),
+          ...(fk.has(c.name) ? { isForeignKey: true } : {}),
+        })),
+      };
+      tables.set(m.name.toLowerCase(), table);
+      fs.writeFileSync(path.join(semantic, 'tables', `${m.name}.dbml`), renderNewTableDbml(table));
+    }
+    const owners = new Map<string, { name: string; relationships: TableRelationship[] }>();
+    for (const rel of inventory.relationships.map(canonicalRelationship)) {
+      const { fromModel, ...rest } = rel;
+      const entry = owners.get(fromModel.toLowerCase()) ?? { name: fromModel, relationships: [] };
+      entry.relationships.push(rest);
+      owners.set(fromModel.toLowerCase(), entry);
+    }
+    fs.writeFileSync(path.join(semantic, 'tables', '_relationships.dbml'), editRelationshipsDbml(null, {
+      filePath: 'tables/_relationships.dbml',
+      owners,
+      resolve: (name) => {
+        const table = tables.get(name.toLowerCase());
+        return table && {
+          name: table.name,
+          reference: table.name,
+          columns: (c: string) => table.columns.find((col) => col.name.toLowerCase() === c.toLowerCase())?.name,
+          path: `tables/${table.name}.dbml`,
+          storage: 'dbml' as const,
+          primaryKey: table.columns.filter((c) => c.isPrimaryKey).map((c) => c.name),
+        };
+      },
+    }));
+    const diagram = path.join(semantic, 'silver', 'orders.dbml');
+    fs.writeFileSync(diagram, renderNewSubjectAreaDbml({
+      filePath: 'silver/orders.dbml',
+      domain: 'orders',
+      description: 'Built from inventory',
+      members: inventory.models.map((m) => ({ name: m.name, path: `tables/${m.name}.dbml` })),
+      relationshipsFiles: ['tables/_relationships.dbml'],
+    }));
+
+    const diff = await run(['diff', '--domain', path.relative(root, diagram), '--json'], root);
+    const result = JSON.parse(diff.out) as DiffResult;
+    const d = result.domains[0];
+    expect(d).toMatchObject({ file: '.erd-studio/silver/orders.dbml', domain: 'orders', layer: 'silver' });
+    expect(d.fixes.filter((f) => f.severity === 'blocking')).toEqual([]);
+    expect(diff.code).toBe(0);
+    expect(result.clean).toBe(true);
+    expect(d.missingModelFiles).toEqual([]);
+    expect(d.counts.matchedRelationships).toBe(inventory.relationships.length);
+    expect((await run(['diff', '--all', '--json'], root)).code).toBe(0);
+  });
+});
+
+describe('diff names a DBML diagram\'s errors', () => {
+  it('a .dbml that does not parse is dbml-invalid with its file and line; a table file is not-a-diagram', async () => {
+    const root = copyProject('dbt-project');
+    const semantic = path.join(root, '.erd-studio');
+    fs.mkdirSync(path.join(semantic, 'tables'), { recursive: true });
+    fs.writeFileSync(path.join(semantic, 'tables', 'dim_x.dbml'), 'Table dim_x {\n  id INT\n}\n');
+    fs.writeFileSync(path.join(semantic, 'silver', 'broken.dbml'), "Project broken {\n  erd_schema_version: '7'\n");
+
+    const broken = await run(['diff', '--domain', '.erd-studio/silver/broken.dbml', '--json'], root);
+    expect(broken.code).toBe(3);
+    const error = JSON.parse(broken.out).error;
+    expect(error.code).toBe('dbml-invalid');
+    expect(error.message).toMatch(/^\.erd-studio\/silver\/broken\.dbml:\d+: /);
+
+    const table = await run(['diff', '--domain', '.erd-studio/tables/dim_x.dbml', '--json'], root);
+    expect(table.code).toBe(3);
+    expect(JSON.parse(table.out).error.code).toBe('not-a-diagram');
   });
 });

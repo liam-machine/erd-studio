@@ -24,6 +24,7 @@ import {
   validateRelationshipEnds,
   validateOpenModelFilePayload,
   validateDismissManifestHintPayload,
+  validateImportEmbeddedTablesPayload,
   validateExportDiagramPayload,
 } from '../../src/providers/payloadValidation';
 import { TABLE_NAME_PATTERN } from '../../src/types/naming';
@@ -299,6 +300,17 @@ describe('validateDismissManifestHintPayload (#113)', () => {
 
   it.each([null, 'x', 3, [], { forever: true }])('rejects %j', (value) => {
     expect(validateDismissManifestHintPayload(value)).toMatch(/takes no payload/);
+  });
+});
+
+describe('validateImportEmbeddedTablesPayload (native DBML storage, §2.5)', () => {
+  it('accepts no payload or an empty object', () => {
+    expect(validateImportEmbeddedTablesPayload(undefined)).toBeNull();
+    expect(validateImportEmbeddedTablesPayload({})).toBeNull();
+  });
+
+  it.each([null, 'x', 3, [], { file: '/etc/passwd' }])('rejects %j', (value) => {
+    expect(validateImportEmbeddedTablesPayload(value)).toMatch(/takes no payload/);
   });
 });
 

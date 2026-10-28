@@ -55,8 +55,8 @@ describe('FileWatcherService', () => {
       const logicalOnly = new FileWatcherService('/test/workspace', '.erd-studio', undefined, undefined, { dbt: false });
       const patterns = _mockFileWatchers.map(w => (w._pattern as vscode.RelativePattern).pattern);
       expect(patterns).toEqual([
-        '.erd-studio/**/*.json',
-        '.erd-studio/{logical-models,tables}/**/*.yml',
+        '.erd-studio/**/*.{json,dbml,dbdiagram}',
+        '.erd-studio/{logical-models,tables}/**/*.{yml,dbml}',
       ]);
       expect(patterns.some(p => p.includes('manifest') || p.includes('dbt_project') || p.startsWith('{models'))).toBe(false);
       logicalOnly.dispose();
@@ -630,7 +630,7 @@ describe('FileWatcherService', () => {
     it('watches the logical-models/ top level and its layer folders (issue #76)', () => {
       const pattern = _mockFileWatchers[3]._pattern as vscode.RelativePattern;
       // …and v6's tables/ library (#162), in the same glob.
-      expect(pattern.pattern).toBe('.erd-studio/{logical-models,tables}/**/*.yml');
+      expect(pattern.pattern).toBe('.erd-studio/{logical-models,tables}/**/*.{yml,dbml}');
     });
 
     it('reports a change to a model file in a layer folder by model name', () => {
@@ -754,6 +754,129 @@ describe('FileWatcherService', () => {
       expect(classifySemanticPath(root, '/ws/.erd-studio/silver/a/b.json')).toBe('other');
       expect(classifySemanticPath(root, '/ws/.erd-studio/silver/orders.yml')).toBe('other');
       expect(classifySemanticPath(root, '/ws/other/silver/orders.json')).toBe('other');
+    });
+  });
+
+  // Native DBML storage (§5.4): `.dbml` diagrams, `.dbdiagram` layouts,
+  // relationships files and `.dbml` tables, each classified by core's one
+  // classifier and raising exactly one event.
+  describe('native DBML storage', () => {
+    const ws = '/test/workspace/.erd-studio';
+    const semanticWatcher = () => _mockFileWatchers[1];
+    const tableWatcher = () => _mockFileWatchers[3];
+
+    it('classifies each kind of file under the semantic dir', () => {
+      expect(classifySemanticPath(ws, `${ws}/gold/sales.dbml`)).toBe('domain');
+      expect(classifySemanticPath(ws, `${ws}/gold/sales.dbdiagram`)).toBe('layout');
+      expect(classifySemanticPath(ws, `${ws}/tables/dim_date.dbml`)).toBe('table');
+      expect(classifySemanticPath(ws, `${ws}/tables/gold/fct_order.dbml`)).toBe('table');
+      expect(classifySemanticPath(ws, `${ws}/tables/gold/_relationships.dbml`)).toBe('relationships');
+      expect(classifySemanticPath(ws, `${ws}/tables/_relationships.dbml`)).toBe('relationships');
+      expect(classifySemanticPath(ws, `${ws}/gold/_relationships.dbml`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/templates/x.dbml`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/gold/nested/x.dbml`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/logical-models/x.yml`)).toBe('table');
+    });
+
+    it('a .dbml diagram change and create raise the domain events', () => {
+      const listener = vi.fn();
+      service.onSemanticFileChanged(listener);
+      const uri = vscode.Uri.file(`${ws}/gold/sales.dbml`);
+      semanticWatcher()._simulateCreate(uri);
+      vi.advanceTimersByTime(300);
+      expect(listener).toHaveBeenCalledWith({ uri, created: true });
+    });
+
+    it('a layout change is a change to its diagram; our own layout write is skipped', () => {
+      const tracker = new OwnWriteTracker();
+      _clearMockFileWatchers();
+      service = new FileWatcherService('/test/workspace', '.erd-studio', defaultDbtProjectConfig(), tracker);
+      const listener = vi.fn();
+      service.onSemanticFileChanged(listener);
+      const layout = vscode.Uri.file(`${ws}/gold/sales.dbdiagram`);
+      semanticWatcher()._simulateChange(layout);
+      vi.advanceTimersByTime(300);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener.mock.calls[0][0].uri.fsPath).toBe(`${ws}/gold/sales.dbml`);
+
+      listener.mockClear();
+      vi.spyOn(tracker, 'consume').mockReturnValue(true);
+      semanticWatcher()._simulateChange(layout);
+      vi.advanceTimersByTime(300);
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('a relationships file raises onRelationshipsChanged, never a table or domain event', () => {
+      const relationships = vi.fn();
+      const tables = vi.fn();
+      const domains = vi.fn();
+      const deleted = vi.fn();
+      service.onRelationshipsChanged(relationships);
+      service.onTableChanged(tables);
+      service.onSemanticFileChanged(domains);
+      service.onSemanticFileDeleted(deleted);
+      const uri = vscode.Uri.file(`${ws}/tables/gold/_relationships.dbml`);
+      semanticWatcher()._simulateChange(uri);
+      tableWatcher()._simulateChange(uri);
+      vi.advanceTimersByTime(300);
+      semanticWatcher()._simulateDelete(uri);
+      tableWatcher()._simulateDelete(uri);
+      vi.advanceTimersByTime(300);
+      expect(relationships).toHaveBeenCalledTimes(2);
+      expect(relationships).toHaveBeenCalledWith({ uri });
+      expect(tables).not.toHaveBeenCalled();
+      expect(domains).not.toHaveBeenCalled();
+      expect(deleted).not.toHaveBeenCalled();
+    });
+
+    it('a .dbml table change raises ONE table event (the semantic watcher ignores it), named by its stem', () => {
+      const tables = vi.fn();
+      const domains = vi.fn();
+      service.onTableChanged(tables);
+      service.onSemanticFileChanged(domains);
+      const uri = vscode.Uri.file(`${ws}/tables/gold/fct_order.dbml`);
+      semanticWatcher()._simulateChange(uri);
+      tableWatcher()._simulateChange(uri);
+      vi.advanceTimersByTime(300);
+      expect(tables).toHaveBeenCalledTimes(1);
+      expect(tables).toHaveBeenCalledWith({ uri, modelName: 'fct_order' });
+      expect(domains).not.toHaveBeenCalled();
+    });
+
+    it('a deleted table file never raises the "Subject area file deleted" event', () => {
+      const deleted = vi.fn();
+      service.onSemanticFileDeleted(deleted);
+      semanticWatcher()._simulateDelete(vscode.Uri.file(`${ws}/tables/gold/fct_order.dbml`));
+      semanticWatcher()._simulateDelete(vscode.Uri.file(`${ws}/tables/dim_date.dbml`));
+      vi.advanceTimersByTime(300);
+      expect(deleted).not.toHaveBeenCalled();
+      semanticWatcher()._simulateDelete(vscode.Uri.file(`${ws}/gold/sales.dbml`));
+      vi.advanceTimersByTime(300);
+      expect(deleted).toHaveBeenCalledTimes(1);
+    });
+
+    it('a .yml table or .json diagram CREATED by someone else raises onForeignFormatCreated before its change event', () => {
+      const foreign = vi.fn();
+      const order: string[] = [];
+      service.onForeignFormatCreated((e) => { foreign(e); order.push('foreign'); });
+      service.onSemanticFileChanged(() => order.push('changed'));
+      service.onTableChanged(() => order.push('table'));
+      const yml = vscode.Uri.file(`${ws}/tables/gold/dim_new.yml`);
+      const json = vscode.Uri.file(`${ws}/gold/new.json`);
+      tableWatcher()._simulateCreate(yml);
+      semanticWatcher()._simulateCreate(json);
+      vi.advanceTimersByTime(300);
+      expect(foreign).toHaveBeenCalledWith({ uri: yml });
+      expect(foreign).toHaveBeenCalledWith({ uri: json });
+      expect(order).toEqual(['foreign', 'table', 'foreign', 'changed']);
+
+      // A change is not a create, and neither is a .dbml.
+      foreign.mockClear();
+      tableWatcher()._simulateChange(yml);
+      tableWatcher()._simulateCreate(vscode.Uri.file(`${ws}/tables/gold/dim_new2.dbml`));
+      semanticWatcher()._simulateCreate(vscode.Uri.file(`${ws}/gold/other.dbml`));
+      vi.advanceTimersByTime(300);
+      expect(foreign).not.toHaveBeenCalled();
     });
   });
 

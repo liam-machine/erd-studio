@@ -479,9 +479,20 @@
           },
           {
             "filenamePattern": "**/erd-studio/*/*.json"
+          },
+          {
+            "filenamePattern": "**/.erd-studio/*/*.dbml"
           }
         ],
         "priority": "default"
+      }
+    ],
+    "languages": [
+      {
+        "id": "json",
+        "extensions": [
+          ".dbdiagram"
+        ]
       }
     ],
     "menus": {

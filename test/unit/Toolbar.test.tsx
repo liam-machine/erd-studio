@@ -321,7 +321,7 @@ describe('the top-right corner actions', () => {
     render(<Toolbar {...defaultProps} />);
 
     expect(screen.getByRole('button', { name: /send feedback/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /open underlying json file/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /open the diagram's file in a text editor/i })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /more actions/i })).toBeNull();
   });
 
@@ -386,7 +386,7 @@ describe('the top-right corner actions', () => {
     expect(trigger().getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('menuitem', { name: /Export as Mermaid or DBML/ })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /Send feedback/ })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /Open as JSON file/ })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /Open file/ })).toBeTruthy();
   });
 
   it('posts exportDiagram (no payload) from the labelled button', () => {

@@ -95,7 +95,7 @@ export interface EditorState extends CanvasState {
    * The domain file is empty or not valid JSON (#186), with where the JSON
    * mistake is when the host located it; null unless the host said so.
    */
-  errorFileProblem: { problem: 'empty' | 'syntax'; line?: number; column?: number } | null;
+  errorFileProblem: { problem: 'empty' | 'syntax'; line?: number; column?: number; fileType?: 'JSON' | 'DBML' } | null;
   /** Available model templates loaded from semantic/templates/*.json. */
   templates: TableTemplate[];
   /** Manifest models available to add to this domain (not already in domain). @deprecated Use existingModels. */
@@ -177,6 +177,12 @@ export interface EditorState extends CanvasState {
    * and is deliberately NOT touched by `setDomain`.
    */
   logicalOnly: boolean;
+  /**
+   * The host said this DBML diagram declares Tables of its own and has no
+   * table `use` line (`dbmlEmbeddedTables`, §2.5): a single-file DBML to
+   * import. Cleared by every `domainLoaded`; the host re-sends it after one.
+   */
+  embeddedTables: boolean;
 }
 
 export interface EditorActions extends CanvasActions {
@@ -197,6 +203,8 @@ export interface EditorActions extends CanvasActions {
   dismissPhysicalSourceNotice: () => void;
   /** Store the `manifestMissing` flag of the latest host payload. */
   setManifestMissing: (missing: boolean) => void;
+  /** Show (or clear) the "This file holds its own tables" banner. */
+  setEmbeddedTables: (embedded: boolean) => void;
   /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
   dismissManifestHint: () => void;
   /**
@@ -326,6 +334,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   manifestMissing: false,
   manifestHintDismissed: false,
   logicalOnly: false,
+  embeddedTables: false,
 
   // Actions
   setViewport: (viewport) => set({ viewport }),
@@ -340,6 +349,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setAddExistingModelDialogOpen: (open) => set({ addExistingModelDialogOpen: open }),
   dismissPhysicalSourceNotice: () => set({ physicalSourceNoticeDismissed: true }),
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
+  setEmbeddedTables: (embedded) => set({ embeddedTables: embedded }),
   dismissManifestHint: () => set({ manifestHintDismissed: true }),
   setLogicalOnly: (logicalOnly) => set(
     logicalOnly

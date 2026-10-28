@@ -51,6 +51,7 @@ import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
 import { ManifestHint } from './components/Canvas/ManifestHint';
+import { EmbeddedTablesBanner } from './components/Canvas/EmbeddedTablesBanner';
 import { EmptyCanvas } from './components/EmptyCanvas/EmptyCanvas';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
@@ -210,6 +211,8 @@ function EditorCanvas() {
           // Follows every payload: one without the flag (dbt has since run)
           // hides the logical "Run dbt parse" hint.
           useEditorStore.getState().setManifestMissing(msg.manifestMissing === true);
+          // The import banner follows the host: it re-sends it after each load that needs it.
+          useEditorStore.getState().setEmbeddedTables(false);
           // No dbt project: no Physical tab, no Diff. Absent means today's
           // behaviour, so an older host keeps both.
           useEditorStore.getState().setLogicalOnly(msg.logicalOnly === true);
@@ -229,6 +232,9 @@ function EditorCanvas() {
           useEditorStore.getState().setManifestMissing(msg.manifestMissing === true);
           useEditorStore.getState().setLogicalOnly(msg.logicalOnly === true);
           break;
+        case 'dbmlEmbeddedTables':
+          useEditorStore.getState().setEmbeddedTables(true);
+          break;
         case 'discrepancyReport':
           setDiscrepancyReport(msg.payload);
           break;
@@ -245,7 +251,12 @@ function EditorCanvas() {
             msg.payload.kind,
             msg.payload.mergeConflict === true,
             msg.payload.fileProblem
-              ? { problem: msg.payload.fileProblem, line: msg.payload.line, column: msg.payload.column }
+              ? {
+                problem: msg.payload.fileProblem,
+                line: msg.payload.line,
+                column: msg.payload.column,
+                ...(msg.payload.fileType ? { fileType: msg.payload.fileType } : {}),
+              }
               : null,
           );
           break;
@@ -495,11 +506,13 @@ function EditorCanvas() {
   // reloads the canvas by itself on the save that fixes it.
   if (error && !domain && errorKind === 'domain-file' && errorFileProblem) {
     const { problem, line, column } = errorFileProblem;
+    // The file's own format (a `.dbml` diagram says DBML); older hosts send none, which is JSON.
+    const fileType = errorFileProblem.fileType ?? 'JSON';
     return (
       <div className="editor-message editor-message--error" role="alert">
         {problem === 'syntax' ? (
           <>
-            <p className="editor-message__title">This diagram&apos;s file isn&apos;t valid JSON</p>
+            <p className="editor-message__title">This diagram&apos;s file isn&apos;t valid {fileType}</p>
             <p className="editor-message__detail">{error}</p>
             <p className="editor-message__detail">
               This is a problem in the file, not in ERD Studio — it is often left by a hand edit or an AI
@@ -622,6 +635,8 @@ function EditorCanvas() {
       <PhysicalSourceNotice />
       {/* Logical-stage "Run dbt parse" hint (#113) — no manifest.json yet. */}
       <ManifestHint />
+      {/* A single-file DBML dropped into a layer folder (§2.5): offer Import DBML. */}
+      <EmbeddedTablesBanner />
 
       <ReactFlow
         // flex basis 0 rather than the default height:100%, so the notice's

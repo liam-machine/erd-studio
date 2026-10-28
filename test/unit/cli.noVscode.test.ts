@@ -6,6 +6,7 @@ const ROOT = path.resolve(__dirname, '../..');
 
 /**
  * dist/cli.js runs outside VS Code, so nothing it bundles may import 'vscode'.
+ * It reads native DBML storage, so it bundles the pinned DBML parser (one copy).
  * Bundle it in memory the way esbuild.js does (no `external`) and fail if any
  * import resolves to 'vscode' — naming the chain, not just "bundle failed".
  */
@@ -39,7 +40,10 @@ describe('CLI bundle', () => {
     expect(inputs.some((i) => /(^|\/)vscode(\/|$)/.test(i))).toBe(false);
     // Self-contained: no worker file is needed at run time.
     expect(inputs.some((i) => i.includes('manifestWorker'))).toBe(false);
-    // Export needs no DBML parser: only the extension's Import DBML… bundles one.
-    expect(inputs.filter((i) => /@dbml|dbml-parse/.test(i))).toEqual([]);
+    // Native DBML storage (§7.1): the CLI reads `.dbml` files, so it bundles
+    // the DBML parser — the root's pinned `@dbml/parse`, never a test alias.
+    const parserInputs = inputs.filter((i) => /@dbml|dbml-parse/.test(i));
+    expect(parserInputs.some((i) => i.startsWith('node_modules/@dbml/parse/'))).toBe(true);
+    expect(parserInputs.filter((i) => /dbml-parse-v\d/.test(i) || /node_modules\/.+\/node_modules\/@dbml\/parse\//.test(i))).toEqual([]);
   });
 });

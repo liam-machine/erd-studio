@@ -67,6 +67,22 @@ describe('the "isn\'t valid JSON" screen', () => {
     expect(mockVsCode.postMessage).toHaveBeenLastCalledWith({ type: 'ready' });
   });
 
+  it('says DBML for a .dbml diagram (native DBML storage), and JSON when an older host sends no file type', () => {
+    render(<App />);
+    postFromHost({
+      type: 'error',
+      payload: {
+        message: ".erd-studio/gold/sales.dbml has a mistake at line 6, column 1: Expect a closing brace '}' [1005].",
+        kind: 'domain-file', fileProblem: 'syntax', line: 6, column: 1, fileType: 'DBML',
+      },
+    });
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain("This diagram's file isn't valid DBML");
+    expect(alert.textContent).not.toContain('valid JSON');
+    fireEvent.click(screen.getByText('Open at Line 6'));
+    expect(mockVsCode.postMessage).toHaveBeenLastCalledWith({ type: 'viewFile', payload: { line: 6, column: 1 } });
+  });
+
   it('offers Open as Text when the mistake could not be located', () => {
     render(<App />);
     postFromHost({ type: 'error', payload: { message: '.erd-studio/gold/reporting.json is not valid JSON.', kind: 'domain-file', fileProblem: 'syntax' } });

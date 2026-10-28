@@ -129,7 +129,11 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
   }
   lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'subject area')}, ${plural(r.erd.logicalModels, 'table')}`
-    + (r.erd.semanticDirExists ? ` — file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}` : ''));
+    + (r.erd.semanticDirExists
+      ? (r.erd.storage === 'dbml'
+        ? ' — storage DBML'
+        : ` — ${r.erd.storage === 'mixed' ? 'storage mixed, ' : ''}file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}`)
+      : ''));
   const migration = r.erd.namingMigration;
   if (migration && migration.moves + migration.rewrites > 0) {
     lines.push(`${p.yellow('!')} "Migrate to the New File Naming" in VS Code would `

@@ -422,3 +422,31 @@ describe('export --all', () => {
     expect(await runExportAll(ctx, { format: 'dbml-rich' })).toEqual(await runExportAll(ctx, { format: 'dbml-rich' }));
   });
 });
+
+describe('export on native DBML storage (§7.1, S4)', () => {
+  const NATIVE = path.join(ROOT, 'test/fixtures/dbml-native');
+
+  it.each(CLI_EXPORT_FORMATS)('--domain a .dbml diagram exports it as %s', async (format) => {
+    const r = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/gold/sales.dbml', '--format', format], NATIVE);
+    expect(r.code).toBe(0);
+    expect(r.out.startsWith(FIRST_LINE[format])).toBe(true);
+    if (format !== 'dbml-layout') expect(r.out).toContain('fct_order');
+  });
+
+  it('--all exports every DBML diagram, skipping none', async () => {
+    const r = await run(['export', '--project', NATIVE, '--all', '--format', 'dbml', '--json'], NATIVE);
+    expect(r.code).toBe(0);
+    const result = JSON.parse(r.out) as ExportAllResult;
+    expect(result.files.map((f) => [f.domain, f.fileName])).toEqual([
+      ['.erd-studio/gold/sales.dbml', 'sales.dbml'],
+      ['.erd-studio/silver/staging.dbml', 'staging.dbml'],
+    ]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('--domain a table file is not-a-diagram (exit 3)', async () => {
+    const r = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/tables/gold/fct_order.dbml', '--format', 'dbml', '--json'], NATIVE);
+    expect(r.code).toBe(3);
+    expect(JSON.parse(r.out).error.code).toBe('not-a-diagram');
+  });
+});

@@ -20,8 +20,8 @@ import * as path from 'path';
 
 import type { TableLibraryService, TableFileEntry, TableFileError } from '../services/logicalModelService';
 import type { SubjectAreaService } from '../services/domainService';
+import { subjectAreaTableNames } from '../services/domainService';
 import type { LayerConfig } from '../types/layer';
-import { getRawSubjectAreaTableNames } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
 // Tree element type
@@ -40,6 +40,22 @@ export interface TableLibraryTableNode {
   readonly library?: 'tables';
   /** What is wrong in the file, so the problem stays visible after its one warning (#164). */
   readonly fileError?: Pick<TableFileError, 'kind' | 'line' | 'mergeConflict' | 'readable' | 'key'>;
+  /** How the file stores the table (native DBML storage); shown only while the project is `mixed`. */
+  readonly storage?: 'yaml' | 'dbml';
+  /** The project holds both YAML and DBML tables: each entry names its format. */
+  readonly showStorage?: true;
+}
+
+/**
+ * The command that opens a table file from the tree. A `.dbml` table opens
+ * in the text editor (`vscode.openWith … 'default'`): the canvas's selector
+ * also matches `tables/*.dbml`, which the canvas would only hand back (§5.9).
+ */
+function openTableCommand(uri: vscode.Uri, options?: Record<string, unknown>): vscode.Command {
+  if (uri.fsPath.toLowerCase().endsWith('.dbml')) {
+    return { command: 'vscode.openWith', title: 'Open Table', arguments: [uri, 'default', ...(options ? [options] : [])] };
+  }
+  return { command: 'vscode.open', title: 'Open Table', arguments: [uri, ...(options ? [options] : [])] };
 }
 
 export interface TableLibraryFolderNode {
@@ -93,7 +109,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       item.tooltip = `"${element.name}" has a file in both the old and the new table folder. Subject areas use:\n${element.shadowedBy}\n\n` +
         'This copy in tables/ is ignored. Keep one of the two files.';
       item.resourceUri = vscode.Uri.file(element.filePath);
-      item.command = { command: 'vscode.open', title: 'Open Table', arguments: [item.resourceUri] };
+      item.command = openTableCommand(item.resourceUri);
       return item;
     }
 
@@ -108,7 +124,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
         'Table names are unique across all folders, as dbt model names are. Use "Give Duplicate Table Its Own Name" ' +
         `to make this copy "${element.folder ? `${element.folder}_` : ''}${element.name}" with the warehouse name (alias) "${element.name}".`;
       item.resourceUri = vscode.Uri.file(element.filePath);
-      item.command = { command: 'vscode.open', title: 'Open Table', arguments: [item.resourceUri] };
+      item.command = openTableCommand(item.resourceUri);
       return item;
     }
 
@@ -133,12 +149,12 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       );
     }
 
+    if (element.showStorage && element.storage) {
+      item.description = `${item.description ?? ''} · ${element.storage === 'dbml' ? 'DBML' : 'YAML'}`.replace(/^ · /, '');
+    }
+
     item.resourceUri = vscode.Uri.file(element.filePath);
-    item.command = {
-      command: 'vscode.open',
-      title: 'Open Table',
-      arguments: [item.resourceUri],
-    };
+    item.command = openTableCommand(item.resourceUri);
 
     return item;
   }
@@ -151,6 +167,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     if (!this.tableLibraryService.dirExists()) return [];
 
     const usageMap = this.buildUsageMap();
+    // Each entry names its format only while the project holds both (§5.5).
+    const showStorage = typeof this.tableLibraryService.projectStorage === 'function' && this.tableLibraryService.projectStorage() === 'mixed';
     const toNode = (entry: TableFileEntry): TableLibraryTableNode => {
       // Through the service's mtime cache, so an unchanged library is not re-parsed.
       const error = entry.shadowedBy ? null : this.tableLibraryService.getTableFileError(entry.name);
@@ -160,6 +178,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
         filePath: entry.filePath,
         referencingDomains: entry.shadowedBy ? [] : usageMap.get(entry.name) ?? [],
         folder: entry.folder,
+        ...(entry.storage ? { storage: entry.storage } : {}),
+        ...(showStorage ? { showStorage: true as const } : {}),
         ...(entry.library ? { library: entry.library } : {}),
         ...(entry.shadowedBy ? { shadowedBy: entry.shadowedBy } : {}),
         ...(error ? {
@@ -242,11 +262,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     }
     item.resourceUri = vscode.Uri.file(element.filePath);
     const at0 = new vscode.Position(error.line !== undefined && error.line >= 1 ? error.line - 1 : 0, 0);
-    item.command = {
-      command: 'vscode.open',
-      title: 'Open Table',
-      arguments: [item.resourceUri, { selection: new vscode.Range(at0, at0), preview: false }],
-    };
+    item.command = openTableCommand(item.resourceUri, { selection: new vscode.Range(at0, at0), preview: false });
     return item;
   }
 
@@ -269,8 +285,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
   }
 
   /**
-   * Scan all domain JSON files and build a map of model name → domain names.
-   * Uses raw JSON.parse to avoid expensive YAML model resolution.
+   * Scan all diagram files and build a map of model name → domain names.
+   * Reads raw membership (`subjectAreaTableNames`) to avoid expensive model resolution.
    */
   private buildUsageMap(): Map<string, string[]> {
     const map = new Map<string, string[]>();
@@ -278,10 +294,11 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
 
     for (const summary of summaries) {
       try {
-        const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as unknown;
-        // Format-agnostic: honours v4 inline objects, v5 name strings, and
-        // (for usage counting only) hybrid/legacy documents awaiting migration.
-        const modelNames = getRawSubjectAreaTableNames(raw);
+        // Format-agnostic: honours v4 inline objects, v5 name strings,
+        // (for usage counting only) hybrid/legacy documents awaiting
+        // migration, and a DBML diagram's `use` lines.
+        const modelNames = subjectAreaTableNames(fs.readFileSync(summary.filePath, 'utf-8'), summary.filePath);
+        if (!modelNames) continue;
 
         for (const name of modelNames) {
           const existing = map.get(name);

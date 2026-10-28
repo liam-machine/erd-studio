@@ -135,6 +135,21 @@ export function describeJsonMistake(shown: string, err: Pick<SubjectAreaFileErro
   return at ? `${shown} has a mistake ${at}.` : `${shown} is not valid JSON.`;
 }
 
+/**
+ * The sentence for a `.dbml` diagram that does not parse (`invalid-dbml`):
+ * "<shown> has a mistake at line L, column C: <the parser's words> [code]."
+ * when core located it, else "<shown> is not valid DBML.". The parser's
+ * words are taken from core's message, after its "column C: ".
+ */
+export function describeDbmlMistake(shown: string, err: Pick<SubjectAreaFileError, 'line' | 'column' | 'message'>): string {
+  if (err.line === undefined || err.column === undefined) return `${shown} is not valid DBML.`;
+  const marker = `line ${err.line}, column ${err.column}: `;
+  const at = err.message.indexOf(marker);
+  const detail = at === -1 ? '' : err.message.slice(at + marker.length).trim();
+  const ended = detail === '' ? '' : `: ${detail}${/[.!?]$/.test(detail) ? '' : '.'}`;
+  return `${shown} has a mistake at line ${err.line}, column ${err.column}${ended || '.'}`;
+}
+
 /** "at line L, column C: <hint>" for a located JSON mistake, else undefined. */
 function jsonMistakeAt(err: Pick<SubjectAreaFileError, 'line' | 'column' | 'syntaxProblem'>): string | undefined {
   if (err.line === undefined || err.column === undefined || err.syntaxProblem === undefined) return undefined;

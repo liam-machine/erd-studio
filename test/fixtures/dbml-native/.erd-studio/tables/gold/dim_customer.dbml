@@ -1,0 +1,10 @@
+Table dim_customer [schema: 'gold', role: 'conformed-dim'] {
+  customer_key INT [note: 'Surrogate key']
+  valid_from DATE [scd_type: '2']
+  customer_id VARCHAR [natural_key: 'true']
+  parent_customer_key INT [foreign_key: 'true']
+  segment VARCHAR [scd_type: '1']
+  indexes {
+    (customer_key, valid_from) [pk]
+  }
+}

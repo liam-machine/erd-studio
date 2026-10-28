@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   TOOLING_EXCLUDE,
+  toolingExclude,
   classifyMarkerFiles,
   detectPhysicalTooling,
   hasCreateTable,
@@ -239,5 +240,35 @@ describe('nothing identifying comes back', () => {
     for (const platform of result.platforms) expect(PLATFORMS).toContain(platform);
     // An adapter it has no name for is just "other".
     expect(result.platforms).toEqual(['fabric', 'other']);
+  });
+});
+
+describe('the configured semantic dir is excluded too (native DBML storage, §5.7)', () => {
+  it('a project storing its model as .dbml under a custom semantic dir is not a DBML-built schema', async () => {
+    const files = {
+      'docs/erd/tables/fct_order.dbml': 'Table fct_order {\n  id INT\n}\n',
+      'docs/erd/gold/sales.dbml': "Project sales {\n  erd_schema_version: '7'\n}\n",
+      '.erd-studio/tables/dim_date.dbml': 'Table dim_date {\n  id INT\n}\n',
+    };
+    const exclude = globToRegExp(toolingExclude('./docs/erd/'));
+    const probe: ToolingProbe = {
+      find: async (include, max) => {
+        const re = globToRegExp(include);
+        return Object.keys(files).filter(f => re.test(f) && !exclude.test(f)).slice(0, max).map(f => ROOT + f);
+      },
+      readHead: async (file, bytes) => files[file.slice(ROOT.length) as keyof typeof files]?.slice(0, bytes),
+      manifestPathFor: () => undefined,
+    };
+    expect((await detectPhysicalTooling(probe)).tools).not.toContain('dbml');
+    // Without the setting, the custom folder's files would count.
+    expect(globToRegExp(TOOLING_EXCLUDE).test('docs/erd/tables/fct_order.dbml')).toBe(false);
+    expect(exclude.test('docs/erd/tables/fct_order.dbml')).toBe(true);
+  });
+
+  it('keeps the default exclude for the default dir, and ignores a dir with glob characters', () => {
+    expect(toolingExclude('.erd-studio')).toBe(TOOLING_EXCLUDE);
+    expect(toolingExclude(undefined)).toBe(TOOLING_EXCLUDE);
+    expect(toolingExclude('a{b,c}')).toBe(TOOLING_EXCLUDE);
+    expect(toolingExclude('erd')).toContain(',erd}');
   });
 });

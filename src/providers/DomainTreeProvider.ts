@@ -319,6 +319,10 @@ export class SubjectAreaTreeProvider
     item.description = element.designCount > 0
       ? `${element.modelCount} ${modelWord}, ${element.designCount} ${designWord}`
       : `${element.modelCount} ${modelWord}`;
+    // The same name in both formats in one layer (native DBML storage): say which is which.
+    if (element.summary.conflict) {
+      item.description += element.summary.storage === 'dbml' ? ' (DBML)' : ' (JSON)';
+    }
 
     item.contextValue = 'domain';
     item.iconPath = new vscode.ThemeIcon('json');

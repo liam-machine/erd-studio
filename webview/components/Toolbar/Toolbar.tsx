@@ -1023,9 +1023,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                     className="toolbar__dropdown-item"
                     onClick={handleViewFile}
                     role="menuitem"
-                    title="Open the underlying JSON file in a text editor"
+                    title="Open the diagram's file in a text editor"
                   >
-                    {'{ }'} Open as JSON file
+                    {'{ }'} Open file
                   </button>
                 </div>
               )}
@@ -1051,8 +1051,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               <button
                 className="toolbar__corner-button"
                 onClick={handleViewFile}
-                title="Open as JSON file"
-                aria-label="Open underlying JSON file in text editor"
+                title="Open file"
+                aria-label="Open the diagram's file in a text editor"
               >
                 {'{ }'} View File
               </button>

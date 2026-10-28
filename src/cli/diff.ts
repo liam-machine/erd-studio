@@ -20,7 +20,7 @@ import type { SyncPlan } from '../types/syncPlan';
 import { SubjectAreaFileError } from '../services/domainService';
 import type { TableFileError, TableFileErrorKind } from '../services/logicalModelService';
 import { usesLibraryRelationships } from '../services/libraryRelationships';
-import { DBML_TABLE_QUOTE_HINT_CODES, canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship } from '@erd-studio/core';
+import { DBML_TABLE_QUOTE_HINT_CODES, canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship, subjectAreaStorageOf } from '@erd-studio/core';
 import type { ColumnPair } from '@erd-studio/core';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
@@ -269,10 +269,18 @@ export function describeSubjectAreaError(ctx: CliContext, file: string, err: unk
   const message = redactPaths(raw.split(file).join(rel));
   if (err instanceof SubjectAreaFileError) {
     if (err.mergeConflict) { return { code: 'merge-conflict', message: conflictedSubjectAreaMessage(rel, err.line) }; }
+    // A `.dbml` diagram that does not parse: named with its file and line.
+    if (err.reason === 'invalid-dbml') {
+      return { code: 'dbml-invalid', message: `${rel}${err.line !== undefined ? `:${err.line}` : ''}: ${message}` };
+    }
     return { code: err.reason === 'missing' ? 'domain-missing' : 'domain-invalid', message };
   }
+  // A `--domain` that is a table, relationships or layout file, not a diagram.
+  if (/is a DBML table or relationships file, not a diagram/.test(raw) || file.endsWith('.dbdiagram')) {
+    return { code: 'not-a-diagram', message };
+  }
   if (/invalid layer/.test(raw)) { return { code: 'unknown-layer', message }; }
-  if (/pre-v\d|mixes inline (?:model|table)|schemaVersion/.test(raw)) { return { code: 'unsupported-format', message }; }
+  if (/pre-v\d|mixes inline (?:model|table)|schemaVersion|erd_schema_version/.test(raw)) { return { code: 'unsupported-format', message }; }
   return { code: 'domain-invalid', message };
 }
 
@@ -511,9 +519,10 @@ export function fixesFromPlan(
 export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean): SubjectAreaDiff {
   const rel = relPath(ctx.root, file);
 
+  // The v4 probe is for JSON files only: a `.dbml` diagram is never v4.
   let raw: unknown;
   try {
-    raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    raw = subjectAreaStorageOf(file) === 'json' ? JSON.parse(fs.readFileSync(file, 'utf-8')) : undefined;
   } catch {
     raw = undefined; // getSubjectArea below produces the precise error
   }
@@ -528,7 +537,7 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
   if (format === 'v4' && typeof obj.schemaVersion === 'number') {
     return {
       file: rel,
-      domain: typeof obj.domain === 'string' ? obj.domain : path.basename(file, '.json'),
+      domain: typeof obj.domain === 'string' ? obj.domain : path.basename(file, path.extname(file)),
       layer: typeof obj.layer === 'string' ? obj.layer : path.basename(path.dirname(file)),
       clean: false,
       counts: { blocking: 0, advisory: 0, matchedModels: 0, matchedColumns: 0, matchedRelationships: 0 },

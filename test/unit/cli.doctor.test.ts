@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runDoctor, type DoctorResult } from '../../src/cli/doctor';
 import { main } from '../../src/cli/index';
@@ -553,5 +553,52 @@ describe('doctor via main', () => {
     expect(r.nextSteps.map((s) => s.id).slice(0, 5)).toEqual([
       'resolve-merge-conflicts', 'fix-model-yaml', 'install-dbt', 'run-parse', 'run-catalog',
     ]);
+  });
+});
+
+describe('doctor on native DBML storage (§7.1, S4)', () => {
+  it('lists every DBML diagram, reports storage dbml and reads no .dbml as JSON', async () => {
+    const root = copyFixture('dbml-native');
+    const parse = vi.spyOn(JSON, 'parse');
+    let out = '';
+    const code = await main(['doctor', '--project', root, '--no-dbt', '--json'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: tmp,
+      env: cleanEnv,
+    });
+    const dbmlTexts = ['gold/sales.dbml', 'silver/staging.dbml'].map((f) => fs.readFileSync(path.join(root, '.erd-studio', f), 'utf-8'));
+    expect(parse.mock.calls.some(([text]) => dbmlTexts.includes(String(text)))).toBe(false);
+    parse.mockRestore();
+    expect(code).toBe(0);
+    const r = JSON.parse(out) as DoctorResult;
+    expect(r.erd.storage).toBe('dbml');
+    expect(r.erd.domains).toBe(2);
+    expect(r.erd.diagrams.sort((a, b) => a.file.localeCompare(b.file))).toEqual([
+      { file: '.erd-studio/gold/sales.dbml', format: 'dbml' },
+      { file: '.erd-studio/silver/staging.dbml', format: 'dbml' },
+    ]);
+    expect(r.erd.logicalModels).toBe(6);
+    expect(r.erd.domainFormatIssues).toEqual([]);
+    expect(r.erd.unreadableModelFiles).toEqual([]);
+  });
+
+  it('reports a DBML diagram holding git conflict markers as conflicted', async () => {
+    const root = copyFixture('dbml-native');
+    const file = path.join(root, '.erd-studio', 'silver', 'staging.dbml');
+    fs.writeFileSync(file, `${fs.readFileSync(file, 'utf-8')}<<<<<<< HEAD\nNote a {\n  'x'\n}\n=======\n>>>>>>> other\n`);
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(r.erd.conflictedDomainFiles).toEqual([expect.objectContaining({ file: '.erd-studio/silver/staging.dbml' })]);
+    expect(r.nextSteps.map((s) => s.id)).toContain('resolve-merge-conflicts');
+  });
+
+  it('a project with no .erd-studio yet is storage dbml with no diagrams', async () => {
+    const root = path.join(tmp, 'fresh');
+    fs.mkdirSync(root);
+    fs.writeFileSync(path.join(root, 'dbt_project.yml'), 'name: fresh\nversion: "1.0.0"\n');
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(r.erd.semanticDirExists).toBe(false);
+    expect(r.erd.storage).toBe('dbml');
+    expect(r.erd.diagrams).toEqual([]);
   });
 });

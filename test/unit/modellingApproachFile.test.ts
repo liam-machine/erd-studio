@@ -37,14 +37,14 @@ describe('.erd-studio/modelling-approach.md is ignored by the extension', () => 
     expect(classifySemanticPath(semantic, path.join(semantic, 'modelling-approach.md'))).toBe('other');
   });
 
-  it('the semantic-file watcher glob (**/*.json) and the custom editor selector cannot match it', () => {
+  it('the semantic-file watcher glob (**/*.{json,dbml,dbdiagram}) and the custom editor selector cannot match it', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'));
     const selectors = (pkg.contributes.customEditors[0].selector as Array<{ filenamePattern: string }>).map((s) => s.filenamePattern);
     for (const pattern of selectors) {
-      expect(pattern.endsWith('/*/*.json'), pattern).toBe(true);
+      expect(pattern.endsWith('/*/*.json') || pattern.endsWith('/*/*.dbml'), pattern).toBe(true);
     }
     const watcher = fs.readFileSync(path.join(REPO_ROOT, 'src', 'watchers', 'FileWatcherService.ts'), 'utf-8');
-    expect(watcher).toContain('`${this.semanticDir}/**/*.json`');
+    expect(watcher).toContain('`${this.semanticDir}/**/*.{json,dbml,dbdiagram}`');
   });
 
   it('adds no layer, domain or model, with or without layers.json', () => {

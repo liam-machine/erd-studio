@@ -546,3 +546,54 @@ describe('TableLibraryTreeProvider: a model file that needs fixing (#164)', () =
   });
 });
 
+
+describe('TableLibraryTreeProvider: native DBML storage (§5.5)', () => {
+  const TABLES = '/project/.erd-studio/tables';
+  const dbmlEntry = (name: string, folder = ''): TableFileEntry => ({
+    name, folder, filePath: folder ? `${TABLES}/${folder}/${name}.dbml` : `${TABLES}/${name}.dbml`, storage: 'dbml', library: 'tables',
+  });
+  const SALES: SubjectAreaSummary = { domain: 'sales', layer: 'gold', filePath: '/project/.erd-studio/gold/sales.dbml', storage: 'dbml' };
+
+  function providerFor(entries: TableFileEntry[], storage: 'yaml' | 'dbml' | 'mixed') {
+    const service = createMockTableLibraryServiceFromEntries(entries, '/project/.erd-studio/logical-models');
+    (service as unknown as { projectStorage: () => string }).projectStorage = () => storage;
+    return new TableLibraryTreeProvider(service, createMockSubjectAreaService([SALES]), '/project', '.erd-studio');
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockReadFileSync.mockImplementation((p: string) => (String(p).endsWith('.dbml')
+      ? "Project sales {\n  erd_schema_version: '7'\n}\n\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n"
+      : '{}'));
+  });
+
+  function tableNodes(provider: TableLibraryTreeProvider): TableLibraryTableNode[] {
+    return (provider.getChildren() as TableLibraryNode[]).flatMap((n) => (n.type === 'folder' ? n.children : [n]));
+  }
+
+  it('opens a .dbml table in the text editor (openWith … default), never the canvas', () => {
+    const provider = providerFor([dbmlEntry('fct_order', 'gold')], 'dbml');
+    const item = provider.getTreeItem(tableNodes(provider).find((n) => n.name === 'fct_order')!);
+    expect(item.command?.command).toBe('vscode.openWith');
+    expect(item.command?.arguments?.[1]).toBe('default');
+  });
+
+  it('counts a DBML diagram\'s use lines as usage', () => {
+    const provider = providerFor([dbmlEntry('fct_order', 'gold'), dbmlEntry('dim_date')], 'dbml');
+    const nodes = tableNodes(provider);
+    expect(nodes.find((n) => n.name === 'fct_order')?.referencingDomains).toEqual(['sales']);
+    expect(nodes.find((n) => n.name === 'dim_date')?.referencingDomains).toEqual([]);
+  });
+
+  it('names each table\'s format only while the project is mixed', () => {
+    const yml: TableFileEntry = { name: 'dim_old', folder: '', filePath: `${DIR}/dim_old.yml`, storage: 'yaml' };
+    const mixed = providerFor([dbmlEntry('fct_order', 'gold'), yml], 'mixed');
+    const items = tableNodes(mixed).map((n) => mixed.getTreeItem(n));
+    expect(items.find((i) => i.label === 'fct_order')?.description).toBe('1 subject area · DBML');
+    expect(items.find((i) => i.label === 'dim_old')?.description).toBe('(unused) · YAML');
+    expect(items.find((i) => i.label === 'dim_old')?.command?.command).toBe('vscode.open');
+
+    const dbml = providerFor([dbmlEntry('fct_order', 'gold')], 'dbml');
+    expect(dbml.getTreeItem(tableNodes(dbml)[0]).description).toBe('1 subject area');
+  });
+});

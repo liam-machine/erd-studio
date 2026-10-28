@@ -828,6 +828,10 @@ export interface SubjectAreaSummary {
   layer: Layer;
   /** Absolute path to the domain JSON file. */
   filePath: string;
+  /** The file's storage: a `.json` or a `.dbml` diagram. Optional: absent from a host older than native DBML storage. */
+  storage?: 'json' | 'dbml';
+  /** The same stem exists in both formats in one layer (`x.json` and `x.dbml`): the tree names each one's format. */
+  conflict?: true;
 }
 
 // ---------------------------------------------------------------------------

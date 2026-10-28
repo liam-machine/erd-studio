@@ -289,6 +289,21 @@ describe('LayerService', () => {
       expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual(['bronze']);
     });
 
+    it('never offers a DBML table library tables/ as a layer, flat or foldered (§3.3)', () => {
+      fs.mkdirSync(path.join(semanticDir, 'tables', 'gold'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'tables', 'gold', 'fct_order.dbml'), 'Table fct_order {\n  id INT\n}\n');
+      fs.writeFileSync(path.join(semanticDir, 'tables', 'gold', '_relationships.dbml'), '// relationships\n');
+      fs.mkdirSync(path.join(semanticDir, 'gold'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'gold', 'sales.dbml'), "Project sales {\n  erd_schema_version: '7'\n}\n");
+      expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual(['gold']);
+    });
+
+    it('a relationships file alone also makes tables/ the library, not a layer', () => {
+      fs.mkdirSync(path.join(semanticDir, 'tables'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'tables', '_relationships.dbml'), '// relationships\n');
+      expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual([]);
+    });
+
     it('uses known defaults for recognised layers and generated config otherwise', () => {
       fs.mkdirSync(path.join(semanticDir, 'gold'), { recursive: true });
       fs.mkdirSync(path.join(semanticDir, 'platinum'), { recursive: true });
@@ -300,6 +315,14 @@ describe('LayerService', () => {
       expect(platinum.label).toBe('Platinum');
       expect(platinum.abbreviation).toBe('PLA');
       expect(platinum.creatable).toBe(true);
+    });
+  });
+
+  describe('addLayer refuses a name starting with _ (native DBML storage, §5.5)', () => {
+    it('throws and writes nothing', async () => {
+      await expect(service.addLayer({ id: '_relationships', label: 'R', abbreviation: 'R', color: '#123456', creatable: true }))
+        .rejects.toThrow(/may not start with "_"/);
+      expect(fs.existsSync(configPath)).toBe(false);
     });
   });
 });

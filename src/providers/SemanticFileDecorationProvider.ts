@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 
+import { classifySemanticFile } from '@erd-studio/core';
+
 import type { LayerService } from '../services/layerService';
 
 /**
@@ -39,9 +41,13 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
     }
 
     // --- Domain file decoration ---
-    // Only decorate .json files inside a known layer directory of the
-    // configured semantic dir (extractLayerId returns null otherwise).
-    if (!fsPath.endsWith('.json')) {
+    // Only decorate diagrams — .json files, and .dbml files the classifier
+    // calls diagrams (never a table, relationships or layout file) — inside
+    // a known layer directory of the configured semantic dir
+    // (extractLayerId returns null otherwise).
+    if (fsPath.endsWith('.dbml')) {
+      if (!this.isDbmlDiagram(fsPath)) return undefined;
+    } else if (!fsPath.endsWith('.json')) {
       return undefined;
     }
 
@@ -71,6 +77,20 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
     if (!rest) return null;
 
     return rest;
+  }
+
+  /**
+   * Whether a `.dbml` path is a diagram, by path only (§3.5): `<layer>/<name>.dbml`
+   * under the semantic dir, not in the table library and not a relationships
+   * file. No `.dbml` under `tables/` is a diagram whatever `layers.json`
+   * says, so this needs no file access.
+   */
+  private isDbmlDiagram(fsPath: string): boolean {
+    const normalised = fsPath.replace(/\\/g, '/');
+    const marker = `/${this.semanticDir}/`;
+    const idx = normalised.lastIndexOf(marker);
+    if (idx === -1) return false;
+    return classifySemanticFile(normalised.substring(idx + marker.length), { tablesDirIsLayer: false }).kind === 'diagram';
   }
 
   /**

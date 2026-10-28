@@ -16,9 +16,16 @@ import * as path from 'path';
 import { Document, Pair, YAMLMap, YAMLSeq, parseDocument, isAlias, isMap, isNode, isPair, isScalar, isSeq, visit } from 'yaml';
 import type { Alias, Node, Scalar, ScalarTag, Tags } from 'yaml';
 
-import { LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, TABLES_DIR, classifyTableLoadError, tableLoadWarningOf, parseTableText, writesTableNaming } from '@erd-studio/core';
+import {
+  DBML_RELATIONSHIPS_FILE_NAME, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, TABLES_DIR, TableDbmlError, classifyTableLoadError,
+  isLibraryFolderName, isReservedTableName, tableLoadWarningOf, parseTableText, writesTableNaming,
+} from '@erd-studio/core';
+import { attachRelationships, dbmlTableLookup, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
 import { projectNamingOf } from './projectNaming';
-import type { TableLoadErrorKind } from '@erd-studio/core';
+import { projectStorageIn } from './projectStorage';
+import type {
+  DbmlAttachResult, DbmlAttachTable, DbmlProblem, DbmlMetadataTarget, DbmlRelationshipsReading, DbmlTableReading, DbmlTableStructureRule, ProjectStorage, TableLoadErrorKind,
+} from '@erd-studio/core';
 import type { ColumnDef, TableRelationship, SemanticTable } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
@@ -31,20 +38,32 @@ import { keepLineEndings } from './lineEndings';
 export { LOGICAL_MODELS_DIR, TABLES_DIR } from '@erd-studio/core';
 
 /**
- * Whether `{semanticRoot}/tables/` is a layer folder rather than v6's table
- * library (#162). A project made before v6 may have a layer called `tables`:
- * it is one when `layers.json` lists a layer with that id, or when the folder
- * holds a subject area file (`tables/*.json`). A library folder holds only
- * `*.yml`, at the top or one folder down. A folder that is a layer keeps the
- * project on v5 (it is never read as a library) until it is renamed.
+ * Whether `{semanticRoot}/tables/` holds DBML evidence: a `*.dbml` file at
+ * the top level or one folder down (a table or a relationships file; no
+ * content sniff). Native DBML storage's library is always `tables/` (§3.3).
  */
-export function tablesDirIsLayer(semanticRoot: string): boolean {
+export function tablesDirHasDbml(semanticRoot: string): boolean {
   const dir = path.join(semanticRoot, TABLES_DIR);
   try {
-    if (fs.readdirSync(dir, { withFileTypes: true }).some((d) => d.isFile() && d.name.endsWith('.json'))) return true;
+    return fs.readdirSync(dir, { withFileTypes: true }).some((d) =>
+      (d.isFile() && d.name.endsWith('.dbml')) ||
+      (d.isDirectory() && isLibraryFolderName(d.name) && listNames(path.join(dir, d.name)).some((f) => f.endsWith('.dbml'))));
   } catch {
     return false;
   }
+}
+
+/** The names in `dir`, or none when it cannot be listed. */
+function listNames(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** Whether `layers.json` under `semanticRoot` lists a layer called `tables`. */
+function layersListTables(semanticRoot: string): boolean {
   try {
     const config = JSON.parse(fs.readFileSync(path.join(semanticRoot, LAYERS_CONFIG_FILE), 'utf-8')) as { layers?: unknown };
     return Array.isArray(config.layers) &&
@@ -55,18 +74,77 @@ export function tablesDirIsLayer(semanticRoot: string): boolean {
 }
 
 /**
- * Whether `{semanticRoot}/tables/` is the v6 table library: it holds a table
- * file (top level or one folder down) and is not a layer folder (see
+ * Whether `{semanticRoot}/tables/` is a layer folder rather than the table
+ * library (#162). A project made before v6 may have a layer called `tables`:
+ * it is one when `layers.json` lists a layer with that id, or when the folder
+ * holds a subject area file (`tables/*.json`). A library folder holds only
+ * table files, at the top or one folder down. A folder that is a layer keeps
+ * the project on v5 (it is never read as a library) until it is renamed.
+ *
+ * With DBML evidence in `tables/` (§3.3 of the native DBML storage spec) it
+ * is the library unless BOTH hold: a `tables` entry in `layers.json` (which
+ * a 1.x first-run prompt may have written) or a stray `tables/*.json` alone
+ * does not make a DBML library a layer; `doctor` reports either as
+ * `tablesLayerConflict`.
+ */
+export function tablesDirIsLayer(semanticRoot: string): boolean {
+  const dir = path.join(semanticRoot, TABLES_DIR);
+  let json: boolean;
+  try {
+    json = fs.readdirSync(dir, { withFileTypes: true }).some((d) => d.isFile() && d.name.endsWith('.json'));
+  } catch {
+    return false;
+  }
+  if (tablesDirHasDbml(semanticRoot)) {
+    return json && layersListTables(semanticRoot);
+  }
+  return json || layersListTables(semanticRoot);
+}
+
+/**
+ * The `tablesLayerConflict` text (§3.3) when `tables/` holds DBML evidence
+ * and also looks like a layer (listed in `layers.json`, or holding a
+ * `*.json`), else undefined. Shown once per session by the canvas and
+ * reported as an error by `doctor`. Nothing reclassifies silently.
+ */
+export function tablesLayerConflict(semanticRoot: string): string | undefined {
+  if (!tablesDirHasDbml(semanticRoot)) return undefined;
+  const dir = path.join(semanticRoot, TABLES_DIR);
+  const jsonFiles = listNames(dir).filter((f) => f.endsWith('.json')).sort((a, b) => a.localeCompare(b));
+  const listed = layersListTables(semanticRoot);
+  if (jsonFiles.length > 0 && listed) {
+    const dbmlFiles = [
+      ...listNames(dir).filter((f) => f.endsWith('.dbml')),
+      ...listNames(dir).filter((f) => isLibraryFolderName(f)).flatMap((f) => listNames(path.join(dir, f)).filter((g) => g.endsWith('.dbml')).map((g) => `${f}/${g}`)),
+    ].sort((a, b) => a.localeCompare(b)).map((f) => `tables/${f}`);
+    return `layers.json lists \`tables\` and tables/ holds diagrams, so tables/ is a layer and its DBML files are not read: ${dbmlFiles.join(', ')}. ` +
+      'Move them into the table library, or rename the tables layer.';
+  }
+  if (listed) {
+    return 'layers.json lists `tables`, but tables/ is the DBML table library. Remove the `tables` layer from layers.json.';
+  }
+  if (jsonFiles.length > 0) {
+    return `tables/ is the DBML table library, but it holds ${jsonFiles.map((f) => `tables/${f}`).join(', ')}, which ERD Studio ignores there. ` +
+      'Move them into a layer folder.';
+  }
+  return undefined;
+}
+
+/**
+ * Whether `{semanticRoot}/tables/` is the table library: it holds a table
+ * file — a `*.yml`, or a `*.dbml` (relationships files included) — at the
+ * top level or one folder down, and is not a layer folder (see
  * {@link tablesDirIsLayer}).
  */
 export function hasTablesLibrary(semanticRoot: string): boolean {
   const dir = path.join(semanticRoot, TABLES_DIR);
   if (!fs.existsSync(dir) || tablesDirIsLayer(semanticRoot)) return false;
   // A folder made by hand (or by an assistant) is not a library until it holds a table file.
+  const isTableFile = (name: string): boolean => name.endsWith('.yml') || name.endsWith('.dbml');
   try {
     return fs.readdirSync(dir, { withFileTypes: true }).some((d) =>
-      (d.isFile() && d.name.endsWith('.yml')) ||
-      (d.isDirectory() && !d.name.startsWith('.') && fs.readdirSync(path.join(dir, d.name)).some((f) => f.endsWith('.yml'))));
+      (d.isFile() && isTableFile(d.name)) ||
+      (d.isDirectory() && !d.name.startsWith('.') && fs.readdirSync(path.join(dir, d.name)).some(isTableFile)));
   } catch {
     return false;
   }
@@ -142,6 +220,8 @@ export interface TableFileError {
   code?: string;
   /** The file holds unresolved git merge conflicts (#145); `line` is the first `<<<<<<<`. */
   mergeConflict?: true;
+  /** A `.dbml` table's `Metadata` block whose table or column is missing (D25). */
+  target?: DbmlMetadataTarget;
   /**
    * The model was still read (#164): a key written twice, whose last value is
    * used. The file is refused for writing until one copy is removed.
@@ -174,7 +254,7 @@ function duplicateKeyFileError(name: string, filePath: string, warning: { key: s
 }
 
 export interface TableFileEntry {
-  /** Model name (the file stem). */
+  /** Model name: the file stem as listed (a `.dbml` file's declared name may differ in case, D2). */
   readonly name: string;
   /** Sub-folder under its library folder (`''` for a file at the top level). */
   readonly folder: string;
@@ -192,6 +272,101 @@ export interface TableFileEntry {
    * written by this version. Absent for `logical-models/`.
    */
   readonly library?: typeof TABLES_DIR;
+  /**
+   * How the file stores the table: `yaml` (`*.yml`) or `dbml` (`*.dbml`, only
+   * in `tables/`). Within one directory a `.dbml` wins over a `.yml` of the
+   * same name, which is then `shadowedBy` it (§3.4).
+   */
+  readonly storage: 'yaml' | 'dbml';
+}
+
+/** A `.dbml` table file read through the cache: the reader's answer for its text. */
+interface CachedDbmlTable {
+  readonly signature: string;
+  readonly reading: DbmlTableReading;
+}
+
+/** A relationships file read through the cache. */
+interface CachedRelationships {
+  readonly signature: string;
+  readonly reading: DbmlRelationshipsReading;
+}
+
+/**
+ * The message a DBML table write gets until the editor pipeline writes DBML
+ * (stage S5 of the native DBML storage spec).
+ */
+export const DBML_TABLE_EDITING_NOT_AVAILABLE = 'Editing DBML tables is not available yet in this build of ERD Studio.';
+
+/** Refused: a write to a `.dbml` table file, which this build reads but does not write yet. */
+export class DbmlTableWriteRefused extends Error {
+  readonly filePath?: string;
+  constructor(message: string = DBML_TABLE_EDITING_NOT_AVAILABLE, filePath?: string) {
+    super(message);
+    this.name = 'DbmlTableWriteRefused';
+    if (filePath !== undefined) this.filePath = filePath;
+  }
+}
+
+/** Whether `filePath` is a `.dbml` file. */
+function isDbmlFile(filePath: string): boolean {
+  return filePath.toLowerCase().endsWith('.dbml');
+}
+
+/**
+ * The file in `dir` named `name` + `ext`: the exact spelling when it is
+ * listed, else the first (sorted) whose stem matches without case; null
+ * when there is none or `dir` cannot be listed. A `.dbml` relationships file
+ * is never a table.
+ */
+function listedFile(dir: string, name: string, ext: '.yml' | '.dbml'): string | null {
+  let files: string[];
+  try {
+    files = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile() && d.name.endsWith(ext)).map((d) => d.name);
+  } catch {
+    return null;
+  }
+  const exact = `${name}${ext}`;
+  if (files.includes(exact)) return path.join(dir, exact);
+  const stem = (f: string): string => f.slice(0, -ext.length);
+  const file = files.sort((a, b) => a.localeCompare(b))
+    .find((f) => sameName(stem(f), name) && !(ext === '.dbml' && isReservedTableName(stem(f))));
+  return file === undefined ? null : path.join(dir, file);
+}
+
+/** A file's `mtime:size`, or null when it cannot be stat'ed. */
+function fileSignature(filePath: string): string | null {
+  try {
+    const stat = fs.statSync(filePath);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return null;
+  }
+}
+
+/** A `.dbml` file name's stem (`_relationships.dbml` → `_relationships`). */
+function dbmlStem(fileName: string): string {
+  return fileName.slice(0, -'.dbml'.length);
+}
+
+/** The {@link TableDbmlError} for a reading that failed, so `classifyTableLoadError` classifies it as core's loader does. */
+function dbmlReadingError(error: Extract<DbmlTableReading, { ok: false }>['error']): Error {
+  if (error.kind === 'read') {
+    // An empty file: a read failure, as the YAML reader's is.
+    return Object.assign(new Error(error.message), { code: 'EEMPTY' });
+  }
+  const code = error.code;
+  const rule = code?.startsWith('structure:') ? code.slice('structure:'.length) : undefined;
+  const dbmlCode = code !== undefined && /^\d+$/.test(code) ? Number(code) : undefined;
+  return new TableDbmlError(error.message, {
+    ...(dbmlCode !== undefined ? { dbmlCode } : {}),
+    ...(rule !== undefined ? { rule: rule as DbmlTableStructureRule } : {}),
+    ...(error.line !== undefined ? { line: error.line } : {}),
+    ...(error.column !== undefined ? { column: error.column } : {}),
+    ...(error.mergeConflict ? { mergeConflict: true } : {}),
+    ...(error.target !== undefined ? { target: error.target } : {}),
+    ...(dbmlCode === undefined && rule === undefined && error.kind === 'dbmlSyntax' ? { dbmlCode: 1000 } : {}),
+  });
 }
 
 /**
@@ -371,6 +546,18 @@ export class TableLibraryService {
    * entries eagerly when the logical-model watcher fires.
    */
   private readonly cache = new Map<string, CachedTable>();
+  /** `.dbml` table files' readings, keyed by path and checked against mtime + size like {@link cache}. */
+  private readonly dbmlCache = new Map<string, CachedDbmlTable>();
+  /**
+   * Every relationships file's reading (§5.1), keyed by path and checked
+   * against mtime + size. Not part of a table's cache entry: a relationships
+   * file changing needs no table re-read.
+   */
+  private readonly relationshipsCache = new Map<string, CachedRelationships>();
+  /** The last {@link libraryAttachment}, against the signatures of every file it read. */
+  private attachMemo: { key: string; result: DbmlAttachResult } | undefined;
+  /** DBML reader warnings already logged, by path and signature, so a refresh does not repeat them. */
+  private readonly loggedDbmlProblems = new Set<string>();
 
   /**
    * Told when a model file exists but cannot be read or parsed, or was read
@@ -471,6 +658,23 @@ export class TableLibraryService {
   /** {@link writesTableNaming}'s last answer, briefly. */
   private namingMemo: { at: number; v6: boolean } | undefined;
 
+  /**
+   * The project's storage to write (§3.2): `projectStorageIn` over this
+   * library and the project's diagrams, memoised briefly like
+   * {@link writesTableNaming} and invalidated the same way. The one host
+   * answer (`projectStorageOf`).
+   */
+  projectStorage(): ProjectStorage {
+    const now = Date.now();
+    if (this.storageMemo === undefined || now - this.storageMemo.at > 1000) {
+      this.storageMemo = { at: now, storage: projectStorageIn(this.semanticRoot, this, tablesDirIsLayer(this.semanticRoot)) };
+    }
+    return this.storageMemo.storage;
+  }
+
+  /** {@link projectStorage}'s last answer, briefly. */
+  private storageMemo: { at: number; storage: ProjectStorage } | undefined;
+
   /** The library new table files are created in (see {@link writesTableNaming}). */
   private newTablesDir(): string {
     return this.writesTableNaming() && !tablesDirIsLayer(this.semanticRoot) ? this.v6TablesDir : this.tablesDir;
@@ -494,8 +698,12 @@ export class TableLibraryService {
    */
   invalidateCache(name?: string): void {
     this.namingMemo = undefined;
+    this.storageMemo = undefined;
+    this.attachMemo = undefined;
     if (name === undefined) {
       this.cache.clear();
+      this.dbmlCache.clear();
+      this.relationshipsCache.clear();
       return;
     }
     // An unsafe name was never cached (nothing was read for it), so there is
@@ -503,7 +711,14 @@ export class TableLibraryService {
     const filePath = this.resolveTablePath(name);
     if (filePath !== null) {
       this.cache.delete(filePath);
+      this.dbmlCache.delete(filePath);
     }
+  }
+
+  /** Drop every relationships file's cached reading (a relationships file changed on disk). */
+  invalidateRelationships(): void {
+    this.relationshipsCache.clear();
+    this.attachMemo = undefined;
   }
 
   /**
@@ -535,6 +750,175 @@ export class TableLibraryService {
     }
     this.cache.set(filePath, { signature, model: structuredClone(model) });
     return model;
+  }
+
+  /**
+   * The one place a table file is read (§5.1): a `.yml` through
+   * {@link readTableFile}, a `.dbml` through core's `parseTableDbml`, both
+   * cached against the file's mtime + size. A DBML table gets the
+   * relationships it owns from the library's relationships files
+   * ({@link libraryAttachment}), which are not part of its cache entry.
+   * Returns a fresh copy; null when the file is missing; throws on a file
+   * that cannot be read.
+   */
+  private readTableEntry(filePath: string, fallbackName: string, options: { relationships?: boolean } = {}): SemanticTable | null {
+    if (!isDbmlFile(filePath)) return this.readTableFile(filePath, fallbackName);
+    const reading = this.readDbmlTableFile(filePath);
+    if (reading === null) return null;
+    if (!reading.ok) throw dbmlReadingError(reading.error);
+    const model = structuredClone(reading.table);
+    if (options.relationships !== false) {
+      const relationships = this.libraryAttachment()?.byOwner.get(model.name.toLowerCase());
+      if (relationships && relationships.length > 0) model.relationships = structuredClone(relationships);
+    }
+    return model;
+  }
+
+  /** A `.dbml` table file's reading, through {@link dbmlCache}; null when the file is gone. Never throws. */
+  private readDbmlTableFile(filePath: string): DbmlTableReading | null {
+    const signature = fileSignature(filePath);
+    if (signature === null) {
+      this.dbmlCache.delete(filePath);
+      return null;
+    }
+    const cached = this.dbmlCache.get(filePath);
+    if (cached && cached.signature === signature) return cached.reading;
+    let reading: DbmlTableReading;
+    try {
+      reading = parseTableDbml(fs.readFileSync(filePath, 'utf-8'), dbmlStem(path.basename(filePath)));
+    } catch (err) {
+      reading = { ok: false, error: { kind: 'read', message: err instanceof Error ? err.message : String(err) } };
+    }
+    this.dbmlCache.set(filePath, { signature, reading });
+    if (reading.ok) this.logDbmlProblems(filePath, signature, reading.problems);
+    return reading;
+  }
+
+  /** Log a DBML reader's warnings once per file version. */
+  private logDbmlProblems(filePath: string, signature: string, problems: readonly DbmlProblem[]): void {
+    if (problems.length === 0) return;
+    const key = `${filePath}\0${signature}`;
+    if (this.loggedDbmlProblems.has(key)) return;
+    this.loggedDbmlProblems.add(key);
+    for (const problem of problems) {
+      console.warn(`[LogicalModelService] ${this.libraryRelativePath(filePath)}${problem.line !== undefined ? ` line ${problem.line}` : ''}: ${problem.message}`);
+    }
+  }
+
+  /**
+   * Every relationships file of the DBML library (`tables/[<folder>/]_relationships.dbml`,
+   * any case), top level first, then each folder alphabetically. None when
+   * `tables/` is a layer.
+   */
+  listRelationshipsFiles(): string[] {
+    if (!fs.existsSync(this.v6TablesDir) || tablesDirIsLayer(this.semanticRoot)) return [];
+    const out: string[] = [];
+    for (const folder of ['', ...this.listFoldersOf(this.v6TablesDir)]) {
+      const dir = path.join(this.v6TablesDir, folder);
+      const file = listNames(dir).sort((a, b) => a.localeCompare(b))
+        .find((f) => f.toLowerCase().endsWith('.dbml') && isReservedTableName(dbmlStem(f)) && dbmlStem(f) === dbmlStem(f).trim());
+      if (file) out.push(path.join(dir, file));
+    }
+    return out;
+  }
+
+  /** A relationships file's reading, through {@link relationshipsCache}; null when it is gone. */
+  readRelationshipsFile(filePath: string): DbmlRelationshipsReading | null {
+    const signature = fileSignature(filePath);
+    if (signature === null) {
+      this.relationshipsCache.delete(filePath);
+      return null;
+    }
+    const cached = this.relationshipsCache.get(filePath);
+    if (cached && cached.signature === signature) return cached.reading;
+    let reading: DbmlRelationshipsReading;
+    try {
+      reading = readRelationshipsDbml(fs.readFileSync(filePath, 'utf-8'));
+    } catch (err) {
+      reading = { readable: false, refs: [], problems: [{ severity: 'error', message: err instanceof Error ? err.message : String(err) }] };
+    }
+    this.relationshipsCache.set(filePath, { signature, reading });
+    this.logDbmlProblems(filePath, signature, reading.problems);
+    return reading;
+  }
+
+  /**
+   * One `attachRelationships` over every relationships file of the library
+   * onto every table that reads (§2.4, §5.1): what each DBML table owns,
+   * misplaced Refs included, duplicates removed, orphans reported. Memoised
+   * against the signatures of every file it read, so it is recomputed at
+   * call time when any of them changed. Undefined when the library has no
+   * relationships file (no DBML table owns anything then).
+   */
+  libraryAttachment(): DbmlAttachResult | undefined {
+    const relFiles = this.listRelationshipsFiles();
+    if (relFiles.length === 0) return undefined;
+    const keyParts: string[] = [];
+    const readings: Array<{ path: string; reading: DbmlRelationshipsReading }> = [];
+    for (const filePath of relFiles) {
+      const reading = this.readRelationshipsFile(filePath);
+      if (reading === null) continue;
+      keyParts.push(`${filePath}\0${this.relationshipsCache.get(filePath)?.signature ?? ''}`);
+      readings.push({ path: this.libraryRelativePath(filePath), reading });
+    }
+    const tables: DbmlAttachTable[] = [];
+    for (const entry of this.listTableFiles()) {
+      if (entry.shadowedBy) continue;
+      let model: SemanticTable | null = null;
+      let alias: string | undefined;
+      try {
+        if (entry.storage === 'dbml') {
+          const reading = this.readDbmlTableFile(entry.filePath);
+          if (reading?.ok) {
+            model = reading.table;
+            alias = reading.alias;
+          }
+          keyParts.push(`${entry.filePath}\0${this.dbmlCache.get(entry.filePath)?.signature ?? ''}`);
+        } else {
+          model = this.readTableFile(entry.filePath, entry.name);
+          keyParts.push(`${entry.filePath}\0${this.cache.get(entry.filePath)?.signature ?? ''}`);
+        }
+      } catch {
+        model = null;
+      }
+      if (!model) continue;
+      tables.push({
+        table: { name: model.name, columns: model.columns },
+        folder: entry.folder,
+        storage: entry.storage,
+        ...(alias !== undefined ? { dbmlAlias: alias } : {}),
+      });
+    }
+    const key = keyParts.join('\n');
+    if (this.attachMemo && this.attachMemo.key === key) return this.attachMemo.result;
+    const result = attachRelationships(readings, dbmlTableLookup(tables));
+    for (const warning of result.warnings) console.warn(`[LogicalModelService] ${warning}`);
+    this.attachMemo = { key, result };
+    return result;
+  }
+
+  /** How `name`'s file stores it: `yaml`, `dbml`, or undefined when there is no file (or the name is unsafe). */
+  tableStorage(name: string): 'yaml' | 'dbml' | undefined {
+    try {
+      const filePath = this.findTableFile(name);
+      return filePath === null ? undefined : isDbmlFile(filePath) ? 'dbml' : 'yaml';
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * The relationships file that holds the Refs `tableName` owns, for a DBML
+   * table (its folder's `_relationships.dbml`, which may not exist yet), else
+   * undefined.
+   */
+  relationshipsFileFor(tableName: string): string | undefined {
+    try {
+      const filePath = this.findTableFile(tableName);
+      return filePath !== null && isDbmlFile(filePath) ? path.join(path.dirname(filePath), DBML_RELATIONSHIPS_FILE_NAME) : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -627,7 +1011,7 @@ export class TableLibraryService {
       return null;
     }
     try {
-      const model = this.readTableFile(filePath, name);
+      const model = this.readTableEntry(filePath, name);
       const warning = model ? tableLoadWarningOf(model) : undefined;
       if (warning) {
         this.recordFailure(filePath, duplicateKeyFileError(name, filePath, warning), null);
@@ -687,30 +1071,48 @@ export class TableLibraryService {
     const winners = new Map<string, string>();
     // `logical-models/`'s files by lower-case name: a `tables/` file of the
     // same name in any case is shadowed by it (#162). Within one library
-    // the match stays exact, as before.
+    // the match stays exact for YAML, as before; a `.dbml` table's name is
+    // compared without case (D2), so within `tables/` any pair involving a
+    // `.dbml` file is matched by its lower-case name.
     const v5Winners = new Map<string, string>();
+    const dbmlWinners = new Map<string, { filePath: string; dbml: boolean }>();
     let library: typeof TABLES_DIR | undefined;
     const add = (dir: string, folder: string): void => {
-      let files: string[];
+      let files: Array<{ file: string; name: string; storage: 'yaml' | 'dbml' }>;
       try {
         files = fs.readdirSync(dir, { withFileTypes: true })
-          .filter((d) => d.isFile() && d.name.endsWith('.yml'))
+          .filter((d) => d.isFile())
           .map((d) => d.name)
-          .sort((a, b) => a.localeCompare(b));
+          .flatMap((file): Array<{ file: string; name: string; storage: 'yaml' | 'dbml' }> => {
+            if (file.endsWith('.yml')) return [{ file, name: file.slice(0, -'.yml'.length), storage: 'yaml' }];
+            // `.dbml` tables live only in `tables/`, never next to a relationships file's name.
+            if (library && file.endsWith('.dbml') && !isReservedTableName(dbmlStem(file))) {
+              return [{ file, name: dbmlStem(file), storage: 'dbml' }];
+            }
+            return [];
+          })
+          // Within one directory a `.dbml` is listed (and wins) before a `.yml` of the same name (§3.4).
+          .sort((a, b) => a.name.toLowerCase() === b.name.toLowerCase() && a.storage !== b.storage
+            ? (a.storage === 'dbml' ? -1 : 1)
+            : a.file.localeCompare(b.file));
       } catch {
         return;
       }
-      for (const file of files) {
-        const name = file.replace(/\.yml$/, '');
+      for (const { file, name, storage } of files) {
         const filePath = path.join(dir, file);
-        const winner = winners.get(name) ?? (library ? v5Winners.get(name.toLowerCase()) : undefined);
+        const lower = name.toLowerCase();
+        const dbmlWinner = dbmlWinners.get(lower);
+        const winner = winners.get(name)
+          ?? (library ? v5Winners.get(lower) : undefined)
+          ?? (dbmlWinner && (storage === 'dbml' || dbmlWinner.dbml) ? dbmlWinner.filePath : undefined);
         const tag = library ? { library } : {};
         if (winner === undefined) {
           winners.set(name, filePath);
-          if (!library) v5Winners.set(name.toLowerCase(), filePath);
-          entries.push({ name, folder, filePath, ...tag });
+          if (!library) v5Winners.set(lower, filePath);
+          else if (!dbmlWinners.has(lower)) dbmlWinners.set(lower, { filePath, dbml: storage === 'dbml' });
+          entries.push({ name, folder, filePath, storage, ...tag });
         } else {
-          entries.push({ name, folder, filePath, shadowedBy: winner, ...tag });
+          entries.push({ name, folder, filePath, shadowedBy: winner, storage, ...tag });
         }
       }
     };
@@ -759,7 +1161,7 @@ export class TableLibraryService {
     for (const entry of this.listTableFiles()) {
       if (entry.shadowedBy) continue;
       try {
-        const model = this.readTableFile(entry.filePath, entry.name);
+        const model = this.readTableEntry(entry.filePath, entry.name);
         if (model) {
           models.push(model);
         }
@@ -784,8 +1186,11 @@ export class TableLibraryService {
    * relationship mode (`usesLibraryRelationships`).
    */
   hasUnreadableRelationships(): boolean {
+    // A relationships file that does not read holds Refs nobody can see (§4.3).
+    if (this.listRelationshipsFiles().some((filePath) => this.readRelationshipsFile(filePath)?.readable === false)) return true;
     return this.listTableFiles().some((entry) => {
-      if (entry.shadowedBy) return false;
+      // A `.dbml` table holds no relationships of its own (they are in relationships files).
+      if (entry.shadowedBy || entry.storage === 'dbml') return false;
       try {
         this.readTableFile(entry.filePath, entry.name);
         return false;
@@ -885,6 +1290,9 @@ export class TableLibraryService {
    * document generated from the model. Line endings follow the file's own.
    */
   private renderTable(model: SemanticTable, filePath: string): string {
+    // A `.dbml` table is never written as YAML: the DBML writer comes with the
+    // editor pipeline (S5). Refused before anything is built.
+    if (isDbmlFile(filePath)) throw new DbmlTableWriteRefused(undefined, filePath);
     const existing = this.loadEditableDocument(filePath);
     // A model read from a file with a key written twice is never written, even
     // when that key is `name:` and so points the write at another file (#164).
@@ -936,6 +1344,7 @@ export class TableLibraryService {
     this.ownWriteTracker.recordWrite(filePath);
     this.cache.delete(filePath);
     this.namingMemo = undefined;
+    this.storageMemo = undefined;
   }
 
   /**
@@ -943,6 +1352,7 @@ export class TableLibraryService {
    */
   deleteTable(name: string): void {
     const filePath = this.tablePath(name);
+    if (isDbmlFile(filePath)) throw new DbmlTableWriteRefused(undefined, filePath);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
       this.ownWriteTracker.recordDelete(filePath);
@@ -966,6 +1376,7 @@ export class TableLibraryService {
     if (!model) {
       throw new Error(`Table "${oldName}" not found in the Table Library`);
     }
+    if (this.tableStorage(oldName) === 'dbml') throw new DbmlTableWriteRefused(undefined, this.findTableFile(oldName) ?? undefined);
     if (newName !== oldName && this.tableExists(newName)) {
       throw new Error(`Table "${newName}" already exists in the Table Library`);
     }
@@ -1103,48 +1514,27 @@ export class TableLibraryService {
    * Throws on a name that is not path-safe (like {@link tablePath}).
    */
   findTableFile(name: string): string | null {
-    const topLevel = this.newTablePath(name, undefined, this.tablesDir);
-    if (fs.existsSync(topLevel)) {
-      return topLevel;
+    // Throws on a name that is not path-safe.
+    this.newTablePath(name, undefined, this.tablesDir);
+    // §3.4's order, resolved from the directory listing, never with
+    // `existsSync` (which ignores case on macOS and Windows, so the looked-up
+    // spelling would leak into paths): `logical-models/` top level then
+    // folders, then `tables/` top level then folders, `.dbml` before `.yml`
+    // in each. The listed file is returned (an exact spelling first, then any
+    // case), so callers get the file's real name.
+    const root = path.resolve(this.tablesDir);
+    for (const folder of ['', ...this.listFolders()]) {
+      const hit = listedFile(path.join(root, folder), name, '.yml');
+      if (hit !== null) return hit;
     }
-    for (const folder of this.listFolders()) {
-      const candidate = path.join(path.resolve(this.tablesDir), folder, `${name}.yml`);
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-    // Then v6's `tables/` (#162), in the same order; a project that writes
-    // v6 creates its new files there (newTablePath, #182). Checked file by
-    // file, so a lookup costs a few stats, never a scan of the library.
     const v6Dir = path.resolve(this.v6TablesDir);
-    if (!fs.existsSync(v6Dir)) {
+    if (!fs.existsSync(v6Dir) || tablesDirIsLayer(this.semanticRoot)) {
       return null;
     }
     for (const folder of ['', ...this.listFoldersOf(v6Dir)]) {
-      const candidate = path.join(v6Dir, folder, `${name}.yml`);
-      if (fs.existsSync(candidate)) {
-        if (tablesDirIsLayer(this.semanticRoot)) return null;
-        // A `logical-models/` file whose name differs only in case is the
-        // copy `listTableFiles` keeps and `doctor` reports as used, on every
-        // file system. Only a name that is in `tables/` pays for this.
-        return this.v5FileIgnoringCase(name) ?? candidate;
-      }
-    }
-    return null;
-  }
-
-  /** A `logical-models/` file (top level, then folders) whose name matches `name` ignoring case. */
-  private v5FileIgnoringCase(name: string): string | null {
-    const root = path.resolve(this.tablesDir);
-    for (const folder of ['', ...this.listFolders()]) {
-      let files: string[];
-      try {
-        files = fs.readdirSync(path.join(root, folder));
-      } catch {
-        continue;
-      }
-      const file = files.sort((a, b) => a.localeCompare(b)).find((f) => f.endsWith('.yml') && sameName(f.slice(0, -'.yml'.length), name));
-      if (file) return path.join(root, folder, file);
+      const dir = path.join(v6Dir, folder);
+      const hit = (isReservedTableName(name) ? null : listedFile(dir, name, '.dbml')) ?? listedFile(dir, name, '.yml');
+      if (hit !== null) return hit;
     }
     return null;
   }
@@ -1170,6 +1560,15 @@ export class TableLibraryService {
       return path.join(modelsDir, folder, `${name}.yml`);
     }
     return resolved;
+  }
+
+  /**
+   * Where a new table file for `name` goes (today's rule: the library new
+   * files go to, `{folder}/` when given and allowed), for callers outside
+   * this service such as sync plans and `diff`. Throws on an unsafe name.
+   */
+  pathForNewTable(name: string, folder?: string): string {
+    return this.newTablePath(name, folder);
   }
 
   /** Whether `folder` may be created under logical-models/ (the layer id format). */
@@ -1895,6 +2294,8 @@ export class TableLibraryService {
   dataTypeAliasColumns(name: string): { columns: string[]; ignored: string[]; anchored: string[] } {
     const found = { columns: [] as string[], ignored: [] as string[], anchored: [] as string[] };
     const filePath = this.resolveTablePath(name);
+    // `data_type:` is a YAML spelling; a `.dbml` table has none.
+    if (filePath !== null && isDbmlFile(filePath)) return found;
     let doc: Document | null;
     try {
       doc = filePath === null ? null : this.loadEditableDocument(filePath);

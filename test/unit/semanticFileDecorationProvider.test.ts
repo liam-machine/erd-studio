@@ -46,4 +46,15 @@ describe('SemanticFileDecorationProvider (H30 semanticDir)', () => {
     expect(provider.provideFileDecoration(uri('/proj/.erd-studio/unknown/customer.json'))).toBeUndefined();
     expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/customer.yml'))).toBeUndefined();
   });
+
+  it('decorates a .dbml diagram, but never a table, relationships or layout file (native DBML storage)', () => {
+    const provider = new SemanticFileDecorationProvider(fakeLayerService());
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/customer.dbml'))?.tooltip)
+      .toBe('Silver subject area (opens in visual editor)');
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/customer.dbdiagram'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/_relationships.dbml'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/tables/silver.dbml'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/tables/silver/customer.dbml'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/tables/silver/_relationships.dbml'))).toBeUndefined();
+  });
 });

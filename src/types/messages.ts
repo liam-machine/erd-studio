@@ -165,6 +165,8 @@ export interface ErrorMessage {
     /** With `fileProblem: 'syntax'`: the 1-based line and column of the mistake, when it was located. */
     line?: number;
     column?: number;
+    /** With `fileProblem: 'syntax'`: the diagram file's format, from its extension ("isn't valid JSON" / "isn't valid DBML"). Absent means JSON. */
+    fileType?: 'JSON' | 'DBML';
   };
 }
 
@@ -276,7 +278,19 @@ export interface FeedbackSubmittedMessage {
 }
 
 /** Union of all messages the extension can send to the webview. */
+/**
+ * Sent after a DBML diagram loads that declares Tables of its own and has no
+ * table `use` line (§2.5): most likely a single-file DBML dropped into a
+ * layer folder (a dbdiagram.io download or a rich export). The canvas shows
+ * "This file holds its own tables. Import these tables…", whose button posts
+ * {@link ImportEmbeddedTablesMessage}. No payload.
+ */
+export interface DbmlEmbeddedTablesMessage {
+  type: 'dbmlEmbeddedTables';
+}
+
 export type ExtensionMessage =
+  | DbmlEmbeddedTablesMessage
   | OpenFeedbackMessage
   | FeedbackContextMessage
   | FeedbackAnalysisMessage
@@ -693,6 +707,16 @@ export interface CloseEditorMessage {
 }
 
 /**
+ * Run Import DBML on this canvas's own file (§2.5): the button of the banner
+ * {@link DbmlEmbeddedTablesMessage} shows. No payload. Writes only through
+ * the Import DBML command, which asks before writing, so it is not on the
+ * physical allowlist.
+ */
+export interface ImportEmbeddedTablesMessage {
+  type: 'importEmbeddedTables';
+}
+
+/**
  * Pick another diagram to open (`erdStudio.openDomain` with no file). Sent by
  * the "deleted or renamed" screen (#161) — the renamed copy is one pick away.
  * No payload; allowed on the physical stage.
@@ -836,6 +860,7 @@ export type WebviewMessage =
   | OpenFeedbackLinkMessage
   | RequestReloadMessage
   | CloseEditorMessage
+  | ImportEmbeddedTablesMessage
   | OpenAnotherDomainMessage
   | OpenGettingStartedMessage
   | ExportDiagramMessage

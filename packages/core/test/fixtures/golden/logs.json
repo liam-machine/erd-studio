@@ -29,6 +29,21 @@
   "errors.conflict-positions.host": [
     "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/conflict-positions.json has unresolved git merge conflicts (first at line 12). Resolve them in the file — if only positions conflict, either side is safe to keep."
   ],
+  "errors.dbml-conflict.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/dbml-conflict.dbml has unresolved git merge conflicts (first at line 7). Resolve them in the file — if only the layout conflicts, either side is safe to keep."
+  ],
+  "errors.dbml-future.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: <root>/.erd-studio/silver/dbml-future.dbml has erd_schema_version 8 but this extension only supports up to version 7. Please update the extension."
+  ],
+  "errors.dbml-not-a-diagram.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: <root>/.erd-studio/tables/dim_customer.dbml is a DBML table or relationships file, not a diagram. Open a diagram in a layer folder."
+  ],
+  "errors.dbml-syntax.host": [
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/dbml-syntax.dbml is invalid-dbml — re-reading in 150ms (likely mid-write)",
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/dbml-syntax.dbml is invalid-dbml — re-reading in 350ms (likely mid-write)",
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/dbml-syntax.dbml is invalid-dbml — re-reading in 700ms (likely mid-write)",
+    "error: [SemanticEditorProvider] Failed to load domain: .erd-studio/silver/dbml-syntax.dbml has a mistake at line 6, column 1: Expect a closing brace '}' [1005]."
+  ],
   "errors.empty.host": [
     "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/empty.json is empty — re-reading in 150ms (likely mid-write)",
     "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/empty.json is empty — re-reading in 350ms (likely mid-write)",

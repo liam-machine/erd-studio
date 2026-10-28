@@ -527,7 +527,7 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(listTree(ws)).toEqual(before);
     expect(fs.existsSync(path.join(ws, 'selectors.yml'))).toBe(false);
     const patterns = vscode._mockFileWatchers.map((w) => (w._pattern as vscode.RelativePattern).pattern);
-    expect(patterns).toEqual(['.erd-studio/**/*.json', '.erd-studio/{logical-models,tables}/**/*.yml']);
+    expect(patterns).toEqual(['.erd-studio/**/*.{json,dbml,dbdiagram}', '.erd-studio/{logical-models,tables}/**/*.{yml,dbml}']);
   });
 
   /** Activate in `ws` (holding the logical-only fixture) and open its diagram in the real editor provider. */
@@ -733,6 +733,50 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
       type: 'status',
       payload: expect.objectContaining({ logicalOnly: true, project: expect.objectContaining({ name: 'diagrams' }), domainCount: 1 }),
     }));
+  });
+});
+
+describe('activate() in a native DBML project (S4)', () => {
+  let ws: string;
+  beforeEach(() => {
+    ws = path.join(root, 'dbml');
+    fs.cpSync(path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native'), ws, { recursive: true });
+    openWorkspace(ws);
+  });
+
+  it('sets erdStudio.storage to dbml and shows the Table Library, writes nothing, and opens a .dbml diagram', async () => {
+    const setContext = vi.spyOn(vscode.commands, 'executeCommand');
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    const before = listTree(ws);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(setContext).toHaveBeenCalledWith('setContext', 'erdStudio.storage', 'dbml');
+    expect(setContext).toHaveBeenCalledWith('setContext', 'erdStudio.hasLogicalModelsDir', true);
+    expect(listTree(ws)).toEqual(before);
+
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const file = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
+    const panel = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    await panel._simulateMessage({ type: 'ready' });
+    const loaded = panel._postedMessages.find((m) => (m as { type: string }).type === 'domainLoaded') as { payload: { schemaVersion: number } };
+    expect(loaded.payload.schemaVersion).toBe(7);
+    expect(listTree(ws)).toEqual(before);
+  });
+
+  it('warns once about tablesLayerConflict when layers.json also lists tables', async () => {
+    const layersFile = path.join(ws, '.erd-studio', 'layers.json');
+    const layers = JSON.parse(fs.readFileSync(layersFile, 'utf-8'));
+    layers.layers.push({ id: 'tables', label: 'Tables', abbreviation: 'TBL', color: '#888888', creatable: true, order: 3 });
+    fs.writeFileSync(layersFile, JSON.stringify(layers, null, 2));
+    await activate(context);
+    const conflicts = warn.mock.calls.filter((c) => String(c[0]).includes('tables/ is the DBML table library'));
+    expect(conflicts).toHaveLength(1);
   });
 });
 

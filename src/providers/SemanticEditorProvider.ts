@@ -66,14 +66,16 @@ import {
   SubjectAreaFileError,
   SubjectAreaService,
   isSubjectAreaFilePath,
+  subjectAreaTableNames,
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
 import { buildSyncPlan, countSyncPlanActions } from '../services/syncPlanBuilder';
 import { findVenvActivate } from '../services/dbtEnv';
 import { runDbtParse } from '../commands/runDbtParse';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
+import { IMPORT_DBML_COMMAND } from '../commands/importDbml';
 import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
-import { SEND_FEEDBACK_BUTTON, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, showErrorWithActions } from '../services/commandErrors';
+import { SEND_FEEDBACK_BUTTON, describeDbmlMistake, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, showErrorWithActions } from '../services/commandErrors';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
@@ -81,21 +83,20 @@ import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewTablePositions, findOpenPosition } from '../services/positionService';
 import {
+  classifySemanticFile,
   computeMissingPositions,
+  subjectAreaStorageOf,
   SubjectAreaValidationError,
   EMPTY_DBT_KEY_INDEX,
   backwardsRelationshipNote,
   linkKey,
   normaliseSubjectAreaDocument,
-  toTableNamingDocument,
-  parseSubjectAreaJson,
   sameLink,
   setMetaEntry,
   toDisplaySubjectArea,
 } from '@erd-studio/core';
 import type { DbtKeyIndex } from '@erd-studio/core';
 import { dbtKeyIndexOf, withDbtKeyHints } from '../services/stageDisplay';
-import { keepLineEndings } from '../services/lineEndings';
 import { rewriteJsonScalars } from '../services/minimalEdits';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
@@ -144,7 +145,7 @@ import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from
 import type { UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, SemanticTable, UnifiedSubjectArea } from '../types/semantic';
-import { describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat, getRawSubjectAreaTableNames } from '../types/semantic';
+import { describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
 import { saveDocument, saveDocumentByUri } from './documentSave';
 import { dirtyFiles } from './dirtyDocuments';
@@ -184,7 +185,18 @@ import { namingMigrationIsEmpty } from '../services/namingMigration';
 import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
-import { DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused } from '../services/logicalModelService';
+import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused, tablesDirIsLayer } from '../services/logicalModelService';
+import {
+  DBML_DIAGRAM_EDITING_NOT_AVAILABLE,
+  NotASubjectAreaObject,
+  codecFor,
+  isTableNamingDocument,
+  readLayoutText,
+  markTableNamingDocument,
+  serialiseSubjectArea,
+  subjectAreaFileObject,
+} from './subjectAreaCodec';
+import type { ParsedSubjectArea } from './subjectAreaCodec';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
 import { normaliseName } from '../services/nameUtils';
 
@@ -369,25 +381,9 @@ class EditRefused extends Error {
 /** A refusal the user was told about in plain words, which usage telemetry does not count as a failure. */
 function isExplainedRefusal(err: unknown): boolean {
   return err instanceof EditRefused || err instanceof RelationshipsRewriteRefused || err instanceof DuplicateKeyWriteRefused
-    || err instanceof TableNamingWriteRefused;
+    || err instanceof TableNamingWriteRefused || err instanceof DbmlTableWriteRefused;
 }
 
-/**
- * The subject area documents `parseSubjectAreaDocument` read from a v6 file
- * (#162): held under the in-memory (v5) keys like every other, and written
- * back in the v6 naming by `serialiseSubjectArea` (#182).
- */
-const tableNamingDocuments = new WeakSet<object>();
-
-/** A parsed subject area document as its file's text: v6 keys again for a v6 file (#182), else as it is. */
-function subjectAreaFileObject(parsed: Record<string, unknown>): Record<string, unknown> {
-  return tableNamingDocuments.has(parsed) ? toTableNamingDocument(parsed) : parsed;
-}
-
-/** `parsed` re-rendered as its file's text, in the file's own naming and line endings. */
-function serialiseSubjectArea(parsed: Record<string, unknown>, original: string): string {
-  return keepLineEndings(JSON.stringify(subjectAreaFileObject(parsed), null, 2) + '\n', original);
-}
 import {
   isValidCardinality,
   isValidRelationshipRole,
@@ -409,6 +405,7 @@ import {
   validateMarkKey,
   validateRelationshipEnds,
   validateDismissManifestHintPayload,
+  validateImportEmbeddedTablesPayload,
   validateExportDiagramPayload,
   validateAnnotationUpdate,
   validateTableNameSafety,
@@ -1048,6 +1045,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     });
   }
 
+  /** A `file:` `.dbml` the classifier says is not a diagram: a table, relationships or other file (§5.9). */
+  private isRerouted(document: vscode.TextDocument): boolean {
+    if (document.uri.scheme !== 'file' || !document.uri.fsPath.toLowerCase().endsWith('.dbml')) return false;
+    const semanticRoot = path.dirname(this.tableLibraryService.getTablesDir());
+    const rel = path.relative(semanticRoot, document.uri.fsPath).split(path.sep).join('/');
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return !isSubjectAreaFilePath(document.uri.fsPath);
+    return classifySemanticFile(rel, { tablesDirIsLayer: tablesDirIsLayer(semanticRoot) }).kind !== 'diagram';
+  }
+
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
     webviewPanel: vscode.WebviewPanel,
@@ -1061,6 +1067,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const foreignOwner = this.foreignProjectOf(document.uri.fsPath);
     if (foreignOwner !== null) {
       this.showForeignProject(webviewPanel, document.uri.fsPath, foreignOwner);
+      return;
+    }
+
+    // The `**/.erd-studio/*/*.dbml` selector also matches `tables/x.dbml` and
+    // `tables/_relationships.dbml`, and a glob cannot exclude them (§5.9). A
+    // `file:` one that is not a diagram is reopened as text. Other schemes
+    // (`git:` in the SCM diff, the merge editor's inputs) are never rerouted:
+    // disposing their panel would break those views; they get the
+    // not-a-diagram page with Open as Text instead.
+    if (this.isRerouted(document)) {
+      const column = webviewPanel.viewColumn;
+      webviewPanel.dispose();
+      await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default', { viewColumn: column, preview: false });
       return;
     }
 
@@ -1144,6 +1163,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'openAnotherDomain':
             await vscode.commands.executeCommand('erdStudio.openDomain');
             break;
+          case 'importEmbeddedTables': {
+            // The banner over a DBML diagram that holds its own tables (§2.5):
+            // Import DBML on this very file. The command asks before writing.
+            const payloadError = validateImportEmbeddedTablesPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await vscode.commands.executeCommand(IMPORT_DBML_COMMAND, document.uri);
+            break;
+          }
           case 'dismissWelcome':
             await this.context.globalState.update('welcomeDismissed', true);
             break;
@@ -1857,7 +1887,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private isSubjectAreaV5(parsed: Record<string, unknown>): boolean {
     // A v6 file (#162) is held under the v5 keys: it is edited as v5 and written back as v6.
-    if (tableNamingDocuments.has(parsed)) return true;
+    if (isTableNamingDocument(parsed)) return true;
     const format = detectSubjectAreaFormat(parsed);
     const unsupported = describeUnsupportedSubjectAreaFormat(format, 'being edited', parsed);
     if (unsupported) {
@@ -2481,7 +2511,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // diagram an AI assistant, git or the file explorer just removed (#161).
     this.refuseIfSubjectAreaFileGone(document);
     const text = document.getText();
-    const parsed = this.parseSubjectAreaDocument(document, text);
+    const file = this.parseSubjectAreaFile(document, text);
+    // A DBML diagram is read, not yet written (native DBML storage, S4):
+    // refused before anything is mutated or built.
+    if (file.storage === 'dbml') throw new EditRefused(DBML_DIAGRAM_EDITING_NOT_AVAILABLE);
+    const parsed = file.parsed;
     const section = this.getStageSection(parsed, stage);
 
     try {
@@ -2497,7 +2531,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const otherDomains = options.otherDomains ? this.rewriteOtherSubjectAreas(document.uri.fsPath, options.otherDomains) : [];
 
     // Re-rendered as before, in the file's own naming (#182) and line endings.
-    const updatedText = serialiseSubjectArea(parsed, text);
+    const [primary] = codecFor(document.uri.fsPath).render(file, text, document.uri.fsPath);
+    const updatedText = primary.kind === 'delete' ? text : primary.text;
     const edit = new vscode.WorkspaceEdit();
     const fullRange = new vscode.Range(
       document.positionAt(0),
@@ -2636,7 +2671,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // A v6 diagram (#162) is rewritten under the v5 keys and written back in its own naming (#182).
       if (format === 'v6') {
         parsed = normaliseSubjectAreaDocument(parsed);
-        tableNamingDocuments.add(parsed);
+        markTableNamingDocument(parsed);
       }
       if (!rewrite(parsed)) continue;
       if (dirtyFiles([summary.filePath]).length > 0) {
@@ -2670,10 +2705,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * tolerant `JSON.parse`: a bad document there is not the user's error.
    */
   private parseSubjectAreaDocument(document: vscode.TextDocument, text: string = document.getText()): Record<string, unknown> {
+    return this.parseSubjectAreaFile(document, text).parsed;
+  }
+
+  /**
+   * {@link parseSubjectAreaDocument} with what the codec knows besides the
+   * object (§5.2): the storage, and for a DBML diagram its version, writable
+   * flag and layout. A `.dbml` diagram reads into a plain v5 object (D8).
+   */
+  private parseSubjectAreaFile(document: vscode.TextDocument, text: string = document.getText()): ParsedSubjectArea {
     const shown = this.shownSubjectAreaPath(document.uri.fsPath);
-    let data: unknown;
+    const codec = codecFor(document.uri.fsPath);
     try {
-      data = parseSubjectAreaJson(text, shown);
+      // Messages name the file project-relative; a DBML diagram's layout is read beside the real path.
+      return codec.parse(text, shown, codec.storage === 'dbml' ? readLayoutText(document.uri.fsPath) : null);
     } catch (err) {
       if (err instanceof SubjectAreaFileError) {
         const fileProblem = this.subjectAreaFileProblemPayload(err, document.uri.fsPath);
@@ -2681,19 +2726,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const next = fileProblem.fileProblem === 'empty' ? 'Restore its content, then try again.' : 'Fix it and save, then try again.';
         throw new EditRefused(`${fileProblem.message} ${next}`);
       }
+      if (err instanceof NotASubjectAreaObject) {
+        throw new EditRefused(`Subject area file ${shown} does not contain a JSON object.`);
+      }
+      if (err instanceof SubjectAreaValidationError) throw new EditRefused(err.message);
       throw err;
     }
-    if (!data || typeof data !== 'object' || Array.isArray(data)) {
-      throw new EditRefused(`Subject area file ${shown} does not contain a JSON object.`);
-    }
-    // A v6 file (#162) is edited under the v5 keys, like every other, and
-    // written back in its own naming (`serialiseSubjectArea`, #182).
-    if (detectSubjectAreaFormat(data) === 'v6') {
-      const normalised = normaliseSubjectAreaDocument(data as Record<string, unknown>);
-      tableNamingDocuments.add(normalised);
-      return normalised;
-    }
-    return data as Record<string, unknown>;
   }
 
   /**
@@ -2794,6 +2832,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (err.reason === 'empty') {
       return { message: `${shown} has no content.`, kind: 'domain-file', fileProblem: 'empty' };
     }
+    if (err.reason === 'invalid-dbml') {
+      // A broken DBML diagram gets the same syntax screen, worded for DBML (§4.7).
+      return {
+        message: describeDbmlMistake(shown, err),
+        kind: 'domain-file',
+        fileProblem: 'syntax',
+        ...(err.line !== undefined ? { line: err.line } : {}),
+        ...(err.column !== undefined ? { column: err.column } : {}),
+        fileType: 'DBML',
+      };
+    }
     if (err.reason !== 'invalid-json') return undefined;
     return {
       message: describeJsonMistake(shown, err),
@@ -2865,6 +2914,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // `templates/*.json` and the other reserved directories, and a glob cannot
     // express the exclusion, so the refusal lives here. Rendering a canvas for
     // one of those can only ever end in a parse error the user cannot act on.
+    if (!isSubjectAreaFilePath(document.uri.fsPath) && document.uri.fsPath.toLowerCase().endsWith('.dbml')) {
+      // A table or relationships file shown through another scheme (an SCM
+      // diff), or reached directly: core's own words, with Open as Text.
+      this.postLoadError(webview, errorKey, {
+        message: `${document.uri.fsPath} is a DBML table or relationships file, not a diagram. Open a diagram in a layer folder.`,
+        kind: 'not-a-domain',
+      }, undefined, 'notDomain');
+      return;
+    }
     if (!isSubjectAreaFilePath(document.uri.fsPath)) {
       this.postLoadError(webview, errorKey, {
         message:
@@ -2902,8 +2960,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       // Auto-assign positions for models that lack them (e.g. added by AI agents)
       const computed = this.computeMissingPositions(unifiedDomain);
+      // A DBML diagram's layout is not written yet (S5): its computed positions are shown, never persisted.
+      const dbml = subjectAreaStorageOf(document.uri.fsPath) === 'dbml';
       if (computed) {
-        if (options.persistPositions && !autoLayout) {
+        if (options.persistPositions && !autoLayout && !dbml) {
           const positionsWritten = await this.autoPositionNewTables(document, computed);
           if (positionsWritten) {
             // Re-read since we wrote new positions to the file
@@ -2934,6 +2994,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           ...this.manifestHintFlag(),
           ...this.logicalOnlyFlag(),
         });
+        if (dbml && this.holdsOwnTables(document)) {
+          // A single-file DBML dropped into a layer folder (§2.5): offer Import.
+          this.post(webview, { type: 'dbmlEmbeddedTables' });
+        }
         if (options.persistPositions) {
           this.recordCanvasOpen(document, 'logical', displayDomain.models.length, catalog !== undefined);
           if (displayDomain.models.length === 0) telemetry.feature('emptyCanvas');
@@ -2978,13 +3042,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return { manifestMissing: true };
   }
 
+  /** Whether a DBML diagram declares Tables of its own and has no table `use` line (§2.5). Never throws. */
+  private holdsOwnTables(document: vscode.TextDocument): boolean {
+    try {
+      return codecFor(document.uri.fsPath).parse(document.getText(), document.uri.fsPath, readLayoutText(document.uri.fsPath)).holdsOwnTables === true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Usage telemetry for a canvas's first load: only the stage, format and counts. */
   private recordCanvasOpen(document: vscode.TextDocument, stage: Stage, modelCount: number, hasCatalog: boolean): void {
     let format: 'v4' | 'v5' = 'v5';
-    try {
-      if (detectSubjectAreaFormat(JSON.parse(document.getText()) as Record<string, unknown>) === 'v4') format = 'v4';
-    } catch {
-      // Loaded a moment ago, so this cannot really fail; v5 is the only other loadable format.
+    if (subjectAreaStorageOf(document.uri.fsPath) === 'dbml') {
+      // A DBML diagram counts as 'v5' (D21), plus the feature: never JSON-parsed.
+      telemetry.featureOnce('dbmlProject');
+    } else {
+      try {
+        if (detectSubjectAreaFormat(JSON.parse(document.getText()) as Record<string, unknown>) === 'v4') format = 'v4';
+      } catch {
+        // Loaded a moment ago, so this cannot really fail; v5 is the only other loadable format.
+      }
     }
     telemetry.canvasOpened(stage, format, modelCount);
     // Without dbt the manifest service is disabled and reports neither missing
@@ -3007,7 +3085,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private recordRelationshipState(document: vscode.TextDocument): void {
     try {
-      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      // A DBML diagram is read through its codec (a v5 object, D8), never `JSON.parse`d.
+      const parsed = subjectAreaStorageOf(document.uri.fsPath) === 'dbml'
+        ? codecFor(document.uri.fsPath).parse(document.getText(), document.uri.fsPath, readLayoutText(document.uri.fsPath)).parsed
+        : JSON.parse(document.getText()) as Record<string, unknown>;
       // Read only: a v6 file (#162) is surveyed like v5, through its v5 keys.
       const format = detectSubjectAreaFormat(parsed);
       const section = this.getStageSection(format === 'v6' ? normaliseSubjectAreaDocument(parsed) : parsed, 'logical');
@@ -3163,13 +3244,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         continue;
       }
       try {
-        const text = document.getText();
-        const parsed = JSON.parse(text) as unknown;
-
         // Check if this domain references the changed model. The shared
-        // format-agnostic extractor handles v5 name strings, v4/hybrid inline
-        // objects and legacy top-level `models` — and tolerates junk entries.
-        const referencesModel = getRawSubjectAreaTableNames(parsed).includes(modelName);
+        // raw membership reader handles v5 name strings, v4/hybrid inline
+        // objects, legacy top-level `models` and a DBML diagram's `use`
+        // lines — and tolerates junk entries.
+        const names = subjectAreaTableNames(document.getText(), document.uri.fsPath);
+        if (names === null) throw new Error(`${this.shownSubjectAreaPath(document.uri.fsPath)} does not parse`);
+        const referencesModel = names.some((n) => sameName(n, modelName));
 
         if (referencesModel) {
           await this.sendSubjectAreaData(document, webview, panelKey);
@@ -3177,6 +3258,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[SemanticEditorProvider] Refresh for model "${modelName}" failed: ${message}`);
+      }
+    }
+  }
+
+  /** Redraw every open canvas of the diagram at `fsPath` (its layout file changed outside the editor). */
+  async refreshSubjectAreaPanel(fsPath: string): Promise<void> {
+    for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
+      if (this.disposedWebviews.has(webview) || !samePath(document.uri.fsPath, fsPath)) continue;
+      try {
+        if (activeStage === 'physical') {
+          await this.handleSwitchStage(panelKey, document, webview, 'physical');
+        } else {
+          await this.sendSubjectAreaData(document, webview, panelKey);
+        }
+      } catch (err) {
+        console.error(`[SemanticEditorProvider] Refresh failed for ${fsPath}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }

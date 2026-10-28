@@ -25,8 +25,10 @@ import { readNamingMigrationInput } from '../services/namingMigrationFiles';
 import { tablesDirIsLayer, TABLES_DIR } from '../services/logicalModelService';
 import { normaliseName } from '../services/nameUtils';
 import { SubjectAreaFileError } from '../services/domainService';
-import { keysContradictedRelationships, linkKey, parseSubjectAreaJson } from '@erd-studio/core';
-import type { Relationship } from '@erd-studio/core';
+import { keysContradictedRelationships, layoutFilePathOf, linkKey, parseSubjectAreaJson, subjectAreaStorageOf } from '@erd-studio/core';
+import type { ProjectStorage, Relationship } from '@erd-studio/core';
+import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { projectStorageOf } from '../services/projectStorage';
 import { dbtKeyIndexOf } from '../services/stageDisplay';
 import {
   dbtCommands,
@@ -125,6 +127,14 @@ export interface DoctorResult extends Envelope {
      * no library folder yet, writes v6 (#182).
      */
     naming: ProjectNaming;
+    /**
+     * How the project stores its logical model (native DBML storage, §3.2):
+     * `dbml` (also when there is no `.erd-studio` yet), `yaml` or `mixed`.
+     * When it is `dbml`, `naming` says nothing: the library is `tables/`.
+     */
+    storage: ProjectStorage;
+    /** Every diagram, project-relative, with its file format (`json` or `dbml`, by the classifier). */
+    diagrams: Array<{ file: string; format: 'json' | 'dbml' }>;
     /**
      * What "ERD Studio: Migrate to the New File Naming" would change (#182),
      * when the project is not already v6. The CLI only describes it: the
@@ -272,6 +282,15 @@ function namingMigrationPreview(ctx: CliContext): NonNullable<DoctorResult['erd'
   return { moves: plan.moves.length, rewrites: plan.rewrites.length, refusals: [...plan.refusals], preview: describeNamingMigration(plan) };
 }
 
+/** A DBML diagram's layout file text, or null when there is none. */
+function readLayoutFile(diagramPath: string): string | null {
+  try {
+    return fs.readFileSync(layoutFilePathOf(diagramPath), 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
 function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   const semanticRoot = path.join(ctx.root, ctx.semanticDir);
   const exists = fs.existsSync(semanticRoot);
@@ -279,7 +298,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     return {
       semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
       conflictedDomainFiles: [], dataTypeAliasFiles: [], backwardsRelationships: [],
-      naming: 'v6', tablesFolderIsLayer: false, namingConflicts: [],
+      naming: 'v6', storage: 'dbml', diagrams: [], tablesFolderIsLayer: false, namingConflicts: [],
     };
   }
   const domains = ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir);
@@ -287,6 +306,13 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   const conflicted: ConflictedSubjectAreaFile[] = [];
   for (const d of domains) {
     try {
+      // A `.dbml` diagram is read through core's DBML reader (a v5 object, D8):
+      // its format is never a v4 / hybrid / legacy issue, and a conflict
+      // throws like a JSON one.
+      if (subjectAreaStorageOf(d.filePath) === 'dbml') {
+        parseSubjectAreaDbml(fs.readFileSync(d.filePath, 'utf-8'), d.filePath, readLayoutFile(d.filePath));
+        continue;
+      }
       const raw = parseSubjectAreaJson(fs.readFileSync(d.filePath, 'utf-8'), d.filePath);
       const format = detectSubjectAreaFormat(raw);
       // A file mixing the v5 and v6 names (#162) is a hand-edit to undo, not one the migration repairs.
@@ -321,6 +347,8 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     domains: domains.length,
     logicalModels: ctx.tableLibraryService.listTableNames().length,
     naming,
+    storage: projectStorageOf(ctx.tableLibraryService),
+    diagrams: domains.map((d) => ({ file: relPath(ctx.root, d.filePath), format: d.storage ?? 'json' })),
     ...(naming === 'v6' ? {} : { namingMigration: namingMigrationPreview(ctx) }),
     tablesFolderIsLayer: fs.existsSync(path.join(semanticRoot, TABLES_DIR)) && tablesDirIsLayer(semanticRoot),
     namingConflicts: ctx.tableLibraryService.tableNamingConflicts()
@@ -580,7 +608,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       erd: {
         semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
         conflictedDomainFiles: [], dataTypeAliasFiles: [], backwardsRelationships: [],
-        naming: 'v6', tablesFolderIsLayer: false, namingConflicts: [],
+        naming: 'v6', storage: 'dbml', diagrams: [], tablesFolderIsLayer: false, namingConflicts: [],
       },
       harness: { schemaSkill: 'missing', setupSkill: 'missing', version: harnessVersion },
     };

@@ -409,6 +409,11 @@ export class LayerService {
   async addLayer(layer: Omit<LayerConfig, 'order'>): Promise<void> {
     const layers = this.loadConfig();
 
+    // A `_` name is never a layer: `_relationships` is the DBML relationships file's (§2.1).
+    if (layer.id.startsWith('_')) {
+      throw new Error(`Layer ID "${layer.id}" may not start with "_"`);
+    }
+
     // Check for duplicate ID
     if (layers.some(l => l.id === layer.id)) {
       throw new Error(`Layer with ID "${layer.id}" already exists`);
