@@ -220,7 +220,7 @@ Table bridge_empty {
 | `grain` | `grain` | `erd_grain` |
 | `alias` | `alias` (custom property; DBML's own `as` alias is never written) | `erd_alias` |
 | `rationale.<key>` | `rationale_<snake_case>` (`rationaleProperty`) | `erd_rationale_…` |
-| `meta` | `meta_<key>: '<text>'` for a string value under `/^[a-z_][a-z0-9_]*$/` (not `json`); every other entry goes into **one** `meta_json: '<JSON of exactly those entries>'` | `erd_meta_…` |
+| `meta` | `meta_<key>: '<text>'` for a string value under `/^[a-z_][a-z0-9_]*$/` (not `json`); every other entry goes into **one** `meta_json: '<JSON of exactly those entries>'`, written where its first entry is; a text entry between two that need it goes into it too, so the map reads back in its key order | `erd_meta_…` |
 | column `name` | `<ident(name)>` | quoted names |
 | column `dataType` | `columnType(dataType)`: bare when a plain identifier, else `"…"`; empty → `""` | any DBML type. The read value is `rawDb` `type.type_name` (args included, quotes stripped). |
 | `isPrimaryKey` | single PK → column `pk`; two or more → `indexes { (a, b) [pk] }` | `primary key` flag |
@@ -745,7 +745,7 @@ Every reader strips a leading BOM first (§2.1) and takes an optional last `pars
 6. Structure checks (§2.2) → `dbmlStructure` with a message naming the rule. The stem and the declared name compare case-insensitively.
 7. Map `rawDb.tables[0]` per §2.2. Drop the placeholder. Read custom values with `propertyText`, accepting the `erd_` prefix (`bareDbmlProperty`) and 11.0's typed values (each one an `unquotedValue` warning, §2.2). Mirror `yamlToTable`'s normalisation exactly:
    - `scdType` is an integer 0–2 or absent; `additiveType` is in the union; `modelRole` is any string, as YAML keeps it.
-   - `meta` is read through core's `readMeta` rules. `meta_json` is parsed as JSON, and invalid JSON is a warning, with the entry kept as the string under the key `json`. `meta_<key>` entries win over the same key inside `meta_json`.
+   - `meta` is read through core's `readMeta` rules. `meta_json` is parsed as JSON, and invalid JSON is a warning, with the entry kept as the string under the key `json`. `meta_<key>` entries win over the same key inside `meta_json`. Entries read in the order the properties come, `meta_json`'s where it stands, so `meta` keeps its key order (stress round 1).
 
 **`readRelationshipsDbml`** works from the AST, never `rawDb`:
 

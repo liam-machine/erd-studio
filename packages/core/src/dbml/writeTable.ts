@@ -76,21 +76,28 @@ function ownMetaProperty(key: string, value: unknown): value is string {
   return typeof value === 'string' && META_KEY.test(key) && key !== META_JSON_KEY;
 }
 
-/** A meta map as properties: `meta_<key>` for each text value under a lower-case key, the rest in one `meta_json`. */
+/**
+ * A meta map as properties, in its own key order: `meta_<key>` for each text
+ * value under a lower-case key, the rest in one `meta_json` where its first
+ * entry is. The reader takes the entries in the order the properties come,
+ * so a text entry between two that need `meta_json` goes into it too: the map
+ * reads back in its key order (the order the canvas and the exports show).
+ */
 function metaSettings(meta: Meta | undefined): string[] {
   const settings: string[] = [];
-  const rest: Record<string, unknown> = {};
-  let hasRest = false;
-  for (const [key, value] of Object.entries(meta ?? {})) {
-    if (value === undefined) continue;
-    if (ownMetaProperty(key, value)) {
-      settings.push(`${DBML_RICH_META_PREFIX}${key}: ${dbmlString(value)}`);
+  const entries = Object.entries(meta ?? {}).filter(([, value]) => value !== undefined);
+  const inJson = entries.map(([key, value]) => !ownMetaProperty(key, value));
+  const first = inJson.indexOf(true);
+  const last = inJson.lastIndexOf(true);
+  const json: Record<string, unknown> = {};
+  entries.forEach(([key, value], i) => {
+    if (first !== -1 && i >= first && i <= last) {
+      Object.defineProperty(json, key, { value, enumerable: true, writable: true, configurable: true });
+      if (i === last) settings.push(`${DBML_RICH_META_JSON_PROPERTY}: ${dbmlString(JSON.stringify(json))}`);
     } else {
-      Object.defineProperty(rest, key, { value, enumerable: true, writable: true, configurable: true });
-      hasRest = true;
+      settings.push(`${DBML_RICH_META_PREFIX}${key}: ${dbmlString(value as string)}`);
     }
-  }
-  if (hasRest) settings.push(`${DBML_RICH_META_JSON_PROPERTY}: ${dbmlString(JSON.stringify(rest))}`);
+  });
   return settings;
 }
 

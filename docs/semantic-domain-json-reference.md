@@ -89,7 +89,7 @@ Table bridge_empty {
 | `grain` | `grain: '…'` |
 | `alias` (warehouse table name) | `alias: 'orders'` (never DBML's own `as`, which ERD Studio reads but never writes) |
 | `rationale.<key>` | `rationale_<snake_case>: '…'` (`rationale_purpose`, `rationale_measures`, …) |
-| `meta` | `meta_<key>: '<text>'` for a text value under a plain lowercase key; everything else in **one** `meta_json: '<JSON>'` |
+| `meta` | `meta_<key>: '<text>'` for a text value under a plain lowercase key; everything else in **one** `meta_json: '<JSON>'`, in the map's key order (`meta_json` stands where its first entry is, and a text value between two of its entries goes into it) |
 | column name, type | `<name> <type>`; a type that is not a plain identifier is quoted (`"DECIMAL(18,2)"`) |
 | primary key | `pk` on one column; two or more as `indexes { (a, b) [pk] }` |
 | column description | `note: '…'` |

@@ -121,31 +121,41 @@ function readProperties(
   return out;
 }
 
-/** `meta` from `meta_json` and `meta_<key>` properties (a `meta_<key>` wins over the same key in the JSON). */
+/**
+ * `meta` from `meta_json` and `meta_<key>` properties, in the order the
+ * properties come (`meta_json`'s entries where it is). A `meta_<key>` wins
+ * over the same key in the JSON, and stands where it is.
+ */
 function readMetaProperties(props: ReadonlyMap<string, string>, where: string, problems: DbmlProblem[]): ReturnType<typeof readMeta> {
   const raw: Record<string, unknown> = {};
   const set = (key: string, value: unknown): void => {
     Object.defineProperty(raw, key, { value, enumerable: true, writable: true, configurable: true });
   };
-  const json = props.get(DBML_RICH_META_JSON_PROPERTY);
-  if (json !== undefined) {
-    let parsed: unknown;
-    let ok = false;
-    try {
-      parsed = JSON.parse(json);
-      ok = !!parsed && typeof parsed === 'object' && !Array.isArray(parsed);
-    } catch {
-      ok = false;
-    }
-    if (ok) {
-      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) set(key, value);
-    } else {
-      problems.push({ code: 'metaJson', severity: 'warning', message: `${where}: meta_json is not a JSON object; it is kept as the text of meta "json"` });
-      set('json', json);
+  const own = new Set<string>();
+  for (const key of props.keys()) {
+    if (key !== DBML_RICH_META_JSON_PROPERTY && key.startsWith(DBML_RICH_META_PREFIX) && key.length > DBML_RICH_META_PREFIX.length) {
+      own.add(key.slice(DBML_RICH_META_PREFIX.length));
     }
   }
   for (const [key, value] of props) {
-    if (key === DBML_RICH_META_JSON_PROPERTY || !key.startsWith(DBML_RICH_META_PREFIX)) continue;
+    if (key === DBML_RICH_META_JSON_PROPERTY) {
+      let parsed: unknown;
+      let ok = false;
+      try {
+        parsed = JSON.parse(value);
+        ok = !!parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+      } catch {
+        ok = false;
+      }
+      if (ok) {
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) if (!own.has(k)) set(k, v);
+      } else {
+        problems.push({ code: 'metaJson', severity: 'warning', message: `${where}: meta_json is not a JSON object; it is kept as the text of meta "json"` });
+        set('json', value);
+      }
+      continue;
+    }
+    if (!key.startsWith(DBML_RICH_META_PREFIX)) continue;
     const metaKey = key.slice(DBML_RICH_META_PREFIX.length);
     if (metaKey !== '') set(metaKey, value);
   }

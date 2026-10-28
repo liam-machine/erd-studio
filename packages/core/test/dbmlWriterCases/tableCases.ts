@@ -538,4 +538,28 @@ export const NEW_TABLE_CASES: WriterCase[] = [
       expect(o.output).toBe('Table sat {\n  hk binary\n  load_date timestamp\n  indexes {\n    (hk, load_date) [pk]\n  }\n}\n');
     },
   },
+  {
+    // Stress round 1: `{ owner: 'x', contains_pii: true }` read back as `{ contains_pii, owner }`.
+    name: 'a new table keeps its meta in key order (meta_json where its first entry is)',
+    run: () => ({
+      path: 'tables/dim_employee.dbml',
+      input: null,
+      output: renderNewTableDbml({
+        name: 'dim_employee',
+        meta: { owner: 'people', contains_pii: true, exposure: 'crm' },
+        columns: [{ name: 'id', dataType: 'int', description: '', meta: { a: 'x', b: true, c: 'y', d: ['p', 'q'], e: 'z' } }],
+      }),
+    }),
+    check: (o) => {
+      expect(o.output).toBe(
+        "Table dim_employee [\n  meta_owner: 'people',\n  meta_json: '{\"contains_pii\":true}',\n  meta_exposure: 'crm'\n] {\n" +
+          "  id int [meta_a: 'x', meta_json: '{\"b\":true,\"c\":\"y\",\"d\":[\"p\",\"q\"]}', meta_e: 'z']\n}\n",
+      );
+      const read = readTable(o.output, 'dim_employee').table;
+      expect(Object.keys(read.meta ?? {})).toEqual(['owner', 'contains_pii', 'exposure']);
+      expect(read.meta).toEqual({ owner: 'people', contains_pii: true, exposure: 'crm' });
+      expect(Object.keys(read.columns?.[0]?.meta ?? {})).toEqual(['a', 'b', 'c', 'd', 'e']);
+      expect(read.columns?.[0]?.meta).toEqual({ a: 'x', b: true, c: 'y', d: ['p', 'q'], e: 'z' });
+    },
+  },
 ];

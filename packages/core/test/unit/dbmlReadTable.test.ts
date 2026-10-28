@@ -138,6 +138,12 @@ describe('parseTableDbml: the §2.2 field mapping', () => {
     expect(invalid.table.meta).toEqual({ json: '{not json' });
     expect(invalid.problems.map((p) => p.code)).toEqual(['metaJson']);
   });
+
+  it('meta: entries read in the order the properties come, meta_json entries where meta_json is', () => {
+    const read = ok(parseTableDbml(`Table t [meta_owner: 'o', meta_json: '{"pii":true,"owner":"json","tags":["a"]}', meta_exposure: 'e'] {\n  id int\n}\n`, 't'));
+    expect(read.table.meta).toEqual({ owner: 'o', pii: true, tags: ['a'], exposure: 'e' });
+    expect(Object.keys(read.table.meta ?? {})).toEqual(['owner', 'pii', 'tags', 'exposure']);
+  });
 });
 
 describe('parseTableDbml: names', () => {
