@@ -322,14 +322,19 @@ function jsonEqual(a: unknown, b: unknown): boolean {
  * The new text of a DBML diagram's layout file (`<name>.dbdiagram`), or
  * `null` when nothing needs writing. ERD Studio owns two lists in it,
  * `defaultView.tablePositions` and `defaultView.stickyNoteLayouts`; every
- * other key and value is kept as parsed, and the text is written as
- * two-space JSON with a final line break (its canonical form, so a file ERD
- * Studio wrote round-trips byte for byte).
+ * other key and value is kept as parsed. An existing file keeps its own
+ * style ({@link jsonStyleOf}): compact on one line or indented by its own
+ * width (spaces or tabs), its line endings, its byte-order mark and whatever
+ * it ends with. The two lists are merged into the file's entries, in its
+ * order, so an entry that did not move keeps its keys, their order and
+ * any key ERD Studio does not own: moving one table changes that table's
+ * lines and nothing else. A new file is two-space JSON with a final line
+ * break (so a file ERD Studio wrote round-trips byte for byte).
  *
  * - `oldText` `null` (no file): created only when there is at least one
  *   position or sticky layout.
- * - Both lists deep-equal to what is there: `null`, no write. A missing
- *   list, or a missing `defaultView`, counts as an empty list.
+ * - Both merged lists deep-equal to what is there: `null`, no write. A
+ *   missing list, or a missing `defaultView`, counts as an empty list.
  * - `oldText` that is not a JSON object: throws {@link DbdiagramLayoutRefused}.
  *
  * Pure, parser-free and deterministic.
@@ -388,17 +393,96 @@ export function editDiagramLayout(
   const view: Record<string, unknown> = hasView
     ? (existingView as Record<string, unknown>)
     : { detailLevel: 'All', relationshipMode: 'All', tablePositions: [], tableGroupCollapseStates: [], stickyNoteLayouts: [], referencePaths: [] };
+  const mergedTables = mergeEntries(view.tablePositions, tablePositions, TABLE_POSITION_KEYS);
+  const mergedStickies = mergeEntries(view.stickyNoteLayouts, stickyNoteLayouts, STICKY_LAYOUT_KEYS);
   if (
     hasView &&
-    jsonEqual(view.tablePositions === undefined ? [] : view.tablePositions, tablePositions) &&
-    jsonEqual(view.stickyNoteLayouts === undefined ? [] : view.stickyNoteLayouts, stickyNoteLayouts)
+    jsonEqual(view.tablePositions === undefined ? [] : view.tablePositions, mergedTables) &&
+    jsonEqual(view.stickyNoteLayouts === undefined ? [] : view.stickyNoteLayouts, mergedStickies)
   ) {
     return null;
   }
-  view.tablePositions = tablePositions;
-  view.stickyNoteLayouts = stickyNoteLayouts;
+  view.tablePositions = mergedTables;
+  view.stickyNoteLayouts = mergedStickies;
   file.defaultView = view;
-  return JSON.stringify(file, null, 2) + '\n';
+  return stringifyInStyle(file, jsonStyleOf(oldText));
+}
+
+/** The keys ERD Studio owns in a `tablePositions` entry and a `stickyNoteLayouts` entry. */
+const TABLE_POSITION_KEYS = ['name', 'schemaName', 'x', 'y'] as const;
+const STICKY_LAYOUT_KEYS = ['name', 'x', 'y', 'width', 'height'] as const;
+
+/**
+ * `wanted` (the whole new list, by `name`) laid over the file's `existing`
+ * list: an existing entry still wanted stays where it is, keeps its other
+ * keys and their order, and takes the owned keys' new values (an owned key
+ * the new entry lacks is removed); one no longer wanted, unnamed or listed
+ * twice is dropped; a new name is appended, in `wanted` order.
+ */
+function mergeEntries(
+  existing: unknown,
+  wanted: ReadonlyArray<{ name: string }>,
+  owned: readonly string[],
+): Array<Record<string, unknown>> {
+  const byName = new Map<string, Record<string, unknown>>();
+  for (const entry of wanted) if (!byName.has(entry.name)) byName.set(entry.name, entry as unknown as Record<string, unknown>);
+  const out: Array<Record<string, unknown>> = [];
+  const placed = new Set<string>();
+  for (const entry of Array.isArray(existing) ? existing : []) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const old = entry as Record<string, unknown>;
+    const name = old.name;
+    if (typeof name !== 'string' || placed.has(name)) continue;
+    const next = byName.get(name);
+    if (!next) continue;
+    // Owned keys keep their place; one the old entry lacked goes after its own keys.
+    const merged: Record<string, unknown> = { ...old };
+    for (const key of owned) {
+      if (Object.prototype.hasOwnProperty.call(next, key)) merged[key] = next[key];
+      else delete merged[key];
+    }
+    out.push(merged);
+    placed.add(name);
+  }
+  for (const [name, entry] of byName) {
+    if (!placed.has(name)) out.push({ ...entry });
+  }
+  return out;
+}
+
+/** How an existing JSON file is laid out, so an edit writes it the same way. */
+interface JsonTextStyle {
+  /** `undefined`: compact, on one line. Otherwise one level's indent (`'  '`, `'\t'`, …). */
+  indent: string | undefined;
+  /** `'\r\n'` when the file uses CRLF line breaks, else `'\n'`. */
+  eol: '\n' | '\r\n';
+  /** Whatever came before the opening brace (a byte-order mark, white space). */
+  leading: string;
+  /** Whatever came after the closing brace: usually `'\n'`, or nothing. */
+  trailing: string;
+}
+
+/**
+ * The style of `text`, a JSON document: compact when its value is on one
+ * line, else the indent of its first indented line (capped at ten
+ * characters, as `JSON.stringify` caps it), its line endings, and the text
+ * around the value kept as it is.
+ */
+function jsonStyleOf(text: string): JsonTextStyle {
+  const leading = /^[\uFEFF\s]*/.exec(text)![0];
+  const trailing = /\s*$/.exec(text.slice(leading.length))![0];
+  const body = text.slice(leading.length, text.length - trailing.length);
+  const eol = body.includes('\r\n') || (!body.includes('\n') && trailing.includes('\r\n')) ? '\r\n' : '\n';
+  if (!body.includes('\n')) return { indent: undefined, eol, leading, trailing };
+  const first = /\n([ \t]+)\S/.exec(body);
+  const indent = first ? first[1].slice(0, 10) : '  ';
+  return { indent, eol, leading, trailing };
+}
+
+/** `value` as JSON in `style` (see {@link jsonStyleOf}). */
+function stringifyInStyle(value: unknown, style: JsonTextStyle): string {
+  const json = style.indent === undefined ? JSON.stringify(value) : JSON.stringify(value, null, style.indent);
+  return style.leading + (style.eol === '\r\n' ? json.replace(/\n/g, '\r\n') : json) + style.trailing;
 }
 
 /** Where {@link placeUnlaidNotes} assumes a table's right edge is: the canvas's default node width. */

@@ -346,6 +346,92 @@ describe('editDiagramLayout (a DBML diagram\'s layout file)', () => {
     expect(editDiagramLayout('﻿' + created, positions, stickies)).toBeNull();
   });
 
+  describe('keeps the file\'s own formatting, so moving one table is a small diff', () => {
+    const file = {
+      version: '3.0.0',
+      gridEnabling: false,
+      currentViewName: null,
+      defaultView: {
+        detailLevel: 'All',
+        relationshipMode: 'All',
+        tablePositions: [
+          { name: 'dim_customer', schemaName: 'public', x: 40, y: 40 },
+          { name: 'fct_order', schemaName: 'public', x: 400, y: 200 },
+          { name: 'dim_date', schemaName: 'public', x: 40, y: 400 },
+        ],
+        tableGroupCollapseStates: [],
+        stickyNoteLayouts: [],
+        referencePaths: [],
+      },
+      views: {},
+    };
+    const placed = { dim_customer: { x: 40, y: 40 }, fct_order: { x: 400, y: 200 }, dim_date: { x: 40, y: 400 } };
+    const moved = { ...placed, fct_order: { x: 520, y: 200 } };
+    const changedLines = (a: string, b: string): number => {
+      const la = a.split('\n');
+      const lb = b.split('\n');
+      expect(lb).toHaveLength(la.length);
+      return la.filter((line, i) => line !== lb[i]).length;
+    };
+
+    it('compact on one line, with no final line break: stays compact, with none', () => {
+      const compact = JSON.stringify(file);
+      expect(editDiagramLayout(compact, placed, [])).toBeNull();
+      const out = editDiagramLayout(compact, moved, [])!;
+      expect(out).toBe(compact.replace('"x":400', '"x":520'));
+    });
+
+    it('four-space and tab indents keep their indent and final line break', () => {
+      for (const indent of ['    ', '\t']) {
+        const text = JSON.stringify(file, null, indent) + '\n';
+        expect(editDiagramLayout(text, placed, [])).toBeNull();
+        const out = editDiagramLayout(text, moved, [])!;
+        expect(changedLines(text, out)).toBe(1);
+        expect(out).toBe(text.replace(`"x": 400`, `"x": 520`));
+      }
+    });
+
+    it('no final line break stays without one; CRLF stays CRLF; a byte-order mark stays', () => {
+      const bare = JSON.stringify(file, null, 2);
+      expect(editDiagramLayout(bare, moved, [])).toBe(bare.replace('"x": 400', '"x": 520'));
+      const crlf = '﻿' + JSON.stringify(file, null, 2).replace(/\n/g, '\r\n') + '\r\n';
+      expect(editDiagramLayout(crlf, placed, [])).toBeNull();
+      expect(editDiagramLayout(crlf, moved, [])).toBe(crlf.replace('"x": 400', '"x": 520'));
+    });
+
+    it('keeps the file\'s table order, its entries\' key order and keys it does not own', () => {
+      const own = {
+        ...file,
+        defaultView: {
+          ...file.defaultView,
+          tablePositions: [
+            { x: 40, y: 400, name: 'dim_date', schemaName: 'public', color: '#fff' },
+            { schemaName: 'public', name: 'fct_order', x: 400, y: 200 },
+            { name: 'dim_customer', schemaName: 'public', x: 40, y: 40 },
+          ],
+        },
+      };
+      const text = JSON.stringify(own, null, 2) + '\n';
+      // Same places in another order: no write.
+      expect(editDiagramLayout(text, placed, [])).toBeNull();
+      const out = editDiagramLayout(text, moved, [])!;
+      expect(changedLines(text, out)).toBe(1);
+      // A table placed for the first time is appended; one no longer placed is dropped.
+      const grown = JSON.parse(editDiagramLayout(text, { fct_order: { x: 400, y: 200 }, dim_date: { x: 40, y: 400 }, dim_store: { x: 9, y: 9 } }, [])!);
+      expect(grown.defaultView.tablePositions).toEqual([
+        { x: 40, y: 400, name: 'dim_date', schemaName: 'public', color: '#fff' },
+        { schemaName: 'public', name: 'fct_order', x: 400, y: 200 },
+        { name: 'dim_store', schemaName: 'public', x: 9, y: 9 },
+      ]);
+    });
+
+    it('a sticky note that loses its size loses the size keys, and keeps the rest', () => {
+      const text = JSON.stringify({ ...file, defaultView: { ...file.defaultView, stickyNoteLayouts: [{ name: 'n1', x: 1, y: 2, width: 200, height: 100, colour: 'y' }] } }, null, 2) + '\n';
+      const out = JSON.parse(editDiagramLayout(text, placed, [{ name: 'n1', x: 1, y: 2 }])!);
+      expect(out.defaultView.stickyNoteLayouts).toEqual([{ name: 'n1', x: 1, y: 2, colour: 'y' }]);
+    });
+  });
+
   it('read(edit(x)) gives back the positions and the sticky layouts', () => {
     const text = editDiagramLayout(null, positions, stickies)!;
     const reading = readDbdiagramLayout(text);
