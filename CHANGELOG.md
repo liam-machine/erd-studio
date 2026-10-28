@@ -8,6 +8,11 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+- **A project a newer ERD Studio stored as DBML is no longer shown as empty, and is never changed by this version.** The 1.9 pre-release and 2.0 can keep a project's tables and diagrams as `.dbml` files, which this version cannot read. Opened on such a project, ERD Studio now says *"This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). Update ERD Studio to open it."* once, shows the same message in the ERD Studio and Table Library views instead of *"No tables found"*, with an **Update ERD Studio** button, and opens no diagram. Everything that would write into the project's `.erd-studio` folder (New Subject Area, Draw from dbt, the layer, table library and migration commands, regenerating `selectors.yml`, and setting up or updating your AI helper's files) stops with the same message instead of putting YAML or JSON files beside the DBML ones. `erd-studio doctor` reports it too, with **Update ERD Studio** as the first next step. Projects stored as YAML and JSON work exactly as before.
+
 ## 1.7.2 — 2026-10-23
 
 ### Changed
