@@ -1,6 +1,6 @@
 /**
- * `outlineDbmlFile` (native DBML storage §7.1): the `use` lines and Enums
- * `doctor` checks, read from the AST alone.
+ * `outlineDbmlFile` (native DBML storage §7.1): the `use` lines, Enums and
+ * Metadata targets `doctor` checks, read from the AST alone.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -21,6 +21,7 @@ describe('outlineDbmlFile', () => {
     expect(outlineDbmlFile(text, 'tables/gold/_relationships.dbml')).toEqual({
       parses: true,
       enums: [],
+      metadata: [],
       uses: [
         { path: '../dim_date.dbml', resolved: 'tables/dim_date.dbml', line: 2, wildcard: false, tables: ['dim_date'] },
         { path: './fct_order', resolved: 'tables/gold/fct_order.dbml', line: 3, wildcard: false, tables: ['fct_order'] },
@@ -34,8 +35,27 @@ describe('outlineDbmlFile', () => {
     expect(outlineDbmlFile(text, 'tables/t.dbml').enums).toEqual([{ name: 'status', line: 5 }, { name: 'gold.kind', line: 9 }]);
   });
 
+  it('lists the target of each Metadata block (D25), table or column, with its line', () => {
+    const text = [
+      "use { table fct_order } from '../tables/gold/fct_order.dbml'",
+      '',
+      'Metadata Table fct_order {',
+      "  grain: 'One row per order'",
+      '}',
+      '',
+      'Metadata Column fct_order.customer_key {',
+      "  note: 'The buyer'",
+      '}',
+      '',
+    ].join('\n');
+    expect(outlineDbmlFile(text, 'gold/sales.dbml').metadata).toEqual([
+      { table: 'fct_order', line: 3 },
+      { table: 'fct_order', column: 'customer_key', line: 7 },
+    ]);
+  });
+
   it('a file with a syntax error has no outline', () => {
-    expect(outlineDbmlFile('Table t {\n  id int\n', 'tables/t.dbml')).toEqual({ parses: false, uses: [], enums: [] });
+    expect(outlineDbmlFile('Table t {\n  id int\n', 'tables/t.dbml')).toEqual({ parses: false, uses: [], enums: [], metadata: [] });
   });
 
   it('findConflictMarkers is exported from the main entry', () => {

@@ -38,9 +38,10 @@ Onboarding has three starting points — no folder open, a folder without dbt (l
   | `tablesLayerConflict` (`tables` listed as a layer, or `.json` in the DBML `tables/`) | error | `fix-dbml-file` |
   | `missingLayersConfig` (a DBML library with no `layers.json`) | warning | |
   | `dbmlDiagramInYamlProject`, `yamlTableInDbmlDiagram` | warning | |
-  | `declaredInDiagram` (a Table / Ref / TableGroup / Metadata block in a diagram) | warning | kept byte for byte, not drawn |
+  | `declaredInDiagram` (a Table / Ref / TableGroup in a diagram; a Metadata block there is `foreignMetadata`) | warning | kept byte for byte, not drawn |
   | `declaresOwnTables` (Tables and no table `use` lines) | warning | routed to `import-dbml-file` |
   | `structure:metadataTarget` (D25: a `Metadata` block whose target the file does not declare) | warning | one warning with the reader's text; the parser's raw `[4000]` is dropped |
+  | `foreignMetadata` (D25: a `Metadata Table t` / `Metadata Column t.c` block in a diagram or relationships file) | warning, at the block's line, naming the target table and its file | ERD Studio reads and edits a table's properties only in its table file, so the canvas never shows the block's values while other DBML tools apply them; move them inline into the table file. Reported instead of the diagram reader's `declaredInDiagram` for the same block |
   | `metaJson`, `unreadableRef`, `diagramWarning` (the readers' other warnings: a `meta_json` that is not a JSON object, a Ref line it cannot read, any other diagram warning) | warning | |
   | unsorted `use` lines or Refs | not reported | cosmetic |
 

@@ -1,6 +1,7 @@
 /**
  * The outline of a `.dbml` file that `doctor` checks: its `use` lines
- * (resolved against the file's folder) and the Enums it declares. Read from
+ * (resolved against the file's folder), the Enums it declares and the
+ * targets of its `Metadata` blocks (D25). Read from
  * the AST alone, so a file with binding errors still outlines; a file that
  * does not parse at all has no outline (`parses: false`).
  */
@@ -14,7 +15,7 @@ export function outlineDbmlFile(rawText: string, filePath: string): DbmlFileOutl
   const text = stripBom(rawText);
   const compiled = compileOne(text);
   if (compiled.errors.some((d) => d.errorClass === 'syntax') || !compiled.ast) {
-    return { parses: false, uses: [], enums: [] };
+    return { parses: false, uses: [], enums: [], metadata: [] };
   }
   const uses = useLinesOf(compiled.ast, text, filePath).map((use) => ({
     path: use.importPath,
@@ -24,11 +25,23 @@ export function outlineDbmlFile(rawText: string, filePath: string): DbmlFileOutl
     tables: use.tables.map((t) => t.name),
   }));
   const enums: DbmlFileOutline['enums'] = [];
+  const metadata: NonNullable<DbmlFileOutline['metadata']> = [];
   for (const node of topLevel(compiled.ast)) {
-    if (elementType(node)?.toLowerCase() !== 'enum') continue;
-    const parts = plainNames(node.name);
-    if (!parts || parts.length === 0) continue;
-    enums.push({ name: parts.join('.'), line: lineAt(text, node.start) });
+    const type = elementType(node)?.toLowerCase();
+    if (type === 'enum') {
+      const parts = plainNames(node.name);
+      if (!parts || parts.length === 0) continue;
+      enums.push({ name: parts.join('.'), line: lineAt(text, node.start) });
+    } else if (type === 'metadata') {
+      const parts = plainNames(node.name);
+      const column = String(node.targetKind?.value ?? '').toLowerCase() === 'column';
+      if (!parts || parts.length < (column ? 2 : 1)) continue;
+      metadata.push({
+        table: column ? parts[parts.length - 2] : parts[parts.length - 1],
+        ...(column ? { column: parts[parts.length - 1] } : {}),
+        line: lineAt(text, node.start),
+      });
+    }
   }
-  return { parses: true, uses, enums };
+  return { parses: true, uses, enums, metadata };
 }

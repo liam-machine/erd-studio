@@ -138,6 +138,12 @@ export interface DbmlFileOutline {
   uses: DbmlUseOutline[];
   /** Each Enum's name as declared (`status`, `gold.status`) and its 1-based line. */
   enums: Array<{ name: string; line: number }>;
+  /**
+   * Each `Metadata Table t` / `Metadata Column t.c` block (D25, DBML 9.1+):
+   * the table it targets (its last name part, as written), the column for a
+   * column block, and its 1-based line. Optional: an older core leaves it unset.
+   */
+  metadata?: Array<{ table: string; column?: string; line: number }>;
 }
 
 /** A diagnostic of {@link DbmlStorageReader}-adjacent multi-file compiles (`compileDbmlProject`). */

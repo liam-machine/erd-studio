@@ -833,6 +833,29 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(ids(r)).toEqual(['ready']);
   });
 
+  it('a Metadata block in a diagram or relationships file is one foreignMetadata warning naming its line and target table (D25), raising no next step', async () => {
+    const root = nativeWith({
+      'gold/sales.dbml': (t) => `${t}\nMetadata Table fct_order {\n  grain: 'One row per order'\n}\n`,
+      'tables/gold/_relationships.dbml': (t) => `${t}\nMetadata Column fct_order.customer_key {\n  note: 'The buyer'\n}\n`,
+    });
+    const r = await doctor(root);
+    const lineOf = (rel: string, needle: string): number =>
+      fs.readFileSync(path.join(root, '.erd-studio', rel), 'utf-8').split('\n').findIndex((l) => l.startsWith(needle)) + 1;
+    const found = problem(r, 'foreignMetadata');
+    expect(found.map((p) => [p.file, p.line, p.severity])).toEqual([
+      ['.erd-studio/gold/sales.dbml', lineOf('gold/sales.dbml', 'Metadata Table'), 'warning'],
+      ['.erd-studio/tables/gold/_relationships.dbml', lineOf('tables/gold/_relationships.dbml', 'Metadata Column'), 'warning'],
+    ]);
+    expect(found.map((p) => p.message)).toEqual([
+      expect.stringMatching(/^This Metadata block sets properties of fct_order from outside its table file \(tables\/gold\/fct_order\.dbml\)\./),
+      expect.stringMatching(/^This Metadata block sets properties of fct_order\.customer_key from outside its table file \(tables\/gold\/fct_order\.dbml\)\..*Move them into tables\/gold\/fct_order\.dbml as inline settings, and remove the block\.$/),
+    ]);
+    // The diagram reader's own note on the same block is not repeated.
+    expect(problem(r, 'declaredInDiagram')).toEqual([]);
+    expect(r.erd.dbmlProblems.filter((p) => p.severity === 'error')).toEqual([]);
+    expect(ids(r)).toEqual(['ready']);
+  });
+
   it("a relationships file's syntax error is reported once (the compile's, not the reader's copy too)", async () => {
     const r = await doctor(nativeWith({ 'tables/_relationships.dbml': (t) => `${t}Ref: dim_date.date_key >\n` }));
     expect(problem(r, 1002)).toEqual([expect.objectContaining({ file: '.erd-studio/tables/_relationships.dbml', line: 6, severity: 'error', message: 'Unexpected EOF' })]);
