@@ -24,6 +24,7 @@ import {
   classifySemanticFile,
   findConflictMarkers,
   layoutFilePathOf,
+  parseTableText,
 } from '@erd-studio/core';
 import type { DbmlFileOutline, ProjectStorage, Relationship } from '@erd-studio/core';
 import { compileDbmlProject, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, usePathBetween } from '@erd-studio/core/dbml';
@@ -340,6 +341,22 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     }
     return undefined;
   };
+  /**
+   * Why a member's YAML file is not a table, or undefined when it is one (or does not read: its own error
+   * says why). An empty file, or one with no name: key (a dbt schema file, say), is never read as a table,
+   * so the member is drawn as missing — as Convert's plan says of the file.
+   */
+  const notATable = (t: { path: string; storage: 'yaml' | 'dbml' }): string | undefined => {
+    if (t.storage !== 'yaml' || !snapshot) return undefined;
+    const text = snapshot.readText(t.path);
+    if (text === null) return undefined;
+    if (text.split(/\r?\n/).every((line) => /^\s*(#.*)?$/.test(line))) return 'is empty';
+    try {
+      return parseTableText(text, t.path.replace(/^.*\//, '').replace(/\.ya?ml$/i, '')) === null ? 'has no name: key' : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   /** How a member's YAML table is named in a message: its own name, or the member with the name its file holds. */
   const yamlTableLabel = (name: string, t: { name: string; path: string }): string =>
     t.name.toLowerCase() === name.toLowerCase() ? `${t.name} is still a YAML table (${t.path})` : `${name} is still a YAML table (${t.path}, which holds the table ${t.name})`;
@@ -365,6 +382,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
       ...[head.fromModel, head.toModel].filter((n, i, all) => all.indexOf(n) === i).flatMap((name) => {
         const t = memberTableOf(name);
         if (!t) return [`${name} has no table file`];
+        const notTable = notATable(t);
+        if (notTable) return [`${name}'s file ${t.path} ${notTable}, so it is not a table yet`];
         if (t.storage === 'yaml') return [yamlTableLabel(name, t)];
         return [];
       }),
@@ -378,6 +397,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     // "Add from dbt" only helps a table with no file; a YAML one is finished by Convert.
     const how = [
       ...(waits.some((w) => w.endsWith('has no table file')) ? ['Add from dbt makes a missing table'] : []),
+      ...(waits.some((w) => w.endsWith('so it is not a table yet')) ? ['write the table in that file, then run Convert Project to DBML'] : []),
       ...(waits.some((w) => w.includes('is still a YAML table')) ? ['Convert Project to DBML converts a YAML table once its file is fixed'] : []),
     ];
     push({
@@ -581,10 +601,14 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     // Members with no .dbml table file to use (D26), and the diagram's own pending relationships (D27).
     for (const name of reading.unlinked ?? []) {
       const t = memberTableOf(name);
+      const notTable = t ? notATable(t) : undefined;
       push({
         file: projectRel(f.rel), code: 'unlinkedTable',
         message: !t
           ? `${name} is on this diagram but has no table file, so it is drawn as missing (its name is in the Project's erd_unlinked_tables). Add it (Add from dbt), or remove it from the diagram.`
+          : notTable
+            ? `${name} is on this diagram, but its file ${t.path} ${notTable}, so ERD Studio does not read it as a table and draws ${name} as missing (its name is in the Project's erd_unlinked_tables). `
+              + `Write the table in that file, then run ERD Studio: Convert Project to DBML; or delete the file and remove ${name} from the diagram.`
           : t.storage === 'yaml'
             ? `${yamlTableLabel(name, t).replace(' is still a YAML table', ' is on this diagram but is still a YAML table')}, so the diagram names it in erd_unlinked_tables instead of a use line. Fix that file if needed, then run ERD Studio: Convert Project to DBML.`
             : `${t.name} has a table file now (${t.path}), but the diagram still names it in erd_unlinked_tables. ERD Studio moves it to a use line on its next edit of this diagram, or run ERD Studio: Convert Project to DBML.`,

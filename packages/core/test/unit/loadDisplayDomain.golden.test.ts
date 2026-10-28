@@ -235,4 +235,28 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
       expect(normaliseStorageRows(twin, without)).not.toEqual(normaliseStorageRows(expected, without));
     });
   });
+
+  it.each([
+    ['with no name: key', null],
+    ['empty', ''],
+  ])('a DBML diagram member whose YAML file is %s is not called a YAML table: it is drawn as missing, as the plan says', async (_label, namelessText) => {
+    const root = path.join(FIXTURES, 'dbml', 'missing-model-converted');
+    const read = fsReadFile(root);
+    const warnings: string[] = [];
+    await loadDisplaySubjectArea({
+      domainPath: '.erd-studio/silver/partial.dbml',
+      readFile: async (p) => (namelessText !== null && p.endsWith('/nameless.yml') ? namelessText : read(p)),
+      readOnly: false,
+      warn: (m) => warnings.push(m),
+      dbml: dbmlStorageReader,
+    });
+    const mixed = warnings.filter((w) => w.includes('is a YAML table'));
+    // broken.yml is a table that does not parse: Convert leaves it, and editing waits for it.
+    expect(mixed).toEqual([
+      'Table "broken" is a YAML table (.erd-studio/logical-models/broken.yml); the DBML diagram shows it, but run ERD Studio: Convert Project to DBML '
+        + 'before editing its relationships (fix the file first if Convert leaves it as it is)',
+    ]);
+    // Its parse error still follows the mixed-state warning.
+    expect(warnings.indexOf(mixed[0])).toBeLessThan(warnings.findIndex((w) => w.startsWith('Failed to read model "broken"')));
+  });
 });

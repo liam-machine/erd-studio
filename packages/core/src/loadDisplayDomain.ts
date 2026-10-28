@@ -386,10 +386,15 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         parsed.set(name, parseDbmlTable(name, text, dbml, maxYamlChars, warn));
         return;
       }
-      if (reading) {
-        warn(`Table "${name}" is a YAML table (${path}); the DBML diagram shows it, but ERD Studio: Convert Project to DBML before editing its relationships`);
+      // The YAML table's own warnings (a parse error, say) follow the mixed-state one.
+      const parseWarnings: string[] = [];
+      const table = parseTable(name, text, maxYamlChars, maxYamlNodes, (m) => parseWarnings.push(m));
+      // An empty file, or one with no name:, is no table: it is drawn as missing, and says so below.
+      if (reading && (table.model !== null || table.loadError !== undefined)) {
+        warn(`Table "${name}" is a YAML table (${path}); the DBML diagram shows it, but run ERD Studio: Convert Project to DBML before editing its relationships (fix the file first if Convert leaves it as it is)`);
       }
-      parsed.set(name, parseTable(name, text, maxYamlChars, maxYamlNodes, warn));
+      for (const m of parseWarnings) warn(m);
+      parsed.set(name, table);
     });
 
     // 7b. DBML relationships: every relationships file in the probe set,

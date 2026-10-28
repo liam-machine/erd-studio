@@ -979,6 +979,23 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(pending.message).not.toContain('Add from dbt');
   });
 
+  it('a member whose YAML file is empty is named as an empty file drawn as missing, not as a YAML table (as Convert\'s plan says)', async () => {
+    const r = await doctor(nativeWith({
+      'gold/sales.dbml': replace("  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n", "  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n  erd_unlinked_tables: 'dim_sales_rep'\n"),
+      'tables/gold/dim_sales_rep.yml': () => '',
+      'tables/gold/_relationships.dbml': (text) => `${text}\n// erd-studio pending: Ref: fct_order.order_id >? dim_sales_rep.sales_rep_key\n`,
+    }));
+    expect(r.erd.dbmlConversion?.leftAsIs?.find((l) => l.path === 'tables/gold/dim_sales_rep.yml')?.problem).toMatch(/^It is empty, so ERD Studio does not read it as a table/);
+    expect(problem(r, 'unlinkedTable').map((p) => p.message)).toEqual([
+      'dim_sales_rep is on this diagram, but its file tables/gold/dim_sales_rep.yml is empty, so ERD Studio does not read it as a table and draws dim_sales_rep as missing '
+        + "(its name is in the Project's erd_unlinked_tables). Write the table in that file, then run ERD Studio: Convert Project to DBML; or delete the file and remove dim_sales_rep from the diagram.",
+    ]);
+    const [pending] = problem(r, 'pendingRelationship');
+    expect(pending.message).toContain("dim_sales_rep's file tables/gold/dim_sales_rep.yml is empty, so it is not a table yet");
+    expect(pending.message).toContain('(write the table in that file, then run Convert Project to DBML)');
+    expect(pending.message).not.toContain('is still a YAML table');
+  });
+
   it('a project Convert left mixed: finish-dbml-conversion names each file left as it is, with its problem and line', async () => {
     const r = await doctor(nativeWith({
       'tables/gold/dim_other.yml': () => 'name: dim_other\ndescription: one\ndescription: two\ncolumns:\n  - name: id\n    dataType: INT\n',

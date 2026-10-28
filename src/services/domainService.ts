@@ -342,7 +342,7 @@ export class SubjectAreaService {
         if (this.tableLibraryService.tableStorage(name) === 'yaml') {
           console.warn(
             `[DomainService] Table "${name}" is a YAML table (${this.tableLibraryService.tableLibraryFile(name)}); the DBML diagram shows it, ` +
-            'but ERD Studio: Convert Project to DBML before editing its relationships',
+            'but run ERD Studio: Convert Project to DBML before editing its relationships (fix the file first if Convert leaves it as it is)',
           );
         }
       }
