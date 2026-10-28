@@ -166,6 +166,7 @@ The Confluence app renders whatever is committed in a customer's repo — writte
 - Put user-facing notes under `## Unreleased` in `CHANGELOG.md` in every PR (`### Added` / `### Changed` / `### Fixed` / `### Removed`). Never edit the root `version` by hand — `deploy.yml` owns it.
 - Packages publish automatically on merge to `main` (patch by default). For a MINOR (a breaking change while `0.x`), set the new version in the PR: the package's `package.json`, the renderer's exact `@erd-studio/core` pin, the root dependencies, then `npm install`. Never unpublish or overwrite an npm version; fix forward.
 - Edit `deploy.yml`'s `paths-ignore` and its `changes` filter together (`test/unit/deployWorkflow.test.ts`).
+- Opt-in pre-releases go through `prerelease.yml` (manual: `ref` + `version` between the latest stable and the ref's pinned stable, e.g. 1.9.0 before 2.0.0); it never commits a version, and the stable deploy ignores pre-release versions. See `docs/dev/releasing.md` → "Pre-releases (opt-in)".
 - Mechanics, manual publishing and PATs: `docs/dev/releasing.md`.
 
 ## Code review checklist
