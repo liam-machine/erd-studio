@@ -314,8 +314,13 @@ export function parseSubjectAreaDbml(
   const stubColumns = jsonValue(projectText(DBML_DIAGRAM_PROPERTIES.stubColumns), DBML_DIAGRAM_PROPERTIES.stubColumns, isStringArray, warnings);
   const modelFolder = projectText(DBML_DIAGRAM_PROPERTIES.modelFolder);
 
-  // Members with no table file to `use` (D26): read by name, after the `use` members.
-  const unlinked = unlinkedMembers(projectText(DBML_DIAGRAM_PROPERTIES.unlinkedTables), members, warnings);
+  // Members with no table file to `use` (D26): read by name, after the `use` members. Read from the AST,
+  // as subjectAreaMembersDbml reads it (trees, commands, the CLI), so every reader lists the same members.
+  const unlinkedEntry = projectEntry(first.ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables);
+  if (unlinkedEntry.count > 1) {
+    warnings.push(`The Project names ${DBML_DIAGRAM_PROPERTIES.unlinkedTables} ${unlinkedEntry.count} times; only the last is read. Keep one`);
+  }
+  const unlinked = unlinkedMembers(unlinkedEntry.value, members, warnings);
   members.push(...unlinked);
 
   // Pending relationships (D27): the diagram's own, owned by a table with no table file.
@@ -470,24 +475,26 @@ export function subjectAreaMembersDbml(rawText: string, parser: DbmlParserModule
     if (name.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM || !isSafeTableName(name)) continue;
     members.push(name);
   }
-  const unlinked = projectEntryText(compiled.ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables);
+  const unlinked = projectEntry(compiled.ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value;
   members.push(...unlinkedMembers(unlinked, members, []));
   return members;
 }
 
 /**
  * A Project key's string value from the AST alone (no compile of the rest):
- * the first Project's entry, its single- or triple-quoted string unescaped.
- * Undefined when there is no such entry or it is not a string.
+ * the first Project's LAST entry of the key (any case), as the parser's own
+ * database reads a repeated key, its single-, triple- or double-quoted
+ * string unescaped; and how many entries the key has. `value` is undefined
+ * when there is no such entry or it is not a string.
  */
-function projectEntryText(ast: AstNode, text: string, key: string): string | undefined {
+function projectEntry(ast: AstNode, text: string, key: string): { value: string | undefined; count: number } {
   const project = topLevel(ast).find((n) => elementType(n)?.toLowerCase() === 'project');
   const body: AstNode[] = Array.isArray(project?.body?.body) ? project!.body.body : [];
-  const entry = body.find((n) => String(n?.type?.value ?? '').toLowerCase() === key);
-  const value = entry?.body;
-  if (!value || typeof value.start !== 'number' || typeof value.end !== 'number') return undefined;
+  const entries = body.filter((n) => String(n?.type?.value ?? '').toLowerCase() === key);
+  const value = entries[entries.length - 1]?.body;
+  if (!value || typeof value.start !== 'number' || typeof value.end !== 'number') return { value: undefined, count: entries.length };
   const source = text.slice(value.start, value.end).trim();
-  const quoted = /^'''([^]*)'''$/.exec(source) ?? /^'([^]*)'$/.exec(source);
-  if (!quoted) return undefined;
-  return quoted[1].replace(/\\(.)/g, '$1');
+  const quoted = /^'''([^]*)'''$/.exec(source) ?? /^'([^]*)'$/.exec(source) ?? /^"([^]*)"$/.exec(source);
+  if (!quoted) return { value: undefined, count: entries.length };
+  return { value: quoted[1].replace(/\\(.)/g, '$1'), count: entries.length };
 }

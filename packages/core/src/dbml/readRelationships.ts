@@ -224,8 +224,11 @@ function refsOf(text: string, compiled: CompiledFile, problems: DbmlProblem[], l
  */
 export function readPendingRefs(text: string, parser: DbmlParserModule, problems: DbmlProblem[], nodes: readonly AstNode[]): DbmlStoredRef[] {
   if (!/erd-studio pending:/i.test(text)) return [];
-  // Only a comment between top-level elements: never text inside one (a Note's body, a Ref block).
-  const inside = (offset: number): boolean => nodes.some((n) => typeof n.start === 'number' && typeof n.end === 'number' && n.start <= offset && offset < n.end);
+  // Only a comment between top-level elements: never text inside one (a Note's body, a Ref block), nor
+  // inside a /* … */ block comment (lines a user commented out are not read).
+  const blocks = blockCommentSpans(text);
+  const inside = (offset: number): boolean => nodes.some((n) => typeof n.start === 'number' && typeof n.end === 'number' && n.start <= offset && offset < n.end)
+    || blocks.some((b) => b.start <= offset && offset < b.end);
   const out: DbmlStoredRef[] = [];
   let offset = 0;
   const lines = text.split('\n');
@@ -255,3 +258,41 @@ export function readPendingRefs(text: string, parser: DbmlParserModule, problems
   return out;
 }
 
+
+/**
+ * The `/* … *\/` block comments of a DBML text, as offset spans (an
+ * unclosed one runs to the end). Strings (`'…'`, `'''…'''`, `"…"`, backticks)
+ * and `//` line comments are skipped, so a `/*` inside them opens nothing.
+ */
+export function blockCommentSpans(text: string): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = [];
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '/' && text[i + 1] === '/') {
+      const nl = text.indexOf('\n', i);
+      i = nl < 0 ? text.length : nl + 1;
+      continue;
+    }
+    if (c === '/' && text[i + 1] === '*') {
+      const close = text.indexOf('*/', i + 2);
+      const end = close < 0 ? text.length : close + 2;
+      spans.push({ start: i, end });
+      i = end;
+      continue;
+    }
+    if (c === "'" && text.startsWith("'''", i)) {
+      const close = text.indexOf("'''", i + 3);
+      i = close < 0 ? text.length : close + 3;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== c && text[j] !== '\n') j += text[j] === '\\' ? 2 : 1;
+      i = j + 1;
+      continue;
+    }
+    i++;
+  }
+  return spans;
+}

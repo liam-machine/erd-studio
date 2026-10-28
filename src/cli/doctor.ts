@@ -22,7 +22,7 @@ import type { ProjectNaming } from '../types/semantic';
 import { projectNamingOf } from '../services/projectNaming';
 import { describeNamingMigration, planNamingMigration } from '../services/namingMigration';
 import { readNamingMigrationInput } from '../services/namingMigrationFiles';
-import { describeDbmlConversion, planDbmlConversion } from '../services/dbmlConversion';
+import { dbmlConversionIsEmpty, describeDbmlConversion, planDbmlConversion } from '../services/dbmlConversion';
 import type { DbmlConversionPlan } from '../services/dbmlConversion';
 import { readDbmlConversionInput } from '../services/dbmlConversionFiles';
 import { tablesDirIsLayer, TABLES_DIR } from '../services/logicalModelService';
@@ -416,14 +416,21 @@ async function dbmlConversionPreview(ctx: CliContext, storage: ProjectStorage): 
       preview: describeDbmlConversion(plan),
     },
     // A run that stopped part way, or a project Convert left mixed: files it left as they are (D26/D27).
-    unfinished: plan.resumed.length > 0 || (storage === 'mixed' && plan.refusals.length === 0 && plan.leftAsIs.length > 0),
+    // And a DBML project with pending relationships or unlinked members Convert settles now (D26/D27).
+    unfinished: plan.resumed.length > 0 || (storage === 'mixed' && plan.refusals.length === 0 && plan.leftAsIs.length > 0)
+      || (storage === 'dbml' && plan.refusals.length === 0 && !dbmlConversionIsEmpty(plan)),
     leftAsIs: plan.leftAsIs,
   };
 }
 
-/** The erd summary with Convert's preview when storage is not `dbml`. */
+/**
+ * The erd summary with Convert's preview when storage is not `dbml`, or when a
+ * DBML project has pending relationships or unlinked members (D26/D27), which
+ * Convert settles once their tables have files.
+ */
 async function withDbmlConversion(ctx: CliContext, erd: DoctorResult['erd']): Promise<{ erd: DoctorResult['erd']; unfinished: boolean; settled: string[]; leftAsIs?: DbmlConversionPlan['leftAsIs'] }> {
-  if (!erd.semanticDirExists || erd.storage === 'dbml') return { erd, unfinished: false, settled: [] };
+  const settles = erd.dbmlProblems.some((p) => p.code === 'pendingRelationship' || p.code === 'unlinkedTable');
+  if (!erd.semanticDirExists || (erd.storage === 'dbml' && !settles)) return { erd, unfinished: false, settled: [] };
   try {
     const { preview, unfinished, settled, leftAsIs } = await dbmlConversionPreview(ctx, erd.storage);
     return { erd: { ...erd, dbmlConversion: preview }, unfinished, settled, leftAsIs };
@@ -797,7 +804,9 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
         ? `The conversion to DBML left ${left.length === 1 ? 'a file' : `${left.length} files`} as ${left.length === 1 ? 'it is' : 'they are'} until fixed: `
           + `${left.map((l) => `${l.path}${l.line !== undefined ? `:${l.line}` : ''} (${l.problem.replace(/\.$/, '')})`).join('; ')}. `
           + 'Fix them, then run ERD Studio: Convert Project to DBML again to finish it; it checks every file first.'
-        : 'A conversion to DBML stopped part way. Run ERD Studio: Convert Project to DBML again to finish it; it checks every file first.',
+        : r.erd.storage === 'dbml'
+          ? 'Some pending relationships or diagram members are ready to settle: their tables have files now. Run ERD Studio: Convert Project to DBML to make them live Refs and use lines; it checks every file first.'
+          : 'A conversion to DBML stopped part way. Run ERD Studio: Convert Project to DBML again to finish it; it checks every file first.',
       command: null,
     });
   }

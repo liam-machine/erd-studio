@@ -70,6 +70,7 @@ import {
   editSubjectAreaDbml,
   parseSubjectAreaDbml,
   parseTableDbml,
+  pendingRelationshipRef,
   readRelationshipsDbml,
   renderNewSubjectAreaDbml,
   renderNewTableDbml,
@@ -121,9 +122,12 @@ export interface DbmlConversionPlan {
   /** Targets already on disk with exactly the planned bytes (a half-applied earlier run): neither created nor refused. */
   resumed: string[];
   /**
-   * Non-empty: nothing is written. Only what leaving a file as it is would
-   * itself change or lose: a layer called `tables`, and the self-check (an
-   * ERD Studio bug). Everything else is converted, handled or left as is.
+   * Non-empty: nothing is written. Only where leaving a file as it is would
+   * not help: a layer called `tables`; an existing DBML table or
+   * relationships file Convert must change but cannot (one that holds a
+   * self-join or a disagreeing composite included); and the self-check and
+   * its round limit (an ERD Studio bug). Everything else is converted,
+   * handled or left as is.
    */
   refusals: string[];
   /** Lossless, deterministic fixes Convert applies (§6.1, D27): "Handled for you". */
@@ -181,6 +185,17 @@ export function keptFromLine(oldPath: string): string {
 }
 
 /** Whether the plan writes anything. (A plan that writes nothing may still list files left as they are.) */
+/**
+ * The heading for the files Convert leaves as they are, by their own format:
+ * "Left as YAML until fixed" (tables), "Left as JSON until fixed"
+ * (diagrams), or "Left as they are until fixed" for a mix or an existing
+ * `.dbml` file.
+ */
+export function dbmlLeftAsIsTitle(left: ReadonlyArray<{ path: string }>): string {
+  const kinds = new Set(left.map((l) => (/\.ya?ml$/i.test(l.path) ? 'YAML' : /\.json$/i.test(l.path) ? 'JSON' : 'other')));
+  return kinds.size === 1 && !kinds.has('other') ? `Left as ${[...kinds][0]} until fixed` : 'Left as they are until fixed';
+}
+
 export function dbmlConversionIsEmpty(plan: DbmlConversionPlan): boolean {
   return plan.creates.length === 0 && plan.replaces.length === 0 && plan.deletes.length === 0;
 }
@@ -208,17 +223,6 @@ function dirOf(p: string): string {
 function describeEnds(from: string, fromColumns: readonly string[], to: string, toColumns: readonly string[]): string {
   const cols = (cs: readonly string[]): string => (cs.length === 1 ? cs[0] : `(${cs.join(', ')})`);
   return `${from}.${cols(fromColumns)} → ${to}.${cols(toColumns)}`;
-}
-
-/** A Ref line as the relationships writer writes it (D18 marks), for a diagram's pending relationship (D27). */
-function refLine(rel: Relationship, members: readonly Relationship[] = [rel]): string {
-  const cols = (cs: string[]): string => (cs.length === 1 ? dbmlName(cs[0]) : `(${cs.map(dbmlName).join(', ')})`);
-  const fromEnd = `${dbmlName(rel.fromModel)}.${cols(members.map((m) => m.fromColumn))}`;
-  const toEnd = `${dbmlName(rel.toModel)}.${cols(members.map((m) => m.toColumn))}`;
-  const name = rel.role ? ` ${dbmlName(rel.role)}` : '';
-  if (rel.cardinality === 'one-to-one') return `Ref${name}: ${toEnd} ?- ${fromEnd}`;
-  if (rel.cardinality === 'many-to-many') return `Ref${name}: ${fromEnd} <>? ${toEnd}`;
-  return `Ref${name}: ${fromEnd} >? ${toEnd}`;
 }
 
 /** A deterministic UUID for a duplicate sticky-note id, so a re-plan (and a resume) writes the same bytes. */
@@ -1193,6 +1197,15 @@ async function planOnce(
     const kept = keptJsonLines(d.file.path, d.raw, viewAt, ignored);
     const unknown = kept.keys.filter((k) => !ignored.some(([i]) => i === k));
     const names = Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
+    // A table with no .dbml file listed twice in different case draws twice in 1.x (one box per spelling), and
+    // a DBML diagram names each member once: keeping one would lose the other's box, so the diagram stays JSON.
+    const twice = names.find((name, i) => libraryPlan.resolveTable(name)?.storage !== 'dbml'
+      && names.slice(0, i).some((earlier) => lower(earlier) === lower(name) && earlier !== name));
+    if (twice !== undefined) {
+      const first = names.find((n) => lower(n) === lower(twice))!;
+      leave(d.file.path, `It lists ${first} and ${twice}, which differ only in case and have no table file, so it draws two tables where a DBML diagram can name one. Remove one of them.`);
+      continue;
+    }
     const members: Array<{ name: string; reference: string; path: string }> = [];
     const unlinked: string[] = [];
     const missing: string[] = [];
@@ -1295,7 +1308,9 @@ async function planOnce(
     const ownAfter = ownPending(f.path, ownBefore);
     const affected = members === null
       || members.some((m) => pathChanged.has(lower(m)) || relationshipsFilesFor([m]).some((r) => createdRelationships.has(r)))
-      || ownAfter.length !== ownBefore.length;
+      || ownAfter.length !== ownBefore.length
+      // An unlinked member whose table has a .dbml file now (Add from dbt made it): it gains its use line.
+      || (d.reading?.unlinked ?? []).some((m) => libraryPlan.resolveTable(m)?.storage === 'dbml');
     if (!affected) continue;
     if (!d.reading) {
       leave(f.path, `It must gain use lines for the converted tables, and it does not read: ${d.error}. It still draws the same in ERD Studio; fix it so other DBML tools read it too.`);
@@ -1445,14 +1460,13 @@ async function planOnce(
     for (const model of Array.isArray(was.models) ? (was.models as Array<Record<string, unknown>>) : []) {
       if (typeof model.name === 'string' && dedupedKeys.has(lower(model.name))) delete model.loadWarning;
     }
-    // A DBML diagram lists its members with no table file after its use lines (D26): the same tables,
-    // in the same places, listed in that order.
-    const unlinkedHere = new Set((unlinkedOf.get(from) ?? []).map(lower));
-    if (unlinkedHere.size > 0 && Array.isArray(was.models)) {
-      const models = was.models as Array<{ name?: unknown }>;
-      const isUnlinked = (m: { name?: unknown }): boolean => typeof m.name === 'string' && unlinkedHere.has(lower(m.name));
-      was.models = [...models.filter((m) => !isUnlinked(m)), ...models.filter(isUnlinked)];
-    }
+    // The members are compared as a set, by name: a DBML diagram lists its use lines first and the
+    // members with no table file after them (D26), so a member that gains or loses a table file (this
+    // run, or a fix between runs) changes its place in the list, never in the drawing (positions are
+    // keyed by name). A drawn name can differ from the member's (a YAML table whose name: is not its
+    // file's), so the order cannot be matched member by member.
+    sortModelsByName(was);
+    sortModelsByName(now);
     const drop = movedInto.get(to);
     if (drop && Array.isArray(now.relationships)) {
       // A moved relationship this diagram now also draws (documented in the
@@ -1479,6 +1493,14 @@ async function planOnce(
     }
   }
   return { plan, leaveMore: new Map() };
+}
+
+/** `area.models` sorted by name (any case first, then exact), in place: the self-check's member order. */
+function sortModelsByName(area: Record<string, unknown>): void {
+  if (!Array.isArray(area.models)) return;
+  const nameOf = (m: unknown): string => (isObject(m) && typeof m.name === 'string' ? m.name : '');
+  const order = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  area.models = [...(area.models as unknown[])].sort((a, b) => order(lower(nameOf(a)), lower(nameOf(b))) || order(nameOf(a), nameOf(b)));
 }
 
 /**
@@ -1521,7 +1543,7 @@ function pendingRefLines(own: readonly Relationship[]): string[] {
     const key = rel.compositeKey ? `c\u0000${lower(rel.fromModel)}\u0000${lower(rel.toModel)}\u0000${lower(rel.compositeKey)}` : `l\u0000${linkKey(rel)}`;
     units.set(key, [...(units.get(key) ?? []), rel]);
   }
-  return [...units.values()].map((members) => refLine(members[0], members));
+  return [...units.values()].map((members) => pendingRelationshipRef(members));
 }
 
 /**
@@ -1654,11 +1676,11 @@ export function describeDbmlConversion(plan: DbmlConversionPlan): string {
       for (const h of plan.handled) lines.push(`• ${h.path}: ${h.text}`);
     }
     if (plan.leftAsIs.length > 0) {
-      lines.push(`Left as YAML until fixed (${plan.leftAsIs.length === 1 ? 'this file stays' : 'these files stay'} as ${plan.leftAsIs.length === 1 ? 'it is' : 'they are'}; run Convert again after fixing ${plan.leftAsIs.length === 1 ? 'it' : 'them'} to finish the job):`);
+      lines.push(`${dbmlLeftAsIsTitle(plan.leftAsIs)} (${plan.leftAsIs.length === 1 ? 'this file stays' : 'these files stay'} as ${plan.leftAsIs.length === 1 ? 'it is' : 'they are'}; run Convert again after fixing ${plan.leftAsIs.length === 1 ? 'it' : 'them'} to finish the job):`);
       for (const l of plan.leftAsIs) lines.push(`• ${l.path}${l.line !== undefined ? `:${l.line}` : ''}: ${l.problem}`);
     }
     if (plan.keptMissing.length > 0) {
-      lines.push('Kept as missing on the diagram, drawn as before (create them later with Add from dbt):');
+      lines.push('Kept as missing on their diagrams, drawn as before (create them later with Add from dbt):');
       for (const k of plan.keptMissing) lines.push(`• ${k.diagram}: ${k.tables.join(', ')}`);
     }
     if (!dbmlConversionIsEmpty(plan)) {

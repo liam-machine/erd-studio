@@ -867,8 +867,8 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 35 (native DBML storage: SKILL.md + DBML.md + LEGACY.md)', () => {
-      expect(HARNESS_VERSION).toBe('35');
+    it('is 36 (native DBML storage, with erd_unlinked_tables and pending relationships; 35 shipped in pre-release 1.9.0)', () => {
+      expect(HARNESS_VERSION).toBe('36');
     });
 
     it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {

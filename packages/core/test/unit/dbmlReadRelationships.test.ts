@@ -311,6 +311,12 @@ Ref: fct.a >? dim.a
     expect(reading.problems).toEqual([expect.objectContaining({ line: 6, code: 'unreadableRef', message: expect.stringMatching(/^Line 6: the pending relationship `Ref: fct\.c >` is not one/) })]);
   });
 
+  it.each(STORAGE_PARSERS)('%s: a pending line inside a /* */ block comment is not read', (_label, parser) => {
+    const text = "use { table a } from './a.dbml'\n\n/* disabled for now\n// erd-studio pending: Ref: a.x >? b.y\n*/\n// erd-studio pending: Ref: a.z >? c.z\nNote n { '/* not a comment */' }\n";
+    const reading = readRelationshipsDbml(text, parser);
+    expect(reading.pending?.map((r) => r.relationships[0].toModel)).toEqual(['c']);
+  });
+
   it('attaches a pending relationship to its owner exactly like a live Ref, a target with no table kept as written', () => {
     const table = (name: string, columns: string[]): DbmlAttachTable => ({
       table: { name, columns: columns.map((c) => ({ name: c, dataType: 'int', description: '' }) as ColumnDef) }, folder: '', storage: 'dbml',

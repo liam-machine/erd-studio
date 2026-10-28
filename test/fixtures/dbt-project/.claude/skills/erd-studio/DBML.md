@@ -135,4 +135,4 @@ The project's own files are DBML; these commands bring other DBML in and send di
 - **dbdiagram.io** — `dbdiagram push <name>.dbml --name "<Name>"` (dbdiagram's own CLI: `npm install -g dbdiagram`, then `dbdiagram auth login`) uploads an exported diagram with the `.dbdiagram` positions next to it. It sends the data model to dbdiagram.io under the user's account: run it only when the user asks, and show the command first. ERD Studio itself never contacts dbdiagram.io.
 - **`meta.dbml`** — an imported table or column may carry a `dbml` entry in its metadata (`meta_json` in DBML, `meta.dbml` in YAML): what the DBML file said that ERD Studio has no field for (`not_null`, `unique`, `default`, `increment`, `checks`, `enum`, `indexes`, `header_color`, the original `name` when it had to change, another tool's own `properties`). Keep it exactly as it is — the next DBML export carries it back out — and write or change it only when the user asks.
 
-<!-- erd-studio-harness: 35 -->
+<!-- erd-studio-harness: 36 -->

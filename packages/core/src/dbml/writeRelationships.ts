@@ -105,6 +105,13 @@ export interface RelationshipsFileEdit {
    * Convert sets it; canvas edits do not.
    */
   writePending?: boolean;
+  /**
+   * The units stored as pending lines (D27) anywhere in the library before
+   * this edit, named as before it. One this edit writes into this file (its
+   * owner moved here, say) stays a pending line while it cannot be live,
+   * instead of being refused or written as a Ref that does not compile.
+   */
+  pendingBefore?: readonly RefUnit[];
   /** The DBML parser; the pinned one unless a test passes another. */
   parser?: DbmlParserModule;
 }
@@ -371,7 +378,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   /** Each Ref in the file: its unit as read and, for a bare `-` whose orientation the keys cannot settle, the other way round. */
   const current: Array<{ ref: RefNode; unit: RefUnit; spelledNames: string[]; alt?: { unit: RefUnit; spelledNames: string[] } }> = [];
   /** The file's pending relationships (D27): each one's unit, as named after the edit, and its line's span. */
-  const pendingLines: Array<{ unit: RefUnit; start: number; end: number }> = [];
+  const pendingLines: Array<{ unit: RefUnit; start: number; end: number; spelledNames: string[] }> = [];
   if (oldText !== null) {
     const reading = readRelationshipsDbml(text, parser);
     for (const stored of reading.pending ?? []) {
@@ -380,6 +387,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
       pendingLines.push({
         start: stored.start,
         end: stored.fullEnd,
+        spelledNames: [rels[0].fromModel, rels[0].toModel],
         unit: {
           from: canonical(rels[0].fromModel),
           to: canonical(rels[0].toModel),
@@ -522,41 +530,81 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     return table !== undefined && table.storage === 'dbml' && (columns as string[]).every((c) => table.columns(c) !== undefined);
   });
   const pendingCuts: TextEdit[] = [];
+  /** Pending lines re-spelled in place (an end or column renamed, or a slot a renamed unit takes). */
+  const pendingEdits: TextEdit[] = [];
   const stillPending = new Set<RefUnit>();
   const newPending: RefUnit[] = [];
+  /** Lines whose listed owner no longer holds them here: cut, unless a new unit of that owner takes the slot (below). */
+  const ownerCuts: Array<{ unit: RefUnit; start: number; end: number }> = [];
+  /** A pending line's Ref text, and where it starts, or null when the line is not one (never, for a line read as pending). */
+  const pendingRefOf = (line: { start: number; end: number }): { at: number; ref: string } | null => {
+    const raw = text.slice(line.start, line.end).replace(/\r?\n$/, '');
+    const m = /^([ \t]*\/\/[ \t]*erd-studio pending:[ \t]*)(\S.*?)[ \t]*$/i.exec(raw);
+    return m ? { at: line.start + m[1].length, ref: m[2] } : null;
+  };
+  /** A pending line naming a table or column this edit renames: only those names are spelled anew. */
+  const respellPending = (line: { start: number; end: number }): void => {
+    const found = pendingRefOf(line);
+    if (!found) return;
+    const out = respellIncoming(found.ref);
+    if (out !== found.ref) pendingEdits.push({ start: found.at, end: found.at + found.ref.length, text: out });
+  };
   for (const pendingLine of pendingLines) {
     const unit = withRenamedColumns(pendingLine.unit);
     const owner = lower(unit.from);
+    const respell = renamedEnd(pendingLine.spelledNames) || columnsDiffer(pendingLine.unit, unit);
     const wanted = desired.find((d) => !matched.has(d) && identityKey(d) === identityKey(unit));
     if (wanted) {
       matched.add(wanted);
       if (liveable(wanted)) {
         pendingCuts.push({ start: pendingLine.start, end: pendingLine.end, text: '' });
         stillPending.add(wanted); // re-added below as a live insert
+      } else if (respell) {
+        respellPending(pendingLine);
       }
       continue;
     }
     if (listed.has(owner)) {
-      const entry = [...edit.owners.entries()].find(([k]) => lower(canonical(k)) === owner)?.[1];
-      if (entry || edit.resolve(unit.from) === undefined) pendingCuts.push({ start: pendingLine.start, end: pendingLine.end, text: '' });
+      // Its owner no longer holds it here: dropped from the list, deleted, or moved to another folder
+      // (whose file gains it, still pending while it cannot be live).
+      ownerCuts.push({ unit, start: pendingLine.start, end: pendingLine.end });
       continue;
     }
     // An owner this edit does not list: its pending line turns live once both ends have files with those columns.
     if (liveable(unit)) {
       pendingCuts.push({ start: pendingLine.start, end: pendingLine.end, text: '' });
       desired.push(unit);
+      continue;
     }
+    if (respell) respellPending(pendingLine);
   }
   const inserted = desired.filter((d) => !matched.has(d) || stillPending.has(d));
-  if (edit.writePending) {
-    for (let i = inserted.length - 1; i >= 0; i--) {
-      const unit = inserted[i];
-      if (incomingByKey.has(identityKey(unit)) || liveable(unit)) continue;
+  const pendingBeforeKeys = new Set((edit.pendingBefore ?? []).map((u) => identityKey(withRenamedColumns({ ...u, from: canonical(u.from), to: canonical(u.to) }))));
+  /** A cut line of the same owner, columns, cardinality and role that a new unit replaces (a renamed end the edit does not name). */
+  const slotOf = (unit: RefUnit): { unit: RefUnit; start: number; end: number } | undefined => ownerCuts.find((c) => lower(c.unit.from) === lower(unit.from)
+    && c.unit.fromColumns.map(lower).join(',') === unit.fromColumns.map(lower).join(',')
+    && c.unit.toColumns.length === unit.toColumns.length
+    && c.unit.cardinality === unit.cardinality && (c.unit.role ?? '') === (unit.role ?? '')
+    && !liveable(c.unit));
+  for (let i = inserted.length - 1; i >= 0; i--) {
+    const unit = inserted[i];
+    if (incomingByKey.has(identityKey(unit)) || liveable(unit)) continue;
+    if (edit.writePending || pendingBeforeKeys.has(identityKey(unit))) {
       newPending.push(unit);
       inserted.splice(i, 1);
+      continue;
     }
-    newPending.sort((a, b) => (refUnitSortKey(a) < refUnitSortKey(b) ? -1 : refUnitSortKey(a) > refUnitSortKey(b) ? 1 : 0));
+    // A pending relationship whose other end was renamed outside this edit (a YAML table): the line is re-spelled in place.
+    const slot = slotOf(unit);
+    if (slot) {
+      ownerCuts.splice(ownerCuts.indexOf(slot), 1);
+      const found = pendingRefOf(slot);
+      if (found) pendingEdits.push({ start: found.at, end: found.at + found.ref.length, text: refText(unit) });
+      inserted.splice(i, 1);
+    }
   }
+  for (const c of ownerCuts) pendingCuts.push({ start: c.start, end: c.end, text: '' });
+  newPending.sort((a, b) => (refUnitSortKey(a) < refUnitSortKey(b) ? -1 : refUnitSortKey(a) > refUnitSortKey(b) ? 1 : 0));
   for (const unit of inserted) for (const n of [unit.from, unit.to]) touched.add(lower(n));
 
   // --- Refusals ---------------------------------------------------------------------
@@ -768,7 +816,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     const lead = text === '' ? '' : text.endsWith('\n\n') ? '' : text.endsWith('\n') ? eol : `${eol}${eol}`;
     refInserts.push({ start: at, end: at, text: `${refInserts.some((e) => e.start === at) ? eol : lead}${pendingBlock.join(eol)}${eol}` });
   }
-  const out = applyTextEdits(text, [...useEdits, ...edits, ...pendingLineCuts(text, pendingCuts), ...refInserts]);
+  const out = applyTextEdits(text, [...useEdits, ...edits, ...pendingEdits, ...pendingLineCuts(text, pendingCuts), ...refInserts]);
   return hadBom ? `﻿${out}` : out;
 
   function incomingText(unit: RefUnit): string {

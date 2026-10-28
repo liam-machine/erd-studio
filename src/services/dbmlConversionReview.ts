@@ -13,7 +13,7 @@
 
 import { classifySemanticFile } from '@erd-studio/core';
 
-import { isDbmlSelfCheckRefusal, type DbmlConversionPlan } from './dbmlConversion';
+import { dbmlLeftAsIsTitle, isDbmlSelfCheckRefusal, type DbmlConversionPlan } from './dbmlConversion';
 
 export const CONVERT_PANEL_VIEW_TYPE = 'erdStudio.convertToDbml';
 export const CONVERT_PANEL_TITLE = 'Convert to DBML';
@@ -40,6 +40,10 @@ export interface ConvertReviewSection {
   id: string;
   title: string;
   items: ConvertReviewItem[];
+  /** A sentence about the whole section, shown under its items and not counted. */
+  hint?: string;
+  /** The count its title shows, when it is not the number of items (tables, not diagram rows). */
+  count?: number;
 }
 
 export interface ConvertReviewView {
@@ -134,9 +138,12 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
 
   // Files left as they are until fixed (each with Open), and members kept missing (D26): listed in every view.
   const leftLocations: ConvertRefusalLocation[] = [];
+  // What is left, by its own format: YAML tables, JSON diagrams, or a mix (an existing .dbml file included).
+  const leftTitle = dbmlLeftAsIsTitle(plan.leftAsIs);
   const leftSection = (offset: number): ConvertReviewSection => ({
     id: 'left',
-    title: 'Left as YAML until fixed',
+    title: leftTitle,
+    ...(plan.leftAsIs.length > 0 ? { hint: `${plan.leftAsIs.length === 1 ? 'This file stays' : 'These files stay'} exactly as ${plan.leftAsIs.length === 1 ? 'it is' : 'they are'}, and the diagrams draw ${plan.leftAsIs.length === 1 ? 'it' : 'them'} as before. Fix ${plan.leftAsIs.length === 1 ? 'it' : 'them'} and run Convert again to finish the job.` } : {}),
     items: [
       ...plan.leftAsIs.map((l): ConvertReviewItem => {
         leftLocations.push({ path: l.path, ...(l.line !== undefined ? { line: l.line } : {}) });
@@ -148,7 +155,6 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
           open: offset + leftLocations.length - 1,
         };
       }),
-      ...(plan.leftAsIs.length > 0 ? [{ text: `${plan.leftAsIs.length === 1 ? 'This file stays' : 'These files stay'} exactly as ${plan.leftAsIs.length === 1 ? 'it is' : 'they are'}, and the diagrams draw ${plan.leftAsIs.length === 1 ? 'it' : 'them'} as before. Fix ${plan.leftAsIs.length === 1 ? 'it' : 'them'} and run Convert again to finish the job.` }] : []),
     ],
   });
   const handledSection: ConvertReviewSection = {
@@ -156,20 +162,21 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
     title: 'Handled for you',
     items: plan.handled.map((h) => ({ path: display(h.path), text: h.text })),
   };
+  const missingTables = plan.keptMissing.reduce((n, k) => n + k.tables.length, 0);
   const missingSection: ConvertReviewSection = {
     id: 'missing',
-    title: 'Kept as missing on the diagram',
-    items: [
-      ...plan.keptMissing.map((k) => ({ path: display(k.diagram), text: k.tables.join(', ') })),
-      ...(plan.keptMissing.length > 0 ? [{ text: 'These tables have no table file. They stay on their diagrams, drawn as missing exactly as before. Create them later with Add from dbt.' }] : []),
-    ],
+    title: 'Kept as missing on their diagrams',
+    count: missingTables,
+    ...(plan.keptMissing.length > 0 ? { hint: `${missingTables === 1 ? 'This table has' : 'These tables have'} no table file. ${missingTables === 1 ? 'It stays on its diagram' : `They stay on ${plan.keptMissing.length === 1 ? 'their diagram' : 'their diagrams'}`}, drawn as missing exactly as before. Create ${missingTables === 1 ? 'it' : 'them'} later with Add from dbt.` } : {}),
+    items: plan.keptMissing.map((k) => ({ path: display(k.diagram), text: k.tables.join(', ') })),
   };
   const summaryOf = (): string => {
     const s = plan.summary;
     const parts = [`${plural(s.tables, 'table')} and ${plural(s.diagrams, 'diagram')} convert to DBML`];
     if (plan.leftAsIs.length > 0) parts.push(`${plural(plan.leftAsIs.length, 'file')} ${plan.leftAsIs.length === 1 ? 'stays' : 'stay'} as ${plan.leftAsIs.length === 1 ? 'it is' : 'they are'} until fixed`);
-    const missing = plan.keptMissing.reduce((n, k) => n + k.tables.length, 0);
-    if (missing > 0) parts.push(`${plural(missing, 'missing table')} ${missing === 1 ? 'stays' : 'stay'} on ${plan.keptMissing.length === 1 ? 'its diagram' : 'their diagrams'}`);
+    const missing = missingTables;
+    const where = plan.keptMissing.length > 1 ? 'their diagrams' : missing === 1 ? 'its diagram' : 'their diagram';
+    if (missing > 0) parts.push(`${plural(missing, 'missing table')} ${missing === 1 ? 'stays' : 'stay'} on ${where}`);
     return `${parts.join('; ')}.`;
   };
 
@@ -370,6 +377,7 @@ body {
   color: var(--vscode-badge-foreground); background: var(--vscode-badge-background);
 }
 .cdb-section__items { margin: 2px 0 6px; padding: 0 0 0 18px; list-style: none; }
+.cdb-section__hint { margin: 0 0 6px; padding: 0 0 0 18px; color: var(--vscode-descriptionForeground); }
 .cdb-item { padding: 3px 0; line-height: 1.4; overflow-wrap: anywhere; }
 .cdb-item__path { font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); }
 .cdb-item__tag { margin-left: 8px; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
@@ -448,8 +456,9 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
   const n = escapeHtml(nonce);
   const sections = view.sections.map((section) => `
     <details class="cdb-section" data-section="${escapeHtml(section.id)}" open>
-      <summary class="cdb-section__title">${escapeHtml(section.title)}<span class="cdb-section__count">${section.items.length}</span></summary>
-      <ul class="cdb-section__items">${section.items.map((item) => renderItem(item, section.id === 'problems' || (section.id === 'left' && item.path !== undefined))).join('')}</ul>
+      <summary class="cdb-section__title">${escapeHtml(section.title)}<span class="cdb-section__count">${section.count ?? section.items.length}</span></summary>
+      <ul class="cdb-section__items">${section.items.map((item) => renderItem(item, section.id === 'problems' || (section.id === 'left' && item.path !== undefined))).join('')}</ul>${section.hint !== undefined ? `
+      <p class="cdb-section__hint">${escapeHtml(section.hint)}</p>` : ''}
     </details>`).join('');
   const actions = view.mode === 'review'
     ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="cancel">Cancel</button>' +

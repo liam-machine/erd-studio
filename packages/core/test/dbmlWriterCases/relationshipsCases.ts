@@ -103,6 +103,29 @@ Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
 // erd-studio pending: Ref: customer_profile.customer_key >? dim_gone.k
 `;
 
+/** A pending line to a column its target table does not have. */
+const PENDING_TO_COLUMN = `use { table gold.dim_customer } from './dim_customer.dbml'
+use { table customer_profile } from './customer_profile.dbml'
+
+Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+
+// erd-studio pending: Ref: customer_profile.customer_key >? dim_date.nope
+`;
+
+/** The library with \`dim_date\` renamed to \`dim_day\`. */
+const DIM_DAY_LIBRARY: Readonly<Record<string, string>> = (() => {
+  const out: Record<string, string> = { ...LIBRARY };
+  delete out['tables/dim_date.dbml'];
+  out['tables/dim_day.dbml'] = LIBRARY['tables/dim_date.dbml'].replace('Table dim_date', 'Table dim_day');
+  return out;
+})();
+
+/** The library with fct_order's \`order_date_key\` renamed to \`order_day_key\`. */
+const ORDER_DAY_LIBRARY: Readonly<Record<string, string>> = {
+  ...LIBRARY,
+  'tables/gold/fct_order.dbml': LIBRARY['tables/gold/fct_order.dbml'].replace('order_date_key', 'order_day_key'),
+};
+
 /** The library with a file for dim_missing. */
 const WITH_DIM_MISSING: Readonly<Record<string, string>> = { ...LIBRARY, 'tables/dim_missing.dbml': 'Table dim_missing {\n  date_key int [pk]\n}\n' };
 
@@ -120,10 +143,13 @@ export function relEdit(text: string | null, edit: EditInput, library: Readonly<
   return editRelationshipsDbml(text, { filePath: path, resolve: relationshipsResolver(libraryOf(library)), ...edit });
 }
 
-function relCase(name: string, text: string | null, edit: () => EditInput, check: (output: string) => void, library: Readonly<Record<string, string>> = LIBRARY): WriterCase {
+/** `renamed`: the input is against the library before a rename, so only the output is compiled (with `library`). */
+function relCase(name: string, text: string | null, edit: () => EditInput, check: (output: string) => void, library: Readonly<Record<string, string>> = LIBRARY, renamed = false): WriterCase {
   return {
     name,
-    run: (): WriterOutcome => ({ path: REL_PATH, input: text, output: relEdit(text, edit(), library), context: { ...library } }),
+    run: (): WriterOutcome => (renamed
+      ? { path: REL_PATH, output: relEdit(text, edit(), library), context: { ...library }, parsers: ['9.1.1', '10.3.1', '11.0.0'] }
+      : { path: REL_PATH, input: text, output: relEdit(text, edit(), library), context: { ...library } }),
     check: (o) => check(o.output),
   };
 }
@@ -531,4 +557,50 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
       ].join('\n'));
     },
   },
+
+  // --- Renames over pending lines (D27): only the renamed names are spelled anew -----------
+  relCase('renaming a pending line\'s owner re-spells it (and its live Refs); another owner\'s line stays', PENDING_FILE, () => {
+    const list = currentOwners(PENDING_FILE).get('fct_order') ?? [];
+    return {
+      owners: new Map([['fct_order_line', { name: 'fct_order_line', relationships: list }]]),
+      renamedOwners: new Map([['fct_order', 'fct_order_line']]),
+      pathChanged: new Set(['fct_order', 'fct_order_line']),
+    };
+  }, (out) => {
+    expect(out).toContain('// erd-studio pending: Ref: fct_order_line.order_date_key >? dim_missing.date_key\n');
+    expect(out).toContain('// erd-studio pending: Ref: customer_profile.customer_key >? dim_gone.k\n');
+    expect(out).toContain('Ref: fct_order_line.Customer_Key >? gold.dim_customer.customer_key\n');
+    expect(out).not.toMatch(/\bfct_order\./);
+  }, RENAMED_LIBRARY, true),
+  relCase('renaming a pending line\'s target table re-spells it, its owner not listed', PENDING_TO_COLUMN, () => ({
+    owners: new Map(),
+    renamedOwners: new Map([['dim_date', 'dim_day']]),
+    pathChanged: new Set(['dim_date', 'dim_day']),
+  }), (out) => {
+    expect(out).toBe(PENDING_TO_COLUMN.replace('>? dim_date.nope', '>? dim_day.nope'));
+  }, DIM_DAY_LIBRARY, true),
+  relCase('renaming a pending line\'s column re-spells only that column', PENDING_FILE, () => {
+    const list = (currentOwners(PENDING_FILE).get('fct_order') ?? []).map((r) => (r.fromColumn === 'order_date_key' ? { ...r, fromColumn: 'order_day_key' } : r));
+    return {
+      owners: new Map([['fct_order', { name: 'fct_order', relationships: list }]]),
+      renamedColumns: new Map([['fct_order', new Map([['order_date_key', 'order_day_key']])]]),
+    };
+  }, (out) => {
+    expect(out).toBe(PENDING_FILE.replace('fct_order.order_date_key >? dim_missing', 'fct_order.order_day_key >? dim_missing'));
+  }, ORDER_DAY_LIBRARY, true),
+  relCase('a pending relationship carried into a new file (its owner moved there) stays pending, never a live Ref or a refusal', null, () => ({
+    owners: new Map([['fct_order', { name: 'fct_order', relationships: [M21('Customer_Key', 'dim_customer', 'customer_key'), M21('order_date_key', 'dim_missing', 'date_key'), M21('ship_date_key', 'dim_date', 'nope')] }]]),
+    pendingBefore: [
+      { from: 'fct_order', to: 'dim_missing', fromColumns: ['order_date_key'], toColumns: ['date_key'], cardinality: 'many-to-one' },
+      { from: 'fct_order', to: 'dim_date', fromColumns: ['ship_date_key'], toColumns: ['nope'], cardinality: 'many-to-one' },
+    ],
+  }), (out) => {
+    expect(out).toContain('// erd-studio pending: Ref: fct_order.order_date_key >? dim_missing.date_key\n');
+    expect(out).toContain('// erd-studio pending: Ref: fct_order.ship_date_key >? dim_date.nope\n');
+    expect(out).not.toMatch(/^Ref: fct_order\.(order|ship)_date_key/m);
+  }),
+  relCase('an owner listed with a pending relationship whose other table was renamed outside the edit (a YAML table): the line is re-spelled in place', PENDING_FILE,
+    () => changed(PENDING_FILE, 'fct_order', (list) => list.map((r) => (r.toModel === 'dim_missing' ? { ...r, toModel: 'dim_missing2' } : r))), (out) => {
+      expect(out).toBe(PENDING_FILE.replace('>? dim_missing.date_key', '>? dim_missing2.date_key'));
+    }),
 ];

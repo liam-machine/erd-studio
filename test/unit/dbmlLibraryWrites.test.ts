@@ -365,3 +365,67 @@ describe('refusals', () => {
     expect(() => planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }] })).toThrow(/dim_yaml is a YAML table.*Convert the project to DBML first/);
   });
 });
+
+describe('pending relationships (D27) through renames and moves, as a project Convert left mixed has them', () => {
+  /** fct_order with a live Ref and pending lines: to a YAML table, to a table with no file, to a column dim_date lacks. */
+  function pendingBase(): Record<string, string> {
+    return {
+      ...base(),
+      'tables/gold/_relationships.dbml': `${HEADER}use { table dim_customer } from './dim_customer.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.customer_key >? dim_customer.customer_key\n\n`
+        + '// erd-studio pending: Ref: fct_order.id >? left_yaml.id\n'
+        + '// erd-studio pending: Ref: fct_order.date_key >? dim_missing.date_key\n'
+        + '// erd-studio pending: Ref: fct_order.customer_key >? dim_date.nope\n',
+      'tables/gold/left_yaml.yml': 'name: left_yaml\n',
+    };
+  }
+  const pendingLines = (text: string): string[] => text.split('\n').filter((l) => l.startsWith('// erd-studio pending:'));
+
+  it('renaming the owner re-spells its pending lines, so they still belong to it', () => {
+    const files = pendingBase();
+    const model = { ...modelOf(files, 'fct_order'), name: 'fct_sale' };
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model, fromName: 'fct_order' }], delete: ['fct_order'] });
+    const after = apply(files, plan.writes);
+    expect(pendingLines(after['tables/gold/_relationships.dbml'])).toEqual([
+      '// erd-studio pending: Ref: fct_sale.id >? left_yaml.id',
+      '// erd-studio pending: Ref: fct_sale.date_key >? dim_missing.date_key',
+      '// erd-studio pending: Ref: fct_sale.customer_key >? dim_date.nope',
+    ]);
+    expect(modelOf(after, 'fct_sale').relationships).toHaveLength(4);
+    expectClean(Object.fromEntries(Object.entries(after).filter(([p]) => !p.endsWith('.yml'))));
+  });
+
+  it('renaming a pending line\'s target (the owner following, as the provider does) re-spells that end only', () => {
+    const files = pendingBase();
+    const dim = { ...modelOf(files, 'dim_date'), name: 'dim_day' };
+    const fct = modelOf(files, 'fct_order');
+    fct.relationships = fct.relationships!.map((r) => (r.toModel === 'dim_date' ? { ...r, toModel: 'dim_day' } : r));
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model: dim, fromName: 'dim_date' }, { model: fct }], delete: ['dim_date'] });
+    const after = apply(files, plan.writes);
+    expect(pendingLines(after['tables/gold/_relationships.dbml'])).toContain('// erd-studio pending: Ref: fct_order.customer_key >? dim_day.nope');
+  });
+
+  it('renaming a column a pending line names writes the relationships file, the column re-spelled', () => {
+    const files = pendingBase();
+    const model = modelOf(files, 'fct_order');
+    model.columns = model.columns.map((c) => (c.name === 'date_key' ? { ...c, name: 'order_date_key' } : c));
+    model.relationships = model.relationships!.map((r) => (r.fromColumn === 'date_key' ? { ...r, fromColumn: 'order_date_key' } : r));
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }] });
+    expect(pathsOf(plan.writes)).toEqual(['replace tables/gold/_relationships.dbml', 'replace tables/gold/fct_order.dbml']);
+    expect(pendingLines(apply(files, plan.writes)['tables/gold/_relationships.dbml'])).toContain('// erd-studio pending: Ref: fct_order.order_date_key >? dim_missing.date_key');
+  });
+
+  it('moving the owner to another folder carries its pending lines there, still pending, and the old file keeps no copy', () => {
+    const files = pendingBase();
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { move: [{ name: 'fct_order', toFolder: 'silver' }] });
+    const after = apply(files, plan.writes);
+    expect(pendingLines(after['tables/gold/_relationships.dbml'])).toEqual([]);
+    expect(pendingLines(after['tables/silver/_relationships.dbml'])).toEqual([
+      '// erd-studio pending: Ref: fct_order.customer_key >? dim_date.nope',
+      '// erd-studio pending: Ref: fct_order.date_key >? dim_missing.date_key',
+      '// erd-studio pending: Ref: fct_order.id >? left_yaml.id',
+    ]);
+    expect(after['tables/silver/_relationships.dbml']).toContain('Ref: fct_order.customer_key >? dim_customer.customer_key');
+    expect(modelOf(after, 'fct_order').relationships).toHaveLength(4);
+    expectClean(Object.fromEntries(Object.entries(after).filter(([p]) => !p.endsWith('.yml'))));
+  });
+});

@@ -555,11 +555,42 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
     const left = await runDoctor({ project: path.join(CORE_FIXTURES, 'library-relationships'), semanticDir: '.erd-studio', noDbt: true });
     expect(left.erd.dbmlConversion!.refusals).toEqual([]);
     expect(left.erd.dbmlConversion!.leftAsIs).toEqual([expect.objectContaining({ path: 'gold/sales.json' })]);
-    expect(left.erd.dbmlConversion!.preview).toMatch(/^Left as YAML until fixed/);
+    expect(left.erd.dbmlConversion!.preview).toMatch(/^Left as JSON until fixed/);
 
     const dbml = await runDoctor({ project: path.join(CORE_FIXTURES, 'dbml', 'showcase'), semanticDir: '.erd-studio', noDbt: true });
     expect(dbml.erd.storage).toBe('dbml');
     expect(dbml.erd.dbmlConversion).toBeUndefined();
+  });
+
+  it('a DBML project whose pending lines and unlinked members are ready: doctor says to run Convert, and Convert settles them', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-settle-'));
+    try {
+      const dir = path.join(root, '.erd-studio');
+      const write = (rel: string, text: string): void => {
+        fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+        fs.writeFileSync(path.join(dir, rel), text);
+      };
+      write('layers.json', LAYERS);
+      write('tables/dim.dbml', 'Table dim {\n  dim_key INT [pk]\n}\n');
+      write('tables/fct.dbml', 'Table fct {\n  fct_key INT [pk]\n  dim_key INT\n}\n');
+      // Add from dbt made fct after Convert: its pending lines can be live now.
+      write('tables/_relationships.dbml', "// ERD Studio relationships.\nuse { table dim } from './dim.dbml'\n\n// erd-studio pending: Ref: fct.dim_key >? dim.dim_key\n");
+      write('gold/c.dbml', "Project c {\n  erd_schema_version: '7'\n  erd_unlinked_tables: 'fct'\n}\n\nuse { table dim } from '../tables/dim.dbml'\nuse * from '../tables/_relationships.dbml'\n");
+      const doctor = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true });
+      expect(doctor.erd.storage).toBe('dbml');
+      expect(doctor.erd.dbmlConversion?.refusals).toEqual([]);
+      expect(doctor.nextSteps.find((x) => x.id === 'finish-dbml-conversion')?.why).toMatch(/^Some pending relationships or diagram members are ready to settle.*Run ERD Studio: Convert Project to DBML/);
+      const plan = await planDbmlConversion(readDbmlConversionInput(root, '.erd-studio'));
+      expect(plan.refusals).toEqual([]);
+      const rel = plan.replaces.find((r) => r.path === 'tables/_relationships.dbml')!.text;
+      expect(rel).toContain('Ref: fct.dim_key >? dim.dim_key\n');
+      expect(rel).not.toContain('erd-studio pending');
+      const diagramText = plan.replaces.find((r) => r.path === 'gold/c.dbml')!.text;
+      expect(diagramText).toContain("use { table fct } from '../tables/fct.dbml'");
+      expect(diagramText).not.toContain('erd_unlinked_tables');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('a half-applied run whose target has other bytes: that .yml stays, the rest finishes', async () => {
@@ -1127,6 +1158,65 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     expect(relationships).toContain("use { table other } from './other.dbml'\n");
     expect(classifyStorage(done)).toBe('dbml');
     expectCompilesEverywhere(inputOf(fixed), finish);
+  });
+
+  it('a YAML table left behind in the middle of a diagram (its name: is not its file, or is written twice): no false self-check refusal', async () => {
+    for (const left of ['name: bar\ncolumns: []\n', 'name: foo\nname: other\ncolumns: []\n']) {
+      const input = inputOf({
+        'logical-models/dim.yml': DIM,
+        'logical-models/foo.yml': left,
+        'logical-models/fct.yml': yml('fct', [['fct_key', 'INT', true], 'dim_key'], [FCT_REL]),
+        'gold/c.json': diagram('c', 'gold', ['dim', 'foo', 'fct']),
+      });
+      const plan = await planDbmlConversion(input);
+      expect(plan.refusals, left).toEqual([]);
+      expect(plan.leftAsIs.map((l) => l.path), left).toEqual(['logical-models/foo.yml']);
+      expect(created(plan, 'gold/c.dbml'), left).toContain("erd_unlinked_tables: 'foo'");
+      const before = await displayOf(after(input, { ...plan, creates: [], replaces: [], deletes: [] }), 'gold/c.json');
+      const now = await displayOf(after(input, plan), 'gold/c.dbml');
+      const byName = (d: DisplaySubjectArea) => d.models.map((m) => m.name).sort();
+      expect(byName(now), left).toEqual(byName(before));
+    }
+  });
+
+  it('a missing table listed twice in different case draws twice: that diagram stays JSON, the rest converts', async () => {
+    const plan = await planDbmlConversion(inputOf({
+      'logical-models/dim.yml': DIM,
+      'gold/c.json': diagram('c', 'gold', ['dim', 'miss', 'MISS']),
+    }));
+    expect(plan.refusals).toEqual([]);
+    expect(plan.leftAsIs).toEqual([{ path: 'gold/c.json', problem: 'It lists miss and MISS, which differ only in case and have no table file, so it draws two tables where a DBML diagram can name one. Remove one of them.' }]);
+    expect(plan.creates.map((c) => c.path)).toEqual(['tables/dim.dbml']);
+  });
+
+  it('finishing a diagram that keeps other missing members: the fixed table gains its use line ahead of them, with no false self-check refusal', async () => {
+    // As on Liam's gold/commercial: members with no table file at all stay unlinked for good, and the
+    // fixed table is not the first unlinked name, so its place in the member list changes.
+    const files = {
+      'logical-models/dim.yml': DIM,
+      'logical-models/other.yml': DUPLICATE_DIFFERENT,
+      'logical-models/risk.yml': 'name: risk\nname: risk2\ncolumns: []\n',
+      'gold/c.json': diagram('c', 'gold', ['gone_a', 'dim', 'risk', 'gone_b', 'other', 'gone_c']),
+    };
+    const first = await planDbmlConversion(inputOf(files));
+    expect(first.refusals).toEqual([]);
+    const mixed = after(inputOf(files), first);
+    expect(mixed['gold/c.dbml']).toContain("erd_unlinked_tables: 'gone_a, risk, gone_b, other, gone_c'");
+    // One fixed, then the other: each run finishes what it can.
+    const oneFixed = { ...mixed, 'logical-models/other.yml': DUPLICATE_DIFFERENT.replace('description: one\n', '') };
+    const second = await planDbmlConversion(inputOf(oneFixed));
+    expect(second.refusals).toEqual([]);
+    expect(second.leftAsIs.map((l) => l.path)).toEqual(['logical-models/risk.yml']);
+    const done1 = after(inputOf(oneFixed), second);
+    expect(done1['gold/c.dbml']).toContain("erd_unlinked_tables: 'gone_a, risk, gone_b, gone_c'");
+    expect(done1['gold/c.dbml']).toContain("use { table other } from '../tables/other.dbml'");
+    const bothFixed = { ...done1, 'logical-models/risk.yml': 'name: risk\ncolumns: []\n' };
+    const third = await planDbmlConversion(inputOf(bothFixed));
+    expect(third.refusals).toEqual([]);
+    expect(third.leftAsIs).toEqual([]);
+    const done2 = after(inputOf(bothFixed), third);
+    expect(done2['gold/c.dbml']).toContain("erd_unlinked_tables: 'gone_a, gone_b, gone_c'");
+    expect(classifyStorage(done2)).toBe('dbml');
   });
 });
 

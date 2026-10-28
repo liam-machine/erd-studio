@@ -627,7 +627,7 @@
         },
         {
           "command": "erdStudio.convertProjectToDbml",
-          "when": "erdStudio.hasProject && erdStudio.storage != dbml"
+          "when": "erdStudio.hasProject"
         },
         {
           "command": "erdStudio.importDbml",

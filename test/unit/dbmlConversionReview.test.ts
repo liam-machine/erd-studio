@@ -290,11 +290,11 @@ describe('buildConvertReview: what Convert handles, leaves and keeps missing (D2
   it('lists, in order: Handled for you, Left as YAML until fixed (each with Open), Kept as missing, then the files and notes; Convert stays', () => {
     const { view, locations } = buildConvertReview(partial, { display, introLines: ['intro'] });
     expect(view.mode).toBe('review');
-    expect(view.summary).toBe('1 table and 1 diagram convert to DBML; 1 file stays as it is until fixed; 2 missing tables stay on its diagram.');
+    expect(view.summary).toBe('1 table and 1 diagram convert to DBML; 1 file stays as it is until fixed; 2 missing tables stay on their diagram.');
     expect(view.sections.map((x) => [x.id, x.title])).toEqual([
       ['handled', 'Handled for you'],
       ['left', 'Left as YAML until fixed'],
-      ['missing', 'Kept as missing on the diagram'],
+      ['missing', 'Kept as missing on their diagrams'],
       ['tables', 'Tables'],
       ['diagrams', 'Diagrams and their .dbdiagram layout files'],
       ['removed', 'Files removed'],
@@ -304,18 +304,39 @@ describe('buildConvertReview: what Convert handles, leaves and keeps missing (D2
     expect(section('handled').items).toEqual([{ path: '.erd-studio/gold/commercial.json', text: 'It lists Dim, which is the table dim; the DBML diagram names it dim.' }]);
     expect(section('left').items).toEqual([
       { path: '.erd-studio/logical-models/gold/gld_fct_x.yml', line: 293, text: 'The key name is written twice with different values (line 293). Keep the one you mean.', open: 0 },
-      { text: 'This file stays exactly as it is, and the diagrams draw it as before. Fix it and run Convert again to finish the job.' },
     ]);
+    // The explanation is the section's hint, not a counted item.
+    expect(section('left').hint).toBe('This file stays exactly as it is, and the diagrams draw it as before. Fix it and run Convert again to finish the job.');
     expect(locations).toEqual([{ path: 'logical-models/gold/gld_fct_x.yml', line: 293 }]);
     expect(section('missing').items).toEqual([
       { path: '.erd-studio/gold/commercial.dbml', text: 'gld_fct_risk_child, gld_fct_risk_parent' },
-      { text: 'These tables have no table file. They stay on their diagrams, drawn as missing exactly as before. Create them later with Add from dbt.' },
     ]);
+    expect(section('missing').count).toBe(2);
+    expect(section('missing').hint).toBe('These tables have no table file. They stay on their diagram, drawn as missing exactly as before. Create them later with Add from dbt.');
     const html = buildConvertPanelHtml(view, 'n');
+    // Each badge counts what its title names: one file left, two missing tables.
+    expect(html).toContain('Left as YAML until fixed<span class="cdb-section__count">1</span>');
+    expect(html).toContain('Kept as missing on their diagrams<span class="cdb-section__count">2</span>');
+    expect(html).toContain('<p class="cdb-section__hint">This file stays exactly as it is');
     expect(html).toContain('data-action="convert"');
     expect(html).toContain('data-action="open" data-index="0"');
     expect(html).toContain('<p class="cdb__summary">1 table and 1 diagram convert to DBML;');
     expect(isConvertPanelToHost({ type: 'open', index: 0 }, locations.length)).toBe(true);
+  });
+
+  it('titles what is left by its format: YAML, JSON, or a mix', () => {
+    const titleOf = (paths: string[]): string => buildConvertReview(plan({ ...partial, leftAsIs: paths.map((path) => ({ path, problem: 'p' })) }), { display, introLines: [] })
+      .view.sections.find((x) => x.id === 'left')!.title;
+    expect(titleOf(['logical-models/a.yml'])).toBe('Left as YAML until fixed');
+    expect(titleOf(['gold/c.json'])).toBe('Left as JSON until fixed');
+    expect(titleOf(['logical-models/a.yml', 'gold/c.json'])).toBe('Left as they are until fixed');
+    expect(titleOf(['gold/d.dbml'])).toBe('Left as they are until fixed');
+  });
+
+  it('says its diagram for one missing table, and their diagrams for several diagrams', () => {
+    const summary = (keptMissing: Array<{ diagram: string; tables: string[] }>): string | undefined => buildConvertReview(plan({ ...partial, leftAsIs: [], keptMissing }), { display, introLines: [] }).view.summary;
+    expect(summary([{ diagram: 'gold/a.dbml', tables: ['x'] }])).toMatch(/1 missing table stays on its diagram\.$/);
+    expect(summary([{ diagram: 'gold/a.dbml', tables: ['x'] }, { diagram: 'gold/b.dbml', tables: ['y'] }])).toMatch(/2 missing tables stay on their diagrams\.$/);
   });
 
   it('nothing else can convert until the files are fixed: Check Again, no Convert', () => {

@@ -25,7 +25,7 @@ export { renderNewTableDbml, editTableDbml, renamedColumnsOf } from './writeTabl
 export type { EditTableDbmlOptions, ForeignDbmlMetadata } from './writeTable.js';
 export { editRelationshipsDbml, relationshipUnits, refUnitSortKey, usePathBetween, DBML_CONVERT_FIRST_MESSAGE } from './writeRelationships.js';
 export type { RefUnit, RelationshipsFileEdit, DbmlResolvedTable } from './writeRelationships.js';
-export { renderNewSubjectAreaDbml, editSubjectAreaDbml } from './writeDiagram.js';
+export { renderNewSubjectAreaDbml, editSubjectAreaDbml, pendingRelationshipRef } from './writeDiagram.js';
 export type { SubjectAreaDbmlEdit, NewSubjectAreaDbml, DbmlDiagramTable } from './writeDiagram.js';
 export { applyTextEdits } from './splice.js';
 export type { TextEdit } from './splice.js';

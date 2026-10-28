@@ -52,6 +52,22 @@ export const SALES_MISSING = SALES
 /** SALES_MISSING with dim_date unlinked too, though it has a table file now. */
 export const SALES_UNLINKED = SALES_MISSING.replace("erd_unlinked_tables: 'gld_fct_risk_child'", "erd_unlinked_tables: 'gld_fct_risk_child, dim_date'");
 
+/** The library with \`dim_customer\` renamed to \`dim_client\` (its relationships file following). */
+const CLIENT_LIBRARY: Readonly<Record<string, string>> = (() => {
+  const out: Record<string, string> = { ...DIAGRAM_LIBRARY };
+  delete out['tables/gold/dim_customer.dbml'];
+  out['tables/gold/dim_client.dbml'] = DIAGRAM_LIBRARY['tables/gold/dim_customer.dbml'].replace('gold.dim_customer', 'gold.dim_client');
+  out['tables/gold/_relationships.dbml'] = DIAGRAM_LIBRARY['tables/gold/_relationships.dbml'].replace(/dim_customer/g, 'dim_client');
+  return out;
+})();
+
+/** The library with dim_customer's \`customer_key\` renamed to \`customer_id\` (its relationships file following). */
+const CUSTOMER_ID_LIBRARY: Readonly<Record<string, string>> = {
+  ...DIAGRAM_LIBRARY,
+  'tables/gold/dim_customer.dbml': DIAGRAM_LIBRARY['tables/gold/dim_customer.dbml'].replace('customer_key int [pk]', 'customer_id int [pk]'),
+  'tables/gold/_relationships.dbml': DIAGRAM_LIBRARY['tables/gold/_relationships.dbml'].replace('gold.dim_customer.customer_key', 'gold.dim_customer.customer_id'),
+};
+
 type Obj = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 /** Read `text` as the diagram at `path`. */
@@ -352,7 +368,29 @@ use { table fct_order } from '../tables/gold/fct_order.dbml'
       .replace('\n// erd-studio pending: Ref: gld_fct_risk_child.customer_key >? gold.dim_customer.customer_key\n', ''));
     expect(out).not.toContain('erd_unlinked_tables');
   }),
-
+  // A rename the provider makes runs renameTableInSubjectAreaRelationships on the diagram: its own pending
+  // relationship follows, and its line is re-spelled (never refused as a relationship the diagram holds).
+  diagramCase('renaming the table a pending line points at re-spells the line', SALES_MISSING, (a) => {
+    a.logical.models = a.logical.models.map((m: string) => (m === 'dim_customer' ? 'dim_client' : m));
+    for (const r of a.logical.relationships) if (r.toModel === 'dim_customer') r.toModel = 'dim_client';
+  }, (out) => {
+    expect(out).toContain('// erd-studio pending: Ref: gld_fct_risk_child.customer_key >? gold.dim_client.customer_key\n');
+    expect(out).toContain("use { table gold.dim_client } from '../tables/gold/dim_client.dbml'\n");
+    expect(readDiagram(out).logical.relationships).toEqual([
+      { fromModel: 'gld_fct_risk_child', fromColumn: 'customer_key', toModel: 'dim_client', toColumn: 'customer_key', cardinality: 'many-to-one' },
+    ]);
+  }, { library: CLIENT_LIBRARY, extra: { pathChanged: new Set(['dim_customer', 'dim_client']) }, parsers: ['9.1.1', '10.3.1', '11.0.0'] }),
+  diagramCase('renaming a column a pending line names re-spells only that column', SALES_MISSING, (a) => {
+    for (const r of a.logical.relationships) if (r.toColumn === 'customer_key') r.toColumn = 'customer_id';
+  }, (out) => {
+    expect(out).toBe(SALES_MISSING.replace('>? gold.dim_customer.customer_key', '>? gold.dim_customer.customer_id'));
+  }, { library: CUSTOMER_ID_LIBRARY, parsers: ['9.1.1', '10.3.1', '11.0.0'] }),
+  diagramCase('renaming an unlinked YAML member keeps it unlinked, under its new name, in its place', SALES_MISSING.replace("erd_unlinked_tables: 'gld_fct_risk_child'", "erd_unlinked_tables: 'gld_fct_risk_child, left_yaml'"), (a) => {
+    a.logical.models = a.logical.models.map((m: string) => (m === 'left_yaml' ? 'left_yaml2' : m));
+  }, (out) => {
+    expect(out).toContain("erd_unlinked_tables: 'gld_fct_risk_child, left_yaml2'");
+    expect(out).not.toContain('use { table left_yaml2 }');
+  }, { yaml: { left_yaml2: 'logical-models/left_yaml2.yml' } }),
 ];
 
 /** New-file cases: `renderNewSubjectAreaDbml`. */

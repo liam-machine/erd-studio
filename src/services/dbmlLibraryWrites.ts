@@ -253,18 +253,15 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     }
     stored.set(path, list);
   }
-  /** Each relationships file's pending relationships (D27): the tables they name, lower-case. */
-  const pendingNames = new Map<string, Set<string>>();
+  /** Each relationships file's pending relationships (D27), as units named as the library reads them. */
+  const pendingUnits = new Map<string, RefUnit[]>();
   for (const { path, reading } of readings) {
-    const names = new Set<string>();
-    for (const ref of reading.pending ?? []) {
-      for (const rel of ref.relationships.slice(0, 1)) {
-        names.add(lower(lookup(rel.fromModel)?.table.name ?? rel.fromModel));
-        names.add(lower(lookup(rel.toModel)?.table.name ?? rel.toModel));
-      }
-    }
-    if (names.size > 0) pendingNames.set(path, names);
+    if (!reading.readable) continue;
+    const units = (reading.pending ?? []).map((ref) => storedUnit(ref, lookup)?.unit).filter((u): u is RefUnit => u !== undefined);
+    if (units.length > 0) pendingUnits.set(path, units);
   }
+  /** Every pending unit before the plan: one a plan carries into another file stays pending there (D27). */
+  const pendingBefore = [...pendingUnits.values()].flat();
 
   // --- 1. The path overlay ------------------------------------------------------------------
   const after = new Map<string, DbmlPlannedTable>();
@@ -429,10 +426,12 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     const desiredIds = new Set(desiredUnits.map(unitIdentity));
     for (const u of desiredUnits) for (const l of unitLinks(u)) touchedLinks.add(l);
     // The owner's Refs in every file other than its home leave that file; the ones it keeps travel home verbatim.
+    // Its pending lines there leave too: home writes them, pending while they cannot be live.
     for (const [file, refs] of stored) {
       if (file === home) continue;
       const mine = refs.filter((r) => r.owner === oldKey);
-      if (mine.length === 0) continue;
+      const minePending = (pendingUnits.get(file) ?? []).some((u) => lower(u.from) === oldKey);
+      if (mine.length === 0 && !minePending) continue;
       editFor(file).owners.set(oldKey, null);
       if (!entry) continue;
       for (const r of mine) {
@@ -474,8 +473,9 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     if (refs.some((r) => changedNames.has(lower(r.unit.from)) || changedNames.has(lower(r.unit.to))
       || namesRenamedColumn(r.unit.from, r.unit.fromColumns) || namesRenamedColumn(r.unit.to, r.unit.toColumns))) editFor(file);
   }
-  for (const [file, names] of pendingNames) {
-    if ([...names].some((n) => changedNames.has(n))) editFor(file);
+  for (const [file, units] of pendingUnits) {
+    if (units.some((u) => changedNames.has(lower(u.from)) || changedNames.has(lower(u.to))
+      || namesRenamedColumn(u.from, u.fromColumns) || namesRenamedColumn(u.to, u.toColumns))) editFor(file);
   }
   // Convert: every file with a pending line that can be a live Ref now (both ends have .dbml files with those columns).
   if (ops.writePending) {
@@ -533,6 +533,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       ...(e.incoming.length > 0 ? { incoming: e.incoming } : {}),
       ...(pathChangedAfter.size > 0 ? { pathChanged: pathChangedAfter } : {}),
       ...(ops.writePending ? { writePending: true } : {}),
+      ...(pendingBefore.length > 0 ? { pendingBefore } : {}),
       resolve: resolveForWriter,
     };
     const text = editRelationshipsDbml(oldText, fileEdit);

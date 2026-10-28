@@ -321,6 +321,18 @@ Note "n1" {
     expect(subjectAreaMembersDbml(MISSING)).toEqual(['fct_order', 'gld_dim_project', 'gld_fct_risk_child', 'gld_fct_risk_parent']);
   });
 
+  it.each(STORAGE_PARSERS)('%s: both readers read a double-quoted value and a repeated key alike, and the canvas reader warns about the repeat', (_label, parser) => {
+    const use = "use { table a } from '../tables/a.dbml'\n";
+    const quoted = `Project p {\n  erd_unlinked_tables: "x, y"\n}\n${use}`;
+    expect(parseSubjectAreaDbml(quoted, 'gold/p.dbml', null, parser).members).toEqual(['a', 'x', 'y']);
+    expect(subjectAreaMembersDbml(quoted, parser)).toEqual(['a', 'x', 'y']);
+    const twice = `Project p {\n  erd_unlinked_tables: 'x'\n  erd_unlinked_tables: 'y'\n}\n${use}`;
+    const reading = parseSubjectAreaDbml(twice, 'gold/p.dbml', null, parser);
+    expect(reading.members).toEqual(['a', 'y']);
+    expect(subjectAreaMembersDbml(twice, parser)).toEqual(['a', 'y']);
+    expect(reading.warnings).toContainEqual(expect.stringMatching(/names erd_unlinked_tables 2 times; only the last is read/));
+  });
+
   it('a diagram whose members all have no table file is not a dropped-in single-file DBML', () => {
     const reading = parseSubjectAreaDbml("Project p {\n  erd_unlinked_tables: 'a'\n}\n", 'gold/p.dbml', null);
     expect(reading.members).toEqual(['a']);

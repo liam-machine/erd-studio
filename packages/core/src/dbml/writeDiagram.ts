@@ -194,6 +194,23 @@ function noteBlock(annotation: Annotation, eol: string): string {
   ].join(eol);
 }
 
+/**
+ * A pending relationship's Ref text (D27), from its column pairs (one unless
+ * a composite), foreign-key end first: written as the relationships writer
+ * writes a Ref (D18 marks). `referenceOf` spells a table that has a file
+ * (`gold.x` for a schema-qualified one); a table with none is its name.
+ */
+export function pendingRelationshipRef(members: readonly Relationship[], referenceOf: (table: string) => string | undefined = () => undefined): string {
+  const rel = members[0];
+  const cols = (cs: string[]): string => (cs.length === 1 ? dbmlName(cs[0]) : `(${cs.map(dbmlName).join(', ')})`);
+  const fromEnd = `${referenceOf(rel.fromModel) ?? dbmlName(rel.fromModel)}.${cols(members.map((m) => m.fromColumn))}`;
+  const toEnd = `${referenceOf(rel.toModel) ?? dbmlName(rel.toModel)}.${cols(members.map((m) => m.toColumn))}`;
+  const name = rel.role ? ` ${dbmlName(rel.role)}` : '';
+  if (rel.cardinality === 'one-to-one') return `Ref${name}: ${toEnd} ?- ${fromEnd}`;
+  if (rel.cardinality === 'many-to-many') return `Ref${name}: ${fromEnd} <>? ${toEnd}`;
+  return `Ref${name}: ${fromEnd} >? ${toEnd}`;
+}
+
 function tableUseLine(reference: string, fromFile: string, toFile: string): string {
   return `use { table ${reference} } from '${usePathBetween(fromFile, toFile)}'`;
 }
@@ -288,14 +305,37 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
     [r.fromModel, r.fromColumn, r.toModel, r.toColumn, r.cardinality, r.role ?? ''].map((part) => lower(String(part ?? ''))).join('\u0000');
   const pendingIds = new Set(pendingRefs.flatMap((ref) => ref.relationships.map(relationshipIdentity)));
   const afterOwn = Array.isArray(afterLogical.relationships) ? (afterLogical.relationships as Relationship[]) : [];
-  if (afterOwn.some((r) => !isObject(r) || !pendingIds.has(relationshipIdentity(r)))) {
-    refuse(file, `${file} is a DBML diagram, which holds no relationships: they live in the table library, in the relationships file of the foreign-key table's folder.`);
-  }
-  const afterOwnIds = new Set(afterOwn.map(relationshipIdentity));
+  const beforeLogical = isObject(before.logical) ? before.logical : {};
+  const beforeOwn = Array.isArray(beforeLogical.relationships) ? (beforeLogical.relationships as Relationship[]) : [];
+  const afterOwnIds = new Set(afterOwn.filter(isObject).map(relationshipIdentity));
+  // A pending relationship whose ends or columns an edit re-spelled (a table or column rename, here or in
+  // the library) is the same relationship: it takes the place of the one it was, with the same cardinality
+  // and role, and its line is re-spelled. Anything else new is refused: a DBML diagram holds no Refs (D5).
+  const respelledTo = new Map<string, Relationship>();
+  const notOwn = (): never => refuse(file, `${file} is a DBML diagram, which holds no relationships: they live in the table library, in the relationships file of the foreign-key table's folder.`);
+  afterOwn.forEach((r, i) => {
+    if (!isObject(r)) notOwn();
+    if (pendingIds.has(relationshipIdentity(r))) return;
+    const was = beforeOwn[i];
+    const same = isObject(was) && pendingIds.has(relationshipIdentity(was)) && !afterOwnIds.has(relationshipIdentity(was))
+      && was.cardinality === r.cardinality && lower(was.role ?? '') === lower(r.role ?? '')
+      && !respelledTo.has(relationshipIdentity(was));
+    // Its foreign-key table still has no .dbml file: once it has one, the relationship belongs in the library.
+    if (!same || (edit.resolveTable(r.fromModel)?.storage === 'dbml' && lower(r.fromModel) !== lower(was!.fromModel))) notOwn();
+    respelledTo.set(relationshipIdentity(was!), r);
+  });
   const pendingCuts: TextEdit[] = [];
+  const pendingEdits: TextEdit[] = [];
   for (const ref of pendingRefs) {
-    const kept = ref.relationships.filter((r) => afterOwnIds.has(relationshipIdentity(r))).length;
-    if (kept === ref.relationships.length) continue;
+    const now = ref.relationships.map((r) => (afterOwnIds.has(relationshipIdentity(r)) ? r : respelledTo.get(relationshipIdentity(r))));
+    const kept = now.filter((r) => r !== undefined).length;
+    if (kept === ref.relationships.length) {
+      if (now.every((r, i) => r === ref.relationships[i])) continue;
+      const raw = text.slice(ref.start, ref.fullEnd).replace(/\r?\n$/, '');
+      const m = /^([ \t]*\/\/[ \t]*erd-studio pending:[ \t]*)(\S.*?)[ \t]*$/i.exec(raw);
+      if (m) pendingEdits.push({ start: ref.start + m[1].length, end: ref.start + m[1].length + m[2].length, text: pendingRelationshipRef(now as Relationship[], (t) => edit.resolveTable(t)?.reference) });
+      continue;
+    }
     if (kept > 0) refuse(file, `${file}: line ${ref.line} is one pending relationship of several column pairs; remove all of it or none.`, ref.line);
     pendingCuts.push({ start: ref.start, end: ref.fullEnd, text: '' });
   }
@@ -360,6 +400,25 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
       }
       newMembers.push(name);
     }
+    // A new member with no .dbml file that takes the place of an unlinked member this edit removed (that
+    // member renamed: a YAML table Convert left, say) stays unlinked under its new name, in its place.
+    const removedUnlinked = unlinkedLeft.filter((n) => n !== '').length;
+    if (removedUnlinked > 0) {
+      let slots = removedUnlinked;
+      const unlinkedNow = new Set(newUnlinked.map(lower));
+      const renamedUnlinked = new Set<string>();
+      for (const name of newMembers) {
+        if (slots === 0) break;
+        if (oldMembers.some((m) => lower(m) === lower(name)) || edit.resolveTable(name)?.storage === 'dbml') continue;
+        renamedUnlinked.add(lower(name));
+        slots--;
+      }
+      if (renamedUnlinked.size > 0) {
+        newMembers.splice(0, newMembers.length, ...newMembers.filter((n) => !renamedUnlinked.has(lower(n))));
+        const ordered = allNewMembers.filter((n) => unlinkedNow.has(lower(n)) || renamedUnlinked.has(lower(n)));
+        newUnlinked.splice(0, newUnlinked.length, ...ordered);
+      }
+    }
   }
 
   // --- Project ---------------------------------------------------------------------
@@ -382,7 +441,8 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
         else edits.push({ start: project.type.end, end: project.type.end, text: ` ${dbmlName(domainAfter)}` });
       }
       const body: AstNode[] = Array.isArray(project.body?.body) ? project.body.body : [];
-      const entryOf = (key: string): AstNode | undefined => body.find((n) => lower(String(n?.type?.value ?? '')) === key);
+      // A repeated key is read from its last entry (as the readers read it), so that is the one edited.
+      const entryOf = (key: string): AstNode | undefined => [...body].reverse().find((n) => lower(String(n?.type?.value ?? '')) === key);
       const close = project.body.blockCloseBrace as AstNode;
       const indent = body.length > 0 ? text.slice(text.lastIndexOf('\n', body[0].start - 1) + 1, body[0].start) : '  ';
       const order = ['note', ...PROJECT_KEYS];
@@ -611,7 +671,7 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
     lateEdits.push({ start: at, end: at, text: `${lead}${appended.join(`${eol}${eol}`)}${eol}` });
   }
 
-  const out = applyTextEdits(text, [...edits, ...pendingLineCuts(text, pendingCuts), ...lateEdits]);
+  const out = applyTextEdits(text, [...edits, ...pendingEdits, ...pendingLineCuts(text, pendingCuts), ...lateEdits]);
   return hadBom ? `﻿${out}` : out;
 
   /** The first `use` line of a diagram that has none: after the Project (one blank line between), else after the header. */
