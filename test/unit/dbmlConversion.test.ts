@@ -135,7 +135,8 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
   ])('a name %s: every copy stays YAML (Convert never picks one)', async (_label, files) => {
     const plan = await planDbmlConversion(inputOf({ ...files, 'logical-models/other.yml': yml('other', ['id']) }));
     expect(plan.refusals).toEqual([]);
-    for (const p of Object.keys(files)) expect(leftOf(plan, p)?.problem).toMatch(/One table has 2 files/);
+    // The fix names the command as the palette lists it.
+    for (const p of Object.keys(files)) expect(leftOf(plan, p)?.problem).toMatch(/^One table has 2 files: .*\(ERD Studio: Give Duplicate Table Its Own Name, or delete the others\)\.$/);
     expect(plan.creates.map((c) => c.path)).toEqual(['tables/other.dbml']);
   });
 

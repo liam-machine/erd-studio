@@ -759,7 +759,7 @@ async function planOnce(
       continue;
     }
     for (const e of yaml) {
-      leave(e.path, `One table has ${entries.length} files: ${entries.map((x) => x.path).join(', ')}. Keep one of them (ERD Studio: Give Duplicate Its Own Name, or delete the others).`);
+      leave(e.path, `One table has ${entries.length} files: ${entries.map((x) => x.path).join(', ')}. Keep one of them (ERD Studio: Give Duplicate Table Its Own Name, or delete the others).`);
     }
   }
   if (leaveMore.size > 0) return again();
