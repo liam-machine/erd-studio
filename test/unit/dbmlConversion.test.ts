@@ -140,6 +140,20 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
     expect(plan.creates.map((c) => c.path)).toEqual(['tables/other.dbml']);
   });
 
+  it('a relationship to a name left in two files stays pending, and its note names both files (not only the last one read)', async () => {
+    const plan = await planDbmlConversion(inputOf({
+      'logical-models/gold/dim.yml': DIM,
+      'logical-models/silver/dim.yml': yml('dim', [['dim_key', 'INT', true], 'other_label']),
+      'logical-models/gold/fct.yml': yml('fct', ['fct_id', 'dim_key'], [FCT_REL]),
+    }));
+    expect(plan.refusals).toEqual([]);
+    expect(plan.notes).toContain(
+      'logical-models/gold/fct.yml: the relationship fct.dim_key → dim.dim_key is kept as a pending line in tables/gold/_relationships.dbml '
+        + '(dim stays a YAML table until its files (logical-models/gold/dim.yml, logical-models/silver/dim.yml) are made one). '
+        + 'It draws as before, and becomes a live Ref when both ends have table files.',
+    );
+  });
+
   it('a .yml that does not parse, and one with a duplicate key with different values, stay YAML', async () => {
     const plan = await planDbmlConversion(inputOf({
       'logical-models/broken.yml': 'name: broken\ncolumns:\n  - name: a\n    dataType: [INT\n',

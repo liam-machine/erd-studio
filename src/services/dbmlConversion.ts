@@ -637,8 +637,15 @@ async function planOnce(
   const addName = (name: string, entry: { path: string; target?: string; text?: string; storage: 'yaml' | 'dbml' }): void => {
     byName.set(lower(name), [...(byName.get(lower(name)) ?? []), entry]);
   };
-  /** Tables left as YAML (lower-case name → their file), so diagrams list them as unlinked and Refs to them stay pending. */
-  const leftTables = new Map<string, string>();
+  /**
+   * Tables left as YAML (lower-case name → their files, in library order), so diagrams list them as
+   * unlinked and Refs to them stay pending. A name left in two files (a duplicate) keeps both.
+   */
+  const leftTables = new Map<string, string[]>();
+  const addLeftTable = (name: string, path: string): void => {
+    const paths = leftTables.get(lower(name)) ?? [];
+    if (!paths.includes(path)) leftTables.set(lower(name), [...paths, path]);
+  };
   const converted: LibraryTable[] = [];
   /** Converted tables whose identical duplicate keys were read once: the before-display's warning is not a difference. */
   const dedupedKeys = new Set<string>();
@@ -647,10 +654,10 @@ async function planOnce(
     const stem = cls.name ?? stemOf(f.path);
     if (left.has(f.path)) {
       // A name it holds (or its stem) is a left table: diagrams keep it unlinked, Refs to it pending.
-      leftTables.set(lower(stem), f.path);
+      addLeftTable(stem, f.path);
       let held: SemanticTable | null = null;
       try { held = parseTableText(f.text, stem, { duplicateKeys: 'last' }); } catch { /* unreadable: its stem names it */ }
-      if (held) leftTables.set(lower(held.name), f.path);
+      if (held) addLeftTable(held.name, f.path);
       continue;
     }
     if (isReservedTableName(stem)) {
@@ -844,8 +851,10 @@ async function planOnce(
   /** Why a table name has no DBML table to point a live Ref at, or undefined when it has one. */
   const noFileReason = (name: string): string | undefined => {
     if (tableOf(name)) return undefined;
-    const yamlFile = leftTables.get(lower(name));
-    if (yamlFile) return `${name} stays a YAML table until ${yamlFile} is fixed`;
+    const yamlFiles = leftTables.get(lower(name));
+    if (yamlFiles && yamlFiles.length === 1) return `${name} stays a YAML table until ${yamlFiles[0]} is fixed`;
+    // A name in two files: neither is the table until one is kept, so both are named.
+    if (yamlFiles) return `${name} stays a YAML table until its files (${yamlFiles.join(', ')}) are made one`;
     const unreadable = unreadableTables.get(lower(name));
     if (unreadable) return `${unreadable.path} does not read`;
     return `${name} has no table file`;
