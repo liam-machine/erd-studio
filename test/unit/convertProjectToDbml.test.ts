@@ -14,6 +14,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import {
+  CONVERT_ALREADY_RUNNING_MESSAGE,
   CONVERT_GIT_LINE,
   CONVERT_RESUME_LINE,
   CONVERT_TEAMMATES_LINE,
@@ -32,7 +33,7 @@ import {
   DBML_CONVERSION_OFFER_TITLE,
   SemanticEditorProvider,
 } from '../../src/providers/SemanticEditorProvider';
-import type { ConvertReviewView } from '../../src/services/dbmlConversionReview';
+import { MIGRATE_TO_V5_COMMAND_TITLE, UNSAVED_TAG, type ConvertReviewView } from '../../src/services/dbmlConversionReview';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
@@ -307,6 +308,70 @@ describe('convertProjectToDbml', () => {
     expect(apply).toHaveBeenCalledTimes(1);
     // The superseded run is not counted as a cancel.
     expect(feature).not.toHaveBeenCalledWith('convertToDbmlCancelled');
+  });
+
+  it('a run started while another is converting only reveals the panel; the conversion applies once and stays', async () => {
+    useFixture('composite-and-self');
+    // Hold the first run's edit until the second run has started.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const realApply = vscode.workspace.applyEdit.bind(vscode.workspace);
+    const apply = vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit: vscode.WorkspaceEdit) => {
+      if (apply.mock.calls.length === 1) await gate;
+      return realApply(edit);
+    });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    let second: Promise<unknown> | undefined;
+    const shown = answerPanel(async (panel) => {
+      await panel._simulateMessage({ type: 'convert' });
+      await vi.waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+      second = convertProjectToDbml(deps());
+      expect(await second).toBe('cancelled');
+      release();
+    });
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    expect(await second).toBe('cancelled');
+    expect(shown).toHaveLength(1);
+    expect(shown[0].panel._reveals).toHaveLength(1);
+    expect(info).toHaveBeenCalledWith(CONVERT_ALREADY_RUNNING_MESSAGE);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(snapshot()).toEqual(snapshot(TWIN));
+    // Once it has returned, the command runs normally again.
+    expect(await convertProjectToDbml(deps())).toBe('nothing');
+  });
+
+  it('Check Again with the fix still unsaved: the problem says to save it first', async () => {
+    useFixture('composite-and-self');
+    const broken = path.join(erd, 'logical-models', 'gold', 'employee.yml');
+    const good = fs.readFileSync(broken, 'utf-8');
+    fs.writeFileSync(broken, `${good}name: twice\n`);
+    let step = 0;
+    const shown = answerPanel(async (panel) => {
+      step += 1;
+      if (step === 1) {
+        const doc = vscode.createMockTextDocument(broken, `${good}name: twice\n`);
+        doc._setText(good); // the user's fix, not saved
+        vscode.workspace.textDocuments = [doc as never];
+        await panel._simulateMessage({ type: 'checkAgain' });
+      } else {
+        await panel._simulateMessage({ type: 'cancel' });
+      }
+    });
+    expect(await convertProjectToDbml(deps())).toBe('refused');
+    expect(shown.map((x) => x.view.sections[0].items[0].tag)).toEqual([undefined, UNSAVED_TAG]);
+    expect(shown[0].view.intro[0]).toMatch(/^Fix this and save, then choose Check Again\./);
+  });
+
+  it('a diagram still v4 after the v4 step: the page names the command that ran and does not claim every v4 diagram converted', async () => {
+    useFixture('composite-and-self');
+    fs.writeFileSync(path.join(erd, 'gold', 'old.json'), JSON.stringify({ schemaVersion: 4, domain: 'old', layer: 'gold', logical: { models: [{ name: 'inline', columns: [] }], relationships: [] } }));
+    const migrateToV5 = vi.fn(async (): Promise<boolean> => true); // ran, but the file is still v4
+    const shown = answerPanel((panel) => panel._simulateMessage({ type: 'cancel' }));
+    expect(await convertProjectToDbml(deps({ migrateToV5 }))).toBe('refused');
+    const { view } = shown[0];
+    expect(view.sections[0].items[0].text).toBe(`This diagram is still in schema v4 after ${MIGRATE_TO_V5_COMMAND_TITLE}. Open it and check its tables, then choose Check Again.`);
+    expect(view.intro[0]).toContain('Migrate Subject Areas to the Central Table Library ran, but nothing else was changed.');
+    expect(view.intro[0]).not.toContain('The v4 subject areas were converted');
   });
 
   it('VS Code applying only part of the edit: applyFileWrites puts it all back, and the failure is counted', async () => {

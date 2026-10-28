@@ -40,7 +40,7 @@ import {
   showErrorWithActions as showErrorWith,
   type ErrorActions,
 } from '../services/commandErrors';
-import { dbmlConversionIsEmpty, describeDbmlConversion, planDbmlConversion } from '../services/dbmlConversion';
+import { dbmlConversionIsEmpty, describeDbmlConversion, isDbmlSelfCheckRefusal, planDbmlConversion } from '../services/dbmlConversion';
 import type { DbmlConversionPlan } from '../services/dbmlConversion';
 import { buildConvertReview } from '../services/dbmlConversionReview';
 import { readDbmlConversionInput } from '../services/dbmlConversionFiles';
@@ -79,6 +79,18 @@ export interface ConvertProjectDeps {
 }
 
 export type ConvertProjectOutcome = 'converted' | 'nothing' | 'refused' | 'cancelled' | 'failed';
+
+/**
+ * Set from the moment a run's user chooses Convert until that run returns. A
+ * run started meanwhile (the palette, the offer, another run's Check Again)
+ * would take the panel over and apply the same plan a second time, and the
+ * first run's reconcile would then undo the second's conversion: it only
+ * reveals the panel and says a conversion is already running.
+ */
+let conversionInFlight = false;
+
+/** The message a run started while another is converting shows. */
+export const CONVERT_ALREADY_RUNNING_MESSAGE = `${CONVERT_TO_DBML_TITLE}: a conversion is already running. Wait for it to finish, then run it again if you need to.`;
 
 /** Files a conversion replaced this session: an undo or redo of one is saved, so the disk follows. */
 const convertedReplaces = new Set<string>();
@@ -139,16 +151,28 @@ export function convertIntroLines(plan: DbmlConversionPlan): string[] {
  * the user's choice. Paths are shown project-relative; a refusal opens only a
  * file that is on disk under the semantic dir.
  */
-function showConvertPanel(deps: Pick<ConvertProjectDeps, 'workspaceRoot' | 'semanticDir'>, plan: DbmlConversionPlan, nothingChanged: string): Promise<ConvertPanelChoice> {
+function showConvertPanel(
+  deps: Pick<ConvertProjectDeps, 'workspaceRoot' | 'semanticDir'>,
+  plan: DbmlConversionPlan,
+  nothingChanged: string,
+  v4StepRan = false,
+): Promise<ConvertPanelChoice> {
   const semanticRoot = path.join(deps.workspaceRoot, deps.semanticDir);
   const abs = (rel: string): string => path.join(semanticRoot, ...rel.split('/'));
   const { view, locations } = buildConvertReview(plan, {
     display: (rel) => projectRelative(deps.workspaceRoot, abs(rel)),
     exists: (rel) => fs.existsSync(abs(rel)),
+    // Check Again plans from the disk: a fix still unsaved in its editor is marked.
+    unsaved: (rel) => dirtyFiles([abs(rel)]).length > 0,
     introLines: convertIntroLines(plan),
     nothingChanged,
+    v4StepRan,
   });
-  return ConvertToDbmlPanel.show({ view, locations, semanticRoot });
+  const selfCheck = plan.refusals.filter(isDbmlSelfCheckRefusal);
+  const feedback = view.reportable && selfCheck.length > 0
+    ? feedbackPrefill(CONVERT_TO_DBML_TITLE, 'while checking the DBML it would write', new Error(selfCheck.join('\n')))
+    : undefined;
+  return ConvertToDbmlPanel.show({ view, locations, semanticRoot, ...(feedback ? { feedback } : {}) });
 }
 
 /** The v4 step threw: it has counted and logged its own failure. */
@@ -161,7 +185,12 @@ class V5StepFailed extends Error {
 
 /** The command. Never throws: anything unexpected is counted and shown as ERD Studio's, with Send Feedback (#219). */
 export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<ConvertProjectOutcome> {
-  const progress = { v5Converted: false, applied: false, counted: false };
+  if (conversionInFlight) {
+    ConvertToDbmlPanel.reveal();
+    void vscode.window.showInformationMessage(CONVERT_ALREADY_RUNNING_MESSAGE);
+    return 'cancelled';
+  }
+  const progress = { v5Converted: false, applied: false, counted: false, converting: false };
   const retry = (): Promise<ConvertProjectOutcome> => convertProjectToDbml(deps);
   try {
     return await runConversion(deps, progress, retry);
@@ -189,6 +218,7 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
     });
     return progress.applied ? 'converted' : 'failed';
   } finally {
+    if (progress.converting) conversionInFlight = false;
     // Whatever ended the run (a toast, a refusal by name, nothing to do), a
     // panel no run is waiting on closes.
     ConvertToDbmlPanel.closeIfIdle();
@@ -197,14 +227,17 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
 
 async function runConversion(
   deps: ConvertProjectDeps,
-  progress: { v5Converted: boolean; applied: boolean; counted: boolean },
+  progress: { v5Converted: boolean; applied: boolean; counted: boolean; converting: boolean },
   retry: () => Promise<ConvertProjectOutcome>,
 ): Promise<ConvertProjectOutcome> {
   const semanticRoot = path.join(deps.workspaceRoot, deps.semanticDir);
   const abs = (rel: string): string => path.join(semanticRoot, ...rel.split('/'));
-  const nothingChanged = (): string => (progress.v5Converted
-    ? 'The v4 subject areas were converted to the Table Library, but nothing else was changed.'
-    : 'Nothing was changed.');
+  const nothingChanged = (): string => {
+    if (!progress.v5Converted) return 'Nothing was changed.';
+    return plan.v4SubjectAreas.length > 0
+      ? 'Migrate Subject Areas to the Central Table Library ran, but nothing else was changed.'
+      : 'The v4 subject areas were converted to the Table Library, but nothing else was changed.';
+  };
 
   // 1. Read and plan.
   let plan = await planProjectDbmlConversion(deps);
@@ -212,7 +245,7 @@ async function runConversion(
   // What stops it, in the panel: Check Again plans again; Close (or closing the tab) ends the run.
   const refused = async (): Promise<ConvertProjectOutcome> => {
     telemetry.feature('convertToDbmlRefused');
-    const choice = await showConvertPanel(deps, plan, nothingChanged());
+    const choice = await showConvertPanel(deps, plan, nothingChanged(), progress.v5Converted);
     return choice === 'checkAgain' ? retry() : 'refused';
   };
 
@@ -277,6 +310,9 @@ async function runConversion(
     telemetry.feature('convertToDbmlCancelled');
     return 'cancelled';
   }
+  // From here until this run returns, another run only reveals the panel.
+  conversionInFlight = true;
+  progress.converting = true;
 
   // 7. The panel may have waited: plan again from the files as they are now (#219).
   const again = await planProjectDbmlConversion(deps);

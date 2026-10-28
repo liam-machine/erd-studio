@@ -17,6 +17,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { openTableFileAt } from '../commands/openModelFile';
+import type { FeedbackPrefill } from '../services/commandErrors';
 import {
   CONVERT_PANEL_TITLE,
   CONVERT_PANEL_VIEW_TYPE,
@@ -35,6 +36,8 @@ export interface ConvertPanelContent {
   locations: ConvertRefusalLocation[];
   /** The semantic dir, absolute: locations resolve under it and never outside. */
   semanticRoot: string;
+  /** What Send Feedback prefills, on a page refused by ERD Studio's own self-check. */
+  feedback?: FeedbackPrefill;
 }
 
 export class ConvertToDbmlPanel {
@@ -72,6 +75,11 @@ export class ConvertToDbmlPanel {
   /** The open panel, if any. */
   static get currentPanel(): ConvertToDbmlPanel | undefined {
     return ConvertToDbmlPanel.current;
+  }
+
+  /** Bring the open panel to the front, unchanged. */
+  static reveal(): void {
+    ConvertToDbmlPanel.current?.panel.reveal(vscode.ViewColumn.Active);
   }
 
   /** Close the panel unless a run is waiting on it. */
@@ -136,6 +144,11 @@ export class ConvertToDbmlPanel {
         return;
       case 'checkAgain':
         if (mode === 'refused') this.settle('checkAgain');
+        return;
+      case 'sendFeedback':
+        if (mode === 'refused' && this.content.view.reportable && this.content.feedback) {
+          await vscode.commands.executeCommand('erdStudio.reportBug', this.content.feedback);
+        }
         return;
       case 'cancel':
         if (this.resolve || mode === 'refused') this.dispose();

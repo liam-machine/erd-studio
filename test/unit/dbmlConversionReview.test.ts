@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { ConvertToDbmlPanel } from '../../src/providers/ConvertToDbmlPanel';
-import type { DbmlConversionPlan } from '../../src/services/dbmlConversion';
+import { DBML_SELF_CHECK_REFUSAL_END, type DbmlConversionPlan } from '../../src/services/dbmlConversion';
 import {
   CONVERT_PANEL_TITLE,
   CONVERT_PANEL_VIEW_TYPE,
@@ -21,6 +21,8 @@ import {
   buildConvertReview,
   isConvertPanelToHost,
   locateDbmlRefusal,
+  MIGRATE_TO_V5_COMMAND_TITLE,
+  UNSAVED_TAG,
 } from '../../src/services/dbmlConversionReview';
 
 function plan(overrides: Partial<DbmlConversionPlan> = {}): DbmlConversionPlan {
@@ -91,7 +93,12 @@ describe('buildConvertReview', () => {
     ]);
     expect(section('diagrams').items[0].tag).toBe('new layout');
     expect(section('removed').items).toHaveLength(4);
-    expect(section('moved').items.map((i) => i.text)).toEqual(['fct.a_id → dim_a.id: also shows in gold/aaa.json', '1 other relationship shows in the same diagrams as before.']);
+    // Each diagram as the .dbml it becomes, project-relative, in the path style.
+    expect(section('moved').items).toEqual([
+      { text: 'fct.a_id → dim_a.id also shows in', paths: ['.erd-studio/gold/aaa.dbml'] },
+      { text: '1 other relationship shows in the same diagrams as before.' },
+    ]);
+    expect(buildConvertPanelHtml(view, 'n')).toContain('<span class="cdb-item__paths"><code class="cdb-item__path">.erd-studio/gold/aaa.dbml</code></span>');
     expect(section('notes').items[0].text).toContain('are kept as // lines');
     expect(view.counts).toEqual([
       { label: 'tables', value: 2 }, { label: 'diagrams', value: 2 }, { label: 'relationships', value: 3 },
@@ -121,12 +128,45 @@ describe('buildConvertReview', () => {
     expect(html).toContain('>Close</button>');
     expect(html).toContain('>Check Again</button>');
     expect(html).toContain('are kept as // lines');
+    expect(html).not.toContain('data-action="sendFeedback"');
+    expect(view.intro[0]).toBe('Fix these and save, then choose Check Again. Nothing was changed.');
+    expect(view.reportable).toBeUndefined();
+  });
+
+  it('a problem whose file has unsaved edits says Check Again reads what is saved', () => {
+    const { view } = buildConvertReview(plan({ refusals: [LIAM], v4SubjectAreas: ['gold/old.json'] }), {
+      display, introLines: [], unsaved: (rel) => rel === 'logical-models/gold/gld_fct_controlpro_project_monthly.yml',
+    });
+    expect(view.sections[0].items[0].tag).toBe(UNSAVED_TAG);
+    expect(view.sections[0].items[1].tag).toBeUndefined();
+    expect(buildConvertPanelHtml(view, 'n')).toContain(`<span class="cdb-item__tag">${UNSAVED_TAG}</span>`);
+  });
+
+  it('a v4 diagram names the migration command, and says when that command already ran', () => {
+    const v4 = plan({ v4SubjectAreas: ['gold/old.json'] });
+    const before = buildConvertReview(v4, { display, introLines: [] }).view.sections[0].items[0].text;
+    expect(before).toBe(`This diagram is in schema v4. Run ${MIGRATE_TO_V5_COMMAND_TITLE}, then choose Check Again.`);
+    const after = buildConvertReview(v4, { display, introLines: [], v4StepRan: true }).view.sections[0].items[0].text;
+    expect(after).toBe(`This diagram is still in schema v4 after ${MIGRATE_TO_V5_COMMAND_TITLE}. Open it and check its tables, then choose Check Again.`);
+    expect(after).not.toContain('Convert does it for you');
+  });
+
+  it('a self-check refusal is ERD Studio\'s problem: no "fix these", and Send Feedback beside Check Again', () => {
+    const selfCheck = `Convert would change what gold/sales.json draws (models[0].name). ${DBML_SELF_CHECK_REFUSAL_END}`;
+    const { view } = buildConvertReview(plan({ refusals: [selfCheck] }), { display, introLines: [], exists: () => true });
+    expect(view.reportable).toBe(true);
+    expect(view.heading).toBe("Can't convert this project safely");
+    expect(view.intro[0]).toMatch(/^ERD Studio checks the DBML it would write before writing anything, and that check failed\. This is a problem in ERD Studio, not in your files\. Nothing was changed\./);
+    expect(view.intro[0]).not.toMatch(/Fix th/);
+    const html = buildConvertPanelHtml(view, 'n');
+    expect(html).toContain('data-action="sendFeedback">Send Feedback</button>');
+    expect(html).toContain('data-action="checkAgain"');
   });
 });
 
 describe('isConvertPanelToHost', () => {
   it('accepts the four messages, and an Open only by a whole index into the host list', () => {
-    for (const type of ['convert', 'cancel', 'checkAgain']) expect(isConvertPanelToHost({ type }, 0)).toBe(true);
+    for (const type of ['convert', 'cancel', 'checkAgain', 'sendFeedback']) expect(isConvertPanelToHost({ type }, 0)).toBe(true);
     expect(isConvertPanelToHost({ type: 'open', index: 0 }, 1)).toBe(true);
   });
 
@@ -213,6 +253,19 @@ describe('ConvertToDbmlPanel', () => {
     expect((show.mock.calls[0][1] as { selection: vscode.Range }).selection.start.line).toBe(292);
     await panel._simulateMessage({ type: 'checkAgain' });
     expect(await choice).toBe('checkAgain');
+  });
+
+  it('Send Feedback runs Report Bug with the host\'s prefill, only on a reportable refused page', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    const feedback = { kind: 'bug' as const, title: 'Convert Project to DBML failed', description: 'x' };
+    void ConvertToDbmlPanel.show({ ...refusedContent(), feedback });
+    await vscode.window._webviewPanels[0]._simulateMessage({ type: 'sendFeedback' });
+    expect(exec).not.toHaveBeenCalled(); // not a self-check page
+    const selfCheck = buildConvertReview(plan({ refusals: [`Convert would write gold/a.dbml so that it no longer loads. ${DBML_SELF_CHECK_REFUSAL_END}`] }), { display, introLines: [] });
+    void ConvertToDbmlPanel.show({ view: selfCheck.view, locations: selfCheck.locations, semanticRoot, feedback });
+    await vscode.window._webviewPanels[0]._simulateMessage({ type: 'sendFeedback' });
+    expect(exec).toHaveBeenCalledWith('erdStudio.reportBug', feedback);
+    expect(ConvertToDbmlPanel.currentPanel?.waiting).toBe(true);
   });
 
   it('never opens a location outside the semantic dir', async () => {

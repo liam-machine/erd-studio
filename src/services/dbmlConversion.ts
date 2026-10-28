@@ -135,6 +135,18 @@ export interface DbmlConversionPlan {
   summary: { tables: number; diagrams: number; relationshipsFiles: number; relationships: number };
 }
 
+/**
+ * How every self-check refusal ends: the planned DBML would not compile, load
+ * or draw the same. These are ERD Studio's own bugs, not something in the
+ * user's files, so the Convert panel words them differently and offers Send Feedback.
+ */
+export const DBML_SELF_CHECK_REFUSAL_END = 'Nothing was changed; please report this with the file.';
+
+/** Whether a refusal is the planner's self-check (ERD Studio's bug), not a problem the user can fix. */
+export function isDbmlSelfCheckRefusal(refusal: string): boolean {
+  return refusal.endsWith(DBML_SELF_CHECK_REFUSAL_END);
+}
+
 /** Test seams. */
 export interface DbmlConversionOptions {
   /** The multi-file compile of the self-check (default: core's, with the pinned parser). */
@@ -1204,7 +1216,7 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
   for (const [file, list] of Object.entries(compiled)) {
     const fresh = list.find((d) => !already.has(diagnosticKey(file, d)));
     if (fresh) {
-      refusals.push(`Convert would write DBML that does not compile: ${file}:${fresh.line} ${fresh.message} [${fresh.code}]. Nothing was changed; please report this with the file.`);
+      refusals.push(`Convert would write DBML that does not compile: ${file}:${fresh.line} ${fresh.message} [${fresh.code}]. ${DBML_SELF_CHECK_REFUSAL_END}`);
       return withoutWrites(plan);
     }
   }
@@ -1228,7 +1240,7 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
     if (was === null) continue;
     const now = await displayOf(after, to, libraryFolders, input.layers);
     if (now === null) {
-      refusals.push(`Convert would write ${to} so that it no longer loads. Nothing was changed; please report this with the file.`);
+      refusals.push(`Convert would write ${to} so that it no longer loads. ${DBML_SELF_CHECK_REFUSAL_END}`);
       return withoutWrites(plan);
     }
     const drop = movedInto.get(to);
@@ -1252,7 +1264,7 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
     const b = normaliseForStorageEquivalence(now, { convert: true });
     const difference = firstDifference(a, b);
     if (difference !== null) {
-      refusals.push(`Convert would change what ${from} draws (${difference}). Nothing was changed; please report this with the file.`);
+      refusals.push(`Convert would change what ${from} draws (${difference}). ${DBML_SELF_CHECK_REFUSAL_END}`);
       return withoutWrites(plan);
     }
   }

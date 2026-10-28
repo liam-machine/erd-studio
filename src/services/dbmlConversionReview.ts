@@ -13,7 +13,7 @@
 
 import { classifySemanticFile } from '@erd-studio/core';
 
-import type { DbmlConversionPlan } from './dbmlConversion';
+import { isDbmlSelfCheckRefusal, type DbmlConversionPlan } from './dbmlConversion';
 
 export const CONVERT_PANEL_VIEW_TYPE = 'erdStudio.convertToDbml';
 export const CONVERT_PANEL_TITLE = 'Convert to DBML';
@@ -30,6 +30,8 @@ export interface ConvertReviewItem {
   /** A short tag after the path: new, updated, removed, layout. */
   tag?: string;
   text?: string;
+  /** Further project-relative paths after the text, each in the monospace path style. */
+  paths?: string[];
   /** Index into the host's list of openable locations (refusals only). */
   open?: number;
 }
@@ -43,6 +45,8 @@ export interface ConvertReviewSection {
 export interface ConvertReviewView {
   /** `review`: Convert and Cancel. `refused`: Check again and Close, no Convert. */
   mode: 'review' | 'refused';
+  /** Refused by ERD Studio's own self-check (its bug): the page offers Send Feedback too. */
+  reportable?: boolean;
   heading: string;
   intro: string[];
   counts: Array<{ label: string; value: number }>;
@@ -84,6 +88,21 @@ export interface ConvertReviewOptions {
   introLines: string[];
   /** The refused page's sentence about what was (not) changed. */
   nothingChanged?: string;
+  /** Whether a path relative to the semantic dir has unsaved edits in an editor (Check Again reads the disk). */
+  unsaved?: (relPath: string) => boolean;
+  /** This run already ran Migrate Subject Areas to the Central Table Library, and these diagrams are still v4. */
+  v4StepRan?: boolean;
+}
+
+/** The v4 → v5 command, by its title in the palette. */
+export const MIGRATE_TO_V5_COMMAND_TITLE = 'ERD Studio: Migrate Subject Areas to the Central Table Library';
+
+/** The tag on a problem whose file has unsaved edits: Check Again reads what is saved. */
+export const UNSAVED_TAG = 'unsaved edits: save, then Check Again';
+
+/** A converted diagram's path: its `.json` becomes the `.dbml` beside it (an existing `.dbml` stays). */
+function diagramTarget(relPath: string): string {
+  return relPath.endsWith('.json') ? `${relPath.slice(0, -'.json'.length)}.dbml` : relPath;
 }
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -111,26 +130,36 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
 
   if (plan.refusals.length > 0 || plan.v4SubjectAreas.length > 0) {
     const locations: ConvertRefusalLocation[] = [];
+    const unsavedTag = (rel: string): { tag?: string } => (options.unsaved?.(rel) ? { tag: UNSAVED_TAG } : {});
     const items: ConvertReviewItem[] = plan.refusals.map((text) => {
       const at = locateDbmlRefusal(text, options.exists);
       if (!at) return { text };
       locations.push(at);
-      return { path: display(at.path), ...(at.line !== undefined ? { line: at.line } : {}), text, open: locations.length - 1 };
+      return { path: display(at.path), ...(at.line !== undefined ? { line: at.line } : {}), ...unsavedTag(at.path), text, open: locations.length - 1 };
     });
     for (const v4 of plan.v4SubjectAreas) {
       locations.push({ path: v4 });
       items.push({
         path: display(v4),
-        text: 'This diagram is still in schema v4. Run the v4 → v5 step first (Convert does it for you when you run it again), then convert.',
+        ...unsavedTag(v4),
+        text: options.v4StepRan
+          ? `This diagram is still in schema v4 after ${MIGRATE_TO_V5_COMMAND_TITLE}. Open it and check its tables, then choose Check Again.`
+          : `This diagram is in schema v4. Run ${MIGRATE_TO_V5_COMMAND_TITLE}, then choose Check Again.`,
         open: locations.length - 1,
       });
     }
+    const nothingChanged = options.nothingChanged ?? 'Nothing was changed.';
+    // The self-check's refusals are ERD Studio's bugs: the user can't fix them, so say so and offer Send Feedback.
+    const reportable = plan.refusals.some(isDbmlSelfCheckRefusal);
     return {
       view: {
         mode: 'refused',
-        heading: "Can't convert yet",
+        ...(reportable ? { reportable: true } : {}),
+        heading: reportable ? "Can't convert this project safely" : "Can't convert yet",
         intro: [
-          `Fix ${items.length === 1 ? 'this' : 'these'}, then choose Check Again. ${options.nothingChanged ?? 'Nothing was changed.'}`,
+          reportable
+            ? `ERD Studio checks the DBML it would write before writing anything, and that check failed. This is a problem in ERD Studio, not in your files. ${nothingChanged} Send Feedback reports it.`
+            : `Fix ${items.length === 1 ? 'this' : 'these'} and save, then choose Check Again. ${nothingChanged}`,
         ],
         counts: [{ label: items.length === 1 ? 'problem' : 'problems', value: items.length }],
         sections: [{ id: 'problems', title: 'Problems', items }, ...(notes.items.length > 0 ? [notes] : [])],
@@ -157,7 +186,7 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
 
   const moved: ConvertReviewItem[] = [];
   const also = plan.movedRelationships.filter((m) => m.diagrams.length > 0);
-  for (const m of also) moved.push({ text: `${m.from} → ${m.to}: also shows in ${m.diagrams.join(', ')}` });
+  for (const m of also) moved.push({ text: `${m.from} → ${m.to} also shows in`, paths: m.diagrams.map((d) => display(diagramTarget(d))) });
   const only = plan.movedRelationships.length - also.length;
   if (only > 0) moved.push({ text: `${plural(only, also.length > 0 ? 'other relationship' : 'relationship')} ${only === 1 ? 'shows' : 'show'} in the same diagrams as before.` });
 
@@ -199,6 +228,7 @@ export type ConvertPanelToHost =
   | { type: 'convert' }
   | { type: 'cancel' }
   | { type: 'checkAgain' }
+  | { type: 'sendFeedback' }
   | { type: 'open'; index: number };
 
 /**
@@ -213,6 +243,7 @@ export function isConvertPanelToHost(value: unknown, openable: number): value is
     case 'convert':
     case 'cancel':
     case 'checkAgain':
+    case 'sendFeedback':
       return true;
     case 'open':
       return typeof msg.index === 'number' && Number.isInteger(msg.index) && msg.index >= 0 && msg.index < openable;
@@ -272,6 +303,7 @@ body {
 .cdb-item__path { font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); }
 .cdb-item__tag { margin-left: 8px; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
 .cdb-item__text { display: block; color: var(--vscode-foreground); }
+.cdb-item__paths { display: block; }
 .cdb-item--problem { padding: 6px 0; }
 .cdb-item--problem .cdb-item__path { color: var(--vscode-errorForeground); }
 .cdb-item__open {
@@ -312,6 +344,10 @@ const SCRIPT = `
       vscode.postMessage({ type: 'open', index: Number(target.getAttribute('data-index')) });
       return;
     }
+    if (action === 'sendFeedback') {
+      vscode.postMessage({ type: 'sendFeedback' });
+      return;
+    }
     if (action === 'convert') { lock(target, 'Converting\\u2026'); }
     else if (action === 'checkAgain') { lock(target, 'Checking\\u2026'); }
     else if (action === 'cancel') { lock(target, null); }
@@ -330,7 +366,10 @@ function renderItem(item: ConvertReviewItem, problem: boolean): string {
     ? `<button type="button" class="cdb-item__open" data-action="open" data-index="${item.open}">Open</button>`
     : '';
   const text = item.text !== undefined ? `<span class="cdb-item__text">${escapeHtml(item.text)}</span>` : '';
-  return `<li class="cdb-item${problem ? ' cdb-item--problem' : ''}">${where}${tag}${open}${text}</li>`;
+  const paths = item.paths && item.paths.length > 0
+    ? `<span class="cdb-item__paths">${item.paths.map((p) => `<code class="cdb-item__path">${escapeHtml(p)}</code>`).join(', ')}</span>`
+    : '';
+  return `<li class="cdb-item${problem ? ' cdb-item--problem' : ''}">${where}${tag}${open}${text}${paths}</li>`;
 }
 
 /** The page: header, counts, the scrollable sectioned list, and the sticky buttons. */
@@ -345,6 +384,7 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
     ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="cancel">Cancel</button>' +
       '<button type="button" class="cdb__button" data-action="convert">Convert</button>'
     : '<button type="button" class="cdb__button cdb__button--secondary" data-action="cancel">Close</button>' +
+      (view.reportable ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="sendFeedback">Send Feedback</button>' : '') +
       '<button type="button" class="cdb__button" data-action="checkAgain">Check Again</button>';
   return `<!DOCTYPE html>
 <html lang="en">
