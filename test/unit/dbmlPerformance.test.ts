@@ -2,9 +2,8 @@
  * Performance budgets for reading a large native DBML library (§7.6 of
  * docs/plans/native-dbml-storage.md): a flat library of 10,000 tables and
  * 30,000 Refs in one `tables/_relationships.dbml`. A time over its budget
- * is printed; the test fails above three times the budget (the margin CI
- * needs), which the quadratic reads this guards against exceed many times
- * over. `DBML_PERF_LOG=1` prints every time.
+ * is printed; the test fails above three times the budget (eight on CI),
+ * which the quadratic reads this guards against exceed many times over. `DBML_PERF_LOG=1` prints every time.
  *
  * The read budgets hold from S4 (the attachment is computed once per pass
  * and memoised, never rebuilt per table). The relationship-edit budget
@@ -27,10 +26,11 @@ let root: string;
 
 /**
  * The margin the budgets are asserted with (§7.6): a loaded CI runner may be
- * several times slower than a laptop, while the regressions this guards
- * against (a library pass per table) are tens of times slower.
+ * several times slower than a laptop (GitHub's ubuntu runner read the cold
+ * library at 3.5× the budget), while the regressions this guards against (a
+ * library pass per table) are tens of times slower. So 3× locally, 8× on CI.
  */
-const MARGIN = 3;
+const MARGIN = process.env.CI ? 8 : 3;
 
 /** Run `fn`, print its time when it exceeds `budgetMs`, assert it within {@link MARGIN}× the budget, and return its result. */
 function withinBudget<T>(label: string, budgetMs: number, fn: () => T): T {
