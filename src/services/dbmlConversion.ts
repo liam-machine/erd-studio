@@ -987,7 +987,7 @@ async function planOnce(
     }
     if (!input.layers.includes(layer)) {
       // It does not open (its layer is unknown), so the self-check could not tell whether it draws the same.
-      leave(f.path, `It is in the ${layer}/ folder, which is not a layer in layers.json, so ERD Studio does not open it. Add the layer ${layer} to layers.json (or move the file into a layer's folder), then convert again.`);
+      leave(f.path, unknownLayerProblem(layer, files.find((x) => x.kind === 'layers')?.text ?? null));
       continue;
     }
     const name = cls.name ?? stemOf(f.path);
@@ -1585,6 +1585,27 @@ async function planOnce(
     }
   }
   return { plan, leaveMore: new Map() };
+}
+
+/**
+ * Why a diagram's folder is not a layer ERD Studio opens, and what to do: the
+ * folder name can't be a layer id (layers.json skips such an entry), layers.json
+ * does not read (the default layers apply), or layers.json does not list it.
+ */
+function unknownLayerProblem(layer: string, layersText: string | null): string {
+  const opens = 'so ERD Studio does not open it';
+  if (!/^[a-z][a-z0-9_-]*$/.test(layer)) {
+    return `It is in the ${layer}/ folder, and a layer id (its folder's name) is lower-case letters, digits, - and _, starting with a letter, ${opens}. ` +
+      "Move it into a layer's folder (or rename the folder and its id in layers.json to such a name), then convert again.";
+  }
+  const warnings: string[] = [];
+  parseLayersText(layersText, (message) => warnings.push(message));
+  // A warning about the whole file (not one entry) means the default layers apply.
+  const wholeFile = warnings.find((w) => !/^(Layer |Duplicate layer )/.test(w));
+  if (layersText !== null && wholeFile !== undefined) {
+    return `It is in the ${layer}/ folder, and layers.json does not read (${wholeFile}), so ERD Studio uses its default layers and does not open it. Fix layers.json, then convert again.`;
+  }
+  return `It is in the ${layer}/ folder, which is not a layer in layers.json, ${opens}. Add the layer ${layer} to layers.json (or move the file into a layer's folder), then convert again.`;
 }
 
 /** `area.models` sorted by name (any case first, then exact), in place: the self-check's member order. */

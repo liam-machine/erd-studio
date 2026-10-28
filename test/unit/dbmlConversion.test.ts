@@ -1332,6 +1332,32 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
     expect(plan.deletes).toContain('gold/d.json');
   });
 
+  it('a diagram whose folder can never be a layer, or whose layers.json does not read, says so instead of "add the layer"', async () => {
+    // Gold_Ext is listed, but layers.json skips an id with capitals: adding it again would not help.
+    const listed = JSON.stringify({ schemaVersion: 1, layers: [...JSON.parse(LAYERS).layers, { id: 'Gold_Ext', label: 'Gold Ext', abbreviation: 'GEX', color: '#123456', creatable: true, order: 9 }] });
+    const capitals = await planDbmlConversion(inputOf({
+      'layers.json': listed,
+      'logical-models/dim.yml': DIM,
+      'Gold_Ext/ext.json': diagram('ext', 'Gold_Ext', ['dim']),
+    }));
+    expect(capitals.refusals).toEqual([]);
+    expect(leftOf(capitals, 'Gold_Ext/ext.json')?.problem).toBe(
+      'It is in the Gold_Ext/ folder, and a layer id (its folder\'s name) is lower-case letters, digits, - and _, starting with a letter, so ERD Studio does not open it. '
+        + 'Move it into a layer\'s folder (or rename the folder and its id in layers.json to such a name), then convert again.',
+    );
+    // platinum is listed in a layers.json that does not read: the default layers apply.
+    const broken = await planDbmlConversion(inputOf({
+      'layers.json': '{ "layers": [ { "id": "platinum", "label": "Platinum" } ] }',
+      'logical-models/dim.yml': DIM,
+      'platinum/exec.json': diagram('exec', 'platinum', ['dim']),
+    }));
+    expect(broken.refusals).toEqual([]);
+    expect(leftOf(broken, 'platinum/exec.json')?.problem).toBe(
+      'It is in the platinum/ folder, and layers.json does not read (Layers config missing schemaVersion field), so ERD Studio uses its default layers and does not open it. '
+        + 'Fix layers.json, then convert again.',
+    );
+  });
+
   it('a composite relationship of one column pair is written as a single-column Ref, with a note', async () => {
     const fct = yml('fct', ['id', 'dim_key'], [{ ...FCT_REL, compositeKey: 'fk_dim' }]);
     const input = inputOf({ 'logical-models/dim.yml': DIM, 'logical-models/fct.yml': fct, 'gold/d.json': diagram('d', 'gold', ['dim', 'fct']) });
