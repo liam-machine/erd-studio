@@ -265,3 +265,26 @@ describe('attachRelationships', () => {
     expect(relationshipsFileFolder('C:\\p\\.erd-studio\\tables\\SAP FI\\_relationships.dbml')).toBe('SAP FI');
   });
 });
+
+describe('line numbers in a large file (§7.6)', () => {
+  it('reads 30,000 Refs with the right line each, in linear time', async () => {
+    const { lineAt } = await import('../../src/dbml/parser');
+    const lines = ['// header', ''];
+    for (let i = 0; i < 30_000; i++) lines.push(`Ref: t${i}.fk >? t${i + 1}.id`);
+    const text = `${lines.join('\n')}\n`;
+    const start = performance.now();
+    const reading = readRelationshipsDbml(text);
+    const elapsed = performance.now() - start;
+    expect(reading.refs).toHaveLength(30_000);
+    expect(reading.refs[0].line).toBe(3);
+    expect(reading.refs[29_999].line).toBe(30_002);
+    // A line scan per Ref took about 15 s here; linear is about 1 s.
+    expect(elapsed).toBeLessThan(10_000);
+    // lineAt keeps answering for whichever text it is asked about.
+    expect(lineAt('a\nb\r\nc', 0)).toBe(1);
+    expect(lineAt('a\nb\r\nc', 2)).toBe(2);
+    expect(lineAt(text, text.length + 50)).toBe(lines.length + 1);
+    expect(lineAt('a\nb\r\nc', 5)).toBe(3);
+    expect(lineAt('x', -1)).toBe(1);
+  }, 60_000);
+});

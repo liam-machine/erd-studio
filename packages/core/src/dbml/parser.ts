@@ -54,12 +54,32 @@ export function stripBom(text: string): string {
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
+/**
+ * The offsets just after each `\n` of the last text {@link lineAt} was asked
+ * about. A reader asks for the line of every Ref in one file, so scanning
+ * from the start each time made reading a 30,000-Ref relationships file
+ * quadratic (§7.6).
+ */
+let lineIndex: { text: string; breaks: number[] } | undefined;
+
 /** 1-based line of `offset` in `text`. */
 export function lineAt(text: string, offset: number): number {
-  let line = 1;
+  if (lineIndex === undefined || lineIndex.text !== text) {
+    const breaks: number[] = [];
+    for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) breaks.push(i);
+    lineIndex = { text, breaks };
+  }
   const end = Math.min(Math.max(offset, 0), text.length);
-  for (let i = 0; i < end; i++) if (text.charCodeAt(i) === 10) line++;
-  return line;
+  // The number of line breaks before `end`, by binary search.
+  const { breaks } = lineIndex;
+  let lo = 0;
+  let hi = breaks.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (breaks[mid] < end) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo + 1;
 }
 
 /** The offset where the line holding `offset` starts. */

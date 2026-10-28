@@ -122,6 +122,9 @@ describe('a DBML diagram on the canvas', () => {
     expect(Object.keys(loaded.payload.viewConfig.positions).sort()).toEqual(['dim_date', 'fct_order']);
     expect(fs.existsSync(at('silver/staging.dbdiagram'))).toBe(false);
     expect(_appliedEdits).toHaveLength(0);
+    // No ELK pass is asked for: its position save would be refused with a toast on open (S5 writes layouts).
+    expect((loaded as { autoLayout?: boolean }).autoLayout).toBeUndefined();
+    expect(panel._postedMessages.some((m) => (m as { type: string }).type === 'error')).toBe(false);
   });
 
   it('refuses an edit with the not-yet message, and writes nothing', async () => {
@@ -148,6 +151,22 @@ describe('a DBML diagram on the canvas', () => {
     expect(parsed.logical.models).toEqual(['fct_order', 'dim_customer', 'dim_date', 'dim_region', 'customer_profile', 'bridge_empty']);
     expect(parsed.logical.relationships).toEqual([]);
     expect(provider.parseSubjectAreaFile(doc)).toMatchObject({ storage: 'dbml', dbmlSchemaVersion: 7, writable: true });
+    // The layout the edit pipeline will write through is beside the real file, never the shown relative path.
+    expect(provider.parseSubjectAreaFile(doc).layoutPath).toBe(at('gold/sales.dbdiagram'));
+  });
+
+  it('the relationship survey reads a DBML diagram as v5 through the codec: the library is surveyed, nothing JSON.parsed or failed', () => {
+    const provider = buildProvider(root) as any;
+    const doc = openDoc('gold/sales.dbml');
+    const parse = vi.spyOn(JSON, 'parse');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const survey = vi.spyOn(telemetry, 'relationshipState');
+    const listTables = vi.spyOn(provider.tableLibraryService, 'listTables');
+    provider.recordRelationshipState(doc);
+    expect(error).not.toHaveBeenCalled();
+    expect(listTables).toHaveBeenCalledTimes(1);
+    expect(survey).toHaveBeenCalledTimes(1);
+    expect(parse.mock.calls.some(([text]) => text === doc.getText())).toBe(false);
   });
 
   it('records the canvas open as v5 plus the dbmlProject feature, and never JSON.parses the document', async () => {
@@ -173,6 +192,31 @@ describe('a DBML diagram on the canvas', () => {
     expect(staging._postedMessages).toHaveLength(0);
     await provider.refreshSubjectAreasReferencingTable('FCT_ORDER');
     expect(staging._postedMessages.map((m) => (m as { type: string }).type)).toContain('domainLoaded');
+  });
+});
+
+describe('removing a DBML table from a JSON diagram (D16 until S5)', () => {
+  it('never offers or performs a bare delete of the .dbml file; a YAML table beside it is still offered', async () => {
+    fs.writeFileSync(at('tables/gold/dim_yaml.yml'), 'name: dim_yaml\ncolumns:\n  - name: id\n    dataType: INT\n');
+    fs.writeFileSync(at('gold/mixed.json'), `${JSON.stringify({
+      schemaVersion: 5, domain: 'mixed', layer: 'gold',
+      logical: { models: ['dim_customer', 'dim_yaml'], relationships: [] }, viewConfig: {},
+    }, null, 2)}\n`);
+    const provider = buildProvider(root);
+    const panel = await resolve(provider, openDoc('gold/mixed.json'));
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string, ...items: string[]) =>
+      (String(m).includes('Delete the table file') ? items[0] : undefined)) as never);
+
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_customer'] } });
+    expect(info.mock.calls.some((c) => String(c[0]).includes('Delete the table file'))).toBe(false);
+    expect(fs.existsSync(at('tables/gold/dim_customer.dbml'))).toBe(true);
+
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_yaml'] } });
+    await vi.waitFor(() => expect(fs.existsSync(at('tables/gold/dim_yaml.yml'))).toBe(false));
+    expect(info.mock.calls.filter((c) => String(c[0]).includes('Delete the table file'))).toEqual([
+      ['Table "dim_yaml" removed from this subject area. Delete the table file entirely?', 'Delete Table File', 'Keep File'],
+    ]);
+    expect(fs.existsSync(at('tables/gold/dim_customer.dbml'))).toBe(true);
   });
 });
 

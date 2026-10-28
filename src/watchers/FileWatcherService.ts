@@ -129,8 +129,13 @@ export class FileWatcherService implements vscode.Disposable {
   // Event emitters (private — fire events internally)
   private readonly _onManifestChanged = new vscode.EventEmitter<void>();
   private readonly _onCatalogChanged = new vscode.EventEmitter<void>();
-  /** `created` is true when the file was created (not changed) and is a `{layer}/{domain}.json`. */
-  private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri; created?: boolean }>();
+  /**
+   * `created` is true when the file was created (not changed) and is a `{layer}/{domain}.json`.
+   * `layout` is true when the change was to a DBML diagram's `.dbdiagram` layout, reported as
+   * a change to its diagram (`uri`): the one change an open canvas does not see through its
+   * own document (§5.4).
+   */
+  private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri; created?: boolean; layout?: boolean }>();
   private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uris: vscode.Uri[] }>();
   private readonly _onLayerConfigChanged = new vscode.EventEmitter<void>();
   private readonly _onTableChanged = new vscode.EventEmitter<{ uri: vscode.Uri; modelName: string }>();
@@ -291,7 +296,7 @@ export class FileWatcherService implements vscode.Disposable {
           }
           const diagram = vscode.Uri.file(diagramPathOfLayout(uri.fsPath));
           console.log(`[FileWatcherService] Layout changed: ${uri.fsPath}`);
-          this.safeFireEvent(() => this._onSemanticFileChanged.fire({ uri: diagram }));
+          this.safeFireEvent(() => this._onSemanticFileChanged.fire({ uri: diagram, layout: true }));
         });
         return;
       }

@@ -82,7 +82,8 @@ describe('listSubjectAreas', () => {
   });
 
   it('counts no relationships in a DBML diagram (D5)', () => {
-    write('gold/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n");
+    // A Note the JSON fallback's text match would count, were the diagram not skipped.
+    write('gold/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n  Note: '\"relationships\": [x'\n}\n");
     write('gold/finance.json', JSON.stringify({ schemaVersion: 5, domain: 'finance', layer: 'gold', logical: { models: [], relationships: [{}, {}] } }));
     expect(services(root).subjectAreaService.countSubjectAreaFileRelationships(root, '.erd-studio')).toBe(2);
   });

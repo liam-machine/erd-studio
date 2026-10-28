@@ -89,6 +89,7 @@ import {
   SubjectAreaValidationError,
   EMPTY_DBT_KEY_INDEX,
   backwardsRelationshipNote,
+  layoutFilePathOf,
   linkKey,
   normaliseSubjectAreaDocument,
   sameLink,
@@ -185,7 +186,7 @@ import { namingMigrationIsEmpty } from '../services/namingMigration';
 import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
-import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused, tablesDirIsLayer } from '../services/logicalModelService';
+import { DBML_TABLE_EDITING_NOT_AVAILABLE, DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused, tablesDirIsLayer } from '../services/logicalModelService';
 import {
   DBML_DIAGRAM_EDITING_NOT_AVAILABLE,
   NotASubjectAreaObject,
@@ -2717,8 +2718,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const shown = this.shownSubjectAreaPath(document.uri.fsPath);
     const codec = codecFor(document.uri.fsPath);
     try {
-      // Messages name the file project-relative; a DBML diagram's layout is read beside the real path.
-      return codec.parse(text, shown, codec.storage === 'dbml' ? readLayoutText(document.uri.fsPath) : null);
+      // Messages name the file project-relative; a DBML diagram's layout is
+      // read, and will be written (S5), beside the real path, never the shown one.
+      const file = codec.parse(text, shown, codec.storage === 'dbml' ? readLayoutText(document.uri.fsPath) : null);
+      return file.storage === 'dbml' ? { ...file, layoutPath: layoutFilePathOf(document.uri.fsPath) } : file;
     } catch (err) {
       if (err instanceof SubjectAreaFileError) {
         const fileProblem = this.subjectAreaFileProblemPayload(err, document.uri.fsPath);
@@ -2956,12 +2959,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // edit, one undo step). The simple placement below still goes out in the
       // payload so the first paint is never at (0,0), but it is not written:
       // should the ELK run fail, the next open simply asks again.
-      const autoLayout = activeStage === 'logical' && isFreshLayout(unifiedDomain);
+      // A DBML diagram's layout is not written yet (S5): its computed positions
+      // are shown, never persisted, and no ELK pass is asked for, since its
+      // `updatePositions` would be refused with a toast before the user did anything.
+      const dbml = subjectAreaStorageOf(document.uri.fsPath) === 'dbml';
+      const autoLayout = activeStage === 'logical' && !dbml && isFreshLayout(unifiedDomain);
 
       // Auto-assign positions for models that lack them (e.g. added by AI agents)
       const computed = this.computeMissingPositions(unifiedDomain);
-      // A DBML diagram's layout is not written yet (S5): its computed positions are shown, never persisted.
-      const dbml = subjectAreaStorageOf(document.uri.fsPath) === 'dbml';
       if (computed) {
         if (options.persistPositions && !autoLayout && !dbml) {
           const positionsWritten = await this.autoPositionNewTables(document, computed);
@@ -4210,9 +4215,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         this.selectorsService.scheduleRegenerate();
 
-        // Single batched prompt for any underlying .yml files.
+        // Single batched prompt for any underlying .yml files. A `.dbml`
+        // table is never offered: deleting it bare would leave its Refs and
+        // every `use` line naming it dangling, which breaks those files for
+        // other DBML tools (D16). Its cascade comes with the DBML writes (S5).
         const filesToOffer = [...namesSet].filter((name) =>
-          this.tableLibraryService.tableExists(name),
+          this.tableLibraryService.tableExists(name) && this.tableLibraryService.tableStorage(name) !== 'dbml',
         );
         if (filesToOffer.length > 0) {
           const fileIsSingle = filesToOffer.length === 1;
@@ -4226,6 +4234,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             .then(async (choice) => {
               if (choice !== deleteLabel) return;
               // Captured before the delete: afterwards the folder is unknowable.
+              // Re-checked here: the prompt may have waited while a file changed.
+              if (filesToOffer.some((name) => this.tableLibraryService.tableStorage(name) === 'dbml')) {
+                void vscode.window.showErrorMessage(DBML_TABLE_EDITING_NOT_AVAILABLE);
+                return;
+              }
               const filePaths = filesToOffer.map((name) => this.tableLibraryService.tablePath(name));
               const shownPaths = filesToOffer.map((name) => this.libraryRelativePath(name));
               const deleteFiles = async (): Promise<void> => {

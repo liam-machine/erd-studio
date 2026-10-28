@@ -769,6 +769,81 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(listTree(ws)).toEqual(before);
   });
 
+  /** The watcher over the semantic dir's diagrams and layouts. */
+  const semanticWatcher = () => vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('dbdiagram'))!;
+  const foreignToasts = () => warn.mock.calls.filter((c) => String(c[0]).includes('was just added to this DBML project'));
+
+  it('the foreign-format toast is never raised by ERD Studio\'s own New Diagram (§5.4)', async () => {
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    // New Diagram still writes a .json in this build (S6 switches it to .dbml).
+    // Within the storage memo's second the project still reads as `dbml`
+    // when the watcher reports the file, so only the own-create mark keeps
+    // the toast away.
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value: string }>) =>
+      items.find((i) => i.value === 'gold')) as never);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('orders').mockResolvedValueOnce('');
+    await vscode.commands.executeCommand('erdStudio.createDomain');
+    const created = path.join(ws, '.erd-studio', 'gold', 'orders.json');
+    expect(fs.existsSync(created)).toBe(true);
+    semanticWatcher()._simulateCreate(vscode.Uri.file(created));
+    await vi.advanceTimersByTimeAsync(400);
+    expect(foreignToasts()).toHaveLength(0);
+    expect(featureOnce).not.toHaveBeenCalledWith('dbmlForeignFormatWarned');
+  });
+
+  it('the foreign-format toast: once per session for a .json or .yml someone else adds, with the Update action, counted once', async () => {
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const external = path.join(ws, '.erd-studio', 'gold', 'from_helper.json');
+    fs.writeFileSync(external, '{"schemaVersion": 5, "domain": "from_helper", "layer": "gold", "logical": {"models": []}}\n');
+    semanticWatcher()._simulateCreate(vscode.Uri.file(external));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(foreignToasts()).toHaveLength(1);
+    expect(foreignToasts()[0][0]).toContain('(.erd-studio/gold/from_helper.json)');
+    expect(foreignToasts()[0].slice(1)).toEqual(['Update AI Helper Files', 'Not Now']);
+    expect(featureOnce).toHaveBeenCalledWith('dbmlForeignFormatWarned');
+
+    const yml = path.join(ws, '.erd-studio', 'tables', 'gold', 'dim_new.yml');
+    fs.writeFileSync(yml, 'name: dim_new\ncolumns: []\n');
+    for (const w of vscode._mockFileWatchers) w._simulateCreate(vscode.Uri.file(yml));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(foreignToasts()).toHaveLength(1);
+    expect(featureOnce.mock.calls.filter((c) => c[0] === 'dbmlForeignFormatWarned')).toHaveLength(1);
+  });
+
+  it('the foreign-format toast is not raised outside a DBML project', async () => {
+    fs.rmSync(path.join(ws, '.erd-studio', 'tables'), { recursive: true, force: true });
+    fs.rmSync(path.join(ws, '.erd-studio', 'gold', 'sales.dbml'));
+    fs.rmSync(path.join(ws, '.erd-studio', 'silver', 'staging.dbml'));
+    fs.mkdirSync(path.join(ws, '.erd-studio', 'logical-models'), { recursive: true });
+    fs.writeFileSync(path.join(ws, '.erd-studio', 'logical-models', 'dim_a.yml'), 'name: dim_a\ncolumns: []\n');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const external = path.join(ws, '.erd-studio', 'gold', 'from_helper.json');
+    fs.writeFileSync(external, '{"schemaVersion": 5, "domain": "from_helper", "layer": "gold", "logical": {"models": []}}\n');
+    semanticWatcher()._simulateCreate(vscode.Uri.file(external));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(foreignToasts()).toHaveLength(0);
+  });
+
+  it('a layout change redraws its diagram\'s canvas; a change to the diagram file itself does not (its document does)', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const refresh = vi.spyOn(provider, 'refreshSubjectAreaPanel').mockResolvedValue(undefined as never);
+    const diagram = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    semanticWatcher()._simulateChange(vscode.Uri.file(diagram));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(refresh).not.toHaveBeenCalled();
+    semanticWatcher()._simulateChange(vscode.Uri.file(path.join(ws, '.erd-studio', 'gold', 'sales.dbdiagram')));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledWith(diagram);
+  });
+
   it('warns once about tablesLayerConflict when layers.json also lists tables', async () => {
     const layersFile = path.join(ws, '.erd-studio', 'layers.json');
     const layers = JSON.parse(fs.readFileSync(layersFile, 'utf-8'));

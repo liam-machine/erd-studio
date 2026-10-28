@@ -798,6 +798,13 @@ describe('FileWatcherService', () => {
       vi.advanceTimersByTime(300);
       expect(listener).toHaveBeenCalledTimes(1);
       expect(listener.mock.calls[0][0].uri.fsPath).toBe(`${ws}/gold/sales.dbml`);
+      expect(listener.mock.calls[0][0].layout).toBe(true);
+      // The diagram file's own change carries no layout flag: its open canvas sees it through its document.
+      listener.mockClear();
+      semanticWatcher()._simulateChange(vscode.Uri.file(`${ws}/gold/sales.dbml`));
+      vi.advanceTimersByTime(300);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener.mock.calls[0][0].layout).toBeUndefined();
 
       listener.mockClear();
       vi.spyOn(tracker, 'consume').mockReturnValue(true);

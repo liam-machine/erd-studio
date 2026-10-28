@@ -53,6 +53,12 @@ export function tablesDirHasDbml(semanticRoot: string): boolean {
   }
 }
 
+/**
+ * `a.localeCompare(b)`'s order, from one collator: `localeCompare` builds a
+ * collator per call, which made sorting a 10,000-file library folder slow.
+ */
+const compareNames = new Intl.Collator().compare;
+
 /** The names in `dir`, or none when it cannot be listed. */
 function listNames(dir: string): string[] {
   try {
@@ -322,16 +328,27 @@ function isDbmlFile(filePath: string): boolean {
 function listedFile(dir: string, name: string, ext: '.yml' | '.dbml'): string | null {
   let files: string[];
   try {
-    files = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile() && d.name.endsWith(ext)).map((d) => d.name);
+    files = fs.readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.name.endsWith(ext) && (d.isFile() || (d.isSymbolicLink() && isFileTarget(path.join(dir, d.name)))))
+      .map((d) => d.name);
   } catch {
     return null;
   }
   const exact = `${name}${ext}`;
   if (files.includes(exact)) return path.join(dir, exact);
   const stem = (f: string): string => f.slice(0, -ext.length);
-  const file = files.sort((a, b) => a.localeCompare(b))
+  const file = files.sort(compareNames)
     .find((f) => sameName(stem(f), name) && !(ext === '.dbml' && isReservedTableName(stem(f))));
   return file === undefined ? null : path.join(dir, file);
+}
+
+/** Whether `filePath` (a symbolic link) points at a file: a symlinked table file is read, as `existsSync` found it before §3.4. */
+function isFileTarget(filePath: string): boolean {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /** A file's `mtime:size`, or null when it cannot be stat'ed. */
@@ -554,8 +571,28 @@ export class TableLibraryService {
    * file changing needs no table re-read.
    */
   private readonly relationshipsCache = new Map<string, CachedRelationships>();
-  /** The last {@link libraryAttachment}, against the signatures of every file it read. */
-  private attachMemo: { key: string; result: DbmlAttachResult } | undefined;
+  /**
+   * The last {@link libraryAttachment}, against two keys. `key`: every
+   * relationships file's signature, the listed table files and
+   * {@link tableCacheGeneration}. `quickKey`: the same relationships files,
+   * `layers.json` and every library directory's own signature (a file added,
+   * removed or renamed in a directory changes its mtime), with the
+   * generation; checked first, with a few stats and no directory listing.
+   */
+  private attachMemo: {
+    key: string;
+    quickKey: string;
+    relFiles: readonly string[];
+    dirs: readonly string[];
+    result: DbmlAttachResult;
+  } | undefined;
+  /**
+   * Bumped whenever a table's cache entry changes (a file read anew, dropped,
+   * or the caches invalidated), so {@link libraryAttachment} can tell that a
+   * table it read changed without re-stat'ing the whole library on every
+   * read: the memo is checked against the set of cache keys (§5.1).
+   */
+  private tableCacheGeneration = 0;
   /** DBML reader warnings already logged, by path and signature, so a refresh does not repeat them. */
   private readonly loggedDbmlProblems = new Set<string>();
 
@@ -700,6 +737,7 @@ export class TableLibraryService {
     this.namingMemo = undefined;
     this.storageMemo = undefined;
     this.attachMemo = undefined;
+    this.tableCacheGeneration++;
     if (name === undefined) {
       this.cache.clear();
       this.dbmlCache.clear();
@@ -732,7 +770,7 @@ export class TableLibraryService {
     try {
       stat = fs.statSync(filePath);
     } catch {
-      this.cache.delete(filePath);
+      if (this.cache.delete(filePath)) this.tableCacheGeneration++;
       return null;
     }
     const signature = `${stat.mtimeMs}:${stat.size}`;
@@ -740,15 +778,17 @@ export class TableLibraryService {
     if (cached && cached.signature === signature) {
       return structuredClone(cached.model);
     }
+    // The cache entry changes now whatever the read finds (a file that
+    // throws keeps no entry), and only then: a file that stays broken does
+    // not bump the generation on every read.
+    if (this.cache.delete(filePath)) this.tableCacheGeneration++;
     const content = fs.readFileSync(filePath, 'utf-8');
     // A key written twice is read as dbt reads it, the last copy winning; the
     // model carries a loadWarning and writes are refused (loadEditableDocument).
     const model = parseTableText(content, fallbackName, { duplicateKeys: 'last' });
-    if (!model) {
-      this.cache.delete(filePath);
-      return null;
-    }
+    if (!model) return null;
     this.cache.set(filePath, { signature, model: structuredClone(model) });
+    this.tableCacheGeneration++;
     return model;
   }
 
@@ -767,22 +807,26 @@ export class TableLibraryService {
     if (reading === null) return null;
     if (!reading.ok) throw dbmlReadingError(reading.error);
     const model = structuredClone(reading.table);
-    if (options.relationships !== false) {
-      const relationships = this.libraryAttachment()?.byOwner.get(model.name.toLowerCase());
-      if (relationships && relationships.length > 0) model.relationships = structuredClone(relationships);
-    }
+    if (options.relationships !== false) this.attachOwned(model, this.libraryAttachment());
     return model;
+  }
+
+  /** Give a DBML table the relationships it owns in `attachment`. */
+  private attachOwned(model: SemanticTable, attachment: DbmlAttachResult | undefined): void {
+    const relationships = attachment?.byOwner.get(model.name.toLowerCase());
+    if (relationships && relationships.length > 0) model.relationships = structuredClone(relationships);
   }
 
   /** A `.dbml` table file's reading, through {@link dbmlCache}; null when the file is gone. Never throws. */
   private readDbmlTableFile(filePath: string): DbmlTableReading | null {
     const signature = fileSignature(filePath);
     if (signature === null) {
-      this.dbmlCache.delete(filePath);
+      if (this.dbmlCache.delete(filePath)) this.tableCacheGeneration++;
       return null;
     }
     const cached = this.dbmlCache.get(filePath);
     if (cached && cached.signature === signature) return cached.reading;
+    this.tableCacheGeneration++;
     let reading: DbmlTableReading;
     try {
       reading = parseTableDbml(fs.readFileSync(filePath, 'utf-8'), dbmlStem(path.basename(filePath)));
@@ -815,8 +859,9 @@ export class TableLibraryService {
     const out: string[] = [];
     for (const folder of ['', ...this.listFoldersOf(this.v6TablesDir)]) {
       const dir = path.join(this.v6TablesDir, folder);
-      const file = listNames(dir).sort((a, b) => a.localeCompare(b))
-        .find((f) => f.toLowerCase().endsWith('.dbml') && isReservedTableName(dbmlStem(f)) && dbmlStem(f) === dbmlStem(f).trim());
+      const file = listNames(dir)
+        .filter((f) => f.toLowerCase().endsWith('.dbml') && isReservedTableName(dbmlStem(f)) && dbmlStem(f) === dbmlStem(f).trim())
+        .sort(compareNames)[0];
       if (file) out.push(path.join(dir, file));
     }
     return out;
@@ -851,8 +896,14 @@ export class TableLibraryService {
    * relationships file (no DBML table owns anything then).
    */
   libraryAttachment(): DbmlAttachResult | undefined {
+    const memo = this.attachMemo;
+    if (memo && memo.quickKey === this.attachQuickKey(memo.relFiles, memo.dirs)) return memo.result;
     const relFiles = this.listRelationshipsFiles();
-    if (relFiles.length === 0) return undefined;
+    if (relFiles.length === 0) {
+      this.attachMemo = undefined;
+      return undefined;
+    }
+    const dirs = this.libraryDirs();
     const keyParts: string[] = [];
     const readings: Array<{ path: string; reading: DbmlRelationshipsReading }> = [];
     for (const filePath of relFiles) {
@@ -861,9 +912,20 @@ export class TableLibraryService {
       keyParts.push(`${filePath}\0${this.relationshipsCache.get(filePath)?.signature ?? ''}`);
       readings.push({ path: this.libraryRelativePath(filePath), reading });
     }
+    // The tables are keyed by what is listed and by the table caches'
+    // generation, not by a stat of every file: a read that finds a table
+    // changed bumps the generation (and the watchers invalidate), so a memo
+    // hit costs one listing, never a pass over every table (§7.6 budgets).
+    const entries = this.listTableFiles().filter((e) => !e.shadowedBy);
+    for (const entry of entries) keyParts.push(entry.filePath);
+    const keyOf = (): string => `${keyParts.join('\n')}\n#${this.tableCacheGeneration}`;
+    if (memo && memo.key === keyOf()) {
+      // Something listed changed but no table it reads did (an unrelated file in a library folder).
+      this.attachMemo = { ...memo, relFiles, dirs, quickKey: this.attachQuickKey(relFiles, dirs) };
+      return memo.result;
+    }
     const tables: DbmlAttachTable[] = [];
-    for (const entry of this.listTableFiles()) {
-      if (entry.shadowedBy) continue;
+    for (const entry of entries) {
       let model: SemanticTable | null = null;
       let alias: string | undefined;
       try {
@@ -873,10 +935,8 @@ export class TableLibraryService {
             model = reading.table;
             alias = reading.alias;
           }
-          keyParts.push(`${entry.filePath}\0${this.dbmlCache.get(entry.filePath)?.signature ?? ''}`);
         } else {
           model = this.readTableFile(entry.filePath, entry.name);
-          keyParts.push(`${entry.filePath}\0${this.cache.get(entry.filePath)?.signature ?? ''}`);
         }
       } catch {
         model = null;
@@ -889,12 +949,27 @@ export class TableLibraryService {
         ...(alias !== undefined ? { dbmlAlias: alias } : {}),
       });
     }
-    const key = keyParts.join('\n');
-    if (this.attachMemo && this.attachMemo.key === key) return this.attachMemo.result;
     const result = attachRelationships(readings, dbmlTableLookup(tables));
     for (const warning of result.warnings) console.warn(`[LogicalModelService] ${warning}`);
-    this.attachMemo = { key, result };
+    // Keyed after the reads above, which bump the generation for any table they found changed.
+    this.attachMemo = { key: keyOf(), quickKey: this.attachQuickKey(relFiles, dirs), relFiles, dirs, result };
     return result;
+  }
+
+  /** Every library directory whose listing {@link libraryAttachment} depends on: both libraries and their folders. */
+  private libraryDirs(): string[] {
+    return [this.tablesDir, this.v6TablesDir].flatMap((dir) => [dir, ...this.listFoldersOf(dir).map((f) => path.join(dir, f))]);
+  }
+
+  /** {@link attachMemo}'s quick key: signatures only, no listing. */
+  private attachQuickKey(relFiles: readonly string[], dirs: readonly string[]): string {
+    const sig = (p: string): string => fileSignature(p) ?? '-';
+    return [
+      ...relFiles.map(sig),
+      sig(path.join(this.semanticRoot, LAYERS_CONFIG_FILE)),
+      ...dirs.map(sig),
+      `#${this.tableCacheGeneration}`,
+    ].join('\n');
   }
 
   /** How `name`'s file stores it: `yaml`, `dbml`, or undefined when there is no file (or the name is unsafe). */
@@ -1094,7 +1169,7 @@ export class TableLibraryService {
           // Within one directory a `.dbml` is listed (and wins) before a `.yml` of the same name (§3.4).
           .sort((a, b) => a.name.toLowerCase() === b.name.toLowerCase() && a.storage !== b.storage
             ? (a.storage === 'dbml' ? -1 : 1)
-            : a.file.localeCompare(b.file));
+            : compareNames(a.file, b.file));
       } catch {
         return;
       }
@@ -1158,16 +1233,23 @@ export class TableLibraryService {
    */
   listTables(): SemanticTable[] {
     const models: SemanticTable[] = [];
+    const dbmlModels: SemanticTable[] = [];
     for (const entry of this.listTableFiles()) {
       if (entry.shadowedBy) continue;
       try {
-        const model = this.readTableEntry(entry.filePath, entry.name);
+        // The relationships are attached once below, not once per table.
+        const model = this.readTableEntry(entry.filePath, entry.name, { relationships: false });
         if (model) {
           models.push(model);
+          if (entry.storage === 'dbml') dbmlModels.push(model);
         }
       } catch {
         // Skip invalid files
       }
+    }
+    if (dbmlModels.length > 0) {
+      const attachment = this.libraryAttachment();
+      for (const model of dbmlModels) this.attachOwned(model, attachment);
     }
     return models;
   }

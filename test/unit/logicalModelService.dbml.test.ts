@@ -7,7 +7,7 @@
  * pipeline writes DBML (S5).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -133,6 +133,29 @@ describe('findTableFile follows core\'s tableFileCandidates order (§3.4)', () =
   });
 });
 
+describe('symbolic links', () => {
+  it('finds and reads a table file that is a symlink, at the top level and in a folder (as existsSync did before §3.4)', () => {
+    const real = path.join(root, 'shared');
+    fs.mkdirSync(real, { recursive: true });
+    fs.writeFileSync(path.join(real, 'dim_x.yml'), yamlTable('dim_x'));
+    fs.writeFileSync(path.join(real, 'dim_y.dbml'), dbmlTable('dim_y'));
+    fs.mkdirSync(path.join(semantic, 'logical-models/gold'), { recursive: true });
+    fs.symlinkSync(path.join(real, 'dim_x.yml'), path.join(semantic, 'logical-models/gold/dim_x.yml'));
+    fs.mkdirSync(path.join(semantic, 'tables'), { recursive: true });
+    write('tables/dim_z.dbml', dbmlTable('dim_z'));
+    fs.symlinkSync(path.join(real, 'dim_y.dbml'), path.join(semantic, 'tables/dim_y.dbml'));
+    // A link to nothing is not a table file.
+    fs.symlinkSync(path.join(real, 'gone.yml'), path.join(semantic, 'logical-models/gold/gone.yml'));
+    const lib = service();
+    expect(rel(lib.findTableFile('dim_x'))).toBe('logical-models/gold/dim_x.yml');
+    expect(lib.getTable('dim_x')?.name).toBe('dim_x');
+    expect(lib.tableExists('dim_x')).toBe(true);
+    expect(rel(lib.findTableFile('DIM_Y'))).toBe('tables/dim_y.dbml');
+    expect(lib.getTable('dim_y')?.name).toBe('dim_y');
+    expect(lib.findTableFile('gone')).toBeNull();
+  });
+});
+
 describe('case (D2)', () => {
   it('a wrong-case lookup returns the listed file name, never the spelling looked up', () => {
     const file = write('tables/gold/Dim_X.dbml', dbmlTable('Dim_X'));
@@ -219,6 +242,45 @@ describe('relationships (§2.4)', () => {
     expect(lib.getTable('fct_order')?.relationships).toHaveLength(3);
     lib.invalidateCache();
     expect(lib.getTable('fct_order')?.relationships).toHaveLength(3);
+  });
+
+  it('listTables() attaches once per call, and a warm getTable() lists nothing (no per-table library pass)', () => {
+    for (let i = 0; i < 30; i++) write(`tables/gold/t${i}.dbml`, dbmlTable(`t${i}`, '  id INT [pk]\n  customer_key INT'));
+    const lib = service();
+    lib.listTables();
+    const listing = vi.spyOn(lib, 'listTableFiles');
+    const tables = lib.listTables();
+    expect(tables.find((t) => t.name === 'fct_order')?.relationships).toHaveLength(3);
+    // Once for the tables listed, at most once for the attachment's key: never once per table.
+    expect(listing.mock.calls.length).toBeLessThanOrEqual(2);
+    listing.mockClear();
+    for (let i = 0; i < 30; i++) lib.getTable(`t${i}`);
+    expect(lib.getTable('fct_order')?.relationships).toHaveLength(3);
+    expect(listing).not.toHaveBeenCalled();
+  });
+
+  it('the memoised attachment sees a new table file, a new relationships file and a changed table', () => {
+    const lib = service();
+    expect(lib.getTable('dim_customer')?.relationships).toBeUndefined();
+    // A new table owning a Ref that was an orphan: the directory changed, so the memo is rebuilt.
+    fs.appendFileSync(path.join(semantic, 'tables/gold/_relationships.dbml'), 'Ref: dim_region.customer_key >? dim_customer.customer_key\n');
+    bumpMtime(path.join(semantic, 'tables/gold/_relationships.dbml'));
+    expect(lib.getTable('fct_order')?.relationships).toHaveLength(3);
+    write('tables/gold/dim_region.dbml', dbmlTable('dim_region', '  region_key INT [pk]\n  customer_key INT'));
+    expect(lib.getTable('fct_order')?.relationships).toHaveLength(3);
+    expect(lib.listTables().find((t) => t.name === 'dim_region')?.relationships).toEqual([
+      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
+    ]);
+    // A relationships file in a new folder.
+    write('tables/silver/stg_x.dbml', dbmlTable('stg_x', '  id INT [pk]\n  customer_key INT'));
+    expect(lib.getTable('stg_x')?.relationships).toBeUndefined();
+    write('tables/silver/_relationships.dbml', `${HEADER}Ref: stg_x.customer_key >? dim_customer.customer_key\n`);
+    expect(lib.getTable('stg_x')?.relationships).toHaveLength(1);
+    // A table edited in place, then read: its new column is what the attachment resolves against.
+    const fct = path.join(semantic, 'tables/gold/fct_order.dbml');
+    fs.writeFileSync(fct, dbmlTable('fct_order', '  order_id INT [pk]\n  CUSTOMER_KEY INT\n  order_date_key INT\n  Ship_Date_Key INT'));
+    bumpMtime(fct);
+    expect(lib.getTable('fct_order')?.relationships?.[0]).toMatchObject({ fromColumn: 'CUSTOMER_KEY' });
   });
 
   it('an unreadable relationships file counts as unreadable relationships', () => {

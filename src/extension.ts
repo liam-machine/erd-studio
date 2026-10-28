@@ -1271,7 +1271,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // once per session; the file is never converted or deleted.
   let foreignFormatWarned = false;
   const foreignFormatSubscription = fileWatcherService.onForeignFormatCreated(({ uri }) => {
-    if (foreignFormatWarned || knownStorage !== 'dbml') return;
+    // New Diagram and Rename write their `.json` outside the own-write
+    // tracker and mark it here instead (the change event below consumes the
+    // mark, after this one): ERD Studio's own file is never blamed on a helper.
+    if (foreignFormatWarned || knownStorage !== 'dbml' || subjectAreasCreatedHere.has(uri.fsPath)) return;
     foreignFormatWarned = true;
     telemetry.featureOnce('dbmlForeignFormatWarned');
     const shown = path.relative(workspaceRoot, uri.fsPath).split(path.sep).join('/');
@@ -1299,10 +1302,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   // Semantic file changed externally → refresh tree view + model library
-  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri, created }) => {
+  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri, created, layout }) => {
     // A DBML diagram's layout file lives beside it and is no open document of
     // the canvas: its change arrives here as a change to the diagram (§5.4).
-    if (uri.fsPath.endsWith('.dbml')) void editorProvider.refreshSubjectAreaPanel(uri.fsPath);
+    // A change to the diagram file itself reaches an open canvas through its
+    // document, so redrawing for it too would draw it twice.
+    if (layout) void editorProvider.refreshSubjectAreaPanel(uri.fsPath);
     // A domain file ERD Studio did not write appeared: an AI assistant, a hand
     // edit or a git pull. createDomain / renameDomain write outside the own-write
     // tracker, so they mark their paths in subjectAreasCreatedHere instead.
