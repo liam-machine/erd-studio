@@ -125,7 +125,10 @@ the helper will be missing: ask them to start it from VS Code's integrated termi
 - a `fix-model-yaml` step or fix whose model file's entry in doctor's `erd.unreadableModelFiles`
   or the diff's `unreadableModelFiles` has `mergeConflict: true` (the step and the fix themselves
   carry no such field);
-- a diff `error` with code `merge-conflict` (a diagram file the diff could not load).
+- a diff `error` with code `merge-conflict` (a diagram file the diff could not load);
+- in a DBML project, doctor's `resolve-merge-conflicts` step naming a `.dbml` or `.dbdiagram`
+  file — its entry in `erd.dbmlProblems` has `mergeConflict: true` (a table file, a
+  `_relationships.dbml`, a diagram or a layout file; never a `fix-dbml-file`).
 
 The file still holds git's conflict markers (`<<<<<<<` … `=======` … `>>>>>>>`): two people
 changed the same lines, git kept both versions, and ERD Studio cannot read the file until one is
@@ -146,7 +149,10 @@ chosen. Only the user knows which version is right — it is often a teammate's 
    check for every `<<<<<<<`.
    - **Only `viewConfig.positions` differ** (where tables sit on the canvas): say either side is
      safe — the design is the same, only the layout differs. Offer to keep either one, and edit
-     only once the user says which.
+     only once the user says which. The same goes for a `.dbdiagram` layout file.
+   - **A conflicted `_relationships.dbml`** usually means both sides added relationships: offer
+     to keep both sides' Ref lines and both sides' `use` lines, then run doctor; a Ref that now
+     appears twice is reported (`duplicateRef`) — delete one copy.
    - **Anything else differs:** describe each version in one line and ask which to keep. Do not
      recommend one.
 4. Never pick a side unasked. Never run `git add`, `git checkout --ours` / `--theirs`,
@@ -158,6 +164,32 @@ chosen. Only the user knows which version is right — it is often a teammate's 
    them to finish the merge in git.
 6. If the user resolves it themselves instead, re-run doctor (or the diff) once they say the file
    is saved, then carry on from where you stopped.
+
+## DBML files
+
+A DBML project (doctor's `erd.storage` is `dbml` or `mixed`) reports its files' problems in
+`erd.dbmlProblems`: `file`, `line`, `code`, `severity` and `message`. Only errors raise a next
+step; a warning is information (often with the exact line to add) and never blocks.
+
+- **`fix-dbml-file`** — a `.dbml` file ERD Studio or other DBML tools cannot read. The usual cause
+  is an unquoted value: `grain: One row per order` → `grain: 'One row per order'`, `natural_key: true`
+  → `natural_key: 'true'` (the message says "Quote the value"). Others: a `use`, `Ref` or inline
+  `[ref: …]` inside a table file (move it to the folder's `_relationships.dbml`, as the message
+  says), a table file holding two Tables or a name other than its file's, a Ref that is stored
+  twice (`duplicateRef`: delete one), or a `tables` layer in `layers.json`. Fix the line, then
+  re-run doctor. Never "fix" a file by reformatting it.
+- **`resolve-format-conflicts`** — the same table (or diagram) exists as both YAML/JSON and DBML
+  (`x.yml` and `x.dbml`); only one is read. Show the user both files and ask which to keep;
+  never delete or convert either yourself.
+- **`finish-dbml-conversion`** — a **Convert Project to DBML** stopped part way (some files
+  converted, their YAML/JSON sources still there). Ask the user to run **ERD Studio: Convert
+  Project to DBML** again in VS Code: it checks every file and finishes. Never finish it by hand.
+- **`import-dbml-file`** — a `.dbml` in a layer folder declares its own Tables and imports none:
+  it is a single-file DBML (a dbdiagram.io download or an export), not an ERD Studio diagram. Ask
+  the user to run **ERD Studio: Import DBML…** on it.
+- **diff / export error codes**: `dbml-invalid` — a `.dbml` diagram does not parse (the message
+  names the file and line; fix it as above); `not-a-diagram` — the `--domain` you passed is a
+  table, relationships or layout file: pass the diagram (`.erd-studio/<layer>/<name>.dbml`).
 
 ## Manifest stale or unreadable
 

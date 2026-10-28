@@ -472,3 +472,25 @@ describe('detectConventions — descriptions and table shape', () => {
     expect(r.conventions.shape.evidence).toContain('shape: orders looks like a fact (keys to other tables + amounts to add up)');
   });
 });
+
+describe('inventory on native DBML storage (§7.1, S8)', () => {
+  it('gives every diagram and table its format, and reads a DBML diagram\'s members from its use lines, a missing table file included', async () => {
+    const root = path.join(tmp, 'native');
+    fs.cpSync(path.join(FIXTURES, 'dbml-native'), root, { recursive: true });
+    // A member whose table file is gone: still listed, from its use line.
+    fs.rmSync(path.join(root, '.erd-studio', 'tables', 'gold', 'bridge_empty.dbml'));
+    const r = runInventory(await ctxFor(root), { summary: true });
+    const sales = r.domains.find((d) => d.domain === 'sales')!;
+    expect(sales).toMatchObject({ file: '.erd-studio/gold/sales.dbml', format: 'dbml' });
+    expect(sales.models).toEqual(['fct_order', 'dim_customer', 'dim_date', 'dim_region', 'customer_profile', 'bridge_empty']);
+    expect(r.logicalTables.map((t) => t.name)).not.toContain('bridge_empty');
+    expect(r.logicalTables.find((t) => t.name === 'dim_date')).toMatchObject({ file: '.erd-studio/tables/dim_date.dbml', format: 'dbml', folder: '' });
+    expect(r.logicalTables.find((t) => t.name === 'fct_order')!.domains.sort()).toEqual(['.erd-studio/gold/sales.dbml', '.erd-studio/silver/staging.dbml']);
+  });
+
+  it('a YAML project lists json diagrams and yaml tables', async () => {
+    const r = runInventory(await ctxFor(PROJECT), { summary: true });
+    expect(r.domains.every((d) => d.format === 'json')).toBe(true);
+    expect(r.logicalTables.every((t) => t.format === 'yaml')).toBe(true);
+  });
+});

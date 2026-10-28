@@ -91,7 +91,7 @@ function subjectAreaBlock(d: SubjectAreaDiff, p: Paint): string[] {
     ].filter(Boolean).join(', ');
   const unreadable = new Map(d.unreadableModelFiles.map((u) => [u.name, u]));
   const lines = [`${head} — ${summary}`, ...d.fixes.map((f) => {
-    const u = f.kind === 'fix-model-yaml' ? unreadable.get(f.model) : undefined;
+    const u = f.kind === 'fix-model-yaml' || f.kind === 'fix-dbml-file' ? unreadable.get(f.model) : undefined;
     return u ? `  ${p.red('✗')} ${describeUnreadable(u, 'diff')}` : fixLine(f, p);
   })];
   if (d.modelsWithoutColumns.length > 0) {
@@ -155,8 +155,19 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   for (const c of r.erd.conflictedDomainFiles) {
     lines.push(`${p.red('✗')} ${c.file} line ${c.line}: ${mergeConflictHumanHint('doctor')}`);
   }
-  for (const u of r.erd.unreadableModelFiles) {
+  // DBML table files are reported once, as DBML problems, below.
+  for (const u of r.erd.unreadableModelFiles.filter((f) => !f.file.toLowerCase().endsWith('.dbml'))) {
     lines.push(`${p.red('✗')} ${describeUnreadable(u, 'doctor')}`);
+  }
+  // DBML problems by severity: errors first, then warnings.
+  const problems = r.erd.dbmlProblems ?? [];
+  for (const severity of ['error', 'warning'] as const) {
+    for (const d of problems.filter((q) => q.severity === severity)) {
+      if (d.mergeConflict && r.erd.conflictedDomainFiles.some((c) => c.file === d.file)) continue;
+      const where = `${d.file}${d.line !== undefined ? ` line ${d.line}` : ''}`;
+      const text = d.mergeConflict ? mergeConflictHumanHint('doctor') : `${d.message} (${d.code})`;
+      lines.push(`${severity === 'error' ? p.red('✗') : p.yellow('!')} ${where}: ${text}`);
+    }
   }
   for (const a of r.erd.dataTypeAliasFiles) {
     if (a.columns.length > 0) {
@@ -179,6 +190,9 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
       + ` (it starts at ${foreignKeyAtTo(b.cardinality) ? b.toModel : b.fromModel}'s key) — in ${b.domains.join(', ')}`);
   }
   lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
+  if ((r.harness.newer ?? []).length > 0) {
+    lines.push(`${p.yellow('!')} Update ERD Studio: these helper files are from a newer version: ${r.harness.newer.join(', ')}`);
+  }
   lines.push('', 'Next steps:');
   r.nextSteps.forEach((s, i) => {
     lines.push(`  ${i + 1}. ${s.title}${s.command ? ` — ${s.command}` : ''}`);

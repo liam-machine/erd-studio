@@ -20,6 +20,7 @@ export { parseTableDbml } from './readTable.js';
 export { readRelationshipsDbml } from './readRelationships.js';
 export { parseSubjectAreaDbml, subjectAreaMembersDbml } from './readDiagram.js';
 export { compileDbmlProject } from './compileProject.js';
+export { outlineDbmlFile } from './outline.js';
 export { renderNewTableDbml, editTableDbml } from './writeTable.js';
 export type { EditTableDbmlOptions, ForeignDbmlMetadata } from './writeTable.js';
 export { editRelationshipsDbml, relationshipUnits, refUnitSortKey, usePathBetween, DBML_CONVERT_FIRST_MESSAGE } from './writeRelationships.js';

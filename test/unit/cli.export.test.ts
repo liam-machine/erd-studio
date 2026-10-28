@@ -132,6 +132,9 @@ describe('parseArgs — export', () => {
     expect(USAGE).toMatch(/dbml-layout +the table positions for dbml-rich, as dbdiagram's \.dbdiagram file/);
     expect(USAGE).toMatch(/--all +every subject area, as a JSON list of \{ fileName, content \}/);
     expect(USAGE).not.toContain('--out');
+    // Native DBML storage (§7.1): the example names a DBML diagram.
+    expect(USAGE).toContain('erd-studio export --domain .erd-studio/gold/sales.dbml --format dbml');
+    expect(USAGE).not.toContain('sales.json');
     expect(() => parseArgs(['exprt'])).toThrow(/doctor, inventory, diff, export, version/);
   });
 });
@@ -448,5 +451,26 @@ describe('export on native DBML storage (§7.1, S4)', () => {
     const r = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/tables/gold/fct_order.dbml', '--format', 'dbml', '--json'], NATIVE);
     expect(r.code).toBe(3);
     expect(JSON.parse(r.out).error.code).toBe('not-a-diagram');
+  });
+});
+
+describe('export: a DBML diagram exports as its YAML twin does (§9.6, S8)', () => {
+  const CORE = path.join(ROOT, 'packages/core/test/fixtures');
+  const exportOf = async (project: string, domain: string, format: string): Promise<string> => {
+    const r = await run(['export', '--project', project, '--domain', domain, '--format', format], project);
+    expect(r.code, `${project} ${format}`).toBe(0);
+    return r.out;
+  };
+
+  it.each(CLI_EXPORT_FORMATS)('composite-and-self: byte for byte as %s', async (format) => {
+    const yaml = await exportOf(path.join(CORE, 'composite-and-self'), '.erd-studio/gold/vault.json', format);
+    const dbml = await exportOf(path.join(CORE, 'dbml/composite-and-self'), '.erd-studio/gold/vault.dbml', format);
+    expect(dbml).toBe(yaml);
+  });
+
+  it.each(CLI_EXPORT_FORMATS)('showcase: the same lines as %s (relationships come in the library\'s sorted order, §2.8)', async (format) => {
+    const yaml = await exportOf(path.join(CORE, 'showcase'), '.erd-studio/silver/showcase.json', format);
+    const dbml = await exportOf(path.join(CORE, 'dbml/showcase'), '.erd-studio/silver/showcase.dbml', format);
+    expect(dbml.split('\n').sort()).toEqual(yaml.split('\n').sort());
   });
 });

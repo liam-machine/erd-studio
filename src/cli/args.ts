@@ -240,7 +240,7 @@ Shared options:
   --verbose             show internal diagnostics on stderr
 
 export prints a subject area's logical (design) diagram on stdout and writes no file:
-  erd-studio export --domain .erd-studio/gold/sales.json --format dbml > sales.dbml
+  erd-studio export --domain .erd-studio/gold/sales.dbml --format dbml > sales.dbml
   dbml         DBML any tool reads; ERD Studio's fields go in notes
   dbml-rich    DBML for dbdiagram.io: ERD Studio's fields as properties (DBML 9.1+)
   dbml-layout  the table positions for dbml-rich, as dbdiagram's .dbdiagram file:

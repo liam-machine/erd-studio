@@ -117,6 +117,29 @@ export interface DbmlStorageReader {
   subjectAreaMembers(text: string): string[] | null;
 }
 
+/** A `use` line of a `.dbml` file, as `outlineDbmlFile` reads it. */
+export interface DbmlUseOutline {
+  /** The path as written. */
+  path: string;
+  /** Resolved against the file's folder, with `.dbml`, posix and relative to the semantic dir (it may leave it: `../x`). */
+  resolved: string;
+  /** 1-based. */
+  line: number;
+  /** `use * from …`. */
+  wildcard: boolean;
+  /** A selective line's table specifiers: each unqualified name, lower-case. */
+  tables: string[];
+}
+
+/** What `doctor` checks in a `.dbml` file: its `use` lines and the Enums it declares (`outlineDbmlFile`). */
+export interface DbmlFileOutline {
+  /** False when the file does not parse (a syntax error): nothing else is read. */
+  parses: boolean;
+  uses: DbmlUseOutline[];
+  /** Each Enum's name as declared (`status`, `gold.status`) and its 1-based line. */
+  enums: Array<{ name: string; line: number }>;
+}
+
 /** A diagnostic of {@link DbmlStorageReader}-adjacent multi-file compiles (`compileDbmlProject`). */
 export interface DbmlDiagnostic {
   code: number;

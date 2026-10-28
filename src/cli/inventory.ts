@@ -73,8 +73,10 @@ export interface InventoryModel {
 /** A table in the ERD Studio library (the design), as `logicalTables` lists it. */
 export interface InventoryLogicalTable {
   name: string;
-  /** Its yml file, project-relative. */
+  /** Its file, project-relative: a `.dbml` table file, or a `.yml` in a project from before 2.0. */
   file: string;
+  /** The file's format (additive). */
+  format: 'yaml' | 'dbml';
   /** Folder under the library (`''` at the top level). */
   folder: string;
   description: string;
@@ -99,7 +101,8 @@ export interface InventoryResult extends Envelope {
   clusters: string[][];
   /** Inventory names that already have a logical-models/*.yml. */
   alreadyModelled: string[];
-  domains: Array<{ file: string; layer: string; domain: string; models: string[] }>;
+  /** Every diagram: its file, `format` (`json` or `dbml`, additive) and the tables it lists (a DBML diagram's table `use` lines). */
+  domains: Array<{ file: string; layer: string; domain: string; models: string[]; format: 'json' | 'dbml' }>;
   /**
    * Every table in the ERD Studio library (restricted to `--models` when
    * given), by name — in a logical-only folder, the inventory itself.
@@ -229,7 +232,7 @@ export function listSubjectAreaFiles(ctx: CliContext): InventoryResult['domains'
     } catch {
       // Unreadable or invalid: listed with no models; `diff` reports the error.
     }
-    return { file: relPath(ctx.root, d.filePath), layer: d.layer, domain: d.domain, models };
+    return { file: relPath(ctx.root, d.filePath), layer: d.layer, domain: d.domain, models, format: d.storage ?? 'json' };
   });
 }
 
@@ -394,6 +397,7 @@ export function listLogicalTables(
     const item: InventoryLogicalTable = {
       name: entry.name,
       file: relPath(ctx.root, entry.filePath),
+      format: entry.storage,
       folder: entry.folder,
       description: (unreadable ? undefined : table?.description) ?? '',
       grain: (unreadable ? undefined : table?.grain) || null,

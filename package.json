@@ -766,7 +766,8 @@
     "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json && npm run typecheck --workspaces",
     "test": "vitest run",
     "test:watch": "vitest",
-    "regen-fixtures": "tsx scripts/regen-fixtures.ts"
+    "regen-fixtures": "tsx scripts/regen-fixtures.ts",
+    "test:e2e:dbml": "node scripts/e2e-dbml.mjs"
   },
   "devDependencies": {
     "@testing-library/react": "^16.1.0",

@@ -30,14 +30,20 @@ export type FixKind =
   | 'add-column' | 'remove-column' | 'set-type'
   | 'add-relationship' | 'remove-relationship' | 'set-cardinality'
   | 'declare-composite-foreign-key'
-  | 'resolve-phantom' | 'fix-model-yaml';
+  | 'resolve-phantom' | 'fix-model-yaml'
+  /** A `.dbml` table file that does not read (native DBML storage, §7.1); `fix-model-yaml` stays for YAML. */
+  | 'fix-dbml-file';
 
 export interface Fix {
   severity: 'blocking' | 'advisory';
   kind: FixKind;
   model: string;
   column?: string;
-  /** The file to edit: `<semanticDir>/logical-models/<m>.yml` or the domain JSON, project-relative. */
+  /**
+   * The file to edit, project-relative: the table's file (`tables/…/<m>.dbml`, or
+   * `logical-models/<m>.yml` before 2.0), its folder's `_relationships.dbml` for a
+   * relationship a DBML table owns, or the domain JSON.
+   */
   file: string;
   /** Types (set-type) or cardinalities (set-cardinality). */
   from?: string;
@@ -54,7 +60,7 @@ export interface Fix {
   };
   /** set-cardinality: the file the link is stored in now, when the fix moves it to `file`. */
   movesFrom?: string;
-  /** fix-model-yaml: where the parser stopped (1-based). */
+  /** fix-model-yaml / fix-dbml-file: where the parser stopped (1-based). */
   line?: number;
   explain: string;
 }
@@ -328,12 +334,15 @@ export function fixesFromPlan(
 ): Fix[] {
   const ymlFile = (model: string): string =>
     plan.modelContext[model]?.logicalModelPath ?? `${semanticDir}/logical-models/${model}.yml`;
+  // The file a table's relationships are stored in: its folder's
+  // `_relationships.dbml` for a DBML table (§2.3), its own yml otherwise.
+  const ownerFile = (model: string): string => plan.modelContext[model]?.relationshipsPath ?? ymlFile(model);
   // A relationship is fixed where it is defined (#126): the yml of the model
   // holding its foreign key when the library holds it, else the domain file.
   // A new one goes where the project keeps relationships.
   const relationshipFile = (r: Parameters<typeof linkKey>[0], adding: boolean): string =>
     (adding ? relationshipHome.addToLibrary : relationshipHome.inLibrary.has(linkKey(r)))
-      ? ymlFile(r.fromModel)
+      ? ownerFile(r.fromModel)
       : domainFile;
   const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
   const fixes: Fix[] = [];
@@ -459,9 +468,9 @@ export function fixesFromPlan(
             entry = reverseRelationship(entry);
           }
           entry = canonicalRelationship(entry);
-          if (!same(stored.fromModel, entry.fromModel)) movesFrom = ymlFile(stored.fromModel);
+          if (!same(stored.fromModel, entry.fromModel)) movesFrom = ownerFile(stored.fromModel);
         }
-        const file = stored ? ymlFile(entry.fromModel) : domainFile;
+        const file = stored ? ownerFile(entry.fromModel) : domainFile;
         // A composite's pairs, read from the end the entry is stored from.
         const entryPairs = pairs && (same(entry.fromModel, r.fromModel) && same(entry.fromColumn, r.fromColumn) ? [...pairs] : pairs && reversePairs(pairs));
         fixes.push({
@@ -493,7 +502,7 @@ export function fixesFromPlan(
   }
   for (const u of unreadable) {
     fixes.push({
-      severity: 'blocking', kind: 'fix-model-yaml', model: u.name, file: u.file,
+      severity: 'blocking', kind: u.file.toLowerCase().endsWith('.dbml') ? 'fix-dbml-file' : 'fix-model-yaml', model: u.name, file: u.file,
       ...(u.line !== undefined ? { line: u.line } : {}),
       explain: u.mergeConflict
         ? `${u.file}${u.line !== undefined ? ` line ${u.line}` : ''}: ${unreadableHint(u)}. Raise this before anything `

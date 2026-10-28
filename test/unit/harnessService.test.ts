@@ -42,6 +42,19 @@ const SYNC_GUIDE = '.claude/skills/erd-studio/SYNC.md';
 const HOOK = '.claude/skills/erd-studio/enforce-skill.sh';
 const SETUP_SKILL = '.claude/skills/erd-studio-setup/SKILL.md';
 const CURRENT_MARKER = `<!-- erd-studio-harness: ${HARNESS_VERSION} -->`;
+const DBML_GUIDE = '.claude/skills/erd-studio/DBML.md';
+const LEGACY_GUIDE = '.claude/skills/erd-studio/LEGACY.md';
+
+/**
+ * Everything a target tells an assistant about the files: a skill target's
+ * SKILL.md with its companions (DBML.md, LEGACY.md, SYNC.md), or a
+ * single-file target's whole text.
+ */
+function guideOf(svc: HarnessService, id: (typeof HARNESS_TARGETS)[number]['id']): string {
+  return id === 'claude' || id === 'agents'
+    ? svc.schemaSkillFiles().map(([, content]) => content).join('\n')
+    : svc.generateContent(id);
+}
 
 function writeFile(root: string, rel: string, content: string): void {
   const p = path.join(root, rel);
@@ -143,7 +156,11 @@ describe('HarnessService', () => {
       const content = service.generateContent('gemini');
       expect(content).toContain('# ERD Studio');
       expect(content).toContain('Code Review Rules');
-      expect(content).toContain('Schema version');
+      // DBML rules first (native DBML storage, §7.3); the stale "Schema version must be 5" is gone.
+      expect(content).toContain('### ERD Studio DBML files');
+      expect(content).toContain("**Custom values are quoted strings**, even `'true'` and numbers");
+      expect(content).toContain('**One Table per table file**');
+      expect(content).not.toContain('**Schema version** must be `5`');
     });
 
     it('generates Codex AGENTS.md section', () => {
@@ -165,7 +182,7 @@ describe('HarnessService', () => {
 
     it('all formats include schema content', () => {
       for (const target of HARNESS_TARGETS) {
-        const content = service.generateContent(target.id);
+        const content = guideOf(service, target.id);
         expect(content).toContain('schemaVersion');
         expect(content).toContain('viewConfig');
         expect(content).toContain('logical');
@@ -175,7 +192,7 @@ describe('HarnessService', () => {
 
     it('all formats explain per-layer model folders', () => {
       for (const target of HARNESS_TARGETS) {
-        const content = service.generateContent(target.id);
+        const content = guideOf(service, target.id);
         expect(content).toContain('logical-models/{folder}/{name}.yml');
         expect(content).toContain('unique across all folders');
         expect(content).toContain('logical-models/gold/fct_sale.yml');
@@ -185,7 +202,7 @@ describe('HarnessService', () => {
 
     it('all formats include sync reconciliation pointer', () => {
       for (const target of HARNESS_TARGETS) {
-        const content = service.generateContent(target.id);
+        const content = guideOf(service, target.id);
         expect(content).toContain('## Sync Reconciliation');
         expect(content).toContain('.sync-plan.json');
       }
@@ -731,7 +748,7 @@ describe('HarnessService', () => {
     });
 
     it('lists the Claude target\'s version-marked files', () => {
-      expect(claudeManagedFiles()).toEqual([SCHEMA_SKILL, SYNC_GUIDE, SETUP_SKILL]);
+      expect(claudeManagedFiles()).toEqual([SCHEMA_SKILL, SYNC_GUIDE, DBML_GUIDE, LEGACY_GUIDE, SETUP_SKILL]);
     });
 
     it('flags claude when a current SKILL.md has a missing or outdated SYNC.md', () => {
@@ -778,19 +795,21 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 34 (the setup skill\'s Without dbt route; logical-only projects in the schema guide)', () => {
-      expect(HARNESS_VERSION).toBe('34');
+    it('is 35 (native DBML storage: SKILL.md + DBML.md + LEGACY.md)', () => {
+      expect(HARNESS_VERSION).toBe('35');
     });
 
     it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {
       for (const target of ['claude', 'agents', 'copilot', 'gemini', 'codex'] as const) {
-        const content = service.generateContent(target);
+        const content = guideOf(service, target);
         expect(content, target).toContain('**A folder without `dbt_project.yml` is logical-only.**');
         expect(content, target).toContain('Never tell the user they need dbt, and never run dbt there');
         // The CLI's own spelling of the refusal and of doctor's flag.
         expect(content, target).toContain('`erd-studio diff` exits with `not-dbt-project`');
         expect(content, target).toContain('reporting `dbtProject: false`');
-        expect(content, target).toContain('the project is new, so use v6');
+        // A new project is DBML (§7.3 item 1), in the skill and in the legacy rules alike.
+        expect(content, target).toContain('**`dbml`, or no `.erd-studio/` folder yet** (a new project) → write DBML');
+        expect(content, target).toContain('the project is new, so it is DBML');
       }
       const cli = (name: string): string => fs.readFileSync(path.resolve(__dirname, '../../src/cli', name), 'utf-8');
       expect(cli('diff.ts')).toContain("'not-dbt-project'");
@@ -798,7 +817,7 @@ describe('HarnessService', () => {
     });
 
     it('points assistants at Import DBML…, the dbdiagram.io export and the CLI formats, and keeps meta.dbml', () => {
-      const content = service.generateContent('claude');
+      const content = guideOf(service, 'claude');
       expect(content).toContain('## DBML: import and export');
       expect(content).toContain('**ERD Studio: Import DBML…**');
       expect(content).toContain('**ERD Studio: Export All Diagrams…**');
@@ -812,15 +831,17 @@ describe('HarnessService', () => {
       expect(content).toContain('run it only when the user asks');
       expect(content).toContain('Keep it exactly as it is');
       // The external-sources protocol sends a DBML file to the command.
-      expect(content).toContain('A **DBML file** (`.dbml`) has its own command');
+      expect(content).toContain('A **DBML file** (`.dbml`) from another tool has its own command');
+      // The project's own storage is DBML: the old "only storage" sentence is gone (§7.3 item 9).
+      expect(content).not.toContain('stay the only storage');
       // Every target that carries the schema guide gets the section.
       for (const id of ['agents', 'copilot', 'gemini', 'codex'] as const) {
-        expect(service.generateContent(id), id).toContain('## DBML: import and export');
+        expect(guideOf(service, id), id).toContain('## DBML: import and export');
       }
     });
 
     it('tells assistants to write the naming doctor reports, and never to move files between the two folders (#182)', () => {
-      const content = service.generateContent('claude');
+      const content = guideOf(service, 'claude');
       expect(content).toContain('use the one `erd-studio doctor` reports');
       expect(content).toContain('read `erd.naming`');
       // Every renamed key, in both namings, on one row of the mapping table.
@@ -832,13 +853,13 @@ describe('HarnessService', () => {
     });
 
     it('tells assistants to write each key once per block (#164)', () => {
-      const SCHEMA_CONTENT = service.generateContent('claude');
+      const SCHEMA_CONTENT = guideOf(service, 'claude');
       expect(SCHEMA_CONTENT).toContain('Write each key once per block');
       expect(SCHEMA_CONTENT).toContain('a key written twice makes ERD Studio refuse every change to that file');
     });
 
     it('tells assistants a merge-conflict fix-model-yaml is the user\'s to settle (#150)', () => {
-      const SCHEMA_CONTENT = service.generateContent('claude');
+      const SCHEMA_CONTENT = guideOf(service, 'claude');
       expect(SCHEMA_CONTENT).toContain("unless that file's entry in their `unreadableModelFiles` list has `mergeConflict: true`");
       // The flag is on the unreadableModelFiles entry, never on the fix (src/cli/diff.ts `Fix`).
       expect(SCHEMA_CONTENT).not.toMatch(/`fix-model-yaml`[^.]{0,40}(?:with|marked|has) `mergeConflict/);
@@ -848,7 +869,7 @@ describe('HarnessService', () => {
     });
 
     it('documents compositeKey, self-references, real spelling and marking the referenced key (#133 L1–L4)', () => {
-      const SCHEMA_CONTENT = service.generateContent('claude');
+      const SCHEMA_CONTENT = guideOf(service, 'claude');
       expect(SCHEMA_CONTENT).toContain('| `compositeKey` | No |');
       expect(SCHEMA_CONTENT).toContain('all sharing the same `compositeKey` value, stored together on the FK side');
       expect(SCHEMA_CONTENT).toContain('never `many-to-many`');
@@ -860,7 +881,7 @@ describe('HarnessService', () => {
     });
 
     it('tells assistants to store a relationship on its many side and never write one-to-many (#133)', () => {
-      const SCHEMA_CONTENT = service.generateContent('claude');
+      const SCHEMA_CONTENT = guideOf(service, 'claude');
       expect(SCHEMA_CONTENT).toContain('Never write `one-to-many`: swap the ends and write `many-to-one`');
       expect(SCHEMA_CONTENT).toContain('Keys win: the many side is never its model\'s whole primary or natural key');
       expect(SCHEMA_CONTENT).toContain('| `role` | No |');
@@ -869,7 +890,7 @@ describe('HarnessService', () => {
     });
 
     it('tells assistants where relationships live and how to choose', () => {
-      const SCHEMA_CONTENT = service.generateContent('claude');
+      const SCHEMA_CONTENT = guideOf(service, 'claude');
       expect(SCHEMA_CONTENT).toContain('### Where relationships live');
       expect(SCHEMA_CONTENT).toMatch(/\*\*any\*\* model file already has a `relationships:` list, or \*\*no\*\* domain file has a `logical\.relationships` entry/);
       expect(SCHEMA_CONTENT).not.toContain('relationships are ONLY stored in the domain');
@@ -877,7 +898,8 @@ describe('HarnessService', () => {
 
     it('states the YAML quoting rule, and every model example in the schema guide parses', () => {
       service.install(tmpDir, CLAUDE, true);
-      const skill = read(tmpDir, '.claude/skills/erd-studio/SKILL.md');
+      // The YAML rules live in LEGACY.md, complete (§7.3).
+      const skill = read(tmpDir, LEGACY_GUIDE);
       expect(skill).toContain('Wrap every `description`, `grain`, `rationale` and `dataType` value in double quotes');
       expect(skill).toContain('`` ` @ * & ! % [ { - | > \' " ``');
       expect(skill).toContain('Indent with spaces, never tabs.');
@@ -900,7 +922,7 @@ describe('HarnessService', () => {
     it('tells every assistant to follow the team\'s metadata list, copying dbt keys and never guessing', () => {
       service.install(tmpDir, CLAUDE, true);
       const skill = read(tmpDir, '.claude/skills/erd-studio/SKILL.md');
-      expect(skill).toContain('#### The team\'s metadata list');
+      expect(skill).toContain('### The team\'s metadata list');
       expect(skill).toContain('If it has a **Metadata** section, that is the team\'s metadata list');
       expect(skill).toContain('**Use its key names exactly.**');
       expect(skill).toContain('**Source `dbt`: copy it; never make it up.**');
@@ -914,7 +936,7 @@ describe('HarnessService', () => {
 
     it('documents `meta` on models and columns, never compared with dbt', () => {
       service.install(tmpDir, CLAUDE, true);
-      const skill = read(tmpDir, '.claude/skills/erd-studio/SKILL.md');
+      const skill = read(tmpDir, LEGACY_GUIDE);
       expect(skill).toContain('### Metadata (`meta`)');
       expect(skill).toContain('| `meta` | No | Free-form metadata map');
       expect(skill).toContain('| `meta` | No | Free-form dbt-style metadata map for this column');
@@ -1167,7 +1189,9 @@ describe('HarnessService', () => {
       }
       expect(fs.existsSync(path.join(tmpDir, '.agents/skills/erd-studio/enforce-skill.sh'))).toBe(false);
       expect(fs.existsSync(path.join(tmpDir, '.claude'))).toBe(false);
-      expect(agentsManagedFiles()).toEqual([AGENTS_SCHEMA_SKILL, AGENTS_SYNC_GUIDE, AGENTS_SETUP_SKILL]);
+      expect(agentsManagedFiles()).toEqual([
+        AGENTS_SCHEMA_SKILL, AGENTS_SYNC_GUIDE, '.agents/skills/erd-studio/DBML.md', '.agents/skills/erd-studio/LEGACY.md', AGENTS_SETUP_SKILL,
+      ]);
     });
 
     it('uses the same schema skill text as Claude Code, with portable frontmatter only', () => {
@@ -1218,8 +1242,11 @@ describe('HarnessService', () => {
 
     it('rewrites the data directory for a custom semanticDir in the .agents copies too', () => {
       new HarnessService('docs/erd').install(tmpDir, AGENTS);
-      expect(read(tmpDir, AGENTS_SCHEMA_SKILL)).toContain('docs/erd/logical-models/');
-      expect(read(tmpDir, AGENTS_SCHEMA_SKILL)).not.toContain('.erd-studio/');
+      expect(read(tmpDir, AGENTS_SCHEMA_SKILL)).toContain('docs/erd/tables/');
+      expect(read(tmpDir, '.agents/skills/erd-studio/LEGACY.md')).toContain('docs/erd/logical-models/');
+      for (const file of ['SKILL.md', 'SYNC.md', 'DBML.md', 'LEGACY.md']) {
+        expect(read(tmpDir, `.agents/skills/erd-studio/${file}`), file).not.toContain('.erd-studio/');
+      }
     });
 
     it('leaves a hand-written .agents setup SKILL.md alone unless told to replace it', () => {
@@ -1538,6 +1565,185 @@ describe('HarnessService', () => {
       writeFile(tmpDir, SCHEMA_SKILL, '# mine\n');
       expect(service.installRecommended(tmpDir, { replaceUnmanaged: true, assistants: ['copilot'] }).status).toBe('updated');
       expect(read(tmpDir, SCHEMA_SKILL)).toBe('# mine\n');
+    });
+  });
+
+  describe('native DBML storage (§7.3): SKILL.md + DBML.md + LEGACY.md', () => {
+    const SKILL_FILE_LINE_CAP = 500;
+    const SKILL_FILE_BYTE_CAP = 48 * 1024;
+
+    it('caps every generated skill file at 500 lines and 48 KB', () => {
+      for (const svc of [service, new HarnessService('docs/erd')]) {
+        for (const [name, content] of svc.schemaSkillFiles()) {
+          expect(content.split('\n').length, name).toBeLessThanOrEqual(SKILL_FILE_LINE_CAP);
+          expect(Buffer.byteLength(content, 'utf-8'), name).toBeLessThanOrEqual(SKILL_FILE_BYTE_CAP);
+        }
+      }
+    });
+
+    it('installs DBML.md and LEGACY.md beside SKILL.md, each with the version marker', () => {
+      for (const target of [CLAUDE, AGENTS]) {
+        const result = service.install(tmpDir, target, true);
+        const base = target.id === 'claude' ? '.claude/skills/erd-studio' : '.agents/skills/erd-studio';
+        for (const file of ['DBML.md', 'LEGACY.md']) {
+          expect(result.filesWritten, `${target.id} ${file}`).toContain(`${base}/${file}`);
+          expect(extractHarnessVersion(read(tmpDir, `${base}/${file}`)), file).toBe(HARNESS_VERSION);
+        }
+      }
+      const skill = read(tmpDir, SCHEMA_SKILL);
+      // SKILL.md links both and says which to read from erd.storage.
+      expect(skill).toContain('read `erd.storage`');
+      expect(skill).toContain('follow `DBML.md`');
+      expect(skill).toContain('follow `LEGACY.md`');
+      expect(read(tmpDir, DBML_GUIDE)).toContain('# ERD Studio — the DBML format');
+      expect(read(tmpDir, LEGACY_GUIDE)).toContain('# ERD Studio — YAML and JSON files (projects before 2.0)');
+    });
+
+    it('covers the companions in harnessStatus, detectStale and Update All like SYNC.md', () => {
+      service.install(tmpDir, CLAUDE, true);
+      service.install(tmpDir, AGENTS, true);
+      expect(service.detectStale(tmpDir)).toEqual([]);
+      for (const file of [DBML_GUIDE, LEGACY_GUIDE]) {
+        const original = read(tmpDir, file);
+        ageMarker(tmpDir, file, '34');
+        expect(service.harnessStatus(tmpDir).claude.schemaSkill, file).toBe('outdated');
+        expect(service.detectStale(tmpDir).map((t) => t.id), file).toEqual(['claude']);
+        // Update All: install every stale target.
+        for (const t of service.detectStale(tmpDir)) service.install(tmpDir, t, true);
+        expect(read(tmpDir, file), file).toBe(original);
+        fs.rmSync(path.join(tmpDir, file));
+        expect(service.harnessStatus(tmpDir).claude.schemaSkill, `${file} missing`).toBe('outdated');
+        service.install(tmpDir, CLAUDE, true);
+        expect(service.detectStale(tmpDir)).toEqual([]);
+      }
+    });
+
+    it('gives the single-file targets the whole guide inline', () => {
+      for (const id of ['copilot', 'gemini', 'codex'] as const) {
+        const content = service.generateContent(id);
+        expect(content, id).toContain('# ERD Studio — AI Data Modeling Guide');
+        expect(content, id).toContain('# ERD Studio — the DBML format');
+        expect(content, id).toContain('# ERD Studio — YAML and JSON files (projects before 2.0)');
+        // Inline, the parts name each other, not files the target never gets.
+        expect(content, id).not.toContain('`DBML.md`');
+        expect(content, id).not.toContain('`LEGACY.md`');
+        expect(content, id).toContain('the "DBML format" part of this guide');
+      }
+    });
+
+    it('tells assistants what to write from erd.storage, including an older CLI and no CLI', () => {
+      const skill = service.generateContent('claude');
+      for (const text of [
+        '**`dbml`, or no `.erd-studio/` folder yet** (a new project) → write DBML',
+        '**`yaml`** → write YAML tables and JSON diagrams',
+        '**`mixed`** (a project half-way to DBML)',
+        'a DBML diagram may list only DBML tables',
+        '**The doctor result has no `erd.storage` field**',
+        '**No CLI** (the command is not found, exit 127)',
+        '**Never convert files between the formats by hand**',
+        'A new project also needs `.erd-studio/layers.json`',
+      ]) {
+        expect(skill, text).toContain(text);
+      }
+      // The layers.json example is valid against its schema's required fields.
+      const block = /```json\n([\s\S]*?)```/.exec(skill.slice(skill.indexOf('A new project also needs')))![1];
+      const layers = JSON.parse(block) as { schemaVersion: number; layers: Array<Record<string, unknown>> };
+      expect(layers.schemaVersion).toBe(1);
+      for (const layer of layers.layers) {
+        expect(Object.keys(layer).sort()).toEqual(['abbreviation', 'color', 'creatable', 'id', 'label', 'order']);
+      }
+    });
+
+    it('states the DBML rules: quoting first, one Table per file, Refs and use lines, no Metadata blocks', () => {
+      const dbml = service.schemaSkillFiles().find(([name]) => name === 'DBML.md')![1];
+      const firstRule = dbml.indexOf('**First rule: quote every custom value');
+      expect(firstRule).toBeGreaterThan(0);
+      expect(firstRule).toBeLessThan(dbml.indexOf('**Exactly one `Table` per file**'));
+      for (const text of [
+        "`natural_key: 'true'`",
+        "`erd_schema_version: '7'`",
+        '**No `use`, no `Ref`, and no inline `[ref: …]` in a table file**',
+        '`_erd_no_columns unknown [erd_placeholder: \'true\'',
+        '**Never write a `Metadata` block**',
+        '`Ref: dim.pk ?- fct.fk`',
+        '**Name a Ref only to give it a role; the name is shown on the line.**',
+        '**One Ref per pair of column sets, in one file only.**',
+        'paths **relative to the diagram file**',
+        '**Omit it, or leave a table out of it, for auto layout**',
+        '**ERD Studio: Import DBML…**',
+      ]) {
+        expect(dbml, text).toContain(text);
+      }
+      // Every field name comes from core's one property table.
+      for (const name of ['role', 'grain', 'alias', 'schema', 'natural_key', 'scd_type', 'additive_type', 'foreign_key', 'meta_json', 'rationale_']) {
+        expect(dbml, name).toContain(`\`${name}`);
+      }
+    });
+
+    it('keeps the complete YAML/JSON rules in LEGACY.md and never tells anyone to convert by hand', () => {
+      const legacy = service.schemaSkillFiles().find(([name]) => name === 'LEGACY.md')![1];
+      for (const text of [
+        '## File naming: v5 or v6',
+        'Wrap every `description`, `grain`, `rationale` and `dataType` value in double quotes',
+        '### Model file location (layer folders)',
+        '### Where relationships live',
+        '**Composite foreign keys**',
+        'run ERD Studio: Convert Project to DBML',
+      ]) {
+        expect(legacy, text).toContain(text);
+      }
+    });
+
+    it('writes SYNC.md with DBML actions and keeps the YAML ones as legacy', () => {
+      const sync = service.schemaSkillFiles().find(([name]) => name === 'SYNC.md')![1];
+      expect(sync).toContain('`relationshipsPath`');
+      expect(sync).toContain('| Action | What to do (DBML) |');
+      expect(sync).toContain('**Legacy (a `.yml` table or `.json` diagram, projects from before 2.0):**');
+      expect(sync).toContain('| Action | What to do (YAML / JSON) |');
+    });
+
+    it('describes the skill as DBML first in every generator', () => {
+      const { fm } = parseSkill(service.generateContent('claude'));
+      expect(fm.description as string).toContain('DBML tables, relationships and diagrams (YAML/JSON for older');
+      expect(service.generateContent('copilot')).toContain('DBML tables, relationships and diagrams (YAML/JSON for older projects)');
+    });
+  });
+
+  describe("a newer marker (a teammate on a later ERD Studio) is 'newer', never replaced", () => {
+    const newer = String(Number(HARNESS_VERSION) + 1);
+
+    it('reports newer, not outdated, and never lists it as stale', () => {
+      service.install(tmpDir, CLAUDE, true);
+      service.install(tmpDir, AGENTS, true);
+      service.install(tmpDir, HARNESS_TARGETS.find((t) => t.id === 'copilot')!, true);
+      service.install(tmpDir, HARNESS_TARGETS.find((t) => t.id === 'codex')!, true);
+      for (const file of [SCHEMA_SKILL, SETUP_SKILL, AGENTS_SCHEMA_SKILL, '.github/instructions/erd-studio.instructions.md', 'AGENTS.md']) {
+        ageMarker(tmpDir, file, newer);
+      }
+      const status = service.harnessStatus(tmpDir);
+      expect(status.claude.schemaSkill).toBe('newer');
+      expect(status.claude.setupSkill).toBe('newer');
+      expect(status.agents.schemaSkill).toBe('newer');
+      expect(status.copilot).toBe('newer');
+      expect(status.codex).toBe('newer');
+      expect(service.detectStale(tmpDir)).toEqual([]);
+    });
+
+    it('Update All, the QuickPick and the Welcome panel never replace a newer file', () => {
+      service.install(tmpDir, CLAUDE, true);
+      service.install(tmpDir, HARNESS_TARGETS.find((t) => t.id === 'codex')!, true);
+      for (const file of [SCHEMA_SKILL, DBML_GUIDE, SETUP_SKILL, 'AGENTS.md']) ageMarker(tmpDir, file, newer);
+      const before = snapshot(tmpDir);
+      for (const t of HARNESS_TARGETS) service.install(tmpDir, t, true);
+      const after = snapshot(tmpDir);
+      for (const file of [SCHEMA_SKILL, DBML_GUIDE, SETUP_SKILL, 'AGENTS.md']) {
+        expect(after[file], file).toBe(before[file]);
+      }
+      // An older companion beside a newer SKILL.md is still put right.
+      expect(extractHarnessVersion(after[LEGACY_GUIDE])).toBe(HARNESS_VERSION);
+      const result = service.installRecommended(tmpDir, { replaceUnmanaged: false, assistants: ['claude'] });
+      expect(result.status).toBe('unchanged');
+      expect(snapshot(tmpDir)[SCHEMA_SKILL]).toBe(before[SCHEMA_SKILL]);
     });
   });
 });

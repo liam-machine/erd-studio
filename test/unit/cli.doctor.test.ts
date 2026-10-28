@@ -602,3 +602,240 @@ describe('doctor on native DBML storage (§7.1, S4)', () => {
     expect(r.erd.diagrams).toEqual([]);
   });
 });
+
+describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps and the helper files', () => {
+  /** A copy of the DBML fixture with `edits` applied (paths relative to its .erd-studio). */
+  function nativeWith(edits: Record<string, (text: string) => string | null>): string {
+    const root = copyFixture('dbml-native');
+    for (const [rel, edit] of Object.entries(edits)) {
+      const file = path.join(root, '.erd-studio', rel);
+      const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
+      const after = edit(before);
+      if (after === null) fs.rmSync(file);
+      else {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, after);
+      }
+    }
+    return root;
+  }
+  const doctor = (root: string): Promise<DoctorResult> =>
+    runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+  const replace = (from: string, to: string) => (text: string): string => {
+    expect(text, from).toContain(from);
+    return text.replace(from, to);
+  };
+  const ids = (r: DoctorResult): string[] => r.nextSteps.map((s) => s.id);
+  const problem = (r: DoctorResult, code: string | number) => r.erd.dbmlProblems.filter((p) => p.code === code);
+
+  it('a clean DBML project has no problems and is ready', async () => {
+    const r = await doctor(copyFixture('dbml-native'));
+    expect(r.erd.dbmlProblems).toEqual([]);
+    expect(ids(r)).toEqual(['ready']);
+  });
+
+  it('an unquoted value is an error with the parser code and the quote hint, raising fix-dbml-file', async () => {
+    const r = await doctor(nativeWith({ 'tables/dim_date.dbml': replace("role: 'conformed-dim'", 'role: conformed') }));
+    const [p] = problem(r, 3075);
+    expect(p).toMatchObject({ file: '.erd-studio/tables/dim_date.dbml', line: 2, severity: 'error' });
+    expect(p.message).toContain("Quote the value, as in grain: 'One row per order line'.");
+    expect(ids(r)[0]).toBe('fix-dbml-file');
+    expect(r.nextSteps[0].why).toContain('.erd-studio/tables/dim_date.dbml:2 (3075)');
+  });
+
+  it('an unquoted 11.0 number or boolean is a warning with the quoted form, and raises no next step', async () => {
+    const r = await doctor(nativeWith({ 'tables/gold/fct_order.dbml': replace("[natural_key: 'true']", '[natural_key: true]') }));
+    const [p] = problem(r, 'unquotedValue');
+    expect(p).toMatchObject({ file: '.erd-studio/tables/gold/fct_order.dbml', severity: 'warning' });
+    expect(p.message).toContain("natural_key: 'true'");
+    expect(ids(r)).toEqual(['ready']);
+  });
+
+  it('a Ref, use line or inline ref in a table file is an error naming the line to write instead', async () => {
+    const r = await doctor(nativeWith({ 'tables/gold/fct_order.dbml': replace("customer_key INT [foreign_key: 'true']", "customer_key INT [foreign_key: 'true', ref: > dim_customer.customer_key]") }));
+    const [p] = problem(r, 'inlineRefInTableFile');
+    expect(p.severity).toBe('error');
+    expect(p.message).toContain('Ref: fct_order.customer_key >? dim_customer.customer_key');
+    expect(ids(r)).toContain('fix-dbml-file');
+  });
+
+  it('a duplicate Enum across table files is a warning only', async () => {
+    const r = await doctor(nativeWith({ 'tables/gold/dim_region.dbml': (t) => `Enum order_status {\n  a\n}\n\n${t}` }));
+    expect(problem(r, 'duplicateEnum').map((p) => [p.file, p.severity])).toEqual([
+      ['.erd-studio/tables/gold/dim_region.dbml', 'warning'],
+      ['.erd-studio/tables/gold/fct_order.dbml', 'warning'],
+    ]);
+    expect(ids(r)).toEqual(['ready']);
+  });
+
+  it('the same Ref twice is an error (duplicateRef), and a missing use line is a warning giving the line', async () => {
+    const r = await doctor(nativeWith({
+      'tables/gold/_relationships.dbml': (t) => t
+        .replace("use { table dim_date } from '../dim_date.dbml'\n", '')
+        .replace('Ref: fct_order.customer_key >? dim_customer.customer_key', 'Ref: fct_order.customer_key >? dim_customer.customer_key\nRef: fct_order.customer_key >? dim_customer.customer_key'),
+    }));
+    expect(problem(r, 'duplicateRef')).toEqual([expect.objectContaining({ file: '.erd-studio/tables/gold/_relationships.dbml', severity: 'error' })]);
+    const [missing] = problem(r, 'missingUse');
+    expect(missing.severity).toBe('warning');
+    expect(missing.message).toContain("Add the line: use { table dim_date } from '../dim_date.dbml'");
+    expect(ids(r)).toContain('fix-dbml-file');
+  });
+
+  it('a misplaced, orphaned or dangling Ref is a warning', async () => {
+    const r = await doctor(nativeWith({
+      // dim_date (top level) owns a Ref placed in the gold file; a Ref from a table with no file; a Ref to a gone column.
+      'tables/gold/_relationships.dbml': (t) => `${t}Ref: dim_date.previous_date_key >? dim_date.date_key\n`,
+      'tables/_relationships.dbml': (t) => `${t}Ref: dim_date.date_key >? dim_date.no_such_column\n`,
+    }));
+    expect(problem(r, 'misplacedRef')).toEqual([expect.objectContaining({ severity: 'warning', file: '.erd-studio/tables/gold/_relationships.dbml' })]);
+    expect(problem(r, 'misplacedRef')[0].message).toContain('tables/_relationships.dbml');
+    expect(problem(r, 'danglingRef')).toEqual([expect.objectContaining({ severity: 'warning', file: '.erd-studio/tables/_relationships.dbml' })]);
+  });
+
+  it('a diagram use path that misses its table and a missing relationships use line are warnings with the corrected line', async () => {
+    const r = await doctor(nativeWith({
+      'silver/staging.dbml': (t) => t
+        .replace("use { table dim_date } from '../tables/dim_date.dbml'", "use { table dim_date } from '../tables/gold/dim_date.dbml'")
+        .replace("use * from '../tables/gold/_relationships.dbml'\n", ''),
+    }));
+    const [mismatch] = problem(r, 'usePathMismatch');
+    expect(mismatch).toMatchObject({ file: '.erd-studio/silver/staging.dbml', severity: 'warning' });
+    expect(mismatch.message).toContain("use { table dim_date } from '../tables/dim_date.dbml'");
+    const [rel] = problem(r, 'missingRelationshipsUse');
+    expect(rel.message).toContain("use * from '../tables/gold/_relationships.dbml'");
+  });
+
+  it('a table file whose name differs from its stem in case is a warning (nameCaseDrift)', async () => {
+    const r = await doctor(nativeWith({ 'tables/dim_date.dbml': replace('Table dim_date', 'Table Dim_Date') }));
+    expect(problem(r, 'nameCaseDrift')).toEqual([expect.objectContaining({ severity: 'warning', file: '.erd-studio/tables/dim_date.dbml' })]);
+  });
+
+  it('routes every conflicted DBML or layout file to resolve-merge-conflicts, never fix-dbml-file', async () => {
+    const conflict = (t: string): string => `<<<<<<< HEAD\n${t}=======\n${t}>>>>>>> other\n`;
+    const r = await doctor(nativeWith({ 'tables/gold/_relationships.dbml': conflict, 'gold/sales.dbdiagram': conflict, 'tables/dim_date.dbml': conflict }));
+    const conflicted = r.erd.dbmlProblems.filter((p) => p.mergeConflict);
+    expect(conflicted.map((p) => p.file).sort()).toEqual([
+      '.erd-studio/gold/sales.dbdiagram', '.erd-studio/tables/dim_date.dbml', '.erd-studio/tables/gold/_relationships.dbml',
+    ]);
+    expect(conflicted.every((p) => p.severity === 'error' && p.line === 1)).toBe(true);
+    expect(ids(r)[0]).toBe('resolve-merge-conflicts');
+    const step = r.nextSteps[0];
+    expect(step.why).toContain('.erd-studio/gold/sales.dbdiagram:1');
+    expect(step.why).toContain('.erd-studio/tables/dim_date.dbml:1');
+    // No parser error is reported for a conflicted file, so no fix-dbml-file for it.
+    expect(r.erd.dbmlProblems.filter((p) => !p.mergeConflict && conflicted.some((c) => c.file === p.file))).toEqual([]);
+    expect(ids(r)).not.toContain('fix-model-yaml');
+  });
+
+  it('a table or diagram in both formats raises resolve-format-conflicts', async () => {
+    const r = await doctor(nativeWith({
+      'tables/gold/dim_region.yml': () => 'name: dim_region\ncolumns:\n  - name: region_code\n    dataType: "VARCHAR"\n',
+      'gold/sales.json': () => JSON.stringify({ schemaVersion: 5, domain: 'sales', layer: 'gold', logical: { models: [], relationships: [] }, viewConfig: {} }),
+    }));
+    // A YAML source beside its converted DBML file is an unfinished conversion: finishing it settles them.
+    expect(ids(r)).toContain('finish-dbml-conversion');
+    expect(ids(r)).not.toContain('resolve-format-conflicts');
+    expect(problem(r, 'formatConflict').map((p) => p.severity)).toEqual(['error', 'error']);
+    expect(ids(r)).not.toContain('fix-dbml-file');
+  });
+
+  it('a diagram that declares its own Tables raises import-dbml-file, its own step per file', async () => {
+    const r = await doctor(nativeWith({ 'gold/pulled.dbml': () => 'Table a {\n  id int [pk]\n}\n' }));
+    expect(problem(r, 'declaresOwnTables')).toEqual([expect.objectContaining({ file: '.erd-studio/gold/pulled.dbml', severity: 'warning' })]);
+    const step = r.nextSteps.find((s) => s.id === 'import-dbml-file')!;
+    expect(step.why).toBe('Run ERD Studio: Import DBML… on .erd-studio/gold/pulled.dbml; it is a single-file DBML, not an ERD Studio diagram.');
+  });
+
+  it('a Table declared inside an ERD Studio diagram is a warning', async () => {
+    const r = await doctor(nativeWith({ 'silver/staging.dbml': (t) => `${t}\nTableGroup g {\n  fct_order\n}\n` }));
+    expect(problem(r, 'declaredInDiagram').map((p) => p.severity)).toEqual(['warning']);
+  });
+
+  it('tablesLayerConflict is an error and missingLayersConfig a warning', async () => {
+    const listed = await doctor(nativeWith({ 'layers.json': (t) => t.replace('"layers": [', '"layers": [\n    { "id": "tables", "label": "Tables", "abbreviation": "TBL", "color": "#a0a0a0", "creatable": true, "order": 0 },') }));
+    expect(problem(listed, 'tablesLayerConflict')).toEqual([expect.objectContaining({ severity: 'error', file: '.erd-studio/tables' })]);
+    expect(problem(listed, 'tablesLayerConflict')[0].message).toContain('Remove the `tables` layer from layers.json');
+    const missing = await doctor(nativeWith({ 'layers.json': () => null }));
+    expect(problem(missing, 'missingLayersConfig')).toEqual([expect.objectContaining({ severity: 'warning' })]);
+  });
+
+  it('a project path with a space is a warning (pathWithSpace)', async () => {
+    const root = path.join(tmp, 'My Projects', 'repo');
+    fs.mkdirSync(path.dirname(root), { recursive: true });
+    fs.cpSync(path.join(FIXTURES, 'dbml-native'), root, { recursive: true });
+    const r = await doctor(root);
+    const [p] = problem(r, 'pathWithSpace');
+    expect(p.severity).toBe('warning');
+    expect(p.message).toContain('DBML 10.x drops imported tables when a folder in the path has a space; 9.1 and 11+ do not. ERD Studio is not affected.');
+    expect(p.message).not.toContain(tmp);
+    expect(ids(r)).toEqual(['ready']);
+  });
+
+  it('a .dbml diagram in a YAML project is a warning', async () => {
+    const root = copyFixture('logical-only');
+    fs.writeFileSync(path.join(root, '.erd-studio', 'gold', 'extra.dbml'), "Project extra {\n  erd_schema_version: '7'\n}\n");
+    const r = await doctor(root);
+    expect(r.erd.storage).toBe('yaml');
+    expect(problem(r, 'dbmlDiagramInYamlProject')).toEqual([expect.objectContaining({ file: '.erd-studio/gold/extra.dbml', severity: 'warning' })]);
+  });
+
+  it('turn-round-relationships names the relationships file for a DBML table', async () => {
+    // fct_order.order_line_id is its whole key; pointing it at dim_customer's non-key column draws it backwards.
+    const r = await doctor(nativeWith({
+      'tables/gold/_relationships.dbml': (t) => `${t}Ref: fct_order.order_line_id >? dim_customer.segment\n`,
+    }));
+    const step = r.nextSteps.find((s) => s.id === 'turn-round-relationships');
+    expect(step?.why).toContain("in the relationships file of that column's table (tables/gold/_relationships.dbml)");
+  });
+
+  it('prints storage, DBML problems by severity and the newer-helper line in human output', async () => {
+    const root = nativeWith({ 'tables/dim_date.dbml': replace("role: 'conformed-dim'", 'role: conformed') });
+    let out = '';
+    await main(['doctor', '--project', root, '--no-dbt'], { stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: tmp, env: cleanEnv });
+    expect(out).toContain('storage DBML');
+    expect(out).toContain('.erd-studio/tables/dim_date.dbml line 2:');
+    expect(out).toContain('(3075)');
+  });
+
+  describe('update-harness covers every helper target, and a newer marker is never offered', () => {
+    const OLD = '<!-- erd-studio-harness: 1 -->';
+    const NEWER = `<!-- erd-studio-harness: ${Number(HARNESS_VERSION) + 1} -->`;
+    for (const [label, rel, text] of [
+      ['.agents', '.agents/skills/erd-studio/SKILL.md', `---\nname: erd-studio\n---\n${OLD}\n`],
+      ['Copilot', '.github/instructions/erd-studio.instructions.md', `x\n${OLD}\n`],
+      ['Gemini', '.gemini/styleguide.md', `x\n${OLD}\n`],
+      ['AGENTS.md', 'AGENTS.md', `<!-- BEGIN erd-studio-harness -->\n## ERD Studio Domain Files\n${OLD}\n<!-- END erd-studio-harness -->\n`],
+    ] as const) {
+      it(`raises update-harness for an outdated ${label} target alone`, async () => {
+        for (const fixture of ['dbml-native', 'logical-only']) {
+          const root = copyFixture(fixture);
+          fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+          fs.writeFileSync(path.join(root, rel), text);
+          const r = await doctor(root);
+          const step = r.nextSteps.find((s) => s.id === 'update-harness');
+          expect(step, `${label} ${fixture}`).toBeDefined();
+          expect(r.harness.outdated.length).toBe(1);
+          expect(step!.why).toContain(r.harness.outdated[0]);
+          // In a DBML project, an old helper would write YAML into it.
+          expect(step!.why.includes('An AI helper from before 2.0 writes YAML into this DBML project.'), fixture).toBe(fixture === 'dbml-native');
+          fs.rmSync(root, { recursive: true, force: true });
+        }
+      });
+    }
+
+    it("reports a newer marker as 'newer', never as update-harness", async () => {
+      const root = copyFixture('dbml-native');
+      fs.mkdirSync(path.join(root, '.claude/skills/erd-studio'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.claude/skills/erd-studio/SKILL.md'), `x\n${NEWER}\n`);
+      fs.writeFileSync(path.join(root, 'AGENTS.md'), `<!-- BEGIN erd-studio-harness -->\n## ERD Studio Domain Files\n${NEWER}\n<!-- END erd-studio-harness -->\n`);
+      const r = await doctor(root);
+      expect(r.harness.schemaSkill).toBe('newer');
+      expect(r.harness.newer).toEqual(['.claude/skills (Claude Code)', 'AGENTS.md (Codex)']);
+      expect(r.harness.outdated).toEqual([]);
+      expect(ids(r)).not.toContain('update-harness');
+      let out = '';
+      await main(['doctor', '--project', root, '--no-dbt'], { stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: tmp, env: cleanEnv });
+      expect(out).toContain('Update ERD Studio: these helper files are from a newer version: .claude/skills (Claude Code), AGENTS.md (Codex)');
+    });
+  });
+});

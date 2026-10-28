@@ -305,7 +305,9 @@ export function deriveAiHelperState(
 ): AiHelperState {
   const folders = recommendedSkillTargets(assistants).map((t) => harness[t]);
   if (folders.some((f) => f.schemaSkill === 'unmanaged' || f.setupSkill === 'unmanaged')) { return 'unmanaged'; }
-  if (folders.every((f) => f.schemaSkill === 'current' && f.setupSkill === 'current') && cli === 'ready') { return 'ready'; }
+  // A newer marker (a teammate on a later ERD Studio) is never replaced, so it counts as set up.
+  const upToDate = (state: FileState): boolean => state === 'current' || state === 'newer';
+  if (folders.every((f) => upToDate(f.schemaSkill) && upToDate(f.setupSkill)) && cli === 'ready') { return 'ready'; }
   // Never set up: no setup skill anywhere and no helper tool (the schema skill alone is the old harness).
   if (harness.claude.setupSkill === 'missing' && harness.agents.setupSkill === 'missing' && cli === 'missing') {
     return 'missing';

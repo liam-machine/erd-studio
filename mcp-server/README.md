@@ -62,9 +62,9 @@ All tools take a `project_path` argument: the **absolute path** to the dbt proje
 
 | Tool | Returns |
 |---|---|
-| `list_domains` | All ERDs grouped by layer. Filter optional by `layer`. |
-| `read_domain` | Full domain: models + columns + relationships + cardinality + rationale. |
-| `list_models` | All logical model definitions from `.erd-studio/logical-models/*.yml`. |
+| `list_domains` | All ERDs grouped by layer, each with its `file_format` (`dbml`, or `json` before 2.0). Filter optional by `layer`. |
+| `read_domain` | Full domain: models + columns + relationships + cardinality + rationale. `domain` is the diagram's file name without `.dbml` or `.json`. |
+| `list_models` | All logical model definitions: the `.dbml` table files in `.erd-studio/tables/` (or older `.yml` files), each with its `file_format`. |
 | `read_model` | Single logical model with column-level metadata, grain, SCD types, rationale. |
 | `list_manifest_models` | Models from `target/manifest.json` (what dbt actually built), with unique/relationship test coverage. Filter optional by `name_contains`. |
 | `get_editor_setup` | Returns install instructions for the ERD Studio VS Code extension. Use this when the user wants to edit, design, or build (this MCP server is read-only). |
@@ -73,7 +73,7 @@ All tools are read-only. If the project hasn't been initialized with a `.erd-stu
 
 ## What the AI gets
 
-Unlike most ERD tools where the model is locked behind a vendor UI, ERD Studio stores the semantic model as **plain YAML + JSON in your dbt repo**. This MCP server exposes that model structurally:
+Unlike most ERD tools where the model is locked behind a vendor UI, ERD Studio stores the semantic model in your repo as **DBML**, an open format that other DBML tools read too (one file per table, plus relationships and diagrams), with **YAML + JSON** for projects from before ERD Studio 2.0. This MCP server exposes that model structurally, in either format:
 
 - **Grain** as a first-class field — *"one row per customer (current + history)"*
 - **Model role** — `conformed-dim`, `transaction-fact`, `bridge`, etc.

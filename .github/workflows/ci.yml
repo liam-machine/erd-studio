@@ -32,6 +32,13 @@ jobs:
         run: |
           node dist/cli.js doctor --project test/fixtures/dbt-project --json --no-dbt > /dev/null
           rc=0; node dist/cli.js diff --project test/fixtures/dbt-project --all --json > /dev/null || rc=$?; test "$rc" -le 1
+          node dist/cli.js doctor --project test/fixtures/dbml-native --json > /dev/null
+          node dist/cli.js export --project test/fixtures/dbml-native --all --format dbml > /dev/null
+      # Native DBML storage end to end: Convert the dbt-project fixture, then
+      # doctor / diff / export and every diagram's display agree before and
+      # after, and every written .dbml compiles in DBML 9.1.1, 10.3.1 and 11.0.0.
+      # Uses the build above (no second build).
+      - run: npm run test:e2e:dbml -- --no-build
       # The extension builds the workspace packages from source; this checks
       # their own publishable builds (esbuild + declarations) still succeed.
       - run: npm run build:packages

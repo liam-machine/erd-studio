@@ -217,6 +217,12 @@ describe('package.json schema contributions', () => {
     ['project/.erd-studio/logical-models/a/b/too_deep.yml', undefined],
     ['project/models/schema.yml', undefined],
     ['project/.vscode/settings.json', undefined],
+    // Native DBML storage (§7.5): .dbml and .dbdiagram files have no JSON Schema.
+    ['project/.erd-studio/tables/dim_customer.dbml', undefined],
+    ['project/.erd-studio/tables/gold/fct_order.dbml', undefined],
+    ['project/.erd-studio/tables/gold/_relationships.dbml', undefined],
+    ['project/.erd-studio/gold/sales.dbml', undefined],
+    ['project/.erd-studio/gold/sales.dbdiagram', undefined],
   ])('%s → %s', (file, expected) => {
     expect(schemaFor(file)).toBe(expected);
   });
@@ -232,7 +238,8 @@ function listFiles(dir: string): string[] {
   );
 }
 
-const fixtureFiles = listFiles(FIXTURE_DIR).map((abs) => ({
+// `.dbml` and `.dbdiagram` files have no schema (§7.5): the walk skips them.
+const fixtureFiles = listFiles(FIXTURE_DIR).filter((abs) => !/\.(dbml|dbdiagram)$/i.test(abs)).map((abs) => ({
   rel: `dbt-project/.erd-studio/${path.relative(FIXTURE_DIR, abs).split(path.sep).join('/')}`,
   abs,
 }));

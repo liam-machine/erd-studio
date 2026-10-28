@@ -8,10 +8,11 @@
  * State of one harness file on disk.
  * - `missing`   — not installed.
  * - `current`   — carries this build's `HARNESS_VERSION` marker.
- * - `outdated`  — carries an older (or newer) marker; an update replaces it.
+ * - `outdated`  — carries an older marker; an update replaces it.
+ * - `newer`     — carries a newer marker (a teammate on a later ERD Studio): never replaced; update ERD Studio instead.
  * - `unmanaged` — exists with no marker: the user's own file, only replaced on explicit confirmation.
  */
-export type FileState = 'missing' | 'current' | 'outdated' | 'unmanaged';
+export type FileState = 'missing' | 'current' | 'outdated' | 'newer' | 'unmanaged';
 
 export interface HarnessStatus {
   claude: {

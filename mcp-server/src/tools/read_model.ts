@@ -16,7 +16,7 @@ export const read_model = {
         .describe('Absolute path to the dbt project root, or a folder holding .erd-studio/ with no dbt project.'),
       model_name: z
         .string()
-        .describe('Logical model name (filename without .yml; the file may be at the top of logical-models/ or tables/, or in a layer folder).'),
+        .describe('Logical model name (file name without its extension: a .dbml table file in tables/, or an older .yml; at the top of the library or in a layer folder).'),
     },
     annotations: {
       readOnlyHint: true,

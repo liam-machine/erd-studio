@@ -2,7 +2,9 @@
 
 This is the reference for metadata: the extra facts a team records about a table or a column,
 such as who owns it, which system it comes from, or whether it holds personal data. dbt keeps them
-under `meta:`; ERD Studio keeps them in the same shape in each logical model file, and shows them
+under `meta:`; ERD Studio keeps them in each logical table file (a `.dbml` table as `meta_<key>`
+settings, with anything that is not text in one `meta_json`; a `.yml` table as a `meta:` map, in
+the same shape as dbt's), and shows them
 in the Detail panel and when you hover a table's name or a column on the canvas.
 
 The aim: detect what dbt already records, confirm it with **one** yes, save the agreed keys as the
@@ -123,10 +125,13 @@ Take them from `inventory --models` for the models you are writing (`models[].me
 `columns[].meta`) — only the keys on the list whose source is `dbt`, each on the model or column
 where dbt has it.
 
-- **Exact values.** `true` / `false` stay unquoted and a list stays a list. Numbers arrive as
-  text (`"24"`); write them quoted or not — ERD Studio reads `24` and `"24"` the same — but keep
-  the quotes when leaving them off would change the digits (`"1.10"`, `"007"`). Nothing is
-  reworded, merged or summarised.
+- **Exact values.** In a DBML table, a text value is `meta_<key>: '<text>'` and every other
+  value (`true` / `false`, a number, a list, a map) goes into the one `meta_json` setting as JSON
+  (`meta_json: '{"pii":true,"tags":["finance"]}'`), merged with what is already there. In a YAML
+  table, `true` / `false` stay unquoted and a list stays a list; numbers arrive as text (`"24"`);
+  write them quoted or not — ERD Studio reads `24` and `"24"` the same — but keep the quotes when
+  leaving them off would change the digits (`"1.10"`, `"007"`). Nothing is reworded, merged or
+  summarised.
 - **No value in dbt, no key.** A key dbt has as empty (`null`) counts as no value. Never guess one
   and never write an empty placeholder.
 - **Models written this session** get the values as you write them.

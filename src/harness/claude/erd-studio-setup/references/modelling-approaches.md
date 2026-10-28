@@ -43,8 +43,11 @@ the rule list says exactly that.
 ## 2. What you may set — and what you must not change
 
 The approach is applied only through **design fields that the ERD Studio diff does not compare**,
-so applying it can never create drift. All of these live in `logical-models/<name>.yml`, and the
-ERD Studio schema skill defines their format:
+so applying it can never create drift. All of these live in the table's file — a `.dbml` table
+file (`tables/<name>.dbml`), or a `.yml` (`logical-models/<name>.yml`) in a project from before
+2.0 — and the ERD Studio schema skill defines their format. The names below are the YAML ones; in
+DBML they are `role`, `grain`, `rationale_<field>` (`rationale_role_choice`, …), `scd_type`,
+`additive_type` and `natural_key`, every value quoted (`scd_type: '2'`, `natural_key: 'true'`):
 
 | Field | Level | Valid values | Use it for |
 |---|---|---|---|

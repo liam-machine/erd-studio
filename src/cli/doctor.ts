@@ -15,7 +15,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { FileState } from '../types/harness';
+import type { FileState, HarnessStatus } from '../types/harness';
 import { redactPaths } from '../types/feedback';
 import { detectSubjectAreaFormat, mixesTableNaming, usesTableLibrary } from '../types/semantic';
 import type { ProjectNaming } from '../types/semantic';
@@ -62,11 +62,12 @@ import {
   type Envelope,
 } from './context';
 import { toUnreadableTableFile, unreadableHint, type UnreadableTableFile } from './diff';
+import { collectDbmlProblems, FORMAT_CONFLICT_CODE, type DbmlProblemEntry } from './dbmlProblems';
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
   | 'resolve-merge-conflicts' | 'fix-model-yaml' | 'resolve-naming-conflicts' | 'fix-subject-area-naming' | 'migrate-v5' | 'turn-round-relationships' | 'update-harness'
-  | 'finish-dbml-conversion' | 'ready';
+  | 'finish-dbml-conversion' | 'fix-dbml-file' | 'resolve-format-conflicts' | 'import-dbml-file' | 'ready';
 
 export interface NextStep {
   id: NextStepId;
@@ -138,6 +139,14 @@ export interface DoctorResult extends Envelope {
     storage: ProjectStorage;
     /** Every diagram, project-relative, with its file format (`json` or `dbml`, by the classifier). */
     diagrams: Array<{ file: string; format: 'json' | 'dbml' }>;
+    /**
+     * Every problem in the project's `.dbml` and `.dbdiagram` files (§7.1),
+     * each with a fixed severity. Errors raise `fix-dbml-file` (or, with
+     * `mergeConflict`, `resolve-merge-conflicts`; a table or diagram in both
+     * formats, `resolve-format-conflicts`); warnings never raise a next step.
+     * Where a line is missing or wrong, the message gives the exact line.
+     */
+    dbmlProblems: DbmlProblemEntry[];
     /**
      * What "ERD Studio: Migrate to the New File Naming" would change (#182),
      * when the project is not already v6. The CLI only describes it: the
@@ -211,7 +220,16 @@ export interface DoctorResult extends Envelope {
      */
     backwardsRelationships: BackwardsRelationship[];
   };
-  harness: { schemaSkill: FileState; setupSkill: FileState; version: string };
+  harness: {
+    /** The Claude schema skill (`.claude/skills/erd-studio/`, folding in its companions). */
+    schemaSkill: FileState;
+    setupSkill: FileState;
+    version: string;
+    /** Every helper target whose files carry an older marker (Claude, `.agents`, Copilot, Gemini, `AGENTS.md`): `update-harness`. */
+    outdated: string[];
+    /** Every helper target whose files come from a newer ERD Studio (a teammate's): update ERD Studio, never these files. */
+    newer: string[];
+  };
   nextSteps: NextStep[];
 }
 
@@ -278,6 +296,28 @@ export function runtimeInfo(): DoctorResult['runtime'] {
     : { kind: 'node', version: process.versions.node };
 }
 
+/**
+ * doctor's harness block: the Claude skill states as before, plus every
+ * target whose files are older (`update-harness`) or newer (a teammate on a
+ * later ERD Studio: never replaced) than this build's.
+ */
+export function harnessSummary(status: HarnessStatus): DoctorResult['harness'] {
+  const targets: Array<[string, FileState[]]> = [
+    ['.claude/skills (Claude Code)', [status.claude.schemaSkill, status.claude.setupSkill]],
+    ['.agents/skills (Copilot, Codex, Gemini CLI, Cursor)', [status.agents.schemaSkill, status.agents.setupSkill]],
+    ['.github/instructions/erd-studio.instructions.md (GitHub Copilot)', [status.copilot]],
+    ['.gemini/styleguide.md (Gemini)', [status.gemini]],
+    ['AGENTS.md (Codex)', [status.codex]],
+  ];
+  return {
+    schemaSkill: status.claude.schemaSkill,
+    setupSkill: status.claude.setupSkill,
+    version: HARNESS_VERSION,
+    outdated: targets.filter(([, states]) => states.includes('outdated')).map(([name]) => name),
+    newer: targets.filter(([, states]) => states.includes('newer')).map(([name]) => name),
+  };
+}
+
 /** Folder of a venv executable (`<venv>/bin/dbt`, `<venv>\Scripts\dbt.exe`), project-relative. */
 function venvDirOf(candidate: DbtCandidate, root: string): string | null {
   if (candidate.source !== 'venv') { return null; }
@@ -300,6 +340,25 @@ async function probe(
   const candidates = opts.trustVenv ? all : all.filter((c) => !isUntrustedProjectExecutable(c));
   const run = opts.runVersion ?? undefined;
   return { result: await probeDbt(candidates, run), checked: true, untrusted };
+}
+
+/**
+ * Where `turn-round-relationships` says to rewrite a backwards relationship:
+ * the relationships file of that column's table when it is DBML, its own
+ * file when it is YAML (undefined keeps the YAML wording). The rewritten
+ * relationship starts at the column that is not a key, the stored `toModel`.
+ */
+function backwardsHomeOf(ctx: CliContext, erd: DoctorResult['erd']): string | undefined {
+  const homes = new Set<string>();
+  let yaml = false;
+  for (const b of erd.backwardsRelationships) {
+    const file = ctx.tableLibraryService.relationshipsFileFor(b.toModel);
+    if (file === undefined) { yaml = true; continue; }
+    homes.add(ctx.tableLibraryService.libraryRelativePath(file));
+  }
+  if (homes.size === 0) return undefined;
+  const list = [...homes].sort().join(', ');
+  return `in the relationships file of that column's table (${list})${yaml ? ", or in that column's table file for a YAML table" : ''}`;
 }
 
 /** The naming migration's plan (#182), as doctor reports it. */
@@ -376,7 +435,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     return {
       semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
       conflictedDomainFiles: [], dataTypeAliasFiles: [], backwardsRelationships: [],
-      naming: 'v6', storage: 'dbml', diagrams: [], tablesFolderIsLayer: false, namingConflicts: [],
+      naming: 'v6', storage: 'dbml', diagrams: [], dbmlProblems: [], tablesFolderIsLayer: false, namingConflicts: [],
     };
   }
   const domains = ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir);
@@ -428,6 +487,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     naming,
     storage,
     diagrams: domains.map((d) => ({ file: relPath(ctx.root, d.filePath), format: d.storage ?? 'json' })),
+    dbmlProblems: collectDbmlProblems(ctx, storage),
     // The YAML naming migration is offered only to a YAML project (§6.5).
     ...(naming === 'v6' || storage !== 'yaml' ? {} : { namingMigration: namingMigrationPreview(ctx) }),
     tablesFolderIsLayer: fs.existsSync(path.join(semanticRoot, TABLES_DIR)) && tablesDirIsLayer(semanticRoot),
@@ -484,7 +544,16 @@ function backwardsRelationshipsOf(ctx: CliContext, domainFiles: string[]): Backw
   return [...byLink.values()];
 }
 
-function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boolean; installPath: string; invocation: string | null; unfinishedDbmlConversion?: boolean }): NextStep[] {
+interface NextStepDeps {
+  needsDeps: boolean;
+  installPath: string;
+  invocation: string | null;
+  unfinishedDbmlConversion?: boolean;
+  /** Where a backwards relationship is rewritten, when its table is DBML (`in the relationships file of …`). */
+  backwardsHome?: string;
+}
+
+function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): NextStep[] {
   const steps: NextStep[] = [];
   const { dbt, profiles, artifacts } = r;
   // Logical-only: no dbt step at all — never tell someone without dbt to install it.
@@ -503,14 +572,24 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
   // diagram cannot load whatever state dbt is in, and only the user can say
   // which side to keep — an assistant working down this list must raise it
   // before it installs dbt or runs anything against the warehouse.
-  if (r.erd.conflictedDomainFiles.length > 0) {
-    const n = r.erd.conflictedDomainFiles.length;
+  // Every conflicted DBML or layout file (table, relationships, diagram,
+  // .dbdiagram) joins the conflicted diagrams here, never fix-dbml-file.
+  const conflictedFiles = [...r.erd.conflictedDomainFiles];
+  for (const p of r.erd.dbmlProblems) {
+    if (p.mergeConflict && p.line !== undefined && !conflictedFiles.some((c) => c.file === p.file)) {
+      conflictedFiles.push({ file: p.file, line: p.line });
+    }
+  }
+  if (conflictedFiles.length > 0) {
+    const n = conflictedFiles.length;
+    const onlyDiagrams = conflictedFiles.every((c) => r.erd.conflictedDomainFiles.includes(c));
+    const noun = onlyDiagrams ? 'diagram' : 'file';
     steps.push({
       id: 'resolve-merge-conflicts',
-      title: `Resolve the git merge conflict${n === 1 ? ' in a diagram' : `s in ${n} diagrams`}`,
-      why: `${r.erd.conflictedDomainFiles.map((c) => `${c.file}:${c.line}`).join('; ')}. `
+      title: `Resolve the git merge conflict${n === 1 ? ` in a ${noun}` : `s in ${n} ${noun}s`}`,
+      why: `${conflictedFiles.map((c) => `${c.file}:${c.line}`).join('; ')}. `
         + `${n === 1 ? 'This file still holds' : 'Each of these files still holds'} git conflict markers `
-        + '(<<<<<<< … ======= … >>>>>>>), so the diagram cannot load. '
+        + `(<<<<<<< … ======= … >>>>>>>), so ${onlyDiagrams ? 'the diagram cannot load' : 'ERD Studio cannot read it'}. `
         + `Show the user ${n === 1 ? 'the file and line' : 'each file and line'}: git left two versions there. `
         + 'If only positions differ, tell them either side is safe to keep; otherwise ask the user which side to keep. '
         + "Don't pick a side or run git commands yourself; "
@@ -521,19 +600,34 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
   // A model file that does not parse renders as an empty model whatever
   // state dbt is in, so it comes before the dbt steps too — as the step's
   // own why says, it is to be fixed before anything else.
-  if (r.erd.unreadableModelFiles.length > 0) {
-    const list = r.erd.unreadableModelFiles.map((u) =>
+  // DBML table files are fix-dbml-file's (or, conflicted, resolve-merge-conflicts').
+  const unreadableYaml = r.erd.unreadableModelFiles.filter((u) => !u.file.toLowerCase().endsWith('.dbml'));
+  if (unreadableYaml.length > 0) {
+    const list = unreadableYaml.map((u) =>
       `${u.file}${u.line !== undefined ? `:${u.line}` : ''}${u.code ? ` (${u.code})` : ''} — ${unreadableHint(u)}`);
     steps.push({
       id: 'fix-model-yaml',
-      title: `Fix ${r.erd.unreadableModelFiles.length === 1 ? 'a table file that does' : `${r.erd.unreadableModelFiles.length} table files that do`} not parse`,
+      title: `Fix ${unreadableYaml.length === 1 ? 'a table file that does' : `${unreadableYaml.length} table files that do`} not parse`,
       why: `${list.join('; ')}. `
-        + (r.erd.unreadableModelFiles.every((u) => u.readable)
+        + (unreadableYaml.every((u) => u.readable)
           ? 'ERD Studio loads these with the last copy of each repeated key but will not change the files until one copy is removed; fix them before anything else.'
           : 'ERD Studio shows these tables as empty until they parse; fix them before anything else.')
-        + (r.erd.unreadableModelFiles.some((u) => u.mergeConflict)
+        + (unreadableYaml.some((u) => u.mergeConflict)
           ? " A merge conflict is the user's to resolve; once they have saved the file, re-run doctor."
           : ''),
+      command: null,
+    });
+  }
+  // A DBML file that does not parse, or breaks every other DBML tool: like a
+  // YAML file that does not parse, it is fixed before anything else.
+  const dbmlErrors = r.erd.dbmlProblems.filter((p) => p.severity === 'error' && !p.mergeConflict && p.code !== FORMAT_CONFLICT_CODE);
+  if (dbmlErrors.length > 0) {
+    const files = new Set(dbmlErrors.map((p) => p.file));
+    steps.push({
+      id: 'fix-dbml-file',
+      title: `Fix ${files.size === 1 ? 'a DBML file' : `${files.size} DBML files`} that ERD Studio or other DBML tools cannot read`,
+      why: `${dbmlErrors.map((p) => `${p.file}${p.line !== undefined ? `:${p.line}` : ''} (${p.code}) — ${p.message}`).join('; ')}. `
+        + 'Fix these lines before anything else (a value to quote is the usual one), then re-run doctor.',
       command: null,
     });
   }
@@ -543,7 +637,9 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
   // for it is no conflict to settle by hand: finishing the conversion does it.
   const resumed = r.erd.dbmlConversion?.resumed ?? [];
   const isResumed = (file: string): boolean => resumed.some((p) => file.endsWith(`/${p}`));
-  const namingConflicts = r.erd.namingConflicts.filter((c) => !isResumed(c.kept) && !isResumed(c.ignored));
+  // A YAML file beside a DBML one of the same name is a format conflict (below), not a naming one.
+  const sameFormat = (c: { kept: string; ignored: string }): boolean => c.kept.toLowerCase().endsWith('.dbml') === c.ignored.toLowerCase().endsWith('.dbml');
+  const namingConflicts = r.erd.namingConflicts.filter((c) => sameFormat(c) && !isResumed(c.kept) && !isResumed(c.ignored));
   if (namingConflicts.length > 0) {
     const n = namingConflicts.length;
     steps.push({
@@ -552,6 +648,20 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       why: `${namingConflicts.map((c) => `${c.name}: ${c.kept} is used, ${c.ignored} is ignored`).join('; ')}. `
         + 'The project is half-way between the old (logical-models/) and new (tables/) file naming. Show the user both files '
         + "and ask which to keep; don't delete either yourself.",
+      command: null,
+    });
+  }
+  // The same table or diagram in both formats: only one is read, and which is
+  // right is the user's call. While a conversion is unfinished, finishing it
+  // settles a source beside its converted file, so nothing is raised here.
+  const formatConflicts = deps.unfinishedDbmlConversion ? [] : r.erd.dbmlProblems.filter((p) => p.code === FORMAT_CONFLICT_CODE);
+  if (formatConflicts.length > 0) {
+    const n = formatConflicts.length;
+    steps.push({
+      id: 'resolve-format-conflicts',
+      title: `Keep one file for ${n === 1 ? 'a table or diagram' : `${n} tables or diagrams`} found as both YAML/JSON and DBML`,
+      why: `${formatConflicts.map((p) => p.message).join(' ')} `
+        + 'Never convert or delete one by hand to settle it; once the user has chosen, re-run doctor.',
       command: null,
     });
   }
@@ -643,6 +753,14 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: null,
     });
   }
+  for (const p of r.erd.dbmlProblems.filter((q) => q.code === 'declaresOwnTables')) {
+    steps.push({
+      id: 'import-dbml-file',
+      title: `Import ${p.file.split('/').pop()}`,
+      why: `Run ERD Studio: Import DBML… on ${p.file}; it is a single-file DBML, not an ERD Studio diagram.`,
+      command: null,
+    });
+  }
   const backwards = r.erd.backwardsRelationships.length;
   if (backwards > 0) {
     steps.push({
@@ -650,16 +768,20 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       title: 'Turn round relationships drawn backwards',
       why: `${backwards === 1 ? '1 relationship looks' : `${backwards} relationships look`} drawn backwards: ${backwards === 1 ? 'it starts' : 'each starts'} at a table's key `
         + 'and points at a column that is not the other table\'s key. Turn it round on the canvas (the ⚠ on the line → Turn round), '
-        + 'or rewrite it as a many-to-one from the column that is not a key to the key, in that column\'s table file. '
+        + `or rewrite it as a many-to-one from the column that is not a key to the key, ${deps.backwardsHome ?? "in that column's table file"}. `
         + 'Leave one that was drawn this way on purpose.',
       command: null,
     });
   }
-  if (r.harness.schemaSkill === 'outdated' || r.harness.setupSkill === 'outdated') {
+  // Any helper target with an older marker, in every project; a newer one
+  // (a teammate on a later ERD Studio) is never offered for replacement.
+  if (r.harness.outdated.length > 0) {
     steps.push({
       id: 'update-harness',
-      title: 'Update the ERD Studio skills',
-      why: 'The installed Claude skill files come from an older ERD Studio; run "ERD Studio: Set Up My AI Helper" in VS Code.',
+      title: 'Update the ERD Studio AI helper files',
+      why: `The installed AI helper files come from an older ERD Studio: ${r.harness.outdated.join(', ')}. `
+        + 'Run "ERD Studio: Set Up My AI Helper" in VS Code (or Update All when it offers).'
+        + (r.erd.storage !== 'yaml' ? ' An AI helper from before 2.0 writes YAML into this DBML project.' : ''),
       command: null,
     });
   }
@@ -701,9 +823,9 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       erd: {
         semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
         conflictedDomainFiles: [], dataTypeAliasFiles: [], backwardsRelationships: [],
-        naming: 'v6', storage: 'dbml', diagrams: [], tablesFolderIsLayer: false, namingConflicts: [],
+        naming: 'v6', storage: 'dbml', diagrams: [], dbmlProblems: [], tablesFolderIsLayer: false, namingConflicts: [],
       },
-      harness: { schemaSkill: 'missing', setupSkill: 'missing', version: harnessVersion },
+      harness: { schemaSkill: 'missing', setupSkill: 'missing', version: harnessVersion, outdated: [], newer: [] },
     };
     return { ...base, nextSteps: [] };
   }
@@ -775,13 +897,13 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       modelsDiscovered: discovered.size,
     },
     erd: conversion.erd,
-    harness: { schemaSkill: harness.claude.schemaSkill, setupSkill: harness.claude.setupSkill, version: harnessVersion },
+    harness: harnessSummary(harness),
   };
 
   const deps = detectDepsStatus(root, identity.packagesInstallPath);
   return {
     ...base,
-    nextSteps: nextStepsFor(base, { needsDeps: deps.needsDeps, installPath: deps.installPath, invocation, unfinishedDbmlConversion: conversion.unfinished }),
+    nextSteps: nextStepsFor(base, { needsDeps: deps.needsDeps, installPath: deps.installPath, invocation, unfinishedDbmlConversion: conversion.unfinished, backwardsHome: backwardsHomeOf(ctx, base.erd) }),
   };
 }
 
@@ -811,7 +933,7 @@ async function logicalOnlyDoctor(ctx: CliContext, opts: DoctorOptions): Promise<
     },
     projectFiles: { schemaYmlFiles: 0, sourceFiles: 0, modelsDiscovered: 0 },
     erd: conversion.erd,
-    harness: { schemaSkill: harness.claude.schemaSkill, setupSkill: harness.claude.setupSkill, version: HARNESS_VERSION },
+    harness: harnessSummary(harness),
   };
-  return { ...base, nextSteps: nextStepsFor(base, { needsDeps: false, installPath: '', invocation: null, unfinishedDbmlConversion: conversion.unfinished }) };
+  return { ...base, nextSteps: nextStepsFor(base, { needsDeps: false, installPath: '', invocation: null, unfinishedDbmlConversion: conversion.unfinished, backwardsHome: backwardsHomeOf(ctx, base.erd) }) };
 }
