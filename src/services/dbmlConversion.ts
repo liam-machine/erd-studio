@@ -639,15 +639,35 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
   /** Relationships files an earlier, half-applied run wrote: they hold what this run would write there (§6.1 step 7). */
   const resumedRelationships = new Set<string>();
   const pool: PoolEntry[] = [];
+  /** Refs a relationships file holds for a table still in YAML: replaced by the YAML file's list. */
+  const replacedRefs: Array<{ rel: Relationship; table: LibraryTable }> = [];
   for (const t of library.values()) {
     if (t.converted) {
       (t.model.relationships ?? []).forEach((entry, index) => {
         pool.push({ rel: { ...entry, fromModel: t.name } as Relationship, file: t.converted!.source, index, source: 'yaml' });
       });
+      // A table still in YAML keeps its relationships in its own file: that list is what ERD Studio
+      // draws, and a Ref a relationships file holds for it is never drawn (attachRelationships orphans
+      // it). Such Refs are an earlier, half-applied run's output (or written by hand against D20), so
+      // the YAML list replaces them; one the YAML file no longer has is named, not silently dropped.
+      const stale = attachment.byOwner.get(lower(t.name)) ?? [];
+      if (stale.length > 0) resumedRelationships.add(relationshipsFileOfFolder(t.folder));
+      for (const entry of stale) replacedRefs.push({ rel: { ...entry, fromModel: t.name } as Relationship, table: t });
+      continue;
     }
     (attachment.byOwner.get(lower(t.name)) ?? []).forEach((entry, index) => {
       pool.push({ rel: { ...entry, fromModel: t.name } as Relationship, file: relationshipsFileOfFolder(t.folder), index: 1000 + index, source: 'dbml' });
     });
+  }
+  {
+    const yamlLinks = new Set(pool.filter((e) => e.source === 'yaml').map((e) => linkKey(e.rel)));
+    for (const { rel, table } of replacedRefs) {
+      if (yamlLinks.has(linkKey(rel))) continue;
+      notes.push(
+        `${relationshipsFileOfFolder(table.folder)}: the Ref ${describeEnds(rel.fromModel, [rel.fromColumn], rel.toModel, [rel.toColumn])} belongs to ${table.name}, ` +
+          `which is still a YAML table (${table.converted!.source}), so ERD Studio never drew it; ${table.converted!.source}'s relationships replace it.`,
+      );
+    }
   }
   const dangling: Dangling[] = [];
   /** Respell an entry against the library; a dangling one is recorded and dropped (null). */
@@ -922,7 +942,10 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
   }
   let libraryPlan: DbmlLibraryWritePlan;
   try {
-    libraryPlan = planDbmlLibraryWrites(snapshot, { save: saves });
+    // Every table this run writes as DBML gains its file: a Ref already in a relationships file that
+    // names one (written against it while it was YAML) gets its use line, or the file would not compile.
+    const gainFile = [...library.values()].filter((t) => t.converted).map((t) => t.name);
+    libraryPlan = planDbmlLibraryWrites(snapshot, { save: saves, ...(gainFile.length > 0 ? { gainFile } : {}) });
   } catch (err) {
     if (err instanceof DbmlEditRefused) {
       // A table Convert itself writes is named by the file it comes from.

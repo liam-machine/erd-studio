@@ -38,7 +38,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { classifySemanticFile, diagramPathOfLayout, isReservedTableName } from '@erd-studio/core';
+import { DBML_RELATIONSHIPS_FILE_STEM, classifySemanticFile, diagramPathOfLayout, isReservedTableName } from '@erd-studio/core';
 
 import { LOGICAL_MODELS_DIR, TABLES_DIR, tablesDirHasDbml, tablesDirIsLayer } from '../services/logicalModelService';
 import { NON_SUBJECT_AREA_DIRS } from '../services/domainService';
@@ -98,7 +98,8 @@ export function classifySemanticPath(
   }
   const file = segments[segments.length - 1];
   if (file.endsWith('.dbml') || file.endsWith('.dbdiagram') || (file.endsWith('.yml') && segments.length <= 3)) {
-    const kind = classifySemanticFile(segments.join('/'), { tablesDirIsLayer: tablesDirIsLayer(semanticRoot) }).kind;
+    // Only a path under `tables/` depends on whether `tables` is a layer: nothing else lists the folder.
+    const kind = classifySemanticFile(segments.join('/'), { tablesDirIsLayer: segments[0] === TABLES_DIR && tablesDirIsLayer(semanticRoot) }).kind;
     switch (kind) {
       case 'diagram': return 'domain';
       case 'layout': return 'layout';
@@ -119,6 +120,26 @@ export function classifySemanticPath(
     return 'other';
   }
   return 'domain';
+}
+
+/**
+ * {@link classifySemanticPath} for the semantic watcher, which must not list
+ * `tables/` per event: a `.dbml` or `.dbdiagram` under `tables/` that is not
+ * a relationships file is a table (or, when `tables` is a layer, `other`),
+ * and the watcher ignores both alike, so it is answered `table` from the
+ * path alone. A burst of N table writes (Convert, a checkout, an assistant)
+ * would otherwise read the library folder N times (O(N²) on a large library).
+ */
+export function classifyWatchedSemanticPath(semanticRoot: string, fsPath: string): SemanticPathKind {
+  const rel = path.relative(semanticRoot, fsPath);
+  const segments = rel.split(path.sep);
+  const file = segments[segments.length - 1];
+  if (segments.length >= 2 && segments[0] === TABLES_DIR && !rel.startsWith('..') && !path.isAbsolute(rel)
+    && (file.endsWith('.dbml') || file.endsWith('.dbdiagram'))
+    && file.slice(0, file.lastIndexOf('.')).toLowerCase() !== DBML_RELATIONSHIPS_FILE_STEM) {
+    return 'table';
+  }
+  return classifySemanticPath(semanticRoot, fsPath);
 }
 
 export class FileWatcherService implements vscode.Disposable {
@@ -275,7 +296,7 @@ export class FileWatcherService implements vscode.Disposable {
     // event for the same file arrives in between.
     const createdPending = new Set<string>();
     const handleChange = (uri: vscode.Uri, created = false) => {
-      const kind = classifySemanticPath(this.semanticRoot, uri.fsPath);
+      const kind = classifyWatchedSemanticPath(this.semanticRoot, uri.fsPath);
       if (kind === 'layer-config') {
         this.handleLayerConfigEvent(uri);
         return;
@@ -315,7 +336,7 @@ export class FileWatcherService implements vscode.Disposable {
     };
 
     const handleDelete = (uri: vscode.Uri) => {
-      const kind = classifySemanticPath(this.semanticRoot, uri.fsPath);
+      const kind = classifyWatchedSemanticPath(this.semanticRoot, uri.fsPath);
       if (kind === 'layer-config') {
         this.handleLayerConfigEvent(uri);
         return;

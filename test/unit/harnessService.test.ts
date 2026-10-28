@@ -51,9 +51,12 @@ const LEGACY_GUIDE = '.claude/skills/erd-studio/LEGACY.md';
  * single-file target's whole text.
  */
 function guideOf(svc: HarnessService, id: (typeof HARNESS_TARGETS)[number]['id']): string {
-  return id === 'claude' || id === 'agents'
-    ? svc.schemaSkillFiles().map(([, content]) => content).join('\n')
-    : svc.generateContent(id);
+  if (id === 'claude' || id === 'agents') return svc.schemaSkillFiles().map(([, content]) => content).join('\n');
+  // Codex's AGENTS.md carries the skill part and points at DBML.md and LEGACY.md in .agents/skills/erd-studio/.
+  if (id === 'codex') {
+    return [svc.generateContent('codex'), ...svc.schemaSkillFiles().filter(([name]) => name === 'DBML.md' || name === 'LEGACY.md').map(([, c]) => c)].join('\n');
+  }
+  return svc.generateContent(id);
 }
 
 function writeFile(root: string, rel: string, content: string): void {
@@ -167,6 +170,23 @@ describe('HarnessService', () => {
       const content = service.generateContent('codex');
       expect(content).toContain('## ERD Studio Domain Files');
       expect(content).toContain('# ERD Studio');
+    });
+
+    it('keeps the Codex section well inside the 32 KiB Codex reads of AGENTS.md, pointing at the DBML and YAML/JSON parts', () => {
+      const content = service.generateContent('codex');
+      // Room is left for the user's own AGENTS.md content above the region.
+      expect(Buffer.byteLength(content, 'utf-8')).toBeLessThanOrEqual(26 * 1024);
+      // Which format to write comes first, then where each format's rules are.
+      expect(content).toContain('read `erd.storage`');
+      expect(content).toContain('follow `.agents/skills/erd-studio/DBML.md`');
+      expect(content).toContain('follow `.agents/skills/erd-studio/LEGACY.md`');
+      expect(content).toContain('if they are missing, ask the user to run it');
+      // The two long parts are not inline.
+      expect(content).not.toContain('# ERD Studio — the DBML format');
+      expect(content).not.toContain('# ERD Studio — YAML and JSON files');
+      // And the files it names are the ones the Agent Skills target installs.
+      expect(service.schemaSkillFiles().map(([name]) => name)).toEqual(expect.arrayContaining(['DBML.md', 'LEGACY.md']));
+      expect(HARNESS_TARGETS.find((t) => t.id === 'agents')!.relativePath).toBe('.agents/skills/erd-studio/SKILL.md');
     });
 
     it('wraps the Codex section in BEGIN/END region markers with the version marker inside', () => {
@@ -1639,8 +1659,23 @@ describe('HarnessService', () => {
       }
     });
 
-    it('gives the single-file targets the whole guide inline', () => {
-      for (const id of ['copilot', 'gemini', 'codex'] as const) {
+    it('final review: Project names quoted, portability warnings fixed, the export path spelled out, cross-format Refs left out', () => {
+      for (const id of ['claude', 'copilot', 'gemini', 'codex'] as const) {
+        const content = guideOf(service, id);
+        // A hyphenated name fails every parser unquoted.
+        expect(content, id).toContain('double-quote it when it is not a plain identifier or is a DBML keyword, as `Project "customer-360"`');
+        // Warnings other DBML tools fail on are fixed, not ignored.
+        expect(content, id).toContain('Then fix every `missingUse`, `missingRelationshipsUse`, `unquotedValue` and `usePathMismatch` warning in a file you wrote');
+        expect(content, id).not.toContain('warnings raise no next step');
+        // The CLI takes the diagram's path from the project folder.
+        expect(content, id).toContain('`erd-studio export --domain .erd-studio/<layer>/<name>.dbml --format dbml`');
+        // A DBML↔YAML relationship in a mixed project has no home yet.
+        expect(content, id).toContain('A relationship between a DBML table and a YAML table cannot be stored yet: leave it out');
+      }
+    });
+
+    it('gives the single-file targets the whole guide inline (Codex: the skill part, see the 32 KiB test)', () => {
+      for (const id of ['copilot', 'gemini'] as const) {
         const content = service.generateContent(id);
         expect(content, id).toContain('# ERD Studio — AI Data Modeling Guide');
         expect(content, id).toContain('# ERD Studio — the DBML format');

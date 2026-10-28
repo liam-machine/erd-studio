@@ -35,6 +35,7 @@ import {
   editTableDbml,
   parseTableDbml,
   relationshipUnits,
+  renamedColumnsOf,
   renderNewTableDbml,
 } from '@erd-studio/core/dbml';
 import type { DbmlResolvedTable, RefUnit, RelationshipsFileEdit } from '@erd-studio/core/dbml';
@@ -86,6 +87,13 @@ export interface DbmlLibraryOps {
   move?: Array<{ name: string; toFolder: string }>;
   /** The library folder new tables go in (`''` = the top level). */
   newTableFolder?: string;
+  /**
+   * Tables that gain their `.dbml` file in this edit although the snapshot
+   * already lists them there (Convert lists the files it is about to write):
+   * every relationships file whose Refs name one re-resolves its `use` lines,
+   * so a Ref written against the table while it was YAML compiles after.
+   */
+  gainFile?: string[];
 }
 
 /** A table as the plan leaves it. */
@@ -252,6 +260,10 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   const writes: FileWrite[] = [];
   const pathChanged = new Map<string, string | null>();
   const renames = new Map<string, string>(); // old lower → new name
+  /** Column renames, per table: its lower name after the plan → old lower column → new name (the table writer's own pairing). */
+  const columnRenames = new Map<string, Map<string, string>>();
+  /** The same, keyed by the table's lower name before the plan. */
+  const columnRenamesBefore = new Map<string, Map<string, string>>();
   /** Owners whose relationships this plan places: lower name after → desired list, or null (deleted). */
   const affected = new Map<string, { name: string; relationships: readonly TableRelationship[] } | null>();
   /** Old lower name of each affected owner (for finding its Refs). */
@@ -317,6 +329,13 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     }
     const planned = plannedTable(text, path, model);
     after.set(lower(model.name), planned);
+    if (t) {
+      const columnsRenamed = renamedColumnsOf(t.columns, (model.columns ?? []).map((c) => c.name));
+      if (columnsRenamed.size > 0) {
+        columnRenames.set(lower(model.name), columnsRenamed);
+        columnRenamesBefore.set(sourceKey, columnsRenamed);
+      }
+    }
     // Relationships: placed when they changed, or the owner was renamed or is new.
     const desired = model.relationships ?? [];
     const current = t ? attachment.byOwner.get(lower(t.name)) ?? [] : [];
@@ -349,6 +368,14 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       oldNameOf.set(key, key);
     }
   }
+
+  /** A unit (ends named after the plan) with the columns this plan renames spelled anew. */
+  const withRenamedColumns = (unit: RefUnit): RefUnit => {
+    if (columnRenames.size === 0) return unit;
+    const spell = (table: string, column: string): string => columnRenames.get(lower(table))?.get(lower(column)) ?? column;
+    return { ...unit, fromColumns: unit.fromColumns.map((c) => spell(unit.from, c)), toColumns: unit.toColumns.map((c) => spell(unit.to, c)) };
+  };
+  const renamedName = (name: string): string => renames.get(lower(name)) ?? name;
 
   const resolveTable = (name: string): DbmlPlannedTable | undefined => {
     const key = renames.get(lower(name)) !== undefined ? lower(renames.get(lower(name))!) : lower(name);
@@ -385,7 +412,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       editFor(file).owners.set(oldKey, null);
       if (!entry) continue;
       for (const r of mine) {
-        const unit = { ...r.unit, from: entry.name, to: renames.get(lower(r.unit.to)) ?? r.unit.to };
+        const unit = withRenamedColumns({ ...r.unit, from: entry.name, to: renamedName(r.unit.to) });
         if (desiredIds.has(unitIdentity(unit))) editFor(home!).incoming.push({ text: r.text, unit: { ...r.unit } });
       }
     }
@@ -394,7 +421,8 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   // D20: a relationship this plan writes from a DBML owner may name only DBML tables.
   for (const [key, entry] of affected) {
     if (!entry) continue;
-    const before = new Set(relationshipUnits(entry.name, attachment.byOwner.get(oldNameOf.get(key) ?? key) ?? []).map(unitIdentity));
+    const before = new Set(relationshipUnits(entry.name, attachment.byOwner.get(oldNameOf.get(key) ?? key) ?? [])
+      .map((u) => unitIdentity(withRenamedColumns({ ...u, to: renamedName(u.to) }))));
     for (const unit of relationshipUnits(entry.name, entry.relationships)) {
       if (before.has(unitIdentity(unit))) continue;
       for (const end of [unit.from, unit.to]) {
@@ -405,14 +433,20 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     }
   }
   // Files whose Refs name a renamed, moved or deleted table: their ends and use lines follow.
-  const changedNames = new Set<string>([...pathChanged.keys()]);
-  const pathChangedAfter = new Set<string>();
+  const changedNames = new Set<string>([...pathChanged.keys(), ...(ops.gainFile ?? []).map(lower)]);
+  const pathChangedAfter = new Set<string>((ops.gainFile ?? []).map((name) => lower(renamedName(name))));
   for (const [oldKey, newPath] of pathChanged) {
     if (newPath === null) pathChangedAfter.add(oldKey);
     else pathChangedAfter.add(lower(renames.get(oldKey) ?? oldKey));
   }
+  // And files whose Refs name a column this plan renames: the column token follows.
+  const namesRenamedColumn = (table: string, columns: readonly string[]): boolean => {
+    const renamedHere = columnRenamesBefore.get(lower(table));
+    return renamedHere !== undefined && columns.some((c) => renamedHere.has(lower(c)));
+  };
   for (const [file, refs] of stored) {
-    if (refs.some((r) => changedNames.has(lower(r.unit.from)) || changedNames.has(lower(r.unit.to)))) editFor(file);
+    if (refs.some((r) => changedNames.has(lower(r.unit.from)) || changedNames.has(lower(r.unit.to))
+      || namesRenamedColumn(r.unit.from, r.unit.fromColumns) || namesRenamedColumn(r.unit.to, r.unit.toColumns))) editFor(file);
   }
 
   // --- 5. Cross-file duplicates, on the library as it will be -------------------------------------
@@ -455,6 +489,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       filePath: file,
       owners: e.owners,
       ...(renames.size > 0 ? { renamedOwners: renames } : {}),
+      ...(columnRenames.size > 0 ? { renamedColumns: columnRenames } : {}),
       ...(e.incoming.length > 0 ? { incoming: e.incoming } : {}),
       ...(pathChangedAfter.size > 0 ? { pathChanged: pathChangedAfter } : {}),
       resolve: resolveForWriter,

@@ -226,6 +226,13 @@ const SUBJECT_AREA_READ_RETRY_DELAYS_MS = [150, 350, 700];
  * the canvas on the first one leaves an error over a file that is fine. A
  * genuinely unreadable file costs the same ~1.2 s of retries, then reports.
  */
+/** A document's first line (the classifier reads a DBML export's header from it). */
+function firstLineOf(document: vscode.TextDocument): string {
+  const text = document.getText();
+  const end = text.indexOf('\n');
+  return (end < 0 ? text : text.slice(0, end)).replace(/\r$/, '');
+}
+
 function isRetryableSubjectAreaRead(err: unknown): err is SubjectAreaFileError {
   return err instanceof SubjectAreaFileError && (err.transient || err.reason === 'unreadable');
 }
@@ -1079,10 +1086,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** A `file:` `.dbml` the classifier says is not a diagram: a table, relationships or other file (§5.9). */
   private isRerouted(document: vscode.TextDocument): boolean {
     if (document.uri.scheme !== 'file' || !document.uri.fsPath.toLowerCase().endsWith('.dbml')) return false;
+    // The first line too: a DBML export 1.x saved beside its diagram (`// erd-studio dbml-export …`) opens as text, as it did then (§3.5).
+    const firstLine = firstLineOf(document);
     const semanticRoot = path.dirname(this.tableLibraryService.getTablesDir());
     const rel = path.relative(semanticRoot, document.uri.fsPath).split(path.sep).join('/');
-    if (rel.startsWith('..') || path.isAbsolute(rel)) return !isSubjectAreaFilePath(document.uri.fsPath);
-    return classifySemanticFile(rel, { tablesDirIsLayer: tablesDirIsLayer(semanticRoot) }).kind !== 'diagram';
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return !isSubjectAreaFilePath(document.uri.fsPath, firstLine);
+    return classifySemanticFile(rel, { tablesDirIsLayer: tablesDirIsLayer(semanticRoot), firstLine }).kind !== 'diagram';
   }
 
   async resolveCustomTextEditor(
@@ -3324,7 +3333,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // `templates/*.json` and the other reserved directories, and a glob cannot
     // express the exclusion, so the refusal lives here. Rendering a canvas for
     // one of those can only ever end in a parse error the user cannot act on.
-    if (!isSubjectAreaFilePath(document.uri.fsPath) && document.uri.fsPath.toLowerCase().endsWith('.dbml')) {
+    if (!isSubjectAreaFilePath(document.uri.fsPath, firstLineOf(document)) && document.uri.fsPath.toLowerCase().endsWith('.dbml')) {
       // A table or relationships file shown through another scheme (an SCM
       // diff), or reached directly: core's own words, with Open as Text.
       this.postLoadError(webview, errorKey, {
@@ -4670,17 +4679,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               const deleteFiles = async (): Promise<void> => {
                 // A DBML table: the D16 cascade, one WorkspaceEdit through applyFileWrites.
                 if (filesToOffer.some((name) => this.tableLibraryService.tableStorage(name) === 'dbml')) {
-                  let ok: boolean;
+                  let result: { ok: boolean; unrestored: string[] };
                   try {
-                    ok = await this.deleteTablesWithCascade(filesToOffer);
+                    result = await this.deleteTablesWithCascade(filesToOffer);
                   } catch (err) {
                     void vscode.window.showErrorMessage(`Could not delete ${shownPaths.join(', ')}: ${err instanceof Error ? err.message : String(err)}`);
                     return;
                   }
-                  if (ok) {
+                  if (result.ok) {
                     vscode.window.showInformationMessage(fileIsSingle ? `Deleted ${shownPaths[0]}` : `Deleted ${filesToOffer.length} table files`);
                     return;
                   }
+                  // Files left half-deleted: the reconcile's modal names them, and "nothing was deleted" would contradict it.
+                  if (result.unrestored.length > 0) return;
                   const again = await vscode.window.showErrorMessage(tableFileDeleteFailedMessage(shownPaths), 'Try Again');
                   if (again === 'Try Again') await deleteFiles();
                   return;
@@ -4776,7 +4787,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * VS Code did not apply it (reconciled by applyFileWrites). A file that
    * could not be saved afterwards is reported, never ignored.
    */
-  async deleteTablesWithCascade(names: readonly string[]): Promise<boolean> {
+  async deleteTablesWithCascade(names: readonly string[]): Promise<{ ok: boolean; unrestored: string[] }> {
     const lowerNames = new Set(names.map((n) => n.toLowerCase()));
     const readText = (filePath: string): string | null => this.openOrDiskText(filePath);
     let writes: FileWrite[];
@@ -4802,7 +4813,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       throw new EditRefused(`${path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again.`);
     }
     const applied = await applyFileWrites(writes, {});
-    if (!applied.ok) return false;
+    // Not applied: `unrestored` lists the files the reconcile could not put back (its modal already named them).
+    if (!applied.ok) return { ok: false, unrestored: applied.unrestored };
     const unsaved: string[] = [];
     const saveFailures = new Set<SaveFailure>();
     let modelFileUnsaved = false;
@@ -4823,7 +4835,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.tableLibraryService.invalidateCache();
     await this.refreshAllOpenSubjectAreas();
     for (const uri of applied.replaced) this._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: true });
-    return true;
+    return { ok: true, unrestored: [] };
   }
 
   /** Single-relationship removal — thin wrapper over the batch handler. */

@@ -250,6 +250,19 @@ describe('the custom-editor reroute (§5.9)', () => {
     });
   });
 
+  it.each(['// erd-studio dbml-export v1', '// erd-studio dbml-export v2'])(
+    'a DBML export 1.x saved beside its diagram (%s) is reopened in the text editor', async (header) => {
+      fs.writeFileSync(at('gold/sales_export.dbml'), `${header}\nTable fct_order {\n  id INT [pk]\n}\n`);
+      const provider = buildProvider(root);
+      const execute = vi.spyOn(vscode.commands, 'executeCommand');
+      const doc = openDoc('gold/sales_export.dbml');
+      const panel = await resolve(provider, doc);
+      expect(panel._disposed).toBe(true);
+      expect(execute).toHaveBeenCalledWith('vscode.openWith', doc.uri, 'default', expect.objectContaining({ preview: false }));
+      expect(panel._postedMessages).toEqual([]);
+    },
+  );
+
   it('a diagram is not rerouted', async () => {
     const provider = buildProvider(root);
     const panel = await resolve(provider, openDoc('gold/sales.dbml'));

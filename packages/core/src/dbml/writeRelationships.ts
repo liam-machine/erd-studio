@@ -7,7 +7,9 @@
  * Only the owners an edit lists are touched. A Ref that is the same as
  * before keeps its bytes (its `?` marks, `[delete: cascade]` and trailing
  * comment included); one whose cardinality or role changed is rewritten in
- * place with its settings and comment kept; one that is gone is cut, and a
+ * place with its settings and comment kept; one an end of which was
+ * renamed (the table, or a column the edit renames) is re-spelled in place,
+ * only the renamed names changing; one that is gone is cut, and a
  * new one is inserted at its sorted place. `use` lines are maintained only
  * for the tables this edit touches, so hand-added or missing lines for
  * other tables stay as they are (Law 1). The file is never deleted (D15).
@@ -83,6 +85,13 @@ export interface RelationshipsFileEdit {
   owners: ReadonlyMap<string, { name: string; relationships: readonly TableRelationship[] } | null>;
   /** Table renames done in this edit: old lower-case name → new name (Refs naming them are re-spelled). */
   renamedOwners?: ReadonlyMap<string, string>;
+  /**
+   * Column renames done in this edit: a table's name (after the edit, any
+   * case) → its old column name, lower-case → the new name. A Ref naming a
+   * renamed column is the same Ref as before: only the column's spelling
+   * changes, so its settings, comments, block form and operator keep their bytes.
+   */
+  renamedColumns?: ReadonlyMap<string, ReadonlyMap<string, string>>;
   /** Ref texts moving INTO this file from another file, carried verbatim. */
   incoming?: ReadonlyArray<{ text: string; unit: RefUnit }>;
   /** Tables whose path changed in this edit (rename, move, delete), lower-case: their `use` lines are re-resolved. */
@@ -241,6 +250,16 @@ function refNodeOf(node: AstNode): RefNode {
   };
 }
 
+/** The column tokens of a Ref end expression (one, or a composite's list), in order. */
+function columnTokens(expr: AstNode | undefined): AstNode[] {
+  let last = expr;
+  while (last?.kind === '<infix-expression>' && last.op?.value === '.') last = last.rightExpression;
+  if (!last) return [];
+  const inner = last.kind === '<primary-expression>' && last.expression?.kind === '<tuple-expression>' ? last.expression : last;
+  if (inner.kind === '<tuple-expression>') return Array.isArray(inner.elementList) ? (inner.elementList as AstNode[]) : [];
+  return [last];
+}
+
 /** The table part (qualifier removed) and columns of a Ref end expression. */
 function endParts(expr: AstNode | undefined): { table: string; columns: string[] } | null {
   const fragments = nameFragments(expr);
@@ -274,6 +293,18 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     return edit.resolve(after)?.name ?? after;
   };
   const columnSpelling = (table: string, column: string): string => edit.resolve(table)?.columns(column) ?? column;
+  const columnRenames = new Map<string, ReadonlyMap<string, string>>();
+  for (const [table, columns] of edit.renamedColumns ?? []) if (columns.size > 0) columnRenames.set(lower(canonical(table)), columns);
+  /** A column as it is named after the edit (`table` is a name as it reads after the edit). */
+  const columnAfter = (table: string, column: string): string => columnRenames.get(lower(table))?.get(lower(column)) ?? column;
+  /** A unit (ends named as after the edit) with its renamed columns spelled anew. */
+  const withRenamedColumns = (unit: RefUnit): RefUnit => (columnRenames.size === 0 ? unit : {
+    ...unit,
+    fromColumns: unit.fromColumns.map((c) => columnAfter(unit.from, c)),
+    toColumns: unit.toColumns.map((c) => columnAfter(unit.to, c)),
+  });
+  const columnsDiffer = (a: RefUnit, b: RefUnit): boolean =>
+    a.fromColumns.some((c, i) => c !== b.fromColumns[i]) || a.toColumns.some((c, i) => c !== b.toColumns[i]);
   const endText = (table: string, columns: readonly string[]): string => {
     const reference = edit.resolve(table)?.reference ?? dbmlName(table);
     const spelled = columns.map((c) => dbmlName(columnSpelling(table, c)));
@@ -359,7 +390,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   }
   const incomingByKey = new Map<string, string>();
   for (const { text: refLine, unit } of edit.incoming ?? []) {
-    const canon = { ...unit, from: canonical(unit.from), to: canonical(unit.to) };
+    const canon = withRenamedColumns({ ...unit, from: canonical(unit.from), to: canonical(unit.to) });
     incomingByKey.set(identityKey(canon), refLine);
     if (!desired.some((d) => identityKey(d) === identityKey(canon))) desired.push(canon);
   }
@@ -374,31 +405,44 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     desired?: RefUnit;
     /** The table names as the file spells them (from, to). */
     spelledNames: string[];
-    /** An end of it was renamed in this edit. */
+    /** An end of it (a table, or a column) was renamed in this edit. */
     renamed: boolean;
+    /** Its sort key as the file has it, before any rename. */
+    keyBefore: string;
     /** Its role as the file has it (a regenerated block-form Ref splices its name only when this differs). */
     readRole?: string;
   };
   const kept: Kept[] = [];
   const cut: Array<{ unit: RefUnit; ref: RefNode; spelledNames: string[] }> = [];
+  type KeptInput = Omit<Kept, 'keyBefore'>;
   const touched = new Set<string>();
   const renamedEnd = (names: readonly string[]): boolean => names.some((n) => renamed.has(lower(n)));
   const unmatched = (test: (d: RefUnit) => boolean): RefUnit | undefined => desired.find((d) => !matched.has(d) && test(d));
 
   for (const entry of current) {
     // A bare `-` whose orientation is not settled reads the way a desired unit has it, if one does.
-    let { unit, spelledNames } = entry;
-    if (entry.alt && !unmatched((d) => endsKey(d) === endsKey(unit)) && unmatched((d) => endsKey(d) === endsKey(entry.alt!.unit))) {
-      ({ unit, spelledNames } = entry.alt);
+    // Every unit is matched with its renamed columns spelled as they are after the edit.
+    let read = entry.unit;
+    let { spelledNames } = entry;
+    let unit = withRenamedColumns(read);
+    if (entry.alt) {
+      const altUnit = withRenamedColumns(entry.alt.unit);
+      if (!unmatched((d) => endsKey(d) === endsKey(unit)) && unmatched((d) => endsKey(d) === endsKey(altUnit))) {
+        read = entry.alt.unit;
+        unit = altUnit;
+        spelledNames = entry.alt.spelledNames;
+      }
     }
     const c = { ref: entry.ref, unit, spelledNames };
-    const respell = renamedEnd(c.spelledNames);
+    const respell = renamedEnd(c.spelledNames) || columnsDiffer(read, unit);
+    const keyBefore = refUnitSortKey({ ...read, from: spelledNames[0], to: spelledNames[1] });
+    const keep = (k: KeptInput): void => { kept.push({ ...k, keyBefore }); };
     const touch = (...names: string[]): void => { for (const n of [...c.spelledNames, ...names]) touched.add(lower(n)); };
     const identical = unmatched((d) => identityKey(d) === identityKey(c.unit));
     if (identical) {
       // The same link, cardinality and role: its bytes stay (re-spelled only where an end was renamed).
       matched.add(identical);
-      kept.push({ unit: c.unit, ref: c.ref, mode: respell ? 'respell' : 'keep', desired: identical, spelledNames: c.spelledNames, renamed: respell });
+      keep({ unit: c.unit, ref: c.ref, mode: respell ? 'respell' : 'keep', desired: identical, spelledNames: c.spelledNames, renamed: respell });
       if (respell) touch(c.unit.from, c.unit.to);
       continue;
     }
@@ -407,12 +451,12 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
       // Same ends and pairs, another cardinality or role: rewritten in place, in the file's own pair order.
       matched.add(same);
       const unit2: RefUnit = { ...same, fromColumns: [...c.unit.fromColumns], toColumns: [...c.unit.toColumns] };
-      kept.push({ unit: unit2, ref: c.ref, mode: 'regenerate', desired: same, spelledNames: c.spelledNames, renamed: respell, ...(c.unit.role !== undefined ? { readRole: c.unit.role } : {}) });
+      keep({ unit: unit2, ref: c.ref, mode: 'regenerate', desired: same, spelledNames: c.spelledNames, renamed: respell, ...(c.unit.role !== undefined ? { readRole: c.unit.role } : {}) });
       touch(same.from, same.to);
       continue;
     }
     if (!listed.has(lower(c.unit.from))) {
-      kept.push({ unit: c.unit, ref: c.ref, mode: respell ? 'respell' : 'keep', spelledNames: c.spelledNames, renamed: respell });
+      keep({ unit: c.unit, ref: c.ref, mode: respell ? 'respell' : 'keep', spelledNames: c.spelledNames, renamed: respell });
       if (respell) touch(c.unit.from, c.unit.to);
       continue;
     }
@@ -453,17 +497,9 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     const settings = ref.application?.args?.find?.((a: AstNode) => a?.kind === '<list-expression>');
     return settings ? ` ${text.slice(settings.start, settings.end)}` : '';
   };
-  const respelled = (k: Kept): string => {
-    // Each end whose table was renamed is spelled anew; the operator and the rest keep their bytes.
-    const spans: TextEdit[] = [];
-    for (const side of [k.ref.left, k.ref.right]) {
-      const parts = endParts(side);
-      if (!parts || !renamed.has(lower(parts.table))) continue;
-      const table = canonical(parts.table);
-      spans.push({ start: side!.start - k.ref.node.start, end: side!.end - k.ref.node.start, text: endText(table, parts.columns) });
-    }
-    return applyTextEdits(text.slice(k.ref.node.start, k.ref.node.end), spans);
-  };
+  const respelled = (k: Kept): string =>
+    // Each end whose table was renamed is spelled anew, and each renamed column token; the operator and the rest keep their bytes.
+    applyTextEdits(text.slice(k.ref.node.start, k.ref.node.end), endRespellings([k.ref.left, k.ref.right], k.ref.node.start));
   /**
    * A regenerated Ref. A one-line Ref is written anew with its settings kept; a block-form Ref
    * (`Ref name {\n  // …\n  a.x > b.y [settings]\n}`) keeps its block and comments, and only its
@@ -501,7 +537,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const moving: Array<{ unit: RefUnit; text: string }> = [];
   const staying: Kept[] = [];
   const inFileOrder = kept.slice().sort((a, b) => a.ref.node.start - b.ref.node.start);
-  const keyBefore = (k: Kept): string => refUnitSortKey({ ...k.unit, from: k.spelledNames[0], to: k.spelledNames[1] });
+  const keyBefore = (k: Kept): string => k.keyBefore;
   const sign = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
   for (const [i, k] of inFileOrder.entries()) {
     if (k.renamed && k.mode !== 'keep') {
@@ -581,10 +617,12 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   }
   newUses.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const keptUses = uses.filter((u) => !useEdits.some((e) => e.text === '' && e.start <= u.node.start && e.end >= u.node.end));
+  // ERD Studio's own header comment sits right above the first use line; it describes the file, not that line.
+  const headerFloor = text.startsWith(DBML_RELATIONSHIPS_FILE_HEADER) && text.indexOf('\n') >= 0 ? text.indexOf('\n') + 1 : 0;
   for (const added of newUses) {
     const before = keptUses.find((u) => u.importPath > added.path);
     if (before) {
-      const at = attachedStart(text, before.node);
+      const at = Math.max(attachedStart(text, before.node, headerFloor), Math.min(headerFloor, before.node.start));
       useEdits.push({ start: at, end: at, text: `${added.line}${eol}` });
       continue;
     }
@@ -640,7 +678,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
 
   /** An incoming Ref's text with each renamed end spelled anew; everything else kept verbatim. */
   function respellIncoming(refLine: string): string {
-    if (renamed.size === 0) return refLine;
+    if (renamed.size === 0 && columnRenames.size === 0) return refLine;
     let compiled;
     try {
       compiled = compileOne(refLine, parser);
@@ -650,13 +688,33 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     const node = topLevel(compiled.ast).find((n) => lower(elementType(n) ?? '') === 'ref');
     if (!node) return refLine;
     const ref = refNodeOf(node);
+    return applyTextEdits(refLine, endRespellings([ref.left, ref.right], 0));
+  }
+
+  /**
+   * The spans that re-spell Ref ends (offsets less `base`): an end whose table
+   * was renamed is written anew; otherwise only its renamed column tokens are,
+   * so a qualifier, alias or quoting the file uses for the table stays.
+   */
+  function endRespellings(sides: Array<AstNode | undefined>, base: number): TextEdit[] {
     const spans: TextEdit[] = [];
-    for (const side of [ref.left, ref.right]) {
+    for (const side of sides) {
       const parts = endParts(side);
-      if (!parts || !renamed.has(lower(parts.table))) continue;
-      spans.push({ start: side!.start, end: side!.end, text: endText(canonical(parts.table), parts.columns) });
+      if (!parts || !side) continue;
+      const table = canonical(parts.table);
+      const after = parts.columns.map((c) => columnAfter(table, c));
+      if (renamed.has(lower(parts.table))) {
+        spans.push({ start: side.start - base, end: side.end - base, text: endText(table, after) });
+        continue;
+      }
+      const tokens = columnTokens(side);
+      if (tokens.length !== parts.columns.length) continue;
+      parts.columns.forEach((c, i) => {
+        if (after[i] === c) return;
+        spans.push({ start: tokens[i].start - base, end: tokens[i].end - base, text: dbmlName(columnSpelling(table, after[i])) });
+      });
     }
-    return applyTextEdits(refLine, spans);
+    return spans;
   }
 
   /** The sort key of a Ref that stays, as it reads after the edit. */

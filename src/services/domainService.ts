@@ -77,9 +77,10 @@ const DEFAULT_SEMANTIC_DIR = '.erd-studio';
  * file, never a diagram. Callers that know the semantic root should prefer
  * `classifySemanticPath()`, which also proves the path is *under* it; this
  * one exists for the custom editor, which is handed a document whose path
- * the selector has already placed.
+ * the selector has already placed. `firstLine`, when the caller has the
+ * text, lets a `.dbml` that starts with the export header count as `other`.
  */
-export function isSubjectAreaFilePath(fsPath: string): boolean {
+export function isSubjectAreaFilePath(fsPath: string, firstLine?: string): boolean {
   const file = path.basename(fsPath);
   const dir = path.basename(path.dirname(fsPath));
   if (file.startsWith('.') || dir.startsWith('.')) return false;
@@ -93,7 +94,11 @@ export function isSubjectAreaFilePath(fsPath: string): boolean {
   // `.dbml` under `tables/` is ever a diagram), whatever its folder is called.
   if (path.basename(path.dirname(path.dirname(fsPath))) === TABLES_DIR) return false;
   const semanticRoot = path.dirname(path.dirname(fsPath));
-  return classifySemanticFile(`${dir}/${file}`, { tablesDirIsLayer: tablesDirIsLayer(semanticRoot) }).kind === 'diagram';
+  // A caller that has the text passes its first line, so a 1.x DBML export (its header line) is not a diagram.
+  return classifySemanticFile(`${dir}/${file}`, {
+    tablesDirIsLayer: tablesDirIsLayer(semanticRoot),
+    ...(firstLine !== undefined ? { firstLine } : {}),
+  }).kind === 'diagram';
 }
 
 /**

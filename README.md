@@ -31,7 +31,7 @@
 
 - **In your repo.** Plain DBML files, reviewed in the same pull request as your code. No account, server or database.
 - **Works with the AI you already use.** Claude Code, GitHub Copilot, Codex, Gemini CLI and Cursor read and write the same files. Review their proposals on the canvas before anyone writes SQL.
-- **No lock-in.** Your files are [DBML](https://dbml.dbdiagram.io/docs), the open-source schema language behind dbdiagram.io, which other DBML tools read as they are. Import DBML from any DBML tool, and export a single file for dbdiagram.io (keys, grain and notes, with table positions in a `.dbdiagram` layout file) or Mermaid any time.
+- **No lock-in.** Your files are [DBML](https://dbml.dbdiagram.io/docs), the open-source schema language behind dbdiagram.io; DBML parsers read your files as a multi-file project (the versions are in [Leaving ERD Studio](docs/leaving-erd-studio.md)). Import DBML from any DBML tool, and export a single file for dbdiagram.io (keys, grain and notes, with table positions in a `.dbdiagram` layout file) or Mermaid any time.
 - **Checked against dbt.** A read-only **Physical** view shows what your dbt project has; **⊕ Diff** highlights every difference from your design and makes a sync plan your AI applies. More stacks later.
 
 ## Get started

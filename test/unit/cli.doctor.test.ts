@@ -641,6 +641,7 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(p.message).toContain("Quote the value, as in grain: 'One row per order line'.");
     expect(ids(r)[0]).toBe('fix-dbml-file');
     expect(r.nextSteps[0].why).toContain('.erd-studio/tables/dim_date.dbml:2 (3075)');
+    expect(r.nextSteps[0].why).toContain('(a value to quote is the usual one)');
   });
 
   it('an unquoted 11.0 number or boolean is a warning with the quoted form, and raises no next step', async () => {
@@ -700,6 +701,12 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     const [dangling] = problem(r, 'danglingRef');
     expect(dangling).toMatchObject({ severity: 'warning', file: '.erd-studio/tables/_relationships.dbml', line: 5 });
     expect(dangling.message).toContain('dim_date.no_such_column');
+    // The line is still drawn (the loader emits it); saying otherwise would mislead the user.
+    expect(dangling.message).toContain('ERD Studio still draws the line between the two tables');
+    expect(dangling.message).not.toContain('not drawn');
+    // A binding error is no quoting problem: the step does not point at quoting.
+    expect(r.nextSteps[0].why).toContain('Fix these lines before anything else, then re-run doctor.');
+    expect(r.nextSteps[0].why).not.toContain('a value to quote');
     const [orphaned] = problem(r, 'orphanedRef');
     expect(orphaned).toMatchObject({ severity: 'warning', file: '.erd-studio/tables/gold/_relationships.dbml', line: 15 });
     expect(orphaned.message).toBe("This Ref's foreign-key end is ghost, which has no table file; it is not drawn. Add the table, or delete the Ref.");

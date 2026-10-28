@@ -155,8 +155,11 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
  * before 2.0, complete. The two skill targets install them as `SKILL.md`
  * plus the version-marked companions `DBML.md` and `LEGACY.md` (as `SYNC.md`
  * already is), which keeps each file under the 500-line skill limit; the
- * single-file targets (Copilot, Gemini, Codex) carry all three inline
- * ({@link SCHEMA_CONTENT}). `{SKILL}`, `{DBML}`, `{LEGACY}` and `{BESIDE}`
+ * single-file targets Copilot and Gemini carry all three inline
+ * ({@link SCHEMA_CONTENT}); Codex's `AGENTS.md` carries the skill part only
+ * and points at the Agent Skills copies of the other two
+ * ({@link CODEX_CONTENT}), as Codex reads only the first 32 KiB of
+ * `AGENTS.md`. `{SKILL}`, `{DBML}`, `{LEGACY}` and `{BESIDE}`
  * are how each part refers to the others, filled in by {@link schemaPart}.
  */
 const SKILL_PART = `# ERD Studio — AI Data Modeling Guide
@@ -169,7 +172,7 @@ ERD Studio keeps a project's logical data model in \`.erd-studio/\` as plain tex
 
 - **\`dbml\`, or no \`.erd-studio/\` folder yet** (a new project) → write DBML: follow {DBML}.
 - **\`yaml\`** → write YAML tables and JSON diagrams: follow {LEGACY}, in the file naming doctor's \`erd.naming\` reports.
-- **\`mixed\`** (a project half-way to DBML) → new tables and new diagrams are DBML; an existing file keeps its format (edit a \`.yml\` table as YAML and a \`.json\` diagram as JSON, by {LEGACY}). A JSON diagram may list DBML tables; a DBML diagram may list only DBML tables, and a DBML table's Refs may name only DBML tables. Suggest **ERD Studio: Convert Project to DBML** to the user rather than converting anything yourself.
+- **\`mixed\`** (a project half-way to DBML) → new tables and new diagrams are DBML; an existing file keeps its format (edit a \`.yml\` table as YAML and a \`.json\` diagram as JSON, by {LEGACY}). A JSON diagram may list DBML tables; a DBML diagram may list only DBML tables, and a DBML table's Refs may name only DBML tables. A relationship between a DBML table and a YAML table cannot be stored yet: leave it out, and tell the user it needs **ERD Studio: Convert Project to DBML** first. Suggest **ERD Studio: Convert Project to DBML** to the user rather than converting anything yourself.
 - **The doctor result has no \`erd.storage\` field** (an ERD Studio CLI older than 2.0, perhaps a teammate's) → write what the files already are: if \`.erd-studio/tables/\` holds \`.dbml\` table files, DBML; otherwise follow {LEGACY}. Tell the user their ERD Studio is older than these instructions.
 - **No CLI** (the command is not found, exit 127) → the same rule from the files: any \`.erd-studio/**/*.dbml\`, or no \`.erd-studio/\` folder at all, means DBML; only \`.yml\` tables and \`.json\` diagrams means {LEGACY}.
 
@@ -216,7 +219,7 @@ A new project also needs \`.erd-studio/layers.json\`, which lists the layer fold
 - **Add a relationship** = one \`Ref\` line in the \`_relationships.dbml\` of the foreign-key table's folder, + a \`use\` line there for every table the Ref names that the file does not import yet.
 - **Remove a table from a diagram** = delete its \`use\` line there (and its position in the layout file). The table file and its Refs stay: the diagram just stops showing them.
 - **Never hand-merge a conflicted file.** When a file holds git conflict markers (\`<<<<<<<\` … \`>>>>>>>\`), show the user the file and line and ask which side to keep; never pick a side yourself or run git commands.
-- **Check your work** with \`erd-studio doctor\` (its \`erd.dbmlProblems\` names every problem with its file, line and the exact line to write) and \`erd-studio export --domain <diagram>.dbml --format dbml\`. Fix every \`fix-dbml-file\` error before anything else; warnings raise no next step.
+- **Check your work** with \`erd-studio doctor\` (its \`erd.dbmlProblems\` names every problem with its file, line and the exact line to write) and \`erd-studio export --domain .erd-studio/<layer>/<name>.dbml --format dbml\` (the diagram's path from the project folder, \`.erd-studio/\` included). Fix every \`fix-dbml-file\` error before anything else. Then fix every \`missingUse\`, \`missingRelationshipsUse\`, \`unquotedValue\` and \`usePathMismatch\` warning in a file you wrote (the message gives the exact line): ERD Studio reads on without the fix, but other DBML tools reject the file and every diagram that imports it. Other warnings are information.
 
 ## Team Modelling Approach
 
@@ -502,7 +505,7 @@ Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_
 }
 \`\`\`
 
-- **\`Project <name>\`** (the diagram's name, its file stem for a new one) with its description as \`Note\`, and \`erd_schema_version: '7'\` always. Optional quoted keys: \`erd_model_folder\` (the dbt \`models/\` path filter), \`erd_show_fk_edges\` (\`'true'\` / \`'false'\`), \`erd_layout_options\` (JSON text) and \`erd_stub_columns\` (a JSON array of table names whose physical-only columns are not compared — for conformed dimensions included only to anchor relationships). Keep any other Project key as it is.
+- **\`Project <name>\`** (the diagram's name, its file stem for a new one; double-quote it when it is not a plain identifier or is a DBML keyword, as \`Project "customer-360"\`, or every DBML tool rejects the file) with its description as \`Note\`, and \`erd_schema_version: '7'\` always. Optional quoted keys: \`erd_model_folder\` (the dbt \`models/\` path filter), \`erd_show_fk_edges\` (\`'true'\` / \`'false'\`), \`erd_layout_options\` (JSON text) and \`erd_stub_columns\` (a JSON array of table names whose physical-only columns are not compared — for conformed dimensions included only to anchor relationships). Keep any other Project key as it is.
 - **The diagram's tables are its table \`use\` lines**, in order, with paths **relative to the diagram file**, not to \`.erd-studio\` (\`../tables/gold/fct_order.dbml\`). Doctor reports a path that does not point at the table's file (\`usePathMismatch\`) with the corrected line.
 - **Then one \`use * from '…'\` for the \`_relationships.dbml\` of every library folder that holds one of the diagram's tables**, when that file exists, sorted by path. Without it other DBML tools draw no Refs (doctor: \`missingRelationshipsUse\`); ERD Studio draws them anyway.
 - **No Tables, Refs or TableGroups in a diagram**: they belong in the library. A file that declares its own Tables and imports none is a single-file DBML (a dbdiagram.io download): run **ERD Studio: Import DBML…** on it (doctor: \`import-dbml-file\`).
@@ -846,8 +849,23 @@ function schemaPart(part: string, refs: PartRefs): string {
   return part.replace(/\{(SKILL|DBML|LEGACY|BESIDE)\}/g, (_, key: keyof PartRefs) => refs[key]);
 }
 
-/** The whole guide in one text, for the single-file targets (Copilot, Gemini, Codex). */
+/** The whole guide in one text, for the single-file targets (Copilot, Gemini). */
 const SCHEMA_CONTENT = [SKILL_PART, DBML_PART, LEGACY_PART].map((part) => schemaPart(part, INLINE_REFS)).join('\n\n---\n\n');
+
+/**
+ * Codex reads `AGENTS.md` only up to its `project_doc_max_bytes` (32 KiB by
+ * default), and the whole guide is far longer: the region carries the skill
+ * part (which format to write, and every rule the formats share) and points
+ * at the DBML and YAML/JSON parts in the Agent Skills folder, which the
+ * recommended install writes for Codex.
+ */
+const CODEX_REFS: PartRefs = {
+  SKILL: 'the ERD Studio section of `AGENTS.md`',
+  DBML: '`.agents/skills/erd-studio/DBML.md`',
+  LEGACY: '`.agents/skills/erd-studio/LEGACY.md`',
+  BESIDE: '. Read the one that applies before writing any `.erd-studio` file. Both come with the Agent Skills install of **ERD Studio: Set Up My AI Helper**; if they are missing, ask the user to run it (or **ERD Studio: Install AI Coding Harness** → Agent Skills) first, and never write a `.erd-studio` file without them',
+};
+const CODEX_CONTENT = schemaPart(SKILL_PART, CODEX_REFS);
 
 /** The skill targets' `SKILL.md` body, and its two companions. */
 const SKILL_CONTENT = schemaPart(SKILL_PART, SPLIT_REFS);
@@ -1151,7 +1169,7 @@ function generateCodexAgents(): string {
 ${CODEX_REGION_BEGIN}
 ${CODEX_SECTION_HEADING}
 
-${SCHEMA_CONTENT}
+${CODEX_CONTENT}
 
 ${buildVersionMarker()}
 ${CODEX_REGION_END}

@@ -366,7 +366,9 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
         if (gone.length > 0) {
           push({
             file: projectRel(f.rel), line: ref.line, code: 'danglingRef',
-            message: `This Ref names ${gone.join(', ')}, which ${gone.length === 1 ? 'is' : 'are'} not a column of ${gone.length === 1 ? 'its' : 'their'} table; it is not drawn. `
+            // The loader still emits it and the canvas draws every line whose two tables it shows.
+            message: `This Ref names ${gone.join(', ')}, which ${gone.length === 1 ? 'is' : 'are'} not a column of ${gone.length === 1 ? 'its' : 'their'} table. `
+              + 'ERD Studio still draws the line between the two tables, but it points at a column the table does not have, and other DBML tools reject the file. '
               + 'Fix the column name, or delete the Ref.',
           });
         }

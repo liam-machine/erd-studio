@@ -13,6 +13,7 @@ import { DbmlEditRefused, parseTableDbml, readRelationshipsDbml } from '@erd-stu
 import { attachRelationships, dbmlTableLookup } from '@erd-studio/core';
 import type { DbmlAttachTable } from '@erd-studio/core';
 import { planDbmlLibraryWrites } from '../../src/services/dbmlLibraryWrites';
+import { renameColumnInRelationships } from '../../src/services/libraryRelationships';
 import type { DbmlLibrarySnapshot, DbmlSnapshotTable } from '../../src/services/dbmlLibraryWrites';
 import type { FileWrite } from '../../src/services/fileWrites';
 import type { SemanticTable } from '../../src/types/semantic';
@@ -223,6 +224,69 @@ describe('the rename ops shape (§4.6 step 0)', () => {
     expect(after['tables/gold/fct_sale.dbml']).toBe('Table fct_sale {\n  id INT [pk]\n  date_key INT\n  customer_key INT\n}\n');
     expect(after['tables/gold/_relationships.dbml']).toBe(`${HEADER}use { table dim_date } from '../dim_date.dbml'\nuse { table dim_customer } from './dim_customer.dbml'\nuse { table fct_sale } from './fct_sale.dbml'\n\nRef: fct_sale.customer_key >? dim_customer.customer_key\nRef: fct_sale.date_key >? dim_date.date_key [delete: cascade] // keep me\n`);
     expect(plan.pathChanged).toEqual(new Map([['fct_order', 'tables/gold/fct_sale.dbml']]));
+    expectClean(after);
+  });
+});
+
+describe('a column rename keeps the Ref (Law 4)', () => {
+  /** Rename `table.from` → `to` as the editor does: the table's column, its own Refs and every other table's (#126). */
+  function renameColumn(files: Record<string, string>, table: string, from: string, to: string) {
+    const model = modelOf(files, table);
+    model.columns = model.columns.map((c) => (c.name === from ? { ...c, name: to } : c));
+    renameColumnInRelationships([model], table, from, to);
+    const others = Object.keys(files)
+      .filter((p) => p.endsWith('.dbml') && !p.endsWith('_relationships.dbml'))
+      .map((p) => p.slice(p.lastIndexOf('/') + 1, -'.dbml'.length))
+      .filter((n) => n !== table)
+      .map((n) => modelOf(files, n));
+    const changed = renameColumnInRelationships(others, table, from, to);
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }, ...changed.map((m) => ({ model: m }))] });
+    return apply(files, plan.writes);
+  }
+
+  it('the referenced column: settings, trailing comment and operator keep their bytes', () => {
+    const after = renameColumn(base(), 'dim_date', 'date_key', 'day_key');
+    expect(after['tables/gold/_relationships.dbml']).toBe(`${HEADER}use { table dim_date } from '../dim_date.dbml'\nuse { table dim_customer } from './dim_customer.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.customer_key >? dim_customer.customer_key\nRef: fct_order.date_key >? dim_date.day_key [delete: cascade] // keep me\n`);
+    expectClean(after);
+  });
+
+  it('the foreign-key column, with a hand-written operator', () => {
+    const files = base();
+    files['tables/gold/_relationships.dbml'] = files['tables/gold/_relationships.dbml'].replace('date_key >? dim_date', 'date_key > dim_date');
+    const after = renameColumn(files, 'fct_order', 'date_key', 'order_date_key');
+    expect(after['tables/gold/_relationships.dbml']).toContain('\nRef: fct_order.order_date_key > dim_date.date_key [delete: cascade] // keep me\n');
+    expectClean(after);
+  });
+
+  it('a block-form Ref keeps its block, its comment lines and its settings', () => {
+    const files: Record<string, string> = {
+      'tables/fct_order.dbml': 'Table fct_order {\n  id INT [pk]\n  dim_key INT\n}\n',
+      'tables/dim.dbml': 'Table dim {\n  dim_key INT [pk]\n}\n',
+      'tables/_relationships.dbml': `${HEADER}use { table dim } from './dim.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef r1 {\n  // my comment\n  fct_order.dim_key > dim.dim_key [delete: cascade]\n}\n`,
+    };
+    const after = renameColumn(files, 'dim', 'dim_key', 'k');
+    expect(after['tables/_relationships.dbml']).toBe(`${HEADER}use { table dim } from './dim.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef r1 {\n  // my comment\n  fct_order.dim_key > dim.k [delete: cascade]\n}\n`);
+    expectClean(after);
+  });
+
+  it('one column of a composite Ref, on a schema-qualified table', () => {
+    const files: Record<string, string> = {
+      'tables/employee.dbml': 'Table employee {\n  id INT [pk]\n  a INT\n  b INT\n}\n',
+      'tables/badge.dbml': 'Table gold.badge {\n  id INT [pk]\n  a INT\n  b INT\n  indexes {\n    (a, b) [unique]\n  }\n}\n',
+      'tables/_relationships.dbml': `${HEADER}use { table gold.badge } from './badge.dbml'\nuse { table employee } from './employee.dbml'\n\nRef: employee.(a, b) > gold.badge.(a, b) [update: cascade] // composite\n`,
+    };
+    const after = renameColumn(files, 'badge', 'b', 'b2');
+    expect(after['tables/_relationships.dbml']).toContain('\nRef: employee.(a, b) > gold.badge.(a, b2) [update: cascade] // composite\n');
+    expectClean(after);
+  });
+
+  it('a Ref whose owner the edit does not list still follows the column', () => {
+    const files = base();
+    const model = modelOf(files, 'dim_date');
+    model.columns = model.columns.map((c) => (c.name === 'date_key' ? { ...c, name: 'day_key' } : c));
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }] });
+    const after = apply(files, plan.writes);
+    expect(after['tables/gold/_relationships.dbml']).toContain('\nRef: fct_order.date_key >? dim_date.day_key [delete: cascade] // keep me\n');
     expectClean(after);
   });
 });

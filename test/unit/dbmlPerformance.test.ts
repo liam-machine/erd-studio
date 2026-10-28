@@ -18,6 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { TableLibraryService } from '../../src/services/logicalModelService';
+import { classifyWatchedSemanticPath } from '../../src/watchers/FileWatcherService';
 
 const TABLES = 10_000;
 const REFS_PER_TABLE = 3;
@@ -89,4 +90,15 @@ describe(`a flat DBML library of ${TABLES} tables and ${TABLES * REFS_PER_TABLE}
     const text = (writes[0] as { text: string }).text;
     expect(text.split('\n').filter((l) => l.startsWith('Ref')).length).toBe(TABLES * REFS_PER_TABLE - 1);
   }, 120_000);
+
+  it('the semantic watcher classifies a burst of one event per table file without listing the library each time', () => {
+    const semantic = path.join(root, '.erd-studio');
+    const tables = path.join(semantic, 'tables');
+    const kinds = withinBudget(`classify ${TABLES} table-file events`, 500, () =>
+      Array.from({ length: TABLES }, (_, i) => classifyWatchedSemanticPath(semantic, path.join(tables, `t${i}.dbml`))));
+    expect(kinds.every((k) => k === 'table')).toBe(true);
+    // The relationships file and a diagram are still told apart.
+    expect(classifyWatchedSemanticPath(semantic, path.join(tables, '_relationships.dbml'))).toBe('relationships');
+    expect(classifyWatchedSemanticPath(semantic, path.join(semantic, 'gold', 'sales.dbml'))).toBe('domain');
+  });
 });

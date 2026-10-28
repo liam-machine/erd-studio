@@ -603,25 +603,8 @@ function editTable(oldText: string, desired: SemanticTable, options: EditTableDb
 
   // --- Columns -------------------------------------------------------------
   const desiredColumns = desired.columns ?? [];
-  const matchOf = new Map<number, number>(); // desired index → current index
-  const used = new Set<number>();
-  desiredColumns.forEach((d, di) => {
-    const ci = currentColumns.findIndex((c, i) => !used.has(i) && c.name === d.name);
-    if (ci >= 0) { matchOf.set(di, ci); used.add(ci); }
-  });
-  desiredColumns.forEach((d, di) => {
-    if (matchOf.has(di)) return;
-    const ci = currentColumns.findIndex((c, i) => !used.has(i) && c.name.toLowerCase() === d.name.toLowerCase());
-    if (ci >= 0) { matchOf.set(di, ci); used.add(ci); }
-  });
-  {
-    const removed = currentColumns.map((_, i) => i).filter((i) => !used.has(i));
-    const added = desiredColumns.map((_, i) => i).filter((i) => !matchOf.has(i));
-    if (removed.length === 1 && added.length === 1 && removed[0] === added[0]) {
-      matchOf.set(added[0], removed[0]);
-      used.add(removed[0]);
-    }
-  }
+  const matchOf = matchColumns(currentColumns.map((c) => c.name), desiredColumns.map((c) => c.name)); // desired index → current index
+  const used = new Set<number>(matchOf.values());
   const currentOf = new Map<number, number>(); // current index → desired index
   for (const [di, ci] of matchOf) currentOf.set(ci, di);
   const renamedColumns = new Map<string, string>(); // current real spelling → desired spelling
@@ -962,4 +945,38 @@ function editTable(oldText: string, desired: SemanticTable, options: EditTableDb
       });
     }
   }
+}
+
+/**
+ * Which current column each desired column is (desired index → current
+ * index): the same name, then the same name in another case, then, when
+ * exactly one column went and one came at the same place, a rename. The
+ * one rule the table writer and the relationships planner share, so a Ref
+ * follows a column rename exactly when the table file does.
+ */
+export function matchColumns(current: readonly string[], desired: readonly string[]): Map<number, number> {
+  const matchOf = new Map<number, number>();
+  const used = new Set<number>();
+  desired.forEach((d, di) => {
+    const ci = current.findIndex((c, i) => !used.has(i) && c === d);
+    if (ci >= 0) { matchOf.set(di, ci); used.add(ci); }
+  });
+  desired.forEach((d, di) => {
+    if (matchOf.has(di)) return;
+    const ci = current.findIndex((c, i) => !used.has(i) && c.toLowerCase() === d.toLowerCase());
+    if (ci >= 0) { matchOf.set(di, ci); used.add(ci); }
+  });
+  const removed = current.map((_, i) => i).filter((i) => !used.has(i));
+  const added = desired.map((_, i) => i).filter((i) => !matchOf.has(i));
+  if (removed.length === 1 && added.length === 1 && removed[0] === added[0]) matchOf.set(added[0], removed[0]);
+  return matchOf;
+}
+
+/** The columns a table edit renames: current name, lower-case → its new spelling (a case-only change included). */
+export function renamedColumnsOf(current: readonly string[], desired: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [di, ci] of matchColumns(current, desired)) {
+    if (desired[di] !== current[ci]) out.set(current[ci].toLowerCase(), desired[di]);
+  }
+  return out;
 }

@@ -21,7 +21,7 @@ export { readRelationshipsDbml } from './readRelationships.js';
 export { parseSubjectAreaDbml, subjectAreaMembersDbml } from './readDiagram.js';
 export { compileDbmlProject } from './compileProject.js';
 export { outlineDbmlFile } from './outline.js';
-export { renderNewTableDbml, editTableDbml } from './writeTable.js';
+export { renderNewTableDbml, editTableDbml, renamedColumnsOf } from './writeTable.js';
 export type { EditTableDbmlOptions, ForeignDbmlMetadata } from './writeTable.js';
 export { editRelationshipsDbml, relationshipUnits, refUnitSortKey, usePathBetween, DBML_CONVERT_FIRST_MESSAGE } from './writeRelationships.js';
 export type { RefUnit, RelationshipsFileEdit, DbmlResolvedTable } from './writeRelationships.js';

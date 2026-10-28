@@ -633,7 +633,7 @@ describe('Delete Table (File): the D16 cascade', () => {
     expect(provider.describeDbmlDeleteCascade(['dim_date'], false))
       .toBe(" This removes the table's file, its 3 relationships and its place in 2 diagrams.");
     const before = snapshot();
-    expect(await provider.deleteTablesWithCascade(['dim_date'])).toBe(true);
+    expect(await provider.deleteTablesWithCascade(['dim_date'])).toEqual({ ok: true, unrestored: [] });
     const after = snapshot();
     expect('tables/dim_date.dbml' in after).toBe(false);
     expect(after['tables/gold/fct_y.yml']).toBe(before['tables/gold/fct_y.yml']);
@@ -657,12 +657,26 @@ describe('Delete Table (File): the D16 cascade', () => {
     expect(after['tables/gold/_relationships.dbml']).not.toContain('dim_date');
   });
 
+  it('a delete VS Code applies part of reports what could not be put back, so callers say nothing contradictory', async () => {
+    const { _mockWorkspaceState } = await import('../__mocks__/vscode');
+    vi.spyOn(vscode.window, 'showErrorMessage').mockImplementation((async () => undefined) as never);
+    const { provider } = buildProvider(new OwnWriteTracker());
+    // Put back: nothing changed, and nothing is left half-deleted.
+    _mockWorkspaceState.applyEditPrefixes.push(1);
+    expect(await provider.deleteTablesWithCascade(['dim_date'])).toEqual({ ok: false, unrestored: [] });
+    // Not put back: the files the reconcile could not restore are named.
+    _mockWorkspaceState.applyEditPrefixes.push(1, 0);
+    const result = await provider.deleteTablesWithCascade(['dim_date']);
+    expect(result.ok).toBe(false);
+    expect(result.unrestored.length).toBeGreaterThan(0);
+  });
+
   it('a file that could not be saved afterwards is reported by name', async () => {
     const { _failMockSave } = await import('../__mocks__/vscode');
     const error = vi.spyOn(vscode.window, 'showErrorMessage').mockImplementation((async () => undefined) as never);
     const { provider } = buildProvider(new OwnWriteTracker());
     _failMockSave(at('tables/gold/_relationships.dbml'));
-    expect(await provider.deleteTablesWithCascade(['dim_date'])).toBe(true);
+    expect(await provider.deleteTablesWithCascade(['dim_date'])).toEqual({ ok: true, unrestored: [] });
     expect(error).toHaveBeenCalledWith(expect.stringContaining('Could not save .erd-studio/tables/gold/_relationships.dbml'));
   });
 });

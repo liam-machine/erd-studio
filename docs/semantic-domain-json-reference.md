@@ -833,12 +833,13 @@ clean.
 
 ### Editor Support (JSON Schemas)
 
-Each hand-editable file has a JSON Schema (draft-07) in [`schemas/`](../schemas). It gives completion, hover descriptions and warnings for undeclared properties and invalid values:
+Each hand-editable JSON or YAML file (`layers.json`, templates, and the YAML/JSON files of projects from before 2.0) has a JSON Schema (draft-07) in [`schemas/`](../schemas). It gives completion, hover descriptions and warnings for undeclared properties and invalid values. `.dbml` and `.dbdiagram` files have none: the DBML parser and `erd-studio doctor` check them instead.
 
 | File | Schema |
 |------|--------|
 | `.erd-studio/{layer}/{domain}.json` | [`domain.schema.json`](../schemas/domain.schema.json) |
 | `.erd-studio/logical-models/[{folder}/]{name}.yml` | [`logical-model.schema.json`](../schemas/logical-model.schema.json) |
+| `.erd-studio/tables/[{folder}/]{name}.yml` | [`logical-model.schema.json`](../schemas/logical-model.schema.json) |
 | `.erd-studio/layers.json` | [`layers.schema.json`](../schemas/layers.schema.json) |
 | `.erd-studio/templates/{id}.json` | [`template.schema.json`](../schemas/template.schema.json) |
 

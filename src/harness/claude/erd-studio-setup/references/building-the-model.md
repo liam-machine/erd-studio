@@ -145,7 +145,8 @@ use * from '../tables/gold/_relationships.dbml'
 ```
 
 - The Project name matches the file name; lowercase letters, digits, `-` and `_`, starting with a
-  letter. `erd_schema_version: '7'` always; `erd_model_folder` is optional (the common folder of
+  letter. Double-quote a name with a `-` (`Project "customer-360" {`), or every DBML tool and
+  ERD Studio reject the file. `erd_schema_version: '7'` always; `erd_model_folder` is optional (the common folder of
   the chosen models' files).
 - One table `use` line per chosen name, including already-modelled ones, with the path from the
   diagram to the table's file; then one `use *` line per `_relationships.dbml` of those tables'

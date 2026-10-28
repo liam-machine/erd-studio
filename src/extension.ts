@@ -1691,8 +1691,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (confirm === 'Delete') {
         try {
           if (dbml) {
-            if (!(await editorProvider.deleteTablesWithCascade([node.name]))) {
-              void vscode.window.showErrorMessage(`Delete Table: VS Code did not apply the change, so "${node.name}" was not deleted.`);
+            const result = await editorProvider.deleteTablesWithCascade([node.name]);
+            if (!result.ok) {
+              // Files the reconcile could not put back are already named in its modal; saying nothing was deleted would contradict it.
+              if (result.unrestored.length === 0) {
+                void vscode.window.showErrorMessage(`Delete Table: VS Code did not apply the change, so "${node.name}" was not deleted.`);
+              }
               return;
             }
             tableLibraryProvider.refresh();

@@ -482,6 +482,24 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
     expectCompilesEverywhere(input, plan);
   });
 
+  it('a Ref already written against a YAML table gets its use line when that table is converted', async () => {
+    // The header Convert and the canvas write (a comment right above a use line belongs to that line).
+    const header = '// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.\n';
+    const input = inputOf({
+      'tables/gold/fct_order.dbml': 'Table fct_order {\n  id INT [pk]\n  new_key INT\n}\n',
+      'tables/gold/dim_new.yml': yml('dim_new', [['new_key', 'INT', true]]),
+      'tables/gold/_relationships.dbml': `${header}use { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.new_key > dim_new.new_key // written before converting\n`,
+      'gold/sales.dbml': "Project sales {\n  erd_schema_version: '7'\n}\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\nuse * from '../tables/gold/_relationships.dbml'\n",
+    });
+    const plan = await planDbmlConversion(input);
+    expect(plan.refusals).toEqual([]);
+    expect(created(plan, 'tables/gold/dim_new.dbml')).toBeDefined();
+    expect(written(plan, 'tables/gold/_relationships.dbml')).toBe(
+      `${header}use { table dim_new } from './dim_new.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.new_key > dim_new.new_key // written before converting\n`,
+    );
+    expectCompilesEverywhere(input, plan);
+  });
+
   it('a half-applied run: plans the rest, lists what is already there, and doctor says to finish it', async () => {
     const input = readDbmlConversionInput(path.join(FIXTURES, 'half-converted'), '.erd-studio');
     const plan = await planDbmlConversion(input);
@@ -728,6 +746,38 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('a half-applied run, then a YAML relationship edit: the YAML list wins, with no self-check refusal', async () => {
+    const files = {
+      'logical-models/dim.yml': DIM,
+      'logical-models/other.yml': yml('other', [['other_key', 'INT', true]]),
+      'logical-models/fct.yml': yml('fct', [['fct_key', 'INT', true], 'dim_key', 'other_key'], [
+        FCT_REL,
+        { fromColumn: 'other_key', toModel: 'other', toColumn: 'other_key', cardinality: 'many-to-one' },
+      ]),
+      'gold/d.json': diagram('d', 'gold', ['fct', 'dim', 'other']),
+    };
+    const first = await planDbmlConversion(inputOf(files));
+    expect(first.refusals).toEqual([]);
+    const half = applied(inputOf(files), first, { only: ['tables/_relationships.dbml'] });
+    const edit = (from: string, to: string): DbmlConversionInput => ({
+      ...half,
+      files: half.files.map((f) => (f.path === 'logical-models/fct.yml' ? { ...f, text: f.text.replace(from, to) } : f)),
+    });
+
+    // The user removes a relationship from the yml the canvas still reads.
+    const removed = await planDbmlConversion(edit('  - fromColumn: other_key\n    toModel: other\n    toColumn: other_key\n    cardinality: many-to-one\n', ''));
+    expect(removed.refusals).toEqual([]);
+    expect(refLines(written(removed, 'tables/_relationships.dbml'))).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
+    expect(removed.notes).toContain('tables/_relationships.dbml: the Ref fct.other_key → other.other_key belongs to fct, which is still a YAML table (logical-models/fct.yml), so ERD Studio never drew it; logical-models/fct.yml\'s relationships replace it.');
+    expect(removed.resumed).not.toContain('tables/_relationships.dbml');
+
+    // Or changes a cardinality: written as the yml has it, never "stored twice".
+    const changed = await planDbmlConversion(edit('toColumn: dim_key\n    cardinality: many-to-one', 'toColumn: dim_key\n    cardinality: one-to-one'));
+    expect(changed.refusals).toEqual([]);
+    expect(refLines(written(changed, 'tables/_relationships.dbml'))).toEqual(['Ref: dim.dim_key ?- fct.dim_key', 'Ref: fct.other_key >? other.other_key']);
+    expect(changed.notes.filter((n) => /stored twice/.test(n))).toEqual([]);
   });
 
   it('a stale layout file beside a diagram with no positions is a named refusal', async () => {

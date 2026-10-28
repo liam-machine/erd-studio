@@ -646,7 +646,10 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
       id: 'fix-dbml-file',
       title: `Fix ${files.size === 1 ? 'a DBML file' : `${files.size} DBML files`} that ERD Studio or other DBML tools cannot read`,
       why: `${dbmlErrors.map((p) => `${p.file}${p.line !== undefined ? `:${p.line}` : ''} (${p.code}) — ${p.message}`).join('; ')}. `
-        + 'Fix these lines before anything else (a value to quote is the usual one), then re-run doctor.',
+        // The quoting hint only when a problem is a quoting one (its message carries "Quote the value").
+        + (dbmlErrors.some((p) => p.message.includes('Quote the value'))
+          ? 'Fix these lines before anything else (a value to quote is the usual one), then re-run doctor.'
+          : 'Fix these lines before anything else, then re-run doctor.'),
       command: null,
     });
   }

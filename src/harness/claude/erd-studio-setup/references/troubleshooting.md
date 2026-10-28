@@ -169,11 +169,14 @@ chosen. Only the user knows which version is right — it is often a teammate's 
 
 A DBML project (doctor's `erd.storage` is `dbml` or `mixed`) reports its files' problems in
 `erd.dbmlProblems`: `file`, `line`, `code`, `severity` and `message`. Only errors raise a next
-step; a warning is information (often with the exact line to add) and never blocks.
+step, but fix these warnings too in any file you wrote: `missingUse`, `missingRelationshipsUse`,
+`unquotedValue` (`natural_key: true` → `natural_key: 'true'`) and `usePathMismatch`. The message
+gives the exact line. ERD Studio reads on without the fix, but other DBML tools reject the file
+and every diagram that imports it. Other warnings are information.
 
 - **`fix-dbml-file`** — a `.dbml` file ERD Studio or other DBML tools cannot read. The usual cause
-  is an unquoted value: `grain: One row per order` → `grain: 'One row per order'`, `natural_key: true`
-  → `natural_key: 'true'` (the message says "Quote the value"). Others: a `use`, `Ref` or inline
+  is an unquoted text value: `grain: One row per order` → `grain: 'One row per order'` (the
+  message says "Quote the value"). Others: a `use`, `Ref` or inline
   `[ref: …]` inside a table file (move it to the folder's `_relationships.dbml`, as the message
   says), a table file holding two Tables or a name other than its file's, a Ref that is stored
   twice (`duplicateRef`: delete one), or a `tables` layer in `layers.json`. Fix the line, then
