@@ -143,11 +143,21 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     return item;
   }
 
+  /**
+   * While this returns true the view is empty, so its welcome text (the DBML
+   * guard's message, see `dbmlStorageGuardUi.ts`) shows instead.
+   */
+  setHiddenWhen(hidden: () => boolean): void {
+    this.hiddenWhen = hidden;
+  }
+  private hiddenWhen: () => boolean = () => false;
+
   getChildren(element?: TableLibraryNode): TableLibraryNode[] | undefined {
     if (element) {
       return element.type === 'folder' ? element.children : undefined;
     }
 
+    if (this.hiddenWhen()) return [];
     if (!this.tableLibraryService.dirExists()) return [];
 
     const usageMap = this.buildUsageMap();

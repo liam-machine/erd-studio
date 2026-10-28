@@ -42,6 +42,7 @@ import {
   type ProfilesInfo,
 } from '../services/dbtEnv';
 import { HARNESS_VERSION, HarnessService } from '../services/harnessService';
+import { DBML_STORAGE_MESSAGE, detectDbmlStorage } from '../services/dbmlStorageGuard';
 import {
   buildCliContext,
   makeEnvelope,
@@ -55,6 +56,7 @@ import {
 import { toUnreadableTableFile, unreadableHint, type UnreadableTableFile } from './diff';
 
 export type NextStepId =
+  | 'update-erd-studio'
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
   | 'resolve-merge-conflicts' | 'fix-model-yaml' | 'resolve-naming-conflicts' | 'fix-subject-area-naming' | 'migrate-v5' | 'turn-round-relationships' | 'update-harness' | 'ready';
 
@@ -97,6 +99,14 @@ export interface DoctorResult extends Envelope {
   projectFiles: { schemaYmlFiles: number; sourceFiles: number; modelsDiscovered: number };
   erd: {
     semanticDirExists: boolean;
+    /**
+     * Set when a newer ERD Studio (the 1.9 pre-release or 2.0) stored this
+     * project as DBML, which this version cannot read: the first file that
+     * shows it, project-relative. Absent otherwise. Nothing else in `erd`
+     * describes such a project, and nothing may be written to its ERD Studio
+     * folder by this version's conventions.
+     */
+    dbmlStorage?: { file: string };
     layers: string[];
     domains: number;
     logicalModels: number;
@@ -266,6 +276,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
       naming: 'v6', tablesFolderIsLayer: false, namingConflicts: [],
     };
   }
+  const dbmlEvidence = detectDbmlStorage(semanticRoot);
   const domains = ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir);
   const issues: DoctorResult['erd']['domainFormatIssues'] = [];
   const conflicted: ConflictedSubjectAreaFile[] = [];
@@ -301,6 +312,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   return {
     backwardsRelationships: backwardsRelationshipsOf(ctx, domains.map((d) => d.filePath).filter((f) => !issues.some((i) => i.file === relPath(ctx.root, f)))),
     semanticDirExists: true,
+    ...(dbmlEvidence ? { dbmlStorage: { file: relPath(ctx.root, path.join(semanticRoot, dbmlEvidence.file)) } } : {}),
     layers: ctx.layerService.getValidLayerIds(),
     domains: domains.length,
     logicalModels: ctx.tableLibraryService.listTableNames().length,
@@ -363,6 +375,19 @@ function backwardsRelationshipsOf(ctx: CliContext, domainFiles: string[]): Backw
 function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boolean; installPath: string; invocation: string | null }): NextStep[] {
   const steps: NextStep[] = [];
   const { dbt, profiles, artifacts } = r;
+
+  // First: nothing else in this report describes a DBML project, and writing
+  // YAML / JSON files into it would put them beside the DBML ones.
+  if (r.erd.dbmlStorage) {
+    steps.push({
+      id: 'update-erd-studio',
+      title: 'Update ERD Studio',
+      why: `${DBML_STORAGE_MESSAGE} (${r.erd.dbmlStorage.file} is a DBML file.) Until then, don't create or change files in `
+        + `${r.semanticDir}/ by this version's conventions: they would sit beside the DBML files, and the newer version would `
+        + 'report them as conflicts. In VS Code: Extensions view → ERD Studio → Update (or Switch to Pre-Release Version).',
+      command: null,
+    });
+  }
 
   if (dbt.untrustedVenvDbt) {
     steps.push({

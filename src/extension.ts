@@ -77,6 +77,7 @@ import { exportSubjectAreaFile } from './services/diagramExport';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
 import { saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles } from './providers/dirtyDocuments';
+import { DBML_STORAGE_MESSAGE, DbmlStorageGuard, OPEN_EXTENSION_PAGE_COMMAND, openExtensionPage } from './providers/dbmlStorageGuardUi';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -455,6 +456,35 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.moveRelationshipsToLibrary',
   'erdStudio.exportDiagram',
   'erdStudio.migrateToTableNaming',
+  // Code-only: the DBML guard's "Update ERD Studio" link (dbmlStorageGuardUi).
+  OPEN_EXTENSION_PAGE_COMMAND,
+]);
+
+/**
+ * Commands that write into the ERD Studio folder, refused while the project
+ * is stored as DBML by a newer ERD Studio (see `src/services/dbmlStorageGuard.ts`).
+ * Registered through `registerGuarded` in activate(); their dbtSemantic.*
+ * aliases delegate to them, so they are refused too.
+ */
+export const DBML_GUARDED_COMMANDS: ReadonlySet<string> = new Set([
+  'erdStudio.createDomain',
+  'erdStudio.setupSemanticDirectory',
+  'erdStudio.deleteDomain',
+  'erdStudio.renameDomain',
+  'erdStudio.drawFromDbt',
+  'erdStudio.addLayer',
+  'erdStudio.editLayer',
+  'erdStudio.removeLayer',
+  'erdStudio.initializeLayerConfig',
+  'erdStudio.installCodingHarness',
+  'erdStudio.setupAiHelper',
+  'erdStudio.syncDomainTags',
+  'erdStudio.migrateToV5',
+  'erdStudio.migrateToTableNaming',
+  'erdStudio.deleteLogicalModel',
+  'erdStudio.organizeModelLibrary',
+  'erdStudio.moveRelationshipsToLibrary',
+  'erdStudio.resolveDuplicateModel',
 ]);
 
 /**
@@ -874,6 +904,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // by the dbt_project.yml watcher below, which prompts for a window reload.
   const dbtConfig = readDbtProjectConfig(workspaceRoot);
 
+  // A project a newer ERD Studio stored as DBML (the 1.9 pre-release or 2.0)
+  // is one this version cannot read: say so once, and refuse every write into
+  // the ERD Studio folder rather than put YAML / JSON files beside the DBML
+  // ones. Checked fresh on every refusal; a YAML / JSON project is unaffected.
+  const dbmlGuard = new DbmlStorageGuard(path.join(workspaceRoot, semanticDir));
+  context.subscriptions.push(dbmlGuard);
+  dbmlGuard.isActive();
+  dbmlGuard.watch();
+  /** registerCommand for a DBML_GUARDED_COMMANDS entry: refused while the project is stored as DBML. */
+  const registerGuarded = (command: string, handler: (...args: any[]) => unknown): vscode.Disposable => {
+    if (!DBML_GUARDED_COMMANDS.has(command)) { throw new Error(`${command} is not in DBML_GUARDED_COMMANDS`); }
+    return vscode.commands.registerCommand(command, (...args: unknown[]) => (dbmlGuard.refuse() ? undefined : handler(...args)));
+  };
+
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const subjectAreaService = new SubjectAreaService(layerService);
   const tableLibraryService = new TableLibraryService(workspaceRoot, semanticDir);
@@ -919,6 +963,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     {
       // Paths compared as the file system does (a `c:` drive letter, a folder in another case).
       isFileDirtyInEditor: (filePath) => dirtyFiles([filePath]).length > 0,
+      // This version lists no DBML diagram, so a regenerate would drop their selectors.
+      isBlocked: () => dbmlGuard.isActive(),
       onSkipped: (info) => {
         const message = info.reason === 'unsaved-edits'
           ? 'selectors.yml has unsaved edits in your editor — ERD Studio won\'t overwrite to avoid losing your work. ' +
@@ -975,7 +1021,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Check for v4 → v5 migration (non-blocking)
   const migrationService = new MigrationService(workspaceRoot, layerService, tableLibraryService, semanticDir);
-  if (migrationService.needsMigration()) {
+  if (!dbmlGuard.isActive() && migrationService.needsMigration()) {
     void vscode.window.showInformationMessage(
       'ERD Studio has a new table storage format that lets subject areas share tables. Migrate subject area files now?',
       'Migrate Now',
@@ -1012,6 +1058,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tableLibraryService,
   );
   editorProviderForFeedback = editorProvider;
+  // The DBML guard: both views show its message instead of their contents, and
+  // the canvas refuses to open or write.
+  treeProvider.setHiddenWhen(() => dbmlGuard.isActive());
+  tableLibraryProvider.setHiddenWhen(() => dbmlGuard.isActive());
+  editorProvider.setDbmlStorageGuard(dbmlGuard);
 
   // Report tracking is constructed here, before refreshContextKeys() is defined
   // and called below, so nothing can reference a service that does not exist
@@ -1051,6 +1102,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   const refreshContextKeys = (): void => {
+    // Publishes erdStudio.dbmlStorage when it changed.
+    dbmlGuard.isActive();
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
     // A project that writes the v6 naming (#182) makes `tables/` with its first
     // table, so the view shows from setup on, not only once a table exists.
@@ -1059,6 +1112,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     refreshDiagramsStatus();
   };
   refreshContextKeys();
+  context.subscriptions.push(
+    dbmlGuard.onDidChange(() => {
+      treeProvider.invalidateSubjectArea();
+      treeProvider.refresh();
+      tableLibraryProvider.refresh();
+      refreshContextKeys();
+    }),
+    vscode.commands.registerCommand(OPEN_EXTENSION_PAGE_COMMAND, () => openExtensionPage()),
+  );
 
   // The one domain picker: straight to the only domain, a QuickPick when
   // there are several. Shared by openCanvas and Export Diagram.
@@ -1462,7 +1524,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('erdStudio.openTrackedReport', (node?: MyReportNode) => {
       if (node?.report?.url) { void vscode.env.openExternal(vscode.Uri.parse(node.report.url)); }
     }),
-    vscode.commands.registerCommand('erdStudio.deleteLogicalModel', async (node: TableLibraryNode | undefined) => {
+    registerGuarded('erdStudio.deleteLogicalModel', async (node: TableLibraryNode | undefined) => {
       if (!node || node.type !== 'model') {
         void vscode.window.showErrorMessage('Delete Table: No table selected. Right-click a table in the Table Library.');
         return;
@@ -1486,7 +1548,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       selectDbtProject(context, workspaceRoot, semanticDir, typeof target === 'string' ? target : undefined)),
     // Move top-level logical-models/*.yml files into the folder of the one
     // layer whose domains use them (issue #76). Prompted, one WorkspaceEdit.
-    vscode.commands.registerCommand('erdStudio.organizeModelLibrary', async () => {
+    registerGuarded('erdStudio.organizeModelLibrary', async () => {
       if (!tableLibraryService.dirExists()) {
         void vscode.window.showInformationMessage('Organise Table Library: there is no Table Library folder yet.');
         return;
@@ -1564,7 +1626,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // identities). Give it its own name — `{layer}_{name}` — with an alias that
     // keeps the table name, and repoint the domains of its layer at it.
     // Prompted, one WorkspaceEdit, one undo step.
-    vscode.commands.registerCommand('erdStudio.resolveDuplicateModel', async (arg?: TableLibraryNode | string) => {
+    registerGuarded('erdStudio.resolveDuplicateModel', async (arg?: TableLibraryNode | string) => {
       const entries = tableLibraryService.listTableFiles();
       // A duplicate within one library (#182: `tables/` too). A `tables/` copy of a
       // name `logical-models/` also has is the migration's conflict, not fixed here (#181).
@@ -1684,7 +1746,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     // Store every domain file's relationships once, in their from-models'
     // library files (#126). The opt-in for a project that keeps them per domain.
-    vscode.commands.registerCommand('erdStudio.moveRelationshipsToLibrary', () =>
+    registerGuarded('erdStudio.moveRelationshipsToLibrary', () =>
       moveRelationshipsToLibrary({
         workspaceRoot,
         semanticDir,
@@ -1752,7 +1814,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         defaultSaveFolder: workspaceRoot,
         projectRoot: workspaceRoot,
       }, arg)),
-    vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, async () => {
+    registerGuarded(DRAW_FROM_DBT_COMMAND, async () => {
       const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
       await drawFromDbt({
         workspaceRoot,
@@ -1786,7 +1848,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
       });
     }),
-    vscode.commands.registerCommand(
+    registerGuarded(
       'erdStudio.createDomain',
       async (layerArg?: Layer) => {
         // Step 1: Determine layer
@@ -1907,7 +1969,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
       },
     ),
-    vscode.commands.registerCommand(
+    registerGuarded(
       'erdStudio.deleteDomain',
       async (element?: TreeElement) => {
         if (!element || element.type !== 'domain') {
@@ -1952,7 +2014,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         selectorsService.scheduleRegenerate();
       },
     ),
-    vscode.commands.registerCommand(
+    registerGuarded(
       'erdStudio.renameDomain',
       async (element?: TreeElement) => {
         if (!element || element.type !== 'domain') {
@@ -2054,7 +2116,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     // Regenerate the root selectors.yml from current domain files.
     // Run a domain refresh in dbt with: dbt build --selector domain_{layer}_{domain}
-    vscode.commands.registerCommand('erdStudio.syncDomainTags', async () => {
+    registerGuarded('erdStudio.syncDomainTags', async () => {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -2138,7 +2200,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
     }),
     // Migrate v4 domains to v5 central model store
-    vscode.commands.registerCommand('erdStudio.migrateToV5', async () => {
+    registerGuarded('erdStudio.migrateToV5', async () => {
       if (!migrationService.needsMigration()) {
         void vscode.window.showInformationMessage('All subject area files already use the v5 central Table Library format.');
         return;
@@ -2146,10 +2208,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // v4 → v5, then on to the new file naming (#182), so nobody goes through two prompts.
       if (await migrateToV5()) await migrateNaming();
     }),
-    vscode.commands.registerCommand('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
+    registerGuarded('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
 
     // F408: Set up semantic directory for new projects
-    vscode.commands.registerCommand(
+    registerGuarded(
       'erdStudio.setupSemanticDirectory',
       async () => {
         const fullSemanticDir = path.join(workspaceRoot, semanticDir);
@@ -2194,7 +2256,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // -------------------------------------------------------------------------
     // Layer Management Commands (unchanged)
     // -------------------------------------------------------------------------
-    vscode.commands.registerCommand(
+    registerGuarded(
       'erdStudio.addLayer',
       async () => {
         // Step 1: Layer ID
@@ -2266,7 +2328,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerGuarded(
       'erdStudio.editLayer',
       async (element?: TreeElement) => {
         let layerId: string | undefined;
@@ -2346,7 +2408,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerGuarded(
       'erdStudio.removeLayer',
       async (element?: TreeElement) => {
         let layerId: string | undefined;
@@ -2403,7 +2465,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerGuarded(
       'erdStudio.initializeLayerConfig',
       async () => {
         // saveConfig refuses to overwrite an unreadable layers.json (H18) —
@@ -2447,7 +2509,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // -------------------------------------------------------------------------
     // AI Coding Harness Installation
     // -------------------------------------------------------------------------
-    vscode.commands.registerCommand(
+    registerGuarded(
       'erdStudio.installCodingHarness',
       async () => {
         const harnessService = new HarnessService(semanticDir);
@@ -2573,6 +2635,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     promptFor(assistant, workspaceRoot, firstWorkspaceFolder, process.platform);
 
   const runSetup = async () => {
+    // The Getting Started panel calls this directly: its skill files describe
+    // the YAML / JSON files, which a DBML project must not get.
+    if (dbmlGuard.isActive()) { return { ok: false, filesWritten: [], message: DBML_STORAGE_MESSAGE }; }
     const outcome = await runSetupAiHelper({
       root: workspaceRoot,
       harness: setupHarness,
@@ -2627,7 +2692,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('erdStudio.setupAiHelper', async () => {
+    registerGuarded('erdStudio.setupAiHelper', async () => {
       const outcome = await runSetup();
       await GettingStartedPanel.currentPanel?.postSetupResult(outcome);
       if (!outcome.ok) {
@@ -2700,7 +2765,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // workspace when none are present. Never overwrite anything silently:
   // harness files (AGENTS.md in particular) can hold user content.
   let harnessPromptShown = false;
-  {
+  // Not in a project stored as DBML: this version's skill files describe YAML / JSON.
+  if (!dbmlGuard.isActive()) {
     const harnessService = new HarnessService(semanticDir);
     const existing = harnessService.detectExisting(workspaceRoot);
     const installedCount = [...existing.values()].filter(Boolean).length;
@@ -2786,7 +2852,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // First-run check
   const fullSemanticDir = path.join(workspaceRoot, semanticDir);
-  if (fs.existsSync(fullSemanticDir) && !layerService.configFileExists()) {
+  if (fs.existsSync(fullSemanticDir) && !layerService.configFileExists() && !dbmlGuard.isActive()) {
     const detected = layerService.detectLayersFromFilesystem();
     if (detected.length > 0) {
       const layerNames = detected.map(l => l.label).join(', ');
