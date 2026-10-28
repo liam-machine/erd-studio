@@ -28,6 +28,7 @@ import {
 } from '@erd-studio/core';
 import type { DbmlFileOutline, ProjectStorage, Relationship } from '@erd-studio/core';
 import { compileDbmlProject, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, usePathBetween } from '@erd-studio/core/dbml';
+import { listMisnamedTableFiles } from '../services/dbmlConversionFiles';
 import { tablesDirIsLayer, tablesLayerConflict, TABLES_DIR } from '../services/logicalModelService';
 import type { CliContext } from './context';
 import { unreadableHint } from './diff';
@@ -357,6 +358,15 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
       return undefined;
     }
   };
+  /** A member's table file that ERD Studio never lists because it is named `.yaml` or `.YML` (Convert leaves it, saying so). */
+  const misnamed = listMisnamedTableFiles(semanticRoot);
+  const misnamedOf = (name: string): { path: string; file: string; stem: string; caseOnly: boolean } | undefined => {
+    const lower = name.toLowerCase();
+    const m = misnamed.find((x) => x.name.toLowerCase() === lower || x.path.replace(/^.*\//, '').replace(/\.ya?ml$/i, '').toLowerCase() === lower);
+    if (!m) return undefined;
+    const file = m.path.replace(/^.*\//, '');
+    return { path: m.path, file, stem: file.replace(/\.ya?ml$/i, ''), caseOnly: file.toLowerCase().endsWith('.yml') };
+  };
   /** How a member's YAML table is named in a message: its own name, or the member with the name its file holds. */
   const yamlTableLabel = (name: string, t: { name: string; path: string }): string =>
     t.name.toLowerCase() === name.toLowerCase() ? `${t.name} is still a YAML table (${t.path})` : `${name} is still a YAML table (${t.path}, which holds the table ${t.name})`;
@@ -381,6 +391,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     const waits = [
       ...[head.fromModel, head.toModel].filter((n, i, all) => all.indexOf(n) === i).flatMap((name) => {
         const t = memberTableOf(name);
+        const wrongName = t ? undefined : misnamedOf(name);
+        if (wrongName) return [`${name}'s file ${wrongName.path} is not named .yml, so ERD Studio does not read it as a table yet`];
         if (!t) return [`${name} has no table file`];
         const notTable = notATable(t);
         if (notTable) return [`${name}'s file ${t.path} ${notTable}, so it is not a table yet`];
@@ -398,6 +410,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     const how = [
       ...(waits.some((w) => w.endsWith('has no table file')) ? ['Add from dbt makes a missing table'] : []),
       ...(waits.some((w) => w.endsWith('so it is not a table yet')) ? ['write the table in that file, then run Convert Project to DBML'] : []),
+      ...(waits.some((w) => w.endsWith('does not read it as a table yet')) ? ['rename that file to .yml, then run Convert Project to DBML'] : []),
       ...(waits.some((w) => w.includes('is still a YAML table')) ? ['Convert Project to DBML converts a YAML table once its file is fixed'] : []),
     ];
     push({
@@ -602,9 +615,14 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     for (const name of reading.unlinked ?? []) {
       const t = memberTableOf(name);
       const notTable = t ? notATable(t) : undefined;
+      const wrongName = t ? undefined : misnamedOf(name);
       push({
         file: projectRel(f.rel), code: 'unlinkedTable',
-        message: !t
+        message: wrongName
+          ? `${name} is on this diagram, but its table file ${wrongName.path} is named ${wrongName.file}, and ERD Studio reads a table file only when its name ends in .yml`
+            + (wrongName.caseOnly ? ', in lower case, so only a file system that ignores case finds this one' : `, so it draws ${name} as missing`)
+            + ` (its name is in the Project's erd_unlinked_tables). Rename it to ${wrongName.stem}.yml, then run ERD Studio: Convert Project to DBML.`
+          : !t
           ? `${name} is on this diagram but has no table file, so it is drawn as missing (its name is in the Project's erd_unlinked_tables). Add it (Add from dbt), or remove it from the diagram.`
           : notTable
             ? `${name} is on this diagram, but its file ${t.path} ${notTable}, so ERD Studio does not read it as a table and draws ${name} as missing (its name is in the Project's erd_unlinked_tables). `

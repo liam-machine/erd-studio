@@ -113,6 +113,13 @@ export interface DbmlConversionInput {
    * resolver of the self-check.
    */
   files: DbmlConversionFile[];
+  /**
+   * Table files in the library whose name ends in `.yaml`, or `.yml` in
+   * another case (`.YML`), with the table each holds: ERD Studio's library
+   * never lists them, so Convert leaves each with what to rename it to.
+   * Optional (absent: none).
+   */
+  misnamedTables?: Array<{ path: string; name: string }>;
 }
 
 export interface DbmlConversionPlan {
@@ -757,6 +764,24 @@ async function planOnce(
     if (!reading.writable) nonWritableTables.add(f.path);
     existingDbml.push(table);
     addName(reading.table.name, { path: f.path, text: f.text, storage: 'dbml' });
+  }
+  // A table file named .yaml (or .YML): never listed by the library, so never converted. Diagrams keep its
+  // members as they drew them, and it is left with the name to give it (unless a table of that name has a file).
+  for (const m of input.misnamedTables ?? []) {
+    const stem = stemOf(m.path);
+    if (left.has(m.path)) {
+      addLeftTable(stem, m.path);
+      addLeftTable(m.name, m.path);
+      continue;
+    }
+    if (byName.has(lower(m.name)) || byName.has(lower(stem))) continue;
+    const file = m.path.slice(m.path.lastIndexOf('/') + 1);
+    const caseOnly = lower(file).endsWith('.yml');
+    leave(m.path, caseOnly
+      ? `It is named ${file}, and ERD Studio reads a table file only when its name ends in .yml, in lower case: the table library does not list it, ` +
+        `and a diagram finds it only on a file system that ignores case. Rename it to ${stem}.yml, then convert again.`
+      : `It is named ${file}, and ERD Studio reads a table file only when its name ends in .yml, so it does not read this one ` +
+        `(a diagram that lists ${m.name} draws it as missing). Rename it to ${stem}.yml, then convert again.`);
   }
   // Names: one file per table, whatever the folder, format or case. Convert never picks a copy: the
   // YAML copies stay as they are (the resolver keeps choosing what it chose), the DBML ones stay too.

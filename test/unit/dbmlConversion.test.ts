@@ -1332,6 +1332,47 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
     expect(plan.deletes).toContain('gold/d.json');
   });
 
+  it('a table file named .yaml or .YML is left with the name to give it, and its member is not called missing', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-misnamed-'));
+    try {
+      const sd = path.join(root, '.erd-studio');
+      const put = (rel: string, text: string): void => {
+        fs.mkdirSync(path.dirname(path.join(sd, rel)), { recursive: true });
+        fs.writeFileSync(path.join(sd, rel), text);
+      };
+      put('layers.json', LAYERS);
+      put('logical-models/dim.yml', DIM);
+      put('logical-models/gold/dim_a.yaml', yml('dim_a', ['a_key']));
+      put('logical-models/gold/dim_b.YML', yml('dim_b', ['b_key']));
+      // A dbt schema file named .yaml is not a table: never listed, as before.
+      put('logical-models/gold/_models.yaml', 'version: 2\nmodels:\n  - name: dim_a\n');
+      put('gold/d.json', diagram('d', 'gold', ['dim', 'dim_a', 'dim_b']));
+      const input = readDbmlConversionInput(root, '.erd-studio');
+      expect(input.misnamedTables).toEqual([
+        { path: 'logical-models/gold/dim_a.yaml', name: 'dim_a' },
+        { path: 'logical-models/gold/dim_b.YML', name: 'dim_b' },
+      ]);
+      const plan = await planDbmlConversion(input);
+      expect(plan.refusals).toEqual([]);
+      expect(leftOf(plan, 'logical-models/gold/dim_a.yaml')?.problem).toBe(
+        'It is named dim_a.yaml, and ERD Studio reads a table file only when its name ends in .yml, so it does not read this one '
+          + '(a diagram that lists dim_a draws it as missing). Rename it to dim_a.yml, then convert again.',
+      );
+      expect(leftOf(plan, 'logical-models/gold/dim_b.YML')?.problem).toBe(
+        'It is named dim_b.YML, and ERD Studio reads a table file only when its name ends in .yml, in lower case: the table library does not list it, '
+          + 'and a diagram finds it only on a file system that ignores case. Rename it to dim_b.yml, then convert again.',
+      );
+      // Not "create them later with Add from dbt": each has a file, under the wrong name.
+      expect(plan.keptMissing).toEqual([]);
+      expect(created(plan, 'gold/d.dbml')).toContain("erd_unlinked_tables: 'dim_a, dim_b'");
+      expect(plan.deletes).not.toContain('logical-models/gold/dim_a.yaml');
+      // The same plan twice.
+      expect(JSON.stringify(await planDbmlConversion(readDbmlConversionInput(root, '.erd-studio')))).toBe(JSON.stringify(plan));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('a diagram whose folder can never be a layer, or whose layers.json does not read, says so instead of "add the layer"', async () => {
     // Gold_Ext is listed, but layers.json skips an id with capitals: adding it again would not help.
     const listed = JSON.stringify({ schemaVersion: 1, layers: [...JSON.parse(LAYERS).layers, { id: 'Gold_Ext', label: 'Gold Ext', abbreviation: 'GEX', color: '#123456', creatable: true, order: 9 }] });

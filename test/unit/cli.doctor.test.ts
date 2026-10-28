@@ -996,6 +996,27 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(pending.message).not.toContain('is still a YAML table');
   });
 
+  it('a member whose table file is named .yaml is named as that file, to rename, not as a table to add from dbt (as Convert\'s plan says)', async () => {
+    const r = await doctor(nativeWith({
+      'gold/sales.dbml': replace("  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n", "  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n  erd_unlinked_tables: 'dim_sales_rep'\n"),
+      'tables/gold/dim_sales_rep.yaml': () => 'name: dim_sales_rep\ncolumns:\n  - name: sales_rep_key\n    dataType: INT\n',
+      'tables/gold/_relationships.dbml': (text) => `${text}\n// erd-studio pending: Ref: fct_order.order_id >? dim_sales_rep.sales_rep_key\n`,
+    }));
+    expect(r.erd.dbmlConversion?.leftAsIs?.find((l) => l.path === 'tables/gold/dim_sales_rep.yaml')?.problem).toBe(
+      'It is named dim_sales_rep.yaml, and ERD Studio reads a table file only when its name ends in .yml, so it does not read this one '
+        + '(a diagram that lists dim_sales_rep draws it as missing). Rename it to dim_sales_rep.yml, then convert again.',
+    );
+    expect(r.erd.dbmlConversion?.keptMissing ?? []).toEqual([]);
+    expect(problem(r, 'unlinkedTable').map((p) => p.message)).toEqual([
+      'dim_sales_rep is on this diagram, but its table file tables/gold/dim_sales_rep.yaml is named dim_sales_rep.yaml, and ERD Studio reads a table file only when its name ends in .yml, '
+        + "so it draws dim_sales_rep as missing (its name is in the Project's erd_unlinked_tables). Rename it to dim_sales_rep.yml, then run ERD Studio: Convert Project to DBML.",
+    ]);
+    const [pending] = problem(r, 'pendingRelationship');
+    expect(pending.message).toContain("dim_sales_rep's file tables/gold/dim_sales_rep.yaml is not named .yml, so ERD Studio does not read it as a table yet");
+    expect(pending.message).toContain('(rename that file to .yml, then run Convert Project to DBML)');
+    expect(pending.message).not.toContain('Add from dbt');
+  });
+
   it('a project Convert left mixed: finish-dbml-conversion names each file left as it is, with its problem and line', async () => {
     const r = await doctor(nativeWith({
       'tables/gold/dim_other.yml': () => 'name: dim_other\ndescription: one\ndescription: two\ncolumns:\n  - name: id\n    dataType: INT\n',
