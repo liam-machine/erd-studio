@@ -25,7 +25,7 @@ import {
   findConflictMarkers,
   layoutFilePathOf,
 } from '@erd-studio/core';
-import type { DbmlFileOutline, ProjectStorage } from '@erd-studio/core';
+import type { DbmlFileOutline, ProjectStorage, Relationship } from '@erd-studio/core';
 import { compileDbmlProject, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, usePathBetween } from '@erd-studio/core/dbml';
 import { tablesDirIsLayer, tablesLayerConflict, TABLES_DIR } from '../services/logicalModelService';
 import type { CliContext } from './context';
@@ -79,6 +79,10 @@ const SEVERITY: Readonly<Record<string, 'error' | 'warning'>> = {
   diagramWarning: 'warning',
   // D25: a Metadata block in a diagram or relationships file that sets a table's properties from outside its file.
   foreignMetadata: 'warning',
+  // D26: a diagram member with no .dbml table file (erd_unlinked_tables).
+  unlinkedTable: 'warning',
+  // D27: a pending relationship (`// erd-studio pending: Ref …`).
+  pendingRelationship: 'warning',
   // D25: a Metadata block naming a table or column the file does not declare.
   'structure:metadataTarget': 'warning',
 };
@@ -332,6 +336,37 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
       return false;
     }
   };
+  /**
+   * A pending relationship (D27): drawn by ERD Studio, a comment to every other DBML tool. Says what it
+   * waits for, or that both ends are ready and the next write (or Convert) makes it a live Ref.
+   */
+  const pushPending = (rel: string, ref: { line: number; relationships: Relationship[] }): void => {
+    const head = ref.relationships[0];
+    if (!head) return;
+    const cols = (cs: string[]): string => (cs.length === 1 ? cs[0] : `(${cs.join(', ')})`);
+    const link = `${head.fromModel}.${cols(ref.relationships.map((r) => r.fromColumn))} → ${head.toModel}.${cols(ref.relationships.map((r) => r.toColumn))}`;
+    const waits = [
+      ...[head.fromModel, head.toModel].filter((n, i, all) => all.indexOf(n) === i).flatMap((name) => {
+        const t = tableOf(name);
+        if (!t) return [`${name} has no table file`];
+        if (t.storage === 'yaml') return [`${t.name} is still a YAML table (${t.path})`];
+        return [];
+      }),
+      ...ref.relationships.flatMap((r) => [[head.fromModel, r.fromColumn], [head.toModel, r.toColumn]] as const)
+        .filter(([table, column]) => {
+          const t = tableOf(table);
+          return t !== undefined && t.storage === 'dbml' && !t.columns.some((c) => c.toLowerCase() === column.toLowerCase());
+        })
+        .map(([table, column]) => `${tableOf(table)!.name} has no column ${column}`),
+    ];
+    push({
+      file: projectRel(rel), line: ref.line, code: 'pendingRelationship',
+      message: waits.length > 0
+        ? `The pending relationship ${link} is drawn by ERD Studio, but other DBML tools see only a comment: ${[...new Set(waits)].join('; ')}. `
+          + 'It becomes a live Ref once both ends have table files with those columns (Add from dbt makes the table). Keep the line as it is.'
+        : `The pending relationship ${link} can be a live Ref now: both ends have table files. Run ERD Studio: Convert Project to DBML to make it one.`,
+    });
+  };
   /** Relationships file (project-relative) → the tables (lower case) its `missingUse` warnings name. */
   const missingUseTables = new Map<string, Set<string>>();
   for (const f of files) {
@@ -381,6 +416,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
         });
       }
     }
+    for (const ref of reading.pending ?? []) pushPending(f.rel, ref);
     if (missing.size > 0) missingUseTables.set(projectRel(f.rel), new Set(missing.keys()));
     for (const m of missing.values()) {
       push({
@@ -521,6 +557,19 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
         });
       }
     }
+    // Members with no .dbml table file to use (D26), and the diagram's own pending relationships (D27).
+    for (const name of reading.unlinked ?? []) {
+      const t = tableOf(name);
+      push({
+        file: projectRel(f.rel), code: 'unlinkedTable',
+        message: !t
+          ? `${name} is on this diagram but has no table file, so it is drawn as missing (its name is in the Project's erd_unlinked_tables). Add it (Add from dbt), or remove it from the diagram.`
+          : t.storage === 'yaml'
+            ? `${t.name} is on this diagram but is still a YAML table (${t.path}), so the diagram names it in erd_unlinked_tables instead of a use line. Fix that file if needed, then run ERD Studio: Convert Project to DBML.`
+            : `${t.name} has a table file now (${t.path}), but the diagram still names it in erd_unlinked_tables. ERD Studio moves it to a use line on its next edit of this diagram, or run ERD Studio: Convert Project to DBML.`,
+      });
+    }
+    for (const pending of reading.pending ?? []) pushPending(f.rel, pending);
     const usedPaths = new Set(outline(f).uses.map((u) => u.resolved.toLowerCase()));
     for (const folder of [...memberFolders].sort()) {
       const relFile = relationshipsFiles.get(folder);

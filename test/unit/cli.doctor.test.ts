@@ -916,13 +916,48 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
       'gold/sales.json': () => JSON.stringify({ schemaVersion: 5, domain: 'sales', layer: 'gold', logical: { models: [], relationships: [] }, viewConfig: {} }),
     }));
     expect(r.erd.dbmlConversion?.resumed).toEqual([]);
-    expect(r.erd.dbmlConversion?.refusals.join(' ')).toContain('tables/gold/dim_region.dbml already exists, with other contents');
+    expect(r.erd.dbmlConversion?.refusals).toEqual([]);
+    expect(r.erd.dbmlConversion?.leftAsIs?.map((l) => l.problem).join(' ')).toContain('tables/gold/dim_region.dbml already exists, with other contents');
     expect(problem(r, 'formatConflict').map((p) => p.severity)).toEqual(['error', 'error']);
     expect(ids(r)).toEqual(['resolve-format-conflicts']);
     const step = r.nextSteps[0];
     expect(step.title).toBe('Keep one file for 2 tables or diagrams found as both YAML/JSON and DBML');
     expect(step.why).toContain('dim_region exists as both YAML and DBML');
     expect(step.why).toContain('The diagram sales exists as both JSON and DBML');
+  });
+
+  it('a diagram member with no table file (erd_unlinked_tables) and pending relationships are warnings naming diagram, table and fix (D26/D27)', async () => {
+    const r = await doctor(nativeWith({
+      'gold/sales.dbml': replace("  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n", "  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n  erd_unlinked_tables: 'gld_fct_risk_child, dim_region'\n")
+        .bind(null) as never,
+      'tables/gold/_relationships.dbml': (text) => `${text}\n// erd-studio pending: Ref: fct_order.risk_key >? gld_fct_risk_child.risk_key\n`,
+    }));
+    expect(problem(r, 'unlinkedTable')).toEqual([
+      expect.objectContaining({ file: '.erd-studio/gold/sales.dbml', severity: 'warning', message: expect.stringMatching(/^gld_fct_risk_child is on this diagram but has no table file, so it is drawn as missing .* Add it \(Add from dbt\), or remove it from the diagram\.$/) }),
+    ]);
+    expect(problem(r, 'pendingRelationship')).toEqual([
+      expect.objectContaining({
+        file: '.erd-studio/tables/gold/_relationships.dbml', line: 16, severity: 'warning',
+        message: expect.stringMatching(/^The pending relationship fct_order\.risk_key → gld_fct_risk_child\.risk_key is drawn by ERD Studio, but other DBML tools see only a comment: gld_fct_risk_child has no table file; fct_order has no column risk_key\./),
+      }),
+    ]);
+    // Warnings only: the project still compiles for every DBML tool, and nothing blocks.
+    expect(r.erd.dbmlProblems.filter((p) => p.severity === 'error')).toEqual([]);
+    expect(ids(r)).toEqual(['ready']);
+  });
+
+  it('a project Convert left mixed: finish-dbml-conversion names each file left as it is, with its problem and line', async () => {
+    const r = await doctor(nativeWith({
+      'tables/gold/dim_other.yml': () => 'name: dim_other\ndescription: one\ndescription: two\ncolumns:\n  - name: id\n    dataType: INT\n',
+    }));
+    expect(r.erd.storage).toBe('mixed');
+    expect(r.erd.dbmlConversion?.refusals).toEqual([]);
+    expect(r.erd.dbmlConversion?.leftAsIs).toEqual([{ path: 'tables/gold/dim_other.yml', line: 3, problem: 'The key description is written twice with different values (line 3). Keep the one you mean.' }]);
+    const step = r.nextSteps.find((x) => x.id === 'finish-dbml-conversion')!;
+    expect(step.why).toBe(
+      'The conversion to DBML left a file as it is until fixed: .erd-studio/tables/gold/dim_other.yml:3 (The key description is written twice with different values (line 3). Keep the one you mean). '
+        + 'Fix them, then run ERD Studio: Convert Project to DBML again to finish it; it checks every file first.',
+    );
   });
 
   it('a YAML twin in another library folder raises resolve-format-conflicts', async () => {

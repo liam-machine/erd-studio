@@ -23,6 +23,7 @@ import { projectNamingOf } from '../services/projectNaming';
 import { describeNamingMigration, planNamingMigration } from '../services/namingMigration';
 import { readNamingMigrationInput } from '../services/namingMigrationFiles';
 import { describeDbmlConversion, planDbmlConversion } from '../services/dbmlConversion';
+import type { DbmlConversionPlan } from '../services/dbmlConversion';
 import { readDbmlConversionInput } from '../services/dbmlConversionFiles';
 import { tablesDirIsLayer, TABLES_DIR } from '../services/logicalModelService';
 import { normaliseName } from '../services/nameUtils';
@@ -172,6 +173,12 @@ export interface DoctorResult extends Envelope {
       notes: string[];
       /** Files an earlier run already converted (a half-applied conversion). */
       resumed: string[];
+      /** Lossless fixes Convert applies by itself (a member spelled in another case, identical duplicate keys). */
+      handled?: Array<{ path: string; text: string }>;
+      /** Files Convert leaves exactly as they are until fixed (the project stays mixed); running it again finishes the job. */
+      leftAsIs?: Array<{ path: string; line?: number; problem: string }>;
+      /** Diagram members with no table file, kept on the converted diagram and drawn as missing (erd_unlinked_tables). */
+      keptMissing?: Array<{ diagram: string; tables: string[] }>;
       /** The plan in words, as the VS Code dialog shows it. */
       preview: string;
     };
@@ -372,7 +379,7 @@ function namingMigrationPreview(ctx: CliContext): NonNullable<DoctorResult['erd'
  * stopped part way; and the files (relative to the semantic dir, lower case)
  * of each source beside its converted target that finishing settles.
  */
-async function dbmlConversionPreview(ctx: CliContext): Promise<{ preview: NonNullable<DoctorResult['erd']['dbmlConversion']>; unfinished: boolean; settled: string[] }> {
+async function dbmlConversionPreview(ctx: CliContext, storage: ProjectStorage): Promise<{ preview: NonNullable<DoctorResult['erd']['dbmlConversion']>; unfinished: boolean; settled: string[]; leftAsIs: DbmlConversionPlan['leftAsIs'] }> {
   const input = readDbmlConversionInput(ctx.root, ctx.semanticDir);
   const plan = await planDbmlConversion(input);
   // A source beside its converted target: a run that stopped part way, or a file an older helper (or a
@@ -403,18 +410,23 @@ async function dbmlConversionPreview(ctx: CliContext): Promise<{ preview: NonNul
       refusals: plan.refusals,
       notes: plan.notes,
       resumed: plan.resumed,
+      handled: plan.handled,
+      leftAsIs: plan.leftAsIs,
+      keptMissing: plan.keptMissing,
       preview: describeDbmlConversion(plan),
     },
-    unfinished: plan.resumed.length > 0,
+    // A run that stopped part way, or a project Convert left mixed: files it left as they are (D26/D27).
+    unfinished: plan.resumed.length > 0 || (storage === 'mixed' && plan.refusals.length === 0 && plan.leftAsIs.length > 0),
+    leftAsIs: plan.leftAsIs,
   };
 }
 
 /** The erd summary with Convert's preview when storage is not `dbml`. */
-async function withDbmlConversion(ctx: CliContext, erd: DoctorResult['erd']): Promise<{ erd: DoctorResult['erd']; unfinished: boolean; settled: string[] }> {
+async function withDbmlConversion(ctx: CliContext, erd: DoctorResult['erd']): Promise<{ erd: DoctorResult['erd']; unfinished: boolean; settled: string[]; leftAsIs?: DbmlConversionPlan['leftAsIs'] }> {
   if (!erd.semanticDirExists || erd.storage === 'dbml') return { erd, unfinished: false, settled: [] };
   try {
-    const { preview, unfinished, settled } = await dbmlConversionPreview(ctx);
-    return { erd: { ...erd, dbmlConversion: preview }, unfinished, settled };
+    const { preview, unfinished, settled, leftAsIs } = await dbmlConversionPreview(ctx, erd.storage);
+    return { erd: { ...erd, dbmlConversion: preview }, unfinished, settled, leftAsIs };
   } catch {
     // ERD Studio's own failure while planning: a refusal in the preview, never a failed doctor run.
     const refusal = 'ERD Studio could not plan the conversion of this project (an error in ERD Studio, not in your files). Please report it, with this doctor output.';
@@ -563,6 +575,8 @@ interface NextStepDeps {
   installPath: string;
   invocation: string | null;
   unfinishedDbmlConversion?: boolean;
+  /** Files Convert leaves as they are until fixed (relative to the semantic dir), listed in finish-dbml-conversion. */
+  leftByConversion?: ReadonlyArray<{ path: string; line?: number; problem: string }>;
   /**
    * The files (relative to the semantic dir, lower case) of each source beside its converted target that
    * finishing the conversion settles: their format conflict is not raised while it is unfinished.
@@ -771,11 +785,19 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
       command: null,
     });
   }
-  if (deps.unfinishedDbmlConversion) {
+  // A file Convert leaves because it clashes with its DBML twin is a format conflict (above), for the user to settle.
+  const left = (deps.leftByConversion ?? []).filter((l) => !formatConflicts.some((p) => p.message.includes(l.path)));
+  const unfinished = deps.unfinishedDbmlConversion === true
+    && (left.length > 0 || (deps.leftByConversion ?? []).length === 0 || (r.erd.dbmlConversion?.resumed ?? []).length > 0);
+  if (unfinished) {
     steps.push({
       id: 'finish-dbml-conversion',
       title: 'Finish the conversion to DBML',
-      why: 'A conversion to DBML stopped part way. Run ERD Studio: Convert Project to DBML again to finish it; it checks every file first.',
+      why: left.length > 0
+        ? `The conversion to DBML left ${left.length === 1 ? 'a file' : `${left.length} files`} as ${left.length === 1 ? 'it is' : 'they are'} until fixed: `
+          + `${left.map((l) => `${l.path}${l.line !== undefined ? `:${l.line}` : ''} (${l.problem.replace(/\.$/, '')})`).join('; ')}. `
+          + 'Fix them, then run ERD Studio: Convert Project to DBML again to finish it; it checks every file first.'
+        : 'A conversion to DBML stopped part way. Run ERD Studio: Convert Project to DBML again to finish it; it checks every file first.',
       command: null,
     });
   }
@@ -929,7 +951,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
   const deps = detectDepsStatus(root, identity.packagesInstallPath);
   return {
     ...base,
-    nextSteps: nextStepsFor(base, { needsDeps: deps.needsDeps, installPath: deps.installPath, invocation, unfinishedDbmlConversion: conversion.unfinished, settledByConversion: conversion.settled, backwardsHome: backwardsHomeOf(ctx, base.erd) }),
+    nextSteps: nextStepsFor(base, { needsDeps: deps.needsDeps, installPath: deps.installPath, invocation, unfinishedDbmlConversion: conversion.unfinished, settledByConversion: conversion.settled, ...(conversion.leftAsIs ? { leftByConversion: conversion.leftAsIs.map((l) => ({ ...l, path: `${ctx.semanticDir}/${l.path}` })) } : {}), backwardsHome: backwardsHomeOf(ctx, base.erd) }),
   };
 }
 
@@ -961,5 +983,5 @@ async function logicalOnlyDoctor(ctx: CliContext, opts: DoctorOptions): Promise<
     erd: conversion.erd,
     harness: harnessSummary(harness),
   };
-  return { ...base, nextSteps: nextStepsFor(base, { needsDeps: false, installPath: '', invocation: null, unfinishedDbmlConversion: conversion.unfinished, settledByConversion: conversion.settled, backwardsHome: backwardsHomeOf(ctx, base.erd) }) };
+  return { ...base, nextSteps: nextStepsFor(base, { needsDeps: false, installPath: '', invocation: null, unfinishedDbmlConversion: conversion.unfinished, settledByConversion: conversion.settled, ...(conversion.leftAsIs ? { leftByConversion: conversion.leftAsIs.map((l) => ({ ...l, path: `${ctx.semanticDir}/${l.path}` })) } : {}), backwardsHome: backwardsHomeOf(ctx, base.erd) }) };
 }
