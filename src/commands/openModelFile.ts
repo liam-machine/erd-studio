@@ -9,6 +9,8 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { DBML_TABLE_QUOTE_HINT_CODES } from '@erd-studio/core';
 import type { TableFileError, TableFileErrorKind } from '../services/logicalModelService';
+import { OPEN_FILE_BUTTON, projectRelative, showErrorWithActions } from '../services/commandErrors';
+import { refusalLocation, type RefusedWrite } from '../services/newSubjectAreaWriter';
 
 /** Open `filePath`, placing the cursor at the 1-based `line` / `column` when given. */
 export async function openTableFileAt(filePath: string, line?: number, column?: number): Promise<void> {
@@ -21,6 +23,32 @@ export async function openTableFileAt(filePath: string, line?: number, column?: 
     options.selection = new vscode.Range(position, position);
   }
   await vscode.window.showTextDocument(document, options);
+}
+
+/**
+ * A command's refused write (§4.7 of docs/plans/native-dbml-storage.md): a
+ * modal with the refusal's own sentence and `outcome`, naming the file (and
+ * line) it points at, with Open File there. `refusalLocation` is the one
+ * answer for where a refusal points, shared with Draw from dbt and Import DBML.
+ */
+export function showRefusedWrite(
+  title: string,
+  err: RefusedWrite,
+  where: { semanticRoot: string; workspaceRoot: string; outcome: string },
+): void {
+  const location = refusalLocation(err, where.semanticRoot);
+  const file = location
+    ? `${projectRelative(where.workspaceRoot, location.filePath)}${location.line !== undefined ? `, line ${location.line}` : ''}`
+    : undefined;
+  showErrorWithActions(
+    (message, ...items) => vscode.window.showErrorMessage(message, { modal: true, ...(file ? { detail: `File: ${file}` } : {}) }, ...items),
+    `${title}: ${err.message} ${where.outcome}`,
+    location ? { [OPEN_FILE_BUTTON]: () => openTableFileAt(location.filePath, location.line) } : {},
+    (choice, failure) => {
+      console.error(`[ERD Studio] ${title}: "${choice}" failed:`, failure);
+      void vscode.window.showErrorMessage(`${title}: could not open ${file ?? 'the file'}.`);
+    },
+  );
 }
 
 /** The tip for each of ERD Studio's own DBML table-file rules (`structure:<rule>` codes). */

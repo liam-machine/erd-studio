@@ -59,7 +59,8 @@ import { TelemetryService, telemetry } from './services/telemetryService';
 import { startKnownFixes } from './services/knownFixesService';
 import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
 import { saveFailureCodes, tableFileErrorCode, type SaveFailure } from './services/telemetryPayload';
-import { notifyTableFileError, shouldWarnAboutTableFile } from './commands/openModelFile';
+import { notifyTableFileError, shouldWarnAboutTableFile, showRefusedWrite } from './commands/openModelFile';
+import { isRefusedWrite } from './services/newSubjectAreaWriter';
 import { MyReportsTreeProvider, type MyReportNode } from './providers/MyReportsTreeProvider';
 import type { FeedbackKind } from './types/feedback';
 import { CliLauncherService, type CliLauncherOptions } from './services/cliLauncherService';
@@ -1767,7 +1768,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             readText: openOrDiskText,
           });
         } catch (err) {
-          void vscode.window.showErrorMessage(`Organise Table Library: ${err instanceof Error ? err.message : String(err)} Nothing was changed.`);
+          if (isRefusedWrite(err)) {
+            showRefusedWrite('Organise Table Library', err, { semanticRoot: fullSemanticDirPath, workspaceRoot, outcome: 'Nothing was changed.' });
+          } else {
+            void vscode.window.showErrorMessage(`Organise Table Library: ${err instanceof Error ? err.message : String(err)} Nothing was changed.`);
+          }
           return;
         }
         const dirty = dirtyFiles([...writes.map((w) => w.path), ...yamlRenames.map((r) => r.from)]);
@@ -1889,7 +1894,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             readText: openOrDiskText,
           });
         } catch (err) {
-          void vscode.window.showErrorMessage(`Give Duplicate Its Own Name: ${err instanceof Error ? err.message : String(err)} Nothing was changed.`);
+          if (isRefusedWrite(err)) {
+            showRefusedWrite('Give Duplicate Its Own Name', err, { semanticRoot: fullSemanticDirPath, workspaceRoot: root, outcome: 'Nothing was changed.' });
+          } else {
+            void vscode.window.showErrorMessage(`Give Duplicate Its Own Name: ${err instanceof Error ? err.message : String(err)} Nothing was changed.`);
+          }
           return;
         }
         const repointed = planned.repointed.map((p) => libPath(p).replace(/\.dbml$/i, ''));
@@ -2458,6 +2467,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               resolver: currentDbmlResolver(tableLibraryService, read).resolver,
             });
           } catch (err) {
+            if (isRefusedWrite(err)) {
+              showRefusedWrite('Rename Subject Area', err, { semanticRoot: fullSemanticDirPath, workspaceRoot, outcome: 'Nothing was changed.' });
+              return;
+            }
             const msg = err instanceof Error ? err.message : String(err);
             void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}": ${msg}`);
             return;

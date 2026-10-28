@@ -397,6 +397,69 @@ describe('in a native DBML project', () => {
     expect(info).toHaveBeenCalledWith(expect.stringContaining('is now its own table, "gold_dim_date"'));
   });
 
+  describe('a refused write shows a modal naming the file, with Open File at the line (§4.7)', () => {
+    /** The one modal error shown, with its options and buttons. */
+    function refusalModal(): { message: string; detail?: string; buttons: string[] } {
+      const modal = errors.mock.calls.find((c) => typeof c[1] === 'object' && (c[1] as { modal?: boolean }).modal);
+      expect(modal).toBeDefined();
+      const [message, options, ...buttons] = modal as [string, { detail?: string }, ...string[]];
+      return { message, detail: options.detail, buttons };
+    }
+
+    it('Organise Table Library', async () => {
+      fs.writeFileSync(erd('tables', 'dim_only_gold.dbml'), 'Table dim_only_gold {\n  id INT [pk]\n  date_key INT\n}\n');
+      fs.appendFileSync(erd('tables', '_relationships.dbml'), "use { table dim_only_gold } from './dim_only_gold.dbml'\nRef: dim_only_gold.date_key >? dim_date.date_key\n");
+      // The folder the table moves to has a relationships file that does not read: its Ref cannot be written there.
+      fs.appendFileSync(erd('tables', 'gold', '_relationships.dbml'), 'Ref: fct_order.customer_key >\n');
+      const sales = erd('gold', 'sales.dbml');
+      fs.writeFileSync(sales, fs.readFileSync(sales, 'utf-8').replace("use * from '../tables/_relationships.dbml'", "use { table dim_only_gold } from '../tables/dim_only_gold.dbml'\nuse * from '../tables/_relationships.dbml'"));
+      const before = bytes();
+      await activate(context);
+      vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+        (args.includes('Move Files') ? 'Move Files' : undefined)) as never);
+      const open = vi.spyOn(vscode.workspace, 'openTextDocument');
+      errors.mockResolvedValueOnce('Open File' as never);
+      await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+      const modal = refusalModal();
+      expect(modal.message).toMatch(/^Organise Table Library: Fix the DBML in tables\/gold\/_relationships\.dbml first .* Nothing was changed\.$/);
+      expect(modal.detail).toMatch(/^File: \.erd-studio\/tables\/gold\/_relationships\.dbml, line \d+$/);
+      expect(modal.buttons).toEqual(['Open File']);
+      await vi.waitFor(() => expect(open).toHaveBeenCalledWith(expect.objectContaining({ fsPath: erd('tables', 'gold', '_relationships.dbml') })));
+      expect(bytes()).toEqual(before);
+    });
+
+    it('Give Duplicate Its Own Name', async () => {
+      fs.writeFileSync(erd('tables', 'gold', 'dim_date.dbml'), "use { table dim_customer } from './dim_customer.dbml'\nTable dim_date {\n  date_key INT [pk]\n}\n");
+      const before = bytes();
+      await activate(context);
+      vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
+      vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+        (args.includes('Rename') ? 'Rename' : undefined)) as never);
+      await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', erd('tables', 'gold', 'dim_date.dbml'));
+      const modal = refusalModal();
+      expect(modal.message).toMatch(/^Give Duplicate Its Own Name: tables\/gold\/dim_date\.dbml: .* Nothing was changed\.$/);
+      expect(modal.detail).toBe('File: .erd-studio/tables/gold/dim_date.dbml, line 1');
+      expect(modal.buttons).toEqual(['Open File']);
+      expect(bytes()).toEqual(before);
+    });
+
+    it('Rename Subject Area', async () => {
+      const sales = erd('gold', 'sales.dbml');
+      fs.appendFileSync(sales, '\nProject second {\n  Note: \'again\'\n}\n');
+      const before = bytes();
+      await activate(context);
+      vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
+      await vscode.commands.executeCommand('erdStudio.renameDomain', {
+        type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: sales, storage: 'dbml' },
+      });
+      const modal = refusalModal();
+      expect(modal.message).toMatch(/^Rename Subject Area: gold\/sales\.dbml: .* Nothing was changed\.$/);
+      expect(modal.detail).toBe('File: .erd-studio/gold/sales.dbml');
+      expect(modal.buttons).toEqual(['Open File']);
+      expect(bytes()).toEqual(before);
+    });
+  });
+
   it('Move Relationships to Table Library has nothing to move in a DBML project', async () => {
     await activate(context);
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
