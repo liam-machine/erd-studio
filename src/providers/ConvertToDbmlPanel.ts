@@ -23,6 +23,7 @@ import {
   CONVERT_PANEL_VIEW_TYPE,
   buildConvertPanelHtml,
   isConvertPanelToHost,
+  type ConvertPanelProgress,
   type ConvertRefusalLocation,
   type ConvertReviewView,
 } from '../services/dbmlConversionReview';
@@ -80,6 +81,17 @@ export class ConvertToDbmlPanel {
   /** Bring the open panel to the front, unchanged. */
   static reveal(): void {
     ConvertToDbmlPanel.current?.panel.reveal(vscode.ViewColumn.Active);
+  }
+
+  /**
+   * Show what Convert is doing (after the user chose Convert): on the
+   * Convert button and in the status line beside it. Nothing when no panel is open.
+   */
+  static showProgress(text: string): void {
+    const panel = ConvertToDbmlPanel.current;
+    if (!panel || panel.disposed) return;
+    const message: ConvertPanelProgress = { type: 'progress', text };
+    void Promise.resolve(panel.panel.webview.postMessage(message)).catch(() => { /* the panel closed meanwhile */ });
   }
 
   /** Close the panel unless a run is waiting on it. */

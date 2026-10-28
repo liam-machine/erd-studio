@@ -41,9 +41,9 @@ import {
   type ErrorActions,
 } from '../services/commandErrors';
 import { dbmlConversionIsEmpty, describeDbmlConversion, isDbmlSelfCheckRefusal, planDbmlConversion } from '../services/dbmlConversion';
-import type { DbmlConversionPlan } from '../services/dbmlConversion';
+import type { DbmlConversionPhase, DbmlConversionPlan } from '../services/dbmlConversion';
 import { buildConvertReview } from '../services/dbmlConversionReview';
-import { readDbmlConversionInput } from '../services/dbmlConversionFiles';
+import { dbmlConversionFingerprint, readDbmlConversionInput } from '../services/dbmlConversionFiles';
 import type { FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
 import { ownWrites } from '../services/ownWriteTracker';
@@ -55,11 +55,17 @@ export const CONVERT_TO_DBML_TITLE = 'Convert Project to DBML';
 const CANVAS_VIEW_TYPE = 'erdStudio.domainEditor';
 
 /** The panel's fixed lines (§6.2 step 6). */
+export const CONVERT_OPTIONAL_LINE = 'Converting is optional: if you cancel, your project keeps working exactly as it is.';
 export const CONVERT_WHAT_LINE =
   'Convert writes the tables, relationships and diagrams below as DBML files and removes the YAML and JSON files they came from, in one edit.';
 export const CONVERT_TEAMMATES_LINE =
-  'Everyone who opens this project needs ERD Studio 2.0 or later. Older versions show no diagrams, and AI helper files from before 2.0 ' +
-  'write YAML: update them afterwards (ERD Studio: Set Up My AI Helper).';
+  'Afterwards, everyone who opens this project needs ERD Studio 1.9 pre-release or 2.0 and later: older versions (1.7.x and earlier) show no diagrams. ' +
+  'AI helper files from before 2.0 write YAML: update them afterwards (ERD Studio: Set Up My AI Helper).';
+/** The last sentence of the toast after a conversion. */
+export const CONVERTED_TEAMMATES_SENTENCE =
+  "Teammates and other VS Code windows on an older ERD Studio (1.7.x) can't open the converted project until they update.";
+/** Said when the user cancels while Convert is still reading or planning. */
+export const CONVERT_CANCELLED_MESSAGE = `${CONVERT_TO_DBML_TITLE} was cancelled. Nothing was changed.`;
 export const CONVERT_GIT_LINE =
   'Git will show the converted files as new files, because their content changes completely, so their history does not follow them. Commit your work first.';
 export const CONVERT_RESUME_LINE = 'An earlier conversion stopped part way; this finishes it.';
@@ -76,7 +82,44 @@ export interface ConvertProjectDeps {
   onConverted: (paths: string[]) => Promise<void>;
   /** Hold open canvases' refreshes while the edit applies; returns the release. */
   holdRefreshes?: () => () => void;
+  /**
+   * Hold the sidebar views' and context keys' refreshes from the moment the
+   * edit applies until `onConverted` has run, so the watcher's events for
+   * every written file make one refresh, not thousands; returns the release.
+   */
+  holdViewRefreshes?: () => () => void;
 }
+
+/** The user cancelled while Convert was reading or planning: nothing was written. */
+export class ConvertCancelled extends Error {
+  constructor() {
+    super('Convert Project to DBML was cancelled');
+    this.name = 'ConvertCancelled';
+  }
+}
+
+/** A plan with the fingerprint of the files it was made from (`dbmlConversionFingerprint`). */
+interface FingerprintedPlan {
+  plan: DbmlConversionPlan;
+  fingerprint: string;
+}
+
+/** Let the extension host handle other events (the progress notification, its Cancel button). */
+const breathe = (): Promise<void> => new Promise((resolve) => { setImmediate(resolve); });
+
+const thousands = (n: number): string => n.toLocaleString('en-US');
+
+/** The progress messages, by phase (shown in the notification, and in the panel once Convert was chosen). */
+export const CONVERT_PROGRESS = {
+  reading: 'Reading the project…',
+  planning: (tables: number, diagrams: number): string =>
+    `Planning ${thousands(tables)} table${tables === 1 ? '' : 's'} and ${thousands(diagrams)} diagram${diagrams === 1 ? '' : 's'}…`,
+  checking: 'Checking the DBML…',
+  writing: (files: number): string => `Writing ${thousands(files)} file${files === 1 ? '' : 's'}…`,
+  saving: (files: number): string => `Saving ${thousands(files)} file${files === 1 ? '' : 's'}…`,
+  reopening: 'Reopening diagrams…',
+  refreshing: 'Refreshing the views…',
+} as const;
 
 export type ConvertProjectOutcome = 'converted' | 'nothing' | 'refused' | 'cancelled' | 'failed';
 
@@ -135,9 +178,50 @@ export async function planProjectDbmlConversion(deps: Pick<ConvertProjectDeps, '
   return planDbmlConversion(readDbmlConversionInput(deps.workspaceRoot, deps.semanticDir));
 }
 
+/**
+ * Read and plan with a progress notification ("Reading the project…",
+ * "Planning 1,100 tables and 21 diagrams…", "Checking the DBML…"), which
+ * Cancel stops ({@link ConvertCancelled}: nothing is written). The planner
+ * yields to the event loop as it works, so the notification updates and
+ * Cancel is heard. The plan comes with the fingerprint of the files it read.
+ */
+export async function planWithProgress(
+  deps: Pick<ConvertProjectDeps, 'workspaceRoot' | 'semanticDir' | 'tableLibraryService'>,
+): Promise<FingerprintedPlan> {
+  return vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: CONVERT_TO_DBML_TITLE, cancellable: true },
+    async (progress, token) => {
+      const report = async (message: string): Promise<void> => {
+        progress.report({ message });
+        ConvertToDbmlPanel.showProgress(message);
+        await breathe();
+        if (token.isCancellationRequested) throw new ConvertCancelled();
+      };
+      await report(CONVERT_PROGRESS.reading);
+      deps.tableLibraryService.invalidateCache();
+      // Taken before reading: a file written while it reads changes the next one, never this plan's.
+      const fingerprint = dbmlConversionFingerprint(deps.workspaceRoot, deps.semanticDir);
+      const input = readDbmlConversionInput(deps.workspaceRoot, deps.semanticDir);
+      const tables = input.files.filter((f) => f.kind === 'table').length;
+      const diagrams = input.files.filter((f) => f.kind === 'diagram').length;
+      const phaseMessage = (phase: DbmlConversionPhase): string =>
+        phase === 'checking' ? CONVERT_PROGRESS.checking : CONVERT_PROGRESS.planning(tables, diagrams);
+      const plan = await planDbmlConversion(input, {
+        onPhase: (phase) => report(phaseMessage(phase)),
+        pause: async () => {
+          await breathe();
+          if (token.isCancellationRequested) throw new ConvertCancelled();
+        },
+      });
+      return { plan, fingerprint };
+    },
+  );
+}
+
 /** The review's header lines (§6.2 step 6). */
 export function convertIntroLines(plan: DbmlConversionPlan): string[] {
   return [
+    CONVERT_OPTIONAL_LINE,
     CONVERT_WHAT_LINE,
     CONVERT_TEAMMATES_LINE,
     CONVERT_GIT_LINE,
@@ -196,6 +280,14 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
     return await runConversion(deps, progress, retry);
   } catch (err) {
     ConvertToDbmlPanel.closeIfIdle();
+    if (err instanceof ConvertCancelled) {
+      // Cancelled while reading or planning: nothing was written (the v4 step, if it ran, asked first).
+      telemetry.feature('convertToDbmlCancelled');
+      void vscode.window.showInformationMessage(progress.v5Converted
+        ? `${CONVERT_TO_DBML_TITLE} was cancelled. The v4 subject areas were converted to the Table Library, but nothing else was changed.`
+        : CONVERT_CANCELLED_MESSAGE);
+      return 'cancelled';
+    }
     console.error('[convertProjectToDbml] failed:', err);
     // A conversion that landed counts as one, even when a later step (the refresh) threw.
     if (progress.applied) { if (!progress.counted) telemetry.feature('convertToDbml'); }
@@ -239,8 +331,9 @@ async function runConversion(
       : 'The v4 subject areas were converted to the Table Library, but nothing else was changed.';
   };
 
-  // 1. Read and plan.
-  let plan = await planProjectDbmlConversion(deps);
+  // 1. Read and plan, with a progress notification Cancel stops (nothing is written).
+  let planned = await planWithProgress(deps);
+  let plan = planned.plan;
 
   // What stops it, in the panel: Check Again plans again; Close (or closing the tab) ends the run.
   const refused = async (): Promise<ConvertProjectOutcome> => {
@@ -258,7 +351,8 @@ async function runConversion(
       return 'cancelled';
     }
     progress.v5Converted = true;
-    plan = await planProjectDbmlConversion(deps);
+    planned = await planWithProgress(deps);
+    plan = planned.plan;
     if (plan.v4SubjectAreas.length > 0) return refused();
   }
 
@@ -317,8 +411,12 @@ async function runConversion(
   conversionInFlight = true;
   progress.converting = true;
 
-  // 7. The panel may have waited: plan again from the files as they are now (#219).
-  const again = await planProjectDbmlConversion(deps);
+  // 7. The panel may have waited (#219). Every file Convert reads as it was
+  // when it planned (paths, times and sizes): the plan shown is the plan applied.
+  // Anything changed: plan again from the files as they are now, and stop if
+  // that plan is not the one shown.
+  const changed = dbmlConversionFingerprint(deps.workspaceRoot, deps.semanticDir) !== planned.fingerprint;
+  const again = changed ? (await planWithProgress(deps)).plan : plan;
   if (again.refusals.length > 0 || describeDbmlConversion(again) !== describeDbmlConversion(plan) || dirtyFiles(touched(again)).length > 0) {
     showErrorWithActions(
       `${CONVERT_TO_DBML_TITLE}: the project changed while the preview was open. ${nothingChanged()} Run it again.`,
@@ -348,12 +446,44 @@ async function runConversion(
   };
 
   // 9. One WorkspaceEdit, reconciled by applyFileWrites when VS Code refuses part of it.
+  // From here it cannot be cancelled: the notification says what it is doing.
+  return vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: CONVERT_TO_DBML_TITLE, cancellable: false },
+    (bar) => applyConversion(deps, plan, writes, { ensureDir, removeNewFolders, retry, progress, abs, semanticRoot }, async (message) => {
+      bar.report({ message });
+      ConvertToDbmlPanel.showProgress(message);
+      await breathe();
+    }),
+  );
+}
+
+/** Steps 9–12, inside the progress notification. */
+async function applyConversion(
+  deps: ConvertProjectDeps,
+  plan: DbmlConversionPlan,
+  writes: FileWrite[],
+  ctx: {
+    ensureDir: (filePath: string) => void;
+    removeNewFolders: () => void;
+    retry: () => Promise<ConvertProjectOutcome>;
+    progress: { applied: boolean; counted: boolean };
+    abs: (rel: string) => string;
+    semanticRoot: string;
+  },
+  report: (message: string) => Promise<void>,
+): Promise<ConvertProjectOutcome> {
+  const { ensureDir, removeNewFolders, retry, progress, abs, semanticRoot } = ctx;
+  // Open canvases, and the sidebar views and context keys, wait until every file is written.
   const held = deps.holdRefreshes?.();
+  const heldViews = deps.holdViewRefreshes?.();
   let released = false;
   const release = (): void => { if (!released) { released = true; held?.(); } };
+  let viewsReleased = false;
+  const releaseViews = (): void => { if (!viewsReleased) { viewsReleased = true; heldViews?.(); } };
   // The canvases to reopen, read before VS Code may close a deleted file's tab itself.
   const canvasTabs = convertedCanvasTabs(plan, abs);
   try {
+    await report(CONVERT_PROGRESS.writing(writes.length));
     const applied = await applyFileWrites(writes, { ensureDir });
     // Convert has finished with the panel: close it before anything opens, so
     // the editor Convert leaves in front is the one Undo works from.
@@ -377,6 +507,7 @@ async function runConversion(
     }
     progress.applied = true;
     const unsaved: string[] = [];
+    if (applied.replaced.length > 0) await report(CONVERT_PROGRESS.saving(applied.replaced.length));
     for (const uri of applied.replaced) {
       if (await saveDocumentByUri(uri)) ownWrites.recordWrite(uri.fsPath);
       else unsaved.push(uri.fsPath);
@@ -399,15 +530,19 @@ async function runConversion(
     const placed = new Set(plan.placedDiagrams.map((d) => path.resolve(abs(d))));
     // A reopened canvas reads the library as it now is, not as listed mid-apply.
     deps.tableLibraryService.invalidateCache();
+    await report(CONVERT_PROGRESS.reopening);
     const reopened = await reopenConvertedCanvases(canvasTabs);
     const undoFrom: UndoFrom = reopened.length > 0
       ? (reopened.every((target) => placed.has(path.resolve(target))) ? 'diagram' : 'unplacedDiagram')
       : await openUndoTarget(plan, abs);
 
-    // 12. Refresh.
+    // 12. Refresh: the canvases first, then the views and context keys once
+    // (their refreshes, the watcher's included, waited for this).
+    await report(CONVERT_PROGRESS.refreshing);
     deps.tableLibraryService.invalidateCache();
     release();
     await deps.onConverted([...writes.map((w) => w.path)]);
+    releaseViews();
     telemetry.feature('convertToDbml');
     progress.counted = true;
     if (unsaved.length > 0) {
@@ -424,12 +559,13 @@ async function runConversion(
           (plan.leftAsIs.length > 0
             ? `${plan.leftAsIs.length} file${plan.leftAsIs.length === 1 ? ' stays' : 's stay'} as ${plan.leftAsIs.length === 1 ? 'it is' : 'they are'} until fixed; run Convert again after fixing ${plan.leftAsIs.length === 1 ? 'it' : 'them'}. `
             : '') +
-          convertedUndoSentence(undoFrom),
+          `${convertedUndoSentence(undoFrom)} ${CONVERTED_TEAMMATES_SENTENCE}`,
       );
     }
     return 'converted';
   } finally {
     release();
+    releaseViews();
   }
 }
 

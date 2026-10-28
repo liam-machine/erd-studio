@@ -50,7 +50,9 @@ import { layoutFilePathOf, normaliseSubjectAreaDocument, parseTableText, toTable
 import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
-import { convertProjectToDbml, planProjectDbmlConversion } from './commands/convertProjectToDbml';
+import { convertProjectToDbml } from './commands/convertProjectToDbml';
+import { countDbmlConversionCandidates } from './services/dbmlConversionFiles';
+import { RefreshGate } from './services/refreshGate';
 import { projectNamingOf } from './services/projectNaming';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE, hasOpenSubjectAreaCanvas, saveAllAndReload } from './services/recoveryService';
 import { submitFeedback } from './services/feedbackService';
@@ -1089,6 +1091,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     semanticDir,
     () => layerService.getAllLayers(),
   );
+  // Held while Convert Project to DBML writes: one refresh of each view after, not one per file.
+  const viewRefreshes = new RefreshGate();
+  viewRefreshes.gateMethod(treeProvider, 'refresh', 'subjectAreas');
+  viewRefreshes.gateMethod(tableLibraryProvider, 'refresh', 'tableLibrary');
   const editorProvider = new SemanticEditorProvider(
     context,
     subjectAreaService,
@@ -1146,7 +1152,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let knownStorage: ProjectStorage = 'yaml';
   // `tablesLayerConflict` (§3.3) is shown once per session.
   let tablesLayerConflictShown = false;
-  const refreshContextKeys = (): void => {
+  const refreshContextKeysNow = (): void => {
     const hasSemanticDir = fs.existsSync(fullSemanticDirPath);
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', hasSemanticDir);
     knownStorage = projectStorageOf(tableLibraryService);
@@ -1165,6 +1171,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }
   };
+  const refreshContextKeys = viewRefreshes.gate('contextKeys', refreshContextKeysNow);
   refreshContextKeys();
 
   // The one domain picker: straight to the only domain, a QuickPick when
@@ -1566,7 +1573,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tableLibraryService,
     version: currentVersion,
     migrateToV5,
-    holdRefreshes: () => editorProvider.holdRefreshes(),
+    // The canvases, and the sidebar views and context keys (one refresh after, not one per moved file).
+    holdRefreshes: () => {
+      const canvases = editorProvider.holdRefreshes();
+      const views = viewRefreshes.hold();
+      return () => { canvases(); views(); };
+    },
     onMigrated: async (paths) => {
       for (const p of paths) treeProvider.invalidateSubjectArea(p);
       refreshContextKeys();
@@ -1590,6 +1602,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tableLibraryService,
     migrateToV5,
     holdRefreshes: () => editorProvider.holdRefreshes(),
+    holdViewRefreshes: () => viewRefreshes.hold(),
     onConverted: async (paths) => {
       for (const p of paths) {
         if (p.endsWith('.yml') || p.endsWith('.json')) convertedSourcesHere.add(path.resolve(p));
@@ -1604,7 +1617,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   });
   editorProvider.setDbmlConversion(
-    () => planProjectDbmlConversion({ workspaceRoot, semanticDir, tableLibraryService }),
+    () => countDbmlConversionCandidates(workspaceRoot, semanticDir),
     async () => (await convertToDbml()) === 'converted',
   );
 

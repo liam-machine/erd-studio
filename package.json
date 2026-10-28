@@ -745,6 +745,11 @@
           ],
           "markdownDescription": "When ERD Studio hits an error that a newer release already fixes, say so and offer **Update**. The first error in a session downloads the list of known fixes (once a day at most) from ERD Studio's server; the request carries nothing about you, your project or the error — the list is matched on your machine. Works whether or not `#erdStudio.telemetry.enabled#` is on."
         },
+        "erdStudio.dbml.offerConvert": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When you open a diagram in a YAML/JSON project, offer once a session to convert it to DBML. Your project keeps working as it is either way; turn this off to stop the offer in every workspace. **ERD Studio: Convert Project to DBML** still works from the Command Palette."
+        },
         "dbtSemantic.projectPath": {
           "type": "string",
           "markdownDeprecationMessage": "Deprecated: use `#erdStudio.projectPath#` instead. Legacy values are still honoured.",
