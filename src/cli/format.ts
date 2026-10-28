@@ -149,6 +149,13 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
       + (conversion.v4SubjectAreas.length > 0 ? ` (after the v4 → v5 step for ${conversion.v4SubjectAreas.join(', ')})` : '')
       + (conversion.refusals.length > 0 ? ` (not yet: ${conversion.refusals.join(' ')})` : ''));
   }
+  // The files it would leave as they are, each with its problem: what to fix (an empty or non-table .yml,
+  // a name that is not its file's, one table in two files, a column listed twice, …).
+  if (conversion && conversion.refusals.length === 0) {
+    for (const l of conversion.leftAsIs ?? []) {
+      lines.push(`${p.yellow('!')} ${r.semanticDir}/${l.path}${l.line !== undefined ? ` line ${l.line}` : ''}: Convert leaves it as it is until fixed — ${l.problem}`);
+    }
+  }
   for (const c of r.erd.namingConflicts ?? []) {
     lines.push(`${p.red('✗')} ${c.name} is in both ${c.kept} and ${c.ignored} — ${c.kept} is used; keep one`);
   }
@@ -156,8 +163,11 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     lines.push(`${p.red('✗')} ${c.file} line ${c.line}: ${mergeConflictHumanHint('doctor')}`);
   }
   // DBML table files are reported once, as DBML problems, below.
+  // A file Convert fixes by itself (a key written twice with the same value) says so, so the two never disagree.
+  const handledByConvert = new Map((conversion?.refusals.length === 0 ? conversion.handled ?? [] : []).map((h) => [`${r.semanticDir}/${h.path}`, h.text]));
   for (const u of r.erd.unreadableModelFiles.filter((f) => !f.file.toLowerCase().endsWith('.dbml'))) {
-    lines.push(`${p.red('✗')} ${describeUnreadable(u, 'doctor')}`);
+    const handled = handledByConvert.get(u.file);
+    lines.push(`${p.red('✗')} ${describeUnreadable(u, 'doctor')}${handled ? ` ("Convert Project to DBML" fixes it: ${handled.replace(/\.$/, '')})` : ''}`);
   }
   // DBML problems by severity: errors first, then warnings.
   const problems = r.erd.dbmlProblems ?? [];

@@ -634,7 +634,7 @@ async function planOnce(
       }
     }
     if (!model) {
-      leave(f.path, 'It has no name: key, so ERD Studio does not read it as a table. Add one, or delete the file.');
+      leave(f.path, noTableProblem(f.text));
       continue;
     }
     if (lower(model.name) !== lower(stem)) {
@@ -906,6 +906,11 @@ async function planOnce(
       leave(f.path, `It says its layer is "${obj.layer}", but it is in the ${layer}/ folder, and a DBML diagram's layer is its folder. Make them agree.`);
       continue;
     }
+    if (!input.layers.includes(layer)) {
+      // It does not open (its layer is unknown), so the self-check could not tell whether it draws the same.
+      leave(f.path, `It is in the ${layer}/ folder, which is not a layer in layers.json, so ERD Studio does not open it. Add the layer ${layer} to layers.json (or move the file into a layer's folder), then convert again.`);
+      continue;
+    }
     const name = cls.name ?? stemOf(f.path);
     jsonDiagrams.push({ file: f, raw: raw as Record<string, unknown>, obj, layer, name, target: `${layer}/${name}.dbml` });
   }
@@ -1009,7 +1014,15 @@ async function planOnce(
     const groups = new Map<string, PoolEntry[]>();
     for (const e of list) if (e.rel.compositeKey) groups.set(lower(e.rel.compositeKey), [...(groups.get(lower(e.rel.compositeKey)) ?? []), e]);
     for (const [key, members] of groups) {
-      if (members.length < 2) continue;
+      if (members.length < 2) {
+        // A composite of one column pair: drawn as a single relationship (with a warning), written as one Ref.
+        const r = members[0].rel;
+        notes.push(
+          `${members[0].file}: the composite relationship "${key}" from ${r.fromModel} has only one column pair (${describeEnds(r.fromModel, [r.fromColumn], r.toModel, [r.toColumn])}), ` +
+            'so it is written as a single-column Ref without its compositeKey, as ERD Studio already drew it. Add the other columns on the canvas if it is meant to be composite.',
+        );
+        continue;
+      }
       const head = members[0].rel;
       if (members.some((m) => lower(m.rel.toModel) !== lower(head.toModel) || m.rel.cardinality !== head.cardinality)) {
         for (const m of members) leaveSource(m, holdersOfEntry(m), `The columns of the composite relationship "${key}" from ${head.fromModel} disagree about the table they point at or their cardinality. Make them agree.`);
@@ -1544,6 +1557,23 @@ function pendingRefLines(own: readonly Relationship[]): string[] {
     units.set(key, [...(units.get(key) ?? []), rel]);
   }
   return [...units.values()].map((members) => pendingRelationshipRef(members));
+}
+
+/**
+ * Why a `.yml` in the library that parses is not a table (it has no `name:`):
+ * an empty file, a dbt schema file (`version:` with `models:` or `sources:`)
+ * copied in, or neither. Each says what to do.
+ */
+function noTableProblem(text: string): string {
+  if (text.split(/\r?\n/).every((line) => /^\s*(#.*)?$/.test(line))) {
+    return 'It is empty, so ERD Studio does not read it as a table (a diagram that lists it draws it as missing). Write the table in it, or delete the file.';
+  }
+  let raw: unknown;
+  try { raw = parseDocument(text).toJS({ maxAliasCount: -1 }); } catch { raw = undefined; }
+  if (isObject(raw) && 'version' in raw && (Array.isArray(raw.models) || Array.isArray(raw.sources) || Array.isArray(raw.seeds) || Array.isArray(raw.snapshots))) {
+    return 'It is a dbt schema file (version: and models: or sources:), not an ERD Studio table. Move it out of the table library, or delete it.';
+  }
+  return 'It has no name: key, so ERD Studio does not read it as a table. Add one, or delete the file.';
 }
 
 /**

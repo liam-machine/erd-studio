@@ -15,13 +15,14 @@ import * as v10 from 'dbml-parse-v10';
 
 import { classifySemanticFile, detectProjectStorage, loadDisplaySubjectArea } from '@erd-studio/core';
 import type { DisplaySubjectArea } from '@erd-studio/core';
-import { compileDbmlProject, dbmlStorageReader, readRelationshipsDbml } from '@erd-studio/core/dbml';
+import { compileDbmlProject, dbmlStorageReader, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
 import type { DbmlParserModule } from '@erd-studio/core/dbml';
 
 import { dbmlConversionIsEmpty, describeDbmlConversion, keptFromLine, planDbmlConversion } from '../../src/services/dbmlConversion';
 import type { DbmlConversionInput, DbmlConversionPlan } from '../../src/services/dbmlConversion';
 import { readDbmlConversionInput } from '../../src/services/dbmlConversionFiles';
 import { runDoctor } from '../../src/cli/doctor';
+import { formatDoctor, makePaint } from '../../src/cli/format';
 
 const CORE_FIXTURES = path.resolve(__dirname, '../../packages/core/test/fixtures');
 const FIXTURES = path.resolve(__dirname, '../fixtures/dbml-convert');
@@ -1230,3 +1231,83 @@ function classifyStorage(files: Record<string, string>): 'yaml' | 'dbml' | 'mixe
     subjectAreaStorages: kinds.filter((k) => k.kind === 'diagram').map((k) => (k.storage === 'dbml' ? 'dbml' : 'json')),
   });
 }
+
+describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 planted problems)', () => {
+  it('meta keeps its key order: a text entry before a true/false one reads back first', async () => {
+    const table = 'name: dim\nmeta:\n  owner: people\n  contains_pii: true\n  exposure: crm\ncolumns:\n  - name: dim_key\n    dataType: INT\n    isPrimaryKey: true\n';
+    const plan = await planDbmlConversion(inputOf({ 'logical-models/dim.yml': table, 'gold/d.json': diagram('d', 'gold', ['dim']) }));
+    expect(plan.refusals).toEqual([]);
+    const text = created(plan, 'tables/dim.dbml')!;
+    const reading = parseTableDbml(text, 'dim');
+    expect(reading.ok).toBe(true);
+    if (reading.ok) expect(Object.keys(reading.table.meta ?? {})).toEqual(['owner', 'contains_pii', 'exposure']);
+  });
+
+  it('an empty .yml and a dbt schema file in the library stay as they are, each with what it is', async () => {
+    const plan = await planDbmlConversion(inputOf({
+      'logical-models/dim.yml': DIM,
+      'logical-models/silver/dim_sales_rep.yml': '',
+      'logical-models/silver/schema.yml': 'version: 2\nmodels:\n  - name: dim_store\n    columns:\n      - name: store_key\n',
+      'logical-models/silver/nameless.yml': 'columns: []\n',
+    }));
+    expect(plan.refusals).toEqual([]);
+    expect(leftOf(plan, 'logical-models/silver/dim_sales_rep.yml')?.problem).toMatch(/^It is empty, so ERD Studio does not read it as a table/);
+    expect(leftOf(plan, 'logical-models/silver/schema.yml')?.problem).toMatch(/^It is a dbt schema file \(version: and models: or sources:\), not an ERD Studio table\. Move it out of the table library/);
+    expect(leftOf(plan, 'logical-models/silver/nameless.yml')?.problem).toMatch(/^It has no name: key/);
+    expect(created(plan, 'tables/dim.dbml')).toBeDefined();
+  });
+
+  it('a diagram in a folder layers.json does not list stays JSON (it does not open, so Convert cannot check it)', async () => {
+    const plan = await planDbmlConversion(inputOf({
+      'logical-models/dim.yml': DIM,
+      'gold/d.json': diagram('d', 'gold', ['dim']),
+      'platinum/exec.json': diagram('exec', 'platinum', ['dim']),
+    }));
+    expect(plan.refusals).toEqual([]);
+    expect(leftOf(plan, 'platinum/exec.json')?.problem).toBe(
+      'It is in the platinum/ folder, which is not a layer in layers.json, so ERD Studio does not open it. Add the layer platinum to layers.json (or move the file into a layer\'s folder), then convert again.',
+    );
+    expect(plan.deletes).not.toContain('platinum/exec.json');
+    expect(plan.creates.map((c) => c.path)).not.toContain('platinum/exec.dbml');
+    expect(plan.deletes).toContain('gold/d.json');
+  });
+
+  it('a composite relationship of one column pair is written as a single-column Ref, with a note', async () => {
+    const fct = yml('fct', ['id', 'dim_key'], [{ ...FCT_REL, compositeKey: 'fk_dim' }]);
+    const input = inputOf({ 'logical-models/dim.yml': DIM, 'logical-models/fct.yml': fct, 'gold/d.json': diagram('d', 'gold', ['dim', 'fct']) });
+    const plan = await planDbmlConversion(input);
+    expect(plan.refusals).toEqual([]);
+    expect(refLines(written(plan, 'tables/_relationships.dbml'))).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
+    expect(plan.notes).toContain(
+      'logical-models/fct.yml: the composite relationship "fk_dim" from fct has only one column pair (fct.dim_key → dim.dim_key), so it is written as a single-column Ref ' +
+        'without its compositeKey, as ERD Studio already drew it. Add the other columns on the canvas if it is meant to be composite.',
+    );
+    expectCompilesEverywhere(input, plan);
+  });
+
+  it('doctor says Convert fixes a key written twice with the same value, so the two never disagree', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-stress-dup-'));
+    try {
+      const sem = path.join(root, '.erd-studio');
+      fs.mkdirSync(path.join(sem, 'logical-models'), { recursive: true });
+      fs.mkdirSync(path.join(sem, 'gold'), { recursive: true });
+      fs.writeFileSync(path.join(sem, 'layers.json'), LAYERS);
+      fs.writeFileSync(path.join(sem, 'logical-models', 'dim.yml'), 'name: dim\ncolumns:\n  - name: dim_key\n    dataType: INT\n    dataType: INT\n');
+      fs.writeFileSync(path.join(sem, 'gold', 'd.json'), diagram('d', 'gold', ['dim']));
+      const result = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true });
+      expect(result.erd.dbmlConversion!.handled).toEqual([expect.objectContaining({ path: 'logical-models/dim.yml' })]);
+      expect(formatDoctor(result, makePaint(false))).toMatch(
+        /✗ .*dim\.yml line 5: .*written twice.* \("Convert Project to DBML" fixes it: The key dataType is written twice with the same value \(line 5\); converted as if written once\)/,
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('doctor lists each file Convert would leave as it is, with its problem', async () => {
+    const left = await runDoctor({ project: path.join(CORE_FIXTURES, 'library-relationships'), semanticDir: '.erd-studio', noDbt: true });
+    expect(formatDoctor(left, makePaint(false))).toContain(
+      '! .erd-studio/gold/sales.json: Convert leaves it as it is until fixed — It defines the relationship fct_order.customer_key → dim_customer.customer_key as one-to-one',
+    );
+  });
+});
