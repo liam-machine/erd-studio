@@ -1599,6 +1599,27 @@ describe('HarnessService', () => {
       expect(read(tmpDir, LEGACY_GUIDE)).toContain('# ERD Studio — YAML and JSON files (projects before 2.0)');
     });
 
+    it("never silently replaces a hand-written DBML.md or LEGACY.md (no marker): Update All keeps it, the Welcome panel asks", () => {
+      service.install(tmpDir, CLAUDE, true);
+      const mine = '# My own DBML notes\n';
+      fs.writeFileSync(path.join(tmpDir, DBML_GUIDE), mine);
+      fs.writeFileSync(path.join(tmpDir, LEGACY_GUIDE), mine);
+      // Update All's call: overwrite on, no confirmation.
+      const updated = service.install(tmpDir, CLAUDE, true);
+      expect(updated.filesWritten).not.toContain(DBML_GUIDE);
+      expect(read(tmpDir, DBML_GUIDE)).toBe(mine);
+      expect(read(tmpDir, LEGACY_GUIDE)).toBe(mine);
+      // The Welcome panel lists them for confirmation, keeps them on Keep mine, replaces them on Replace.
+      const asked = service.installRecommended(tmpDir, { replaceUnmanaged: false, assistants: ['claude'] });
+      expect(asked.status).toBe('needs-confirmation');
+      expect(asked.unmanaged).toEqual(expect.arrayContaining([DBML_GUIDE, LEGACY_GUIDE]));
+      service.installRecommended(tmpDir, { replaceUnmanaged: false, keepUnmanaged: true, assistants: ['claude'] });
+      expect(read(tmpDir, DBML_GUIDE)).toBe(mine);
+      service.installRecommended(tmpDir, { replaceUnmanaged: true, assistants: ['claude'] });
+      expect(extractHarnessVersion(read(tmpDir, DBML_GUIDE))).toBe(HARNESS_VERSION);
+      expect(extractHarnessVersion(read(tmpDir, LEGACY_GUIDE))).toBe(HARNESS_VERSION);
+    });
+
     it('covers the companions in harnessStatus, detectStale and Update All like SYNC.md', () => {
       service.install(tmpDir, CLAUDE, true);
       service.install(tmpDir, AGENTS, true);

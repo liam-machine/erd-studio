@@ -502,6 +502,9 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
     // The yml beside the DBML file the earlier run wrote is no conflict to settle by hand.
     expect(doctor.erd.namingConflicts.map((c) => c.name)).toEqual(['employee']);
     expect(doctor.nextSteps.map((s) => s.id)).not.toContain('resolve-naming-conflicts');
+    // Nor a format conflict: the DBML file holds exactly what Convert writes, so finishing settles the pair.
+    expect(doctor.erd.dbmlProblems.filter((p) => p.code === 'formatConflict').length).toBeGreaterThan(0);
+    expect(doctor.nextSteps.map((s) => s.id)).not.toContain('resolve-format-conflicts');
     expect(doctor.nextSteps.find((s) => s.id === 'finish-dbml-conversion')).toMatchObject({
       why: 'A conversion to DBML stopped part way. Run ERD Studio: Convert Project to DBML again to finish it; it checks every file first.',
       command: null,

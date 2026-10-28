@@ -1351,12 +1351,15 @@ export class HarnessService {
    * Replace / Keep mine modal ever passes. `keepUnmanagedPrimary` is that
    * modal's "Keep mine": a hand-written primary SKILL.md is left alone while
    * every companion that is not hand-written is still installed.
+   * A hand-written SKILL.md companion (SYNC.md, DBML.md, LEGACY.md with no
+   * marker) is replaced only with `replaceUnmanagedCompanions`, the same
+   * confirmed Replace; every other caller (Update All) leaves it alone.
    */
   install(
     workspaceRoot: string,
     target: HarnessTarget,
     overwrite: boolean = false,
-    options: { replaceUnmanagedSetupSkill?: boolean; keepUnmanagedPrimary?: boolean } = {},
+    options: { replaceUnmanagedSetupSkill?: boolean; keepUnmanagedPrimary?: boolean; replaceUnmanagedCompanions?: boolean } = {},
   ): HarnessInstallResult {
     const filePath = path.join(workspaceRoot, target.relativePath);
     const dir = path.dirname(filePath);
@@ -1416,12 +1419,12 @@ export class HarnessService {
       if (skillTarget) {
         const paths = skillTargetPaths(skillTarget);
         // SYNC.md, DBML.md, LEGACY.md — loaded on demand beside SKILL.md.
-        // Under "Keep mine" a hand-written companion is kept too, and a
-        // newer one (a teammate's) is never replaced.
+        // A hand-written companion (no marker) is kept unless the user
+        // confirmed Replace, and a newer one (a teammate's) is never replaced.
         for (const [name, generate] of SKILL_COMPANIONS) {
           const companionPath = path.join(dir, name);
           const state = fileState(companionPath);
-          if ((keepPrimary && state === 'unmanaged') || state === 'newer') continue;
+          if ((state === 'unmanaged' && (keepPrimary || options.replaceUnmanagedCompanions !== true)) || state === 'newer') continue;
           fs.writeFileSync(companionPath, applySemanticDir(generate(), this.semanticDir), 'utf-8');
           filesWritten.push(rel(companionPath));
         }
@@ -1748,6 +1751,10 @@ export class HarnessService {
       const paths = skillTargetPaths(t);
       if (status[t].schemaSkill === 'unmanaged') { unmanaged.push(paths.schemaSkill); }
       if (status[t].setupSkill === 'unmanaged') { unmanaged.push(paths.setupSkill); }
+      // A hand-written SYNC.md / DBML.md / LEGACY.md is the user's too: asked about, never silently replaced.
+      for (const companion of paths.companions) {
+        if (fileState(path.join(workspaceRoot, companion)) === 'unmanaged') { unmanaged.push(companion); }
+      }
     }
     const keep = options.keepUnmanaged === true && !options.replaceUnmanaged;
     if (unmanaged.length > 0 && !options.replaceUnmanaged && !keep) {
@@ -1756,8 +1763,11 @@ export class HarnessService {
 
     // A newer file (a teammate on a later ERD Studio) is never replaced, so it counts as up to date.
     const fine = (state: FileState): boolean => state === 'current' || state === 'newer';
+    // A hand-written companion the user chose to replace is not up to date either.
+    const replacing = (t: SkillHarnessTarget): boolean => options.replaceUnmanaged
+      && skillTargetPaths(t).companions.some((c) => unmanaged.includes(c));
     const upToDate = (t: SkillHarnessTarget) => fine(status[t].schemaSkill) && fine(status[t].setupSkill)
-      && (t !== 'claude' || status.claude.hookRegistered);
+      && (t !== 'claude' || status.claude.hookRegistered) && !replacing(t);
     if (targets.every(upToDate)) {
       return { status: 'unchanged', unmanaged: [], filesWritten: [], targets };
     }
@@ -1768,6 +1778,7 @@ export class HarnessService {
       const target = HARNESS_TARGETS.find((h) => h.id === t)!;
       const result = this.install(workspaceRoot, target, true, {
         replaceUnmanagedSetupSkill: options.replaceUnmanaged,
+        replaceUnmanagedCompanions: options.replaceUnmanaged,
         keepUnmanagedPrimary: keep,
       });
       for (const f of result.filesWritten ?? []) {

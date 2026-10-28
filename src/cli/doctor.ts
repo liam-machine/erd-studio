@@ -367,22 +367,35 @@ function namingMigrationPreview(ctx: CliContext): NonNullable<DoctorResult['erd'
   return { moves: plan.moves.length, rewrites: plan.rewrites.length, refusals: [...plan.refusals], preview: describeNamingMigration(plan) };
 }
 
-/** Convert Project to DBML's plan (§6.5), as doctor reports it, and whether a run stopped part way. */
-async function dbmlConversionPreview(ctx: CliContext): Promise<{ preview: NonNullable<DoctorResult['erd']['dbmlConversion']>; unfinished: boolean }> {
+/**
+ * Convert Project to DBML's plan (§6.5), as doctor reports it; whether a run
+ * stopped part way; and the files (relative to the semantic dir, lower case)
+ * of each source beside its converted target that finishing settles.
+ */
+async function dbmlConversionPreview(ctx: CliContext): Promise<{ preview: NonNullable<DoctorResult['erd']['dbmlConversion']>; unfinished: boolean; settled: string[] }> {
   const input = readDbmlConversionInput(ctx.root, ctx.semanticDir);
   const plan = await planDbmlConversion(input);
-  // A source beside its converted target: a run that stopped part way (or a file an older helper wrote since).
-  const paths = new Set(input.files.map((f) => f.path.toLowerCase()));
-  const besideTarget = input.files.some((f) => {
+  // A source beside its converted target: a run that stopped part way, or a file an older helper (or a
+  // 1.x teammate) wrote since. Only a pair the plan resumes (its target holds exactly what Convert writes)
+  // is one finishing settles. Convert refuses a target with other contents, and any refusal empties
+  // `resumed`: such a pair is a format conflict for the user to settle, and nothing is unfinished until
+  // the plan can run.
+  const paths = new Map(input.files.map((f) => [f.path.toLowerCase(), f.path]));
+  const resumed = new Set(plan.resumed.map((p) => p.toLowerCase()));
+  const settled: string[] = [];
+  for (const f of input.files) {
+    let target: string | undefined;
     if (f.kind === 'table' && f.storage === 'yaml') {
       const at = f.path.indexOf('/');
-      const rest = f.path.slice(at + 1).replace(/\.yml$/i, '.dbml');
-      return paths.has(`tables/${rest}`.toLowerCase());
+      target = `tables/${f.path.slice(at + 1).replace(/\.yml$/i, '.dbml')}`;
+    } else if (f.kind === 'diagram' && f.storage === 'json') {
+      target = f.path.replace(/\.json$/i, '.dbml');
     }
-    if (f.kind === 'diagram' && f.storage === 'json') return paths.has(f.path.replace(/\.json$/i, '.dbml').toLowerCase());
-    return false;
-  });
+    const existing = target === undefined ? undefined : paths.get(target.toLowerCase());
+    if (existing !== undefined && resumed.has(existing.toLowerCase())) settled.push(f.path.toLowerCase(), existing.toLowerCase());
+  }
   return {
+    settled,
     preview: {
       ...plan.summary,
       v4SubjectAreas: plan.v4SubjectAreas,
@@ -392,16 +405,16 @@ async function dbmlConversionPreview(ctx: CliContext): Promise<{ preview: NonNul
       resumed: plan.resumed,
       preview: describeDbmlConversion(plan),
     },
-    unfinished: plan.resumed.length > 0 || besideTarget,
+    unfinished: plan.resumed.length > 0,
   };
 }
 
 /** The erd summary with Convert's preview when storage is not `dbml`. */
-async function withDbmlConversion(ctx: CliContext, erd: DoctorResult['erd']): Promise<{ erd: DoctorResult['erd']; unfinished: boolean }> {
-  if (!erd.semanticDirExists || erd.storage === 'dbml') return { erd, unfinished: false };
+async function withDbmlConversion(ctx: CliContext, erd: DoctorResult['erd']): Promise<{ erd: DoctorResult['erd']; unfinished: boolean; settled: string[] }> {
+  if (!erd.semanticDirExists || erd.storage === 'dbml') return { erd, unfinished: false, settled: [] };
   try {
-    const { preview, unfinished } = await dbmlConversionPreview(ctx);
-    return { erd: { ...erd, dbmlConversion: preview }, unfinished };
+    const { preview, unfinished, settled } = await dbmlConversionPreview(ctx);
+    return { erd: { ...erd, dbmlConversion: preview }, unfinished, settled };
   } catch {
     // ERD Studio's own failure while planning: a refusal in the preview, never a failed doctor run.
     const refusal = 'ERD Studio could not plan the conversion of this project (an error in ERD Studio, not in your files). Please report it, with this doctor output.';
@@ -415,6 +428,7 @@ async function withDbmlConversion(ctx: CliContext, erd: DoctorResult['erd']): Pr
         },
       },
       unfinished: false,
+      settled: [],
     };
   }
 }
@@ -549,6 +563,11 @@ interface NextStepDeps {
   installPath: string;
   invocation: string | null;
   unfinishedDbmlConversion?: boolean;
+  /**
+   * The files (relative to the semantic dir, lower case) of each source beside its converted target that
+   * finishing the conversion settles: their format conflict is not raised while it is unfinished.
+   */
+  settledByConversion?: readonly string[];
   /** Where a backwards relationship is rewritten, when its table is DBML (`in the relationships file of …`). */
   backwardsHome?: string;
 }
@@ -652,9 +671,13 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
     });
   }
   // The same table or diagram in both formats: only one is read, and which is
-  // right is the user's call. While a conversion is unfinished, finishing it
-  // settles a source beside its converted file, so nothing is raised here.
-  const formatConflicts = deps.unfinishedDbmlConversion ? [] : r.erd.dbmlProblems.filter((p) => p.code === FORMAT_CONFLICT_CODE);
+  // right is the user's call. Finishing an unfinished conversion settles a
+  // source beside a converted file that holds what Convert writes, so only
+  // those pairs are left out; a pair with other contents (Convert refuses it)
+  // or in two folders is raised here.
+  const settled = deps.settledByConversion ?? [];
+  const settledHere = (file: string): boolean => settled.some((p) => file.toLowerCase().endsWith(`/${p}`));
+  const formatConflicts = r.erd.dbmlProblems.filter((p) => p.code === FORMAT_CONFLICT_CODE && !settledHere(p.file));
   if (formatConflicts.length > 0) {
     const n = formatConflicts.length;
     steps.push({
@@ -903,7 +926,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
   const deps = detectDepsStatus(root, identity.packagesInstallPath);
   return {
     ...base,
-    nextSteps: nextStepsFor(base, { needsDeps: deps.needsDeps, installPath: deps.installPath, invocation, unfinishedDbmlConversion: conversion.unfinished, backwardsHome: backwardsHomeOf(ctx, base.erd) }),
+    nextSteps: nextStepsFor(base, { needsDeps: deps.needsDeps, installPath: deps.installPath, invocation, unfinishedDbmlConversion: conversion.unfinished, settledByConversion: conversion.settled, backwardsHome: backwardsHomeOf(ctx, base.erd) }),
   };
 }
 
@@ -935,5 +958,5 @@ async function logicalOnlyDoctor(ctx: CliContext, opts: DoctorOptions): Promise<
     erd: conversion.erd,
     harness: harnessSummary(harness),
   };
-  return { ...base, nextSteps: nextStepsFor(base, { needsDeps: false, installPath: '', invocation: null, unfinishedDbmlConversion: conversion.unfinished, backwardsHome: backwardsHomeOf(ctx, base.erd) }) };
+  return { ...base, nextSteps: nextStepsFor(base, { needsDeps: false, installPath: '', invocation: null, unfinishedDbmlConversion: conversion.unfinished, settledByConversion: conversion.settled, backwardsHome: backwardsHomeOf(ctx, base.erd) }) };
 }

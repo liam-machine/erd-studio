@@ -94,8 +94,8 @@ So when you ask the AI *"propose a column to add to `dim_customer`"*, it sees no
 If your dbt project doesn't have a `.erd-studio/` directory yet:
 
 1. Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio)
-2. In VS Code: Command Palette → `dbt: Set Up Semantic Domains Directory`
-3. Optionally: Command Palette → `dbt: Install AI Coding Harness` to get the bundled skill
+2. In VS Code: Command Palette → `ERD Studio: New Subject Area`
+3. Optionally: Command Palette → `ERD Studio: Set Up My AI Helper` to get the bundled skill
 
 The MCP server still works on uninitialized projects — `list_manifest_models` reads `target/manifest.json` directly, and the other tools return graceful "install the extension to start designing" tips. So you can install this MCP first to inspect what dbt has, then move to the extension for the design work.
 

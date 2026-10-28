@@ -132,7 +132,7 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     + (r.erd.semanticDirExists
       ? (r.erd.storage === 'dbml'
         ? ' — storage DBML'
-        : ` — ${r.erd.storage === 'mixed' ? 'storage mixed, ' : ''}file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}`)
+        : ` — storage ${r.erd.storage === 'mixed' ? 'mixed' : 'YAML'}, file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}`)
       : ''));
   const migration = r.erd.namingMigration;
   if (migration && migration.moves + migration.rewrites > 0) {

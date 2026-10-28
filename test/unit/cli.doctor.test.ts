@@ -681,15 +681,117 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(ids(r)).toContain('fix-dbml-file');
   });
 
-  it('a misplaced, orphaned or dangling Ref is a warning', async () => {
+  it('a misplaced Ref is a warning naming its home, and raises no next step', async () => {
+    // dim_date (top level) owns a Ref placed in the gold file.
     const r = await doctor(nativeWith({
-      // dim_date (top level) owns a Ref placed in the gold file; a Ref from a table with no file; a Ref to a gone column.
-      'tables/gold/_relationships.dbml': (t) => `${t}Ref: dim_date.previous_date_key >? dim_date.date_key\n`,
-      'tables/_relationships.dbml': (t) => `${t}Ref: dim_date.date_key >? dim_date.no_such_column\n`,
+      'tables/gold/_relationships.dbml': (t) => `${t}Ref "alt": dim_date.calendar_date >? dim_date.date_key\n`,
     }));
     expect(problem(r, 'misplacedRef')).toEqual([expect.objectContaining({ severity: 'warning', file: '.erd-studio/tables/gold/_relationships.dbml' })]);
     expect(problem(r, 'misplacedRef')[0].message).toContain('tables/_relationships.dbml');
-    expect(problem(r, 'danglingRef')).toEqual([expect.objectContaining({ severity: 'warning', file: '.erd-studio/tables/_relationships.dbml' })]);
+    expect(ids(r)).toEqual(['ready']);
+  });
+
+  it("a dangling or orphaned Ref is ERD Studio's warning, and the parser's binding error on its line raises fix-dbml-file", async () => {
+    // A Ref to a gone column, and a Ref from a table with no file: every other DBML tool fails the file.
+    const r = await doctor(nativeWith({
+      'tables/_relationships.dbml': (t) => `${t}Ref: dim_date.date_key >? dim_date.no_such_column\n`,
+      'tables/gold/_relationships.dbml': (t) => `${t}Ref: ghost.x >? dim_date.date_key\n`,
+    }));
+    const [dangling] = problem(r, 'danglingRef');
+    expect(dangling).toMatchObject({ severity: 'warning', file: '.erd-studio/tables/_relationships.dbml', line: 5 });
+    expect(dangling.message).toContain('dim_date.no_such_column');
+    const [orphaned] = problem(r, 'orphanedRef');
+    expect(orphaned).toMatchObject({ severity: 'warning', file: '.erd-studio/tables/gold/_relationships.dbml', line: 15 });
+    expect(orphaned.message).toBe("This Ref's foreign-key end is ghost, which has no table file; it is not drawn. Add the table, or delete the Ref.");
+    expect(problem(r, 4000).map((p) => [p.file, p.line, p.severity])).toEqual([
+      ['.erd-studio/tables/_relationships.dbml', 5, 'error'],
+      ['.erd-studio/tables/gold/_relationships.dbml', 15, 'error'],
+    ]);
+    expect(ids(r)[0]).toBe('fix-dbml-file');
+  });
+
+  it('a Ref whose foreign-key end is a YAML table is orphaned, with the move to its file (a mixed project)', async () => {
+    const r = await doctor(nativeWith({
+      'tables/gold/fct_extra.yml': () => 'name: fct_extra\ncolumns:\n  - name: extra_key\n    dataType: INT\n    isPrimaryKey: true\n  - name: customer_key\n    dataType: INT\n',
+      'tables/gold/_relationships.dbml': (t) => `${t}Ref: fct_extra.customer_key >? dim_customer.customer_key\n`,
+    }));
+    expect(r.erd.storage).toBe('mixed');
+    const [orphaned] = problem(r, 'orphanedRef');
+    expect(orphaned).toMatchObject({ severity: 'warning', file: '.erd-studio/tables/gold/_relationships.dbml', line: 15 });
+    expect(orphaned.message).toContain('fct_extra, a YAML table');
+    expect(orphaned.message).toContain('Move it into tables/gold/fct_extra.yml');
+    expect(problem(r, 'danglingRef')).toEqual([]);
+  });
+
+  describe('a table file that does not read says so once, and its Refs are not blamed', () => {
+    const conflict = (t: string): string => `<<<<<<< HEAD\n${t}=======\n${t}>>>>>>> other\n`;
+    const cases: Array<[string, Record<string, (t: string) => string | null>, string]> = [
+      ['a merge conflict in a foreign-key table', { 'tables/gold/fct_order.dbml': conflict }, 'resolve-merge-conflicts'],
+      ['a merge conflict in a referenced table', { 'tables/gold/dim_customer.dbml': conflict }, 'resolve-merge-conflicts'],
+      ['a parse error in a table both ends name', { 'tables/dim_date.dbml': replace("role: 'conformed-dim'", 'role: conformed dim') }, 'fix-dbml-file'],
+    ];
+    for (const [label, edits, step] of cases) {
+      it(label, async () => {
+        const r = await doctor(nativeWith(edits));
+        expect(problem(r, 'danglingRef')).toEqual([]);
+        expect(problem(r, 'orphanedRef')).toEqual([]);
+        expect(r.erd.dbmlProblems.every((p) => !p.file.endsWith('_relationships.dbml'))).toBe(true);
+        expect(ids(r)).toEqual([step]);
+      });
+    }
+  });
+
+  describe('a table file ERD Studio cannot read is an error, and fix-dbml-file names it', () => {
+    const cases: Array<[string, (t: string) => string | null, string]> = [
+      ['two Tables in one file', (t) => `${t}\nTable other {\n  id int\n}\n`, 'structure:notOneTable'],
+      ['a Table not named as its file', (t) => t.replace('Table bridge_empty', 'Table something_else'), 'structure:nameMismatch'],
+      ['an empty file', () => '', 'read'],
+    ];
+    for (const [label, edit, code] of cases) {
+      it(label, async () => {
+        const r = await doctor(nativeWith({ 'tables/gold/bridge_empty.dbml': edit }));
+        expect(problem(r, code)).toEqual([expect.objectContaining({ file: '.erd-studio/tables/gold/bridge_empty.dbml', severity: 'error' })]);
+        expect(ids(r)[0]).toBe('fix-dbml-file');
+        expect(r.nextSteps[0].why).toContain(`.erd-studio/tables/gold/bridge_empty.dbml`);
+        expect(r.nextSteps[0].why).toContain(`(${code})`);
+      });
+    }
+  });
+
+  it('a Metadata block naming an unknown column is a warning with its precise text, once, and raises no next step (D25)', async () => {
+    const r = await doctor(nativeWith({ 'tables/gold/fct_order.dbml': (t) => `${t}\nMetadata Column fct_order.nope {\n  note: 'x'\n}\n` }));
+    expect(r.erd.dbmlProblems).toEqual([{
+      file: '.erd-studio/tables/gold/fct_order.dbml', line: 31, code: 'structure:metadataTarget', severity: 'warning',
+      message: "A Metadata block on line 31 targets column 'nope', which this table does not have; rename or remove the block.",
+    }]);
+    expect(ids(r)).toEqual(['ready']);
+  });
+
+  it('a use line or a Ref in a table file is an error (useInTableFile, refInTableFile)', async () => {
+    const used = await doctor(nativeWith({ 'tables/gold/dim_region.dbml': (t) => `use { table dim_date } from '../dim_date.dbml'\n${t}` }));
+    expect(problem(used, 'useInTableFile')).toEqual([expect.objectContaining({ severity: 'error', line: 1 })]);
+    expect(ids(used)).toContain('fix-dbml-file');
+    const ref = await doctor(nativeWith({ 'tables/gold/dim_region.dbml': (t) => `${t}\nRef: dim_region.region_code > dim_region.region_code\n` }));
+    const [p] = problem(ref, 'refInTableFile');
+    expect(p).toMatchObject({ severity: 'error', file: '.erd-studio/tables/gold/dim_region.dbml' });
+    expect(p.message).toContain("_relationships.dbml");
+    expect(ids(ref)).toContain('fix-dbml-file');
+  });
+
+  it('a YAML table listed in a DBML diagram is a warning (yamlTableInDbmlDiagram, a mixed project)', async () => {
+    const r = await doctor(nativeWith({
+      'tables/gold/fct_extra.yml': () => 'name: fct_extra\ncolumns:\n  - name: extra_key\n    dataType: INT\n',
+      'silver/staging.dbml': (t) => `${t}use { table fct_extra } from '../tables/gold/fct_extra.dbml'\n`,
+    }));
+    const [p] = problem(r, 'yamlTableInDbmlDiagram');
+    expect(p).toMatchObject({ severity: 'warning', file: '.erd-studio/silver/staging.dbml', line: 10 });
+    expect(p.message).toContain('fct_extra is a YAML table (tables/gold/fct_extra.yml)');
+  });
+
+  it("the layout file's problems are diagram warnings that raise no next step (diagramWarning)", async () => {
+    const r = await doctor(nativeWith({ 'gold/sales.dbdiagram': () => 'not json' }));
+    expect(problem(r, 'diagramWarning')).toEqual([expect.objectContaining({ severity: 'warning', file: '.erd-studio/gold/sales.dbml', message: 'Layout file: The layout file is not JSON.' })]);
+    expect(ids(r)).toEqual(['ready']);
   });
 
   it('a diagram use path that misses its table and a missing relationships use line are warnings with the corrected line', async () => {
@@ -703,6 +805,31 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(mismatch.message).toContain("use { table dim_date } from '../tables/dim_date.dbml'");
     const [rel] = problem(r, 'missingRelationshipsUse');
     expect(rel.message).toContain("use * from '../tables/gold/_relationships.dbml'");
+  });
+
+  it("a stale or wrong-case use path is reported once, as a warning: not also as the parser's import errors", async () => {
+    const r = await doctor(nativeWith({
+      'gold/sales.dbml': (t) => t
+        .replace("'../tables/gold/dim_customer.dbml'", "'../tables/gold/Dim_Customer.dbml'")
+        .replace("'../tables/dim_date.dbml'", "'../tables/silver/dim_date.dbml'"),
+    }));
+    expect(problem(r, 'usePathMismatch').map((p) => [p.line, p.severity])).toEqual([[9, 'warning'], [10, 'warning']]);
+    expect(r.erd.dbmlProblems.filter((p) => typeof p.code === 'number')).toEqual([]);
+    expect(ids(r)).toEqual(['ready']);
+  });
+
+  it("a Ref naming a table the file does not import is one missingUse warning, not also the parser's binding errors", async () => {
+    const r = await doctor(nativeWith({ 'tables/gold/_relationships.dbml': (t) => t.replace("use { table dim_region } from './dim_region.dbml'\n", '') }));
+    expect(problem(r, 'missingUse')).toEqual([expect.objectContaining({ severity: 'warning', line: 8 })]);
+    expect(problem(r, 'missingUse')[0].message).toContain("Add the line: use { table dim_region } from './dim_region.dbml'");
+    expect(r.erd.dbmlProblems.filter((p) => typeof p.code === 'number')).toEqual([]);
+    expect(ids(r)).toEqual(['ready']);
+  });
+
+  it("a relationships file's syntax error is reported once (the compile's, not the reader's copy too)", async () => {
+    const r = await doctor(nativeWith({ 'tables/_relationships.dbml': (t) => `${t}Ref: dim_date.date_key >\n` }));
+    expect(problem(r, 1002)).toEqual([expect.objectContaining({ file: '.erd-studio/tables/_relationships.dbml', line: 6, severity: 'error', message: 'Unexpected EOF' })]);
+    expect(ids(r)[0]).toBe('fix-dbml-file');
   });
 
   it('a table file whose name differs from its stem in case is a warning (nameCaseDrift)', async () => {
@@ -727,16 +854,27 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(ids(r)).not.toContain('fix-model-yaml');
   });
 
-  it('a table or diagram in both formats raises resolve-format-conflicts', async () => {
+  it('a table and a diagram beside a DBML twin with other contents raise resolve-format-conflicts, never finish-dbml-conversion', async () => {
+    // What a pre-2.0 helper or a 1.x teammate writes into a DBML project: Convert refuses the pair, so only the user can settle it.
     const r = await doctor(nativeWith({
       'tables/gold/dim_region.yml': () => 'name: dim_region\ncolumns:\n  - name: region_code\n    dataType: "VARCHAR"\n',
       'gold/sales.json': () => JSON.stringify({ schemaVersion: 5, domain: 'sales', layer: 'gold', logical: { models: [], relationships: [] }, viewConfig: {} }),
     }));
-    // A YAML source beside its converted DBML file is an unfinished conversion: finishing it settles them.
-    expect(ids(r)).toContain('finish-dbml-conversion');
-    expect(ids(r)).not.toContain('resolve-format-conflicts');
+    expect(r.erd.dbmlConversion?.resumed).toEqual([]);
+    expect(r.erd.dbmlConversion?.refusals.join(' ')).toContain('tables/gold/dim_region.dbml already exists, with other contents');
     expect(problem(r, 'formatConflict').map((p) => p.severity)).toEqual(['error', 'error']);
-    expect(ids(r)).not.toContain('fix-dbml-file');
+    expect(ids(r)).toEqual(['resolve-format-conflicts']);
+    const step = r.nextSteps[0];
+    expect(step.title).toBe('Keep one file for 2 tables or diagrams found as both YAML/JSON and DBML');
+    expect(step.why).toContain('dim_region exists as both YAML and DBML');
+    expect(step.why).toContain('The diagram sales exists as both JSON and DBML');
+  });
+
+  it('a YAML twin in another library folder raises resolve-format-conflicts', async () => {
+    const r = await doctor(nativeWith({ 'tables/dim_region.yml': () => 'name: dim_region\ncolumns:\n  - name: region_code\n    dataType: VARCHAR\n' }));
+    expect(problem(r, 'formatConflict')).toEqual([expect.objectContaining({ severity: 'error', file: '.erd-studio/tables/dim_region.yml' })]);
+    expect(ids(r)).toContain('resolve-format-conflicts');
+    expect(ids(r)).not.toContain('finish-dbml-conversion');
   });
 
   it('a diagram that declares its own Tables raises import-dbml-file, its own step per file', async () => {

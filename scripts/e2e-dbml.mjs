@@ -123,7 +123,9 @@ for (const m of plan.movedRelationships) {
 // The diagrams whose own file held relationships: Convert moves those into the library (§6.3).
 const movedLinks = new Set(plan.movedRelationships.flatMap((m) => linksOf(m.from, m.to)));
 const holders = new Set();
-for (const [diagram, display] of Object.entries(runHelper('displays', original))) {
+const before = runHelper('displays', original);
+const after = runHelper('displays', converted);
+for (const diagram of Object.keys(before)) {
   const file = path.join(original, '.erd-studio', `${diagram}.json`);
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
@@ -132,15 +134,18 @@ for (const [diagram, display] of Object.entries(runHelper('displays', original))
   } catch {
     // not a JSON diagram, or unreadable: nothing held
   }
-  void display;
 }
-const before = runHelper('displays', original);
-const after = runHelper('displays', converted);
+// A note touches a diagram when it names the diagram's file or one of its tables as a whole name, and says
+// something that changes what is drawn. Keys kept as `//` lines in the diagram file are comments: no
+// export holds them, so that note changes no export byte.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const mentions = (note, name) => new RegExp(`(^|[^\\w])${escapeRe(name)}([^\\w]|$)`, 'i').test(note);
+const drawingNotes = plan.notes.filter((note) => !/ are kept as \/\/ lines /.test(note));
 const touched = (diagram) => {
   if (movedInto.has(diagram) || holders.has(diagram)) return true;
   const display = before[diagram];
-  const names = [diagram, ...(display?.models ?? []).map((m) => m.name)];
-  return plan.notes.some((note) => names.some((n) => note.includes(n)));
+  const names = [`${diagram}.json`, ...(display?.models ?? []).map((m) => m.name)];
+  return drawingNotes.some((note) => names.some((n) => mentions(note, n)));
 };
 
 // diff --all: equal after normalising the paths (and schemaVersion)
@@ -167,6 +172,7 @@ function normaliseDiff(result) {
   }
   return out;
 }
+const linkOfFix = (r) => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`.toLowerCase();
 const diffBefore = normaliseDiff(JSON.parse(cli(original, ['diff', '--all', '--json']).out));
 const diffAfter = normaliseDiff(JSON.parse(cli(converted, ['diff', '--all', '--json']).out));
 for (const diagram of Object.keys(diffBefore).sort()) {
@@ -178,7 +184,14 @@ for (const diagram of Object.keys(diffBefore).sort()) {
     if (b.needsMigration) fail(`diff: ${diagram} still needs migration after Convert`);
     continue;
   }
-  if (movedInto.has(diagram)) continue; // it gains the moved relationships: checked on the display below
+  const moved = movedInto.get(diagram);
+  if (moved) {
+    // It gains exactly the moved relationships (checked on its display below): compare everything else,
+    // without the fixes about those relationships and the counts they change.
+    const rest = (d) => JSON.stringify({ ...d, counts: undefined, fixes: d.fixes.filter((f) => !(f.relationship && moved.has(linkOfFix(f.relationship)))) });
+    if (rest(a) !== rest(b)) fail(`diff: ${diagram} differs after Convert by more than its moved relationships`, { before: a, after: b });
+    continue;
+  }
   if (JSON.stringify(a) !== JSON.stringify(b)) fail(`diff: ${diagram} differs after Convert`, { before: a, after: b });
 }
 pass(`diff --all compared on ${Object.keys(diffBefore).length} diagrams`);
@@ -229,7 +242,9 @@ const exportsOf = (project, format) => {
   const files = JSON.parse(r.out).files ?? [];
   return new Map(files.map((f) => [`${key(f.domain)}\u0000${f.fileName}`, f.content]));
 };
-let exportsCompared = 0;
+let byteCompared = 0;
+let lineCompared = 0;
+const skippedMoved = new Set();
 for (const format of FORMATS) {
   const a = exportsOf(original, format);
   const b = exportsOf(converted, format);
@@ -237,16 +252,24 @@ for (const format of FORMATS) {
     const [diagram] = k.split('\u0000');
     if (diffBefore[diagram]?.needsMigration || before[diagram]?.loadError) continue;
     if (!b.has(k)) { fail(`export ${format}: ${diagram} is missing after Convert`); continue; }
-    exportsCompared++;
+    if (movedInto.has(diagram)) {
+      // It gains the moved relationships, whose export lines differ per format: checked on its display above.
+      skippedMoved.add(diagram);
+      continue;
+    }
     if (!touched(diagram)) {
+      byteCompared++;
       if (b.get(k) !== text) fail(`export ${format}: ${diagram} differs after Convert`, firstLineDiff(text, b.get(k)));
-    } else if (!movedInto.has(diagram)) {
+    } else {
       // A diagram the plan touches: the same lines, in the library's order (§2.8, "the order of relationships").
+      lineCompared++;
       const sorted = (t) => t.split('\n').sort().join('\n');
       if (sorted(b.get(k)) !== sorted(text)) fail(`export ${format}: ${diagram} has other lines after Convert`, firstLineDiff(sorted(text), sorted(b.get(k))));
     }
   }
 }
+if (byteCompared === 0) fail('export: no export was compared byte for byte (every diagram counted as touched by the plan)');
+if (skippedMoved.size > 0) log(`note exports not compared for ${[...skippedMoved].sort().join(', ')}: each gains moved relationships (its display is checked)`);
 const round = (layout) => JSON.stringify(JSON.parse(layout), (k, v) => (typeof v === 'number' && (k === 'x' || k === 'y' || k === 'width' || k === 'height') ? Math.round(v * 100) / 100 : v));
 const layoutsA = exportsOf(original, 'dbml-layout');
 const layoutsB = exportsOf(converted, 'dbml-layout');
@@ -258,7 +281,7 @@ for (const [k, text] of layoutsA) {
   if (other === undefined) { fail(`layout: ${diagram} is missing after Convert`); continue; }
   if (round(text) !== round(other)) fail(`layout: ${diagram} differs after Convert`, firstLineDiff(text, other));
 }
-pass(`exports compared (${exportsCompared} files: byte for byte where the plan touches nothing, else line for line) and layouts after rounding`);
+pass(`exports compared: ${byteCompared} byte for byte (the plan touches nothing there), ${lineCompared} line for line; layouts after rounding`);
 
 // ── 5. Every written .dbml compiles in 9.1.1, 10.3.1 and 11.0.0 ─────────────
 const compiled = runHelper('compile', converted);

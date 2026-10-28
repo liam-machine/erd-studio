@@ -62,14 +62,17 @@ describe('one DBML parser copy per bundle', () => {
     const result = await build({ bundle: true, write: false, platform: 'node', logLevel: 'silent', loader: { '.md': 'text' }, ...options });
     return result.outputFiles!.map((f) => f.text).join('\n');
   };
-  let baseline = 0;
+  // Measured in each test that needs it, so a test run on its own (-t, a retry, .only) never compares against 0.
+  const measureBaseline = async (): Promise<number> =>
+    count(await bundle({ stdin: { contents: "export * from '@dbml/parse';", resolveDir: ROOT, loader: 'js' }, format: 'cjs' }));
 
   it('measures one copy of the pinned parser', async () => {
-    baseline = count(await bundle({ stdin: { contents: "export * from '@dbml/parse';", resolveDir: ROOT, loader: 'js' }, format: 'cjs' }));
-    expect(baseline).toBeGreaterThan(0);
+    expect(await measureBaseline()).toBeGreaterThan(0);
   });
 
   it('dist/cli.js, dist/extension.js and the MCP server each hold exactly that one copy', async () => {
+    const baseline = await measureBaseline();
+    expect(baseline).toBeGreaterThan(0);
     const cli = await bundle({
       entryPoints: [path.join(ROOT, 'src/cli/index.ts')], format: 'cjs', target: 'node18',
       define: { __ERD_CLI_VERSION__: JSON.stringify('0.0.0-test') },

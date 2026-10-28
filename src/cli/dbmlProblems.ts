@@ -81,6 +81,9 @@ const SEVERITY: Readonly<Record<string, 'error' | 'warning'>> = {
   'structure:metadataTarget': 'warning',
 };
 
+/** D25's table-read code: a Metadata block whose target the file does not declare. */
+const METADATA_TARGET_CODE = 'structure:metadataTarget';
+
 /** A `.dbml` / `.dbdiagram` file of the project, classified. */
 interface ProjectFile {
   /** Posix, relative to the semantic dir. */
@@ -230,6 +233,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
   }
 
   // ── Table files ──────────────────────────────────────────────────────────
+  const metadataTargetFiles = new Set<string>();
   const enumHomes = new Map<string, Array<{ rel: string; line: number; name: string }>>();
   const outlines = new Map<string, DbmlFileOutline>();
   const outline = (f: ProjectFile): DbmlFileOutline => {
@@ -267,11 +271,21 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
       }
     } else if (reading && !reading.ok) {
       const err = reading.error;
-      const code = err.code ?? err.kind;
-      // A parser error is already reported by the compile above, with its line.
-      if (!/^\d+$/.test(String(code))) {
+      const code = String(err.code ?? err.kind);
+      if (code === METADATA_TARGET_CODE) {
+        // D25: a warning, with the reader's own precise text (it already says to rename or remove the block);
+        // the parser's raw [4000] for the same block is dropped below.
+        metadataTargetFiles.add(projectRel(f.rel));
         push({
-          file: projectRel(f.rel), ...(err.line !== undefined ? { line: err.line } : {}), code: String(code),
+          file: projectRel(f.rel), ...(err.line !== undefined ? { line: err.line } : {}), code,
+          message: /[.!?]$/.test(err.message) ? err.message : `${err.message}.`,
+        });
+      } else if (!/^\d+$/.test(code)) {
+        // A parser error is already reported by the compile above, with its line. Any other reason the
+        // table does not read (an empty file, two Tables, a name that is not its file's) is an error:
+        // ERD Studio cannot read the table.
+        push({
+          file: projectRel(f.rel), ...(err.line !== undefined ? { line: err.line } : {}), code, severity: 'error',
           message: `${err.message} (${unreadableHint({ kind: err.kind, line: err.line, code: err.code })})`,
         });
       }
@@ -307,12 +321,25 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     for (const t of snapshot.tables.values()) if (t.dbmlAlias !== undefined && t.dbmlAlias.toLowerCase() === lower) return t;
     return undefined;
   };
+  // Whether a table's file reads (a file that reads with a repeated YAML key counts: it loads).
+  const readsCleanly = (t: { name: string }): boolean => {
+    try {
+      const err = lib.getTableFileError(t.name);
+      return !err || err.readable === true;
+    } catch {
+      return false;
+    }
+  };
+  /** Relationships file (project-relative) → the tables (lower case) its `missingUse` warnings name. */
+  const missingUseTables = new Map<string, Set<string>>();
   for (const f of files) {
     if (f.kind !== 'relationships' || conflicted.has(f.rel)) continue;
     const reading = lib.readRelationshipsFile(f.abs);
     if (!reading) continue;
     for (const p of reading.problems) {
       if (p.mergeConflict) continue;
+      // The reader's own copy of a parser diagnostic the compile above already reported at that line.
+      if (typeof p.code === 'number' && (diagnostics[f.rel] ?? []).some((d) => d.code === p.code && d.line === p.line)) continue;
       push({ file: projectRel(f.rel), ...(p.line !== undefined ? { line: p.line } : {}), code: p.code ?? 'unreadableRef', message: p.message });
     }
     if (!reading.readable) continue;
@@ -329,6 +356,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
       }
       const owner = tableOf(ref.owner);
       const target = tableOf(ref.target);
+      // A table whose file does not read has no columns to check: that file's own problem is the one to fix.
+      if ((owner && !readsCleanly(owner)) || (target && !readsCleanly(target))) continue;
       if (owner && target) {
         const gone = ref.relationships.flatMap((r) => [
           ...(owner.columns.some((c) => c.toLowerCase() === r.fromColumn.toLowerCase()) ? [] : [`${owner.name}.${r.fromColumn}`]),
@@ -348,6 +377,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
         });
       }
     }
+    if (missing.size > 0) missingUseTables.set(projectRel(f.rel), new Set(missing.keys()));
     for (const m of missing.values()) {
       push({
         file: projectRel(f.rel), line: m.line, code: 'missingUse',
@@ -372,6 +402,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
   }
   for (const o of attachment?.orphaned ?? []) {
     const owner = tableOf(o.owner);
+    // A DBML owner is orphaned only while its table file does not read: that file's own problem says what to fix.
+    if (owner && (owner.storage !== 'yaml' || !readsCleanly(owner))) continue;
     push({
       file: projectRel(libraryRel(o.path)), line: o.line, code: 'orphanedRef',
       message: owner
@@ -387,6 +419,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
   }
 
   // ── Diagrams ────────────────────────────────────────────────────────────
+  /** `file\0line` of every use line reported as usePathMismatch. */
+  const usePathLines = new Set<string>();
   const relationshipsFiles = new Map<string, string>(); // folder (lower) → rel path
   for (const f of files) if (f.kind === 'relationships') relationshipsFiles.set(folderOf(f.rel).toLowerCase(), f.rel);
   for (const f of files) {
@@ -440,6 +474,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
       const specifierOk = !o || o.wildcard || o.tables.length === 0 || o.tables.includes(t.name.toLowerCase())
         || o.tables.includes(t.reference.toLowerCase());
       if (use.resolved !== t.path || !specifierOk) {
+        usePathLines.add(`${projectRel(f.rel)}\u0000${use.line}`);
         push({
           file: projectRel(f.rel), line: use.line, code: 'usePathMismatch',
           message: `This use line does not point at ${t.path}, the file of ${t.name}. ERD Studio reads the table by name and rewrites the line on its next edit; `
@@ -458,7 +493,21 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
       });
     }
   }
-  return problems;
+  // The parser's own diagnostics for what ERD Studio's checks above already report with the line to write:
+  // a Metadata block's missing target (D25's warning), a use line that misses its file (usePathMismatch) and
+  // a Ref naming a table the file does not import (missingUse). Each is a warning (§7.1): ERD Studio reads the
+  // file anyway and rewrites the line on its next write, so it is reported once, at that severity.
+  return problems.filter((p) => {
+    if (typeof p.code !== 'number') return true;
+    if (p.code === 4000 && metadataTargetFiles.has(p.file) && /metadata target/i.test(p.message)) return false;
+    if ((p.code === 4000 || p.code === 4001) && p.line !== undefined && usePathLines.has(`${p.file}\u0000${p.line}`)) return false;
+    const missingHere = missingUseTables.get(p.file);
+    if (p.code === 4000 && missingHere) {
+      const named = /Table '([^']+)' does not exist/i.exec(p.message);
+      if (named && missingHere.has(named[1].toLowerCase())) return false;
+    }
+    return true;
+  });
 }
 
 /**

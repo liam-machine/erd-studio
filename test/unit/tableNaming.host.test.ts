@@ -595,7 +595,7 @@ describe('doctor reports the naming (#181)', () => {
     expect(r.erd.naming).toBe('v6');
     expect(r.erd.logicalModels).toBe(9);
     expect(r.erd.domainFormatIssues).toEqual([]);
-    expect(formatDoctor(r, makePaint(false))).toContain('9 tables — file naming v6');
+    expect(formatDoctor(r, makePaint(false))).toContain('9 tables — storage YAML, file naming v6');
   });
 
   it('mixed, with the table in both folders as a finding and the first step after any merge conflict', async () => {
