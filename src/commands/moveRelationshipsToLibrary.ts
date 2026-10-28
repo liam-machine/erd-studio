@@ -66,12 +66,18 @@ import type { TableLibraryService } from '../services/logicalModelService';
 
 const TITLE = 'Move Relationships to Table Library';
 
+/** Move Relationships in a DBML project (§5.7): there is nothing a diagram file can hold. */
+export const DBML_NOTHING_TO_MOVE_MESSAGE = 'Nothing to move: relationships in a DBML project are already in the table library.';
+
+/** A mixed project's way to move a diagram's relationships onto DBML tables (§6.3). */
+const MIXED_DBML_OWNER_HINT = 'Convert the project to DBML (ERD Studio: Convert Project to DBML) to move them.';
+
 export interface MoveRelationshipsDeps {
   workspaceRoot: string;
   semanticDir: string;
   subjectAreaService: Pick<SubjectAreaService, 'listSubjectAreas'>;
   tableLibraryService: Pick<TableLibraryService, 'getTable' | 'listTables' | 'tablePath' | 'invalidateCache' | 'getTablesDir'>
-    & Partial<Pick<TableLibraryService, 'findTableNameIgnoringCase' | 'hasTablesLibrary' | 'isTableNamingFile'>>;
+    & Partial<Pick<TableLibraryService, 'findTableNameIgnoringCase' | 'hasTablesLibrary' | 'isTableNamingFile' | 'projectStorage'>>;
   /** Refresh the trees, open canvases and selectors once the files are written. */
   onWritten: (domainPaths: string[]) => Promise<void>;
   /** Test seam: how one file is written. Defaults to {@link writeFileAtomic}. */
@@ -255,6 +261,12 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
   const { workspaceRoot, semanticDir, subjectAreaService, tableLibraryService } = deps;
   const writeFile = deps.writeFile ?? writeFileAtomic;
   telemetry.feature('relMoveStarted');
+  // Hidden by its `when` clause in a DBML project, where relationships only live in the library (D5).
+  if (tableLibraryService.projectStorage?.() === 'dbml') {
+    telemetry.feature('relMoveNothingToMove');
+    void vscode.window.showInformationMessage(DBML_NOTHING_TO_MOVE_MESSAGE);
+    return;
+  }
   // Read the library fresh: a cached copy may predate an edit made on disk.
   tableLibraryService.invalidateCache();
   const domains = readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir)
@@ -388,6 +400,10 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
   for (const target of moveTargets(plan)) {
     const name = libraryModel(target)?.name ?? target;
     const filePath = tableLibraryService.tablePath(name);
+    if (filePath.toLowerCase().endsWith('.dbml')) {
+      // A mixed project: a DBML table's relationships are Refs in its folder's relationships file.
+      throw new MoveStopped(`${relPath(filePath)} is a DBML table, and this command moves relationships into YAML table files only. ${MIXED_DBML_OWNER_HINT} Nothing was changed.`, filePath);
+    }
     const original = fs.readFileSync(filePath, 'utf-8');
     if (relationshipsRewriteLoses(original)) {
       throw new MoveStopped(`${relPath(filePath)} changed while the dialog was open (its relationships list now has comments, YAML anchors or entries it cannot read). Nothing was changed.`, filePath);

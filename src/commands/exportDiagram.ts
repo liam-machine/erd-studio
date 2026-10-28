@@ -122,6 +122,17 @@ export const KEEP_LAYOUT_BUTTON = 'Save .dbml Only';
 export { OPEN_FILE_BUTTON };
 export const CHOOSE_ANOTHER_LOCATION_BUTTON = 'Choose Another Location';
 
+/** A Save As… target inside the semantic dir (§5.7): refused, in every project. */
+export function exportInsideSemanticDirMessage(semanticRoot: string): string {
+  return `Save the export outside ${path.basename(semanticRoot)}/: files there are your diagrams' own storage.`;
+}
+
+/** Whether `filePath` is `folder` or inside it (compared without case, so a differently cased path on macOS or Windows counts). */
+export function isInsideFolder(folder: string, filePath: string): boolean {
+  const rel = path.relative(path.resolve(folder).toLowerCase(), path.resolve(filePath).toLowerCase());
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
 /** The name the "ours" message gives the command. */
 const COMMAND_NAME = 'Export Diagram';
 
@@ -158,8 +169,15 @@ export interface ExportDiagramDeps {
   hasDiagrams: () => boolean;
   /** The picker `erdStudio.openDomain` uses; undefined when cancelled. */
   pickDomain: () => Promise<string | undefined>;
-  /** Where Save As… starts (the project root); the domain's own folder without it. */
+  /** Where Save As… starts (the project root); without it, the project root for a diagram in the semantic dir, else the diagram's own folder. */
   defaultSaveFolder?: string;
+  /**
+   * The semantic dir (`<root>/.erd-studio`), absolute. A Save As… target
+   * inside it is refused (§5.7): files there are the diagrams' own storage,
+   * and an export saved as `<layer>/<name>.dbml` would overwrite one or show
+   * up as a diagram.
+   */
+  semanticRoot?: string;
   /** The dbt project root, which messages name files relative to; just the file name without it. */
   projectRoot?: string;
   ui?: ExportDiagramUi;
@@ -320,8 +338,11 @@ async function runExportDiagram(
       break;
     }
     case 'save': {
-      const folder = deps.defaultSaveFolder ?? path.dirname(domainPath);
-      const saved = await saveAs(ui, format, exported, vscode.Uri.file(path.join(folder, exported.fileName)));
+      const folder = deps.defaultSaveFolder
+        ?? (deps.semanticRoot !== undefined && isInsideFolder(deps.semanticRoot, domainPath)
+          ? deps.projectRoot ?? path.dirname(deps.semanticRoot)
+          : path.dirname(domainPath));
+      const saved = await saveAs(ui, format, exported, vscode.Uri.file(path.join(folder, exported.fileName)), deps.semanticRoot);
       if (!saved) { return cancelled(); }
       result.savedTo = saved.savedTo;
       if (saved.layoutSavedTo) { result.layoutSavedTo = saved.layoutSavedTo; }
@@ -373,6 +394,7 @@ async function saveAs(
   format: DiagramExportFormat,
   exported: SubjectAreaExport,
   startAt: vscode.Uri,
+  semanticRoot?: string,
 ): Promise<Saved | undefined> {
   const target = await ui.showSaveDialog({
     title: `${EXPORT_TITLE}: Save ${FORMAT_LABELS[format]}`,
@@ -382,6 +404,15 @@ async function saveAs(
   });
   if (!target) { return undefined; }
   const name = path.basename(target.fsPath);
+  // Never into the diagrams' own storage (§5.7), in every project: nothing is written.
+  if (semanticRoot !== undefined && isInsideFolder(semanticRoot, target.fsPath)) {
+    const outside = vscode.Uri.file(path.join(path.dirname(semanticRoot), name));
+    showFailure(ui, {
+      message: exportInsideSemanticDirMessage(semanticRoot),
+      actions: { [CHOOSE_ANOTHER_LOCATION_BUTTON]: () => retrySave(ui, format, exported, outside, semanticRoot) },
+    });
+    return undefined;
+  }
 
   // The layout file goes beside the .dbml under the same name. The save
   // dialog asked about the file the user named; this one they did not, so
@@ -405,7 +436,7 @@ async function saveAs(
     content = exported.layout.dbmlWithLayoutFileName(layoutName);
   }
 
-  const retry = () => retrySave(ui, format, exported, target);
+  const retry = () => retrySave(ui, format, exported, target, semanticRoot);
   try {
     await ui.writeFile(target, content);
   } catch (err) {
@@ -449,9 +480,9 @@ function layoutSaveFailure(ui: ExportDiagramUi, savedName: string, layoutTarget:
 }
 
 /** Choose Another Location: the save step again, counted and shown as the first one was. */
-async function retrySave(ui: ExportDiagramUi, format: DiagramExportFormat, exported: SubjectAreaExport, previous: vscode.Uri): Promise<void> {
+async function retrySave(ui: ExportDiagramUi, format: DiagramExportFormat, exported: SubjectAreaExport, previous: vscode.Uri, semanticRoot?: string): Promise<void> {
   try {
-    if (await saveAs(ui, format, exported, previous)) {
+    if (await saveAs(ui, format, exported, previous, semanticRoot)) {
       telemetry.feature(FORMAT_FEATURES[format]);
     } else {
       cancelled();

@@ -44,8 +44,9 @@ import {
 import { TableLibraryTreeProvider, type TableLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
-import { validateTableName } from './providers/payloadValidation';
+import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
 import { layoutFilePathOf, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
+import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
 import { projectNamingOf } from './services/projectNaming';
@@ -86,6 +87,9 @@ import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportD
 import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
 import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
+import { currentDbmlResolver, newDbmlSubjectAreaText, planDbmlDuplicateRename, planDbmlSubjectAreaRename, planDbmlTableMoves } from './commands/dbmlLifecycle';
+import { applyFileWrites } from './providers/applyFileWrites';
+import type { FileWrite } from './services/fileWrites';
 import { saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles } from './providers/dirtyDocuments';
 
@@ -565,6 +569,41 @@ export function mostRecentlyModified(domains: readonly SubjectAreaSummary[]): Su
   }
   if (domains.length > 1 && bestTime - oldest < SAME_CHECKOUT_WINDOW_MS) { return domains[0]; }
   return best;
+}
+
+/** A file's text: an open document's (unsaved edits included), else the disk's without a byte-order mark; null when there is none. */
+function openOrDiskText(filePath: string): string | null {
+  const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && path.resolve(d.uri.fsPath) === path.resolve(filePath));
+  if (doc) return doc.getText();
+  try {
+    return fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Apply a lifecycle command's DBML writes (§5.7) as ONE WorkspaceEdit
+ * (`applyFileWrites`), save every replaced document and record own writes
+ * after the bytes land. Returns false when VS Code did not apply it
+ * (`applyFileWrites` reconciled), or the files it could not save.
+ */
+async function applyLifecycleWrites(writes: readonly FileWrite[], libraryRoot: string): Promise<{ ok: boolean; unsaved: string[] }> {
+  const applied = await applyFileWrites(writes, {
+    ensureDir: (filePath) => {
+      const rel = path.relative(libraryRoot, filePath);
+      if (!rel.startsWith('..') && !path.isAbsolute(rel)) fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    },
+  });
+  if (!applied.ok) return { ok: false, unsaved: [] };
+  const unsaved: string[] = [];
+  for (const uri of applied.replaced) {
+    if (await saveDocumentByUri(uri)) ownWrites.recordWrite(uri.fsPath);
+    else unsaved.push(uri.fsPath);
+  }
+  for (const filePath of applied.created) ownWrites.recordWrite(filePath);
+  for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
+  return { ok: true, unsaved };
 }
 
 function findMatchingTabs(fileUri: vscode.Uri): vscode.Tab[] {
@@ -1609,7 +1648,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const confirm = await vscode.window.showWarningMessage(
         dbml
           ? `Delete table "${node.name}"?${editorProvider.describeDbmlDeleteCascade([node.name], false)}`
-          : `Delete table "${node.name}"? This removes the YAML file — subject area references are not cleaned up.`,
+          : `Delete table "${node.name}"? This removes the table's file — subject area references are not cleaned up.`,
         { modal: true },
         'Delete',
       );
@@ -1651,12 +1690,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       const modelsDir = tableLibraryService.getTablesDir();
       const plan = planOrganizeByLayer(
-        // `.dbml` tables are not moved yet: their relationships and `use` lines move with them (S6).
-        tableLibraryService.listTableFiles().filter((e) => e.storage === 'yaml'),
+        tableLibraryService.listTableFiles(),
         usage,
-        // Each file is organised within its own library: `logical-models/` or v6's `tables/` (#182).
+        // Each file is organised within its own library: `logical-models/` or v6's `tables/` (#182). Extensions are kept.
         (name, layer, from) => TableLibraryService.isTableFolderName(layer)
-          ? path.join(tableLibraryService.isTableNamingFile(from) ? path.join(path.dirname(modelsDir), TABLES_DIR) : modelsDir, layer, `${name}.yml`)
+          ? path.join(tableLibraryService.isTableNamingFile(from) ? path.join(path.dirname(modelsDir), TABLES_DIR) : modelsDir, layer, `${name}${from.toLowerCase().endsWith('.dbml') ? '.dbml' : '.yml'}`)
           : null,
         new Set(layerService.getAllLayers().map((l) => l.id)),
       );
@@ -1672,6 +1710,56 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         'Move Files',
       );
       if (choice !== 'Move Files') return;
+
+      // A `.dbml` table moves with its Refs and every `use` line that names it
+      // (§5.7, §4.6 step 3): one WorkspaceEdit through applyFileWrites, YAML
+      // moves in it as a create of the same bytes plus a delete.
+      const dbmlMoves = plan.moves.filter((m) => m.from.toLowerCase().endsWith('.dbml'));
+      if (dbmlMoves.length > 0) {
+        let writes: FileWrite[];
+        try {
+          const diagrams = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).filter((d) => d.storage === 'dbml').map((d) => d.filePath);
+          writes = planDbmlTableMoves({
+            tableLibraryService,
+            moves: dbmlMoves.map((m) => ({ name: m.name, toFolder: m.layer })),
+            diagrams,
+            readText: openOrDiskText,
+          });
+          for (const move of plan.moves) {
+            if (move.from.toLowerCase().endsWith('.dbml')) continue;
+            writes.push({ kind: 'create', path: move.to, text: fs.readFileSync(move.from, 'utf-8') }, { kind: 'delete', path: move.from });
+          }
+        } catch (err) {
+          void vscode.window.showErrorMessage(`Organise Table Library: ${err instanceof Error ? err.message : String(err)} Nothing was changed.`);
+          return;
+        }
+        const dirty = dirtyFiles(writes.map((w) => w.path));
+        if (dirty.length > 0) {
+          void vscode.window.showErrorMessage(`Organise Table Library: ${path.relative(workspaceRoot, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again. Nothing was changed.`);
+          return;
+        }
+        const result = await applyLifecycleWrites(writes, path.dirname(modelsDir));
+        if (!result.ok) {
+          void vscode.window.showErrorMessage('Organise Table Library: VS Code rejected the file moves; nothing was changed.');
+          return;
+        }
+        for (const move of plan.moves) {
+          if (!move.fromFolder) continue;
+          try {
+            if (fs.readdirSync(path.dirname(move.from)).length === 0) fs.rmdirSync(path.dirname(move.from));
+          } catch { /* already gone */ }
+        }
+        tableLibraryService.invalidateCache();
+        tableLibraryProvider.refresh();
+        await editorProvider.refreshAllOpenSubjectAreas();
+        if (result.unsaved.length > 0) {
+          void vscode.window.showErrorMessage(`Could not save ${result.unsaved.map((p) => path.relative(workspaceRoot, p).split(path.sep).join('/')).join(', ')}. Save the file from its tab, or revert it.`);
+        }
+        void vscode.window.showInformationMessage(
+          `Moved ${plan.moves.length} table file${plan.moves.length === 1 ? '' : 's'} into layer folders.`,
+        );
+        return;
+      }
 
       const edit = new vscode.WorkspaceEdit();
       const newFolders = new Set<string>();
@@ -1718,15 +1806,91 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const entries = tableLibraryService.listTableFiles();
       // A duplicate within one library (#182: `tables/` too). A `tables/` copy of a
       // name `logical-models/` also has is the migration's conflict, not fixed here (#181).
-      const duplicates = entries.filter((e) => e.shadowedBy && (!e.library || tableLibraryService.isTableNamingFile(e.shadowedBy))
-        // A `.dbml` copy is not renamed yet: its `use` lines and Refs move with it (S6).
-        && e.storage === 'yaml' && !e.shadowedBy.endsWith('.dbml'));
+      const duplicates = entries.filter((e) => e.shadowedBy && (!e.library || tableLibraryService.isTableNamingFile(e.shadowedBy)));
       const target = typeof arg === 'string' ? arg : arg?.type === 'model' ? arg.filePath : undefined;
       // Compare real paths: the tree hands over what the library listed, but a
       // warning or a caller may name the same file through a symlinked prefix.
       const realPath = (p: string): string => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
       let entry = target === undefined ? undefined : duplicates.find((e) => realPath(e.filePath) === realPath(target));
       const libPath = (p: string): string => tableLibraryService.libraryRelativePath(p);
+
+      /**
+       * A `.dbml` copy (§5.7): renamed in place by core's table writer with the
+       * alias that keeps its warehouse table, the old copy deleted, and only
+       * the DBML diagrams whose `use` line resolves to THIS copy repointed.
+       * Refs naming the old spelling stay with the copy the library uses.
+       */
+      async function resolveDbmlDuplicate(dup: (typeof entries)[number]): Promise<void> {
+        const root = workspaceRoot as string;
+        const copyReading = (() => {
+          try { return parseTableDbml((openOrDiskText(dup.filePath) ?? ''), path.basename(dup.filePath).replace(/\.dbml$/i, '')); } catch { return null; }
+        })();
+        if (!copyReading?.ok) {
+          void vscode.window.showErrorMessage(`${libPath(dup.filePath)} could not be read as a table file. Fix or rename it by hand.`);
+          return;
+        }
+        const copyName = copyReading.table.name;
+        const taken = new Set(entries.map((e) => e.name.toLowerCase()));
+        const newName = (await vscode.window.showInputBox({
+          title: `Give ${libPath(dup.filePath)} its own name`,
+          prompt: `Table names are unique, as dbt model names are. The warehouse table name stays "${copyReading.table.alias || copyName}" (set as the table's alias).`,
+          value: suggestDuplicateName(copyName, dup.folder, new Set(entries.map((e) => e.name))),
+          ignoreFocusOut: true,
+          validateInput: (value) => validateNewDbmlTableName(value) ?? validateTableName(value)
+            ?? (taken.has(value.trim().toLowerCase()) ? `"${value.trim()}" already exists in the Table Library.` : null),
+        }))?.trim();
+        if (!newName) return;
+        const alias = copyReading.table.alias || copyName;
+        let planned: ReturnType<typeof planDbmlDuplicateRename>;
+        try {
+          planned = planDbmlDuplicateRename({
+            tableLibraryService,
+            copy: { filePath: dup.filePath, name: copyName },
+            newName,
+            alias,
+            diagrams: subjectAreaService.listSubjectAreas(root, semanticDir).filter((d) => d.storage === 'dbml').map((d) => d.filePath),
+            readText: openOrDiskText,
+          });
+        } catch (err) {
+          void vscode.window.showErrorMessage(`Give Duplicate Its Own Name: ${err instanceof Error ? err.message : String(err)} Nothing was changed.`);
+          return;
+        }
+        const repointed = planned.repointed.map((p) => libPath(p).replace(/\.dbml$/i, ''));
+        const choice = await vscode.window.showInformationMessage(
+          `Rename the duplicate "${copyName}" to "${newName}"?`,
+          {
+            modal: true,
+            detail: `${libPath(dup.filePath)} becomes ${libPath(planned.newPath)}, with alias "${alias}".`
+              + (repointed.length > 0 ? `\nRepoints ${repointed.join(', ')}, whose use line names this copy.` : ''),
+          },
+          'Rename',
+        );
+        if (choice !== 'Rename') return;
+        const dirty = dirtyFiles(planned.writes.map((w) => w.path));
+        if (dirty.length > 0) {
+          void vscode.window.showErrorMessage(`${path.relative(root, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again. Nothing was changed.`);
+          return;
+        }
+        const result = await applyLifecycleWrites(planned.writes, path.dirname(tableLibraryService.getTablesDir()));
+        if (!result.ok) {
+          void vscode.window.showErrorMessage(`Could not rename ${libPath(dup.filePath)}; nothing was changed.`);
+          return;
+        }
+        if (result.unsaved.length > 0) {
+          void vscode.window.showErrorMessage(`Could not save ${result.unsaved.map((p) => path.relative(root, p).split(path.sep).join('/')).join(', ')}. Save the file from its tab, or revert it.`);
+        }
+        for (const p of planned.repointed) treeProvider.invalidateSubjectArea(p);
+        tableLibraryService.invalidateCache();
+        tableLibraryProvider.refresh();
+        treeProvider.refresh();
+        selectorsService.scheduleRegenerate();
+        await editorProvider.refreshAllOpenSubjectAreas();
+        void vscode.window.showInformationMessage(
+          `${libPath(planned.newPath)} is now its own table, "${newName}" (warehouse table: ${alias}).` +
+          (repointed.length ? ` Repointed ${repointed.length} subject area${repointed.length === 1 ? '' : 's'}.` : ''),
+        );
+      }
+
       if (!entry) {
         if (duplicates.length === 0) {
           void vscode.window.showInformationMessage('Every table file in the library has its own name.');
@@ -1740,6 +1904,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         entry = pick.entry;
       }
       const dup = entry;
+
+      if (dup.storage === 'dbml') {
+        await resolveDbmlDuplicate(dup);
+        return;
+      }
 
       const model = (() => {
         try { return parseTableText(fs.readFileSync(dup.filePath, 'utf-8'), dup.name); } catch { return null; }
@@ -1905,6 +2074,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         pickDomain: async () => pickDomainFile(subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir), 'Export which diagram?'),
         defaultSaveFolder: workspaceRoot,
         projectRoot: workspaceRoot,
+        semanticRoot: fullSemanticDirPath,
       }, arg)),
     // Export every domain's logical design into a folder the user picks, one
     // file each (plus its .dbdiagram for DBML for dbdiagram.io).
@@ -1923,6 +2093,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         defaultFolder: workspaceRoot,
         projectRoot: workspaceRoot,
+        semanticRoot: fullSemanticDirPath,
       })),
     vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, async () => {
       if (!hasDbt) {
@@ -2047,9 +2218,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           console.warn('[createDomain] Failed to load manifest for folder detection, skipping folder picker');
         }
 
-        // Step 5: Create unified v3 domain file
+        // Step 5: Create the diagram file: `.dbml` in a project that writes DBML
+        // (a new, empty one too, §3.2), else the JSON diagram as before.
         const layerDir = path.join(workspaceRoot, semanticDir, layer);
-        const filePath = path.join(layerDir, `${slug}.json`);
+        const dbml = tableLibraryService.writesDbml();
+        const filePath = path.join(layerDir, `${slug}.${dbml ? 'dbml' : 'json'}`);
+        // One name per diagram, whatever its format: `<slug>.json` beside `<slug>.dbml` would be two.
+        const otherFormat = path.join(layerDir, `${slug}.${dbml ? 'json' : 'dbml'}`);
+        if (fs.existsSync(otherFormat)) {
+          void vscode.window.showErrorMessage(`Subject area "${slug}" already exists in the ${layer} layer`);
+          return;
+        }
 
         // A folder with no ERD data yet (a plain folder, or a dbt project
         // never set up): New Diagram is the explicit action that makes the
@@ -2062,7 +2241,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           layerService.invalidateCache();
         };
         try {
-          if (createdSemanticDir) {
+          // Every way a 2.0 project is created writes layers.json (§3.3): a DBML
+          // project's own is written when it is missing, not only with the folder.
+          if (createdSemanticDir || (dbml && !fs.existsSync(path.join(fullSemanticDirPath, 'layers.json')))) {
             await layerService.saveConfig(layerService.getAllLayers());
             layerService.invalidateCache();
           }
@@ -2089,11 +2270,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         try {
           subjectAreasCreatedHere.add(filePath);
-          // In the naming the project writes (#182): v6 for a new or migrated project.
-          const fileData = tableLibraryService.writesTableNaming()
-            ? toTableNamingDocument(domainData as unknown as Record<string, unknown>)
-            : domainData;
-          fs.writeFileSync(filePath, JSON.stringify(fileData, null, 2) + '\n', { encoding: 'utf-8', flag: 'wx' });
+          if (dbml) {
+            // No layout file yet: it is written when something is placed.
+            fs.writeFileSync(filePath, newDbmlSubjectAreaText({
+              semanticRoot: fullSemanticDirPath,
+              filePath,
+              domain: slug,
+              description: description.trim(),
+              ...(modelFolder ? { modelFolder } : {}),
+            }), { encoding: 'utf-8', flag: 'wx' });
+          } else {
+            // In the naming the project writes (#182): v6 for a new or migrated project.
+            const fileData = tableLibraryService.writesTableNaming()
+              ? toTableNamingDocument(domainData as unknown as Record<string, unknown>)
+              : domainData;
+            fs.writeFileSync(filePath, JSON.stringify(fileData, null, 2) + '\n', { encoding: 'utf-8', flag: 'wx' });
+          }
+          tableLibraryService.invalidateCache();
           telemetry.feature('domainCreated');
           // A blank start in a folder without dbt (logical-only mode).
           if (!hasDbt) { telemetry.feature('blankDiagram'); }
@@ -2188,11 +2381,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const oldFilePath = element.summary.filePath;
         const oldFileUri = vscode.Uri.file(oldFilePath);
         const layer = element.summary.layer;
-        if (oldFilePath.endsWith('.dbml')) {
-          void vscode.window.showInformationMessage('Rename Subject Area: renaming a DBML diagram is not available yet in this build of ERD Studio.');
-          return;
-        }
-
         const shouldProceed = await handleUnsavedChanges(oldFileUri, oldDomainName, 'renaming');
         if (!shouldProceed) { return; }
 
@@ -2207,6 +2395,54 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (!newDomainSlug) { return; }
         const newSlug = newDomainSlug.trim();
         if (newSlug === oldDomainName) { return; }
+
+        // A `.dbml` diagram: one WorkspaceEdit through applyFileWrites (§5.7),
+        // the Project name spliced by core's writer, its layout file moved with it.
+        if (oldFilePath.endsWith('.dbml')) {
+          const newDbmlPath = path.join(path.dirname(oldFilePath), `${newSlug}.dbml`);
+          if (fs.existsSync(path.join(path.dirname(oldFilePath), `${newSlug}.json`)) || fs.existsSync(newDbmlPath)) {
+            void vscode.window.showErrorMessage(`A subject area named "${newSlug}" already exists in the ${layer} layer`);
+            return;
+          }
+          let writes: FileWrite[];
+          try {
+            const read = (filePath: string): string | null => {
+              const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && path.resolve(d.uri.fsPath) === path.resolve(filePath));
+              if (doc) return doc.getText();
+              try { return fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, ''); } catch { return null; }
+            };
+            const text = read(oldFilePath);
+            if (text === null) throw new Error(`${path.basename(oldFilePath)} could not be read.`);
+            writes = planDbmlSubjectAreaRename({
+              semanticRoot: fullSemanticDirPath,
+              oldPath: oldFilePath,
+              newPath: newDbmlPath,
+              newSlug,
+              text,
+              layoutText: read(layoutFilePathOf(oldFilePath)),
+              resolver: currentDbmlResolver(tableLibraryService, read).resolver,
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}": ${msg}`);
+            return;
+          }
+          const oldTabs = findMatchingTabs(oldFileUri);
+          if (oldTabs.length > 0) { await vscode.window.tabGroups.close(oldTabs, true); }
+          for (const w of writes) if (w.kind === 'create') subjectAreasCreatedHere.add(w.path);
+          const applied = await applyFileWrites(writes);
+          if (!applied.ok) {
+            void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}" to "${newSlug}"`);
+            return;
+          }
+          for (const filePath of applied.created) ownWrites.recordWrite(filePath);
+          for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
+          treeProvider.invalidateSubjectArea(oldFilePath);
+          treeProvider.refresh();
+          selectorsService.scheduleRegenerate();
+          await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(newDbmlPath), SUBJECT_AREA_EDITOR_VIEW_TYPE);
+          return;
+        }
 
         // Read and update domain name in the unified file.
         // Validate via SubjectAreaService, but rewrite the RAW document so v5 model
@@ -2412,8 +2648,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           // A new project writes the v6 naming (#182): its tables/ library is
           // made with the first table (an empty one would read as a layer
           // folder). Only a project already on the v5 naming gets logical-models/.
+          // A DBML project (a new one, §3.2) never gets logical-models/ either.
           const logicalModelsDir = path.join(fullSemanticDir, 'logical-models');
-          if (!tableLibraryService.writesTableNaming() && !fs.existsSync(logicalModelsDir)) {
+          if (!tableLibraryService.writesDbml() && !tableLibraryService.writesTableNaming() && !fs.existsSync(logicalModelsDir)) {
             fs.mkdirSync(logicalModelsDir, { recursive: true });
           }
 

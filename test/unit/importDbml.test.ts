@@ -38,7 +38,7 @@ import {
 } from '../../src/commands/importDbml';
 import { NO_LEGACY_ALIAS, PRE_REGISTERED_COMMANDS } from '../../src/extension';
 import type { FeedbackPrefill } from '../../src/services/commandErrors';
-import { SubjectAreaService } from '../../src/services/domainService';
+import { SubjectAreaService, subjectAreaTableNames } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { DuplicateKeyWriteRefused, TableLibraryService } from '../../src/services/logicalModelService';
 import { buildLogicalDisplaySubjectArea } from '../../src/services/stageDisplay';
@@ -178,7 +178,12 @@ function makeProject(naming: 'v5' | 'v6' | 'none' = 'v5'): void {
     fs.writeFileSync(erd('layers.json'), LAYERS_JSON);
   }
   if (naming === 'v5') fs.mkdirSync(erd('logical-models'), { recursive: true });
-  if (naming === 'v6') fs.mkdirSync(erd('tables'), { recursive: true });
+  if (naming === 'v6') {
+    fs.mkdirSync(erd('tables'), { recursive: true });
+    // A YAML project in the v6 naming: one v6 JSON diagram is YAML evidence (native DBML storage, §3.2); an empty project writes DBML.
+    fs.mkdirSync(erd('seed'), { recursive: true });
+    fs.writeFileSync(erd('seed', 'seed.json'), JSON.stringify({ schemaVersion: 6, subjectArea: 'seed', layer: 'seed', description: '', logical: { tables: [], relationships: [] }, viewConfig: {} }));
+  }
   layerService = new LayerService(tmp, '.erd-studio');
   subjectAreaService = new SubjectAreaService(layerService);
   lms = new TableLibraryService(tmp, '.erd-studio');
@@ -621,7 +626,7 @@ describe('Import DBML — the project\'s naming', () => {
     const result = await importDbml(deps(ui));
 
     // An empty library is grouped by layer from its first file.
-    expect(erdFiles()).toEqual(['layers.json', 'silver/shop.json', 'tables/silver/customers.yml', 'tables/silver/orders.yml']);
+    expect(erdFiles()).toEqual(['layers.json', 'seed/seed.json', 'silver/shop.json', 'tables/silver/customers.yml', 'tables/silver/orders.yml']);
     const doc = readJson(result!.domainPath);
     expect(doc.logical.tables).toEqual(['customers', 'orders']);
     expect(doc.logical.models).toBeUndefined();
@@ -637,8 +642,9 @@ describe('Import DBML — the project\'s naming', () => {
     const result = await importDbml(deps(ui));
 
     expect(result).toBeDefined();
-    expect(erdFiles()).toEqual(['layers.json', 'silver/shop.json', 'tables/silver/customers.yml', 'tables/silver/orders.yml']);
-    expect(readJson(result!.domainPath).logical.tables).toEqual(['customers', 'orders']);
+    // A new project stores its model as DBML (native DBML storage, §3.2): the relationship in its folder's relationships file.
+    expect(erdFiles()).toEqual(['layers.json', 'silver/shop.dbml', 'tables/silver/_relationships.dbml', 'tables/silver/customers.dbml', 'tables/silver/orders.dbml']);
+    expect(subjectAreaTableNames(fs.readFileSync(result!.domainPath, 'utf-8'), result!.domainPath)).toEqual(['customers', 'orders']);
   });
 
   it('an empty v5 library: grouped by layer from its first file', async () => {
@@ -685,7 +691,8 @@ describe('Import DBML — where relationships go', () => {
     const file = dbmlFile('shop.dbml', SHOP_DBML);
     const result = await importDbml(deps(fakeUi({ file, layer: 'gold' })));
 
-    expect(readJson(result!.domainPath).logical.relationships).toEqual([]);
+    // A mixed project writes new files as DBML (§3.2): a DBML diagram holds no relationships (D5).
+    expect(result!.domainPath.endsWith('.dbml')).toBe(true);
     expect(lms.getTable('orders')?.relationships).toEqual([
       expect.objectContaining({ fromColumn: 'customer_id', toModel: 'customers', toColumn: 'id', cardinality: 'many-to-one' }),
     ]);
@@ -866,7 +873,9 @@ describe('Import DBML — a write that fails', () => {
 
   it('a project with no ERD folder: a failed import also removes the folder it created', async () => {
     makeProject('none');
-    vi.spyOn(lms, 'saveTable').mockImplementation(() => { throw fsError('ENOSPC', erd('x')); });
+    // A new project writes DBML (§3.2): the write's own plan fails (the first plan is the pre-write check).
+    const plan = lms.planTableWrites.bind(lms);
+    vi.spyOn(lms, 'planTableWrites').mockImplementationOnce(plan).mockImplementation(() => { throw fsError('ENOSPC', erd('x')); });
     const file = dbmlFile('shop.dbml', SHOP_DBML);
     const ui = fakeUi({ file, layer: 'silver' });
 

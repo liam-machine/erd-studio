@@ -137,6 +137,8 @@ export interface TableContext {
   modelName: string;
   /** Relative path to the logical model YAML (e.g. .erd-studio/logical-models/dim_customer.yml). */
   logicalModelPath: string;
+  /** A DBML table's relationships file, project-relative (`.erd-studio/tables/gold/_relationships.dbml`), where its Refs go. Absent for a YAML table. */
+  relationshipsPath?: string;
   /** Relative path to the dbt SQL file (from manifest originalFilePath). Null if not in manifest. */
   dbtSqlPath: string | null;
   /** Relative path to the dbt schema YAML. Null if not determinable. */

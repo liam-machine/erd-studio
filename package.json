@@ -551,12 +551,12 @@
         },
         {
           "command": "erdStudio.moveRelationshipsToLibrary",
-          "when": "view == erdStudio.modelLibrary",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage != dbml",
           "group": "1_organise@1"
         },
         {
           "command": "erdStudio.migrateToTableNaming",
-          "when": "view == erdStudio.modelLibrary",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage != dbml",
           "group": "1_organise@2"
         },
         {
@@ -606,6 +606,14 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "erdStudio.moveRelationshipsToLibrary",
+          "when": "erdStudio.storage != dbml"
+        },
+        {
+          "command": "erdStudio.migrateToTableNaming",
+          "when": "erdStudio.storage != dbml"
+        },
         {
           "command": "erdStudio.importDbml",
           "when": "erdStudio.hasProject"

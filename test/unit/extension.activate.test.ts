@@ -36,6 +36,7 @@ import { GETTING_STARTED_VIEW_TYPE, GettingStartedPanel } from '../../src/provid
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { telemetry } from '../../src/services/telemetryService';
+import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
@@ -623,10 +624,11 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(pick).toHaveBeenCalledTimes(1);
     const layers = JSON.parse(fs.readFileSync(path.join(ws, '.erd-studio', 'layers.json'), 'utf-8')) as { layers: Array<{ id: string }> };
     expect(layers.layers.map((l) => l.id)).toContain('gold');
-    const domainPath = path.join(ws, '.erd-studio', 'gold', 'orders.json');
-    const domain = JSON.parse(fs.readFileSync(domainPath, 'utf-8')) as { schemaVersion: number; subjectArea: string; description: string };
-    expect(domain).toMatchObject({ schemaVersion: 6, subjectArea: 'orders', description: 'Orders and customers' });
-    expect(listTree(ws)).toEqual(['.erd-studio/', '.erd-studio/gold/', '.erd-studio/gold/orders.json', '.erd-studio/layers.json']);
+    // A new project stores its diagrams as DBML (native DBML storage, §3.2): no layout file until something is placed.
+    const domainPath = path.join(ws, '.erd-studio', 'gold', 'orders.dbml');
+    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'gold/orders.dbml', null).obj;
+    expect(domain).toMatchObject({ domain: 'orders', layer: 'gold', description: 'Orders and customers' });
+    expect(listTree(ws)).toEqual(['.erd-studio/', '.erd-studio/gold/', '.erd-studio/gold/orders.dbml', '.erd-studio/layers.json']);
     const opened = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
     expect((opened[0][1] as { fsPath: string }).fsPath).toBe(domainPath);
     expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasSemanticDir', true);
@@ -679,8 +681,10 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(pick).not.toHaveBeenCalled(); // the default layers have gold
     const confirm = info.mock.calls.find((c) => c.includes('Import'))!;
     expect(confirm[0]).toBe('Import 6 tables into a new diagram "coffee-shop" in the Gold layer.');
-    const domainPath = path.join(ws, '.erd-studio', 'gold', 'coffee-shop.json');
+    // A new project stores the example as DBML (native DBML storage, §3.2).
+    const domainPath = path.join(ws, '.erd-studio', 'gold', 'coffee-shop.dbml');
     expect(fs.existsSync(domainPath)).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.erd-studio', 'tables', 'gold', 'fct_orders.dbml'))).toBe(true);
     expect(fs.existsSync(path.join(ws, '.erd-studio', 'layers.json'))).toBe(true);
     expect(fs.existsSync(path.join(ws, 'coffee-shop.dbml'))).toBe(false); // nothing but the diagram's own files
     const opened = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
@@ -776,15 +780,12 @@ describe('activate() in a native DBML project (S4)', () => {
   it('the foreign-format toast is never raised by ERD Studio\'s own New Diagram (§5.4)', async () => {
     const featureOnce = vi.spyOn(telemetry, 'featureOnce');
     await activate(context);
-    // New Diagram still writes a .json in this build (S6 switches it to .dbml).
-    // Within the storage memo's second the project still reads as `dbml`
-    // when the watcher reports the file, so only the own-create mark keeps
-    // the toast away.
+    // New Diagram writes a .dbml in a DBML project (S6), never a foreign format.
     vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value: string }>) =>
       items.find((i) => i.value === 'gold')) as never);
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('orders').mockResolvedValueOnce('');
     await vscode.commands.executeCommand('erdStudio.createDomain');
-    const created = path.join(ws, '.erd-studio', 'gold', 'orders.json');
+    const created = path.join(ws, '.erd-studio', 'gold', 'orders.dbml');
     expect(fs.existsSync(created)).toBe(true);
     semanticWatcher()._simulateCreate(vscode.Uri.file(created));
     await vi.advanceTimersByTimeAsync(400);
@@ -1672,20 +1673,19 @@ describe('erdStudio.drawFromDbt', () => {
     expect((input.mock.calls[0][0] as { value: string; prompt: string }).value).toBe('silver');
     expect((input.mock.calls[0][0] as { prompt: string }).prompt).toContain('Silver layer');
     expect(fs.existsSync(path.join(erd(), 'layers.json'))).toBe(true);
-    const domainPath = path.join(erd(), 'silver', 'silver.json');
-    // A new project is written in the v6 naming (#182).
-    const domain = JSON.parse(fs.readFileSync(domainPath, 'utf-8')) as {
-      schemaVersion: number; subjectArea: string; layer: string; logical: { tables: string[]; relationships: unknown[] }; viewConfig: unknown;
+    // A new project is written as DBML (native DBML storage, §3.2).
+    const domainPath = path.join(erd(), 'silver', 'silver.dbml');
+    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'silver/silver.dbml', null).obj as {
+      domain: string; layer: string; logical: { models: string[]; relationships: unknown[] };
     };
-    expect(domain.schemaVersion).toBe(6);
-    expect(domain.subjectArea).toBe('silver');
+    expect(domain.domain).toBe('silver');
     expect(domain.layer).toBe('silver');
-    expect(domain.viewConfig).toEqual({}); // fresh: the canvas lays it out on first open
-    expect(domain.logical.tables.length).toBeGreaterThan(1);
-    expect(domain.logical.tables).not.toContain('dim_region'); // a .sql with no columns to copy
+    expect(fs.existsSync(path.join(erd(), 'silver', 'silver.dbdiagram'))).toBe(false); // fresh: the canvas lays it out on first open
+    expect(domain.logical.models.length).toBeGreaterThan(1);
+    expect(domain.logical.models).not.toContain('dim_region'); // a .sql with no columns to copy
     // An empty library is grouped by layer from the start, in tables/.
-    for (const model of domain.logical.tables) {
-      expect(fs.existsSync(path.join(erd(), 'tables', 'silver', `${model}.yml`)), model).toBe(true);
+    for (const model of domain.logical.models) {
+      expect(fs.existsSync(path.join(erd(), 'tables', 'silver', `${model}.dbml`)), model).toBe(true);
     }
     expect(fs.existsSync(lib())).toBe(false);
     expect(opened()).toHaveLength(1);

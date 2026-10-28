@@ -407,11 +407,12 @@ describe('TableLibraryService with tables/', () => {
     expect(text).toMatch(/^tableRole: reference$/m);
   });
 
-  it('a project with no library folder at all writes its first table to tables/ in v6', () => {
+  it('a project with no library folder at all writes its first table to tables/ as DBML (native DBML storage, §3.2)', () => {
     fs.rmSync(erd, { recursive: true });
     const lib = new TableLibraryService(root, '.erd-studio');
     lib.saveTable({ name: 'dim_first', columns: [], modelRole: 'reference' });
-    expect(fs.readFileSync(path.join(erd, 'tables', 'dim_first.yml'), 'utf-8')).toMatch(/^tableRole: reference$/m);
+    expect(fs.readFileSync(path.join(erd, 'tables', 'dim_first.dbml'), 'utf-8')).toMatch(/^Table dim_first \[role: 'reference'\]/m);
+    expect(fs.existsSync(path.join(erd, 'tables', 'dim_first.yml'))).toBe(false);
     expect(fs.existsSync(path.join(erd, 'logical-models'))).toBe(false);
   });
 

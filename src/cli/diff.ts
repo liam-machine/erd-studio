@@ -579,6 +579,13 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
     modelFolder: (name) => ctx.tableLibraryService.tableFolder(name),
     tableLibraryFile: (name) => ctx.tableLibraryService.tableLibraryFile(name),
     newTableLibraryDir: ctx.tableLibraryService.newTableLibraryDirName(),
+    newTableFilePath: (name) => {
+      try { return ctx.tableLibraryService.libraryRelativePath(ctx.tableLibraryService.pathForNewTable(name)); } catch { return undefined; }
+    },
+    relationshipsFile: (name) => {
+      const file = ctx.tableLibraryService.relationshipsFileFor(name);
+      return file === undefined ? undefined : ctx.tableLibraryService.libraryRelativePath(file);
+    },
   });
   const unreadableModelFiles = unreadableTables(ctx, unified);
   // The entry each link is drawn from (core's read winner), keyed by link.

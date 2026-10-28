@@ -18,7 +18,7 @@ import type { Alias, Node, Scalar, ScalarTag, Tags } from 'yaml';
 
 import {
   DBML_RELATIONSHIPS_FILE_NAME, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, TABLES_DIR, TableDbmlError, classifyTableLoadError,
-  dbmlName, isLibraryFolderName, isReservedTableName, tableLoadWarningOf, parseTableText, writesTableNaming,
+  dbmlName, isLibraryFolderName, isReservedTableName, tableLoadWarningOf, parseTableText, writesDbml, writesTableNaming,
 } from '@erd-studio/core';
 import { attachRelationships, dbmlTableLookup, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
 import { projectNamingOf } from './projectNaming';
@@ -725,8 +725,19 @@ export class TableLibraryService {
   /** {@link projectStorage}'s last answer, briefly. */
   private storageMemo: { at: number; storage: ProjectStorage } | undefined;
 
-  /** The library new table files are created in (see {@link writesTableNaming}). */
+  /**
+   * Whether a NEW table file is written as DBML (§3.2, the one switch-over):
+   * the project's storage is `dbml` (a new, empty project too) or `mixed`.
+   * `projectStorage` already answers `yaml` when `tables/` is a layer.
+   * An existing table always keeps its own format.
+   */
+  writesDbml(): boolean {
+    return writesDbml(this.projectStorage());
+  }
+
+  /** The library new table files are created in (see {@link writesTableNaming}; a DBML project's is always `tables/`). */
   private newTablesDir(): string {
+    if (this.writesDbml()) return this.v6TablesDir;
     return this.writesTableNaming() && !tablesDirIsLayer(this.semanticRoot) ? this.v6TablesDir : this.tablesDir;
   }
 
@@ -1123,7 +1134,9 @@ export class TableLibraryService {
     }
     for (const save of ops?.save ?? []) {
       const { model, fromName } = save;
-      const storage = storageOf(fromName ?? model.name) ?? (options.dbml ? 'dbml' : 'yaml');
+      // A new table is DBML when it joins a DBML diagram (D20), or when the
+      // project writes DBML (§3.2); an existing one keeps its format.
+      const storage = storageOf(fromName ?? model.name) ?? (options.dbml || this.writesDbml() ? 'dbml' : 'yaml');
       if (storage === 'dbml') {
         dbmlOps.save!.push(save);
         continue;
@@ -1136,12 +1149,28 @@ export class TableLibraryService {
     }
     const anyDbml = dbmlOps.save!.length > 0 || dbmlOps.delete!.length > 0;
     if (!anyDbml && !options.dbml) return { writes };
-    // A folder already on disk is used as it is spelled there (`Gold` for the layer `gold`).
-    const listedFolder = layerFolder ? this.listFoldersOf(this.v6TablesDir).find((f) => f.toLowerCase() === layerFolder.toLowerCase()) : undefined;
-    const folder = listedFolder ?? (layerFolder && TABLE_FOLDER_PATTERN.test(layerFolder) ? layerFolder : '');
-    const plan = planDbmlLibraryWrites(this.dbmlSnapshot(options.readText), { ...dbmlOps, newTableFolder: folder });
+    const plan = planDbmlLibraryWrites(this.dbmlSnapshot(options.readText), { ...dbmlOps, newTableFolder: this.dbmlNewTableFolder(layerFolder) });
     for (const w of plan.writes) writes.push({ ...w, path: this.semanticAbsolute(w.path) } as FileWrite);
     return { writes, plan };
+  }
+
+  /**
+   * The DBML library folder a new table in `layerFolder` goes in: a folder
+   * already on disk as it is spelled there (`Gold` for the layer `gold`),
+   * else the layer when it is folder-shaped, else the top level (`''`).
+   */
+  private dbmlNewTableFolder(layerFolder: string | undefined): string {
+    const listedFolder = layerFolder ? this.listFoldersOf(this.v6TablesDir).find((f) => f.toLowerCase() === layerFolder.toLowerCase()) : undefined;
+    return listedFolder ?? (layerFolder && TABLE_FOLDER_PATTERN.test(layerFolder) ? layerFolder : '');
+  }
+
+  /**
+   * `planDbmlLibraryWrites` over this library for any ops (moves included),
+   * with absolute paths: Organise Table Library's moves (§5.7).
+   */
+  planDbmlLibraryOps(ops: DbmlLibraryOps, readText?: (filePath: string) => string | null): { writes: FileWrite[]; plan: DbmlLibraryWritePlan } {
+    const plan = planDbmlLibraryWrites(this.dbmlSnapshot(readText), ops);
+    return { writes: plan.writes.map((w) => ({ ...w, path: this.semanticAbsolute(w.path) }) as FileWrite), plan };
   }
 
   /**
@@ -1498,9 +1527,12 @@ export class TableLibraryService {
    * domain change. Use this for non-editor callers (migration, seeding, CLI).
    */
   saveTable(model: SemanticTable, folder?: string): void {
-    // A DBML table is spliced in place and its relationships placed in its folder's file (§5.1).
-    if (this.tableStorage(model.name) === 'dbml') {
-      this.applyDbmlOps({ save: [{ model }] });
+    // A DBML table is spliced in place and its relationships placed in its
+    // folder's file (§5.1); a new table in a project that writes DBML is
+    // created as one (§3.2).
+    const storage = this.tableStorage(model.name);
+    if (storage === 'dbml' || (storage === undefined && this.writesDbml())) {
+      this.applyDbmlOps({ save: [{ model }], newTableFolder: this.dbmlNewTableFolder(folder) });
       return;
     }
     const filePath = this.tablePath(model.name, folder);
@@ -1824,28 +1856,36 @@ export class TableLibraryService {
    * (see TABLE_FOLDER_PATTERN) nor an existing library folder is ignored and
    * the top level used instead.
    */
-  private newTablePath(name: string, folder?: string, libraryDir: string = this.newTablesDir()): string {
+  private newTablePath(name: string, folder?: string, libraryDir?: string): string {
     if (typeof name !== 'string' || !name.trim() || name.includes('/') || name.includes('\\') || name.includes('..')) {
       throw new Error(`Invalid table name "${String(name)}": must not contain path separators.`);
     }
-    const modelsDir = path.resolve(libraryDir);
-    const resolved = path.resolve(modelsDir, `${name}.yml`);
+    // A new file in a project that writes DBML is `tables/[folder/]<name>.dbml`
+    // (§3.2, §5.1); a renamed YAML file passes its own library and stays YAML.
+    const ext = libraryDir === undefined && this.writesDbml() ? '.dbml' : '.yml';
+    const modelsDir = path.resolve(libraryDir ?? this.newTablesDir());
+    const resolved = path.resolve(modelsDir, `${name}${ext}`);
     if (path.dirname(resolved) !== modelsDir) {
       throw new Error(`Invalid table name "${name}": resolves outside the Table Library.`);
     }
     // A layer-shaped name may be created; any folder already in the library
     // (listed by readdir, so it cannot hold a separator) may be written into —
     // that is what keeps a renamed file in a hand-made `Staging/` folder.
-    if (folder && (TableLibraryService.isTableFolderName(folder) || this.listFoldersOf(modelsDir).includes(folder))) {
-      return path.join(modelsDir, folder, `${name}.yml`);
+    if (folder) {
+      const listed = this.listFoldersOf(modelsDir);
+      // DBML: a folder already on disk is used as it is spelled there, as the planner does.
+      const existing = ext === '.dbml' ? listed.find((f) => f.toLowerCase() === folder.toLowerCase()) : listed.find((f) => f === folder);
+      if (existing !== undefined) return path.join(modelsDir, existing, `${name}${ext}`);
+      if (TableLibraryService.isTableFolderName(folder)) return path.join(modelsDir, folder, `${name}${ext}`);
     }
     return resolved;
   }
 
   /**
-   * Where a new table file for `name` goes (today's rule: the library new
-   * files go to, `{folder}/` when given and allowed), for callers outside
-   * this service such as sync plans and `diff`. Throws on an unsafe name.
+   * Where a new table file for `name` goes, for callers outside this service
+   * such as sync plans and `diff`: `tables/[folder/]<name>.dbml` when the
+   * project writes DBML (§3.2), else today's rule (the library new files go
+   * to, `{folder}/` when given and allowed). Throws on an unsafe name.
    */
   pathForNewTable(name: string, folder?: string): string {
     return this.newTablePath(name, folder);

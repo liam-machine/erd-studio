@@ -13,6 +13,7 @@ import * as vscode from 'vscode';
 
 import { activate, _resetFirstRunGuardForTests } from '../../src/extension';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
+import { subjectAreaTableNames } from '../../src/services/domainService';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
@@ -114,8 +115,10 @@ describe('erdStudio.importDbml in activate()', () => {
     await vscode.commands.executeCommand('erdStudio.importDbml');
 
     expect(fs.existsSync(path.join(plain, '.erd-studio', 'layers.json'))).toBe(true);
-    const doc = JSON.parse(fs.readFileSync(path.join(plain, '.erd-studio', 'gold', 'shop.json'), 'utf-8'));
-    expect(doc.logical.tables).toEqual(['shop_customer']);
+    // A new project stores its model as DBML (native DBML storage, §3.2).
+    const diagram = path.join(plain, '.erd-studio', 'gold', 'shop.dbml');
+    expect(subjectAreaTableNames(fs.readFileSync(diagram, 'utf-8'), diagram)).toEqual(['shop_customer']);
+    expect(fs.existsSync(path.join(plain, '.erd-studio', 'tables', 'gold', 'shop_customer.dbml'))).toBe(true);
   });
 
   it('with a project: picks the file, reads it and its layout through workspace.fs, writes the diagram and opens it', async () => {

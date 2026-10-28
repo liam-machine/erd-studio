@@ -16,7 +16,7 @@
 
 import * as path from 'path';
 
-import { canonicalRelationship, linkKey, toTableNamingDocument } from '@erd-studio/core';
+import { canonicalRelationship, isReservedTableName, linkKey, toTableNamingDocument } from '@erd-studio/core';
 import { WRITTEN_SCHEMA_VERSION } from '../types/semantic';
 import type { ColumnDef, Relationship, SemanticTable } from '../types/semantic';
 import type { YmlData } from '../types/ymlData';
@@ -95,7 +95,12 @@ export interface DbtTestIndex {
   unique: DraftUniqueInfo;
 }
 
-export type DraftSkipReason = 'invalid-name' | 'not-found' | 'disabled' | 'duplicate' | 'already-in-domain' | 'over-limit';
+export type DraftSkipReason =
+  | 'invalid-name' | 'not-found' | 'disabled' | 'duplicate' | 'already-in-domain' | 'over-limit'
+  /** A DBML diagram: the library has the table as YAML, which a `use` line cannot import (D20). */
+  | 'yaml-table'
+  /** A DBML diagram: `_relationships` is the relationships file's name (§2.1). */
+  | 'reserved-name';
 
 export interface DraftSkipped {
   name: string;
@@ -127,6 +132,12 @@ export interface BuildDbtDraftInput {
    * its own regardless.
    */
   skipDisabled?: boolean;
+  /**
+   * The draft is for a DBML diagram (native DBML storage, §5.7): a library
+   * table stored as YAML is skipped (`yaml-table`, D20), and so is a new
+   * table named `_relationships` (`reserved-name`, §2.1).
+   */
+  dbml?: { tableStorage(name: string): 'yaml' | 'dbml' | undefined };
 }
 
 export interface DbtDraft {
@@ -613,7 +624,10 @@ export function buildDbtDraft(input: BuildDbtDraftInput): DbtDraft {
     if (disabled.has(key)) { skipped.push({ name, reason: 'disabled' }); continue; }
 
     let model: SemanticTable | undefined;
-    if (!input.libraryHas(name)) {
+    const inLibrary = input.libraryHas(name);
+    if (input.dbml && inLibrary && input.dbml.tableStorage(name) === 'yaml') { skipped.push({ name, reason: 'yaml-table' }); continue; }
+    if (input.dbml && !inLibrary && isReservedTableName(name)) { skipped.push({ name, reason: 'reserved-name' }); continue; }
+    if (!inLibrary) {
       model = seed(name);
       if (!model) { skipped.push({ name, reason: 'not-found' }); continue; }
     }

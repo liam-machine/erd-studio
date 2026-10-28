@@ -913,6 +913,8 @@ describe('moveRelationshipsToLibrary — composite keys move as one (#133 L2)', 
   beforeEach(() => {
     _resetMockWorkspace();
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-move-group-'));
+    // A YAML project (an empty logical-models/ is YAML evidence): a new project would write DBML (§3.2).
+    fs.mkdirSync(path.join(root, SEMANTIC_DIR, 'logical-models'), { recursive: true });
     tableLibraryService = new TableLibraryService(root, SEMANTIC_DIR);
     tableLibraryService.saveTable(PIT);
     tableLibraryService.saveTable(SAT);

@@ -172,7 +172,64 @@ export interface DbmlModel {
 
 export type ReadDbmlResult =
   | { ok: true; model: DbmlModel }
-  | { ok: false; diagnostics: DbmlDiagnostic[] };
+  /** `importsOtherFiles`: the file has a `use` declaration (§5.7), so it is part of a multi-file project; nothing was parsed. */
+  | { ok: false; diagnostics: DbmlDiagnostic[]; importsOtherFiles?: true };
+
+/**
+ * Import DBML's refusal for a file with `use` lines (native DBML storage,
+ * §5.7): `Parser.parse` rejects `use`, and the file is one part of a
+ * multi-file project, so Import names the route that works instead.
+ */
+export const IMPORT_MULTI_FILE_MESSAGE =
+  'This DBML file imports other files (`use`), so it is part of a multi-file project, such as another ERD Studio 2.0 project. ' +
+  'Import reads one self-contained file: open that project\'s diagram in ERD Studio and use **Export Diagram… → DBML (rich)**, then import the exported file.';
+
+/**
+ * The 1-based line of the first `use` declaration in `text` (a line whose
+ * first token is `use`, outside a comment or a string), or undefined.
+ */
+export function firstUseDeclarationLine(text: string): number | undefined {
+  let line = 1;
+  let atLineStart = true;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (c === '\n') { line++; atLineStart = true; i++; continue; }
+    if (c === ' ' || c === '\t' || c === '\r' || c === '\uFEFF') { i++; continue; }
+    if (text.startsWith('//', i)) {
+      while (i < n && text[i] !== '\n') i++;
+      continue;
+    }
+    if (text.startsWith('/*', i)) {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end < 0 ? n : end + 2;
+      for (let j = i; j < stop; j++) if (text[j] === '\n') line++;
+      i = stop;
+      atLineStart = false;
+      continue;
+    }
+    if (text.startsWith("'''", i)) {
+      const end = text.indexOf("'''", i + 3);
+      const stop = end < 0 ? n : end + 3;
+      for (let j = i; j < stop; j++) if (text[j] === '\n') line++;
+      i = stop;
+      atLineStart = false;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1;
+      while (j < n && text[j] !== c && text[j] !== '\n') j += text[j] === '\\' ? 2 : 1;
+      i = j + 1;
+      atLineStart = false;
+      continue;
+    }
+    if (atLineStart && /^use(?=[\s{*'"])/.test(text.slice(i, i + 4))) return line;
+    atLineStart = false;
+    i++;
+  }
+  return undefined;
+}
 
 /**
  * The parts of an `@dbml/parse` module the reader uses. Tests pass the 9.x and
@@ -208,6 +265,10 @@ export { ERD_STUDIO_DBML_HEADER_PREFIX };
  * Warnings (a Records row a ref does not match, …) are ignored. Never throws.
  */
 export function readDbml(text: string, parser: DbmlParserModule = PINNED_PARSER): ReadDbmlResult {
+  const useLine = firstUseDeclarationLine(text);
+  if (useLine !== undefined) {
+    return { ok: false, importsOtherFiles: true, diagnostics: [{ line: useLine, column: 1, message: IMPORT_MULTI_FILE_MESSAGE }] };
+  }
   let raw: unknown;
   try {
     const layout = new parser.MemoryProjectLayout();

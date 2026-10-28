@@ -395,9 +395,19 @@ describe('DBML table writes outside the editor (S5: planDbmlLibraryWrites + writ
     expect(writes.map((w) => `${w.kind} ${rel(w.path)}`)).toEqual(['create tables/Gold/dim_new.dbml']);
   });
 
-  it('pathForNewTable keeps today\'s rule (a .yml path) until the switch-over (S6)', () => {
+  it('pathForNewTable names a .dbml in tables/ once the project writes DBML (the S6 switch-over), else today\'s rule', () => {
     write('tables/dim_date.dbml', dbmlTable('dim_date'));
-    expect(rel(service().pathForNewTable('dim_new'))).toBe('tables/dim_new.yml');
+    expect(rel(service().pathForNewTable('dim_new'))).toBe('tables/dim_new.dbml');
+    expect(rel(service().pathForNewTable('dim_new', 'gold'))).toBe('tables/gold/dim_new.dbml');
+    write('logical-models/dim_old.yml', yamlTable('dim_old'));
+    write('tables/dim_date.dbml', dbmlTable('dim_date'));
+    // Mixed: still DBML for a new file.
+    expect(rel(service().pathForNewTable('dim_new'))).toBe('tables/dim_new.dbml');
+  });
+
+  it('pathForNewTable keeps today\'s rule (a .yml path) in a YAML project', () => {
+    write('logical-models/dim_old.yml', yamlTable('dim_old'));
+    expect(rel(service().pathForNewTable('dim_new'))).toBe('logical-models/dim_new.yml');
   });
 
   it('tableStorage and relationshipsFileFor name a DBML table\'s format and its folder\'s relationships file', () => {

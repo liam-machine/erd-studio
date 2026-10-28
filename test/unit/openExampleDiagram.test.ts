@@ -197,7 +197,8 @@ describe('Open Example Diagram', () => {
 
     const result = await openExampleDiagram(deps(ui));
 
-    const domainPath = erd(EXAMPLE_LAYER, 'coffee-shop.json');
+    // A new project stores the example as DBML (native DBML storage, §3.2).
+    const domainPath = erd(EXAMPLE_LAYER, 'coffee-shop.dbml');
     expect(result?.domainPath).toBe(domainPath);
     // No Open dialog, no layer pick (the default layers have gold), no read from disk.
     expect(ui.dialogs).toBe(0);
@@ -211,11 +212,11 @@ describe('Open Example Diagram', () => {
     expect(ui.confirms[0].detail).not.toContain('Left out');
     expect(ui.errors).toEqual([]);
     expect(ui.opened).toEqual([domainPath]);
-    // A project with no library yet writes the table naming (#182), in a layer folder.
+    // A project with no library yet writes DBML (§3.2), in a layer folder, with the relationships in its folder's file.
     expect(erdFiles()).toEqual([
-      'gold/coffee-shop.json',
+      'gold/coffee-shop.dbml',
       'layers.json',
-      ...SAMPLE_TABLES.map((t) => `tables/gold/${t}.yml`).sort(),
+      ...[...SAMPLE_TABLES.map((t) => `tables/gold/${t}.dbml`), 'tables/gold/_relationships.dbml'].sort(),
     ]);
     // Counted as the example only: the Import DBML counts stay the user's own files.
     expect(features()).toEqual(['exampleDiagram']);
@@ -274,7 +275,8 @@ describe('Open Example Diagram', () => {
     const ui = recorder({ layer: 'marts' });
     const result = await openExampleDiagram(deps(ui));
     expect(ui.picks).toEqual([['staging', 'marts']]);
-    expect(result?.domainPath).toBe(erd('marts', 'coffee-shop.json'));
+    // A project with no tables yet writes DBML (§3.2).
+    expect(result?.domainPath).toBe(erd('marts', 'coffee-shop.dbml'));
   });
 
   it('exampleDbmlUi reads only the example and finds no layout next to it', async () => {

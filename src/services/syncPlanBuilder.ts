@@ -67,6 +67,18 @@ export interface SyncPlanContext {
    * Default `logical-models`.
    */
   newTableLibraryDir?: string;
+  /**
+   * Where a table with no file yet would get one, relative to the semantic
+   * dir (`tables/gold/x.dbml` in a project that writes DBML, §5.7). Wins
+   * over `newTableLibraryDir` and `modelFolder` for a table with no file.
+   * The host passes `TableLibraryService.pathForNewTable`.
+   */
+  newTableFilePath?: (modelName: string) => string | undefined;
+  /**
+   * The relationships file holding a DBML table's Refs, relative to the
+   * semantic dir (`relationshipsFileFor`), or undefined for a YAML table.
+   */
+  relationshipsFile?: (modelName: string) => string | undefined;
 }
 
 /** Actions that edit dbt files, after which `dbt compile` is needed. */
@@ -225,13 +237,17 @@ export function buildSyncPlan(
       dbtSchemaPath = dbtSqlPath.replace(/\.sql$/, '.yml');
     }
 
+    const relationshipsFile = ctx.relationshipsFile?.(modelName);
     modelContext[modelName] = {
       modelName,
       // The file where it actually is — top level or a layer folder.
       logicalModelPath: toSlash(path.join(
         ctx.semanticDir,
-        ctx.tableLibraryFile?.(modelName) ?? path.join(ctx.newTableLibraryDir ?? 'logical-models', ctx.modelFolder?.(modelName) ?? '', `${modelName}.yml`),
+        ctx.tableLibraryFile?.(modelName)
+          ?? ctx.newTableFilePath?.(modelName)
+          ?? path.join(ctx.newTableLibraryDir ?? 'logical-models', ctx.modelFolder?.(modelName) ?? '', `${modelName}.yml`),
       )),
+      ...(relationshipsFile !== undefined ? { relationshipsPath: toSlash(path.join(ctx.semanticDir, relationshipsFile)) } : {}),
       dbtSqlPath,
       dbtSchemaPath,
     };

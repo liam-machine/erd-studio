@@ -165,6 +165,18 @@ function layersOf(root: string): string | null {
 
 type Naming = 'v5' | 'v6';
 
+/**
+ * A YAML project in the v6 naming with no table yet: one v6 JSON diagram is
+ * YAML evidence (§3.2 of the native DBML storage spec), so new tables are
+ * still `tables/*.yml`. Without it an empty project writes DBML.
+ */
+function seedV6YamlProject(semanticRoot: string): void {
+  fs.mkdirSync(path.join(semanticRoot, 'seed'), { recursive: true });
+  fs.writeFileSync(path.join(semanticRoot, 'seed', 'seed.json'), JSON.stringify({
+    schemaVersion: 6, subjectArea: 'seed', layer: 'seed', description: '', logical: { tables: [], relationships: [] }, viewConfig: {},
+  }));
+}
+
 interface RoundTrip {
   dbml: string;
   layout: string;
@@ -192,6 +204,7 @@ async function roundTrip(
   fs.mkdirSync(semanticRoot, { recursive: true });
   if (options.layers !== null) fs.writeFileSync(path.join(semanticRoot, 'layers.json'), options.layers);
   if (options.naming === 'v5') fs.mkdirSync(path.join(semanticRoot, 'logical-models'));
+  else seedV6YamlProject(semanticRoot);
   const library = new TableLibraryService(workspace);
 
   const plan = planDbmlImport({
@@ -925,6 +938,7 @@ describe('foreign DBML → ERD Studio → rich DBML', () => {
 
     const workspace = tempWorkspace();
     fs.mkdirSync(path.join(workspace, '.erd-studio'), { recursive: true });
+    seedV6YamlProject(path.join(workspace, '.erd-studio'));
     const library = new TableLibraryService(workspace);
     const lib = { findTableName: (n: string) => library.findTableNameIgnoringCase(n), getTable: (n: string) => library.getTable(n) };
     const plan = planDbmlImport({

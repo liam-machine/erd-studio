@@ -2150,6 +2150,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       if (this.context.workspaceState?.get<boolean>(NAMING_MIGRATION_DECLINED_KEY)) return false;
       if (hooks.naming() === 'v6') return false;
+      // A DBML or mixed project is not offered the YAML naming migration (§5.7).
+      if (this.tableLibraryService.projectStorage() !== 'yaml') return false;
       const plan = hooks.plan();
       // A v4 file is no refusal here: the command runs the v5 migration first.
       const refused = plan.v4SubjectAreas.length > 0 ? plan.refusals.length > 1 : plan.refusals.length > 0;
@@ -5894,6 +5896,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         modelFolder: (name) => this.tableLibraryService.tableFolder(name),
         tableLibraryFile: (name) => this.tableLibraryService.tableLibraryFile(name),
         newTableLibraryDir: this.tableLibraryService.newTableLibraryDirName(),
+        newTableFilePath: (name) => {
+          try { return this.tableLibraryService.libraryRelativePath(this.tableLibraryService.pathForNewTable(name)); } catch { return undefined; }
+        },
+        relationshipsFile: (name) => {
+          const file = this.tableLibraryService.relationshipsFileFor(name);
+          return file === undefined ? undefined : this.tableLibraryService.libraryRelativePath(file);
+        },
       });
 
       const totalActions = countSyncPlanActions(syncPlan);
