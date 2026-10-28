@@ -304,4 +304,4 @@ relationships:
 
 **Which to use:** put new relationships in the model YAML when **any** model file already has a `relationships:` list, or **no** domain file has a `logical.relationships` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's `logical.relationships[]`, and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same two columns twice — not in both places, and not once in each direction; if a domain and the model YAML disagree, the model YAML wins.
 
-<!-- erd-studio-harness: 36 -->
+<!-- erd-studio-harness: 37 -->

@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '36';
+export const HARNESS_VERSION = '37';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -867,7 +867,7 @@ const CODEX_REFS: PartRefs = {
   SKILL: 'the ERD Studio section of `AGENTS.md`',
   DBML: '`.agents/skills/erd-studio/DBML.md`',
   LEGACY: '`.agents/skills/erd-studio/LEGACY.md`',
-  BESIDE: '. Read the one that applies before writing any `.erd-studio` file. Both are installed with this section (and with the Agent Skills install); if they are missing, ask the user to run **ERD Studio: Install AI Coding Harness** → OpenAI Codex (or **ERD Studio: Set Up My AI Helper**) again first, and never write a `.erd-studio` file without them',
+  BESIDE: '. Read the one that applies before writing any `.erd-studio` file. Both are installed with this section (and with the Agent Skills install); if they are missing, ask the user to run **ERD Studio: Install AI Helper Files…** → OpenAI Codex (or **ERD Studio: Set Up My AI Helper**) again first, and never write a `.erd-studio` file without them',
 };
 const CODEX_CONTENT = schemaPart(SKILL_PART, CODEX_REFS);
 

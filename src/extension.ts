@@ -1066,14 +1066,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const migrationService = new MigrationService(workspaceRoot, layerService, tableLibraryService, semanticDir);
   if (migrationService.needsMigration()) {
     void vscode.window.showInformationMessage(
-      'ERD Studio has a new table storage format that lets subject areas share tables. Migrate subject area files now?',
+      'Some diagrams here keep their tables inside the diagram file, an older format. Move their tables into the Table Library, so diagrams can share them?',
       'Migrate Now',
       'Later',
     ).then((choice) => {
       if (choice === 'Migrate Now') {
         const result = migrationService.migrate();
         const details: string[] = [];
-        if (result.domainsConverted > 0) details.push(`${result.domainsConverted} subject area(s) converted`);
+        if (result.domainsConverted > 0) details.push(`${result.domainsConverted} diagram(s) converted`);
         if (result.modelsCreated > 0) details.push(`${result.modelsCreated} table file(s) created in the Table Library`);
         if (result.mergeConflicts.length > 0) details.push(`${result.mergeConflicts.length} merge conflict(s) resolved (richest version kept)`);
         vscode.window.showInformationMessage(`Migration complete: ${details.join(', ')}.`);
@@ -1333,8 +1333,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     telemetry.featureOnce('dbmlForeignFormatWarned');
     const shown = path.relative(workspaceRoot, uri.fsPath).split(path.sep).join('/');
     void vscode.window.showWarningMessage(
-      `A YAML/JSON file was just added to this DBML project (${shown}), probably by an AI helper set up before ERD Studio 2.0. ` +
-        'Update the AI helper files so it writes DBML?',
+      `A YAML/JSON file was just added to this DBML project (${shown}). It was probably written by an AI helper set up with an ` +
+        'older ERD Studio, or by a teammate or another window on an older ERD Studio (they need this version or later to write DBML). ' +
+        'Update the AI helper files so they write DBML?',
       'Update AI Helper Files',
       'Not Now',
     ).then((choice) => {
@@ -1529,8 +1530,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const migrateToV5 = async (): Promise<boolean> => {
     const v4Count = migrationService.findV4SubjectAreas().length;
     const confirm = await vscode.window.showWarningMessage(
-      `Found ${v4Count} subject area file(s) using the legacy inline table format. ` +
-      'Migration will extract tables to the Table Library and convert subject area files to use name references. ' +
+      `${v4Count} diagram file(s) still keep their tables inside the diagram, the format from before the Table Library. ` +
+      'Migrating moves each table into its own file in the Table Library, and the diagrams then list their tables by name. ' +
       'This cannot be undone automatically.',
       'Migrate Now',
       'Cancel',
@@ -1547,7 +1548,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     telemetry.feature('migrateV5');
     const details: string[] = [];
-    if (result.domainsConverted > 0) details.push(`${result.domainsConverted} subject area(s) converted`);
+    if (result.domainsConverted > 0) details.push(`${result.domainsConverted} diagram(s) converted`);
     if (result.modelsCreated > 0) details.push(`${result.modelsCreated} table file(s) created in the Table Library`);
     if (result.mergeConflicts.length > 0) details.push(`${result.mergeConflicts.length} merge conflict(s) resolved`);
     void vscode.window.showInformationMessage(`Migration complete: ${details.join(', ')}.`);
@@ -2702,7 +2703,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Migrate v4 domains to v5 central model store
     vscode.commands.registerCommand('erdStudio.migrateToV5', async () => {
       if (!migrationService.needsMigration()) {
-        void vscode.window.showInformationMessage('All subject area files already use the v5 central Table Library format.');
+        void vscode.window.showInformationMessage('Nothing to migrate: every diagram already keeps its tables in the Table Library.');
         return;
       }
       // v4 → v5, then on to the new file naming (#182), so nobody goes through two prompts.
@@ -2751,7 +2752,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         refreshContextKeys();
         treeProvider.refresh();
         await new Promise(resolve => setTimeout(resolve, 100));
-        void vscode.window.showInformationMessage('ERD Studio directory created! Now create your first subject area.');
+        void vscode.window.showInformationMessage('ERD Studio directory created! Now create your first diagram.');
         await vscode.commands.executeCommand('erdStudio.createDomain');
       },
     ),
@@ -3052,7 +3053,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         });
 
         const selected = await vscode.window.showQuickPick(items, {
-          placeHolder: 'Select AI coding harnesses to install ERD Studio schema into',
+          placeHolder: 'Choose the AI assistants to install ERD Studio\'s helper files for',
           canPickMany: true,
           ignoreFocusOut: true,
         });
@@ -3071,11 +3072,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (failed.length > 0) {
           const errors = failed.map(r => `${r.target.id}: ${r.error}`).join('; ');
           void vscode.window.showErrorMessage(
-            `Harness install: ${succeeded.length} installed, ${failed.length} failed. Errors: ${errors}`,
+            `AI helper files: ${succeeded.length} installed, ${failed.length} failed. Errors: ${errors}`,
           );
         } else {
           void vscode.window.showInformationMessage(
-            `AI coding harness: ${succeeded.length} installed.`,
+            `AI helper files: ${succeeded.length} installed.`,
           );
         }
       },
@@ -3299,7 +3300,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       harnessPromptShown = true;
       const names = staleTargets.map(t => t.label.replace(/\$\([^)]+\)\s*/g, '')).join(', ');
       void vscode.window.showWarningMessage(
-        `ERD Studio: ${staleTargets.length} AI coding harness file(s) outdated (${names}). Update to v${HARNESS_VERSION}?`,
+        `ERD Studio: ${staleTargets.length} AI helper file(s) come from an older ERD Studio (${names}). Update to v${HARNESS_VERSION}?`,
         'Update All',
         'Choose…',
         'Dismiss',
@@ -3311,11 +3312,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (failed.length > 0) {
             const errors = failed.map(r => `${r.target.id}: ${r.error}`).join('; ');
             void vscode.window.showErrorMessage(
-              `ERD Studio: ${failed.length} harness file(s) could not be updated. Errors: ${errors}`,
+              `ERD Studio: ${failed.length} AI helper file(s) could not be updated. Errors: ${errors}`,
             );
           } else {
             void vscode.window.showInformationMessage(
-              `ERD Studio: Updated ${results.length} AI coding harness file(s) to v${HARNESS_VERSION} (${names}).`,
+              `ERD Studio: Updated ${results.length} AI helper file(s) to v${HARNESS_VERSION} (${names}).`,
             );
           }
         } else if (choice === 'Choose…') {

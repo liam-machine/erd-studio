@@ -1127,7 +1127,7 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
           expect(r.harness.outdated.length).toBe(1);
           expect(step!.why).toContain(r.harness.outdated[0]);
           // In a DBML project, an old helper would write YAML into it.
-          expect(step!.why.includes('An AI helper from before 2.0 writes YAML into this DBML project.'), fixture).toBe(fixture === 'dbml-native');
+          expect(step!.why.includes('An AI helper set up with an older ERD Studio may write YAML into this DBML project.'), fixture).toBe(fixture === 'dbml-native');
           fs.rmSync(root, { recursive: true, force: true });
         }
       });

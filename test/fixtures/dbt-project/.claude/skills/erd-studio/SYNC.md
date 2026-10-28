@@ -135,4 +135,4 @@ models:
 - **Cascade deletions**: When removing a model from a JSON domain, also remove the domain JSON's relationships referencing it. When renaming or deleting a table or column, update every Ref (DBML) or model YAML `relationships:` entry that points at it
 - **Column ordering**: When adding columns, append them after the table's last column (before its `indexes` block and `Note` in DBML; to the end of the columns array in YAML)
 
-<!-- erd-studio-harness: 36 -->
+<!-- erd-studio-harness: 37 -->

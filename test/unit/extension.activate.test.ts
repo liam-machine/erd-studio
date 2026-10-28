@@ -803,6 +803,10 @@ describe('activate() in a native DBML project (S4)', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(foreignToasts()).toHaveLength(1);
     expect(foreignToasts()[0][0]).toContain('(.erd-studio/gold/from_helper.json)');
+    // A teammate or another window on an older ERD Studio is as likely as a helper,
+    // and no release number is named (a 1.9 pre-release user reads this too).
+    expect(foreignToasts()[0][0]).toContain('or by a teammate or another window on an older ERD Studio');
+    expect(foreignToasts()[0][0]).not.toMatch(/\b2\.0\b/);
     expect(foreignToasts()[0].slice(1)).toEqual(['Update AI Helper Files', 'Not Now']);
     expect(featureOnce).toHaveBeenCalledWith('dbmlForeignFormatWarned');
 
@@ -1632,7 +1636,7 @@ describe('Welcome panel: first run', () => {
     // its picture shows a new project, which is DBML.
     expect(step('newDiagram').description).toContain('Each table is a file in .erd-studio/');
     expect(step('newDiagram').description).not.toMatch(/YAML|JSON/);
-    expect((step('newDiagram').media as { altText?: string }).altText).toContain('DBML');
+    expect((step('newDiagram').media as { altText?: string }).altText).toContain('the DBML files a new project keeps it in');
     const svg = fs.readFileSync(path.join(REPO_ROOT, step('newDiagram').media.svg), 'utf-8');
     for (const file of ['sales.dbml', 'sales.dbdiagram', 'customer.dbml', '_relationships.dbml']) expect(svg).toContain(`>${file}</text>`);
     expect(svg).not.toMatch(/\.yml<|sales\.json</);

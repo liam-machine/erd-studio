@@ -838,7 +838,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
       title: 'Update the ERD Studio AI helper files',
       why: `The installed AI helper files come from an older ERD Studio: ${r.harness.outdated.join(', ')}. `
         + 'Run "ERD Studio: Set Up My AI Helper" in VS Code (or Update All when it offers).'
-        + (r.erd.storage !== 'yaml' ? ' An AI helper from before 2.0 writes YAML into this DBML project.' : ''),
+        + (r.erd.storage !== 'yaml' ? ' An AI helper set up with an older ERD Studio may write YAML into this DBML project.' : ''),
       command: null,
     });
   }
