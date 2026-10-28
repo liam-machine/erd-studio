@@ -376,7 +376,46 @@ export function editTableDbml(oldText: string, desired: SemanticTable, options: 
   return refuseOverlaps(options.file ?? `${options.fileStem ?? desired.name}.dbml`, () => editTable(oldText, desired, options));
 }
 
+/** Which meta a table edit touches: `''` for the table's own, `c:<column, lower-case>` for a column's. */
+function metaOwnerId(column: string | undefined): string {
+  return column === undefined ? '' : `c:${column.toLowerCase()}`;
+}
+
+/**
+ * Edit, then read the result back: a meta map the splice left in another key
+ * order (a new non-text entry joining `meta_json` before later text entries, a
+ * value moving between text and non-text) is edited again with that owner's
+ * meta properties rewritten whole, the way a new file writes them. The order
+ * is what the canvas and the exports show, so an edit keeps it as YAML does.
+ */
 function editTable(oldText: string, desired: SemanticTable, options: EditTableDbmlOptions): string {
+  const touched = new Set<string>();
+  const out = editTableOnce(oldText, desired, options, new Set(), touched);
+  if (touched.size === 0) return out;
+  const stem = options.fileStem ?? desired.name;
+  const readBack = parseTableDbml(stripBom(out), stem, options.parser ?? PINNED_PARSER);
+  if (!readBack.ok) return out;
+  const keysOf = (meta: Meta | undefined): string => JSON.stringify(Object.keys(readMeta(meta) ?? {}));
+  const reordered = new Set<string>();
+  for (const id of touched) {
+    if (id === '') {
+      if (keysOf(readBack.table.meta) !== keysOf(desired.meta)) reordered.add(id);
+      continue;
+    }
+    const want = (desired.columns ?? []).find((c) => metaOwnerId(c.name) === id);
+    const got = (readBack.table.columns ?? []).find((c) => metaOwnerId(c.name) === id);
+    if (want && got && keysOf(got.meta) !== keysOf(want.meta)) reordered.add(id);
+  }
+  return reordered.size === 0 ? out : editTableOnce(oldText, desired, options, reordered, new Set());
+}
+
+function editTableOnce(
+  oldText: string,
+  desired: SemanticTable,
+  options: EditTableDbmlOptions,
+  rewriteMeta: ReadonlySet<string>,
+  touchedMeta: Set<string>,
+): string {
   const parser = options.parser ?? PINNED_PARSER;
   const hadBom = oldText.charCodeAt(0) === 0xfeff;
   const text = stripBom(oldText);
@@ -585,7 +624,7 @@ function editTable(oldText: string, desired: SemanticTable, options: EditTableDb
     if (want === have) continue;
     setProperty(tableSetters, key, want === undefined ? undefined : dbmlString(want), tableOwner);
   }
-  planMeta(tableSetters, current.meta, desired.meta, tableOwner, undefined);
+  planMeta(tableSetters, current.meta, desired.meta, tableOwner, undefined, '');
 
   // Description: the effective `note` (a block's, else the body Note, else the header setting).
   const wantDescription = noteValue(desired.description);
@@ -689,7 +728,7 @@ function editTable(oldText: string, desired: SemanticTable, options: EditTableDb
     if (wantAdditive !== present(have.additiveType)) {
       setProperty(setters, DBML_RICH_COLUMN_PROPERTIES.additiveType, wantAdditive === undefined ? undefined : dbmlString(wantAdditive), owner);
     }
-    planMeta(setters, have.meta, want.meta, owner, have.name);
+    planMeta(setters, have.meta, want.meta, owner, have.name, metaOwnerId(want.name));
   });
 
   // Metadata Column blocks of removed columns go with them.
@@ -888,10 +927,23 @@ function editTable(oldText: string, desired: SemanticTable, options: EditTableDb
     wantRaw: Meta | undefined,
     owner: { column?: string; list: AstNode | undefined; ownerKey: AstNode | string; anchor: number; multiLine: boolean; order: readonly string[] },
     column: string | undefined,
+    id: string,
   ): void {
     const have = haveRaw ?? {};
     const want = readMeta(wantRaw) ?? {};
     if (deepEqual(have, want)) return;
+    touchedMeta.add(id);
+    const allKeys = [...new Set([...Object.keys(have), ...Object.keys(want)])];
+    const foreign = (key: string): boolean => (options.foreignMetadata ?? []).some((m) => bareDbmlProperty(m.property.toLowerCase()) === `${DBML_RICH_META_PREFIX}${key}`
+      && (column === undefined ? m.column === undefined : m.column !== undefined && m.column.toLowerCase() === column.toLowerCase()));
+    if (rewriteMeta.has(id) && !allKeys.some(foreign)) {
+      // The splice would reorder the map: write this owner's meta whole, in want's key order.
+      for (const s of setters) if (s.key.startsWith(DBML_RICH_META_PREFIX)) removeSetter(s);
+      metaSettings(want).forEach((setting, i) => {
+        planFor(owner.list, owner.ownerKey, owner.anchor, owner.multiLine).added.push({ order: 1000 + i / 10000, text: setting });
+      });
+      return;
+    }
     const attrs = new Map<string, Setter[]>();
     for (const s of setters) {
       if (!s.key.startsWith(DBML_RICH_META_PREFIX) || s.key === DBML_RICH_META_JSON_PROPERTY) continue;

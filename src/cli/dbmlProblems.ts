@@ -365,7 +365,9 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     const m = misnamed.find((x) => x.name.toLowerCase() === lower || x.path.replace(/^.*\//, '').replace(/\.ya?ml$/i, '').toLowerCase() === lower);
     if (!m) return undefined;
     const file = m.path.replace(/^.*\//, '');
-    return { path: m.path, file, stem: file.replace(/\.ya?ml$/i, ''), caseOnly: file.toLowerCase().endsWith('.yml') };
+    const stem = file.replace(/\.ya?ml$/i, '');
+    // The name to give it: its table's (what the loader probes and a DBML table file must have), its own stem when they agree.
+    return { path: m.path, file, stem: stem.toLowerCase() === m.name.toLowerCase() ? stem : m.name, caseOnly: file.toLowerCase().endsWith('.yml') };
   };
   /** How a member's YAML table is named in a message: its own name, or the member with the name its file holds. */
   const yamlTableLabel = (name: string, t: { name: string; path: string }): string =>

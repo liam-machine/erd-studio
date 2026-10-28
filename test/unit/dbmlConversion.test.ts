@@ -365,6 +365,15 @@ describe('planDbmlConversion: what ERD Studio does not read is kept as a // bloc
     expect(plan.notes).toContain('logical-models/dim.yml: its YAML anchors and aliases are written out in full; the lines that held them are kept as // lines above the Table in tables/dim.dbml.');
   });
 
+  it('a kept column line keeps the line that names its column when name: is not the first key', async () => {
+    const plan = await planDbmlConversion(inputOf({
+      'logical-models/fct_k.yml': 'name: fct_k\ncolumns:\n  - dataType: int\n    name: id\n    isSourceCode: true\n',
+    }));
+    expect(created(plan, 'tables/fct_k.dbml')!.split('\n').slice(0, 4)).toEqual([
+      keptFromLine('logical-models/fct_k.yml'), '//   - dataType: int', '//     name: id', '//     isSourceCode: true',
+    ]);
+  });
+
   it('unknown JSON keys above the Project', async () => {
     const plan = await planDbmlConversion(inputOf({
       'logical-models/dim.yml': DIM,
@@ -1332,6 +1341,32 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
     expect(plan.deletes).toContain('gold/d.json');
   });
 
+  it('a diagram in a folder that is not a default layer, with no layers.json, says the project has none', async () => {
+    const input = inputOf({
+      'logical-models/dim.yml': DIM,
+      'silver/d.json': diagram('d', 'silver', ['dim']),
+      'bronze/e.json': diagram('e', 'bronze', ['dim']),
+    });
+    input.files = input.files.filter((f) => f.path !== 'layers.json');
+    const plan = await planDbmlConversion(input);
+    expect(plan.refusals).toEqual([]);
+    expect(leftOf(plan, 'bronze/e.json')?.problem).toBe(
+      'It is in the bronze/ folder, and the project has no layers.json, so ERD Studio opens only its default layers (silver/, gold/) and does not open it. '
+        + 'Create layers.json with the layer bronze (ERD Studio: Initialize Layer Configuration, then add the layer), or move the file into silver/ or gold/, then convert again.',
+    );
+    expect(plan.deletes).toContain('silver/d.json');
+  });
+
+  it('a .yaml table file whose name: differs from its file name is told to take its table\'s name', async () => {
+    const input = inputOf({ 'logical-models/dim.yml': DIM, 'gold/d.json': diagram('d', 'gold', ['dim', 'dim_b']) });
+    input.misnamedTables = [{ path: 'logical-models/foo.yaml', name: 'dim_b' }];
+    const plan = await planDbmlConversion(input);
+    expect(leftOf(plan, 'logical-models/foo.yaml')?.problem).toBe(
+      'It is named foo.yaml, and ERD Studio reads a table file only when its name ends in .yml, so it does not read this one '
+        + '(a diagram that lists dim_b draws it as missing). Rename it to dim_b.yml, then convert again.',
+    );
+  });
+
   it('a table file named .yaml or .YML is left with the name to give it, and its member is not called missing', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-misnamed-'));
     try {
@@ -1416,6 +1451,20 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
         'without its compositeKey, as ERD Studio already drew it. Add the other columns on the canvas if it is meant to be composite.',
     );
     expectCompilesEverywhere(input, plan);
+  });
+
+  it('a composite relationship of one column pair to a table with no file says it is a pending line, not a Ref', async () => {
+    const fct = yml('fct', ['id', 'z_id'], [{ fromColumn: 'z_id', toModel: 'dim_zz', toColumn: 'id', cardinality: 'many-to-one', compositeKey: 'ck2' }]);
+    const input = inputOf({ 'logical-models/fct.yml': fct, 'gold/d.json': diagram('d', 'gold', ['fct']) });
+    const plan = await planDbmlConversion(input);
+    expect(plan.refusals).toEqual([]);
+    const notes = plan.notes.filter((n) => n.includes('fct.z_id → dim_zz.id'));
+    expect(notes[0]).toBe(
+      'logical-models/fct.yml: the composite relationship "ck2" from fct has only one column pair (fct.z_id → dim_zz.id), so it is kept as a single-column pending line ' +
+        'without its compositeKey, as ERD Studio already drew it. Add the other columns on the canvas if it is meant to be composite.',
+    );
+    expect(notes.some((n) => n.includes('Ref without'))).toBe(false);
+    expect(written(plan, 'tables/_relationships.dbml')).toContain('// erd-studio pending: Ref: fct.z_id >? dim_zz.id');
   });
 
   it('doctor says Convert fixes a key written twice with the same value, so the two never disagree', async () => {

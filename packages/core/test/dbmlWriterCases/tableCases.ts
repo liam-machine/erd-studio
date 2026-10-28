@@ -562,4 +562,40 @@ export const NEW_TABLE_CASES: WriterCase[] = [
       expect(read.columns?.[0]?.meta).toEqual({ a: 'x', b: true, c: 'y', d: ['p', 'q'], e: 'z' });
     },
   },
+  // Review of the stress fixes: an edit keeps the meta key order as YAML does.
+  ...((): WriterCase[] => {
+    const input = (meta: Record<string, unknown>, columnMeta?: Record<string, unknown>): string => renderNewTableDbml({
+      name: 'fct_m', meta: meta as SemanticTable['meta'],
+      columns: [{ name: 'id', dataType: 'int', description: '', ...(columnMeta ? { meta: columnMeta as SemanticTable['meta'] } : {}) }],
+    });
+    const order = (out: string, keys: string[], columnKeys?: string[]): void => {
+      const read = readTable(out, 'fct_m').table;
+      expect(Object.keys(read.meta ?? {})).toEqual(keys);
+      if (columnKeys) expect(Object.keys(read.columns?.[0]?.meta ?? {})).toEqual(columnKeys);
+    };
+    return [
+      tableCase('a new non-text meta entry reads back last, after the text entries that follow meta_json', 'fct_m',
+        input({ owner: 'p', pii: true, team: 'd' }), (t) => { t.meta = { owner: 'p', pii: true, team: 'd', flag: false }; }, (out) => {
+          order(out, ['owner', 'pii', 'team', 'flag']);
+          expect(readTable(out, 'fct_m').table.meta).toEqual({ owner: 'p', pii: true, team: 'd', flag: false });
+        }),
+      tableCase('a text meta entry that becomes non-text keeps its place', 'fct_m',
+        input({ owner: 'p', team: 'd', pii: true }), (t) => { t.meta = { owner: 'p', team: true, pii: true }; }, (out) => {
+          order(out, ['owner', 'team', 'pii']);
+        }),
+      tableCase('the first meta entry turning non-text stays first', 'fct_m',
+        input({ owner: 'p', team: 'd', pii: true }), (t) => { t.meta = { owner: true, team: 'd', pii: true }; }, (out) => {
+          order(out, ['owner', 'team', 'pii']);
+        }),
+      tableCase('a column meta add keeps the column meta in key order', 'fct_m',
+        input({ owner: 'p' }, { a: 'x', b: true, c: 'y' }), (t) => { t.columns![0].meta = { a: 'x', b: true, c: 'y', d: [1] }; }, (out) => {
+          order(out, ['owner'], ['a', 'b', 'c', 'd']);
+        }),
+      tableCase('a meta add that keeps the order is still a splice', 'fct_m',
+        input({ owner: 'p', pii: true }), (t) => { t.meta = { owner: 'p', pii: true, flag: false }; }, (out) => {
+          expect(out).toBe(input({ owner: 'p', pii: true }).replace(`meta_json: '{"pii":true}'`, `meta_json: '{"pii":true,"flag":false}'`));
+          order(out, ['owner', 'pii', 'flag']);
+        }),
+    ];
+  })(),
 ];

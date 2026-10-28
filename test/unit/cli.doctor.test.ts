@@ -1017,6 +1017,17 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(pending.message).not.toContain('Add from dbt');
   });
 
+  it('a member whose .yaml file has another stem is told to take its table\'s name, which finishes the job', async () => {
+    const r = await doctor(nativeWith({
+      'gold/sales.dbml': replace("  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n", "  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n  erd_unlinked_tables: 'dim_sales_rep'\n"),
+      'tables/gold/foo.yaml': () => 'name: dim_sales_rep\ncolumns:\n  - name: sales_rep_key\n    dataType: INT\n',
+    }));
+    expect(r.erd.dbmlConversion?.leftAsIs?.find((l) => l.path === 'tables/gold/foo.yaml')?.problem).toMatch(/Rename it to dim_sales_rep\.yml, then convert again\.$/);
+    expect(problem(r, 'unlinkedTable').map((p) => p.message)).toEqual([
+      expect.stringMatching(/its table file tables\/gold\/foo\.yaml is named foo\.yaml, .* Rename it to dim_sales_rep\.yml, then run ERD Studio: Convert Project to DBML\.$/),
+    ]);
+  });
+
   it('a project Convert left mixed: finish-dbml-conversion names each file left as it is, with its problem and line', async () => {
     const r = await doctor(nativeWith({
       'tables/gold/dim_other.yml': () => 'name: dim_other\ndescription: one\ndescription: two\ncolumns:\n  - name: id\n    dataType: INT\n',

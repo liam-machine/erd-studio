@@ -479,9 +479,11 @@ function keptYamlLines(oldPath: string, text: string, tableName: string): KeptLi
     },
   });
   if (keep.size === 0) return { block: [], comments: false, unknownKeys: [], ignoredValues: [], anchors: false };
-  // A kept line inside a column or relationship entry keeps the entry's first line (`- name: x`) too,
+  // A kept line inside a column or relationship entry keeps the entry's first line (`- name: x`) and the
+  // line of the key that names it (`name:`, or a relationship's `fromColumn:`) too, wherever that key is,
   // so the comment says which column (or relationship) it belonged to.
   if (isMap(root)) {
+    const naming: Record<string, readonly string[]> = { columns: ['name'], relationships: ['fromColumn'] };
     for (const key of ['columns', 'relationships']) {
       const list = (root.items as Pair[]).find((p) => isScalar(p.key) && p.key.value === key)?.value;
       if (!isSeq(list)) continue;
@@ -490,11 +492,19 @@ function keptYamlLines(oldPath: string, text: string, tableName: string): KeptLi
         if (!range) continue;
         const first = lineIndexAt(starts, range[0]);
         const last = lineIndexAt(starts, Math.max(range[0], range[1] - 1));
+        let holdsKept = false;
         for (let i = first + 1; i <= last; i++) {
           if (keep.has(i)) {
-            keep.add(first);
+            holdsKept = true;
             break;
           }
+        }
+        if (!holdsKept) continue;
+        keep.add(first);
+        for (const name of naming[key]) {
+          const pair = pairOf(item, name);
+          const at = pair && isNode(pair.key) ? pair.key.range : undefined;
+          if (at) keep.add(lineIndexAt(starts, at[0]));
         }
       }
     }
@@ -778,11 +788,13 @@ async function planOnce(
     if (byName.has(lower(m.name)) || byName.has(lower(stem)) || files.some((f) => f.kind === 'table' && [lower(stem), lower(m.name)].includes(lower(stemOf(f.path))))) continue;
     const file = m.path.slice(m.path.lastIndexOf('/') + 1);
     const caseOnly = lower(file).endsWith('.yml');
+    // The name the loader probes, and the one a DBML table file must have: its table's.
+    const target = lower(m.name) === lower(stem) ? stem : m.name;
     leave(m.path, caseOnly
       ? `It is named ${file}, and ERD Studio reads a table file only when its name ends in .yml, in lower case: the table library does not list it, ` +
-        `and a diagram finds it only on a file system that ignores case. Rename it to ${stem}.yml, then convert again.`
+        `and a diagram finds it only on a file system that ignores case. Rename it to ${target}.yml, then convert again.`
       : `It is named ${file}, and ERD Studio reads a table file only when its name ends in .yml, so it does not read this one ` +
-        `(a diagram that lists ${m.name} draws it as missing). Rename it to ${stem}.yml, then convert again.`);
+        `(a diagram that lists ${m.name} draws it as missing). Rename it to ${target}.yml, then convert again.`);
   }
   // Names: one file per table, whatever the folder, format or case. Convert never picks a copy: the
   // YAML copies stay as they are (the resolver keeps choosing what it chose), the DBML ones stay too.
@@ -1124,7 +1136,10 @@ async function planOnce(
         const r = members[0].rel;
         notes.push(
           `${members[0].file}: the composite relationship "${key}" from ${r.fromModel} has only one column pair (${describeEnds(r.fromModel, [r.fromColumn], r.toModel, [r.toColumn])}), ` +
-            'so it is written as a single-column Ref without its compositeKey, as ERD Studio already drew it. Add the other columns on the canvas if it is meant to be composite.',
+            (members[0].pending === undefined
+              ? 'so it is written as a single-column Ref without its compositeKey'
+              : 'so it is kept as a single-column pending line without its compositeKey') +
+            ', as ERD Studio already drew it. Add the other columns on the canvas if it is meant to be composite.',
         );
         continue;
       }
@@ -1630,6 +1645,11 @@ function unknownLayerProblem(layer: string, layersText: string | null): string {
   const wholeFile = warnings.find((w) => !/^(Layer |Duplicate layer )/.test(w));
   if (layersText !== null && wholeFile !== undefined) {
     return `It is in the ${layer}/ folder, and layers.json does not read (${wholeFile}), so ERD Studio uses its default layers and does not open it. Fix layers.json, then convert again.`;
+  }
+  if (layersText === null) {
+    const defaults = parseLayersText(null).map((l) => `${l.id}/`).join(', ');
+    return `It is in the ${layer}/ folder, and the project has no layers.json, so ERD Studio opens only its default layers (${defaults}) and does not open it. ` +
+      `Create layers.json with the layer ${layer} (ERD Studio: Initialize Layer Configuration, then add the layer), or move the file into ${defaults.replace(/, ([^,]*)$/, ' or $1')}, then convert again.`;
   }
   return `It is in the ${layer}/ folder, which is not a layer in layers.json, ${opens}. Add the layer ${layer} to layers.json (or move the file into a layer's folder), then convert again.`;
 }

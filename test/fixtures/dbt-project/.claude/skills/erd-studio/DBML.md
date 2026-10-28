@@ -47,7 +47,7 @@ Table fct_order [
 | warehouse table name (dbt `alias`) | `alias` (never DBML's own `as`) | `alias: 'customer'` |
 | design rationale | `rationale_<field>` | `rationale_grain_choice: '…'` |
 | metadata, text values | `meta_<key>` (key matching `[a-z_][a-z0-9_]*`) | `meta_owner: 'crm-team'` |
-| metadata, anything else | one `meta_json` with exactly those entries as JSON | `meta_json: '{"pii":true}'` |
+| metadata, anything else | one `meta_json` with those entries as JSON, where its first entry is (ERD Studio also keeps a text value inside it when it sits between two of its entries, so the metadata reads back in key order: leave such a `meta_json` as it is) | `meta_json: '{"pii":true}'` |
 | column type | the column's type | `email VARCHAR` |
 | column description | `note` (column setting) | `[note: 'Email address']` |
 | primary key | `pk`, or `indexes { (a, b) [pk] }` | `[pk]` |
