@@ -9,11 +9,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { Filepath } from '@dbml/parse';
 import type { DbmlDiagnostic } from '@erd-studio/core';
 import { compileDbmlProject } from '@erd-studio/core/dbml';
 
-import { DbmlFileCompileMemo, compileDbmlFilesSeparately, withKeptFilepathKeys } from '../../src/services/dbmlFileCompile';
+import { DbmlFileCompileMemo, compileDbmlFilesSeparately, compileDbmlFilesSeparatelyAsync } from '../../src/services/dbmlFileCompile';
 import { planDbmlConversion } from '../../src/services/dbmlConversion';
 import type { DbmlConversionInput } from '../../src/services/dbmlConversion';
 import { classifySemanticFile } from '@erd-studio/core';
@@ -188,6 +187,21 @@ describe('compileDbmlFilesSeparately reports what the whole-project compile repo
     expect(calls).toBe(first + 1);
   });
 
+  it('the asynchronous form gives the same result, pausing as it works, and stops when the pause throws', async () => {
+    const files = project();
+    files['tables/gold/gold_t05.dbml'] = files['tables/gold/gold_t05.dbml'].replace('{', '{ (((');
+    let pauses = 0;
+    const slow = (subset: Readonly<Record<string, string>>, entries: readonly string[]): Record<string, DbmlDiagnostic[]> => {
+      const until = Date.now() + 3;
+      while (Date.now() < until) { /* a slow compile, so the slices end */ }
+      return compileDbmlProject(subset, entries);
+    };
+    const result = await compileDbmlFilesSeparatelyAsync(files, Object.keys(files), async () => { pauses++; }, slow);
+    expect(keys(result)).toEqual(keys(compileDbmlFilesSeparately(files, Object.keys(files))));
+    expect(pauses).toBeGreaterThan(0);
+    await expect(compileDbmlFilesSeparatelyAsync(files, Object.keys(files), async () => { throw new Error('cancelled'); }, slow)).rejects.toThrow('cancelled');
+  });
+
   it('compiles many small layouts, never the whole project at once', () => {
     const files = project();
     let largest = 0;
@@ -196,27 +210,6 @@ describe('compileDbmlFilesSeparately reports what the whole-project compile repo
       return compileDbmlProject(subset, entries);
     });
     expect(largest).toBeLessThan(Object.keys(files).length * 0.75);
-  });
-});
-
-describe('withKeptFilepathKeys', () => {
-  it('keeps each key, gives the same keys, and puts the parser method back', () => {
-    const original = (Filepath.prototype as { toKey: () => string }).toKey;
-    const a = Filepath.from('/erd-studio/tables/a b.dbml');
-    const b = Filepath.from('/erd-studio/gold/x.dbml');
-    const inside = withKeptFilepathKeys(() => [a.toKey(), a.toKey(), b.toKey()]);
-    expect(inside).toEqual([original.call(a), original.call(a), original.call(b)]);
-    expect((Filepath.prototype as { toKey: () => string }).toKey).toBe(original);
-  });
-
-  it('puts the method back when the work throws, and nests', () => {
-    const original = (Filepath.prototype as { toKey: () => string }).toKey;
-    expect(() => withKeptFilepathKeys(() => withKeptFilepathKeys(() => { throw new Error('boom'); }))).toThrow('boom');
-    expect((Filepath.prototype as { toKey: () => string }).toKey).toBe(original);
-  });
-
-  it('runs unchanged with a parser that has no such method', () => {
-    expect(withKeptFilepathKeys(() => 42, class {})).toBe(42);
   });
 });
 

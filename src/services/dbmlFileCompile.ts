@@ -43,7 +43,6 @@
 
 import * as path from 'path';
 
-import { Filepath } from '@dbml/parse';
 import type { DbmlDiagnostic, DbmlStoredRef } from '@erd-studio/core';
 import { compileDbmlProject, outlineDbmlFile, readRelationshipsDbml } from '@erd-studio/core/dbml';
 
@@ -152,39 +151,6 @@ function usesOfUnparsed(filePath: string, text: string): FileFacts['uses'] {
   return out;
 }
 
-/** Set while {@link withKeptFilepathKeys} has the parser's method replaced. */
-let keepingFilepathKeys = false;
-
-/**
- * Run `work` with each @dbml/parse `Filepath` computing its cache key once.
- * The Compiler rebuilds the key (every path segment through
- * encodeURIComponent) for every query it caches, about a third of a compile;
- * a Filepath's root and segments are set in its constructor and never
- * change, so the key is kept for it. The parser's own method is put back
- * afterwards; a parser without the method runs unchanged.
- */
-export function withKeptFilepathKeys<T>(work: () => T, filepath: { prototype: object } = Filepath): T {
-  const proto = filepath.prototype as { toKey?: () => string };
-  const original = proto.toKey;
-  if (typeof original !== 'function' || keepingFilepathKeys) return work();
-  const kept = new WeakMap<object, string>();
-  keepingFilepathKeys = true;
-  proto.toKey = function keptKey(this: object): string {
-    let key = kept.get(this);
-    if (key === undefined) {
-      key = original.call(this);
-      kept.set(this, key);
-    }
-    return key;
-  };
-  try {
-    return work();
-  } finally {
-    proto.toKey = original;
-    keepingFilepathKeys = false;
-  }
-}
-
 /** One endpoint as the compiler compares it: the table and its sorted columns. */
 function sideKey(table: string, columns: readonly string[]): string {
   return `${table.toLowerCase()}.(${columns.map((c) => c.toLowerCase()).sort().join(',')})`;
@@ -206,15 +172,45 @@ export function compileDbmlFilesSeparately(
   compile: DbmlProjectCompile = compileDbmlProject,
   memo: DbmlFileCompileMemo = new DbmlFileCompileMemo(),
 ): Record<string, DbmlDiagnostic[]> {
-  return withKeptFilepathKeys(() => compileSeparately(files, entries, compile, memo));
+  const steps = compileSteps(files, entries, compile, memo);
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
 }
 
-function compileSeparately(
+/** How long the asynchronous compile works before it lets the extension host handle other events. */
+const SLICE_MS = 50;
+
+/**
+ * {@link compileDbmlFilesSeparately}, letting the extension host breathe:
+ * after every {@link SLICE_MS} of compiling it awaits `pause` (which yields
+ * to the event loop, so a progress notification updates and its Cancel
+ * button is heard, and may throw to stop). The same result.
+ */
+export async function compileDbmlFilesSeparatelyAsync(
+  files: Readonly<Record<string, string>>,
+  entries: readonly string[],
+  pause: () => Promise<void>,
+  compile: DbmlProjectCompile = compileDbmlProject,
+  memo: DbmlFileCompileMemo = new DbmlFileCompileMemo(),
+): Promise<Record<string, DbmlDiagnostic[]>> {
+  const steps = compileSteps(files, entries, compile, memo);
+  for (;;) {
+    const until = Date.now() + SLICE_MS;
+    let step = steps.next();
+    while (!step.done && Date.now() < until) step = steps.next();
+    if (step.done) return step.value;
+    await pause();
+  }
+}
+
+/** The work, one small compile per step. */
+function* compileSteps(
   files: Readonly<Record<string, string>>,
   entries: readonly string[],
   compile: DbmlProjectCompile,
   memo: DbmlFileCompileMemo,
-): Record<string, DbmlDiagnostic[]> {
+): Generator<void, Record<string, DbmlDiagnostic[]>> {
   const clean = (p: string): string => p.replace(/^\/+/, '');
   const set: Record<string, string> = {};
   for (const [p, text] of Object.entries(files)) set[clean(p)] = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
@@ -316,6 +312,7 @@ function compileSeparately(
       const subset: Record<string, string> = {};
       for (const f of closureOf(entry)) subset[f] = set[f];
       for (const [file, list] of Object.entries(compileOnce(subset, entry))) for (const d of list) add(file, d);
+      yield;
       continue;
     }
     if (facts.uses.length === 0 && harvested.has(entry)) continue;
@@ -338,6 +335,7 @@ function compileSeparately(
       const out = compileOnce(subset, entry);
       for (const d of out[entry] ?? []) add(entry, d);
       harvest(subset, entry, out);
+      yield;
     }
   }
 

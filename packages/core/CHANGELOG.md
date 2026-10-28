@@ -37,6 +37,7 @@ All notable changes to `@erd-studio/core`. While `0.x`, a breaking change bumps 
 - `DiagramExportFormat` gains `'dbml-rich'` and `DIAGRAM_EXPORT_FORMATS` a third entry: an exhaustive `switch` or a `Record<DiagramExportFormat, …>` over it needs a case, and a picker built from `DIAGRAM_EXPORT_FORMATS` offers it. `DIAGRAM_EXPORT_FILE_EXTENSIONS` maps both `dbml` and `'dbml-rich'` to `dbml`, so a `.dbml` file name no longer names one format.
 
 ### Fixed
+- The DBML readers, writers and `compileDbmlProject` are about a third faster: while a compile runs, each of the parser's file paths computes its cache key once instead of on every query. The results are unchanged, and the parser is left as it was afterwards.
 - `parseSubjectAreaJson` (and so `loadDisplaySubjectArea`) reads a domain file that starts with a byte order mark, which used to be rejected as invalid JSON.
 - `loadDisplaySubjectArea` keeps a `meta` key named `__proto__` on a model or column. The model file reader kept it, but the copy each listing gets dropped a text value and turned a map value into the meta's prototype.
 
