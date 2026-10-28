@@ -644,6 +644,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /** `{layer}/{domain}\0{ignored file}` pairs already warned about this session. */
   private readonly duplicateWarningsShown = new Set<string>();
+  /** Open holds from {@link holdRefreshes}; while above 0, outside refreshes and the duplicate warning wait. */
+  private refreshHolds = 0;
 
   /**
    * Fires after this provider has written a domain file (and any model files)
@@ -2227,7 +2229,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   holdRefreshes(): () => void {
     const held = [...this.openPanels.keys()].filter((key) => !this.pendingUpdates.get(key));
     for (const key of held) this.pendingUpdates.set(key, true);
-    return () => { for (const key of held) this.pendingUpdates.delete(key); };
+    // Watcher-driven refreshes and the duplicate warning wait too: they read
+    // the disk half-way through, when a converted table's .yml and .dbml
+    // both exist, and a warning shown then is never taken back.
+    this.refreshHolds++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.refreshHolds--;
+      for (const key of held) this.pendingUpdates.delete(key);
+    };
   }
 
   /**
@@ -3181,6 +3193,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * `date` table's columns. The warning names both files and offers the fix.
    */
   private warnAboutDuplicateTables(domain: UnifiedSubjectArea): void {
+    if (this.refreshHolds > 0) return;
     const used = new Set(domain.logical.models.map((m) => m.name.toLowerCase()));
     const rel = (p: string): string => this.tableLibraryService.libraryRelativePath(p);
     for (const entry of this.tableLibraryService.listTableFiles()) {
@@ -3655,6 +3668,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Stage-aware: panels viewing physical stage get physical data.
    */
   async refreshAllOpenSubjectAreas(): Promise<void> {
+    // Held (holdRefreshes): the command that holds redraws every canvas once it releases.
+    if (this.refreshHolds > 0) return;
     for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
       // The snapshot may include a panel that was disposed while an earlier
       // iteration awaited — skip it rather than refreshing a dead webview.
@@ -3689,6 +3704,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * cross-panel refresh has to be driven from here).
    */
   async refreshSubjectAreasReferencingTable(modelName: string, exceptPanelKey?: string): Promise<void> {
+    if (this.refreshHolds > 0) return;
     for (const [panelKey, { document, webview }] of Array.from(this.openPanels.entries())) {
       if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey)) {
         continue;
@@ -3719,6 +3735,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /** Redraw every open canvas of the diagram at `fsPath` (its layout file changed outside the editor). */
   async refreshSubjectAreaPanel(fsPath: string): Promise<void> {
+    if (this.refreshHolds > 0) return;
     for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
       if (this.disposedWebviews.has(webview) || !samePath(document.uri.fsPath, fsPath)) continue;
       try {

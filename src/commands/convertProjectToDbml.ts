@@ -397,6 +397,8 @@ async function runConversion(
     // (or else a new file, as text) is opened, so Edit > Undo has an editor of
     // the edit to undo from and nothing lands on top of it.
     const placed = new Set(plan.placedDiagrams.map((d) => path.resolve(abs(d))));
+    // A reopened canvas reads the library as it now is, not as listed mid-apply.
+    deps.tableLibraryService.invalidateCache();
     const reopened = await reopenConvertedCanvases(canvasTabs);
     const undoFrom: UndoFrom = reopened.length > 0
       ? (reopened.every((target) => placed.has(path.resolve(target))) ? 'diagram' : 'unplacedDiagram')
