@@ -297,9 +297,56 @@ describe('convertProjectToDbml', () => {
     expect(info.mock.calls.at(-1)![0]).toContain('with this file in front');
   });
 
+  /** Rewrite vault.json's positions: `undefined` drops viewConfig.positions, else keeps only the named tables. */
+  function vaultPositions(keep: string[] | undefined): void {
+    const file = path.join(erd, 'gold', 'vault.json');
+    const doc = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    if (keep === undefined) doc.viewConfig = {};
+    else doc.viewConfig.positions = Object.fromEntries(Object.entries(doc.viewConfig.positions).filter(([k]) => keep.includes(k)));
+    fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
+  }
+
+  it.each([
+    ['no positions (the canvas would run its ELK auto layout and save it)', undefined],
+    ['some positions (the canvas would place and save the rest)', ['pit_customer']],
+  ])('a converted diagram with %s is opened as text, never in the canvas, so no layout write lands on top of the conversion', async (_label, keep) => {
+    useFixture('composite-and-self');
+    vaultPositions(keep);
+    const plan = await planProjectDbmlConversion(deps());
+    expect(plan.placedDiagrams).toEqual([]);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined as never);
+    const show = vi.spyOn(vscode.window, 'showTextDocument').mockResolvedValue(undefined as never);
+    const info = answerConvert();
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    expect(exec.mock.calls.filter((c) => c[0] === 'vscode.openWith')).toEqual([]);
+    expect(show).toHaveBeenCalledTimes(1);
+    expect((show.mock.calls[0][0] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'vault.dbml'));
+    expect(info.mock.calls.at(-1)![0]).toContain('Edit > Undo, straight away, with this file in front, puts every file back.');
+  });
+
+  it('a fully placed converted diagram is in placedDiagrams (the one Convert may open in the canvas)', async () => {
+    useFixture('composite-and-self');
+    expect((await planProjectDbmlConversion(deps())).placedDiagrams).toEqual(['gold/vault.dbml']);
+  });
+
+  it('reopening a canvas whose diagram is not fully placed: the toast does not promise a one-step undo', async () => {
+    useFixture('composite-and-self');
+    vaultPositions(undefined);
+    const json = vscode.Uri.file(path.join(erd, 'gold', 'vault.json'));
+    const tab = { input: new vscode.TabInputCustom(json, 'erdStudio.domainEditor') };
+    (vscode.window.tabGroups as { all: unknown[] }).all = [{ tabs: [tab] }];
+    (vscode.window.tabGroups as unknown as { close: () => Promise<boolean> }).close = vi.fn(async () => true);
+    vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined as never);
+    const info = answerConvert();
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    const toast = info.mock.calls.at(-1)![0] as string;
+    expect(toast).not.toContain('straight away');
+    expect(toast).toContain(convertedUndoSentence('unplacedDiagram'));
+  });
+
   it('when nothing could be opened, the toast still says undo needs a converted file in front', async () => {
     expect(convertedUndoSentence(undefined)).toBe('Edit > Undo, straight away, with a converted file open in front, puts every file back.');
-    expect(CONVERT_UNDO_LINE).toContain('with the diagram Convert opens (or any converted file) in front');
+    expect(CONVERT_UNDO_LINE).toContain('with the diagram or file Convert opens (or any converted file) in front');
   });
 
   it('reopens the .dbml even when VS Code closed the deleted diagram\'s tab itself', async () => {

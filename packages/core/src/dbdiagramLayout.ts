@@ -322,14 +322,17 @@ function jsonEqual(a: unknown, b: unknown): boolean {
  * The new text of a DBML diagram's layout file (`<name>.dbdiagram`), or
  * `null` when nothing needs writing. ERD Studio owns two lists in it,
  * `defaultView.tablePositions` and `defaultView.stickyNoteLayouts`; every
- * other key and value is kept as parsed. An existing file keeps its own
- * style ({@link jsonStyleOf}): compact on one line or indented by its own
- * width (spaces or tabs), its line endings, its byte-order mark and whatever
- * it ends with. The two lists are merged into the file's entries, in its
- * order, so an entry that did not move keeps its keys, their order and
- * any key ERD Studio does not own: moving one table changes that table's
- * lines and nothing else. A new file is two-space JSON with a final line
- * break (so a file ERD Studio wrote round-trips byte for byte).
+ * other key and value is kept as written. The two lists are merged into
+ * the file's entries, in its order, so an entry that did not move keeps its
+ * keys, their order, any key ERD Studio does not own, its schema name and its
+ * unrounded coordinates. An existing file is edited as text
+ * ({@link spliceLists}): only the entries that changed are rewritten, each in
+ * the style of the entry it replaces (one line, or indented), so moving one
+ * table changes that table's lines and nothing else, whatever mix of styles
+ * the file is in. Only when a list or `defaultView` itself is missing is the
+ * whole file written again, in its own style ({@link jsonStyleOf}). A new file
+ * is two-space JSON with a final line break (so a file ERD Studio wrote
+ * round-trips byte for byte).
  *
  * - `oldText` `null` (no file): created only when there is at least one
  *   position or sticky layout.
@@ -402,6 +405,8 @@ export function editDiagramLayout(
   ) {
     return null;
   }
+  const spliced = hasView ? spliceLists(oldText, mergedTables, mergedStickies) : null;
+  if (spliced !== null) return spliced;
   view.tablePositions = mergedTables;
   view.stickyNoteLayouts = mergedStickies;
   file.defaultView = view;
@@ -415,9 +420,10 @@ const STICKY_LAYOUT_KEYS = ['name', 'x', 'y', 'width', 'height'] as const;
 /**
  * `wanted` (the whole new list, by `name`) laid over the file's `existing`
  * list: an existing entry still wanted stays where it is, keeps its other
- * keys and their order, and takes the owned keys' new values (an owned key
- * the new entry lacks is removed); one no longer wanted, unnamed or listed
- * twice is dropped; a new name is appended, in `wanted` order.
+ * keys and their order, and takes the owned keys' new values when they
+ * really changed (an owned key the new entry lacks is removed); one no
+ * longer wanted, unnamed or listed twice is dropped; a new name is appended,
+ * in `wanted` order.
  */
 function mergeEntries(
   existing: unknown,
@@ -436,16 +442,272 @@ function mergeEntries(
     const next = byName.get(name);
     if (!next) continue;
     // Owned keys keep their place; one the old entry lacked goes after its own keys.
+    // A value that did not really change is kept as written: a coordinate
+    // that rounds to the new one (dbdiagram writes unrounded floats), and a
+    // schema name (names here are unqualified, so the new one is always the
+    // default; the reader keeps the file's).
     const merged: Record<string, unknown> = { ...old };
     for (const key of owned) {
-      if (Object.prototype.hasOwnProperty.call(next, key)) merged[key] = next[key];
-      else delete merged[key];
+      if (!Object.prototype.hasOwnProperty.call(next, key)) {
+        delete merged[key];
+        continue;
+      }
+      const was = old[key];
+      const now = next[key];
+      if (key === 'schemaName' && typeof was === 'string' && was !== '') continue;
+      if (isFiniteNumber(was) && isFiniteNumber(now) && round(was) === now) continue;
+      merged[key] = now;
     }
     out.push(merged);
     placed.add(name);
   }
   for (const [name, entry] of byName) {
     if (!placed.has(name)) out.push({ ...entry });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Editing the layout file as text
+// ---------------------------------------------------------------------------
+
+/** Where a JSON value sits in the text: `[start, end)`. */
+interface JsonSpan {
+  start: number;
+  end: number;
+}
+
+/** An object member: its key and where its key and value sit. */
+interface JsonMemberSpan {
+  key: string;
+  keyStart: number;
+  value: JsonSpan;
+}
+
+const WHITESPACE = /[ \t\r\n﻿]/;
+
+function skipWhitespace(text: string, at: number): number {
+  while (at < text.length && WHITESPACE.test(text[at])) at++;
+  return at;
+}
+
+/** The end of the string starting at `at` (its opening quote). */
+function stringEnd(text: string, at: number): number {
+  let i = at + 1;
+  while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+  return i + 1;
+}
+
+/** The end of the JSON value starting at `at`. `text` is known to parse. */
+function valueEnd(text: string, at: number): number {
+  const c = text[at];
+  if (c === '"') return stringEnd(text, at);
+  if (c === '{' || c === '[') {
+    let depth = 0;
+    let i = at;
+    while (i < text.length) {
+      const ch = text[i];
+      if (ch === '"') { i = stringEnd(text, i); continue; }
+      if (ch === '{' || ch === '[') depth++;
+      else if (ch === '}' || ch === ']') {
+        depth--;
+        if (depth === 0) return i + 1;
+      }
+      i++;
+    }
+    return text.length;
+  }
+  let i = at;
+  while (i < text.length && !/[,\]}\s]/.test(text[i])) i++;
+  return i;
+}
+
+/** The members of the object whose `{` is at `at`. */
+function objectMembers(text: string, at: number): JsonMemberSpan[] {
+  const out: JsonMemberSpan[] = [];
+  let i = skipWhitespace(text, at + 1);
+  while (i < text.length && text[i] !== '}') {
+    const keyStart = i;
+    const keyEnd = stringEnd(text, i);
+    const key = JSON.parse(text.slice(keyStart, keyEnd)) as string;
+    i = skipWhitespace(text, keyEnd) + 1; // past ':'
+    const start = skipWhitespace(text, i);
+    const end = valueEnd(text, start);
+    out.push({ key, keyStart, value: { start, end } });
+    i = skipWhitespace(text, end);
+    if (text[i] === ',') i = skipWhitespace(text, i + 1);
+  }
+  return out;
+}
+
+/** The elements of the array whose `[` is at `at`. */
+function arrayElements(text: string, at: number): JsonSpan[] {
+  const out: JsonSpan[] = [];
+  let i = skipWhitespace(text, at + 1);
+  while (i < text.length && text[i] !== ']') {
+    const end = valueEnd(text, i);
+    out.push({ start: i, end });
+    i = skipWhitespace(text, end);
+    if (text[i] === ',') i = skipWhitespace(text, i + 1);
+  }
+  return out;
+}
+
+/** The value of `key` in the object at `at` (the last one, as `JSON.parse` reads a repeated key). */
+function memberValue(text: string, at: number, key: string): JsonSpan | undefined {
+  let found: JsonSpan | undefined;
+  for (const member of objectMembers(text, at)) if (member.key === key) found = member.value;
+  return found;
+}
+
+/** The white space that starts the line `at` is on. */
+function lineIndentAt(text: string, at: number): string {
+  const lineStart = text.lastIndexOf('\n', at - 1) + 1;
+  return /^[ \t]*/.exec(text.slice(lineStart))![0];
+}
+
+/** How one entry of a list is written, so a rewritten or added entry matches it. */
+type EntryStyle =
+  | { inline: true; pad: string; colon: string; comma: string }
+  | { inline: false; base: string; unit: string };
+
+/** The style of the object written at `span`. */
+function entryStyleOf(text: string, span: JsonSpan): EntryStyle {
+  const entry = text.slice(span.start, span.end);
+  if (!entry.includes('\n')) {
+    const members = objectMembers(text, span.start);
+    const first = members[0];
+    const pad = first ? text.slice(span.start + 1, first.keyStart) : '';
+    const keyEnd = first ? stringEnd(text, first.keyStart) : 0;
+    const colon = first ? text.slice(keyEnd, first.value.start) : ': ';
+    const comma = members[1] ? text.slice(first.value.end, members[1].keyStart) : ', ';
+    return { inline: true, pad, colon: colon.trim() === ':' ? colon : ': ', comma: comma.trim() === ',' ? comma : ', ' };
+  }
+  const base = lineIndentAt(text, span.end - 1);
+  const members = objectMembers(text, span.start);
+  const memberIndent = members[0] ? lineIndentAt(text, members[0].keyStart) : base + '  ';
+  const unit = memberIndent.startsWith(base) && memberIndent.length > base.length ? memberIndent.slice(base.length) : '  ';
+  return { inline: false, base, unit };
+}
+
+/** `entry` written in `style`, its continuation lines ending with `eol`. */
+function renderEntry(entry: Record<string, unknown>, style: EntryStyle, eol: string): string {
+  if (style.inline) {
+    const members = Object.entries(entry).map(([k, v]) => JSON.stringify(k) + style.colon + JSON.stringify(v));
+    return members.length === 0 ? '{}' : '{' + style.pad + members.join(style.comma) + style.pad + '}';
+  }
+  return JSON.stringify(entry, null, style.unit).split('\n').join(eol + style.base);
+}
+
+/**
+ * The text of `oldText` with `defaultView.tablePositions` and
+ * `defaultView.stickyNoteLayouts` replaced by `tables` and `stickies`,
+ * touching only what changed: an entry deep-equal to the one it replaces
+ * keeps its exact text, a changed one is rewritten in its own style, a new
+ * one is written like the list's last entry (or, in an empty list, like the
+ * other list's entries, else as the file is indented), and the white space
+ * between entries is the list's own. A missing list stays missing while it
+ * holds nothing, and is otherwise added as `defaultView`'s last key. `null`
+ * when the text is not laid out as expected (no `defaultView` object, or one
+ * with no keys, or a list that is not a list): the caller writes the whole
+ * file instead.
+ */
+function spliceLists(
+  oldText: string,
+  tables: Array<Record<string, unknown>>,
+  stickies: Array<Record<string, unknown>>,
+): string | null {
+  const root = skipWhitespace(oldText, 0);
+  if (oldText[root] !== '{') return null;
+  const viewSpan = memberValue(oldText, root, 'defaultView');
+  if (!viewSpan || oldText[viewSpan.start] !== '{') return null;
+  const viewMembers = objectMembers(oldText, viewSpan.start);
+  if (viewMembers.length === 0) return null;
+  const tableSpan = memberValue(oldText, viewSpan.start, 'tablePositions');
+  const stickySpan = memberValue(oldText, viewSpan.start, 'stickyNoteLayouts');
+  if ((tableSpan && oldText[tableSpan.start] !== '[') || (stickySpan && oldText[stickySpan.start] !== '[')) return null;
+
+  const { eol, indent: fileIndent } = jsonStyleOf(oldText);
+  const tableElements = tableSpan ? arrayElements(oldText, tableSpan.start) : [];
+  const stickyElements = stickySpan ? arrayElements(oldText, stickySpan.start) : [];
+  const lastStyle = (elements: JsonSpan[]): EntryStyle | undefined =>
+    elements.length > 0 && oldText[elements[elements.length - 1].start] === '{' ? entryStyleOf(oldText, elements[elements.length - 1]) : undefined;
+  const memberIndent = lineIndentAt(oldText, viewMembers[0].keyStart);
+
+  /** The new text of one list, given its old span (absent: the list is new). */
+  const rewrite = (span: JsonSpan | undefined, elements: JsonSpan[], wanted: Array<Record<string, unknown>>, otherElements: JsonSpan[]): string => {
+    const oldEntries = new Map<string, JsonSpan>();
+    for (const element of elements) {
+      if (oldText[element.start] !== '{') continue;
+      const name = memberValue(oldText, element.start, 'name');
+      if (!name || oldText[name.start] !== '"') continue;
+      const key = JSON.parse(oldText.slice(name.start, name.end)) as string;
+      if (!oldEntries.has(key)) oldEntries.set(key, element);
+    }
+    const keyIndent = span ? lineIndentAt(oldText, span.start) : memberIndent;
+    const newStyle: EntryStyle =
+      lastStyle(elements) ??
+      lastStyle(otherElements) ??
+      (fileIndent === undefined ? { inline: true, pad: '', colon: ':', comma: ',' } : { inline: false, base: keyIndent + fileIndent, unit: fileIndent });
+    const texts = wanted.map((entry) => {
+      const was = oldEntries.get(entry.name as string);
+      if (was) {
+        const oldEntry = JSON.parse(oldText.slice(was.start, was.end)) as unknown;
+        return jsonEqual(oldEntry, entry) ? oldText.slice(was.start, was.end) : renderEntry(entry, entryStyleOf(oldText, was), eol);
+      }
+      return renderEntry(entry, newStyle, eol);
+    });
+    if (texts.length === 0) return '[]';
+    let head: string;
+    let tail: string;
+    let sep: string;
+    if (span && elements.length > 0) {
+      head = oldText.slice(span.start + 1, elements[0].start);
+      tail = oldText.slice(elements[elements.length - 1].end, span.end - 1);
+      sep = elements.length > 1 ? oldText.slice(elements[0].end, elements[1].start) : ',' + head;
+    } else if (fileIndent === undefined) {
+      head = '';
+      tail = '';
+      sep = newStyle.inline ? newStyle.comma : ',';
+    } else {
+      const elementIndent = newStyle.inline ? keyIndent + fileIndent : newStyle.base;
+      head = eol + elementIndent;
+      tail = eol + keyIndent;
+      sep = ',' + head;
+    }
+    return '[' + head + texts.join(sep) + tail + ']';
+  };
+
+  // A new key goes after defaultView's last one, separated as its keys are.
+  const last = viewMembers[viewMembers.length - 1];
+  const memberSep = viewMembers.length > 1
+    ? oldText.slice(viewMembers[0].value.end, viewMembers[1].keyStart)
+    : ',' + oldText.slice(viewSpan.start + 1, viewMembers[0].keyStart);
+  const firstKeyEnd = stringEnd(oldText, viewMembers[0].keyStart);
+  const colon = oldText.slice(firstKeyEnd, viewMembers[0].value.start);
+
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+  const plan = (key: string, span: JsonSpan | undefined, elements: JsonSpan[], wanted: Array<Record<string, unknown>>, other: JsonSpan[]): void => {
+    if (span) {
+      edits.push({ start: span.start, end: span.end, text: rewrite(span, elements, wanted, other) });
+    } else if (wanted.length > 0) {
+      edits.push({ start: last.value.end, end: last.value.end, text: memberSep + JSON.stringify(key) + colon + rewrite(undefined, [], wanted, other) });
+    }
+  };
+  plan('tablePositions', tableSpan, tableElements, tables, stickyElements);
+  plan('stickyNoteLayouts', stickySpan, stickyElements, stickies, tableElements);
+  // Two inserts at one place: tables first, so apply the later-planned one first.
+  let out = oldText;
+  for (const edit of edits.map((e, i) => ({ ...e, i })).sort((a, b) => b.start - a.start || b.i - a.i)) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
+  }
+  // Belt and braces: the splice must say exactly what the merge decided.
+  try {
+    const check = JSON.parse(out.replace(/^﻿/, '')) as Record<string, unknown>;
+    const view = check.defaultView as Record<string, unknown>;
+    if (!jsonEqual(view.tablePositions ?? [], tables) || !jsonEqual(view.stickyNoteLayouts ?? [], stickies)) return null;
+  } catch {
+    return null;
   }
   return out;
 }

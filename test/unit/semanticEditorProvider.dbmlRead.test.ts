@@ -130,12 +130,16 @@ describe('a DBML diagram on the canvas', () => {
     const provider = buildProvider(root);
     const panel = await resolve(provider, openDoc('gold/sales.dbml'));
     const diagram = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    const layoutBefore = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8');
     await panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 10, y: 20 } } } });
     const errors = panel._postedMessages.filter((m) => (m as { type: string }).type === 'error');
     expect(errors).toEqual([]);
     expect(_appliedEdits).toHaveLength(1);
     expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(diagram);
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toContain('"name": "fct_order",\n        "schemaName": "public",\n        "x": 10,\n        "y": 20');
+    // Only the moved table's line changes, in the file's one-line style.
+    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(
+      layoutBefore.replace('{ "name": "fct_order", "schemaName": "public", "x": 400, "y": 200 }', '{ "name": "fct_order", "schemaName": "public", "x": 10, "y": 20 }'),
+    );
   });
 
   it('every handler reads a DBML diagram as a plain v5 object (D8): detectSubjectAreaFormat says v5', () => {

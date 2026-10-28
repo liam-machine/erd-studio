@@ -125,6 +125,13 @@ export interface DbmlConversionPlan {
   v4SubjectAreas: string[];
   /** Relationships a diagram file held, now in the library, and the other diagrams where they now also draw. */
   movedRelationships: Array<{ from: string; to: string; diagrams: string[] }>;
+  /**
+   * Converted diagrams (their new `.dbml` paths) whose layout places every one
+   * of their tables, so opening one in the canvas writes nothing: no ELK auto
+   * layout and no auto-placed new tables. Undo of the conversion is one step
+   * from such a canvas; any other diagram's first open saves a layout on top.
+   */
+  placedDiagrams: string[];
   summary: { tables: number; diagrams: number; relationshipsFiles: number; relationships: number };
 }
 
@@ -471,7 +478,7 @@ interface Dangling {
 
 function emptyPlan(): DbmlConversionPlan {
   return {
-    creates: [], replaces: [], deletes: [], resumed: [], refusals: [], notes: [], v4SubjectAreas: [], movedRelationships: [],
+    creates: [], replaces: [], deletes: [], resumed: [], refusals: [], notes: [], v4SubjectAreas: [], movedRelationships: [], placedDiagrams: [],
     summary: { tables: 0, diagrams: 0, relationshipsFiles: 0, relationships: 0 },
   };
 }
@@ -1107,6 +1114,12 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
       const stale = fileAt.get(layoutFilePathOf(d.target)) ?? fileAtLower.get(lower(layoutFilePathOf(d.target)));
       if (stale) refusals.push(`${stale.path} already exists, and ${d.file.path} has no positions or sticky notes to put in it, so the converted diagram would read that file's layout. Delete ${stale.path} (or move it), then convert.`);
     }
+    // Opening it writes nothing only when every table already has a place (isFreshLayout / computeMissingPositions read exact names).
+    const placed = (name: string): boolean => {
+      const p = Object.prototype.hasOwnProperty.call(positions, name) ? positions[name] : undefined;
+      return !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
+    };
+    if (members.every((m) => placed(m.name))) plan.placedDiagrams.push(d.target);
     diagramTargets.set(lower(d.target), d.file.path);
     plan.deletes.push(d.file.path);
   }

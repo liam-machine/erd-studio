@@ -308,10 +308,10 @@ describe('editDiagramLayout (a DBML diagram\'s layout file)', () => {
     expect(editDiagramLayout('{"version":"3.0.0","defaultView":{}}', {}, [])).toBeNull();
     expect(editDiagramLayout('{"version":"3.0.0"}', {}, [])).toBeNull();
     expect(editDiagramLayout('{"version":"3.0.0","defaultView":null}', {}, [])).toBeNull();
-    // A real change still writes, and the missing list is then written empty.
+    // A real change still writes; the missing list stays missing while it holds nothing.
     const moved = JSON.parse(editDiagramLayout(noStickies, { a: { x: 3, y: 2 } }, [])!);
     expect(moved.defaultView.tablePositions).toEqual([{ name: 'a', schemaName: 'public', x: 3, y: 2 }]);
-    expect(moved.defaultView.stickyNoteLayouts).toEqual([]);
+    expect(moved.defaultView.stickyNoteLayouts).toBeUndefined();
     const placed = JSON.parse(editDiagramLayout('{"version":"3.0.0"}', { a: { x: 1, y: 2 } }, [])!);
     expect(placed.defaultView.tablePositions).toEqual([{ name: 'a', schemaName: 'public', x: 1, y: 2 }]);
   });
@@ -332,7 +332,7 @@ describe('editDiagramLayout (a DBML diagram\'s layout file)', () => {
     expect(out.team).toEqual({ owner: 'x' });
     expect(out.defaultView.detailLevel).toBe('Keys');
     expect(out.defaultView.extra).toEqual([1, 2]);
-    expect(out.defaultView.stickyNoteLayouts).toEqual([]);
+    expect(out.defaultView.stickyNoteLayouts).toBeUndefined();
   });
 
   it('refuses a file that is not a JSON object, never regenerating it', () => {
@@ -430,6 +430,86 @@ describe('editDiagramLayout (a DBML diagram\'s layout file)', () => {
       const out = JSON.parse(editDiagramLayout(text, placed, [{ name: 'n1', x: 1, y: 2 }])!);
       expect(out.defaultView.stickyNoteLayouts).toEqual([{ name: 'n1', x: 1, y: 2, colour: 'y' }]);
     });
+  });
+
+  describe('edits the text, so a file in mixed styles changes only the lines that moved', () => {
+    // The repo's own native fixture: one-line entries inside an indented file (the style the harness shows assistants).
+    const NATIVE = path.resolve(__dirname, '../../../../test/fixtures/dbml-native/.erd-studio/gold/sales.dbdiagram');
+    const native = fs.readFileSync(NATIVE, 'utf-8');
+    const reading = readDbdiagramLayout(native);
+    const nativePositions = Object.fromEntries(reading.tables.map((t) => [t.name, { x: t.x, y: t.y }]));
+    const diffLines = (a: string, b: string): string[] => {
+      const la = a.split('\n');
+      const lb = b.split('\n');
+      expect(lb).toHaveLength(la.length);
+      return lb.filter((line, i) => line !== la[i]);
+    };
+
+    it('moving one table in the native fixture changes exactly its one line, in its one-line style', () => {
+      expect(editDiagramLayout(native, nativePositions, reading.stickies)).toBeNull();
+      const out = editDiagramLayout(native, { ...nativePositions, fct_order: { x: 410, y: 200 } }, reading.stickies)!;
+      expect(diffLines(native, out)).toEqual(['      { "name": "fct_order", "schemaName": "public", "x": 410, "y": 200 },']);
+    });
+
+    it('moving a sticky note changes its one line; resizing one adds its size on that line', () => {
+      const [a, b] = reading.stickies;
+      const out = editDiagramLayout(native, nativePositions, [a, { ...b, x: 1200, width: 100 }])!;
+      expect(diffLines(native, out)).toEqual(['      { "name": "9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f", "x": 1200, "y": 200, "width": 100 }']);
+    });
+
+    it('a new table is appended in the list\'s own one-line style; a removed one takes only its line', () => {
+      const grown = editDiagramLayout(native, { ...nativePositions, dim_store: { x: 9, y: 9 } }, reading.stickies)!;
+      expect(grown).toBe(native.replace(
+        '"x": 760, "y": 400 }\n',
+        '"x": 760, "y": 400 },\n      { "name": "dim_store", "schemaName": "public", "x": 9, "y": 9 }\n',
+      ));
+      const { bridge_empty: _gone, ...fewer } = nativePositions;
+      const shrunk = editDiagramLayout(native, fewer, reading.stickies)!;
+      expect(shrunk).toBe(native.replace(
+        ',\n      { "name": "bridge_empty", "schemaName": "public", "x": 760, "y": 400 }\n',
+        '\n',
+      ));
+    });
+
+    it('a file dbdiagram wrote: moving one table changes only its x, keeping other tables\' schema names and unrounded floats', () => {
+      const pulled = readDbdiagramLayout(pulledLayout);
+      const pulledPositions = Object.fromEntries(pulled.tables.map((t) => [t.name, { x: t.x, y: t.y }]));
+      expect(editDiagramLayout(pulledLayout, pulledPositions, [])).toBeNull();
+      const out = editDiagramLayout(pulledLayout, { ...pulledPositions, dim_project: { x: -600, y: 340 } }, [])!;
+      expect(diffLines(pulledLayout, out)).toEqual(['        "x": -600,']);
+      expect(out).toContain('"x": -202.669921875');
+      expect(out.match(/"schemaName": "silver"/g)).toHaveLength(pulledLayout.match(/"schemaName": "silver"/g)!.length);
+    });
+
+    it('an emptied list is written [], and an empty list gains entries in the other list\'s style', () => {
+      const cleared = editDiagramLayout(native, nativePositions, [])!;
+      expect(JSON.parse(cleared).defaultView.stickyNoteLayouts).toEqual([]);
+      expect(cleared).toContain('"stickyNoteLayouts": [],');
+      const refilled = editDiagramLayout(cleared, nativePositions, reading.stickies)!;
+      expect(refilled).toBe(native);
+    });
+
+    it('a missing sticky list stays missing while empty, and is added as defaultView\'s last key when needed', () => {
+      const hand = '{\n  "defaultView": {\n    "tablePositions": [\n      { "name": "a", "schemaName": "public", "x": 1, "y": 2 }\n    ]\n  }\n}\n';
+      expect(editDiagramLayout(hand, { a: { x: 3, y: 2 } }, [])).toBe(hand.replace('"x": 1', '"x": 3'));
+      const noted = editDiagramLayout(hand, { a: { x: 1, y: 2 } }, [{ name: 'n1', x: 5, y: 6 }])!;
+      expect(noted).toBe(
+        '{\n  "defaultView": {\n    "tablePositions": [\n      { "name": "a", "schemaName": "public", "x": 1, "y": 2 }\n    ],\n' +
+          '    "stickyNoteLayouts": [\n      { "name": "n1", "x": 5, "y": 6 }\n    ]\n  }\n}\n',
+      );
+    });
+  });
+
+  it('keeps an unmoved entry\'s own schema name and unrounded coordinates when another table moves', () => {
+    const text = JSON.stringify({ defaultView: { tablePositions: [
+      { name: 'a', schemaName: 'silver', x: 1.23456, y: 2 },
+      { name: 'b', schemaName: 'public', x: 10, y: 20 },
+    ], stickyNoteLayouts: [] } }, null, 2) + '\n';
+    const out = JSON.parse(editDiagramLayout(text, { a: { x: 1.23456, y: 2 }, b: { x: 11, y: 20 } }, [])!);
+    expect(out.defaultView.tablePositions).toEqual([
+      { name: 'a', schemaName: 'silver', x: 1.23456, y: 2 },
+      { name: 'b', schemaName: 'public', x: 11, y: 20 },
+    ]);
   });
 
   it('read(edit(x)) gives back the positions and the sticky layouts', () => {
