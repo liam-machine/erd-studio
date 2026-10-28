@@ -4,7 +4,7 @@
  * table and relationships files opened as `file:` documents are handed to
  * the text editor while other schemes are not, a DBML document is never
  * `JSON.parse`d, every handler sees a v5 object, a single-file DBML in a
- * layer folder offers Import DBML, and an edit is refused (writes come in S5).
+ * layer folder offers Import DBML, and an edit is written (S5).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -27,7 +27,6 @@ import { SelectorsService } from '../../src/services/selectorsService';
 import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
 import { telemetry } from '../../src/services/telemetryService';
 import { IMPORT_DBML_COMMAND } from '../../src/commands/importDbml';
-import { DBML_DIAGRAM_EDITING_NOT_AVAILABLE } from '../../src/providers/subjectAreaCodec';
 import type { ManifestService } from '../../src/services/manifestService';
 import type { YmlParserService } from '../../src/services/ymlParserService';
 import type { TemplateService } from '../../src/services/templateService';
@@ -109,12 +108,12 @@ describe('a DBML diagram on the canvas', () => {
     );
     expect(loaded.payload.relationships.length).toBeGreaterThanOrEqual(8);
     expect(loaded.payload.viewConfig.annotations).toHaveLength(2);
-    // The ready load never writes a DBML diagram's layout yet (S5).
+    // A fully laid out diagram: the ready load writes nothing.
     expect(_appliedEdits).toHaveLength(0);
     expect(panel._postedMessages.some((m) => (m as { type: string }).type === 'dbmlEmbeddedTables')).toBe(false);
   });
 
-  it('places a diagram with no layout file without writing one', async () => {
+  it('places a diagram with no layout file without writing one, and asks the canvas for an ELK layout (S5)', async () => {
     const provider = buildProvider(root);
     const panel = await resolve(provider, openDoc('silver/staging.dbml'));
     await panel._simulateMessage({ type: 'ready' });
@@ -122,23 +121,21 @@ describe('a DBML diagram on the canvas', () => {
     expect(Object.keys(loaded.payload.viewConfig.positions).sort()).toEqual(['dim_date', 'fct_order']);
     expect(fs.existsSync(at('silver/staging.dbdiagram'))).toBe(false);
     expect(_appliedEdits).toHaveLength(0);
-    // No ELK pass is asked for: its position save would be refused with a toast on open (S5 writes layouts).
-    expect((loaded as { autoLayout?: boolean }).autoLayout).toBeUndefined();
+    // A fresh layout: the webview's ELK pass persists through updatePositions, which writes the layout file.
+    expect((loaded as { autoLayout?: boolean }).autoLayout).toBe(true);
     expect(panel._postedMessages.some((m) => (m as { type: string }).type === 'error')).toBe(false);
   });
 
-  it('refuses an edit with the not-yet message, and writes nothing', async () => {
+  it('an edit is written (S5): a drag writes the layout file only, the diagram keeps its bytes', async () => {
     const provider = buildProvider(root);
     const panel = await resolve(provider, openDoc('gold/sales.dbml'));
-    const before = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8');
+    const diagram = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
     await panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 10, y: 20 } } } });
-    await panel._simulateMessage({ type: 'updateModelDescription', payload: { modelName: 'fct_order', description: 'changed' } });
-    const errors = panel._postedMessages.filter((m) => (m as { type: string }).type === 'error') as Array<{ payload: { message: string } }>;
-    expect(errors.length).toBeGreaterThanOrEqual(2);
-    for (const e of errors) expect(e.payload.message).toContain('not available yet');
-    expect(errors.some((e) => e.payload.message.includes(DBML_DIAGRAM_EDITING_NOT_AVAILABLE))).toBe(true);
-    expect(_appliedEdits).toHaveLength(0);
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(before);
+    const errors = panel._postedMessages.filter((m) => (m as { type: string }).type === 'error');
+    expect(errors).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(diagram);
+    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toContain('"name": "fct_order",\n        "schemaName": "public",\n        "x": 10,\n        "y": 20');
   });
 
   it('every handler reads a DBML diagram as a plain v5 object (D8): detectSubjectAreaFormat says v5', () => {
@@ -195,8 +192,8 @@ describe('a DBML diagram on the canvas', () => {
   });
 });
 
-describe('removing a DBML table from a JSON diagram (D16 until S5)', () => {
-  it('never offers or performs a bare delete of the .dbml file; a YAML table beside it is still offered', async () => {
+describe('removing a DBML table from a JSON diagram (D16)', () => {
+  it('offers the delete with its cascade, and runs it as one edit; a YAML table beside it keeps the plain prompt', async () => {
     fs.writeFileSync(at('tables/gold/dim_yaml.yml'), 'name: dim_yaml\ncolumns:\n  - name: id\n    dataType: INT\n');
     fs.writeFileSync(at('gold/mixed.json'), `${JSON.stringify({
       schemaVersion: 5, domain: 'mixed', layer: 'gold',
@@ -208,15 +205,20 @@ describe('removing a DBML table from a JSON diagram (D16 until S5)', () => {
       (String(m).includes('Delete the table file') ? items[0] : undefined)) as never);
 
     await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_customer'] } });
-    expect(info.mock.calls.some((c) => String(c[0]).includes('Delete the table file'))).toBe(false);
-    expect(fs.existsSync(at('tables/gold/dim_customer.dbml'))).toBe(true);
+    await vi.waitFor(() => expect(fs.existsSync(at('tables/gold/dim_customer.dbml'))).toBe(false));
+    // The replaced files are saved after the edit lands.
+    await vi.waitFor(() => expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).not.toMatch(/dim_customer/));
+    const prompt = info.mock.calls.find((c) => String(c[0]).includes('Delete the table file'));
+    expect(String(prompt?.[0])).toContain("This removes the table's file, its 3 relationships and its place in 1 other diagram.");
+    // Its Refs and every use line naming it are gone; the diagram that used it no longer does.
+    const relationships = fs.readFileSync(at('tables/gold/_relationships.dbml'), 'utf-8');
+    expect(relationships).not.toMatch(/dim_customer/);
 
     await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_yaml'] } });
     await vi.waitFor(() => expect(fs.existsSync(at('tables/gold/dim_yaml.yml'))).toBe(false));
-    expect(info.mock.calls.filter((c) => String(c[0]).includes('Delete the table file'))).toEqual([
+    expect(info.mock.calls.filter((c) => String(c[0]).includes('Delete the table file') && String(c[0]).includes('dim_yaml'))).toEqual([
       ['Table "dim_yaml" removed from this subject area. Delete the table file entirely?', 'Delete Table File', 'Keep File'],
     ]);
-    expect(fs.existsSync(at('tables/gold/dim_customer.dbml'))).toBe(true);
   });
 });
 

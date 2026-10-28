@@ -85,6 +85,7 @@ import { computeNewTablePositions, findOpenPosition } from '../services/position
 import {
   classifySemanticFile,
   computeMissingPositions,
+  diagramPathOfLayout,
   subjectAreaStorageOf,
   SubjectAreaValidationError,
   EMPTY_DBT_KEY_INDEX,
@@ -177,6 +178,7 @@ import {
   renameTableInSubjectAreaRelationships,
   renameTableInRelationships,
   routeToLibrary,
+  dropRelationshipsTo,
   sharedRelationshipCount,
   usesLibraryRelationships,
 } from '../services/libraryRelationships';
@@ -186,9 +188,12 @@ import { namingMigrationIsEmpty } from '../services/namingMigration';
 import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
-import { DBML_TABLE_EDITING_NOT_AVAILABLE, DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused, tablesDirIsLayer } from '../services/logicalModelService';
+import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused, tablesDirIsLayer } from '../services/logicalModelService';
+import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
+import type { FileWrite } from '../services/fileWrites';
+import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
+import { applyFileWrites } from './applyFileWrites';
 import {
-  DBML_DIAGRAM_EDITING_NOT_AVAILABLE,
   NotASubjectAreaObject,
   codecFor,
   isTableNamingDocument,
@@ -197,7 +202,7 @@ import {
   serialiseSubjectArea,
   subjectAreaFileObject,
 } from './subjectAreaCodec';
-import type { ParsedSubjectArea } from './subjectAreaCodec';
+import type { ParsedSubjectArea, SubjectAreaResolver } from './subjectAreaCodec';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
 import { normaliseName } from '../services/nameUtils';
 
@@ -382,7 +387,7 @@ class EditRefused extends Error {
 /** A refusal the user was told about in plain words, which usage telemetry does not count as a failure. */
 function isExplainedRefusal(err: unknown): boolean {
   return err instanceof EditRefused || err instanceof RelationshipsRewriteRefused || err instanceof DuplicateKeyWriteRefused
-    || err instanceof TableNamingWriteRefused || err instanceof DbmlTableWriteRefused;
+    || err instanceof TableNamingWriteRefused || err instanceof DbmlTableWriteRefused || err instanceof DbmlEditRefused;
 }
 
 import {
@@ -410,6 +415,7 @@ import {
   validateExportDiagramPayload,
   validateAnnotationUpdate,
   validateTableNameSafety,
+  validateNewDbmlTableName,
   validatePoint,
   validatePositions,
   validateAnalyzeFeedbackPayload,
@@ -1963,13 +1969,43 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Whether this project keeps relationships in the model library (#126) —
    * see `usesLibraryRelationships` for the opt-in rule.
    */
-  private relationshipsInLibrary(models: readonly SemanticTable[]): boolean {
+  private relationshipsInLibrary(models: readonly SemanticTable[], document?: vscode.TextDocument): boolean {
+    // A DBML diagram holds no relationships (D5): they live in the table library.
+    if (document && this.isDbmlDocument(document)) return true;
     const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
     return usesLibraryRelationships(
       models,
       this.subjectAreaService.countSubjectAreaFileRelationships(this.workspaceRoot, semanticDir),
       this.tableLibraryService.hasUnreadableRelationships(),
+      this.libraryHoldsDbml(),
     );
+  }
+
+  /**
+   * Whether the table library holds a DBML table or relationships file. A
+   * library double without the method (older tests) holds none.
+   */
+  private libraryHoldsDbml(): boolean {
+    const lib = this.tableLibraryService as Partial<Pick<import('../services/logicalModelService').TableLibraryService, 'hasDbmlLibrary'>>;
+    return typeof lib.hasDbmlLibrary === 'function' ? lib.hasDbmlLibrary.call(this.tableLibraryService) : false;
+  }
+
+  /**
+   * Why `name` cannot join the DBML diagram `document`, or null (D20, §2.1):
+   * an existing YAML table cannot (a `use` line cannot point at a `.yml`),
+   * and a new table may not be named like the relationships file. Null for a
+   * JSON diagram.
+   */
+  private dbmlMemberProblem(document: vscode.TextDocument, name: string): string | null {
+    if (!this.isDbmlDocument(document)) return null;
+    const storage = this.tableLibraryService.tableStorage(name);
+    if (storage === 'yaml') return `"${name}" is a YAML table, and a DBML diagram can only show DBML tables. ${DBML_CONVERT_FIRST_MESSAGE}.`;
+    return storage === undefined ? validateNewDbmlTableName(name) : null;
+  }
+
+  /** Whether `document` is a DBML diagram (`.dbml`). */
+  private isDbmlDocument(document: vscode.TextDocument): boolean {
+    return codecFor(document.uri.fsPath).storage === 'dbml';
   }
 
   /**
@@ -1982,6 +2018,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     added: readonly Relationship[],
     newModels: readonly SemanticTable[],
   ): { kept: Relationship[]; saves: SemanticTable[] } {
+    if (this.isDbmlDocument(document)) {
+      // A DBML diagram holds no relationships (D5): every one goes to the library.
+      const { kept, changed } = routeToLibrary(added, newModels, (name) => this.tableLibraryService.getTable(name), []);
+      if (kept.length > 0) console.warn(`[SemanticEditorProvider] ${kept.length} relationship(s) name a table with no file; not stored`);
+      return { kept: [], saves: [...newModels, ...changed.filter((m) => !newModels.includes(m))] };
+    }
     if (added.length === 0 || !this.relationshipsInLibrary(this.tableLibraryService.listTables())) {
       return { kept: [...added], saves: [...newModels] };
     }
@@ -2432,7 +2474,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const unsavedTables = await this.saveDirtyTableDocuments(panelKey, onSaveFailure);
     unsaved.push(...unsavedTables);
     if (unsaved.length > 0) {
-      const modelFile = unsavedTables.some((p) => /\.ya?ml$/i.test(p));
+      const modelFile = unsavedTables.some((p) => /\.(ya?ml|dbml|dbdiagram)$/i.test(p));
       for (const code of saveFailureCodes(saveFailures, { modelFile, undoRedo: true })) telemetry.error(code);
       void webview.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
     }
@@ -2513,9 +2555,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.refuseIfSubjectAreaFileGone(document);
     const text = document.getText();
     const file = this.parseSubjectAreaFile(document, text);
-    // A DBML diagram is read, not yet written (native DBML storage, S4):
-    // refused before anything is mutated or built.
-    if (file.storage === 'dbml') throw new EditRefused(DBML_DIAGRAM_EDITING_NOT_AVAILABLE);
     const parsed = file.parsed;
     const section = this.getStageSection(parsed, stage);
 
@@ -2524,6 +2563,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     } catch (err) {
       if (err instanceof EditAborted) return false;
       throw err;
+    }
+    // A DBML diagram, or a project whose library holds DBML (native DBML
+    // storage, §5.3): planned against the library and applied by
+    // applyFileWrites. A YAML/JSON project keeps the path below unchanged.
+    if (file.storage === 'dbml' || this.libraryHoldsDbml()
+      || (options.otherDomains !== undefined && this.listOtherSubjectAreas(document.uri.fsPath).some((s) => s.storage === 'dbml'))) {
+      return this.applyStorageEdit(document, file, text, options);
     }
     // A model file open with unsaved edits would be replaced by text rendered
     // from disk: refuse by name (the handler reports it), before anything is written.
@@ -2644,6 +2690,273 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return true;
   }
 
+  /** Every diagram of the project except `currentPath`. */
+  private listOtherSubjectAreas(currentPath: string): import('../types/semantic').SubjectAreaSummary[] {
+    const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
+    return this.subjectAreaService.listSubjectAreas(this.workspaceRoot, semanticDir).filter((s) => !samePath(s.filePath, currentPath));
+  }
+
+  /** A file's text: an open document's (unsaved edits included), else the disk's; null when there is none. */
+  private openOrDiskText(filePath: string): string | null {
+    const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && samePath(d.uri.fsPath, filePath));
+    if (doc) return doc.getText();
+    try {
+      return fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
+  /** A writer's refusal (`DbmlEditRefused`) as the toast the handlers show; anything else as it is. */
+  private refusalOf(err: unknown): unknown {
+    if (err instanceof DbmlEditRefused) return new EditRefused(err.message);
+    return err;
+  }
+
+  /** Whether `filePath` is inside a table library folder (`tables/`, `logical-models/`). */
+  private isLibraryPath(filePath: string): boolean {
+    const semanticRoot = path.dirname(this.tableLibraryService.getTablesDir());
+    const rel = path.relative(semanticRoot, filePath).split(path.sep);
+    return rel.length > 1 && (rel[0] === 'tables' || rel[0] === 'logical-models');
+  }
+
+  /**
+   * The {@link SubjectAreaResolver} of a library plan: tables, relationships
+   * files and file existence as the plan leaves them, and the tables whose
+   * file moved, was renamed or was deleted (old and new names).
+   */
+  private resolverOf(plan: DbmlLibraryWritePlan): SubjectAreaResolver {
+    const pathChanged = new Set<string>();
+    for (const [oldName, newPath] of plan.pathChanged) {
+      pathChanged.add(oldName.toLowerCase());
+      if (newPath !== null) pathChanged.add(path.posix.basename(newPath).replace(/\.dbml$/i, '').toLowerCase());
+    }
+    return {
+      semanticRoot: path.dirname(this.tableLibraryService.getTablesDir()),
+      resolveTable: (name) => plan.resolveTable(name),
+      relationshipsFilesFor: (names) => plan.relationshipsFilesFor(names),
+      fileExists: (relPath) => plan.fileExists(relPath),
+      ...(pathChanged.size > 0 ? { pathChanged } : {}),
+    };
+  }
+
+  /**
+   * {@link applySubjectAreaEdit} for a DBML diagram, or a project whose
+   * library holds DBML (§5.3): the library writes are planned
+   * (`planTableWrites`), the diagram is rendered against the library as the
+   * edit leaves it, other diagrams the edit renames in are re-rendered, and
+   * every other DBML diagram whose `use` lines the edit invalidates is
+   * settled — all in ONE WorkspaceEdit applied by `applyFileWrites`, with
+   * the primary's replace first so the step undoes as one.
+   */
+  private async applyStorageEdit(
+    document: vscode.TextDocument,
+    file: ParsedSubjectArea,
+    text: string,
+    options: Parameters<SemanticEditorProvider['applySubjectAreaEdit']>[2],
+  ): Promise<boolean> {
+    const { refreshWebview = true, webview, modelFiles, errorLabel, onSuccess } = options;
+    const panelKey = document.uri.toString();
+    const fsPath = document.uri.fsPath;
+    const readText = (filePath: string): string | null => this.openOrDiskText(filePath);
+
+    let primaryText: string;
+    let writes: FileWrite[];
+    let plan: DbmlLibraryWritePlan;
+    let tableWrites: FileWrite[];
+    try {
+      const lib = this.tableLibraryService.planTableWrites(
+        modelFiles,
+        modelFiles?.save?.length ? this.newTableFolder(fsPath) : undefined,
+        { dbml: file.storage === 'dbml', readText },
+      );
+      tableWrites = lib.writes;
+      plan = lib.plan ?? this.tableLibraryService.planTableWrites(undefined, undefined, { dbml: true, readText }).plan!;
+      const resolver = this.resolverOf(plan);
+      const [primary, ...layout] = codecFor(fsPath).render(file, text, fsPath, resolver);
+      primaryText = primary.kind === 'delete' ? text : primary.text;
+      const others = options.otherDomains ? this.rewriteOtherSubjectAreaWrites(fsPath, options.otherDomains, resolver) : [];
+      const rewritten = new Set(others.map((w) => (w.path.toLowerCase().endsWith('.dbdiagram') ? diagramPathOfLayout(w.path) : w.path)));
+      const settled = this.settleDbmlDiagrams(fsPath, rewritten, plan, resolver);
+      writes = [...layout, ...tableWrites, ...others, ...settled];
+    } catch (err) {
+      throw this.refusalOf(err);
+    }
+    // Any file this edit writes that is open with unsaved changes would be
+    // replaced under the user's work: refused by name, before anything is written.
+    const dirty = dirtyFiles(writes.map((w) => w.path).filter((p) => !samePath(p, fsPath)));
+    if (dirty.length > 0) {
+      const name = path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/');
+      throw new EditRefused(`${name} has unsaved changes. Save or revert it, then try again.`);
+    }
+
+    this.pendingUpdates.set(panelKey, true);
+    let applied: Awaited<ReturnType<typeof applyFileWrites>>;
+    try {
+      applied = await applyFileWrites(writes, {
+        primary: { document, text: primaryText },
+        ensureDir: (filePath) => { if (this.isLibraryPath(filePath)) this.tableLibraryService.ensureDir(filePath); },
+      });
+      if (!applied.ok) {
+        telemetry.error('editRejected');
+        if (errorLabel && webview) {
+          webview.postMessage({ type: 'error', payload: { message: errorLabel } });
+        }
+        return false;
+      }
+      options.onApplied?.();
+      const unsaved: string[] = [];
+      const saveFailures = new Set<SaveFailure>();
+      const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
+      let modelFileUnsaved = false;
+      if (await saveDocument(document, onSaveFailure)) {
+        this.ownWriteTracker.recordWrite(fsPath);
+      } else {
+        unsaved.push(fsPath);
+      }
+      for (const filePath of applied.created) this.ownWriteTracker.recordWrite(filePath);
+      for (const filePath of applied.deleted) this.ownWriteTracker.recordDelete(filePath);
+      const ourPaths = this.editedTablePaths.get(panelKey) ?? new Set<string>();
+      for (const uri of applied.replaced) {
+        // Remember what WE edited for this diagram, layout files included, so
+        // an undo/redo only ever flushes those.
+        ourPaths.add(uri.fsPath);
+        if (await saveDocumentByUri(uri, onSaveFailure)) {
+          this.ownWriteTracker.recordWrite(uri.fsPath);
+        } else {
+          unsaved.push(uri.fsPath);
+          if (this.isLibraryPath(uri.fsPath)) modelFileUnsaved = true;
+        }
+      }
+      for (const filePath of applied.created) ourPaths.add(filePath);
+      if (ourPaths.size > 0) this.editedTablePaths.set(panelKey, ourPaths);
+      if (unsaved.length > 0) {
+        for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
+        options.onUnsaved?.();
+        webview?.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
+      }
+      this.tableLibraryService.invalidateCache();
+      if (refreshWebview && webview) {
+        await this.sendSubjectAreaData(document, webview);
+      }
+    } finally {
+      this.pendingUpdates.delete(panelKey);
+    }
+
+    const touchedModels = [
+      ...(modelFiles?.save ?? []).map((entry) => entry.model.name),
+      ...(modelFiles?.delete ?? []),
+    ];
+    for (const name of new Set(touchedModels)) {
+      await this.refreshSubjectAreasReferencingTable(name, panelKey);
+    }
+    this._onDidWriteSubjectArea.fire({
+      uri: document.uri,
+      modelLibraryChanged: applied.created.length > 0 || applied.deleted.length > 0,
+    });
+    // Other diagrams this edit wrote (a layout path maps to its diagram).
+    const otherDiagrams = new Set<string>();
+    for (const w of writes) {
+      if (w.kind === 'delete' || this.isLibraryPath(w.path)) continue;
+      const diagram = w.path.toLowerCase().endsWith('.dbdiagram') ? diagramPathOfLayout(w.path) : w.path;
+      if (!samePath(diagram, fsPath)) otherDiagrams.add(diagram);
+    }
+    for (const diagram of otherDiagrams) {
+      const uri = vscode.Uri.file(diagram);
+      this._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: false });
+      const other = this.openPanels.get(uri.toString());
+      if (other && !this.disposedWebviews.has(other.webview)) await this.sendSubjectAreaData(other.document, other.webview, uri.toString());
+    }
+
+    onSuccess?.();
+    return true;
+  }
+
+  /**
+   * {@link rewriteOtherSubjectAreas} for every diagram format (§5.3 step 3):
+   * each other diagram, parsed from its open document or the disk, run
+   * through `rewrite`, and the ones it changes rendered against the library
+   * as the edit leaves it. Throws, naming it, when a file it would change is
+   * open with unsaved edits.
+   */
+  private rewriteOtherSubjectAreaWrites(
+    currentPath: string,
+    rewrite: (parsed: Record<string, unknown>) => boolean,
+    resolver: SubjectAreaResolver,
+  ): FileWrite[] {
+    const out: FileWrite[] = [];
+    for (const summary of this.listOtherSubjectAreas(currentPath)) {
+      if (summary.storage !== 'dbml') {
+        for (const { filePath, text } of this.rewriteOtherSubjectAreas(currentPath, rewrite, [summary])) {
+          out.push({ kind: 'replace', path: filePath, text });
+        }
+        continue;
+      }
+      const original = this.openOrDiskText(summary.filePath);
+      if (original === null) continue;
+      let file: ParsedSubjectArea;
+      try {
+        file = codecFor(summary.filePath).parse(original, summary.filePath, readLayoutText(summary.filePath));
+      } catch {
+        continue;
+      }
+      if (!rewrite(file.parsed)) continue;
+      const rendered = codecFor(summary.filePath).render(file, original, summary.filePath, resolver);
+      const changed = rendered.filter((w, i) => i > 0 || (w.kind !== 'delete' && w.text !== original));
+      if (changed.length === 0) continue;
+      const dirty = dirtyFiles(changed.map((w) => w.path));
+      if (dirty.length > 0) {
+        const name = path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/');
+        throw new EditRefused(`${name} has unsaved changes. Save or revert it, then try again.`);
+      }
+      out.push(...changed);
+    }
+    return out;
+  }
+
+  /**
+   * The settle pass (§5.3 step 4): every other DBML diagram with a member
+   * in a folder whose relationships file the plan creates, or a member whose
+   * file the plan moves, renames or deletes, re-rendered with no change of
+   * its own, so its `use` lines stay valid in the same WorkspaceEdit.
+   */
+  private settleDbmlDiagrams(currentPath: string, skip: ReadonlySet<string>, plan: DbmlLibraryWritePlan, resolver: SubjectAreaResolver): FileWrite[] {
+    if (plan.createdRelationshipsFiles.length === 0 && plan.pathChanged.size === 0) return [];
+    const created = new Set(plan.createdRelationshipsFiles);
+    const out: FileWrite[] = [];
+    for (const summary of this.listOtherSubjectAreas(currentPath)) {
+      if (summary.storage !== 'dbml' || skip.has(summary.filePath)) continue;
+      const original = this.openOrDiskText(summary.filePath);
+      if (original === null) continue;
+      let file: ParsedSubjectArea;
+      try {
+        file = codecFor(summary.filePath).parse(original, summary.filePath, readLayoutText(summary.filePath));
+      } catch {
+        continue;
+      }
+      const logical = (file.parsed.logical ?? {}) as { models?: unknown };
+      const members = Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
+      const affected = members.some((m) => plan.pathChanged.has(m.toLowerCase())
+        || plan.relationshipsFilesFor([m]).some((f) => created.has(f)));
+      if (!affected) continue;
+      try {
+        const [primary] = codecFor(summary.filePath).render(file, original, summary.filePath, { ...resolver, refreshRelationshipsUses: true });
+        if (primary.kind !== 'delete' && primary.text !== original) out.push(primary);
+      } catch (err) {
+        // A diagram the writer will not touch (it does not read, or holds a second Project) is left as it is.
+        console.warn(`[SemanticEditorProvider] ${path.basename(summary.filePath)} left as it is: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (out.length > 0) {
+      const dirty = dirtyFiles(out.map((w) => w.path));
+      if (dirty.length > 0) {
+        const name = path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/');
+        throw new EditRefused(`${name} has unsaved changes. Save or revert it, then try again.`);
+      }
+    }
+    return out;
+  }
+
   /**
    * The other v5 domain files `rewrite` changes, with their new text (#133
    * L5). Read from disk, as the next canvas load would; a file that does not
@@ -2653,11 +2966,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private rewriteOtherSubjectAreas(
     currentPath: string,
     rewrite: (parsed: Record<string, unknown>) => boolean,
+    summaries?: readonly import('../types/semantic').SubjectAreaSummary[],
   ): Array<{ filePath: string; text: string }> {
     const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
     const out: Array<{ filePath: string; text: string }> = [];
-    for (const summary of this.subjectAreaService.listSubjectAreas(this.workspaceRoot, semanticDir)) {
+    for (const summary of summaries ?? this.subjectAreaService.listSubjectAreas(this.workspaceRoot, semanticDir)) {
       if (samePath(summary.filePath, currentPath)) continue;
+      // A `.dbml` diagram is never JSON.parse'd here (rewriteOtherSubjectAreaWrites renders it).
+      if (summary.storage === 'dbml') continue;
       let original: string;
       let parsed: Record<string, unknown>;
       try {
@@ -2959,16 +3275,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // edit, one undo step). The simple placement below still goes out in the
       // payload so the first paint is never at (0,0), but it is not written:
       // should the ELK run fail, the next open simply asks again.
-      // A DBML diagram's layout is not written yet (S5): its computed positions
-      // are shown, never persisted, and no ELK pass is asked for, since its
-      // `updatePositions` would be refused with a toast before the user did anything.
-      const dbml = subjectAreaStorageOf(document.uri.fsPath) === 'dbml';
-      const autoLayout = activeStage === 'logical' && !dbml && isFreshLayout(unifiedDomain);
+      // A DBML diagram's positions live in its layout file (`.dbdiagram`),
+      // written the same way.
+      const autoLayout = activeStage === 'logical' && isFreshLayout(unifiedDomain);
 
       // Auto-assign positions for models that lack them (e.g. added by AI agents)
       const computed = this.computeMissingPositions(unifiedDomain);
       if (computed) {
-        if (options.persistPositions && !autoLayout && !dbml) {
+        if (options.persistPositions && !autoLayout) {
           const positionsWritten = await this.autoPositionNewTables(document, computed);
           if (positionsWritten) {
             // Re-read since we wrote new positions to the file
@@ -2999,7 +3313,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           ...this.manifestHintFlag(),
           ...this.logicalOnlyFlag(),
         });
-        if (dbml && this.holdsOwnTables(document)) {
+        if (subjectAreaStorageOf(document.uri.fsPath) === 'dbml' && this.holdsOwnTables(document)) {
           // A single-file DBML dropped into a layer folder (§2.5): offer Import.
           this.post(webview, { type: 'dbmlEmbeddedTables' });
         }
@@ -3350,6 +3664,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const inDomain = modelNames.find((n) => sameName(n, model.name));
         if (inDomain !== undefined) {
           webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this subject area.` } });
+          return;
+        }
+        // A table added through a DBML diagram is a new `.dbml` file (D20), never named like the relationships file.
+        const reserved = this.isDbmlDocument(document) ? validateNewDbmlTableName(model.name) : null;
+        if (reserved) {
+          webview.postMessage({ type: 'error', payload: { message: `Failed to add table: ${reserved}` } });
           return;
         }
         // The model library is shared across domains — never overwrite a
@@ -3935,7 +4255,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const parsed = this.parseSubjectAreaDocument(document);
     const v5 = this.isSubjectAreaV5(parsed);
     const models = v5 ? this.tableLibraryService.listTables() : [];
-    const home = v5 && this.relationshipsInLibrary(models) ? 'library' : 'domain';
+    // A DBML diagram always stores relationships in the library (D5).
+    const home = v5 && this.relationshipsInLibrary(models, document) ? 'library' : 'domain';
     const dbt = await this.loadDbtKeyIndex();
     // Filled by the mutator, which applySubjectAreaEdit runs before it reads modelFiles.
     const save: Array<{ model: SemanticTable }> = [];
@@ -3974,7 +4295,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           if (typeof marked === 'string') throw new EditRefused(marked.replace('{was}', ops[0].kind === 'add' ? 'added' : 'changed'));
           (section.models as SemanticTable[])[inline] = marked;
         }
-        if (plan.domainRelationships) section.relationships = plan.domainRelationships;
+        if (plan.domainRelationships) {
+          // A DBML diagram's object never holds relationships; the writer refuses any.
+          if (home === 'library' && this.isDbmlDocument(document) && plan.domainRelationships.length > 0) {
+            throw new EditRefused('A DBML diagram holds no relationships; they live in the table library.');
+          }
+          section.relationships = plan.domainRelationships;
+        }
         save.push(...plan.changed.map((model) => ({ model })));
         grouped = plan.grouped;
       },
@@ -4049,6 +4376,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const existingModel = this.tableLibraryService.getTable(payload.oldName);
         if (!existingModel) {
           webview.postMessage({ type: 'error', payload: { message: this.tableUnavailableMessage(payload.oldName) } });
+          return;
+        }
+        // A DBML table's new file name may not be the relationships file's (§2.1).
+        const reserved = this.tableLibraryService.tableStorage(payload.oldName) === 'dbml' ? validateNewDbmlTableName(trimmedNew) : null;
+        if (reserved) {
+          webview.postMessage({ type: 'error', payload: { message: reserved } });
           return;
         }
         const renamedModel: import('../types/semantic').SemanticTable = { ...existingModel, name: trimmedNew };
@@ -4215,18 +4548,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         this.selectorsService.scheduleRegenerate();
 
-        // Single batched prompt for any underlying .yml files. A `.dbml`
-        // table is never offered: deleting it bare would leave its Refs and
-        // every `use` line naming it dangling, which breaks those files for
-        // other DBML tools (D16). Its cascade comes with the DBML writes (S5).
-        const filesToOffer = [...namesSet].filter((name) =>
-          this.tableLibraryService.tableExists(name) && this.tableLibraryService.tableStorage(name) !== 'dbml',
-        );
+        // Single batched prompt for any underlying table files. A `.dbml`
+        // table's file goes with its relationships and every use line that
+        // names it, in diagrams and relationships files (D16).
+        const filesToOffer = [...namesSet].filter((name) => this.tableLibraryService.tableExists(name));
         if (filesToOffer.length > 0) {
           const fileIsSingle = filesToOffer.length === 1;
+          const dbmlNames = filesToOffer.filter((name) => this.tableLibraryService.tableStorage(name) === 'dbml');
+          const cascade = dbmlNames.length > 0 ? this.describeDbmlDeleteCascade(dbmlNames) : '';
           const prompt = fileIsSingle
-            ? `Table "${filesToOffer[0]}" removed from this subject area. Delete the table file entirely?`
-            : `${filesToOffer.length} tables removed from this subject area. Delete their table files entirely?`;
+            ? `Table "${filesToOffer[0]}" removed from this subject area. Delete the table file entirely?${cascade}`
+            : `${filesToOffer.length} tables removed from this subject area. Delete their table files entirely?${cascade}`;
           const deleteLabel = fileIsSingle ? 'Delete Table File' : 'Delete Table Files';
           const keepLabel = fileIsSingle ? 'Keep File' : 'Keep Files';
           void vscode.window
@@ -4234,14 +4566,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             .then(async (choice) => {
               if (choice !== deleteLabel) return;
               // Captured before the delete: afterwards the folder is unknowable.
-              // Re-checked here: the prompt may have waited while a file changed.
-              if (filesToOffer.some((name) => this.tableLibraryService.tableStorage(name) === 'dbml')) {
-                void vscode.window.showErrorMessage(DBML_TABLE_EDITING_NOT_AVAILABLE);
-                return;
-              }
               const filePaths = filesToOffer.map((name) => this.tableLibraryService.tablePath(name));
               const shownPaths = filesToOffer.map((name) => this.libraryRelativePath(name));
               const deleteFiles = async (): Promise<void> => {
+                // A DBML table: the D16 cascade, one WorkspaceEdit through applyFileWrites.
+                if (filesToOffer.some((name) => this.tableLibraryService.tableStorage(name) === 'dbml')) {
+                  let ok: boolean;
+                  try {
+                    ok = await this.deleteTablesWithCascade(filesToOffer);
+                  } catch (err) {
+                    void vscode.window.showErrorMessage(`Could not delete ${shownPaths.join(', ')}: ${err instanceof Error ? err.message : String(err)}`);
+                    return;
+                  }
+                  if (ok) {
+                    vscode.window.showInformationMessage(fileIsSingle ? `Deleted ${shownPaths[0]}` : `Deleted ${filesToOffer.length} table files`);
+                    return;
+                  }
+                  const again = await vscode.window.showErrorMessage(tableFileDeleteFailedMessage(shownPaths), 'Try Again');
+                  if (again === 'Try Again') await deleteFiles();
+                  return;
+                }
                 // Delete through a WorkspaceEdit so VS Code snapshots the files
                 // and the deletion is undoable, rather than a bare unlink.
                 const deleteEdit = new vscode.WorkspaceEdit();
@@ -4293,6 +4637,79 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       console.error(`[SemanticEditorProvider] Remove ${errorLabel} failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${errorLabel}: ${message}` } });
     }
+  }
+
+  /** What deleting DBML tables also removes, for the Delete Table File prompt (D16). */
+  private describeDbmlDeleteCascade(names: readonly string[]): string {
+    const lowerNames = new Set(names.map((n) => n.toLowerCase()));
+    let relationships = 0;
+    for (const model of this.tableLibraryService.listTables()) {
+      for (const rel of model.relationships ?? []) {
+        if (lowerNames.has(model.name.toLowerCase()) || lowerNames.has(rel.toModel.toLowerCase())) relationships++;
+      }
+    }
+    let diagrams = 0;
+    for (const summary of this.listOtherSubjectAreas('')) {
+      if (summary.storage !== 'dbml') continue;
+      const members = subjectAreaTableNames(this.openOrDiskText(summary.filePath) ?? '', summary.filePath) ?? [];
+      if (members.some((m) => lowerNames.has(m.toLowerCase()))) diagrams++;
+    }
+    const rels = `${relationships} relationship${relationships === 1 ? '' : 's'}`;
+    const places = `${diagrams} other diagram${diagrams === 1 ? '' : 's'}`;
+    return ` This removes the table's file, its ${rels} and its place in ${places}.`;
+  }
+
+  /**
+   * Delete Table File for tables that include DBML ones (D16): the files,
+   * the Refs they own, other DBML owners' Refs to them, and every `use` line
+   * naming them (relationships files and diagrams, with their positions and
+   * sticky-note links), as ONE WorkspaceEdit (its own undo step). Returns
+   * false when VS Code did not apply it (reconciled by applyFileWrites).
+   */
+  private async deleteTablesWithCascade(names: readonly string[]): Promise<boolean> {
+    const lowerNames = new Set(names.map((n) => n.toLowerCase()));
+    const readText = (filePath: string): string | null => this.openOrDiskText(filePath);
+    // Other DBML owners lose their relationships to the deleted tables.
+    const saves: SemanticTable[] = [];
+    for (const model of this.tableLibraryService.listTables()) {
+      if (lowerNames.has(model.name.toLowerCase()) || this.tableLibraryService.tableStorage(model.name) !== 'dbml') continue;
+      let copy = model;
+      for (const name of names) copy = dropRelationshipsTo([copy], name)[0] ?? copy;
+      if (copy !== model) saves.push(copy);
+    }
+    let writes: FileWrite[];
+    try {
+      const lib = this.tableLibraryService.planTableWrites({ delete: [...names], save: saves.map((model) => ({ model })) }, undefined, { readText });
+      const plan = lib.plan ?? this.tableLibraryService.planTableWrites(undefined, undefined, { dbml: true, readText }).plan!;
+      const resolver = this.resolverOf(plan);
+      const diagrams = this.rewriteOtherSubjectAreaWrites('', (parsed) => {
+        const logical = (parsed.logical ?? {}) as Record<string, unknown>;
+        const models = Array.isArray(logical.models) ? (logical.models as unknown[]) : [];
+        const removed = new Set(models.filter((m): m is string => typeof m === 'string' && lowerNames.has(m.toLowerCase())));
+        if (removed.size === 0) return false;
+        logical.models = models.filter((m) => !(typeof m === 'string' && removed.has(m)));
+        pruneViewConfigForRemovedTables(parsed, removed);
+        return true;
+      }, resolver);
+      writes = [...lib.writes, ...diagrams.filter((w) => w.path.toLowerCase().endsWith('.dbml') || w.path.toLowerCase().endsWith('.dbdiagram'))];
+    } catch (err) {
+      throw this.refusalOf(err);
+    }
+    const dirty = dirtyFiles(writes.map((w) => w.path));
+    if (dirty.length > 0) {
+      throw new EditRefused(`${path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again.`);
+    }
+    const applied = await applyFileWrites(writes, {});
+    if (!applied.ok) return false;
+    for (const uri of applied.replaced) {
+      if (await saveDocumentByUri(uri)) this.ownWriteTracker.recordWrite(uri.fsPath);
+    }
+    for (const filePath of applied.created) this.ownWriteTracker.recordWrite(filePath);
+    for (const filePath of applied.deleted) this.ownWriteTracker.recordDelete(filePath);
+    this.tableLibraryService.invalidateCache();
+    await this.refreshAllOpenSubjectAreas();
+    for (const uri of applied.replaced) this._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: true });
+    return true;
   }
 
   /** Single-relationship removal — thin wrapper over the batch handler. */
@@ -4620,6 +5037,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
         const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
         let seededModel: import('../types/semantic').SemanticTable | undefined;
+        const dbmlProblem = this.dbmlMemberProblem(document, payload.modelName);
+        if (dbmlProblem) {
+          webview.postMessage({ type: 'error', payload: { message: `Failed to add table: ${dbmlProblem}` } });
+          return;
+        }
         if (!this.tableLibraryService.tableExists(payload.modelName)) {
           const seed = seedTableFromDbt(payload.modelName, ymlData, manifest, await this.loadCatalog());
           if (!seed) {
@@ -4920,6 +5342,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
+      const dbmlProblems = draft.modelNames.map((name) => this.dbmlMemberProblem(document, name)).filter((m): m is string => m !== null);
+      if (dbmlProblems.length > 0) {
+        this.post(webview, { type: 'error', payload: { message: `No tables were added${from}. ${dbmlProblems[0]}${dbmlProblems.length > 1 ? ` (and ${dbmlProblems.length - 1} more)` : ''}` } });
+        return;
+      }
       const routed = this.routeAddedRelationships(document, draft.relationships, draft.newModels);
       await this.applySubjectAreaEdit(
         document,

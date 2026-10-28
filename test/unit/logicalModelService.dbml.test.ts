@@ -3,8 +3,8 @@
  * docs/plans/native-dbml-storage.md): `.dbml` tables listed beside `.yml`
  * ones, looked up from the directory listing in core's candidate order, read
  * through one private reader with their relationships attached from every
- * relationships file, cached, and refused for writing until the editor
- * pipeline writes DBML (S5).
+ * relationships file, cached, and written outside the editor through the
+ * DBML library planner (S5).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -328,18 +328,41 @@ describe('DBML TableFileErrors', () => {
   });
 });
 
-describe('writes are refused until the editor pipeline writes DBML (S5)', () => {
-  it('saveTable, serializeTable, deleteTable and renameTable refuse a .dbml table and touch nothing', () => {
-    const file = write('tables/dim_date.dbml', dbmlTable('dim_date'));
-    const before = fs.readFileSync(file, 'utf-8');
+describe('DBML table writes outside the editor (S5: planDbmlLibraryWrites + writeFilesWithRollback)', () => {
+  it('serializeTable never renders a .dbml table as YAML; saveTable splices it in place', () => {
+    const file = write('tables/dim_date.dbml', '// keep me\n' + dbmlTable('dim_date', '  id INT [pk]\n  label VARCHAR'));
     const lib = service();
     const table = lib.getTable('dim_date')!;
-    expect(() => lib.saveTable(table)).toThrow(DbmlTableWriteRefused);
     expect(() => lib.serializeTable(table)).toThrow(DbmlTableWriteRefused);
-    expect(() => lib.deleteTable('dim_date')).toThrow(DbmlTableWriteRefused);
-    expect(() => lib.renameTable('dim_date', 'dim_day')).toThrow(DbmlTableWriteRefused);
-    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+    table.columns[1].description = 'Shown name';
+    lib.saveTable(table);
+    expect(fs.readFileSync(file, 'utf-8')).toBe("// keep me\nTable dim_date {\n  id INT [pk]\n  label VARCHAR [note: 'Shown name']\n}\n");
     expect(fs.readdirSync(path.dirname(file))).toEqual(['dim_date.dbml']);
+  });
+
+  it('renameTable renames the file, splices the name and re-spells every Ref naming it', () => {
+    write('tables/dim_date.dbml', dbmlTable('dim_date'));
+    write('tables/fct_x.dbml', dbmlTable('fct_x', '  id INT [pk]\n  date_id INT'));
+    write('tables/_relationships.dbml', `${HEADER}use { table dim_date } from './dim_date.dbml'\nuse { table fct_x } from './fct_x.dbml'\n\nRef: fct_x.date_id >? dim_date.id\n`);
+    const lib = service();
+    lib.renameTable('dim_date', 'dim_day');
+    expect(fs.existsSync(path.join(semantic, 'tables/dim_date.dbml'))).toBe(false);
+    expect(fs.readFileSync(path.join(semantic, 'tables/dim_day.dbml'), 'utf-8')).toBe(dbmlTable('dim_day'));
+    expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8'))
+      .toBe(`${HEADER}use { table dim_day } from './dim_day.dbml'\nuse { table fct_x } from './fct_x.dbml'\n\nRef: fct_x.date_id >? dim_day.id\n`);
+    expect(lib.getTable('fct_x')?.relationships?.[0]).toMatchObject({ toModel: 'dim_day', toColumn: 'id' });
+  });
+
+  it('deleteTable runs the D16 cascade: the file, its Refs and other owners\' Refs to it, and their use lines', () => {
+    write('tables/dim_date.dbml', dbmlTable('dim_date'));
+    write('tables/fct_x.dbml', dbmlTable('fct_x', '  id INT [pk]\n  date_id INT'));
+    write('tables/_relationships.dbml', `${HEADER}use { table dim_date } from './dim_date.dbml'\nuse { table fct_x } from './fct_x.dbml'\n\nRef: fct_x.date_id >? dim_date.id\n`);
+    const lib = service();
+    lib.deleteTable('dim_date');
+    expect(fs.existsSync(path.join(semantic, 'tables/dim_date.dbml'))).toBe(false);
+    // The relationships file keeps its header and is never deleted (D15).
+    expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8')).toBe(`${HEADER}\n`);
+    expect(lib.getTable('fct_x')?.relationships).toBeUndefined();
   });
 
   it('pathForNewTable keeps today\'s rule (a .yml path) until the switch-over (S6)', () => {

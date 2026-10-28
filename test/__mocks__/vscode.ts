@@ -668,8 +668,14 @@ export class WorkspaceEdit {
 /** Every WorkspaceEdit passed to workspace.applyEdit, in order. */
 export const _appliedEdits: WorkspaceEdit[] = [];
 
-/** Set to false to make workspace.applyEdit reject (nothing is applied). */
-export const _mockWorkspaceState = { applyEditResult: true };
+/**
+ * Set `applyEditResult` to false to make workspace.applyEdit reject (nothing
+ * is applied). `applyEditPrefixes` scripts the next calls, one entry each: a
+ * number n applies the edit's first n operations and then returns false, as
+ * VS Code does when a file operation fails part way (it keeps the steps that
+ * ran); `'ok'` applies the call normally.
+ */
+export const _mockWorkspaceState: { applyEditResult: boolean; applyEditPrefixes: Array<number | 'ok'> } = { applyEditResult: true, applyEditPrefixes: [] };
 
 /** fsPaths whose document save() resolves false (see `_failMockSave`). */
 const _failingSaves = new Set<string>();
@@ -710,6 +716,7 @@ export function _resetMockWorkspace(): void {
   _mockDocuments.clear();
   _appliedEdits.length = 0;
   _mockWorkspaceState.applyEditResult = true;
+  _mockWorkspaceState.applyEditPrefixes.length = 0;
   workspace.textDocuments = [];
   _textDocumentChangeListeners.length = 0;
 }
@@ -771,10 +778,12 @@ export function createMockTextDocument(fsPath: string, text = '{}', options: { p
  */
 async function applyMockEdit(edit: WorkspaceEdit): Promise<boolean> {
   _appliedEdits.push(edit);
-  if (!_mockWorkspaceState.applyEditResult) {
+  const scripted = _mockWorkspaceState.applyEditPrefixes.shift();
+  if (scripted === undefined && !_mockWorkspaceState.applyEditResult) {
     return false;
   }
-  for (const op of edit._ops) {
+  const prefix = typeof scripted === 'number' ? scripted : edit._ops.length;
+  for (const op of edit._ops.slice(0, prefix)) {
     switch (op.kind) {
       case 'replace':
       case 'insert': {
@@ -811,7 +820,7 @@ async function applyMockEdit(edit: WorkspaceEdit): Promise<boolean> {
       }
     }
   }
-  return true;
+  return prefix >= edit._ops.length;
 }
 
 /** Open (or return the already-open) persisted document backed by a real file. */

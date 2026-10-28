@@ -36,9 +36,36 @@ export function usesLibraryRelationships(
   domainFileRelationshipCount: number,
   /** A model file that does not parse still lists some (`hasUnreadableRelationships`). */
   unreadableModelRelationships = false,
+  /**
+   * The library holds a DBML table or a relationships file (native DBML
+   * storage, §5.1): a DBML table's relationships can only live in the
+   * library, so the project keeps them there whatever the diagrams hold.
+   */
+  dbmlLibrary = false,
 ): boolean {
-  return domainFileRelationshipCount === 0 || unreadableModelRelationships
+  return dbmlLibrary || domainFileRelationshipCount === 0 || unreadableModelRelationships
     || models.some((m) => (m.relationships?.length ?? 0) > 0);
+}
+
+/**
+ * The library tables whose relationships name `tableName` as their other
+ * end (any case), each a copy with those entries removed — what Delete Table
+ * saves so no relationship is left pointing at a table that is gone (D16).
+ * The table itself is not among them; its own file goes with it.
+ */
+export function dropRelationshipsTo(models: readonly SemanticTable[], tableName: string): SemanticTable[] {
+  const out: SemanticTable[] = [];
+  for (const model of models) {
+    if (same(model.name, tableName)) continue;
+    const list = model.relationships ?? [];
+    const kept = list.filter((rel) => !same(rel.toModel, tableName));
+    if (kept.length === list.length) continue;
+    const copy: SemanticTable = { ...model };
+    if (kept.length > 0) copy.relationships = kept;
+    else delete copy.relationships;
+    out.push(copy);
+  }
+  return out;
 }
 
 /** The full relationships stored in `model`'s library file. */

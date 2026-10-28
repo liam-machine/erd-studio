@@ -1,0 +1,154 @@
+/**
+ * The one helper that applies a set of {@link FileWrite}s as ONE
+ * WorkspaceEdit (D23, §5.3 steps 6–7 of docs/plans/native-dbml-storage.md).
+ *
+ * Order: the primary document's full-range replace first (a text edit, so
+ * the custom editor's undo groups the step under it), then every create
+ * (relationships files before table files before layout files), then every
+ * other replace, then every delete.
+ *
+ * VS Code's `applyEdit` is all-or-nothing only for text edits: an edit with
+ * file creations or deletions keeps the steps that ran before the one that
+ * failed. So when it returns `false` this helper reconciles: a planned create
+ * whose file holds exactly the planned bytes is deleted, a planned delete
+ * whose file is gone is re-created from the text read before, and a replaced
+ * document that holds the planned text is set back with a text edit (saved
+ * only if it was saved before). When that fails too, a modal names every file
+ * it could not put back ("Restore these from source control"); nothing is
+ * retried.
+ */
+
+import * as fs from 'fs';
+import * as path from 'path';
+import * as vscode from 'vscode';
+
+import type { FileWrite } from '../services/fileWrites';
+import { mergeFileWrites, orderFileWrites } from '../services/fileWrites';
+
+/** What {@link applyFileWrites} did. */
+export interface AppliedFileWrites {
+  ok: boolean;
+  /** Documents replaced (not the primary), to save by URI after a success. */
+  replaced: vscode.Uri[];
+  created: string[];
+  deleted: string[];
+  /** After a failure: files the reconcile could not put back (listed in the modal). */
+  unrestored: string[];
+}
+
+export interface ApplyFileWritesOptions {
+  /** The document whose full-range replace goes first (always, for undo grouping), and its new text. */
+  primary?: { document: vscode.TextDocument; text: string };
+  /** Called before each create, to make its folder where only a plain mkdir is wrong (library paths). */
+  ensureDir?(filePath: string): void;
+}
+
+const samePath = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
+
+/** An open document's text, else the file's, else null (absent). */
+function currentText(filePath: string): { text: string | null; dirty: boolean } {
+  const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && samePath(d.uri.fsPath, filePath));
+  if (doc) return { text: doc.getText(), dirty: doc.isDirty };
+  try {
+    return { text: fs.readFileSync(filePath, 'utf-8'), dirty: false };
+  } catch {
+    return { text: null, dirty: false };
+  }
+}
+
+function fullRange(doc: vscode.TextDocument): vscode.Range {
+  return new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length));
+}
+
+/** Apply `writes` (absolute paths) as one WorkspaceEdit, reconciling a partial failure. */
+export async function applyFileWrites(writes: readonly FileWrite[], options: ApplyFileWritesOptions = {}): Promise<AppliedFileWrites> {
+  const primaryPath = options.primary?.document.uri.fsPath;
+  const ordered = orderFileWrites(mergeFileWrites(writes.filter((w) => !(primaryPath !== undefined && w.kind === 'replace' && samePath(w.path, primaryPath)))));
+
+  // What each replaced or deleted file held before, to put back after a failure.
+  const prior = new Map<string, { text: string | null; dirty: boolean }>();
+  if (options.primary) prior.set(options.primary.document.uri.fsPath, { text: options.primary.document.getText(), dirty: options.primary.document.isDirty });
+  for (const w of ordered) if (w.kind !== 'create' && !prior.has(w.path)) prior.set(w.path, currentText(w.path));
+
+  const edit = new vscode.WorkspaceEdit();
+  if (options.primary) edit.replace(options.primary.document.uri, fullRange(options.primary.document), options.primary.text);
+  const replaced: vscode.Uri[] = [];
+  const created: string[] = [];
+  const deleted: string[] = [];
+  for (const w of ordered) {
+    const uri = vscode.Uri.file(w.path);
+    if (w.kind === 'create') {
+      options.ensureDir?.(w.path);
+      edit.createFile(uri, { overwrite: false, contents: Buffer.from(w.text, 'utf-8') });
+      created.push(w.path);
+    } else if (w.kind === 'replace') {
+      const doc = await vscode.workspace.openTextDocument(uri);
+      edit.replace(doc.uri, fullRange(doc), w.text);
+      replaced.push(doc.uri);
+    } else {
+      edit.deleteFile(uri, { ignoreIfNotExists: true });
+      deleted.push(w.path);
+    }
+  }
+
+  if (await vscode.workspace.applyEdit(edit)) return { ok: true, replaced, created, deleted, unrestored: [] };
+
+  // --- Reconcile: put back whatever landed --------------------------------------------
+  const planned = new Map<string, FileWrite>();
+  for (const w of ordered) planned.set(w.path, w);
+  if (options.primary) planned.set(options.primary.document.uri.fsPath, { kind: 'replace', path: options.primary.document.uri.fsPath, text: options.primary.text });
+  const undo = new vscode.WorkspaceEdit();
+  const undoSaves: vscode.Uri[] = [];
+  let anything = false;
+  const isBack = (w: FileWrite): boolean => {
+    const now = currentText(w.path).text;
+    if (w.kind === 'create') return now === null || now !== w.text;
+    if (w.kind === 'delete') return now !== null || prior.get(w.path)?.text === null;
+    return now !== w.text;
+  };
+  for (const w of planned.values()) {
+    const uri = vscode.Uri.file(w.path);
+    const now = currentText(w.path).text;
+    if (w.kind === 'create') {
+      if (now !== null && now === w.text) {
+        undo.deleteFile(uri, { ignoreIfNotExists: true });
+        anything = true;
+      }
+    } else if (w.kind === 'delete') {
+      const before = prior.get(w.path)?.text ?? null;
+      if (now === null && before !== null) {
+        undo.createFile(uri, { overwrite: false, contents: Buffer.from(before, 'utf-8') });
+        anything = true;
+      }
+    } else if (now !== null && now === w.text) {
+      const before = prior.get(w.path);
+      if (before?.text !== null && before?.text !== undefined) {
+        const doc = await vscode.workspace.openTextDocument(uri);
+        undo.replace(doc.uri, fullRange(doc), before.text);
+        if (!before.dirty) undoSaves.push(doc.uri);
+        anything = true;
+      }
+    }
+  }
+  let unrestored: string[] = [];
+  if (anything) {
+    const ok = await vscode.workspace.applyEdit(undo);
+    if (ok) {
+      for (const uri of undoSaves) {
+        try {
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await doc.save();
+        } catch { /* left open and dirty: the user sees it */ }
+      }
+    } else {
+      unrestored = [...planned.values()].filter((w) => !isBack(w)).map((w) => w.path);
+      if (unrestored.length === 0) unrestored = [...planned.keys()];
+      const shown = unrestored.map((p) => vscode.workspace.asRelativePath?.(p) ?? p);
+      void vscode.window.showErrorMessage(
+        `ERD Studio could not apply the edit, and could not put back ${shown.join(', ')}. Restore these from source control.`,
+        { modal: true },
+      );
+    }
+  }
+  return { ok: false, replaced, created, deleted, unrestored };
+}

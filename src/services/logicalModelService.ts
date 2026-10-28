@@ -18,7 +18,7 @@ import type { Alias, Node, Scalar, ScalarTag, Tags } from 'yaml';
 
 import {
   DBML_RELATIONSHIPS_FILE_NAME, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, TABLES_DIR, TableDbmlError, classifyTableLoadError,
-  isLibraryFolderName, isReservedTableName, tableLoadWarningOf, parseTableText, writesTableNaming,
+  dbmlName, isLibraryFolderName, isReservedTableName, tableLoadWarningOf, parseTableText, writesTableNaming,
 } from '@erd-studio/core';
 import { attachRelationships, dbmlTableLookup, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
 import { projectNamingOf } from './projectNaming';
@@ -32,6 +32,19 @@ import type { ManifestData, ManifestModelInfo } from '../types/manifest';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
 import { sameName } from '../types/naming';
 import { keepLineEndings } from './lineEndings';
+import type { FileWrite } from './fileWrites';
+import { writeFilesWithRollback } from './fsFileWrites';
+import { planDbmlLibraryWrites } from './dbmlLibraryWrites';
+import type { DbmlLibraryOps, DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
+import { dropRelationshipsTo } from './libraryRelationships';
+
+/** Table file writes an editor edit bundles with its diagram change (one WorkspaceEdit). */
+export interface TableFileOps {
+  /** Tables whose file is written in full (created if missing); `fromName` renames. */
+  save?: Array<{ model: SemanticTable; fromName?: string }>;
+  /** Table names whose file is deleted. */
+  delete?: string[];
+}
 
 // The directory name and the YAML -> SemanticTable parsing live in
 // @erd-studio/core; re-exported so existing imports of this module keep working.
@@ -299,12 +312,12 @@ interface CachedRelationships {
 }
 
 /**
- * The message a DBML table write gets until the editor pipeline writes DBML
- * (stage S5 of the native DBML storage spec).
+ * The message a YAML write of a `.dbml` table file gets: DBML tables are
+ * written only by the DBML writer (`planTableWrites`), so reaching this is a bug.
  */
-export const DBML_TABLE_EDITING_NOT_AVAILABLE = 'Editing DBML tables is not available yet in this build of ERD Studio.';
+export const DBML_TABLE_EDITING_NOT_AVAILABLE = 'A DBML table file is written by the DBML writer, never as YAML (an ERD Studio bug; nothing was changed).';
 
-/** Refused: a write to a `.dbml` table file, which this build reads but does not write yet. */
+/** Refused: a YAML render of a `.dbml` table file (never written as YAML). */
 export class DbmlTableWriteRefused extends Error {
   readonly filePath?: string;
   constructor(message: string = DBML_TABLE_EDITING_NOT_AVAILABLE, filePath?: string) {
@@ -996,6 +1009,151 @@ export class TableLibraryService {
     }
   }
 
+  /** Whether the library holds a DBML table or a relationships file (`usesLibraryRelationships`' DBML clause, §5.1). */
+  hasDbmlLibrary(): boolean {
+    return this.listRelationshipsFiles().length > 0 || this.listTableFiles().some((e) => e.storage === 'dbml');
+  }
+
+  /** A path relative to the semantic dir, posix. */
+  private semanticRelative(filePath: string): string {
+    return path.relative(this.semanticRoot, filePath).split(path.sep).join('/');
+  }
+
+  /** An absolute path from one relative to the semantic dir. */
+  semanticAbsolute(relPath: string): string {
+    return path.join(this.semanticRoot, ...relPath.split('/'));
+  }
+
+  /**
+   * What `planDbmlLibraryWrites` reads (§4.6): every listed table (winners)
+   * with its real spelling, declared reference, columns and key; every
+   * relationships file's reading; every table and relationships file path.
+   * `readText` reads a file by absolute path (the editor passes one that
+   * prefers an open document); by default the disk, byte-order mark stripped.
+   */
+  dbmlSnapshot(readText?: (filePath: string) => string | null): DbmlLibrarySnapshot {
+    const tables = new Map<string, DbmlSnapshotTable>();
+    const files = new Set<string>();
+    for (const entry of this.listTableFiles()) {
+      files.add(this.semanticRelative(entry.filePath));
+      if (entry.shadowedBy) continue;
+      let model: SemanticTable | null = null;
+      let reference: string | undefined;
+      let alias: string | undefined;
+      try {
+        if (entry.storage === 'dbml') {
+          const reading = this.readDbmlTableFile(entry.filePath);
+          if (reading?.ok) {
+            model = reading.table;
+            reference = reading.declaredReference;
+            alias = reading.alias;
+          }
+        } else {
+          model = this.readTableFile(entry.filePath, entry.name);
+        }
+      } catch {
+        model = null;
+      }
+      const name = model?.name ?? entry.name;
+      const columns = (model?.columns ?? []).map((c) => c.name);
+      tables.set(name.toLowerCase(), {
+        name,
+        reference: reference ?? dbmlName(name),
+        path: this.semanticRelative(entry.filePath),
+        storage: entry.storage,
+        folder: entry.folder,
+        columns,
+        primaryKey: (model?.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name),
+        ...(alias !== undefined ? { dbmlAlias: alias } : {}),
+      });
+    }
+    const relationshipsFiles = new Map<string, DbmlRelationshipsReading>();
+    for (const filePath of this.listRelationshipsFiles()) {
+      const reading = this.readRelationshipsFile(filePath);
+      if (reading === null) continue;
+      const rel = this.semanticRelative(filePath);
+      relationshipsFiles.set(rel, reading);
+      files.add(rel);
+    }
+    const read = readText ?? ((filePath: string): string | null => {
+      try {
+        return fs.readFileSync(filePath, 'utf-8');
+      } catch {
+        return null;
+      }
+    });
+    return {
+      semanticDir: this.semanticRoot,
+      tables,
+      relationshipsFiles,
+      files,
+      readText: (rel) => {
+        const text = read(this.semanticAbsolute(rel));
+        return text === null ? null : text.replace(/^\uFEFF/, '');
+      },
+    };
+  }
+
+  /**
+   * The table file writes for `ops` (§5.1), with absolute paths: YAML tables
+   * as today (`serializeTable`, in place), DBML tables through
+   * `planDbmlLibraryWrites`. A new table is DBML when `options.dbml` (it is
+   * added through a DBML diagram, D20), else YAML. `plan` is set whenever a
+   * DBML table is written, or `options.dbml` asks for the DBML resolver.
+   */
+  planTableWrites(
+    ops: TableFileOps | undefined,
+    layerFolder?: string,
+    options: { dbml?: boolean; readText?: (filePath: string) => string | null } = {},
+  ): { writes: FileWrite[]; plan?: DbmlLibraryWritePlan } {
+    const writes: FileWrite[] = [];
+    const dbmlOps: DbmlLibraryOps = { save: [], delete: [] };
+    const storageOf = (name: string): 'yaml' | 'dbml' | undefined => this.tableStorage(name);
+    for (const name of ops?.delete ?? []) {
+      if (storageOf(name) === 'dbml') {
+        dbmlOps.delete!.push(name);
+        continue;
+      }
+      if (!this.tableExists(name)) continue;
+      writes.push({ kind: 'delete', path: this.tablePath(name) });
+    }
+    for (const save of ops?.save ?? []) {
+      const { model, fromName } = save;
+      const storage = storageOf(fromName ?? model.name) ?? (options.dbml ? 'dbml' : 'yaml');
+      if (storage === 'dbml') {
+        dbmlOps.save!.push(save);
+        continue;
+      }
+      // A renamed file stays in its own library and folder (#182).
+      const renamed = fromName !== undefined && fromName !== model.name;
+      const modelPath = renamed ? this.renamedTablePath(fromName, model.name) : this.tablePath(model.name, layerFolder);
+      const text = this.serializeTable(model, fromName);
+      writes.push(this.tableExists(model.name) ? { kind: 'replace', path: modelPath, text } : { kind: 'create', path: modelPath, text });
+    }
+    const anyDbml = dbmlOps.save!.length > 0 || dbmlOps.delete!.length > 0;
+    if (!anyDbml && !options.dbml) return { writes };
+    const folder = layerFolder && (TABLE_FOLDER_PATTERN.test(layerFolder) || this.listFoldersOf(this.v6TablesDir).includes(layerFolder)) ? layerFolder : '';
+    const plan = planDbmlLibraryWrites(this.dbmlSnapshot(options.readText), { ...dbmlOps, newTableFolder: folder });
+    for (const w of plan.writes) writes.push({ ...w, path: this.semanticAbsolute(w.path) } as FileWrite);
+    return { writes, plan };
+  }
+
+  /**
+   * Apply DBML library writes straight to disk (the non-editor paths), all
+   * or nothing (`writeFilesWithRollback`), recording own writes and dropping
+   * caches once the bytes land.
+   */
+  private applyDbmlOps(ops: DbmlLibraryOps): void {
+    const plan = planDbmlLibraryWrites(this.dbmlSnapshot(), ops);
+    writeFilesWithRollback(plan.writes.map((w) => ({ ...w, path: this.semanticAbsolute(w.path) }) as FileWrite), {
+      onWritten: (filePath, kind) => {
+        if (kind === 'delete') this.ownWriteTracker.recordDelete(filePath);
+        else this.ownWriteTracker.recordWrite(filePath);
+      },
+    });
+    this.invalidateCache();
+  }
+
   // -------------------------------------------------------------------------
   // Read operations
   // -------------------------------------------------------------------------
@@ -1334,6 +1492,11 @@ export class TableLibraryService {
    * domain change. Use this for non-editor callers (migration, seeding, CLI).
    */
   saveTable(model: SemanticTable, folder?: string): void {
+    // A DBML table is spliced in place and its relationships placed in its folder's file (§5.1).
+    if (this.tableStorage(model.name) === 'dbml') {
+      this.applyDbmlOps({ save: [{ model }] });
+      return;
+    }
     const filePath = this.tablePath(model.name, folder);
     this.ensureDir(filePath);
     this.writeAtomic(filePath, this.renderTable(model, filePath));
@@ -1372,8 +1535,8 @@ export class TableLibraryService {
    * document generated from the model. Line endings follow the file's own.
    */
   private renderTable(model: SemanticTable, filePath: string): string {
-    // A `.dbml` table is never written as YAML: the DBML writer comes with the
-    // editor pipeline (S5). Refused before anything is built.
+    // A `.dbml` table is never written as YAML: it is spliced by the DBML
+    // writer (`planTableWrites`). Refused before anything is built.
     if (isDbmlFile(filePath)) throw new DbmlTableWriteRefused(undefined, filePath);
     const existing = this.loadEditableDocument(filePath);
     // A model read from a file with a key written twice is never written, even
@@ -1434,7 +1597,11 @@ export class TableLibraryService {
    */
   deleteTable(name: string): void {
     const filePath = this.tablePath(name);
-    if (isDbmlFile(filePath)) throw new DbmlTableWriteRefused(undefined, filePath);
+    if (isDbmlFile(filePath)) {
+      // D16: the file, the Refs it owns, other owners' Refs to it and the use lines naming it, in one go.
+      this.applyDbmlOps({ delete: [name], save: dropRelationshipsTo(this.listTables(), name).map((model) => ({ model })) });
+      return;
+    }
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
       this.ownWriteTracker.recordDelete(filePath);
@@ -1458,9 +1625,13 @@ export class TableLibraryService {
     if (!model) {
       throw new Error(`Table "${oldName}" not found in the Table Library`);
     }
-    if (this.tableStorage(oldName) === 'dbml') throw new DbmlTableWriteRefused(undefined, this.findTableFile(oldName) ?? undefined);
     if (newName !== oldName && this.tableExists(newName)) {
       throw new Error(`Table "${newName}" already exists in the Table Library`);
+    }
+    if (this.tableStorage(oldName) === 'dbml') {
+      // The file is renamed with its Table name spliced; every Ref naming it is re-spelled (§4.6).
+      this.applyDbmlOps({ save: [{ model: { ...model, name: newName }, fromName: oldName }] });
+      return;
     }
     // Carry the existing document (comments, key order, extra keys) across
     // to the new file rather than regenerating it from the parsed model.

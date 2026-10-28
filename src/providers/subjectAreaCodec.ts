@@ -10,24 +10,31 @@
  * - **DBML** — core's `parseSubjectAreaDbml`, which reads a `.dbml` diagram
  *   (with its `.dbdiagram` layout) into a plain v5 object (`schemaVersion`
  *   5, D8), so every `detectSubjectAreaFormat` call site sees `v5`. Its
- *   `render` is refused until the editor pipeline writes DBML (S5).
+ *   `render` splices the diagram (`editSubjectAreaDbml`) against the library
+ *   as an edit leaves it (a {@link SubjectAreaResolver}) and writes the
+ *   layout file only when a position or sticky-note box changed.
  *
  * `parse` throws core's `SubjectAreaFileError` / `SubjectAreaValidationError`
  * (and {@link NotASubjectAreaObject}); the provider words them for the user.
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 import {
   detectSubjectAreaFormat,
+  editDiagramLayout,
   layoutFilePathOf,
+  stickyLayoutsOf,
   normaliseSubjectAreaDocument,
   parseSubjectAreaJson,
   subjectAreaStorageOf,
   toTableNamingDocument,
 } from '@erd-studio/core';
-import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { editSubjectAreaDbml, parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+import type { DbmlDiagramTable } from '@erd-studio/core/dbml';
+import type { Annotation, NodePosition } from '@erd-studio/core';
 
 import { subjectAreaTableNames } from '../services/domainService';
 import type { FileWrite } from '../services/fileWrites';
@@ -51,12 +58,34 @@ export interface ParsedSubjectArea {
   layoutText?: string | null;
 }
 
+/**
+ * The library as an edit leaves it, for rendering a DBML diagram (§5.2):
+ * tables resolved after the edit's table writes, the relationships files of
+ * their folders, and which files exist. Paths are posix, relative to
+ * `semanticRoot`.
+ */
+export interface SubjectAreaResolver {
+  /** The semantic dir, absolute. */
+  semanticRoot: string;
+  resolveTable(name: string): DbmlDiagramTable | undefined;
+  relationshipsFilesFor(names: readonly string[]): string[];
+  fileExists(relPath: string): boolean;
+  /** Tables whose file moved, was renamed or was deleted in this edit (lower-case). */
+  pathChanged?: ReadonlySet<string>;
+  /** Recompute the relationships `use` lines even when membership did not change (the settle pass). */
+  refreshRelationshipsUses?: boolean;
+}
+
 /** Turns one kind of diagram file into a {@link ParsedSubjectArea} and back. */
 export interface SubjectAreaCodec {
   readonly storage: 'json' | 'dbml';
   parse(text: string, filePath: string, layoutText?: string | null): ParsedSubjectArea;
-  /** The writes that store `p`; the FIRST is always the primary file's replace, even when its text is unchanged. */
-  render(p: ParsedSubjectArea, text: string, filePath: string): FileWrite[];
+  /**
+   * The writes that store `p` (absolute paths); the FIRST is always the
+   * primary file's replace, even when its text is unchanged. A DBML diagram
+   * needs `resolver`; the JSON codec ignores it.
+   */
+  render(p: ParsedSubjectArea, text: string, filePath: string, resolver?: SubjectAreaResolver): FileWrite[];
   /** The tables the file names, from its raw text; null when it does not parse. */
   tableNames(text: string, filePath: string): string[] | null;
 }
@@ -69,16 +98,6 @@ export class NotASubjectAreaObject extends Error {
   }
 }
 
-/** The message a DBML diagram edit gets until the editor pipeline writes DBML (S5). */
-export const DBML_DIAGRAM_EDITING_NOT_AVAILABLE = 'Editing DBML diagrams is not available yet in this build of ERD Studio.';
-
-/** Thrown by the DBML codec's `render` until DBML diagrams are written (S5). */
-export class DbmlDiagramEditingNotAvailable extends Error {
-  constructor() {
-    super(DBML_DIAGRAM_EDITING_NOT_AVAILABLE);
-    this.name = 'DbmlDiagramEditingNotAvailable';
-  }
-}
 
 /**
  * The subject area documents the JSON codec read from a v6 file (#162):
@@ -155,11 +174,64 @@ const dbmlCodec: SubjectAreaCodec = {
       layoutText: layout,
     };
   },
-  render() {
-    throw new DbmlDiagramEditingNotAvailable();
+  render(p, text, filePath, resolver) {
+    if (!resolver) throw new Error('A DBML diagram is rendered against the library: pass a resolver.');
+    const rel = path.relative(resolver.semanticRoot, filePath).split(path.sep).join('/');
+    const primary = editSubjectAreaDbml(text, {
+      filePath: rel,
+      before: p.snapshot,
+      after: p.parsed,
+      resolveTable: (name) => resolver.resolveTable(name),
+      relationshipsFilesFor: (names) => resolver.relationshipsFilesFor(names),
+      fileExists: (relPath) => resolver.fileExists(relPath),
+      ...(resolver.pathChanged ? { pathChanged: resolver.pathChanged } : {}),
+      ...(resolver.refreshRelationshipsUses ? { refreshRelationshipsUses: true } : {}),
+    });
+    const writes: FileWrite[] = [{ kind: 'replace', path: filePath, text: primary }];
+    const layout = layoutWrite(p, filePath);
+    if (layout) writes.push(layout);
+    return writes;
   },
   tableNames: subjectAreaTableNames,
 };
+
+/** A diagram object's positions and sticky-note boxes: what its layout file holds. */
+function layoutOf(obj: Record<string, unknown>): { positions: Record<string, NodePosition>; annotations: Annotation[] } {
+  const view = obj.viewConfig && typeof obj.viewConfig === 'object' && !Array.isArray(obj.viewConfig)
+    ? obj.viewConfig as Record<string, unknown>
+    : {};
+  const positions = view.positions && typeof view.positions === 'object' && !Array.isArray(view.positions)
+    ? view.positions as Record<string, NodePosition>
+    : {};
+  const annotations = Array.isArray(view.annotations) ? view.annotations as Annotation[] : [];
+  return { positions, annotations };
+}
+
+/**
+ * The layout file's write for an edit, or null: written only when a position
+ * or a sticky-note box changed, so an edit that moved nothing leaves the
+ * layout file's bytes alone (D7), even where the reader placed a note the
+ * file does not place yet.
+ */
+function layoutWrite(p: ParsedSubjectArea, filePath: string): FileWrite | null {
+  const before = layoutOf(p.snapshot);
+  const after = layoutOf(p.parsed);
+  const same = JSON.stringify(sortedPositions(before.positions)) === JSON.stringify(sortedPositions(after.positions))
+    && JSON.stringify(stickyLayoutsOf(before.annotations)) === JSON.stringify(stickyLayoutsOf(after.annotations));
+  if (same) return null;
+  const layoutPath = p.layoutPath ?? layoutFilePathOf(filePath);
+  const oldText = p.layoutText ?? null;
+  const next = editDiagramLayout(oldText, after.positions, stickyLayoutsOf(after.annotations));
+  if (next === null) return null;
+  return oldText === null ? { kind: 'create', path: layoutPath, text: next } : { kind: 'replace', path: layoutPath, text: next };
+}
+
+function sortedPositions(positions: Record<string, NodePosition>): Array<[string, number, number]> {
+  return Object.entries(positions)
+    .filter(([, v]) => !!v && typeof v === 'object')
+    .map(([k, v]): [string, number, number] => [k, Number(v.x), Number(v.y)])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
 
 /** The codec for a diagram file, by its extension (`.dbml` → DBML, anything else → JSON). */
 export function codecFor(filePath: string): SubjectAreaCodec {
