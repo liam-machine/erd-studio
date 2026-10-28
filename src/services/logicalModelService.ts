@@ -37,6 +37,7 @@ import { writeFilesWithRollback } from './fsFileWrites';
 import { planDbmlLibraryWrites } from './dbmlLibraryWrites';
 import type { DbmlLibraryOps, DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
 import { dropRelationshipsTo } from './libraryRelationships';
+import { TableLibraryIndex, foldersOf, hasDbmlEvidence, holdsTableFiles, isLayerFolder, layersListTables, listDir } from './tableLibraryIndex';
 
 /** Table file writes an editor edit bundles with its diagram change (one WorkspaceEdit). */
 export interface TableFileOps {
@@ -57,38 +58,20 @@ export { LOGICAL_MODELS_DIR, TABLES_DIR } from '@erd-studio/core';
  */
 export function tablesDirHasDbml(semanticRoot: string): boolean {
   const dir = path.join(semanticRoot, TABLES_DIR);
-  try {
-    return fs.readdirSync(dir, { withFileTypes: true }).some((d) =>
-      (d.isFile() && d.name.endsWith('.dbml')) ||
-      (d.isDirectory() && isLibraryFolderName(d.name) && listNames(path.join(dir, d.name)).some((f) => f.endsWith('.dbml'))));
-  } catch {
-    return false;
-  }
+  return hasDbmlEvidence(listDir(dir), (folder) => listNamesOrNull(path.join(dir, folder)));
 }
-
-/**
- * `a.localeCompare(b)`'s order, from one collator: `localeCompare` builds a
- * collator per call, which made sorting a 10,000-file library folder slow.
- */
-const compareNames = new Intl.Collator().compare;
 
 /** The names in `dir`, or none when it cannot be listed. */
 function listNames(dir: string): string[] {
+  return listNamesOrNull(dir) ?? [];
+}
+
+/** The names in `dir`, or null when it cannot be listed. */
+function listNamesOrNull(dir: string): string[] | null {
   try {
     return fs.readdirSync(dir);
   } catch {
-    return [];
-  }
-}
-
-/** Whether `layers.json` under `semanticRoot` lists a layer called `tables`. */
-function layersListTables(semanticRoot: string): boolean {
-  try {
-    const config = JSON.parse(fs.readFileSync(path.join(semanticRoot, LAYERS_CONFIG_FILE), 'utf-8')) as { layers?: unknown };
-    return Array.isArray(config.layers) &&
-      config.layers.some((l) => !!l && typeof l === 'object' && (l as { id?: unknown }).id === TABLES_DIR);
-  } catch {
-    return false;
+    return null;
   }
 }
 
@@ -104,20 +87,13 @@ function layersListTables(semanticRoot: string): boolean {
  * is the library unless BOTH hold: a `tables` entry in `layers.json` (which
  * a 1.x first-run prompt may have written) or a stray `tables/*.json` alone
  * does not make a DBML library a layer; `doctor` reports either as
- * `tablesLayerConflict`.
+ * `tablesLayerConflict`. `TableLibraryService` answers the same from its
+ * index (`tableLibraryIndex.ts`, the same rules over one listing).
  */
 export function tablesDirIsLayer(semanticRoot: string): boolean {
-  const dir = path.join(semanticRoot, TABLES_DIR);
-  let json: boolean;
-  try {
-    json = fs.readdirSync(dir, { withFileTypes: true }).some((d) => d.isFile() && d.name.endsWith('.json'));
-  } catch {
-    return false;
-  }
-  if (tablesDirHasDbml(semanticRoot)) {
-    return json && layersListTables(semanticRoot);
-  }
-  return json || layersListTables(semanticRoot);
+  const top = listDir(path.join(semanticRoot, TABLES_DIR));
+  if (top === null) return false;
+  return isLayerFolder(top, tablesDirHasDbml(semanticRoot), layersListTables(semanticRoot));
 }
 
 /**
@@ -159,14 +135,7 @@ export function hasTablesLibrary(semanticRoot: string): boolean {
   const dir = path.join(semanticRoot, TABLES_DIR);
   if (!fs.existsSync(dir) || tablesDirIsLayer(semanticRoot)) return false;
   // A folder made by hand (or by an assistant) is not a library until it holds a table file.
-  const isTableFile = (name: string): boolean => name.endsWith('.yml') || name.endsWith('.dbml');
-  try {
-    return fs.readdirSync(dir, { withFileTypes: true }).some((d) =>
-      (d.isFile() && isTableFile(d.name)) ||
-      (d.isDirectory() && !d.name.startsWith('.') && fs.readdirSync(path.join(dir, d.name)).some(isTableFile)));
-  } catch {
-    return false;
-  }
+  return holdsTableFiles(listDir(dir), (folder) => listNamesOrNull(path.join(dir, folder)));
 }
 
 /** Parsed model cached against the file's mtime + size. */
@@ -330,39 +299,6 @@ export class DbmlTableWriteRefused extends Error {
 /** Whether `filePath` is a `.dbml` file. */
 function isDbmlFile(filePath: string): boolean {
   return filePath.toLowerCase().endsWith('.dbml');
-}
-
-/**
- * The file in `dir` named `name` + `ext`: the exact spelling when it is
- * listed, else the first (sorted) whose stem matches without case; null
- * when there is none or `dir` cannot be listed. Only a file `isTable` accepts
- * (the single classifier, D10) is a candidate, so a `.dbml` relationships
- * file is never a table.
- */
-function listedFile(dir: string, name: string, ext: '.yml' | '.dbml', isTable: (filePath: string) => boolean): string | null {
-  let files: string[];
-  try {
-    files = fs.readdirSync(dir, { withFileTypes: true })
-      .filter((d) => d.name.endsWith(ext) && (d.isFile() || (d.isSymbolicLink() && isFileTarget(path.join(dir, d.name)))))
-      .map((d) => d.name)
-      .filter((f) => isTable(path.join(dir, f)));
-  } catch {
-    return null;
-  }
-  const exact = `${name}${ext}`;
-  if (files.includes(exact)) return path.join(dir, exact);
-  const stem = (f: string): string => f.slice(0, -ext.length);
-  const file = files.sort(compareNames).find((f) => sameName(stem(f), name));
-  return file === undefined ? null : path.join(dir, file);
-}
-
-/** Whether `filePath` (a symbolic link) points at a file: a symlinked table file is read, as `existsSync` found it before §3.4. */
-function isFileTarget(filePath: string): boolean {
-  try {
-    return fs.statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
 }
 
 /** A file's `mtime:size`, or null when it cannot be stat'ed. */
@@ -607,6 +543,13 @@ export class TableLibraryService {
    * read: the memo is checked against the set of cache keys (§5.1).
    */
   private tableCacheGeneration = 0;
+  /**
+   * The mtime + size each `.yml` was last read at, whether it parsed or not
+   * (a file that throws keeps no {@link cache} entry), so
+   * {@link peekTableFileError} can tell a file read in this version from one
+   * never read.
+   */
+  private readonly yamlReadSignatures = new Map<string, string>();
   /** DBML reader warnings already logged, by path and signature, so a refresh does not repeat them. */
   private readonly loggedDbmlProblems = new Set<string>();
 
@@ -637,6 +580,18 @@ export class TableLibraryService {
    * made a save quadratic. Never held across a change to the document.
    */
   private aliasTargets: Map<Alias, Node | undefined> | null = null;
+  /**
+   * The name → file index of both library folders (`tableLibraryIndex.ts`):
+   * every lookup, listing and "is `tables/` a layer?" answer comes from one
+   * listing, re-validated by the directories' signatures on each use.
+   */
+  private readonly index: TableLibraryIndex;
+  /**
+   * Each table's attach fingerprint (what `attachRelationships` reads of it:
+   * name, folder, storage, DBML alias, column names and keys), by the parsed
+   * object the cache holds, so an unchanged table is not re-fingerprinted.
+   */
+  private readonly attachFingerprints = new WeakMap<object, string>();
 
   constructor(
     workspaceRoot: string,
@@ -646,17 +601,33 @@ export class TableLibraryService {
     this.semanticRoot = path.join(workspaceRoot, semanticDir);
     this.tablesDir = path.join(this.semanticRoot, LOGICAL_MODELS_DIR);
     this.v6TablesDir = path.join(this.semanticRoot, TABLES_DIR);
+    this.index = new TableLibraryIndex(this.semanticRoot, this.tablesDir, this.v6TablesDir);
+  }
+
+  /** How many times the library index was built (tests and benchmarks). */
+  get indexBuilds(): number {
+    return this.index.builds;
+  }
+
+  /** Whether the next lookup lists the library from scratch (no index yet, or a directory changed). */
+  indexIsCold(): boolean {
+    return this.index.isCold();
+  }
+
+  /** Whether `tables/` is a layer folder (`tablesDirIsLayer`), from the index. */
+  tablesDirIsLayer(): boolean {
+    return this.index.get().v6IsLayer;
   }
 
   /** Whether `tables/` is read as the v6 library (it exists and is not a layer folder). */
   hasTablesLibrary(): boolean {
-    return hasTablesLibrary(this.semanticRoot);
+    return this.index.get().v6IsLibrary;
   }
 
   /** Whether `filePath` is inside v6's `tables/` library (not a layer folder of that name), whose files are written in v6 (#182). */
   isTableNamingFile(filePath: string): boolean {
     const rel = path.relative(path.resolve(this.v6TablesDir), path.resolve(filePath));
-    return !rel.startsWith('..') && !path.isAbsolute(rel) && !tablesDirIsLayer(this.semanticRoot);
+    return !rel.startsWith('..') && !path.isAbsolute(rel) && !this.tablesDirIsLayer();
   }
 
   /**
@@ -688,7 +659,7 @@ export class TableLibraryService {
 
   /** Whether `logical-models/` exists, empty or not. */
   hasV5Folder(): boolean {
-    return fs.existsSync(this.tablesDir);
+    return this.index.get().v5Exists;
   }
 
   /**
@@ -718,7 +689,7 @@ export class TableLibraryService {
   projectStorage(): ProjectStorage {
     const now = Date.now();
     if (this.storageMemo === undefined || now - this.storageMemo.at > 1000) {
-      this.storageMemo = { at: now, storage: projectStorageIn(this.semanticRoot, this, tablesDirIsLayer(this.semanticRoot)) };
+      this.storageMemo = { at: now, storage: projectStorageIn(this.semanticRoot, this, this.tablesDirIsLayer()) };
     }
     return this.storageMemo.storage;
   }
@@ -739,7 +710,7 @@ export class TableLibraryService {
   /** The library new table files are created in (see {@link writesTableNaming}; a DBML project's is always `tables/`). */
   private newTablesDir(): string {
     if (this.writesDbml()) return this.v6TablesDir;
-    return this.writesTableNaming() && !tablesDirIsLayer(this.semanticRoot) ? this.v6TablesDir : this.tablesDir;
+    return this.writesTableNaming() && !this.tablesDirIsLayer() ? this.v6TablesDir : this.tablesDir;
   }
 
   /** The folder name (`tables` or `logical-models`) new table files are created in, as sync plans report it. */
@@ -755,27 +726,91 @@ export class TableLibraryService {
   }
 
   /**
-   * Drop cached parses. Pass a model name to drop a single entry, or nothing
-   * to clear everything (e.g. after a bulk change on disk).
+   * Drop cached parses. Pass a model name to drop that table's entry only
+   * ({@link invalidatePaths} of its file), or nothing to clear everything —
+   * every parse, the attach memo and the library index (a bulk change on
+   * disk, such as Convert or a migration).
    */
   invalidateCache(name?: string): void {
-    this.namingMemo = undefined;
-    this.storageMemo = undefined;
-    this.attachMemo = undefined;
-    this.tableCacheGeneration++;
     if (name === undefined) {
+      this.namingMemo = undefined;
+      this.storageMemo = undefined;
+      this.attachMemo = undefined;
+      this.tableCacheGeneration++;
       this.cache.clear();
       this.dbmlCache.clear();
       this.relationshipsCache.clear();
+      this.yamlReadSignatures.clear();
+      this.index.invalidate();
       return;
     }
     // An unsafe name was never cached (nothing was read for it), so there is
     // nothing to drop — and dropping a cache entry must never throw.
     const filePath = this.resolveTablePath(name);
-    if (filePath !== null) {
-      this.cache.delete(filePath);
-      this.dbmlCache.delete(filePath);
+    this.namingMemo = undefined;
+    this.storageMemo = undefined;
+    if (filePath !== null) this.invalidatePaths([filePath]);
+    else this.tableCacheGeneration++;
+  }
+
+  /**
+   * Drop what is cached for exactly these files, after ERD Studio wrote,
+   * created or deleted them (or a watcher saw them change): a table's parse
+   * (which tells the attach memo to re-check, keeping its result when no
+   * table's name, columns or keys changed), a relationships file's reading
+   * (and the attach memo with it), and the library index when a file
+   * appeared in or left the library. Anything else stays cached; the parse
+   * caches are checked against mtime + size on every read regardless.
+   */
+  invalidatePaths(paths: Iterable<string>): void {
+    this.namingMemo = undefined;
+    this.storageMemo = undefined;
+    const index = this.index.peek();
+    let indexStale = false;
+    for (const given of paths) {
+      const resolved = path.resolve(given);
+      let dropped = false;
+      for (const key of new Set([given, resolved])) {
+        if (this.cache.delete(key)) dropped = true;
+        if (this.dbmlCache.delete(key)) dropped = true;
+        this.yamlReadSignatures.delete(key);
+        if (this.relationshipsCache.delete(key)) this.attachMemo = undefined;
+      }
+      const inLibrary = this.isLibraryPath(resolved);
+      // A library file told to have changed always moves the generation, so
+      // the attach memo re-checks its tables: one that did not read before
+      // (and so had no cache entry to drop) may read now.
+      if (dropped || inLibrary) this.tableCacheGeneration++;
+      if (!inLibrary) continue;
+      const kind = this.classifyLibraryFile(resolved).kind;
+      if (kind === 'relationships') {
+        this.attachMemo = undefined;
+        if (index && index.relationshipsFiles.some((f) => path.resolve(f) === resolved) !== fs.existsSync(resolved)) indexStale = true;
+      } else if (kind === 'table') {
+        if (index && index.tableFiles.has(resolved) !== fs.existsSync(resolved)) indexStale = true;
+      } else {
+        // A folder, or a file that is neither: list the library again.
+        indexStale = true;
+      }
     }
+    // The index re-validates itself by the directories' signatures; a write
+    // in the same clock tick as its build could leave those unchanged.
+    if (indexStale) this.index.invalidate();
+  }
+
+  /** List the library again on the next lookup (the parses stay cached; they are checked against mtime + size). */
+  invalidateIndex(): void {
+    this.namingMemo = undefined;
+    this.storageMemo = undefined;
+    this.index.invalidate();
+  }
+
+  /** Whether `filePath` (absolute) is inside `logical-models/` or `tables/`. */
+  private isLibraryPath(filePath: string): boolean {
+    return [this.tablesDir, this.v6TablesDir].some((dir) => {
+      const rel = path.relative(path.resolve(dir), filePath);
+      return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    });
   }
 
   /** Drop every relationships file's cached reading (a relationships file changed on disk). */
@@ -790,7 +825,8 @@ export class TableLibraryService {
    * Returns null when the file is missing, empty, not a mapping, or has no
    * `name`; throws on read/parse failure.
    */
-  private readTableFile(filePath: string, fallbackName: string): SemanticTable | null {
+  private readTableFile(filePath: string, fallbackName: string, options: { clone?: boolean } = {}): SemanticTable | null {
+    const clone = options.clone !== false;
     let stat: fs.Stats;
     try {
       stat = fs.statSync(filePath);
@@ -801,20 +837,23 @@ export class TableLibraryService {
     const signature = `${stat.mtimeMs}:${stat.size}`;
     const cached = this.cache.get(filePath);
     if (cached && cached.signature === signature) {
-      return structuredClone(cached.model);
+      return clone ? structuredClone(cached.model) : cached.model;
     }
     // The cache entry changes now whatever the read finds (a file that
     // throws keeps no entry), and only then: a file that stays broken does
     // not bump the generation on every read.
     if (this.cache.delete(filePath)) this.tableCacheGeneration++;
+    // This version of the file has been read now, whatever the read finds (`peekTableFileError`).
+    this.yamlReadSignatures.set(filePath, signature);
     const content = fs.readFileSync(filePath, 'utf-8');
     // A key written twice is read as dbt reads it, the last copy winning; the
     // model carries a loadWarning and writes are refused (loadEditableDocument).
     const model = parseTableText(content, fallbackName, { duplicateKeys: 'last' });
     if (!model) return null;
-    this.cache.set(filePath, { signature, model: structuredClone(model) });
+    const cachedModel = structuredClone(model);
+    this.cache.set(filePath, { signature, model: cachedModel });
     this.tableCacheGeneration++;
-    return model;
+    return clone ? model : cachedModel;
   }
 
   /**
@@ -880,16 +919,7 @@ export class TableLibraryService {
    * `tables/` is a layer.
    */
   listRelationshipsFiles(): string[] {
-    if (!fs.existsSync(this.v6TablesDir) || tablesDirIsLayer(this.semanticRoot)) return [];
-    const out: string[] = [];
-    for (const folder of ['', ...this.listFoldersOf(this.v6TablesDir)]) {
-      const dir = path.join(this.v6TablesDir, folder);
-      const file = listNames(dir)
-        .filter((f) => this.classifyLibraryFile(path.join(dir, f)).kind === 'relationships')
-        .sort(compareNames)[0];
-      if (file) out.push(path.join(dir, file));
-    }
-    return out;
+    return [...this.index.get().relationshipsFiles];
   }
 
   /** A relationships file's reading, through {@link relationshipsCache}; null when it is gone. */
@@ -937,20 +967,15 @@ export class TableLibraryService {
       keyParts.push(`${filePath}\0${this.relationshipsCache.get(filePath)?.signature ?? ''}`);
       readings.push({ path: this.libraryRelativePath(filePath), reading });
     }
-    // The tables are keyed by what is listed and by the table caches'
-    // generation, not by a stat of every file: a read that finds a table
-    // changed bumps the generation (and the watchers invalidate), so a memo
-    // hit costs one listing, never a pass over every table (§7.6 budgets).
-    const entries = this.listTableFiles().filter((e) => !e.shadowedBy);
-    for (const entry of entries) keyParts.push(entry.filePath);
-    const keyOf = (): string => `${keyParts.join('\n')}\n#${this.tableCacheGeneration}`;
-    if (memo && memo.key === keyOf()) {
-      // Something listed changed but no table it reads did (an unrelated file in a library folder).
-      this.attachMemo = { ...memo, relFiles, dirs, quickKey: this.attachQuickKey(relFiles, dirs) };
-      return memo.result;
-    }
+    // The memo is checked against what attachRelationships reads of each
+    // table (its fingerprint), not against the table's file: a table read
+    // anew (the generation moved) whose name, columns and keys are what
+    // they were — a description, a note, a position elsewhere — keeps the
+    // result, and only the tables themselves are read (through the caches,
+    // one stat each), never attached again (§7.6 budgets).
     const tables: DbmlAttachTable[] = [];
-    for (const entry of entries) {
+    for (const entry of this.listTableFiles()) {
+      if (entry.shadowedBy) continue;
       let model: SemanticTable | null = null;
       let alias: string | undefined;
       try {
@@ -961,29 +986,60 @@ export class TableLibraryService {
             alias = reading.alias;
           }
         } else {
-          model = this.readTableFile(entry.filePath, entry.name);
+          model = this.readTableFile(entry.filePath, entry.name, { clone: false });
         }
       } catch {
         model = null;
       }
-      if (!model) continue;
-      tables.push({
+      if (!model) {
+        keyParts.push(`${entry.filePath}\0-`);
+        continue;
+      }
+      const table: DbmlAttachTable = {
         table: { name: model.name, columns: model.columns },
         folder: entry.folder,
         storage: entry.storage,
         ...(alias !== undefined ? { dbmlAlias: alias } : {}),
-      });
+      };
+      tables.push(table);
+      keyParts.push(`${entry.filePath}\0${this.attachFingerprint(model, table)}`);
+    }
+    const key = keyParts.join('\n');
+    if (memo && memo.key === key) {
+      // Something listed or read anew changed nothing the attachment reads.
+      this.attachMemo = { ...memo, relFiles, dirs, quickKey: this.attachQuickKey(relFiles, dirs) };
+      return memo.result;
     }
     const result = attachRelationships(readings, dbmlTableLookup(tables));
     for (const warning of result.warnings) console.warn(`[LogicalModelService] ${warning}`);
     // Keyed after the reads above, which bump the generation for any table they found changed.
-    this.attachMemo = { key: keyOf(), quickKey: this.attachQuickKey(relFiles, dirs), relFiles, dirs, result };
+    this.attachMemo = { key, quickKey: this.attachQuickKey(relFiles, dirs), relFiles, dirs, result };
     return result;
+  }
+
+  /** What {@link libraryAttachment} reads of a table, as one string; cached by the parsed object. */
+  private attachFingerprint(model: SemanticTable, table: DbmlAttachTable): string {
+    const place = `${table.folder}\0${table.storage}\0${table.dbmlAlias ?? ''}`;
+    let own = this.attachFingerprints.get(model);
+    if (own === undefined) {
+      own = [
+        model.name,
+        ...(model.columns ?? []).map((c) => c && typeof c === 'object'
+          ? `${String(c.name)}\u0001${c.isPrimaryKey ? 1 : 0}${c.isNaturalKey ? 1 : 0}${(c as { dbtKey?: unknown }).dbtKey !== undefined ? JSON.stringify((c as { dbtKey?: unknown }).dbtKey) : ''}`
+          : String(c)),
+      ].join('\u0002');
+      this.attachFingerprints.set(model, own);
+    }
+    return `${place}\0${own}`;
   }
 
   /** Every library directory whose listing {@link libraryAttachment} depends on: both libraries and their folders. */
   private libraryDirs(): string[] {
-    return [this.tablesDir, this.v6TablesDir].flatMap((dir) => [dir, ...this.listFoldersOf(dir).map((f) => path.join(dir, f))]);
+    const index = this.index.get();
+    return [
+      this.tablesDir, ...index.v5Folders.map((f) => path.join(this.tablesDir, f)),
+      this.v6TablesDir, ...index.v6Folders.map((f) => path.join(this.v6TablesDir, f)),
+    ];
   }
 
   /** {@link attachMemo}'s quick key: signatures only, no listing. */
@@ -1065,7 +1121,7 @@ export class TableLibraryService {
             alias = reading.alias;
           }
         } else {
-          model = this.readTableFile(entry.filePath, entry.name);
+          model = this.readTableFile(entry.filePath, entry.name, { clone: false });
         }
       } catch {
         model = null;
@@ -1161,7 +1217,7 @@ export class TableLibraryService {
    * else the layer when it is folder-shaped, else the top level (`''`).
    */
   private dbmlNewTableFolder(layerFolder: string | undefined): string {
-    const listedFolder = layerFolder ? this.listFoldersOf(this.v6TablesDir).find((f) => f.toLowerCase() === layerFolder.toLowerCase()) : undefined;
+    const listedFolder = layerFolder ? this.index.get().v6Folders.find((f) => f.toLowerCase() === layerFolder.toLowerCase()) : undefined;
     return listedFolder ?? (layerFolder && TABLE_FOLDER_PATTERN.test(layerFolder) ? layerFolder : '');
   }
 
@@ -1206,7 +1262,8 @@ export class TableLibraryService {
    * v6's `tables/` (#182) when it is not a layer folder.
    */
   dirExists(): boolean {
-    return fs.existsSync(this.tablesDir) || (fs.existsSync(this.v6TablesDir) && !tablesDirIsLayer(this.semanticRoot));
+    const index = this.index.get();
+    return index.v5Exists || (index.v6Exists && !index.v6IsLayer);
   }
 
   /**
@@ -1266,7 +1323,8 @@ export class TableLibraryService {
    * the two would be one file on a teammate's Mac and one table in dbt.
    */
   findTableNameIgnoringCase(name: string): string | null {
-    return this.listTableFiles().find((e) => sameName(e.name, name))?.name ?? null;
+    if (typeof name !== 'string') return null;
+    return this.index.get().firstNameByKey.get(name.trim().toLowerCase()) ?? null;
   }
 
   /**
@@ -1324,8 +1382,44 @@ export class TableLibraryService {
     if (filePath === null || !fs.existsSync(filePath)) {
       return null;
     }
-    this.getTable(name);
+    // getTable's bookkeeping without its copy and relationships: only the
+    // file's own reading decides whether it is broken.
+    try {
+      let model: SemanticTable | null;
+      if (isDbmlFile(filePath)) {
+        const reading = this.readDbmlTableFile(filePath);
+        if (reading !== null && !reading.ok) throw dbmlReadingError(reading.error);
+        model = reading?.ok ? reading.table : null;
+      } else {
+        model = this.readTableFile(filePath, name, { clone: false });
+      }
+      const warning = model ? tableLoadWarningOf(model) : undefined;
+      if (warning) {
+        this.recordFailure(filePath, duplicateKeyFileError(name, filePath, warning), null);
+      } else {
+        this.failedPaths.delete(filePath);
+      }
+    } catch (err) {
+      this.recordFailure(filePath, describeTableFileError(name, filePath, err), err);
+    }
     return this.failedPaths.get(filePath) ?? null;
+  }
+
+  /**
+   * {@link getTableFileError} when the file has already been read in its
+   * current version (the answer then costs a stat and the cache), else
+   * undefined: the Table Library shows a large library at once and reads
+   * the files it has not read yet afterwards, in the background.
+   */
+  peekTableFileError(name: string): TableFileError | null | undefined {
+    const filePath = this.resolveTablePath(name);
+    if (filePath === null) return null;
+    const signature = fileSignature(filePath);
+    if (signature === null) return null;
+    const read = isDbmlFile(filePath)
+      ? this.dbmlCache.get(filePath)?.signature === signature
+      : this.yamlReadSignatures.get(filePath) === signature;
+    return read ? this.getTableFileError(name) : undefined;
   }
 
   /**
@@ -1336,69 +1430,7 @@ export class TableLibraryService {
    * Dot-folders, deeper nesting and symlinked folders are not scanned.
    */
   listTableFiles(): TableFileEntry[] {
-    const entries: TableFileEntry[] = [];
-    const winners = new Map<string, string>();
-    // `logical-models/`'s files by lower-case name: a `tables/` file of the
-    // same name in any case is shadowed by it (#162). Within one library
-    // the match stays exact for YAML, as before; a `.dbml` table's name is
-    // compared without case (D2), so within `tables/` any pair involving a
-    // `.dbml` file is matched by its lower-case name.
-    const v5Winners = new Map<string, string>();
-    const dbmlWinners = new Map<string, { filePath: string; dbml: boolean }>();
-    let library: typeof TABLES_DIR | undefined;
-    const add = (dir: string, folder: string): void => {
-      let files: Array<{ file: string; name: string; storage: 'yaml' | 'dbml' }>;
-      try {
-        files = fs.readdirSync(dir, { withFileTypes: true })
-          .filter((d) => d.isFile())
-          .map((d) => d.name)
-          .flatMap((file): Array<{ file: string; name: string; storage: 'yaml' | 'dbml' }> => {
-            // The single classifier (D10): a `.yml` in either library, a
-            // `.dbml` only in `tables/` and never a relationships file.
-            const kind = this.classifyLibraryFile(path.join(dir, file));
-            return kind.kind === 'table' && kind.name !== undefined && (kind.storage === 'yaml' || kind.storage === 'dbml')
-              ? [{ file, name: kind.name, storage: kind.storage }]
-              : [];
-          })
-          // Within one directory a `.dbml` is listed (and wins) before a `.yml` of the same name (§3.4).
-          .sort((a, b) => a.name.toLowerCase() === b.name.toLowerCase() && a.storage !== b.storage
-            ? (a.storage === 'dbml' ? -1 : 1)
-            : compareNames(a.file, b.file));
-      } catch {
-        return;
-      }
-      for (const { file, name, storage } of files) {
-        const filePath = path.join(dir, file);
-        const lower = name.toLowerCase();
-        const dbmlWinner = dbmlWinners.get(lower);
-        const winner = winners.get(name)
-          ?? (library ? v5Winners.get(lower) : undefined)
-          ?? (dbmlWinner && (storage === 'dbml' || dbmlWinner.dbml) ? dbmlWinner.filePath : undefined);
-        const tag = library ? { library } : {};
-        if (winner === undefined) {
-          winners.set(name, filePath);
-          if (!library) v5Winners.set(lower, filePath);
-          else if (!dbmlWinners.has(lower)) dbmlWinners.set(lower, { filePath, dbml: storage === 'dbml' });
-          entries.push({ name, folder, filePath, storage, ...tag });
-        } else {
-          entries.push({ name, folder, filePath, shadowedBy: winner, storage, ...tag });
-        }
-      }
-    };
-    if (fs.existsSync(this.tablesDir)) {
-      add(this.tablesDir, '');
-      for (const folder of this.listFolders()) {
-        add(path.join(this.tablesDir, folder), folder);
-      }
-    }
-    if (this.hasTablesLibrary()) {
-      library = TABLES_DIR;
-      add(this.v6TablesDir, '');
-      for (const folder of this.listFoldersOf(this.v6TablesDir)) {
-        add(path.join(this.v6TablesDir, folder), folder);
-      }
-    }
-    return entries;
+    return [...this.index.get().entries];
   }
 
   /**
@@ -1415,18 +1447,15 @@ export class TableLibraryService {
    * sorted alphabetically. Dot-folders (`.git`, editor state) are skipped.
    */
   listFolders(): string[] {
-    return this.listFoldersOf(this.tablesDir);
+    return [...this.index.get().v5Folders];
   }
 
+  /** A library's folders, from the index (either library) or a listing. */
   private listFoldersOf(dir: string): string[] {
-    try {
-      return fs.readdirSync(dir, { withFileTypes: true })
-        .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
-        .map((d) => d.name)
-        .sort((a, b) => a.localeCompare(b));
-    } catch {
-      return [];
-    }
+    const resolved = path.resolve(dir);
+    if (resolved === path.resolve(this.tablesDir)) return this.listFolders();
+    if (resolved === path.resolve(this.v6TablesDir)) return [...this.index.get().v6Folders];
+    return foldersOf(listDir(dir));
   }
 
   /**
@@ -1477,7 +1506,7 @@ export class TableLibraryService {
       // A `.dbml` table holds no relationships of its own (they are in relationships files).
       if (entry.shadowedBy || entry.storage === 'dbml') return false;
       try {
-        this.readTableFile(entry.filePath, entry.name);
+        this.readTableFile(entry.filePath, entry.name, { clone: false });
         return false;
       } catch {
         try { return RELATIONSHIPS_IN_TEXT.test(fs.readFileSync(entry.filePath, 'utf-8')); } catch { return false; }
@@ -1838,28 +1867,13 @@ export class TableLibraryService {
   findTableFile(name: string): string | null {
     // Throws on a name that is not path-safe.
     this.newTablePath(name, undefined, this.tablesDir);
-    // §3.4's order, resolved from the directory listing, never with
-    // `existsSync` (which ignores case on macOS and Windows, so the looked-up
-    // spelling would leak into paths): `logical-models/` top level then
-    // folders, then `tables/` top level then folders, `.dbml` before `.yml`
-    // in each. The listed file is returned (an exact spelling first, then any
-    // case), so callers get the file's real name.
-    const root = path.resolve(this.tablesDir);
-    const isTable = (filePath: string): boolean => this.classifyLibraryFile(filePath).kind === 'table';
-    for (const folder of ['', ...this.listFolders()]) {
-      const hit = listedFile(path.join(root, folder), name, '.yml', isTable);
-      if (hit !== null) return hit;
-    }
-    const v6Dir = path.resolve(this.v6TablesDir);
-    if (!fs.existsSync(v6Dir) || tablesDirIsLayer(this.semanticRoot)) {
-      return null;
-    }
-    for (const folder of ['', ...this.listFoldersOf(v6Dir)]) {
-      const dir = path.join(v6Dir, folder);
-      const hit = listedFile(dir, name, '.dbml', isTable) ?? listedFile(dir, name, '.yml', isTable);
-      if (hit !== null) return hit;
-    }
-    return null;
+    // §3.4's order, resolved from the directory listing (the index), never
+    // with `existsSync` (which ignores case on macOS and Windows, so the
+    // looked-up spelling would leak into paths): `logical-models/` top level
+    // then folders, then `tables/` top level then folders, `.dbml` before
+    // `.yml` in each. The listed file is returned (an exact spelling first,
+    // then any case), so callers get the file's real name.
+    return this.index.find(name);
   }
 
   /**
