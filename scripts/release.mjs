@@ -8,12 +8,15 @@
  *     Prints the version to publish: max(package.json, latest STABLE marketplace version) + patch.
  *     Pre-release versions on the Marketplace are never the base: a published 1.9.0
  *     pre-release must not turn the next stable patch into 1.9.1. A patch that a pre-release
- *     already took is skipped, and a changelog pin that a pre-release already took fails the
- *     run (before anything is committed) rather than shipping as a patch.
+ *     already took is skipped, and a changelog pin that a pre-release already took, or that
+ *     sits below one, fails the run (before anything is committed) rather than shipping.
  *     The marketplace file is the output of `npx @vscode/vsce show <publisher.name> --json`;
  *     when it is missing or unparsable the local version is used as the base, so a
  *     desynced repo (lost bump commit, rewritten history) never fails with
- *     "version already exists" as long as the marketplace lookup succeeded.
+ *     "version already exists" as long as the marketplace lookup succeeded. A changelog pin
+ *     ahead of package.json fails when the lookup failed: without the Marketplace list it
+ *     cannot be checked against the pre-releases, and vsce's --skip-duplicate would quietly
+ *     skip a pin that collides with one (its duplicate check ignores the channel).
  *
  *     A patch bump is the default, not the only option: writing an explicit version in the
  *     changelog's Unreleased heading — `## Unreleased — 1.0.0` — releases exactly that
@@ -30,13 +33,17 @@
  *     also read from the PR_TITLE / PR_NUMBER environment variables).
  *
  *   node scripts/release.mjs check-prerelease --version <v> --marketplace-json <file>
- *                                            [--changelog <file>] [--rerun]
+ *                                            [--changelog <file>]
+ *                                            [--rerun --head <sha> --tag-commit <sha>]
  *     Fails (exit 1) unless <v> is a safe pre-release number: strict x.y.z, above every
  *     version on the Marketplace in either channel, on a newer major.minor than the latest
  *     stable (so stable patch bumps never catch up with it), and below the version pinned in
  *     the changelog's `## Unreleased — X.Y.Z` heading, so the eventual stable release moves
  *     pre-release users onto it. `--rerun` (a re-run of the same workflow run) accepts <v>
- *     already being on the Marketplace as a pre-release. A missing Marketplace lookup fails.
+ *     already being on the Marketplace as a pre-release only when the `prerelease-v<v>` tag
+ *     (`--tag-commit`, created just before the first publish) marks this run's commit
+ *     (`--head`), so a re-run can never attach a different build to a published version.
+ *     A missing Marketplace lookup fails.
  *
  *   node scripts/release.mjs prerelease-notes --version <v> [--changelog <file>]
  *     Prints the GitHub Release body for a pre-release: an opt-in / how-to-switch / shared-repo
@@ -215,8 +222,8 @@ export function pinnedReleaseVersion(content) {
  *
  * `marketplaceVersion` is the latest STABLE version (see `latestMarketplaceVersion`).
  * `published` lists every version on the Marketplace in either channel: a patch number a
- * pre-release already took is skipped, and a pin a pre-release already took throws — the
- * deploy then stops before it commits anything, instead of shipping the release as a patch.
+ * pre-release already took is skipped, and a pin a pre-release already took, or one below a
+ * pre-release, throws — the deploy then stops before it commits anything.
  */
 export function resolveReleaseVersion(localVersion, marketplaceVersion, pinnedVersion, onNote, published = []) {
   const note = (message) => {
@@ -249,15 +256,23 @@ export function resolveReleaseVersion(localVersion, marketplaceVersion, pinnedVe
         'Pin a stable version above every pre-release in the `## Unreleased — X.Y.Z` heading.',
     );
   }
+  // VS Code installs the highest version a user's channel allows, so a stable release
+  // below a pre-release never reaches anyone who opted in (docs/dev/releasing.md:
+  // the pin "must be above every pre-release").
   const highestPublished = highestOf([...taken].filter((v) => parseVersion(v)));
   if (highestPublished && compareVersions(pinnedVersion, highestPublished) < 0) {
-    note(
-      `warning: changelog pins v${pinnedVersion}, below pre-release v${highestPublished}; ` +
-        'pre-release users stay on the pre-release until a higher version ships',
+    throw new Error(
+      `changelog pins v${pinnedVersion}, below pre-release v${highestPublished}, so pre-release users ` +
+        'would never get it. Pin a stable version above every pre-release in the `## Unreleased — X.Y.Z` heading.',
     );
   }
   note(`changelog pins v${pinnedVersion}; releasing that instead of v${patch}`);
   return pinnedVersion;
+}
+
+function normaliseSha(value) {
+  const sha = String(value ?? '').trim().toLowerCase();
+  return /^[0-9a-f]{40}$/.test(sha) ? sha : '';
 }
 
 /**
@@ -266,8 +281,11 @@ export function resolveReleaseVersion(localVersion, marketplaceVersion, pinnedVe
  * Returns `{ errors, notes }`; the version is safe when `errors` is empty. Rules:
  * - strict `x.y.z` (no `v`, no suffix — the Marketplace accepts nothing else);
  * - the Marketplace lookup must have worked (a pre-release is never guessed);
- * - not already on the Marketplace in either channel (a `rerun` of the same workflow run
- *   may find it there as a pre-release, and carries on);
+ * - not already on the Marketplace in either channel. A `rerun` of the same workflow run
+ *   may find it there as a pre-release and carries on, but only when `tagCommit` (the
+ *   commit the `prerelease-v<version>` tag marks; the first attempt tags it before it
+ *   publishes) equals `headCommit` (the commit this attempt checked out). A branch ref
+ *   re-resolves on a re-run, and another run's re-run must not adopt this version;
  * - above the latest stable, on a newer major.minor than it — the stable deploy only
  *   patch-bumps, so a pre-release on the stable x.y line would be caught up with and
  *   leapfrogged by an ordinary stable patch;
@@ -276,7 +294,7 @@ export function resolveReleaseVersion(localVersion, marketplaceVersion, pinnedVe
  * - below the changelog's pinned stable version, when there is one, so that release moves
  *   pre-release users onto it. Without a pin this is only a note.
  */
-export function checkPrereleaseVersion({ version, showJson, changelog, rerun = false }) {
+export function checkPrereleaseVersion({ version, showJson, changelog, rerun = false, headCommit, tagCommit }) {
   const errors = [];
   const notes = [];
   const requested = String(version ?? '').trim();
@@ -296,7 +314,18 @@ export function checkPrereleaseVersion({ version, showJson, changelog, rerun = f
   } else if (same.length > 0 && !rerun) {
     errors.push(`v${requested} is already on the Marketplace as a pre-release; use v${bumpPatch(requested)}.`);
   } else if (same.length > 0) {
-    notes.push(`v${requested} is already on the Marketplace as a pre-release; re-run, carrying on`);
+    const head = normaliseSha(headCommit);
+    const tagged = normaliseSha(tagCommit);
+    if (!head || head !== tagged) {
+      errors.push(
+        `v${requested} is already on the Marketplace as a pre-release, and the prerelease-v${requested} tag ` +
+          (tagged ? `marks ${tagged.slice(0, 7)}` : 'does not exist') +
+          `, not this run's commit${head ? ` ${head.slice(0, 7)}` : ''}. A re-run only finishes a release of the ` +
+          `same commit (a branch ref may have moved since); dispatch a new run with v${bumpPatch(requested)}.`,
+      );
+    } else {
+      notes.push(`v${requested} is already on the Marketplace as a pre-release of this commit; re-run, carrying on`);
+    }
   }
 
   const others = entries.filter((entry) => compareVersions(entry.version, requested) !== 0);
@@ -478,6 +507,14 @@ export function main(argv = process.argv.slice(2), env = process.env) {
     const changelogPath = args.changelog ?? path.join(cwd, 'CHANGELOG.md');
     const changelog = fs.existsSync(changelogPath) ? fs.readFileSync(changelogPath, 'utf8') : '';
     const pinned = pinnedReleaseVersion(changelog);
+    const lookupFailed = !showJson || !Array.isArray(showJson.versions);
+    if (lookupFailed && pinned && parseVersion(pinned) && parseVersion(pkg.version) && compareVersions(pinned, pkg.version) > 0) {
+      console.error(
+        `error: changelog pins v${pinned}, but the Marketplace lookup failed, so it cannot be checked against ` +
+          'the pre-releases (a pin a pre-release took would be skipped as a duplicate). Re-run the deploy.',
+      );
+      return 1;
+    }
     let version;
     try {
       version = resolveReleaseVersion(
@@ -508,6 +545,8 @@ export function main(argv = process.argv.slice(2), env = process.env) {
       showJson: readJsonIfPresent(args['marketplace-json']),
       changelog,
       rerun: args.rerun === true || args.rerun === 'true',
+      headCommit: typeof args.head === 'string' ? args.head : undefined,
+      tagCommit: typeof args['tag-commit'] === 'string' ? args['tag-commit'] : undefined,
     });
     const annotate = env.GITHUB_ACTIONS === 'true';
     for (const message of notes) {

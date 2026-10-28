@@ -131,6 +131,22 @@ describe('prerelease.yml', () => {
     expect(commandsMatching(/wrangler/)).toEqual([]);
   });
 
+  it('a re-run proves it is finishing the same commit', () => {
+    // The first attempt tags the commit before it publishes; validation hands the
+    // tag's commit and HEAD to check-prerelease, which refuses a mismatch on --rerun.
+    const validate = steps[indexOf((s) => /release\.mjs check-prerelease/.test(s.run ?? ''))].run ?? '';
+    expect(validate).toContain('--head "$HEAD_SHA"');
+    expect(validate).toContain('--tag-commit "$TAG_COMMIT"');
+    const tag = indexOf((s) => /git\/refs/.test(s.run ?? '') && /HEAD_SHA/.test(s.run ?? ''));
+    const publish = indexOf((s) => /vsce publish/.test(s.run ?? ''));
+    expect(tag).toBeLessThan(publish);
+    // The release never replaces an asset, and never creates its tag anywhere else.
+    expect(commandsMatching(/--clobber/)).toEqual([]);
+    const release = steps[indexOf((s) => /gh release create/.test(s.run ?? ''))].run ?? '';
+    expect(release).toContain('--verify-tag');
+    expect(release).not.toContain('--target');
+  });
+
   it('passes inputs to shell scripts through env, never interpolated', () => {
     for (const step of steps) {
       expect(step.run ?? '').not.toMatch(/\$\{\{\s*inputs\./);
