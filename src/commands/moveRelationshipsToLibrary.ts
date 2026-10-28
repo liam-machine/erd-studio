@@ -322,7 +322,7 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
     void vscode.window.showInformationMessage(
       `${TITLE}: nothing to move — ${domains.length === 0
         ? 'no diagram file holds a relationship of its own, and every relationship in the Table Library is stored with the table holding the foreign key.'
-        : 'every relationship in the diagram files starts at a table with no readable file in logical-models/.'}`,
+        : 'every relationship in the diagram files starts at a table with no readable file in the Table Library.'}`,
     );
     return;
   }

@@ -401,7 +401,7 @@ describe('buildUnifiedSubjectArea', () => {
       .toEqual({ kind: 'yamlIndent', line: 3, column: 1, code: 'TAB_AS_INDENT' });
     expect(classifyTableLoadError(Object.assign(new Error('x'), { code: 'EACCES' }))).toEqual({ kind: 'read' });
     expect(classifyTableLoadError(new Error('no code'))).toEqual({ kind: 'yamlOther' });
-    expect(describeTableLoadError({ kind: 'read' })).toBe('logical-models file could not be read');
+    expect(describeTableLoadError({ kind: 'read' })).toBe('table file could not be read');
     expect(describeTableLoadError({ kind: 'yamlDuplicateKey' })).toBe('logical-models file has a YAML error');
   });
 

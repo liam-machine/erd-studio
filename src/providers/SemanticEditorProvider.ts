@@ -1947,12 +1947,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return layerIds.has(layer) && this.tableLibraryService.groupsByFolder(layerIds) ? layer : undefined;
   }
 
-  /** `logical-models/[{folder}/]{name}.yml` (or `tables/…`) for an existing model file, for messages. */
+  /**
+   * A table's file relative to the semantic dir, for messages: the file that
+   * holds it, else where the project puts a new one (`tables/…/x.dbml` in a
+   * DBML project, `logical-models/…/x.yml` or `tables/…/x.yml` in a YAML one).
+   */
   private libraryRelativePath(name: string): string {
     const filePath = this.tableLibraryService.findTableFile(name);
     if (filePath) return this.tableLibraryService.libraryRelativePath(filePath);
-    const folder = this.tableLibraryService.tableFolder(name);
-    return `logical-models/${folder ? `${folder}/` : ''}${name}.yml`;
+    try {
+      return this.tableLibraryService.libraryRelativePath(this.tableLibraryService.pathForNewTable(name));
+    } catch {
+      return name;
+    }
   }
 
   /**
@@ -5171,7 +5178,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (!this.tableLibraryService.tableExists(payload.modelName)) {
           const seed = seedTableFromDbt(payload.modelName, ymlData, manifest, await this.loadCatalog());
           if (!seed) {
-            webview.postMessage({ type: 'error', payload: { message: `Table "${payload.modelName}" not found in .yml files, manifest, or logical-models/.` } });
+            webview.postMessage({ type: 'error', payload: { message: `Table "${payload.modelName}" not found in your dbt .yml files, the manifest or the table library.` } });
             return;
           }
           seededModel = { ...seed, name: payload.modelName };
@@ -5236,7 +5243,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (!ymlModel && !manifestModel) {
         webview.postMessage({
           type: 'error',
-          payload: { message: `Table "${payload.modelName}" not found in .yml files or manifest.` },
+          payload: { message: `Table "${payload.modelName}" not found in your dbt .yml files or the manifest.` },
         });
         return;
       }

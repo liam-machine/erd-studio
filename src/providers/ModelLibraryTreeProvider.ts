@@ -1,9 +1,11 @@
 /**
  * TableLibraryTreeProvider — VS Code TreeDataProvider for the Model Library sidebar.
  *
- * Shows the model YAML files in .erd-studio/logical-models/. A library with
- * no sub-folders is a flat alphabetical list, exactly as before layer folders
- * existed. Once any model lives in a folder (logical-models/{layer}/), the
+ * Shows the table files of the library: `.dbml` tables in .erd-studio/tables/
+ * (native DBML storage), or the YAML files of a project from before 2.0 in
+ * .erd-studio/logical-models/ (or v6's tables/). A library with no
+ * sub-folders is a flat alphabetical list, exactly as before layer folders
+ * existed. Once any table lives in a folder (`{library}/{layer}/`), the
  * folders are shown first — in layers.json order, labelled with the layer's
  * label — and the models still at the top level follow them, the same shape
  * the file explorer shows.

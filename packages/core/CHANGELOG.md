@@ -30,6 +30,7 @@ All notable changes to `@erd-studio/core`. While `0.x`, a breaking change bumps 
 - `TableLoadErrorKind` gains `'dbmlSyntax'`, `'dbmlInvalid'` and `'dbmlStructure'`, so an exhaustive `Record` or `switch` over it needs cases. `TableLoadError` gains the optional `code` (the DBML parser's error code) and `target`.
 - `SubjectAreaFileErrorReason` gains `'invalid-dbml'` (a DBML diagram that does not parse: transient, with `line` and `column`; not transient, with `mergeConflict: true`, for git conflict markers).
 - The loader's warning for a table it cannot find now reads `Model "<name>" not found in the table library` (was `… not found in logical-models/`).
+- `describeTableLoadError` says `table file could not be read` for a `read` failure (was `logical-models file could not be read`): the `read` kind carries no format, and a `.dbml` table file can fail it too. The YAML and DBML wordings are unchanged.
 - Cores 0.3.0 and older cannot read DBML projects (see the note at the top of this section).
 - `DiagramExportFormat` gains `'dbml-rich'` and `DIAGRAM_EXPORT_FORMATS` a third entry: an exhaustive `switch` or a `Record<DiagramExportFormat, …>` over it needs a case, and a picker built from `DIAGRAM_EXPORT_FORMATS` offers it. `DIAGRAM_EXPORT_FILE_EXTENSIONS` maps both `dbml` and `'dbml-rich'` to `dbml`, so a `.dbml` file name no longer names one format.
 

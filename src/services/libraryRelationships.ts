@@ -1202,7 +1202,7 @@ function planGroupMoves(
     }
     const owner = libraryModel(head[0].fromModel);
     if (!owner) {
-      leave(`${head[0].fromModel} has no readable file in logical-models/`);
+      leave(`${head[0].fromModel} has no readable file in the Table Library`);
       continue;
     }
     // What the library already says about these pairs.
@@ -1476,7 +1476,7 @@ export function describeMovePlan(plan: MoveToLibraryPlan, fileOf: (model: string
     lines.push(
       '',
       `${plural(plan.skippedNoModel.length, 'relationship starts', 'relationships start')} at a table with no readable ` +
-      'file in logical-models/ and will stay in the diagram files.',
+      'file in the Table Library and will stay in the diagram files.',
     );
   }
   // Every entry the move turns round is listed: the preview is the only chance to check them.

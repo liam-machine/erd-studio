@@ -852,7 +852,7 @@ function isDbmlKind(kind: TableLoadErrorKind): boolean {
  */
 export function describeTableLoadError(error: TableLoadError): string {
   if (error.kind === 'read') {
-    return 'logical-models file could not be read';
+    return 'table file could not be read';
   }
   if (isDbmlKind(error.kind)) {
     return describeDbmlTableLoadError(error);

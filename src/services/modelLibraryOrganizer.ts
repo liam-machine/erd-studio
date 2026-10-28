@@ -163,7 +163,7 @@ export function describeOrganizePlan(plan: OrganizePlan): string {
     );
   }
   if (staying.length > 0) {
-    lines.push(`Staying at the top of logical-models/: ${staying.join('; ')}.`);
+    lines.push(`Staying at the top of the Table Library: ${staying.join('; ')}.`);
   }
   if (plan.otherFolders.length > 0) {
     const folders = plan.otherFolders.map(f => `${f.folder}/ (${f.count})`).join(', ');

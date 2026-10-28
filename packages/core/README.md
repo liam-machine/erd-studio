@@ -40,7 +40,7 @@ Bad input rejects with one of four classes, so a host can map them to its own er
 
 | Class | When |
 |---|---|
-| `SubjectAreaFileError` | the domain file is missing (`reason: 'missing'`), empty (`'empty'`) or not JSON (`'invalid-json'`), including a file holding unresolved git merge conflicts (`mergeConflict: true`, see below) |
+| `SubjectAreaFileError` | the domain file is missing (`reason: 'missing'`), empty (`'empty'`), not JSON (`'invalid-json'`) or, for a `.dbml` diagram read with `dbml` (see below), not valid DBML (`'invalid-dbml'`), including a file holding unresolved git merge conflicts (`mergeConflict: true`, see below) |
 | `SubjectAreaValidationError` | not a loadable domain: not an object, no or a newer `schemaVersion`, a legacy or hybrid layout, an unconfigured layer, a malformed v4 inline model (say, `columns` that is not a list) |
 | `TooManyTablesError` | `logical.models` has more than `maxModels` entries (checked before any model file is read) |
 | `FileTooLargeError` | the domain file is longer than `maxDomainChars` |

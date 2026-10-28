@@ -693,3 +693,17 @@ describe('another diagram with a byte-order mark (D7)', () => {
     expect(text).toContain("use { table dim_day } from '../tables/dim_day.dbml'");
   });
 });
+
+describe('messages name the project\'s own table library', () => {
+  it('a table with no file is named where a new one goes: tables/<name>.dbml, never logical-models/<name>.yml', () => {
+    const { provider } = buildProvider(new OwnWriteTracker());
+    const named = (provider as unknown as { libraryRelativePath(name: string): string }).libraryRelativePath('dim_missing');
+    expect(named).toBe('tables/dim_missing.dbml');
+    expect((provider as unknown as { libraryRelativePath(name: string): string }).libraryRelativePath('dim_date')).toBe('tables/dim_date.dbml');
+  });
+
+  it('adding a table found nowhere says so without naming logical-models/', async () => {
+    const r = await run({ type: 'addExistingModel', payload: { modelName: 'dim_nowhere' } });
+    expect(r.errors).toEqual(['Table "dim_nowhere" not found in your dbt .yml files, the manifest or the table library.']);
+  });
+});

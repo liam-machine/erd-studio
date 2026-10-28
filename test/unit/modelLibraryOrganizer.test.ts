@@ -177,7 +177,7 @@ describe('describeOrganizePlan', () => {
     };
     expect(describeOrganizePlan(plan)).toBe([
       'Move 3 tables into layer folders (1 → gold/, 2 → silver/).',
-      'Staying at the top of logical-models/: 1 table used by more than one layer (d); 2 unused tables (e, f); ' +
+      'Staying at the top of the Table Library: 1 table used by more than one layer (d); 2 unused tables (e, f); ' +
         '1 table whose layer folder already has a file of that name (g).',
       'Subject area files reference tables by name, so no subject area file changes.',
     ].join('\n\n'));
@@ -193,7 +193,7 @@ describe('describeOrganizePlan', () => {
   it('describes a plan with nothing to move', () => {
     const text = describeOrganizePlan({ moves: [], shared: [], unused: ['x'], conflicts: [], otherFolders: [] });
     expect(text).not.toContain('Move ');
-    expect(text).toContain('Staying at the top of logical-models/: 1 unused table (x).');
+    expect(text).toContain('Staying at the top of the Table Library: 1 unused table (x).');
   });
 
   it('names at most three models per group', () => {

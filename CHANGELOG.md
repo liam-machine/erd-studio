@@ -50,6 +50,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - An undo or redo on the canvas that cannot save a file now says so, as any other canvas edit does, instead of leaving the file silently unsaved.
 
 ### Fixed
+- Messages no longer name `logical-models/` as where your tables live, which is wrong in a DBML project (`tables/`): the **Organise Table Library** preview, the error when a table to add is found nowhere, **Move Relationships to Table Library** and a table file that can't be read now say the Table Library, or name the file the project would really write.
 - **Migrate to the New File Naming** no longer leaves a project half moved when VS Code applies only part of its edit: it puts back every file that moved, and if it cannot put one back it names it so you can restore it from source control.
 - ERD Studio no longer writes a dbt `selectors.yml` into a folder that isn't a dbt project. With `erdStudio.projectPath` pointing at a plain folder (one with no `dbt_project.yml`) that already held diagrams, opening VS Code or editing a diagram created `selectors.yml` there. Now nothing is written, and **Regenerate dbt selectors.yml** says the folder is not a dbt project instead. dbt projects work as before.
 - README: removed the out-of-date "Not using dbt?" workaround (a placeholder `dbt_project.yml` is no longer needed; set `erdStudio.projectPath` instead), replaced a **Set Up ERD Studio** button that does not exist with the real command, and corrected what the Physical view needs and how to install the AI coding harness.
