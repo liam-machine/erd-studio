@@ -673,6 +673,30 @@ describe('readSubjectAreaRelationships', () => {
   });
 });
 
+describe('readSubjectAreaRelationships skips a DBML diagram by its storage', () => {
+  it('never reads a .dbml diagram as JSON, even one whose text would parse', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-read-rels-'));
+    try {
+      const filePath = path.join(dir, 'orders.dbml');
+      fs.writeFileSync(filePath, JSON.stringify({
+        schemaVersion: 5, domain: 'orders', layer: 'gold', description: '',
+        logical: { models: ['fct_order'], relationships: [
+          { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
+        ] },
+      }));
+      // Its text parses as a v5 domain: only the storage skip keeps it out (before, a parse failure did).
+      const domains = readSubjectAreaRelationships(
+        { listSubjectAreas: () => [{ domain: 'orders', layer: 'gold', filePath, storage: 'dbml' as const }] },
+        dir,
+        '.erd-studio',
+      );
+      expect(domains).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('moveRelationshipsToLibrary — turns reversed library entries round (#133)', () => {
   const DIM = [
     '# hand-written dimension',

@@ -17,8 +17,8 @@ import { Document, Pair, YAMLMap, YAMLSeq, parseDocument, isAlias, isMap, isNode
 import type { Alias, Node, Scalar, ScalarTag, Tags } from 'yaml';
 
 import {
-  DBML_RELATIONSHIPS_FILE_NAME, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, TABLES_DIR, TableDbmlError, classifyTableLoadError,
-  dbmlName, isLibraryFolderName, isReservedTableName, tableLoadWarningOf, parseTableText, writesDbml, writesTableNaming,
+  DBML_RELATIONSHIPS_FILE_NAME, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, TABLES_DIR, TableDbmlError, classifySemanticFile, classifyTableLoadError,
+  dbmlName, isLibraryFolderName, tableLoadWarningOf, parseTableText, writesDbml, writesTableNaming,
 } from '@erd-studio/core';
 import { attachRelationships, dbmlTableLookup, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
 import { projectNamingOf } from './projectNaming';
@@ -335,23 +335,24 @@ function isDbmlFile(filePath: string): boolean {
 /**
  * The file in `dir` named `name` + `ext`: the exact spelling when it is
  * listed, else the first (sorted) whose stem matches without case; null
- * when there is none or `dir` cannot be listed. A `.dbml` relationships file
- * is never a table.
+ * when there is none or `dir` cannot be listed. Only a file `isTable` accepts
+ * (the single classifier, D10) is a candidate, so a `.dbml` relationships
+ * file is never a table.
  */
-function listedFile(dir: string, name: string, ext: '.yml' | '.dbml'): string | null {
+function listedFile(dir: string, name: string, ext: '.yml' | '.dbml', isTable: (filePath: string) => boolean): string | null {
   let files: string[];
   try {
     files = fs.readdirSync(dir, { withFileTypes: true })
       .filter((d) => d.name.endsWith(ext) && (d.isFile() || (d.isSymbolicLink() && isFileTarget(path.join(dir, d.name)))))
-      .map((d) => d.name);
+      .map((d) => d.name)
+      .filter((f) => isTable(path.join(dir, f)));
   } catch {
     return null;
   }
   const exact = `${name}${ext}`;
   if (files.includes(exact)) return path.join(dir, exact);
   const stem = (f: string): string => f.slice(0, -ext.length);
-  const file = files.sort(compareNames)
-    .find((f) => sameName(stem(f), name) && !(ext === '.dbml' && isReservedTableName(stem(f))));
+  const file = files.sort(compareNames).find((f) => sameName(stem(f), name));
   return file === undefined ? null : path.join(dir, file);
 }
 
@@ -884,7 +885,7 @@ export class TableLibraryService {
     for (const folder of ['', ...this.listFoldersOf(this.v6TablesDir)]) {
       const dir = path.join(this.v6TablesDir, folder);
       const file = listNames(dir)
-        .filter((f) => f.toLowerCase().endsWith('.dbml') && isReservedTableName(dbmlStem(f)) && dbmlStem(f) === dbmlStem(f).trim())
+        .filter((f) => this.classifyLibraryFile(path.join(dir, f)).kind === 'relationships')
         .sort(compareNames)[0];
       if (file) out.push(path.join(dir, file));
     }
@@ -1352,12 +1353,12 @@ export class TableLibraryService {
           .filter((d) => d.isFile())
           .map((d) => d.name)
           .flatMap((file): Array<{ file: string; name: string; storage: 'yaml' | 'dbml' }> => {
-            if (file.endsWith('.yml')) return [{ file, name: file.slice(0, -'.yml'.length), storage: 'yaml' }];
-            // `.dbml` tables live only in `tables/`, never next to a relationships file's name.
-            if (library && file.endsWith('.dbml') && !isReservedTableName(dbmlStem(file))) {
-              return [{ file, name: dbmlStem(file), storage: 'dbml' }];
-            }
-            return [];
+            // The single classifier (D10): a `.yml` in either library, a
+            // `.dbml` only in `tables/` and never a relationships file.
+            const kind = this.classifyLibraryFile(path.join(dir, file));
+            return kind.kind === 'table' && kind.name !== undefined && (kind.storage === 'yaml' || kind.storage === 'dbml')
+              ? [{ file, name: kind.name, storage: kind.storage }]
+              : [];
           })
           // Within one directory a `.dbml` is listed (and wins) before a `.yml` of the same name (§3.4).
           .sort((a, b) => a.name.toLowerCase() === b.name.toLowerCase() && a.storage !== b.storage
@@ -1398,6 +1399,15 @@ export class TableLibraryService {
       }
     }
     return entries;
+  }
+
+  /**
+   * What a file in the library is, by the single classifier (D10, §3.5):
+   * its path relative to the semantic dir, with `tables/` read as the
+   * library (callers list `tables/` only while it is one).
+   */
+  private classifyLibraryFile(filePath: string): ReturnType<typeof classifySemanticFile> {
+    return classifySemanticFile(path.relative(this.semanticRoot, filePath).split(path.sep).join('/'), { tablesDirIsLayer: false });
   }
 
   /**
@@ -1835,8 +1845,9 @@ export class TableLibraryService {
     // in each. The listed file is returned (an exact spelling first, then any
     // case), so callers get the file's real name.
     const root = path.resolve(this.tablesDir);
+    const isTable = (filePath: string): boolean => this.classifyLibraryFile(filePath).kind === 'table';
     for (const folder of ['', ...this.listFolders()]) {
-      const hit = listedFile(path.join(root, folder), name, '.yml');
+      const hit = listedFile(path.join(root, folder), name, '.yml', isTable);
       if (hit !== null) return hit;
     }
     const v6Dir = path.resolve(this.v6TablesDir);
@@ -1845,7 +1856,7 @@ export class TableLibraryService {
     }
     for (const folder of ['', ...this.listFoldersOf(v6Dir)]) {
       const dir = path.join(v6Dir, folder);
-      const hit = (isReservedTableName(name) ? null : listedFile(dir, name, '.dbml')) ?? listedFile(dir, name, '.yml');
+      const hit = listedFile(dir, name, '.dbml', isTable) ?? listedFile(dir, name, '.yml', isTable);
       if (hit !== null) return hit;
     }
     return null;

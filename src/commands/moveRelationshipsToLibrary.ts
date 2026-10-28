@@ -95,7 +95,11 @@ export interface SubjectAreaRelationships {
   relationships: Relationship[];
 }
 
-/** Every readable v5 and v6 domain file's models and `logical.relationships`. */
+/**
+ * Every readable v5 and v6 domain file's models and `logical.relationships`.
+ * A DBML diagram is skipped by its storage, not by failing to parse as JSON:
+ * it holds no relationships (they live in the library's relationships files).
+ */
 export function readSubjectAreaRelationships(
   subjectAreaService: Pick<SubjectAreaService, 'listSubjectAreas'>,
   workspaceRoot: string,
@@ -103,6 +107,7 @@ export function readSubjectAreaRelationships(
 ): SubjectAreaRelationships[] {
   const domains: SubjectAreaRelationships[] = [];
   for (const summary of subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)) {
+    if (summary.storage === 'dbml') continue;
     try {
       const file = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as Record<string, unknown>;
       const format = detectSubjectAreaFormat(file);

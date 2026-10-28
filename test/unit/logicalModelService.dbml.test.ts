@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { tableFileCandidates } from '@erd-studio/core';
+import { classifySemanticFile, tableFileCandidates } from '@erd-studio/core';
 import {
   DbmlTableWriteRefused,
   TableLibraryService,
@@ -108,6 +108,33 @@ describe('listing and shadowing', () => {
     expect(lib.getTable('_relationships')?.name).toBe('_relationships');
     // The relationships FILE is never a table, whatever the lookup.
     expect(rel(lib.findTableFile('_relationships'))).toBe('tables/_relationships.yml');
+  });
+});
+
+describe('the listing, the lookup and the relationships files agree with classifySemanticFile (D10, §3.5)', () => {
+  it('every listed entry, found file and relationships file is what the single classifier says it is', () => {
+    const files = [
+      'logical-models/dim_old.yml', 'logical-models/stray.dbml', 'logical-models/gold/fct_old.yml',
+      'tables/dim_date.dbml', 'tables/_relationships.dbml', 'tables/silver/_RELATIONSHIPS.dbml', 'tables/notes.txt',
+      'tables/gold/fct_order.dbml', 'tables/gold/_relationships.dbml', 'tables/gold/dim_yaml.yml',
+      'tables/.hidden.dbml',
+    ];
+    for (const f of files) write(f, f.endsWith('.yml') ? yamlTable(path.basename(f, '.yml')) : f.endsWith('.dbml') ? dbmlTable(path.basename(f, '.dbml')) : 'x\n');
+    const lib = service();
+    const classify = (f: string) => classifySemanticFile(f, { tablesDirIsLayer: false });
+    const expected = files.filter((f) => classify(f).kind === 'table');
+    expect(lib.listTableFiles().map((e) => rel(e.filePath)).sort()).toEqual([...expected].sort());
+    for (const e of lib.listTableFiles()) {
+      const c = classify(rel(e.filePath)!);
+      expect([e.name, e.storage]).toEqual([c.name, c.storage]);
+    }
+    // A name only a non-table file has is not found: logical-models/stray.dbml is not a table, nor is a relationships file.
+    expect(lib.findTableFile('stray')).toBeNull();
+    expect(lib.findTableFile('_relationships')).toBeNull();
+    expect(rel(lib.findTableFile('fct_order'))).toBe('tables/gold/fct_order.dbml');
+    expect(lib.listRelationshipsFiles().map(rel)).toEqual(
+      ['tables/_relationships.dbml', 'tables/gold/_relationships.dbml', 'tables/silver/_RELATIONSHIPS.dbml'].filter((f) => classify(f).kind === 'relationships'),
+    );
   });
 });
 
