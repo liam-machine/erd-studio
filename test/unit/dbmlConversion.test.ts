@@ -150,7 +150,7 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
     expect(plan.notes).toContain(
       'logical-models/gold/fct.yml: the relationship fct.dim_key → dim.dim_key is kept as a pending line in tables/gold/_relationships.dbml '
         + '(dim stays a YAML table until its files (logical-models/gold/dim.yml, logical-models/silver/dim.yml) are made one). '
-        + 'It draws as before, and becomes a live Ref when both ends have table files.',
+        + 'It draws as before, and becomes a live Ref when both ends have table files with those columns.',
     );
   });
 
@@ -701,7 +701,8 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
     expect(created(plan, 'tables/_relationships.dbml')).toContain('// erd-studio pending: Ref: fct.dim_key >? dim.nope\n');
-    expect(plan.notes).toEqual([expect.stringMatching(/kept as a pending line in tables\/_relationships\.dbml \(dim has no column nope\)\. It draws as before/)]);
+    expect(plan.notes).toEqual(['logical-models/fct.yml: the relationship fct.dim_key → dim.nope is kept as a pending line in tables/_relationships.dbml (dim has no column nope). '
+      + 'It draws as before, and becomes a live Ref when both ends have table files with those columns.']);
     expectCompilesEverywhere(input, plan);
   });
 
@@ -724,7 +725,7 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     expect(created(plan, 'tables/_relationships.dbml')).toContain('// erd-studio pending: Ref: fct.gone >? dim.dim_key\n');
     expect(plan.notes).toEqual([
       'logical-models/fct.yml: the relationship fct.gone → dim.dim_key is kept as a pending line in tables/_relationships.dbml (fct has no column gone). '
-        + 'It draws as before, and becomes a live Ref when both ends have table files.',
+        + 'It draws as before, and becomes a live Ref when both ends have table files with those columns.',
     ]);
     expectCompilesEverywhere(input, plan);
   });

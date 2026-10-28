@@ -1143,7 +1143,7 @@ async function planOnce(
     const owner = tableOf(e.rel.fromModel)!;
     notes.push(
       `${e.file}: the relationship ${describeEnds(e.rel.fromModel, [e.rel.fromColumn], e.rel.toModel, [e.rel.toColumn])} is kept as a pending line in ` +
-        `${relationshipsFileOfFolder(owner.folder)} (${e.pending}). It draws as before, and becomes a live Ref when both ends have table files.`,
+        `${relationshipsFileOfFolder(owner.folder)} (${e.pending}). It draws as before, and becomes a live Ref when both ends have table files with those columns.`,
     );
   }
 
