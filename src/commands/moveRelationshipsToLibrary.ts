@@ -473,7 +473,7 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
       return;
     }
     written.push(write);
-    // Recorded once the bytes are on disk (the tracker stats the file), so
+    // Recorded once the bytes are on disk (the tracker reads what the file holds), so
     // the watchers skip this write; the caller issues the refreshes.
     ownWrites.recordWrite(write.filePath);
   }

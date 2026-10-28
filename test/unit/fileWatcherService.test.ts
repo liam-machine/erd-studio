@@ -24,7 +24,7 @@ vi.mock('fs', async () => {
 });
 
 import { FileWatcherService, classifySemanticPath } from '../../src/watchers/FileWatcherService';
-import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import { CONSUMED_GRACE_MS, OwnWriteTracker } from '../../src/services/ownWriteTracker';
 import { defaultDbtProjectConfig } from '../../src/services/dbtProjectConfig';
 import {
   _clearMockFileWatchers,
@@ -683,6 +683,8 @@ describe('FileWatcherService', () => {
       vi.advanceTimersByTime(300);
       expect(listener).not.toHaveBeenCalled();
 
+      // Past the grace a duplicate event of the same save gets, the next event is reported.
+      vi.advanceTimersByTime(CONSUMED_GRACE_MS);
       modelWatcher._simulateChange(vscode.Uri.file(modelPath));
       vi.advanceTimersByTime(300);
       expect(listener).toHaveBeenCalledTimes(1);

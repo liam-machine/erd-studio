@@ -22,8 +22,10 @@
  * produces one event rather than N.
  *
  * Events caused by the extension's own writes (recorded in OwnWriteTracker by
- * the service that wrote the file) are swallowed so a save does not bounce
- * back as a spurious "external change".
+ * the service that wrote the file, and matched by content however late the
+ * debounced callback runs) are swallowed so a save does not bounce back as a
+ * spurious "external change". While a write the editor announced is still
+ * being saved, the callback waits another debounce (`debounceOwnWrite`).
  *
  * Usage:
  *   const watcher = new FileWatcherService(workspaceRoot);
@@ -310,7 +312,7 @@ export class FileWatcherService implements vscode.Disposable {
       if (kind === 'other' && !isJson) return;
       if (kind === 'layout') {
         // A layout change is a change to its diagram, skipped on our own write.
-        this.debounce(`layout:${uri.toString()}`, () => {
+        this.debounceOwnWrite(`layout:${uri.toString()}`, () => [uri.fsPath], () => {
           if (this.ownWriteTracker.consume(uri.fsPath)) {
             console.log(`[FileWatcherService] Ignoring own write: ${uri.fsPath}`);
             return;
@@ -323,7 +325,7 @@ export class FileWatcherService implements vscode.Disposable {
       }
       if (created && kind === 'domain') { createdPending.add(uri.toString()); }
       // Per-file debounce key allows parallel updates to different files
-      this.debounce(`semantic:${uri.toString()}`, () => {
+      this.debounceOwnWrite(`semantic:${uri.toString()}`, () => [uri.fsPath], () => {
         const wasCreated = createdPending.delete(uri.toString());
         if (this.ownWriteTracker.consume(uri.fsPath)) {
           console.log(`[FileWatcherService] Ignoring own write: ${uri.fsPath}`);
@@ -358,7 +360,7 @@ export class FileWatcherService implements vscode.Disposable {
       }
       this.pendingDeletes.set(uri.toString(), uri);
       // Single debounce key: a checkout that deletes N domains yields one event
-      this.debounce('semantic-del', () => {
+      this.debounceOwnWrite('semantic-del', () => [...this.pendingDeletes.values()].map((u) => u.fsPath), () => {
         const uris = Array.from(this.pendingDeletes.values())
           .filter((u) => !this.ownWriteTracker.consume(u.fsPath));
         this.pendingDeletes = new Map();
@@ -380,7 +382,7 @@ export class FileWatcherService implements vscode.Disposable {
 
   /** A relationships file's create/change/delete → one debounced onRelationshipsChanged per file; own writes swallowed. */
   private handleRelationshipsEvent(uri: vscode.Uri): void {
-    this.debounce(`relationships:${uri.toString()}`, () => {
+    this.debounceOwnWrite(`relationships:${uri.toString()}`, () => [uri.fsPath], () => {
       if (this.ownWriteTracker.consume(uri.fsPath)) {
         console.log(`[FileWatcherService] Ignoring own write: ${uri.fsPath}`);
         return;
@@ -395,7 +397,7 @@ export class FileWatcherService implements vscode.Disposable {
    * Own writes (LayerService.saveConfig) are swallowed like any other own write.
    */
   private handleLayerConfigEvent(uri: vscode.Uri): void {
-    this.debounce('layer-config', () => {
+    this.debounceOwnWrite('layer-config', () => [uri.fsPath], () => {
       if (this.ownWriteTracker.consume(uri.fsPath)) {
         console.log('[FileWatcherService] Ignoring own write to layers.json');
         return;
@@ -497,7 +499,7 @@ export class FileWatcherService implements vscode.Disposable {
       const modelName = fileName.replace(/\.(yml|dbml)$/, '');
       if (dbml && isReservedTableName(modelName)) return;
       if (created && !dbml) createdPending.add(uri.toString());
-      this.debounce(`logical-model:${modelName}`, () => {
+      this.debounceOwnWrite(`logical-model:${modelName}`, () => [uri.fsPath], () => {
         const wasCreated = createdPending.delete(uri.toString());
         if (this.ownWriteTracker.consume(uri.fsPath)) {
           console.log(`[FileWatcherService] Ignoring own write to model: ${modelName}`);
@@ -575,12 +577,32 @@ export class FileWatcherService implements vscode.Disposable {
       try {
         fn();
       } finally {
-        // Delete timer after callback completes to prevent race conditions
-        this.debounceTimers.delete(key);
+        // Delete timer after callback completes to prevent race conditions —
+        // unless the callback debounced the key again (see debounceOwnWrite).
+        if (this.debounceTimers.get(key) === timer) this.debounceTimers.delete(key);
       }
     }, DEBOUNCE_DELAY_MS);
 
     this.debounceTimers.set(key, timer);
+  }
+
+  /**
+   * {@link debounce} for a callback that asks the own-write tracker about
+   * `paths()`: while ERD Studio is still saving one of them (announced with
+   * `expectWrite`, not recorded yet), the callback waits another debounce
+   * instead of deciding. When the extension host was busy, the debounce
+   * timer can fire before the save's completion is processed; deciding then
+   * would take our own save for an external change. The tracker bounds how
+   * long a write stays pending, so this never waits for ever.
+   */
+  private debounceOwnWrite(key: string, paths: () => readonly string[], fn: () => void): void {
+    this.debounce(key, () => {
+      if (paths().some((p) => this.ownWriteTracker.isPending(p))) {
+        this.debounceOwnWrite(key, paths, fn);
+        return;
+      }
+      fn();
+    });
   }
 
   /**

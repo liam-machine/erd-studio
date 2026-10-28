@@ -1015,7 +1015,8 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
 
         expect(listener).not.toHaveBeenCalled();
 
-        // An external edit to the same file is still reported (the record was consumed).
+        // An external edit to the same file is still reported: it holds other bytes than ours.
+        fs.appendFileSync(ymlPath(h, 'fct_order'), '# edited outside ERD Studio\n');
         _mockFileWatchers[3]._simulateChange(vscode.Uri.file(ymlPath(h, 'fct_order')));
         vi.advanceTimersByTime(300);
         expect(listener).toHaveBeenCalledTimes(1);
