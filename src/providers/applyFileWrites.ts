@@ -39,6 +39,16 @@ export interface AppliedFileWrites {
   unrestored: string[];
 }
 
+/** Every file an applied edit wrote, created, deleted or moved (both ends of a rename). */
+export function writtenPaths(applied: Pick<AppliedFileWrites, 'replaced' | 'created' | 'deleted' | 'renamed'>): string[] {
+  return [
+    ...applied.replaced.map((uri) => uri.fsPath),
+    ...applied.created,
+    ...applied.deleted,
+    ...applied.renamed.flatMap((r) => [r.from, r.to]),
+  ];
+}
+
 export interface ApplyFileWritesOptions {
   /** The document whose full-range replace goes first (always, for undo grouping), and its new text. */
   primary?: { document: vscode.TextDocument; text: string };

@@ -239,6 +239,44 @@ describe('table edits (applyTableEdit): the table file is spliced, the diagram k
   });
 });
 
+describe('after an edit, only the files it wrote are read again', () => {
+  it('an edit to one table keeps every other table\'s cached reading and the library index', async () => {
+    // The copy's directories just changed: put their times in the past, so the index is not in its racy window.
+    const past = new Date(Date.now() - 60_000);
+    const age = (dir: string): void => {
+      for (const d of fs.readdirSync(dir, { withFileTypes: true })) if (d.isDirectory()) age(path.join(dir, d.name));
+      fs.utimesSync(dir, past, past);
+    };
+    age(path.join(root, '.erd-studio'));
+    fs.utimesSync(at('layers.json'), past, past);
+    const { provider, tables } = buildProvider(new OwnWriteTracker());
+    const document = createMockTextDocument(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8'), { persist: true });
+    (vscode.workspace.textDocuments as unknown[]).push(document);
+    const panel = createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(document as unknown as vscode.TextDocument, panel as unknown as vscode.WebviewPanel, {} as vscode.CancellationToken);
+    await panel._simulateMessage({ type: 'ready' });
+    const cache = (tables as unknown as { dbmlCache: Map<string, unknown> }).dbmlCache;
+    const customer = cache.get(at('tables/gold/dim_customer.dbml'));
+    const order = cache.get(at('tables/gold/fct_order.dbml'));
+    expect(customer).toBeDefined();
+    expect(order).toBeDefined();
+    const builds = tables.indexBuilds;
+    const wipe = vi.spyOn(tables, 'invalidateCache');
+
+    panel._postedMessages.length = 0;
+    await panel._simulateMessage({ type: 'addColumn', payload: { modelName: 'fct_order', column: { name: 'discount', dataType: 'DECIMAL', description: '' } } });
+    expect(panel._postedMessages.filter((m) => (m as { type: string }).type === 'error')).toEqual([]);
+    expect(wipe.mock.calls.filter((args) => args.length === 0 || args[0] === undefined)).toEqual([]);
+    // fct_order was written and read again; dim_customer is the very same reading.
+    expect(cache.get(at('tables/gold/fct_order.dbml'))).not.toBe(order);
+    expect(cache.get(at('tables/gold/dim_customer.dbml'))).toBe(customer);
+    // No table file appeared or went: the library was not listed again.
+    expect(tables.indexBuilds).toBe(builds);
+    const loaded = panel._postedMessages.find((m) => (m as { type: string }).type === 'domainLoaded') as { payload: { models: Array<{ name: string; columns: Array<{ name: string }> }> } };
+    expect(loaded.payload.models.find((m) => m.name === 'fct_order')?.columns.map((c) => c.name)).toContain('discount');
+  });
+});
+
 describe('relationship edits: always in the library (D5), in the owner\'s folder file', () => {
   it('addRelationship', async () => {
     const r = await run({ type: 'addRelationship', payload: { fromModel: 'customer_profile', fromColumn: 'loyalty_tier', toModel: 'dim_region', toColumn: 'region_name', cardinality: 'many-to-one' } });

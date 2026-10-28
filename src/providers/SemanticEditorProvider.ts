@@ -195,7 +195,7 @@ import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRe
 import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
 import type { FileWrite } from '../services/fileWrites';
 import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
-import { applyFileWrites } from './applyFileWrites';
+import { applyFileWrites, writtenPaths } from './applyFileWrites';
 import {
   NotASubjectAreaObject,
   codecFor,
@@ -2595,7 +2595,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       for (const code of saveFailureCodes(saveFailures, { modelFile, undoRedo: true })) telemetry.error(code);
       void webview.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
     }
-    this.tableLibraryService.invalidateCache();
+    // Only what this canvas wrote can have changed (an undo of a create
+    // deletes, of a delete creates): those files' parses, and the library
+    // index, which is rebuilt from one listing.
+    this.tableLibraryService.invalidatePaths([document.uri.fsPath, ...(this.editedTablePaths.get(panelKey) ?? [])]);
+    this.tableLibraryService.invalidateIndex();
     await this.sendSubjectAreaData(document, webview, panelKey);
     this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: true });
   }
@@ -2773,6 +2777,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (ourPaths.size > 0) {
         this.editedTablePaths.set(panelKey, ourPaths);
       }
+      // The table files this edit wrote, created or deleted: their parses, and
+      // the library index when one appeared or went (the redraw below reads both).
+      this.tableLibraryService.invalidatePaths([...created, ...deleted, ...modelDocs.map((d) => d.uri.fsPath)]);
       // Our own writes are suppressed at the watcher, so the refreshes it
       // used to drive are issued here instead: this panel via sendSubjectAreaData,
       // the sidebar/model library via onDidWriteSubjectArea, and any OTHER open
@@ -2964,7 +2971,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         options.onUnsaved?.();
         webview?.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
       }
-      this.tableLibraryService.invalidateCache();
+      // Only the files this edit wrote: every other table keeps its parse,
+      // and the attach memo its result unless a relationships file or a
+      // table's columns or keys changed.
+      this.tableLibraryService.invalidatePaths(writtenPaths(applied));
       if (refreshWebview && webview) {
         await this.sendSubjectAreaData(document, webview);
       }
@@ -4875,7 +4885,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
       void vscode.window.showErrorMessage(this.describeUnsaved(unsaved));
     }
-    this.tableLibraryService.invalidateCache();
+    this.tableLibraryService.invalidatePaths(writtenPaths(applied));
     await this.refreshAllOpenSubjectAreas();
     for (const uri of applied.replaced) this._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: true });
     return { ok: true, unrestored: [] };
