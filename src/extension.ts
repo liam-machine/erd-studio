@@ -1082,12 +1082,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   }
   const treeProvider = new SubjectAreaTreeProvider(subjectAreaService, layerService, workspaceRoot, semanticDir);
+  // `erdStudio.tablesLoading`: true from here until the Table Library's first
+  // getChildren has produced its items (and while a full rebuild of the
+  // library runs), so its view shows "Loading tables…" rather than the
+  // empty-state text meanwhile.
+  void vscode.commands.executeCommand('setContext', 'erdStudio.tablesLoading', true);
   const tableLibraryProvider = new TableLibraryTreeProvider(
     tableLibraryService,
     subjectAreaService,
     workspaceRoot,
     semanticDir,
     () => layerService.getAllLayers(),
+    (loading) => { void vscode.commands.executeCommand('setContext', 'erdStudio.tablesLoading', loading); },
   );
   const editorProvider = new SemanticEditorProvider(
     context,

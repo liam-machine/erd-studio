@@ -75,13 +75,21 @@ export class SubjectAreaTreeProvider
   private readonly semanticDir: string;
 
   /**
-   * Parsed-domain cache keyed by file path. Resolving a v5 domain means one
-   * YAML parse per referenced model, so without this every tree refresh cost
-   * O(domains x models) reads. Entries are validated by mtime + size so an
-   * edit is never served stale; invalidateSubjectArea() drops entries eagerly when
-   * the file watcher reports a change.
+   * Table-count cache keyed by file path. The count comes from the diagram
+   * file alone (`countSubjectAreaTables`: no table is resolved), and is
+   * validated by mtime + size so an edit is never served stale;
+   * invalidateSubjectArea() drops entries eagerly when the file watcher
+   * reports a change.
    */
   private readonly summaryCache = new Map<string, CachedSubjectAreaSummary>();
+
+  /**
+   * The subject areas by layer, listed once per render: the root's
+   * getChildren lists them, and the first getChildren of each layer that
+   * follows reads this instead of listing every layer folder again (a later
+   * one, such as expanding a collapsed layer, lists afresh). Dropped on refresh().
+   */
+  private summariesByLayer: { byLayer: Map<string, SubjectAreaSummary[]>; unread: Set<string> } | undefined;
 
   /** The project row, or undefined while the workspace has one dbt project. */
   private projectRow: ProjectNode | undefined;
@@ -162,6 +170,7 @@ export class SubjectAreaTreeProvider
 
   /** Refresh the entire tree (or a specific element). */
   refresh(element?: TreeElement): void {
+    this.summariesByLayer = undefined;
     this._onDidChangeTreeData.fire(element);
   }
 
@@ -202,8 +211,10 @@ export class SubjectAreaTreeProvider
 
     let modelCount = 0;
     try {
-      const domain = this.subjectAreaService.getSubjectArea(filePath);
-      modelCount = domain.logical.models.length;
+      // Counted from the diagram file alone: resolving every table (a full
+      // getSubjectArea) only to count them made each refresh as slow as
+      // opening every diagram.
+      modelCount = this.subjectAreaService.countSubjectAreaTables(filePath);
     } catch (err) {
       console.warn(`[DomainTreeProvider] Failed to load ${filePath}:`, err);
       // Do not cache failures — the file may be mid-write
@@ -247,6 +258,7 @@ export class SubjectAreaTreeProvider
       }
       const layers = this.layerService.getAllLayers();
       const layerNodes = layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
+      this.summariesByLayer = { byLayer: this.listByLayer(), unread: new Set(layers.map((l) => l.id)) };
       // Only alongside real content: an empty tree must stay empty so the
       // welcome view (which has its own Select dbt Project button) shows.
       return this.projectRow ? [this.projectRow, ...layerNodes] : layerNodes;
@@ -263,9 +275,22 @@ export class SubjectAreaTreeProvider
   // Private helpers
   // -------------------------------------------------------------------------
 
+  /** Every subject area, grouped by layer (one listing of the project). */
+  private listByLayer(): Map<string, SubjectAreaSummary[]> {
+    const byLayer = new Map<string, SubjectAreaSummary[]>();
+    for (const summary of this.subjectAreaService.listSubjectAreas(this.projectPath, this.semanticDir)) {
+      const list = byLayer.get(summary.layer);
+      if (list) list.push(summary);
+      else byLayer.set(summary.layer, [summary]);
+    }
+    return byLayer;
+  }
+
   private getLayerChildren(layer: Layer): TreeElement[] {
-    const summaries = this.subjectAreaService.listSubjectAreas(this.projectPath, this.semanticDir);
-    const layerDomains = summaries.filter(s => s.layer === layer);
+    // A layer asked for on its own (no root call just before it) lists afresh.
+    const memo = this.summariesByLayer;
+    const byLayer = memo?.unread.delete(layer) ? memo.byLayer : this.listByLayer();
+    const layerDomains = byLayer.get(layer) ?? [];
 
     const domainNodes: SubjectAreaNode[] = layerDomains.map(summary => ({
       type: 'domain' as const,

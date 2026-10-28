@@ -62,13 +62,16 @@ function createMockSubjectAreaService(
   summaries: SubjectAreaSummary[] = [],
   domains: Map<string, UnifiedSubjectArea> = new Map(),
 ): SubjectAreaService {
+  const getSubjectArea = vi.fn((filePath: string) => {
+    const d = domains.get(filePath);
+    if (!d) throw new Error(`Not found: ${filePath}`);
+    return d;
+  });
   return {
     listSubjectAreas: vi.fn().mockReturnValue(summaries),
-    getSubjectArea: vi.fn((filePath: string) => {
-      const d = domains.get(filePath);
-      if (!d) throw new Error(`Not found: ${filePath}`);
-      return d;
-    }),
+    getSubjectArea,
+    // The tree counts from the diagram file alone; the mock counts what getSubjectArea would resolve.
+    countSubjectAreaTables: vi.fn((filePath: string) => getSubjectArea(filePath).logical.models.length),
   } as unknown as SubjectAreaService;
 }
 
@@ -419,7 +422,7 @@ describe('SubjectAreaTreeProvider', () => {
       const svc = createMockSubjectAreaService(summaries, domains);
       return {
         provider: new SubjectAreaTreeProvider(svc, layerService, tempDir),
-        getSubjectArea: svc.getSubjectArea as unknown as ReturnType<typeof vi.fn>,
+        getSubjectArea: svc.countSubjectAreaTables as unknown as ReturnType<typeof vi.fn>,
       };
     }
 
@@ -473,7 +476,7 @@ describe('SubjectAreaTreeProvider', () => {
       p.getChildren({ type: 'layer', layer: 'silver' });
       p.getChildren({ type: 'layer', layer: 'silver' });
 
-      expect(svc.getSubjectArea).toHaveBeenCalledTimes(2);
+      expect(svc.countSubjectAreaTables).toHaveBeenCalledTimes(2);
     });
   });
 });

@@ -72,6 +72,9 @@ export interface TableLibraryFolderNode {
 
 export type TableLibraryNode = TableLibraryTableNode | TableLibraryFolderNode;
 
+/** How long one slice of the background read of unread table files may run before yielding. */
+const UNREAD_SLICE_MS = 50;
+
 /** Layer ids that have their own contributed colour (`erdStudio.layer.{id}`). */
 const LAYER_COLOR_IDS = new Set(['bronze', 'silver', 'gold', 'platinum']);
 
@@ -83,6 +86,17 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<TableLibraryNode | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
+  /**
+   * Each diagram's member names (`subjectAreaTableNames`), by path, checked
+   * against the file's mtime + size: a refresh after one diagram changed
+   * reads that diagram only, not every diagram of the project.
+   */
+  private readonly membersCache = new Map<string, { signature: string; names: string[] | null }>();
+  /** True until the first root getChildren has produced its items, and while a full rebuild runs (`erdStudio.tablesLoading`). */
+  private loading = true;
+  /** The background read of table files the last render had not read yet (see {@link checkUnreadFiles}). */
+  private unreadCheck: ReturnType<typeof setTimeout> | undefined;
+
   constructor(
     private readonly tableLibraryService: TableLibraryService,
     private readonly subjectAreaService: SubjectAreaService,
@@ -90,10 +104,23 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     private readonly semanticDir: string,
     /** Configured layers, for ordering and labelling folders. Optional. */
     private readonly getLayers: () => LayerConfig[] = () => [],
+    /** Told when the tree starts or stops loading (the extension sets `erdStudio.tablesLoading`). Optional. */
+    private readonly onLoadingChange?: (loading: boolean) => void,
   ) {}
 
   refresh(): void {
     this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /** Whether the tree has not produced its items yet, or is listing the library from scratch. */
+  isLoading(): boolean {
+    return this.loading;
+  }
+
+  private setLoading(loading: boolean): void {
+    if (this.loading === loading) return;
+    this.loading = loading;
+    this.onLoadingChange?.(loading);
   }
 
   getTreeItem(element: TableLibraryNode): vscode.TreeItem {
@@ -165,15 +192,34 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     if (element) {
       return element.type === 'folder' ? element.children : undefined;
     }
+    // A library listed from scratch (no index yet, or one a bulk change
+    // dropped) is a full rebuild: `erdStudio.tablesLoading` holds until the
+    // items are produced, so the empty-state text never shows meanwhile.
+    if (typeof this.tableLibraryService.indexIsCold === 'function' && this.tableLibraryService.indexIsCold()) this.setLoading(true);
+    try {
+      return this.rootChildren();
+    } finally {
+      this.setLoading(false);
+    }
+  }
 
+  private rootChildren(): TableLibraryNode[] {
     if (!this.tableLibraryService.dirExists()) return [];
 
     const usageMap = this.buildUsageMap();
     // Each entry names its format only while the project holds both (§5.5).
     const showStorage = typeof this.tableLibraryService.projectStorage === 'function' && this.tableLibraryService.projectStorage() === 'mixed';
+    // A file read before (in its current version) answers from the service's
+    // cache; one never read is read after the tree shows (checkUnreadFiles),
+    // so a large library appears at once instead of after parsing every file.
+    const peek = typeof this.tableLibraryService.peekTableFileError === 'function';
+    const unread: string[] = [];
     const toNode = (entry: TableFileEntry): TableLibraryTableNode => {
-      // Through the service's mtime cache, so an unchanged library is not re-parsed.
-      const error = entry.shadowedBy ? null : this.tableLibraryService.getTableFileError(entry.name);
+      let error = entry.shadowedBy ? null : peek ? this.tableLibraryService.peekTableFileError(entry.name) : this.tableLibraryService.getTableFileError(entry.name);
+      if (error === undefined) {
+        unread.push(entry.name);
+        error = null;
+      }
       return {
         type: 'model',
         name: entry.name,
@@ -210,6 +256,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       list.push(toNode(entry));
       grouped.set(key, list);
     }
+    this.checkUnreadFiles(unread);
     // No folders in use: the flat list users had before layer folders.
     if (grouped.size === 0) return topLevel;
 
@@ -287,19 +334,48 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
   }
 
   /**
+   * Read, in the background and a slice at a time (the extension host stays
+   * responsive), the table files the last render had not read, and render
+   * again only when one of them turns out to need fixing. Any earlier check
+   * still running is replaced.
+   */
+  private checkUnreadFiles(names: readonly string[]): void {
+    if (this.unreadCheck !== undefined) clearTimeout(this.unreadCheck);
+    this.unreadCheck = undefined;
+    if (names.length === 0) return;
+    const queue = [...names];
+    let broken = false;
+    const step = (): void => {
+      this.unreadCheck = undefined;
+      const started = Date.now();
+      while (queue.length > 0 && Date.now() - started < UNREAD_SLICE_MS) {
+        if (this.tableLibraryService.getTableFileError(queue.shift()!)) broken = true;
+      }
+      if (queue.length > 0) {
+        this.unreadCheck = setTimeout(step, 0);
+      } else if (broken) {
+        this.refresh();
+      }
+    };
+    this.unreadCheck = setTimeout(step, 0);
+  }
+
+  /**
    * Scan all diagram files and build a map of model name → domain names.
    * Reads raw membership (`subjectAreaTableNames`) to avoid expensive model resolution.
    */
   private buildUsageMap(): Map<string, string[]> {
     const map = new Map<string, string[]>();
     const summaries = this.subjectAreaService.listSubjectAreas(this.projectPath, this.semanticDir);
+    const listed = new Set<string>();
 
     for (const summary of summaries) {
+      listed.add(summary.filePath);
       try {
         // Format-agnostic: honours v4 inline objects, v5 name strings,
         // (for usage counting only) hybrid/legacy documents awaiting
         // migration, and a DBML diagram's `use` lines.
-        const modelNames = subjectAreaTableNames(fs.readFileSync(summary.filePath, 'utf-8'), summary.filePath);
+        const modelNames = this.memberNames(summary.filePath);
         if (!modelNames) continue;
 
         for (const name of modelNames) {
@@ -314,11 +390,32 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
         // Skip unreadable/invalid domain files
       }
     }
+    for (const filePath of this.membersCache.keys()) {
+      if (!listed.has(filePath)) this.membersCache.delete(filePath);
+    }
 
     return map;
   }
 
+  /** A diagram's member names, through {@link membersCache}; read afresh (uncached) when the file cannot be stat'ed. Throws when it cannot be read. */
+  private memberNames(filePath: string): string[] | null {
+    let signature: string | null = null;
+    try {
+      const stat = fs.statSync(filePath);
+      signature = `${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      // No stat (a virtual path in tests): read without caching.
+    }
+    const cached = signature === null ? undefined : this.membersCache.get(filePath);
+    if (cached && cached.signature === signature) return cached.names;
+    const names = subjectAreaTableNames(fs.readFileSync(filePath, 'utf-8'), filePath);
+    if (signature !== null) this.membersCache.set(filePath, { signature, names });
+    return names;
+  }
+
   dispose(): void {
+    if (this.unreadCheck !== undefined) clearTimeout(this.unreadCheck);
+    this.membersCache.clear();
     this._onDidChangeTreeData.dispose();
   }
 }

@@ -312,6 +312,33 @@ export class SubjectAreaService {
   }
 
   /**
+   * How many tables a diagram file shows — the length of its logical
+   * stage's `models` — without resolving a single table, for the Subject
+   * Areas tree's count: a JSON file validated as `getSubjectArea` validates
+   * it (name strings in v5 / v6, named objects in v4), a DBML diagram's
+   * members from its `use` lines (`subjectAreaMembersDbml`, no compile of
+   * the library). Throws when the file cannot be read, is not valid JSON or
+   * does not validate, or (DBML) has a syntax error.
+   */
+  countSubjectAreaTables(filePath: string): number {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    if (subjectAreaStorageOf(filePath) === 'dbml') {
+      const members = subjectAreaMembersDbml(raw);
+      if (members === null) throw new SubjectAreaValidationError(`${filePath} has a DBML syntax error`);
+      return members.length;
+    }
+    const { obj, format } = validateSubjectAreaDocument(parseSubjectAreaJson(raw, filePath), filePath);
+    const logical = obj.logical;
+    if (!logical || typeof logical !== 'object' || Array.isArray(logical)) return 0;
+    const models = (logical as { models?: unknown }).models;
+    if (!Array.isArray(models)) return 0;
+    // As `parseStageData` reads them: one table per name (a missing one is a placeholder), or per named inline table.
+    return format === 'v5' || format === 'v6'
+      ? models.filter((m) => typeof m === 'string').length
+      : models.filter((m) => !!m && typeof m === 'object' && typeof (m as { name?: unknown }).name === 'string').length;
+  }
+
+  /**
    * Read a `.dbml` diagram (§5.5): the diagram and its layout file from disk,
    * through core's `parseSubjectAreaDbml` (which throws `SubjectAreaFileError`
    * / `SubjectAreaValidationError`). A table or relationships file passed as
