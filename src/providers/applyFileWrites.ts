@@ -2,11 +2,21 @@
  * The one helper that applies a set of {@link FileWrite}s as ONE
  * WorkspaceEdit (D23, §5.3 steps 6–7 of docs/plans/native-dbml-storage.md).
  *
- * Order: the primary document's full-range replace first (a text edit, so
- * the custom editor's undo groups the step under it), then every create
- * (relationships files before table files before layout files), then every
- * other replace, then every file rename (`renames`, bytes kept), then every
- * delete.
+ * Order: the primary document's replace first (a text edit, so the custom
+ * editor's undo groups the step under it), then every create (relationships
+ * files before table files before layout files), then every other replace,
+ * then every file rename (`renames`, bytes kept), then every delete.
+ *
+ * Nothing is sent that changes nothing: a replace whose text is what the
+ * file (or its open document) already holds is left out — no edit, no save,
+ * no watcher event. The primary is the exception, because it anchors the
+ * undo step: VS Code's Undo on the canvas undoes the last edit of the
+ * canvas's own document, so an edit that touched only other files (a drag
+ * that wrote only the `.dbdiagram` layout, a column edit that wrote only a
+ * table file) would otherwise not be undone from the canvas. When the
+ * primary's text is unchanged its anchor is the smallest edit that is still
+ * one ({@link undoAnchor}: one character replaced by itself), never a
+ * full-range replace of the whole diagram.
  *
  * VS Code's `applyEdit` is all-or-nothing only for text edits: an edit with
  * file creations or deletions keeps the steps that ran before the one that
@@ -79,20 +89,48 @@ function fullRange(doc: vscode.TextDocument): vscode.Range {
   return new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length));
 }
 
+/**
+ * The undo anchor of a document whose text an edit leaves as it is: the
+ * first character that is not a line break (nor half of a surrogate pair),
+ * replaced by itself. It is a text edit, so VS Code records the step in the
+ * document's undo stack, and it sends one character over IPC instead of the
+ * whole file. A document with no such character gets the full-range replace.
+ */
+export function undoAnchor(doc: vscode.TextDocument): { range: vscode.Range; text: string } {
+  const text = doc.getText();
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0x0a || code === 0x0d || code === 0xfeff) continue;
+    if (code >= 0xd800 && code <= 0xdfff) continue;
+    return { range: new vscode.Range(doc.positionAt(i), doc.positionAt(i + 1)), text: text[i] };
+  }
+  return { range: fullRange(doc), text };
+}
+
 /** Apply `writes` (absolute paths) as one WorkspaceEdit, reconciling a partial failure. */
 export async function applyFileWrites(writes: readonly FileWrite[], options: ApplyFileWritesOptions = {}): Promise<AppliedFileWrites> {
   const primaryPath = options.primary?.document.uri.fsPath;
-  const ordered = orderFileWrites(mergeFileWrites(writes.filter((w) => !(primaryPath !== undefined && w.kind === 'replace' && samePath(w.path, primaryPath)))));
+  const allWrites = orderFileWrites(mergeFileWrites(writes.filter((w) => !(primaryPath !== undefined && w.kind === 'replace' && samePath(w.path, primaryPath)))));
 
   // What each planned file held before (null: absent), to put back after a
   // failure. Creates too: a create that failed because its file was already
   // there must never have that file deleted by the reconcile.
   const prior = new Map<string, { text: string | null; dirty: boolean }>();
   if (options.primary) prior.set(options.primary.document.uri.fsPath, { text: options.primary.document.getText(), dirty: options.primary.document.isDirty });
-  for (const w of ordered) if (!prior.has(w.path)) prior.set(w.path, currentText(w.path));
+  for (const w of allWrites) if (!prior.has(w.path)) prior.set(w.path, currentText(w.path));
+  // A replace that leaves its file as it is: nothing to write, save, undo or put back.
+  const ordered = allWrites.filter((w) => !(w.kind === 'replace' && prior.get(w.path)?.text === w.text));
 
   const edit = new vscode.WorkspaceEdit();
-  if (options.primary) edit.replace(options.primary.document.uri, fullRange(options.primary.document), options.primary.text);
+  if (options.primary) {
+    const { document, text } = options.primary;
+    if (text === document.getText()) {
+      const anchor = undoAnchor(document);
+      edit.replace(document.uri, anchor.range, anchor.text);
+    } else {
+      edit.replace(document.uri, fullRange(document), text);
+    }
+  }
   const replaced: vscode.Uri[] = [];
   const created: string[] = [];
   const deleted: string[] = [];

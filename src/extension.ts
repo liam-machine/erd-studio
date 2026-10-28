@@ -1374,6 +1374,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (created && !subjectAreasCreatedHere.delete(uri.fsPath)) { telemetry.feature('domainCreatedExternal'); }
     // A canvas showing "deleted or renamed" whose file is back redraws (#161).
     editorProvider.syncSubjectAreaFilePresence();
+    // A layout file holds positions only, which neither tree shows.
+    if (layout) return;
     treeProvider.invalidateSubjectArea(uri.fsPath);
     treeProvider.refresh();
     tableLibraryProvider.refresh();
@@ -1406,7 +1408,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // refresh would send a second, identical domainLoaded and clear the user's
   // column selection), so the side effects the watcher used to drive are
   // issued here directly instead.
-  const editorWroteSubscription = editorProvider.onDidWriteSubjectArea(({ uri, modelLibraryChanged }) => {
+  const editorWroteSubscription = editorProvider.onDidWriteSubjectArea(({ uri, modelLibraryChanged, layoutOnly }) => {
+    // A drag, an auto layout or a note moved or resized: positions only,
+    // which neither tree shows. Refreshing them anyway re-rendered both
+    // sidebars after every move.
+    if (layoutOnly) return;
     treeProvider.invalidateSubjectArea(uri.fsPath);
     treeProvider.refresh();
     // The Model Library lists a "N domains" count and the referencing domain

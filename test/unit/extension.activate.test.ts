@@ -410,6 +410,30 @@ describe('activate() with a dbt project', () => {
     expect(refreshes).toBeGreaterThan(0);
   });
 
+  it('refreshes neither tree for a layout-only write (a drag, a layout, a note moved)', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    await activate(context);
+
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider & {
+      _onDidWriteSubjectArea: { fire: (e: { uri: unknown; modelLibraryChanged: boolean; layoutOnly?: boolean }) => void };
+    };
+    const treeOf = (id: string) => (createTreeView.mock.calls.find((c) => c[0] === id)![1] as {
+      treeDataProvider: { onDidChangeTreeData: (cb: () => void) => void };
+    }).treeDataProvider;
+    let refreshes = 0;
+    treeOf('erdStudio.modelLibrary').onDidChangeTreeData(() => { refreshes++; });
+    treeOf('erdStudio.domainTree').onDidChangeTreeData(() => { refreshes++; });
+
+    const uri = vscode.Uri.file(path.join(root, '.erd-studio', 'silver', 'showcase.json'));
+    provider._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: false, layoutOnly: true });
+    expect(refreshes).toBe(0);
+
+    // Anything else still refreshes both.
+    provider._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: false });
+    expect(refreshes).toBeGreaterThanOrEqual(2);
+  });
+
   it('routes erdStudio.reportBug through the focused canvas instead of input boxes', async () => {
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     await activate(context);
@@ -866,6 +890,27 @@ describe('activate() in a native DBML project (S4)', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledWith(diagram);
+  });
+
+  it('a layout change outside ERD Studio refreshes neither sidebar tree (positions are not shown there)', async () => {
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    vi.spyOn(provider, 'refreshSubjectAreaPanel').mockResolvedValue(undefined as never);
+    const treeOf = (id: string) => (createTreeView.mock.calls.find((c) => c[0] === id)![1] as {
+      treeDataProvider: { onDidChangeTreeData: (cb: () => void) => void };
+    }).treeDataProvider;
+    let refreshes = 0;
+    treeOf('erdStudio.modelLibrary').onDidChangeTreeData(() => { refreshes++; });
+    treeOf('erdStudio.domainTree').onDidChangeTreeData(() => { refreshes++; });
+    semanticWatcher()._simulateChange(vscode.Uri.file(path.join(ws, '.erd-studio', 'gold', 'sales.dbdiagram')));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(refreshes).toBe(0);
+    semanticWatcher()._simulateChange(vscode.Uri.file(path.join(ws, '.erd-studio', 'gold', 'sales.dbml')));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(refreshes).toBeGreaterThan(0);
   });
 
   it('warns once about tablesLayerConflict when layers.json also lists tables', async () => {

@@ -207,13 +207,61 @@ function layoutOf(obj: Record<string, unknown>): { positions: Record<string, Nod
   return { positions, annotations };
 }
 
+/** The annotation fields a layout file holds (a sticky note's box); everything else about a note is in the diagram. */
+const ANNOTATION_LAYOUT_KEYS = new Set(['x', 'y', 'width', 'height']);
+
+/** `obj` without what only a layout changes: `viewConfig.positions` and each note's box. An emptied viewConfig goes too. */
+function withoutLayout(obj: Record<string, unknown>): Record<string, unknown> {
+  const view = obj.viewConfig;
+  if (!view || typeof view !== 'object' || Array.isArray(view)) return obj;
+  const { positions: _positions, ...rest } = view as Record<string, unknown>;
+  if (Array.isArray(rest.annotations)) {
+    rest.annotations = (rest.annotations as unknown[]).map((a) => {
+      if (!a || typeof a !== 'object' || Array.isArray(a)) return a;
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(a as Record<string, unknown>)) if (!ANNOTATION_LAYOUT_KEYS.has(k)) out[k] = v;
+      return out;
+    });
+    if ((rest.annotations as unknown[]).length === 0) delete rest.annotations;
+  }
+  const { viewConfig: _viewConfig, ...top } = obj;
+  return Object.keys(rest).length > 0 ? { ...top, viewConfig: rest } : top;
+}
+
+/** Structural equality of parsed JSON values (key order ignored; `undefined` members count as absent). */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b || a === null || b === null || typeof a !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    const bb = b as unknown[];
+    return a.length === bb.length && a.every((v, i) => sameJson(v, bb[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(ao), ...Object.keys(bo)]);
+  for (const k of keys) if (!sameJson(ao[k], bo[k])) return false;
+  return true;
+}
+
+/**
+ * Whether an edit changed the layout and nothing else: table positions and
+ * sticky-note boxes (position and size). Such an edit writes a DBML
+ * diagram's `.dbdiagram` alone — never the `.dbml`, nothing in the table
+ * library — and changes nothing the sidebar shows, for either storage. An
+ * edit that changed nothing at all is not one (it keeps the general path).
+ */
+export function isLayoutOnlyChange(before: Record<string, unknown>, after: Record<string, unknown>): boolean {
+  return !sameJson(before, after) && sameJson(withoutLayout(before), withoutLayout(after));
+}
+
 /**
  * The layout file's write for an edit, or null: written only when a position
  * or a sticky-note box changed, so an edit that moved nothing leaves the
  * layout file's bytes alone (D7), even where the reader placed a note the
  * file does not place yet.
  */
-function layoutWrite(p: ParsedSubjectArea, filePath: string): FileWrite | null {
+export function layoutWrite(p: ParsedSubjectArea, filePath: string): FileWrite | null {
   const before = layoutOf(p.snapshot);
   const after = layoutOf(p.parsed);
   const same = JSON.stringify(sortedPositions(before.positions)) === JSON.stringify(sortedPositions(after.positions))

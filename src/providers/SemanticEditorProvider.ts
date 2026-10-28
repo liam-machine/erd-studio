@@ -196,10 +196,13 @@ import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/db
 import type { FileWrite } from '../services/fileWrites';
 import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
 import { applyFileWrites, writtenPaths } from './applyFileWrites';
+import type { AppliedFileWrites } from './applyFileWrites';
 import {
   NotASubjectAreaObject,
   codecFor,
+  isLayoutOnlyChange,
   isTableNamingDocument,
+  layoutWrite,
   readLayoutText,
   markTableNamingDocument,
   serialiseSubjectArea,
@@ -559,6 +562,19 @@ export function tableFileDeleteFailedMessage(shownPaths: readonly string[]): str
     `Another program may have ${shownPaths.length === 1 ? 'it' : 'one of them'} open, or the folder may be read-only.`;
 }
 
+/** What {@link SemanticEditorProvider.onDidWriteSubjectArea} says about a write. */
+export interface SubjectAreaWriteEvent {
+  uri: vscode.Uri;
+  /** True when a logical-models/*.yml file was created or deleted. */
+  modelLibraryChanged: boolean;
+  /**
+   * True when the write changed only the layout (table positions, sticky-note
+   * boxes): nothing either sidebar tree shows, so listeners skip their
+   * refreshes. Absent means anything may have changed.
+   */
+  layoutOnly?: boolean;
+}
+
 /** Error posted to the webview when a mutation is attempted while viewing the physical stage. */
 export const PHYSICAL_READ_ONLY_MESSAGE = 'Physical stage is read-only. Switch to the Logical stage to make changes.';
 
@@ -653,11 +669,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * deliberately ignore them — extension.ts listens here instead to refresh
    * the domain tree, the model library view and the context keys.
    */
-  private readonly _onDidWriteSubjectArea = new vscode.EventEmitter<{
-    uri: vscode.Uri;
-    /** True when a logical-models/*.yml file was created or deleted. */
-    modelLibraryChanged: boolean;
-  }>();
+  private readonly _onDidWriteSubjectArea = new vscode.EventEmitter<SubjectAreaWriteEvent>();
 
   /** @see _onDidWriteSubjectArea */
   readonly onDidWriteSubjectArea = this._onDidWriteSubjectArea.event;
@@ -734,7 +746,60 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const prev = this.editQueues.get(documentUri) ?? Promise.resolve();
     const next = prev.then(() => fn(), () => fn());
     this.editQueues.set(documentUri, next);
+    this.editQueueSeq.set(documentUri, (this.editQueueSeq.get(documentUri) ?? 0) + 1);
     return next;
+  }
+
+  /** Per panel: how many edits were ever queued (to tell whether a waiting batch is still the last one). */
+  private readonly editQueueSeq = new Map<string, number>();
+
+  /**
+   * Per panel: the `updatePositions` batch that is queued and has not started
+   * yet, with the queue position it was given ({@link queuePositions}).
+   */
+  private readonly waitingPositions = new Map<string, {
+    seq: number;
+    positions: Record<string, { x: number; y: number }>;
+    annotations: Map<string, AnnotationPositionPayload>;
+    done: Promise<void>;
+  }>();
+
+  /**
+   * Queue an `updatePositions`, folding it into the batch already waiting
+   * for this panel when that batch is still the last thing queued: the
+   * positions merge (the later message wins for a table or note both moved),
+   * one edit is written and both senders resolve when it lands. While the
+   * host is busy, drags that pile up are saved once instead of one save
+   * (and one layout file write) each. A batch that has started, or one with
+   * another edit queued after it, is never joined, so edits stay in order.
+   * Folded drags are one undo step (they reach the file as one edit).
+   */
+  private queuePositions(
+    panelKey: string,
+    run: (positions: Record<string, { x: number; y: number }>, annotations: AnnotationPositionPayload[]) => Promise<void>,
+    positions: Record<string, { x: number; y: number }>,
+    annotations: AnnotationPositionPayload[],
+  ): Promise<void> {
+    const waiting = this.waitingPositions.get(panelKey);
+    if (waiting && waiting.seq === this.editQueueSeq.get(panelKey)) {
+      Object.assign(waiting.positions, positions);
+      for (const a of annotations) waiting.annotations.set(a.id, a);
+      return waiting.done;
+    }
+    const batch = {
+      seq: 0,
+      positions: { ...positions },
+      annotations: new Map(annotations.map((a) => [a.id, a] as const)),
+      done: Promise.resolve(),
+    };
+    batch.done = this.queueEdit(panelKey, () => {
+      // Started: a later message queues a batch of its own.
+      if (this.waitingPositions.get(panelKey) === batch) this.waitingPositions.delete(panelKey);
+      return run(batch.positions, [...batch.annotations.values()]);
+    });
+    batch.seq = this.editQueueSeq.get(panelKey) ?? 0;
+    this.waitingPositions.set(panelKey, batch);
+    return batch.done;
   }
 
   /**
@@ -1266,13 +1331,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to move annotation: ${annotations}` } });
                 break;
               }
-              await this.queueEdit(panelKey, () =>
-                this.handleUpdatePositions(
-                  document,
-                  webviewPanel.webview,
-                  payload.positions,
-                  annotations,
-                ),
+              await this.queuePositions(
+                panelKey,
+                (positions, moved) => this.handleUpdatePositions(document, webviewPanel.webview, positions, moved),
+                payload.positions,
+                annotations,
               );
             }
             break;
@@ -2531,9 +2594,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    *
    * Returns the paths that could not be saved.
    */
-  private async saveDirtyTableDocuments(panelKey: string, onFailure: (reason: SaveFailure) => void): Promise<string[]> {
-    const ourPaths = this.editedTablePaths.get(panelKey);
-    if (!ourPaths || ourPaths.size === 0) return [];
+  private async saveDirtyTableDocuments(panelKey: string, onFailure: (reason: SaveFailure) => void, alsoPaths: readonly string[] = []): Promise<string[]> {
+    const ourPaths = new Set([...(this.editedTablePaths.get(panelKey) ?? []), ...alsoPaths]);
+    if (ourPaths.size === 0) return [];
     const unsaved: string[] = [];
     for (const doc of vscode.workspace.textDocuments) {
       if (!doc.isDirty) continue;
@@ -2583,12 +2646,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const saveFailures = new Set<SaveFailure>();
     const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
     const unsaved: string[] = [];
-    if (await saveDocument(document, onSaveFailure)) {
-      this.ownWriteTracker.recordWrite(document.uri.fsPath);
-    } else {
-      unsaved.push(document.uri.fsPath);
+    // A DBML diagram's layout file is always flushed with it: VS Code's undo
+    // stack outlives this panel's `editedTablePaths` (cleared when the canvas
+    // closes), and an undo that rewound the layout must never leave it dirty
+    // in the background, where VS Code would show it as an unsaved tab.
+    const layoutPaths = this.isDbmlDocument(document) ? [layoutFilePathOf(document.uri.fsPath)] : [];
+    const expected = [document.uri.fsPath, ...layoutPaths, ...(this.editedTablePaths.get(panelKey) ?? [])];
+    this.ownWriteTracker.expectWrite(expected);
+    let unsavedTables: string[];
+    try {
+      if (await saveDocument(document, onSaveFailure)) {
+        this.ownWriteTracker.recordWrite(document.uri.fsPath);
+      } else {
+        unsaved.push(document.uri.fsPath);
+      }
+      unsavedTables = await this.saveDirtyTableDocuments(panelKey, onSaveFailure, layoutPaths);
+    } finally {
+      this.ownWriteTracker.settleWrites(expected);
     }
-    const unsavedTables = await this.saveDirtyTableDocuments(panelKey, onSaveFailure);
     unsaved.push(...unsavedTables);
     if (unsaved.length > 0) {
       const modelFile = unsavedTables.some((p) => /\.(ya?ml|dbml|dbdiagram)$/i.test(p));
@@ -2685,12 +2760,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (err instanceof EditAborted) return false;
       throw err;
     }
+    // Only positions or sticky-note boxes moved (a drag, a layout, a resize):
+    // the layout is all that is written, in either storage, and the sidebar
+    // trees are told nothing they show changed.
+    const layoutOnly = !modelFiles?.save?.length && !modelFiles?.delete?.length && options.otherDomains === undefined
+      && isLayoutOnlyChange(file.snapshot, file.parsed);
+    if (layoutOnly && (file.storage === 'json' || (file.writable !== false && !file.holdsOwnTables))) {
+      return this.applyLayoutOnlyEdit(document, file, text, options);
+    }
     // A DBML diagram, or a project whose library holds DBML (native DBML
     // storage, §5.3): planned against the library and applied by
     // applyFileWrites. A YAML/JSON project keeps the path below unchanged.
     if (file.storage === 'dbml' || this.libraryHoldsDbml()
       || (options.otherDomains !== undefined && this.listOtherSubjectAreas(document.uri.fsPath).some((s) => s.storage === 'dbml'))) {
-      return this.applyStorageEdit(document, file, text, options);
+      return this.applyStorageEdit(document, file, text, options, layoutOnly);
     }
     // A model file open with unsaved edits would be replaced by text rendered
     // from disk: refuse by name (the handler reports it), before anything is written.
@@ -2720,6 +2803,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       otherDomainDocs.push(otherDoc);
     }
 
+    // The watchers wait for these saves instead of taking one for an external change.
+    const expected = [document.uri.fsPath, ...created, ...deleted, ...modelDocs.map((d) => d.uri.fsPath), ...otherDomainDocs.map((d) => d.uri.fsPath)];
+    this.ownWriteTracker.expectWrite(expected);
     this.pendingUpdates.set(panelKey, true);
     try {
       const success = await vscode.workspace.applyEdit(edit);
@@ -2739,7 +2825,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       let modelFileUnsaved = false;
       if (await saveDocument(document, onSaveFailure)) {
         // Own writes are recorded only once the bytes are on disk — the tracker
-        // stats the file — so the logical-model / semantic watchers can tell
+        // reads what the file holds — so the logical-model / semantic watchers can tell
         // this save apart from an external edit and skip the extra refresh.
         this.ownWriteTracker.recordWrite(document.uri.fsPath);
       } else {
@@ -2788,6 +2874,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         await this.sendSubjectAreaData(document, webview);
       }
     } finally {
+      this.ownWriteTracker.settleWrites(expected);
       this.pendingUpdates.delete(panelKey);
     }
 
@@ -2882,8 +2969,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     file: ParsedSubjectArea,
     text: string,
     options: Parameters<SemanticEditorProvider['applySubjectAreaEdit']>[2],
+    layoutOnly = false,
   ): Promise<boolean> {
-    const { refreshWebview = true, webview, modelFiles, errorLabel, onSuccess } = options;
+    const { refreshWebview = true, webview, modelFiles, onSuccess } = options;
     const panelKey = document.uri.toString();
     const fsPath = document.uri.fsPath;
     const readText = (filePath: string): string | null => this.openOrDiskText(filePath);
@@ -2924,53 +3012,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
 
     this.pendingUpdates.set(panelKey, true);
-    let applied: Awaited<ReturnType<typeof applyFileWrites>>;
+    let applied: AppliedFileWrites;
     try {
-      applied = await applyFileWrites(writes, {
-        primary: { document, text: primaryText },
-        ensureDir: (filePath) => { if (this.isLibraryPath(filePath)) this.tableLibraryService.ensureDir(filePath); },
-      });
-      if (!applied.ok) {
-        telemetry.error('editRejected');
-        // Put back: the caller's label, else the plain refusal (§5.3 step 7).
-        // Not put back: the reconcile's modal already lists the files, and a
-        // toast saying nothing changed would contradict it.
-        if (webview && applied.unrestored.length === 0) {
-          webview.postMessage({ type: 'error', payload: { message: errorLabel ?? EDIT_NOT_APPLIED_MESSAGE } });
-        }
-        return false;
-      }
-      options.onApplied?.();
-      const unsaved: string[] = [];
-      const saveFailures = new Set<SaveFailure>();
-      const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
-      let modelFileUnsaved = false;
-      if (await saveDocument(document, onSaveFailure)) {
-        this.ownWriteTracker.recordWrite(fsPath);
-      } else {
-        unsaved.push(fsPath);
-      }
-      for (const filePath of applied.created) this.ownWriteTracker.recordWrite(filePath);
-      for (const filePath of applied.deleted) this.ownWriteTracker.recordDelete(filePath);
-      const ourPaths = this.editedTablePaths.get(panelKey) ?? new Set<string>();
-      for (const uri of applied.replaced) {
-        // Remember what WE edited for this diagram, layout files included, so
-        // an undo/redo only ever flushes those.
-        ourPaths.add(uri.fsPath);
-        if (await saveDocumentByUri(uri, onSaveFailure)) {
-          this.ownWriteTracker.recordWrite(uri.fsPath);
-        } else {
-          unsaved.push(uri.fsPath);
-          if (this.isLibraryPath(uri.fsPath)) modelFileUnsaved = true;
-        }
-      }
-      for (const filePath of applied.created) ourPaths.add(filePath);
-      if (ourPaths.size > 0) this.editedTablePaths.set(panelKey, ourPaths);
-      if (unsaved.length > 0) {
-        for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
-        options.onUnsaved?.();
-        webview?.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
-      }
+      const result = await this.applyAndSaveWrites(document, primaryText, writes, options);
+      if (!result) return false;
+      applied = result;
       // Only the files this edit wrote: every other table keeps its parse,
       // and the attach memo its result unless a relationships file or a
       // table's columns or keys changed.
@@ -2992,6 +3038,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this._onDidWriteSubjectArea.fire({
       uri: document.uri,
       modelLibraryChanged: applied.created.length > 0 || applied.deleted.length > 0,
+      ...(layoutOnly ? { layoutOnly: true } : {}),
     });
     // Other diagrams this edit wrote (a layout path maps to its diagram).
     const otherDiagrams = new Set<string>();
@@ -3007,6 +3054,150 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (other && !this.disposedWebviews.has(other.webview)) await this.sendSubjectAreaData(other.document, other.webview, uri.toString());
     }
 
+    onSuccess?.();
+    return true;
+  }
+
+  /**
+   * Apply `writes` with the primary document's new text as ONE WorkspaceEdit
+   * (`applyFileWrites`), then save every document it touched and record each
+   * file as an own write once its bytes are on disk. Every path is announced
+   * to the own-write tracker first, so a watcher that fires before a save
+   * completes waits for it. Reports a rejected edit or an unsaved file to the
+   * webview; returns what was applied, or null when VS Code rejected it.
+   * The caller holds `pendingUpdates`.
+   */
+  private async applyAndSaveWrites(
+    document: vscode.TextDocument,
+    primaryText: string,
+    writes: readonly FileWrite[],
+    options: Parameters<SemanticEditorProvider['applySubjectAreaEdit']>[2],
+  ): Promise<AppliedFileWrites | null> {
+    const { webview, errorLabel } = options;
+    const panelKey = document.uri.toString();
+    const fsPath = document.uri.fsPath;
+    const expected = [fsPath, ...writes.map((w) => w.path)];
+    this.ownWriteTracker.expectWrite(expected);
+    try {
+      const applied = await applyFileWrites(writes, {
+        primary: { document, text: primaryText },
+        ensureDir: (filePath) => { if (this.isLibraryPath(filePath)) this.tableLibraryService.ensureDir(filePath); },
+      });
+      if (!applied.ok) {
+        telemetry.error('editRejected');
+        // Put back: the caller's label, else the plain refusal (§5.3 step 7).
+        // Not put back: the reconcile's modal already lists the files, and a
+        // toast saying nothing changed would contradict it.
+        if (webview && applied.unrestored.length === 0) {
+          webview.postMessage({ type: 'error', payload: { message: errorLabel ?? EDIT_NOT_APPLIED_MESSAGE } });
+        }
+        return null;
+      }
+      options.onApplied?.();
+      const unsaved: string[] = [];
+      const saveFailures = new Set<SaveFailure>();
+      const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
+      let modelFileUnsaved = false;
+      if (await saveDocument(document, onSaveFailure)) {
+        this.ownWriteTracker.recordWrite(fsPath);
+      } else {
+        unsaved.push(fsPath);
+      }
+      for (const filePath of applied.created) this.ownWriteTracker.recordWrite(filePath);
+      for (const filePath of applied.deleted) this.ownWriteTracker.recordDelete(filePath);
+      for (const { from, to } of applied.renamed) {
+        this.ownWriteTracker.recordDelete(from);
+        this.ownWriteTracker.recordWrite(to);
+      }
+      const ourPaths = this.editedTablePaths.get(panelKey) ?? new Set<string>();
+      for (const uri of applied.replaced) {
+        // Remember what WE edited for this diagram, layout files included, so
+        // an undo/redo only ever flushes those.
+        ourPaths.add(uri.fsPath);
+        if (await saveDocumentByUri(uri, onSaveFailure)) {
+          this.ownWriteTracker.recordWrite(uri.fsPath);
+        } else {
+          unsaved.push(uri.fsPath);
+          if (this.isLibraryPath(uri.fsPath)) modelFileUnsaved = true;
+        }
+      }
+      for (const filePath of applied.created) ourPaths.add(filePath);
+      if (ourPaths.size > 0) this.editedTablePaths.set(panelKey, ourPaths);
+      if (unsaved.length > 0) {
+        for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
+        options.onUnsaved?.();
+        webview?.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
+      }
+      return applied;
+    } finally {
+      this.ownWriteTracker.settleWrites(expected);
+    }
+  }
+
+  /**
+   * {@link applySubjectAreaEdit} for an edit that changed only the layout
+   * (table positions, sticky-note boxes; {@link isLayoutOnlyChange}): a drag,
+   * an auto layout, a note moved or resized. Nothing in the table library
+   * can change, so nothing is planned against it: no `planTableWrites`, no
+   * library plan or attachment, no settle pass, no diagram render.
+   *
+   * - A DBML diagram writes its `.dbdiagram` alone. The `.dbml` keeps its
+   *   text; `applyFileWrites` gives it the one-character undo anchor so the
+   *   step still undoes from the canvas.
+   * - A JSON diagram holds its positions, so its own text is rendered as on
+   *   any edit (cheap: no library involved).
+   *
+   * Still one WorkspaceEdit, one save pass, one undo step, own writes
+   * recorded after the bytes land. Nothing in the library is invalidated
+   * (a layout file is not a library file), and `onDidWriteSubjectArea`
+   * carries `layoutOnly`, so the sidebar trees are not refreshed.
+   */
+  private async applyLayoutOnlyEdit(
+    document: vscode.TextDocument,
+    file: ParsedSubjectArea,
+    text: string,
+    options: Parameters<SemanticEditorProvider['applySubjectAreaEdit']>[2],
+  ): Promise<boolean> {
+    const { refreshWebview = true, webview, onSuccess } = options;
+    const panelKey = document.uri.toString();
+    const fsPath = document.uri.fsPath;
+    let primaryText: string;
+    let writes: FileWrite[];
+    try {
+      if (file.storage === 'dbml') {
+        primaryText = text;
+        const layout = layoutWrite(file, fsPath);
+        writes = layout ? [layout] : [];
+      } else {
+        const [primary] = codecFor(fsPath).render(file, text, fsPath);
+        primaryText = primary.kind === 'delete' ? text : primary.text;
+        writes = [];
+      }
+    } catch (err) {
+      throw this.refusalOf(err);
+    }
+    // Nothing moved (a drop where it was): no edit, no save, no undo step.
+    if (primaryText === text && writes.length === 0) {
+      onSuccess?.();
+      return true;
+    }
+    const dirty = dirtyFiles(writes.map((w) => w.path));
+    if (dirty.length > 0) {
+      const name = path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/');
+      throw new EditRefused(`${name} has unsaved changes. Save or revert it, then try again.`);
+    }
+
+    this.pendingUpdates.set(panelKey, true);
+    try {
+      const applied = await this.applyAndSaveWrites(document, primaryText, writes, options);
+      if (!applied) return false;
+      if (refreshWebview && webview) {
+        await this.sendSubjectAreaData(document, webview);
+      }
+    } finally {
+      this.pendingUpdates.delete(panelKey);
+    }
+    this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: false, layoutOnly: true });
     onSuccess?.();
     return true;
   }
@@ -5042,6 +5233,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         (_section, parsed) => {
           const existingViewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
           const existingPositions = (existingViewConfig.positions ?? {}) as Record<string, unknown>;
+          // Every table dropped where it already was, and no note moved: nothing to write.
+          const unmoved = Object.entries(positions).every(([name, p]) => {
+            const old = existingPositions[name] as { x?: unknown; y?: unknown } | undefined;
+            return old?.x === p.x && old?.y === p.y;
+          });
+          if (unmoved && annotations.length === 0) throw new EditAborted();
           // Merge incoming positions over disk positions — prevents concurrent tabs from
           // clobbering each other's saves when using the shared global viewConfig.
           const mergedPositions = { ...existingPositions, ...positions };
