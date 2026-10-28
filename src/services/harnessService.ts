@@ -138,7 +138,7 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
   {
     label: '$(code) OpenAI Codex',
     id: 'codex',
-    description: 'codex-erd-studio.md (appended to AGENTS.md)',
+    description: 'AGENTS.md section, with .agents/skills/erd-studio/DBML.md and LEGACY.md',
     relativePath: 'AGENTS.md',
     // No gitignorePattern — AGENTS.md may contain non-ERD-Studio content
   },
@@ -857,13 +857,14 @@ const SCHEMA_CONTENT = [SKILL_PART, DBML_PART, LEGACY_PART].map((part) => schema
  * default), and the whole guide is far longer: the region carries the skill
  * part (which format to write, and every rule the formats share) and points
  * at the DBML and YAML/JSON parts in the Agent Skills folder, which the
- * recommended install writes for Codex.
+ * Codex install writes beside it (`CODEX_COMPANIONS`), as the recommended
+ * install does.
  */
 const CODEX_REFS: PartRefs = {
   SKILL: 'the ERD Studio section of `AGENTS.md`',
   DBML: '`.agents/skills/erd-studio/DBML.md`',
   LEGACY: '`.agents/skills/erd-studio/LEGACY.md`',
-  BESIDE: '. Read the one that applies before writing any `.erd-studio` file. Both come with the Agent Skills install of **ERD Studio: Set Up My AI Helper**; if they are missing, ask the user to run it (or **ERD Studio: Install AI Coding Harness** → Agent Skills) first, and never write a `.erd-studio` file without them',
+  BESIDE: '. Read the one that applies before writing any `.erd-studio` file. Both are installed with this section (and with the Agent Skills install); if they are missing, ask the user to run **ERD Studio: Install AI Coding Harness** → OpenAI Codex (or **ERD Studio: Set Up My AI Helper**) again first, and never write a `.erd-studio` file without them',
 };
 const CODEX_CONTENT = schemaPart(SKILL_PART, CODEX_REFS);
 
@@ -1274,6 +1275,19 @@ function skillTargetPaths(target: SkillHarnessTarget): SkillTargetPaths {
   };
 }
 
+/**
+ * The companions Codex's `AGENTS.md` region points at (`CODEX_REFS`), in the
+ * Agent Skills folder: `[workspace-relative path, generator]`.
+ */
+const CODEX_COMPANIONS: ReadonlyArray<readonly [string, () => string]> = SKILL_COMPANIONS
+  .filter(([name]) => name === 'DBML.md' || name === 'LEGACY.md')
+  .map(([name, generate]) => [`.agents/skills/erd-studio/${name}`, generate] as const);
+
+/** Codex's version-marked companions, workspace-relative (see `CODEX_COMPANIONS`). */
+export function codexManagedFiles(): string[] {
+  return CODEX_COMPANIONS.map(([p]) => p);
+}
+
 function isSkillTarget(id: HarnessTarget['id']): id is SkillHarnessTarget {
   return id === 'claude' || id === 'agents';
 }
@@ -1406,12 +1420,13 @@ export class HarnessService {
         const regionVersion = region ? extractHarnessVersion(existing.slice(region.start, region.end)) : null;
         // A region from a newer ERD Studio (a teammate's) is never replaced with older text.
         if ((hasSection && !overwrite) || (regionVersion !== null && isNewerHarnessVersion(regionVersion))) {
+          // The region stays; a missing or outdated companion it points at is still put right.
           return {
             target,
             success: true,
             filePath,
             alreadyExisted: true,
-            filesWritten: [],
+            filesWritten: this.writeCodexCompanions(workspaceRoot, { repairOnly: true, replaceUnmanaged: false }),
           };
         }
         fs.writeFileSync(filePath, mergeCodexContent(existing, content), 'utf-8');
@@ -1431,6 +1446,11 @@ export class HarnessService {
 
       const rel = (p: string) => path.relative(workspaceRoot, p).split(path.sep).join('/');
       const filesWritten: string[] = keepPrimary || primaryNewer ? [] : [rel(filePath)];
+
+      // Codex's region points at the DBML and YAML/JSON parts: they come with it (§7.3).
+      if (target.id === 'codex') {
+        filesWritten.push(...this.writeCodexCompanions(workspaceRoot, { repairOnly: false, replaceUnmanaged: options.replaceUnmanagedCompanions === true }));
+      }
 
       // Companion files for the two skill targets
       let setupDirExisted = true;
@@ -1515,6 +1535,29 @@ export class HarnessService {
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  }
+
+  /**
+   * The files Codex's `AGENTS.md` region points at (`CODEX_REFS`):
+   * `.agents/skills/erd-studio/DBML.md` and `LEGACY.md`, byte for byte the
+   * Agent Skills target's copies, so a Codex-only install is never left
+   * without the format rules. A hand-written one (no marker) is kept unless
+   * the user confirmed Replace (`replaceUnmanaged`), and a newer one (a
+   * teammate's) is never replaced. `repairOnly` writes only a missing or
+   * outdated one. Returns the workspace-relative paths written.
+   */
+  private writeCodexCompanions(workspaceRoot: string, options: { repairOnly: boolean; replaceUnmanaged: boolean }): string[] {
+    const written: string[] = [];
+    for (const [relativePath, generate] of CODEX_COMPANIONS) {
+      const filePath = path.join(workspaceRoot, ...relativePath.split('/'));
+      const state = fileState(filePath);
+      if (state === 'newer' || (state === 'unmanaged' && !options.replaceUnmanaged)) continue;
+      if (options.repairOnly && state !== 'missing' && state !== 'outdated') continue;
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, applySemanticDir(generate(), this.semanticDir), 'utf-8');
+      written.push(relativePath);
+    }
+    return written;
   }
 
   /**
@@ -1668,6 +1711,8 @@ export class HarnessService {
         stale.push(target);
       } else if (version === HARNESS_VERSION && isSkillTarget(target.id) && this.skillCompanionsStale(workspaceRoot, target.id)) {
         stale.push(target);
+      } else if (version === HARNESS_VERSION && target.id === 'codex' && this.codexCompanionsStale(workspaceRoot)) {
+        stale.push(target);
       }
     }
     return stale;
@@ -1688,6 +1733,14 @@ export class HarnessService {
       if (state === 'missing' || state === 'outdated') { return true; }
     }
     return fileState(path.join(workspaceRoot, paths.setupSkill)) === 'outdated';
+  }
+
+  /** A Codex companion (`CODEX_COMPANIONS`) missing or carrying an older marker. */
+  private codexCompanionsStale(workspaceRoot: string): boolean {
+    return codexManagedFiles().some((p) => {
+      const state = fileState(path.join(workspaceRoot, ...p.split('/')));
+      return state === 'missing' || state === 'outdated';
+    });
   }
 
   /** Schema skill (folding in SYNC.md) and setup skill state for one skill folder. */
@@ -1716,6 +1769,8 @@ export class HarnessService {
       if (region !== null) {
         const version = extractHarnessVersion(agents.slice(region.start, region.end));
         codex = version === null ? 'outdated' : stateOfVersion(version);
+        // A current region whose companions are missing or older reads as outdated, as a skill folder's does.
+        if (codex === 'current' && this.codexCompanionsStale(workspaceRoot)) codex = 'outdated';
       }
     } catch {
       // No AGENTS.md (or unreadable) — nothing of ours there.

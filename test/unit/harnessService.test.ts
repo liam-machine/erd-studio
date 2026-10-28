@@ -12,6 +12,7 @@ import {
   applySemanticDir,
   agentsManagedFiles,
   claudeManagedFiles,
+  codexManagedFiles,
   extractHarnessVersion,
   findCodexRegion,
   mergeCodexContent,
@@ -180,7 +181,7 @@ describe('HarnessService', () => {
       expect(content).toContain('read `erd.storage`');
       expect(content).toContain('follow `.agents/skills/erd-studio/DBML.md`');
       expect(content).toContain('follow `.agents/skills/erd-studio/LEGACY.md`');
-      expect(content).toContain('if they are missing, ask the user to run it');
+      expect(content).toContain('if they are missing, ask the user to run **ERD Studio: Install AI Coding Harness** → OpenAI Codex');
       // The two long parts are not inline.
       expect(content).not.toContain('# ERD Studio — the DBML format');
       expect(content).not.toContain('# ERD Studio — YAML and JSON files');
@@ -355,6 +356,57 @@ describe('HarnessService', () => {
       expect(content).toContain(CODEX_REGION_BEGIN);
       expect(content).toContain(`<!-- erd-studio-harness: ${HARNESS_VERSION} -->`);
       expect(service.detectStale(tmpDir)).toEqual([]);
+    });
+
+    describe('a Codex-only install writes the DBML and YAML/JSON parts its region points at (§7.3)', () => {
+      const CODEX = HARNESS_TARGETS.find(t => t.id === 'codex')!;
+      const AGENTS_DBML = '.agents/skills/erd-studio/DBML.md';
+      const AGENTS_LEGACY = '.agents/skills/erd-studio/LEGACY.md';
+
+      it('writes .agents/skills/erd-studio/DBML.md and LEGACY.md, byte for byte the Agent Skills copies, and no SKILL.md', () => {
+        const result = service.install(tmpDir, CODEX);
+        expect(result.filesWritten).toEqual(['AGENTS.md', AGENTS_DBML, AGENTS_LEGACY]);
+        expect(codexManagedFiles()).toEqual([AGENTS_DBML, AGENTS_LEGACY]);
+        const files = new Map(service.schemaSkillFiles());
+        expect(read(tmpDir, AGENTS_DBML)).toBe(files.get('DBML.md'));
+        expect(read(tmpDir, AGENTS_LEGACY)).toBe(files.get('LEGACY.md'));
+        // Every path the region names is on disk.
+        for (const named of read(tmpDir, 'AGENTS.md').match(/\.agents\/skills\/erd-studio\/[A-Z]+\.md/g) ?? []) {
+          expect(fs.existsSync(path.join(tmpDir, named)), named).toBe(true);
+        }
+        // Not an Agent Skills install: no SKILL.md, so no skill appears there.
+        expect(fs.existsSync(path.join(tmpDir, AGENTS_SCHEMA_SKILL))).toBe(false);
+        expect(service.harnessStatus(tmpDir).codex).toBe('current');
+        expect(service.detectStale(tmpDir)).toEqual([]);
+      });
+
+      it('a missing or older companion makes Codex outdated and stale, and Update All (or a plain re-install) puts it back', () => {
+        service.install(tmpDir, CODEX);
+        fs.unlinkSync(path.join(tmpDir, AGENTS_DBML));
+        ageMarker(tmpDir, AGENTS_LEGACY);
+        expect(service.harnessStatus(tmpDir).codex).toBe('outdated');
+        expect(service.detectStale(tmpDir).map((t) => t.id)).toEqual(['codex']);
+        // Without overwrite the region stays as it is, and the companions are repaired.
+        const agentsBefore = read(tmpDir, 'AGENTS.md');
+        expect(service.install(tmpDir, CODEX).filesWritten).toEqual([AGENTS_DBML, AGENTS_LEGACY]);
+        expect(read(tmpDir, 'AGENTS.md')).toBe(agentsBefore);
+        expect(service.harnessStatus(tmpDir).codex).toBe('current');
+        fs.unlinkSync(path.join(tmpDir, AGENTS_DBML));
+        service.install(tmpDir, CODEX, true);
+        expect(extractHarnessVersion(read(tmpDir, AGENTS_DBML))).toBe(HARNESS_VERSION);
+        expect(service.detectStale(tmpDir)).toEqual([]);
+      });
+
+      it('never replaces a hand-written (no marker) or newer companion, unless Replace was confirmed for a hand-written one', () => {
+        writeFile(tmpDir, AGENTS_DBML, '# our own DBML notes\n');
+        writeFile(tmpDir, AGENTS_LEGACY, `# a teammate's\n<!-- erd-studio-harness: ${Number(HARNESS_VERSION) + 1} -->\n`);
+        const before = snapshot(tmpDir);
+        expect(service.install(tmpDir, CODEX, true).filesWritten).toEqual(['AGENTS.md']);
+        expect(read(tmpDir, AGENTS_DBML)).toBe(before[AGENTS_DBML]);
+        expect(read(tmpDir, AGENTS_LEGACY)).toBe(before[AGENTS_LEGACY]);
+        expect(service.install(tmpDir, CODEX, true, { replaceUnmanagedCompanions: true }).filesWritten).toEqual(['AGENTS.md', AGENTS_DBML]);
+        expect(read(tmpDir, AGENTS_LEGACY)).toBe(before[AGENTS_LEGACY]);
+      });
     });
 
     it('appends (never replaces) when overwrite=true and AGENTS.md has no ERD section', () => {
