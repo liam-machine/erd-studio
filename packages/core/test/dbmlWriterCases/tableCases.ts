@@ -588,7 +588,7 @@ export const NEW_TABLE_CASES: WriterCase[] = [
           order(out, ['owner', 'team', 'pii']);
         }),
       tableCase('a column meta add keeps the column meta in key order', 'fct_m',
-        input({ owner: 'p' }, { a: 'x', b: true, c: 'y' }), (t) => { t.columns![0].meta = { a: 'x', b: true, c: 'y', d: [1] }; }, (out) => {
+        input({ owner: 'p' }, { a: 'x', b: true, c: 'y' }), (t) => { t.columns![0].meta = { a: 'x', b: true, c: 'y', d: ['1'] }; }, (out) => {
           order(out, ['owner'], ['a', 'b', 'c', 'd']);
         }),
       tableCase('a meta add that keeps the order is still a splice', 'fct_m',
