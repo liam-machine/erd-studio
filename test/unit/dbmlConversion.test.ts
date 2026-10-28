@@ -166,7 +166,24 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
     expect(plan.deletes).toEqual(['logical-models/dim.yml']);
   });
 
-  it('a .json diagram that is hybrid or legacy stays JSON', async () => {
+  it('a .yml with git merge conflicts or tab indentation stays YAML with what to do, at its line', async () => {
+    const plan = await planDbmlConversion(inputOf({
+      'logical-models/merged.yml': 'name: merged\n<<<<<<< HEAD\ncolumns:\n  - name: a\n=======\ncolumns:\n  - name: b\n>>>>>>> branch\n',
+      'logical-models/tabbed.yml': 'name: tabbed\ncolumns:\n  - name: a\n\tdataType: INT\n',
+      'logical-models/dim.yml': DIM,
+    }));
+    expect(plan.refusals).toEqual([]);
+    expect(leftOf(plan, 'logical-models/merged.yml')).toEqual({
+      path: 'logical-models/merged.yml', line: 2,
+      problem: 'It has unresolved git merge conflicts (first at line 2). Resolve them (keep one side), then convert again.',
+    });
+    expect(leftOf(plan, 'logical-models/tabbed.yml')).toEqual({
+      path: 'logical-models/tabbed.yml', line: 4,
+      problem: 'It does not parse as YAML: line 4 is indented with a tab, and YAML indents with spaces only. Replace the tab with spaces, then convert again.',
+    });
+  });
+
+  it('a .json diagram that is hybrid or legacy stays JSON, saying what is wrong and how to repair it', async () => {
     const plan = await planDbmlConversion(inputOf({
       'logical-models/dim.yml': DIM,
       'gold/hybrid.json': JSON.stringify({ schemaVersion: 5, domain: 'h', logical: { models: ['dim', { name: 'inline' }] } }),
@@ -174,9 +191,15 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
     }));
     expect(plan.refusals).toEqual([]);
     expect(plan.leftAsIs.map((l) => [l.path, l.problem])).toEqual([
-      ['gold/hybrid.json', 'It does not load (it is a hybrid file).'],
-      ['gold/legacy.json', 'It does not load (it is a legacy file).'],
+      ['gold/hybrid.json', 'It does not load, so it is not converted: it mixes inline table objects with table name references '
+        + '(or declares schemaVersion 5 with inline tables). Run "ERD Studio: Migrate Subject Areas to the Central Table Library" to repair it, '
+        + 'or edit the file so every entry in "logical.models" is a table name string. Then convert again.'],
+      ['gold/legacy.json', 'It does not load, so it is not converted: it uses a pre-v4 layout (schemaVersion < 4 or a top-level "models" array) '
+        + 'that is no longer supported. Run "ERD Studio: Migrate Subject Areas to the Central Table Library" to convert it, or move '
+        + '"models"/"relationships" under a "logical" section and set "schemaVersion" to 5. Then convert again.'],
     ]);
+    // Neither names the format by its internal name.
+    for (const l of plan.leftAsIs) expect(l.problem).not.toMatch(/hybrid|legacy file/);
     expect(plan.deletes).toEqual(['logical-models/dim.yml']);
   });
 

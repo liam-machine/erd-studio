@@ -36,6 +36,7 @@ import {
   canonicalRelationship,
   classifySemanticFile,
   dbmlName,
+  describeUnsupportedSubjectAreaFormat,
   detectSubjectAreaFormat,
   editDiagramLayout,
   isReservedTableName,
@@ -686,9 +687,16 @@ async function planOnce(
         leave(f.path, `The key ${first.key} is written twice with different values (line ${first.line}). Keep the one you mean.`, first.line);
         continue;
       } else {
-        const e = err as { message?: string; line?: number; linePos?: Array<{ line: number }> };
+        const e = err as { message?: string; line?: number; linePos?: Array<{ line: number }>; code?: string; mergeConflict?: boolean };
         const line = e.line ?? e.linePos?.[0]?.line;
-        leave(f.path, `It does not parse as YAML${line !== undefined ? ` (line ${line})` : ''}: ${String(e.message ?? err).split('\n')[0].replace(/[\s:]+$/, '')}.`, line);
+        if (e.mergeConflict === true && line !== undefined) {
+          // Said as the diagram's twin says it (and doctor), with what to do.
+          leave(f.path, `It has unresolved git merge conflicts (first at line ${line}). Resolve them (keep one side), then convert again.`, line);
+        } else if (e.code === 'TAB_AS_INDENT') {
+          leave(f.path, `It does not parse as YAML: line ${line ?? '?'} is indented with a tab, and YAML indents with spaces only. Replace the tab with spaces, then convert again.`, line);
+        } else {
+          leave(f.path, `It does not parse as YAML${line !== undefined ? ` (line ${line})` : ''}: ${String(e.message ?? err).split('\n')[0].replace(/[\s:]+$/, '')}. Fix it, then convert again.`, line);
+        }
         continue;
       }
     }
@@ -960,7 +968,9 @@ async function planOnce(
       continue;
     }
     if (format === 'hybrid' || format === 'legacy') {
-      leave(f.path, `It does not load (it is a ${format} file).`);
+      // What is wrong and how to repair it, as the editor says it (not the format's internal name).
+      const why = describeUnsupportedSubjectAreaFormat(format, f.path, raw) ?? `It is a ${format} file.`;
+      leave(f.path, `It does not load, so it is not converted: ${why.replace(/^Subject area file \S+ /, 'it ')} Then convert again.`);
       continue;
     }
     let obj: Record<string, unknown>;
