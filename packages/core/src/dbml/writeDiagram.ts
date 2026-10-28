@@ -8,7 +8,7 @@
  * here. A DBML diagram holds no Refs (D5).
  */
 
-import type { Annotation, AnnotationColor } from '../types/semantic.js';
+import type { Annotation, AnnotationColor, Relationship } from '../types/semantic.js';
 import { DBML_SCHEMA_VERSION } from '../types/semantic.js';
 import { SubjectAreaFileError, SubjectAreaValidationError } from '../domain.js';
 import {
@@ -16,7 +16,10 @@ import {
   DBML_RELATIONSHIPS_FILE_STEM,
   DBML_RICH_NOTE_PROPERTIES,
   DBML_RICH_STICKY_COLOURS,
+  formatUnlinkedTables,
+  pendingRefLine,
 } from '../dbmlRichProperties.js';
+import { readPendingRefs } from './readRelationships.js';
 import { dbmlName, dbmlNoteText, dbmlString } from '../dbmlText.js';
 import { isSafeTableName } from '../logicalModel.js';
 import { normalisePosix } from '../storage.js';
@@ -47,7 +50,7 @@ import {
   type ListPlan,
   type TextEdit,
 } from './splice.js';
-import { DBML_CONVERT_FIRST_MESSAGE, usePathBetween, useLinesOf } from './writeRelationships.js';
+import { DBML_CONVERT_FIRST_MESSAGE, pendingLineCuts, usePathBetween, useLinesOf } from './writeRelationships.js';
 
 /** A table as the diagram writer resolves it AFTER the edit. */
 export interface DbmlDiagramTable {
@@ -94,6 +97,18 @@ export interface NewSubjectAreaDbml {
   stubColumns?: string[];
   /** The member tables, in order: each one's file (relative to the semantic dir) and how a specifier spells it. */
   members: ReadonlyArray<{ name: string; reference?: string; path: string }>;
+  /**
+   * Members with no `.dbml` table file to `use` (D26), in order: written as
+   * the Project's `erd_unlinked_tables`, never as `use` lines. Omitted or
+   * empty: no key.
+   */
+  unlinked?: readonly string[];
+  /**
+   * The diagram's own pending relationships (D27), each a Ref line
+   * (`Ref: a.x >? b.y`) written as `// erd-studio pending: <line>` after
+   * the `use` lines. Their foreign-key table has no `.dbml` file.
+   */
+  pendingRefs?: readonly string[];
   /** The relationships files (relative to the semantic dir) the diagram imports. */
   relationshipsFiles: readonly string[];
   annotations?: readonly Annotation[];
@@ -128,10 +143,15 @@ const PROJECT_KEYS = [
   DBML_DIAGRAM_PROPERTIES.showFkEdges,
   DBML_DIAGRAM_PROPERTIES.layoutOptions,
   DBML_DIAGRAM_PROPERTIES.stubColumns,
+  DBML_DIAGRAM_PROPERTIES.unlinkedTables,
 ] as const;
 
-/** The Project values a diagram object holds (§2.5), as the text each key is written with; undefined = not written. */
-function projectValues(obj: Json): Record<string, string | undefined> {
+/**
+ * The Project values a diagram object holds (§2.5), as the text each key is
+ * written with; undefined = not written. `unlinked` is the members with no
+ * table file to `use` (D26), which the object alone cannot tell apart.
+ */
+function projectValues(obj: Json, unlinked: readonly string[] = []): Record<string, string | undefined> {
   const view = isObject(obj.viewConfig) ? obj.viewConfig : {};
   const description = typeof obj.description === 'string' ? dbmlNoteText(obj.description) : '';
   return {
@@ -141,6 +161,7 @@ function projectValues(obj: Json): Record<string, string | undefined> {
     [DBML_DIAGRAM_PROPERTIES.showFkEdges]: typeof view.showFkEdges === 'boolean' ? String(view.showFkEdges) : undefined,
     [DBML_DIAGRAM_PROPERTIES.layoutOptions]: isObject(view.layoutOptions) ? JSON.stringify(view.layoutOptions) : undefined,
     [DBML_DIAGRAM_PROPERTIES.stubColumns]: Array.isArray(obj.stubColumns) ? JSON.stringify(obj.stubColumns) : undefined,
+    [DBML_DIAGRAM_PROPERTIES.unlinkedTables]: unlinked.length > 0 ? formatUnlinkedTables(unlinked) : undefined,
   };
 }
 
@@ -192,7 +213,7 @@ export function renderNewSubjectAreaDbml(input: NewSubjectAreaDbml): string {
     ...(input.modelFolder !== undefined ? { modelFolder: input.modelFolder } : {}),
     ...(input.stubColumns !== undefined ? { stubColumns: input.stubColumns } : {}),
     viewConfig: view,
-  });
+  }, input.unlinked ?? []);
   const out: string[] = [...projectLines(input.domain, values)];
   const uses = input.members.map((m) => tableUseLine(m.reference ?? dbmlName(m.name), input.filePath, m.path));
   const relationships = [...new Set(input.relationshipsFiles.map(normalisePosix))]
@@ -200,6 +221,8 @@ export function renderNewSubjectAreaDbml(input: NewSubjectAreaDbml): string {
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     .map((path) => `use * from '${path}'`);
   if (uses.length + relationships.length > 0) out.push('', ...uses, ...relationships);
+  const pending = (input.pendingRefs ?? []).map((line) => pendingRefLine(line));
+  if (pending.length > 0) out.push('', ...pending);
   for (const annotation of input.annotations ?? []) out.push('', noteBlock(annotation, '\n'));
   return `${out.join('\n')}\n`;
 }
@@ -259,8 +282,22 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
 
   // --- Refusals ----------------------------------------------------------------
   const afterLogical = isObject(after.logical) ? after.logical : {};
-  if (Array.isArray(afterLogical.relationships) && afterLogical.relationships.length > 0) {
+  // A DBML diagram's only relationships are its pending ones (D27): kept, or removed (their line cut); never added or changed.
+  const pendingRefs = readPendingRefs(text, parser, [], topLevel(compileOne(text, parser).ast));
+  const relationshipIdentity = (r: Relationship): string =>
+    [r.fromModel, r.fromColumn, r.toModel, r.toColumn, r.cardinality, r.role ?? ''].map((part) => lower(String(part ?? ''))).join('\u0000');
+  const pendingIds = new Set(pendingRefs.flatMap((ref) => ref.relationships.map(relationshipIdentity)));
+  const afterOwn = Array.isArray(afterLogical.relationships) ? (afterLogical.relationships as Relationship[]) : [];
+  if (afterOwn.some((r) => !isObject(r) || !pendingIds.has(relationshipIdentity(r)))) {
     refuse(file, `${file} is a DBML diagram, which holds no relationships: they live in the table library, in the relationships file of the foreign-key table's folder.`);
+  }
+  const afterOwnIds = new Set(afterOwn.map(relationshipIdentity));
+  const pendingCuts: TextEdit[] = [];
+  for (const ref of pendingRefs) {
+    const kept = ref.relationships.filter((r) => afterOwnIds.has(relationshipIdentity(r))).length;
+    if (kept === ref.relationships.length) continue;
+    if (kept > 0) refuse(file, `${file}: line ${ref.line} is one pending relationship of several column pairs; remove all of it or none.`, ref.line);
+    pendingCuts.push({ start: ref.start, end: ref.fullEnd, text: '' });
   }
   if (before.layer !== after.layer) refuse(file, `${file}: a DBML diagram's layer is its folder; move the file to change it.`);
   if (before.schemaVersion !== after.schemaVersion) refuse(file, `${file}: the schema version of a DBML diagram is not changed by an edit.`);
@@ -282,12 +319,55 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   const plans: ListPlan[] = [];
   let firstUseDone = false;
 
+  // --- Members: use lines and erd_unlinked_tables (D26) -----------------------------------
+  const uses = useLinesOf(ast, text, file);
+  const memberUses = uses.filter((u) => lower(u.stem) !== DBML_RELATIONSHIPS_FILE_STEM && isSafeTableName(u.stem));
+  const relUses = uses.filter((u) => lower(u.stem) === DBML_RELATIONSHIPS_FILE_STEM);
+  const allOldMembers = modelsOf(before);
+  const allNewMembers = modelsOf(after);
+  // `before` must be what the text reads as: members are paired with their use lines by position,
+  // and the members with no table file to use (D26) come after them.
+  if (memberUses.length + (reading.unlinked ?? []).length !== allOldMembers.length
+    || reading.members.length !== allOldMembers.length
+    || reading.members.some((m, i) => lower(m) !== lower(allOldMembers[i]))) {
+    refuse(file, `ERD Studio could not line up the use lines of ${file} with its members (the diagram changed since it was read); reload it and try again.`);
+  }
+  const changing = !deepEqual(before, after) || edit.refreshRelationshipsUses === true || (edit.pathChanged?.size ?? 0) > 0;
+  const oldMembers = allOldMembers.slice(0, memberUses.length);
+  const oldUnlinked = allOldMembers.slice(memberUses.length);
+  // Each member after the edit is a use line or stays unlinked: a use member keeps its line; an
+  // unlinked one whose table now has a .dbml file gains a line on any edit that changes something
+  // (a no-op stays one, Law 1); one that still has none stays in erd_unlinked_tables.
+  const newMembers: string[] = [];
+  const newUnlinked: string[] = [];
+  {
+    const useLeft = oldMembers.map(lower);
+    const unlinkedLeft = oldUnlinked.map(lower);
+    for (const name of allNewMembers) {
+      const atUse = useLeft.indexOf(lower(name));
+      if (atUse >= 0) {
+        useLeft[atUse] = '';
+        newMembers.push(name);
+        continue;
+      }
+      const atUnlinked = unlinkedLeft.indexOf(lower(name));
+      if (atUnlinked >= 0) {
+        unlinkedLeft[atUnlinked] = '';
+        const table = changing ? edit.resolveTable(name) : undefined;
+        if (table && table.storage === 'dbml') newMembers.push(name);
+        else newUnlinked.push(name);
+        continue;
+      }
+      newMembers.push(name);
+    }
+  }
+
   // --- Project ---------------------------------------------------------------------
   const project = nodes.find((n) => lower(elementType(n) ?? '') === 'project');
   const domainBefore = typeof before.domain === 'string' ? before.domain : '';
   const domainAfter = typeof after.domain === 'string' ? after.domain : domainBefore;
-  const valuesBefore = projectValues(before);
-  const valuesAfter = projectValues(after);
+  const valuesBefore = projectValues(before, oldUnlinked);
+  const valuesAfter = projectValues(after, newUnlinked);
   const projectChanged = domainBefore !== domainAfter || Object.keys(valuesAfter).some((k) => valuesAfter[k] !== valuesBefore[k]);
   if (projectChanged) {
     if (!project) {
@@ -342,11 +422,6 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   }
 
   // --- Table use lines -----------------------------------------------------------------
-  const uses = useLinesOf(ast, text, file);
-  const memberUses = uses.filter((u) => lower(u.stem) !== DBML_RELATIONSHIPS_FILE_STEM && isSafeTableName(u.stem));
-  const relUses = uses.filter((u) => lower(u.stem) === DBML_RELATIONSHIPS_FILE_STEM);
-  const oldMembers = modelsOf(before);
-  const newMembers = modelsOf(after);
   // Retained members: each new entry takes the first unused old one with its name.
   const taken = new Set<number>();
   const oldIndexOf: Array<number | undefined> = newMembers.map((name) => {
@@ -361,7 +436,6 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   const retained = oldIndexOf.filter((i): i is number => i !== undefined);
   const reordered = retained.some((i, k) => k > 0 && i < retained[k - 1]);
   const pathChanged = new Set([...(edit.pathChanged ?? [])].map(lower));
-  const changing = !deepEqual(before, after) || edit.refreshRelationshipsUses === true || pathChanged.size > 0;
   const newLineFor = (name: string): string => {
     const table = edit.resolveTable(name);
     if (!table || table.storage !== 'dbml') {
@@ -387,12 +461,6 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
     if (changing && !edit.fileExists(use.resolved) && table && table.storage === 'dbml') return tableUseLine(table.reference, file, table.path);
     return own;
   };
-  // `before` must be what the text reads as: members are paired with their use lines by position.
-  if (memberUses.length !== oldMembers.length
-    || reading.members.length !== oldMembers.length
-    || reading.members.some((m, i) => lower(m) !== lower(oldMembers[i]))) {
-    refuse(file, `ERD Studio could not line up the use lines of ${file} with its members (the diagram changed since it was read); reload it and try again.`);
-  }
   const lastTableUse = memberUses[memberUses.length - 1];
   const afterUses = (): number => {
     const last = uses[uses.length - 1];
@@ -543,7 +611,7 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
     lateEdits.push({ start: at, end: at, text: `${lead}${appended.join(`${eol}${eol}`)}${eol}` });
   }
 
-  const out = applyTextEdits(text, [...edits, ...lateEdits]);
+  const out = applyTextEdits(text, [...edits, ...pendingLineCuts(text, pendingCuts), ...lateEdits]);
   return hadBom ? `﻿${out}` : out;
 
   /** The first `use` line of a diagram that has none: after the Project (one blank line between), else after the header. */

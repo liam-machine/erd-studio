@@ -100,7 +100,43 @@ export const DBML_DIAGRAM_PROPERTIES = Object.freeze({
   layoutOptions: 'erd_layout_options',
   /** `stubColumns`, as a JSON array of strings. */
   stubColumns: 'erd_stub_columns',
+  /**
+   * Diagram members that have no `.dbml` table file to `use` (no table file
+   * at all, or a table still stored as YAML), as one comma-separated string
+   * in member order: `'gld_fct_risk_child, gld_fct_risk_parent'`. Read by
+   * name like any member; never written empty (the key is dropped). DBML
+   * Project keys take no lists ([3006]), hence the one string (D26).
+   */
+  unlinkedTables: 'erd_unlinked_tables',
 } as const);
+
+/** The names an `erd_unlinked_tables` value lists: split on commas, trimmed, empty parts dropped, in order. */
+export function parseUnlinkedTables(value: string): string[] {
+  return value.split(',').map((part) => part.trim()).filter((part) => part !== '');
+}
+
+/** The `erd_unlinked_tables` value for `names` (in order). */
+export function formatUnlinkedTables(names: readonly string[]): string {
+  return names.join(', ');
+}
+
+/**
+ * The start of a pending relationship (D27): a whole-line comment holding a
+ * Ref ERD Studio keeps and draws but cannot write as a live Ref yet, because
+ * an end has no `.dbml` table file (or no such column). In a relationships
+ * file it belongs to its foreign-key table like a live Ref; in a diagram file
+ * it is one of the diagram's own relationships (its foreign-key table has no
+ * table file). Other DBML tools see only a comment.
+ */
+export const DBML_PENDING_REF_PREFIX = '// erd-studio pending: ';
+
+/** A pending relationship line: its Ref text after the marker (group 1). Case-insensitive, any indent. */
+export const DBML_PENDING_REF_PATTERN = /^[ \t]*\/\/[ \t]*erd-studio pending:[ \t]*(\S.*?)[ \t]*$/i;
+
+/** The pending line for a Ref line (`Ref: a.x >? b.y` → `// erd-studio pending: Ref: a.x >? b.y`). */
+export function pendingRefLine(refLine: string): string {
+  return `${DBML_PENDING_REF_PREFIX}${refLine}`;
+}
 
 /** The stem reserved for a library folder's relationships file, in any case. */
 export const DBML_RELATIONSHIPS_FILE_STEM = '_relationships';

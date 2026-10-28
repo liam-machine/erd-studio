@@ -16,7 +16,7 @@
  */
 
 import type { Cardinality, Relationship, TableRelationship } from '../types/semantic.js';
-import { DBML_RELATIONSHIPS_FILE_HEADER, DBML_RELATIONSHIPS_FILE_STEM } from '../dbmlRichProperties.js';
+import { DBML_RELATIONSHIPS_FILE_HEADER, DBML_RELATIONSHIPS_FILE_STEM, pendingRefLine } from '../dbmlRichProperties.js';
 import { dbmlName } from '../dbmlText.js';
 import { canonicalRelationship } from '../relationships.js';
 import { reverseBareOneToOne } from '../dbmlAttach.js';
@@ -98,8 +98,39 @@ export interface RelationshipsFileEdit {
   pathChanged?: ReadonlySet<string>;
   /** A table as it is AFTER this edit; undefined when it has no file. */
   resolve(name: string): DbmlResolvedTable | undefined;
+  /**
+   * A new unit that cannot be a live Ref (an end with no `.dbml` table file,
+   * a YAML end, or a column the table does not have) is written as a pending
+   * line (D27, `// erd-studio pending: Ref …`) instead of being refused.
+   * Convert sets it; canvas edits do not.
+   */
+  writePending?: boolean;
   /** The DBML parser; the pinned one unless a test passes another. */
   parser?: DbmlParserModule;
+}
+
+/**
+ * Cuts for whole pending lines (D27, each span a line with its line break):
+ * a run of cut lines that leaves a blank line above it and nothing (or
+ * another blank line) below takes that blank line too, so removing the last
+ * pending lines never leaves a blank line behind.
+ */
+export function pendingLineCuts(text: string, spans: ReadonlyArray<{ start: number; end: number }>): Array<{ start: number; end: number; text: string }> {
+  const sorted = [...spans].sort((a, b) => a.start - b.start);
+  const runs: Array<{ start: number; end: number }> = [];
+  for (const span of sorted) {
+    const last = runs[runs.length - 1];
+    if (last && last.end === span.start) last.end = span.end;
+    else runs.push({ ...span });
+  }
+  return runs.map((run) => {
+    const rest = text.slice(run.end);
+    const blankBelow = rest === '' || /^\r?\n/.test(rest) || /^\s*$/.test(rest);
+    const above = text.slice(0, run.start);
+    const blankAbove = /\r?\n\r?\n$/.test(above);
+    if (blankAbove && blankBelow) return { start: run.start - (above.endsWith('\r\n') ? 2 : 1), end: run.end, text: '' };
+    return { start: run.start, end: run.end, text: '' };
+  });
 }
 
 /** The message for a Ref to a YAML table (D20). */
@@ -339,8 +370,26 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   let ast: AstNode | undefined;
   /** Each Ref in the file: its unit as read and, for a bare `-` whose orientation the keys cannot settle, the other way round. */
   const current: Array<{ ref: RefNode; unit: RefUnit; spelledNames: string[]; alt?: { unit: RefUnit; spelledNames: string[] } }> = [];
+  /** The file's pending relationships (D27): each one's unit, as named after the edit, and its line's span. */
+  const pendingLines: Array<{ unit: RefUnit; start: number; end: number }> = [];
   if (oldText !== null) {
     const reading = readRelationshipsDbml(text, parser);
+    for (const stored of reading.pending ?? []) {
+      const rels = stored.relationships;
+      if (rels.length === 0) continue;
+      pendingLines.push({
+        start: stored.start,
+        end: stored.fullEnd,
+        unit: {
+          from: canonical(rels[0].fromModel),
+          to: canonical(rels[0].toModel),
+          fromColumns: rels.map((r) => r.fromColumn),
+          toColumns: rels.map((r) => r.toColumn),
+          cardinality: rels[0].cardinality,
+          ...(rels[0].role !== undefined ? { role: rels[0].role } : {}),
+        },
+      });
+    }
     if (!reading.readable) {
       const problem = reading.problems[0];
       const message = (problem?.message ?? 'it does not read').replace(/\. No relationship is read from (it|the file) until[^]*$/, '').replace(/\.$/, '');
@@ -463,7 +512,51 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     cut.push({ unit: c.unit, ref: c.ref, spelledNames: c.spelledNames });
     touch(c.unit.from, c.unit.to);
   }
-  const inserted = desired.filter((d) => !matched.has(d));
+  // --- Pending relationships (D27) ---------------------------------------------------------
+  // A pending line stays while its unit is desired and still cannot be live; it becomes a live Ref
+  // (its line cut) once both ends have .dbml files with those columns; it goes when its owner is
+  // listed without it, or was deleted. A new unit that cannot be live is written pending only when
+  // the caller asks (Convert); otherwise it is refused below, as before.
+  const liveable = (unit: RefUnit): boolean => [[unit.from, unit.fromColumns], [unit.to, unit.toColumns]].every(([name, columns]) => {
+    const table = edit.resolve(name as string);
+    return table !== undefined && table.storage === 'dbml' && (columns as string[]).every((c) => table.columns(c) !== undefined);
+  });
+  const pendingCuts: TextEdit[] = [];
+  const stillPending = new Set<RefUnit>();
+  const newPending: RefUnit[] = [];
+  for (const pendingLine of pendingLines) {
+    const unit = withRenamedColumns(pendingLine.unit);
+    const owner = lower(unit.from);
+    const wanted = desired.find((d) => !matched.has(d) && identityKey(d) === identityKey(unit));
+    if (wanted) {
+      matched.add(wanted);
+      if (liveable(wanted)) {
+        pendingCuts.push({ start: pendingLine.start, end: pendingLine.end, text: '' });
+        stillPending.add(wanted); // re-added below as a live insert
+      }
+      continue;
+    }
+    if (listed.has(owner)) {
+      const entry = [...edit.owners.entries()].find(([k]) => lower(canonical(k)) === owner)?.[1];
+      if (entry || edit.resolve(unit.from) === undefined) pendingCuts.push({ start: pendingLine.start, end: pendingLine.end, text: '' });
+      continue;
+    }
+    // An owner this edit does not list: its pending line turns live once both ends have files with those columns.
+    if (liveable(unit)) {
+      pendingCuts.push({ start: pendingLine.start, end: pendingLine.end, text: '' });
+      desired.push(unit);
+    }
+  }
+  const inserted = desired.filter((d) => !matched.has(d) || stillPending.has(d));
+  if (edit.writePending) {
+    for (let i = inserted.length - 1; i >= 0; i--) {
+      const unit = inserted[i];
+      if (incomingByKey.has(identityKey(unit)) || liveable(unit)) continue;
+      newPending.push(unit);
+      inserted.splice(i, 1);
+    }
+    newPending.sort((a, b) => (refUnitSortKey(a) < refUnitSortKey(b) ? -1 : refUnitSortKey(a) > refUnitSortKey(b) ? 1 : 0));
+  }
   for (const unit of inserted) for (const n of [unit.from, unit.to]) touched.add(lower(n));
 
   // --- Refusals ---------------------------------------------------------------------
@@ -660,14 +753,22 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     refInserts.push({ start: at, end: at, text: `${refInserts.some((e) => e.start === at) ? '' : lead}${addition.text}${eol}` });
   }
 
+  const pendingBlock = newPending.map((unit) => pendingRefLine(refText(unit)));
   if (oldText === null) {
     const header = DBML_RELATIONSHIPS_FILE_HEADER;
     const useBlock = newUses.map((u) => u.line).join('\n');
     const refBlock = additions.map((a) => a.text).join('\n');
-    if (additions.length === 0) return `${header}\n`;
-    return `${header}\n${useBlock}${useBlock ? '\n' : ''}\n${refBlock}\n`;
+    const tail = pendingBlock.length > 0 ? `\n${pendingBlock.join('\n')}\n` : '';
+    if (additions.length === 0) return `${header}\n${tail}`;
+    return `${header}\n${useBlock}${useBlock ? '\n' : ''}\n${refBlock}\n${tail}`;
   }
-  const out = applyTextEdits(text, [...useEdits, ...edits, ...refInserts]);
+  if (pendingBlock.length > 0) {
+    // New pending lines go at the end of the file, after a blank line.
+    const at = text.length;
+    const lead = text === '' ? '' : text.endsWith('\n\n') ? '' : text.endsWith('\n') ? eol : `${eol}${eol}`;
+    refInserts.push({ start: at, end: at, text: `${refInserts.some((e) => e.start === at) ? eol : lead}${pendingBlock.join(eol)}${eol}` });
+  }
+  const out = applyTextEdits(text, [...useEdits, ...edits, ...pendingLineCuts(text, pendingCuts), ...refInserts]);
   return hadBom ? `﻿${out}` : out;
 
   function incomingText(unit: RefUnit): string {

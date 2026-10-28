@@ -115,7 +115,9 @@ function at(location: DbmlRefLocation): string {
  *   share `nextCompositeKey(entriesSoFar, toModel)`, in file order.
  *
  * A dangling end (a target with no table, or a column it does not have) is
- * kept in the owner's list, as written.
+ * kept in the owner's list, as written. A reading's `pending` relationships
+ * (D27, `// erd-studio pending: Ref …` lines) are attached exactly like its
+ * Refs.
  *
  * `options.partial` says `tables` holds only some of the library (core's
  * loader reads a diagram's members, not every table file): a Ref whose owner
@@ -138,7 +140,8 @@ export function attachRelationships(
   for (const { path, folder: givenFolder, reading } of readings) {
     if (!reading || !reading.readable) continue;
     const folder = givenFolder ?? relationshipsFileFolder(path);
-    for (const ref of reading.refs) {
+    // Pending relationships (D27) belong to their owner exactly like live Refs: drawn when both ends are shown.
+    for (const ref of [...reading.refs, ...(reading.pending ?? [])]) {
       if (ref.relationships.length === 0) continue;
       let rels = ref.relationships;
       if (ref.oneToOneDirection === 'keys') {

@@ -93,6 +93,19 @@ const BRIDGE_RENAMED: Readonly<Record<string, string>> = (() => {
   return out;
 })();
 
+/** A relationships file with a live Ref and two pending lines (D27): one to a table with no file, one from another owner. */
+export const PENDING_FILE = `use { table gold.dim_customer } from './dim_customer.dbml'
+use { table fct_order } from './fct_order.dbml'
+
+Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
+
+// erd-studio pending: Ref: fct_order.order_date_key >? dim_missing.date_key
+// erd-studio pending: Ref: customer_profile.customer_key >? dim_gone.k
+`;
+
+/** The library with a file for dim_missing. */
+const WITH_DIM_MISSING: Readonly<Record<string, string>> = { ...LIBRARY, 'tables/dim_missing.dbml': 'Table dim_missing {\n  date_key int [pk]\n}\n' };
+
 const M21 = (fromColumn: string, toModel: string, toColumn: string, extra: Partial<TableRelationship> = {}): TableRelationship =>
   ({ fromColumn, toModel, toColumn, cardinality: 'many-to-one', ...extra });
 
@@ -469,6 +482,53 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
       expect(o.output.startsWith('﻿')).toBe(true);
       expect(o.output.replace(/\r\n/g, '')).not.toContain('\n');
       expect(o.output).toContain('Ref: bridge.a_key >? dim_date.date_key\r\n');
+    },
+  },
+
+  // --- Pending relationships (D27) --------------------------------------------------------
+  relCase('a pending line stays byte for byte while its relationship is still wanted and cannot be live', PENDING_FILE, () => changed(PENDING_FILE, 'fct_order', (list) => list), (out) => {
+    expect(out).toBe(PENDING_FILE);
+  }),
+  relCase('a pending line goes when its owner is listed without it; another owner\'s stays', PENDING_FILE,
+    () => changed(PENDING_FILE, 'fct_order', (list) => list.filter((r) => r.toModel !== 'dim_missing')), (out) => {
+      expect(out).toBe(PENDING_FILE.replace('// erd-studio pending: Ref: fct_order.order_date_key >? dim_missing.date_key\n', ''));
+    }),
+  relCase('a pending line becomes a live Ref (with its use line) once both ends have files with those columns', PENDING_FILE,
+    () => changed(PENDING_FILE, 'fct_order', (list) => list, WITH_DIM_MISSING), (out) => {
+      expect(out).toBe([
+        "use { table dim_missing } from '../dim_missing.dbml'",
+        "use { table gold.dim_customer } from './dim_customer.dbml'",
+        "use { table fct_order } from './fct_order.dbml'",
+        '',
+        'Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key',
+        'Ref: fct_order.order_date_key >? dim_missing.date_key',
+        '',
+        '// erd-studio pending: Ref: customer_profile.customer_key >? dim_gone.k',
+        '',
+      ].join('\n'));
+    }, WITH_DIM_MISSING),
+  {
+    name: 'writePending (Convert): a new relationship that cannot be live is written as a pending line, after the Refs',
+    run: (): WriterOutcome => ({
+      path: REL_PATH,
+      input: null,
+      output: relEdit(null, {
+        owners: new Map([['fct_order', { name: 'fct_order', relationships: [M21('Customer_Key', 'dim_customer', 'customer_key'), M21('order_date_key', 'dim_missing', 'date_key')] }]]),
+        writePending: true,
+      }),
+      context: { ...LIBRARY },
+    }),
+    check: (o) => {
+      expect(o.output).toBe([
+        '// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.',
+        "use { table gold.dim_customer } from './dim_customer.dbml'",
+        "use { table fct_order } from './fct_order.dbml'",
+        '',
+        'Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key',
+        '',
+        '// erd-studio pending: Ref: fct_order.order_date_key >? dim_missing.date_key',
+        '',
+      ].join('\n'));
     },
   },
 ];

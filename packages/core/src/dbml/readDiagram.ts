@@ -9,7 +9,7 @@
  * unreadable. Only a syntax error, or an error left after blanking, does.
  */
 
-import type { Annotation, AnnotationColor, NodePosition } from '../types/semantic.js';
+import type { Annotation, AnnotationColor, NodePosition, Relationship } from '../types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, DBML_SCHEMA_VERSION, WRITTEN_SCHEMA_VERSION } from '../types/semantic.js';
 import type { DbmlMemberUse, DbmlSubjectAreaReading } from '../types/dbmlStorage.js';
 import {
@@ -21,8 +21,12 @@ import {
   DBML_DIAGRAM_PROPERTIES,
   DBML_RELATIONSHIPS_FILE_STEM,
   DBML_RICH_NOTE_PROPERTIES,
+  parseUnlinkedTables,
   stickyColourOfHex,
 } from '../dbmlRichProperties.js';
+import { nextCompositeKey } from '../relationships.js';
+import { readPendingRefs } from './readRelationships.js';
+import type { DbmlProblem } from '../types/dbmlStorage.js';
 import { placeUnlaidNotes, readDbdiagramLayout } from '../dbdiagramLayout.js';
 import { findConflictMarkers } from '../mergeConflict.js';
 import { isSafeTableName } from '../logicalModel.js';
@@ -310,6 +314,17 @@ export function parseSubjectAreaDbml(
   const stubColumns = jsonValue(projectText(DBML_DIAGRAM_PROPERTIES.stubColumns), DBML_DIAGRAM_PROPERTIES.stubColumns, isStringArray, warnings);
   const modelFolder = projectText(DBML_DIAGRAM_PROPERTIES.modelFolder);
 
+  // Members with no table file to `use` (D26): read by name, after the `use` members.
+  const unlinked = unlinkedMembers(projectText(DBML_DIAGRAM_PROPERTIES.unlinkedTables), members, warnings);
+  members.push(...unlinked);
+
+  // Pending relationships (D27): the diagram's own, owned by a table with no table file.
+  const pendingProblems: DbmlProblem[] = [];
+  const pendingRefs = readPendingRefs(text, parser, pendingProblems, topLevel(first.ast));
+  for (const problem of pendingProblems) warnings.push(problem.message);
+  const pending = pendingRefs.map((ref) => ({ line: ref.line, relationships: ref.relationships }));
+  const ownRelationships = pendingRelationships(pending.map((p) => p.relationships));
+
   // The layout file: table positions and sticky-note boxes.
   const positions: Record<string, NodePosition> = {};
   let stickies: ReturnType<typeof readDbdiagramLayout>['stickies'] = [];
@@ -363,11 +378,11 @@ export function parseSubjectAreaDbml(
     layer,
     description,
     ...(modelFolder !== undefined ? { modelFolder } : {}),
-    logical: { models: [...members], relationships: [] },
+    logical: { models: [...members], relationships: ownRelationships },
     viewConfig,
     ...(stubColumns !== undefined ? { stubColumns } : {}),
   };
-  const holdsOwnTables = declaredTables > 0 && members.length === 0;
+  const holdsOwnTables = declaredTables > 0 && uses.length === 0;
   if (holdsOwnTables) {
     warnings.push('The diagram declares its own Tables and imports none from the library: it looks like a single-file DBML to import (ERD Studio: Import DBML)');
   }
@@ -380,7 +395,57 @@ export function parseSubjectAreaDbml(
     warnings,
     uses,
     holdsOwnTables,
+    ...(unlinked.length > 0 ? { unlinked } : {}),
+    ...(pending.length > 0 ? { pending } : {}),
   };
+}
+
+/**
+ * The names an `erd_unlinked_tables` value lists (D26), in order: each one
+ * that passes `isSafeTableName` and is not already a member (a `use` line, or
+ * an earlier entry, compared without case), with a warning for the rest.
+ */
+function unlinkedMembers(value: string | undefined, members: readonly string[], warnings: string[]): string[] {
+  if (value === undefined) return [];
+  const seen = new Set(members.map((m) => m.toLowerCase()));
+  const out: string[] = [];
+  for (const name of parseUnlinkedTables(value)) {
+    if (!isSafeTableName(name)) {
+      warnings.push(`The Project's ${DBML_DIAGRAM_PROPERTIES.unlinkedTables} names '${name}', which is not a table name ERD Studio can read; it is ignored`);
+      continue;
+    }
+    if (seen.has(name.toLowerCase())) {
+      warnings.push(`The Project's ${DBML_DIAGRAM_PROPERTIES.unlinkedTables} names ${name}, which the diagram already lists; it is shown once`);
+      continue;
+    }
+    seen.add(name.toLowerCase());
+    out.push(name);
+  }
+  return out;
+}
+
+/** Pending Refs as a diagram's own relationships: a Ref of several column pairs is one composite (`nextCompositeKey`, per owner, in file order). */
+function pendingRelationships(refs: ReadonlyArray<readonly Relationship[]>): Relationship[] {
+  const out: Relationship[] = [];
+  const byOwner = new Map<string, Relationship[]>();
+  for (const rels of refs) {
+    if (rels.length === 0) continue;
+    const owner = rels[0].fromModel.toLowerCase();
+    const list = byOwner.get(owner) ?? [];
+    byOwner.set(owner, list);
+    if (rels.length === 1) {
+      list.push(rels[0]);
+      out.push({ ...rels[0] });
+      continue;
+    }
+    const compositeKey = nextCompositeKey(list, rels[0].toModel);
+    for (const rel of rels) {
+      const entry = { ...rel, compositeKey };
+      list.push(entry);
+      out.push(entry);
+    }
+  }
+  return out;
 }
 
 /**
@@ -405,5 +470,24 @@ export function subjectAreaMembersDbml(rawText: string, parser: DbmlParserModule
     if (name.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM || !isSafeTableName(name)) continue;
     members.push(name);
   }
+  const unlinked = projectEntryText(compiled.ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables);
+  members.push(...unlinkedMembers(unlinked, members, []));
   return members;
+}
+
+/**
+ * A Project key's string value from the AST alone (no compile of the rest):
+ * the first Project's entry, its single- or triple-quoted string unescaped.
+ * Undefined when there is no such entry or it is not a string.
+ */
+function projectEntryText(ast: AstNode, text: string, key: string): string | undefined {
+  const project = topLevel(ast).find((n) => elementType(n)?.toLowerCase() === 'project');
+  const body: AstNode[] = Array.isArray(project?.body?.body) ? project!.body.body : [];
+  const entry = body.find((n) => String(n?.type?.value ?? '').toLowerCase() === key);
+  const value = entry?.body;
+  if (!value || typeof value.start !== 'number' || typeof value.end !== 'number') return undefined;
+  const source = text.slice(value.start, value.end).trim();
+  const quoted = /^'''([^]*)'''$/.exec(source) ?? /^'([^]*)'$/.exec(source);
+  if (!quoted) return undefined;
+  return quoted[1].replace(/\\(.)/g, '$1');
 }

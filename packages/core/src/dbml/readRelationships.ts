@@ -15,6 +15,7 @@
 import type { Cardinality, Relationship } from '../types/semantic.js';
 import type { DbmlOneToOneDirection, DbmlProblem, DbmlRelationshipsReading, DbmlStoredRef } from '../types/dbmlStorage.js';
 import { findConflictMarkers } from '../mergeConflict.js';
+import { DBML_PENDING_REF_PATTERN } from '../dbmlRichProperties.js';
 import { normaliseRelationshipRole } from '../relationships.js';
 import type { DbmlParserModule } from './parserModule.js';
 import {
@@ -151,12 +152,19 @@ export function readRelationshipsDbml(rawText: string, parser: DbmlParserModule 
     };
   }
 
+  const refs = refsOf(text, compiled, problems);
+  const pending = readPendingRefs(text, parser, problems, topLevel(compiled.ast));
+  return { readable: true, refs, problems, ...(pending.length > 0 ? { pending } : {}) };
+}
+
+/** Every Ref of a compiled text, Ref by Ref (a Ref that cannot be read is skipped with a problem). */
+function refsOf(text: string, compiled: CompiledFile, problems: DbmlProblem[], lineOffset = 0, what = ''): DbmlStoredRef[] {
   const refs: DbmlStoredRef[] = [];
   for (const node of topLevel(compiled.ast)) {
     if (elementType(node)?.toLowerCase() !== 'ref') continue;
-    const line = lineAt(text, node.start);
+    const line = lineAt(text, node.start) + lineOffset;
     const skip = (why: string): void => {
-      problems.push({ line, severity: 'warning', code: 'unreadableRef', message: `Line ${line}: \`${sourceOf(text, node)}\` ${why}; it is not drawn.` });
+      problems.push({ line, severity: 'warning', code: 'unreadableRef', message: `Line ${line}: ${what}\`${sourceOf(text, node)}\` ${why}; it is not drawn.` });
     };
     const application = refApplication(node);
     const callee = application?.callee;
@@ -205,5 +213,45 @@ export function readRelationshipsDbml(rawText: string, parser: DbmlParserModule 
       ...(oriented.oneToOneDirection !== undefined ? { oneToOneDirection: oriented.oneToOneDirection } : {}),
     });
   }
-  return { readable: true, refs, problems };
+  return refs;
 }
+
+/**
+ * The pending relationships of a file (D27): each whole-line
+ * `// erd-studio pending: Ref …` comment, its Ref compiled on its own (so
+ * one that does not read never hides another), with the comment line's
+ * span and line. Shared by the relationships reader and the diagram reader.
+ */
+export function readPendingRefs(text: string, parser: DbmlParserModule, problems: DbmlProblem[], nodes: readonly AstNode[]): DbmlStoredRef[] {
+  if (!/erd-studio pending:/i.test(text)) return [];
+  // Only a comment between top-level elements: never text inside one (a Note's body, a Ref block).
+  const inside = (offset: number): boolean => nodes.some((n) => typeof n.start === 'number' && typeof n.end === 'number' && n.start <= offset && offset < n.end);
+  const out: DbmlStoredRef[] = [];
+  let offset = 0;
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const start = offset;
+    offset += raw.length + 1;
+    const match = DBML_PENDING_REF_PATTERN.exec(raw.replace(/\r$/, ''));
+    if (!match || inside(start + raw.indexOf('/'))) continue;
+    const line = i + 1;
+    const refText = match[1];
+    let compiled: CompiledFile;
+    try {
+      compiled = compileOne(refText, parser);
+    } catch {
+      problems.push({ line, severity: 'warning', code: 'unreadableRef', message: `Line ${line}: the pending relationship \`${refText}\` is not one \`Ref: a.x > b.y\` line; it is not drawn.` });
+      continue;
+    }
+    if (compiled.errors.some((d) => d.errorClass === 'syntax') || !topLevel(compiled.ast).some((n) => elementType(n)?.toLowerCase() === 'ref')) {
+      problems.push({ line, severity: 'warning', code: 'unreadableRef', message: `Line ${line}: the pending relationship \`${refText}\` is not one \`Ref: a.x > b.y\` line; it is not drawn.` });
+      continue;
+    }
+    for (const ref of refsOf(refText, compiled, problems, line - 1, 'the pending relationship ')) {
+      out.push({ ...ref, start, fullEnd: Math.min(offset, text.length), pending: true });
+    }
+  }
+  return out;
+}
+

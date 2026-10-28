@@ -44,6 +44,14 @@ Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_
 }
 `;
 
+/** SALES with a member that has no table file and its pending relationship (D26/D27). */
+export const SALES_MISSING = SALES
+  .replace("  database_type: 'Snowflake'\n", "  database_type: 'Snowflake'\n  erd_unlinked_tables: 'gld_fct_risk_child'\n")
+  .concat('\n// erd-studio pending: Ref: gld_fct_risk_child.customer_key >? gold.dim_customer.customer_key\n');
+
+/** SALES_MISSING with dim_date unlinked too, though it has a table file now. */
+export const SALES_UNLINKED = SALES_MISSING.replace("erd_unlinked_tables: 'gld_fct_risk_child'", "erd_unlinked_tables: 'gld_fct_risk_child, dim_date'");
+
 type Obj = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 /** Read `text` as the diagram at `path`. */
@@ -321,6 +329,30 @@ use { table fct_order } from '../tables/gold/fct_order.dbml'
       expect(o.output).toContain("use { table dim_date } from '../tables/dim_date.dbml'\r\n");
     },
   },
+
+  // --- Members with no table file (D26) and pending relationships (D27) ----------------------
+  diagramCase('a no-op keeps erd_unlinked_tables and the pending lines byte for byte', SALES_UNLINKED, () => undefined, (out) => { expect(out).toBe(SALES_UNLINKED); }),
+  diagramCase('an edit keeps an unlinked member that still has no file, and its pending line', SALES_MISSING, (a) => { a.description = 'Revenue star'; }, (out) => {
+    expect(out).toBe(SALES_MISSING.replace("Note: 'Sales star schema'", "Note: 'Revenue star'"));
+  }),
+  diagramCase('an unlinked member whose table now has a .dbml file gains a use line on any edit that changes something', SALES_UNLINKED, (a) => { a.description = 'Revenue star'; }, (out) => {
+    expect(out).toBe(SALES_UNLINKED
+      .replace("Note: 'Sales star schema'", "Note: 'Revenue star'")
+      .replace("erd_unlinked_tables: 'gld_fct_risk_child, dim_date'", "erd_unlinked_tables: 'gld_fct_risk_child'")
+      .replace("use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\n", "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table dim_date } from '../tables/dim_date.dbml'\n")
+      .replace("use * from '../tables/gold/_relationships.dbml'\n", "use * from '../tables/_relationships.dbml'\nuse * from '../tables/gold/_relationships.dbml'\n"));
+    expect(readDiagram(out).logical.models).toEqual(['fct_order', 'dim_customer', 'dim_date', 'gld_fct_risk_child']);
+  }),
+  diagramCase('removing the last unlinked member drops the key (never written empty), and its pending line goes with its relationship', SALES_MISSING, (a) => {
+    a.logical.models = a.logical.models.filter((m: string) => m !== 'gld_fct_risk_child');
+    a.logical.relationships = [];
+  }, (out) => {
+    expect(out).toBe(SALES_MISSING
+      .replace("  erd_unlinked_tables: 'gld_fct_risk_child'\n", '')
+      .replace('\n// erd-studio pending: Ref: gld_fct_risk_child.customer_key >? gold.dim_customer.customer_key\n', ''));
+    expect(out).not.toContain('erd_unlinked_tables');
+  }),
+
 ];
 
 /** New-file cases: `renderNewSubjectAreaDbml`. */

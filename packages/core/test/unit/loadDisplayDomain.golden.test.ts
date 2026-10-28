@@ -95,6 +95,14 @@ const DBML_TWIN_CASES: Record<string, { domainPath: string; rows: Partial<Record
     domainPath: '.erd-studio/silver/partial.dbml',
     rows: { schemaVersion: 'the YAML case is 5, a DBML diagram is 7' },
   },
+  // Convert's own output for missing-model (D26/D27): dim_missing, broken (left as YAML: it does not
+  // parse) and nameless (left as YAML: no name) are named in erd_unlinked_tables, and the diagram's two
+  // relationships from tables with no DBML file are its pending lines. No exception: it draws what the
+  // JSON diagram drew, broken's YAML load error included.
+  'missing-model-converted': {
+    domainPath: '.erd-studio/silver/partial.dbml',
+    rows: { schemaVersion: 'the YAML case is 5, a DBML diagram is 7' },
+  },
   'library-relationships': {
     domainPath: '.erd-studio/gold/sales.dbml',
     rows: {
@@ -103,6 +111,9 @@ const DBML_TWIN_CASES: Record<string, { domainPath: string; rows: Partial<Record
     },
   },
 };
+
+/** A twin compared with another case's golden. */
+const GOLDEN_OF: Record<string, string> = { 'missing-model-converted': 'missing-model' };
 
 /**
  * What a twin cannot hold, beyond the §2.8 rows, applied to the YAML golden
@@ -150,7 +161,7 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
         warn: () => {},
       });
 
-      const expected = { ...readGolden(`${name}.host.json`).payload };
+      const expected = { ...readGolden(`${GOLDEN_OF[name] ?? name}.host.json`).payload };
       delete expected.templates;
       delete expected.manifestModels;
       delete expected.existingModels;
@@ -204,7 +215,7 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
         dbml: dbmlStorageReader,
       });
       expect(domain.schemaVersion).toBe(7);
-      const expected = { ...readGolden(`${name}.host.json`).payload };
+      const expected = { ...readGolden(`${GOLDEN_OF[name] ?? name}.host.json`).payload };
       delete expected.templates;
       delete expected.manifestModels;
       delete expected.existingModels;

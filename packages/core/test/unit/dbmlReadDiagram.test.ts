@@ -275,3 +275,55 @@ describe('subjectAreaMembersDbml', () => {
     expect(subjectAreaMembersDbml("Project p {\nuse { table a } from '../tables/a.dbml'\n")).toBeNull();
   });
 });
+
+describe('members with no table file (erd_unlinked_tables, D26) and pending relationships (D27)', () => {
+  const MISSING = `Project commercial {
+  erd_schema_version: '7'
+  erd_unlinked_tables: 'gld_fct_risk_child, gld_fct_risk_parent,,  fct_order , ../escape'
+}
+
+use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table gld_dim_project } from '../tables/gold/gld_dim_project.dbml'
+
+Note "n1" {
+  '// erd-studio pending: Ref: never.read >? from.a_note'
+}
+
+// erd-studio pending: Ref: gld_fct_risk_child.project_id >? gld_dim_project.project_id
+//   erd-studio pending: Ref "as of": gld_fct_risk_parent.(a, b) >? gld_dim_project.(a, b)
+// erd-studio pending: not a Ref
+`;
+
+  it.each(STORAGE_PARSERS)('%s: reads the unlinked members after the use members, and the pending lines as the diagram\'s own relationships', (_label, parser) => {
+    const reading = parseSubjectAreaDbml(MISSING, 'gold/commercial.dbml', null, parser);
+    expect(reading.members).toEqual(['fct_order', 'gld_dim_project', 'gld_fct_risk_child', 'gld_fct_risk_parent']);
+    expect(reading.unlinked).toEqual(['gld_fct_risk_child', 'gld_fct_risk_parent']);
+    expect((reading.obj.logical as { models: string[] }).models).toEqual(reading.members);
+    expect(reading.uses?.map((u) => u.name)).toEqual(['fct_order', 'gld_dim_project']);
+    expect((reading.obj.logical as { relationships: unknown[] }).relationships).toEqual([
+      { fromModel: 'gld_fct_risk_child', fromColumn: 'project_id', toModel: 'gld_dim_project', toColumn: 'project_id', cardinality: 'many-to-one' },
+      { fromModel: 'gld_fct_risk_parent', fromColumn: 'a', toModel: 'gld_dim_project', toColumn: 'a', cardinality: 'many-to-one', role: 'as of', compositeKey: 'fk_gld_dim_project' },
+      { fromModel: 'gld_fct_risk_parent', fromColumn: 'b', toModel: 'gld_dim_project', toColumn: 'b', cardinality: 'many-to-one', role: 'as of', compositeKey: 'fk_gld_dim_project' },
+    ]);
+    expect(reading.pending?.map((p) => p.line)).toEqual([13, 14]);
+    // Not a table name, a member already listed, and a pending line that is not a Ref: warned about, never read.
+    expect(reading.warnings).toEqual(expect.arrayContaining([
+      expect.stringMatching(/erd_unlinked_tables names fct_order, which the diagram already lists/),
+      expect.stringMatching(/erd_unlinked_tables names '\.\.\/escape', which is not a table name/),
+      expect.stringMatching(/^Line 15: the pending relationship `not a Ref`/),
+    ]));
+    // The diagram still validates as a v5 document, with its own relationships.
+    expect(detectSubjectAreaFormat(reading.obj)).toBe('v5');
+    expect(() => validateSubjectAreaDocument(reading.obj, 'gold/commercial.dbml')).not.toThrow();
+  });
+
+  it('subjectAreaMembersDbml lists the unlinked members too, from the AST alone', () => {
+    expect(subjectAreaMembersDbml(MISSING)).toEqual(['fct_order', 'gld_dim_project', 'gld_fct_risk_child', 'gld_fct_risk_parent']);
+  });
+
+  it('a diagram whose members all have no table file is not a dropped-in single-file DBML', () => {
+    const reading = parseSubjectAreaDbml("Project p {\n  erd_unlinked_tables: 'a'\n}\n", 'gold/p.dbml', null);
+    expect(reading.members).toEqual(['a']);
+    expect(reading.holdsOwnTables).toBe(false);
+  });
+});

@@ -66,6 +66,12 @@ export interface DbmlStoredRef {
   line: number;
   /** How a `-` Ref was oriented; `'keys'` leaves it to `attachRelationships`, which has the tables. */
   oneToOneDirection?: DbmlOneToOneDirection;
+  /**
+   * A pending relationship (D27): read from a `// erd-studio pending: Ref …`
+   * comment line, not a live Ref. `start`/`fullEnd` are that line's span
+   * (its line break included). Optional: absent on a live Ref.
+   */
+  pending?: true;
 }
 
 /** A relationships file, read Ref by Ref (`readRelationshipsDbml`). */
@@ -74,6 +80,12 @@ export interface DbmlRelationshipsReading {
   readable: boolean;
   refs: DbmlStoredRef[];
   problems: DbmlProblem[];
+  /**
+   * Pending relationships (D27): `// erd-studio pending: Ref …` lines, read
+   * like Refs and attached to their owner like them, never compiled as part
+   * of the file. Optional: a reader older than 2.0's leaves it unset.
+   */
+  pending?: DbmlStoredRef[];
 }
 
 /** A table `use` line of a diagram: the member it names and where its path points. */
@@ -105,6 +117,19 @@ export interface DbmlSubjectAreaReading {
   uses?: DbmlMemberUse[];
   /** The file declares at least one Table and has no table `use` line: most likely a dropped-in single-file DBML to import. */
   holdsOwnTables?: boolean;
+  /**
+   * Members listed by the Project's `erd_unlinked_tables` (D26), in order:
+   * they have no `.dbml` table file to `use`, and come after the `use`
+   * members in `members`. Optional: absent from a reader older than 2.0's.
+   */
+  unlinked?: string[];
+  /**
+   * The diagram's pending relationships (D27): `// erd-studio pending: Ref …`
+   * lines, owned by a table with no `.dbml` file, read into
+   * `obj.logical.relationships` (canonical). Each with its 1-based line.
+   * Optional: absent from a reader older than 2.0's.
+   */
+  pending?: Array<{ line: number; relationships: Relationship[] }>;
 }
 
 /** The DBML readers `loadDisplaySubjectArea` needs; `dbmlStorageReader` from `@erd-studio/core/dbml` is one. */

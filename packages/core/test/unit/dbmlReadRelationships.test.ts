@@ -288,3 +288,38 @@ describe('line numbers in a large file (§7.6)', () => {
     expect(lineAt('x', -1)).toBe(1);
   }, 60_000);
 });
+
+describe('pending relationships (D27)', () => {
+  const FILE = `use { table fct } from './fct.dbml'
+
+Ref: fct.a >? dim.a
+// erd-studio pending: Ref: fct.b >? dim_missing.b
+// erd-studio pending: Ref "role": dim.k ?- fct.k
+// erd-studio pending: Ref: fct.c >
+`;
+
+  it.each(STORAGE_PARSERS)('%s: reads each pending line as a Ref of its own, never among the live Refs', (_label, parser) => {
+    const reading = readRelationshipsDbml(FILE, parser);
+    expect(reading.readable).toBe(true);
+    expect(reading.refs.map((r) => r.relationships[0].fromColumn)).toEqual(['a']);
+    expect(reading.pending?.map((r) => [r.line, r.pending, r.relationships])).toEqual([
+      [4, true, [{ fromModel: 'fct', fromColumn: 'b', toModel: 'dim_missing', toColumn: 'b', cardinality: 'many-to-one' }]],
+      [5, true, [{ fromModel: 'fct', fromColumn: 'k', toModel: 'dim', toColumn: 'k', cardinality: 'one-to-one', role: 'role' }]],
+    ]);
+    expect(reading.pending![0].start).toBe(FILE.indexOf('// erd-studio pending: Ref: fct.b'));
+    expect(FILE.slice(reading.pending![0].start, reading.pending![0].fullEnd)).toBe('// erd-studio pending: Ref: fct.b >? dim_missing.b\n');
+    expect(reading.problems).toEqual([expect.objectContaining({ line: 6, code: 'unreadableRef', message: expect.stringMatching(/^Line 6: the pending relationship `Ref: fct\.c >` is not one/) })]);
+  });
+
+  it('attaches a pending relationship to its owner exactly like a live Ref, a target with no table kept as written', () => {
+    const table = (name: string, columns: string[]): DbmlAttachTable => ({
+      table: { name, columns: columns.map((c) => ({ name: c, dataType: 'int', description: '' }) as ColumnDef) }, folder: '', storage: 'dbml',
+    });
+    const result = attachRelationships([{ path: 'tables/_relationships.dbml', reading: readRelationshipsDbml(FILE) }], dbmlTableLookup([table('fct', ['a', 'b', 'k']), table('dim', ['a', 'k'])]));
+    expect(result.byOwner.get('fct')).toEqual([
+      { fromColumn: 'a', toModel: 'dim', toColumn: 'a', cardinality: 'many-to-one' },
+      { fromColumn: 'b', toModel: 'dim_missing', toColumn: 'b', cardinality: 'many-to-one' },
+      { fromColumn: 'k', toModel: 'dim', toColumn: 'k', cardinality: 'one-to-one', role: 'role' },
+    ]);
+  });
+});

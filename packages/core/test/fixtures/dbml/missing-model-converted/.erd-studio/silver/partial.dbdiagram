@@ -1,0 +1,39 @@
+{
+  "version": "3.0.0",
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "relationshipMode": "All",
+    "tablePositions": [
+      {
+        "name": "dim_customer",
+        "schemaName": "public",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "name": "dim_missing",
+        "schemaName": "public",
+        "x": 400,
+        "y": 0
+      },
+      {
+        "name": "broken",
+        "schemaName": "public",
+        "x": 0,
+        "y": 300
+      },
+      {
+        "name": "nameless",
+        "schemaName": "public",
+        "x": 400,
+        "y": 300
+      }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": []
+  },
+  "views": {}
+}
