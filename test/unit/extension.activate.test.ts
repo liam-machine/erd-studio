@@ -814,6 +814,29 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(featureOnce.mock.calls.filter((c) => c[0] === 'dbmlForeignFormatWarned')).toHaveLength(1);
   });
 
+  it('"Subject area file deleted": not for a diagram whose name is back as .json (Undo of Convert), still for one really deleted', async () => {
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const deletedToasts = () => info.mock.calls.filter((c) => /subject area files? deleted/i.test(String(c[0])));
+
+    // Undo of Convert Project to DBML: the .json comes back and the .dbml goes.
+    const salesDbml = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    fs.writeFileSync(path.join(ws, '.erd-studio', 'gold', 'sales.json'), '{"schemaVersion": 5, "domain": "sales", "layer": "gold", "logical": {"models": []}}\n');
+    fs.rmSync(salesDbml);
+    semanticWatcher()._simulateDelete(vscode.Uri.file(salesDbml));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(deletedToasts()).toHaveLength(0);
+
+    // A diagram the user deletes: the toast, as before.
+    const staging = path.join(ws, '.erd-studio', 'silver', 'staging.dbml');
+    fs.rmSync(staging);
+    semanticWatcher()._simulateDelete(vscode.Uri.file(staging));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(deletedToasts()).toHaveLength(1);
+    expect(deletedToasts()[0][0]).toBe('Subject area file deleted. Regenerate dbt selectors.yml to drop the removed subject area from the selector set.');
+  });
+
   it('the foreign-format toast is not raised outside a DBML project', async () => {
     fs.rmSync(path.join(ws, '.erd-studio', 'tables'), { recursive: true, force: true });
     fs.rmSync(path.join(ws, '.erd-studio', 'gold', 'sales.dbml'));

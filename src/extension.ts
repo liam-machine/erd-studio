@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 
 import { SubjectAreaService, renameSubjectAreaInRaw, subjectAreaTableNames } from './services/domainService';
 import { LayerService } from './services/layerService';
+import { removedSubjectAreaPaths } from './services/removedSubjectAreas';
 import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, type SubjectAreaSummary, type Layer, type Stage, type UnifiedSubjectArea, type StageData } from './types/semantic';
 import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
 import { TemplateService } from './services/templateService';
@@ -1432,11 +1433,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeProvider.refresh();
     tableLibraryProvider.refresh();
     refreshContextKeys();
-    const subject = uris.length === 1
+    // A diagram whose name is back in the other format (Undo of Convert
+    // Project to DBML restores each .json as it deletes the .dbml) was not
+    // removed: no selectors prompt for it.
+    const removed = removedSubjectAreaPaths(uris.map((u) => u.fsPath), fs.existsSync);
+    if (removed.length === 0) return;
+    const subject = removed.length === 1
       ? 'Subject area file deleted.'
-      : `${uris.length} subject area files deleted.`;
+      : `${removed.length} subject area files deleted.`;
     void vscode.window.showInformationMessage(
-      `${subject} Regenerate dbt selectors.yml to drop the removed subject area${uris.length === 1 ? '' : 's'} from the selector set.`,
+      `${subject} Regenerate dbt selectors.yml to drop the removed subject area${removed.length === 1 ? '' : 's'} from the selector set.`,
       'Regenerate Now',
     ).then(choice => {
       if (choice === 'Regenerate Now') {
