@@ -143,7 +143,8 @@ export class ConvertToDbmlPanel {
         if (mode === 'review') this.settle('convert');
         return;
       case 'checkAgain':
-        if (mode === 'refused') this.settle('checkAgain');
+        // The refused page, or a review that leaves files as they are (fix them, then check again).
+        if (mode === 'refused' || this.content.view.checkAgain) this.settle('checkAgain');
         return;
       case 'sendFeedback':
         if (mode === 'refused' && this.content.view.reportable && this.content.feedback) {

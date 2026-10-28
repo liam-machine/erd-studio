@@ -27,7 +27,7 @@ import {
 
 function plan(overrides: Partial<DbmlConversionPlan> = {}): DbmlConversionPlan {
   return {
-    creates: [], replaces: [], deletes: [], resumed: [], refusals: [], notes: [], v4SubjectAreas: [],
+    creates: [], replaces: [], deletes: [], resumed: [], refusals: [], handled: [], leftAsIs: [], keptMissing: [], notes: [], v4SubjectAreas: [],
     movedRelationships: [], placedDiagrams: [],
     summary: { tables: 0, diagrams: 0, relationshipsFiles: 0, relationships: 0 },
     ...overrides,
@@ -273,5 +273,69 @@ describe('ConvertToDbmlPanel', () => {
     void ConvertToDbmlPanel.show({ ...refusedContent(), locations: [{ path: '../../etc/passwd' }] });
     await vscode.window._webviewPanels[0]._simulateMessage({ type: 'open', index: 0 });
     expect(show).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildConvertReview: what Convert handles, leaves and keeps missing (D26/D27)', () => {
+  const partial = plan({
+    creates: [{ path: 'tables/dim.dbml', text: '' }, { path: 'gold/commercial.dbml', text: '' }],
+    deletes: ['logical-models/dim.yml', 'gold/commercial.json'],
+    handled: [{ path: 'gold/commercial.json', text: 'It lists Dim, which is the table dim; the DBML diagram names it dim.' }],
+    leftAsIs: [{ path: 'logical-models/gold/gld_fct_x.yml', line: 293, problem: 'The key name is written twice with different values (line 293). Keep the one you mean.' }],
+    keptMissing: [{ diagram: 'gold/commercial.dbml', tables: ['gld_fct_risk_child', 'gld_fct_risk_parent'] }],
+    notes: ['a note'],
+    summary: { tables: 1, diagrams: 1, relationshipsFiles: 0, relationships: 0 },
+  });
+
+  it('lists, in order: Handled for you, Left as YAML until fixed (each with Open), Kept as missing, then the files and notes; Convert stays', () => {
+    const { view, locations } = buildConvertReview(partial, { display, introLines: ['intro'] });
+    expect(view.mode).toBe('review');
+    expect(view.summary).toBe('1 table and 1 diagram convert to DBML; 1 file stays as it is until fixed; 2 missing tables stay on its diagram.');
+    expect(view.sections.map((x) => [x.id, x.title])).toEqual([
+      ['handled', 'Handled for you'],
+      ['left', 'Left as YAML until fixed'],
+      ['missing', 'Kept as missing on the diagram'],
+      ['tables', 'Tables'],
+      ['diagrams', 'Diagrams and their .dbdiagram layout files'],
+      ['removed', 'Files removed'],
+      ['notes', 'Notes'],
+    ]);
+    const section = (id: string) => view.sections.find((x) => x.id === id)!;
+    expect(section('handled').items).toEqual([{ path: '.erd-studio/gold/commercial.json', text: 'It lists Dim, which is the table dim; the DBML diagram names it dim.' }]);
+    expect(section('left').items).toEqual([
+      { path: '.erd-studio/logical-models/gold/gld_fct_x.yml', line: 293, text: 'The key name is written twice with different values (line 293). Keep the one you mean.', open: 0 },
+      { text: 'This file stays exactly as it is, and the diagrams draw it as before. Fix it and run Convert again to finish the job.' },
+    ]);
+    expect(locations).toEqual([{ path: 'logical-models/gold/gld_fct_x.yml', line: 293 }]);
+    expect(section('missing').items).toEqual([
+      { path: '.erd-studio/gold/commercial.dbml', text: 'gld_fct_risk_child, gld_fct_risk_parent' },
+      { text: 'These tables have no table file. They stay on their diagrams, drawn as missing exactly as before. Create them later with Add from dbt.' },
+    ]);
+    const html = buildConvertPanelHtml(view, 'n');
+    expect(html).toContain('data-action="convert"');
+    expect(html).toContain('data-action="open" data-index="0"');
+    expect(html).toContain('<p class="cdb__summary">1 table and 1 diagram convert to DBML;');
+    expect(isConvertPanelToHost({ type: 'open', index: 0 }, locations.length)).toBe(true);
+  });
+
+  it('nothing else can convert until the files are fixed: Check Again, no Convert', () => {
+    const waiting = plan({ leftAsIs: partial.leftAsIs, keptMissing: [] });
+    const { view, locations } = buildConvertReview(waiting, { display, introLines: [], nothingChanged: 'Nothing was changed.' });
+    expect(view.mode).toBe('refused');
+    expect(view.heading).toBe('Nothing else to convert yet');
+    expect(view.sections.map((x) => x.id)).toEqual(['left']);
+    expect(locations).toEqual([{ path: 'logical-models/gold/gld_fct_x.yml', line: 293 }]);
+    const html = buildConvertPanelHtml(view, 'n');
+    expect(html).not.toContain('data-action="convert"');
+    expect(html).toContain('>Check Again</button>');
+  });
+
+  it('a true refusal still shows the refusal view, with the files left listed after the problems (their Open after the problems\')', () => {
+    const refused = plan({ refusals: ['This project has a layer called "tables". Rename that layer, then convert.'], leftAsIs: partial.leftAsIs });
+    const { view, locations } = buildConvertReview(refused, { display, introLines: [] });
+    expect(view.mode).toBe('refused');
+    expect(view.sections.map((x) => x.id)).toEqual(['problems', 'left']);
+    expect(view.sections[1].items[0].open).toBe(0);
+    expect(locations).toEqual([{ path: 'logical-models/gold/gld_fct_x.yml', line: 293 }]);
   });
 });

@@ -163,6 +163,9 @@ describe('convertProjectToDbml', () => {
 
   it('refuses in the panel, listing the refusals with no Convert button, writes nothing, and counts it', async () => {
     useFixture('library-relationships');
+    // A layer called tables: the one refusal a user can fix (D26/D27 leave everything else as it is).
+    fs.mkdirSync(path.join(erd, 'tables'), { recursive: true });
+    fs.writeFileSync(path.join(erd, 'tables', 'old.json'), JSON.stringify({ schemaVersion: 5, domain: 'old', layer: 'tables', logical: { models: [], relationships: [] } }));
     const before = snapshot();
     const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
     const shown = answerPanel((panel) => panel._simulateMessage({ type: 'cancel' }));
@@ -171,8 +174,7 @@ describe('convertProjectToDbml', () => {
     const { view, html, panel } = shown[0];
     expect(view.mode).toBe('refused');
     expect(view.heading).toBe("Can't convert yet");
-    expect(view.sections[0].items[0].text).toMatch(/^gold\/sales\.json defines the relationship/);
-    expect(view.sections[0].items[0].path).toBe('.erd-studio/gold/sales.json');
+    expect(view.sections[0].items[0].text).toMatch(/^This project has a layer called "tables"/);
     expect(html).not.toContain('data-action="convert"');
     expect(html).toContain('data-action="checkAgain"');
     expect(panel._disposed).toBe(true);
@@ -181,7 +183,7 @@ describe('convertProjectToDbml', () => {
     expect(snapshot()).toEqual(before);
   });
 
-  it('a refusal\'s Open opens its file at its line from the host\'s own list; Check Again plans again and then offers Convert', async () => {
+  it('a file left as it is: Open opens it at its line from the host\'s own list; Check Again after the fix plans again (D26/D27)', async () => {
     useFixture('composite-and-self');
     const broken = path.join(erd, 'logical-models', 'gold', 'employee.yml');
     const good = fs.readFileSync(broken, 'utf-8');
@@ -202,17 +204,19 @@ describe('convertProjectToDbml', () => {
       }
     });
     expect(await convertProjectToDbml(deps())).toBe('cancelled');
-    expect(shown.map((x) => x.view.mode)).toEqual(['refused', 'review']);
+    expect(shown.map((x) => x.view.mode)).toEqual(['review', 'review']);
+    expect(shown.map((x) => x.view.sections.some((sec) => sec.id === 'left'))).toEqual([true, false]);
+    expect(shown[0].html).toContain('data-action="checkAgain"');
+    expect(shown[0].html).toContain('data-action="convert"');
     // Check Again reused the one panel.
     expect(vscode.window._webviewPanels).toHaveLength(1);
-    const item = shown[0].view.sections[0].items[0];
+    const item = shown[0].view.sections.find((sec) => sec.id === 'left')!.items[0];
     expect(item).toMatchObject({ path: '.erd-studio/logical-models/gold/employee.yml', open: 0 });
     expect(item.line).toBeGreaterThan(1);
     expect(show).toHaveBeenCalledTimes(1);
     const shownDoc = show.mock.calls[0][0] as unknown as { uri: vscode.Uri };
     expect(shownDoc.uri.fsPath).toBe(broken);
     expect((show.mock.calls[0][1] as { selection: vscode.Range }).selection.start.line).toBe(item.line! - 1);
-    expect(feature).toHaveBeenCalledWith('convertToDbmlRefused');
     expect(feature).toHaveBeenCalledWith('convertToDbmlCancelled');
     expect(vscode._appliedEdits).toHaveLength(0);
   });
@@ -357,9 +361,10 @@ describe('convertProjectToDbml', () => {
         await panel._simulateMessage({ type: 'cancel' });
       }
     });
-    expect(await convertProjectToDbml(deps())).toBe('refused');
-    expect(shown.map((x) => x.view.sections[0].items[0].tag)).toEqual([undefined, UNSAVED_TAG]);
-    expect(shown[0].view.intro[0]).toMatch(/^Fix this and save, then choose Check Again\./);
+    expect(await convertProjectToDbml(deps())).toBe('cancelled');
+    const left = (view: ConvertReviewView) => view.sections.find((sec) => sec.id === 'left')!.items[0];
+    expect(shown.map((x) => left(x.view).tag)).toEqual([undefined, UNSAVED_TAG]);
+    expect(left(shown[0].view).text).toMatch(/^The key name is written twice with different values/);
   });
 
   it('a diagram still v4 after the v4 step: the page names the command that ran and does not claim every v4 diagram converted', async () => {
@@ -655,6 +660,8 @@ describe('the canvas offer (§6.4)', () => {
 
   it('is not made when the conversion would be refused, and the naming offer is then still made', async () => {
     useFixture('library-relationships');
+    fs.mkdirSync(path.join(erd, 'tables'), { recursive: true });
+    fs.writeFileSync(path.join(erd, 'tables', 'old.json'), JSON.stringify({ schemaVersion: 5, domain: 'old', layer: 'tables', logical: { models: [], relationships: [] } }));
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Not Now' as never);
     await openWith(new Map()).open('gold/sales.json');
     const calls = info.mock.calls.map((c) => String(c[0]));

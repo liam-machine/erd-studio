@@ -265,7 +265,8 @@ async function runConversion(
   // 3. Refusals: the panel lists them, each with Open at its file and line.
   if (plan.refusals.length > 0) return refused();
 
-  // 4. Nothing to convert.
+  // 4. Nothing to convert. Files left as they are until fixed (D26/D27) are listed, with Check Again.
+  if (dbmlConversionIsEmpty(plan) && plan.leftAsIs.length > 0) return refused();
   if (dbmlConversionIsEmpty(plan)) {
     void vscode.window.showInformationMessage(deps.tableLibraryService.projectStorage() === 'dbml'
       ? 'This project is already stored as DBML.'
@@ -306,6 +307,8 @@ async function runConversion(
   // took the panel over (the command run again) ends this one uncounted.
   const choice = await showConvertPanel(deps, plan, nothingChanged());
   if (choice === 'superseded') return 'cancelled';
+  // A review that leaves files as they are offers Check Again: plan again from the saved files.
+  if (choice === 'checkAgain') return retry();
   if (choice !== 'convert') {
     telemetry.feature('convertToDbmlCancelled');
     return 'cancelled';
@@ -416,6 +419,9 @@ async function runConversion(
       const s = plan.summary;
       void vscode.window.showInformationMessage(
         `Converted to DBML: ${s.tables} table${s.tables === 1 ? '' : 's'}, ${s.diagrams} diagram${s.diagrams === 1 ? '' : 's'}. ` +
+          (plan.leftAsIs.length > 0
+            ? `${plan.leftAsIs.length} file${plan.leftAsIs.length === 1 ? ' stays' : 's stay'} as ${plan.leftAsIs.length === 1 ? 'it is' : 'they are'} until fixed; run Convert again after fixing ${plan.leftAsIs.length === 1 ? 'it' : 'them'}. `
+            : '') +
           convertedUndoSentence(undoFrom),
       );
     }

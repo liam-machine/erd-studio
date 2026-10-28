@@ -47,7 +47,11 @@ export interface ConvertReviewView {
   mode: 'review' | 'refused';
   /** Refused by ERD Studio's own self-check (its bug): the page offers Send Feedback too. */
   reportable?: boolean;
+  /** A review that leaves files as they are: Check Again (after fixing them) beside Convert. */
+  checkAgain?: boolean;
   heading: string;
+  /** One plain sentence: what converts, what stays as it is, what stays missing. */
+  summary?: string;
   intro: string[];
   counts: Array<{ label: string; value: number }>;
   sections: ConvertReviewSection[];
@@ -128,6 +132,63 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
   const { display } = options;
   const notes: ConvertReviewSection = { id: 'notes', title: 'Notes', items: plan.notes.map((text) => ({ text })) };
 
+  // Files left as they are until fixed (each with Open), and members kept missing (D26): listed in every view.
+  const leftLocations: ConvertRefusalLocation[] = [];
+  const leftSection = (offset: number): ConvertReviewSection => ({
+    id: 'left',
+    title: 'Left as YAML until fixed',
+    items: [
+      ...plan.leftAsIs.map((l): ConvertReviewItem => {
+        leftLocations.push({ path: l.path, ...(l.line !== undefined ? { line: l.line } : {}) });
+        return {
+          path: display(l.path),
+          ...(l.line !== undefined ? { line: l.line } : {}),
+          ...(options.unsaved?.(l.path) ? { tag: UNSAVED_TAG } : {}),
+          text: l.problem,
+          open: offset + leftLocations.length - 1,
+        };
+      }),
+      ...(plan.leftAsIs.length > 0 ? [{ text: `${plan.leftAsIs.length === 1 ? 'This file stays' : 'These files stay'} exactly as ${plan.leftAsIs.length === 1 ? 'it is' : 'they are'}, and the diagrams draw ${plan.leftAsIs.length === 1 ? 'it' : 'them'} as before. Fix ${plan.leftAsIs.length === 1 ? 'it' : 'them'} and run Convert again to finish the job.` }] : []),
+    ],
+  });
+  const handledSection: ConvertReviewSection = {
+    id: 'handled',
+    title: 'Handled for you',
+    items: plan.handled.map((h) => ({ path: display(h.path), text: h.text })),
+  };
+  const missingSection: ConvertReviewSection = {
+    id: 'missing',
+    title: 'Kept as missing on the diagram',
+    items: [
+      ...plan.keptMissing.map((k) => ({ path: display(k.diagram), text: k.tables.join(', ') })),
+      ...(plan.keptMissing.length > 0 ? [{ text: 'These tables have no table file. They stay on their diagrams, drawn as missing exactly as before. Create them later with Add from dbt.' }] : []),
+    ],
+  };
+  const summaryOf = (): string => {
+    const s = plan.summary;
+    const parts = [`${plural(s.tables, 'table')} and ${plural(s.diagrams, 'diagram')} convert to DBML`];
+    if (plan.leftAsIs.length > 0) parts.push(`${plural(plan.leftAsIs.length, 'file')} ${plan.leftAsIs.length === 1 ? 'stays' : 'stay'} as ${plan.leftAsIs.length === 1 ? 'it is' : 'they are'} until fixed`);
+    const missing = plan.keptMissing.reduce((n, k) => n + k.tables.length, 0);
+    if (missing > 0) parts.push(`${plural(missing, 'missing table')} ${missing === 1 ? 'stays' : 'stay'} on ${plan.keptMissing.length === 1 ? 'its diagram' : 'their diagrams'}`);
+    return `${parts.join('; ')}.`;
+  };
+
+  if (plan.refusals.length === 0 && plan.v4SubjectAreas.length === 0 && plan.leftAsIs.length > 0
+    && plan.creates.length === 0 && plan.replaces.length === 0 && plan.deletes.length === 0) {
+    // Nothing else can convert until these files are fixed: no Convert, only Check Again.
+    const left = leftSection(0);
+    return {
+      view: {
+        mode: 'refused',
+        heading: 'Nothing else to convert yet',
+        intro: [`Fix ${plan.leftAsIs.length === 1 ? 'this file' : 'these files'} and save, then choose Check Again. ${options.nothingChanged ?? 'Nothing was changed.'}`],
+        counts: [{ label: plan.leftAsIs.length === 1 ? 'file left as it is' : 'files left as they are', value: plan.leftAsIs.length }],
+        sections: [left, ...(missingSection.items.length > 0 ? [missingSection] : []), ...(notes.items.length > 0 ? [notes] : [])],
+      },
+      locations: leftLocations,
+    };
+  }
+
   if (plan.refusals.length > 0 || plan.v4SubjectAreas.length > 0) {
     const locations: ConvertRefusalLocation[] = [];
     const unsavedTag = (rel: string): { tag?: string } => (options.unsaved?.(rel) ? { tag: UNSAVED_TAG } : {});
@@ -162,9 +223,12 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
             : `Fix ${items.length === 1 ? 'this' : 'these'} and save, then choose Check Again. ${nothingChanged}`,
         ],
         counts: [{ label: items.length === 1 ? 'problem' : 'problems', value: items.length }],
-        sections: [{ id: 'problems', title: 'Problems', items }, ...(notes.items.length > 0 ? [notes] : [])],
+        sections: [{ id: 'problems', title: 'Problems', items }, ...(() => {
+          const left = leftSection(locations.length);
+          return left.items.length > 0 ? [left] : [];
+        })(), ...(notes.items.length > 0 ? [notes] : [])],
       },
-      locations,
+      locations: [...locations, ...leftLocations],
     };
   }
 
@@ -191,7 +255,11 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
   if (only > 0) moved.push({ text: `${plural(only, also.length > 0 ? 'other relationship' : 'relationship')} ${only === 1 ? 'shows' : 'show'} in the same diagrams as before.` });
 
   const s = plan.summary;
+  const left = leftSection(0);
   const sections: ConvertReviewSection[] = [
+    handledSection,
+    left,
+    missingSection,
     { id: 'tables', title: 'Tables', items: strip(tables.sort((a, b) => a.rel.localeCompare(b.rel))) },
     { id: 'relationships', title: 'Relationships files', items: strip(relationships.sort((a, b) => a.rel.localeCompare(b.rel))) },
     { id: 'diagrams', title: 'Diagrams and their .dbdiagram layout files', items: strip(diagrams.sort(byStem)) },
@@ -204,7 +272,9 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
   return {
     view: {
       mode: 'review',
+      ...(plan.leftAsIs.length > 0 ? { checkAgain: true } : {}),
       heading: 'Convert this project to DBML?',
+      summary: summaryOf(),
       intro: options.introLines,
       counts: [
         { label: s.tables === 1 ? 'table' : 'tables', value: s.tables },
@@ -216,7 +286,7 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
       ],
       sections,
     },
-    locations: [],
+    locations: leftLocations,
   };
 }
 
@@ -282,6 +352,7 @@ body {
 .cdb { display: flex; flex-direction: column; height: 100vh; max-width: 960px; margin: 0 auto; }
 .cdb__header { flex: none; padding: 20px 24px 8px; }
 .cdb__heading { margin: 0 0 8px; font-size: 1.4em; font-weight: 600; }
+.cdb__summary { margin: 0 0 8px; line-height: 1.45; font-weight: 600; }
 .cdb__intro { margin: 0 0 6px; line-height: 1.45; color: var(--vscode-descriptionForeground); }
 .cdb__counts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0 0; padding: 0; list-style: none; }
 .cdb__count-value { font-weight: 600; color: var(--vscode-foreground); }
@@ -378,10 +449,11 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
   const sections = view.sections.map((section) => `
     <details class="cdb-section" data-section="${escapeHtml(section.id)}" open>
       <summary class="cdb-section__title">${escapeHtml(section.title)}<span class="cdb-section__count">${section.items.length}</span></summary>
-      <ul class="cdb-section__items">${section.items.map((item) => renderItem(item, section.id === 'problems')).join('')}</ul>
+      <ul class="cdb-section__items">${section.items.map((item) => renderItem(item, section.id === 'problems' || (section.id === 'left' && item.path !== undefined))).join('')}</ul>
     </details>`).join('');
   const actions = view.mode === 'review'
     ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="cancel">Cancel</button>' +
+      (view.checkAgain ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="checkAgain">Check Again</button>' : '') +
       '<button type="button" class="cdb__button" data-action="convert">Convert</button>'
     : '<button type="button" class="cdb__button cdb__button--secondary" data-action="cancel">Close</button>' +
       (view.reportable ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="sendFeedback">Send Feedback</button>' : '') +
@@ -399,6 +471,7 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
 <main class="cdb" data-mode="${view.mode}">
   <header class="cdb__header">
     <h1 class="cdb__heading">${escapeHtml(view.heading)}</h1>
+    ${view.summary ? `<p class="cdb__summary">${escapeHtml(view.summary)}</p>` : ''}
     ${view.intro.map((line) => `<p class="cdb__intro">${escapeHtml(line)}</p>`).join('\n    ')}
     <ul class="cdb__counts">${view.counts.map((c) => `<li class="cdb__count"><span class="cdb__count-value">${c.value}</span> ${escapeHtml(c.label)}</li>`).join('')}</ul>
   </header>
