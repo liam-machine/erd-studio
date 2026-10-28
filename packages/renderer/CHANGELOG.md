@@ -8,6 +8,7 @@ All notable changes to `@erd-studio/renderer`. While `0.x`, a breaking change bu
 - Re-exports core's rich DBML export and its dbdiagram layout file: `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `toDbdiagramLayout`, `serializeDbdiagramLayout`, `dbdiagramLayoutFileName` and the `DbmlRichOptions`, `DbdiagramLayout` and `DbdiagramTablePosition` types.
 
 ### Changed
+- After a domain update, the canvas keeps the existing React Flow node and edge objects for everything that came out the same, so dragging a table re-renders only the tables that moved and their edges instead of every node. What is drawn is unchanged; no API change.
 - A table whose file cannot be read says which format failed: "DBML error on line N" for a `.dbml` table file (ERD Studio 2.0's native DBML storage), and "YAML error on line N" as before for a `.yml` one. A `DisplaySubjectArea` from an older core never carries the DBML kinds, so its nodes read exactly as before.
 
 ### Changed (breaking)

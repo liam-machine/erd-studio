@@ -4,7 +4,9 @@
  *
  *   - The transform effect rebuilds every node and edge when the domain (or
  *     the discrepancy overlay) changes, preserving measured sizes, the
- *     current selection and valid edge selections.
+ *     current selection and valid edge selections, and keeps the existing
+ *     object for every node and edge that came out the same
+ *     (`reuseUnchanged`), so a drag re-renders only what moved.
  *   - The overlay effect updates only the `dimmed` / `isExpanded` flags when
  *     selection, search or column expansion changes.
  *   - The handlers open the detail panel on a model click, select annotations,
@@ -21,6 +23,7 @@ import { useColumnExpansion } from '../hooks/useColumnExpansion';
 import { transformSubjectArea } from '../lib/graphTransformer';
 import { applyNodeOverlays } from '../lib/nodeOverlays';
 import { columnPairs } from '../lib/relationshipDisplayKey';
+import { reuseUnchanged } from '../lib/reuseUnchanged';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
 
 export interface UseCanvasGraphOptions {
@@ -150,6 +153,13 @@ export function useCanvasGraph({
       if (state.selectedEdge && !newEdgeIds.has(state.selectedEdge)) {
         setSelectedEdge(null);
       }
+
+      // Hand back the objects already in the store for every node and edge
+      // the rebuild left as it was: after a drag only the moved tables and
+      // the edges whose sides moved are new, so React Flow and the memoised
+      // node components re-render those alone instead of the whole canvas.
+      newNodes = reuseUnchanged(state.nodes, newNodes);
+      newEdges = reuseUnchanged(state.edges, newEdges);
 
       onTransformedRef.current?.(newNodes, newEdges);
       setNodes(newNodes);
