@@ -94,6 +94,12 @@ const PERMISSION_CODES = new Set(['EACCES', 'EPERM', 'EROFS', 'NoPermissions']);
 const DISK_FULL_CODES = new Set(['ENOSPC', 'EDQUOT']);
 
 export function classifyWriteFailure(err: unknown): WriteFailure {
+  // A DBML write that could not be put back (`FileWriteRollbackFailed`) carries the fs error as its cause.
+  const cause = causeOf(err);
+  if (cause !== undefined) {
+    const inner = classifyWriteFailure(cause);
+    if (inner !== 'other') return inner;
+  }
   const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
   if (PERMISSION_CODES.has(code)) return 'permission';
   if (DISK_FULL_CODES.has(code)) return 'disk-full';
@@ -106,7 +112,15 @@ export function classifyWriteFailure(err: unknown): WriteFailure {
 /** The file a Node `fs` error names (`err.path`), when it names one. */
 export function failedPath(err: unknown): string | undefined {
   const p = err && typeof err === 'object' && 'path' in err ? (err as { path: unknown }).path : undefined;
-  return typeof p === 'string' && p.length > 0 ? p : undefined;
+  if (typeof p === 'string' && p.length > 0) return p;
+  const cause = causeOf(err);
+  return cause === undefined ? undefined : failedPath(cause);
+}
+
+/** The error a wrapper names as its `cause` (one level), when it is an object. */
+function causeOf(err: unknown): object | undefined {
+  const cause = err && typeof err === 'object' && 'cause' in err ? (err as { cause: unknown }).cause : undefined;
+  return cause && typeof cause === 'object' && cause !== err ? cause : undefined;
 }
 
 /** `filePath` relative to `root` with `/` separators; the base name when it is outside `root`. */

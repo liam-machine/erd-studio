@@ -18,7 +18,8 @@ import { LayerService } from '../../src/services/layerService';
 import { SubjectAreaService, subjectAreaTableNames } from '../../src/services/domainService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
 import { writeNewSubjectArea } from '../../src/services/newSubjectAreaWriter';
-import type { FileWriteIo } from '../../src/services/fsFileWrites';
+import { FileWriteRollbackFailed, type FileWriteIo } from '../../src/services/fsFileWrites';
+import { classifyWriteFailure, failedPath } from '../../src/services/commandErrors';
 import { buildDbtDraft } from '../../src/services/dbtDraft';
 import { firstUseDeclarationLine, readDbml, IMPORT_MULTI_FILE_MESSAGE } from '../../src/services/dbmlImportParse';
 import { dbmlImportRefusal } from '../../src/commands/importDbml';
@@ -240,6 +241,14 @@ describe('writeNewSubjectArea for a .dbml diagram (§5.7)', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(String((result.error as Error).message)).toContain('Convert the project to DBML first');
     expect(snapshot()).toEqual(before);
+  });
+});
+
+describe('command errors see through a rollback that could not finish', () => {
+  it('names what the disk refused and where', () => {
+    const err = new FileWriteRollbackFailed(Object.assign(new Error('ENOSPC: no space left'), { code: 'ENOSPC', path: '/p/x.dbml' }), ['/p/y.dbml']);
+    expect(classifyWriteFailure(err)).toBe('disk-full');
+    expect(failedPath(err)).toBe('/p/x.dbml');
   });
 });
 
