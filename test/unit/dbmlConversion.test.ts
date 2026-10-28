@@ -953,7 +953,25 @@ describe('planDbmlConversion: S7 review, round 1', () => {
   it('two columns of one name: the .yml stays, named, never the file Convert would write', async () => {
     const plan = await planDbmlConversion(inputOf({ 'logical-models/t.yml': 'name: t\ncolumns:\n  - name: a\n    dataType: INT\n  - name: a\n    dataType: TEXT\n' }));
     expect(plan.refusals).toEqual([]);
-    expect(plan.leftAsIs).toEqual([{ path: 'logical-models/t.yml', problem: 'It lists the column a more than once, and a DBML table names each column once. Remove or rename the copy.' }]);
+    expect(plan.leftAsIs).toEqual([{ path: 'logical-models/t.yml', line: 5, problem: 'It lists the column a more than once, and a DBML table names each column once. Remove or rename the copy.' }]);
+  });
+
+  it('a file left as it is carries the line to open: the name: that is not the filename, the JSON mistake, the first conflict marker', async () => {
+    const plan = await planDbmlConversion(inputOf({
+      'logical-models/dim_store_format.yml': '# store formats\nname: dim_store_type\ncolumns:\n  - name: a\n    dataType: INT\n',
+      'gold/trailing.json': '{\n  "schemaVersion": 5,\n  "domain": "trailing",\n  "layer": "gold",\n  "logical": { "models": ["x",\n  ] }\n}\n',
+      'gold/conflicted.json': '{\n  "schemaVersion": 5,\n<<<<<<< HEAD\n  "domain": "conflicted",\n=======\n  "domain": "c2",\n>>>>>>> other\n  "layer": "gold"\n}\n',
+    }));
+    expect(plan.refusals).toEqual([]);
+    expect(leftOf(plan, 'logical-models/dim_store_format.yml')).toMatchObject({ line: 2 });
+    expect(leftOf(plan, 'gold/trailing.json')).toEqual({
+      path: 'gold/trailing.json', line: 5,
+      problem: 'It is not valid JSON: at line 5, column 30: there is a comma after the last item, before a closing } or ]. Fix it, then convert again.',
+    });
+    expect(leftOf(plan, 'gold/conflicted.json')).toEqual({
+      path: 'gold/conflicted.json', line: 3,
+      problem: 'It has unresolved git merge conflicts (first at line 3). Resolve them (keep one side; if only positions conflict, either is safe), then convert again.',
+    });
   });
 
   it('sticky notes the canvas never drew (no id, or no position) are kept as // lines, and doctor still runs', async () => {

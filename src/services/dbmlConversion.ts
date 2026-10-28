@@ -31,6 +31,7 @@ import type { Node as YamlNode, Pair } from 'yaml';
 import {
   DBML_RELATIONSHIPS_FILE_NAME,
   RATIONALE_KEYS,
+  SubjectAreaFileError,
   TABLES_DIR,
   canonicalRelationship,
   classifySemanticFile,
@@ -80,6 +81,7 @@ import {
 import { planDbmlLibraryWrites } from './dbmlLibraryWrites';
 import type { DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
 import { planMoveToLibrary } from './libraryRelationships';
+import { jsonMistakeAt } from './commandErrors';
 
 // ---------------------------------------------------------------------------
 // Input and plan
@@ -300,6 +302,36 @@ function lineStarts(text: string): number[] {
   const starts = [0];
   for (let i = 0; i < text.length; i++) if (text[i] === '\n') starts.push(i + 1);
   return starts;
+}
+
+/** The 1-based line of a YAML node (`at`: keys and list indexes from the root), or undefined. */
+function yamlLineOf(text: string, at: ReadonlyArray<string | number>): number | undefined {
+  try {
+    const node = parseDocument(text, { uniqueKeys: false }).getIn(at, true);
+    return isNode(node) && node.range ? lineIndexAt(lineStarts(text), node.range[0]) + 1 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The 1-based line of the second column entry named `name` (as written), or undefined. */
+function secondColumnLine(text: string, name: string): number | undefined {
+  try {
+    const doc = parseDocument(text, { uniqueKeys: false });
+    const columns = doc.get('columns', true);
+    if (!isSeq(columns)) return undefined;
+    let seen = 0;
+    for (const item of columns.items) {
+      if (!isMap(item)) continue;
+      const value = item.get('name', true);
+      if (!isScalar(value) || String(value.value) !== name) continue;
+      seen += 1;
+      if (seen === 2) return value.range ? lineIndexAt(lineStarts(text), value.range[0]) + 1 : undefined;
+    }
+  } catch {
+    /* no line */
+  }
+  return undefined;
 }
 
 /** Every comment's offset in a YAML text, from the CST (never from a `#` inside a scalar). */
@@ -638,7 +670,7 @@ async function planOnce(
       continue;
     }
     if (lower(model.name) !== lower(stem)) {
-      leave(f.path, `It holds the table "${model.name}", and a DBML table file is named exactly as its table. Rename the file or the name: key.`);
+      leave(f.path, `It holds the table "${model.name}", and a DBML table file is named exactly as its table. Rename the file or the name: key.`, yamlLineOf(f.text, ['name']));
       continue;
     }
     if (isReservedTableName(model.name)) {
@@ -649,7 +681,7 @@ async function planOnce(
     const columnNames = (model.columns ?? []).map((c) => c.name);
     const twice = [...new Set(columnNames.filter((n, i) => columnNames.indexOf(n) !== i))];
     if (twice.length > 0) {
-      leave(f.path, `It lists the column${twice.length === 1 ? '' : 's'} ${twice.join(', ')} more than once, and a DBML table names each column once. Remove or rename the copy.`);
+      leave(f.path, `It lists the column${twice.length === 1 ? '' : 's'} ${twice.join(', ')} more than once, and a DBML table names each column once. Remove or rename the copy.`, secondColumnLine(f.text, twice[0]));
       continue;
     }
     const folder = cls.folder ?? '';
@@ -881,7 +913,15 @@ async function planOnce(
     try {
       raw = parseSubjectAreaJson(f.text, f.path);
     } catch (err) {
-      leave(f.path, `It is not valid JSON (${err instanceof Error ? err.message.split('\n')[0] : String(err)}).`);
+      // Where the mistake is, in words, with its line for Open (as the editor says it, #186).
+      const located = err instanceof SubjectAreaFileError ? err : undefined;
+      if (located?.mergeConflict && located.line !== undefined) {
+        leave(f.path, `It has unresolved git merge conflicts (first at line ${located.line}). Resolve them (keep one side; if only positions conflict, either is safe), then convert again.`, located.line);
+      } else if (located && jsonMistakeAt(located) !== undefined) {
+        leave(f.path, `It is not valid JSON: ${jsonMistakeAt(located)}. Fix it, then convert again.`, located.line);
+      } else {
+        leave(f.path, `It is not valid JSON (${err instanceof Error ? err.message.split('\n')[0] : String(err)}).`, located?.line);
+      }
       continue;
     }
     const format = detectSubjectAreaFormat(raw);

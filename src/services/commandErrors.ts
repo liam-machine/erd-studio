@@ -165,7 +165,7 @@ export function describeDbmlMistake(shown: string, err: Pick<SubjectAreaFileErro
 }
 
 /** "at line L, column C: <hint>" for a located JSON mistake, else undefined. */
-function jsonMistakeAt(err: Pick<SubjectAreaFileError, 'line' | 'column' | 'syntaxProblem'>): string | undefined {
+export function jsonMistakeAt(err: Pick<SubjectAreaFileError, 'line' | 'column' | 'syntaxProblem'>): string | undefined {
   if (err.line === undefined || err.column === undefined || err.syntaxProblem === undefined) return undefined;
   return `at line ${err.line}, column ${err.column}: ${JSON_MISTAKE_HINTS[err.syntaxProblem]}`;
 }
