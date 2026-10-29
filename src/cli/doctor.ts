@@ -276,7 +276,6 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
       naming: 'v6', tablesFolderIsLayer: false, namingConflicts: [],
     };
   }
-  const dbmlEvidence = detectDbmlStorage(semanticRoot);
   const domains = ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir);
   const issues: DoctorResult['erd']['domainFormatIssues'] = [];
   const conflicted: ConflictedSubjectAreaFile[] = [];
@@ -312,7 +311,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   return {
     backwardsRelationships: backwardsRelationshipsOf(ctx, domains.map((d) => d.filePath).filter((f) => !issues.some((i) => i.file === relPath(ctx.root, f)))),
     semanticDirExists: true,
-    ...(dbmlEvidence ? { dbmlStorage: { file: relPath(ctx.root, path.join(semanticRoot, dbmlEvidence.file)) } } : {}),
+    ...dbmlStorageOf(ctx.root, ctx.semanticDir),
     layers: ctx.layerService.getValidLayerIds(),
     domains: domains.length,
     logicalModels: ctx.tableLibraryService.listTableNames().length,
@@ -372,21 +371,40 @@ function backwardsRelationshipsOf(ctx: CliContext, domainFiles: string[]): Backw
   return [...byLink.values()];
 }
 
+/**
+ * The step for a project a newer ERD Studio stored as DBML. Nothing else in
+ * this report describes such a project, and writing YAML / JSON files into it
+ * would put them beside the DBML ones.
+ */
+function dbmlStorageStep(file: string, semanticDir: string): NextStep {
+  return {
+    id: 'update-erd-studio',
+    title: 'Open this project with a newer ERD Studio',
+    why: `${DBML_STORAGE_MESSAGE} (${file} is a DBML file.) Until then, don't create or change files in `
+      + `${semanticDir}/ by this version's conventions: they would sit beside the DBML files, and the newer version would `
+      + "report them as conflicts. Leave the AI helper's skill files as they are too: this version's describe YAML / JSON. "
+      + 'In VS Code: Extensions view → ERD Studio → Switch to Pre-Release Version (or Update, once 2.0 is released).',
+    command: null,
+  };
+}
+
+/** `erd.dbmlStorage` for the ERD Studio folder under `root`, or nothing. */
+function dbmlStorageOf(root: string, semanticDir: string): { dbmlStorage?: { file: string } } {
+  const semanticRoot = path.join(root, semanticDir);
+  const evidence = detectDbmlStorage(semanticRoot);
+  return evidence ? { dbmlStorage: { file: relPath(root, path.join(semanticRoot, evidence.file)) } } : {};
+}
+
 function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boolean; installPath: string; invocation: string | null }): NextStep[] {
   const steps: NextStep[] = [];
   const { dbt, profiles, artifacts } = r;
+  // In a DBML project the format, naming and skill checks below read only
+  // what this version understands: their advice would write YAML / JSON into
+  // it, or replace the newer version's skills with older ones.
+  const dbml = r.erd.dbmlStorage !== undefined;
 
-  // First: nothing else in this report describes a DBML project, and writing
-  // YAML / JSON files into it would put them beside the DBML ones.
   if (r.erd.dbmlStorage) {
-    steps.push({
-      id: 'update-erd-studio',
-      title: 'Open this project with a newer ERD Studio',
-      why: `${DBML_STORAGE_MESSAGE} (${r.erd.dbmlStorage.file} is a DBML file.) Until then, don't create or change files in `
-        + `${r.semanticDir}/ by this version's conventions: they would sit beside the DBML files, and the newer version would `
-        + 'report them as conflicts. In VS Code: Extensions view → ERD Studio → Switch to Pre-Release Version (or Update, once 2.0 is released).',
-      command: null,
-    });
+    steps.push(dbmlStorageStep(r.erd.dbmlStorage.file, r.semanticDir));
   }
 
   if (dbt.untrustedVenvDbt) {
@@ -505,7 +523,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
   }
   const namingMix = r.erd.domainFormatIssues.filter((i) => i.namingMix);
   const older = r.erd.domainFormatIssues.length - namingMix.length;
-  if (namingMix.length > 0) {
+  if (!dbml && namingMix.length > 0) {
     steps.push({
       id: 'fix-subject-area-naming',
       title: `Fix ${namingMix.length === 1 ? 'a subject area file that mixes' : `${namingMix.length} subject area files that mix`} the old and new key names`,
@@ -515,7 +533,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: null,
     });
   }
-  if (older > 0) {
+  if (!dbml && older > 0) {
     steps.push({
       id: 'migrate-v5',
       title: 'Migrate older subject area files',
@@ -535,7 +553,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: null,
     });
   }
-  if (r.harness.schemaSkill === 'outdated' || r.harness.setupSkill === 'outdated') {
+  if (!dbml && (r.harness.schemaSkill === 'outdated' || r.harness.setupSkill === 'outdated')) {
     steps.push({
       id: 'update-harness',
       title: 'Update the ERD Studio skills',

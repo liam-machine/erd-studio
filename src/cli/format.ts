@@ -130,7 +130,8 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   if (r.erd.dbmlStorage) {
     lines.push(`${p.red('✗')} ${DBML_STORAGE_MESSAGE} (found ${r.erd.dbmlStorage.file})`);
   }
-  const migration = r.erd.namingMigration;
+  // Not in a DBML project: the migration would write YAML / JSON into it.
+  const migration = r.erd.dbmlStorage ? undefined : r.erd.namingMigration;
   if (migration && migration.moves + migration.rewrites > 0) {
     lines.push(`${p.yellow('!')} "Migrate to the New File Naming" in VS Code would `
       + [migration.moves > 0 ? `move ${plural(migration.moves, 'table file')} to tables/` : '',
@@ -167,7 +168,10 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     lines.push(`${p.yellow('!')} ${ends(b.fromModel, b.fromColumns)} → ${ends(b.toModel, b.toColumns)} looks drawn backwards`
       + ` (it starts at ${foreignKeyAtTo(b.cardinality) ? b.toModel : b.fromModel}'s key) — in ${b.domains.join(', ')}`);
   }
-  lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
+  lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`
+    + (r.erd.dbmlStorage && (r.harness.schemaSkill === 'outdated' || r.harness.setupSkill === 'outdated')
+      ? ' — not this version\'s: leave them, the newer ERD Studio keeps them up to date'
+      : ''));
   lines.push('', 'Next steps:');
   r.nextSteps.forEach((s, i) => {
     lines.push(`  ${i + 1}. ${s.title}${s.command ? ` — ${s.command}` : ''}`);

@@ -15,6 +15,7 @@ import { redactPaths } from '../types/feedback';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import { CatalogService } from '../services/catalogService';
+import { DBML_STORAGE_MESSAGE, detectDbmlStorage } from '../services/dbmlStorageGuard';
 import { findDbtProjectDir } from '../services/dbtEnv';
 import { readDbtProjectConfig, resolveCatalogPath, resolveManifestPath, type DbtProjectConfig } from '../services/dbtProjectConfig';
 import { SubjectAreaService } from '../services/domainService';
@@ -107,6 +108,26 @@ export function requireProjectRoot(project: string | undefined, cwd: string = pr
     );
   }
   return root;
+}
+
+/**
+ * `inventory`, `diff` and `export` stop with `dbml-storage` (exit 3) in a
+ * project a newer ERD Studio stored as DBML: this version reads none of it,
+ * so they would report an empty or misconfigured ERD Studio folder. Checked
+ * where `doctor` looks too: the dbt project, else the folder named (or cwd),
+ * since the newer version works without dbt. `doctor` reports it instead.
+ */
+export function refuseDbmlStorage(project: string | undefined, semanticDir: string, cwd: string = process.cwd()): void {
+  const root = resolveProjectRoot(project, cwd) ?? path.resolve(cwd, project ?? '.');
+  const semanticRoot = path.join(root, semanticDir);
+  const evidence = detectDbmlStorage(semanticRoot);
+  if (evidence) {
+    throw new CliEnvError(
+      'dbml-storage',
+      `${DBML_STORAGE_MESSAGE} (found ${relPath(root, path.join(semanticRoot, evidence.file))}) `
+        + "This version's inventory, diff and export can't read it.",
+    );
+  }
 }
 
 export function makeEnvelope(root: string, semanticDir: string): Envelope {

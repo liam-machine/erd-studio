@@ -7,12 +7,13 @@
  * writes a file (spec D5): Claude makes every `.erd-studio` edit itself.
  *
  * Exit codes: 0 ok · 1 diff found blocking drift · 2 usage · 3 environment
- * (no project, bad domain file) · 4 internal. 5 is reserved for the shim.
+ * (no project, bad domain file, a project stored as DBML by a newer ERD
+ * Studio) · 4 internal. 5 is reserved for the shim.
  */
 
 import { redactPaths } from '../types/feedback';
 import { parseArgs, USAGE, type CliOptions } from './args';
-import { buildCliContext, CLI_VERSION, CliEnvError } from './context';
+import { buildCliContext, CLI_VERSION, CliEnvError, refuseDbmlStorage } from './context';
 import { runDiff } from './diff';
 import { runDoctor, runtimeInfo } from './doctor';
 import { runExport } from './export';
@@ -100,6 +101,7 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
       }
 
       case 'inventory': {
+        refuseDbmlStorage(opts.project, opts.semanticDir, io.cwd);
         const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd });
         const result = runInventory(ctx, { summary: opts.summary, models: opts.models });
         out(result, () => formatInventory(result, paint));
@@ -107,6 +109,7 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
       }
 
       case 'diff': {
+        refuseDbmlStorage(opts.project, opts.semanticDir, io.cwd);
         const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd });
         const { result, exitCode } = runDiff(ctx, { domains: opts.domains, all: opts.all, strict: opts.strict, cwd: io.cwd });
         out(result, () => formatDiff(result, paint));
@@ -114,6 +117,7 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
       }
 
       case 'export': {
+        refuseDbmlStorage(opts.project, opts.semanticDir, io.cwd);
         const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd });
         // parseArgs guarantees exactly one --domain and a --format for export.
         const result = await runExport(ctx, { domain: opts.domains[0], format: opts.format!, cwd: io.cwd });

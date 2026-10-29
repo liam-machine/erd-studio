@@ -65,10 +65,68 @@ describe('erd-studio doctor', () => {
     expect(r.nextSteps[0].why).toContain('Switch to Pre-Release Version');
   });
 
-  it('says nothing about it for a YAML / JSON project (no key in the JSON)', async () => {
-    const r = await runDoctor({ project: FIXTURE_ROOT, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: tmp });
-    expect('dbmlStorage' in r.erd).toBe(false);
-    expect(r.nextSteps.some((s) => s.id === 'update-erd-studio')).toBe(false);
+  it("gives no advice that would write YAML / JSON into it or replace the newer version's skills", async () => {
+    const root = path.join(tmp, 'p');
+    makeDbmlProject(root);
+    // What a part-converted project and a teammate's pull can leave: a v4
+    // diagram, the newer version's skills, and v5-named YAML tables.
+    fs.copyFileSync(path.join(FIXTURE_ROOT, '.erd-studio', 'silver', 'bob.json'), path.join(root, '.erd-studio', 'silver', 'bob.json'));
+    const skill = path.join(root, '.claude', 'skills', 'erd-studio', 'SKILL.md');
+    fs.writeFileSync(skill, '<!-- erd-studio-harness: 37 -->\n# ERD Studio (DBML)\n');
+    fs.mkdirSync(path.join(root, '.erd-studio', 'logical-models'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.erd-studio', 'logical-models', 'dim_date.yml'), 'name: dim_date\ncolumns: []\n');
+
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: tmp });
+    expect(r.harness.schemaSkill).toBe('outdated');
+    expect(r.erd.domainFormatIssues.length).toBeGreaterThan(0);
+    const ids = r.nextSteps.map((s) => s.id);
+    expect(ids[0]).toBe('update-erd-studio');
+    for (const id of ['update-harness', 'migrate-v5', 'fix-subject-area-naming']) {
+      expect(ids, id).not.toContain(id);
+    }
+
+    let out = '';
+    await main(['doctor', '--project', root, '--no-dbt'], {
+      stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: root, env: cleanEnv,
+    });
+    expect(out).not.toContain('Migrate to the New File Naming');
+    expect(out).not.toContain('Update the ERD Studio skills');
+    expect(out).toMatch(/Claude skills: schema outdated, .* leave them/);
+  });
+});
+
+describe('erd-studio inventory / diff / export', () => {
+  async function run(args: string[], cwd: string): Promise<{ code: number; out: string; err: string }> {
+    let out = '';
+    let err = '';
+    const code = await main(args, {
+      stdout: { write: (s: string) => { out += s; } }, stderr: { write: (s: string) => { err += s; } }, cwd, env: cleanEnv,
+    });
+    return { code, out, err };
+  }
+
+  it('stop with dbml-storage (exit 3) instead of reporting an empty or misconfigured project', async () => {
+    const root = path.join(tmp, 'p');
+    makeDbmlProject(root);
+    for (const args of [
+      ['inventory', '--summary'],
+      ['diff', '--all'],
+      ['export', '--domain', '.erd-studio/silver/showcase.dbml', '--format', 'mermaid'],
+    ]) {
+      const human = await run([...args, '--project', root], root);
+      expect(human.code, args[0]).toBe(3);
+      expect(human.err, args[0]).toContain(DBML_STORAGE_MESSAGE);
+      expect(human.err, args[0]).not.toContain('check --semantic-dir');
+
+      const json = await run([...args, '--project', root, '--json'], root);
+      expect(json.code, args[0]).toBe(3);
+      expect(JSON.parse(json.out).error.code, args[0]).toBe('dbml-storage');
+    }
+  });
+
+  it('run as before on a YAML / JSON project', async () => {
+    const r = await run(['inventory', '--summary', '--project', FIXTURE_ROOT, '--json'], FIXTURE_ROOT);
+    expect(r.code).toBe(0);
   });
 });
 
