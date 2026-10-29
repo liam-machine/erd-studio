@@ -542,7 +542,7 @@ export const DBML_OFFER_CONVERT_SETTING = 'dbml.offerConvert';
 export function dbmlConversionOfferDetail(storage: 'yaml' | 'mixed', files: number): string {
   if (storage === 'mixed') {
     return `Your project keeps working as it is — converting is optional. It is stored as DBML, but ${files} file${files === 1 ? ' is' : 's are'} ` +
-      'YAML or JSON (probably written by an AI helper set up before 2.0). Convert them to DBML? (You\'ll see the full list first.)';
+      'YAML or JSON (probably written by an AI helper set up with an older ERD Studio, or by a teammate on one). Convert them to DBML? (You\'ll see the full list first.)';
   }
   return 'Your project keeps working as YAML and JSON — converting is optional. ERD Studio can store it as DBML instead, an open format. ' +
     'Afterwards, everyone who opens it needs ERD Studio 1.9 pre-release or 2.0 and later. ' +

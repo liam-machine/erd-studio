@@ -1318,7 +1318,7 @@ They become library Refs owned by their FK table (`canonicalRelationship`), in t
 - **When it shows:** on a canvas open, when storage is `yaml` or `mixed`, no refusal exists, the plan writes something (a project Convert left mixed, with only files to fix, is not offered again until they are fixed), and the workspaceState key `erdStudio.dbmlConversionDeclined` is unset.
 - **What it shows:** a modal dialog (after pre-release 1.9.0 feedback; it was a non-modal notification) titled "Convert this project to DBML?" with [Convert…] [Don't Ask Again] and VS Code's own Cancel, which (like Escape or closing it) is Not now; the text is its detail:
   - `yaml`: "This project is stored as YAML and JSON. ERD Studio 2.0 stores projects as DBML, an open format. Everyone who opens it will need ERD Studio 2.0 or later afterwards. Convert now? (You'll see the full list of changes first.)";
-  - `mixed`: "This project is stored as DBML, but N files are YAML or JSON (probably written by an AI helper set up before 2.0). Convert them to DBML? (You'll see the full list first.)".
+  - `mixed`: "This project is stored as DBML, but N files are YAML or JSON (probably written by an AI helper set up with an older ERD Studio, or by a teammate on one). Convert them to DBML? (You'll see the full list first.)".
 - **Ordering:** it shows **before** the naming offer, and the naming offer is not shown in a session where the DBML offer was eligible. There is one prompt per canvas open.
 - **Telemetry:** `convertToDbmlOffered`, `convertToDbmlDeclined` (Don't ask again) and `convertToDbmlNotNow`.
 

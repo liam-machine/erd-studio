@@ -150,6 +150,25 @@ describe('migrateToTableNaming (#182)', () => {
     expect(order).toEqual(['hold', 'apply', 'release', 'redraw']);
   });
 
+  it('announces the files it moves and rewrites to the own-write tracker while the edit and its saves run, and settles them after', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(MIGRATE_NAMING_BUTTON as never);
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const d = deps();
+    const plan = planProjectNamingMigration(d);
+    const touched = [...plan.moves.flatMap((m) => [m.from, m.to]), ...plan.rewrites.map((r) => r.path)]
+      .map((rel) => path.join(erd, ...rel.split('/')));
+    expect(touched.length).toBeGreaterThan(0);
+    let pendingDuringApply: boolean[] = [];
+    const apply = vscode.workspace.applyEdit;
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      pendingDuringApply = touched.map((p) => ownWrites.isPending(p));
+      return apply(edit);
+    });
+    expect(await migrateToTableNaming(d)).toBe('migrated');
+    expect(pendingDuringApply.every(Boolean)).toBe(true);
+    expect(touched.some((p) => ownWrites.isPending(p))).toBe(false);
+  });
+
   it('writes nothing when the dialog is cancelled', async () => {
     const before = snapshot();
     vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);

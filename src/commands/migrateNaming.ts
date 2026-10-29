@@ -405,6 +405,30 @@ async function applyMigration(
   retry: () => Promise<MigrateNamingOutcome>,
 ): Promise<MigrateNamingOutcome> {
   const touched = [...plan.moves.flatMap((m) => [abs(m.from), abs(m.to)]), ...plan.rewrites.map((r) => abs(r.path))];
+  // The watchers wait for these files rather than decide while the moves and
+  // saves run, so none is taken for an outside change before it is recorded.
+  const expected = [...touched, ...edit.writes.map((w) => w.path)];
+  ownWrites.expectWrite(expected);
+  try {
+    return await applyMigrationEdit(deps, plan, edit, newFolders, semanticRoot, abs, release, progress, retry, touched);
+  } finally {
+    ownWrites.settleWrites(expected);
+  }
+}
+
+/** {@link applyMigration} once its writes are announced. */
+async function applyMigrationEdit(
+  deps: MigrateNamingDeps,
+  plan: NamingMigrationPlan,
+  edit: { writes: FileWrite[]; renames: Array<{ from: string; to: string }> },
+  newFolders: Set<string>,
+  semanticRoot: string,
+  abs: (rel: string) => string,
+  release: () => void,
+  progress: MigrationProgress,
+  retry: () => Promise<MigrateNamingOutcome>,
+  touched: string[],
+): Promise<MigrateNamingOutcome> {
   const applied = await applyFileWrites(edit.writes, { renames: edit.renames });
   if (!applied.ok) {
     // applyFileWrites put back whatever landed (VS Code keeps the steps that

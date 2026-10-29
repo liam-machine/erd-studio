@@ -482,6 +482,11 @@ async function applyConversion(
   const releaseViews = (): void => { if (!viewsReleased) { viewsReleased = true; heldViews?.(); } };
   // The canvases to reopen, read before VS Code may close a deleted file's tab itself.
   const canvasTabs = convertedCanvasTabs(plan, abs);
+  // The watchers wait for these files instead of deciding while the edit and
+  // its saves run (the extension host is busy for seconds at 1,100 tables),
+  // so none of them is taken for an outside change once its record is made.
+  const expected = writes.map((w) => w.path);
+  ownWrites.expectWrite(expected);
   try {
     await report(CONVERT_PROGRESS.writing(writes.length));
     const applied = await applyFileWrites(writes, { ensureDir });
@@ -564,6 +569,7 @@ async function applyConversion(
     }
     return 'converted';
   } finally {
+    ownWrites.settleWrites(expected);
     release();
     releaseViews();
   }

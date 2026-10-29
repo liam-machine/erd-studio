@@ -668,7 +668,7 @@ describe('the canvas offer (§6.4)', () => {
     await openWith(new Map()).open('gold/sales.dbml');
     expect(offers(info).map((c) => (c[1] as { modal: boolean; detail: string }))).toContainEqual(expect.objectContaining({ modal: true, detail:
       'Your project keeps working as it is — converting is optional. It is stored as DBML, but 3 files are YAML or JSON ' +
-        "(probably written by an AI helper set up before 2.0). Convert them to DBML? (You'll see the full list first.)" }));
+        "(probably written by an AI helper set up with an older ERD Studio, or by a teammate on one). Convert them to DBML? (You'll see the full list first.)" }));
     expect(feature).toHaveBeenCalledWith('convertToDbmlNotNow');
   });
 
@@ -830,6 +830,38 @@ describe('progress, cancel and plan once (pre-release feedback)', () => {
     expect(gate.held).toBe(false);
     expect(treeRefresh).toHaveBeenCalledTimes(1);
     expect(contextKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it('announces every file it writes to the own-write tracker while the edit and its saves run, and settles them after', async () => {
+    useFixture('composite-and-self');
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const plan = await planProjectDbmlConversion(deps());
+    const written = [...plan.creates.map((c) => c.path), ...plan.deletes].map((p) => path.join(erd, p));
+    expect(written.length).toBeGreaterThan(0);
+    let pendingDuringApply: boolean[] = [];
+    const realApply = vscode.workspace.applyEdit;
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      // A watcher event handled now (the host busy mid-apply) waits instead of deciding.
+      pendingDuringApply = written.map((p) => ownWrites.isPending(p));
+      return realApply(edit);
+    });
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    expect(pendingDuringApply.every(Boolean)).toBe(true);
+    expect(written.some((p) => ownWrites.isPending(p))).toBe(false);
+  });
+
+  it('settles what it announced when VS Code refuses the edit', async () => {
+    useFixture('composite-and-self');
+    vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const plan = await planProjectDbmlConversion(deps());
+    const written = plan.creates.map((c) => path.join(erd, c.path));
+    vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValue(false);
+    expect(await convertProjectToDbml(deps())).toBe('failed');
+    expect(written.some((p) => ownWrites.isPending(p))).toBe(false);
   });
 
   it('releases the view hold when VS Code refuses the edit', async () => {
