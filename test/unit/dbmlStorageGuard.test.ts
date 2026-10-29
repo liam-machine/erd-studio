@@ -10,7 +10,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { DBML_STORAGE_MESSAGE, detectDbmlStorage } from '../../src/services/dbmlStorageGuard';
+import { CURRENT_SCHEMA_VERSION } from '@erd-studio/core';
+import { DBML_READING_SCHEMA_VERSION, DBML_STORAGE_MESSAGE, detectDbmlStorage } from '../../src/services/dbmlStorageGuard';
 import {
   DIAGRAM_DBML, EXPORT_DBML, FIXTURE_ROOT, RELATIONSHIPS_DBML, TABLE_DBML, makeDbmlProject,
 } from './dbmlStorageGuard.fixture';
@@ -75,6 +76,17 @@ describe('detectDbmlStorage: projects a newer ERD Studio stored as DBML', () => 
     expect(DBML_STORAGE_MESSAGE).toBe(
       'This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). Update ERD Studio to open it.',
     );
+  });
+});
+
+describe('the guard stands down where core reads DBML (a merge into 2.0)', () => {
+  it('this core cannot read DBML yet; when this fails, delete the stable DBML guard', () => {
+    expect(
+      CURRENT_SCHEMA_VERSION,
+      'core reads DBML storage now: delete src/services/dbmlStorageGuard.ts, src/providers/dbmlStorageGuardUi.ts, '
+        + 'their call sites and tests (search for dbmlStorageGuard)',
+    ).toBeLessThan(DBML_READING_SCHEMA_VERSION);
+    expect(DBML_READING_SCHEMA_VERSION).toBe(7);
   });
 });
 

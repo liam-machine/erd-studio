@@ -19,18 +19,27 @@
  *
  * ERD Studio 2.0 reads DBML, so when this branch meets the 2.0 code the guard
  * must go: delete both files and their call sites (search for
- * `dbmlStorageGuard`), or make {@link detectDbmlStorage} return null.
+ * `dbmlStorageGuard`). Until someone does, it switches itself off: core's
+ * {@link CURRENT_SCHEMA_VERSION} is 7 from the core that reads DBML on, and
+ * {@link detectDbmlStorage} then finds nothing (`dbmlStorageGuard.test.ts`
+ * fails there, to say the guard should be deleted).
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { LOGICAL_MODELS_DIR, NON_SUBJECT_AREA_DIRS, TABLES_DIR } from '@erd-studio/core';
+import { CURRENT_SCHEMA_VERSION, LOGICAL_MODELS_DIR, NON_SUBJECT_AREA_DIRS, TABLES_DIR } from '@erd-studio/core';
 import { tablesDirIsLayer } from './logicalModelService';
 
 /** What the user is told, everywhere: views, refusals, the notification and `doctor`. */
 export const DBML_STORAGE_MESSAGE =
   'This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). Update ERD Studio to open it.';
+
+/**
+ * The first core schema version that reads DBML storage (2.0's). Running on
+ * that core, this guard is stale code from a merge and stands down.
+ */
+export const DBML_READING_SCHEMA_VERSION = 7;
 
 /** The Marketplace / Open VSX id the update button opens. */
 export const ERD_STUDIO_EXTENSION_ID = 'liamwynne.erd-studio';
@@ -144,9 +153,12 @@ function diagramEvidenceIn(dir: string, relDir: string): DbmlStorageEvidence | n
  * Reads folder listings and at most the first 64 KB of a few `.dbml` files,
  * fresh on every call, so it stays right after a git checkout or an
  * assistant's edit without relying on file-watcher events. Writes nothing.
- * A missing or unreadable folder is not DBML storage.
+ * A missing or unreadable folder is not DBML storage, and nothing is when
+ * core itself reads DBML ({@link DBML_READING_SCHEMA_VERSION}).
  */
 export function detectDbmlStorage(semanticRoot: string): DbmlStorageEvidence | null {
+  // This core reads DBML itself: never lock a project it can open.
+  if (CURRENT_SCHEMA_VERSION >= DBML_READING_SCHEMA_VERSION) { return null; }
   const top = dirEntries(semanticRoot);
   if (top.length === 0) { return null; }
 
