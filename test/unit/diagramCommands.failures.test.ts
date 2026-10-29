@@ -398,6 +398,39 @@ describe('the layer commands (#229)', () => {
     expect(fs.readFileSync(layersPath, 'utf-8')).toBe('{ "layers": [ }');
     expect(open).toHaveBeenCalled();
   });
+
+  it('Add Layer on a layer added elsewhere since the name box: says the sidebar was stale, not ERD Studio\'s problem', async () => {
+    fs.cpSync(FIXTURE_ROOT, project, { recursive: true });
+    await openProject(project);
+    const layersPath = path.join(project, '.erd-studio', 'layers.json');
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('platinum' as never);
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value?: string }>) => {
+      // Another window adds it while the colour list is open.
+      const layers = JSON.parse(fs.readFileSync(layersPath, 'utf-8'));
+      layers.layers.push({ id: 'platinum', label: 'Platinum', abbreviation: 'PLA', color: '#ffffff', creatable: true, order: 99 });
+      fs.writeFileSync(layersPath, JSON.stringify(layers, null, 2));
+      return items[0];
+    }) as never);
+
+    await vscode.commands.executeCommand('erdStudio.addLayer');
+
+    expect(toasts()).toEqual([{ message: 'The layer "platinum" is already in layers.json. The sidebar has been refreshed.', buttons: [] }]);
+  });
+
+  it('Set Up with a mistake in layers.json: says so, with Open File, not Try Again', async () => {
+    fs.cpSync(FIXTURE_ROOT, project, { recursive: true });
+    const layersPath = path.join(project, '.erd-studio', 'layers.json');
+    fs.writeFileSync(layersPath, '{ "layers": [ }');
+    await openProject(project);
+
+    await vscode.commands.executeCommand('erdStudio.setupSemanticDirectory');
+
+    expect(toasts()).toEqual([{
+      message: expect.stringMatching(/: \.erd-studio\/layers\.json has a mistake in it, so the layers weren't saved\. Fix the file, then try again\.$/),
+      buttons: ['Open File'],
+    }]);
+    expect(fs.readFileSync(layersPath, 'utf-8')).toBe('{ "layers": [ }');
+  });
 });
 
 describe('the Welcome tab with no folder open (#229)', () => {

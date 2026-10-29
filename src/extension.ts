@@ -2425,6 +2425,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
           await layerService.saveConfig(defaultLayers);
         } catch (err) {
+          // A layers.json with a mistake in it is the user's to fix: Try Again would refuse again.
+          if (err instanceof LayersFileUnreadableError) {
+            showCommandFailure(layersFailure(SET_UP_TITLE, err, {
+              workspaceRoot, layersPath: layerService.getConfigPath(), doing: 'while saving layers.json',
+              outcome: 'The layers weren\'t saved.',
+            }), err);
+            return;
+          }
           // Each step skips what is already there, so Try Again finishes the job.
           showCommandFailure(writeFailure(SET_UP_TITLE, err, {
             workspaceRoot, target: path.join(fullSemanticDir, 'layers.json'), doing: `while creating the ${semanticDir}/ folder`,
@@ -2513,7 +2521,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer "${label}" added. Use Edit Layer to customize display name or abbreviation.`);
         } catch (err) {
-          if (added) { treeProvider.refresh(); }
+          if (added) { refreshContextKeys(); treeProvider.refresh(); layerDecorationProvider.refresh(); decorationProvider.refresh(); }
+          // Added since the name box checked (another window, git): the sidebar was stale.
+          layerService.invalidateCache();
+          if (!added && !layerService.getLoadError() && layerService.hasLayer(layerId)) {
+            treeProvider.refresh();
+            layerDecorationProvider.refresh();
+            decorationProvider.refresh();
+            showCommandFailure({
+              title: 'Add Layer', message: `The layer "${layerId}" is already in layers.json. The sidebar has been refreshed.`, buttons: [],
+            }, undefined);
+            return;
+          }
           showCommandFailure(layersFailure('Add Layer', err, {
             workspaceRoot, layersPath: layerService.getConfigPath(),
             doing: added ? 'while creating the layer\'s folder' : 'while saving layers.json',
