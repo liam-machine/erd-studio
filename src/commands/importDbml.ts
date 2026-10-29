@@ -45,8 +45,15 @@ import {
 } from '../services/dbmlImport';
 import type { DbmlDiagnostic } from '../services/dbmlImportParse';
 import {
+  ADD_LAYER_BUTTON,
+  CHOOSE_ANOTHER_NAME_BUTTON,
+  NO_LAYERS_MESSAGE,
   OPEN_FILE_BUTTON,
+  OPEN_IT_BUTTON,
   SEND_FEEDBACK_BUTTON,
+  SHOW_FILE_BUTTON,
+  TRY_AGAIN_BUTTON,
+  diagramNameTakenMessage,
   feedbackPrefill,
   oursMessage,
   showErrorWithActions,
@@ -77,13 +84,7 @@ export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
 
 const TITLE = 'Import DBML';
 
-export const NO_LAYERS_MESSAGE = 'No layers are configured for new diagrams. Add a layer first.';
-
-export const ADD_LAYER_BUTTON = 'Add Layer';
-export const SHOW_FILE_BUTTON = 'Show File';
-export const TRY_AGAIN_BUTTON = 'Try Again';
-export const OPEN_IT_BUTTON = 'Open It';
-export const CHOOSE_ANOTHER_NAME_BUTTON = 'Choose Another Name';
+export { ADD_LAYER_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON, NO_LAYERS_MESSAGE, OPEN_IT_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
 export const IMPORT_BUTTON = 'Import';
 export { OPEN_FILE_BUTTON };
 
@@ -323,7 +324,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   const tryAgain = again({ layer: chosenLayer, name: slug });
   // The name box already refuses a name in use; this is a diagram that
   // appeared since (another window, git), so the choices are kept.
-  const nameTaken = (): void => showError(`A diagram named "${slug}" already exists in the ${layerLabel} layer.`, {
+  const nameTaken = (): void => showError(diagramNameTakenMessage(slug, layerLabel), {
     [OPEN_IT_BUTTON]: () => ui.openDiagram(domainPath),
     [CHOOSE_ANOTHER_NAME_BUTTON]: again({ layer: chosenLayer }),
   });

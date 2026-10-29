@@ -269,7 +269,8 @@ describe('in a native DBML project', () => {
     await vscode.commands.executeCommand('erdStudio.renameDomain', {
       type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: erd('gold', 'sales.dbml'), storage: 'dbml' },
     });
-    expect(errors).toHaveBeenCalledWith('Rename Subject Area: .erd-studio/gold/sales.dbdiagram has unsaved changes. Save or revert it, then try again. Nothing was changed.');
+    // #229's words and title (Rename Diagram), with Show File.
+    expect(errors).toHaveBeenCalledWith('Rename Diagram: .erd-studio/gold/sales.dbdiagram has unsaved changes. Save or revert it, then try again. Nothing was changed.', 'Show File');
     expect(bytes()).toEqual(before);
   });
 
@@ -499,7 +500,7 @@ describe('in a native DBML project', () => {
         type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: sales, storage: 'dbml' },
       });
       const modal = refusalModal();
-      expect(modal.message).toMatch(/^Rename Subject Area: gold\/sales\.dbml: .* Nothing was changed\.$/);
+      expect(modal.message).toMatch(/^Rename Diagram: gold\/sales\.dbml: .* Nothing was changed\.$/);
       expect(modal.detail).toBe('File: .erd-studio/gold/sales.dbml');
       expect(modal.buttons).toEqual(['Open File']);
       expect(bytes()).toEqual(before);

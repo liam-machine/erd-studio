@@ -1520,7 +1520,12 @@ describe('erdStudio.renameDomain on a JSON diagram (D23: one edit through applyF
     // The new file lands, then the delete fails; the reconcile applies.
     vscode._mockWorkspaceState.applyEditPrefixes.push(1);
     await vscode.commands.executeCommand('erdStudio.renameDomain', element());
-    expect(error).toHaveBeenCalledWith('Failed to rename subject area "bob" to "robert". Nothing was changed.');
+    // #229's words: VS Code refused it, with Try Again and Send Feedback.
+    expect(error).toHaveBeenCalledWith(
+      'VS Code didn\'t accept renaming "bob" to "robert", usually because another program has the file open ' +
+        "or ERD Studio isn't allowed to write to that folder. Nothing was changed.",
+      'Try Again', 'Send Feedback',
+    );
     expect(fs.existsSync(erd('silver', 'robert.json'))).toBe(false);
     expect(fs.readFileSync(erd('silver', 'bob.json'), 'utf-8')).toBe(before);
   });

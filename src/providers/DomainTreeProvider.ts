@@ -18,6 +18,8 @@ import type { SubjectAreaSummary, Layer } from '../types/semantic';
 import { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import { createLogger, elapsedMs, log, plural } from '../services/logger';
+import { layersFailure } from '../services/diagramCommandErrors';
+import { showCommandFailure } from '../commands/commandFailure';
 
 const treeLog = createLogger('Subject Areas');
 
@@ -181,8 +183,11 @@ export class SubjectAreaTreeProvider
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error(`[DomainTreeProvider] Failed to reorder layers: ${message}`);
-      // Reorder is refused when layers.json is unreadable (H18) — tell the user
-      void vscode.window.showErrorMessage(`Failed to reorder layers: ${message}`);
+      // Reorder is refused when layers.json is unreadable (H18) — tell the user, in words (#229)
+      showCommandFailure(layersFailure('Reorder Layers', err, {
+        workspaceRoot: this.projectPath, layersPath: this.layerService.getConfigPath(),
+        doing: 'while saving layers.json', outcome: 'The layers weren\'t reordered.',
+      }), err);
     }
   }
 

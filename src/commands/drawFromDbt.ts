@@ -35,10 +35,15 @@ import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { describeUnstoredRelationships, drawnDiagramCopies, routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import {
+  ADD_LAYER_BUTTON,
+  CHOOSE_ANOTHER_NAME_BUTTON,
+  NO_LAYERS_MESSAGE,
   OPEN_FILE_BUTTON,
+  OPEN_IT_BUTTON,
   SEND_FEEDBACK_BUTTON,
   SHOW_FILE_BUTTON,
   TRY_AGAIN_BUTTON,
+  diagramNameTakenMessage,
   feedbackPrefill,
   oursMessage,
   showErrorWithActions as showErrorWith,
@@ -79,7 +84,6 @@ export const NO_DBT_MODELS_MESSAGE =
   'No dbt models with columns found. Draw from dbt reads the columns listed in your schema .yml files — ' +
   'add columns: to your models there, then try again.';
 
-export const NO_LAYERS_MESSAGE = 'No layers are configured for new diagrams. Add a layer first.';
 
 export interface DrawFromDbtDeps {
   workspaceRoot: string;
@@ -116,10 +120,7 @@ export interface DrawFromDbtResume {
   name?: string;
 }
 
-export const ADD_LAYER_BUTTON = 'Add Layer';
-export { OPEN_FILE_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
-export const OPEN_IT_BUTTON = 'Open It';
-export const CHOOSE_ANOTHER_NAME_BUTTON = 'Choose Another Name';
+export { ADD_LAYER_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON, NO_LAYERS_MESSAGE, OPEN_FILE_BUTTON, OPEN_IT_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
 
 export interface DrawFromDbtResult {
   domainPath: string;
@@ -238,7 +239,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   const tryAgain = (): unknown => drawFromDbt(deps, again);
   // The name box already refuses a name in use; this is a diagram that
   // appeared since (another window, git), so the choices are kept.
-  const nameTaken = (): void => showErrorWithActions(`A diagram named "${slug}" already exists in the ${layerLabel} layer.`, {
+  const nameTaken = (): void => showErrorWithActions(diagramNameTakenMessage(slug, layerLabel), {
     [OPEN_IT_BUTTON]: () => vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE),
     [CHOOSE_ANOTHER_NAME_BUTTON]: () => drawFromDbt(deps, { pick, layer: chosenLayer }),
   });
