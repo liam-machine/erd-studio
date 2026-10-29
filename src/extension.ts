@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { SubjectAreaService, renameSubjectAreaInRaw } from './services/domainService';
-import { LayerService } from './services/layerService';
+import { LayerService, LayersFileUnreadableError } from './services/layerService';
 import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, type SubjectAreaSummary, type Layer, type Stage, type UnifiedSubjectArea, type StageData } from './types/semantic';
 import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
 import { TemplateService } from './services/templateService';
@@ -56,6 +56,27 @@ import { startKnownFixes } from './services/knownFixesService';
 import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
 import { saveFailureCodes, tableFileErrorCode, type SaveFailure } from './services/telemetryPayload';
 import { notifyTableFileError, shouldWarnAboutTableFile } from './commands/openModelFile';
+import { showCommandFailure } from './commands/commandFailure';
+import {
+  ADD_LAYER_BUTTON,
+  CHOOSE_ANOTHER_NAME_BUTTON,
+  NO_LAYERS_MESSAGE,
+  OPEN_IT_BUTTON,
+  diagramNameTakenMessage,
+} from './services/commandErrors';
+import {
+  NEW_DIAGRAM_TITLE,
+  RENAME_DIAGRAM_TITLE,
+  SELECTORS_TITLE,
+  SET_UP_TITLE,
+  deleteFailure,
+  layerGone,
+  layersFailure,
+  renameReadFailure,
+  renameRefused,
+  unsavedSaveFailure,
+  writeFailure,
+} from './services/diagramCommandErrors';
 import { MyReportsTreeProvider, type MyReportNode } from './providers/MyReportsTreeProvider';
 import type { FeedbackKind } from './types/feedback';
 import { CliLauncherService, type CliLauncherOptions } from './services/cliLauncherService';
@@ -604,10 +625,10 @@ async function handleUnsavedChanges(
     if (doc) {
       const saved = await doc.save();
       if (!saved) {
-        const opName = operation === 'deleting' ? 'Deletion' : 'Rename';
-        void vscode.window.showErrorMessage(
-          `Failed to save "${domainName}". ${opName} cancelled.`,
-        );
+        // save() resolves false with no reason (usually the file changed on disk): the tab says why.
+        showCommandFailure(unsavedSaveFailure(domainName, operation), undefined, {
+          showTab: () => vscode.commands.executeCommand('vscode.openWith', fileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE),
+        });
         return false;
       }
     }
@@ -733,7 +754,7 @@ function noProjectGettingStartedDeps(): GettingStartedDeps {
     }),
     clipboardText: (assistant) => (assistant && assistant !== 'claude' ? assistantInfo(assistant).prompt : SETUP_PROMPT),
     openCanvas: async () => {
-      void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE);
+      void showNoProjectWarning();
     },
   };
 }
@@ -1454,6 +1475,128 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     selectorsService.scheduleRegenerate();
   };
 
+  /**
+   * A layer the sidebar showed that layers.json no longer has (#229): the
+   * sidebar was stale, so it is refreshed. When layers.json can't be read the
+   * layer may well be in it, so that is what is said instead.
+   */
+  const showLayerGone = (title: string, layerId: string): void => {
+    layerService.invalidateCache();
+    const loadError = layerService.getLoadError();
+    if (loadError && layerService.configFileExists()) {
+      const err = new LayersFileUnreadableError(loadError);
+      showCommandFailure(layersFailure(title, err, {
+        workspaceRoot, layersPath: layerService.getConfigPath(), doing: 'while reading layers.json', outcome: 'Nothing was changed.',
+      }), err);
+      return;
+    }
+    treeProvider.refresh();
+    layerDecorationProvider.refresh();
+    decorationProvider.refresh();
+    showCommandFailure(layerGone(title, layerId), undefined);
+  };
+
+  /**
+   * New Diagram's write: the ERD folder, the layer folder and the diagram
+   * file, then open it. Its own step so a failure's Try Again re-runs it with
+   * the answers already given, never the questions (#229).
+   */
+  const createDiagramFile = async (layer: string, slug: string, description: string, modelFolder: string | undefined): Promise<void> => {
+    const layerDir = path.join(workspaceRoot, semanticDir, layer);
+    const filePath = path.join(layerDir, `${slug}.json`);
+    const retry = (): Promise<void> => createDiagramFile(layer, slug, description, modelFolder);
+
+    // A folder with no ERD data yet (a plain folder, or a dbt project
+    // never set up): New Diagram is the explicit action that makes the
+    // ERD folder, with the default layers.json first, as Draw from dbt and
+    // Import DBML do. Removed again if the diagram cannot be written, as is
+    // a layer folder made for it.
+    const createdSemanticDir = !fs.existsSync(fullSemanticDirPath);
+    const createdLayerDir = !fs.existsSync(layerDir);
+    const undoFolders = (): void => {
+      if (createdSemanticDir) {
+        try { fs.rmSync(fullSemanticDirPath, { recursive: true, force: true }); } catch { /* leave it */ }
+        layerService.invalidateCache();
+      } else if (createdLayerDir) {
+        try { fs.rmdirSync(layerDir); } catch { /* not empty, or never made: leave it */ }
+      }
+    };
+    const failed = (err: unknown, doing: string): void => {
+      undoFolders();
+      showCommandFailure(writeFailure(NEW_DIAGRAM_TITLE, err, {
+        workspaceRoot, target: filePath, doing, outcome: 'Nothing was created.', retry: true,
+      }), err, { retry });
+    };
+    try {
+      if (createdSemanticDir) {
+        await layerService.saveConfig(layerService.getAllLayers());
+        layerService.invalidateCache();
+      }
+      if (createdLayerDir) {
+        fs.mkdirSync(layerDir, { recursive: true });
+      }
+    } catch (err) {
+      failed(err, 'while creating the folder for it');
+      return;
+    }
+
+    const emptyStage: StageData = { models: [], relationships: [] };
+    const domainData: UnifiedSubjectArea = {
+      schemaVersion: WRITTEN_SCHEMA_VERSION,
+      domain: slug,
+      layer,
+      description: description.trim(),
+      ...(modelFolder ? { modelFolder } : {}),
+      logical: { ...emptyStage },
+      viewConfig: {},
+    };
+
+    try {
+      subjectAreasCreatedHere.add(filePath);
+      // In the naming the project writes (#182): v6 for a new or migrated project.
+      const fileData = tableLibraryService.writesTableNaming()
+        ? toTableNamingDocument(domainData as unknown as Record<string, unknown>)
+        : domainData;
+      fs.writeFileSync(filePath, JSON.stringify(fileData, null, 2) + '\n', { encoding: 'utf-8', flag: 'wx' });
+      telemetry.feature('domainCreated');
+      // A blank start in a folder without dbt (logical-only mode).
+      if (!hasDbt) { telemetry.feature('blankDiagram'); }
+    } catch (err) {
+      subjectAreasCreatedHere.delete(filePath);
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
+        // The name box checked the diagrams it knew; this one appeared since,
+        // or is a file the sidebar cannot list.
+        const layerLabel = layerService.getLayer(layer)?.label ?? layer;
+        showCommandFailure(
+          { title: NEW_DIAGRAM_TITLE, message: diagramNameTakenMessage(slug, layerLabel), buttons: [OPEN_IT_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON] },
+          undefined,
+          {
+            openIt: () => vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), SUBJECT_AREA_EDITOR_VIEW_TYPE),
+            chooseAnother: () => vscode.commands.executeCommand('erdStudio.createDomain', layer),
+          },
+        );
+        return;
+      }
+      failed(err, 'while writing the diagram file');
+      return;
+    }
+
+    // Refresh tree, regenerate selectors.yml, and auto-open the diagram.
+    // The semantic dir may have just been created — reveal the title buttons.
+    if (createdSemanticDir) {
+      layerDecorationProvider.refresh();
+      decorationProvider.refresh();
+    }
+    refreshContextKeys();
+    treeProvider.refresh();
+    selectorsService.scheduleRegenerate();
+    await vscode.commands.executeCommand(
+      'vscode.openWith',
+      vscode.Uri.file(filePath),
+      SUBJECT_AREA_EDITOR_VIEW_TYPE,
+    );
+  };
+
   context.subscriptions.push(
     { dispose() { clearTimeout(manifestRetryTimeout); } },
     configChangedSubscription,
@@ -1894,7 +2037,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (!layer) {
           const creatableLayers = layerService.getCreatableLayers();
           if (creatableLayers.length === 0) {
-            void vscode.window.showErrorMessage('No layers configured for subject area creation. Add layers first.');
+            showCommandFailure({ title: NEW_DIAGRAM_TITLE, message: NO_LAYERS_MESSAGE, buttons: [ADD_LAYER_BUTTON] }, undefined);
             return;
           }
           const layerItems = creatableLayers.map(l => ({ label: l.label, value: l.id }));
@@ -1951,82 +2094,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           console.warn('[createDomain] Failed to load manifest for folder detection, skipping folder picker');
         }
 
-        // Step 5: Create unified v3 domain file
-        const layerDir = path.join(workspaceRoot, semanticDir, layer);
-        const filePath = path.join(layerDir, `${slug}.json`);
-
-        // A folder with no ERD data yet (a plain folder, or a dbt project
-        // never set up): New Diagram is the explicit action that makes the
-        // ERD folder, with the default layers.json first, as Draw from dbt and
-        // Import DBML do. Removed again if the diagram cannot be written.
-        const createdSemanticDir = !fs.existsSync(fullSemanticDirPath);
-        const undoSemanticDir = (): void => {
-          if (!createdSemanticDir) { return; }
-          try { fs.rmSync(fullSemanticDirPath, { recursive: true, force: true }); } catch { /* leave it */ }
-          layerService.invalidateCache();
-        };
-        try {
-          if (createdSemanticDir) {
-            await layerService.saveConfig(layerService.getAllLayers());
-            layerService.invalidateCache();
-          }
-          if (!fs.existsSync(layerDir)) {
-            fs.mkdirSync(layerDir, { recursive: true });
-          }
-        } catch (err) {
-          undoSemanticDir();
-          const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(`Failed to create directory: ${msg}`);
-          return;
-        }
-
-        const emptyStage: StageData = { models: [], relationships: [] };
-        const domainData: UnifiedSubjectArea = {
-          schemaVersion: WRITTEN_SCHEMA_VERSION,
-          domain: slug,
-          layer,
-          description: description.trim(),
-          ...(modelFolder ? { modelFolder } : {}),
-          logical: { ...emptyStage },
-          viewConfig: {},
-        };
-
-        try {
-          subjectAreasCreatedHere.add(filePath);
-          // In the naming the project writes (#182): v6 for a new or migrated project.
-          const fileData = tableLibraryService.writesTableNaming()
-            ? toTableNamingDocument(domainData as unknown as Record<string, unknown>)
-            : domainData;
-          fs.writeFileSync(filePath, JSON.stringify(fileData, null, 2) + '\n', { encoding: 'utf-8', flag: 'wx' });
-          telemetry.feature('domainCreated');
-          // A blank start in a folder without dbt (logical-only mode).
-          if (!hasDbt) { telemetry.feature('blankDiagram'); }
-        } catch (err) {
-          subjectAreasCreatedHere.delete(filePath);
-          if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
-            void vscode.window.showErrorMessage(`Subject area "${slug}" already exists in the ${layer} layer`);
-            return;
-          }
-          undoSemanticDir();
-          const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(`Failed to create subject area file: ${msg}`);
-          return;
-        }
-
-        // Step 6: Refresh tree, regenerate selectors.yml, and auto-open domain.
-        // The semantic dir may have just been created — reveal the title buttons.
-        if (createdSemanticDir) {
-          layerDecorationProvider.refresh();
-          decorationProvider.refresh();
-        }
-        refreshContextKeys();
-        treeProvider.refresh();
-        selectorsService.scheduleRegenerate();
-        await vscode.commands.executeCommand(
-          'vscode.openWith',
-          vscode.Uri.file(filePath),
-          SUBJECT_AREA_EDITOR_VIEW_TYPE,
-        );
+        // Step 5: Create the diagram file, and open it.
+        await createDiagramFile(layer, slug, description, modelFolder);
       },
     ),
     vscode.commands.registerCommand(
@@ -2051,27 +2120,40 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         if (confirm !== 'Delete') { return; }
 
-        // Close any open editors
-        const matchingTabs = findMatchingTabs(fileUri);
-        if (matchingTabs.length > 0) {
-          await vscode.window.tabGroups.close(matchingTabs, true);
-        }
-
-        // Delete the unified domain file. Record it as an own delete so the
-        // watcher does not show the "Domain file deleted" toast — selectors
-        // regeneration is already scheduled below.
-        try {
-          await vscode.workspace.fs.delete(fileUri);
+        // Close any open editors, then delete the unified domain file.
+        // Record it as an own delete so the watcher does not show the
+        // "Domain file deleted" toast — selectors regeneration is scheduled
+        // here. A file already gone is deleted; Try Again retries the delete,
+        // not the confirmation.
+        const deleteFile = async (): Promise<void> => {
+          const matchingTabs = findMatchingTabs(fileUri);
+          if (matchingTabs.length > 0) {
+            await vscode.window.tabGroups.close(matchingTabs, true);
+          }
+          try {
+            await vscode.workspace.fs.delete(fileUri);
+          } catch (err) {
+            if (fs.existsSync(filePath)) {
+              // Nothing was deleted: the diagram comes back where it was.
+              if (matchingTabs.length > 0) {
+                void vscode.commands.executeCommand('vscode.openWith', fileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE);
+              }
+              showCommandFailure(deleteFailure(domainName, filePath, err), err, {
+                retry: async () => {
+                  // Its reopened tab may have been edited since.
+                  if (await handleUnsavedChanges(fileUri, domainName, 'deleting')) { await deleteFile(); }
+                },
+              });
+              return;
+            }
+          }
           ownWrites.recordDelete(filePath);
           treeProvider.invalidateSubjectArea(filePath);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(`Failed to delete subject area: ${msg}`);
-        }
-
-        treeProvider.refresh();
-        refreshDiagramsStatus();
-        selectorsService.scheduleRegenerate();
+          treeProvider.refresh();
+          refreshDiagramsStatus();
+          selectorsService.scheduleRegenerate();
+        };
+        await deleteFile();
       },
     ),
     vscode.commands.registerCommand(
@@ -2102,42 +2184,70 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const newSlug = newDomainSlug.trim();
         if (newSlug === oldDomainName) { return; }
 
-        // Read and update domain name in the unified file.
-        // Validate via SubjectAreaService, but rewrite the RAW document so v5 model
-        // name references and unknown keys are preserved — re-serialising the
-        // resolved UnifiedSubjectArea would inline model bodies into a v5 file.
-        let renamedContent: string;
-        try {
-          subjectAreaService.getSubjectArea(oldFilePath);
-          renamedContent = renameSubjectAreaInRaw(fs.readFileSync(oldFilePath, 'utf-8'), newSlug);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(`Failed to read subject area file: ${msg}`);
-          return;
-        }
-
-        // Close old editor tabs before applying the edit (file will be deleted)
-        const oldTabs = findMatchingTabs(oldFileUri);
-        if (oldTabs.length > 0) { await vscode.window.tabGroups.close(oldTabs, true); }
-
         const newFilePath = path.join(workspaceRoot, semanticDir, layer, `${newSlug}.json`);
         const newFileUri = vscode.Uri.file(newFilePath);
+        const openRenamed = async (): Promise<void> => {
+          selectorsService.scheduleRegenerate();
+          await vscode.commands.executeCommand('vscode.openWith', newFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE);
+        };
 
-        const edit = new vscode.WorkspaceEdit();
-        subjectAreasCreatedHere.add(newFilePath);
-        edit.createFile(newFileUri, { overwrite: false, ignoreIfExists: false });
-        edit.insert(newFileUri, new vscode.Position(0, 0), renamedContent);
-        edit.deleteFile(oldFileUri, { ignoreIfNotExists: false });
+        // Read, check and rename. Try Again runs this again, never the
+        // questions: it re-reads the file, so edits saved since are kept.
+        const rename = async (): Promise<boolean> => {
+          // Read and update domain name in the unified file.
+          // Validate via SubjectAreaService, but rewrite the RAW document so v5 model
+          // name references and unknown keys are preserved — re-serialising the
+          // resolved UnifiedSubjectArea would inline model bodies into a v5 file.
+          let renamedContent: string;
+          try {
+            subjectAreaService.getSubjectArea(oldFilePath);
+            renamedContent = renameSubjectAreaInRaw(fs.readFileSync(oldFilePath, 'utf-8'), newSlug);
+          } catch (err) {
+            showCommandFailure(renameReadFailure(oldFilePath, err, workspaceRoot), err);
+            return false;
+          }
 
-        const success = await vscode.workspace.applyEdit(edit);
-        if (!success) {
-          void vscode.window.showErrorMessage(`Failed to rename subject area "${oldDomainName}" to "${newSlug}"`);
-          return;
-        }
+          // The name box checked the diagrams the sidebar lists; a file it
+          // cannot list (unreadable, or named otherwise inside) would make the
+          // edit fail every time, so say so before closing anything. (A
+          // case-only rename finds itself on macOS and Windows: not taken.)
+          if (fs.existsSync(newFilePath) && newFilePath.toLowerCase() !== oldFilePath.toLowerCase()) {
+            const layerLabel = layerService.getLayer(layer)?.label ?? layer;
+            showCommandFailure(
+              { title: RENAME_DIAGRAM_TITLE, message: diagramNameTakenMessage(newSlug, layerLabel), buttons: [OPEN_IT_BUTTON] },
+              undefined,
+              { openIt: () => vscode.commands.executeCommand('vscode.openWith', newFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE) },
+            );
+            return false;
+          }
+
+          // Close old editor tabs before applying the edit (file will be deleted)
+          const oldTabs = findMatchingTabs(oldFileUri);
+          if (oldTabs.length > 0) { await vscode.window.tabGroups.close(oldTabs, true); }
+
+          const edit = new vscode.WorkspaceEdit();
+          subjectAreasCreatedHere.add(newFilePath);
+          edit.createFile(newFileUri, { overwrite: false, ignoreIfExists: false });
+          edit.insert(newFileUri, new vscode.Position(0, 0), renamedContent);
+          edit.deleteFile(oldFileUri, { ignoreIfNotExists: false });
+
+          if (await vscode.workspace.applyEdit(edit)) { return true; }
+          subjectAreasCreatedHere.delete(newFilePath);
+          // Nothing was changed: the diagram comes back where it was.
+          if (oldTabs.length > 0) { void vscode.commands.executeCommand('vscode.openWith', oldFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE); }
+          showCommandFailure(renameRefused(oldDomainName, newSlug), new Error('workspace.applyEdit returned false'), {
+            retry: async () => {
+              // Its reopened tab may have been edited since.
+              if (!(await handleUnsavedChanges(oldFileUri, oldDomainName, 'renaming'))) { return; }
+              if (await rename()) { await openRenamed(); }
+            },
+          });
+          return false;
+        };
+        if (!(await rename())) { return; }
 
         // Auto-open renamed domain
-        selectorsService.scheduleRegenerate();
-        await vscode.commands.executeCommand('vscode.openWith', newFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE);
+        await openRenamed();
       },
     ),
     vscode.commands.registerCommand('erdStudio.refreshManifest', async () => {
@@ -2207,8 +2317,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             // For 'skipped': the onSkipped hook has already shown the
             // out-of-sync notification + status bar. No success toast.
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            void vscode.window.showErrorMessage(`Failed to regenerate selectors.yml: ${msg}`);
+            showCommandFailure(writeFailure(SELECTORS_TITLE, err, {
+              workspaceRoot, target: path.join(workspaceRoot, 'selectors.yml'), doing: 'while writing selectors.yml',
+              outcome: 'selectors.yml was not changed.', retry: true,
+            }), err, { retry: () => vscode.commands.executeCommand('erdStudio.syncDomainTags') });
           }
         },
       );
@@ -2313,8 +2425,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
           await layerService.saveConfig(defaultLayers);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(`Failed to create the ERD Studio directory structure: ${msg}`);
+          // A layers.json with a mistake in it is the user's to fix: Try Again would refuse again.
+          if (err instanceof LayersFileUnreadableError) {
+            showCommandFailure(layersFailure(SET_UP_TITLE, err, {
+              workspaceRoot, layersPath: layerService.getConfigPath(), doing: 'while saving layers.json',
+              outcome: 'The layers weren\'t saved.',
+            }), err);
+            return;
+          }
+          // Each step skips what is already there, so Try Again finishes the job.
+          showCommandFailure(writeFailure(SET_UP_TITLE, err, {
+            workspaceRoot, target: path.join(fullSemanticDir, 'layers.json'), doing: `while creating the ${semanticDir}/ folder`,
+            outcome: `Some of ${semanticDir}/ may already have been created.`, retry: true,
+          }), err, { retry: () => vscode.commands.executeCommand('erdStudio.setupSemanticDirectory') });
           return;
         }
 
@@ -2375,6 +2498,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const label = layerId.charAt(0).toUpperCase() + layerId.slice(1);
         const abbreviation = layerId.slice(0, 3).toUpperCase();
 
+        let added = false;
         try {
           await layerService.addLayer({
             id: layerId,
@@ -2383,6 +2507,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             color,
             creatable: true,
           });
+          added = true;
 
           // Create layer directory
           const layerDir = path.join(workspaceRoot, semanticDir, layerId);
@@ -2396,8 +2521,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer "${label}" added. Use Edit Layer to customize display name or abbreviation.`);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(`Failed to add layer: ${msg}`);
+          if (added) { refreshContextKeys(); treeProvider.refresh(); layerDecorationProvider.refresh(); decorationProvider.refresh(); }
+          // Added since the name box checked (another window, git): the sidebar was stale.
+          layerService.invalidateCache();
+          if (!added && !layerService.getLoadError() && layerService.hasLayer(layerId)) {
+            treeProvider.refresh();
+            layerDecorationProvider.refresh();
+            decorationProvider.refresh();
+            showCommandFailure({
+              title: 'Add Layer', message: `The layer "${layerId}" is already in layers.json. The sidebar has been refreshed.`, buttons: [],
+            }, undefined);
+            return;
+          }
+          showCommandFailure(layersFailure('Add Layer', err, {
+            workspaceRoot, layersPath: layerService.getConfigPath(),
+            doing: added ? 'while creating the layer\'s folder' : 'while saving layers.json',
+            outcome: added ? `The layer was added, but its folder in ${semanticDir}/ wasn't created.` : 'The layer wasn\'t added.',
+          }), err);
         }
       },
     ),
@@ -2419,7 +2559,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         const layer = layerService.getLayer(layerId);
         if (!layer) {
-          void vscode.window.showErrorMessage(`Layer "${layerId}" not found`);
+          showLayerGone('Edit Layer', layerId);
           return;
         }
 
@@ -2436,7 +2576,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         try {
           switch (editChoice.value) {
             case 'rename': {
-              const newLabel = await vscode.window.showInputBox({ prompt: 'New layer display name', value: layer.label, ignoreFocusOut: true });
+              const newLabel = await vscode.window.showInputBox({
+                prompt: 'New layer display name', value: layer.label, ignoreFocusOut: true,
+                validateInput: (value: string) => (value.trim() ? undefined : 'Layer name is required'),
+              });
               if (newLabel === undefined || newLabel.trim() === layer.label) return;
               await layerService.updateLayer(layerId, { label: newLabel.trim() });
               break;
@@ -2476,8 +2619,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer "${layer.label}" updated.`);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(`Failed to update layer: ${msg}`);
+          // Removed since it was picked (another window, git): the sidebar was stale.
+          layerService.invalidateCache();
+          if (!layerService.getLoadError() && !layerService.getLayer(layerId)) { showLayerGone('Edit Layer', layerId); return; }
+          showCommandFailure(layersFailure('Edit Layer', err, {
+            workspaceRoot, layersPath: layerService.getConfigPath(), doing: 'while saving layers.json', outcome: 'The layer wasn\'t changed.',
+          }), err);
         }
       },
     ),
@@ -2499,7 +2646,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         const layer = layerService.getLayer(layerId);
         if (!layer) {
-          void vscode.window.showErrorMessage(`Layer "${layerId}" not found`);
+          showLayerGone('Remove Layer', layerId);
           return;
         }
 
@@ -2519,8 +2666,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         if (confirm !== 'Remove') return;
 
+        let removed = false;
         try {
           await layerService.removeLayer(layerId);
+          removed = true;
 
           // Remove layer directory
           const layerDir = path.join(workspaceRoot, semanticDir, layerId);
@@ -2533,8 +2682,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer "${layer.label}" removed.`);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(`Failed to remove layer: ${msg}`);
+          if (removed) { treeProvider.refresh(); layerDecorationProvider.refresh(); decorationProvider.refresh(); }
+          layerService.invalidateCache();
+          if (!removed && !layerService.getLoadError() && !layerService.getLayer(layerId)) { showLayerGone('Remove Layer', layerId); return; }
+          showCommandFailure(layersFailure('Remove Layer', err, {
+            workspaceRoot, layersPath: layerService.getConfigPath(),
+            doing: removed ? 'while deleting the layer\'s folder' : 'while saving layers.json',
+            outcome: removed ? `The layer was removed, but its folder in ${semanticDir}/ is still there.` : 'The layer wasn\'t removed.',
+          }), err);
         }
       },
     ),
@@ -2574,8 +2729,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await vscode.commands.executeCommand('vscode.open', uri);
           }
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(`Failed to save layer configuration: ${msg}`);
+          showCommandFailure(layersFailure('Initialize Layer Configuration', err, {
+            workspaceRoot, layersPath: layerService.getConfigPath(), doing: 'while saving layers.json', outcome: 'layers.json was not changed.',
+          }), err);
         }
       },
     ),
@@ -2952,8 +3108,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           try {
             await layerService.saveConfig(detected);
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            void vscode.window.showErrorMessage(`Failed to save layer configuration: ${msg}`);
+            showCommandFailure(layersFailure('Save Config', err, {
+              workspaceRoot, layersPath: layerService.getConfigPath(), doing: 'while saving layers.json', outcome: 'layers.json was not changed.',
+            }), err);
             return;
           }
           layerService.invalidateCache();

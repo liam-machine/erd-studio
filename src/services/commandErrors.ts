@@ -29,6 +29,17 @@ export const SAVE_AND_TRY_AGAIN_BUTTON = 'Save and Try Again';
 export const SAVE_ALL_BUTTON = 'Save All';
 export const RELOAD_WINDOW_BUTTON = 'Reload Window';
 
+/** The buttons and words every way of making a diagram shares (#204, #229). */
+export const ADD_LAYER_BUTTON = 'Add Layer';
+export const OPEN_IT_BUTTON = 'Open It';
+export const CHOOSE_ANOTHER_NAME_BUTTON = 'Choose Another Name';
+export const NO_LAYERS_MESSAGE = 'No layers are configured for new diagrams. Add a layer first.';
+
+/** A diagram with this name appeared since the name box checked it (another window, git). */
+export function diagramNameTakenMessage(name: string, layerLabel: string): string {
+  return `A diagram named "${name}" already exists in the ${layerLabel} layer.`;
+}
+
 /** A failure's buttons, by label, and what each one does. */
 export type ErrorActions = Readonly<Record<string, () => unknown>>;
 

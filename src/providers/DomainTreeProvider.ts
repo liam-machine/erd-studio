@@ -17,6 +17,8 @@ import * as path from 'path';
 import type { SubjectAreaSummary, Layer } from '../types/semantic';
 import { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
+import { layersFailure } from '../services/diagramCommandErrors';
+import { showCommandFailure } from '../commands/commandFailure';
 
 /** MIME type for layer drag-drop within the tree. */
 const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer';
@@ -155,8 +157,11 @@ export class SubjectAreaTreeProvider
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[DomainTreeProvider] Failed to reorder layers: ${message}`);
-      // Reorder is refused when layers.json is unreadable (H18) — tell the user
-      void vscode.window.showErrorMessage(`Failed to reorder layers: ${message}`);
+      // Reorder is refused when layers.json is unreadable (H18) — tell the user, in words (#229)
+      showCommandFailure(layersFailure('Reorder Layers', err, {
+        workspaceRoot: this.projectPath, layersPath: this.layerService.getConfigPath(),
+        doing: 'while saving layers.json', outcome: 'The layers weren\'t reordered.',
+      }), err);
     }
   }
 
