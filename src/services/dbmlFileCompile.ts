@@ -32,8 +32,9 @@
  *    them (both column lists sorted, the pair unordered), and a pair is
  *    reported when the two files share a file that reaches both.
  * 3. **Anything else crossing files** (a TableGroup, a TablePartial, an inline
- *    `ref:`, a `reuse` line, a file that does not parse or a Ref the reader
- *    skips): a file whose `use` lines reach one is compiled the old way, with
+ *    `ref:`, a `reuse` line, a `use` line renaming a table with `as`, a file
+ *    that does not parse or a Ref the reader skips; looked for in the code,
+ *    never in comments, notes or other strings): a file whose `use` lines reach one is compiled the old way, with
  *    every file it reaches, and all of that compile's diagnostics are kept.
  *    Convert writes none of these; a project that has them pays only for the
  *    files that reach them.
@@ -62,8 +63,10 @@ const CHUNK_USES = 48;
 interface FileFacts {
   parses: boolean;
   uses: Array<{ line: number; resolved: string; wildcard: boolean; tables: string[] }>;
-  /** Lower-case names of the tables it declares. */
+  /** Lower-case names of the tables it declares (empty when it was not outlined: see {@link outlined}). */
   declares: string[];
+  /** Whether {@link declares} was read (a file with no `use`, `Ref` or exotic code is outlined only when a `use *` reaches it). */
+  outlined: boolean;
   /** Holds only `use` lines, standalone Refs and comments, all readable. */
   pureRelationships: boolean;
   /** Something whose diagnostics cross files beyond what parts 1 and 2 see. */
@@ -81,7 +84,23 @@ export class DbmlFileCompileMemo {
 }
 
 const USE_LINE = /^\s*(?:re)?use\b/m;
-const EXOTIC_TEXT = /\b(?:TableGroup|TablePartial|reuse)\b|\[[^\]]*\bref\s*:/i;
+/**
+ * What crosses files beyond parts 1 and 2, tested on the code alone
+ * ({@link codeOf}): a TableGroup, a TablePartial, a `reuse` line, an inline
+ * `ref:` setting, or a `use` line that renames a table (`as`), whose Refs
+ * part 2 cannot match by name.
+ */
+const EXOTIC_CODE = /\b(?:TableGroup|TablePartial|reuse)\b|\[[^\]]*\bref\s*:|\buse\s*\{[^}]*\bas\b/i;
+
+/**
+ * Comments and string literals (notes, descriptions, quoted names) blanked to
+ * spaces, so a note that says "kept for reuse" or "FK, ref: SAP" is not taken
+ * for code. Line breaks stay.
+ */
+export function codeOf(text: string): string {
+  return text.replace(/'''[\s\S]*?(?:'''|$)|'(?:\\.|[^'\\\n])*'?|"(?:\\.|[^"\\\n])*"?|`[^`]*`?|\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/g,
+    (m) => m.replace(/[^\r\n]/g, ' '));
+}
 
 function blankRange(chars: string[], start: number, end: number): void {
   for (let i = Math.max(0, start); i < Math.min(chars.length, end); i++) if (chars[i] !== '\n' && chars[i] !== '\r') chars[i] = ' ';
@@ -95,9 +114,11 @@ function lineRanges(text: string): number[] {
 }
 
 function readFacts(filePath: string, text: string): FileFacts {
-  const hasUse = USE_LINE.test(text);
-  const hasRef = /\bRef\b/.test(text);
-  const outline = hasUse || hasRef || EXOTIC_TEXT.test(text) ? outlineDbmlFile(text, filePath) : null;
+  const code = codeOf(text);
+  const hasUse = USE_LINE.test(code);
+  const hasRef = /\bRef\b/.test(code);
+  const exoticCode = EXOTIC_CODE.test(code);
+  const outline = hasUse || hasRef || exoticCode ? outlineDbmlFile(text, filePath) : null;
   const parses = outline ? outline.parses : true;
   const uses = parses
     ? (outline?.uses ?? []).map((u) => ({ line: u.line, resolved: u.resolved.replace(/^\.\//, ''), wildcard: u.wildcard, tables: u.tables }))
@@ -110,7 +131,7 @@ function readFacts(filePath: string, text: string): FileFacts {
     refs = reading.refs;
     refsReadable = reading.readable && reading.problems.length === 0;
   }
-  const exotic = !parses || !refsReadable || EXOTIC_TEXT.test(text);
+  const exotic = !parses || !refsReadable || exoticCode;
   let pureRelationships = false;
   if (parses && !exotic && declares.length === 0 && (outline?.enums.length ?? 0) === 0 && (outline?.metadata?.length ?? 0) === 0) {
     // Blank the use lines, the Refs and the comments: nothing else may be left.
@@ -132,7 +153,17 @@ function readFacts(filePath: string, text: string): FileFacts {
     const line = starts.findIndex((s, i) => s <= at && (starts[i + 1] ?? Infinity) > at);
     return at - (starts[line] ?? 0) + 1;
   });
-  return { parses, uses, declares, pureRelationships, exotic, refs, refColumns };
+  return { parses, uses, declares, outlined: outline !== null, pureRelationships, exotic, refs, refColumns };
+}
+
+/** The tables a file declares, outlining it now if it was not (a plain table file a `use *` reaches). */
+function declaresOf(filePath: string, text: string, facts: FileFacts): string[] {
+  if (!facts.outlined) {
+    const outline = outlineDbmlFile(text, filePath);
+    facts.declares = outline.parses ? (outline.tables ?? []).map((t) => t.toLowerCase()) : [];
+    facts.outlined = true;
+  }
+  return facts.declares;
 }
 
 /**
@@ -151,9 +182,9 @@ function usesOfUnparsed(filePath: string, text: string): FileFacts['uses'] {
   return out;
 }
 
-/** One endpoint as the compiler compares it: the table and its sorted columns. */
+/** One endpoint as the compiler compares it: the table (`public.` is the default schema) and its sorted columns. */
 function sideKey(table: string, columns: readonly string[]): string {
-  return `${table.toLowerCase()}.(${columns.map((c) => c.toLowerCase()).sort().join(',')})`;
+  return `${table.toLowerCase().replace(/^public\./, '')}.(${columns.map((c) => c.toLowerCase()).sort().join(',')})`;
 }
 
 function lastPart(name: string): string {
@@ -347,12 +378,13 @@ function* compileSteps(
     if (!/\bRef\b/.test(set[file])) continue;
     const facts = factsOf(file);
     if (facts.exotic || facts.refs.length === 0) continue;
-    const visible = new Set(facts.declares);
+    // By last name part: a schema-qualified name (`gold.a`) and its table are one.
+    const visible = new Set(facts.declares.map(lastPart));
     for (const u of facts.uses) {
       const targets = targetsOf(u.resolved);
       if (targets.length === 0) continue;
-      if (u.wildcard) { for (const t of targets) for (const name of factsOf(t).declares) visible.add(name); }
-      else for (const name of u.tables) visible.add(name.toLowerCase());
+      if (u.wildcard) { for (const t of targets) for (const name of declaresOf(t, set[t], factsOf(t))) visible.add(lastPart(name)); }
+      else for (const name of u.tables) visible.add(lastPart(name));
     }
     for (const [index, ref] of facts.refs.entries()) {
       const members = ref.relationships;

@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import type { DbmlDiagnostic } from '@erd-studio/core';
 import { compileDbmlProject } from '@erd-studio/core/dbml';
 
-import { DbmlFileCompileMemo, compileDbmlFilesSeparately, compileDbmlFilesSeparatelyAsync } from '../../src/services/dbmlFileCompile';
+import { DbmlFileCompileMemo, codeOf, compileDbmlFilesSeparately, compileDbmlFilesSeparatelyAsync } from '../../src/services/dbmlFileCompile';
 import { planDbmlConversion } from '../../src/services/dbmlConversion';
 import type { DbmlConversionInput } from '../../src/services/dbmlConversion';
 import { classifySemanticFile } from '@erd-studio/core';
@@ -210,6 +210,82 @@ describe('compileDbmlFilesSeparately reports what the whole-project compile repo
       return compileDbmlProject(subset, entries);
     });
     expect(largest).toBeLessThan(Object.keys(files).length * 0.75);
+  });
+});
+
+describe('hand-written shapes the reader accepts: the same diagnostics as the whole-project compile', () => {
+  const dim = 'Table dim {\n  dim_key int [pk]\n}\n';
+  const fct = 'Table fct {\n  id int [pk]\n  dim_key int\n}\n';
+  const cases: Record<string, Record<string, string>> = {
+    'a duplicate Ref across files whose tables a diagram imports with use * (plain table files)': {
+      'tables/dim.dbml': dim,
+      'tables/fct.dbml': fct,
+      'tables/_relationships.dbml': "use { table dim } from './dim.dbml'\nuse { table fct } from './fct.dbml'\nRef: fct.dim_key > dim.dim_key\n",
+      'gold/sales.dbml': "use * from '../tables/dim.dbml'\nuse * from '../tables/fct.dbml'\nuse * from '../tables/_relationships.dbml'\nRef: fct.dim_key > dim.dim_key\n",
+    },
+    'a duplicate Ref between schema-qualified tables': {
+      'tables/a.dbml': 'Table gold.a {\n  id int [pk]\n  b_id int\n}\n',
+      'tables/b.dbml': 'Table gold.b {\n  id int [pk]\n}\n',
+      'tables/_relationships.dbml': "use { table gold.a } from './a.dbml'\nuse { table gold.b } from './b.dbml'\nRef: gold.a.b_id > gold.b.id\n",
+      'gold/x.dbml': "use { table gold.a } from '../tables/a.dbml'\nuse { table gold.b } from '../tables/b.dbml'\nuse * from '../tables/_relationships.dbml'\nRef: gold.a.b_id > gold.b.id\n",
+    },
+    'a duplicate Ref written once with public. and once without': {
+      'tables/dim.dbml': dim,
+      'tables/fct.dbml': fct,
+      'tables/_relationships.dbml': "use { table dim } from './dim.dbml'\nuse { table fct } from './fct.dbml'\nRef: public.fct.dim_key > public.dim.dim_key\n",
+      'gold/sales.dbml': "use { table dim } from '../tables/dim.dbml'\nuse { table fct } from '../tables/fct.dbml'\nuse * from '../tables/_relationships.dbml'\nRef: fct.dim_key > dim.dim_key\n",
+    },
+    'a duplicate Ref through a use line that renames a table (as)': {
+      'tables/dim.dbml': dim,
+      'tables/fct.dbml': fct,
+      'tables/_relationships.dbml': "use { table dim } from './dim.dbml'\nuse { table fct } from './fct.dbml'\nRef: fct.dim_key > dim.dim_key\n",
+      'gold/sales.dbml': "use { table dim as d } from '../tables/dim.dbml'\nuse { table fct } from '../tables/fct.dbml'\nuse * from '../tables/_relationships.dbml'\nRef: fct.dim_key > d.dim_key\n",
+    },
+  };
+  for (const [name, files] of Object.entries(cases)) {
+    it(name, () => {
+      expect(keys(compileDbmlProject(files, Object.keys(files))).length).toBeGreaterThanOrEqual(0);
+      expectSameAsWholeProject(files);
+    });
+  }
+
+  it('the use * case is a real error the file-by-file compile reports (so the case above is not vacuous)', () => {
+    const files = cases['a duplicate Ref across files whose tables a diagram imports with use * (plain table files)'];
+    expect(keys(compileDbmlFilesSeparately(files, Object.keys(files))).some((k) => k.includes('|5001|'))).toBe(true);
+  });
+});
+
+describe('notes and comments that mention reuse or ref: are not code', () => {
+  /** How many compiles a check makes. */
+  function compilesFor(files: Record<string, string>): number {
+    let calls = 0;
+    compileDbmlFilesSeparately(files, Object.keys(files), (subset, entries) => { calls++; return compileDbmlProject(subset, entries); });
+    return calls;
+  }
+  const withNote = (note: string): Record<string, string> => {
+    const files = project();
+    files['tables/gold/gold_t00.dbml'] = files['tables/gold/gold_t00.dbml'].replace("note: 'a label'", `note: '${note}'`);
+    files['tables/gold/gold_t01.dbml'] = `// ${note}\n${files['tables/gold/gold_t01.dbml']}`;
+    files['tables/gold/gold_t02.dbml'] = files['tables/gold/gold_t02.dbml'].replace("[note: 'table 2']", `[note: '''${note}''']`);
+    return files;
+  };
+
+  for (const note of ['kept for reuse', 'FK, ref: SAP', 'see TableGroup sales', 'use { table x as y }']) {
+    it(`"${note}" in a note or comment costs no more compiles than a plain note, with the same result`, () => {
+      const plain = compilesFor(withNote('a plain note'));
+      const files = withNote(note);
+      expect(compilesFor(files)).toBe(plain);
+      expectSameAsWholeProject(files);
+    });
+  }
+
+  it('codeOf blanks comments and strings, keeping every line and column', () => {
+    const text = "Table a [note: 'reuse ref: x'] { // reuse\n  id int /* TableGroup */ [note: '''x\nref: y''']\n}\n";
+    const code = codeOf(text);
+    expect(code).toHaveLength(text.length);
+    expect(code.split('\n')).toHaveLength(text.split('\n').length);
+    expect(code).not.toMatch(/reuse|ref:|TableGroup/);
+    expect(code).toContain('Table a [note:');
   });
 });
 
