@@ -95,7 +95,13 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
    * reads that diagram only, not every diagram of the project.
    */
   private readonly membersCache = new Map<string, { signature: string; names: string[] | null }>();
-  /** True until the first root getChildren has produced its items, and while a full rebuild runs (`erdStudio.tablesLoading`). */
+  /**
+   * `erdStudio.tablesLoading`: true until a root listing finds no rows (and
+   * while a full rebuild runs). A listing with rows leaves it set: VS Code
+   * applies a context key the moment it arrives but draws the rows a little
+   * later, so clearing it on every listing flashed "No tables yet" over a
+   * full library while the window opened.
+   */
   private loading = true;
   /** The background read of table files the last render had not read yet (see {@link checkUnreadFiles}). */
   private unreadCheck: ReturnType<typeof setTimeout> | undefined;
@@ -115,7 +121,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     this._onDidChangeTreeData.fire(undefined);
   }
 
-  /** Whether the tree has not produced its items yet, or is listing the library from scratch. */
+  /** Whether the empty-state text is held back: no root listing has found the library empty (since it last had rows), or it is listed from scratch. */
   isLoading(): boolean {
     return this.loading;
   }
@@ -204,13 +210,16 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     const cold = typeof this.tableLibraryService.indexIsCold === 'function' && this.tableLibraryService.indexIsCold();
     if (cold) this.setLoading(true);
     const start = Date.now();
+    let rows = 0;
     try {
       // One check of the library index for the whole render, not one per row.
       const children = this.withIndexSnapshot(() => this.rootChildren());
+      rows = children.length;
       treeLog.debug(`Listed ${plural(children.length, 'row')} in ${elapsedMs(start)} ms${cold ? ' (library read from scratch)' : ''}`);
       return children;
     } finally {
-      this.setLoading(false);
+      // Only an empty listing lets the "No tables yet" text show.
+      this.setLoading(rows > 0);
     }
   }
 

@@ -97,7 +97,12 @@ export class SubjectAreaTreeProvider
   /** The project row, or undefined while the workspace has one dbt project. */
   private projectRow: ProjectNode | undefined;
 
-  /** True until the first root getChildren has produced its items (`erdStudio.diagramsLoading`). */
+  /**
+   * `erdStudio.diagramsLoading`: true until a root listing finds no rows.
+   * A listing with rows leaves it set: VS Code applies a context key the
+   * moment it arrives but draws the rows a little later, so clearing it on
+   * every first listing flashed "No diagrams yet" over a full project.
+   */
   private loading = true;
 
   // TreeDragAndDropController properties
@@ -109,13 +114,13 @@ export class SubjectAreaTreeProvider
     private readonly layerService: LayerService,
     private readonly projectPath: string,
     semanticDir?: string,
-    /** Told once the first root getChildren has listed (the extension clears `erdStudio.diagramsLoading`). Optional. */
-    private readonly onLoaded?: () => void,
+    /** Told whether the empty-state text may show: false once a root listing finds no rows, true again once one finds rows (the extension sets `erdStudio.diagramsLoading`). Optional. */
+    private readonly onLoadingChange?: (loading: boolean) => void,
   ) {
     this.semanticDir = semanticDir ?? DEFAULT_SEMANTIC_DIR;
   }
 
-  /** Whether the tree has not produced its root items yet. */
+  /** Whether the empty-state text is held back: no root listing has found the tree empty (since it last had rows). */
   isLoading(): boolean {
     return this.loading;
   }
@@ -265,14 +270,19 @@ export class SubjectAreaTreeProvider
 
   getChildren(element?: TreeElement): TreeElement[] | undefined {
     if (!element) {
-      // `erdStudio.diagramsLoading` holds until the root is listed, so the
-      // "No diagrams yet" welcome never flashes while the window opens.
+      // `erdStudio.diagramsLoading` is cleared only by a listing with no
+      // rows, so the "No diagrams yet" welcome never flashes over a project
+      // that has diagrams while the window opens.
+      let rows = 0;
       try {
-        return this.rootChildren();
+        const children = this.rootChildren();
+        rows = children.length;
+        return children;
       } finally {
-        if (this.loading) {
-          this.loading = false;
-          this.onLoaded?.();
+        const loading = rows > 0;
+        if (this.loading !== loading) {
+          this.loading = loading;
+          this.onLoadingChange?.(loading);
         }
       }
     }

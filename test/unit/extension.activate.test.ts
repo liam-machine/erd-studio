@@ -460,7 +460,9 @@ describe('activate() with a dbt project', () => {
     expect(at('erdStudio.diagramsLoading=true')).toBeLessThan(at('createTreeView:erdStudio.domainTree'));
     expect(at('erdStudio.hasProject=true')).toBeLessThan(at('createTreeView:erdStudio.domainTree'));
     expect(at('createTreeView:erdStudio.domainTree')).toBeLessThan(at('erdStudio.hasMultipleDbtProjects=false'));
-    expect(at('createTreeView:erdStudio.domainTree')).toBeLessThan(at('erdStudio.tablesLoading=true'));
+    // Both views' loading keys are set before hasProject, so neither empty state can show first.
+    expect(at('erdStudio.tablesLoading=true')).toBeLessThan(at('erdStudio.hasProject=true'));
+    expect(at('erdStudio.tablesLoading=true')).toBeLessThan(at('createTreeView:erdStudio.modelLibrary'));
     expect(createTreeView.mock.invocationCallOrder[0]).toBeLessThan(registerEditor.mock.invocationCallOrder[0]);
 
     const tree = (createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.domainTree')![1] as {
@@ -478,10 +480,11 @@ describe('activate() with a dbt project', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(changes).toBe(1);
     expect((tree.getChildren() ?? []).length).toBeGreaterThan(0);
-    expect(loadingKeys()).toEqual(['erdStudio.diagramsLoading=true', 'erdStudio.diagramsLoading=false']);
-    // Once only: later listings leave the key alone.
+    // A listing with rows never clears the key: VS Code applies it at once
+    // but draws the rows a little later, so "No diagrams yet" flashed.
+    expect(loadingKeys()).toEqual(['erdStudio.diagramsLoading=true']);
     tree.getChildren();
-    expect(loadingKeys()).toHaveLength(2);
+    expect(loadingKeys()).toEqual(['erdStudio.diagramsLoading=true']);
   });
 
   it('routes erdStudio.reportBug through the focused canvas instead of input boxes', async () => {

@@ -213,26 +213,42 @@ describe('Table Library tree with the real library', () => {
     provider.dispose();
   });
 
-  it('says it is loading until the first render has its items, and while the library is listed from scratch', () => {
+  it('never clears tablesLoading for a listing with rows (VS Code applies the key before it draws the rows, so "No tables yet" flashed)', () => {
     const { subjectAreaService, tableLibraryService } = services();
     const loading = vi.fn();
     const provider = new TableLibraryTreeProvider(tableLibraryService, subjectAreaService, root, '.erd-studio', () => [], loading);
     expect(provider.isLoading()).toBe(true);
-    nodes(provider);
-    expect(provider.isLoading()).toBe(false);
-    expect(loading.mock.calls).toEqual([[false]]);
-    // A bulk change drops the index: the next render is a full rebuild.
+    expect(nodes(provider).length).toBeGreaterThan(0);
+    expect(provider.isLoading()).toBe(true);
+    // A bulk change drops the index: the full rebuild lists rows again, and the key never drops.
     tableLibraryService.invalidateCache();
     nodes(provider);
-    expect(loading.mock.calls).toEqual([[false], [true], [false]]);
+    expect(loading.mock.calls).toEqual([]);
     provider.dispose();
   });
 
-  it('stops loading on an empty project too, so its empty state can show', () => {
+  it('clears it once a listing finds no tables, so the empty state shows, and sets it again when tables appear', () => {
     fs.rmSync(path.join(semantic, 'tables'), { recursive: true });
     const { subjectAreaService, tableLibraryService } = services();
     const loading = vi.fn();
     const provider = new TableLibraryTreeProvider(tableLibraryService, subjectAreaService, root, '.erd-studio', () => [], loading);
+    expect(provider.getChildren()).toEqual([]);
+    expect(loading.mock.calls).toEqual([[false]]);
+    write('tables/gold/fct_sale.dbml', dbmlTable('fct_sale'));
+    tableLibraryService.invalidateCache();
+    expect((provider.getChildren() ?? []).length).toBeGreaterThan(0);
+    expect(loading.mock.calls).toEqual([[false], [true]]);
+    provider.dispose();
+  });
+
+  it('the Subject Areas tree clears diagramsLoading only for a listing with no rows', () => {
+    const { subjectAreaService, layerService } = services();
+    const loading = vi.fn();
+    const provider = new SubjectAreaTreeProvider(subjectAreaService, layerService, root, '.erd-studio', loading);
+    expect((provider.getChildren() ?? []).length).toBeGreaterThan(0);
+    expect(provider.isLoading()).toBe(true);
+    expect(loading.mock.calls).toEqual([]);
+    fs.rmSync(semantic, { recursive: true });
     expect(provider.getChildren()).toEqual([]);
     expect(loading.mock.calls).toEqual([[false]]);
     provider.dispose();

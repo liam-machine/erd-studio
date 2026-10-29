@@ -933,10 +933,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const hasDbt = projectResolution.hasDbt;
   // Pick which sidebar welcome text shows (package.json viewsWelcome):
   // hasProject = a folder is open; hasDbtProject = it holds dbt_project.yml.
-  // `erdStudio.diagramsLoading` is set first, and cleared by the ERD Studio
-  // view's first listing, so its "No diagrams yet" text never flashes while
-  // the rest of activation runs ahead of the view.
-  if (workspaceRoot) void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', true);
+  // `erdStudio.diagramsLoading` and `erdStudio.tablesLoading` are set first,
+  // before either view can show, and each is cleared only by a listing of
+  // its view that finds no rows: "No diagrams yet" / "No tables yet" never
+  // flash while activation runs ahead of the views, nor over a project whose
+  // rows VS Code has not drawn yet.
+  if (workspaceRoot) {
+    void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', true);
+    void vscode.commands.executeCommand('setContext', 'erdStudio.tablesLoading', true);
+  }
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasProject', Boolean(workspaceRoot));
   // The ERD Studio view gets its provider now, before the services it lists
   // from exist: it answers with no rows, so the view shows "Loading
@@ -1167,13 +1172,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     layerService,
     workspaceRoot,
     semanticDir,
-    () => { void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', false); },
+    (loading) => { void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', loading); },
   );
-  // `erdStudio.tablesLoading`: true from here until the Table Library's first
-  // getChildren has produced its items (and while a full rebuild of the
-  // library runs), so its view shows "Loading tables…" rather than the
+  // `erdStudio.tablesLoading` (set above, before the views) holds until a
+  // Table Library listing finds no rows, and while a full rebuild of the
+  // library runs, so its view shows "Loading tables…" rather than the
   // empty-state text meanwhile.
-  void vscode.commands.executeCommand('setContext', 'erdStudio.tablesLoading', true);
   const tableLibraryProvider = new TableLibraryTreeProvider(
     tableLibraryService,
     subjectAreaService,
