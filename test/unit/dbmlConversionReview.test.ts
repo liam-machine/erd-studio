@@ -204,6 +204,19 @@ describe('buildConvertPanelHtml', () => {
     expect(html).toContain('data-action="cancel">Cancel</button><button type="button" class="cdb__button" data-action="convert">Convert</button>');
     expect(html).toContain(`<title>${CONVERT_PANEL_TITLE}</title>`);
   });
+
+  it('writes counts as the progress notification does: 1,100, not 1100', () => {
+    const creates = Array.from({ length: 1100 }, (_, i) => ({ path: `tables/t${i}.dbml`, text: '' }));
+    const { view } = buildConvertReview(plan({
+      creates,
+      summary: { tables: 1100, diagrams: 21, relationshipsFiles: 1, relationships: 2266 },
+    }), { display, introLines: [] });
+    const html = buildConvertPanelHtml(view, 'n');
+    expect(html).toContain('<span class="cdb__count-value">1,100</span> tables');
+    expect(html).toContain('<span class="cdb__count-value">2,266</span> relationships');
+    expect(html).toContain('<span class="cdb-section__count">1,100</span>');
+    expect(view.summary).toContain('1,100 tables and 21 diagrams convert to DBML');
+  });
 });
 
 describe('ConvertToDbmlPanel', () => {

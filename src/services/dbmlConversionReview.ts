@@ -113,7 +113,9 @@ function diagramTarget(relPath: string): string {
   return relPath.endsWith('.json') ? `${relPath.slice(0, -'.json'.length)}.dbml` : relPath;
 }
 
-const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+/** A count as people write it (1,100), as the progress notification shows it. */
+const thousands = (n: number): string => n.toLocaleString('en-US');
+const plural = (n: number, one: string, many = `${one}s`): string => `${thousands(n)} ${n === 1 ? one : many}`;
 
 function kindOf(relPath: string): 'table' | 'relationships' | 'diagram' | 'layout' | 'other' {
   if (relPath.endsWith('.dbdiagram')) return 'layout';
@@ -476,7 +478,7 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
   const n = escapeHtml(nonce);
   const sections = view.sections.map((section) => `
     <details class="cdb-section" data-section="${escapeHtml(section.id)}" open>
-      <summary class="cdb-section__title">${escapeHtml(section.title)}<span class="cdb-section__count">${section.count ?? section.items.length}</span></summary>
+      <summary class="cdb-section__title">${escapeHtml(section.title)}<span class="cdb-section__count">${thousands(section.count ?? section.items.length)}</span></summary>
       <ul class="cdb-section__items">${section.items.map((item) => renderItem(item, section.id === 'problems' || (section.id === 'left' && item.path !== undefined))).join('')}</ul>${section.hint !== undefined ? `
       <p class="cdb-section__hint">${escapeHtml(section.hint)}</p>` : ''}
     </details>`).join('');
@@ -503,7 +505,7 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
     <h1 class="cdb__heading">${escapeHtml(view.heading)}</h1>
     ${view.summary ? `<p class="cdb__summary">${escapeHtml(view.summary)}</p>` : ''}
     ${view.intro.map((line) => `<p class="cdb__intro">${escapeHtml(line)}</p>`).join('\n    ')}
-    <ul class="cdb__counts">${view.counts.map((c) => `<li class="cdb__count"><span class="cdb__count-value">${c.value}</span> ${escapeHtml(c.label)}</li>`).join('')}</ul>
+    <ul class="cdb__counts">${view.counts.map((c) => `<li class="cdb__count"><span class="cdb__count-value">${thousands(c.value)}</span> ${escapeHtml(c.label)}</li>`).join('')}</ul>
   </header>
   <section class="cdb__list" tabindex="0" aria-label="${view.mode === 'review' ? 'Changes' : 'Problems'}">${sections}
   </section>

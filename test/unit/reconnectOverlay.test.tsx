@@ -88,7 +88,7 @@ describe('App load-error page and the reconnect overlay', () => {
 
   it('a silent host gets the overlay after the grace period', () => {
     render(<App />);
-    expect(screen.getByText(/Loading subject area/)).toBeTruthy();
+    expect(screen.getByText(/Loading diagram/)).toBeTruthy();
     act(() => { vi.advanceTimersByTime(RECONNECT_GRACE_MS); });
     expect(overlay()).not.toBeNull();
   });
@@ -103,7 +103,7 @@ describe('App load-error page and the reconnect overlay', () => {
 
     fireEvent.click(screen.getByText('Retry'));
     expect(mockVsCode.postMessage).toHaveBeenLastCalledWith({ type: 'ready' });
-    expect(screen.getByText(/Loading subject area/)).toBeTruthy();
+    expect(screen.getByText(/Loading diagram/)).toBeTruthy();
     expect(overlay()).toBeNull();
 
     // The host re-reads and answers with the error again: still no overlay.
@@ -138,7 +138,7 @@ describe('App load-error page and the reconnect overlay', () => {
     render(<App />);
     act(() => { vi.advanceTimersByTime(1000); });
     postFromHost({ type: 'loading', payload: {} });
-    expect(screen.getByText(/Loading subject area/)).toBeTruthy();
+    expect(screen.getByText(/Loading diagram/)).toBeTruthy();
     postFromHost({ type: 'loading', payload: { tables: 1100 } });
     expect(screen.getByText(`Loading ${(1100).toLocaleString()} tables…`)).toBeTruthy();
     expect(screen.getByRole('status')).toBeTruthy();
@@ -181,7 +181,7 @@ describe('App load-error page and the reconnect overlay', () => {
     hostError();
     expect(screen.getByText('Retry')).toBeTruthy();
     fireEvent.click(screen.getByText('Retry'));
-    expect(screen.getByText(/Loading subject area/)).toBeTruthy();
+    expect(screen.getByText(/Loading diagram/)).toBeTruthy();
     act(() => { vi.advanceTimersByTime(RECONNECT_GRACE_MS); });
     expect(overlay()).not.toBeNull();
   });

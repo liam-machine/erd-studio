@@ -639,7 +639,7 @@ function EditorCanvas() {
       <>
         <div className={`editor-message${hostLoading ? ' editor-message--loading' : ''}`} role="status" aria-live="polite">
           {hostLoading && <span className="editor-message__spinner" aria-hidden="true" />}
-          <p>{tables !== undefined && tables > 0 ? `Loading ${tables.toLocaleString()} ${tables === 1 ? 'table' : 'tables'}…` : 'Loading subject area…'}</p>
+          <p>{tables !== undefined && tables > 0 ? `Loading ${tables.toLocaleString()} ${tables === 1 ? 'table' : 'tables'}…` : 'Loading diagram…'}</p>
         </div>
         {showReconnectOverlay && <ReconnectOverlay onReload={handleReconnect} onShowLogs={handleShowLogs} />}
       </>
