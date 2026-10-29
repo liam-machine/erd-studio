@@ -422,7 +422,7 @@ import {
   type AnnotationPositionPayload,
 } from './payloadValidation';
 import { sameName } from '../types/naming';
-import { DBML_STORAGE_MESSAGE, OPEN_EXTENSION_PAGE_BUTTON, openExtensionPage } from './dbmlStorageGuardUi';
+import { DBML_STORAGE_MESSAGE, showDbmlStoragePage } from './dbmlStorageGuardUi';
 
 /**
  * Canvas messages still handled while the project is stored as DBML by a
@@ -675,39 +675,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.dbmlGuard = guard;
   }
 
-  /**
-   * The page a diagram gets instead of the canvas while the project is stored
-   * as DBML by a newer ERD Studio. Like {@link showForeignProject} it is not
-   * the canvas: its only script posts `openExtensionPage`, handled here.
-   */
-  private showDbmlStorage(webviewPanel: vscode.WebviewPanel): void {
-    const webview = webviewPanel.webview;
-    const nonce = crypto.randomBytes(16).toString('base64');
-    webview.options = { enableScripts: true, localResourceRoots: [] };
-    webview.html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>ERD Studio</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
-</head>
-<body style="font-family: var(--vscode-font-family, sans-serif); padding: 24px; color: var(--vscode-foreground); max-width: 44em; line-height: 1.5;">
-  <h2 style="margin-top: 0;">This project needs a newer ERD Studio</h2>
-  <p>${DBML_STORAGE_MESSAGE}</p>
-  <p>Nothing has been changed. This version of ERD Studio won’t write into the project, so its files stay as the newer version left them.</p>
-  <p><button id="update" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
-    background: var(--vscode-button-background); color: var(--vscode-button-foreground);">${OPEN_EXTENSION_PAGE_BUTTON}</button></p>
-  <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-    document.getElementById('update').addEventListener('click', () => vscode.postMessage({ type: 'openExtensionPage' }));
-  </script>
-</body>
-</html>`;
-    const messages = webview.onDidReceiveMessage((message: unknown) => {
-      if (isTypedMessage(message) && message.type === 'openExtensionPage') { void openExtensionPage(); }
-    });
-    webviewPanel.onDidDispose(() => messages.dispose());
-  }
 
   /**
    * Load the warehouse catalog, if a reader was injected and an artifact exists.
@@ -1108,7 +1075,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // A project a newer ERD Studio stored as DBML: this version would draw it
     // wrong and could write YAML / JSON beside the DBML files.
     if (this.dbmlGuard?.isActive()) {
-      this.showDbmlStorage(webviewPanel);
+      showDbmlStoragePage(webviewPanel);
       return;
     }
 

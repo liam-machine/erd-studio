@@ -268,6 +268,43 @@ describe('a folder a newer ERD Studio stored as DBML, with no dbt_project.yml', 
     ]);
   });
 
+  it('a diagram tab restored from a session with the newer version opens the DBML page, not "No dbt project found"', async () => {
+    context = makeContext(project);
+    await activate(context);
+    const before = snapshot(project);
+
+    const panel = await openDiagram(path.join(project, '.erd-studio', 'silver', 'showcase.dbml'));
+
+    expect(panel.webview.html).toContain('This project needs a newer ERD Studio');
+    expect(panel.webview.html).toContain(DBML_STORAGE_MESSAGE);
+    expect(panel.webview.html).not.toContain('ERD Studio is inactive');
+    exec.mockClear();
+    await panel._simulateMessage({ type: 'openExtensionPage' });
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('extension.open', 'liamwynne.erd-studio'));
+    expect(dbmlWarnings()).toHaveLength(1);
+    expect(snapshot(project)).toEqual(before);
+  });
+
+  it('a restored diagram from a DBML folder the workspace folders did not show starts the guard, so the views say so too', async () => {
+    // The workspace folder is the parent: its own .erd-studio does not exist.
+    vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(tmp), name: 'parent', index: 0 }];
+    context = makeContext(project);
+    await activate(context);
+    expect(contextKey()).toEqual([]);
+
+    const panel = await openDiagram(path.join(project, '.erd-studio', 'silver', 'showcase.dbml'));
+
+    expect(panel.webview.html).toContain(DBML_STORAGE_MESSAGE);
+    expect(contextKey()).toEqual([true]);
+    expect(dbmlWarnings()).toEqual([[DBML_STORAGE_MESSAGE, OPEN_EXTENSION_PAGE_BUTTON]]);
+    exec.mockClear();
+    await vscode.commands.executeCommand(OPEN_EXTENSION_PAGE_COMMAND);
+    expect(exec).toHaveBeenCalledWith('extension.open', 'liamwynne.erd-studio');
+    // A second restored tab neither starts a second guard nor repeats the notice.
+    await openDiagram(path.join(project, '.erd-studio', 'silver', 'showcase.dbml'));
+    expect(dbmlWarnings()).toHaveLength(1);
+  });
+
   it('a plain folder with no dbt project and no DBML gets the no-project welcome as before', async () => {
     fs.rmSync(path.join(project, '.erd-studio'), { recursive: true, force: true });
     context = makeContext(project);
@@ -275,6 +312,12 @@ describe('a folder a newer ERD Studio stored as DBML, with no dbt_project.yml', 
     expect(contextKey()).toEqual([]);
     expect(dbmlWarnings()).toEqual([]);
     expect(welcomeKeys()).toEqual(['erdStudio.hasDbtProject=false', 'erdStudio.storageChecked=true']);
+    const json = path.join(project, '.erd-studio', 'silver', 'bob.json');
+    fs.mkdirSync(path.dirname(json), { recursive: true });
+    fs.copyFileSync(path.join(FIXTURE_ROOT, '.erd-studio', 'silver', 'bob.json'), json);
+    const panel = await openDiagram(json);
+    expect(panel.webview.html).toContain('ERD Studio is inactive');
+    expect(panel.webview.html).not.toContain(DBML_STORAGE_MESSAGE);
   });
 });
 

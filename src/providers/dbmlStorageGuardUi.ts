@@ -15,6 +15,7 @@
  * Writes nothing, ever.
  */
 
+import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 
 import { DBML_STORAGE_MESSAGE, ERD_STUDIO_EXTENSION_ID, detectDbmlStorage } from '../services/dbmlStorageGuard';
@@ -77,6 +78,44 @@ function showDbmlStorageMessage(): void {
   void Promise.resolve(vscode.window.showWarningMessage(DBML_STORAGE_MESSAGE, OPEN_EXTENSION_PAGE_BUTTON)).then((choice) => {
     if (choice === OPEN_EXTENSION_PAGE_BUTTON) { void openExtensionPage(); }
   });
+}
+
+/**
+ * The page a diagram gets instead of the canvas while its project is stored
+ * as DBML: from the canvas editor, and from the no-project stub editor (a
+ * `.dbml` diagram tab restored from a session with the newer version, in a
+ * folder without dbt_project.yml). Its only script posts
+ * `openExtensionPage`, handled here.
+ */
+export function showDbmlStoragePage(webviewPanel: vscode.WebviewPanel): void {
+  const webview = webviewPanel.webview;
+  const nonce = crypto.randomBytes(16).toString('base64');
+  webview.options = { enableScripts: true, localResourceRoots: [] };
+  webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ERD Studio</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+</head>
+<body style="font-family: var(--vscode-font-family, sans-serif); padding: 24px; color: var(--vscode-foreground); max-width: 44em; line-height: 1.5;">
+  <h2 style="margin-top: 0;">This project needs a newer ERD Studio</h2>
+  <p>${DBML_STORAGE_MESSAGE}</p>
+  <p>Nothing has been changed. This version of ERD Studio won’t write into the project, so its files stay as the newer version left them.</p>
+  <p><button id="update" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground);">${OPEN_EXTENSION_PAGE_BUTTON}</button></p>
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    document.getElementById('update').addEventListener('click', () => vscode.postMessage({ type: 'openExtensionPage' }));
+  </script>
+</body>
+</html>`;
+  const messages = webview.onDidReceiveMessage((message: unknown) => {
+    if (typeof message === 'object' && message !== null && (message as { type?: unknown }).type === 'openExtensionPage') {
+      void openExtensionPage();
+    }
+  });
+  webviewPanel.onDidDispose(() => messages.dispose());
 }
 
 export class DbmlStorageGuard implements vscode.Disposable {

@@ -79,6 +79,7 @@ import { saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles } from './providers/dirtyDocuments';
 import {
   DBML_STORAGE_MESSAGE, DbmlStorageGuard, OPEN_EXTENSION_PAGE_COMMAND, STORAGE_CHECKED_CONTEXT_KEY, openExtensionPage,
+  showDbmlStoragePage,
 } from './providers/dbmlStorageGuardUi';
 import { detectDbmlStorage } from './services/dbmlStorageGuard';
 
@@ -507,8 +508,16 @@ export const PRE_REGISTERED_COMMANDS = new Set([
  * custom editor for domain files. Used when no dbt project could be found so
  * the palette, sidebar welcome buttons and domain JSON files show a helpful
  * message instead of "command not found" / a blank editor error.
+ *
+ * `inDbmlStorage(documentPath)` says whether a diagram the stub editor opens
+ * belongs to a project a newer ERD Studio stored as DBML (a `.dbml` diagram
+ * tab restored from a session with that version): it then gets the DBML
+ * page, not "No dbt project found".
  */
-function registerFallbackCommands(context: vscode.ExtensionContext): void {
+function registerFallbackCommands(
+  context: vscode.ExtensionContext,
+  inDbmlStorage: (documentPath: string) => boolean,
+): void {
   const contributed = (context.extension.packageJSON as {
     contributes?: { commands?: Array<{ command: string }> };
   }).contributes?.commands ?? [];
@@ -527,7 +536,11 @@ function registerFallbackCommands(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(SUBJECT_AREA_EDITOR_VIEW_TYPE, {
-      resolveCustomTextEditor(_document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+      resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+        if (inDbmlStorage(document.uri.fsPath)) {
+          showDbmlStoragePage(panel);
+          return;
+        }
         panel.webview.options = { enableScripts: false };
         panel.webview.html =
           '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);padding:1.5em">' +
@@ -548,20 +561,29 @@ function registerFallbackCommands(context: vscode.ExtensionContext): void {
  * `erdStudio.dbmlStorage` (the views show the DBML message instead of "No dbt
  * project in this folder yet"), say so once, and make the views' link work.
  * Everything else is already a no-project stub, so nothing can write.
+ *
+ * Returns the check for one ERD Studio folder, which starts the same guard
+ * when it finds DBML storage there (a restored diagram tab can name a folder
+ * the workspace folders did not), so the views show the message too.
  */
-function guardDbmlStorageWithoutProject(context: vscode.ExtensionContext): void {
+function guardDbmlStorageWithoutProject(context: vscode.ExtensionContext): (semanticRoot: string) => boolean {
+  let guard: DbmlStorageGuard | undefined;
+  const guardIfDbml = (semanticRoot: string): boolean => {
+    if (detectDbmlStorage(semanticRoot) === null) { return false; }
+    if (guard === undefined) {
+      guard = new DbmlStorageGuard(semanticRoot);
+      // Publishes the context key and shows the once-per-session notice.
+      guard.isActive();
+      context.subscriptions.push(
+        guard,
+        vscode.commands.registerCommand(OPEN_EXTENSION_PAGE_COMMAND, () => openExtensionPage()),
+      );
+    }
+    return true;
+  };
   const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
-  const semanticRoot = workspaceFolderPaths()
-    .map((f) => path.join(f, semanticDir))
-    .find((root) => detectDbmlStorage(root) !== null);
-  if (semanticRoot === undefined) { return; }
-  const guard = new DbmlStorageGuard(semanticRoot);
-  // Publishes the context key and shows the once-per-session notice.
-  guard.isActive();
-  context.subscriptions.push(
-    guard,
-    vscode.commands.registerCommand(OPEN_EXTENSION_PAGE_COMMAND, () => openExtensionPage()),
-  );
+  workspaceFolderPaths().some((f) => guardIfDbml(path.join(f, semanticDir)));
+  return guardIfDbml;
 }
 
 /**
@@ -863,13 +885,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     telemetry.activation('no_project', false, 0);
     recordDetectedAssistants();
     recordPhysicalTooling(context);
-    // Register stub commands / editor so palette entries and the sidebar
-    // welcome buttons explain the problem instead of "command not found".
-    registerFallbackCommands(context);
     // The 1.9 pre-release and 2.0 work in a folder without dbt_project.yml,
     // and may have stored it as DBML: say that, not "No dbt project".
     // Before the welcome keys, so "No dbt project" never shows first.
-    guardDbmlStorageWithoutProject(context);
+    const guardIfDbml = guardDbmlStorageWithoutProject(context);
+    // Register stub commands / editor so palette entries and the sidebar
+    // welcome buttons explain the problem instead of "command not found".
+    // A diagram sits at <ERD Studio folder>/<layer>/<file>.
+    registerFallbackCommands(context, (documentPath) => guardIfDbml(path.dirname(path.dirname(documentPath))));
     publishProjectContextKeys(false);
     // A fresh install first activated without a dbt project (usually by
     // clicking the ERD Studio icon) still starts on the Get Started
