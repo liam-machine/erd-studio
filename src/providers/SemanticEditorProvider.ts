@@ -422,7 +422,7 @@ import {
   type AnnotationPositionPayload,
 } from './payloadValidation';
 import { sameName } from '../types/naming';
-import { DBML_STORAGE_MESSAGE, openExtensionPage } from './dbmlStorageGuardUi';
+import { DBML_STORAGE_MESSAGE, OPEN_EXTENSION_PAGE_BUTTON, openExtensionPage } from './dbmlStorageGuardUi';
 
 /**
  * Canvas messages still handled while the project is stored as DBML by a
@@ -696,7 +696,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   <p>${DBML_STORAGE_MESSAGE}</p>
   <p>Nothing has been changed. This version of ERD Studio won’t write into the project, so its files stay as the newer version left them.</p>
   <p><button id="update" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
-    background: var(--vscode-button-background); color: var(--vscode-button-foreground);">Update ERD Studio</button></p>
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground);">${OPEN_EXTENSION_PAGE_BUTTON}</button></p>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     document.getElementById('update').addEventListener('click', () => vscode.postMessage({ type: 'openExtensionPage' }));

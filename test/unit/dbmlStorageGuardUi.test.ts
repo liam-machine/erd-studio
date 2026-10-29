@@ -10,7 +10,7 @@ import {
   DBML_STORAGE_CONTEXT_KEY,
   DBML_STORAGE_MESSAGE,
   DbmlStorageGuard,
-  UPDATE_ERD_STUDIO_BUTTON,
+  OPEN_EXTENSION_PAGE_BUTTON,
   _resetDbmlStorageNoticeForTests,
   openExtensionPage,
 } from '../../src/providers/dbmlStorageGuardUi';
@@ -54,13 +54,13 @@ describe('DbmlStorageGuard', () => {
       ['setContext', DBML_STORAGE_CONTEXT_KEY, true],
     ]);
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(DBML_STORAGE_MESSAGE, UPDATE_ERD_STUDIO_BUTTON);
+    expect(warn).toHaveBeenCalledWith(DBML_STORAGE_MESSAGE, OPEN_EXTENSION_PAGE_BUTTON);
   });
 
   it('refuse() says why every time, and its button opens the extension page', async () => {
     const guard = new DbmlStorageGuard('/p/.erd-studio', () => EVIDENCE);
     guard.isActive();
-    warn.mockResolvedValue(UPDATE_ERD_STUDIO_BUTTON as never);
+    warn.mockResolvedValue(OPEN_EXTENSION_PAGE_BUTTON as never);
     expect(guard.refuse()).toBe(true);
     expect(guard.refuse()).toBe(true);
     expect(warn).toHaveBeenCalledTimes(3);

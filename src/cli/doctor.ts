@@ -381,10 +381,10 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
   if (r.erd.dbmlStorage) {
     steps.push({
       id: 'update-erd-studio',
-      title: 'Update ERD Studio',
+      title: 'Open this project with a newer ERD Studio',
       why: `${DBML_STORAGE_MESSAGE} (${r.erd.dbmlStorage.file} is a DBML file.) Until then, don't create or change files in `
         + `${r.semanticDir}/ by this version's conventions: they would sit beside the DBML files, and the newer version would `
-        + 'report them as conflicts. In VS Code: Extensions view → ERD Studio → Update (or Switch to Pre-Release Version).',
+        + 'report them as conflicts. In VS Code: Extensions view → ERD Studio → Switch to Pre-Release Version (or Update, once 2.0 is released).',
       command: null,
     });
   }

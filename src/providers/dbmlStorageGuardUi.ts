@@ -25,11 +25,15 @@ export { DBML_STORAGE_MESSAGE } from '../services/dbmlStorageGuard';
 /** True while the open project is stored as DBML (package.json `when` clauses). */
 export const DBML_STORAGE_CONTEXT_KEY = 'erdStudio.dbmlStorage';
 
-/** Code-only command behind the views' "Update ERD Studio" link: opens this extension's page. */
+/** Code-only command behind the views' "Open ERD Studio in Extensions" link: opens this extension's page. */
 export const OPEN_EXTENSION_PAGE_COMMAND = 'erdStudio.openExtensionPage';
 
-/** The button on the notification and on every refusal. */
-export const UPDATE_ERD_STUDIO_BUTTON = 'Update ERD Studio';
+/**
+ * The button on the notification and on every refusal. Not "Update": while
+ * 2.0 is unreleased the page it opens has no update for a stable user, only
+ * **Switch to Pre-Release Version**.
+ */
+export const OPEN_EXTENSION_PAGE_BUTTON = 'Open ERD Studio in Extensions';
 
 /** How long the `.dbml` watcher waits for a burst (a checkout) to settle. */
 const WATCH_DEBOUNCE_MS = 300;
@@ -61,8 +65,8 @@ export async function openExtensionPage(): Promise<void> {
 }
 
 function showDbmlStorageMessage(): void {
-  void Promise.resolve(vscode.window.showWarningMessage(DBML_STORAGE_MESSAGE, UPDATE_ERD_STUDIO_BUTTON)).then((choice) => {
-    if (choice === UPDATE_ERD_STUDIO_BUTTON) { void openExtensionPage(); }
+  void Promise.resolve(vscode.window.showWarningMessage(DBML_STORAGE_MESSAGE, OPEN_EXTENSION_PAGE_BUTTON)).then((choice) => {
+    if (choice === OPEN_EXTENSION_PAGE_BUTTON) { void openExtensionPage(); }
   });
 }
 
@@ -88,8 +92,8 @@ export class DbmlStorageGuard implements vscode.Disposable {
 
   /**
    * Call first in anything that writes into the ERD Studio folder: when the
-   * project is stored as DBML, tells the user (with an **Update ERD Studio**
-   * button) and returns true, and the caller stops.
+   * project is stored as DBML, tells the user (with an **Open ERD Studio in
+   * Extensions** button) and returns true, and the caller stops.
    */
   refuse(): boolean {
     if (!this.isActive()) { return false; }

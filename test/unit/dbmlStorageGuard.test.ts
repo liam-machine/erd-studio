@@ -74,8 +74,14 @@ describe('detectDbmlStorage: projects a newer ERD Studio stored as DBML', () => 
 
   it('the message says what happened and what to do', () => {
     expect(DBML_STORAGE_MESSAGE).toBe(
-      'This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). Update ERD Studio to open it.',
+      'This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). '
+        + 'To open it, switch ERD Studio to its pre-release version, or update to 2.0 once it is released.',
     );
+  });
+
+  it('names the pre-release switch: on the latest stable there is no update, only Switch to Pre-Release Version', () => {
+    expect(DBML_STORAGE_MESSAGE).toMatch(/switch ERD Studio to its pre-release version/);
+    expect(DBML_STORAGE_MESSAGE).not.toMatch(/Update ERD Studio to open it/);
   });
 });
 

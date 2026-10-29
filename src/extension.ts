@@ -456,7 +456,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.moveRelationshipsToLibrary',
   'erdStudio.exportDiagram',
   'erdStudio.migrateToTableNaming',
-  // Code-only: the DBML guard's "Update ERD Studio" link (dbmlStorageGuardUi).
+  // Code-only: the DBML guard's "Open ERD Studio in Extensions" link (dbmlStorageGuardUi).
   OPEN_EXTENSION_PAGE_COMMAND,
 ]);
 

@@ -39,7 +39,7 @@ afterEach(() => {
 });
 
 describe('erd-studio doctor', () => {
-  it('reports a DBML project as an error and puts Update ERD Studio first', async () => {
+  it('reports a DBML project as an error and puts the newer ERD Studio first', async () => {
     const root = path.join(tmp, 'p');
     makeDbmlProject(root);
     const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: tmp });
@@ -60,7 +60,9 @@ describe('erd-studio doctor', () => {
     });
     expect(code).toBe(0);
     expect(out).toContain(`✗ ${DBML_STORAGE_MESSAGE} (found ${found})`);
-    expect(out).toMatch(/Next steps:\n {2}1\. Update ERD Studio/);
+    expect(out).toMatch(/Next steps:\n {2}1\. Open this project with a newer ERD Studio/);
+    // On the latest stable there is nothing to update to: name the pre-release switch.
+    expect(r.nextSteps[0].why).toContain('Switch to Pre-Release Version');
   });
 
   it('says nothing about it for a YAML / JSON project (no key in the JSON)', async () => {
@@ -166,7 +168,8 @@ describe('package.json', () => {
       const dbml = pkg.contributes.viewsWelcome.filter((w) => w.view === view && w.when === 'erdStudio.dbmlStorage');
       expect(dbml, view).toHaveLength(1);
       expect(dbml[0].contents).toContain(DBML_STORAGE_MESSAGE);
-      expect(dbml[0].contents).toContain('(command:erdStudio.openExtensionPage)');
+      expect(dbml[0].contents).toContain('[Open ERD Studio in Extensions](command:erdStudio.openExtensionPage)');
+      expect(dbml[0].contents).not.toContain('Update ERD Studio');
     }
     const noTables = pkg.contributes.viewsWelcome.find((w) => w.contents.startsWith('No tables found'))!;
     expect(noTables.when).toBe('!erdStudio.dbmlStorage');

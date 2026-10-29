@@ -31,9 +31,15 @@ import * as path from 'path';
 import { CURRENT_SCHEMA_VERSION, LOGICAL_MODELS_DIR, NON_SUBJECT_AREA_DIRS, TABLES_DIR } from '@erd-studio/core';
 import { tablesDirIsLayer } from './logicalModelService';
 
-/** What the user is told, everywhere: views, refusals, the notification and `doctor`. */
+/**
+ * What the user is told, everywhere: views, refusals, the notification and
+ * `doctor`. While 2.0 is unreleased a stable user has nothing to update to:
+ * the extension page offers only **Switch to Pre-Release Version**, so the
+ * message names that first.
+ */
 export const DBML_STORAGE_MESSAGE =
-  'This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). Update ERD Studio to open it.';
+  'This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). '
+  + 'To open it, switch ERD Studio to its pre-release version, or update to 2.0 once it is released.';
 
 /**
  * The first core schema version that reads DBML storage (2.0's). Running on

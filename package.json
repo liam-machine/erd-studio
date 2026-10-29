@@ -337,7 +337,7 @@
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). Update ERD Studio to open it.\n\n[Update ERD Studio](command:erdStudio.openExtensionPage)\n\nThis version leaves the project's files as they are.",
+        "contents": "This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). To open it, switch ERD Studio to its pre-release version, or update to 2.0 once it is released.\n\n[Open ERD Studio in Extensions](command:erdStudio.openExtensionPage)\n\nThis version leaves the project's files as they are.",
         "when": "erdStudio.dbmlStorage"
       },
       {
@@ -352,7 +352,7 @@
       },
       {
         "view": "erdStudio.modelLibrary",
-        "contents": "This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). Update ERD Studio to open it.\n\n[Update ERD Studio](command:erdStudio.openExtensionPage)",
+        "contents": "This project is stored as DBML by a newer ERD Studio (the 1.9 pre-release or 2.0). To open it, switch ERD Studio to its pre-release version, or update to 2.0 once it is released.\n\n[Open ERD Studio in Extensions](command:erdStudio.openExtensionPage)",
         "when": "erdStudio.dbmlStorage"
       }
     ],

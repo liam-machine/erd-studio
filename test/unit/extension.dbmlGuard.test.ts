@@ -16,7 +16,7 @@ import {
   DBML_STORAGE_CONTEXT_KEY,
   DBML_STORAGE_MESSAGE,
   OPEN_EXTENSION_PAGE_COMMAND,
-  UPDATE_ERD_STUDIO_BUTTON,
+  OPEN_EXTENSION_PAGE_BUTTON,
   _resetDbmlStorageNoticeForTests,
 } from '../../src/providers/dbmlStorageGuardUi';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
@@ -143,7 +143,7 @@ describe('a project a newer ERD Studio stored as DBML', () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(contextKey()).toEqual([true]);
-    expect(dbmlWarnings()).toEqual([[DBML_STORAGE_MESSAGE, UPDATE_ERD_STUDIO_BUTTON]]);
+    expect(dbmlWarnings()).toEqual([[DBML_STORAGE_MESSAGE, OPEN_EXTENSION_PAGE_BUTTON]]);
     expect(snapshot(project)).toEqual(before);
   });
 
