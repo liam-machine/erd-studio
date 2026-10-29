@@ -230,7 +230,7 @@ templates in `references/dbt-setup.md`. `dbt parse` needs a profile to exist but
 nothing, so placeholder values (the templates' `env_var('…', 'placeholder')` defaults) are enough.
 
 If `erd.domainFormatIssues` lists files, say some existing diagrams use an older file format and
-suggest **ERD Studio: Migrate to v5** (Command Palette) before checking them. Show the checklist.
+suggest **ERD Studio: Migrate Subject Areas to the Central Table Library** (Command Palette) before checking them. Show the checklist.
 
 ## Stage 2 — Refresh dbt's project files
 
@@ -412,7 +412,7 @@ Then loop, following `references/verify-and-fix.md`, which maps every fix to its
   lists it as intentional): usually a typo or a model not built yet. Offer to rename it to the
   real dbt name or remove it from this domain. Never delete a table file in the library.
 - **`fix-model-yaml` / `fix-dbml-file`** first, always: the file does not parse — fix that line (DBML: `references/troubleshooting.md`), re-run the diff (a merge conflict: Stage 1). `resolve-format-conflicts`, `finish-dbml-conversion` and `import-dbml-file`: `references/troubleshooting.md`.
-- **`needsMigration`** — older file format; suggest **ERD Studio: Migrate to v5**, skip it now.
+- **`needsMigration`** — older file format; suggest **ERD Studio: Migrate Subject Areas to the Central Table Library**, skip it now.
 - Re-run the diff after each round of edits. **Stop after 3 rounds.** List what remains using
   each fix's `explain` text and suggest looking at it together with **⊕ Diff** on the canvas.
 

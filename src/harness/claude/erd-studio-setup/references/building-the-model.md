@@ -303,7 +303,7 @@ nothing else — a drafted extra column would show up as drift.
     `toModel`, `toColumn`, `cardinality`).
   - Never write one in both places, and never move existing relationships from one place to the
     other yourself — that is the user's choice, made with **ERD Studio: Move Relationships to
-    Model Library**, which explains the move and lets them settle conflicts.
+    Table Library**, which explains the move and lets them settle conflicts.
   - A foreign key over several columns (a Data Vault PIT or bridge, a multi-column natural key)
     is one entry per column pair, all sharing one `compositeKey` (e.g. `fk_sat_customer`), as the
     `/erd-studio` skill's "Composite foreign keys" shows.

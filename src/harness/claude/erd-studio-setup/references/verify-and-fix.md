@@ -39,7 +39,7 @@ Per domain (`domains[i]`):
 |---|---|
 | `file`, `domain`, `layer` | Which diagram this is |
 | `error` | Set when this one domain could not be checked; explain it and move on. Code `merge-conflict`: the diagram file holds git conflict markers — follow troubleshooting.md → "Merge conflicts" |
-| `needsMigration` | The domain uses the older (v4) format. There are no fixes; suggest **ERD Studio: Migrate to v5** from the Command Palette, then re-run |
+| `needsMigration` | The domain uses the older (v4) format. There are no fixes; suggest **ERD Studio: Migrate Subject Areas to the Central Table Library** from the Command Palette, then re-run |
 | `clean` | No blocking differences in this domain |
 | `counts.blocking` / `counts.advisory` | How many differences of each kind |
 | `counts.matchedModels` / `matchedColumns` / `matchedRelationships` | What matched — use these in the success line |
