@@ -181,6 +181,22 @@ export function renameUnsavedFile(filePath: string, workspaceRoot: string): Comm
   };
 }
 
+/**
+ * A DBML diagram's rename would move its layout file onto one already there
+ * (a `.dbdiagram` left behind, say by a delete that couldn't remove it): VS
+ * Code would refuse the edit every time, so this is said before anything
+ * changes, and is the user's to tidy.
+ */
+export function renameLayoutInTheWay(oldName: string, newName: string, layoutPath: string, workspaceRoot: string): CommandFailure {
+  return {
+    title: RENAME_DIAGRAM_TITLE,
+    message: `"${oldName}" can't be renamed to "${newName}": its layout file would replace ${projectRelative(workspaceRoot, layoutPath)}, ` +
+      'which is already there. Delete or move that file, then try again. Nothing was changed.',
+    buttons: [SHOW_FILE_BUTTON],
+    target: layoutPath,
+  };
+}
+
 /** Saving the diagram's unsaved changes failed, so the delete or rename stopped. */
 export function unsavedSaveFailure(name: string, operation: 'deleting' | 'renaming'): CommandFailure {
   return {

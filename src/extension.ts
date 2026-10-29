@@ -84,6 +84,7 @@ import {
   layoutDeleteFailure,
   layersFailure,
   renameReadFailure,
+  renameLayoutInTheWay,
   renameRefused,
   renameUnsavedFile,
   unsavedSaveFailure,
@@ -2802,6 +2803,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               undefined,
               { openIt: () => vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(taken), SUBJECT_AREA_EDITOR_VIEW_TYPE) },
             );
+            return false;
+          }
+          // Nor may the layout file land on one already there (a `.dbdiagram`
+          // a delete left behind): VS Code would refuse the edit every time.
+          const deleted = new Set(writes.filter((w) => w.kind === 'delete').map((w) => w.path.toLowerCase()));
+          const inTheWay = writes.find((w) => w.kind === 'create' && w.path !== newFilePath && fs.existsSync(w.path) && !deleted.has(w.path.toLowerCase()));
+          if (inTheWay !== undefined) {
+            showCommandFailure(renameLayoutInTheWay(oldDomainName, newSlug, inTheWay.path, workspaceRoot), undefined);
             return false;
           }
 

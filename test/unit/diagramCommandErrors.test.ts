@@ -14,6 +14,7 @@ import {
   layerGone,
   layersFailure,
   layoutDeleteFailure,
+  renameLayoutInTheWay,
   renameReadFailure,
   renameRefused,
   renameUnsavedFile,
@@ -253,6 +254,18 @@ describe('a DBML diagram\'s layout file (.dbdiagram, §5.7)', () => {
       'Delete Diagram hit a problem in ERD Studio while deleting the layout file, so .erd-studio/gold/orders.dbdiagram is still there ' +
         "(the diagram was deleted). This isn't something you did. Please send us a report.",
     );
+    expectNoRawError(f);
+  });
+
+  it('Rename: a layout file already under the new name is the user\'s to tidy, with Show File', () => {
+    const f = renameLayoutInTheWay('sales', 'orders', LAYOUT, ROOT);
+    expect(f).toMatchObject({
+      title: 'Rename Diagram',
+      message: '"sales" can\'t be renamed to "orders": its layout file would replace .erd-studio/gold/orders.dbdiagram, ' +
+        'which is already there. Delete or move that file, then try again. Nothing was changed.',
+      buttons: ['Show File'],
+      target: LAYOUT,
+    });
     expectNoRawError(f);
   });
 

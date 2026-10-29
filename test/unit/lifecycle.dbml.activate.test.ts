@@ -368,6 +368,23 @@ describe('in a native DBML project', () => {
       expect(bytes()).toEqual(before);
     });
 
+    it('Rename: a layout file left behind under the new name is said before anything changes, not a refusal to Try Again', async () => {
+      // As a Delete whose layout file couldn't be removed leaves it.
+      fs.writeFileSync(erd('gold', 'revenue.dbdiagram'), '{}\n');
+      await activate(context);
+      const before = bytes();
+      vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
+      const apply = vi.spyOn(vscode.workspace, 'applyEdit');
+      await vscode.commands.executeCommand('erdStudio.renameDomain', sales());
+      expect(toasts()).toEqual([{
+        message: '"sales" can\'t be renamed to "revenue": its layout file would replace .erd-studio/gold/revenue.dbdiagram, ' +
+          'which is already there. Delete or move that file, then try again. Nothing was changed.',
+        buttons: ['Show File'],
+      }]);
+      expect(apply).not.toHaveBeenCalled();
+      expect(bytes()).toEqual(before);
+    });
+
     it('Rename: a .dbml with a DBML mistake says where, with Open File', async () => {
       fs.appendFileSync(erd('gold', 'sales.dbml'), '\nTable broken {\n');
       await activate(context);
