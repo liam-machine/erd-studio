@@ -225,3 +225,33 @@ describe('Table Library tree with the real library', () => {
     provider.dispose();
   });
 });
+
+describe('both trees log how long a render took (debug, in the ERD Studio log)', () => {
+  it('the Subject Areas root and each layer, and the Table Library root (marked when read from scratch)', async () => {
+    const { setLogSink } = await import('../../src/services/logger');
+    const lines: string[] = [];
+    const at = (level: string) => (message: string | Error) => { lines.push(`${level} ${String(message)}`); };
+    setLogSink({ trace: at('trace'), debug: at('debug'), info: at('info'), warn: at('warn'), error: at('error') });
+    try {
+      write('tables/gold/fct_sale.dbml', dbmlTable('fct_sale'));
+      write('gold/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n\nuse { table fct_sale } from '../tables/gold/fct_sale.dbml'\n");
+      const { layerService, subjectAreaService, tableLibraryService } = services();
+      const areas = new SubjectAreaTreeProvider(subjectAreaService, layerService, root);
+      for (const layer of areas.getChildren() ?? []) areas.getChildren(layer);
+      const library = new TableLibraryTreeProvider(tableLibraryService, subjectAreaService, root, '.erd-studio', () => layerService.getAllLayers());
+      library.getChildren();
+      library.getChildren();
+
+      expect(lines).toContainEqual(expect.stringMatching(/^debug \[Subject Areas\] Listed 2 layers in \d+ ms$/));
+      expect(lines).toContainEqual(expect.stringMatching(/^debug \[Subject Areas\] Layer gold listed 1 diagram in \d+ ms$/));
+      const libraryLines = lines.filter((l) => l.startsWith('debug [Table Library] Listed'));
+      expect(libraryLines).toHaveLength(2);
+      expect(libraryLines[0]).toMatch(/Listed 1 row in \d+ ms \(library read from scratch\)$/);
+      // The second render may read from scratch again: files written this instant are not trusted yet.
+      expect(libraryLines[1]).toMatch(/listed 1 row in \d+ ms/i);
+      expect(lines).toContainEqual(expect.stringMatching(/^debug \[Table Library\] Library index built: 1 table file\(s\)/));
+    } finally {
+      setLogSink(undefined);
+    }
+  });
+});

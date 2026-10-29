@@ -58,3 +58,18 @@
   outline: 1px solid var(--focus-border);
   outline-offset: 1px;
 }
+
+.reconnect-overlay__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.reconnect-overlay__button--secondary {
+  background: transparent;
+  color: var(--editor-fg);
+  border: 1px solid var(--panel-border);
+}
+
+.reconnect-overlay__button--secondary:hover {
+  background: var(--selection-bg);
+}

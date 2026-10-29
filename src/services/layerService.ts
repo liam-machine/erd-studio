@@ -24,6 +24,7 @@ import {
 import { LAYERS_CONFIG_FILE, validateLayersConfig } from '@erd-studio/core';
 import { LOGICAL_MODELS_DIR, TABLES_DIR, hasTablesLibrary } from './logicalModelService';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
+import { log } from './logger';
 
 // Validation of layers.json lives in @erd-studio/core; the file name is
 // re-exported so existing imports of this module keep working.
@@ -155,7 +156,7 @@ export class LayerService {
    * saveConfig can refuse to overwrite the broken file with these defaults.
    */
   private fallbackToDefaults(reason: string): LayersConfigFile {
-    console.error(`[LayerService] ${reason}`);
+    log.error(`[LayerService] ${reason}`);
     this.loadError = reason;
     return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: cloneLayers(DEFAULT_LAYERS) };
   }
@@ -188,7 +189,7 @@ export class LayerService {
    * Returns valid config or falls back to defaults on error.
    */
   private validateConfig(data: unknown): LayersConfigFile {
-    const r = validateLayersConfig(data, (m) => console.warn(`[LayerService] ${m}`));
+    const r = validateLayersConfig(data, (m) => log.warn(`[LayerService] ${m}`));
     return r.ok ? r.config : this.fallbackToDefaults(r.reason);
   }
 
@@ -205,7 +206,7 @@ export class LayerService {
     try {
       entries = fs.readdirSync(this.semanticPath, { withFileTypes: true });
     } catch (err) {
-      console.warn(
+      log.warn(
         `[LayerService] Unable to read directory ${this.semanticPath}: ` +
         `${err instanceof Error ? err.message : String(err)}`,
       );

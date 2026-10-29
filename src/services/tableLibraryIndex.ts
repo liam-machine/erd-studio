@@ -24,6 +24,9 @@ import * as path from 'path';
 
 import { LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, TABLES_DIR, classifySemanticFile, isLibraryFolderName } from '@erd-studio/core';
 import type { TableFileEntry } from './logicalModelService';
+import { createLogger } from './logger';
+
+const indexLog = createLogger('Table Library');
 
 /** One directory entry as listed (`readdirSync` with file types). */
 export interface ListedName {
@@ -335,6 +338,7 @@ export class TableLibraryIndex {
     this.data = data;
     this.validation = { paths, sigs, racy: newest >= startedAt - RACY_MS };
     this.builds++;
+    indexLog.debug(`Library index built: ${data.tableFiles.size} table file(s), ${paths.length} folder(s) watched, ${Date.now() - startedAt} ms`);
     return data;
   }
 

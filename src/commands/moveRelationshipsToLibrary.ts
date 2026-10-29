@@ -63,6 +63,7 @@ import { detectSubjectAreaFormat } from '../types/semantic';
 import type { Relationship, SemanticTable } from '../types/semantic';
 import type { SubjectAreaService } from '../services/domainService';
 import type { TableLibraryService } from '../services/logicalModelService';
+import { log } from '../services/logger';
 
 const TITLE = 'Move Relationships to Table Library';
 
@@ -175,7 +176,7 @@ class MoveStopped extends Error {
  */
 function showErrorWithActions(message: string, actions: ErrorActions): void {
   showErrorWith((m, ...items) => vscode.window.showErrorMessage(m, ...items), message, actions, (choice, err) => {
-    console.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+    log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
     const doing = `while running ${choice}`;
     showErrorWithActions(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
   });
@@ -237,7 +238,7 @@ export async function moveRelationshipsToLibrary(deps: MoveRelationshipsDeps): P
     await runMove(deps, progress, retry);
   } catch (err) {
     telemetry.error('relMoveFailed');
-    console.error('[moveRelationshipsToLibrary] failed:', err);
+    log.error('[moveRelationshipsToLibrary] failed:', err);
     if (err instanceof MoveStopped) {
       showErrorWithActions(`${TITLE}: ${err.message}`, {
         ...(err.filePath ? { [OPEN_FILE_BUTTON]: openFile(err.filePath) } : {}),
@@ -448,7 +449,7 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
   const broken = checkLibraryRewrite(readModels, nextModels, [...plan.toLibrary, ...plan.rehome.map((r) => r.to)]);
   if (broken.length > 0) {
     telemetry.relationshipInvariants(broken);
-    console.warn(`[moveRelationshipsToLibrary] relationship self-check: ${broken.join(', ')}`);
+    log.warn(`[moveRelationshipsToLibrary] relationship self-check: ${broken.join(', ')}`);
   }
 
   // All or nothing: if one write fails, every file already written is put back.
@@ -484,7 +485,7 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
     await deps.onWritten(domainPaths);
   } catch (err) {
     // The files are written; a failed refresh must not report the move as failed.
-    console.error('[moveRelationshipsToLibrary] refresh after the move failed:', err);
+    log.error('[moveRelationshipsToLibrary] refresh after the move failed:', err);
   }
 
   const moved = plan.toLibrary.length;

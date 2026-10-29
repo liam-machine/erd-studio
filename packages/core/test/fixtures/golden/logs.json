@@ -12,10 +12,10 @@
   "domain-one-to-many.host": [],
   "domain-one-to-many.unified": [],
   "duplicate-key.host": [
-    "warn: [LogicalModelService] Model \"dim_customer\": \"description\" is written twice in one block (line 4); the last value is used"
+    "warn: [LogicalModelService] <root>/.erd-studio/logical-models/dim_customer.yml:4: Model \"dim_customer\": \"description\" is written twice in one block (line 4); the last value is used"
   ],
   "duplicate-key.unified": [
-    "warn: [LogicalModelService] Model \"dim_customer\": \"description\" is written twice in one block (line 4); the last value is used"
+    "warn: [LogicalModelService] <root>/.erd-studio/logical-models/dim_customer.yml:4: Model \"dim_customer\": \"description\" is written twice in one block (line 4); the last value is used"
   ],
   "errors.array.host": [
     "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/array.json does not contain a JSON object"
@@ -72,13 +72,13 @@
   "library-relationships.unified": [],
   "missing-model.host": [
     "warn: [DomainService] Model \"dim_missing\" not found in the table library",
-    "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
+    "error: [LogicalModelService] <root>/.erd-studio/logical-models/broken.yml:5:3: Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
     "warn: [DomainService] Model \"broken\": logical-models file has a YAML error on line 5",
     "warn: [DomainService] Model \"nameless\" not found in the table library"
   ],
   "missing-model.unified": [
     "warn: [DomainService] Model \"dim_missing\" not found in the table library",
-    "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
+    "error: [LogicalModelService] <root>/.erd-studio/logical-models/broken.yml:5:3: Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
     "warn: [DomainService] Model \"broken\": logical-models file has a YAML error on line 5",
     "warn: [DomainService] Model \"nameless\" not found in the table library"
   ],

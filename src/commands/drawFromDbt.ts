@@ -63,6 +63,7 @@ import type { CatalogData } from '../types/catalog';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import { RESERVED_TABLE_NAME_MESSAGE } from '../types/naming';
+import { log } from '../services/logger';
 
 export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
 
@@ -147,7 +148,7 @@ export async function drawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtRes
 function showErrorWithActions(message: string, actions: ErrorActions): void {
   // A button that fails (a re-run whose dbt read throws) still says so, rather than seeming to do nothing.
   showErrorWith((m, ...items) => vscode.window.showErrorMessage(m, ...items), message, actions, (choice, err) => {
-    console.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+    log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
     const doing = `while running ${choice}`;
     showErrorWithActions(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
   });

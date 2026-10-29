@@ -52,6 +52,7 @@ import type { NamingMigrationPlan } from '../services/namingMigration';
 import { readNamingMigrationInput } from '../services/namingMigrationFiles';
 import { ownWrites } from '../services/ownWriteTracker';
 import { telemetry } from '../services/telemetryService';
+import { log } from '../services/logger';
 
 export const MIGRATE_NAMING_TITLE = 'Migrate to the New File Naming';
 
@@ -129,7 +130,7 @@ function showErrorWithActions(
   show: (message: string, ...items: string[]) => PromiseLike<string | undefined> = (m, ...items) => vscode.window.showErrorMessage(m, ...items),
 ): void {
   showErrorWith(show, message, actions, (choice, err) => {
-    console.error(`[ERD Studio] ${MIGRATE_NAMING_TITLE}: "${choice}" failed:`, err);
+    log.error(`[ERD Studio] ${MIGRATE_NAMING_TITLE}: "${choice}" failed:`, err);
     const doing = `while running ${choice}`;
     showErrorWithActions(oursMessage(MIGRATE_NAMING_TITLE, doing, 'nothing more was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
   });
@@ -221,7 +222,7 @@ export async function migrateToTableNaming(deps: MigrateNamingDeps): Promise<Mig
   try {
     return await runMigration(deps, progress, retry);
   } catch (err) {
-    console.error('[migrateNaming] failed:', err);
+    log.error('[migrateNaming] failed:', err);
     if (err instanceof V5StepFailed) {
       // The v4 step counted its own failure, and writes its files one by one.
       const doing = 'while converting the v4 subject areas';

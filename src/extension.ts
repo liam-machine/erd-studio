@@ -98,6 +98,8 @@ import { applyFileWrites } from './providers/applyFileWrites';
 import type { FileWrite } from './services/fileWrites';
 import { saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles, openOrDiskText } from './providers/dirtyDocuments';
+import { log, elapsedMs, setLogSink } from './services/logger';
+import { LOG_CHANNEL_NAME, SHOW_LOGS_COMMAND } from './services/showLogs';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -168,7 +170,7 @@ async function openWalkthrough(fallback: () => void): Promise<void> {
     telemetry.feature('walkthroughOpened');
   } catch (err) {
     telemetry.error('walkthroughFailed');
-    console.warn('[ERD Studio] Could not open the walkthrough, showing the Welcome panel instead:', err);
+    log.warn('[ERD Studio] Could not open the walkthrough, showing the Welcome panel instead:', err);
     fallback();
   }
 }
@@ -505,6 +507,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.exportAllDiagrams',
   'erdStudio.migrateToTableNaming',
   'erdStudio.convertProjectToDbml',
+  'erdStudio.showLogs',
 ]);
 
 /**
@@ -516,6 +519,7 @@ export const PRE_REGISTERED_COMMANDS = new Set([
   'erdStudio.reportBug',
   'erdStudio.showGettingStarted',
   'erdStudio.trySampleProject',
+  'erdStudio.showLogs',
 ]);
 
 /**
@@ -802,8 +806,39 @@ function noProjectGettingStartedDeps(): GettingStartedDeps {
   };
 }
 
+/**
+ * One line that says what kind of project this is, for anyone reading the log
+ * of a slow or broken one: storage, table and diagram counts, dbt or not.
+ * Never throws (a count that fails is shown as `?`).
+ */
+export function logProjectSummary(facts: {
+  storage: ProjectStorage;
+  tables: () => number;
+  diagrams: () => number;
+  hasDbt: boolean;
+  activationMs: number;
+}): void {
+  const count = (read: () => number): string => {
+    try { return String(read()); } catch { return '?'; }
+  };
+  const storage = facts.storage === 'dbml' ? 'DBML' : facts.storage === 'yaml' ? 'YAML' : 'mixed (DBML and YAML)';
+  log.info(
+    `Project: ${storage} storage, ${count(facts.tables)} table file(s), ${count(facts.diagrams)} diagram(s), ` +
+      `${facts.hasDbt ? 'dbt project' : 'no dbt project (logical only)'}; activated in ${facts.activationMs} ms`,
+  );
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  console.log('ERD Studio is now active');
+  // The ERD Studio output channel (a LogOutputChannel: the user picks its
+  // level). Plugged in first so every later line reaches it.
+  const activationStart = Date.now();
+  const outputChannel = vscode.window.createOutputChannel(LOG_CHANNEL_NAME, { log: true });
+  setLogSink(outputChannel);
+  context.subscriptions.push(outputChannel, { dispose: () => { setLogSink(undefined); } });
+  log.info(
+    `ERD Studio ${String(context.extension.packageJSON.version ?? 'unknown')} activating ` +
+      `(VS Code ${vscode.version}, ${process.platform} ${process.arch})`,
+  );
 
   // Auto-recover from extension updates that orphaned an open domain canvas.
   // VS Code 1.88+ restarts the extension host without a window reload when
@@ -875,6 +910,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // "Show Logs" opens the ERD Studio output channel; it works in any window.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(SHOW_LOGS_COMMAND, () => { outputChannel.show(true); }),
+  );
+
   const projectResolution = resolveWorkspaceProject(context);
   const workspaceRoot = projectResolution.root;
   // Logical-only mode: a root without dbt_project.yml (any folder now opens).
@@ -919,7 +959,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return;
   }
 
-  console.log(hasDbt
+  log.info(hasDbt
     ? `ERD Studio: Found dbt project at ${workspaceRoot}`
     : `ERD Studio: Opened ${workspaceRoot} (no dbt_project.yml: logical-only)`);
 
@@ -959,7 +999,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   } catch (err) {
     // Never let a filesystem oddity (permissions, dangling symlink, …) in a
     // legacy folder abort activation — the rest of the extension still works.
-    console.error('[ERD Studio] Legacy erd-studio/ migration failed:', err);
+    log.error('[ERD Studio] Legacy erd-studio/ migration failed:', err);
   }
 
   // Read target-path / model-paths / seed-paths / snapshot-paths from
@@ -1194,6 +1234,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   const refreshContextKeys = viewRefreshes.gate('contextKeys', refreshContextKeysNow);
   refreshContextKeys();
+  logProjectSummary({
+    storage: knownStorage,
+    tables: () => tableLibraryService.listTableFiles().length,
+    diagrams: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length,
+    hasDbt,
+    activationMs: elapsedMs(activationStart),
+  });
 
   // The one domain picker: straight to the only domain, a QuickPick when
   // there are several. Shared by openCanvas and Export Diagram.
@@ -1314,7 +1361,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               );
             }
           } catch (err) {
-            console.error('[ERD Studio] Manifest retry failed:', err);
+            log.error('[ERD Studio] Manifest retry failed:', err);
           }
         }, 2000);
       } else {
@@ -2329,7 +2376,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             modelFolder = folderChoice.value;
           }
         } catch {
-          console.warn('[createDomain] Failed to load manifest for folder detection, skipping folder picker');
+          log.warn('[createDomain] Failed to load manifest for folder detection, skipping folder picker');
         }
 
         // Step 5: Create the diagram file: `.dbml` in a project that writes DBML
@@ -2708,7 +2755,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
           if (result.errors.length > 0) {
             for (const err of result.errors) {
-              console.warn(`[LegacyTagCleanup] ${err}`);
+              log.warn(`[LegacyTagCleanup] ${err}`);
             }
           }
 

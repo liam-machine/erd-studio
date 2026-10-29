@@ -9,6 +9,7 @@
  */
 
 import * as vscode from 'vscode';
+import { log } from './logger';
 
 /**
  * Custom editor viewType for the domain canvas. Single source of truth — keep
@@ -49,7 +50,7 @@ export async function saveAllAndReload(reason: string): Promise<boolean> {
   try {
     await vscode.commands.executeCommand('workbench.action.files.saveAll');
   } catch (err) {
-    console.error('[ERD Studio] saveAll command threw:', err);
+    log.error('[ERD Studio] saveAll command threw:', err);
   }
 
   // saveAll returns void and won't surface per-file failures (read-only files,

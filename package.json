@@ -236,6 +236,12 @@
         "icon": "$(comment-discussion)"
       },
       {
+        "command": "erdStudio.showLogs",
+        "title": "Show Logs",
+        "category": "ERD Studio",
+        "icon": "$(output)"
+      },
+      {
         "command": "erdStudio.showGettingStarted",
         "title": "Watch Getting Started Video",
         "category": "ERD Studio",
@@ -615,6 +621,11 @@
           "command": "erdStudio.reportBug",
           "when": "view == erdStudio.domainTree",
           "group": "navigation@9"
+        },
+        {
+          "command": "erdStudio.showLogs",
+          "when": "view == erdStudio.domainTree",
+          "group": "9_help@1"
         },
         {
           "command": "erdStudio.refreshMyReports",

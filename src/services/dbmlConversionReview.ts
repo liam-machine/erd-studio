@@ -313,6 +313,8 @@ export type ConvertPanelToHost =
   | { type: 'cancel' }
   | { type: 'checkAgain' }
   | { type: 'sendFeedback' }
+  /** The refused page's Show Logs: opens the ERD Studio output channel. */
+  | { type: 'showLogs' }
   | { type: 'open'; index: number };
 
 /**
@@ -328,6 +330,7 @@ export function isConvertPanelToHost(value: unknown, openable: number): value is
     case 'cancel':
     case 'checkAgain':
     case 'sendFeedback':
+    case 'showLogs':
       return true;
     case 'open':
       return typeof msg.index === 'number' && Number.isInteger(msg.index) && msg.index >= 0 && msg.index < openable;
@@ -440,8 +443,8 @@ const SCRIPT = `
       vscode.postMessage({ type: 'open', index: Number(target.getAttribute('data-index')) });
       return;
     }
-    if (action === 'sendFeedback') {
-      vscode.postMessage({ type: 'sendFeedback' });
+    if (action === 'sendFeedback' || action === 'showLogs') {
+      vscode.postMessage({ type: action });
       return;
     }
     if (action === 'convert') { lock(target, 'Converting\\u2026'); }
@@ -482,6 +485,7 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
       (view.checkAgain ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="checkAgain">Check Again</button>' : '') +
       '<button type="button" class="cdb__button" data-action="convert">Convert</button>'
     : '<button type="button" class="cdb__button cdb__button--secondary" data-action="cancel">Close</button>' +
+      '<button type="button" class="cdb__button cdb__button--secondary" data-action="showLogs">Show Logs</button>' +
       (view.reportable ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="sendFeedback">Send Feedback</button>' : '') +
       '<button type="button" class="cdb__button" data-action="checkAgain">Check Again</button>';
   return `<!DOCTYPE html>

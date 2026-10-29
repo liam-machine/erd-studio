@@ -139,6 +139,9 @@ export const workspace = {
   },
 };
 
+/** Every output channel created, oldest first (tests read `_lines` and `_shown`). */
+export const _outputChannels: Array<{ name?: string; _lines: string[]; _shown: number }> = [];
+
 export const window = {
   showInformationMessage: async () => undefined,
   showWarningMessage: async () => undefined,
@@ -147,11 +150,32 @@ export const window = {
   showQuickPick: async () => undefined,
   showOpenDialog: async () => _mockOpenDialogResult,
   setStatusBarMessage: (_message: string, _hideAfterTimeout?: number) => ({ dispose: () => {} }),
-  createOutputChannel: () => ({
-    appendLine: () => {},
-    show: () => {},
-    dispose: () => {},
-  }),
+  /** A plain channel, or with `{ log: true }` a LogOutputChannel whose lines are kept in `_lines` (`[level] message args`). */
+  createOutputChannel: (name?: string, _options?: unknown) => {
+    const lines: string[] = [];
+    const at = (level: string) => (message: unknown, ...args: unknown[]) => {
+      lines.push([`[${level}] ${message instanceof Error ? message.message : String(message)}`, ...args.map((a) => (a instanceof Error ? a.message : String(a)))].join(' '));
+    };
+    const channel = {
+      name,
+      _lines: lines,
+      _shown: 0,
+      appendLine: (line: string) => { lines.push(line); },
+      append: (text: string) => { lines.push(text); },
+      show: () => { channel._shown++; },
+      hide: () => {},
+      clear: () => { lines.length = 0; },
+      dispose: () => {},
+      logLevel: 2,
+      trace: at('trace'),
+      debug: at('debug'),
+      info: at('info'),
+      warn: at('warn'),
+      error: at('error'),
+    };
+    _outputChannels.push(channel);
+    return channel;
+  },
   showTextDocument: async () => undefined,
   /** Runs the task immediately with a no-op progress reporter. */
   withProgress: async <R>(

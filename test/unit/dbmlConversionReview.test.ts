@@ -129,6 +129,8 @@ describe('buildConvertReview', () => {
     expect(html).toContain('>Check Again</button>');
     expect(html).toContain('are kept as // lines');
     expect(html).not.toContain('data-action="sendFeedback"');
+    // Something stopped it: the log says what Convert read and found.
+    expect(html).toContain('data-action="showLogs">Show Logs</button>');
     expect(view.intro[0]).toBe('Fix these and save, then choose Check Again. Nothing was changed.');
     expect(view.reportable).toBeUndefined();
   });
@@ -166,7 +168,7 @@ describe('buildConvertReview', () => {
 
 describe('isConvertPanelToHost', () => {
   it('accepts the four messages, and an Open only by a whole index into the host list', () => {
-    for (const type of ['convert', 'cancel', 'checkAgain', 'sendFeedback']) expect(isConvertPanelToHost({ type }, 0)).toBe(true);
+    for (const type of ['convert', 'cancel', 'checkAgain', 'sendFeedback', 'showLogs']) expect(isConvertPanelToHost({ type }, 0)).toBe(true);
     expect(isConvertPanelToHost({ type: 'open', index: 0 }, 1)).toBe(true);
   });
 
@@ -253,6 +255,20 @@ describe('ConvertToDbmlPanel', () => {
     expect((show.mock.calls[0][1] as { selection: vscode.Range }).selection.start.line).toBe(292);
     await panel._simulateMessage({ type: 'checkAgain' });
     expect(await choice).toBe('checkAgain');
+  });
+
+  it('Show Logs opens the ERD Studio log and leaves the run waiting', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    void ConvertToDbmlPanel.show(refusedContent());
+    await vscode.window._webviewPanels[0]._simulateMessage({ type: 'showLogs' });
+    expect(exec).toHaveBeenCalledWith('erdStudio.showLogs');
+    expect(ConvertToDbmlPanel.currentPanel?.waiting).toBe(true);
+  });
+
+  it('the review page (nothing failed) offers no Show Logs', () => {
+    const { view } = buildConvertReview(plan({ creates: [{ path: 'tables/a.dbml', text: 'Table a {}' }] as DbmlConversionPlan['creates'] }), { display, introLines: [] });
+    expect(view.mode).toBe('review');
+    expect(buildConvertPanelHtml(view, 'n')).not.toContain('data-action="showLogs"');
   });
 
   it('Send Feedback runs Report Bug with the host\'s prefill, only on a reportable refused page', async () => {

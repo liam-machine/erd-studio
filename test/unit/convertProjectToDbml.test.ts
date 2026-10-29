@@ -48,6 +48,7 @@ import { YmlParserService } from '../../src/services/ymlParserService';
 import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
 import { telemetry } from '../../src/services/telemetryService';
+import { clearLogBuffer, recentLogLines } from '../../src/services/logger';
 
 const CORE_FIXTURES = path.resolve(__dirname, '../../packages/core/test/fixtures');
 const TWIN = path.join(CORE_FIXTURES, 'dbml', 'composite-and-self', '.erd-studio');
@@ -415,7 +416,7 @@ describe('convertProjectToDbml', () => {
     expect(await convertProjectToDbml(deps({ holdRefreshes }))).toBe('failed');
     expect(telemetryError).toHaveBeenCalledWith('convertToDbmlFailed');
     expect(String(error.mock.calls[0][0])).not.toContain('/secret/path');
-    expect(error.mock.calls[0].slice(1)).toEqual(['Send Feedback', 'Try Again']);
+    expect(error.mock.calls[0].slice(1)).toEqual(['Send Feedback', 'Try Again', 'Show Logs']);
   });
 
   it('a failure after the edit applied counts the conversion, not a failure', async () => {
@@ -567,6 +568,35 @@ describe('convertProjectToDbml', () => {
     expect(shown[0].view.intro).toContain(CONVERT_RESUME_LINE);
     expect(shown[0].view.sections.map((x) => x.id)).toContain('resumed');
     expect(snapshot()).toEqual(snapshot(TWIN));
+  });
+});
+
+describe('the ERD Studio log', () => {
+  it('a conversion logs what it read, each planning and writing phase with its time, and the outcome', async () => {
+    useFixture('composite-and-self');
+    clearLogBuffer();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    const lines = recentLogLines().map((l) => l.replace(/^\S+ \[\w+\] /, '')).filter((l) => l.startsWith('[Convert to DBML]'));
+    expect(lines).toContainEqual(expect.stringMatching(/^\[Convert to DBML\] Read \d+ files \(3 tables, 1 diagram\)$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^\[Convert to DBML\] Plan: Reading the project… took \d+ ms$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^\[Convert to DBML\] Plan: \d+ creates?, \d+ replaces?, \d+ deletes?, 0 refusals, 0 files left as is in \d+ ms$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^\[Convert to DBML\] Applying \d+ file writes$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^\[Convert to DBML\] Apply: Writing \d+ files… took \d+ ms$/));
+    expect(lines.at(-1)).toMatch(/^\[Convert to DBML\] Apply: converted in \d+ ms$/);
+  });
+
+  it('a refused conversion logs each problem', async () => {
+    useFixture('library-relationships');
+    fs.mkdirSync(path.join(erd, 'tables'), { recursive: true });
+    fs.writeFileSync(path.join(erd, 'tables', 'old.json'), JSON.stringify({ schemaVersion: 5, domain: 'old', layer: 'tables', logical: { models: [], relationships: [] } }));
+    clearLogBuffer();
+    answerPanel((panel) => panel._simulateMessage({ type: 'cancel' }));
+    expect(await convertProjectToDbml(deps())).toBe('refused');
+    const lines = recentLogLines();
+    expect(lines.some((l) => /\[warn\] \[Convert to DBML\] Stopped before writing: 1 problem/.test(l))).toBe(true);
+    expect(lines.some((l) => /\[warn\] \[Convert to DBML\] Problem: This project has a layer called "tables"/.test(l))).toBe(true);
   });
 });
 

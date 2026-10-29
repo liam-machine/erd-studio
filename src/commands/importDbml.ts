@@ -71,6 +71,7 @@ import type { TableLibraryService } from '../services/logicalModelService';
 import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
+import { log } from '../services/logger';
 
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
 
@@ -216,7 +217,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   const showError = (message: string, actions: ErrorActions = {}): void => {
     // A button that fails (a re-run whose read throws) still says so, rather than seeming to do nothing.
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
-      console.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+      log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
       const doing = `while running ${choice}`;
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
     });
@@ -234,7 +235,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   try {
     text = stripBom(await ui.readFile(filePath));
   } catch (err) {
-    console.error(`[ERD Studio] ${TITLE}: could not read the file:`, err);
+    log.error(`[ERD Studio] ${TITLE}: could not read the file:`, err);
     showError(`${TITLE} couldn't read ${fileName}. Check that the file still exists and that you can open it, then try again.`, {
       [TRY_AGAIN_BUTTON]: again(),
     });
@@ -271,7 +272,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
       // layout that yielded something counts as used.
       layoutUsed = layout.tables.length > 0 || layout.stickies.length > 0;
     } catch (err) {
-      console.error(`[ERD Studio] ${TITLE}: could not read the layout file:`, err);
+      log.error(`[ERD Studio] ${TITLE}: could not read the layout file:`, err);
       layout = { tables: [], stickies: [], problems: ['The layout file could not be read.'] };
     }
   }

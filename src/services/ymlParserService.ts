@@ -30,6 +30,7 @@ import type { CompositeForeignKey } from '../types/manifest';
 import { readMeta, type Meta } from '@erd-studio/core';
 import { normaliseName, parseRefModelName } from './nameUtils';
 import { defaultDbtProjectConfig, type DbtProjectConfig } from './dbtProjectConfig';
+import { log } from './logger';
 
 /**
  * Directories to skip during filesystem walk. Mirrors LegacyTagCleanupService.
@@ -225,7 +226,7 @@ export class YmlParserService {
           compositeForeignKeys,
         );
       } catch (err) {
-        console.warn(
+        log.warn(
           `[YmlParserService] Failed to parse ${filePath}: ` +
             (err instanceof Error ? err.message : String(err)),
         );
@@ -239,7 +240,7 @@ export class YmlParserService {
       try {
         this.parseResourceDocs(filePath, resourceDocs);
       } catch (err) {
-        console.warn(
+        log.warn(
           `[YmlParserService] Failed to parse ${filePath}: ` +
             (err instanceof Error ? err.message : String(err)),
         );

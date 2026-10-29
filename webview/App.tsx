@@ -301,6 +301,11 @@ function EditorCanvas() {
     vscode.postMessage({ type: 'requestReload' });
   }, [vscode]);
 
+  // Open the ERD Studio output channel: what the host was doing, and how long it took.
+  const handleShowLogs = useCallback(() => {
+    vscode.postMessage({ type: 'showLogs' });
+  }, [vscode]);
+
   // Initial-load failure recovery: clear the error and ask the host for the
   // domain again (same handshake as first mount).
   const handleRetryLoad = useCallback(() => {
@@ -618,6 +623,9 @@ function EditorCanvas() {
         >
           Report a Bug
         </button>
+        <button type="button" className="editor-message__button" onClick={handleShowLogs}>
+          Show Logs
+        </button>
         <FeedbackDialog />
       </div>
     );
@@ -633,7 +641,7 @@ function EditorCanvas() {
           {hostLoading && <span className="editor-message__spinner" aria-hidden="true" />}
           <p>{tables !== undefined && tables > 0 ? `Loading ${tables.toLocaleString()} ${tables === 1 ? 'table' : 'tables'}…` : 'Loading subject area…'}</p>
         </div>
-        {showReconnectOverlay && <ReconnectOverlay onReload={handleReconnect} />}
+        {showReconnectOverlay && <ReconnectOverlay onReload={handleReconnect} onShowLogs={handleShowLogs} />}
       </>
     );
   }

@@ -52,6 +52,7 @@ import {
   sourcePathsGlob,
   type DbtProjectConfig,
 } from '../services/dbtProjectConfig';
+import { log } from '../services/logger';
 
 const DEBOUNCE_DELAY_MS = 300;
 
@@ -258,13 +259,13 @@ export class FileWatcherService implements vscode.Disposable {
     const handleChange = (uri: vscode.Uri) => {
       if (path.basename(uri.fsPath) === 'catalog.json') {
         this.debounce('catalog', () => {
-          console.log('[FileWatcherService] Catalog changed');
+          log.debug('[FileWatcherService] External change: catalog.json');
           this.safeFireEvent(() => this._onCatalogChanged.fire());
         });
         return;
       }
       this.debounce('manifest', () => {
-        console.log('[FileWatcherService] Manifest changed');
+        log.debug('[FileWatcherService] External change: manifest.json');
         this.safeFireEvent(() => this._onManifestChanged.fire());
       });
     };
@@ -314,11 +315,11 @@ export class FileWatcherService implements vscode.Disposable {
         // A layout change is a change to its diagram, skipped on our own write.
         this.debounceOwnWrite(`layout:${uri.toString()}`, () => [uri.fsPath], () => {
           if (this.ownWriteTracker.consume(uri.fsPath)) {
-            console.log(`[FileWatcherService] Ignoring own write: ${uri.fsPath}`);
+            log.trace(`[FileWatcherService] Own write, ignored: ${uri.fsPath}`);
             return;
           }
           const diagram = vscode.Uri.file(diagramPathOfLayout(uri.fsPath));
-          console.log(`[FileWatcherService] Layout changed: ${uri.fsPath}`);
+          log.debug(`[FileWatcherService] External change to a layout file: ${uri.fsPath}`);
           this.safeFireEvent(() => this._onSemanticFileChanged.fire({ uri: diagram, layout: true }));
         });
         return;
@@ -328,10 +329,10 @@ export class FileWatcherService implements vscode.Disposable {
       this.debounceOwnWrite(`semantic:${uri.toString()}`, () => [uri.fsPath], () => {
         const wasCreated = createdPending.delete(uri.toString());
         if (this.ownWriteTracker.consume(uri.fsPath)) {
-          console.log(`[FileWatcherService] Ignoring own write: ${uri.fsPath}`);
+          log.trace(`[FileWatcherService] Own write, ignored: ${uri.fsPath}`);
           return;
         }
-        console.log(`[FileWatcherService] Semantic file changed: ${uri.fsPath}`);
+        log.debug(`[FileWatcherService] External change to a diagram or table file: ${uri.fsPath}`);
         if (wasCreated && isJson) this.safeFireEvent(() => this._onForeignFormatCreated.fire({ uri }));
         this.safeFireEvent(() => this._onSemanticFileChanged.fire(wasCreated ? { uri, created: true } : { uri }));
       });
@@ -367,7 +368,7 @@ export class FileWatcherService implements vscode.Disposable {
         if (uris.length === 0) {
           return;
         }
-        console.log(`[FileWatcherService] ${uris.length} semantic file(s) deleted`);
+        log.debug(`[FileWatcherService] External delete: ${uris.length} diagram or table file(s)`);
         this.safeFireEvent(() => this._onSemanticFileDeleted.fire({ uris }));
       });
     };
@@ -384,10 +385,10 @@ export class FileWatcherService implements vscode.Disposable {
   private handleRelationshipsEvent(uri: vscode.Uri): void {
     this.debounceOwnWrite(`relationships:${uri.toString()}`, () => [uri.fsPath], () => {
       if (this.ownWriteTracker.consume(uri.fsPath)) {
-        console.log(`[FileWatcherService] Ignoring own write: ${uri.fsPath}`);
+        log.trace(`[FileWatcherService] Own write, ignored: ${uri.fsPath}`);
         return;
       }
-      console.log(`[FileWatcherService] Relationships file changed: ${uri.fsPath}`);
+      log.debug(`[FileWatcherService] External change to a relationships file: ${uri.fsPath}`);
       this.safeFireEvent(() => this._onRelationshipsChanged.fire({ uri }));
     });
   }
@@ -399,10 +400,10 @@ export class FileWatcherService implements vscode.Disposable {
   private handleLayerConfigEvent(uri: vscode.Uri): void {
     this.debounceOwnWrite('layer-config', () => [uri.fsPath], () => {
       if (this.ownWriteTracker.consume(uri.fsPath)) {
-        console.log('[FileWatcherService] Ignoring own write to layers.json');
+        log.trace('[FileWatcherService] Own write to layers.json, ignored');
         return;
       }
-      console.log('[FileWatcherService] Layer config changed');
+      log.debug('[FileWatcherService] External change: layers.json');
       this.safeFireEvent(() => this._onLayerConfigChanged.fire());
     });
   }
@@ -423,7 +424,7 @@ export class FileWatcherService implements vscode.Disposable {
       this.debounce('project', () => {
         const current = this.readProjectPaths();
         if (current !== this.lastProjectPaths) {
-          console.log('[FileWatcherService] dbt_project.yml path config changed');
+          log.debug('[FileWatcherService] External change: dbt_project.yml paths');
           this.lastProjectPaths = current;
           this.safeFireEvent(() => this._onProjectConfigChanged.fire());
         }
@@ -502,10 +503,10 @@ export class FileWatcherService implements vscode.Disposable {
       this.debounceOwnWrite(`logical-model:${modelName}`, () => [uri.fsPath], () => {
         const wasCreated = createdPending.delete(uri.toString());
         if (this.ownWriteTracker.consume(uri.fsPath)) {
-          console.log(`[FileWatcherService] Ignoring own write to model: ${modelName}`);
+          log.trace(`[FileWatcherService] Own write to table file, ignored: ${modelName}`);
           return;
         }
-        console.log(`[FileWatcherService] Logical model changed: ${modelName}`);
+        log.debug(`[FileWatcherService] External change to table file: ${modelName}`);
         if (wasCreated) this.safeFireEvent(() => this._onForeignFormatCreated.fire({ uri }));
         this.safeFireEvent(() => this._onTableChanged.fire({ uri, modelName }));
       });
@@ -544,7 +545,7 @@ export class FileWatcherService implements vscode.Disposable {
 
     const fire = (reason: string) => {
       this.debounce('dbt-yml', () => {
-        console.log(`[FileWatcherService] dbt source ${reason}`);
+        log.debug(`[FileWatcherService] External change: dbt source ${reason}`);
         this.safeFireEvent(() => this._onDbtYmlChanged.fire());
       });
     };
@@ -613,7 +614,7 @@ export class FileWatcherService implements vscode.Disposable {
     try {
       fireFn();
     } catch (err) {
-      console.error('[FileWatcherService] Error in event handler:', err);
+      log.error('[FileWatcherService] Error in event handler:', err);
     }
   }
 

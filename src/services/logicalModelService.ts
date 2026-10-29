@@ -39,6 +39,7 @@ import type { DbmlLibraryOps, DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSna
 import { dropRelationshipsTo } from './libraryRelationships';
 import { memberAttachment } from './memberAttachment';
 import { TableLibraryIndex, foldersOf, hasDbmlEvidence, holdsTableFiles, isLayerFolder, layersListTables, listDir } from './tableLibraryIndex';
+import { log } from './logger';
 
 /** Table file writes an editor edit bundles with its diagram change (one WorkspaceEdit). */
 export interface TableFileOps {
@@ -753,6 +754,7 @@ export class TableLibraryService {
    */
   invalidateCache(name?: string): void {
     if (name === undefined) {
+      log.debug('[Table Library] Every cached table read dropped (a bulk change)');
       this.namingMemo = undefined;
       this.storageMemo = undefined;
       this.attachMemo = undefined;
@@ -929,7 +931,7 @@ export class TableLibraryService {
     if (this.loggedDbmlProblems.has(key)) return;
     this.loggedDbmlProblems.add(key);
     for (const problem of problems) {
-      console.warn(`[LogicalModelService] ${this.libraryRelativePath(filePath)}${problem.line !== undefined ? ` line ${problem.line}` : ''}: ${problem.message}`);
+      log.warn(`[LogicalModelService] ${this.libraryRelativePath(filePath)}${problem.line !== undefined ? ` line ${problem.line}` : ''}: ${problem.message}`);
     }
   }
 
@@ -1119,7 +1121,7 @@ export class TableLibraryService {
       return memo.result;
     }
     const result = attachRelationships(readings, dbmlTableLookup(tables));
-    for (const warning of result.warnings) console.warn(`[LogicalModelService] ${warning}`);
+    for (const warning of result.warnings) log.warn(`[LogicalModelService] ${warning}`);
     // Keyed after the reads above, which bump the generation for any table they found changed.
     this.attachMemo = { key, quickKey: this.attachQuickKey(relFiles, dirs), relFiles, dirs, result };
     return result;
@@ -1409,7 +1411,7 @@ export class TableLibraryService {
     try {
       return this.tablePath(name);
     } catch (err) {
-      console.warn(`[LogicalModelService] Unsafe model name: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[LogicalModelService] Unsafe model name: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }
@@ -1467,10 +1469,12 @@ export class TableLibraryService {
     const known = this.failedPaths.has(filePath);
     this.failedPaths.set(filePath, error);
     if (!known) {
+      // Where, for the log reader: the file and, when the parser said, its line.
+      const where = `${filePath}${error.line !== undefined ? `:${error.line}${error.column !== undefined ? `:${error.column}` : ''}` : ''}`;
       if (error.readable) {
-        console.warn(`[LogicalModelService] Model "${error.name}": ${error.message}`);
+        log.warn(`[LogicalModelService] ${where}: Model "${error.name}": ${error.message}`);
       } else {
-        console.error(`[LogicalModelService] Failed to read model "${error.name}":`, cause);
+        log.error(`[LogicalModelService] ${where}: Failed to read model "${error.name}":`, cause);
       }
       if (!this.reportedPaths.has(filePath)) {
         this.reportedPaths.add(filePath);
@@ -2144,7 +2148,7 @@ export class TableLibraryService {
       text = fs.readFileSync(filePath, 'utf-8');
       doc = parseDocument(text, { customTags: keepNumberText });
     } catch (err) {
-      console.warn(`[LogicalModelService] Rewriting unparseable model file ${filePath}:`, err);
+      log.warn(`[LogicalModelService] Rewriting unparseable model file ${filePath}:`, err);
       return null;
     }
     if (doc.errors.length > 0 && doc.errors.every((e) => e.code === 'DUPLICATE_KEY')) {

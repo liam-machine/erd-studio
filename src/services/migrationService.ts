@@ -20,6 +20,7 @@ import { LayerService } from './layerService';
 import { keepLineEndings } from './lineEndings';
 import type { SemanticTable, Relationship, ViewConfig } from '../types/semantic';
 import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, mixesTableNaming } from '../types/semantic';
+import { log } from './logger';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -387,7 +388,7 @@ export class MigrationService {
         fs.writeFileSync(filePath, updatedContent, 'utf-8');
         result.domainsConverted++;
       } catch (err) {
-        console.error(`[MigrationService] Failed to migrate ${filePath}:`, err);
+        log.error(`[MigrationService] Failed to migrate ${filePath}:`, err);
       }
     }
 

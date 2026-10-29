@@ -40,6 +40,7 @@ import type { ExportedFile, SubjectAreaFilesExport } from '../services/diagramEx
 import { telemetry } from '../services/telemetryService';
 import type { SubjectAreaSummary } from '../types/semantic';
 import { FORMAT_ITEMS, FORMAT_LABELS, NO_DIAGRAMS_MESSAGE, exportInsideSemanticDirMessage, isInsideFolder } from './exportDiagram';
+import { log } from '../services/logger';
 
 export const EXPORT_ALL_DIAGRAMS_COMMAND = 'erdStudio.exportAllDiagrams';
 
@@ -130,7 +131,7 @@ function oursFailure(err: unknown, ui: ExportAllDiagramsUi, doing = 'while expor
 
 function showFailure(ui: ExportAllDiagramsUi, failure: ShownFailure): void {
   showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), failure.message, failure.actions, (choice, err) => {
-    console.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
+    log.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
     showFailure(ui, oursFailure(err, ui, `while running ${choice}`));
   });
 }

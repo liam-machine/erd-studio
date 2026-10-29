@@ -11,6 +11,7 @@ import { DBML_TABLE_QUOTE_HINT_CODES } from '@erd-studio/core';
 import type { TableFileError, TableFileErrorKind } from '../services/logicalModelService';
 import { OPEN_FILE_BUTTON, projectRelative, showErrorWithActions } from '../services/commandErrors';
 import { refusalLocation, type RefusedWrite } from '../services/newSubjectAreaWriter';
+import { log } from '../services/logger';
 
 /** Open `filePath`, placing the cursor at the 1-based `line` / `column` when given (in `viewColumn`, else the active one). */
 export async function openTableFileAt(filePath: string, line?: number, column?: number, viewColumn?: vscode.ViewColumn): Promise<void> {
@@ -45,7 +46,7 @@ export function showRefusedWrite(
     `${title}: ${err.message} ${where.outcome}`,
     location ? { [OPEN_FILE_BUTTON]: () => openTableFileAt(location.filePath, location.line) } : {},
     (choice, failure) => {
-      console.error(`[ERD Studio] ${title}: "${choice}" failed:`, failure);
+      log.error(`[ERD Studio] ${title}: "${choice}" failed:`, failure);
       void vscode.window.showErrorMessage(`${title}: could not open ${file ?? 'the file'}.`);
     },
   );
@@ -133,7 +134,7 @@ export function notifyTableFileError(error: TableFileError): void {
       return undefined;
     })
     .catch((err: unknown) => {
-      console.error('[ERD Studio] Could not open model file:', err);
+      log.error('[ERD Studio] Could not open model file:', err);
     });
 }
 
@@ -169,7 +170,7 @@ export function shouldWarnAboutTableFile(state: vscode.Memento, filePath: string
     delete warned[old];
   }
   void Promise.resolve(state.update(TABLE_FILE_WARNED_KEY, warned)).catch((err: unknown) => {
-    console.error('[ERD Studio] Could not remember a model file warning:', err);
+    log.error('[ERD Studio] Could not remember a model file warning:', err);
   });
   return true;
 }

@@ -20,6 +20,7 @@ import type { DbmlDiagramTable } from '@erd-studio/core/dbml';
 
 import type { FileWrite } from './fileWrites';
 import type { DbmlLibraryWritePlan } from './dbmlLibraryWrites';
+import { log } from './logger';
 
 /** The library as a plan leaves it, for rendering a DBML diagram (the codec's `SubjectAreaResolver`, without `vscode`). */
 export interface DbmlDiagramResolver {
@@ -125,7 +126,7 @@ export function settleDbmlDiagramWrites(input: SettleInput): FileWrite[] {
         }
       }
     } catch (err) {
-      console.warn(`[ERD Studio] ${path.basename(filePath)} left as it is: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[ERD Studio] ${path.basename(filePath)} left as it is: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   return out;

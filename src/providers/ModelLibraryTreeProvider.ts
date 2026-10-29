@@ -24,6 +24,9 @@ import type { TableLibraryService, TableFileEntry, TableFileError } from '../ser
 import type { SubjectAreaService } from '../services/domainService';
 import { subjectAreaTableNames } from '../services/domainService';
 import type { LayerConfig } from '../types/layer';
+import { createLogger, elapsedMs, plural } from '../services/logger';
+
+const treeLog = createLogger('Table Library');
 
 // ---------------------------------------------------------------------------
 // Tree element type
@@ -195,9 +198,13 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     // A library listed from scratch (no index yet, or one a bulk change
     // dropped) is a full rebuild: `erdStudio.tablesLoading` holds until the
     // items are produced, so the empty-state text never shows meanwhile.
-    if (typeof this.tableLibraryService.indexIsCold === 'function' && this.tableLibraryService.indexIsCold()) this.setLoading(true);
+    const cold = typeof this.tableLibraryService.indexIsCold === 'function' && this.tableLibraryService.indexIsCold();
+    if (cold) this.setLoading(true);
+    const start = Date.now();
     try {
-      return this.rootChildren();
+      const children = this.rootChildren();
+      treeLog.debug(`Listed ${plural(children.length, 'row')} in ${elapsedMs(start)} ms${cold ? ' (library read from scratch)' : ''}`);
+      return children;
     } finally {
       this.setLoading(false);
     }

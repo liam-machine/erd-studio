@@ -687,6 +687,8 @@ export interface SubmitFeedbackMessage {
     /** Steps to reproduce (bug) or rationale (feature). */
     steps?: string;
     includeDiagnostics: boolean;
+    /** Add the recent ERD Studio log (redacted) to the diagnostics; opt-in, absent = false. */
+    includeLog?: boolean;
     /** Recent errors the webview observed (oldest → newest). */
     webviewErrors?: string[];
     regressionOf?: number;
@@ -709,6 +711,8 @@ export interface CopyFeedbackReportMessage {
     description: string;
     steps?: string;
     includeDiagnostics: boolean;
+    /** Add the recent ERD Studio log (redacted) to the diagnostics; opt-in, absent = false. */
+    includeLog?: boolean;
     webviewErrors?: string[];
     domain?: FeedbackSubjectAreaSummary;
   };
@@ -774,6 +778,16 @@ export interface OpenAnotherDomainMessage {
  */
 export interface OpenGettingStartedMessage {
   type: 'openGettingStarted';
+}
+
+/**
+ * Open the ERD Studio output channel (`erdStudio.showLogs`). Sent by the
+ * canvas's load-error screen and the "Canvas disconnected" overlay's
+ * **Show Logs**. No payload; reads nothing and writes nothing, so it is on
+ * the physical-stage allowlist.
+ */
+export interface ShowLogsMessage {
+  type: 'showLogs';
 }
 
 /**
@@ -906,6 +920,7 @@ export type WebviewMessage =
   | ImportEmbeddedTablesMessage
   | OpenAnotherDomainMessage
   | OpenGettingStartedMessage
+  | ShowLogsMessage
   | ExportDiagramMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage

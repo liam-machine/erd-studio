@@ -22,13 +22,14 @@
 
 import * as vscode from 'vscode';
 import type { SaveFailure } from '../services/telemetryPayload';
+import { log } from '../services/logger';
 
 export async function saveDocumentByUri(uri: vscode.Uri, onFailure?: (reason: SaveFailure) => void): Promise<boolean> {
   let doc: vscode.TextDocument;
   try {
     doc = await vscode.workspace.openTextDocument(uri);
   } catch (err) {
-    console.error(`[saveDocumentByUri] could not save ${uri.fsPath}:`, err);
+    log.error(`[saveDocumentByUri] could not save ${uri.fsPath}:`, err);
     onFailure?.('reopenFailed');
     return false;
   }
@@ -43,7 +44,7 @@ export async function saveDocument(doc: vscode.TextDocument, onFailure?: (reason
     onFailure?.('refused');
     return false;
   } catch (err) {
-    console.error(`[saveDocument] could not save ${doc.uri.fsPath}:`, err);
+    log.error(`[saveDocument] could not save ${doc.uri.fsPath}:`, err);
     onFailure?.('threw');
     return false;
   }

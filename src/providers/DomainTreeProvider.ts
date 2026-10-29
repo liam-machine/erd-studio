@@ -17,6 +17,9 @@ import * as path from 'path';
 import type { SubjectAreaSummary, Layer } from '../types/semantic';
 import { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
+import { createLogger, elapsedMs, log, plural } from '../services/logger';
+
+const treeLog = createLogger('Subject Areas');
 
 /** MIME type for layer drag-drop within the tree. */
 const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer';
@@ -162,7 +165,7 @@ export class SubjectAreaTreeProvider
       this.refresh();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[DomainTreeProvider] Failed to reorder layers: ${message}`);
+      log.error(`[DomainTreeProvider] Failed to reorder layers: ${message}`);
       // Reorder is refused when layers.json is unreadable (H18) — tell the user
       void vscode.window.showErrorMessage(`Failed to reorder layers: ${message}`);
     }
@@ -216,7 +219,7 @@ export class SubjectAreaTreeProvider
       // opening every diagram.
       modelCount = this.subjectAreaService.countSubjectAreaTables(filePath);
     } catch (err) {
-      console.warn(`[DomainTreeProvider] Failed to load ${filePath}:`, err);
+      log.warn(`[DomainTreeProvider] Failed to load ${filePath}:`, err);
       // Do not cache failures — the file may be mid-write
       this.summaryCache.delete(key);
       return 0;
@@ -256,9 +259,11 @@ export class SubjectAreaTreeProvider
       if (!fs.existsSync(fullSemanticDir)) {
         return [];
       }
+      const start = Date.now();
       const layers = this.layerService.getAllLayers();
       const layerNodes = layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
       this.summariesByLayer = { byLayer: this.listByLayer(), unread: new Set(layers.map((l) => l.id)) };
+      treeLog.debug(`Listed ${plural(layers.length, 'layer')} in ${elapsedMs(start)} ms`);
       // Only alongside real content: an empty tree must stay empty so the
       // welcome view (which has its own Select dbt Project button) shows.
       return this.projectRow ? [this.projectRow, ...layerNodes] : layerNodes;
@@ -288,6 +293,7 @@ export class SubjectAreaTreeProvider
 
   private getLayerChildren(layer: Layer): TreeElement[] {
     // A layer asked for on its own (no root call just before it) lists afresh.
+    const start = Date.now();
     const memo = this.summariesByLayer;
     const byLayer = memo?.unread.delete(layer) ? memo.byLayer : this.listByLayer();
     const layerDomains = byLayer.get(layer) ?? [];
@@ -305,6 +311,7 @@ export class SubjectAreaTreeProvider
       children.push({ type: 'newDomain', layer });
     }
 
+    treeLog.debug(`Layer ${layer} listed ${plural(domainNodes.length, 'diagram')} in ${elapsedMs(start)} ms`);
     return children;
   }
 

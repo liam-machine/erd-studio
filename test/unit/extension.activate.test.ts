@@ -36,7 +36,13 @@ import { GETTING_STARTED_VIEW_TYPE, GettingStartedPanel } from '../../src/provid
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { telemetry } from '../../src/services/telemetryService';
+import { clearLogBuffer, hasLogSink, recentLogLines } from '../../src/services/logger';
+
 import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+
+/** The message of the last "Found dbt project" line in the ERD Studio log (it no longer goes to console.log). */
+const lastFoundProjectLine = (): string | undefined =>
+  recentLogLines().filter((l) => l.includes('Found dbt project at')).at(-1)?.replace(/^\S+ \[info\] /, '');
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
@@ -1327,7 +1333,7 @@ describe('activate() project-root resolution', () => {
 
     await activate(context);
 
-    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${path.join(root, 'b')}`);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${path.join(root, 'b')}`);
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Open a folder first'), expect.anything());
   });
 
@@ -1340,7 +1346,7 @@ describe('activate() project-root resolution', () => {
 
     await activate(context);
 
-    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${path.join(root, 'a')}`);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${path.join(root, 'a')}`);
   });
 });
 
@@ -1412,7 +1418,7 @@ describe('Select dbt Project… (#82)', () => {
     const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
     context = makeContext(root, { workspaceState: ws });
     await activate(context);
-    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${a}`);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${a}`);
 
     const quickPick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(
       (async (items: Pick[]) => items.find((i) => i.projectRoot === b)) as never,
@@ -1439,14 +1445,14 @@ describe('Select dbt Project… (#82)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
     await activate(context);
-    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${b}`);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${b}`);
   });
 
   it('Auto-detect clears the pick and reloads back to the auto-detected project', async () => {
     const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], ['erdStudio.selectedProjectRoot', b]]);
     context = makeContext(root, { workspaceState: ws });
     await activate(context);
-    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${b}`);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${b}`);
 
     vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(
       (async (items: Pick[]) => items.find((i) => i.label.includes('Auto-detect'))) as never,
@@ -1516,7 +1522,7 @@ describe('Welcome panel: commands', () => {
     expect(count('erdStudio.showGettingStarted')).toBe(1);
     expect(registered().indexOf('erdStudio.showGettingStarted')).toBe(1);
     expect(PRE_REGISTERED_COMMANDS).toEqual(
-      new Set(['erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject']),
+      new Set(['erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject', 'erdStudio.showLogs']),
     );
     // setupAiHelper needs a project: it gets the standard no-project stub instead.
     expect(count('erdStudio.setupAiHelper')).toBe(1);
@@ -2110,5 +2116,42 @@ describe('erdStudio.exportDiagram', () => {
     expect(shown).toHaveBeenCalledWith(
       ".erd-studio/silver/missing.json can't be exported because the diagram file has a problem: it was deleted or renamed.",
     );
+  });
+});
+
+describe('ERD Studio output channel and Show Logs', () => {
+  const logChannels = () => vscode._outputChannels.filter((c) => c.name === 'ERD Studio');
+
+  it('works in an empty window: the channel is the log sink and Show Logs opens it', async () => {
+    clearLogBuffer();
+    const before = logChannels().length;
+    await activate(context);
+
+    expect(logChannels()).toHaveLength(before + 1);
+    expect(hasLogSink()).toBe(true);
+    expect(count('erdStudio.showLogs')).toBe(1);
+    // Registered after the three that must come first; reportBug stays registered()[0].
+    expect(registered()[0]).toBe('erdStudio.reportBug');
+    const channel = logChannels().at(-1)!;
+    expect(channel._lines.some((l) => /\[info\] ERD Studio .* activating \(VS Code /.test(l))).toBe(true);
+
+    await vscode.commands.executeCommand('erdStudio.showLogs');
+    expect(channel._shown).toBe(1);
+  });
+
+  it('logs what kind of project opened: storage, table and diagram counts, dbt or not', async () => {
+    clearLogBuffer();
+    openWorkspace(FIXTURE_ROOT);
+    await activate(context);
+    const summary = recentLogLines().find((l) => l.includes('Project: '));
+    expect(summary).toMatch(/Project: (DBML|YAML|mixed \(DBML and YAML\)) storage, \d+ table file\(s\), \d+ diagram\(s\), dbt project; activated in \d+ ms/);
+  });
+
+  it('disposing the extension unplugs the sink', async () => {
+    await activate(context);
+    expect(hasLogSink()).toBe(true);
+    for (const sub of [...context.subscriptions].reverse()) await sub.dispose();
+    context.subscriptions.length = 0;
+    expect(hasLogSink()).toBe(false);
   });
 });

@@ -47,6 +47,7 @@ import {
 import { telemetry } from '../services/telemetryService';
 import { openTableFileAt } from './openModelFile';
 import { DBDIAGRAM_LAYOUT_EXTENSION, type SubjectAreaExport } from '../services/diagramExport';
+import { log } from '../services/logger';
 
 export const EXPORT_DIAGRAM_COMMAND = 'erdStudio.exportDiagram';
 
@@ -250,7 +251,7 @@ function oursFailure(err: unknown, ui: ExportDiagramUi, doing = 'while exporting
 function showFailure(ui: ExportDiagramUi, failure: ShownFailure): void {
   // A button that fails (Open File on a file deleted since) still says so, rather than seeming to do nothing.
   showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), failure.message, failure.actions, (choice, err) => {
-    console.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
+    log.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
     showFailure(ui, oursFailure(err, ui, `while running ${choice}`));
   });
 }

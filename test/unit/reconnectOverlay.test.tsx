@@ -23,6 +23,7 @@ vi.mock('../../webview/hooks/useVsCodeApi', () => ({
 
 import { LOADING_STALL_MS, RECONNECT_GRACE_MS, useReconnectWatchdog } from '../../webview/hooks/useReconnectWatchdog';
 import { App } from '../../webview/App';
+import { ReconnectOverlay } from '../../webview/components/ReconnectOverlay/ReconnectOverlay';
 import { useEditorStore } from '../../webview/store/editorStore';
 
 const initialStoreState = useEditorStore.getState();
@@ -180,3 +181,28 @@ describe('App load-error page and the reconnect overlay', () => {
   });
 });
 
+describe('Show Logs on the reconnect overlay', () => {
+  it('offers Reload Window and Show Logs, each calling its own handler', () => {
+    const onReload = vi.fn();
+    const onShowLogs = vi.fn();
+    render(<ReconnectOverlay onReload={onReload} onShowLogs={onShowLogs} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show Logs' }));
+    expect(onShowLogs).toHaveBeenCalledTimes(1);
+    expect(onReload).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Window' }));
+    expect(onReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('without onShowLogs there is no Show Logs button', () => {
+    render(<ReconnectOverlay onReload={() => {}} />);
+    expect(screen.queryByRole('button', { name: 'Show Logs' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reload Window' })).not.toBeNull();
+  });
+
+  it('in the canvas, the overlay\'s Show Logs asks the host to open the ERD Studio log', () => {
+    render(<App />);
+    act(() => { vi.advanceTimersByTime(RECONNECT_GRACE_MS); });
+    fireEvent.click(screen.getByRole('button', { name: 'Show Logs' }));
+    expect(mockVsCode.postMessage).toHaveBeenLastCalledWith({ type: 'showLogs' });
+  });
+});

@@ -19,6 +19,10 @@
  * No `vscode`.
  */
 
+import { createLogger } from './logger';
+
+const warmUpLog = createLogger('Table Library');
+
 /** How long one background slice may read before giving the event loop back. */
 export const WARM_UP_SLICE_MS = 12;
 /** How long the host must be free of foreground work before the next slice runs. */
@@ -103,6 +107,7 @@ export class LibraryWarmUp<E> {
 
   private async run(delayMs: number): Promise<WarmUpOutcome> {
     await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    const begun = this.now();
     let queue: E[] | undefined;
     let relationshipsFiles: string[] | undefined;
     let attached = false;
@@ -134,10 +139,12 @@ export class LibraryWarmUp<E> {
         attached = true;
         this.library.warmLibraryAttachment();
       } else {
+        warmUpLog.info(`Background read of the Table Library finished: ${this.filesRead} file(s) in ${this.slices} slice(s), ${Math.round(this.now() - begun)} ms after it started`);
         return 'done';
       }
       await yieldToEventLoop();
     }
+    warmUpLog.debug(`Background read of the Table Library stopped after ${this.filesRead} file(s)`);
     return 'cancelled';
   }
 }

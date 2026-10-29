@@ -10,6 +10,8 @@
  *
  * No `vscode`: the logic is plain, and tested on its own.
  */
+import { log } from './logger';
+
 export class RefreshGate {
   private holds = 0;
   private readonly pending = new Map<string, () => void>();
@@ -70,7 +72,7 @@ export class RefreshGate {
       try {
         run();
       } catch (err) {
-        console.error('[RefreshGate] A held refresh failed:', err);
+        log.error('[RefreshGate] A held refresh failed:', err);
       }
     }
   }

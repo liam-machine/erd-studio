@@ -46,6 +46,7 @@ import { normaliseName } from './nameUtils';
 import { catalogNodeFor, resolveColumnType } from './columnTypes';
 import { tablesDirHasDbml, tablesDirIsLayer } from './logicalModelService';
 import { readFirstLine } from './projectStorage';
+import { log } from './logger';
 
 // The pure domain parsing lives in @erd-studio/core; these are re-exported so
 // existing imports of this module keep working.
@@ -198,7 +199,7 @@ export class SubjectAreaService {
       try {
         entries = fs.readdirSync(layerDir);
       } catch (err) {
-        console.warn(
+        log.warn(
           `[DomainService] Unable to read directory ${layerDir}: ` +
           `${err instanceof Error ? err.message : String(err)}`
         );
@@ -374,12 +375,12 @@ export class SubjectAreaService {
       }
     }
     const reading = readDbmlDiagram(raw, filePath, layout ?? null);
-    for (const warning of reading.warnings) console.warn(`[DomainService] ${filePath}: ${warning}`);
+    for (const warning of reading.warnings) log.warn(`[DomainService] ${filePath}: ${warning}`);
     // Only a library that holds a YAML table can resolve a member to one.
     if (this.tableLibraryService?.hasYamlTableFiles()) {
       for (const name of new Set(reading.members)) {
         if (this.tableLibraryService.tableStorage(name) === 'yaml') {
-          console.warn(
+          log.warn(
             `[DomainService] Table "${name}" is a YAML table (${this.tableLibraryService.tableLibraryFile(name)}); the DBML diagram shows it, ` +
             'but run ERD Studio: Convert Project to DBML before editing its relationships (fix the file first if Convert leaves it as it is)',
           );
@@ -435,7 +436,7 @@ export class SubjectAreaService {
             : null;
         }
         : undefined,
-      warn: (message) => console.warn(`[DomainService] ${message}`),
+      warn: (message) => log.warn(`[DomainService] ${message}`),
       ...(options.dbtKeyIndex ? { dbtKeyIndex: options.dbtKeyIndex } : {}),
     });
   }

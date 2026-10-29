@@ -27,6 +27,8 @@ import {
   type ConvertRefusalLocation,
   type ConvertReviewView,
 } from '../services/dbmlConversionReview';
+import { log } from '../services/logger';
+import { SHOW_LOGS_COMMAND } from '../services/showLogs';
 
 /** What the user chose. `superseded`: a newer run took the panel over before the user chose. */
 export type ConvertPanelChoice = 'convert' | 'cancel' | 'checkAgain' | 'superseded';
@@ -111,7 +113,7 @@ export class ConvertToDbmlPanel {
     this.disposables.push(
       panel.webview.onDidReceiveMessage((message: unknown) => {
         void this.handleMessage(message).catch((err: unknown) => {
-          console.error('[ConvertToDbmlPanel] Message handler failed:', err);
+          log.error('[ConvertToDbmlPanel] Message handler failed:', err);
         });
       }),
       panel.onDidDispose(() => this.dispose()),
@@ -145,7 +147,7 @@ export class ConvertToDbmlPanel {
 
   async handleMessage(message: unknown): Promise<void> {
     if (!isConvertPanelToHost(message, this.content.locations.length)) {
-      console.warn('[ConvertToDbmlPanel] Ignoring an unknown or invalid message:', message);
+      log.warn('[ConvertToDbmlPanel] Ignoring an unknown or invalid message:', message);
       return;
     }
     const mode = this.content.view.mode;
@@ -163,6 +165,9 @@ export class ConvertToDbmlPanel {
           await vscode.commands.executeCommand('erdStudio.reportBug', this.content.feedback);
         }
         return;
+      case 'showLogs':
+        await vscode.commands.executeCommand(SHOW_LOGS_COMMAND);
+        return;
       case 'cancel':
         if (this.resolve || mode === 'refused') this.dispose();
         return;
@@ -171,13 +176,13 @@ export class ConvertToDbmlPanel {
         const filePath = path.resolve(this.content.semanticRoot, ...location.path.split('/'));
         const root = path.resolve(this.content.semanticRoot);
         if (!filePath.startsWith(root + path.sep)) {
-          console.warn('[ConvertToDbmlPanel] Refusing to open a path outside the project:', location.path);
+          log.warn('[ConvertToDbmlPanel] Refusing to open a path outside the project:', location.path);
           return;
         }
         try {
           await openTableFileAt(filePath, location.line, undefined, vscode.ViewColumn.Beside);
         } catch (err) {
-          console.error('[ConvertToDbmlPanel] Could not open', location.path, err);
+          log.error('[ConvertToDbmlPanel] Could not open', location.path, err);
           void vscode.window.showErrorMessage(`${CONVERT_PANEL_TITLE}: could not open ${location.path}.`);
         }
         return;

@@ -48,6 +48,8 @@ import type { FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
 import { ownWrites } from '../services/ownWriteTracker';
 import { telemetry } from '../services/telemetryService';
+import { createLogger, phaseTimer, plural } from '../services/logger';
+import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
 
 export const CONVERT_TO_DBML_TITLE = 'Convert Project to DBML';
 
@@ -136,6 +138,9 @@ let conversionInFlight = false;
 export const CONVERT_ALREADY_RUNNING_MESSAGE = `${CONVERT_TO_DBML_TITLE}: a conversion is already running. Wait for it to finish, then run it again if you need to.`;
 
 /** Files a conversion replaced this session: an undo or redo of one is saved, so the disk follows. */
+/** Convert's lines in the ERD Studio log. */
+const convertLog = createLogger('Convert to DBML');
+
 const convertedReplaces = new Set<string>();
 let undoListener: vscode.Disposable | undefined;
 
@@ -158,10 +163,14 @@ function showErrorWithActions(
   show: (message: string, ...items: string[]) => PromiseLike<string | undefined> = (m, ...items) => vscode.window.showErrorMessage(m, ...items),
 ): void {
   showErrorWith(show, message, actions, (choice, err) => {
-    console.error(`[ERD Studio] ${CONVERT_TO_DBML_TITLE}: "${choice}" failed:`, err);
+    convertLog.error(`"${choice}" failed:`, err);
     const doing = `while running ${choice}`;
-    showErrorWithActions(oursMessage(CONVERT_TO_DBML_TITLE, doing, 'nothing more was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
+    showErrorWithActions(oursMessage(CONVERT_TO_DBML_TITLE, doing, 'nothing more was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err), [SHOW_LOGS_BUTTON]: showLogs });
   });
+}
+
+function showLogs(): unknown {
+  return vscode.commands.executeCommand(SHOW_LOGS_COMMAND);
 }
 
 function sendFeedback(doing: string, err: unknown): () => unknown {
@@ -191,11 +200,16 @@ export async function planWithProgress(
   return vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: CONVERT_TO_DBML_TITLE, cancellable: true },
     async (progress, token) => {
+      const timer = phaseTimer(convertLog, 'Plan');
       const report = async (message: string): Promise<void> => {
+        timer.phase(message);
         progress.report({ message });
         ConvertToDbmlPanel.showProgress(message);
         await breathe();
-        if (token.isCancellationRequested) throw new ConvertCancelled();
+        if (token.isCancellationRequested) {
+          timer.end('cancelled');
+          throw new ConvertCancelled();
+        }
       };
       await report(CONVERT_PROGRESS.reading);
       deps.tableLibraryService.invalidateCache();
@@ -204,15 +218,24 @@ export async function planWithProgress(
       const input = readDbmlConversionInput(deps.workspaceRoot, deps.semanticDir);
       const tables = input.files.filter((f) => f.kind === 'table').length;
       const diagrams = input.files.filter((f) => f.kind === 'diagram').length;
+      convertLog.info(`Read ${plural(input.files.length, 'file')} (${plural(tables, 'table')}, ${plural(diagrams, 'diagram')})`);
       const phaseMessage = (phase: DbmlConversionPhase): string =>
         phase === 'checking' ? CONVERT_PROGRESS.checking : CONVERT_PROGRESS.planning(tables, diagrams);
       const plan = await planDbmlConversion(input, {
         onPhase: (phase) => report(phaseMessage(phase)),
         pause: async () => {
           await breathe();
-          if (token.isCancellationRequested) throw new ConvertCancelled();
+          if (token.isCancellationRequested) {
+            timer.end('cancelled');
+            throw new ConvertCancelled();
+          }
         },
       });
+      timer.end(
+        `${plural(plan.creates.length, 'create')}, ${plural(plan.replaces.length, 'replace')}, ` +
+          `${plural(plan.deletes.length, 'delete')}, ${plural(plan.refusals.length, 'refusal')}, ` +
+          `${plural(plan.leftAsIs.length, 'file')} left as is`,
+      );
       return { plan, fingerprint };
     },
   );
@@ -288,7 +311,7 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
         : CONVERT_CANCELLED_MESSAGE);
       return 'cancelled';
     }
-    console.error('[convertProjectToDbml] failed:', err);
+    convertLog.error('failed:', err);
     // A conversion that landed counts as one, even when a later step (the refresh) threw.
     if (progress.applied) { if (!progress.counted) telemetry.feature('convertToDbml'); }
     else telemetry.error('convertToDbmlFailed');
@@ -297,6 +320,7 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
       showErrorWithActions(oursMessage(CONVERT_TO_DBML_TITLE, doing, 'some files may already be converted (source control shows which)'), {
         [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err.cause),
         [TRY_AGAIN_BUTTON]: retry,
+        [SHOW_LOGS_BUTTON]: showLogs,
       });
       return 'failed';
     }
@@ -307,6 +331,7 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
     showErrorWithActions(oursMessage(CONVERT_TO_DBML_TITLE, doing, outcome), {
       [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err),
       ...(progress.applied ? {} : { [TRY_AGAIN_BUTTON]: retry }),
+      [SHOW_LOGS_BUTTON]: showLogs,
     });
     return progress.applied ? 'converted' : 'failed';
   } finally {
@@ -338,6 +363,9 @@ async function runConversion(
   // What stops it, in the panel: Check Again plans again; Close (or closing the tab) ends the run.
   const refused = async (): Promise<ConvertProjectOutcome> => {
     telemetry.feature('convertToDbmlRefused');
+    convertLog.warn(`Stopped before writing: ${plural(plan.refusals.length, 'problem')}, ${plural(plan.leftAsIs.length, 'file')} left as is`);
+    for (const refusal of plan.refusals) convertLog.warn(`Problem: ${refusal}`);
+    for (const left of plan.leftAsIs) convertLog.info(`Left as is: ${abs(left.path)}${left.line !== undefined ? ` line ${left.line}` : ''}: ${left.problem}`);
     const choice = await showConvertPanel(deps, plan, nothingChanged(), progress.v5Converted);
     return choice === 'checkAgain' ? retry() : 'refused';
   };
@@ -447,13 +475,19 @@ async function runConversion(
 
   // 9. One WorkspaceEdit, reconciled by applyFileWrites when VS Code refuses part of it.
   // From here it cannot be cancelled: the notification says what it is doing.
+  const applyTimer = phaseTimer(convertLog, 'Apply');
+  convertLog.info(`Applying ${plural(writes.length, 'file write')}`);
   return vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: CONVERT_TO_DBML_TITLE, cancellable: false },
     (bar) => applyConversion(deps, plan, writes, { ensureDir, removeNewFolders, retry, progress, abs, semanticRoot }, async (message) => {
+      applyTimer.phase(message);
       bar.report({ message });
       ConvertToDbmlPanel.showProgress(message);
       await breathe();
     }),
+  ).then(
+    (outcome) => { applyTimer.end(outcome); return outcome; },
+    (err: unknown) => { applyTimer.end('stopped by an error'); throw err; },
   );
 }
 
@@ -503,6 +537,7 @@ async function applyConversion(
           {
             [TRY_AGAIN_BUTTON]: retry,
             [SEND_FEEDBACK_BUTTON]: sendFeedback('applying the conversion', new Error('VS Code did not apply the edit (applyEdit returned false).')),
+            [SHOW_LOGS_BUTTON]: showLogs,
           },
         );
       }
@@ -639,7 +674,7 @@ async function openUndoTarget(plan: DbmlConversionPlan, abs: (rel: string) => st
       return 'file';
     }
   } catch (err) {
-    console.warn('[convertProjectToDbml] could not open a converted file:', err);
+    convertLog.warn('could not open a converted file:', err);
   }
   return undefined;
 }
@@ -665,7 +700,7 @@ async function reopenConvertedCanvases(tabs: ReadonlyArray<{ tab: vscode.Tab; ta
       await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(target), CANVAS_VIEW_TYPE);
       opened.push(target);
     } catch (err) {
-      console.warn(`[convertProjectToDbml] could not reopen ${target}:`, err);
+      convertLog.warn(`could not reopen ${target}:`, err);
     }
   }
   return opened;
