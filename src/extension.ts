@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { SubjectAreaService, renameSubjectAreaInRaw } from './services/domainService';
-import { LayerService } from './services/layerService';
+import { LayerService, LayersFileUnreadableError } from './services/layerService';
 import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, type SubjectAreaSummary, type Layer, type Stage, type UnifiedSubjectArea, type StageData } from './types/semantic';
 import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
 import { TemplateService } from './services/templateService';
@@ -72,7 +72,6 @@ import {
   deleteFailure,
   layerGone,
   layersFailure,
-  layersFileMistake,
   renameReadFailure,
   renameRefused,
   unsavedSaveFailure,
@@ -1483,10 +1482,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
    */
   const showLayerGone = (title: string, layerId: string): void => {
     layerService.invalidateCache();
-    if (layerService.getLoadError() && layerService.configFileExists()) {
-      showCommandFailure(layersFileMistake(title, {
-        workspaceRoot, layersPath: layerService.getConfigPath(), outcome: 'Nothing was changed.',
-      }), undefined);
+    const loadError = layerService.getLoadError();
+    if (loadError && layerService.configFileExists()) {
+      const err = new LayersFileUnreadableError(loadError);
+      showCommandFailure(layersFailure(title, err, {
+        workspaceRoot, layersPath: layerService.getConfigPath(), doing: 'while reading layers.json', outcome: 'Nothing was changed.',
+      }), err);
       return;
     }
     treeProvider.refresh();
@@ -2137,7 +2138,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               if (matchingTabs.length > 0) {
                 void vscode.commands.executeCommand('vscode.openWith', fileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE);
               }
-              showCommandFailure(deleteFailure(domainName, filePath, err), err, { retry: deleteFile });
+              showCommandFailure(deleteFailure(domainName, filePath, err), err, {
+                retry: async () => {
+                  // Its reopened tab may have been edited since.
+                  if (await handleUnsavedChanges(fileUri, domainName, 'deleting')) { await deleteFile(); }
+                },
+              });
               return;
             }
           }
@@ -2178,38 +2184,44 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const newSlug = newDomainSlug.trim();
         if (newSlug === oldDomainName) { return; }
 
-        // Read and update domain name in the unified file.
-        // Validate via SubjectAreaService, but rewrite the RAW document so v5 model
-        // name references and unknown keys are preserved — re-serialising the
-        // resolved UnifiedSubjectArea would inline model bodies into a v5 file.
-        let renamedContent: string;
-        try {
-          subjectAreaService.getSubjectArea(oldFilePath);
-          renamedContent = renameSubjectAreaInRaw(fs.readFileSync(oldFilePath, 'utf-8'), newSlug);
-        } catch (err) {
-          showCommandFailure(renameReadFailure(oldFilePath, err, workspaceRoot), err);
-          return;
-        }
-
         const newFilePath = path.join(workspaceRoot, semanticDir, layer, `${newSlug}.json`);
         const newFileUri = vscode.Uri.file(newFilePath);
-        // The name box checked the diagrams the sidebar lists; a file it
-        // cannot list (unreadable, or named otherwise inside) would make the
-        // edit fail every time, so say so before closing anything. (A
-        // case-only rename finds itself on macOS and Windows: not taken.)
-        if (fs.existsSync(newFilePath) && newFilePath.toLowerCase() !== oldFilePath.toLowerCase()) {
-          const layerLabel = layerService.getLayer(layer)?.label ?? layer;
-          showCommandFailure(
-            { title: RENAME_DIAGRAM_TITLE, message: diagramNameTakenMessage(newSlug, layerLabel), buttons: [OPEN_IT_BUTTON] },
-            undefined,
-            { openIt: () => vscode.commands.executeCommand('vscode.openWith', newFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE) },
-          );
-          return;
-        }
+        const openRenamed = async (): Promise<void> => {
+          selectorsService.scheduleRegenerate();
+          await vscode.commands.executeCommand('vscode.openWith', newFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE);
+        };
 
-        // Close old editor tabs before applying the edit (file will be
-        // deleted). Try Again re-applies the edit, never the questions.
-        const applyRename = async (): Promise<boolean> => {
+        // Read, check and rename. Try Again runs this again, never the
+        // questions: it re-reads the file, so edits saved since are kept.
+        const rename = async (): Promise<boolean> => {
+          // Read and update domain name in the unified file.
+          // Validate via SubjectAreaService, but rewrite the RAW document so v5 model
+          // name references and unknown keys are preserved — re-serialising the
+          // resolved UnifiedSubjectArea would inline model bodies into a v5 file.
+          let renamedContent: string;
+          try {
+            subjectAreaService.getSubjectArea(oldFilePath);
+            renamedContent = renameSubjectAreaInRaw(fs.readFileSync(oldFilePath, 'utf-8'), newSlug);
+          } catch (err) {
+            showCommandFailure(renameReadFailure(oldFilePath, err, workspaceRoot), err);
+            return false;
+          }
+
+          // The name box checked the diagrams the sidebar lists; a file it
+          // cannot list (unreadable, or named otherwise inside) would make the
+          // edit fail every time, so say so before closing anything. (A
+          // case-only rename finds itself on macOS and Windows: not taken.)
+          if (fs.existsSync(newFilePath) && newFilePath.toLowerCase() !== oldFilePath.toLowerCase()) {
+            const layerLabel = layerService.getLayer(layer)?.label ?? layer;
+            showCommandFailure(
+              { title: RENAME_DIAGRAM_TITLE, message: diagramNameTakenMessage(newSlug, layerLabel), buttons: [OPEN_IT_BUTTON] },
+              undefined,
+              { openIt: () => vscode.commands.executeCommand('vscode.openWith', newFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE) },
+            );
+            return false;
+          }
+
+          // Close old editor tabs before applying the edit (file will be deleted)
           const oldTabs = findMatchingTabs(oldFileUri);
           if (oldTabs.length > 0) { await vscode.window.tabGroups.close(oldTabs, true); }
 
@@ -2224,15 +2236,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           // Nothing was changed: the diagram comes back where it was.
           if (oldTabs.length > 0) { void vscode.commands.executeCommand('vscode.openWith', oldFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE); }
           showCommandFailure(renameRefused(oldDomainName, newSlug), new Error('workspace.applyEdit returned false'), {
-            retry: async () => { if (await applyRename()) { await openRenamed(); } },
+            retry: async () => {
+              // Its reopened tab may have been edited since.
+              if (!(await handleUnsavedChanges(oldFileUri, oldDomainName, 'renaming'))) { return; }
+              if (await rename()) { await openRenamed(); }
+            },
           });
           return false;
         };
-        const openRenamed = async (): Promise<void> => {
-          selectorsService.scheduleRegenerate();
-          await vscode.commands.executeCommand('vscode.openWith', newFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE);
-        };
-        if (!(await applyRename())) { return; }
+        if (!(await rename())) { return; }
 
         // Auto-open renamed domain
         await openRenamed();
@@ -2545,7 +2557,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         try {
           switch (editChoice.value) {
             case 'rename': {
-              const newLabel = await vscode.window.showInputBox({ prompt: 'New layer display name', value: layer.label, ignoreFocusOut: true });
+              const newLabel = await vscode.window.showInputBox({
+                prompt: 'New layer display name', value: layer.label, ignoreFocusOut: true,
+                validateInput: (value: string) => (value.trim() ? undefined : 'Layer name is required'),
+              });
               if (newLabel === undefined || newLabel.trim() === layer.label) return;
               await layerService.updateLayer(layerId, { label: newLabel.trim() });
               break;
@@ -2585,6 +2600,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer "${layer.label}" updated.`);
         } catch (err) {
+          // Removed since it was picked (another window, git): the sidebar was stale.
+          layerService.invalidateCache();
+          if (!layerService.getLoadError() && !layerService.getLayer(layerId)) { showLayerGone('Edit Layer', layerId); return; }
           showCommandFailure(layersFailure('Edit Layer', err, {
             workspaceRoot, layersPath: layerService.getConfigPath(), doing: 'while saving layers.json', outcome: 'The layer wasn\'t changed.',
           }), err);
@@ -2646,6 +2664,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void vscode.window.showInformationMessage(`Layer "${layer.label}" removed.`);
         } catch (err) {
           if (removed) { treeProvider.refresh(); layerDecorationProvider.refresh(); decorationProvider.refresh(); }
+          layerService.invalidateCache();
+          if (!removed && !layerService.getLoadError() && !layerService.getLayer(layerId)) { showLayerGone('Remove Layer', layerId); return; }
           showCommandFailure(layersFailure('Remove Layer', err, {
             workspaceRoot, layersPath: layerService.getConfigPath(),
             doing: removed ? 'while deleting the layer\'s folder' : 'while saving layers.json',

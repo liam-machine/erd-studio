@@ -88,7 +88,16 @@ export function layersFailure(
   err: unknown,
   ctx: { workspaceRoot: string; layersPath: string; doing: string; outcome: string },
 ): CommandFailure {
-  if (err instanceof LayersFileUnreadableError) return layersFileMistake(title, ctx);
+  if (err instanceof LayersFileUnreadableError) {
+    if (!err.cannotRead) return layersFileMistake(title, ctx);
+    const shown = projectRelative(ctx.workspaceRoot, ctx.layersPath);
+    return {
+      title,
+      message: `${title}: ERD Studio can't read ${shown}, so ${clause(ctx.outcome)}. Check the file's permissions, then try again.`,
+      buttons: [SHOW_FILE_BUTTON],
+      target: ctx.layersPath,
+    };
+  }
   return writeFailure(title, err, { workspaceRoot: ctx.workspaceRoot, target: ctx.layersPath, doing: ctx.doing, outcome: ctx.outcome, retry: false });
 }
 

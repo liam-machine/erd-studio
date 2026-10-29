@@ -53,14 +53,21 @@ function cloneLayers(layers: LayerConfig[]): LayerConfig[] {
   return layers.map(l => ({ ...l }));
 }
 
+/** How `loadFromFile` starts the reason for a layers.json it could not read at all. */
+const READ_FAILURE_PREFIX = 'Failed to read layers config';
+
 /**
  * `saveConfig` refused to overwrite a layers.json it could not read (a JSON
  * mistake, an invalid layer): the user's file to fix, not ERD Studio's (#229).
  */
 export class LayersFileUnreadableError extends Error {
+  /** The file could not be read at all (permissions, a lock), rather than had a mistake in it. */
+  readonly cannotRead: boolean;
+
   constructor(readonly reason: string) {
     super(`${LAYERS_CONFIG_FILE} could not be loaded (${reason}). Fix or remove the file before changing layers.`);
     this.name = 'LayersFileUnreadableError';
+    this.cannotRead = reason.startsWith(READ_FAILURE_PREFIX);
   }
 }
 
@@ -180,7 +187,7 @@ export class LayerService {
       raw = fs.readFileSync(this.configPath, 'utf-8');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return this.fallbackToDefaults(`Failed to read layers config: ${message}`);
+      return this.fallbackToDefaults(`${READ_FAILURE_PREFIX}: ${message}`);
     }
 
     let parsed: unknown;

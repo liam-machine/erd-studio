@@ -200,6 +200,16 @@ describe('the layer commands (#229 rows 11, 12)', () => {
     expect(f.message).not.toContain('Unexpected token');
   });
 
+  it('a layers.json ERD Studio cannot read at all is not "a mistake": Show File', () => {
+    const f = layersFailure('Add Layer', new LayersFileUnreadableError(`Failed to read layers config: EACCES: permission denied, open '${LAYERS}'`), ctx);
+    expect(f).toMatchObject({
+      message: "Add Layer: ERD Studio can't read .erd-studio/layers.json, so the layer wasn't added. Check the file's permissions, then try again.",
+      buttons: ['Show File'],
+      target: LAYERS,
+    });
+    expectNoRawError(f);
+  });
+
   it.each([
     ['permission', errno('EACCES', 'open', LAYERS), ['Show Folder']],
     ['disk-full', ENOSPC, []],

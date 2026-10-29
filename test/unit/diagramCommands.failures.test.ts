@@ -314,7 +314,48 @@ describe('Rename Diagram (#229)', () => {
   });
 });
 
+describe('Rename Diagram: Try Again (#229)', () => {
+  it('re-reads the file, so an edit saved after the refusal is kept, and asks nothing again', async () => {
+    fs.cpSync(FIXTURE_ROOT, project, { recursive: true });
+    await openProject(project);
+    const file = path.join(project, '.erd-studio', 'gold', 'finance.json');
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('sales' as never);
+    const apply = vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    error.mockImplementationOnce((async () => {
+      const doc = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      fs.writeFileSync(file, JSON.stringify({ ...doc, description: 'Edited after the refusal' }, null, 2));
+      return 'Try Again';
+    }) as never);
+
+    await vscode.commands.executeCommand('erdStudio.renameDomain', { type: 'domain', summary: { domain: 'finance', filePath: file, layer: 'gold' } });
+    await settle();
+
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(input).toHaveBeenCalledTimes(1);
+    const inserted = apply.mock.calls[1][0];
+    expect(JSON.stringify(inserted)).toContain('Edited after the refusal');
+  });
+});
+
 describe('the layer commands (#229)', () => {
+  it('Edit Layer on a layer removed after it was picked: the sidebar was stale, not ERD Studio\'s problem', async () => {
+    fs.cpSync(FIXTURE_ROOT, project, { recursive: true });
+    await openProject(project);
+    const layersPath = path.join(project, '.erd-studio', 'layers.json');
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async () => {
+      // Another window removes it while the edit menu is open.
+      const layers = JSON.parse(fs.readFileSync(layersPath, 'utf-8'));
+      layers.layers = layers.layers.filter((l: { id: string }) => l.id !== 'gold');
+      fs.writeFileSync(layersPath, JSON.stringify(layers, null, 2));
+      return { label: 'Abbreviation', value: 'abbreviation' };
+    }) as never);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('GLX' as never);
+
+    await vscode.commands.executeCommand('erdStudio.editLayer', { type: 'layer', layer: 'gold' });
+
+    expect(toasts()).toEqual([{ message: 'The layer "gold" isn\'t in layers.json any more. The sidebar has been refreshed.', buttons: [] }]);
+  });
+
   it('Edit Layer on a layer layers.json no longer has: says the sidebar was stale', async () => {
     fs.cpSync(FIXTURE_ROOT, project, { recursive: true });
     await openProject(project);
