@@ -75,6 +75,30 @@ Since 2.0, **DBML is ERD Studio's storage**: a new project keeps one `.dbml` fil
 - **Large libraries**: every Ref of a folder lives in that folder's `_relationships.dbml`, so a flat library of thousands of tables concentrates merge conflicts in one file and makes every other DBML tool load every table of that folder for any diagram (one broken table there breaks those diagrams in other tools, never in ERD Studio). Use library folders; 2.0 has no automatic split. `test/unit/dbmlPerformance.test.ts` holds the budgets (10,000 tables, 30,000 Refs).
 - **Layout files are written, never shown.** A `.dbdiagram` is written only through the edit pipeline: `applyFileWrites` opens it as a background `TextDocument` (`openTextDocument`, never `showTextDocument`) for the `WorkspaceEdit`, and `applyAndSaveWrites` saves it straight after, recording the own write. No code opens one in an editor tab (audited 2026-10-29: `showTextDocument` / `vscode.open` / `vscode.openWith` are only ever called on a diagram, a table, `layers.json`, the sync plan or an export the user asked for). The only way one could be left dirty in the background, where VS Code's hot exit would later restore it as an unsaved tab, was an Undo after the canvas had been closed and reopened (its `editedTablePaths` were gone): `flushUndoRedo` now always saves the diagram's own layout file too. A save that fails is reported by name (`describeUnsaved`) and leaves the file dirty for the user to resolve. A drag writes the layout file alone (`applyLayoutOnlyEdit`), and its save is recognised as ERD Studio's own however busy the host was, so it no longer comes back as an outside change that redraws the canvas and refreshes both sidebar trees.
 
+## Performance on a large library
+
+A pre-release tester's project (about 1,100 tables, a 500-table diagram) showed what grows with the library. None of it was slow parsing (a DBML table parses in about 1 ms); it was work repeated per table. What keeps it linear, with the details in `docs/dev/architecture.md` (data flow step 3, **Edit pipeline**, **Opening a canvas**, **Background read**):
+
+- **One library index** (`src/services/tableLibraryIndex.ts`, no `vscode`, shared with the CLI). One listing of `logical-models/` and `tables/` answers every name → file lookup, `listTableFiles`, the relationships files, the folders and `tablesDirIsLayer`. It validates itself on use by the signatures of the directories it listed and `layers.json`, so git, an AI assistant or another window adding a file needs no invalidate call. Never list a library folder per lookup again: that was 96% of opening a diagram.
+- **Per-path invalidation.** An edit drops only the parses of the files it wrote (`TableLibraryService.invalidatePaths`, fed by `writtenPaths(applied)`), a written relationships file's reading with the attach memo, and the index only when a table file appeared or went. `invalidateCache()` with no argument (everything) is for Convert and the bulk commands only.
+- **Scoped opens.** A diagram open reads its members and the other ends of their Refs (`readingTables`, `memberAttachment.ts`), compiles the diagram once (`dbmlDiagramReadings.ts`, core's per-diagram compile cache), and answers `ready` with `loading` before it reads anything. The rest of the library is read in the background (`LibraryWarmUp`).
+- **Layout-only writes.** A drag, an auto layout or a note moved writes only the `.dbdiagram` (the diagram file in JSON storage), with no library plan or attach, and `onDidWriteSubjectArea` says `layoutOnly`, so neither sidebar tree refreshes. Own writes are matched by content, so a slow save never comes back as an outside change.
+- **Cheap trees.** The Subject Areas count comes from the diagram text alone; the Table Library caches each diagram's members by mtime and size and reads unread table files in the background.
+- **Linear DBML checks.** Convert's self-check and `doctor` compile file by file (`compileDbmlFilesSeparately`), which reports exactly what one whole-project compile does; @dbml/parse 11 resolves each Ref against every file of a multi-file layout, so the whole-project compile grows with the square of the library.
+
+Measured on the synthetic 1,100-table project (fresh copy per run, median of three, host code driven through the vscode mock; f9a5bee → this branch):
+
+| Operation (1,100 tables, 500-table diagram) | YAML | DBML |
+|---|---|---|
+| Both sidebar trees, first render | 8.9 s → 0.03 s | 15.0 s → 0.24 s |
+| Open the diagram, first time | 3.2 s → 0.19 s | 5.7 s → 0.39 s |
+| Open it again (Retry, reopen) | 2.8 s → 0.04 s | 4.9 s → 0.04 s |
+| Move one table, with the refresh it triggers | 6.8 s → 2 ms | 10.7 s → 9 ms |
+| Convert Project to DBML, plan | 24–28 s → 4.9 s | |
+| `erd-studio doctor` | 40.7 s → 6.3 s | 54.6 s → 4.6 s |
+
+`test/unit/largeLibraryScaling.test.ts` locks this in by counting work, not time: directory listings, table-file reads and DBML compiles for lookups, both tree renders, a cold and a warm open, and a move, on a 1,100-table library it generates. A count that grows with the library fails it on any machine; its wall-clock budgets are only a backstop (3×, 8× on CI). `test/unit/dbmlPerformance.test.ts` covers a 10,000-table flat library.
+
 ## Tests
 
 - Storage: `packages/core/test/fixtures/dbml/` holds the DBML twin of every core fixture (`loadDisplayDomain.golden.test.ts` compares each through `normaliseForStorageEquivalence`), the writer cases are in `packages/core/test/dbmlWriterCases/`, `dbmlMultiParser.test.ts` compiles every writer output in all three parsers, and `dbmlCodecLaws.test.ts` holds the codec laws. `test/fixtures/dbml-native/` is the extension's logical-only DBML project; `npm run test:e2e:dbml` converts a copy of `dbt-project` and compares `doctor`, `diff`, `export` and every display before and after.
