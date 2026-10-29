@@ -8,10 +8,10 @@
  * example a second `domainLoaded` after a v5 model edit).
  *
  * Usage:
- *   ownWrites.expectWrite([filePath]);    // optional: before a save that is about to land
+ *   const expected = ownWrites.expectWrite([filePath]); // optional: before a save that is about to land
  *   ownWrites.recordWrite(filePath);      // right after the bytes land (fs write, document save)
  *   ownWrites.recordDelete(filePath);     // right after unlink / fs.delete
- *   ownWrites.settleWrites([filePath]);   // after the saves, whether or not they landed
+ *   ownWrites.settleWrites(expected);     // after the saves, whether or not they landed
  *   if (ownWrites.isPending(path)) { wait and ask again }   // in the watcher callback
  *   if (ownWrites.consume(uri.fsPath)) { return; }          // in the watcher callback
  *
@@ -28,15 +28,19 @@
  *   external edit is always reported. An event whose file holds exactly the
  *   bytes ERD Studio last wrote changes nothing ERD Studio does not already
  *   know, so suppressing it is safe even if that event was not ours.
- * - A match consumes the record (and every older one for the path). It stays
- *   matchable for {@link CONSUMED_GRACE_MS} more, for a duplicate event of the
- *   same save; after that the next event for the path is reported.
- * - A record no event ever consumed is dropped after {@link MAX_RECORD_AGE_MS}
- *   (it only bounds memory), and at most {@link MAX_RECORDS_PER_PATH} are kept
- *   per path.
+ * - A match consumes every older record for the path. The path's newest
+ *   record stays matchable, consumed or not, while the file holds its bytes:
+ *   a second event of two back-to-back saves may be decided long after the
+ *   first consumed it. Only a newer record or a content mismatch retires it.
+ *   A consumed record that a newer one superseded matches for
+ *   {@link CONSUMED_GRACE_MS} more (a duplicate event of the same save).
+ * - A record is dropped after {@link MAX_RECORD_AGE_MS} (it only bounds
+ *   memory), and at most {@link MAX_RECORDS_PER_PATH} are kept per path.
  * - An expected write ({@link expectWrite}) is pending until it is recorded
- *   or settled, or for {@link MAX_PENDING_MS} at most, so a save that never
- *   finishes cannot hold a watcher back for ever.
+ *   or its operation settles, or for {@link MAX_PENDING_MS} at most, so a save
+ *   that never finishes cannot hold a watcher back for ever. Settling clears
+ *   only that operation's announcements: another operation writing the same
+ *   file at the same time (another canvas) keeps its own.
  */
 
 import * as crypto from 'crypto';
@@ -45,7 +49,7 @@ import * as path from 'path';
 
 /** A record nothing consumed is dropped after this long (memory bound only: matching is by content). */
 export const MAX_RECORD_AGE_MS = 10 * 60_000;
-/** A consumed record still matches a duplicate event of the same save for this long. */
+/** A consumed record a newer one superseded still matches a duplicate event of the same save for this long. */
 export const CONSUMED_GRACE_MS = 2_000;
 /** Records kept per path (oldest dropped first). */
 export const MAX_RECORDS_PER_PATH = 8;
@@ -56,7 +60,7 @@ interface OwnWriteEntry {
   /** What the file held after the write; null when the entry records a deletion (or a write that left no file). */
   readonly content: { size: number; hash: string } | null;
   readonly recordedAt: number;
-  /** When an event consumed it (it then matches only within {@link CONSUMED_GRACE_MS}). */
+  /** When an event consumed it (once superseded, it then matches only within {@link CONSUMED_GRACE_MS}). */
   consumedAt?: number;
 }
 
@@ -77,10 +81,22 @@ function sizeOf(filePath: string): number | null {
   }
 }
 
+/** What one {@link OwnWriteTracker.expectWrite} announced, for {@link OwnWriteTracker.settleWrites}. */
+export interface ExpectedWrites {
+  readonly token: number;
+  readonly paths: readonly string[];
+}
+
+interface PendingWrite {
+  readonly at: number;
+  readonly token: number;
+}
+
 export class OwnWriteTracker {
   private readonly entries = new Map<string, OwnWriteEntry[]>();
-  /** Writes announced by {@link expectWrite} that have not landed yet: path → when (one per announcement). */
-  private readonly pending = new Map<string, number[]>();
+  /** Writes announced by {@link expectWrite} that have not landed yet: path → one per announcement. */
+  private readonly pending = new Map<string, PendingWrite[]>();
+  private nextToken = 1;
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
@@ -94,19 +110,33 @@ export class OwnWriteTracker {
    * wait rather than decide, so an event handled before the save finished
    * (the host was busy) is never taken for an external change.
    */
-  expectWrite(filePaths: Iterable<string>): void {
+  expectWrite(filePaths: Iterable<string>): ExpectedWrites {
     const at = this.now();
+    const token = this.nextToken++;
+    const paths: string[] = [];
     for (const filePath of filePaths) {
       const key = this.key(filePath);
+      paths.push(key);
       const list = this.pending.get(key) ?? [];
-      list.push(at);
+      list.push({ at, token });
       this.pending.set(key, list);
     }
+    return { token, paths };
   }
 
-  /** Clear what {@link expectWrite} announced for these paths (call once the saves are done, landed or not). */
-  settleWrites(filePaths: Iterable<string>): void {
-    for (const filePath of filePaths) this.pending.delete(this.key(filePath));
+  /**
+   * Clear what is left of one {@link expectWrite}'s announcements (call once
+   * its saves are done, landed or not). Another operation's announcements
+   * for the same paths stay pending.
+   */
+  settleWrites(expected: ExpectedWrites): void {
+    for (const key of new Set(expected.paths)) {
+      const list = this.pending.get(key);
+      if (!list) continue;
+      const rest = list.filter((p) => p.token !== expected.token);
+      if (rest.length === 0) this.pending.delete(key);
+      else this.pending.set(key, rest);
+    }
   }
 
   /** Whether an announced write to `filePath` has not landed yet (and was announced less than {@link MAX_PENDING_MS} ago). */
@@ -115,7 +145,7 @@ export class OwnWriteTracker {
     const list = this.pending.get(key);
     if (!list) return false;
     const cutoff = this.now() - MAX_PENDING_MS;
-    const live = list.filter((at) => at >= cutoff);
+    const live = list.filter((p) => p.at >= cutoff);
     if (live.length === 0) {
       this.pending.delete(key);
       return false;
@@ -159,19 +189,16 @@ export class OwnWriteTracker {
       if (current === undefined) current = contentOf(filePath);
       return current !== null && current.hash === entry.content.hash;
     };
-    const now = this.now();
     let match = -1;
     for (let i = list.length - 1; i >= 0; i--) {
-      const entry = list[i];
-      if (entry.consumedAt !== undefined && now - entry.consumedAt > CONSUMED_GRACE_MS) continue;
-      if (holds(entry)) { match = i; break; }
+      if (holds(list[i])) { match = i; break; }
     }
     if (match < 0) {
       this.entries.delete(key);
       return false;
     }
     const kept = list.slice(match);
-    if (kept[0].consumedAt === undefined) kept[0].consumedAt = now;
+    if (kept[0].consumedAt === undefined) kept[0].consumedAt = this.now();
     this.entries.set(key, kept);
     return true;
   }
@@ -202,14 +229,17 @@ export class OwnWriteTracker {
     }
   }
 
-  /** The path's records that can still match (unconsumed and younger than the age bound, or consumed within the grace). */
+  /**
+   * The path's records that can still match: younger than the age bound, and
+   * either unconsumed, the newest, or consumed within the grace.
+   */
   private live(key: string): OwnWriteEntry[] | undefined {
     const list = this.entries.get(key);
     if (!list) return undefined;
     const now = this.now();
-    const live = list.filter((e) => (e.consumedAt !== undefined
-      ? now - e.consumedAt <= CONSUMED_GRACE_MS
-      : now - e.recordedAt <= MAX_RECORD_AGE_MS));
+    const newest = list[list.length - 1];
+    const live = list.filter((e) => now - e.recordedAt <= MAX_RECORD_AGE_MS &&
+      (e.consumedAt === undefined || e === newest || now - e.consumedAt <= CONSUMED_GRACE_MS));
     if (live.length === 0) {
       this.entries.delete(key);
       return undefined;

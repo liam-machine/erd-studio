@@ -2775,7 +2775,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // in the background, where VS Code would show it as an unsaved tab.
     const layoutPaths = this.isDbmlDocument(document) ? [layoutFilePathOf(document.uri.fsPath)] : [];
     const expected = [document.uri.fsPath, ...layoutPaths, ...(this.editedTablePaths.get(panelKey) ?? [])];
-    this.ownWriteTracker.expectWrite(expected);
+    const expectation = this.ownWriteTracker.expectWrite(expected);
     let unsavedTables: string[];
     try {
       if (await saveDocument(document, onSaveFailure)) {
@@ -2785,7 +2785,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       unsavedTables = await this.saveDirtyTableDocuments(panelKey, onSaveFailure, layoutPaths);
     } finally {
-      this.ownWriteTracker.settleWrites(expected);
+      this.ownWriteTracker.settleWrites(expectation);
     }
     unsaved.push(...unsavedTables);
     if (unsaved.length > 0) {
@@ -2932,7 +2932,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     // The watchers wait for these saves instead of taking one for an external change.
     const expected = [document.uri.fsPath, ...created, ...deleted, ...modelDocs.map((d) => d.uri.fsPath), ...otherDomainDocs.map((d) => d.uri.fsPath)];
-    this.ownWriteTracker.expectWrite(expected);
+    const expectation = this.ownWriteTracker.expectWrite(expected);
     this.pendingUpdates.set(panelKey, true);
     try {
       const success = await vscode.workspace.applyEdit(edit);
@@ -3001,7 +3001,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         await this.sendSubjectAreaData(document, webview);
       }
     } finally {
-      this.ownWriteTracker.settleWrites(expected);
+      this.ownWriteTracker.settleWrites(expectation);
       this.pendingUpdates.delete(panelKey);
     }
 
@@ -3204,7 +3204,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const panelKey = document.uri.toString();
     const fsPath = document.uri.fsPath;
     const expected = [fsPath, ...writes.map((w) => w.path)];
-    this.ownWriteTracker.expectWrite(expected);
+    const expectation = this.ownWriteTracker.expectWrite(expected);
     try {
       const applied = await applyFileWrites(writes, {
         primary: { document, text: primaryText },
@@ -3257,7 +3257,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       return applied;
     } finally {
-      this.ownWriteTracker.settleWrites(expected);
+      this.ownWriteTracker.settleWrites(expectation);
     }
   }
 

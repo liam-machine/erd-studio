@@ -409,11 +409,11 @@ async function applyMigration(
   // The watchers wait for these files rather than decide while the moves and
   // saves run, so none is taken for an outside change before it is recorded.
   const expected = [...touched, ...edit.writes.map((w) => w.path)];
-  ownWrites.expectWrite(expected);
+  const expectation = ownWrites.expectWrite(expected);
   try {
     return await applyMigrationEdit(deps, plan, edit, newFolders, semanticRoot, abs, release, progress, retry, touched);
   } finally {
-    ownWrites.settleWrites(expected);
+    ownWrites.settleWrites(expectation);
   }
 }
 

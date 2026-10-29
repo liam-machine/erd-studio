@@ -520,7 +520,7 @@ async function applyConversion(
   // its saves run (the extension host is busy for seconds at 1,100 tables),
   // so none of them is taken for an outside change once its record is made.
   const expected = writes.map((w) => w.path);
-  ownWrites.expectWrite(expected);
+  const expectation = ownWrites.expectWrite(expected);
   try {
     await report(CONVERT_PROGRESS.writing(writes.length));
     const applied = await applyFileWrites(writes, { ensureDir });
@@ -604,7 +604,7 @@ async function applyConversion(
     }
     return 'converted';
   } finally {
-    ownWrites.settleWrites(expected);
+    ownWrites.settleWrites(expectation);
     release();
     releaseViews();
   }

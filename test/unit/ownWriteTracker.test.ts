@@ -40,8 +40,41 @@ describe('OwnWriteTracker', () => {
     // A duplicate event for the same save, moments later, is still ours…
     now += 500;
     expect(tracker.consume(file)).toBe(true);
-    // …but once the grace has passed the next event for the path is reported.
+    // …and so is one long after, while the file holds the bytes we last wrote…
     now += CONSUMED_GRACE_MS + 1;
+    expect(tracker.consume(file)).toBe(true);
+    // …but a change to other bytes is reported.
+    fs.writeFileSync(file, 'name: b\n');
+    expect(tracker.consume(file)).toBe(false);
+  });
+
+  it('two back-to-back own saves: the second event is ours however late it is decided (a host stall)', () => {
+    const file = path.join(tempDir, 'sales.dbdiagram');
+    fs.writeFileSync(file, '{"a":1}');
+    tracker.recordWrite(file);
+    fs.writeFileSync(file, '{"b":22}');
+    tracker.recordWrite(file);
+    // The first save's event is decided after the second landed: it consumes the newest record.
+    expect(tracker.consume(file)).toBe(true);
+    now += CONSUMED_GRACE_MS + 500;
+    // The second save's event, after a stall: the file still holds our bytes.
+    expect(tracker.consume(file)).toBe(true);
+  });
+
+  it('a superseded consumed record matches only within the grace', () => {
+    const file = path.join(tempDir, 'layout.dbdiagram');
+    fs.writeFileSync(file, 'one');
+    tracker.recordWrite(file);
+    expect(tracker.consume(file)).toBe(true);
+    fs.writeFileSync(file, 'two!');
+    tracker.recordWrite(file);
+    fs.writeFileSync(file, 'one');
+    now += 500;
+    expect(tracker.consume(file)).toBe(true);
+    fs.writeFileSync(file, 'two!');
+    tracker.recordWrite(file);
+    now += CONSUMED_GRACE_MS + 1;
+    fs.writeFileSync(file, 'one');
     expect(tracker.consume(file)).toBe(false);
   });
 
@@ -144,13 +177,25 @@ describe('OwnWriteTracker', () => {
       expect(tracker.isPending(file)).toBe(false);
     });
 
-    it('counts each announcement, and settleWrites clears what is left (a save that failed)', () => {
+    it('counts each announcement, and settleWrites clears what is left of that operation (a save that failed)', () => {
       const file = path.join(tempDir, 'y.dbml');
-      tracker.expectWrite([file]);
-      tracker.expectWrite([file]);
+      const expected = tracker.expectWrite([file, file]);
       tracker.recordWrite(file);
       expect(tracker.isPending(file)).toBe(true);
-      tracker.settleWrites([file]);
+      tracker.settleWrites(expected);
+      expect(tracker.isPending(file)).toBe(false);
+    });
+
+    it('settling one operation keeps another operation\'s announcement for the same file pending', () => {
+      const file = path.join(tempDir, 'shared.dbml');
+      const first = tracker.expectWrite([file]);
+      const second = tracker.expectWrite([file]);
+      fs.writeFileSync(file, 'Table a {}');
+      tracker.recordWrite(file);
+      tracker.settleWrites(first);
+      // The second operation's save has not landed: the watcher must still wait for it.
+      expect(tracker.isPending(file)).toBe(true);
+      tracker.settleWrites(second);
       expect(tracker.isPending(file)).toBe(false);
     });
 
