@@ -8,8 +8,10 @@
  *
  * Built from the bundled parser's multi-file compile (every diagram with its
  * imports, each relationships file and each table file on its own, under
- * core's virtual root), the readers' own problems, the library attachment
- * (misplaced, orphaned and duplicate Refs) and ERD Studio's own checks.
+ * core's virtual root; run file by file through `compileDbmlFilesSeparately`,
+ * which reports exactly what one whole-project compile does), the readers'
+ * own problems, the library attachment (misplaced, orphaned and duplicate
+ * Refs) and ERD Studio's own checks.
  * Where a line is missing or wrong, the message carries the exact line to
  * write. Reads only; never throws for a file it cannot read.
  */
@@ -27,8 +29,9 @@ import {
   parseTableText,
 } from '@erd-studio/core';
 import type { DbmlFileOutline, ProjectStorage, Relationship } from '@erd-studio/core';
-import { compileDbmlProject, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, usePathBetween } from '@erd-studio/core/dbml';
+import { outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, usePathBetween } from '@erd-studio/core/dbml';
 import { listMisnamedTableFiles } from '../services/dbmlConversionFiles';
+import { compileDbmlFilesSeparately } from '../services/dbmlFileCompile';
 import { tablesDirIsLayer, tablesLayerConflict, TABLES_DIR } from '../services/logicalModelService';
 import type { CliContext } from './context';
 import { unreadableHint } from './diff';
@@ -222,12 +225,20 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
   const entries = dbmlFiles.filter((f) => f.kind !== 'other').map((f) => f.rel);
   let diagnostics: Record<string, Array<{ code: number; message: string; line: number; column: number }>> = {};
   try {
-    diagnostics = compileDbmlProject(sources, entries);
+    // The whole-project compile's diagnostics, file by file: @dbml/parse 11
+    // resolves each Ref against every file of one multi-file layout, which
+    // took most of doctor's time on a large library (9 s at 1,100 tables);
+    // this is the same answer in linear time (Convert's self-check uses it too).
+    diagnostics = compileDbmlFilesSeparately(sources, entries);
   } catch {
     diagnostics = {};
   }
   const kindOf = new Map(files.map((f) => [f.rel, f.kind]));
-  for (const [rel, list] of Object.entries(diagnostics)) {
+  // In the project's file order, whatever order the compile keyed its result in.
+  const entrySet = new Set(entries);
+  const diagnosed = [...entries, ...Object.keys(diagnostics).filter((rel) => !entrySet.has(rel))];
+  for (const rel of diagnosed) {
+    const list = diagnostics[rel] ?? [];
     if (conflicted.has(rel)) continue;
     const kind = kindOf.get(rel);
     for (const d of list) {
