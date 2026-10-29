@@ -130,10 +130,12 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   lines.push(`${ok(r.artifacts.manifest.status === 'ok')} manifest ${r.artifacts.manifest.status}`
     + (r.artifacts.manifest.models !== null ? ` (${plural(r.artifacts.manifest.models, 'model')})` : ''));
   lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
-  lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'subject area')}, ${plural(r.erd.logicalModels, 'table')}`
-    + (r.erd.semanticDirExists ? ` — file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}` : ''));
+  // A DBML project's counts and naming would read as an empty, healthy YAML one.
   if (r.erd.dbmlStorage) {
-    lines.push(dbmlLine(r.erd.dbmlStorage.file));
+    lines.push(`${ok(false)} ERD Studio not read: stored as DBML`, dbmlLine(r.erd.dbmlStorage.file));
+  } else {
+    lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'subject area')}, ${plural(r.erd.logicalModels, 'table')}`
+      + (r.erd.semanticDirExists ? ` — file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}` : ''));
   }
   // Not in a DBML project: the migration would write YAML / JSON into it.
   const migration = r.erd.dbmlStorage ? undefined : r.erd.namingMigration;

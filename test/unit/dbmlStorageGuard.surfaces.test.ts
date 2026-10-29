@@ -65,6 +65,29 @@ describe('erd-studio doctor', () => {
     expect(r.nextSteps[0].why).toContain('Switch to Pre-Release Version');
   });
 
+  it('prints no table counts or file naming for it, which would read as an empty, healthy project', async () => {
+    const root = path.join(tmp, 'p');
+    makeDbmlProject(root);
+    let out = '';
+    const code = await main(['doctor', '--project', root, '--no-dbt'], {
+      stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: root, env: cleanEnv,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('– ERD Studio not read: stored as DBML\n✗ ');
+    expect(out).not.toMatch(/ERD Studio: \d+ subject area/);
+    expect(out).not.toContain('file naming');
+
+    // --json stays additive: the counts and naming keys are still there.
+    let json = '';
+    await main(['doctor', '--project', root, '--no-dbt', '--json'], {
+      stdout: { write: (s: string) => { json += s; } }, stderr: { write: () => undefined }, cwd: root, env: cleanEnv,
+    });
+    const erd = JSON.parse(json).erd;
+    for (const key of ['domains', 'logicalModels', 'naming', 'semanticDirExists', 'dbmlStorage']) {
+      expect(erd, key).toHaveProperty(key);
+    }
+  });
+
   it("gives no advice that would write YAML / JSON into it or replace the newer version's skills", async () => {
     const root = path.join(tmp, 'p');
     makeDbmlProject(root);
