@@ -2860,9 +2860,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // stays as on disk) and the layout file: nothing either tree shows, and
     // nothing in the table library.
     const diagramUnchanged = this.isDbmlDocument(document) && document.getText() === this.diskTextOf(document.uri.fsPath);
-    // An undo VS Code refused ("changes were made to …") rewinds nothing: every
-    // edit anchors the diagram, so a step that ran leaves it dirty.
-    const nothingRewound = !document.isDirty && layoutPaths.length === 0;
+    // An undo VS Code refused across files ("Could not undo 'Workspace Edit'
+    // across all files because changes were made to …") is split, not
+    // dropped: VS Code rewinds this diagram's own part alone, the
+    // one-character anchor, which leaves its text as on disk (and the
+    // document dirty). With no layout rewound, nothing the canvas, the
+    // library or the trees show changed — unless a file this canvas created
+    // is gone (the undo of a create deletes it, with no text event).
+    const nothingRewound = diagramUnchanged && layoutPaths.length === 0
+      && [...(this.editedTablePaths.get(panelKey) ?? [])].every((p) => fs.existsSync(p));
     const savedOthers: string[] = [];
     const expectation = this.ownWriteTracker.expectWrite(expected);
     let unsavedTables: string[];
@@ -2882,7 +2888,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       for (const code of saveFailureCodes(saveFailures, { modelFile, undoRedo: true })) telemetry.error(code);
       void webview.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
     }
-    const layoutOnly = diagramUnchanged && (layoutPaths.length > 0 || nothingRewound) && unsavedTables.length === 0
+    // Saving the anchor's rewind cleared the dirty mark; the canvas stays as is.
+    if (nothingRewound && unsavedTables.length === 0 && savedOthers.length === 0) return;
+    const layoutOnly = diagramUnchanged && layoutPaths.length > 0 && unsavedTables.length === 0
       && savedOthers.every((p) => layoutPaths.includes(p));
     if (layoutOnly) {
       await this.sendSubjectAreaData(document, webview, panelKey);

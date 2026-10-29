@@ -197,28 +197,80 @@ describe('undo/redo flushes the layout file only when the step rewound it', () =
     expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(rewound);
   });
 
-  it('after a move, an undo VS Code refuses (the .dbdiagram was hand-edited since) leaves the hand edit unsaved and refreshes nothing', async () => {
+  /**
+   * After a move, a hand edit in the .dbdiagram's own tab, then an undo of
+   * the move, which VS Code refuses across files ("Could not undo 'Workspace
+   * Edit' across all files because changes were made to …dbdiagram"). What
+   * VS Code really emits (UndoRedoService._tryToSplitAndUndo): the hand
+   * edit's change event (no reason), then the step SPLIT and this diagram's
+   * part undone alone — the one-character anchor, so the .dbml keeps its
+   * text but turns dirty, and one Undo event for it. The .dbdiagram gets no
+   * Undo event.
+   */
+  async function refusedUndoAfterMove() {
     const h = await open();
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
     const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('gold/sales.dbdiagram')) as unknown as ReturnType<typeof createMockTextDocument>;
     expect(layoutDoc).toBeDefined();
     const diskBefore = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8');
-    layoutDoc._setText(`${diskBefore} `);
+    const dbmlBefore = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    layoutDoc._setText(`${diskBefore}\n`);
+    await _fireDidChangeTextDocument(layoutDoc);
     h.events.length = 0;
-    const recordWrite = vi.spyOn(h.tracker, 'recordWrite');
-    const invalidateIndex = vi.spyOn(h.tables, 'invalidateIndex');
-    // "Could not undo 'Workspace Edit' across all files": nothing rewinds.
-    const refused = vscode.commands.registerCommand('undo', async () => {});
+    h.panel._postedMessages.length = 0;
+    const spies = {
+      recordWrite: vi.spyOn(h.tracker, 'recordWrite'),
+      invalidateIndex: vi.spyOn(h.tables, 'invalidateIndex'),
+      invalidatePaths: vi.spyOn(h.tables, 'invalidatePaths'),
+    };
+    const splitUndo = async (): Promise<void> => {
+      h.document._setText(h.document.getText());
+      await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
+    };
+    const expectNothingRefreshed = (): void => {
+      expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(diskBefore);
+      expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(dbmlBefore);
+      expect(layoutDoc.isDirty).toBe(true);
+      expect(h.document.isDirty).toBe(false);
+      expect(spies.recordWrite.mock.calls.map((c) => relOf(c[0]))).not.toContain('gold/sales.dbdiagram');
+      expect(spies.invalidateIndex).not.toHaveBeenCalled();
+      expect(spies.invalidatePaths).not.toHaveBeenCalled();
+      expect(h.events).toEqual([]);
+      expect(h.panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded')).toEqual([]);
+      expect(h.errors()).toEqual([]);
+    };
+    return { h, splitUndo, expectNothingRefreshed };
+  }
+
+  it('after a move, Cmd+Z on the canvas that VS Code refuses across files (the .dbdiagram was hand-edited since) leaves the hand edit unsaved and refreshes nothing', async () => {
+    const { splitUndo, expectNothingRefreshed } = await refusedUndoAfterMove();
+    await splitUndo();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expectNothingRefreshed();
+  });
+
+  it('the same refused undo from the toolbar refreshes nothing either', async () => {
+    const { h, splitUndo, expectNothingRefreshed } = await refusedUndoAfterMove();
+    const refused = vscode.commands.registerCommand('undo', splitUndo);
     try {
       await h.panel._simulateMessage({ type: 'undo' });
     } finally {
       refused.dispose();
     }
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(diskBefore);
-    expect(layoutDoc.isDirty).toBe(true);
-    expect(recordWrite.mock.calls.map((c) => relOf(c[0]))).not.toContain('gold/sales.dbdiagram');
-    expect(invalidateIndex).not.toHaveBeenCalled();
-    expect(h.events.filter((e) => !e.layoutOnly)).toEqual([]);
+    expectNothingRefreshed();
+  });
+
+  it('an anchor-only undo that took away a file this canvas created still refreshes the library', async () => {
+    const h = await open();
+    // A table this canvas created, which the undo of its create deleted (no text event).
+    const created = at('tables/gold/dim_new.dbml');
+    (h.provider as unknown as { editedTablePaths: Map<string, Set<string>> }).editedTablePaths
+      .set(h.document.uri.toString(), new Set([created]));
+    const invalidateIndex = vi.spyOn(h.tables, 'invalidateIndex');
+    h.document._setText(h.document.getText());
+    await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
+    await vi.waitFor(() => expect(invalidateIndex).toHaveBeenCalled());
+    expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: true }]);
   });
 
   it('the undo of a move is layout-only: one send, no library invalidation, no tree refresh; the save\'s dirty-state event sends nothing', async () => {
