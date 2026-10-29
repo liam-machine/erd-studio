@@ -91,6 +91,15 @@ describe('package.json storage wording (native DBML storage, 2.0)', () => {
     expect(library?.contents).toContain('Each table is a file in .erd-studio/ you can commit.');
   });
 
+  it('the ERD Studio view says "Loading diagrams…" while it loads, and "No diagrams yet." only once loaded', () => {
+    const diagrams = (pkg.contributes.viewsWelcome as Array<{ view: string; contents: string; when?: string }>)
+      .filter((w) => w.view === 'erdStudio.domainTree');
+    expect(diagrams.find((w) => w.contents === 'Loading diagrams…')?.when).toBe('erdStudio.hasProject && erdStudio.diagramsLoading');
+    const empty = diagrams.filter((w) => w.contents.startsWith('No diagrams yet.'));
+    expect(empty).toHaveLength(2);
+    for (const w of empty) expect(w.when).toMatch(/&& !erdStudio\.diagramsLoading$/);
+  });
+
   it('the Table Library says "Loading tables…" while it loads, and its empty state only once loaded', () => {
     const library = (pkg.contributes.viewsWelcome as Array<{ view: string; contents: string; when?: string }>)
       .filter((w) => w.view === 'erdStudio.modelLibrary');

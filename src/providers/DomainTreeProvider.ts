@@ -97,6 +97,9 @@ export class SubjectAreaTreeProvider
   /** The project row, or undefined while the workspace has one dbt project. */
   private projectRow: ProjectNode | undefined;
 
+  /** True until the first root getChildren has produced its items (`erdStudio.diagramsLoading`). */
+  private loading = true;
+
   // TreeDragAndDropController properties
   readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE];
   readonly dragMimeTypes = [LAYER_DRAG_MIME_TYPE];
@@ -106,8 +109,15 @@ export class SubjectAreaTreeProvider
     private readonly layerService: LayerService,
     private readonly projectPath: string,
     semanticDir?: string,
+    /** Told once the first root getChildren has listed (the extension clears `erdStudio.diagramsLoading`). Optional. */
+    private readonly onLoaded?: () => void,
   ) {
     this.semanticDir = semanticDir ?? DEFAULT_SEMANTIC_DIR;
+  }
+
+  /** Whether the tree has not produced its root items yet. */
+  isLoading(): boolean {
+    return this.loading;
   }
 
   // -------------------------------------------------------------------------
@@ -255,18 +265,16 @@ export class SubjectAreaTreeProvider
 
   getChildren(element?: TreeElement): TreeElement[] | undefined {
     if (!element) {
-      const fullSemanticDir = path.join(this.projectPath, this.semanticDir);
-      if (!fs.existsSync(fullSemanticDir)) {
-        return [];
+      // `erdStudio.diagramsLoading` holds until the root is listed, so the
+      // "No diagrams yet" welcome never flashes while the window opens.
+      try {
+        return this.rootChildren();
+      } finally {
+        if (this.loading) {
+          this.loading = false;
+          this.onLoaded?.();
+        }
       }
-      const start = Date.now();
-      const layers = this.layerService.getAllLayers();
-      const layerNodes = layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
-      this.summariesByLayer = { byLayer: this.listByLayer(), unread: new Set(layers.map((l) => l.id)) };
-      treeLog.debug(`Listed ${plural(layers.length, 'layer')} in ${elapsedMs(start)} ms`);
-      // Only alongside real content: an empty tree must stay empty so the
-      // welcome view (which has its own Select dbt Project button) shows.
-      return this.projectRow ? [this.projectRow, ...layerNodes] : layerNodes;
     }
 
     if (element.type === 'layer') {
@@ -279,6 +287,21 @@ export class SubjectAreaTreeProvider
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
+
+  private rootChildren(): TreeElement[] {
+    const fullSemanticDir = path.join(this.projectPath, this.semanticDir);
+    if (!fs.existsSync(fullSemanticDir)) {
+      return [];
+    }
+    const start = Date.now();
+    const layers = this.layerService.getAllLayers();
+    const layerNodes = layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
+    this.summariesByLayer = { byLayer: this.listByLayer(), unread: new Set(layers.map((l) => l.id)) };
+    treeLog.debug(`Listed ${plural(layers.length, 'layer')} in ${elapsedMs(start)} ms`);
+    // Only alongside real content: an empty tree must stay empty so the
+    // welcome view (which has its own Select dbt Project button) shows.
+    return this.projectRow ? [this.projectRow, ...layerNodes] : layerNodes;
+  }
 
   /** Every subject area, grouped by layer (one listing of the project). */
   private listByLayer(): Map<string, SubjectAreaSummary[]> {

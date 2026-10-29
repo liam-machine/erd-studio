@@ -185,9 +185,9 @@ describe('Open Example Diagram', () => {
     expect(pkg.contributes.commands.find((c) => c.command === OPEN_EXAMPLE_DIAGRAM_COMMAND)).toEqual({
       command: OPEN_EXAMPLE_DIAGRAM_COMMAND, title: 'Open Example Diagram', category: 'ERD Studio',
     });
-    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject')!;
+    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
     expect(plain.contents).toContain('New to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)');
-    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject')!;
+    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
     expect(dbt.contents).not.toContain('openExampleDiagram');
   });
 

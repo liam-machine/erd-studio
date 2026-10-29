@@ -440,6 +440,25 @@ describe('activate() with a dbt project', () => {
     expect(refreshes).toBeGreaterThanOrEqual(2);
   });
 
+  it('the ERD Studio view is "loading" from before hasProject until its first listing, so "No diagrams yet" never flashes', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    await activate(context);
+    const contextCalls = (): string[] => exec.mock.calls
+      .filter((c) => c[0] === 'setContext' && /^erdStudio\.(hasProject|diagramsLoading)$/.test(String(c[1])))
+      .map((c) => `${String(c[1])}=${String(c[2])}`);
+    expect(contextCalls()).toEqual(['erdStudio.diagramsLoading=true', 'erdStudio.hasProject=true']);
+
+    const tree = (createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.domainTree')![1] as {
+      treeDataProvider: { getChildren(element?: unknown): unknown[] | undefined };
+    }).treeDataProvider;
+    tree.getChildren();
+    expect(contextCalls()).toEqual(['erdStudio.diagramsLoading=true', 'erdStudio.hasProject=true', 'erdStudio.diagramsLoading=false']);
+    // Once only: later listings leave the key alone.
+    tree.getChildren();
+    expect(contextCalls()).toHaveLength(3);
+  });
+
   it('routes erdStudio.reportBug through the focused canvas instead of input boxes', async () => {
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     await activate(context);

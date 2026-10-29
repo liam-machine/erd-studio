@@ -990,12 +990,12 @@ describe('Import DBML — contributed', () => {
     expect(pkg.contributes.menus['view/title']).toContainEqual({
       command: IMPORT_DBML_COMMAND, when: 'view == erdStudio.domainTree && erdStudio.hasProject', group: '1_create@1',
     });
-    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject')!;
+    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
     expect(dbt.contents.startsWith('No diagrams yet.')).toBe(true);
     expect(dbt.contents).toContain('(command:erdStudio.drawFromDbt)');
     expect(dbt.contents).toContain('[New Diagram](command:erdStudio.createDomain)');
     expect(dbt.contents).toContain('[Import DBML](command:erdStudio.importDbml)');
-    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject')!;
+    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
     expect(plain.contents.startsWith('No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)')).toBe(true);
     expect(plain.contents).toContain('[Import DBML](command:erdStudio.importDbml)');
     expect(plain.contents).not.toContain('erdStudio.drawFromDbt');

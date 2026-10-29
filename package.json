@@ -364,13 +364,18 @@
       },
       {
         "view": "erdStudio.domainTree",
+        "contents": "Loading diagrams…",
+        "when": "erdStudio.hasProject && erdStudio.diagramsLoading"
+      },
+      {
+        "view": "erdStudio.domainTree",
         "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nNew to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)\n\nUsing dbt? Open its folder to compare your design with what dbt built.\n\n[Get started](command:erdStudio.showGettingStarted)",
-        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject"
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading"
       },
       {
         "view": "erdStudio.domainTree",
         "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\nRather start blank? [New Diagram](command:erdStudio.createDomain)\n\nAlready have a DBML file, from dbdiagram.io or another tool? [Import DBML](command:erdStudio.importDbml) Export back to DBML or Mermaid any time — an open format, no lock-in.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
-        "when": "erdStudio.hasDbtProject"
+        "when": "erdStudio.hasDbtProject && !erdStudio.diagramsLoading"
       },
       {
         "view": "erdStudio.domainTree",
