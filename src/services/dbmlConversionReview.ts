@@ -113,8 +113,8 @@ function diagramTarget(relPath: string): string {
   return relPath.endsWith('.json') ? `${relPath.slice(0, -'.json'.length)}.dbml` : relPath;
 }
 
-/** A count as people write it (1,100), as the progress notification shows it. */
-const thousands = (n: number): string => n.toLocaleString('en-US');
+/** A count as people write it (1,100), as the progress notification and the completion toast show it. */
+export const thousands = (n: number): string => n.toLocaleString('en-US');
 const plural = (n: number, one: string, many = `${one}s`): string => `${thousands(n)} ${n === 1 ? one : many}`;
 
 function kindOf(relPath: string): 'table' | 'relationships' | 'diagram' | 'layout' | 'other' {

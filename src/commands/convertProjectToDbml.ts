@@ -42,7 +42,7 @@ import {
 } from '../services/commandErrors';
 import { dbmlConversionIsEmpty, describeDbmlConversion, isDbmlSelfCheckRefusal, planDbmlConversion } from '../services/dbmlConversion';
 import type { DbmlConversionPhase, DbmlConversionPlan } from '../services/dbmlConversion';
-import { buildConvertReview } from '../services/dbmlConversionReview';
+import { buildConvertReview, thousands } from '../services/dbmlConversionReview';
 import { dbmlConversionFingerprint, dbmlConversionOfferFingerprint, readDbmlConversionInput } from '../services/dbmlConversionFiles';
 import type { FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
@@ -65,7 +65,7 @@ export const CONVERT_TEAMMATES_LINE =
   'AI helper files from before 2.0 write YAML: update them afterwards (ERD Studio: Set Up My AI Helper).';
 /** The last sentence of the toast after a conversion. */
 export const CONVERTED_TEAMMATES_SENTENCE =
-  "Teammates and other VS Code windows on an older ERD Studio (1.7.x) can't open the converted project until they update.";
+  "Teammates and other VS Code windows on an older ERD Studio (1.7.x) can't open the converted project until they switch to the ERD Studio pre-release or update to 2.0.";
 /** Said when the user cancels while Convert is still reading or planning. */
 export const CONVERT_CANCELLED_MESSAGE = `${CONVERT_TO_DBML_TITLE} was cancelled. Nothing was changed.`;
 export const CONVERT_GIT_LINE =
@@ -142,8 +142,6 @@ interface FingerprintedPlan {
 
 /** Let the extension host handle other events (the progress notification, its Cancel button). */
 const breathe = (): Promise<void> => new Promise((resolve) => { setImmediate(resolve); });
-
-const thousands = (n: number): string => n.toLocaleString('en-US');
 
 /** The progress messages, by phase (shown in the notification, and in the panel once Convert was chosen). */
 export const CONVERT_PROGRESS = {
@@ -634,14 +632,7 @@ async function applyConversion(
         { [SHOW_FILE_BUTTON]: () => vscode.window.showTextDocument(vscode.Uri.file(unsaved[0])) },
       );
     } else {
-      const s = plan.summary;
-      void vscode.window.showInformationMessage(
-        `Converted to DBML: ${s.tables} table${s.tables === 1 ? '' : 's'}, ${s.diagrams} diagram${s.diagrams === 1 ? '' : 's'}. ` +
-          (plan.leftAsIs.length > 0
-            ? `${plan.leftAsIs.length} file${plan.leftAsIs.length === 1 ? ' stays' : 's stay'} as ${plan.leftAsIs.length === 1 ? 'it is' : 'they are'} until fixed; run Convert again after fixing ${plan.leftAsIs.length === 1 ? 'it' : 'them'}. `
-            : '') +
-          `${convertedUndoSentence(undoFrom)} ${CONVERTED_TEAMMATES_SENTENCE}`,
-      );
+      void vscode.window.showInformationMessage(convertedMessage(plan.summary, plan.leftAsIs.length, undoFrom));
     }
     return 'converted';
   } finally {
@@ -676,6 +667,16 @@ function convertedCanvasTabs(plan: DbmlConversionPlan, abs: (rel: string) => str
 
 /** What Convert left in front for Undo: a diagram that opened without writing, one that saves its layout on open, a file as text, or nothing. */
 export type UndoFrom = 'diagram' | 'unplacedDiagram' | 'file' | undefined;
+
+/** The toast after a conversion: what it converted (counts as the panel writes them, 1,100), what stays, how to undo, and teammates. */
+export function convertedMessage(summary: Pick<DbmlConversionPlan['summary'], 'tables' | 'diagrams'>, leftAsIs: number, undoFrom: UndoFrom): string {
+  const { tables, diagrams } = summary;
+  return `Converted to DBML: ${thousands(tables)} table${tables === 1 ? '' : 's'}, ${thousands(diagrams)} diagram${diagrams === 1 ? '' : 's'}. ` +
+    (leftAsIs > 0
+      ? `${thousands(leftAsIs)} file${leftAsIs === 1 ? ' stays' : 's stay'} as ${leftAsIs === 1 ? 'it is' : 'they are'} until fixed; run Convert again after fixing ${leftAsIs === 1 ? 'it' : 'them'}. `
+      : '') +
+    `${convertedUndoSentence(undoFrom)} ${CONVERTED_TEAMMATES_SENTENCE}`;
+}
 
 /** The toast's undo sentence: undo works from an editor of the edit's files, so it names the one Convert left in front. */
 export function convertedUndoSentence(undoFrom: UndoFrom): string {

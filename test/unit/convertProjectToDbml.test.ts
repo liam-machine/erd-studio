@@ -20,6 +20,7 @@ import {
   CONVERT_OPTIONAL_LINE,
   CONVERT_PROGRESS,
   CONVERTED_TEAMMATES_SENTENCE,
+  convertedMessage,
   CONVERT_RESUME_LINE,
   CONVERT_TEAMMATES_LINE,
   CONVERT_UNDO_LINE,
@@ -177,9 +178,13 @@ describe('convertProjectToDbml', () => {
     expect(feature).toHaveBeenCalledWith('convertToDbml');
     expect(info.mock.calls.at(-1)![0]).toBe(
       'Converted to DBML: 3 tables, 1 diagram. Edit > Undo, straight away, with this diagram in front, puts every file back. ' +
-        "Teammates and other VS Code windows on an older ERD Studio (1.7.x) can't open the converted project until they update.",
+        "Teammates and other VS Code windows on an older ERD Studio (1.7.x) can't open the converted project until they switch to the ERD Studio pre-release or update to 2.0.",
     );
     expect(CONVERTED_TEAMMATES_SENTENCE).toContain('1.7.x');
+    // Counts as the panel writes them, and the next step a stable teammate really has.
+    expect(convertedMessage({ tables: 1100, diagrams: 21 }, 1200, 'diagram')).toMatch(
+      /^Converted to DBML: 1,100 tables, 21 diagrams\. 1,200 files stay as they are until fixed; .* until they switch to the ERD Studio pre-release or update to 2\.0\.$/,
+    );
 
     info.mockClear();
     expect(await convertProjectToDbml(deps())).toBe('nothing');
