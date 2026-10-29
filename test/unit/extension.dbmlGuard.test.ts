@@ -226,6 +226,36 @@ describe('a project a newer ERD Studio stored as DBML', () => {
   });
 });
 
+describe('a folder a newer ERD Studio stored as DBML, with no dbt_project.yml', () => {
+  beforeEach(() => {
+    makeDbmlProject(project);
+    fs.rmSync(path.join(project, 'dbt_project.yml'));
+    vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(project), name: 'analytics', index: 0 }];
+  });
+
+  it('shows the DBML message (key, notice, working link) instead of only "No dbt project", and writes nothing', async () => {
+    context = makeContext(project);
+    const before = snapshot(project);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(contextKey()).toEqual([true]);
+    expect(dbmlWarnings()).toEqual([[DBML_STORAGE_MESSAGE, OPEN_EXTENSION_PAGE_BUTTON]]);
+    exec.mockClear();
+    await vscode.commands.executeCommand(OPEN_EXTENSION_PAGE_COMMAND);
+    expect(exec).toHaveBeenCalledWith('extension.open', 'liamwynne.erd-studio');
+    expect(snapshot(project)).toEqual(before);
+  });
+
+  it('a plain folder with no dbt project and no DBML gets the no-project welcome as before', async () => {
+    fs.rmSync(path.join(project, '.erd-studio'), { recursive: true, force: true });
+    context = makeContext(project);
+    await activate(context);
+    expect(contextKey()).toEqual([]);
+    expect(dbmlWarnings()).toEqual([]);
+  });
+});
+
 describe('a YAML / JSON project is unaffected', () => {
   beforeEach(() => {
     fs.cpSync(FIXTURE_ROOT, project, { recursive: true });

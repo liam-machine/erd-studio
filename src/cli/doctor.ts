@@ -574,6 +574,9 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
   if (!root) {
     // Not an error for doctor: saying so is its job. inventory/diff exit 3 instead.
     const cwdRoot = path.resolve(opts.cwd ?? process.cwd(), opts.project ?? '.');
+    // The 1.9 pre-release and 2.0 work without dbt, so a folder they stored
+    // as DBML is reported even here.
+    const dbml = dbmlStorageOf(cwdRoot, opts.semanticDir);
     const base: Omit<DoctorResult, 'nextSteps'> = {
       ...makeEnvelope(cwdRoot, opts.semanticDir),
       runtime: runtimeInfo(),
@@ -590,13 +593,14 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       },
       projectFiles: { schemaYmlFiles: 0, sourceFiles: 0, modelsDiscovered: 0 },
       erd: {
-        semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
+        semanticDirExists: dbml.dbmlStorage !== undefined, ...dbml,
+        layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
         conflictedDomainFiles: [], dataTypeAliasFiles: [], backwardsRelationships: [],
         naming: 'v6', tablesFolderIsLayer: false, namingConflicts: [],
       },
       harness: { schemaSkill: 'missing', setupSkill: 'missing', version: harnessVersion },
     };
-    return { ...base, nextSteps: [] };
+    return { ...base, nextSteps: dbml.dbmlStorage ? [dbmlStorageStep(dbml.dbmlStorage.file, opts.semanticDir)] : [] };
   }
 
   const [ctx, probed] = await Promise.all([

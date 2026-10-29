@@ -78,6 +78,7 @@ import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrar
 import { saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles } from './providers/dirtyDocuments';
 import { DBML_STORAGE_MESSAGE, DbmlStorageGuard, OPEN_EXTENSION_PAGE_COMMAND, openExtensionPage } from './providers/dbmlStorageGuardUi';
+import { detectDbmlStorage } from './services/dbmlStorageGuard';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -537,6 +538,30 @@ function registerFallbackCommands(context: vscode.ExtensionContext): void {
   );
 }
 
+/**
+ * The no-project half of the DBML guard (`src/services/dbmlStorageGuard.ts`).
+ * The 1.9 pre-release and 2.0 open any folder, so a folder they stored as
+ * DBML may have no dbt_project.yml, and this version then finds no project.
+ * When a workspace folder's ERD Studio folder holds DBML storage, set
+ * `erdStudio.dbmlStorage` (the views show the DBML message instead of "No dbt
+ * project in this folder yet"), say so once, and make the views' link work.
+ * Everything else is already a no-project stub, so nothing can write.
+ */
+function guardDbmlStorageWithoutProject(context: vscode.ExtensionContext): void {
+  const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
+  const semanticRoot = workspaceFolderPaths()
+    .map((f) => path.join(f, semanticDir))
+    .find((root) => detectDbmlStorage(root) !== null);
+  if (semanticRoot === undefined) { return; }
+  const guard = new DbmlStorageGuard(semanticRoot);
+  // Publishes the context key and shows the once-per-session notice.
+  guard.isActive();
+  context.subscriptions.push(
+    guard,
+    vscode.commands.registerCommand(OPEN_EXTENSION_PAGE_COMMAND, () => openExtensionPage()),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Shared helper functions
 // ---------------------------------------------------------------------------
@@ -829,6 +854,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Register stub commands / editor so palette entries and the sidebar
     // welcome buttons explain the problem instead of "command not found".
     registerFallbackCommands(context);
+    // The 1.9 pre-release and 2.0 work in a folder without dbt_project.yml,
+    // and may have stored it as DBML: say that, not "No dbt project".
+    guardDbmlStorageWithoutProject(context);
     // A fresh install first activated without a dbt project (usually by
     // clicking the ERD Studio icon) still starts on the Get Started
     // walkthrough: the video, the sample project and how to open one.

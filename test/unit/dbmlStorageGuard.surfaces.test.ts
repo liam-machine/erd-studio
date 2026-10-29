@@ -93,6 +93,40 @@ describe('erd-studio doctor', () => {
     expect(out).not.toContain('Update the ERD Studio skills');
     expect(out).toMatch(/Claude skills: schema outdated, .* leave them/);
   });
+
+  it('reports it in a folder with no dbt project (the newer version works without dbt)', async () => {
+    const root = path.join(tmp, 'p');
+    makeDbmlProject(root);
+    fs.rmSync(path.join(root, 'dbt_project.yml'));
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: tmp });
+    expect(r.project.found).toBe(false);
+    expect(r.erd.dbmlStorage?.file).toMatch(/^\.erd-studio\/tables\/gold\/[a-z_]+\.dbml$/);
+    expect(r.nextSteps.map((s) => s.id)).toEqual(['update-erd-studio']);
+
+    let out = '';
+    const code = await main(['doctor', '--project', root], {
+      stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: root, env: cleanEnv,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('No dbt project found');
+    expect(out).toContain(`✗ ${DBML_STORAGE_MESSAGE} (found ${r.erd.dbmlStorage!.file})`);
+    expect(out).toMatch(/Next steps:\n {2}1\. Open this project with a newer ERD Studio/);
+  });
+
+  it('a folder with no dbt project and no DBML storage is reported as before', async () => {
+    const root = path.join(tmp, 'empty');
+    fs.mkdirSync(root);
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: tmp });
+    expect('dbmlStorage' in r.erd).toBe(false);
+    expect(r.erd.semanticDirExists).toBe(false);
+    expect(r.nextSteps).toEqual([]);
+  });
+
+  it('says nothing about it for a YAML / JSON project (no key in the JSON)', async () => {
+    const r = await runDoctor({ project: FIXTURE_ROOT, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: tmp });
+    expect('dbmlStorage' in r.erd).toBe(false);
+    expect(r.nextSteps.some((s) => s.id === 'update-erd-studio')).toBe(false);
+  });
 });
 
 describe('erd-studio inventory / diff / export', () => {
@@ -122,6 +156,15 @@ describe('erd-studio inventory / diff / export', () => {
       expect(json.code, args[0]).toBe(3);
       expect(JSON.parse(json.out).error.code, args[0]).toBe('dbml-storage');
     }
+  });
+
+  it('stop in a DBML folder with no dbt project too', async () => {
+    const root = path.join(tmp, 'p');
+    makeDbmlProject(root);
+    fs.rmSync(path.join(root, 'dbt_project.yml'));
+    const r = await run(['inventory', '--json'], root);
+    expect(r.code).toBe(3);
+    expect(JSON.parse(r.out).error.code).toBe('dbml-storage');
   });
 
   it('run as before on a YAML / JSON project', async () => {
@@ -231,6 +274,9 @@ describe('package.json', () => {
     }
     const noTables = pkg.contributes.viewsWelcome.find((w) => w.contents.startsWith('No tables found'))!;
     expect(noTables.when).toBe('!erdStudio.dbmlStorage');
+    // A DBML folder without dbt_project.yml (2.0 works in any folder) gets the DBML message, not "No dbt project".
+    const noProject = pkg.contributes.viewsWelcome.find((w) => w.contents.startsWith('No dbt project in this folder yet'))!;
+    expect(noProject.when).toBe('!erdStudio.hasDbtProject && !erdStudio.dbmlStorage');
     const noDiagrams = pkg.contributes.viewsWelcome.find((w) => w.contents.startsWith('No diagrams yet'))!;
     expect(noDiagrams.when).toBe('erdStudio.hasDbtProject && !erdStudio.dbmlStorage');
     const library = pkg.contributes.views['erd-studio'].find((v) => v.id === 'erdStudio.modelLibrary')!;

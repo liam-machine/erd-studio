@@ -328,7 +328,7 @@
       {
         "view": "erdStudio.domainTree",
         "contents": "No dbt project in this folder yet.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video, a sample project to try, and how to open your own.",
-        "when": "!erdStudio.hasDbtProject"
+        "when": "!erdStudio.hasDbtProject && !erdStudio.dbmlStorage"
       },
       {
         "view": "erdStudio.domainTree",

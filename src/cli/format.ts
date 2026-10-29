@@ -109,8 +109,13 @@ export function formatDiff(r: DiffResult, p: Paint): string {
 export function formatDoctor(r: DoctorResult, p: Paint): string {
   const ok = (b: boolean) => (b ? p.green('✓') : p.yellow('–'));
   const lines: string[] = [];
+  const dbmlLine = (file: string): string => `${p.red('✗')} ${DBML_STORAGE_MESSAGE} (found ${file})`;
   if (!r.project.found) {
     lines.push(`${ok(false)} No dbt project found (looked for dbt_project.yml near ${r.projectRoot})`);
+    if (r.erd.dbmlStorage) {
+      lines.push(dbmlLine(r.erd.dbmlStorage.file), '', 'Next steps:');
+      r.nextSteps.forEach((s, i) => { lines.push(`  ${i + 1}. ${s.title}`); });
+    }
     return lines.join('\n') + '\n';
   }
   lines.push(`${ok(true)} dbt project ${r.project.name ?? '(unnamed)'} at ${r.projectRoot}`);
@@ -128,7 +133,7 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'subject area')}, ${plural(r.erd.logicalModels, 'table')}`
     + (r.erd.semanticDirExists ? ` — file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}` : ''));
   if (r.erd.dbmlStorage) {
-    lines.push(`${p.red('✗')} ${DBML_STORAGE_MESSAGE} (found ${r.erd.dbmlStorage.file})`);
+    lines.push(dbmlLine(r.erd.dbmlStorage.file));
   }
   // Not in a DBML project: the migration would write YAML / JSON into it.
   const migration = r.erd.dbmlStorage ? undefined : r.erd.namingMigration;
