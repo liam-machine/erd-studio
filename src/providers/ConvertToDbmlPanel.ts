@@ -86,12 +86,15 @@ export class ConvertToDbmlPanel {
   }
 
   /**
-   * Show what Convert is doing (after the user chose Convert): on the
-   * Convert button and in the status line beside it. Nothing when no panel is open.
+   * Show what Convert is doing (after the user chose Convert, or Check
+   * Again): on the Convert button and in the status line beside it. Nothing
+   * when no panel is open, or while a run is waiting on the open one for a
+   * choice: that panel is another run's, and a second run's planning must
+   * not disable its buttons (the second run takes it over in `show`).
    */
   static showProgress(text: string): void {
     const panel = ConvertToDbmlPanel.current;
-    if (!panel || panel.disposed) return;
+    if (!panel || panel.disposed || panel.resolve) return;
     const message: ConvertPanelProgress = { type: 'progress', text };
     void Promise.resolve(panel.panel.webview.postMessage(message)).catch(() => { /* the panel closed meanwhile */ });
   }

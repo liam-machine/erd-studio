@@ -817,6 +817,37 @@ describe('progress, cancel and plan once (pre-release feedback)', () => {
     expect(shown[0].html).toContain('class="cdb__status" role="status" aria-live="polite"');
   });
 
+  it('a second run\'s planning never locks a first run\'s panel that is waiting for a choice', async () => {
+    useFixture('composite-and-self');
+    // The second planning notification (run B's) is cancelled once it has said what it is doing.
+    let planning = 0;
+    vi.spyOn(vscode.window, 'withProgress').mockImplementation((async (
+      options: { cancellable?: boolean },
+      task: (progress: { report: (v: { message?: string }) => void }, token: vscode.CancellationToken) => Promise<unknown>,
+    ) => {
+      const second = options.cancellable === true && ++planning === 2;
+      let reported = false;
+      const token = {
+        get isCancellationRequested() { return second && reported; },
+        onCancellationRequested: () => ({ dispose: () => {} }),
+      } as unknown as vscode.CancellationToken;
+      return task({ report: () => { reported = true; } }, token);
+    }) as never);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    // Run A shows its review and waits.
+    const shown = answerPanel(() => undefined);
+    const runA = convertProjectToDbml(deps());
+    await vi.waitFor(() => expect(shown).toHaveLength(1));
+    const panel = shown[0].panel;
+    const progressOf = (): unknown[] => (panel._postedMessages as Array<{ type: string }>).filter((m) => m.type === 'progress');
+    // Run B (the palette, the offer) starts planning, and its notification is cancelled.
+    expect(await convertProjectToDbml(deps())).toBe('cancelled');
+    expect(progressOf()).toEqual([]);
+    // A's panel still answers: Cancel ends run A.
+    await panel._simulateMessage({ type: 'cancel' });
+    expect(await runA).toBe('cancelled');
+  });
+
   it('numbers in the messages read as people write them', () => {
     expect(CONVERT_PROGRESS.planning(1100, 21)).toBe('Planning 1,100 tables and 21 diagrams…');
     expect(CONVERT_PROGRESS.planning(1, 1)).toBe('Planning 1 table and 1 diagram…');
