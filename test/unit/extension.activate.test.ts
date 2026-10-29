@@ -934,6 +934,50 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(sends() - sendsBefore).toBe(1);
   });
 
+  it('a canvas redraw asked for during a burst of ERD Studio\'s own writes (Convert) is made once the burst settles', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const file = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
+    const panel = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    await panel._simulateMessage({ type: 'ready' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const sends = (): number => panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
+    const sendsBefore = sends();
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{yml,dbml}'))!;
+
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const ownBurst = (from: number): void => {
+      for (let i = from; i < from + 40; i++) {
+        const tableFile = path.join(ws, '.erd-studio', 'tables', 'gold', `t_${i}.dbml`);
+        fs.writeFileSync(tableFile, `Table t_${i} {\n  id int [pk]\n}\n`);
+        ownWrites.recordWrite(tableFile);
+        tableWatcher._simulateCreate(vscode.Uri.file(tableFile));
+      }
+    };
+
+    // Our own writes alone, nothing asked for meanwhile: no redraw.
+    ownBurst(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sends() - sendsBefore).toBe(0);
+
+    // Convert's files: their events arrive while it is still saving, so the
+    // bulk change outlasts Convert's own hold, and the redraw Convert asks for
+    // after its write (onConverted) is held. It is made when the burst settles.
+    ownBurst(100);
+    await provider.refreshAllOpenSubjectAreas();
+    expect(sends() - sendsBefore).toBe(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sends() - sendsBefore).toBe(1);
+  });
+
   it('the foreign-format toast is not raised outside a DBML project', async () => {
     fs.rmSync(path.join(ws, '.erd-studio', 'tables'), { recursive: true, force: true });
     fs.rmSync(path.join(ws, '.erd-studio', 'gold', 'sales.dbml'));

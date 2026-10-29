@@ -1584,19 +1584,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // DBML, a branch switch): the watcher holds its events until the files are
   // quiet, and the canvases, sidebar views and context keys wait with them,
   // as they do for Convert's own write. One refresh of each after.
-  let releaseBulkChange: (() => void) | undefined;
+  let releaseBulkChange: (() => boolean) | undefined;
   const bulkChangeStartedSubscription = fileWatcherService.onBulkChangeStarted(() => {
     if (releaseBulkChange) return;
     const canvases = editorProvider.holdRefreshes();
     const views = viewRefreshes.hold();
-    releaseBulkChange = () => { canvases(); views(); };
+    releaseBulkChange = () => { const dropped = canvases(); views(); return dropped; };
   });
   const bulkChangeSettledSubscription = fileWatcherService.onBulkChangeSettled(({ reported }) => {
     const release = releaseBulkChange;
     releaseBulkChange = undefined;
-    release?.();
-    // Only outside changes: our own writes (Convert's) were already drawn.
-    if (reported > 0) void editorProvider.refreshAllOpenSubjectAreas();
+    const dropped = release?.() ?? false;
+    // Outside changes, or a redraw asked for meanwhile (Convert's own, after
+    // its write, when the burst of its own files outlasted its hold); our own
+    // writes alone were already drawn.
+    if (reported > 0 || dropped) void editorProvider.refreshAllOpenSubjectAreas();
   });
 
   // dbt schema .yml changed → refresh physical stage

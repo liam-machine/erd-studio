@@ -725,6 +725,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private readonly duplicateWarningsShown = new Set<string>();
   /** Open holds from {@link holdRefreshes}; while above 0, outside refreshes and the duplicate warning wait. */
   private refreshHolds = 0;
+  /** Canvas refreshes asked for while held, and so not made: a hold's release says whether any were. */
+  private droppedRefreshes = 0;
 
   /**
    * Fires after this provider has written a domain file (and any model files)
@@ -2449,21 +2451,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Hold every open canvas's refresh while the naming migration applies
    * (#182): half-way through, a table can be in both folders or in neither,
    * and a canvas redrawn then would warn about it. The returned function
-   * lets them refresh again; the migration then redraws each once.
+   * lets them refresh again; the migration then redraws each once. It
+   * returns whether a canvas refresh was asked for while this hold was open:
+   * a holder that does not redraw on its own (the watcher's bulk change,
+   * whose burst may be another command's own writes) redraws when it was.
    */
-  holdRefreshes(): () => void {
+  holdRefreshes(): () => boolean {
     const held = [...this.openPanels.keys()].filter((key) => !this.pendingUpdates.get(key));
     for (const key of held) this.pendingUpdates.set(key, true);
     // Watcher-driven refreshes and the duplicate warning wait too: they read
     // the disk half-way through, when a converted table's .yml and .dbml
     // both exist, and a warning shown then is never taken back.
     this.refreshHolds++;
+    const droppedAtHold = this.droppedRefreshes;
     let released = false;
     return () => {
-      if (released) return;
+      if (released) return false;
       released = true;
       this.refreshHolds--;
       for (const key of held) this.pendingUpdates.delete(key);
+      return this.droppedRefreshes > droppedAtHold;
     };
   }
 
@@ -4103,7 +4110,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   async refreshAllOpenSubjectAreas(): Promise<void> {
     // Held (holdRefreshes): the command that holds redraws every canvas once it releases.
-    if (this.refreshHolds > 0) return;
+    if (this.refreshHolds > 0) { this.droppedRefreshes++; return; }
     for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
       // The snapshot may include a panel that was disposed while an earlier
       // iteration awaited — skip it rather than refreshing a dead webview.
@@ -4147,7 +4154,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * it names (a branch switch or an assistant's bulk edit changes hundreds).
    */
   async refreshSubjectAreasReferencingTables(modelNames: Iterable<string>, exceptPanelKey?: string): Promise<void> {
-    if (this.refreshHolds > 0) return;
+    if (this.refreshHolds > 0) { this.droppedRefreshes++; return; }
     const wanted = new Set([...modelNames].map(normaliseName));
     if (wanted.size === 0) return;
     const label = wanted.size === 1 ? `model "${[...modelNames][0]}"` : `${wanted.size} models`;
@@ -4239,7 +4246,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /** Redraw every open canvas of the diagram at `fsPath` (its layout file changed outside the editor). */
   async refreshSubjectAreaPanel(fsPath: string): Promise<void> {
-    if (this.refreshHolds > 0) return;
+    if (this.refreshHolds > 0) { this.droppedRefreshes++; return; }
     for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
       if (this.disposedWebviews.has(webview) || !samePath(document.uri.fsPath, fsPath) || this.forgetIfGone(panelKey)) continue;
       try {
