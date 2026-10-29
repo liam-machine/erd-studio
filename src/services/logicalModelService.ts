@@ -1848,7 +1848,7 @@ export class TableLibraryService {
    * Atomically write `content` to `filePath` (temp file + rename), record it
    * as our own write so the logical-model watcher does not bounce it back as
    * an external change (which would trigger a second identical domainLoaded),
-   * and drop any cached parse for the path.
+   * and drop what is cached for the path (the index too, when the file is new).
    */
   private writeAtomic(filePath: string, content: string): void {
     const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
@@ -1860,9 +1860,10 @@ export class TableLibraryService {
       throw err;
     }
     this.ownWriteTracker.recordWrite(filePath);
-    this.cache.delete(filePath);
-    this.namingMemo = undefined;
-    this.storageMemo = undefined;
+    // The watchers swallow our own writes, so the index is told here: on a
+    // file system with whole-second times a create in the same second as the
+    // last build leaves the directory's signature as it was.
+    this.invalidatePaths([filePath]);
   }
 
   /**
@@ -1881,7 +1882,7 @@ export class TableLibraryService {
       fs.unlinkSync(filePath);
       this.ownWriteTracker.recordDelete(filePath);
     }
-    this.cache.delete(filePath);
+    this.invalidatePaths([filePath]);
   }
 
   /**

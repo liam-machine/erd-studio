@@ -483,6 +483,39 @@ describe('invalidatePaths: only what was written', () => {
   });
 });
 
+describe('ERD Studio\'s own YAML writes outside the editor tell the index (the watchers swallow them)', () => {
+  // On a file system with whole-second times whose directory size does not
+  // follow its entries (FAT, some network mounts), a create or delete in the
+  // same second as the last build leaves every signature as it was: only an
+  // explicit drop of the index makes the next lookup list the library again.
+  const indexOf = (lib: TableLibraryService): TableLibraryIndex => (lib as unknown as { index: TableLibraryIndex }).index;
+
+  it('saveTable of a new table and the YAML deleteTable drop the index, and the next lookup sees them', () => {
+    write('logical-models/old_name.yml', yamlTable('old_name'));
+    write('logical-models/keep.yml', yamlTable('keep'));
+    ageLibrary();
+    const lib = service();
+    expect(lib.listTableNames().sort()).toEqual(['keep', 'old_name']);
+    lib.saveTable({ name: 'new_name', columns: [{ name: 'id', dataType: 'INT' }] } as never);
+    expect(indexOf(lib).peek()).toBeUndefined();
+    expect(lib.findTableFile('new_name')).not.toBeNull();
+    lib.deleteTable('old_name');
+    expect(indexOf(lib).peek()).toBeUndefined();
+    expect(lib.listTableNames().sort()).toEqual(['keep', 'new_name']);
+  });
+
+  it('saving an existing table leaves the index as it is', () => {
+    write('logical-models/keep.yml', yamlTable('keep'));
+    ageLibrary();
+    const lib = service();
+    const table = lib.getTable('keep')!;
+    const builds = lib.indexBuilds;
+    lib.saveTable(table);
+    expect(indexOf(lib).peek()).toBeDefined();
+    expect(lib.indexBuilds).toBe(builds);
+  });
+});
+
 describe('peekTableFileError', () => {
   it('is undefined for a file not read in its current version, and the error once it is', () => {
     write('tables/broken.dbml', 'Table broken {\n  id INT [pk\n');
