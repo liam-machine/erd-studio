@@ -1,0 +1,27 @@
+Table dim_invoice_lines_008 [
+  schema: 'gold',
+  role: 'dimension',
+  grain: 'One row per invoice lines 008'
+] {
+  invoice_lines_008_key BIGINT [pk, note: 'Primary key of dim_invoice_lines_008']
+  owner_name INT [note: 'owner name of the invoice lines 008 row']
+  label DATE [note: 'label of the invoice lines 008 row']
+  country_code BOOLEAN [note: 'country code of the invoice lines 008 row']
+  score BIGINT [note: 'score of the invoice lines 008 row']
+  effective_date DATE [note: 'effective date of the invoice lines 008 row']
+  label_5 STRING [note: 'label 5 of the invoice lines 008 row']
+  is_active INT [note: 'is active of the invoice lines 008 row']
+  type_code STRING [note: 'type code of the invoice lines 008 row']
+  status DOUBLE [note: 'status of the invoice lines 008 row']
+  description_text INT [note: 'description text of the invoice lines 008 row']
+  code DATE [note: 'code of the invoice lines 008 row']
+  currency_code STRING [note: 'currency code of the invoice lines 008 row']
+  valid_from "DECIMAL(18,2)" [note: 'valid from of the invoice lines 008 row']
+  created_at "DECIMAL(18,2)" [note: 'created at of the invoice lines 008 row']
+  discount_pct STRING [note: 'discount pct of the invoice lines 008 row']
+  source_system DATE [note: 'source system of the invoice lines 008 row']
+  quantity INT [note: 'quantity of the invoice lines 008 row']
+  inspections_bim_018_key BIGINT [note: 'FK to fct_inspections_bim_018', foreign_key: 'true']
+  vehicles_wms_023_key BIGINT [note: 'FK to fct_vehicles_wms_023', foreign_key: 'true']
+  Note: 'Synthetic gold table dim_invoice_lines_008'
+}

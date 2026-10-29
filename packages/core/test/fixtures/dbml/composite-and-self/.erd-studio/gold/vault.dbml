@@ -5,5 +5,5 @@ Project vault {
 
 use { table pit_customer } from '../tables/gold/pit_customer.dbml'
 use { table sat_customer } from '../tables/gold/sat_customer.dbml'
-use { table employee } from '../tables/gold/employee.dbml'
+use { table employee }     from '../tables/gold/employee.dbml'
 use * from '../tables/gold/_relationships.dbml'

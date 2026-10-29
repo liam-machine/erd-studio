@@ -213,6 +213,36 @@ export function compileOne(
   return compiled;
 }
 
+/** A lex and parse of one file, without binding or interpreting it. */
+export interface ParsedSyntax {
+  /** The program node. */
+  ast: AstNode;
+  /** The significant tokens, in order (the last is the end-of-file token); comments and whitespace are their trivia. */
+  tokens: AstNode[];
+  /** The lexer's and parser's errors only (1xxx): no binding or validation error. */
+  errors: ParserDiagnostic[];
+}
+
+/**
+ * Lex and parse `text` on its own, the first stage of {@link compileOne}
+ * (the Compiler's `parseFile`), for the formatter: it binds no `use` line
+ * (binding a diagram's 500 imports is most of a compile) and caches
+ * nothing. A parser that throws is passed through.
+ */
+export function parseSyntax(text: string, parser: DbmlParserModule = PINNED_PARSER, virtualPath: string = VIRTUAL_PATH): ParsedSyntax {
+  const layout = new parser.MemoryProjectLayout();
+  const entry = parser.Filepath.from(virtualPath);
+  layout.setSource(entry, text);
+  const compiler = new parser.Compiler(layout);
+  return withKeptFilepathKeys(parser, () => {
+    const report = compiler.parseFile(entry);
+    const value = (report?.getValue?.() ?? {}) as AstNode;
+    const errors = ((report?.getErrors?.() ?? []) as unknown[]).map((d) => diagnosticOf(d, text));
+    const ast = value.ast as AstNode;
+    return { ast: ast && typeof ast === 'object' && 'ast' in ast && ast.ast ? (ast.ast as AstNode) : ast, tokens: Array.isArray(value.tokens) ? (value.tokens as AstNode[]) : [], errors };
+  });
+}
+
 /** The program's top-level declarations. */
 export function topLevel(ast: AstNode | undefined): AstNode[] {
   return Array.isArray(ast?.body) ? (ast!.body as AstNode[]) : [];

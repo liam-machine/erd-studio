@@ -1,0 +1,22 @@
+Table fct_vehicles_wms_023 [
+  schema: 'gold',
+  role: 'fact',
+  grain: 'One row per vehicles wms 023'
+] {
+  vehicles_wms_023_key BIGINT [pk, note: 'Primary key of fct_vehicles_wms_023']
+  owner_name DATE [note: 'owner name of the vehicles wms 023 row']
+  category TIMESTAMP_NTZ [note: 'category of the vehicles wms 023 row']
+  status DOUBLE [note: 'status of the vehicles wms 023 row']
+  weight_kg BOOLEAN [note: 'weight kg of the vehicles wms 023 row', additive_type: 'non-additive']
+  currency_code INT [note: 'currency code of the vehicles wms 023 row']
+  weight_kg_5 DOUBLE [note: 'weight kg 5 of the vehicles wms 023 row', additive_type: 'non-additive']
+  duration_minutes DOUBLE [note: 'duration minutes of the vehicles wms 023 row', additive_type: 'non-additive']
+  unit_price DATE [note: 'unit price of the vehicles wms 023 row', additive_type: 'additive']
+  country_code DATE [note: 'country code of the vehicles wms 023 row']
+  notes INT [note: 'notes of the vehicles wms 023 row']
+  currency_code_10 BIGINT [note: 'currency code 10 of the vehicles wms 023 row']
+  priority BIGINT [note: 'priority of the vehicles wms 023 row']
+  source_system DATE [note: 'source system of the vehicles wms 023 row']
+  invoices_007_key BIGINT [note: 'FK to dim_invoices_007', foreign_key: 'true']
+  Note: 'Synthetic gold table fct_vehicles_wms_023'
+}

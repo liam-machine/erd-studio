@@ -191,6 +191,13 @@ export interface ListPlan {
   added: Array<{ order: number; text: string }>;
   /** A table's new list goes one setting per line when it holds more than one. */
   multiLineWhenNew: boolean;
+  /**
+   * Each element's place in the writer's canonical settings order. When set,
+   * a new setting goes straight after the last kept element that sorts at
+   * or before it (before every element when none does); without it, new
+   * settings are appended.
+   */
+  orders?: number[];
 }
 
 /**
@@ -202,7 +209,8 @@ export interface ListPlan {
  * A list left empty is removed with the space before it.
  */
 export function renderListPlan(text: string, plan: ListPlan, eol: string): TextEdit[] {
-  const added = [...plan.added].sort((a, b) => a.order - b.order).map((a) => a.text);
+  const addedItems = [...plan.added].sort((a, b) => a.order - b.order);
+  const added = addedItems.map((a) => a.text);
   const changed = plan.elements.some((e) => e !== undefined) || added.length > 0;
   if (!changed) return [];
   const list = plan.list;
@@ -229,6 +237,16 @@ export function renderListPlan(text: string, plan: ListPlan, eol: string): TextE
     while (start > 0 && (text[start - 1] === ' ' || text[start - 1] === '\t')) start--;
     return [{ start, end: list.end, text: '' }];
   }
+  const lastKept = kept.lastIndexOf(true);
+  // Where each new setting goes: after which kept element (-1: before the first kept one).
+  const slotOf = (order: number): number => {
+    if (!plan.orders || lastKept < 0) return lastKept;
+    let slot = -1;
+    elements.forEach((_, i) => { if (kept[i] && (plan.orders![i] ?? 999) <= order) slot = i; });
+    return slot;
+  };
+  const slots = addedItems.map((a) => slotOf(a.order));
+  const atEnd = added.filter((_, k) => slots[k] === lastKept);
   // One setting per line: a line break between the elements (or by a bracket), not only inside a value.
   const gaps: string[] = [];
   let at = (list.listOpenBracket?.end ?? list.start + 1) as number;
@@ -242,8 +260,13 @@ export function renderListPlan(text: string, plan: ListPlan, eol: string): TextE
   // then it is spliced element by element, as a multi-line list is.
   if (!multiLine && !gaps.some((g) => g.includes('/*'))) {
     const parts: string[] = [];
-    elements.forEach((_, i) => { if (kept[i]) parts.push(elementText(i)); });
-    parts.push(...added);
+    const addAt = (slot: number): void => { added.forEach((a, k) => { if (slots[k] === slot) parts.push(a); }); };
+    addAt(-1);
+    elements.forEach((_, i) => {
+      if (!kept[i]) return;
+      parts.push(elementText(i));
+      addAt(i);
+    });
     return [{ start: list.start, end: list.end, text: `[${parts.join(', ')}]` }];
   }
   const edits: TextEdit[] = [];
@@ -267,27 +290,40 @@ export function renderListPlan(text: string, plan: ListPlan, eol: string): TextE
     }
   });
   const inCut = (node: AstNode): boolean => cuts.some((c) => node.start >= c.start && node.end <= c.end);
-  const lastKept = kept.lastIndexOf(true);
   commas.forEach((comma, j) => {
-    const needed = kept[j] && (kept.slice(j + 1).some(Boolean) || added.length > 0);
+    const needed = kept[j] && (kept.slice(j + 1).some(Boolean) || atEnd.length > 0);
     if (!needed && !inCut(comma)) edits.push({ start: comma.start, end: comma.end, text: '' });
   });
-  if (added.length > 0) {
+  const indent = elements.length > 0 ? indentAt(text, elements[0].start) : '  ';
+  // New settings that sort before a kept element go in front of it (each followed by a comma).
+  for (let i = 0; i < elements.length; i++) {
+    if (!kept[i]) continue;
+    const previousKept = kept.slice(0, i).lastIndexOf(true);
+    const here = added.filter((_, k) => slots[k] === previousKept && previousKept !== lastKept);
+    if (here.length === 0) continue;
+    const element = elements[i];
+    if (multiLine && startsItsLine(text, element.start)) {
+      const lineStart = text.lastIndexOf('\n', element.start - 1) + 1;
+      edits.push({ start: lineStart, end: lineStart, text: here.map((a) => `${indent}${a},${eol}`).join('') });
+    } else {
+      edits.push({ start: element.start, end: element.start, text: here.map((a) => `${a}, `).join('') });
+    }
+  }
+  if (atEnd.length > 0) {
     const close = list.listCloseBracket as AstNode;
-    const indent = elements.length > 0 ? indentAt(text, elements[0].start) : '  ';
     if (lastKept >= 0 && !commas[lastKept]) edits.push({ start: elements[lastKept].end, end: elements[lastKept].end, text: ',' });
     if (!multiLine) {
       // One line: after the last kept element (and its comma), or straight after `[`.
       const comma = lastKept >= 0 ? commas[lastKept] : undefined;
       const at = lastKept < 0 ? (list.listOpenBracket?.end ?? list.start + 1) as number : comma ? comma.end : elements[lastKept].end;
       const lead = lastKept < 0 ? '' : ' ';
-      edits.push({ start: at, end: at, text: `${lead}${added.join(', ')}${lastKept < 0 && keptCount === 0 && elements.length > 0 ? ' ' : ''}` });
+      edits.push({ start: at, end: at, text: `${lead}${atEnd.join(', ')}${lastKept < 0 && keptCount === 0 && elements.length > 0 ? ' ' : ''}` });
     } else if (startsItsLine(text, close.start)) {
       const at = text.lastIndexOf('\n', close.start - 1) + 1;
-      edits.push({ start: at, end: at, text: added.map((a, i) => `${indent}${a}${i < added.length - 1 ? ',' : ''}${eol}`).join('') });
+      edits.push({ start: at, end: at, text: atEnd.map((a, i) => `${indent}${a}${i < atEnd.length - 1 ? ',' : ''}${eol}`).join('') });
     } else {
       const at = lastKept >= 0 ? elements[lastKept].end : close.start;
-      edits.push({ start: at, end: at, text: added.map((a, i) => `${i === 0 && lastKept < 0 ? '' : eol}${indent}${a}${i < added.length - 1 ? ',' : ''}`).join('') });
+      edits.push({ start: at, end: at, text: atEnd.map((a, i) => `${i === 0 && lastKept < 0 ? '' : eol}${indent}${a}${i < atEnd.length - 1 ? ',' : ''}`).join('') });
     }
   }
   return edits;

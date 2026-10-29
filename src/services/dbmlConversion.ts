@@ -70,21 +70,36 @@ import {
   compileDbmlProject,
   dbmlStorageReader,
   dbmlTableLookup,
-  editSubjectAreaDbml,
   parseSubjectAreaDbml,
   parseTableDbml,
   pendingRelationshipRef,
   readRelationshipsDbml,
-  renderNewSubjectAreaDbml,
-  renderNewTableDbml,
   subjectAreaMembersDbml,
 } from '@erd-studio/core/dbml';
+import { canonicalDbml, editSubjectAreaDbml, formatWrittenDbml, renderNewSubjectAreaDbml, renderNewTableDbml } from './dbmlWriters';
 
 import { DbmlFileCompileMemo, compileDbmlFilesSeparately, compileDbmlFilesSeparatelyAsync } from './dbmlFileCompile';
 import { planDbmlLibraryWrites } from './dbmlLibraryWrites';
 import type { DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
 import { planMoveToLibrary } from './libraryRelationships';
 import { jsonMistakeAt } from './commandErrors';
+
+/**
+ * Whether an existing DBML table file already holds what Convert writes
+ * there (an earlier, half-applied run): the same bytes, or the same table in
+ * an older layout. 1.9.x wrote the body Note last and the column `note`
+ * before the other settings, without aligning: the same table, from the same
+ * characters in another order and spacing. Anything else (a comment or a
+ * setting added by hand, a value changed) is other contents.
+ */
+export function sameConvertedTable(existing: string, planned: string, stem: string): boolean {
+  if (existing === planned) return true;
+  const characters = (text: string): string => [...text.replace(/^\uFEFF/, '').replace(/\s+/g, '')].sort().join('');
+  if (characters(existing) !== characters(planned)) return false;
+  const a = parseTableDbml(existing, stem);
+  const b = parseTableDbml(planned, stem);
+  return a.ok && b.ok && a.writable && a.declaredName === b.declaredName && JSON.stringify(a.table) === JSON.stringify(b.table);
+}
 
 // ---------------------------------------------------------------------------
 // Input and plan
@@ -775,7 +790,9 @@ async function planOnce(
     const target = `${TABLES_DIR}/${folder ? `${folder}/` : ''}${model.name}.dbml`;
     const kept = keptYamlLines(f.path, f.text, model.name);
     const { relationships: _r, ...bare } = model;
-    const text = [...kept.block, renderNewTableDbml(bare as SemanticTable)].join('\n');
+    // The kept YAML lines go above the Table as `//` lines; the whole file is then formatted once more.
+    const rendered = renderNewTableDbml(bare as SemanticTable);
+    const text = kept.block.length > 0 ? formatWrittenDbml([...kept.block, rendered].join('\n'), target) : rendered;
     if (kept.comments) notes.push(`${f.path}: its comments are kept as // lines above the Table in ${target}; ERD Studio does not read them.`);
     if (kept.unknownKeys.length > 0) notes.push(`${f.path}: keys ERD Studio does not read (${kept.unknownKeys.join(', ')}) are kept as // lines above the Table in ${target}.`);
     if (kept.ignoredValues.length > 0) notes.push(`${f.path}: values ERD Studio does not read (${kept.ignoredValues.join(', ')}) are kept as // lines above the Table in ${target}; they were not drawn before and are not drawn now.`);
@@ -839,7 +856,7 @@ async function planOnce(
     const yaml = entries.filter((e) => e.storage === 'yaml');
     const dbml = entries.filter((e) => e.storage === 'dbml');
     if (yaml.length === 1 && dbml.length === 1 && dbml[0].path === yaml[0].target) {
-      if (dbml[0].text === yaml[0].text) {
+      if (sameConvertedTable(dbml[0].text!, yaml[0].text!, stemOf(dbml[0].path))) {
         resumedTables.add(dbml[0].path);
         continue;
       }
@@ -1260,10 +1277,11 @@ async function planOnce(
   const finalLists = listsOf(entries);
   const desired = (t: LibraryTable): TableRelationship[] =>
     (finalLists.get(lower(t.name)) ?? []).map((e) => { const { fromModel: _f, ...rest } = e.rel; return rest as TableRelationship; });
-  const saves: Array<{ model: SemanticTable }> = [];
+  const saves: Array<{ model: SemanticTable; asWritten?: boolean }> = [];
   for (const t of library.values()) {
     if (t.converted) {
-      saves.push({ model: { ...t.model, relationships: desired(t) } });
+      // Its file is the text this run rendered from this model: the plan only places its relationships.
+      saves.push({ model: { ...t.model, relationships: desired(t) }, asWritten: true });
       continue;
     }
     const current = attachment.byOwner.get(lower(t.name)) ?? [];
@@ -1326,7 +1344,8 @@ async function planOnce(
   for (const t of library.values()) {
     if (!t.converted) continue;
     const text = plannedTableText.get(t.path)!;
-    if (t.converted.resumed && fileAt.get(t.path)?.text === text) plan.resumed.push(t.path);
+    const there = fileAt.get(t.path)?.text;
+    if (t.converted.resumed && there !== undefined && sameConvertedTable(there, text, t.name)) plan.resumed.push(t.path);
     else if (fileAt.has(t.path)) {
       leave(t.converted.source, `${t.path} already exists, with other contents than this file converts to. Keep one of them.`);
       continue;
@@ -1432,14 +1451,17 @@ async function planOnce(
       relationshipsFiles: relationshipsFilesFor(members.map((m) => m.name)),
       annotations,
     }));
-    const diagramText = text.join('\n');
+    const diagramText = kept.block.length > 0 ? formatWrittenDbml(text.join('\n'), d.target) : text.join('\n');
     const positions: Record<string, NodePosition> = view.positions ?? {};
     const layout = editDiagramLayout(null, positions, stickyLayoutsOf(annotations));
     const there = (target: string): DbmlConversionFile | undefined => fileAt.get(target) ?? fileAtLower.get(lower(target));
     const clash = [d.target, ...(layout !== null ? [layoutFilePathOf(d.target)] : [])].map(there).find((f, i) => {
       if (!f) return false;
       const body = i === 0 ? diagramText : layout!;
-      return !(f.path === (i === 0 ? d.target : layoutFilePathOf(d.target)) && f.text === body);
+      // An earlier run's diagram in an older layout holds the same tokens: formatted, it is this run's text.
+      // Read only, never written here: compared without formatWrittenDbml's "was written" log line.
+      const same = f.text === body || (i === 0 && canonicalDbml(f.text) === body);
+      return !(f.path === (i === 0 ? d.target : layoutFilePathOf(d.target)) && same);
     });
     if (clash) {
       leave(d.file.path, `${clash.path} is also in ${d.layer}/, and holds something other than this file converts to. Keep one of them.`);

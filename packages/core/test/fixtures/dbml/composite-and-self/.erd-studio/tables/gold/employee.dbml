@@ -2,6 +2,6 @@
 // # Two self-references; the second is spelled in another case.
 Table employee {
   employee_id int [pk]
-  manager_id int
-  mentor_id int
+  manager_id  int
+  mentor_id   int
 }

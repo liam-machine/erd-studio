@@ -1,0 +1,24 @@
+Table fct_cost_codes_crm_020 [
+  schema: 'gold',
+  role: 'fact',
+  grain: 'One row per cost codes crm 020 line'
+] {
+  cost_codes_crm_020_key BIGINT [note: 'Parent key, part of the composite primary key']
+  line_no INT [note: 'Line number within the parent, part of the composite primary key']
+  code BIGINT [note: 'code of the cost codes crm 020 row']
+  country_code "DECIMAL(18,2)" [note: 'country code of the cost codes crm 020 row']
+  label STRING [note: 'label of the cost codes crm 020 row']
+  line_number DOUBLE [note: 'line number of the cost codes crm 020 row']
+  priority DATE [note: 'priority of the cost codes crm 020 row']
+  is_active BIGINT [note: 'is active of the cost codes crm 020 row']
+  owner_name BOOLEAN [note: 'owner name of the cost codes crm 020 row']
+  currency_code "DECIMAL(18,2)" [note: 'currency code of the cost codes crm 020 row']
+  amount "DECIMAL(18,2)" [note: 'amount of the cost codes crm 020 row', additive_type: 'additive']
+  weight_kg DOUBLE [note: 'weight kg of the cost codes crm 020 row', additive_type: 'semi-additive']
+  contacts_001_key BIGINT [note: 'FK to dim_contacts_001', foreign_key: 'true']
+  accounts_000_key BIGINT [note: 'FK to dim_accounts_000', foreign_key: 'true']
+  indexes {
+    (cost_codes_crm_020_key, line_no) [pk]
+  }
+  Note: 'Synthetic gold table fct_cost_codes_crm_020'
+}

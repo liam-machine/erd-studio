@@ -1,5 +1,6 @@
 Table dim_customer [schema: 'silver'] {
-  customer_key INT [pk, note: 'Surrogate key']
-  customer_name VARCHAR [note: 'Display name']
   Note: 'Customers'
+
+  customer_key  INT     [pk, note: 'Surrogate key']
+  customer_name VARCHAR [note: 'Display name']
 }

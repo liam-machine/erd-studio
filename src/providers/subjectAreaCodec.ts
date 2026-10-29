@@ -32,9 +32,9 @@ import {
   subjectAreaStorageOf,
   toTableNamingDocument,
 } from '@erd-studio/core';
-import { editSubjectAreaDbml } from '@erd-studio/core/dbml';
 import { readDbmlDiagram } from '../services/dbmlDiagramReadings';
 import type { DbmlDiagramTable } from '@erd-studio/core/dbml';
+import { editSubjectAreaDbml } from '../services/dbmlWriters';
 import type { Annotation, NodePosition } from '@erd-studio/core';
 
 import { subjectAreaTableNames } from '../services/domainService';

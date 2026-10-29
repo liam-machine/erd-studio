@@ -81,7 +81,7 @@ Each fix:
 
 | kind | Edit (DBML) |
 |---|---|
-| `add-column` | Add a column line to the Table block in `file`, after the last column (before any `indexes` block and the `Note`): `name TYPE [note: '…']`, the type double-quoted when it is not a plain identifier (`"DECIMAL(18,2)"`) |
+| `add-column` | Add a column line to the Table block in `file`, after the last column (before any `indexes` block): `name TYPE [note: '…']`, the type double-quoted when it is not a plain identifier (`"DECIMAL(18,2)"`) |
 | `remove-column` | Delete the column's line from `file`, **and** every Ref in a `_relationships.dbml` that names it |
 | `set-type` | Change the column's type to `to` |
 | `add-relationship` | Add one Ref line to `file` (the `_relationships.dbml` of the foreign-key table's folder): `Ref: from_table.from_col >? to_table.to_col` for `many-to-one`, `Ref: to_table.to_col ?- from_table.from_col` for `one-to-one` (key end first), `<>?` for `many-to-many`; a composite as `from_table.(a, b) >? to_table.(x, y)`. Add a `use { table x } from '…'` line there for each table it names that the file does not import, and `foreign_key: 'true'` on the foreign-key column in its table file |

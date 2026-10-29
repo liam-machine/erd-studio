@@ -1,0 +1,17 @@
+Table fct_trips_hr_024 [
+  schema: 'gold',
+  role: 'fact',
+  grain: 'One row per trips hr 024'
+] {
+  trips_hr_024_key BIGINT [pk, note: 'Primary key of fct_trips_hr_024']
+  unit_price TIMESTAMP_NTZ [note: 'unit price of the trips hr 024 row', additive_type: 'non-additive']
+  updated_at TIMESTAMP_NTZ [note: 'updated at of the trips hr 024 row']
+  is_current BOOLEAN [note: 'is current of the trips hr 024 row']
+  valid_to BIGINT [note: 'valid to of the trips hr 024 row']
+  line_number "DECIMAL(18,2)" [note: 'line number of the trips hr 024 row']
+  created_at BIGINT [note: 'created at of the trips hr 024 row']
+  region DATE [note: 'region of the trips hr 024 row']
+  owner_name INT [note: 'owner name of the trips hr 024 row']
+  valid_from "DECIMAL(18,2)" [note: 'valid from of the trips hr 024 row']
+  Note: 'Synthetic gold table fct_trips_hr_024'
+}

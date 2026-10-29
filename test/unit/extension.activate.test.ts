@@ -156,6 +156,13 @@ describe('activate() with no folder open (empty window)', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('registers Format Document for .dbml files once, before the no-project early return', async () => {
+    const before = vscode._formattingProviders.length;
+    await activate(context);
+    const added = vscode._formattingProviders.slice(before);
+    expect(added.map((p) => p.selector)).toEqual([{ language: 'dbml' }]);
+  });
+
   it('still reports an erdStudio.projectPath that points at no dbt project', async () => {
     vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: '/nowhere/analytics' });
     await activate(context);

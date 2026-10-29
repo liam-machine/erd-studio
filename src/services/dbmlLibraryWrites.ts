@@ -31,13 +31,11 @@ import type { DbmlAttachTable, DbmlRelationshipsReading, DbmlStoredRef } from '@
 import {
   DBML_CONVERT_FIRST_MESSAGE,
   DbmlEditRefused,
-  editRelationshipsDbml,
-  editTableDbml,
   parseTableDbml,
   relationshipUnits,
   renamedColumnsOf,
-  renderNewTableDbml,
 } from '@erd-studio/core/dbml';
+import { editRelationshipsDbml, editTableDbml, renderNewTableDbml } from './dbmlWriters';
 import type { DbmlResolvedTable, RefUnit, RelationshipsFileEdit } from '@erd-studio/core/dbml';
 
 import type { FileWrite } from './fileWrites';
@@ -80,8 +78,13 @@ export interface DbmlLibrarySnapshot {
 
 /** What to write (§4.6). */
 export interface DbmlLibraryOps {
-  /** DBML tables only; a save with `fromName` renames. */
-  save?: Array<{ model: SemanticTable; fromName?: string }>;
+  /**
+   * DBML tables only; a save with `fromName` renames. `asWritten` (Convert
+   * only): the table's file already holds exactly this table, as
+   * `renderNewTableDbml` wrote it from this model, so the plan neither edits
+   * nor re-reads it and only places its relationships.
+   */
+  save?: Array<{ model: SemanticTable; fromName?: string; asWritten?: boolean }>;
   delete?: string[];
   /** Organise: a table to another library folder. */
   move?: Array<{ name: string; toFolder: string }>;
@@ -294,8 +297,19 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     if (text === null) refuse(path, `${path} could not be read; nothing was changed.`);
     return text;
   };
-  const plannedTable = (text: string, path: string, model: SemanticTable): DbmlPlannedTable => {
-    const reading = parseTableDbml(text, stemOf(path));
+  const plannedTable = (text: string, path: string, model: SemanticTable, asWritten = false): DbmlPlannedTable => {
+    const reading = asWritten ? null : parseTableDbml(text, stemOf(path));
+    if (!reading) {
+      const columns = (model.columns ?? []).map((c) => c.name);
+      return {
+        name: model.name,
+        reference: dbmlName(model.name),
+        columns: (col) => columns.find((c) => c === col) ?? columns.find((c) => lower(c) === lower(col)),
+        path,
+        storage: 'dbml',
+        primaryKey: (model.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name),
+      };
+    }
     const columns = reading.ok ? (reading.table.columns ?? []).map((c) => c.name) : (model.columns ?? []).map((c) => c.name);
     const pk = reading.ok ? (reading.table.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name) : (model.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name);
     return {
@@ -322,7 +336,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
 
   // Saves (edits, renames, new tables).
   const newFolder = folderAsListed(ops.newTableFolder ?? '');
-  for (const { model, fromName } of saves) {
+  for (const { model, fromName, asWritten } of saves) {
     const sourceKey = lower(fromName ?? model.name);
     const t = snapshot.tables.get(sourceKey);
     const renamed = t !== undefined && fromName !== undefined && fromName !== model.name;
@@ -345,10 +359,10 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     } else {
       path = t.path;
       const old = tableText(t.path);
-      text = editTableDbml(old, model, { file: t.path, fileStem: stemOf(t.path) });
+      text = asWritten ? old : editTableDbml(old, model, { file: t.path, fileStem: stemOf(t.path) });
       if (text !== old) writes.push({ kind: 'replace', path, text });
     }
-    const planned = plannedTable(text, path, model);
+    const planned = plannedTable(text, path, model, asWritten === true && !!t && !renamed);
     after.set(lower(model.name), planned);
     if (t) {
       const columnsRenamed = renamedColumnsOf(t.columns, (model.columns ?? []).map((c) => c.name));

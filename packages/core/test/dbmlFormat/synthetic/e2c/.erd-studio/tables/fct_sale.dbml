@@ -1,0 +1,10 @@
+Table fct_sale [
+  schema: 'silver',
+  role: 'transaction-fact',
+  grain: 'One row per sale transaction'
+] {
+  sale_id INT [pk, note: 'Sale id from the source system — a degenerate dimension, and this fact\'s own key', natural_key: 'true']
+  project_key INT [note: 'FK to dim_project', foreign_key: 'true']
+  amount DECIMAL [note: 'Sale amount', additive_type: 'additive']
+  Note: 'Sales transaction fact table'
+}

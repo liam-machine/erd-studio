@@ -27,6 +27,8 @@ export { editRelationshipsDbml, relationshipUnits, refUnitSortKey, usePathBetwee
 export type { RefUnit, RelationshipsFileEdit, DbmlResolvedTable } from './writeRelationships.js';
 export { renderNewSubjectAreaDbml, editSubjectAreaDbml, pendingRelationshipRef } from './writeDiagram.js';
 export type { SubjectAreaDbmlEdit, NewSubjectAreaDbml, DbmlDiagramTable } from './writeDiagram.js';
+export { formatDbml } from './format.js';
+export type { DbmlFormatOptions, DbmlFormatResult, DbmlFormatSkipReason } from './format.js';
 export { applyTextEdits } from './splice.js';
 export type { TextEdit } from './splice.js';
 export { DbmlEditRefused } from './errors.js';

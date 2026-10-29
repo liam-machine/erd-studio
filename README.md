@@ -62,7 +62,7 @@ To export, click **⤓** on the canvas toolbar or run **ERD Studio: Export All D
 ```dbml
 // .erd-studio/tables/fct_order.dbml
 Table fct_order [grain: 'One row per order'] {
-  order_id INTEGER [pk]
+  order_id    INTEGER [pk]
   customer_id INTEGER [foreign_key: 'true']
 }
 ```

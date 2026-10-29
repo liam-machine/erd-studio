@@ -18,6 +18,7 @@ import * as path from 'path';
 
 import { planDbmlConversion } from '../../src/services/dbmlConversion';
 import { readDbmlConversionInput } from '../../src/services/dbmlConversionFiles';
+import { formatDbml } from '@erd-studio/core/dbml';
 
 const CORE_FIXTURES = path.resolve(__dirname, '../../packages/core/test/fixtures');
 const VARIANTS = path.resolve(__dirname, '../fixtures/dbml-convert');
@@ -96,5 +97,22 @@ describe('fixtures Convert leaves partly as they are', () => {
       { path: 'logical-models/nameless.yml', problem: 'It has no name: key, so ERD Studio does not read it as a table. Add one, or delete the file.' },
     ]);
     expect(plan.keptMissing).toEqual([{ diagram: 'silver/partial.dbml', tables: ['dim_missing'] }]);
+  });
+});
+
+describe('Convert writes the canonical layout', () => {
+  it.each(['composite-and-self', 'showcase', 'missing-positions'])('every .dbml it creates for %s is a fixed point of the formatter, its table Notes first', async (fixture) => {
+    const plan = await planDbmlConversion(readDbmlConversionInput(path.join(CORE_FIXTURES, fixture), '.erd-studio'));
+    const dbml = plan.creates.filter((c) => c.path.endsWith('.dbml'));
+    expect(dbml.length).toBeGreaterThan(0);
+    for (const c of dbml) {
+      expect(formatDbml(c.text), c.path).toMatchObject({ changed: false });
+      expect(formatDbml(c.text).skipped, c.path).toBeUndefined();
+      // A table's Note is the first line of its body, followed by a blank line.
+      if (c.path.startsWith('tables/') && !c.path.endsWith('_relationships.dbml') && /\n {2}Note: /.test(c.text)) {
+        const open = /^(?:Table [^\n]*\{|\] \{)\n/m.exec(c.text)!;
+        expect(c.text.slice(open.index + open[0].length), c.path).toMatch(/^ {2}Note: '[^\n]*'\n\n/);
+      }
+    }
   });
 });

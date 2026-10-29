@@ -1,0 +1,17 @@
+Table fct_shifts_proc_011 [
+  schema: 'gold',
+  role: 'fact',
+  grain: 'One row per shifts proc 011'
+] {
+  shifts_proc_011_key BIGINT [pk, note: 'Primary key of fct_shifts_proc_011']
+  discount_pct DATE [note: 'discount pct of the shifts proc 011 row']
+  code TIMESTAMP_NTZ [note: 'code of the shifts proc 011 row']
+  loaded_at STRING [note: 'loaded at of the shifts proc 011 row']
+  unit_price "DECIMAL(18,2)" [note: 'unit price of the shifts proc 011 row', additive_type: 'additive']
+  source_system DOUBLE [note: 'source system of the shifts proc 011 row']
+  region INT [note: 'region of the shifts proc 011 row']
+  external_ref "DECIMAL(18,2)" [note: 'external ref of the shifts proc 011 row']
+  duration_minutes STRING [note: 'duration minutes of the shifts proc 011 row', additive_type: 'additive']
+  quantity TIMESTAMP_NTZ [note: 'quantity of the shifts proc 011 row', additive_type: 'semi-additive']
+  Note: 'Synthetic gold table fct_shifts_proc_011'
+}

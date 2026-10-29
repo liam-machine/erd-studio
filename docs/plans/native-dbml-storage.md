@@ -99,7 +99,7 @@ Parser facts verified for this spec, all under `@dbml/parse` 9.1.1, 10.3.1 and 1
   - bump its cache key.
 
   A Confluence build on core 0.3.0 given a `.dbml` path throws `SubjectAreaFileError('invalid-json')` with `transient: true`. Say this in the core changelog as a breaking note.
-- **A DBML language contribution** (syntax highlighting) or a JSON Schema for `.dbml`. `.dbml` files have no schema. `layers.json`, `templates/*.json` and the legacy `.json` / `.yml` files keep theirs.
+- **A JSON Schema for `.dbml`.** `.dbml` files have no schema. (The `dbml` language with its grammar and formatter is in, §2.10.) `layers.json`, `templates/*.json` and the legacy `.json` / `.yml` files keep theirs.
 - **Writing YAML or JSON in a DBML project.** Nothing writes `.yml` or a `.json` diagram once storage is `dbml`.
 
 ---
@@ -173,28 +173,32 @@ Table fct_order [
   meta_owner: 'sales-data',
   meta_json: '{"pii":false,"tags":["finance"]}'
 ] {
-  order_line_id BIGINT [pk, note: 'Line id from the shop']
-  customer_key INT [foreign_key: 'true']
-  order_date_key INT
-  ship_date_key INT
-  region_code VARCHAR
-  country_code VARCHAR
-  amount "DECIMAL(18,2)" [additive_type: 'additive', note: 'Line total']
-  order_number VARCHAR [natural_key: 'true'] // the business key
-  loaded_at timestamp [not null, default: `now()`]   // DBML-only settings: kept, never read
   Note: 'Order lines'
+
+  order_line_id  BIGINT          [pk, note: 'Line id from the shop']
+  customer_key   INT             [foreign_key: 'true']
+  order_date_key INT
+  ship_date_key  INT
+  region_code    VARCHAR
+  country_code   VARCHAR
+  amount         "DECIMAL(18,2)" [additive_type: 'additive', note: 'Line total']
+  order_number   VARCHAR         [natural_key: 'true'] // the business key
+  loaded_at      timestamp       [not null, default: `now()`] // DBML-only settings: kept, never read
 }
 ```
 
 **Example: `tables/gold/dim_customer.dbml`** (composite key, SCD and a self-reference)
 
 ```dbml
-Table dim_customer [schema: 'gold', role: 'conformed-dim'] {
-  customer_key INT [note: 'Surrogate key']
-  valid_from DATE [scd_type: '2']
-  customer_id VARCHAR [natural_key: 'true']
+Table dim_customer [
+  schema: 'gold',
+  role: 'conformed-dim'
+] {
+  customer_key        INT     [note: 'Surrogate key']
+  valid_from          DATE    [scd_type: '2']
+  customer_id         VARCHAR [natural_key: 'true']
   parent_customer_key INT
-  segment VARCHAR [scd_type: '1']
+  segment             VARCHAR [scd_type: '1']
   indexes {
     (customer_key, valid_from) [pk]
   }
@@ -205,7 +209,10 @@ Table dim_customer [schema: 'gold', role: 'conformed-dim'] {
 
 ```dbml
 Table bridge_empty {
-  _erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']
+  _erd_no_columns unknown [
+    erd_placeholder: 'true',
+    note: 'ERD Studio: this table has no columns yet, and DBML needs one'
+  ]
 }
 ```
 
@@ -215,7 +222,7 @@ Table bridge_empty {
 |---|---|---|
 | `name` | `Table <ident(name)>`. The file stem equals `name` exactly. | `Table <schema>.<name>` (schema read from the qualifier, §2.2 schema rule) |
 | `schema` | `schema: '<schema>'` table property when set; absent when unset | the qualifier |
-| `description` | body `Note: '<text>'`, the last element of the body | header setting `[note: '…']` (the writer edits it where it is) |
+| `description` | body `Note: '<text>'`, the first element of the body, followed by a blank line (1.9.x wrote it last; an edit keeps it where it is) | header setting `[note: '…']` (the writer edits it where it is) |
 | `modelRole` | `role` | `erd_role` |
 | `grain` | `grain` | `erd_grain` |
 | `alias` | `alias` (custom property; DBML's own `as` alias is never written) | `erd_alias` |
@@ -240,7 +247,8 @@ Table bridge_empty {
 - A flag is written as `'true'` only when it is set. Unsetting it removes the property.
 - Names are bare when they are a plain identifier and not a DBML keyword, else double-quoted with `\"` and `\\` escapes. These are the `ident()` and `KEYWORDS` of `exportDbmlRich.ts`, moved to `dbmlText.ts`.
 - Notes and descriptions go through `noteText()`: leading whitespace is dropped (§2.8).
-- A new file is laid out as the rich export's `tableBlock` does, minus the Ref-derived `unique` and `foreign_key` additions and with an unqualified name. Settings go inline when there is one, else as a multi-line list. There is one column per line, an `indexes` block only for a composite PK, the `Note` last, two-space indents and `\n` line endings.
+- A new file: one Table with an unqualified name, its settings inline when there is one, else as a multi-line list; the body `Note` **first**, followed by one blank line; one column per line; an `indexes` block only for a composite PK; two-space indents and `\n` line endings; then the formatter (§2.9). A column's settings go in the canonical order: `pk`, DBML's own (`not null`, `unique`, `increment`, `default`; the writer emits none of these today), ERD Studio's properties (`natural_key`, `scd_type`, `additive_type`, `foreign_key`), meta (`meta_<key>` / `meta_json`, in the map's key order), then `note` **last**. (Until 1.9.x the Note was last and the column `note` came second; such files read and edit as before.)
+- A setting an edit **adds** to an existing list goes straight after the last setting there that sorts at or before it in that order (before every setting when none does), so a list in canonical order stays in it and a `note` that was last stays last; every meta setting already there (`meta_json` included) sorts as one, so the meta map keeps its key order. A description an edit adds to a table with no `Note` goes first in the body, with a blank line after it; a composite-PK `indexes` block it adds goes last in the body (before a `Note` that comes after every column, the 1.9.x layout).
 - When editing an existing file, take the indent from the first column line and the EOL from the file (`\r\n` if it holds any).
 
 **Schema rule.** A table written by ERD Studio carries its schema as a property. A hand-written `Table gold.x` is read with schema `gold`. A schema edit on such a table is **refused** with: "tables/…/x.dbml names its schema in the Table name (`Table gold.x`). Change it there, or remove the qualifier and use `[schema: 'gold']`." Ref ends and `use { table … }` specifiers in other files spell the table as declared (its **declared reference**, `gold.x`: §4.5 `resolve`), so changing the qualifier would be a cross-file rename.
@@ -255,14 +263,16 @@ One file per library folder holds every Ref whose **owner** (§2.4) is a DBML ta
 
 ```dbml
 // ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
-use { table dim_date } from '../dim_date.dbml'
+use { table dim_date }         from '../dim_date.dbml'
 use { table customer_profile } from './customer_profile.dbml'
-use { table dim_customer } from './dim_customer.dbml'
-use { table dim_region } from './dim_region.dbml'
-use { table fct_order } from './fct_order.dbml'
+use { table dim_customer }     from './dim_customer.dbml'
+use { table dim_region }       from './dim_region.dbml'
+use { table fct_order }        from './fct_order.dbml'
 
 Ref: dim_customer.customer_key ?- customer_profile.customer_key
+
 Ref "parent": dim_customer.parent_customer_key >? dim_customer.customer_key
+
 Ref: fct_order.customer_key >? dim_customer.customer_key
 Ref "order date": fct_order.order_date_key >? dim_date.date_key
 Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
@@ -275,7 +285,7 @@ Ref: fct_order.(region_code, country_code) >? dim_region.(region_code, country_c
 
 - **Header.** The first line is the comment `DBML_RELATIONSHIPS_FILE_HEADER` (the text above). It is written only when the writer creates the file, and never required on read.
 - **`use` lines.** There is one `use { table <declared reference> } from '<posix path relative to this file, with .dbml>'` for **every table named by any Ref in the file**, sorted by path string (byte order) in one block after the header (D17). This is required: `use` is not transitive, and without it the file fails `[4000]` and breaks every diagram that imports it. The reader accepts `use *` too.
-- **Ref lines.** `Ref[ <ident(role)>]: <end> <op> <end>[ <settings as found>]`, one per relationship unit (a composite is one unit), sorted (§4.5). Each end is spelled `<declared reference>.col` or `<declared reference>.(c1, c2)`, using the table's declared spelling (the library's real case, with its schema qualifier if it has one) and each column's **real spelling** from its table file, with `ident()` for every name.
+- **Ref lines.** `Ref[ <ident(role)>]: <end> <op> <end>[ <settings as found>]`, one per relationship unit (a composite is one unit), sorted (§4.5), with **one blank line between the Refs of different foreign-key tables** (the sort's first key, so each table's Refs are one group). Every write that changes the file adds a missing one (only a line break, after a Ref whose next Ref, with nothing but comment lines between, belongs to another table); a blank line already there stays, and a no-op write adds nothing. Each end is spelled `<declared reference>.col` or `<declared reference>.(c1, c2)`, using the table's declared spelling (the library's real case, with its schema qualifier if it has one) and each column's **real spelling** from its table file, with `ident()` for every name.
 
 **Operators.** The writer never writes `<`. It always marks the FK end with `?` (D18). The reader accepts every form. A `?` never changes the cardinality; it only decides a one-to-one's direction (below).
 
@@ -320,9 +330,9 @@ Project sales {
   erd_layout_options: '{"elk.direction":"RIGHT"}'
 }
 
-use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table fct_order }    from '../tables/gold/fct_order.dbml'
 use { table dim_customer } from '../tables/gold/dim_customer.dbml'
-use { table dim_date } from '../tables/dim_date.dbml'
+use { table dim_date }     from '../tables/dim_date.dbml'
 use * from '../tables/_relationships.dbml'
 use * from '../tables/gold/_relationships.dbml'
 
@@ -461,6 +471,33 @@ Nothing that matters is dropped. Each item below is either invisible or the docu
 | An empty positions map (added in S7) | diagram | A diagram with no layout file reads back with `positions: {}`; a JSON diagram may hold no `positions` at all (the dbt-project fixture's empty diagrams). The comparator treats an empty map as none. |
 
 ---
+
+### 2.9 Canonical layout (the formatter)
+
+Every `.dbml` ERD Studio writes is in one layout, produced by **one whitespace-only formatter**, `formatDbml` (`packages/core/src/dbml/format.ts`, exported from `@erd-studio/core/dbml`). The host runs it at the end of every DBML write and behind VS Code's **Format Document** for `.dbml` files (`src/providers/dbmlFormattingProvider.ts`, registered before the no-project early return, answering with whole-line edits from a Myers line diff, never one whole-document replace).
+
+**Rules** (the module's header comment is normative for the details):
+
+- **F0 Whitespace only.** The output's token sequence (kind and exact text, every comment's text included) equals the input's; only the white space and line breaks between tokens change. The formatter re-lexes its output and compares tokens, gaps and the syntax tree's node kinds; when anything differs it returns the input with `skipped: 'self-check'`. Input with a lexer or parser error (1xxx, or an invalid token) under the pinned parser comes back unchanged with `skipped: 'parse-errors'` and the errors; binding (4xxx) and validation (3xxx) errors do not stop it. Idempotent. Linear in the file's size.
+- **F1** Two-space indent per nesting depth; the input's dominant line ending (a majority vote, LF on a tie); no trailing white space; exactly one final line break; at most one blank line in a row, and none straight after `{` / `[` or before `}` / `]`; a single blank line is kept (it groups lines). A byte-order mark is kept.
+- **F2** An own-line comment stays on its own line, indented like the line after it (before a closing bracket, like the lines inside it); a trailing comment stays trailing, one space after the code. Block comment interiors are untouched.
+- **F3** Consecutive column lines of a `Table` (or `TablePartial`) body, with no blank line or own-line comment between them, are an alignment group: names padded to the group's longest name (a name over 32 code points does not widen it), then one space, types padded to the longest type of a column with settings (cap 24), then one space and the settings. Widths in code points. A type's own spacing is normalised (`decimal(10,2)` → `decimal(10, 2)`).
+- **F4** Settings read `[a, b: c]`. A column's or index's list goes one per line (`[` ending the line, each setting at depth + 1 with `,` after all but the last, `]` alone at the column's depth) when its line would pass 100 code points, or when it holds a `//` comment, an own-line comment, a multi-line string or a line break inside one setting.
+- **F5** A `Table` header with one setting stays inline when it fits in 100; with two or more (or too long), one per line between `Table name [` and `] {`.
+- **F6** Ref lines have one space each side of the operator; any other settings list (a Ref's, an Enum value's, a Note's) keeps the input's choice of one line or one per line, with spacing normalised.
+- **F7** Consecutive one-line selective `use { … } from '…'` / `reuse` lines align their `from` (a `use { … }` part over 48 code points, `USE_CAP`, gets one space and does not widen the run, so one long table name cannot re-pad every import of a large diagram), with one space inside the braces.
+- **F8** A line break is significant in DBML, so breaks are only added or removed inside settings lists; anything the formatter does not explicitly understand is only re-indented.
+- **Never inside a token**: string literals (a triple-quoted note's inner indentation is part of its value), quote styles, backtick expressions, quoted names and block comments stay byte for byte. Long notes are never wrapped.
+
+**Where it runs (W4).** Host modules write DBML only through `src/services/dbmlWriters.ts` (`test/unit/dbmlWriters.test.ts` fails if another module imports a writer from core): core's splicer, then `formatDbml`. An edit whose splice returns the text it was given returns it **unformatted**, so a no-op stays byte-identical and callers keep detecting it by comparing texts; a file is reformatted only by a write that changes it. When the formatter declines (it should not for ERD Studio's own output) the unformatted text is written and the reason logged at `info`. **Never on the layout-only path**: a canvas move writes the `.dbdiagram` and a one-character undo anchor that leaves the diagram's bytes identical (`applyFileWrites`); neither goes near the formatter (`test/unit/layoutOnlyEdit.test.ts`). Convert's composed texts (a table or diagram with the YAML's kept `//` lines above it) are formatted once more as a whole; Convert recognises a half-applied earlier run written in the 1.9.x layout as resumed (`sameConvertedTable`: the same characters apart from white space, and the same table) and leaves those files as they are.
+
+**Order is the writer's, not the formatter's (W1–W3).** The formatter never moves an element or a setting. New content follows §2.2 (Note first, canonical settings order) and §2.3 (blank lines between foreign-key tables); an edit of an existing file keeps its element and setting order. The blank line between foreign-key tables' Refs is the relationships writer's (`separateRefGroups`), added by any write that changes a relationships file, and a Ref an edit adds joins its own table's group (after that table's last Ref, never below the blank line before the next table's); Format Document keeps blank lines but adds none, so it does not group a hand-written file's Refs.
+
+**Format on save never runs on ERD Studio's own saves.** VS Code runs save participants, format on save among them, for an extension's `TextDocument.save()` as for the user's, and ERD Studio is the default `.dbml` formatter, so with `editor.formatOnSave` on, the save after a layout-only move's undo anchor (or after an Undo) would reformat a non-canonical `.dbml`. Every ERD Studio save goes through `saveWithoutFormatting` (`src/providers/documentSave.ts`; `saveDocument` / `saveDocumentByUri` use it), which marks the URI while the save runs, and the provider answers with no edits for a marked URI (`isErdStudioSaving`). The user's own saves still format.
+
+### 2.10 The `dbml` language
+
+`package.json` contributes the language `dbml` (alias `DBML`, extension `.dbml`) with `syntaxes/dbml.language-configuration.json` (comments, brackets, auto-closing pairs) and a TextMate grammar, `syntaxes/dbml.tmLanguage.json` (scope `source.dbml`), so a `.dbml` opened as text is highlighted. `configurationDefaults` sets `"[dbml]": { "editor.defaultFormatter": "liamwynne.erd-studio" }`, so Format Document uses §2.9's formatter unless the user picked another `.dbml` formatter. `test/unit/dbmlGrammar.test.ts` tokenises fixtures with the grammar through the devDependencies `vscode-textmate` and `vscode-oniguruma` (exact pins; tests only, nothing ships from `node_modules`). The two `syntaxes/` files count toward the VSIX's 60-file limit.
 
 ## 3. Format detection and versioning
 
@@ -812,18 +849,18 @@ All writers live in `packages/core/src/dbml/`. They are pure, deterministic and 
 - **Table name** (rename): replace the name token's span with `ident(desired.name)`. A schema-qualified name keeps its qualifier; a DBML alias (`as X`) is kept.
 - **Table settings and properties** (`role`, `grain`, `alias`, `schema`, `rationale_*`, `meta_*`, `meta_json`):
   - **changed**: replace that attribute's value span. If the file spells the name `erd_<x>`, the name is kept.
-  - **added**: append `, <k>: <v>` to an inline list, or a new line `<indent><k>: <v>` with a comma added after the previous attribute in a multi-line list, or, when there is no list, insert ` [<k>: <v>]` **immediately before the body's `{`**, which puts it after the name and after any DBML alias (`Table x as X [k: 'v'] {` parses in all three, verified, and checked again by the S3 multi-parser test).
+  - **added**: placed by the canonical settings order (§2.2): after the last setting of the list that sorts at or before it, or before every setting when none does (`, <k>: <v>` / `<k>: <v>, ` in an inline list; a new line `<indent><k>: <v>` in a multi-line list, with a comma added after the previous attribute when it goes last), or, when there is no list, insert ` [<k>: <v>]` **immediately before the body's `{`**, which puts it after the name and after any DBML alias (`Table x as X [k: 'v'] {` parses in all three, verified, and checked again by the S3 multi-parser test).
   - **removed**: delete the attribute and its separating comma (plus its own line in a multi-line list). Remove the brackets when the list becomes empty.
   - **Meta:** only the properties whose value changed are touched. `meta_json` is recomputed from the desired non-`meta_<key>` entries and rewritten only when its parsed JSON differs.
-- **Description**: replace the body `Note` value span (or the header `note` value). Add `<indent>Note: <v>` as the last body line, or remove the Note's line.
+- **Description**: replace the body `Note` value span (or the header `note` value). Add `<indent>Note: <v>` as the first body line, followed by a blank line (W1), or remove the Note's line.
 - **Columns** are matched desired ↔ current by name, case-insensitively (exact case first). Unmatched columns pair by position only when exactly one was removed and one added at the same index: that is a rename, the `syncColumns` rule.
   - **matched**: splice the name, type and settings as for table settings. `note` is the column description.
-  - **added**: a new line built like `renderNewTableDbml`'s column line, inserted after the line of the previous desired column. The first column goes before the first column, or after `{` when there is none.
+  - **added**: a new line built like `renderNewTableDbml`'s column line, inserted after the line of the previous desired column. The first column goes before the first column (kept or not, so after a body `Note` that comes first), or after `{` when there is none.
   - **removed**: delete the column from the line start of its `start` to its `fullEnd` (the cut rule above). Comment lines **above** it are kept.
   - **reordered** (`reorderColumns`): rebuild the column region. Each column block (the text from the line start of its `fullStart` to its `fullEnd`: its lines plus the comment lines directly above it) is emitted in the desired order. The first column's block starts no earlier than the line after `{`, so a comment above the Table never moves. Non-column body elements stay after the region.
 - **Primary key**:
   - desired PK set of size 1 → `pk` on that column, with the `pk` index line removed if present;
-  - size ≥ 2 → one `(a, b) [pk]` line in `indexes { … }` (a new block before the body `Note`, or the existing pk line replaced) and the column `pk` / `primary key` flags removed;
+  - size ≥ 2 → one `(a, b) [pk]` line in `indexes { … }` (a new block last in the body, or before a body `Note` that comes after every column; or the existing pk line replaced) and the column `pk` / `primary key` flags removed;
   - size 0 → all removed.
 
   Other index lines are untouched. An `indexes` block left empty is removed.
@@ -1141,7 +1178,7 @@ function codecFor(filePath: string): SubjectAreaCodec;   // by subjectAreaStorag
   - `customEditors[0].selector` adds `{ "filenamePattern": "**/.erd-studio/*/*.dbml" }`;
   - the new command `erdStudio.convertProjectToDbml`, title "Convert Project to DBML", category "ERD Studio", shown in the palette when `erdStudio.hasProject` (in a DBML project it settles pending relationships and unlinked members whose tables have files now, D26/D27, or says the project is already DBML), and in the Table Library `view/title` `…` menu while `erdStudio.storage != dbml`;
   - the `when` clause of `erdStudio.migrateToTableNaming` and `erdStudio.moveRelationshipsToLibrary` gains `&& erdStudio.storage != dbml`;
-  - `contributes.languages` gains `{ "id": "json", "extensions": [".dbdiagram"] }`, so a layout file opens as JSON (no new language, no grammar);
+  - `contributes.languages` gains `{ "id": "json", "extensions": [".dbdiagram"] }`, so a layout file opens as JSON, and a new `dbml` language for `.dbml` with its grammar (§2.10);
   - `jsonValidation` and `yamlValidation` are unchanged.
 - **`NO_LEGACY_ALIAS`** (`src/extension.ts:461`) gains `erdStudio.convertProjectToDbml`.
 - There are still no writes on activation. The Convert offer is a prompt only (§6.4).

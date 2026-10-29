@@ -1,0 +1,3 @@
+Project sdd {
+  erd_schema_version: '7'
+}

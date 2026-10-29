@@ -1,0 +1,14 @@
+Table dim_customer [
+  schema: 'silver',
+  role: 'conformed-dim',
+  grain: 'One row per customer',
+  rationale_purpose: 'Central customer reference shared across domains',
+  rationale_design: 'Conformed dimension for consistent customer attributes',
+  rationale_scd_strategy: 'customer_key is the surrogate facts join to; customer_id is the source system\'s business key'
+] {
+  customer_key INT [pk, note: 'Surrogate key — warehouse-generated, one per row', scd_type: '0']
+  customer_id VARCHAR [note: 'Business key from the source CRM', natural_key: 'true', scd_type: '0']
+  customer_name VARCHAR [note: 'Full customer name — not unique, so never a key', scd_type: '2']
+  email VARCHAR [note: 'Customer email address', scd_type: '1']
+  Note: 'Customer dimension with demographics and segmentation'
+}

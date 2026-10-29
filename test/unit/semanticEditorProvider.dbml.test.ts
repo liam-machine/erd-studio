@@ -42,6 +42,12 @@ import type { SemanticTable } from '../../src/types/semantic';
 import { projectDiagnostics } from '../../packages/core/test/dbmlWriterSupport';
 import { TABLE_NAME_RULE } from '../../src/types/naming';
 
+/** A `use { table … } from '…'` line, however far the formatter pads its `from` (consecutive use lines align). */
+function useLine(table: string, from: string): RegExp {
+  const esc = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^use \\{ table ${esc(table)} \\} +from '${esc(from)}'$`, 'm');
+}
+
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const NATIVE = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native');
 
@@ -344,7 +350,7 @@ describe('adding, renaming and removing tables', () => {
   it('addModel: a new .dbml table in the layer\'s folder, its use line and its position', async () => {
     const r = await run({ type: 'addModel', payload: { name: 'dim_store', description: '', columns: [{ name: 'store_key', dataType: 'INT', description: '', isPrimaryKey: true }] } });
     expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml', 'tables/gold/dim_store.dbml']);
-    expect(r.after['gold/sales.dbml']).toContain("use { table dim_store } from '../tables/gold/dim_store.dbml'");
+    expect(r.after['gold/sales.dbml']).toMatch(useLine('dim_store', '../tables/gold/dim_store.dbml'));
     expect(r.after['gold/sales.dbdiagram']).toContain('"name": "dim_store"');
     expect(table('dim_store').columns[0]).toMatchObject({ name: 'store_key', isPrimaryKey: true });
   });
@@ -352,7 +358,7 @@ describe('adding, renaming and removing tables', () => {
   it('addExistingModel: a use line, and a layout file created for its position', async () => {
     const r = await run({ type: 'addExistingModel', payload: { modelName: 'dim_customer' } }, 'silver/staging.dbml');
     expectWrote(r, ['silver/staging.dbdiagram', 'silver/staging.dbml']);
-    expect(r.after['silver/staging.dbml']).toContain("use { table dim_customer } from '../tables/gold/dim_customer.dbml'");
+    expect(r.after['silver/staging.dbml']).toMatch(useLine('dim_customer', '../tables/gold/dim_customer.dbml'));
     expect(new SubjectAreaService(new LayerService(root, '.erd-studio')).listSubjectAreas(root, '.erd-studio').length).toBe(2);
   });
 
@@ -368,10 +374,10 @@ describe('adding, renaming and removing tables', () => {
     expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml', 'tables/gold/_relationships.dbml', 'tables/gold/dim_area.dbml', 'tables/gold/dim_region.dbml']);
     expect('tables/gold/dim_region.dbml' in r.after).toBe(false);
     expect(r.after['tables/gold/dim_area.dbml']).toMatch(/^Table dim_area /);
-    expect(r.after['tables/gold/_relationships.dbml']).toContain("use { table dim_area } from './dim_area.dbml'");
+    expect(r.after['tables/gold/_relationships.dbml']).toMatch(useLine('dim_area', './dim_area.dbml'));
     expect(r.after['tables/gold/_relationships.dbml']).toContain('dim_area.(region_code, country_code)');
     expect(r.after['tables/gold/_relationships.dbml']).not.toMatch(/dim_region/);
-    expect(r.after['gold/sales.dbml']).toContain("use { table dim_area } from '../tables/gold/dim_area.dbml'");
+    expect(r.after['gold/sales.dbml']).toMatch(useLine('dim_area', '../tables/gold/dim_area.dbml'));
     expect(r.after['gold/sales.dbdiagram']).toContain('"name": "dim_area"');
     expect(table('fct_order').relationships?.some((rel) => rel.toModel === 'dim_area')).toBe(true);
   });
@@ -381,7 +387,7 @@ describe('adding, renaming and removing tables', () => {
     expect(r.errors).toEqual([]);
     expect(_appliedEdits).toHaveLength(1);
     expect(r.written).toEqual(expect.arrayContaining(['silver/staging.dbml', 'gold/sales.dbml', 'tables/_relationships.dbml', 'tables/gold/_relationships.dbml', 'tables/dim_day.dbml', 'tables/dim_date.dbml']));
-    expect(r.after['silver/staging.dbml']).toContain("use { table dim_day } from '../tables/dim_day.dbml'");
+    expect(r.after['silver/staging.dbml']).toMatch(useLine('dim_day', '../tables/dim_day.dbml'));
     // Re-spelled only: the operator as the file had it (a bare `>`) is kept.
     expect(r.after['tables/_relationships.dbml']).toContain('Ref "previous day": dim_day.previous_date_key > dim_day.date_key');
     const before = new Set(diagnosticsOf(r.before));
@@ -766,7 +772,7 @@ describe('another diagram with a byte-order mark (D7)', () => {
     expect(ops).toHaveLength(1);
     const text = (ops[0] as { newText: string }).newText;
     expect(text.startsWith('﻿')).toBe(false);
-    expect(text).toContain("use { table dim_day } from '../tables/dim_day.dbml'");
+    expect(text).toMatch(useLine('dim_day', '../tables/dim_day.dbml'));
   });
 });
 
@@ -832,11 +838,11 @@ describe('a diagram with a member with no table file and pending relationships (
     const r = await run({ type: 'addModel', payload: { name: 'gld_fct_risk_child', description: '', columns: [{ name: 'customer_key', dataType: 'INT', description: '' }] } }, 'silver/staging.dbml');
     expect(r.errors).toEqual([]);
     expect(r.after['gold/sales.dbml']).not.toContain('erd_unlinked_tables');
-    expect(r.after['gold/sales.dbml']).toContain("use { table gld_fct_risk_child } from '../tables/silver/gld_fct_risk_child.dbml'");
+    expect(r.after['gold/sales.dbml']).toMatch(useLine('gld_fct_risk_child', '../tables/silver/gld_fct_risk_child.dbml'));
     const relationships = r.after['tables/gold/_relationships.dbml'];
     expect(relationships).toContain('Ref: fct_order.customer_key >? gld_fct_risk_child.customer_key\n');
     expect(relationships).not.toContain('// erd-studio pending: Ref: fct_order.customer_key');
-    expect(relationships).toContain("use { table gld_fct_risk_child } from '../silver/gld_fct_risk_child.dbml'");
+    expect(relationships).toMatch(useLine('gld_fct_risk_child', '../silver/gld_fct_risk_child.dbml'));
     // The diagram's own pending line (its owner had no file) stays until Convert moves it to the library.
     expect(r.after['gold/sales.dbml']).toContain('// erd-studio pending: Ref: gld_fct_risk_child.customer_key >? dim_customer.customer_key');
     const before = new Set(diagnosticsOf(r.before));

@@ -23,6 +23,7 @@ import type { DbmlConversionInput, DbmlConversionPlan } from '../../src/services
 import { readDbmlConversionInput } from '../../src/services/dbmlConversionFiles';
 import { runDoctor } from '../../src/cli/doctor';
 import { formatDoctor, makePaint } from '../../src/cli/format';
+import { clearLogBuffer, recentLogLines } from '../../src/services/logger';
 
 const CORE_FIXTURES = path.resolve(__dirname, '../../packages/core/test/fixtures');
 const FIXTURES = path.resolve(__dirname, '../fixtures/dbml-convert');
@@ -208,6 +209,17 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
     expect(plan.refusals).toEqual([]);
     expect(leftOf(plan, 'logical-models/dim.yml')?.problem).toMatch(/^tables\/dim\.dbml already exists, with other contents than this file converts to/);
     expect(plan.deletes).toEqual([]);
+  });
+
+  it('an x.dbml with a syntax error beside x.json: x.json stays, and the log says nothing was written to x.dbml', async () => {
+    clearLogBuffer();
+    const files = { 'logical-models/dim.yml': DIM, 'gold/sales.json': diagram('sales', 'gold', ['dim']), 'gold/sales.dbml': 'Table broken {\n  id int [pk\n}\n' };
+    for (let run = 0; run < 2; run++) {
+      const plan = await planDbmlConversion(inputOf(files));
+      expect(leftOf(plan, 'gold/sales.json')?.problem).toMatch(/^gold\/sales\.dbml is also in gold\//);
+      expect(written(plan, 'gold/sales.dbml')).toBeUndefined();
+    }
+    expect(recentLogLines().filter((l) => l.includes('gold/sales.dbml') && l.includes('was written'))).toEqual([]);
   });
 
   it('x.json and x.dbml in one layer: x.json stays, unless x.dbml is what x.json converts to', async () => {
@@ -556,7 +568,7 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
     expect(plan.refusals).toEqual([]);
     expect(created(plan, 'tables/gold/dim_new.dbml')).toBeDefined();
     expect(written(plan, 'tables/gold/_relationships.dbml')).toBe(
-      `${header}use { table dim_new } from './dim_new.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.new_key > dim_new.new_key // written before converting\n`,
+      `${header}use { table dim_new }   from './dim_new.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.new_key > dim_new.new_key // written before converting\n`,
     );
     expectCompilesEverywhere(input, plan);
   });
@@ -683,7 +695,7 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
       const input = readDbmlConversionInput(root, '.erd-studio');
       expect(input.files.find((f) => f.path === 'logical-models/dim.yml')).toMatchObject({ hadBom: true, text: DIM });
       const plan = await planDbmlConversion(input);
-      expect(created(plan, 'tables/dim.dbml')).toBe('Table dim {\n  dim_key INT [pk]\n  label INT\n}\n');
+      expect(created(plan, 'tables/dim.dbml')).toBe('Table dim {\n  dim_key INT [pk]\n  label   INT\n}\n');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

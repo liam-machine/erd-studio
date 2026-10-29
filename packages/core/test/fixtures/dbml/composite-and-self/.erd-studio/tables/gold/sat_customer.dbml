@@ -1,7 +1,7 @@
 Table sat_customer {
   customer_hk binary
-  load_date timestamp
-  name string
+  load_date   timestamp
+  name        string
   indexes {
     (customer_hk, load_date) [pk]
   }

@@ -35,6 +35,7 @@ import * as vscode from 'vscode';
 
 import type { FileWrite } from '../services/fileWrites';
 import { mergeFileWrites, orderFileWrites } from '../services/fileWrites';
+import { saveWithoutFormatting } from './documentSave';
 
 /** What {@link applyFileWrites} did. */
 export interface AppliedFileWrites {
@@ -217,7 +218,7 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
       for (const uri of undoSaves) {
         try {
           const doc = await vscode.workspace.openTextDocument(uri);
-          await doc.save();
+          await saveWithoutFormatting(doc);
         } catch { /* left open and dirty: the user sees it */ }
       }
     } else {

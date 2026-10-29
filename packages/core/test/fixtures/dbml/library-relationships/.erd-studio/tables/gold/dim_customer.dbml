@@ -6,6 +6,6 @@ Table dim_customer [
   role: 'dimension',
   alias: 'customer'
 ] {
-  customer_key INT [pk]
+  customer_key  INT [pk]
   customer_name VARCHAR
 }

@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '37';
+export const HARNESS_VERSION = '38';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -406,13 +406,17 @@ Table fct_order [
   meta_owner: 'sales-data',
   meta_json: '{"pii":false,"tags":["finance"]}'
 ] {
-  order_line_id BIGINT [pk, note: 'Line id from the shop']
-  customer_key INT [foreign_key: 'true']
-  order_date_key INT [foreign_key: 'true']
-  amount "DECIMAL(18,2)" [additive_type: 'additive', note: 'Line total']
-  order_number VARCHAR [natural_key: 'true']
-  loaded_at timestamp [not null, default: \`now()\`]
   Note: 'Order lines'
+
+  order_line_id  BIGINT          [pk, note: 'Line id from the shop']
+  customer_key   INT             [foreign_key: 'true']
+  order_date_key INT             [foreign_key: 'true']
+  amount         "DECIMAL(18,2)" [additive_type: 'additive', note: 'Line total']
+  order_number   VARCHAR         [
+    natural_key: 'true',
+    note: 'The order number the customer sees on the receipt, emails and the shop'
+  ]
+  loaded_at      timestamp       [not null, default: \`now()\`]
 }
 \`\`\`
 
@@ -421,7 +425,7 @@ Table fct_order [
 - **Spell names exactly**: the table and column names as they are, in their case (DBML is case-sensitive). A name that is not a plain identifier, or is a DBML keyword, is double-quoted (\`"order"\`); a type that is not a plain identifier is too (\`"DECIMAL(18,2)"\`).
 - **A table needs at least one column.** A table with none yet holds the placeholder line \`_erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']\`; delete it when you add the first real column.
 - **Primary key**: \`pk\` on the column; for two or more columns, an \`indexes { (a, b) [pk] }\` block instead, with no \`pk\` on the columns.
-- The table's description is the \`Note: '…'\` line, last in the block. A text with a line break is triple-quoted (\`'''…'''\`); escape \`'\` as \`\\'\` and \`\\\` as \`\\\\\`.
+- The table's description is the \`Note: '…'\` line, first in the block and followed by a blank line. A text with a line break is triple-quoted (\`'''…'''\`); escape \`'\` as \`\\'\` and \`\\\` as \`\\\\\`.
 - A flag is written only when it is set (\`natural_key: 'true'\`); to unset it, delete the setting. Settings ERD Studio does not model (\`not null\`, \`unique\`, \`default\`, \`increment\`, \`note\` on an index, \`headercolor\`, other indexes, Enums, your own custom settings) are kept exactly as written.
 - **Never write a \`Metadata\` block** (\`Metadata Table x { … }\`): put every property inline, on the Table or the column. A Metadata block silently overrides the inline value.
 
@@ -431,7 +435,7 @@ Table fct_order [
 |---|---|---|
 | table name | \`Table <name>\` (the file stem) | \`Table dim_customer\` |
 | schema | \`schema\` (table setting) | \`schema: 'gold'\` |
-| description | the body's \`Note\` (last line) | \`Note: 'Customer master data'\` |
+| description | the body's \`Note\` (first line) | \`Note: 'Customer master data'\` |
 | role (see "Table roles" in {SKILL}) | \`role\` | \`role: 'conformed-dim'\` |
 | grain | \`grain\` | \`grain: 'One row per customer'\` |
 | warehouse table name (dbt \`alias\`) | \`alias\` (never DBML's own \`as\`) | \`alias: 'customer'\` |
@@ -455,13 +459,15 @@ Each relationship is **one \`Ref\` line, in the \`_relationships.dbml\` of the f
 
 \`\`\`dbml
 // ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
-use { table dim_date } from '../dim_date.dbml'
+use { table dim_date }         from '../dim_date.dbml'
 use { table customer_profile } from './customer_profile.dbml'
-use { table dim_customer } from './dim_customer.dbml'
-use { table fct_order } from './fct_order.dbml'
+use { table dim_customer }     from './dim_customer.dbml'
+use { table fct_order }        from './fct_order.dbml'
 
 Ref: dim_customer.customer_key ?- customer_profile.customer_key
+
 Ref parent: dim_customer.parent_customer_key >? dim_customer.customer_key
+
 Ref: fct_order.customer_key >? dim_customer.customer_key
 Ref "order date": fct_order.order_date_key >? dim_date.date_key
 Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
@@ -483,7 +489,7 @@ Ref: fct_order.(region_code, country_code) >? dim_region.(region_code, country_c
 - **One Ref per pair of column sets, in one file only.** The same two column sets joined twice — in two files, twice in one, or once each way round — fails every DBML tool (\`[5001]\`), and doctor reports it as \`duplicateRef\`.
 - **Spell every end exactly** as its table and column are named; a Ref whose other table has no file is not drawn. A self-reference (\`employee.manager_id >? employee.employee_id\`) is fine; a column never points at itself.
 - **Pending relationships** are whole-line comments, \`// erd-studio pending: Ref: fct_order.risk_key >? gld_fct_risk.risk_key\`, after the Refs: a relationship ERD Studio keeps and draws, but cannot write as a live Ref yet, because an end has no \`.dbml\` table file (or no such column), or is a table still in YAML. A live Ref there would break the whole file in every DBML tool. **Keep these lines exactly as they are**, never write a new one by hand, and never turn one into a live Ref yourself: ERD Studio does that, with its \`use\` line, once both ends have table files (Add from dbt, or Convert Project to DBML). To delete such a relationship, delete its line. Doctor reports each as \`pendingRelationship\`.
-- Keep the Refs sorted (by from table, to table, then columns). Settings on a Ref (\`[delete: cascade]\`, \`[color: …]\`) are kept as written.
+- Keep the Refs sorted (by from table, to table, then columns), with one blank line between the Refs of each foreign-key table. Settings on a Ref (\`[delete: cascade]\`, \`[color: …]\`) are kept as written.
 - **Mark the keys.** Direction comes from keys: mark the referenced column \`pk\` (or \`natural_key: 'true'\`) on the table it points at, and \`foreign_key: 'true'\` on the foreign-key column. Keys win: the many side is never its table's whole primary or natural key while the other end is a column of a table with a different key — such a Ref is drawn backwards, flagged with a ⚠ and reported by doctor as \`turn-round-relationships\`; offer to rewrite it as \`>?\` from the column that is not a key to the key, in the relationships file of that column's table.
 
 ## Diagram: \`<layer>/<name>.dbml\`
@@ -495,9 +501,9 @@ Project sales {
   erd_show_fk_edges: 'false'
 }
 
-use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table fct_order }    from '../tables/gold/fct_order.dbml'
 use { table dim_customer } from '../tables/gold/dim_customer.dbml'
-use { table dim_date } from '../tables/dim_date.dbml'
+use { table dim_date }     from '../tables/dim_date.dbml'
 use * from '../tables/_relationships.dbml'
 use * from '../tables/gold/_relationships.dbml'
 
@@ -514,6 +520,19 @@ Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_
 - **No Tables, Refs or TableGroups in a diagram**: they belong in the library. A file that declares its own Tables and imports none is a single-file DBML (a dbdiagram.io download): run **ERD Studio: Import DBML…** on it (doctor: \`import-dbml-file\`).
 - **Sticky notes** are \`Note "<id>" [color: <hex>, linked_table: '<table>'] { '<text>' }\` at the end, each with its own id (a UUID; two Notes with one name fail every DBML tool). Colours: \`#f59e0b\` yellow, \`#3b82f6\` blue, \`#22c55e\` green, \`#ec4899\` pink, \`#f97316\` orange. \`linked_table\` is optional and draws a dashed line to that table.
 - **The layout file** \`<name>.dbdiagram\` beside the diagram is JSON holding the positions (\`defaultView.tablePositions\`, \`[{ "name": "fct_order", "schemaName": "public", "x": 400, "y": 200 }]\`, and \`stickyNoteLayouts\`). **Omit it, or leave a table out of it, for auto layout**: ERD Studio places what has no position the first time the diagram opens. Never clear positions the user arranged.
+
+## Layout
+
+ERD Studio writes every \`.dbml\` in one layout and tidies a file into it each time it changes that file; **Format Document** (Shift+Alt+F, ⇧⌥F on a Mac, or right-click → Format Document) does the same for a file you or the user edit, except the blank lines between foreign-key tables' Refs (below). Write in this layout, so the next save by ERD Studio changes only what was meant to change:
+
+- **Two-space indents.** At most one blank line in a row, and none straight after \`{\` or before \`}\`.
+- **A table's \`Note\` comes first** in its body, then one blank line, then the columns, then \`indexes\`.
+- **Columns line up**: on consecutive lines, the names are padded to the group's longest name (a name over 32 characters does not widen it); the types are padded to the longest type **of a column that has settings** (a type over 24 characters does not widen it), then one space and the settings. A column with no settings ends at its type, so a long settings-less type such as \`"VARCHAR(4000)"\` does not push the other columns' settings out. A blank line or an own-line comment between columns starts a new group with its own alignment, so use one to group related columns.
+- **Column settings in this order**: \`pk\`; DBML's own (\`not null\`, \`unique\`, \`increment\`, \`default\`); ERD Studio's (\`natural_key\`, \`scd_type\`, \`additive_type\`, \`foreign_key\`); \`meta_*\`; then \`note\` last. Written \`[a, b: c]\`: no space inside the brackets, \`, \` between settings, \`: \` after a name.
+- **Long settings go one per line**: when a column's line would pass 100 characters, \`[\` ends the column line, each setting sits on its own line two spaces further in with a comma after all but the last, and \`]\` is alone on the column's indent (as \`order_number\` above). A Table with two or more settings lists them the same way.
+- **Relationships**: single spaces around the operator. When ERD Studio writes a relationships file it puts one blank line between the Refs of each foreign-key table; Format Document keeps blank lines that are there but does not add these, so keep a table's Refs together and leave a blank line before the next table's.
+- **\`use\` lines** next to each other line up their \`from\` (a \`use { … }\` part over 48 characters does not widen the run).
+- Spacing only: text in quotes (a \`'''\` note included) is never changed, and neither is the order of an existing file's lines or settings — ERD Studio keeps the order a file has, so do not reorder one just to match.
 
 ## DBML: import and export
 
@@ -1015,7 +1034,7 @@ models:
 - **Preserve positions**: Never clear or overwrite layout positions (a DBML diagram's \`.dbdiagram\` file, a JSON diagram's \`viewConfig.positions\`)
 - **Match existing patterns**: When editing dbt YAML, follow the formatting and test patterns already present in the file
 - **Cascade deletions**: When removing a model from a JSON domain, also remove the domain JSON's relationships referencing it. When renaming or deleting a table or column, update every Ref (DBML) or model YAML \`relationships:\` entry that points at it
-- **Column ordering**: When adding columns, append them after the table's last column (before its \`indexes\` block and \`Note\` in DBML; to the end of the columns array in YAML)`;
+- **Column ordering**: When adding columns, append them after the table's last column (before its \`indexes\` block in DBML; to the end of the columns array in YAML)`;
 
 // ---------------------------------------------------------------------------
 // Format-specific generators

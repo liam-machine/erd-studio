@@ -1,0 +1,7 @@
+Ref   "order date" :   fct_order.order_date_key   >?   dim_date.date_key
+Ref: fct_order.(region_code,country_code) >? dim_region.( region_code , country_code ) [delete:cascade,update: no action]
+Ref {
+fct_order.customer_key >? dim_customer.customer_key
+}
+Ref: fct_order.ship_date_key >? dim_date.date_key [
+  delete: cascade,   update: restrict]

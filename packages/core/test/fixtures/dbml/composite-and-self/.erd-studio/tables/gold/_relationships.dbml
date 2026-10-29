@@ -1,9 +1,10 @@
 // ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
-use { table employee } from './employee.dbml'
+use { table employee }     from './employee.dbml'
 use { table pit_customer } from './pit_customer.dbml'
 use { table sat_customer } from './sat_customer.dbml'
 
 Ref manager: employee.manager_id >? employee.employee_id
 Ref: employee.mentor_id >? employee.employee_id
+
 Ref "as of": pit_customer.(customer_hk, as_of_date) >? sat_customer.(customer_hk, load_date)
 Ref: pit_customer.snapshot_hk >? sat_customer.customer_hk

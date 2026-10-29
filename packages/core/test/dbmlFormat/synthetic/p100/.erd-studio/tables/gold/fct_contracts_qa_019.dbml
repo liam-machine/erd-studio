@@ -1,0 +1,25 @@
+Table fct_contracts_qa_019 [
+  schema: 'gold',
+  role: 'fact',
+  grain: 'One row per contracts qa 019'
+] {
+  contracts_qa_019_key BIGINT [pk, note: 'Primary key of fct_contracts_qa_019']
+  country_code BOOLEAN [note: 'country code of the contracts qa 019 row']
+  country_code_1 TIMESTAMP_NTZ [note: 'country code 1 of the contracts qa 019 row']
+  country_code_2 INT [note: 'country code 2 of the contracts qa 019 row']
+  description_text INT [note: 'description text of the contracts qa 019 row']
+  loaded_at BIGINT [note: 'loaded at of the contracts qa 019 row']
+  loaded_at_5 INT [note: 'loaded at 5 of the contracts qa 019 row']
+  owner_name STRING [note: 'owner name of the contracts qa 019 row']
+  unit_price DATE [note: 'unit price of the contracts qa 019 row', additive_type: 'non-additive']
+  country_code_8 TIMESTAMP_NTZ [note: 'country code 8 of the contracts qa 019 row']
+  updated_at DOUBLE [note: 'updated at of the contracts qa 019 row']
+  currency_code BIGINT [note: 'currency code of the contracts qa 019 row']
+  is_current "DECIMAL(18,2)" [note: 'is current of the contracts qa 019 row']
+  source_system STRING [note: 'source system of the contracts qa 019 row']
+  external_ref BIGINT [note: 'external ref of the contracts qa 019 row']
+  region TIMESTAMP_NTZ [note: 'region of the contracts qa 019 row']
+  loaded_at_15 BIGINT [note: 'loaded at 15 of the contracts qa 019 row']
+  is_current_16 DOUBLE [note: 'is current 16 of the contracts qa 019 row']
+  Note: 'Synthetic gold table fct_contracts_qa_019'
+}

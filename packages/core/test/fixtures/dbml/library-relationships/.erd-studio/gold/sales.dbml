@@ -3,9 +3,9 @@ Project sales {
   erd_schema_version: '7'
 }
 
-use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table fct_order }    from '../tables/gold/fct_order.dbml'
 use { table dim_customer } from '../tables/gold/dim_customer.dbml'
-use { table dim_date } from '../tables/gold/dim_date.dbml'
-use { table dim_product } from '../tables/dim_product.dbml'
+use { table dim_date }     from '../tables/gold/dim_date.dbml'
+use { table dim_product }  from '../tables/dim_product.dbml'
 use * from '../tables/_relationships.dbml'
 use * from '../tables/gold/_relationships.dbml'

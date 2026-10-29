@@ -1,0 +1,26 @@
+Table fct_projects_sap_013 [
+  schema: 'gold',
+  role: 'fact',
+  grain: 'One row per projects sap 013'
+] {
+  projects_sap_013_key BIGINT [pk, note: 'Primary key of fct_projects_sap_013']
+  duration_minutes BIGINT [note: 'duration minutes of the projects sap 013 row', additive_type: 'additive']
+  description_text DOUBLE [note: 'description text of the projects sap 013 row']
+  weight_kg BIGINT [note: 'weight kg of the projects sap 013 row', additive_type: 'additive']
+  unit_price DOUBLE [note: 'unit price of the projects sap 013 row', additive_type: 'semi-additive']
+  line_number BIGINT [note: 'line number of the projects sap 013 row']
+  owner_name "DECIMAL(18,2)" [note: 'owner name of the projects sap 013 row']
+  created_at DOUBLE [note: 'created at of the projects sap 013 row']
+  created_at_7 BOOLEAN [note: 'created at 7 of the projects sap 013 row']
+  type_code DOUBLE [note: 'type code of the projects sap 013 row']
+  code DOUBLE [note: 'code of the projects sap 013 row']
+  country_code TIMESTAMP_NTZ [note: 'country code of the projects sap 013 row']
+  updated_at DOUBLE [note: 'updated at of the projects sap 013 row']
+  label INT [note: 'label of the projects sap 013 row']
+  external_ref INT [note: 'external ref of the projects sap 013 row']
+  status BIGINT [note: 'status of the projects sap 013 row']
+  quantity DATE [note: 'quantity of the projects sap 013 row', additive_type: 'additive']
+  region BIGINT [note: 'region of the projects sap 013 row']
+  invoice_lines_008_key BIGINT [note: 'FK to dim_invoice_lines_008', foreign_key: 'true']
+  Note: 'Synthetic gold table fct_projects_sap_013'
+}

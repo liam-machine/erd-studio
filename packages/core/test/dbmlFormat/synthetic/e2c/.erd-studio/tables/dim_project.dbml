@@ -1,0 +1,14 @@
+Table dim_project [
+  schema: 'silver',
+  role: 'conformed-dim',
+  grain: 'One row per project',
+  rationale_purpose: 'Central project reference shared across domains',
+  rationale_design: 'Conformed dimension for consistent project attributes',
+  rationale_scd_strategy: 'project_key is the surrogate facts join to; project_code is the business key'
+] {
+  project_key INT [pk, note: 'Surrogate key — warehouse-generated, one per row', scd_type: '0']
+  project_code VARCHAR [note: 'Business project code from the source system', natural_key: 'true', scd_type: '0']
+  project_name VARCHAR [note: 'Project name — not unique, so never a key', scd_type: '1']
+  parent_project_key INT [note: 'Parent project for hierarchical rollups (self-reference to project_key)', foreign_key: 'true']
+  Note: 'Project dimension table'
+}

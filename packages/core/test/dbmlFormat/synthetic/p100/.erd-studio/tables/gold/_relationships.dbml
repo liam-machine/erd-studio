@@ -1,0 +1,53 @@
+// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
+use { table int_ecom_assets_015 } from '../silver/int_ecom_assets_015.dbml'
+use { table int_safety_products_005 } from '../silver/int_safety_products_005.dbml'
+use { table dim_accounts_000 } from './dim_accounts_000.dbml'
+use { table dim_addresses_002 } from './dim_addresses_002.dbml'
+use { table dim_contacts_001 } from './dim_contacts_001.dbml'
+use { table dim_invoice_lines_008 } from './dim_invoice_lines_008.dbml'
+use { table dim_invoices_007 } from './dim_invoices_007.dbml'
+use { table dim_order_lines_004 } from './dim_order_lines_004.dbml'
+use { table dim_products_005 } from './dim_products_005.dbml'
+use { table dim_suppliers_006 } from './dim_suppliers_006.dbml'
+use { table fct_assets_safety_015 } from './fct_assets_safety_015.dbml'
+use { table fct_budgets_erp_021 } from './fct_budgets_erp_021.dbml'
+use { table fct_contracts_qa_019 } from './fct_contracts_qa_019.dbml'
+use { table fct_cost_codes_crm_020 } from './fct_cost_codes_crm_020.dbml'
+use { table fct_deliveries_fin_026 } from './fct_deliveries_fin_026.dbml'
+use { table fct_employees_fleet_010 } from './fct_employees_fleet_010.dbml'
+use { table fct_incidents_ts_017 } from './fct_incidents_ts_017.dbml'
+use { table fct_inspections_bim_018 } from './fct_inspections_bim_018.dbml'
+use { table fct_materials_ecom_025 } from './fct_materials_ecom_025.dbml'
+use { table fct_payments_iot_009 } from './fct_payments_iot_009.dbml'
+use { table fct_projects_sap_013 } from './fct_projects_sap_013.dbml'
+use { table fct_tasks_gis_014 } from './fct_tasks_gis_014.dbml'
+use { table fct_timesheets_pos_022 } from './fct_timesheets_pos_022.dbml'
+use { table fct_vehicles_wms_023 } from './fct_vehicles_wms_023.dbml'
+
+Ref: dim_accounts_000.incidents_ts_017_key >? fct_incidents_ts_017.incidents_ts_017_key
+Ref: dim_addresses_002.accounts_000_key >? dim_accounts_000.accounts_000_key
+Ref: dim_addresses_002.contracts_qa_019_key >? fct_contracts_qa_019.contracts_qa_019_key
+Ref: dim_addresses_002.safety_products_005_id >? int_safety_products_005.safety_products_005_id
+Ref: dim_invoice_lines_008.inspections_bim_018_key >? fct_inspections_bim_018.inspections_bim_018_key
+Ref: dim_invoice_lines_008.vehicles_wms_023_key >? fct_vehicles_wms_023.vehicles_wms_023_key
+Ref: dim_invoices_007.payments_iot_009_key >? fct_payments_iot_009.payments_iot_009_key
+Ref: dim_products_005.contracts_qa_019_key >? fct_contracts_qa_019.contracts_qa_019_key
+Ref: dim_products_005.projects_sap_013_key >? fct_projects_sap_013.projects_sap_013_key
+Ref: dim_suppliers_006.assets_safety_015_key >? fct_assets_safety_015.assets_safety_015_key
+Ref: fct_assets_safety_015.invoice_lines_008_key >? dim_invoice_lines_008.invoice_lines_008_key
+Ref: fct_budgets_erp_021.ecom_assets_015_id >? int_ecom_assets_015.ecom_assets_015_id
+Ref: fct_cost_codes_crm_020.accounts_000_key >? dim_accounts_000.accounts_000_key
+Ref: fct_cost_codes_crm_020.contacts_001_key >? dim_contacts_001.contacts_001_key
+Ref: fct_deliveries_fin_026.contacts_001_key >? dim_contacts_001.contacts_001_key
+Ref: fct_employees_fleet_010.addresses_002_key >? dim_addresses_002.addresses_002_key
+Ref: fct_incidents_ts_017.accounts_000_key >? dim_accounts_000.accounts_000_key
+Ref: fct_incidents_ts_017.invoices_007_key >? dim_invoices_007.invoices_007_key
+Ref: fct_inspections_bim_018.accounts_000_key >? dim_accounts_000.accounts_000_key
+Ref: fct_materials_ecom_025.addresses_002_key >? dim_addresses_002.addresses_002_key
+Ref: fct_materials_ecom_025.order_lines_004_key >? dim_order_lines_004.order_lines_004_key
+Ref: fct_payments_iot_009.order_lines_004_key >? dim_order_lines_004.order_lines_004_key
+Ref: fct_projects_sap_013.invoice_lines_008_key >? dim_invoice_lines_008.invoice_lines_008_key
+Ref: fct_tasks_gis_014.invoice_lines_008_key >? dim_invoice_lines_008.invoice_lines_008_key
+Ref: fct_tasks_gis_014.invoices_007_key >? dim_invoices_007.invoices_007_key
+Ref: fct_timesheets_pos_022.addresses_002_key >? dim_addresses_002.addresses_002_key
+Ref: fct_vehicles_wms_023.invoices_007_key >? dim_invoices_007.invoices_007_key

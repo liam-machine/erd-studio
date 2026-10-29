@@ -24,6 +24,7 @@ import {
   _fireDidChangeTextDocument,
   TextDocumentChangeReason,
   _mockFileWatchers,
+  _mockFormatOnSave,
   _resetMockWorkspace,
   createMockTextDocument,
   createMockWebviewPanel,
@@ -42,6 +43,8 @@ import { FileWatcherService } from '../../src/watchers/FileWatcherService';
 import type { ManifestService } from '../../src/services/manifestService';
 import type { YmlParserService } from '../../src/services/ymlParserService';
 import type { TemplateService } from '../../src/services/templateService';
+import { formatWrittenDbml } from '../../src/services/dbmlWriters';
+import { registerDbmlFormatting } from '../../src/providers/dbmlFormattingProvider';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const NATIVE = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native');
@@ -431,6 +434,9 @@ describe('a drag on a DBML diagram writes the layout file alone', () => {
     const invalidateCache = vi.spyOn(h.tables, 'invalidateCache');
     const listTables = vi.spyOn(h.tables, 'listTables');
     const dbmlBefore = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    // The fixture is not in the canonical layout, so a formatted write would show: a move never formats.
+    expect(formatWrittenDbml(dbmlBefore, 'gold/sales.dbml')).not.toBe(dbmlBefore);
+    const dbmlFilesBefore = new Map(['gold/sales.dbml', 'tables/gold/fct_order.dbml', 'tables/gold/_relationships.dbml'].map((p) => [p, fs.readFileSync(at(p), 'utf-8')]));
 
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
 
@@ -440,6 +446,7 @@ describe('a drag on a DBML diagram writes the layout file alone', () => {
     const anchor = opsOf(_appliedEdits[0]).find((op) => relOf((op as { uri: { fsPath: string } }).uri.fsPath) === 'gold/sales.dbml') as { newText: string };
     expect(anchor.newText).toHaveLength(1);
     expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(dbmlBefore);
+    for (const [p, text] of dbmlFilesBefore) expect(fs.readFileSync(at(p), 'utf-8'), p).toBe(text);
     expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toContain('"name": "fct_order", "schemaName": "public", "x": 420, "y": 220');
     // Nothing planned against, or dropped from, the table library.
     expect(planTableWrites).not.toHaveBeenCalled();
@@ -452,6 +459,31 @@ describe('a drag on a DBML diagram writes the layout file alone', () => {
     expect(vscode.workspace.textDocuments.filter((d) => d.isDirty)).toEqual([]);
     const edited = (h.provider as unknown as { editedTablePaths: Map<string, Set<string>> }).editedTablePaths.get(h.document.uri.toString());
     expect([...(edited ?? [])].map(relOf)).not.toContain('gold/sales.dbdiagram');
+  });
+
+  it('with editor.formatOnSave on, the anchor\'s save does not format the .dbml: its bytes stay, and the user\'s own save still formats', async () => {
+    const subscriptions: vscode.Disposable[] = [];
+    registerDbmlFormatting({ subscriptions } as unknown as vscode.ExtensionContext);
+    _mockFormatOnSave.enabled = true;
+    try {
+      const h = await open();
+      const dbmlBefore = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+      expect(formatWrittenDbml(dbmlBefore, 'gold/sales.dbml')).not.toBe(dbmlBefore);
+
+      await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+
+      expect(h.errors()).toEqual([]);
+      expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(dbmlBefore);
+      expect(h.document.getText()).toBe(dbmlBefore);
+      expect(vscode.workspace.textDocuments.filter((d) => d.isDirty)).toEqual([]);
+
+      // The format-on-save participant is live: a save that is not ERD Studio's formats.
+      h.document._setText(dbmlBefore);
+      await h.document.save();
+      expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(formatWrittenDbml(dbmlBefore, 'gold/sales.dbml'));
+    } finally {
+      for (const d of subscriptions) d.dispose();
+    }
   });
 
   it('a note moved in the same drag, and a note resized, are layout-only too', async () => {

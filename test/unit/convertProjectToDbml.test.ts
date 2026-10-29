@@ -52,6 +52,7 @@ import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
 import { telemetry } from '../../src/services/telemetryService';
 import { clearLogBuffer, recentLogLines } from '../../src/services/logger';
+import { sameConvertedTable } from '../../src/services/dbmlConversion';
 
 const CORE_FIXTURES = path.resolve(__dirname, '../../packages/core/test/fixtures');
 const TWIN = path.join(CORE_FIXTURES, 'dbml', 'composite-and-self', '.erd-studio');
@@ -585,7 +586,14 @@ describe('convertProjectToDbml', () => {
     expect(await convertProjectToDbml(deps())).toBe('converted');
     expect(shown[0].view.intro).toContain(CONVERT_RESUME_LINE);
     expect(shown[0].view.sections.map((x) => x.id)).toContain('resumed');
-    expect(snapshot()).toEqual(snapshot(TWIN));
+    // The rest is the twin. The files the earlier (1.9.x) run wrote are left as it wrote them: they hold
+    // the same table and Refs in the older layout, and finishing never rewrites a file it does not change.
+    const earlier = snapshot(path.resolve(__dirname, '../fixtures/dbml-convert/half-converted/.erd-studio'));
+    const resumed = ['tables/gold/employee.dbml', 'tables/gold/_relationships.dbml'];
+    const expected = snapshot(TWIN);
+    for (const p of resumed) expected.set(p, earlier.get(p)!);
+    expect(snapshot()).toEqual(expected);
+    expect(sameConvertedTable(earlier.get(resumed[0])!, snapshot(TWIN).get(resumed[0])!, 'employee')).toBe(true);
   });
 });
 

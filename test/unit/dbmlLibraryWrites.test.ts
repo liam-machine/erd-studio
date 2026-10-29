@@ -18,6 +18,12 @@ import type { DbmlLibrarySnapshot, DbmlSnapshotTable } from '../../src/services/
 import type { FileWrite } from '../../src/services/fileWrites';
 import type { SemanticTable } from '../../src/types/semantic';
 import { projectDiagnostics } from '../../packages/core/test/dbmlWriterSupport';
+import { formatWrittenDbml } from '../../src/services/dbmlWriters';
+
+/** The expected text in the canonical layout ERD Studio writes every .dbml in (every write is formatted). */
+function canonical(text: string): string {
+  return formatWrittenDbml(text, 'expected.dbml');
+}
 
 const HEADER = '// ERD Studio relationships.\n';
 
@@ -120,7 +126,7 @@ describe('each op kind: one write per file', () => {
     const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }] });
     expect(pathsOf(plan.writes)).toEqual(['replace tables/gold/_relationships.dbml']);
     const after = apply(files, plan.writes);
-    expect(after['tables/gold/_relationships.dbml']).toBe(`${HEADER}use { table dim_date } from '../dim_date.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.date_key >? dim_date.date_key [delete: cascade] // keep me\n`);
+    expect(after['tables/gold/_relationships.dbml']).toBe(canonical(`${HEADER}use { table dim_date } from '../dim_date.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.date_key >? dim_date.date_key [delete: cascade] // keep me\n`));
     expectClean(after);
   });
 
@@ -144,7 +150,7 @@ describe('each op kind: one write per file', () => {
     const plan = planDbmlLibraryWrites(snapshotOf(files), { delete: ['fct_order'] });
     expect(pathsOf(plan.writes)).toEqual(['delete tables/gold/fct_order.dbml', 'replace tables/gold/_relationships.dbml']);
     expect(plan.pathChanged).toEqual(new Map([['fct_order', null]]));
-    expect(apply(files, plan.writes)['tables/gold/_relationships.dbml']).toBe(`${HEADER}\n`);
+    expect(apply(files, plan.writes)['tables/gold/_relationships.dbml']).toBe(canonical(`${HEADER}\n`));
     expect(plan.resolveTable('fct_order')).toBeUndefined();
     expect(plan.fileExists('tables/gold/fct_order.dbml')).toBe(false);
   });
@@ -221,8 +227,8 @@ describe('the rename ops shape (§4.6 step 0)', () => {
       'replace tables/gold/_relationships.dbml',
     ]);
     const after = apply(files, plan.writes);
-    expect(after['tables/gold/fct_sale.dbml']).toBe('Table fct_sale {\n  id INT [pk]\n  date_key INT\n  customer_key INT\n}\n');
-    expect(after['tables/gold/_relationships.dbml']).toBe(`${HEADER}use { table dim_date } from '../dim_date.dbml'\nuse { table dim_customer } from './dim_customer.dbml'\nuse { table fct_sale } from './fct_sale.dbml'\n\nRef: fct_sale.customer_key >? dim_customer.customer_key\nRef: fct_sale.date_key >? dim_date.date_key [delete: cascade] // keep me\n`);
+    expect(after['tables/gold/fct_sale.dbml']).toBe(canonical('Table fct_sale {\n  id INT [pk]\n  date_key INT\n  customer_key INT\n}\n'));
+    expect(after['tables/gold/_relationships.dbml']).toBe(canonical(`${HEADER}use { table dim_date } from '../dim_date.dbml'\nuse { table dim_customer } from './dim_customer.dbml'\nuse { table fct_sale } from './fct_sale.dbml'\n\nRef: fct_sale.customer_key >? dim_customer.customer_key\nRef: fct_sale.date_key >? dim_date.date_key [delete: cascade] // keep me\n`));
     expect(plan.pathChanged).toEqual(new Map([['fct_order', 'tables/gold/fct_sale.dbml']]));
     expectClean(after);
   });
@@ -246,7 +252,7 @@ describe('a column rename keeps the Ref (Law 4)', () => {
 
   it('the referenced column: settings, trailing comment and operator keep their bytes', () => {
     const after = renameColumn(base(), 'dim_date', 'date_key', 'day_key');
-    expect(after['tables/gold/_relationships.dbml']).toBe(`${HEADER}use { table dim_date } from '../dim_date.dbml'\nuse { table dim_customer } from './dim_customer.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.customer_key >? dim_customer.customer_key\nRef: fct_order.date_key >? dim_date.day_key [delete: cascade] // keep me\n`);
+    expect(after['tables/gold/_relationships.dbml']).toBe(canonical(`${HEADER}use { table dim_date } from '../dim_date.dbml'\nuse { table dim_customer } from './dim_customer.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.customer_key >? dim_customer.customer_key\nRef: fct_order.date_key >? dim_date.day_key [delete: cascade] // keep me\n`));
     expectClean(after);
   });
 
@@ -265,7 +271,7 @@ describe('a column rename keeps the Ref (Law 4)', () => {
       'tables/_relationships.dbml': `${HEADER}use { table dim } from './dim.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef r1 {\n  // my comment\n  fct_order.dim_key > dim.dim_key [delete: cascade]\n}\n`,
     };
     const after = renameColumn(files, 'dim', 'dim_key', 'k');
-    expect(after['tables/_relationships.dbml']).toBe(`${HEADER}use { table dim } from './dim.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef r1 {\n  // my comment\n  fct_order.dim_key > dim.k [delete: cascade]\n}\n`);
+    expect(after['tables/_relationships.dbml']).toBe(canonical(`${HEADER}use { table dim } from './dim.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef r1 {\n  // my comment\n  fct_order.dim_key > dim.k [delete: cascade]\n}\n`));
     expectClean(after);
   });
 
@@ -427,5 +433,76 @@ describe('pending relationships (D27) through renames and moves, as a project Co
     expect(after['tables/silver/_relationships.dbml']).toContain('Ref: fct_order.customer_key >? dim_customer.customer_key');
     expect(modelOf(after, 'fct_order').relationships).toHaveLength(4);
     expectClean(Object.fromEntries(Object.entries(after).filter(([p]) => !p.endsWith('.yml'))));
+  });
+});
+
+describe('the canonical layout (every write is formatted; a no-op stays a no-op)', () => {
+  /** A library as ERD Studio 1.9.x wrote it: the body Note last, the column note before its other settings, nothing aligned, no blank line between foreign-key tables. */
+  const OLD_LAYOUT = (): Record<string, string> => ({
+    'tables/gold/dim_customer.dbml': "Table dim_customer {\n  customer_key INT [pk, note: 'Surrogate key']\n  name VARCHAR\n  Note: 'Customers'\n}\n",
+    'tables/gold/dim_date.dbml': 'Table dim_date {\n  date_key INT [pk]\n}\n',
+    'tables/gold/fct_order.dbml': "Table fct_order {\n  id INT [pk]\n  customer_key INT [note: 'Who ordered', foreign_key: 'true']\n  date_key INT\n  Note: 'Orders'\n}\n",
+    'tables/gold/_relationships.dbml': `${HEADER}use { table dim_customer } from './dim_customer.dbml'\nuse { table dim_date } from './dim_date.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\n` +
+      'Ref: dim_customer.name >? dim_date.date_key\nRef: fct_order.customer_key >? dim_customer.customer_key\n',
+  });
+
+  it('a save that changes nothing writes nothing, however the files are laid out', () => {
+    const files = OLD_LAYOUT();
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model: modelOf(files, 'fct_order') }, { model: modelOf(files, 'dim_customer') }] });
+    expect(plan.writes).toEqual([]);
+  });
+
+  it('the first change to a 1.9.x table file writes it once, in the canonical layout, keeping its element and setting order', () => {
+    const files = OLD_LAYOUT();
+    const model = modelOf(files, 'fct_order');
+    model.columns[2].description = 'Order day';
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }] });
+    expect(pathsOf(plan.writes)).toEqual(['replace tables/gold/fct_order.dbml']);
+    const after = apply(files, plan.writes)['tables/gold/fct_order.dbml'];
+    expect(after).toBe(
+      'Table fct_order {\n' +
+      '  id           INT [pk]\n' +
+      "  customer_key INT [note: 'Who ordered', foreign_key: 'true']\n" +
+      "  date_key     INT [note: 'Order day']\n" +
+      "  Note: 'Orders'\n" +
+      '}\n',
+    );
+    expect(canonical(after)).toBe(after);
+    // The same change again is a no-op.
+    const again = apply(files, plan.writes);
+    expect(planDbmlLibraryWrites(snapshotOf(again), { save: [{ model: modelOf(again, 'fct_order') }] }).writes).toEqual([]);
+  });
+
+  it('a relationships change on a 1.9.x file aligns its use lines and puts a blank line between foreign-key tables', () => {
+    const files = OLD_LAYOUT();
+    const model = modelOf(files, 'fct_order');
+    model.relationships = [...(model.relationships ?? []), { fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' }];
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }] });
+    expect(apply(files, plan.writes)['tables/gold/_relationships.dbml']).toBe(
+      `${HEADER}use { table dim_customer } from './dim_customer.dbml'\nuse { table dim_date }     from './dim_date.dbml'\nuse { table fct_order }    from './fct_order.dbml'\n\n` +
+      'Ref: dim_customer.name >? dim_date.date_key\n\nRef: fct_order.customer_key >? dim_customer.customer_key\nRef: fct_order.date_key >? dim_date.date_key\n',
+    );
+    expectClean(apply(files, plan.writes));
+  });
+
+  it('a new table is written Note first, its columns aligned and their notes last', () => {
+    const files = OLD_LAYOUT();
+    const model: SemanticTable = {
+      name: 'fct_visit',
+      description: 'Visits',
+      columns: [
+        { name: 'visit_id', dataType: 'BIGINT', description: 'The visit', isPrimaryKey: true, isNaturalKey: true },
+        { name: 'date_key', dataType: 'INT', description: '', isForeignKey: true },
+      ],
+    };
+    const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }], newTableFolder: 'gold' });
+    expect(apply(files, plan.writes)['tables/gold/fct_visit.dbml']).toBe(
+      'Table fct_visit {\n' +
+      "  Note: 'Visits'\n" +
+      '\n' +
+      "  visit_id BIGINT [pk, natural_key: 'true', note: 'The visit']\n" +
+      "  date_key INT    [foreign_key: 'true']\n" +
+      '}\n',
+    );
   });
 });

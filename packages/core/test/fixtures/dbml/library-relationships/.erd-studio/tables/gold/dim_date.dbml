@@ -5,6 +5,6 @@ Table dim_date [
   schema: 'gold',
   role: 'dimension'
 ] {
-  date_key INT [pk]
+  date_key      INT [pk]
   calendar_date DATE
 }

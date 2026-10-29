@@ -15,7 +15,8 @@ import * as path from 'path';
 
 import { editDiagramLayout, layoutFilePathOf, stickyLayoutsOf } from '@erd-studio/core';
 import type { Annotation, NodePosition } from '@erd-studio/core';
-import { editSubjectAreaDbml, parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { editSubjectAreaDbml } from './dbmlWriters';
 import type { DbmlDiagramTable } from '@erd-studio/core/dbml';
 
 import type { FileWrite } from './fileWrites';

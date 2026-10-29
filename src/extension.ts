@@ -124,6 +124,7 @@ import type { FileWrite } from './services/fileWrites';
 import { saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles, openOrDiskText } from './providers/dirtyDocuments';
 import { log, elapsedMs, setLogSink } from './services/logger';
+import { registerDbmlFormatting } from './providers/dbmlFormattingProvider';
 import { LOG_CHANNEL_NAME, SHOW_LOGS_COMMAND } from './services/showLogs';
 
 /**
@@ -909,6 +910,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // the known-fixes registry. Independent of telemetry (it sends nothing about
   // the user); its own switch is erdStudio.checkKnownFixes.
   startKnownFixes(context);
+
+  // Format Document for .dbml files: before the no-project early return, so a
+  // .dbml file opened anywhere (a lone file, a folder with no ERD Studio
+  // project) formats exactly as ERD Studio writes it.
+  registerDbmlFormatting(context);
 
   // "Send Feedback" is registered before any early return so it is always
   // reachable from the command palette, even when no dbt project is open.

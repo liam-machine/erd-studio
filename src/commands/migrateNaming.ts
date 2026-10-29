@@ -29,7 +29,7 @@ import { LOGICAL_MODELS_DIR, TABLES_DIR } from '@erd-studio/core';
 
 import { applyFileWrites } from '../providers/applyFileWrites';
 import { dirtyFiles } from '../providers/dirtyDocuments';
-import { saveDocumentByUri } from '../providers/documentSave';
+import { saveDocumentByUri, saveWithoutFormatting } from '../providers/documentSave';
 import {
   RELOAD_WINDOW_BUTTON,
   SAVE_ALL_BUTTON,
@@ -112,7 +112,7 @@ function saveMigratedOnUndo(paths: readonly string[], folders: Iterable<string>)
       // An empty `tables/` left by an undo would read as a layer folder.
       removeEmptiedFolders();
       if (!e.document.isDirty) return;
-      void e.document.save().then((saved) => { if (saved) ownWrites.recordWrite(e.document.uri.fsPath); });
+      void saveWithoutFormatting(e.document).then((saved) => { if (saved) ownWrites.recordWrite(e.document.uri.fsPath); });
     }, 50);
   }));
 }

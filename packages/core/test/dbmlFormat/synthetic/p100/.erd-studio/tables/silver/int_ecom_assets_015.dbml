@@ -1,0 +1,23 @@
+Table int_ecom_assets_015 [
+  schema: 'silver',
+  grain: 'One row per ecom assets 015'
+] {
+  ecom_assets_015_id STRING [pk, note: 'Primary key of int_ecom_assets_015']
+  notes BIGINT [note: 'notes of the ecom assets 015 row']
+  is_active TIMESTAMP_NTZ [note: 'is active of the ecom assets 015 row']
+  description_text DOUBLE [note: 'description text of the ecom assets 015 row']
+  country_code "DECIMAL(18,2)" [note: 'country code of the ecom assets 015 row']
+  discount_pct BOOLEAN [note: 'discount pct of the ecom assets 015 row']
+  loaded_at STRING [note: 'loaded at of the ecom assets 015 row']
+  region DOUBLE [note: 'region of the ecom assets 015 row']
+  notes_7 DOUBLE [note: 'notes 7 of the ecom assets 015 row']
+  owner_name INT [note: 'owner name of the ecom assets 015 row']
+  notes_9 DOUBLE [note: 'notes 9 of the ecom assets 015 row']
+  unit_price DATE [note: 'unit price of the ecom assets 015 row']
+  region_11 DATE [note: 'region 11 of the ecom assets 015 row']
+  type_code BIGINT [note: 'type code of the ecom assets 015 row']
+  line_number DOUBLE [note: 'line number of the ecom assets 015 row']
+  weight_kg BIGINT [note: 'weight kg of the ecom assets 015 row']
+  priority DOUBLE [note: 'priority of the ecom assets 015 row']
+  Note: 'Synthetic silver table int_ecom_assets_015'
+}

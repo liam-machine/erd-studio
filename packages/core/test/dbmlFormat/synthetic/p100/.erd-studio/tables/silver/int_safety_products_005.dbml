@@ -1,0 +1,15 @@
+Table int_safety_products_005 [
+  schema: 'silver',
+  grain: 'One row per safety products 005'
+] {
+  safety_products_005_id STRING [pk, note: 'Primary key of int_safety_products_005']
+  source_system BIGINT [note: 'source system of the safety products 005 row']
+  region BIGINT [note: 'region of the safety products 005 row']
+  code BOOLEAN [note: 'code of the safety products 005 row']
+  region_3 BOOLEAN [note: 'region 3 of the safety products 005 row']
+  category TIMESTAMP_NTZ [note: 'category of the safety products 005 row']
+  line_number DOUBLE [note: 'line number of the safety products 005 row']
+  loaded_at INT [note: 'loaded at of the safety products 005 row']
+  notes BOOLEAN [note: 'notes of the safety products 005 row']
+  Note: 'Synthetic silver table int_safety_products_005'
+}

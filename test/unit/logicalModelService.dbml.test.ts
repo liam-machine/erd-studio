@@ -363,7 +363,8 @@ describe('DBML table writes outside the editor (S5: planDbmlLibraryWrites + writ
     expect(() => lib.serializeTable(table)).toThrow(DbmlTableWriteRefused);
     table.columns[1].description = 'Shown name';
     lib.saveTable(table);
-    expect(fs.readFileSync(file, 'utf-8')).toBe("// keep me\nTable dim_date {\n  id INT [pk]\n  label VARCHAR [note: 'Shown name']\n}\n");
+    // Spliced, then aligned (every DBML write is in the canonical layout).
+    expect(fs.readFileSync(file, 'utf-8')).toBe("// keep me\nTable dim_date {\n  id    INT     [pk]\n  label VARCHAR [note: 'Shown name']\n}\n");
     expect(fs.readdirSync(path.dirname(file))).toEqual(['dim_date.dbml']);
   });
 
@@ -376,7 +377,7 @@ describe('DBML table writes outside the editor (S5: planDbmlLibraryWrites + writ
     expect(fs.existsSync(path.join(semantic, 'tables/dim_date.dbml'))).toBe(false);
     expect(fs.readFileSync(path.join(semantic, 'tables/dim_day.dbml'), 'utf-8')).toBe(dbmlTable('dim_day'));
     expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8'))
-      .toBe(`${HEADER}use { table dim_day } from './dim_day.dbml'\nuse { table fct_x } from './fct_x.dbml'\n\nRef: fct_x.date_id >? dim_day.id\n`);
+      .toBe(`${HEADER}use { table dim_day } from './dim_day.dbml'\nuse { table fct_x }   from './fct_x.dbml'\n\nRef: fct_x.date_id >? dim_day.id\n`);
     expect(lib.getTable('fct_x')?.relationships?.[0]).toMatchObject({ toModel: 'dim_day', toColumn: 'id' });
   });
 
@@ -388,7 +389,7 @@ describe('DBML table writes outside the editor (S5: planDbmlLibraryWrites + writ
     lib.deleteTable('dim_date');
     expect(fs.existsSync(path.join(semantic, 'tables/dim_date.dbml'))).toBe(false);
     // The relationships file keeps its header and is never deleted (D15).
-    expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8')).toBe(`${HEADER}\n`);
+    expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8')).toBe(HEADER);
     expect(lib.getTable('fct_x')?.relationships).toBeUndefined();
   });
 
@@ -402,7 +403,7 @@ describe('DBML table writes outside the editor (S5: planDbmlLibraryWrites + writ
     lib.deleteTable('dim_date');
     expect(fs.existsSync(path.join(semantic, 'tables/dim_date.dbml'))).toBe(false);
     expect(fs.readFileSync(yml, 'utf-8')).toBe(ymlText);
-    expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8')).toBe(`${HEADER}\n`);
+    expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8')).toBe(HEADER);
   });
 
   it('renameTable refuses the reserved name `_relationships` (§2.1), and writes nothing', () => {

@@ -637,6 +637,26 @@ export class Range {
   constructor(public readonly start: Position, public readonly end: Position) {}
 }
 
+/** A text edit, as a formatting provider returns them. */
+export class TextEdit {
+  constructor(public readonly range: Range, public readonly newText: string) {}
+  static replace(range: Range, newText: string): TextEdit { return new TextEdit(range, newText); }
+  static insert(position: Position, newText: string): TextEdit { return new TextEdit(new Range(position, position), newText); }
+  static delete(range: Range): TextEdit { return new TextEdit(range, ''); }
+}
+
+/** Document formatting providers registered through `languages`, in order (tests read and clear it). */
+export const _formattingProviders: Array<{ selector: unknown; provider: { provideDocumentFormattingEdits: (...args: unknown[]) => unknown } }> = [];
+
+export const languages = {
+  getLanguages: async (): Promise<string[]> => ['plaintext', 'json', 'yaml', 'dbml'],
+  registerDocumentFormattingEditProvider: (selector: unknown, provider: { provideDocumentFormattingEdits: (...args: unknown[]) => unknown }) => {
+    const entry = { selector, provider };
+    _formattingProviders.push(entry);
+    return { dispose: () => { const i = _formattingProviders.indexOf(entry); if (i >= 0) _formattingProviders.splice(i, 1); } };
+  },
+};
+
 export interface MockTextDocument {
   uri: ReturnType<typeof createUri>;
   fileName: string;
@@ -739,8 +759,30 @@ export function _closeMockDocument(fsPath: string): void {
   doc.save = async () => { throw new Error('Document has been closed'); };
 }
 
+/**
+ * `editor.formatOnSave` for `.dbml` documents. When on, every save() runs the
+ * registered document formatting providers first and applies their edits, as
+ * VS Code's format-on-save participant does for an extension's save() too.
+ */
+export const _mockFormatOnSave: { enabled: boolean } = { enabled: false };
+
+/** Run the formatting providers over `doc` and return its text with their edits applied (format on save). */
+function formatOnSaveText(doc: MockTextDocument, text: string): string {
+  if (!_mockFormatOnSave.enabled || !doc.uri.fsPath.endsWith('.dbml')) return text;
+  let current = text;
+  for (const { provider } of _formattingProviders) {
+    const edits = (provider.provideDocumentFormattingEdits(doc, { tabSize: 2, insertSpaces: true }) ?? []) as TextEdit[];
+    const spans = edits
+      .map((e) => ({ start: doc.offsetAt(e.range.start), end: doc.offsetAt(e.range.end), text: e.newText }))
+      .sort((a, b) => b.start - a.start);
+    for (const e of spans) current = current.slice(0, e.start) + e.text + current.slice(e.end);
+  }
+  return current;
+}
+
 /** Reset documents, applied edits and applyEdit behaviour (call in beforeEach). */
 export function _resetMockWorkspace(): void {
+  _mockFormatOnSave.enabled = false;
   _failingSaves.clear();
   _mockDocuments.clear();
   _appliedEdits.length = 0;
@@ -783,6 +825,8 @@ export function createMockTextDocument(fsPath: string, text = '{}', options: { p
     },
     save: async () => {
       if (_failingSaves.has(path.resolve(fsPath))) return false;
+      const formatted = formatOnSaveText(doc, current);
+      if (formatted !== current) doc._setText(formatted);
       if (doc._persist) {
         fs.writeFileSync(fsPath, current, 'utf-8');
       }

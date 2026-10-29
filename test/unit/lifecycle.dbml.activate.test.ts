@@ -16,6 +16,12 @@ import { activate, _resetFirstRunGuardForTests } from '../../src/extension';
 import { compileDbmlProject, parseSubjectAreaDbml, type DbmlParserModule } from '@erd-studio/core/dbml';
 import * as v9 from 'dbml-parse-v9';
 import * as v10 from 'dbml-parse-v10';
+import { formatWrittenDbml } from '../../src/services/dbmlWriters';
+
+/** The expected text in the canonical layout ERD Studio writes every .dbml in (every write is formatted). */
+function canonical(text: string): string {
+  return formatWrittenDbml(text, 'expected.dbml');
+}
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const DBML_NATIVE = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native');
@@ -254,7 +260,8 @@ describe('in a native DBML project', () => {
     expect(errors).not.toHaveBeenCalled();
     expect(fs.existsSync(erd('gold', 'sales.dbml'))).toBe(false);
     expect(fs.existsSync(erd('gold', 'sales.dbdiagram'))).toBe(false);
-    expect(fs.readFileSync(erd('gold', 'revenue.dbml'), 'utf-8')).toBe(before.replace('Project sales {', 'Project revenue {'));
+    // The Project name spliced, then the file in the canonical layout (every DBML write is formatted).
+    expect(fs.readFileSync(erd('gold', 'revenue.dbml'), 'utf-8')).toBe(canonical(before.replace('Project sales {', 'Project revenue {')));
     expect(fs.readFileSync(erd('gold', 'revenue.dbdiagram'), 'utf-8')).toBe(layout);
     expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: erd('gold', 'revenue.dbml') }), expect.any(String));
     compilesClean();
@@ -459,7 +466,7 @@ describe('in a native DBML project', () => {
     expect(fs.existsSync(erd('tables', 'dim_only_gold.dbml'))).toBe(false);
     expect(fs.existsSync(erd('tables', 'gold', 'dim_only_gold.dbml'))).toBe(true);
     expect(fs.readFileSync(erd('tables', 'gold', '_relationships.dbml'), 'utf-8')).toContain('dim_only_gold.date_key');
-    expect(fs.readFileSync(sales, 'utf-8')).toContain("use { table dim_only_gold } from '../tables/gold/dim_only_gold.dbml'");
+    expect(fs.readFileSync(sales, 'utf-8')).toMatch(/^use \{ table dim_only_gold \} +from '\.\.\/tables\/gold\/dim_only_gold\.dbml'$/m);
     expect(info).toHaveBeenCalledWith('Moved 1 table file into layer folders.');
     compilesClean();
   });

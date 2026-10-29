@@ -46,24 +46,28 @@ Table fct_order [
   meta_owner: 'sales-data',
   meta_json: '{"pii":false,"tags":["finance"]}'
 ] {
-  order_line_id BIGINT [pk, note: 'Line id from the shop']
-  customer_key INT [foreign_key: 'true']
-  amount "DECIMAL(18,2)" [additive_type: 'additive', note: 'Line total']
-  order_number VARCHAR [natural_key: 'true'] // the business key
-  loaded_at timestamp [not null, default: `now()`]   // DBML-only settings: kept, never read
   Note: 'Order lines'
+
+  order_line_id BIGINT          [pk, note: 'Line id from the shop']
+  customer_key  INT             [foreign_key: 'true']
+  amount        "DECIMAL(18,2)" [additive_type: 'additive', note: 'Line total']
+  order_number  VARCHAR         [natural_key: 'true'] // the business key
+  loaded_at     timestamp       [not null, default: `now()`] // DBML-only settings: kept, never read
 }
 ```
 
 A composite primary key is an `indexes` block, and a table with no columns yet holds ERD Studio's placeholder column (DBML needs at least one):
 
 ```dbml
-Table dim_customer [schema: 'gold', role: 'conformed-dim'] {
-  customer_key INT [note: 'Surrogate key']
-  valid_from DATE [scd_type: '2']
-  customer_id VARCHAR [natural_key: 'true']
-  parent_customer_key INT [foreign_key: 'true']
-  segment VARCHAR [scd_type: '1']
+Table dim_customer [
+  schema: 'gold',
+  role: 'conformed-dim'
+] {
+  customer_key        INT     [note: 'Surrogate key']
+  valid_from          DATE    [scd_type: '2']
+  customer_id         VARCHAR [natural_key: 'true']
+  parent_customer_key INT     [foreign_key: 'true']
+  segment             VARCHAR [scd_type: '1']
   indexes {
     (customer_key, valid_from) [pk]
   }
@@ -72,7 +76,10 @@ Table dim_customer [schema: 'gold', role: 'conformed-dim'] {
 
 ```dbml
 Table bridge_empty {
-  _erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']
+  _erd_no_columns unknown [
+    erd_placeholder: 'true',
+    note: 'ERD Studio: this table has no columns yet, and DBML needs one'
+  ]
 }
 ```
 
@@ -101,21 +108,25 @@ Table bridge_empty {
 
 Settings ERD Studio does not model (`not null`, `unique`, `increment`, `default`, `headercolor`, `check`, other `indexes`, Enums, comments, custom properties it does not know) are never read and are kept byte for byte. A `Metadata Table x { … }` / `Metadata Column x.c { … }` block (DBML 9.1+) in a table file is read like an inline setting and edited where it sets a value; ERD Studio never writes one, A block whose target the file does not declare makes the table unreadable ("A Metadata block on line N targets …"; the table shows as unreadable until you rename or remove the block); `doctor` lists it as a warning.
 
+**Layout.** ERD Studio writes every `.dbml` in one layout, and tidies a file into it whenever it changes that file (a save that changes nothing, and moving tables on the canvas, never touch it); **Format Document** (Shift+Alt+F, ⇧⌥F on a Mac) does the same in the text editor, except that it adds no blank lines between foreign-key tables' Refs (below). Two-space indents and at most one blank line; a table's `Note` first, then a blank line, then the columns; consecutive columns aligned (names padded to the group's longest name, a name over 32 characters not widening it; types padded to the longest type of a column that has settings, a type over 24 characters not widening it; then the settings; a blank line or an own-line comment starts a new group); a column's settings in the order `pk`, DBML's own (`not null`, `default`, …), ERD Studio's (`natural_key`, `scd_type`, `additive_type`, `foreign_key`), `meta_*`, then `note`, and one per line once the column's line would pass 100 characters (a Table with two or more settings lists them one per line too); when ERD Studio writes a relationships file, one blank line between the Refs of each foreign-key table (Format Document keeps the blank lines a file has but adds none); consecutive `use … from` lines aligned (a `use { … }` part over 48 characters does not widen the alignment). Only spacing changes when a file is tidied, never a value or a comment, and an existing file keeps the order of its lines and settings. Files written by ERD Studio 1.9.x (the `Note` last, the column `note` before its other settings) read exactly as before.
+
 ### Relationships file (`tables/[<folder>/]_relationships.dbml`)
 
 One file per library folder holds **every relationship whose foreign-key table lives in that folder**, one `Ref` line each. It needs one `use { table x } from '<path>'` line for **every table its Refs name** (`use` is not transitive: without the line, other DBML tools fail the file and every diagram importing it).
 
 ```dbml
 // ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
-use { table dim_date } from '../dim_date.dbml'
+use { table dim_date }         from '../dim_date.dbml'
 use { table customer_profile } from './customer_profile.dbml'
-use { table dim_customer } from './dim_customer.dbml'
-use { table dim_region } from './dim_region.dbml'
-use { table fct_order } from './fct_order.dbml'
+use { table dim_customer }     from './dim_customer.dbml'
+use { table dim_region }       from './dim_region.dbml'
+use { table fct_order }        from './fct_order.dbml'
 
 Ref: dim_customer.customer_key ?- customer_profile.customer_key
 Ref region: customer_profile.preferred_region_code <>? dim_region.region_code
+
 Ref parent: dim_customer.parent_customer_key >? dim_customer.customer_key
+
 Ref: fct_order.customer_key >? dim_customer.customer_key
 Ref "order date": fct_order.order_date_key >? dim_date.date_key
 Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
@@ -149,9 +160,9 @@ Project sales {
   erd_layout_options: '{"elk.direction":"RIGHT"}'
 }
 
-use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table fct_order }    from '../tables/gold/fct_order.dbml'
 use { table dim_customer } from '../tables/gold/dim_customer.dbml'
-use { table dim_date } from '../tables/dim_date.dbml'
+use { table dim_date }     from '../tables/dim_date.dbml'
 use * from '../tables/_relationships.dbml'
 use * from '../tables/gold/_relationships.dbml'
 

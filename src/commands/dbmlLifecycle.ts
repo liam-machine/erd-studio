@@ -14,7 +14,8 @@ import * as path from 'path';
 
 import { dbmlName, layoutFilePathOf } from '@erd-studio/core';
 import { sameName } from '../types/naming';
-import { editRelationshipsDbml, editSubjectAreaDbml, editTableDbml, parseSubjectAreaDbml, parseTableDbml, renderNewSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { parseSubjectAreaDbml, parseTableDbml } from '@erd-studio/core/dbml';
+import { editRelationshipsDbml, editSubjectAreaDbml, editTableDbml, renderNewSubjectAreaDbml } from '../services/dbmlWriters';
 
 import type { FileWrite } from '../services/fileWrites';
 import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';

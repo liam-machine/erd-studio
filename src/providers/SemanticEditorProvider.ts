@@ -152,7 +152,7 @@ import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, SemanticTable, UnifiedSubjectArea } from '../types/semantic';
 import { describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
-import { saveDocument, saveDocumentByUri } from './documentSave';
+import { saveDocument, saveDocumentByUri, saveWithoutFormatting } from './documentSave';
 import { dirtyFiles } from './dirtyDocuments';
 import { subjectAreaLoadErrorCode, layoutFeature, saveFailureCodes, type SaveFailure, type SubjectAreaLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
 import { openTableFileAt } from '../commands/openModelFile';
@@ -2134,7 +2134,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (e.contentChanges.length === 0) return;
       // A file deleted outside ERD Studio is not saved back into existence (#161).
       if (document.isDirty && fs.existsSync(document.uri.fsPath)) {
-        await document.save();
+        await saveWithoutFormatting(document);
       }
       await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey);
     });

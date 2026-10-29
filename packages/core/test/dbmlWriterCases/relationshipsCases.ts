@@ -49,7 +49,20 @@ use { table customer_profile } from './customer_profile.dbml'
 // the customer of an order
 Ref: fct_order.Customer_Key > gold.dim_customer.customer_key [delete: cascade] // keep me
 Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
+
 Ref: gold.dim_customer.customer_key - customer_profile.customer_key
+`;
+
+/** A 1.9.x relationships file: the Refs of every table run together, with no blank line between tables. */
+const OLD_LAYOUT = `use { table customer_profile } from './customer_profile.dbml'
+use { table gold.dim_customer } from './dim_customer.dbml'
+use { table fct_order } from './fct_order.dbml'
+use { table dim_date } from '../dim_date.dbml'
+
+Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+// the parent
+Ref: gold.dim_customer.parent_key >? gold.dim_customer.customer_key
+Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
 `;
 
 /** A composite Ref with settings and a trailing comment. */
@@ -180,6 +193,23 @@ export function meaning(text: string, library: Readonly<Record<string, string>> 
   return Object.fromEntries([...owners.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, comparableRelationships(v)]));
 }
 
+/** customer_profile's Refs and fct_order's, as ERD Studio writes them anew: two groups with a blank line between. */
+const W3_PROFILE = [M21('customer_key', 'dim_customer', 'customer_key')];
+const W3_ORDER = [M21('customer_key', 'dim_customer', 'customer_key')];
+const W3_TWO_GROUPS = relEdit(null, { owners: new Map([
+  ['customer_profile', { name: 'customer_profile', relationships: W3_PROFILE }],
+  ['fct_order', { name: 'fct_order', relationships: W3_ORDER }],
+]) });
+/** A fresh render of customer_profile's `profile` list beside fct_order's one Ref. */
+const w3Fresh = (profile: TableRelationship[]): string => relEdit(null, { owners: new Map([
+  ['customer_profile', { name: 'customer_profile', relationships: profile }],
+  ['fct_order', { name: 'fct_order', relationships: W3_ORDER }],
+]) });
+const W3_TO_DATE = M21('customer_key', 'dim_date', 'date_key');
+const W3_TO_ORDER = M21('customer_key', 'fct_order', 'order_id');
+/** W3_TWO_GROUPS with a second Ref added to the FIRST group. */
+const W3_FIRST_GROUP_GROWN = relEdit(W3_TWO_GROUPS, changed(W3_TWO_GROUPS, 'customer_profile', (list) => [...list, W3_TO_DATE]));
+
 export const RELATIONSHIPS_CASES: WriterCase[] = [
   relCase('a no-op (every owner listed with what it holds) is byte-identical', HAND_WRITTEN, () => ({
     owners: new Map([...currentOwners(HAND_WRITTEN)].map(([k, v]) => [k, { name: k, relationships: v }])),
@@ -230,6 +260,7 @@ use { table fct_order } from './fct_order.dbml'
 use { table dim_date } from '../dim_date.dbml'
 
 Ref: bridge.a_key <>? fct_order.order_id
+
 Ref: fct_order.ship_date_key >? dim_date.date_key
 Ref: fct_order.order_date_key >? dim_date.date_key
 `);
@@ -257,6 +288,7 @@ use { table gold.dim_customer } from './dim_customer.dbml'
 use { table customer_profile } from './customer_profile.dbml'
 
 // the customer of an order
+
 Ref: gold.dim_customer.customer_key - customer_profile.customer_key
 `);
   }),
@@ -266,6 +298,7 @@ Ref: gold.dim_customer.customer_key - customer_profile.customer_key
     expect(out).toBe(`// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
 
 // the customer of an order
+
 `);
   }),
   relCase('hand-added and missing use lines are left alone when their table is not in the edit (Law 1)', `use { table bridge } from './bridge.dbml'
@@ -283,6 +316,7 @@ use { table gold.dim_customer } from './dim_customer.dbml'
 use { table fct_order } from './fct_order.dbml'
 
 Ref: fct_order.ship_date_key >? dim_date.date_key
+
 Ref "profile of": customer_profile.customer_key >? gold.dim_customer.customer_key
 `);
   }),
@@ -297,6 +331,7 @@ use { table customer_profile } from './customer_profile.dbml'
 use { table gold.dim_customer } from './dim_customer.dbml'
 
 Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+
 Ref: fct_order.order_date_key >? dim_date.date_key
 `);
   }),
@@ -309,6 +344,7 @@ Ref: fct_order.order_date_key >? dim_date.date_key
 use { table gold.dim_customer } from './dim_customer.dbml'
 
 Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+
 // about this Ref
 Ref: fct_order.order_date_key >? dim_date.date_key
 `);
@@ -432,6 +468,7 @@ use { table customer_profile } from './customer_profile.dbml'
 use { table dim_date } from '../dim_date.dbml'
 
 Ref: customer_profile.customer_key >? dim_date.date_key
+
 Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
 `);
     },
@@ -603,4 +640,55 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
     () => changed(PENDING_FILE, 'fct_order', (list) => list.map((r) => (r.toModel === 'dim_missing' ? { ...r, toModel: 'dim_missing2' } : r))), (out) => {
       expect(out).toBe(PENDING_FILE.replace('>? dim_missing.date_key', '>? dim_missing2.date_key'));
     }),
+
+  // --- W3: a blank line between the Refs of different foreign-key tables ----------------
+  relCase('a new file puts a blank line between the Refs of each foreign-key table', null, () => ({
+    owners: new Map([
+      ['fct_order', { name: 'fct_order', relationships: [M21('customer_key', 'dim_customer', 'customer_key'), M21('order_date_key', 'dim_date', 'date_key')] }],
+      ['customer_profile', { name: 'customer_profile', relationships: [M21('customer_key', 'dim_customer', 'customer_key')] }],
+    ]),
+  }), (out) => {
+    expect(out.slice(out.indexOf('\nRef') + 1)).toBe(`Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+
+Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
+Ref: fct_order.order_date_key >? dim_date.date_key
+`);
+  }),
+  relCase('an edit of a pre-2.0 file with no blank lines between tables adds them; Refs of one table stay together', OLD_LAYOUT, () => changed(OLD_LAYOUT, 'fct_order', (list) => [
+    ...list, M21('order_date_key', 'dim_date', 'date_key'),
+  ]), (out) => {
+    expect(out).toBe(`use { table customer_profile } from './customer_profile.dbml'
+use { table gold.dim_customer } from './dim_customer.dbml'
+use { table fct_order } from './fct_order.dbml'
+use { table dim_date } from '../dim_date.dbml'
+
+Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+
+// the parent
+Ref: gold.dim_customer.parent_key >? gold.dim_customer.customer_key
+
+Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
+Ref: fct_order.order_date_key >? dim_date.date_key
+`);
+  }),
+  relCase('a Ref added to the first of two tables joins its group: the file reads as a fresh render does', W3_TWO_GROUPS, () => changed(W3_TWO_GROUPS, 'customer_profile', (list) => [
+    ...list, W3_TO_DATE,
+  ]), (out) => {
+    expect(out).toBe(w3Fresh([...W3_PROFILE, W3_TO_DATE]));
+    expect(out.slice(out.indexOf('\nRef') + 1)).toBe(`Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+Ref: customer_profile.customer_key >? dim_date.date_key
+
+Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
+`);
+  }),
+  relCase('a third Ref added to that first group still joins it (no drift builds up)', W3_FIRST_GROUP_GROWN, () => changed(W3_FIRST_GROUP_GROWN, 'customer_profile', (list) => [
+    ...list, W3_TO_ORDER,
+  ]), (out) => {
+    expect(out).toBe(w3Fresh([...W3_PROFILE, W3_TO_DATE, W3_TO_ORDER]));
+  }),
+  relCase('a no-op on a pre-2.0 file stays byte-identical (no blank lines added)', OLD_LAYOUT, () => ({
+    owners: new Map([...currentOwners(OLD_LAYOUT)].map(([k, v]) => [k, { name: k, relationships: v }])),
+  }), (out) => {
+    expect(out).toBe(OLD_LAYOUT);
+  }),
 ];

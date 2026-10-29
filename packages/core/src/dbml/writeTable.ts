@@ -140,17 +140,22 @@ function tableSettings(table: SemanticTable): string[] {
   return settings;
 }
 
-/** A column's settings, in the order a new file writes them. */
+/**
+ * A column's settings, in the order a new file writes them (the canonical
+ * order, {@link COLUMN_KEY_ORDER}): `pk`, then ERD Studio's properties
+ * (`natural_key`, `scd_type`, `additive_type`, `foreign_key`), then meta,
+ * then the `note` last, so a long note never hides the short flags.
+ */
 function columnSettings(column: ColumnDef, isPk: boolean): string[] {
   const settings: string[] = [];
   if (isPk) settings.push('pk');
-  const note = noteValue(column.description);
-  if (note !== undefined) settings.push(`note: ${dbmlString(note)}`);
   if (column.isNaturalKey) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.naturalKey}: 'true'`);
   if (column.scdType !== undefined && column.scdType !== null) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.scdType}: ${dbmlString(String(column.scdType))}`);
   if (column.additiveType) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.additiveType}: ${dbmlString(column.additiveType)}`);
   if (column.isForeignKey) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.foreignKey}: 'true'`);
   settings.push(...metaSettings(column.meta));
+  const note = noteValue(column.description);
+  if (note !== undefined) settings.push(`note: ${dbmlString(note)}`);
   return settings;
 }
 
@@ -166,11 +171,13 @@ const PLACEHOLDER_LINE = `${DBML_RICH_PLACEHOLDER_COLUMN} unknown [${DBML_RICH_P
 
 /**
  * A new table file (§2.2 layout): one Table named exactly as `table.name`,
- * settings inline when there is one and one per line otherwise, one column
- * per line, an `indexes` block only for a composite primary key, the `Note`
- * last, two-space indents and `\n` line endings. A table with no columns
- * gets the placeholder column DBML needs. Relationships are not written:
- * they live in the folder's relationships file.
+ * settings inline when there is one and one per line otherwise, the `Note`
+ * first in the body followed by a blank line, one column per line, an
+ * `indexes` block only for a composite primary key, two-space indents and
+ * `\n` line endings. A table with no columns gets the placeholder column
+ * DBML needs. Relationships are not written: they live in the folder's
+ * relationships file. The host runs the result through `formatDbml`, which
+ * aligns the columns and wraps long settings lists.
  */
 export function renderNewTableDbml(table: SemanticTable): string {
   const lines: string[] = [];
@@ -180,13 +187,13 @@ export function renderNewTableDbml(table: SemanticTable): string {
   } else {
     lines.push(`Table ${dbmlName(table.name)} [`, ...settings.map((s, i) => `  ${s}${i < settings.length - 1 ? ',' : ''}`), '] {');
   }
+  const description = noteValue(table.description);
+  if (description !== undefined) lines.push(`  Note: ${dbmlString(description)}`, '');
   const columns = table.columns ?? [];
   if (columns.length === 0) lines.push(`  ${PLACEHOLDER_LINE}`);
   const pks = columns.filter((c) => c.isPrimaryKey);
   for (const column of columns) lines.push(`  ${columnLine(column, pks.length === 1 && column.isPrimaryKey === true)}`);
   if (pks.length > 1) lines.push('  indexes {', `    (${pks.map((c) => dbmlName(c.name)).join(', ')}) [pk]`, '  }');
-  const description = noteValue(table.description);
-  if (description !== undefined) lines.push(`  Note: ${dbmlString(description)}`);
   lines.push('}');
   return `${lines.join('\n')}\n`;
 }
@@ -243,17 +250,40 @@ const TABLE_KEY_ORDER: readonly string[] = [
   'schema', 'role', 'grain', 'alias',
   ...RATIONALE_KEYS.map((k) => rationaleProperty(k)),
 ];
+/**
+ * The canonical column settings order (W2): `pk`, DBML's own settings, ERD
+ * Studio's properties, then meta ({@link keyOrder}: 1000), then `note` last
+ * (2000). A setting the edit adds goes after the last setting of the list
+ * that sorts at or before it, so a list in this order stays in it, and a
+ * `note` that was last stays last.
+ */
 const COLUMN_KEY_ORDER: readonly string[] = [
-  'pk', 'note', DBML_RICH_COLUMN_PROPERTIES.naturalKey, DBML_RICH_COLUMN_PROPERTIES.scdType,
+  'pk', 'primary key', 'not null', 'null', 'unique', 'increment', 'default',
+  DBML_RICH_COLUMN_PROPERTIES.naturalKey, DBML_RICH_COLUMN_PROPERTIES.scdType,
   DBML_RICH_COLUMN_PROPERTIES.additiveType, DBML_RICH_COLUMN_PROPERTIES.foreignKey,
 ];
+
+/** Where `note` sorts: after everything else. */
+const NOTE_ORDER = 2000;
 
 function keyOrder(order: readonly string[], key: string): number {
   const at = order.indexOf(key);
   if (at >= 0) return at;
+  if (key === 'note') return NOTE_ORDER;
   if (key === DBML_RICH_META_JSON_PROPERTY) return 1001;
   if (key.startsWith(DBML_RICH_META_PREFIX)) return 1000;
   return 999;
+}
+
+/**
+ * Where an existing setting sorts when a new one is placed among them: as
+ * {@link keyOrder}, except that every meta setting (`meta_json` too) sorts as
+ * one, so a new meta entry goes after the meta already there and the map
+ * reads back in the order it had.
+ */
+function existingKeyOrder(order: readonly string[], rawKey: string): number {
+  const key = bareDbmlProperty(rawKey.toLowerCase());
+  return key.startsWith(DBML_RICH_META_PREFIX) ? 1000 : keyOrder(order, key);
 }
 
 /** The leaf names of a dotted name, as nodes (`gold.x.c` → the `gold`, `x` and `c` nodes). */
@@ -506,8 +536,17 @@ function editTableOnce(
     const key = list ?? ownerKey;
     let plan = plans.get(key);
     if (!plan) {
-      const count = Array.isArray(list?.elementList) ? list!.elementList.length : 0;
-      plan = { list: list ?? null, anchor, elements: new Array(count).fill(undefined), added: [], multiLineWhenNew };
+      const elements: AstNode[] = Array.isArray(list?.elementList) ? list!.elementList : [];
+      const order = ownerKey === 'table' || (list !== undefined && list === tableNode.attributeList) ? TABLE_KEY_ORDER : COLUMN_KEY_ORDER;
+      plan = {
+        list: list ?? null,
+        anchor,
+        elements: new Array(elements.length).fill(undefined),
+        added: [],
+        multiLineWhenNew,
+        // Each setting's place in the canonical order, so a new one goes among them (W2).
+        orders: elements.map((e) => (e?.kind === '<attribute>' ? existingKeyOrder(order, attributeName(e)) : 999)),
+      };
       plans.set(key, plan);
     }
     return plan;
@@ -579,6 +618,13 @@ function editTableOnce(
     });
   };
 
+  /** Where the body's first line starts: after the `{` line when only a comment follows the brace, else straight after `{`. */
+  const afterBrace = (): number => {
+    const brace = tableNode.body.blockOpenBrace as AstNode;
+    const end = nextLineStart(text, brace.end);
+    return /^[ \t]*(\/\/[^\n]*)?\r?\n?$/.test(text.slice(brace.end, end)) ? end : brace.end;
+  };
+
   const tableOwner = {
     list: tableNode.attributeList as AstNode | undefined,
     ownerKey: 'table',
@@ -638,11 +684,11 @@ function editTableOnce(
       if (target?.value) {
         setValue(target, dbmlString(wantDescription));
       } else {
-        // A new body Note, the last line of the body.
-        const close = tableNode.body.blockCloseBrace as AstNode;
-        const at = startsItsLine(text, close.start) ? lineStartOf(text, close.start) : close.start;
+        // A new body Note, the first line of the body and a blank line after it (W1).
+        const at = afterBrace();
         const prefix = at === 0 || text[at - 1] === '\n' ? '' : eol;
-        edits.push({ start: at, end: at, text: `${prefix}${indentUnit}Note: ${dbmlString(wantDescription)}${eol}` });
+        const blank = /^[ \t]*\r?\n/.test(text.slice(at)) ? '' : eol;
+        edits.push({ start: at, end: at, text: `${prefix}${indentUnit}Note: ${dbmlString(wantDescription)}${eol}${blank}` });
       }
     }
   }
@@ -785,7 +831,9 @@ function editTableOnce(
       indexEdits.push({ start: at, end: at, text: `${alone ? '' : eol}${indent}${pkTuple}${eol}` });
     } else {
       const body: AstNode[] = Array.isArray(tableNode.body?.body) ? tableNode.body.body : [];
-      const note = body.find((n) => elementType(n)?.toLowerCase() === 'note');
+      // Before a body Note that comes after the columns (the pre-2.0 layout), else last in the body.
+      const lastColumnEnd = Math.max(0, ...allColumnNodes.map((c) => c.node.end as number));
+      const note = body.find((n) => elementType(n)?.toLowerCase() === 'note' && n.start > lastColumnEnd);
       const close = tableNode.body.blockCloseBrace as AstNode;
       const at = note ? attachedStart(text, note) : startsItsLine(text, close.start) ? lineStartOf(text, close.start) : close.start;
       const prefix = at === 0 || text[at - 1] === '\n' ? '' : eol;
@@ -845,12 +893,9 @@ function editTableOnce(
     }
     // New columns go after the line of the previous desired column; the first before the first kept column.
     const firstKept = columnNodes.find((_, ci) => used.has(ci));
-    const brace = tableNode.body.blockOpenBrace as AstNode;
-    const afterBrace = (): number => {
-      const end = nextLineStart(text, brace.end);
-      return /^[ \t]*(\/\/[^\n]*)?\r?\n?$/.test(text.slice(brace.end, end)) ? end : brace.end;
-    };
-    let anchor: number = firstKept ? attachedStart(text, firstKept.node, afterBrace()) : (placeholderNodes[0] ? attachedStart(text, placeholderNodes[0].node, afterBrace()) : afterBrace());
+    // With no column kept, new ones go where the first column was (after a body Note that comes first).
+    const firstColumn = firstKept ?? allColumnNodes[0];
+    let anchor: number = firstColumn ? attachedStart(text, firstColumn.node, afterBrace()) : afterBrace();
     desiredColumns.forEach((_, di) => {
       const ci = matchOf.get(di);
       if (ci !== undefined) {
@@ -861,7 +906,7 @@ function editTableOnce(
       edits.push({ start: anchor, end: anchor, text: `${needsBreak ? eol : ''}${newLine(di)}${eol}` });
     });
     if (desiredColumns.length === 0 && placeholderNodes.length === 0) {
-      const at = firstKept ? firstKept.node.start : afterBrace();
+      const at = firstColumn ? attachedStart(text, firstColumn.node, afterBrace()) : afterBrace();
       const needsBreak = at > 0 && text[at - 1] !== '\n';
       edits.push({ start: at, end: at, text: `${needsBreak ? eol : ''}${indentUnit}${PLACEHOLDER_LINE}${eol}` });
     }

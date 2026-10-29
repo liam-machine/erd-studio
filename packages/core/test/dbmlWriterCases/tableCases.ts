@@ -108,10 +108,15 @@ export const TABLE_CASES: WriterCase[] = [
   tableCase('a changed setting splices its value only', 'fct_order', FCT_ORDER, (t) => { t.grain = 'One row per order'; }, (out) => {
     expect(out).toBe(FCT_ORDER.replace("grain: 'One row per order line'", "grain: 'One row per order'"));
   }),
-  tableCase('a setting added to a multi-line list gets its own line, with a comma after the one before', 'fct_order', FCT_ORDER, (t) => {
+  tableCase('a setting added to a multi-line list gets its own line at its place in the canonical order', 'fct_order', FCT_ORDER, (t) => {
     t.rationale = { ...t.rationale, design: 'Star' };
   }, (out) => {
-    expect(out).toContain(`  meta_json: '{"pii":false,"tags":["finance"]}',\n  rationale_design: 'Star'\n] {`);
+    expect(out).toBe(FCT_ORDER.replace("  rationale_measures:", "  rationale_design: 'Star',\n  rationale_measures:"));
+  }),
+  tableCase('a setting added last to a multi-line list gets its own line, with a comma after the one before', 'fct_order', FCT_ORDER, (t) => {
+    t.meta = { ...t.meta, team: 'orders' };
+  }, (out) => {
+    expect(out).toContain(`  meta_json: '{"pii":false,"tags":["finance"]}',\n  meta_team: 'orders'\n] {`);
   }),
   tableCase('a setting removed from a multi-line list loses its line, and the comma before a new last one goes', 'fct_order', FCT_ORDER, (t) => {
     delete t.meta;
@@ -121,6 +126,9 @@ export const TABLE_CASES: WriterCase[] = [
   }),
   tableCase('a setting added to an inline list is appended', 'fct_order', INLINE, (t) => { t.grain = 'One row per order'; }, (out) => {
     expect(out).toBe(INLINE.replace("[role: 'transaction-fact']", "[role: 'transaction-fact', grain: 'One row per order']"));
+  }),
+  tableCase('a setting added to an inline list goes before the settings that sort after it', 'fct_order', INLINE, (t) => { t.schema = 'gold'; }, (out) => {
+    expect(out).toBe(INLINE.replace("[role: 'transaction-fact']", "[schema: 'gold', role: 'transaction-fact']"));
   }),
   tableCase('the last setting removed from an inline list removes the brackets', 'fct_order', INLINE, (t) => { delete t.modelRole; }, (out) => {
     expect(out).toBe(INLINE.replace(" [role: 'transaction-fact']", ''));
@@ -173,8 +181,11 @@ export const TABLE_CASES: WriterCase[] = [
   tableCase('a header note setting is edited where it is', 'fct_order', "Table fct_order [note: 'old'] {\n  id int\n}\n", (t) => { t.description = 'new'; }, (out) => {
     expect(out).toBe("Table fct_order [note: 'new'] {\n  id int\n}\n");
   }),
-  tableCase('a new description is the last line of the body', 'fct_order', BARE, (t) => { t.description = '  Leading space is dropped'; }, (out) => {
-    expect(out).toBe(BARE.replace('  amount int\n}', "  amount int\n  Note: 'Leading space is dropped'\n}"));
+  tableCase('a new description is the first line of the body, with a blank line after it', 'fct_order', BARE, (t) => { t.description = '  Leading space is dropped'; }, (out) => {
+    expect(out).toBe(BARE.replace('Table fct_order {\n', "Table fct_order {\n  Note: 'Leading space is dropped'\n\n"));
+  }),
+  tableCase('a new description goes below a comment on the brace line', 'fct_order', 'Table fct_order { // the orders\n  // the key\n  id int\n}\n', (t) => { t.description = 'Orders'; }, (out) => {
+    expect(out).toBe("Table fct_order { // the orders\n  Note: 'Orders'\n\n  // the key\n  id int\n}\n");
   }),
   tableCase('a removed description loses its line', 'fct_order', FCT_ORDER, (t) => { delete t.description; }, (out) => {
     expect(out).toBe(FCT_ORDER.replace("  Note: 'Order lines'\n", ''));
@@ -210,7 +221,7 @@ export const TABLE_CASES: WriterCase[] = [
   tableCase('a new column goes after the line of the previous desired column', 'fct_order', FCT_ORDER, (t) => {
     t.columns!.splice(3, 0, { name: 'promised_date_key', dataType: 'INT', description: 'When promised', isForeignKey: true });
   }, (out) => {
-    expect(out).toBe(FCT_ORDER.replace('  order_date_key INT\n', "  order_date_key INT\n  promised_date_key INT [note: 'When promised', foreign_key: 'true']\n"));
+    expect(out).toBe(FCT_ORDER.replace('  order_date_key INT\n', "  order_date_key INT\n  promised_date_key INT [foreign_key: 'true', note: 'When promised']\n"));
   }),
   tableCase('a new first column goes before the first column', 'fct_order', BARE, (t) => {
     t.columns!.unshift({ name: 'tenant', dataType: 'int', description: '' });
@@ -228,7 +239,7 @@ export const TABLE_CASES: WriterCase[] = [
     t.columns![0].isPrimaryKey = true;
   }, (out) => {
     expect(out.startsWith('// Order lines from the shop.')).toBe(true);
-    expect(out).toContain("  customer_key INT [foreign_key: 'true', pk]\n");
+    expect(out).toContain("  customer_key INT [pk, foreign_key: 'true']\n");
     expect(out).not.toContain('order_line_id');
   }),
   tableCase('reordering columns moves each with the comment lines above it', 'fct_order', FCT_ORDER, (t) => {
@@ -278,12 +289,18 @@ export const TABLE_CASES: WriterCase[] = [
   }, (out) => {
     expect(out).toBe('Table fct_order {\n  a int\n  b int\n  indexes {\n    a [unique]\n    (a, b) [pk]\n  }\n}\n');
   }),
-  tableCase('reordering columns while going to a composite key puts the indexes block before a body Note among the columns', 'fct_order',
+  tableCase('reordering columns while going to a composite key puts the indexes block last when the body Note sits among the columns', 'fct_order',
     "Table fct_order {\n  a int [pk]\n  Note: 'n'\n  b int\n}\n", (t) => {
       t.columns!.reverse();
       for (const c of t.columns!) c.isPrimaryKey = true;
     }, (out) => {
-      expect(out).toBe("Table fct_order {\n  b int\n  a int\n  indexes {\n    (b, a) [pk]\n  }\n  Note: 'n'\n}\n");
+      expect(out).toBe("Table fct_order {\n  b int\n  a int\n  Note: 'n'\n  indexes {\n    (b, a) [pk]\n  }\n}\n");
+    }),
+  tableCase('a composite key in a table whose Note comes first puts the indexes block last', 'fct_order',
+    "Table fct_order {\n  Note: 'n'\n\n  a int [pk]\n  b int\n}\n", (t) => {
+      for (const c of t.columns!) c.isPrimaryKey = true;
+    }, (out) => {
+      expect(out).toBe("Table fct_order {\n  Note: 'n'\n\n  a int\n  b int\n  indexes {\n    (a, b) [pk]\n  }\n}\n");
     }),
   tableCase('removing a column cuts the index lines that name it, with their comments, and keeps an expression index', 'fct_order',
     "Table fct_order {\n  a int [pk]\n  b int\n  c int\n  indexes {\n    c [unique] // c alone\n    (b, c) [name: 'bc'] // b and c\n    `lower(b)` [name: 'expr']\n    b\n  }\n}\n", (t) => {
@@ -302,7 +319,8 @@ export const TABLE_CASES: WriterCase[] = [
       t.columns![0].isNaturalKey = true;
       t.columns![1].description = '';
     }, (out) => {
-      expect(out).toBe("Table fct_order {\n  id int [ /* keep me */ note: 'a', natural_key: 'true']\n  v int [/* first */  pk]\n}\n");
+      // natural_key sorts before note, so it goes in front of it.
+      expect(out).toBe("Table fct_order {\n  id int [ /* keep me */ natural_key: 'true', note: 'a']\n  v int [/* first */  pk]\n}\n");
     }),
   tableCase('renaming a column that an index names renames it there too', 'fct_order', COMPOSITE, (t) => { t.columns![1].name = 'b2'; }, (out) => {
     expect(out).toBe(COMPOSITE.replace('  b int', '  b2 int').replace('(a, b) [pk]', '(a, b2) [pk]'));
@@ -373,7 +391,7 @@ export const TABLE_CASES: WriterCase[] = [
     t.description = 'x';
   }, (out) => {
     expect(out.replace(/\r\n/g, '')).not.toContain('\n');
-    expect(out).toContain("  rationale_design: 'd'\r\n] {");
+    expect(out).toContain("  rationale_design: 'd',\r\n  rationale_measures:");
     expect(out).toContain('  extra int\r\n');
   }),
   tableCase('a no-op keeps `indexes { id [pk] }`, `primary key` flags and erd_ names', 'fct_order',
@@ -517,9 +535,10 @@ export const NEW_TABLE_CASES: WriterCase[] = [
   meta_owner: 'sales-data',
   meta_json: '{"pii":false}'
 ] {
-  id BIGINT [pk, note: 'Line id', natural_key: 'true', scd_type: '0']
-  amount "DECIMAL(18,2)" [additive_type: 'additive', foreign_key: 'true', meta_unit: 'AUD']
   Note: 'Order lines'
+
+  id BIGINT [pk, natural_key: 'true', scd_type: '0', note: 'Line id']
+  amount "DECIMAL(18,2)" [additive_type: 'additive', foreign_key: 'true', meta_unit: 'AUD']
 }
 `);
     },

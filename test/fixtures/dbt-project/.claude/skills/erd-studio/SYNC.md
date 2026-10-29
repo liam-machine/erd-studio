@@ -133,6 +133,6 @@ models:
 - **Preserve positions**: Never clear or overwrite layout positions (a DBML diagram's `.dbdiagram` file, a JSON diagram's `viewConfig.positions`)
 - **Match existing patterns**: When editing dbt YAML, follow the formatting and test patterns already present in the file
 - **Cascade deletions**: When removing a model from a JSON domain, also remove the domain JSON's relationships referencing it. When renaming or deleting a table or column, update every Ref (DBML) or model YAML `relationships:` entry that points at it
-- **Column ordering**: When adding columns, append them after the table's last column (before its `indexes` block and `Note` in DBML; to the end of the columns array in YAML)
+- **Column ordering**: When adding columns, append them after the table's last column (before its `indexes` block in DBML; to the end of the columns array in YAML)
 
-<!-- erd-studio-harness: 37 -->
+<!-- erd-studio-harness: 38 -->

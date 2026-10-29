@@ -1,0 +1,20 @@
+Enum   contact_status {
+    active [note:'Active']
+  inactive   [ note : 'Inactive' ]
+blocked
+}
+
+TableGroup   sales [color: #3b82f6] {
+orders
+  customers
+}
+
+TableGroup reference {
+  dim_date
+}
+
+Enum priority {
+  high [
+         note: 'Do first']
+  low
+}

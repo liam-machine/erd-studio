@@ -106,7 +106,7 @@ or `2` breaks it in other DBML tools.
 |---|---|
 | `Table <name>` | `name`, exactly (double-quoted only when it is not a plain identifier) |
 | `schema: '<schema>'` (table setting) | `schema`, if not empty; otherwise leave it out |
-| `Note: '<text>'` (last line of the block) | `description`; if empty, a one-line plain draft ending in "(draft)" |
+| `Note: '<text>'` (first line of the block, then a blank line) | `description`; if empty, a one-line plain draft ending in "(draft)" |
 | column lines, in order | `columns[].name` — an all-UPPERCASE warehouse spelling in lowercase, mixed case kept |
 | the column's type | `columns[].dataType`, copied exactly, double-quoted when it is not a plain identifier (`"NUMBER(38,0)"`). If it is `''`, see "When dbt has no type" |
 | `note: '…'` (column setting) | `columns[].description`; if empty, a short draft ending in "(draft)" when the meaning is obvious from the name, else leave it out |
@@ -138,9 +138,9 @@ Project orders {
   erd_model_folder: 'models/marts'
 }
 
-use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table fct_order }    from '../tables/gold/fct_order.dbml'
 use { table dim_customer } from '../tables/gold/dim_customer.dbml'
-use { table dim_product } from '../tables/gold/dim_product.dbml'
+use { table dim_product }  from '../tables/gold/dim_product.dbml'
 use * from '../tables/gold/_relationships.dbml'
 ```
 
@@ -170,11 +170,15 @@ Table fct_order [
   grain: 'One row per order',
   rationale_design: 'Kimball transaction fact, per .erd-studio/modelling-approach.md'
 ] {
-  order_id INT [pk, note: 'Order identifier']
-  customer_id INT [foreign_key: 'true', note: 'The customer who placed the order (draft)']
-  product_id INT [foreign_key: 'true', note: 'The product ordered (draft)']
-  order_total "DECIMAL(18,2)" [additive_type: 'additive', note: 'Order value (draft)']
   Note: 'One row per order (draft)'
+
+  order_id    INT             [pk, note: 'Order identifier']
+  customer_id INT             [
+    foreign_key: 'true',
+    note: 'The customer who placed the order (draft)'
+  ]
+  product_id  INT             [foreign_key: 'true', note: 'The product ordered (draft)']
+  order_total "DECIMAL(18,2)" [additive_type: 'additive', note: 'Order value (draft)']
 }
 ```
 
@@ -183,14 +187,16 @@ and `tables/gold/_relationships.dbml`:
 ```dbml
 // ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
 use { table dim_customer } from './dim_customer.dbml'
-use { table dim_product } from './dim_product.dbml'
-use { table fct_order } from './fct_order.dbml'
+use { table dim_product }  from './dim_product.dbml'
+use { table fct_order }    from './fct_order.dbml'
 
 Ref: fct_order.customer_id >? dim_customer.customer_id
 Ref: fct_order.product_id >? dim_product.product_id
 ```
 
-`dim_customer.dbml` gets `customer_id INT [pk, natural_key: 'true', …]`, `role: 'conformed-dim'`
+Both are in the layout ERD Studio writes (the schema skill's `DBML.md`, "Layout"): Note first,
+columns aligned, a column line over 100 characters with its settings one per line, `use` lines
+with their `from` aligned. `dim_customer.dbml` gets `customer_id INT [pk, natural_key: 'true', …]`, `role: 'conformed-dim'`
 and `grain: 'One row per customer'`; the other choices are as in the legacy example. Then the
 diagram above.
 

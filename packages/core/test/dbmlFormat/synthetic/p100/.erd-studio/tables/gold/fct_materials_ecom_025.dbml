@@ -1,0 +1,17 @@
+Table fct_materials_ecom_025 [
+  schema: 'gold',
+  role: 'fact',
+  grain: 'One row per materials ecom 025'
+] {
+  materials_ecom_025_key BIGINT [pk, note: 'Primary key of fct_materials_ecom_025']
+  line_number DATE [note: 'line number of the materials ecom 025 row']
+  valid_to BOOLEAN [note: 'valid to of the materials ecom 025 row']
+  unit_price BOOLEAN [note: 'unit price of the materials ecom 025 row', additive_type: 'non-additive']
+  valid_from STRING [note: 'valid from of the materials ecom 025 row']
+  effective_date BIGINT [note: 'effective date of the materials ecom 025 row']
+  discount_pct INT [note: 'discount pct of the materials ecom 025 row']
+  quantity "DECIMAL(18,2)" [note: 'quantity of the materials ecom 025 row', additive_type: 'non-additive']
+  addresses_002_key BIGINT [note: 'FK to dim_addresses_002', foreign_key: 'true']
+  order_lines_004_key BIGINT [note: 'FK to dim_order_lines_004', foreign_key: 'true']
+  Note: 'Synthetic gold table fct_materials_ecom_025'
+}

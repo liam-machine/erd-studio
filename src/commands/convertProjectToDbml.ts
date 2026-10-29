@@ -28,7 +28,7 @@ import { LOGICAL_MODELS_DIR } from '@erd-studio/core';
 import { applyFileWrites } from '../providers/applyFileWrites';
 import { ConvertToDbmlPanel, type ConvertPanelChoice } from '../providers/ConvertToDbmlPanel';
 import { dirtyFiles } from '../providers/dirtyDocuments';
-import { saveDocumentByUri } from '../providers/documentSave';
+import { saveDocumentByUri, saveWithoutFormatting } from '../providers/documentSave';
 import {
   SAVE_AND_TRY_AGAIN_BUTTON,
   SEND_FEEDBACK_BUTTON,
@@ -184,7 +184,7 @@ function saveReplacedOnUndo(paths: readonly string[]): void {
     if (!undoRedo || !convertedReplaces.has(path.resolve(e.document.uri.fsPath))) return;
     setTimeout(() => {
       if (!e.document.isDirty) return;
-      void e.document.save().then((saved) => { if (saved) ownWrites.recordWrite(e.document.uri.fsPath); });
+      void saveWithoutFormatting(e.document).then((saved) => { if (saved) ownWrites.recordWrite(e.document.uri.fsPath); });
     }, 50);
   });
 }

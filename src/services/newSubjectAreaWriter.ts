@@ -32,7 +32,8 @@ import * as path from 'path';
 
 import { editDiagramLayout, layoutFilePathOf, stickyLayoutsOf, subjectAreaStorageOf } from '@erd-studio/core';
 import type { Annotation, NodePosition } from '@erd-studio/core';
-import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused, renderNewSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
+import { renderNewSubjectAreaDbml } from './dbmlWriters';
 
 import { ownWrites } from './ownWriteTracker';
 import { classifyWriteFailure, failedPath, projectRelative } from './commandErrors';

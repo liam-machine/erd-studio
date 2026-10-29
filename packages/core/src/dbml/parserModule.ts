@@ -9,7 +9,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export interface DbmlParserModule {
-  /** `new Compiler(layout)`; ERD Studio uses `parse.ast`, `parse.errors` and `parse.rawDb`. */
+  /** `new Compiler(layout)`; ERD Studio uses `parse.ast`, `parse.errors`, `parse.rawDb` and (the formatter) `parseFile`. */
   Compiler: new (layout: any) => any;
   /** `new MemoryProjectLayout()`, then `setSource(filepath, text)` per file. */
   MemoryProjectLayout: new (...args: any[]) => any;

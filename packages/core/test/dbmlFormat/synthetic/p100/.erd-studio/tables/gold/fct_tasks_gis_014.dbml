@@ -1,0 +1,28 @@
+Table fct_tasks_gis_014 [
+  schema: 'gold',
+  role: 'fact',
+  grain: 'One row per tasks gis 014'
+] {
+  tasks_gis_014_key BIGINT [pk, note: 'Primary key of fct_tasks_gis_014']
+  region DOUBLE [note: 'region of the tasks gis 014 row']
+  priority INT [note: 'priority of the tasks gis 014 row']
+  line_number INT [note: 'line number of the tasks gis 014 row']
+  external_ref INT [note: 'external ref of the tasks gis 014 row']
+  owner_name BOOLEAN [note: 'owner name of the tasks gis 014 row']
+  external_ref_5 "DECIMAL(18,2)" [note: 'external ref 5 of the tasks gis 014 row']
+  priority_6 BIGINT [note: 'priority 6 of the tasks gis 014 row']
+  region_7 INT [note: 'region 7 of the tasks gis 014 row']
+  is_current STRING [note: 'is current of the tasks gis 014 row']
+  loaded_at STRING [note: 'loaded at of the tasks gis 014 row']
+  created_at TIMESTAMP_NTZ [note: 'created at of the tasks gis 014 row']
+  region_11 "DECIMAL(18,2)" [note: 'region 11 of the tasks gis 014 row']
+  amount TIMESTAMP_NTZ [note: 'amount of the tasks gis 014 row', additive_type: 'non-additive']
+  source_system BIGINT [note: 'source system of the tasks gis 014 row']
+  source_system_14 DOUBLE [note: 'source system 14 of the tasks gis 014 row']
+  unit_price DOUBLE [note: 'unit price of the tasks gis 014 row', additive_type: 'non-additive']
+  quantity DATE [note: 'quantity of the tasks gis 014 row', additive_type: 'additive']
+  is_active "DECIMAL(18,2)" [note: 'is active of the tasks gis 014 row']
+  invoices_007_key BIGINT [note: 'FK to dim_invoices_007', foreign_key: 'true']
+  invoice_lines_008_key BIGINT [note: 'FK to dim_invoice_lines_008', foreign_key: 'true']
+  Note: 'Synthetic gold table fct_tasks_gis_014'
+}

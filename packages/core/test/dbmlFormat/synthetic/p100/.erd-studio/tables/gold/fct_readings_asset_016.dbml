@@ -1,0 +1,24 @@
+Table fct_readings_asset_016 [
+  schema: 'gold',
+  role: 'fact',
+  grain: 'One row per readings asset 016'
+] {
+  readings_asset_016_key BIGINT [pk, note: 'Primary key of fct_readings_asset_016']
+  priority INT [note: 'priority of the readings asset 016 row']
+  effective_date BIGINT [note: 'effective date of the readings asset 016 row']
+  created_at DOUBLE [note: 'created at of the readings asset 016 row']
+  label "DECIMAL(18,2)" [note: 'label of the readings asset 016 row']
+  created_at_4 "DECIMAL(18,2)" [note: 'created at 4 of the readings asset 016 row']
+  valid_to BIGINT [note: 'valid to of the readings asset 016 row']
+  currency_code DATE [note: 'currency code of the readings asset 016 row']
+  description_text TIMESTAMP_NTZ [note: 'description text of the readings asset 016 row']
+  priority_8 "DECIMAL(18,2)" [note: 'priority 8 of the readings asset 016 row']
+  owner_name INT [note: 'owner name of the readings asset 016 row']
+  unit_price DOUBLE [note: 'unit price of the readings asset 016 row', additive_type: 'non-additive']
+  score BOOLEAN [note: 'score of the readings asset 016 row', additive_type: 'semi-additive']
+  valid_to_12 TIMESTAMP_NTZ [note: 'valid to 12 of the readings asset 016 row']
+  source_system TIMESTAMP_NTZ [note: 'source system of the readings asset 016 row']
+  region INT [note: 'region of the readings asset 016 row']
+  discount_pct "DECIMAL(18,2)" [note: 'discount pct of the readings asset 016 row']
+  Note: 'Synthetic gold table fct_readings_asset_016'
+}

@@ -1,0 +1,14 @@
+// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
+use { table dim_customer } from './dim_customer.dbml'
+use { table dim_project } from './dim_project.dbml'
+use { table dim_task } from './dim_task.dbml'
+use { table fct_order } from './fct_order.dbml'
+use { table fct_task_event } from './fct_task_event.dbml'
+
+Ref: dim_project.parent_project_key >? dim_project.project_key
+Ref: dim_task.project_key >? dim_project.project_key
+Ref: fct_order.customer_key >? dim_customer.customer_key
+Ref: fct_order.project_key >? dim_project.project_key
+Ref: fct_task_event.customer_key >? dim_customer.customer_key
+Ref: fct_task_event.project_key >? dim_project.project_key
+Ref: fct_task_event.task_key >? dim_task.task_key

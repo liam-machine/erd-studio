@@ -33,6 +33,12 @@ import { allSelections, buildSyncPlan } from '../../src/services/syncPlanBuilder
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { SemanticTable } from '../../src/types/semantic';
 import { RESERVED_TABLE_NAME_MESSAGE } from '../../src/types/naming';
+import { formatWrittenDbml } from '../../src/services/dbmlWriters';
+
+/** The expected text in the canonical layout ERD Studio writes every .dbml in (every write is formatted). */
+function canonical(text: string): string {
+  return formatWrittenDbml(text, 'expected.dbml');
+}
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const DBML_NATIVE = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native');
@@ -390,7 +396,7 @@ describe('the lifecycle planners (src/commands/dbmlLifecycle.ts)', () => {
       'create gold/revenue.dbml', 'delete gold/sales.dbml', 'create gold/revenue.dbdiagram', 'delete gold/sales.dbdiagram',
     ]);
     const created = writes[0] as { text: string };
-    expect(created.text).toBe(text.replace('Project sales {', 'Project revenue {'));
+    expect(created.text).toBe(canonical(text.replace('Project sales {', 'Project revenue {')));
     expect((writes[2] as { text: string }).text).toBe(layoutText);
   });
 
@@ -411,7 +417,7 @@ describe('the lifecycle planners (src/commands/dbmlLifecycle.ts)', () => {
     const goldRels = byPath.get('tables/gold/_relationships.dbml') as { text: string };
     expect(goldRels.text).toContain('dim_only_gold.date_key');
     expect((byPath.get('tables/_relationships.dbml') as { text: string }).text).not.toContain('dim_only_gold');
-    expect((byPath.get('gold/sales.dbml') as { text: string }).text).toContain("use { table dim_only_gold } from '../tables/gold/dim_only_gold.dbml'");
+    expect((byPath.get('gold/sales.dbml') as { text: string }).text).toMatch(/^use \{ table dim_only_gold \} +from '\.\.\/tables\/gold\/dim_only_gold\.dbml'$/m);
     // Applied, the project compiles from the diagram.
     for (const w of writes) {
       if (w.kind === 'delete') fs.rmSync(w.path);
@@ -471,8 +477,11 @@ describe('the lifecycle planners (src/commands/dbmlLifecycle.ts)', () => {
     });
     expect(planned.repointed).toEqual([rels]);
     const byPath = new Map(planned.writes.map((w) => [path.relative(erd(), w.path).split(path.sep).join('/'), w]));
-    // Only the use line changes: back to the winner, every Ref byte for byte.
-    expect((byPath.get('tables/gold/_relationships.dbml') as { text: string }).text).toBe(relsBefore);
+    // Only the use line changes: back to the winner, every Ref kept (the file then in the canonical layout,
+    // with a blank line between the Refs of each foreign-key table).
+    expect((byPath.get('tables/gold/_relationships.dbml') as { text: string }).text).toBe(canonical(relsBefore
+      .replace('\nRef parent:', '\n\nRef parent:')
+      .replace('\nRef: fct_order.customer_key', '\n\nRef: fct_order.customer_key')));
     for (const w of planned.writes) {
       if (w.kind === 'delete') fs.rmSync(w.path);
       else fs.writeFileSync(w.path, w.text);

@@ -1,0 +1,19 @@
+Project sales {
+  Note: 'Sales star schema'
+  erd_schema_version: '7'
+  erd_show_fk_edges: 'false'
+  erd_layout_options: '{"elk.direction":"RIGHT"}'
+}
+
+use { table fct_order }        from '../tables/gold/fct_order.dbml'
+use { table dim_customer }     from '../tables/gold/dim_customer.dbml'
+use { table dim_date }         from '../tables/dim_date.dbml'
+use { table dim_region }       from '../tables/gold/dim_region.dbml'
+use { table customer_profile } from '../tables/gold/customer_profile.dbml'
+use * from '../tables/_relationships.dbml'
+use * from '../tables/gold/_relationships.dbml'
+
+Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_order'] {
+  'Check the grain with finance'
+}
+Note "9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f" [color: #3b82f6] { '' }

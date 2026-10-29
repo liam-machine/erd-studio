@@ -29,6 +29,8 @@ import {
   compileOne,
   elementType,
   isUseDeclaration,
+  lineStartOf,
+  parseSyntax,
   nameFragments,
   plainNames,
   stripBom,
@@ -36,7 +38,7 @@ import {
   type AstNode,
 } from './parser.js';
 import { readRelationshipsDbml } from './readRelationships.js';
-import { applyTextEdits, attachedStart, cutEdit, eolOf, headerEnd, lineEndOf, refuseOverlaps, type TextEdit } from './splice.js';
+import { applyTextEdits, attachedStart, cutEdit, eolOf, headerEnd, lineEndOf, nextLineStart, refuseOverlaps, type TextEdit } from './splice.js';
 
 /** One relationship unit: a Ref line (a composite is one unit), canonical (`from` is the foreign-key table). */
 export interface RefUnit {
@@ -147,6 +149,72 @@ const lower = (s: string): string => s.toLowerCase();
 
 function refuse(file: string, message: string, line?: number): never {
   throw new DbmlEditRefused(file, message, line);
+}
+
+/**
+ * One blank line between the Refs of different foreign-key tables (W3):
+ * Refs are sorted by their foreign-key table, so each table's Refs form a
+ * group, and a blank line before each new group makes the file read table
+ * by table. Only a line break is ever added, after a Ref whose next Ref (with
+ * nothing but comment lines between them) belongs to another table and has
+ * no blank line above it; blank lines already there stay. A text that does
+ * not read comes back as it is.
+ */
+export function separateRefGroups(text: string, eol: string, parser: DbmlParserModule = PINNED_PARSER): string {
+  // A syntax parse (no binding): the Ref lines and their operators are all this needs.
+  let parsed: ReturnType<typeof parseSyntax>;
+  try {
+    parsed = parseSyntax(text, parser);
+  } catch {
+    return text;
+  }
+  if (parsed.errors.length > 0) return text;
+  const refs: Array<{ node: AstNode; owner: string }> = [];
+  for (const node of topLevel(parsed.ast)) {
+    if (lower(elementType(node) ?? '') !== 'ref') continue;
+    const owner = refOwnerTable(node);
+    if (owner !== undefined) refs.push({ node, owner });
+  }
+  const inserts: TextEdit[] = [];
+  for (let i = 1; i < refs.length; i++) {
+    const before = refs[i - 1];
+    const after = refs[i];
+    if (lower(before.owner) === lower(after.owner)) continue;
+    const end = typeof before.node.fullEnd === 'number' ? before.node.fullEnd as number : before.node.end as number;
+    const at = nextLineStart(text, Math.max(before.node.start as number, end - 1));
+    const gap = text.slice(at, lineStartOf(text, after.node.start));
+    if (at > after.node.start || !/^(?:[ \t]*(?:\/\/[^\n]*)?\r?\n)*$/.test(gap)) continue;
+    if (/(?:^|\n)[ \t]*\r?\n/.test(gap)) continue;
+    inserts.push({ start: at, end: at, text: eol });
+  }
+  return applyTextEdits(text, inserts);
+}
+
+/**
+ * The table part of a Ref's foreign-key end, as the reader orients it (§2.3):
+ * `>` and `<>` the left end, `<` the right, `-` the end its one `?` marks,
+ * else the second. Undefined for a Ref that is not one `a.x <op> b.y`.
+ */
+function refOwnerTable(node: AstNode): string | undefined {
+  const ref = refNodeOf(node);
+  const op = ref.application?.callee?.op?.value;
+  if (typeof op !== 'string') return undefined;
+  const left = endParts(ref.left)?.table;
+  const right = endParts(ref.right)?.table;
+  if (left === undefined || right === undefined) return undefined;
+  const marksRight = op.startsWith('?');
+  const marksLeft = op.endsWith('?');
+  switch (op.replace(/\?/g, '')) {
+    case '>':
+    case '<>':
+      return left;
+    case '<':
+      return right;
+    case '-':
+      return marksLeft && !marksRight ? left : right;
+    default:
+      return undefined;
+  }
 }
 
 /** The sort key of a unit (§4.5 step 3). */
@@ -784,7 +852,23 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const refInserts: TextEdit[] = [];
   for (const addition of additions) {
     const key = refUnitSortKey(addition.unit);
-    const before = stayingInOrder.find((k) => refUnitSortKey(currentKeyOf(k)) > key);
+    const beforeIndex = stayingInOrder.findIndex((k) => refUnitSortKey(currentKeyOf(k)) > key);
+    const before = beforeIndex === -1 ? undefined : stayingInOrder[beforeIndex];
+    const previous = beforeIndex > 0 ? stayingInOrder[beforeIndex - 1] : undefined;
+    const owner = lower(addition.unit.from);
+    if (before && previous && lower(currentKeyOf(before).from) !== owner && lower(currentKeyOf(previous).from) === owner) {
+      // The Ref after it starts the next foreign-key table's group, below the
+      // blank line between the groups (W3): join this table's group, after its
+      // last Ref, rather than landing in a block of its own.
+      const node = previous.ref.node;
+      let at = Math.max(node.fullEnd, node.end);
+      if (text[at - 1] !== '\n') {
+        const lineEnd = text.indexOf('\n', at);
+        at = lineEnd === -1 ? text.length : lineEnd + 1;
+      }
+      refInserts.push({ start: at, end: at, text: `${text[at - 1] === '\n' ? '' : eol}${addition.text}${eol}` });
+      continue;
+    }
     if (before) {
       const at = attachedStart(text, before.ref.node);
       refInserts.push({ start: at, end: at, text: `${addition.text}${eol}` });
@@ -808,7 +892,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     const refBlock = additions.map((a) => a.text).join('\n');
     const tail = pendingBlock.length > 0 ? `\n${pendingBlock.join('\n')}\n` : '';
     if (additions.length === 0) return `${header}\n${tail}`;
-    return `${header}\n${useBlock}${useBlock ? '\n' : ''}\n${refBlock}\n${tail}`;
+    return separateRefGroups(`${header}\n${useBlock}${useBlock ? '\n' : ''}\n${refBlock}\n${tail}`, '\n', parser);
   }
   if (pendingBlock.length > 0) {
     // New pending lines go at the end of the file, after a blank line.
@@ -816,7 +900,9 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     const lead = text === '' ? '' : text.endsWith('\n\n') ? '' : text.endsWith('\n') ? eol : `${eol}${eol}`;
     refInserts.push({ start: at, end: at, text: `${refInserts.some((e) => e.start === at) ? eol : lead}${pendingBlock.join(eol)}${eol}` });
   }
-  const out = applyTextEdits(text, [...useEdits, ...edits, ...pendingEdits, ...pendingLineCuts(text, pendingCuts), ...refInserts]);
+  const spliced = applyTextEdits(text, [...useEdits, ...edits, ...pendingEdits, ...pendingLineCuts(text, pendingCuts), ...refInserts]);
+  // A file the edit changes gets the canonical blank line between foreign-key tables (W3); a no-op stays byte-identical.
+  const out = spliced === text ? spliced : separateRefGroups(spliced, eol, parser);
   return hadBom ? `﻿${out}` : out;
 
   function incomingText(unit: RefUnit): string {

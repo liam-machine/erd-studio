@@ -1,0 +1,24 @@
+Table fct_assets_safety_015 [
+  schema: 'gold',
+  role: 'fact',
+  grain: 'One row per assets safety 015'
+] {
+  assets_safety_015_key BIGINT [pk, note: 'Primary key of fct_assets_safety_015']
+  notes BOOLEAN [note: 'notes of the assets safety 015 row']
+  duration_minutes DOUBLE [note: 'duration minutes of the assets safety 015 row', additive_type: 'additive']
+  valid_to INT [note: 'valid to of the assets safety 015 row']
+  label STRING [note: 'label of the assets safety 015 row']
+  country_code DATE [note: 'country code of the assets safety 015 row']
+  status "DECIMAL(18,2)" [note: 'status of the assets safety 015 row']
+  updated_at DATE [note: 'updated at of the assets safety 015 row']
+  quantity STRING [note: 'quantity of the assets safety 015 row', additive_type: 'additive']
+  is_active BOOLEAN [note: 'is active of the assets safety 015 row']
+  label_9 TIMESTAMP_NTZ [note: 'label 9 of the assets safety 015 row']
+  score STRING [note: 'score of the assets safety 015 row', additive_type: 'semi-additive']
+  discount_pct DATE [note: 'discount pct of the assets safety 015 row']
+  category TIMESTAMP_NTZ [note: 'category of the assets safety 015 row']
+  is_active_13 "DECIMAL(18,2)" [note: 'is active 13 of the assets safety 015 row']
+  valid_from INT [note: 'valid from of the assets safety 015 row']
+  invoice_lines_008_key BIGINT [note: 'FK to dim_invoice_lines_008', foreign_key: 'true']
+  Note: 'Synthetic gold table fct_assets_safety_015'
+}
