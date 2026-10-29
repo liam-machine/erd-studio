@@ -2144,7 +2144,16 @@ describe('ERD Studio output channel and Show Logs', () => {
     openWorkspace(FIXTURE_ROOT);
     await activate(context);
     const summary = recentLogLines().find((l) => l.includes('Project: '));
-    expect(summary).toMatch(/Project: (DBML|YAML|mixed \(DBML and YAML\)) storage, \d+ table file\(s\), \d+ diagram\(s\), dbt project; activated in \d+ ms/);
+    expect(summary).toMatch(/Project: (DBML|YAML|mixed \(DBML and YAML\)) storage, \d+ table file\(s\), \d+ diagram\(s\), dbt project; project read \d+ ms into activation/);
+  });
+
+  it('logs the whole activation time at the end of activate(), after the project summary', async () => {
+    clearLogBuffer();
+    openWorkspace(FIXTURE_ROOT);
+    await activate(context);
+    const lines = recentLogLines();
+    const total = lines.findIndex((l) => /\[info\] Activated in \d+ ms$/.test(l));
+    expect(total).toBeGreaterThan(lines.findIndex((l) => l.includes('Project: ')));
   });
 
   it('disposing the extension unplugs the sink', async () => {

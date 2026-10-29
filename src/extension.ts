@@ -816,8 +816,10 @@ function noProjectGettingStartedDeps(): GettingStartedDeps {
 
 /**
  * One line that says what kind of project this is, for anyone reading the log
- * of a slow or broken one: storage, table and diagram counts, dbt or not.
- * Never throws (a count that fails is shown as `?`).
+ * of a slow or broken one: storage, table and diagram counts, dbt or not,
+ * and how far into activation the project was read (the total is logged as
+ * `Activated in X ms` at the end of `activate()`). Never throws (a count
+ * that fails is shown as `?`).
  */
 export function logProjectSummary(facts: {
   storage: ProjectStorage;
@@ -832,7 +834,7 @@ export function logProjectSummary(facts: {
   const storage = facts.storage === 'dbml' ? 'DBML' : facts.storage === 'yaml' ? 'YAML' : 'mixed (DBML and YAML)';
   log.info(
     `Project: ${storage} storage, ${count(facts.tables)} table file(s), ${count(facts.diagrams)} diagram(s), ` +
-      `${facts.hasDbt ? 'dbt project' : 'no dbt project (logical only)'}; activated in ${facts.activationMs} ms`,
+      `${facts.hasDbt ? 'dbt project' : 'no dbt project (logical only)'}; project read ${facts.activationMs} ms into activation`,
   );
 }
 
@@ -3530,6 +3532,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       ),
     );
   }
+  // The whole of activation, to its last statement (the summary above is part way).
+  log.info(`Activated in ${elapsedMs(activationStart)} ms`);
 }
 
 export function deactivate(): void {
