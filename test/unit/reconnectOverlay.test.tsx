@@ -21,7 +21,7 @@ vi.mock('../../webview/hooks/useVsCodeApi', () => ({
   getVsCodeApi: () => mockVsCode,
 }));
 
-import { RECONNECT_GRACE_MS, useReconnectWatchdog } from '../../webview/hooks/useReconnectWatchdog';
+import { LOADING_STALL_MS, RECONNECT_GRACE_MS, useReconnectWatchdog } from '../../webview/hooks/useReconnectWatchdog';
 import { App } from '../../webview/App';
 import { useEditorStore } from '../../webview/store/editorStore';
 
@@ -132,4 +132,51 @@ describe('App load-error page and the reconnect overlay', () => {
     act(() => { vi.advanceTimersByTime(1); });
     expect(overlay()).not.toBeNull();
   });
+
+  it('the host\'s loading message stops the disconnect timer and says how many tables are loading', () => {
+    render(<App />);
+    act(() => { vi.advanceTimersByTime(1000); });
+    postFromHost({ type: 'loading', payload: {} });
+    expect(screen.getByText(/Loading subject area/)).toBeTruthy();
+    postFromHost({ type: 'loading', payload: { tables: 1100 } });
+    expect(screen.getByText(`Loading ${(1100).toLocaleString()} tables…`)).toBeTruthy();
+    expect(screen.getByRole('status')).toBeTruthy();
+    // A large diagram that takes far longer than the old 5 s grace: no overlay.
+    act(() => { vi.advanceTimersByTime(RECONNECT_GRACE_MS * 6); });
+    expect(overlay()).toBeNull();
+  });
+
+  it('one table is "1 table"', () => {
+    render(<App />);
+    postFromHost({ type: 'loading', payload: { tables: 1 } });
+    expect(screen.getByText('Loading 1 table…')).toBeTruthy();
+  });
+
+  it('a host that says it is loading and then never answers still gets the overlay, after the longer wait', () => {
+    render(<App />);
+    postFromHost({ type: 'loading', payload: { tables: 500 } });
+    act(() => { vi.advanceTimersByTime(LOADING_STALL_MS - 1); });
+    expect(overlay()).toBeNull();
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(overlay()).not.toBeNull();
+  });
+
+  it('an error after loading shows the error page, and its Retry gets the short grace period again', () => {
+    render(<App />);
+    postFromHost({ type: 'loading', payload: { tables: 500 } });
+    hostError();
+    expect(screen.getByText('Retry')).toBeTruthy();
+    fireEvent.click(screen.getByText('Retry'));
+    expect(screen.getByText(/Loading subject area/)).toBeTruthy();
+    act(() => { vi.advanceTimersByTime(RECONNECT_GRACE_MS); });
+    expect(overlay()).not.toBeNull();
+  });
+
+  it('existingTables replaces the Add Existing Table rows', () => {
+    render(<App />);
+    const rows = [{ name: 'a', schema: 's', description: 'd', columnCount: 4, source: 'logical', sourcePath: 'x/a.dbml' }];
+    postFromHost({ type: 'existingTables', payload: { existingModels: rows, manifestModels: [] } });
+    expect(useEditorStore.getState().existingModels).toEqual(rows);
+  });
 });
+

@@ -107,6 +107,8 @@ async function createHarness(options: {
     context, subjectAreaService, new ManifestService(), new YmlParserService(), new TemplateService(),
     layerService, root, selectorsService, tableLibraryService, new OwnWriteTracker(),
   );
+  // The survey runs off the open's critical path; here, at once.
+  provider.relationshipSurveyDelayMs = 0;
   return {
     root,
     tableLibraryService,
@@ -255,17 +257,31 @@ describe('relationship telemetry — the provider', () => {
     expect(errorsRecorded()).not.toContain('relHandlerFailed');
   });
 
-  it('on canvas open, counts the states the relationships are in', async () => {
+  it('on canvas open, counts the states the relationships are in (after the payload, with telemetry on)', async () => {
     const state = vi.spyOn(telemetry, 'relationshipState');
+    vi.spyOn(telemetry, 'enabled').mockReturnValue(true);
     h = await createHarness({
       library: {
         fct_order: [{ fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' }],
         dim_customer: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }],
       },
     });
+    // An earlier test's canvas may still have a survey queued: find this one's.
+    const ours = () => state.mock.calls.filter(([survey]) => (survey as { storedTwice: number }).storedTwice === 1);
     await h.open('orders');
-    expect(state).toHaveBeenCalledTimes(1);
-    expect(state.mock.calls[0][0]).toMatchObject({ storedTwice: 1, oneToManyInModelFile: 1, danglingModel: 0 });
+    await vi.waitFor(() => expect(ours()).toHaveLength(1));
+    expect(ours()[0][0]).toMatchObject({ storedTwice: 1, oneToManyInModelFile: 1, danglingModel: 0 });
+  });
+
+  it('on canvas open with telemetry off, the survey is never run', async () => {
+    const state = vi.spyOn(telemetry, 'relationshipState');
+    vi.spyOn(telemetry, 'enabled').mockReturnValue(false);
+    h = await createHarness();
+    const listTables = vi.spyOn(h.tableLibraryService, 'listTables');
+    await h.open('orders');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(state).not.toHaveBeenCalled();
+    expect(listTables).not.toHaveBeenCalled();
   });
 });
 

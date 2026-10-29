@@ -2,10 +2,10 @@
  * Message protocol types for extension ↔ webview communication.
  *
  * Messages are categorised by direction:
- *   Extension → Webview:  domainLoaded, stageData, discrepancyReport, error,
- *                         openFeedback, feedbackContext, feedbackAnalysis,
- *                         feedbackSubmitted
- *   Webview → Extension:  ready, addModel, addColumn, removeColumn, addRelationship,
+ *   Extension → Webview:  loading, domainLoaded, stageData, existingTables,
+ *                         discrepancyReport, error, openFeedback,
+ *                         feedbackContext, feedbackAnalysis, feedbackSubmitted
+ *   Webview → Extension:  ready, requestExistingTables, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
  *                         addExistingModel(s), updatePositions, switchStage,
  *                         toggleDiscrepancy, requestFeedbackContext,
@@ -97,6 +97,35 @@ export type {
  * Sent when the domain is initially loaded or refreshed.
  * Contains the display-ready domain for rendering.
  */
+/**
+ * The host's first answer to `ready`, posted before it reads anything: the
+ * canvas is connected and its diagram is being read. The webview stops its
+ * "Canvas disconnected" timer and shows "Loading N tables…" until
+ * `domainLoaded` or `error` arrives. Posted again with `tables` once the
+ * diagram's own file has been counted (no table is read for that).
+ */
+export interface LoadingMessage {
+  type: 'loading';
+  payload: {
+    /** How many tables the diagram shows, when known. */
+    tables?: number;
+  };
+}
+
+/**
+ * The full Add Existing Table list, the answer to
+ * {@link RequestExistingTablesMessage}: the same `existingModels` and
+ * `manifestModels` a `domainLoaded` payload carries, with every Table
+ * Library row read (no `detailsPending`).
+ */
+export interface ExistingTablesMessage {
+  type: 'existingTables';
+  payload: {
+    existingModels: import('./display').ExistingTablePreview[];
+    manifestModels: import('./display').ManifestModelPreview[];
+  };
+}
+
 export interface DomainLoadedMessage {
   type: 'domainLoaded';
   payload: DisplaySubjectArea;
@@ -290,6 +319,8 @@ export interface DbmlEmbeddedTablesMessage {
 }
 
 export type ExtensionMessage =
+  | LoadingMessage
+  | ExistingTablesMessage
   | DbmlEmbeddedTablesMessage
   | OpenFeedbackMessage
   | FeedbackContextMessage
@@ -311,6 +342,17 @@ export type ExtensionMessage =
  */
 export interface ReadyMessage {
   type: 'ready';
+}
+
+/**
+ * Sent when the Add Existing Table dialog opens while some Table Library rows
+ * still have `detailsPending` (a large library opened before its table files
+ * were read). The host reads them and answers with
+ * {@link ExistingTablesMessage}. No payload; reads only, so it is allowed on
+ * the physical stage too.
+ */
+export interface RequestExistingTablesMessage {
+  type: 'requestExistingTables';
 }
 
 /**
@@ -820,6 +862,7 @@ export interface RemoveAnnotationsMessage {
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
+  | RequestExistingTablesMessage
   | DismissWelcomeMessage
   | DismissManifestHintMessage
   | AddModelMessage

@@ -14,6 +14,11 @@
  * `addExistingModel { modelName }` as before; more post one `addExistingModels`, which
  * the host adds in one edit (one undo step). Double-click adds that row, with
  * any others ticked. A v4 domain (no central model store) picks one at a time.
+ *
+ * On a large Table Library opened before its files were read, some rows
+ * arrive with `detailsPending` (name and file only). Opening the dialog then
+ * asks the host for the rest (`requestExistingTables`); the rows fill in when
+ * its `existingTables` answer arrives.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -99,6 +104,17 @@ export function AddExistingTableDialog() {
 
     return result;
   }, [models, searchQuery, activeFilters]);
+
+  // Rows the host has not read yet: ask for them once each time the dialog opens.
+  const detailsPending = useMemo(
+    () => existingModels.some((m) => m.detailsPending === true),
+    [existingModels],
+  );
+  useEffect(() => {
+    if (isOpen && detailsPending) send({ type: 'requestExistingTables' });
+    // Only on opening: the answer clears `detailsPending`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   // Escape closes the dialog through the store, not handleClose: start the
   // next opening clean either way, so no tick survives into it unseen.
@@ -267,6 +283,12 @@ export function AddExistingTableDialog() {
           </span>
         </div>
 
+        {detailsPending && (
+          <div className="add-existing-model-dialog__pending" role="status">
+            Reading table details…
+          </div>
+        )}
+
         {/* Selection */}
         {canPickMany && <div className="add-existing-model-dialog__selection">
           <span className="add-existing-model-dialog__selection-count">
@@ -413,7 +435,9 @@ function TableItem({ model, source, sourcePath, isSelected, showCheck, onToggle,
       )}
       <div className="add-existing-model-dialog__item-meta">
         <span className="add-existing-model-dialog__item-columns">
-          {model.columnCount} column{model.columnCount !== 1 ? 's' : ''}
+          {'detailsPending' in model && model.detailsPending
+            ? 'Reading…'
+            : `${model.columnCount} column${model.columnCount !== 1 ? 's' : ''}`}
         </span>
         {model.description && (
           <span className="add-existing-model-dialog__item-desc" title={model.description}>

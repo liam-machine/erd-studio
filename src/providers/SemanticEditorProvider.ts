@@ -19,8 +19,10 @@
  *                         openFeedbackLink),
  *                         viewFile, requestReload, dismissWelcome,
  *                         dismissManifestHint, openGettingStarted,
- *                         exportDiagram, closeEditor, openAnotherDomain
- *   Extension → Webview:  domainLoaded, stageData (echoes switchStage
+ *                         exportDiagram, closeEditor, openAnotherDomain,
+ *                         requestExistingTables
+ *   Extension → Webview:  loading (first answer to ready), domainLoaded,
+ *                         existingTables, stageData (echoes switchStage
  *                         requestId), discrepancyReport, manifestStaleness,
  *                         syncPlanGenerated, openFeedback, feedbackContext,
  *                         feedbackAnalysis, feedbackSubmitted, error
@@ -211,6 +213,7 @@ import {
 import type { ParsedSubjectArea, SubjectAreaResolver } from './subjectAreaCodec';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
 import { normaliseName } from '../services/nameUtils';
+import { yieldToEventLoop } from '../services/libraryWarmUp';
 
 /**
  * Backoff between re-reads of a domain file that read as empty or truncated.
@@ -255,6 +258,20 @@ export function classifySubjectAreaLoadFailure(err: unknown): SubjectAreaLoadFai
 }
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * At most this many Table Library files are read to list the Add Existing
+ * Table rows with a payload. With more unread (a large library opened before
+ * the background read reached it) none is read: their rows go out with
+ * `detailsPending`, and the dialog asks for them when it opens.
+ */
+export const EXISTING_TABLES_READ_AT_MOST = 100;
+
+/**
+ * How long after a canvas opens its relationship survey (usage telemetry,
+ * #133) runs: off the open's critical path, once the payload has gone out.
+ */
+export const RELATIONSHIP_SURVEY_DELAY_MS = 3000;
 
 /**
  * The logical-models/ sub-folder new models created from a domain go in: the
@@ -658,6 +675,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** Per panel: the pending flush after VS Code's own undo/redo (see scheduleNativeUndoFlush). */
   private readonly nativeUndoTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /** The background read of the table library (extension.ts), told about foreground work so it steps aside. */
+  private libraryWarmUp: { noteForegroundWork(): void } | undefined;
+  /** Delay before a canvas open's relationship survey; tests set 0. */
+  relationshipSurveyDelayMs = RELATIONSHIP_SURVEY_DELAY_MS;
+
   /** `{layer}/{domain}\0{ignored file}` pairs already warned about this session. */
   private readonly duplicateWarningsShown = new Set<string>();
   /** Open holds from {@link holdRefreshes}; while above 0, outside refreshes and the duplicate warning wait. */
@@ -889,6 +911,49 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ) {}
 
   /**
+   * The `ready` handler's first answer (`loading`), posted before the
+   * diagram is read, then again with its table count — counted from the
+   * diagram's own text, no table read — each followed by a turn of the
+   * event loop so the message leaves the host before the read blocks it.
+   */
+  private async postLoading(document: vscode.TextDocument, webview: vscode.Webview): Promise<void> {
+    this.post(webview, { type: 'loading', payload: {} });
+    await yieldToEventLoop();
+    let tables: number | undefined;
+    try {
+      tables = this.subjectAreaService.countSubjectAreaTablesInText(document.getText(), document.uri.fsPath);
+    } catch {
+      // The read that follows reports what is wrong with the file.
+      return;
+    }
+    this.post(webview, { type: 'loading', payload: { tables } });
+    await yieldToEventLoop();
+  }
+
+  /**
+   * Answer `requestExistingTables`: read the Table Library files a payload
+   * listed by name only (`detailsPending`), a slice at a time so the host
+   * stays responsive, then post the Add Existing Table rows in full.
+   */
+  private async sendExistingTables(document: vscode.TextDocument, webview: vscode.Webview): Promise<void> {
+    const library = this.tableLibraryService;
+    const unread = library.unreadTableFiles();
+    while (unread.length > 0) {
+      const started = Date.now();
+      do library.warmTableFile(unread.shift()!); while (unread.length > 0 && Date.now() - started < 20);
+      await yieldToEventLoop();
+    }
+    if (this.disposedWebviews.has(webview)) return;
+    const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+    const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+    const domain = this.subjectAreaService.getSubjectArea(document.uri.fsPath);
+    const { existingModels, manifestModels } = this.buildWebviewPayload(
+      { models: domain.logical.models }, manifest, ymlData, domain.modelFolder, { readAllTables: true },
+    );
+    this.post(webview, { type: 'existingTables', payload: { existingModels, manifestModels } });
+  }
+
+  /**
    * Build supplementary payload data for webview messages.
    * Includes templates and list of available models from logical-models/, yml, and manifest.
    */
@@ -897,6 +962,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     manifest: ManifestData,
     ymlData: YmlData,
     modelFolder?: string,
+    options: { readAllTables?: boolean } = {},
   ): {
     templates: ReturnType<TemplateService['loadTemplates']>;
     manifestModels: Array<{
@@ -914,24 +980,31 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const existingModels: import('../types/display').ExistingTablePreview[] = [];
     const addedNames = new Set<string>();
 
-    // 1. Logical models (already designed in ERD Studio's model library)
-    const logicalModels = this.tableLibraryService.listTables();
-    for (const model of logicalModels) {
-      if (existingModelNames.has(model.name)) continue;
-      // A yml whose internal `name:` is not path-safe cannot be added to a
-      // domain — skip it rather than failing the whole payload.
-      const absPath = this.tableLibraryService.resolveTablePath(model.name);
-      if (absPath === null) continue;
-      existingModels.push({
-        name: model.name,
-        schema: model.schema ?? '',
-        description: model.description ?? '',
-        columnCount: (model.columns ?? []).length,
-        source: 'logical',
-        sourcePath: path.relative(this.workspaceRoot, absPath),
-      });
-      addedNames.add(model.name);
-    }
+    // 1. Logical models (already designed in ERD Studio's model library):
+    // what the dialog shows of each, from the caches. On a large library
+    // opened before its files were read, the unread ones go out by name
+    // only (`detailsPending`) and the dialog asks for the rest when it opens.
+    const library = this.tableLibraryService;
+    const previews = library.withIndexSnapshot(() => library.tablePreviews({ readAtMost: options.readAllTables ? Infinity : EXISTING_TABLES_READ_AT_MOST }));
+    library.withIndexSnapshot(() => {
+      for (const model of previews) {
+        if (existingModelNames.has(model.name)) continue;
+        // A yml whose internal `name:` is not path-safe cannot be added to a
+        // domain — skip it rather than failing the whole payload.
+        const absPath = model.pending ? model.filePath : library.resolveTablePath(model.name);
+        if (absPath === null) continue;
+        existingModels.push({
+          name: model.name,
+          schema: model.schema,
+          description: model.description,
+          columnCount: model.columnCount,
+          source: 'logical',
+          sourcePath: path.relative(this.workspaceRoot, absPath),
+          ...(model.pending ? { detailsPending: true as const } : {}),
+        });
+        addedNames.add(model.name);
+      }
+    });
 
     // 2. dbt .yml source file models (declared in dbt project)
     for (const [name, ymlModel] of ymlData.models) {
@@ -1200,6 +1273,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     };
 
     webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
+    // A canvas is opening: the background read of the library waits.
+    this.libraryWarmUp?.noteForegroundWork();
 
     // Track this panel — default to logical stage (v3 unified files have no stage in path)
     const panelKey = document.uri.toString();
@@ -1213,6 +1288,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           console.warn('[SemanticEditorProvider] Ignoring webview message without a string "type"');
           return;
         }
+        // The user is working: the background read of the library waits.
+        this.libraryWarmUp?.noteForegroundWork();
 
         // Guard: reject mutation messages when viewing physical (read-only) stage.
         // Allowed through in physical: non-mutations (ready, switching, viewing,
@@ -1231,7 +1308,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'requestReload', 'openGettingStarted', 'closeEditor', 'openAnotherDomain',
           'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
           'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
-          'openModelFile', 'layoutFinished', 'exportDiagram',
+          'openModelFile', 'layoutFinished', 'exportDiagram', 'requestExistingTables',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           console.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
@@ -1253,10 +1330,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // cleared its error, so a suppressed repeat would leave it showing
             // "Loading domain…" for ever.
             this.lastLoadError.delete(panelKey);
+            // Answer at once, before reading anything: the webview's
+            // "Canvas disconnected" timer stops, and it says how many
+            // tables are loading while a large diagram is read.
+            await this.postLoading(document, webviewPanel.webview);
             // The initial load is the one refresh path allowed to persist
             // auto-computed positions for models that lack them.
             await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: true });
             void this.offerRelationshipPrompts(document, webviewPanel.webview, panelKey);
+            break;
+          case 'requestExistingTables':
+            await this.sendExistingTables(document, webviewPanel.webview);
             break;
           case 'requestReload':
             // Webview detected it was orphaned (e.g. extension update before
@@ -2220,6 +2304,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     await this.maybeOfferTurnRound(document, webview, panelKey);
   }
 
+  /** Wire the background read of the table library, which steps aside while a canvas is busy. */
+  setLibraryWarmUp(warmUp: { noteForegroundWork(): void } | undefined): void {
+    this.libraryWarmUp = warmUp;
+  }
+
   /** Wire Convert Project to DBML's offer (§6.4); the extension calls it once. */
   setDbmlConversion(plan: DbmlConversionHooks['plan'], run: DbmlConversionHooks['run']): void {
     this.dbmlConversion = { plan, run };
@@ -2741,6 +2830,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       onUnsaved?: () => void;
       /** Called as soon as VS Code applies the edit, before anything is saved. */
       onApplied?: () => void;
+      /** Called when the edit went through as a layout-only write (positions or sticky-note boxes alone). */
+      onLayoutOnly?: () => void;
     },
   ): Promise<boolean> {
     const { refreshWebview = true, webview, stage, modelFiles, errorLabel, onSuccess } = options;
@@ -2766,7 +2857,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const layoutOnly = !modelFiles?.save?.length && !modelFiles?.delete?.length && options.otherDomains === undefined
       && isLayoutOnlyChange(file.snapshot, file.parsed);
     if (layoutOnly && (file.storage === 'json' || (file.writable !== false && !file.holdsOwnTables))) {
-      return this.applyLayoutOnlyEdit(document, file, text, options);
+      const written = await this.applyLayoutOnlyEdit(document, file, text, options);
+      if (written) options.onLayoutOnly?.();
+      return written;
     }
     // A DBML diagram, or a project whose library holds DBML (native DBML
     // storage, §5.3): planned against the library and applied by
@@ -3619,10 +3712,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (computed) {
         if (options.persistPositions && !autoLayout) {
           const positionsWritten = await this.autoPositionNewTables(document, computed);
-          if (positionsWritten) {
-            // Re-read since we wrote new positions to the file
+          if (positionsWritten === 'full') {
+            // The full edit path may have settled more than the positions: read the diagram again.
             unifiedDomain = this.subjectAreaService.getSubjectArea(document.uri.fsPath, { dbtKeyIndex });
           }
+          // A layout-only write stored exactly the positions merged below: nothing to read again.
         }
         // Whether or not they were persisted, the payload carries the positions
         // so the canvas never renders a model at (0,0).
@@ -3730,7 +3824,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     }
     telemetry.catalog(hasCatalog);
-    if (stage === 'logical') this.recordRelationshipState(document);
+    if (stage === 'logical') this.scheduleRelationshipSurvey(document);
+  }
+
+  /**
+   * Run the canvas open's relationship survey ({@link recordRelationshipState})
+   * a little later, off the open's critical path: it reads every table in
+   * the library, which on a large library opened cold is most of the cost
+   * of the open. Skipped when usage telemetry is off (nothing would be sent)
+   * or the diagram has been closed since.
+   */
+  private scheduleRelationshipSurvey(document: vscode.TextDocument): void {
+    const timer = setTimeout(() => {
+      if (!telemetry.enabled() || !this.openPanels.has(document.uri.toString())) return;
+      this.libraryWarmUp?.noteForegroundWork();
+      this.recordRelationshipState(document);
+    }, this.relationshipSurveyDelayMs);
+    (timer as { unref?: () => void }).unref?.();
   }
 
   /**
@@ -3833,19 +3943,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async autoPositionNewTables(
     document: vscode.TextDocument,
     computed: Record<string, NodePosition>,
-  ): Promise<boolean> {
+  ): Promise<'layout' | 'full' | false> {
     // Merge computed positions into the document. No webview refresh — the
     // caller (sendSubjectAreaData) is about to send the payload itself.
-    const save = (): Promise<boolean> => this.applySubjectAreaEdit(
-      document,
-      (_section, parsed) => {
-        const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
-        const existingPos = (viewConfig.positions ?? {}) as Record<string, NodePosition>;
-        viewConfig.positions = { ...existingPos, ...computed };
-        parsed.viewConfig = viewConfig;
-      },
-      { refreshWebview: false, stage: 'logical' },
-    );
+    let layoutOnly = false;
+    const save = async (): Promise<'layout' | 'full' | false> => {
+      const written = await this.applySubjectAreaEdit(
+        document,
+        (_section, parsed) => {
+          const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+          const existingPos = (viewConfig.positions ?? {}) as Record<string, NodePosition>;
+          viewConfig.positions = { ...existingPos, ...computed };
+          parsed.viewConfig = viewConfig;
+        },
+        { refreshWebview: false, stage: 'logical', onLayoutOnly: () => { layoutOnly = true; } },
+      );
+      return written ? (layoutOnly ? 'layout' : 'full') : false;
+    };
     if (!this.isDbmlDocument(document)) return save();
     // A DBML diagram's save writes its layout file, which can be refused (the
     // diagram is read-only, the layout is open with unsaved changes or does

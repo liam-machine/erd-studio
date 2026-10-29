@@ -14,11 +14,21 @@
  * true again and starts a fresh grace period — a host that then stays silent
  * still gets the overlay (issue #149: the timer used to keep running behind
  * the error screen, so Retry flashed the overlay before the error came back).
+ *
+ * The host's `loading` message is an answer too: it comes before the host
+ * reads the diagram, which on a large library takes a while. The canvas then
+ * waits {@link LOADING_STALL_MS} instead (the caller passes it as `delayMs`;
+ * a new delay starts a fresh timer), so a slow load never looks like a lost
+ * connection, while a host that stops answering half-way still gets the
+ * overlay in the end.
  */
 import { useEffect, useState } from 'react';
 
 /** How long the webview waits for the host's first answer. */
 export const RECONNECT_GRACE_MS = 5000;
+
+/** How long the webview waits for the diagram once the host has said it is loading it. */
+export const LOADING_STALL_MS = 120_000;
 
 export function useReconnectWatchdog(waiting: boolean, delayMs: number = RECONNECT_GRACE_MS): boolean {
   const [timedOut, setTimedOut] = useState(false);

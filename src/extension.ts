@@ -18,6 +18,7 @@ import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { TABLES_DIR, TableLibraryService, tablesLayerConflict } from './services/logicalModelService';
+import { LibraryWarmUp } from './services/libraryWarmUp';
 import { projectStorageOf } from './services/projectStorage';
 import type { ProjectStorage } from '@erd-studio/core';
 import { ownWrites } from './services/ownWriteTracker';
@@ -109,6 +110,13 @@ const LAST_ACTIVATED_VERSION_KEY = 'lastActivatedVersion';
  * for a workspace with no harness files, so it is not shown on every activation.
  */
 const HARNESS_INSTALL_PROMPTED_KEY = 'erdStudio.harnessInstallPrompted';
+
+/**
+ * How long after activation the background read of the table library starts
+ * (`LibraryWarmUp`): after the views' first render and a restored canvas's
+ * first load, which it would otherwise compete with.
+ */
+const LIBRARY_WARM_UP_DELAY_MS = 1500;
 
 /**
  * globalState: the Welcome panel has been opened automatically (or the
@@ -1118,6 +1126,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   editorProvider.setReportTracking(trackingService);
   editorProvider.setCatalogService(catalogService);
   editorProvider.setLogicalOnly(!hasDbt);
+  // Read the table library in the background, a few milliseconds at a time
+  // (reads only), so the first diagram opened finds its tables already read;
+  // it steps aside whenever a canvas is working.
+  const libraryWarmUp = new LibraryWarmUp(tableLibraryService);
+  editorProvider.setLibraryWarmUp(libraryWarmUp);
+  void libraryWarmUp.start(LIBRARY_WARM_UP_DELAY_MS);
+  context.subscriptions.push({ dispose: () => libraryWarmUp.dispose() });
 
   const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);

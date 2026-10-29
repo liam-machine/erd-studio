@@ -58,7 +58,7 @@ import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { FeedbackDialog } from './components/FeedbackDialog/FeedbackDialog';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
-import { useReconnectWatchdog } from './hooks/useReconnectWatchdog';
+import { LOADING_STALL_MS, RECONNECT_GRACE_MS, useReconnectWatchdog } from './hooks/useReconnectWatchdog';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import type { DisplaySubjectArea } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
@@ -200,10 +200,22 @@ function EditorCanvas() {
   const setManifestStale = useEditorStore((s) => s.setManifestStale);
   const setSyncPlanGenerated = useEditorStore((s) => s.setSyncPlanGenerated);
 
+  // The host's `loading` answer (and the table count it carries) until the
+  // diagram or an error arrives: proof the host is connected.
+  const [hostLoading, setHostLoading] = useState<{ tables?: number } | null>(null);
+
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
       switch (msg.type) {
+        case 'loading':
+          setHostLoading({ ...(typeof msg.payload?.tables === 'number' ? { tables: msg.payload.tables } : {}) });
+          break;
+        case 'existingTables':
+          useEditorStore.getState().setManifestModels(msg.payload.manifestModels);
+          useEditorStore.getState().setExistingModels(msg.payload.existingModels);
+          break;
         case 'domainLoaded':
+          setHostLoading(null);
           applySubjectAreaPayload(msg.payload);
           // Set on a fresh domain (no stored positions), cleared by every other
           // payload — a later load without the flag cancels a pending layout.
@@ -226,6 +238,7 @@ function EditorCanvas() {
           // A reply for a stage the user has since switched away from — drop it
           // so the canvas never flips back to the wrong stage.
           if (isStaleStageReply(msg.requestId)) break;
+          setHostLoading(null);
           applySubjectAreaPayload(msg.payload);
           // Stage replies never ask for the first-open layout.
           useEditorStore.getState().setPendingAutoLayout(false);
@@ -245,6 +258,7 @@ function EditorCanvas() {
           setSyncPlanGenerated(msg.payload);
           break;
         case 'error':
+          setHostLoading(null);
           useEditorStore.getState().recordError('extension', msg.payload.message);
           setError(
             msg.payload.message,
@@ -275,11 +289,13 @@ function EditorCanvas() {
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
 
-  // Detect orphaned-canvas state: if neither `domainLoaded` nor `error`
-  // arrives within the boot grace period, the extension host probably can't
-  // reach this panel. An error is an answer, so it stops the timer; Retry
+  // Detect orphaned-canvas state: if neither `loading`, `domainLoaded` nor
+  // `error` arrives within the boot grace period, the extension host probably
+  // can't reach this panel. An error is an answer, so it stops the timer; Retry
   // clears it and starts a fresh grace period (see useReconnectWatchdog).
-  const showReconnectOverlay = useReconnectWatchdog(!domain && !error);
+  // `loading` is an answer too: the host is reading a large diagram, so the
+  // canvas waits much longer before it suspects the connection.
+  const showReconnectOverlay = useReconnectWatchdog(!domain && !error, hostLoading ? LOADING_STALL_MS : RECONNECT_GRACE_MS);
 
   const handleReconnect = useCallback(() => {
     vscode.postMessage({ type: 'requestReload' });
@@ -289,6 +305,7 @@ function EditorCanvas() {
   // domain again (same handshake as first mount).
   const handleRetryLoad = useCallback(() => {
     setError(null);
+    setHostLoading(null);
     vscode.postMessage({ type: 'ready' });
   }, [setError, vscode]);
 
@@ -609,10 +626,12 @@ function EditorCanvas() {
   // --- Loading state ---------------------------------------------------------
 
   if (!domain) {
+    const tables = hostLoading?.tables;
     return (
       <>
-        <div className="editor-message">
-          <p>Loading subject area&hellip;</p>
+        <div className={`editor-message${hostLoading ? ' editor-message--loading' : ''}`} role="status" aria-live="polite">
+          {hostLoading && <span className="editor-message__spinner" aria-hidden="true" />}
+          <p>{tables !== undefined && tables > 0 ? `Loading ${tables.toLocaleString()} ${tables === 1 ? 'table' : 'tables'}…` : 'Loading subject area…'}</p>
         </div>
         {showReconnectOverlay && <ReconnectOverlay onReload={handleReconnect} />}
       </>
