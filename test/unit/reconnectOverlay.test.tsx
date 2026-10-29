@@ -147,6 +147,19 @@ describe('App load-error page and the reconnect overlay', () => {
     expect(overlay()).toBeNull();
   });
 
+  it('a loading message that arrives after the grace period hides the overlay and starts the longer wait', () => {
+    render(<App />);
+    // The host was busy (another tab's open, activation) for longer than the grace period.
+    act(() => { vi.advanceTimersByTime(RECONNECT_GRACE_MS + 10); });
+    expect(overlay()).not.toBeNull();
+    postFromHost({ type: 'loading', payload: { tables: 500 } });
+    expect(overlay()).toBeNull();
+    act(() => { vi.advanceTimersByTime(LOADING_STALL_MS - 1); });
+    expect(overlay()).toBeNull();
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(overlay()).not.toBeNull();
+  });
+
   it('one table is "1 table"', () => {
     render(<App />);
     postFromHost({ type: 'loading', payload: { tables: 1 } });
