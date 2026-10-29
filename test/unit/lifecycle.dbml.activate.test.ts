@@ -299,6 +299,108 @@ describe('in a native DBML project', () => {
     expect(recorded.mock.calls.map((c) => c[0])).toEqual(expect.arrayContaining([erd('gold', 'sales.dbml'), erd('gold', 'sales.dbdiagram')]));
   });
 
+  describe('the diagram commands\' failures (#229) on a .dbml diagram and its .dbdiagram', () => {
+    const sales = () => ({ type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: erd('gold', 'sales.dbml'), storage: 'dbml' } });
+    const toasts = () => errors.mock.calls.map((call: unknown[]) => ({
+      message: String(call[0]), buttons: call.slice(1).filter((a): a is string => typeof a === 'string'),
+    }));
+    const settle = async (): Promise<void> => { for (let i = 0; i < 50; i++) await Promise.resolve(); };
+
+    it('New Diagram: a JSON diagram of that name says the name is taken, with Open It on that file', async () => {
+      fs.writeFileSync(erd('gold', 'refunds.json'), '{"schemaVersion":5,"domain":"refunds","layer":"gold","logical":{"models":[]}}\n');
+      await activate(context);
+      vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value: string }>) => items.find((i) => i.value === 'gold')) as never);
+      vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('refunds').mockResolvedValueOnce('');
+      const exec = vi.spyOn(vscode.commands, 'executeCommand');
+      errors.mockResolvedValueOnce('Open It' as never);
+      await vscode.commands.executeCommand('erdStudio.createDomain');
+      await settle();
+      expect(toasts()).toEqual([{ message: 'A diagram named "refunds" already exists in the Gold layer.', buttons: ['Open It', 'Choose Another Name'] }]);
+      expect(fs.existsSync(erd('gold', 'refunds.dbml'))).toBe(false);
+      expect(exec.mock.calls.some((c) => c[0] === 'vscode.openWith' && (c[1] as vscode.Uri).fsPath === erd('gold', 'refunds.json'))).toBe(true);
+    });
+
+    it('Delete: a .dbml that cannot be deleted keeps its layout file, with Show File and Try Again', async () => {
+      await activate(context);
+      warn.mockResolvedValue('Delete' as never);
+      const before = bytes();
+      vi.spyOn(vscode.workspace.fs, 'delete').mockRejectedValue(Object.assign(new Error('EACCES: permission denied'), { code: 'NoPermissions' }));
+      await vscode.commands.executeCommand('erdStudio.deleteDomain', sales());
+      expect(toasts()).toEqual([{
+        message: "\"sales\" couldn't be deleted: another program may have it open, or ERD Studio isn't allowed to change that folder. Nothing was deleted.",
+        buttons: ['Show File', 'Try Again'],
+      }]);
+      expect(bytes()).toEqual(before);
+    });
+
+    it('Delete: a layout file that cannot be deleted is said, and Try Again deletes only it', async () => {
+      await activate(context);
+      warn.mockResolvedValue('Delete' as never);
+      let refuseLayout = true;
+      const del = vi.spyOn(vscode.workspace.fs, 'delete').mockImplementation((async (uri: vscode.Uri) => {
+        if (uri.fsPath.endsWith('.dbdiagram') && refuseLayout) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+        fs.rmSync(uri.fsPath);
+      }) as never);
+      errors.mockImplementationOnce((async () => { refuseLayout = false; return 'Try Again'; }) as never);
+      await vscode.commands.executeCommand('erdStudio.deleteDomain', sales());
+      await settle();
+      expect(toasts()).toEqual([{
+        message: '"sales" was deleted, but its layout file .erd-studio/gold/sales.dbdiagram couldn\'t be: another program may have it open, ' +
+          "or ERD Studio isn't allowed to change that folder. Delete it yourself, or try again.",
+        buttons: ['Show File', 'Try Again'],
+      }]);
+      expect(fs.existsSync(erd('gold', 'sales.dbml'))).toBe(false);
+      expect(fs.existsSync(erd('gold', 'sales.dbdiagram'))).toBe(false);
+      // The diagram once, the layout twice (refused, then Try Again): the confirmation asked once.
+      expect(del.mock.calls.map((c) => path.basename((c[0] as vscode.Uri).fsPath))).toEqual(['sales.dbml', 'sales.dbdiagram', 'sales.dbdiagram']);
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('Rename: a JSON diagram with the new name says the name is taken, before anything changes', async () => {
+      fs.writeFileSync(erd('gold', 'revenue.json'), 'not json');
+      await activate(context);
+      const before = bytes();
+      vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
+      const apply = vi.spyOn(vscode.workspace, 'applyEdit');
+      await vscode.commands.executeCommand('erdStudio.renameDomain', sales());
+      expect(toasts()).toEqual([{ message: 'A diagram named "revenue" already exists in the Gold layer.', buttons: ['Open It'] }]);
+      expect(apply).not.toHaveBeenCalled();
+      expect(bytes()).toEqual(before);
+    });
+
+    it('Rename: a .dbml with a DBML mistake says where, with Open File', async () => {
+      fs.appendFileSync(erd('gold', 'sales.dbml'), '\nTable broken {\n');
+      await activate(context);
+      vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
+      await vscode.commands.executeCommand('erdStudio.renameDomain', sales());
+      expect(toasts()).toEqual([{
+        message: expect.stringMatching(/^\.erd-studio\/gold\/sales\.dbml can't be renamed because the diagram file has a problem: there is a DBML mistake at line \d+/),
+        buttons: ['Open File'],
+      }]);
+      expect(fs.existsSync(erd('gold', 'revenue.dbml'))).toBe(false);
+    });
+
+    it('Rename: VS Code refusing the edit offers Try Again, which moves the .dbml and its .dbdiagram without asking again', async () => {
+      await activate(context);
+      const layout = fs.readFileSync(erd('gold', 'sales.dbdiagram'), 'utf-8');
+      const input = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('revenue' as never);
+      // Nothing lands the first time: the edit is refused whole.
+      vscode._mockWorkspaceState.applyEditPrefixes.push(0);
+      errors.mockResolvedValueOnce('Try Again' as never);
+      await vscode.commands.executeCommand('erdStudio.renameDomain', sales());
+      await settle();
+      expect(toasts()).toEqual([{
+        message: "VS Code didn't accept renaming \"sales\" to \"revenue\", usually because another program has the file open or ERD Studio isn't allowed to write to that folder. Nothing was changed.",
+        buttons: ['Try Again', 'Send Feedback'],
+      }]);
+      expect(input).toHaveBeenCalledTimes(1);
+      expect(fs.existsSync(erd('gold', 'sales.dbml'))).toBe(false);
+      expect(fs.existsSync(erd('gold', 'revenue.dbml'))).toBe(true);
+      expect(fs.readFileSync(erd('gold', 'revenue.dbdiagram'), 'utf-8')).toBe(layout);
+      compilesClean();
+    });
+  });
+
   it('Delete Table runs the D16 cascade: the file, its Refs and every use line, as one edit, with the cascade in the prompt', async () => {
     await activate(context);
     warn.mockResolvedValue('Delete' as never);

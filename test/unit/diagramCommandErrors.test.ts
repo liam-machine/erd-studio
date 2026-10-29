@@ -13,8 +13,10 @@ import {
   deleteFailure,
   layerGone,
   layersFailure,
+  layoutDeleteFailure,
   renameReadFailure,
   renameRefused,
+  renameUnsavedFile,
   unsavedSaveFailure,
   writeFailure,
   type CommandFailure,
@@ -226,5 +228,41 @@ describe('the layer commands (#229 rows 11, 12)', () => {
       message: 'The layer "platinum" isn\'t in layers.json any more. The sidebar has been refreshed.',
       buttons: [],
     });
+  });
+});
+
+describe('a DBML diagram\'s layout file (.dbdiagram, §5.7)', () => {
+  const LAYOUT = path.join(LAYER_DIR, 'orders.dbdiagram');
+
+  it('Delete: a layout file left behind is the user\'s to close or unlock, with Show File and Try Again', () => {
+    const f = layoutDeleteFailure('orders', LAYOUT, NO_PERMISSIONS, ROOT);
+    expect(f).toMatchObject({
+      title: 'Delete Diagram',
+      message: '"orders" was deleted, but its layout file .erd-studio/gold/orders.dbdiagram couldn\'t be: another program may have it open, ' +
+        "or ERD Studio isn't allowed to change that folder. Delete it yourself, or try again.",
+      buttons: ['Show File', 'Try Again'],
+      target: LAYOUT,
+    });
+    expectNoRawError(f);
+  });
+
+  it('Delete: anything else is ERD Studio\'s, with Send Feedback, and says the diagram did go', () => {
+    const f = layoutDeleteFailure('orders', LAYOUT, OTHER, ROOT);
+    expect(f.buttons).toEqual(['Send Feedback', 'Try Again']);
+    expect(f.message).toBe(
+      'Delete Diagram hit a problem in ERD Studio while deleting the layout file, so .erd-studio/gold/orders.dbdiagram is still there ' +
+        "(the diagram was deleted). This isn't something you did. Please send us a report.",
+    );
+    expectNoRawError(f);
+  });
+
+  it('Rename: a layout file with unsaved changes is named, with Show File', () => {
+    const f = renameUnsavedFile(LAYOUT, ROOT);
+    expect(f).toMatchObject({
+      title: 'Rename Diagram',
+      message: 'Rename Diagram: .erd-studio/gold/orders.dbdiagram has unsaved changes. Save or revert it, then try again. Nothing was changed.',
+      buttons: ['Show File'],
+    });
+    expectNoRawError(f);
   });
 });
