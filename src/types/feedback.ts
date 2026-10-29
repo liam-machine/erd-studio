@@ -74,6 +74,17 @@ export const FEEDBACK_COPY: Readonly<Record<FeedbackKind, FeedbackKindCopy>> = {
 export const FEEDBACK_IMAGE_NOTE =
   'Images are added on the GitHub page. When the form opens, click the Screenshot box and paste (Ctrl+V / \u2318V) or drag them in \u2014 GitHub accepts no image from here.';
 
+/** The opt-in box for the recent ERD Studio log (off by default, never remembered). */
+export const FEEDBACK_LOG_LABEL = 'Include the recent ERD Studio log';
+
+/**
+ * What the log box means, said before it is ticked: the log can name the
+ * user's tables and diagrams, and the report becomes a public GitHub issue.
+ */
+export const FEEDBACK_LOG_NOTE =
+  'The log can name your tables, columns and diagrams, and your report will be a public GitHub issue. ' +
+  'File paths are shortened. Below is exactly what is added; a long log is cut to its newest lines to fit the GitHub link.';
+
 // ---------------------------------------------------------------------------
 // Which model does the analysis
 // ---------------------------------------------------------------------------
@@ -139,6 +150,12 @@ export interface FeedbackDraft {
   /** Steps to reproduce (bug) or rationale (feature). */
   steps?: string;
   includeDiagnostics: boolean;
+  /**
+   * Add the recent ERD Studio log (the host's in-memory buffer, paths
+   * redacted) to the diagnostics. Opt-in, off by default; ignored when
+   * `includeDiagnostics` is false. Absent means false.
+   */
+  includeLog?: boolean;
   /** Recent errors observed by the webview (oldest → newest). */
   webviewErrors?: string[];
   /** Filing fresh against an issue that was closed as fixed — title gets "Regression: ". */
@@ -165,6 +182,12 @@ export interface FeedbackDiagnosticsView {
   chips: FeedbackDiagnosticsChip[];
   /** Verbatim `formatDiagnostics()` output, shown in the `<details><pre>`. */
   text: string;
+  /**
+   * The recent ERD Studio log, oldest first, already through `redactPaths()`:
+   * exactly the lines the opt-in log box would add. Absent or empty: nothing
+   * logged yet, and the box is not offered.
+   */
+  log?: string[];
 }
 
 /** Capability snapshot pushed alongside the diagnostics view. */

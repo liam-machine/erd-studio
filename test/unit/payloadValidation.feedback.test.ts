@@ -149,6 +149,7 @@ describe('validateSubmitFeedbackPayload', () => {
           webviewErrors: ['boom'],
           regressionOf: 42,
           commentOnIssue: 43,
+          includeLog: true,
           domain: subjectAreaSummary,
         }),
       ),
@@ -173,6 +174,7 @@ describe('validateSubmitFeedbackPayload', () => {
     ],
     ['a zero issue number', submitPayload({ regressionOf: 0 }), /must be a positive integer/],
     ['a fractional issue number', submitPayload({ commentOnIssue: 1.5 }), /must be a positive integer/],
+    ['a non-boolean log flag', submitPayload({ includeLog: 'yes' }), /Log flag must be a boolean/],
     ['non-string webview errors', submitPayload({ webviewErrors: [1] }), /list of strings/],
     ['a bad domain summary', submitPayload({ domain: { name: 'x' } }), /must be a string/],
   ])('rejects %s', (_label, value, pattern) => {
@@ -188,6 +190,7 @@ describe('validateCopyFeedbackReportPayload', () => {
         submitPayload({ webviewErrors: [], domain: subjectAreaSummary }),
       ),
     ).toBeNull();
+    expect(validateCopyFeedbackReportPayload(submitPayload({ includeLog: false }))).toBeNull();
   });
 
   it.each([
@@ -195,6 +198,7 @@ describe('validateCopyFeedbackReportPayload', () => {
     ['a bad kind', submitPayload({ kind: 'x' }), /must be "bug" or "feature"/],
     ['a non-string title', submitPayload({ title: 5 }), /Title must be a string/],
     ['non-string webview errors', submitPayload({ webviewErrors: [1] }), /list of strings/],
+    ['a non-boolean log flag', submitPayload({ includeLog: 1 }), /Log flag must be a boolean/],
   ])('rejects %s', (_label, value, pattern) => {
     expect(validateCopyFeedbackReportPayload(value)).toMatch(pattern as RegExp);
   });

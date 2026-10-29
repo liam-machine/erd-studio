@@ -492,6 +492,7 @@ export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
 /**
  * Validate a `submitFeedback` payload: valid `kind`, string `title` and
  * `description`, optional string `steps`, boolean `includeDiagnostics`,
+ * optional boolean `includeLog`,
  * optional positive integer `regressionOf` / `commentOnIssue`, optional
  * string[] `webviewErrors`, optional domain summary.
  */
@@ -505,6 +506,7 @@ export function validateSubmitFeedbackPayload(value: unknown): string | null {
     description?: unknown;
     steps?: unknown;
     includeDiagnostics?: unknown;
+    includeLog?: unknown;
     webviewErrors?: unknown;
     regressionOf?: unknown;
     commentOnIssue?: unknown;
@@ -524,6 +526,9 @@ export function validateSubmitFeedbackPayload(value: unknown): string | null {
   }
   if (typeof payload.includeDiagnostics !== 'boolean') {
     return 'Diagnostics flag must be a boolean.';
+  }
+  if (payload.includeLog !== undefined && typeof payload.includeLog !== 'boolean') {
+    return 'Log flag must be a boolean.';
   }
   for (const key of ['regressionOf', 'commentOnIssue'] as const) {
     if (payload[key] !== undefined && !isIssueNumber(payload[key])) {
@@ -547,6 +552,7 @@ export function validateCopyFeedbackReportPayload(value: unknown): string | null
     description?: unknown;
     steps?: unknown;
     includeDiagnostics?: unknown;
+    includeLog?: unknown;
     webviewErrors?: unknown;
     domain?: unknown;
   };
@@ -564,6 +570,9 @@ export function validateCopyFeedbackReportPayload(value: unknown): string | null
   }
   if (typeof payload.includeDiagnostics !== 'boolean') {
     return 'Diagnostics flag must be a boolean.';
+  }
+  if (payload.includeLog !== undefined && typeof payload.includeLog !== 'boolean') {
+    return 'Log flag must be a boolean.';
   }
   return (
     validateStringList(payload.webviewErrors, 'Webview errors') ??

@@ -1250,6 +1250,8 @@ describe('submitting', () => {
       description: 'It vanished.',
       steps: '1. Rename it',
       includeDiagnostics: true,
+      // The recent log is opt-in: off unless ticked.
+      includeLog: false,
       domain: { stage: 'logical', modelCount: 0 },
     });
     // Nothing image-shaped rides along any more.
@@ -1414,5 +1416,58 @@ describe('the footer', () => {
   it('shows no auth pill at all without a silent session', () => {
     render(<FeedbackDialog />);
     expect(q('.feedback__auth')).toBeNull();
+  });
+});
+
+describe('the recent ERD Studio log (opt-in)', () => {
+  const LOG = ['2026-10-29T00:00:00.000Z [info] [Canvas] Opened {project}/.erd-studio/{layer}/{domain}.dbml: 500 tables posted 5012 ms after ready'];
+  const logBox = () => q<HTMLInputElement>('.feedback__log-checkbox');
+
+  it('is not offered when the host has no log lines', () => {
+    render(<FeedbackDialog />);
+    expect(logBox()).toBeNull();
+  });
+
+  it('is offered unticked, says the log can name tables and the issue is public, and shows nothing until ticked', () => {
+    resetStore({ feedbackDiagnostics: { ...diagnostics, log: LOG } });
+    render(<FeedbackDialog />);
+    expect(logBox()).not.toBeNull();
+    expect(logBox()!.checked).toBe(false);
+    expect(text('.feedback__log')).toContain('Include the recent ERD Studio log (1 line)');
+    expect(text('.feedback__log')).toMatch(/can name your tables/);
+    expect(text('.feedback__log')).toMatch(/public GitHub issue/);
+    expect(q('.feedback__log-pre')).toBeNull();
+  });
+
+  it('ticked: the exact lines show, and submit and Copy report carry includeLog', async () => {
+    resetStore({ feedbackDiagnostics: { ...diagnostics, log: LOG } });
+    render(<FeedbackDialog />);
+    fireEvent.click(logBox()!);
+    expect(q('.feedback__log-pre')!.textContent).toBe(LOG.join('\n'));
+    fireEvent.change(descriptionInput(), { target: { value: 'Opening the big diagram is slow.' } });
+    fireEvent.click(buttonWithText('Copy report')!);
+    const copied = send.mock.calls.map((c) => c[0]).find((m) => m.type === 'copyFeedbackReport');
+    expect(copied.payload.includeLog).toBe(true);
+    await act(async () => {
+      fireEvent.click(primaryButton());
+    });
+    await waitFor(() => expect(submitted()).toBeTruthy());
+    expect(submitted().includeLog).toBe(true);
+  });
+
+  it('taking the diagnostics off takes the log off too', async () => {
+    resetStore({ feedbackDiagnostics: { ...diagnostics, log: LOG } });
+    render(<FeedbackDialog />);
+    fireEvent.click(logBox()!);
+    fireEvent.click(buttonWithText('remove')!);
+    expect(logBox()!.disabled).toBe(true);
+    expect(logBox()!.checked).toBe(false);
+    expect(q('.feedback__log-pre')).toBeNull();
+    fireEvent.change(descriptionInput(), { target: { value: 'Opening the big diagram is slow.' } });
+    await act(async () => {
+      fireEvent.click(primaryButton());
+    });
+    await waitFor(() => expect(submitted()).toBeTruthy());
+    expect(submitted()).toMatchObject({ includeDiagnostics: false, includeLog: false });
   });
 });
