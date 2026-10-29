@@ -671,6 +671,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Keyed by document URI to support concurrent edits to multiple open domains.
    */
   private readonly pendingUpdates = new Map<string, boolean>();
+  /**
+   * Panels a {@link holdRefreshes} hold marked in `pendingUpdates` (not for an
+   * edit of their own), and those of them a native undo/redo reached while
+   * held: that Cmd+Z is the user's, and is flushed when the hold releases.
+   */
+  private readonly heldPanels = new Set<string>();
+  private readonly undoWhileHeld = new Set<string>();
   /** The move-to-library offer is made at most once per session (#126). */
   private relationshipMoveOffered = false;
   /** The naming migration's offer (#182): at most once per session, before the relationship offers. */
@@ -2079,14 +2086,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // The diagram's layout file rewound by an undo/redo from this canvas
       // (the toolbar's, while it holds `pendingUpdates`, or Cmd+Z with the
       // canvas focused): the flush saves it. Any other dirty layout is the user's.
+      // A hold's mark (holdRefreshes) is not this canvas's undo.
+      const heldByHold = this.heldPanels.has(panelKey);
       const layoutRewound = undoRedo && layoutPath !== undefined && e.document.uri.fsPath === layoutPath
-        && (webviewPanel.active || this.pendingUpdates.get(panelKey) === true);
+        && (webviewPanel.active || (this.pendingUpdates.get(panelKey) === true && !heldByHold));
       if (layoutRewound) {
         const rewound = this.undoRewoundLayout.get(panelKey) ?? new Set<string>();
         rewound.add(layoutPath);
         this.undoRewoundLayout.set(panelKey, rewound);
       }
       if (this.pendingUpdates.get(panelKey)) {
+        // Pending only because a hold marked it (Convert, a bulk change), not
+        // for an edit of this canvas: a native undo/redo it would flush below
+        // is flushed when the hold releases, never dropped.
+        if (heldByHold && undoRedo && (e.document.uri.toString() === document.uri.toString() || layoutRewound
+          || (webviewPanel.active && this.editedTablePaths.get(panelKey)?.has(e.document.uri.fsPath)))) {
+          this.undoWhileHeld.add(panelKey);
+        }
         return;
       }
       if (e.document.uri.toString() !== document.uri.toString()) {
@@ -2458,7 +2474,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   holdRefreshes(): () => boolean {
     const held = [...this.openPanels.keys()].filter((key) => !this.pendingUpdates.get(key));
-    for (const key of held) this.pendingUpdates.set(key, true);
+    for (const key of held) {
+      this.pendingUpdates.set(key, true);
+      this.heldPanels.add(key);
+    }
     // Watcher-driven refreshes and the duplicate warning wait too: they read
     // the disk half-way through, when a converted table's .yml and .dbml
     // both exist, and a warning shown then is never taken back.
@@ -2469,7 +2488,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (released) return false;
       released = true;
       this.refreshHolds--;
-      for (const key of held) this.pendingUpdates.delete(key);
+      for (const key of held) {
+        this.pendingUpdates.delete(key);
+        this.heldPanels.delete(key);
+        // A Cmd+Z on this canvas while held (a bulk change can start under
+        // any edit): flushed now, as it would have been then.
+        const open = this.undoWhileHeld.delete(key) ? this.openPanels.get(key) : undefined;
+        if (open && !this.disposedWebviews.has(open.webview)) this.scheduleNativeUndoFlush(open.document, open.webview, key);
+      }
       return this.droppedRefreshes > droppedAtHold;
     };
   }
@@ -4239,6 +4265,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (this.openPanels.get(panelKey)?.webview === webview) this.openPanels.delete(panelKey);
     this.editedTablePaths.delete(panelKey);
     this.undoRewoundLayout.delete(panelKey);
+    this.undoWhileHeld.delete(panelKey);
     clearTimeout(this.nativeUndoTimers.get(panelKey));
     this.nativeUndoTimers.delete(panelKey);
     this.lastLoadError.delete(panelKey);

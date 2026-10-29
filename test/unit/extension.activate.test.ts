@@ -978,6 +978,53 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(sends() - sendsBefore).toBe(1);
   });
 
+  it('a Cmd+Z on a canvas during a bulk change is flushed when it settles, never dropped; an undo in the layout\'s own tab stays the user\'s', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const file = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    const layoutFile = path.join(ws, '.erd-studio', 'gold', 'sales.dbdiagram');
+    const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
+    const layoutDoc = vscode.createMockTextDocument(layoutFile, fs.readFileSync(layoutFile, 'utf-8'));
+    vscode.workspace.textDocuments.push(layoutDoc);
+    const panel = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    await panel._simulateMessage({ type: 'ready' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const sends = (): number => panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
+    const sendsBefore = sends();
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{yml,dbml}'))!;
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+
+    // A big edit's own writes (a rename across many tables): a bulk change, which holds the canvas.
+    for (let i = 0; i < 40; i++) {
+      const tableFile = path.join(ws, '.erd-studio', 'tables', 'gold', `t_${i}.dbml`);
+      fs.writeFileSync(tableFile, `Table t_${i} {\n  id int [pk]\n}\n`);
+      ownWrites.recordWrite(tableFile);
+      tableWatcher._simulateCreate(vscode.Uri.file(tableFile));
+    }
+    // Meanwhile: an undo typed in the layout file's own tab (the canvas is not
+    // in front), then Cmd+Z on the canvas.
+    panel.active = false;
+    (layoutDoc as unknown as { _setText(t: string): void })._setText(`${layoutDoc.getText()}\n`);
+    await vscode._fireDidChangeTextDocument(layoutDoc, vscode.TextDocumentChangeReason.Undo);
+    panel.active = true;
+    (doc as unknown as { _setText(t: string): void })._setText(`${doc.getText()}\n`);
+    await vscode._fireDidChangeTextDocument(doc, vscode.TextDocumentChangeReason.Undo);
+    expect(doc.isDirty).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    // The canvas's undo is saved and drawn; the layout tab's is left for the user.
+    expect(doc.isDirty).toBe(false);
+    expect(sends() - sendsBefore).toBe(1);
+    expect(layoutDoc.isDirty).toBe(true);
+  });
+
   it('the foreign-format toast is not raised outside a DBML project', async () => {
     fs.rmSync(path.join(ws, '.erd-studio', 'tables'), { recursive: true, force: true });
     fs.rmSync(path.join(ws, '.erd-studio', 'gold', 'sales.dbml'));
