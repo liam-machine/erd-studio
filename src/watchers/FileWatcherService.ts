@@ -21,6 +21,17 @@
  * event carrying every deleted URI, so a branch switch that removes N domains
  * produces one event rather than N.
  *
+ * Table file events are coalesced too: one debounce for every table file,
+ * one log line for the batch, then one `onTableChanged` per table.
+ *
+ * A bulk change (at least {@link BULK_CHANGE_MIN_EVENTS} events on the
+ * project's files in a row, each within the debounce of the last: Edit >
+ * Undo of Convert Project to DBML, a branch switch) raises
+ * `onBulkChangeStarted`, holds every project-file callback until the files
+ * have been quiet for one debounce, then runs them and raises
+ * `onBulkChangeSettled`, so the extension holds its refreshes for the burst
+ * and refreshes once after it.
+ *
  * Events caused by the extension's own writes (recorded in OwnWriteTracker by
  * the service that wrote the file, and matched by content however late the
  * debounced callback runs) are swallowed so a save does not bounce back as a
@@ -52,9 +63,18 @@ import {
   sourcePathsGlob,
   type DbtProjectConfig,
 } from '../services/dbtProjectConfig';
-import { log } from '../services/logger';
+import { log, plural } from '../services/logger';
 
 const DEBOUNCE_DELAY_MS = 300;
+
+/** Events on the project's files, each within the debounce of the last, that make a bulk change. */
+export const BULK_CHANGE_MIN_EVENTS = 20;
+
+/** The debounce key of a bulk change's settling (see {@link FileWatcherService.onBulkChangeSettled}). */
+const BULK_SETTLE_KEY = 'bulk-settle';
+
+/** How many table names the batch's log line names before "and N more". */
+const LOGGED_TABLE_NAMES = 3;
 
 export interface FileWatcherOptions {
   /**
@@ -167,6 +187,8 @@ export class FileWatcherService implements vscode.Disposable {
   private readonly _onForeignFormatCreated = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onDbtYmlChanged = new vscode.EventEmitter<void>();
   private readonly _onProjectConfigChanged = new vscode.EventEmitter<void>();
+  private readonly _onBulkChangeStarted = new vscode.EventEmitter<void>();
+  private readonly _onBulkChangeSettled = new vscode.EventEmitter<{ reported: number }>();
 
   // Public event subscriptions (consumers listen to these)
   readonly onManifestChanged = this._onManifestChanged.event;
@@ -207,12 +229,35 @@ export class FileWatcherService implements vscode.Disposable {
   readonly onDbtYmlChanged = this._onDbtYmlChanged.event;
   /** Fires when target-path or model-paths change in dbt_project.yml. */
   readonly onProjectConfigChanged = this._onProjectConfigChanged.event;
+  /**
+   * Fires once when the project's files start changing in bulk (Edit > Undo
+   * of Convert Project to DBML, a branch switch): the events for them are
+   * held until the burst settles, and the listener can hold its refreshes.
+   */
+  readonly onBulkChangeStarted = this._onBulkChangeStarted.event;
+  /**
+   * Fires once the bulk change has settled and every event it held has run:
+   * `reported` is how many of them were outside changes (not our own writes).
+   */
+  readonly onBulkChangeSettled = this._onBulkChangeSettled.event;
 
   /** Snapshot of path-related keys from dbt_project.yml at startup. */
   private lastProjectPaths: string;
 
   /** Domain-file deletions accumulated while the coalescing debounce is pending. */
   private pendingDeletes = new Map<string, vscode.Uri>();
+
+  /** Table files changed while the table debounce is pending, by model name (the latest file wins). */
+  private readonly pendingTables = new Map<string, vscode.Uri>();
+
+  /** Debounce keys of the project-file callbacks (`debounceOwnWrite`), which a bulk change waits for. */
+  private readonly projectKeys = new Set<string>();
+  /** When the last event on a project file arrived, and how many arrived since the files were last quiet. */
+  private lastProjectEventAt = 0;
+  private projectEvents = 0;
+  /** A bulk change is under way, and how many outside changes it has reported so far. */
+  private bulkActive = false;
+  private bulkReported = 0;
 
   private readonly semanticRoot: string;
 
@@ -320,7 +365,7 @@ export class FileWatcherService implements vscode.Disposable {
           }
           const diagram = vscode.Uri.file(diagramPathOfLayout(uri.fsPath));
           log.debug(`[FileWatcherService] External change to a layout file: ${uri.fsPath}`);
-          this.safeFireEvent(() => this._onSemanticFileChanged.fire({ uri: diagram, layout: true }));
+          this.report(() => this._onSemanticFileChanged.fire({ uri: diagram, layout: true }));
         });
         return;
       }
@@ -334,7 +379,7 @@ export class FileWatcherService implements vscode.Disposable {
         }
         log.debug(`[FileWatcherService] External change to a diagram or table file: ${uri.fsPath}`);
         if (wasCreated && isJson) this.safeFireEvent(() => this._onForeignFormatCreated.fire({ uri }));
-        this.safeFireEvent(() => this._onSemanticFileChanged.fire(wasCreated ? { uri, created: true } : { uri }));
+        this.report(() => this._onSemanticFileChanged.fire(wasCreated ? { uri, created: true } : { uri }));
       });
     };
 
@@ -369,14 +414,14 @@ export class FileWatcherService implements vscode.Disposable {
           return;
         }
         log.debug(`[FileWatcherService] External delete: ${uris.length} diagram or table file(s)`);
-        this.safeFireEvent(() => this._onSemanticFileDeleted.fire({ uris }));
+        this.report(() => this._onSemanticFileDeleted.fire({ uris }));
       });
     };
 
     // Track event subscriptions for disposal
-    this.subscriptions.push(watcher.onDidChange((uri) => handleChange(uri)));
-    this.subscriptions.push(watcher.onDidCreate((uri) => handleChange(uri, true)));
-    this.subscriptions.push(watcher.onDidDelete(handleDelete));
+    this.subscriptions.push(watcher.onDidChange((uri) => { this.noteProjectEvent(); handleChange(uri); }));
+    this.subscriptions.push(watcher.onDidCreate((uri) => { this.noteProjectEvent(); handleChange(uri, true); }));
+    this.subscriptions.push(watcher.onDidDelete((uri) => { this.noteProjectEvent(); handleDelete(uri); }));
 
     this.watchers.push(watcher);
   }
@@ -389,7 +434,7 @@ export class FileWatcherService implements vscode.Disposable {
         return;
       }
       log.debug(`[FileWatcherService] External change to a relationships file: ${uri.fsPath}`);
-      this.safeFireEvent(() => this._onRelationshipsChanged.fire({ uri }));
+      this.report(() => this._onRelationshipsChanged.fire({ uri }));
     });
   }
 
@@ -404,7 +449,7 @@ export class FileWatcherService implements vscode.Disposable {
         return;
       }
       log.debug('[FileWatcherService] External change: layers.json');
-      this.safeFireEvent(() => this._onLayerConfigChanged.fire());
+      this.report(() => this._onLayerConfigChanged.fire());
     });
   }
 
@@ -480,7 +525,9 @@ export class FileWatcherService implements vscode.Disposable {
    * Fires when model definition files are created, modified, or deleted.
    * Used to refresh open domain editors that reference the changed model.
    * Moving a file between folders arrives as a delete + create of the same
-   * model name, which the per-name debounce folds into one event.
+   * model name, which the batch folds into one event. Every table file shares
+   * one debounce: a burst of N (a branch switch, Edit > Undo of Convert) is
+   * one batch and one log line, not N.
    */
   private setupTableWatcher(): void {
     const pattern = new vscode.RelativePattern(
@@ -500,21 +547,35 @@ export class FileWatcherService implements vscode.Disposable {
       const modelName = fileName.replace(/\.(yml|dbml)$/, '');
       if (dbml && isReservedTableName(modelName)) return;
       if (created && !dbml) createdPending.add(uri.toString());
-      this.debounceOwnWrite(`logical-model:${modelName}`, () => [uri.fsPath], () => {
-        const wasCreated = createdPending.delete(uri.toString());
-        if (this.ownWriteTracker.consume(uri.fsPath)) {
-          log.trace(`[FileWatcherService] Own write to table file, ignored: ${modelName}`);
-          return;
+      this.pendingTables.delete(modelName);
+      this.pendingTables.set(modelName, uri);
+      this.debounceOwnWrite('tables', () => [...this.pendingTables.values()].map((u) => u.fsPath), () => {
+        const outside: Array<{ uri: vscode.Uri; modelName: string; wasCreated: boolean }> = [];
+        for (const [name, tableUri] of this.pendingTables) {
+          const wasCreated = createdPending.delete(tableUri.toString());
+          if (this.ownWriteTracker.consume(tableUri.fsPath)) {
+            log.trace(`[FileWatcherService] Own write to table file, ignored: ${name}`);
+            continue;
+          }
+          outside.push({ uri: tableUri, modelName: name, wasCreated });
         }
-        log.debug(`[FileWatcherService] External change to table file: ${modelName}`);
-        if (wasCreated) this.safeFireEvent(() => this._onForeignFormatCreated.fire({ uri }));
-        this.safeFireEvent(() => this._onTableChanged.fire({ uri, modelName }));
+        this.pendingTables.clear();
+        if (outside.length === 0) return;
+        const names = outside.map((t) => t.modelName);
+        log.debug(names.length === 1
+          ? `[FileWatcherService] External change to table file: ${names[0]}`
+          : `[FileWatcherService] External change to ${plural(names.length, 'table file')}: ${names.slice(0, LOGGED_TABLE_NAMES).join(', ')}` +
+            `${names.length > LOGGED_TABLE_NAMES ? ` and ${names.length - LOGGED_TABLE_NAMES} more` : ''}`);
+        for (const t of outside) {
+          if (t.wasCreated) this.safeFireEvent(() => this._onForeignFormatCreated.fire({ uri: t.uri }));
+          this.report(() => this._onTableChanged.fire({ uri: t.uri, modelName: t.modelName }));
+        }
       });
     };
 
-    this.subscriptions.push(watcher.onDidChange((uri) => handleChange(uri)));
-    this.subscriptions.push(watcher.onDidCreate((uri) => handleChange(uri, true)));
-    this.subscriptions.push(watcher.onDidDelete((uri) => handleChange(uri)));
+    this.subscriptions.push(watcher.onDidChange((uri) => { this.noteProjectEvent(); handleChange(uri); }));
+    this.subscriptions.push(watcher.onDidCreate((uri) => { this.noteProjectEvent(); handleChange(uri, true); }));
+    this.subscriptions.push(watcher.onDidDelete((uri) => { this.noteProjectEvent(); handleChange(uri); }));
 
     this.watchers.push(watcher);
   }
@@ -597,13 +658,54 @@ export class FileWatcherService implements vscode.Disposable {
    * long a write stays pending, so this never waits for ever.
    */
   private debounceOwnWrite(key: string, paths: () => readonly string[], fn: () => void): void {
+    this.projectKeys.add(key);
     this.debounce(key, () => {
-      if (paths().some((p) => this.ownWriteTracker.isPending(p))) {
+      // A bulk change runs nothing until the files have been quiet for a debounce.
+      const stillBusy = this.bulkActive && Date.now() - this.lastProjectEventAt < DEBOUNCE_DELAY_MS;
+      if (stillBusy || paths().some((p) => this.ownWriteTracker.isPending(p))) {
         this.debounceOwnWrite(key, paths, fn);
         return;
       }
       fn();
     });
+  }
+
+  /**
+   * An event on a project file (a diagram, layout, table, relationships file
+   * or layers.json) arrived: count it towards a bulk change, and (re)start
+   * the wait for the files to settle.
+   */
+  private noteProjectEvent(): void {
+    this.lastProjectEventAt = Date.now();
+    this.projectEvents++;
+    if (!this.bulkActive && this.projectEvents >= BULK_CHANGE_MIN_EVENTS) {
+      this.bulkActive = true;
+      this.bulkReported = 0;
+      log.debug('[FileWatcherService] Many project files are changing: refreshes wait until they settle');
+      this.safeFireEvent(() => this._onBulkChangeStarted.fire());
+    }
+    this.debounce(BULK_SETTLE_KEY, () => this.settleProjectEvents());
+  }
+
+  /** The files have been quiet for a debounce: once every held callback has run, end the bulk change. */
+  private settleProjectEvents(): void {
+    if ([...this.projectKeys].some((key) => this.debounceTimers.has(key))) {
+      this.debounce(BULK_SETTLE_KEY, () => this.settleProjectEvents());
+      return;
+    }
+    const events = this.projectEvents;
+    this.projectEvents = 0;
+    if (!this.bulkActive) return;
+    this.bulkActive = false;
+    const reported = this.bulkReported;
+    log.debug(`[FileWatcherService] ${plural(events, 'project file event')} settled, ${reported} reported as outside changes`);
+    this.safeFireEvent(() => this._onBulkChangeSettled.fire({ reported }));
+  }
+
+  /** Fire an outside change to a project file, counted towards the bulk change under way. */
+  private report(fireFn: () => void): void {
+    if (this.bulkActive) this.bulkReported++;
+    this.safeFireEvent(fireFn);
   }
 
   /**
@@ -629,6 +731,7 @@ export class FileWatcherService implements vscode.Disposable {
     }
     this.debounceTimers.clear();
     this.pendingDeletes.clear();
+    this.pendingTables.clear();
 
     // Dispose all event subscriptions (onDidChange, onDidCreate, onDidDelete handlers)
     for (const subscription of this.subscriptions) {
@@ -653,5 +756,7 @@ export class FileWatcherService implements vscode.Disposable {
     this._onForeignFormatCreated.dispose();
     this._onDbtYmlChanged.dispose();
     this._onProjectConfigChanged.dispose();
+    this._onBulkChangeStarted.dispose();
+    this._onBulkChangeSettled.dispose();
   }
 }

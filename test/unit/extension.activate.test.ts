@@ -890,6 +890,50 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(deletedToasts()[0][0]).toBe('Subject area file deleted. Regenerate dbt selectors.yml to drop the removed subject area from the selector set.');
   });
 
+  it('a burst of outside table-file changes (Edit > Undo of Convert) builds the library index and refreshes each view and canvas O(1) times', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const tables = (provider as unknown as { tableLibraryService: { indexBuilds: number } }).tableLibraryService;
+    const file = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
+    const panel = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    await panel._simulateMessage({ type: 'ready' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const treeOf = (id: string) => (createTreeView.mock.calls.find((c) => c[0] === id)![1] as {
+      treeDataProvider: { onDidChangeTreeData: (cb: () => void) => void };
+    }).treeDataProvider;
+    let treeRefreshes = 0;
+    treeOf('erdStudio.domainTree').onDidChangeTreeData(() => { treeRefreshes++; });
+    treeOf('erdStudio.modelLibrary').onDidChangeTreeData(() => { treeRefreshes++; });
+    const sends = (): number => panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
+    const sendsBefore = sends();
+    const buildsBefore = tables.indexBuilds;
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{yml,dbml}'))!;
+
+    // 300 table files appear over ~2.5 s, a few at a time, as VS Code's Undo writes them.
+    const N = 300;
+    for (let i = 0; i < N; i++) {
+      const tableFile = path.join(ws, '.erd-studio', 'tables', 'gold', `t_${i}.dbml`);
+      fs.writeFileSync(tableFile, `Table t_${i} {\n  id int [pk]\n}\n`);
+      tableWatcher._simulateCreate(vscode.Uri.file(tableFile));
+      if (i % 10 === 9) await vi.advanceTimersByTimeAsync(80);
+    }
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(tables.indexBuilds - buildsBefore).toBeLessThanOrEqual(2);
+    // Once each, when the burst settles: the ERD Studio view and the Table Library, and the open canvas.
+    expect(treeRefreshes).toBe(2);
+    expect(sends() - sendsBefore).toBe(1);
+  });
+
   it('the foreign-format toast is not raised outside a DBML project', async () => {
     fs.rmSync(path.join(ws, '.erd-studio', 'tables'), { recursive: true, force: true });
     fs.rmSync(path.join(ws, '.erd-studio', 'gold', 'sales.dbml'));

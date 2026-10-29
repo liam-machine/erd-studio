@@ -28,6 +28,7 @@ vi.mock('fs', async () => {
 
 import { FileWatcherService, classifySemanticPath } from '../../src/watchers/FileWatcherService';
 import { CONSUMED_GRACE_MS, OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import { setLogSink } from '../../src/services/logger';
 import { defaultDbtProjectConfig } from '../../src/services/dbtProjectConfig';
 import {
   _clearMockFileWatchers,
@@ -903,6 +904,66 @@ describe('FileWatcherService', () => {
       semanticWatcher()._simulateCreate(vscode.Uri.file(`${ws}/gold/other.dbml`));
       vi.advanceTimersByTime(300);
       expect(foreign).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a bulk change (Edit > Undo of Convert, a branch switch)', () => {
+    const ws = '/test/workspace/.erd-studio';
+    const semanticWatcher = () => _mockFileWatchers[1];
+    const tableWatcher = () => _mockFileWatchers[3];
+
+    it('holds every event until the files are quiet, then reports N tables in one batch and one log line, inside one started/settled pair', () => {
+      const lines: string[] = [];
+      const sink = { trace() {}, debug: (m: string) => { lines.push(m); }, info() {}, warn() {}, error() {} };
+      const previous = setLogSink(sink);
+      try {
+        const tables: string[] = [];
+        const order: string[] = [];
+        service.onTableChanged(({ modelName }) => { tables.push(modelName); order.push('table'); });
+        service.onSemanticFileChanged(() => order.push('diagram'));
+        service.onBulkChangeStarted(() => order.push('started'));
+        service.onBulkChangeSettled(({ reported }) => order.push(`settled:${reported}`));
+
+        // Undo of Convert: every .dbml table goes and its .yml comes back, a few
+        // files at a time, over several seconds; a diagram's .json comes back too.
+        const N = 500;
+        for (let i = 0; i < N; i++) {
+          tableWatcher()._simulateDelete(vscode.Uri.file(`${ws}/tables/gold/t${i}.dbml`));
+          tableWatcher()._simulateCreate(vscode.Uri.file(`${ws}/logical-models/gold/t${i}.yml`));
+          if (i === 10) semanticWatcher()._simulateCreate(vscode.Uri.file(`${ws}/gold/sales.json`));
+          if (i % 25 === 0) vi.advanceTimersByTime(200);
+        }
+        expect(order).toEqual(['started']);
+        expect(tables).toEqual([]);
+
+        vi.advanceTimersByTime(1_000);
+        expect(tables).toHaveLength(N);
+        expect(new Set(tables).size).toBe(N);
+        expect(order[0]).toBe('started');
+        expect(order.at(-1)).toBe(`settled:${N + 1}`);
+        expect(order.filter((o) => o.startsWith('settled'))).toHaveLength(1);
+        expect(lines.filter((l) => /External change to (table file|\d+ table files)/.test(l))).toEqual([
+          `[FileWatcherService] External change to ${N} table files: t0, t1, t2 and ${N - 3} more`,
+        ]);
+        expect(lines.length).toBeLessThan(10);
+      } finally {
+        setLogSink(previous);
+      }
+    });
+
+    it('a few changes are no bulk change: reported as before, nothing held', () => {
+      const started = vi.fn();
+      const settled = vi.fn();
+      const tables = vi.fn();
+      service.onBulkChangeStarted(started);
+      service.onBulkChangeSettled(settled);
+      service.onTableChanged(tables);
+      for (let i = 0; i < 5; i++) tableWatcher()._simulateChange(vscode.Uri.file(`${ws}/tables/gold/t${i}.dbml`));
+      vi.advanceTimersByTime(300);
+      expect(tables).toHaveBeenCalledTimes(5);
+      vi.advanceTimersByTime(1_000);
+      expect(started).not.toHaveBeenCalled();
+      expect(settled).not.toHaveBeenCalled();
     });
   });
 

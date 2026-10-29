@@ -1580,6 +1580,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
+  // Many project files changing at once (Edit > Undo of Convert Project to
+  // DBML, a branch switch): the watcher holds its events until the files are
+  // quiet, and the canvases, sidebar views and context keys wait with them,
+  // as they do for Convert's own write. One refresh of each after.
+  let releaseBulkChange: (() => void) | undefined;
+  const bulkChangeStartedSubscription = fileWatcherService.onBulkChangeStarted(() => {
+    if (releaseBulkChange) return;
+    const canvases = editorProvider.holdRefreshes();
+    const views = viewRefreshes.hold();
+    releaseBulkChange = () => { canvases(); views(); };
+  });
+  const bulkChangeSettledSubscription = fileWatcherService.onBulkChangeSettled(({ reported }) => {
+    const release = releaseBulkChange;
+    releaseBulkChange = undefined;
+    release?.();
+    // Only outside changes: our own writes (Convert's) were already drawn.
+    if (reported > 0) void editorProvider.refreshAllOpenSubjectAreas();
+  });
+
   // dbt schema .yml changed → refresh physical stage
   const dbtYmlChangedSubscription = fileWatcherService.onDbtYmlChanged(
     async () => {
@@ -1757,6 +1776,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     semanticDeletedSubscription,
     layerConfigChangedSubscription,
     logicalModelChangedSubscription,
+    bulkChangeStartedSubscription,
+    bulkChangeSettledSubscription,
     dbtYmlChangedSubscription,
     projectChangedSubscription,
     (() => {
