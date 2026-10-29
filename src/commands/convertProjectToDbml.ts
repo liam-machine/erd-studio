@@ -96,6 +96,8 @@ export interface ConvertProjectDeps {
    * ({@link dbmlConversionGoesNowhere}). The workspace's state.
    */
   workspaceState?: Pick<vscode.Memento, 'get' | 'update'>;
+  /** Close (and forget) the canvases of these files, the JSON diagrams Convert replaced. */
+  closeCanvasesOf?: (fsPaths: string[]) => void;
 }
 
 /** The fingerprint of a project Convert last stopped on with nothing it could write (refused, or only files to fix). */
@@ -606,6 +608,8 @@ async function applyConversion(
     deps.tableLibraryService.invalidateCache();
     await report(CONVERT_PROGRESS.reopening);
     const reopened = await reopenConvertedCanvases(canvasTabs);
+    // A converted JSON diagram's canvas is gone with its file: never refreshed again.
+    deps.closeCanvasesOf?.(plan.deletes.filter((d) => d.endsWith('.json')).map(abs));
     const undoFrom: UndoFrom = reopened.length > 0
       ? (reopened.every((target) => placed.has(path.resolve(target))) ? 'diagram' : 'unplacedDiagram')
       : await openUndoTarget(plan, abs);

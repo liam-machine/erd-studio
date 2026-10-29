@@ -471,3 +471,31 @@ describe('own-write echo after a busy host (watchers)', () => {
     }
   });
 });
+
+describe('a canvas whose panel is gone is never refreshed again', () => {
+  const panelsOf = (provider: SemanticEditorProvider): Map<string, unknown> =>
+    (provider as unknown as { openPanels: Map<string, unknown> }).openPanels;
+  const loads = (panel: ReturnType<typeof createMockWebviewPanel>): number =>
+    panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
+
+  it('VS Code closed the tab (Undo deleted its file) and the dispose never reached us: skipped and forgotten', async () => {
+    const h = await open();
+    Object.defineProperty(h.panel, 'active', { get() { throw new Error('Webview is disposed'); } });
+    await h.provider.refreshAllOpenSubjectAreas();
+    await h.provider.refreshSubjectAreasReferencingTable('fct_order');
+    await h.provider.refreshSubjectAreaPanel(h.document.uri.fsPath);
+    expect(loads(h.panel)).toBe(0);
+    expect(panelsOf(h.provider).has(h.document.uri.toString())).toBe(false);
+  });
+
+  it('closeCanvasesOf disposes the canvases of those files and forgets them; others still refresh', async () => {
+    const h = await open();
+    const disposed = vi.fn();
+    h.panel.onDidDispose(disposed);
+    h.provider.closeCanvasesOf([h.document.uri.fsPath]);
+    expect(disposed).toHaveBeenCalled();
+    expect(panelsOf(h.provider).has(h.document.uri.toString())).toBe(false);
+    await h.provider.refreshAllOpenSubjectAreas();
+    expect(loads(h.panel)).toBe(0);
+  });
+});

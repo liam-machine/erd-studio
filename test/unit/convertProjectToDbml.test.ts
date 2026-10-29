@@ -905,6 +905,21 @@ describe('progress, cancel and plan once (pre-release feedback)', () => {
     expect(notes.filter((n) => n.cancellable)).toHaveLength(1);
   });
 
+  it('closes the canvases of the JSON diagrams it replaced, before the views and canvases refresh', async () => {
+    useFixture('composite-and-self');
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const plan = await planProjectDbmlConversion(deps());
+    const order: string[] = [];
+    const closeCanvasesOf = vi.fn((paths: string[]) => { order.push('close'); expect(paths.length).toBeGreaterThan(0); });
+    const d = deps({ closeCanvasesOf, onConverted: vi.fn(async () => { order.push('refresh'); }) });
+    answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+    expect(await convertProjectToDbml(d)).toBe('converted');
+    const jsons = plan.deletes.filter((p) => p.endsWith('.json')).map((p) => path.join(erd, ...p.split('/')));
+    expect(jsons.length).toBeGreaterThan(0);
+    expect(closeCanvasesOf).toHaveBeenCalledWith(jsons);
+    expect(order).toEqual(['close', 'refresh']);
+  });
+
   it('plans again when a file it reads changed meanwhile (only its time), and still converts when the plan is the same', async () => {
     useFixture('composite-and-self');
     const notes = recordProgress();

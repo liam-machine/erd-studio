@@ -869,6 +869,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       document: vscode.TextDocument;
       webview: vscode.Webview;
       activeStage: Stage;
+      /** The tab's panel, to tell a canvas VS Code closed without its dispose reaching us (see {@link panelIsGone}). */
+      panel?: vscode.WebviewPanel;
       /** Cached discrepancy report from the last comparison (used by sync plan generation). */
       lastDiscrepancyReport?: DiscrepancyReport | null;
       /** The target stage from the last discrepancy comparison (used to refresh after stub toggle). */
@@ -1314,7 +1316,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     // Track this panel — default to logical stage (v3 unified files have no stage in path)
     const panelKey = document.uri.toString();
-    this.openPanels.set(panelKey, { document, webview: webviewPanel.webview, activeStage: 'logical' });
+    this.openPanels.set(panelKey, { document, webview: webviewPanel.webview, activeStage: 'logical', panel: webviewPanel });
 
     // --- Subscriptions (disposed when the panel closes) ---------------------
 
@@ -2103,13 +2105,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel.onDidDispose(() => {
       messageSubscription.dispose();
       changeSubscription.dispose();
-      this.disposedWebviews.add(webviewPanel.webview);
-      this.openPanels.delete(panelKey);
-      this.editedTablePaths.delete(panelKey);
-      this.undoRewoundLayout.delete(panelKey);
-      clearTimeout(this.nativeUndoTimers.get(panelKey));
-      this.nativeUndoTimers.delete(panelKey);
-      this.lastLoadError.delete(panelKey);
+      this.forgetPanel(panelKey, webviewPanel.webview);
       this.backwardsDrawn.delete(document.uri.toString());
     });
   }
@@ -4101,7 +4097,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
       // The snapshot may include a panel that was disposed while an earlier
       // iteration awaited — skip it rather than refreshing a dead webview.
-      if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey)) {
+      if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey) || this.forgetIfGone(panelKey)) {
         continue;
       }
       try {
@@ -4134,7 +4130,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   async refreshSubjectAreasReferencingTable(modelName: string, exceptPanelKey?: string): Promise<void> {
     if (this.refreshHolds > 0) return;
     for (const [panelKey, { document, webview }] of Array.from(this.openPanels.entries())) {
-      if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey)) {
+      if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey) || this.forgetIfGone(panelKey)) {
         continue;
       }
       // The panel that made the edit has already been refreshed by
@@ -4161,11 +4157,54 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /**
+   * Close the canvases of these files (Convert replaced them with their
+   * `.dbml`): each panel is disposed, which drops its state, and its entry
+   * is forgotten even if the dispose never reaches us, so no refresh reads
+   * a file that is gone.
+   */
+  closeCanvasesOf(fsPaths: readonly string[]): void {
+    for (const [panelKey, entry] of Array.from(this.openPanels.entries())) {
+      if (!fsPaths.some((p) => samePath(entry.document.uri.fsPath, p))) continue;
+      try { entry.panel?.dispose(); } catch { /* already disposed */ }
+      this.forgetPanel(panelKey, entry.webview);
+    }
+  }
+
+  /**
+   * Whether a canvas's panel is gone (VS Code closed its tab, e.g. when Undo
+   * deleted its file) though its dispose never reached us: a disposed
+   * panel throws on `active`. Forgets it when so.
+   */
+  private forgetIfGone(panelKey: string): boolean {
+    const entry = this.openPanels.get(panelKey);
+    if (!entry?.panel) return false;
+    try {
+      void entry.panel.active;
+      return false;
+    } catch {
+      this.forgetPanel(panelKey, entry.webview);
+      return true;
+    }
+  }
+
+  /** Drop everything kept for one canvas (on its dispose, or when it is found gone). */
+  private forgetPanel(panelKey: string, webview: vscode.Webview): void {
+    this.disposedWebviews.add(webview);
+    // Only this panel's entry: another canvas of the same file may have replaced it.
+    if (this.openPanels.get(panelKey)?.webview === webview) this.openPanels.delete(panelKey);
+    this.editedTablePaths.delete(panelKey);
+    this.undoRewoundLayout.delete(panelKey);
+    clearTimeout(this.nativeUndoTimers.get(panelKey));
+    this.nativeUndoTimers.delete(panelKey);
+    this.lastLoadError.delete(panelKey);
+  }
+
   /** Redraw every open canvas of the diagram at `fsPath` (its layout file changed outside the editor). */
   async refreshSubjectAreaPanel(fsPath: string): Promise<void> {
     if (this.refreshHolds > 0) return;
     for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
-      if (this.disposedWebviews.has(webview) || !samePath(document.uri.fsPath, fsPath)) continue;
+      if (this.disposedWebviews.has(webview) || !samePath(document.uri.fsPath, fsPath) || this.forgetIfGone(panelKey)) continue;
       try {
         if (activeStage === 'physical') {
           await this.handleSwitchStage(panelKey, document, webview, 'physical');

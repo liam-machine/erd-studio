@@ -1689,6 +1689,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     holdRefreshes: () => editorProvider.holdRefreshes(),
     holdViewRefreshes: () => viewRefreshes.hold(),
     workspaceState: context.workspaceState,
+    closeCanvasesOf: (paths) => editorProvider.closeCanvasesOf(paths),
     onConverted: async (paths) => {
       for (const p of paths) {
         if (p.endsWith('.yml') || p.endsWith('.json')) convertedSourcesHere.add(path.resolve(p));
