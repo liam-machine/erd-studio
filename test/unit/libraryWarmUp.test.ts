@@ -42,6 +42,22 @@ describe('LibraryWarmUp', () => {
     expect(library.attached()).toBe(1);
   });
 
+  it('reads each relationships file in a slice of its own, before the attach', async () => {
+    const clock = { t: 0 };
+    const order: string[] = [];
+    const library = {
+      ...fakeLibrary(4, clock, 1),
+      listRelationshipsFiles: () => ['tables/_relationships.dbml', 'tables/gold/_relationships.dbml'],
+      readRelationshipsFile: (file: string) => { order.push(file); clock.t += 50; },
+      warmLibraryAttachment: () => { order.push('attach'); },
+    };
+    const warmUp = new LibraryWarmUp(library, { sliceMs: 10, quietMs: 0, now: () => clock.t });
+    await warmUp.start(0);
+    expect(order).toEqual(['tables/_relationships.dbml', 'tables/gold/_relationships.dbml', 'attach']);
+    // One slice of table files, then one per relationships file.
+    expect(warmUp.slices).toBe(3);
+  });
+
   it('a slice always reads at least one file, however slow', async () => {
     const clock = { t: 0 };
     const library = fakeLibrary(3, clock, 100);

@@ -6,8 +6,9 @@
  * could do nothing else. After activation this reads every table file the
  * caches do not hold yet, in slices of {@link WARM_UP_SLICE_MS}, giving the
  * event loop back between slices, so the first open finds its tables read
- * and the host never blocks for long. Then it works out the library's
- * relationships once, so the first table edit finds them worked out too.
+ * and the host never blocks for long. Then it reads the relationships files
+ * (one per slice) and works out the library's relationships once, so the
+ * first table edit finds them worked out too.
  *
  * It steps aside for the user: any foreground work (a canvas message, a
  * diagram opening) pushes the next slice back until the host has been quiet
@@ -41,6 +42,10 @@ export interface WarmUpLibrary<E> {
   unreadTableFiles(): E[];
   /** Read one into the cache; never throws. */
   warmTableFile(entry: E): void;
+  /** The relationships files, each read in a slice of its own before the attach. */
+  listRelationshipsFiles?(): string[];
+  /** Read one relationships file into the cache. */
+  readRelationshipsFile?(filePath: string): unknown;
   /** Work out the library's relationships once; never throws. */
   warmLibraryAttachment(): void;
 }
@@ -88,9 +93,18 @@ export class LibraryWarmUp<E> {
     this.disposed = true;
   }
 
+  private relationshipsFiles(): string[] {
+    try {
+      return this.library.listRelationshipsFiles?.() ?? [];
+    } catch {
+      return [];
+    }
+  }
+
   private async run(delayMs: number): Promise<WarmUpOutcome> {
     await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
     let queue: E[] | undefined;
+    let relationshipsFiles: string[] | undefined;
     let attached = false;
     while (!this.disposed) {
       const wait = this.lastForeground + this.quietMs - this.now();
@@ -107,6 +121,15 @@ export class LibraryWarmUp<E> {
           this.library.warmTableFile(queue.shift() as E);
           this.filesRead++;
         } while (queue.length > 0 && this.now() - started < this.sliceMs);
+      } else if ((relationshipsFiles ??= this.relationshipsFiles()).length > 0) {
+        // A relationships file is one parse: one per slice, however long.
+        this.slices++;
+        const file = relationshipsFiles.shift() as string;
+        try {
+          this.library.readRelationshipsFile?.(file);
+        } catch {
+          // Reported where it is used.
+        }
       } else if (!attached) {
         attached = true;
         this.library.warmLibraryAttachment();
