@@ -31,7 +31,7 @@ import {
   type FeedbackKind,
   redactPaths,
 } from '../types/feedback';
-import { recentLogLines, writeLog } from './logger';
+import { LOG_BUFFER_CAPACITY, recentLogLines, writeLog } from './logger';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -437,9 +437,13 @@ export function collectDiagnostics(
   context: vscode.ExtensionContext,
   domain?: Diagnostics['domain'],
   webviewErrors: string[] = [],
-  options: { includeLog?: boolean } = {},
+  options: { includeLog?: boolean; log?: readonly string[] } = {},
 ): Diagnostics {
-  const recentLog = options.includeLog ? redactedRecentLog() : [];
+  // `log`: the lines the dialog showed (redacted again, as any text is);
+  // without it, the buffer as it is now.
+  const recentLog = !options.includeLog ? []
+    : options.log !== undefined ? options.log.slice(-LOG_BUFFER_CAPACITY).map(redactPaths)
+      : redactedRecentLog();
   return {
     extensionVersion: String(context.extension.packageJSON.version ?? 'unknown'),
     vscodeVersion: vscode.version,
@@ -450,6 +454,16 @@ export function collectDiagnostics(
     webviewErrors: webviewErrors.slice(-ERROR_LOG_CAPACITY).map(redactPaths),
     ...(recentLog.length > 0 ? { recentLog } : {}),
   };
+}
+
+/**
+ * The log a report may carry: exactly the lines the dialog previewed
+ * (FEEDBACK_LOG_NOTE promises "Below is exactly what is added"). A line
+ * written while the dialog was open is never sent unseen; with no preview,
+ * no log is sent.
+ */
+export interface SubmitLogOptions {
+  previewedLog?: readonly string[];
 }
 
 /**
@@ -469,10 +483,11 @@ export async function submitFeedback(
   context: vscode.ExtensionContext,
   draft: FeedbackDraft,
   domain?: Diagnostics['domain'],
+  options: SubmitLogOptions = {},
 ): Promise<{ ok: boolean; commentedOn?: number; error?: string }> {
   try {
     const diagnostics = draft.includeDiagnostics
-      ? collectDiagnostics(context, domain, draft.webviewErrors ?? [], { includeLog: draft.includeLog === true })
+      ? collectDiagnostics(context, domain, draft.webviewErrors ?? [], { includeLog: draft.includeLog === true, log: options.previewedLog ?? [] })
       : null;
     const commentOn = draft.commentOnIssue;
 
@@ -524,9 +539,10 @@ export async function copyFeedbackReport(
   context: vscode.ExtensionContext,
   draft: FeedbackDraft,
   domain?: Diagnostics['domain'],
+  options: SubmitLogOptions = {},
 ): Promise<void> {
   const diagnostics = draft.includeDiagnostics
-    ? collectDiagnostics(context, domain, draft.webviewErrors ?? [], { includeLog: draft.includeLog === true })
+    ? collectDiagnostics(context, domain, draft.webviewErrors ?? [], { includeLog: draft.includeLog === true, log: options.previewedLog ?? [] })
     : null;
   await vscode.env.clipboard.writeText(composeMarkdownReport(draft, diagnostics));
   void vscode.window.showInformationMessage('ERD Studio: the report is on your clipboard.');

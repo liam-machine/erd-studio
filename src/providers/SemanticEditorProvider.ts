@@ -694,6 +694,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private readonly editedTablePaths = new Map<string, Set<string>>();
 
+  /** Per webview: the log lines its Send Feedback dialog last previewed (the only ones a report may carry). */
+  private readonly feedbackLogShown = new WeakMap<vscode.Webview, string[]>();
+
   /** Per panel: the pending flush after VS Code's own undo/redo (see scheduleNativeUndoFlush). */
   private readonly nativeUndoTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -1112,6 +1115,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       payload.domain,
       payload.webviewErrors ?? [],
     );
+    // The log a report from this dialog may carry is exactly what it shows.
+    this.feedbackLogShown.set(webview, diagnostics.log ?? []);
     const tier = await resolveAnalysisTier(this.context);
     // The handle is decoration: it labels the auth pill and helps the tracker
     // reconcile. A host with no GitHub authentication provider registered
@@ -1798,7 +1803,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             try {
-              const result = await submitFeedback(this.context, payload, payload.domain);
+              const result = await submitFeedback(this.context, payload, payload.domain, { previewedLog: this.feedbackLogShown.get(webviewPanel.webview) });
               // The issue is filed in the user's own browser, so all we can
               // record is that a form was opened; the tracker reconciles it
               // against GitHub later. A comment on an existing thread files
@@ -1834,7 +1839,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             try {
-              await copyFeedbackReport(this.context, payload, payload.domain);
+              await copyFeedbackReport(this.context, payload, payload.domain, { previewedLog: this.feedbackLogShown.get(webviewPanel.webview) });
             } catch (err) {
               hostErrorLog.record('copyFeedbackReport', err);
               this.post(webviewPanel.webview, {

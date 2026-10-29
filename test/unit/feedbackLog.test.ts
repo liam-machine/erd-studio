@@ -19,6 +19,7 @@ import {
   collectDiagnostics,
   composeFeedbackFields,
   composeMarkdownReport,
+  copyFeedbackReport,
   fitLogToIssueUrl,
   formatDiagnostics,
   hostErrorLog,
@@ -129,15 +130,38 @@ describe('fitting the log to the issue link', () => {
 
   it('submitFeedback sends the log only when ticked, and only inside the diagnostics', async () => {
     withLog(3);
+    const previewedLog = buildFeedbackContext(context).log;
     const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
-    await submitFeedback(context, draft({ includeLog: false }));
+    await submitFeedback(context, draft({ includeLog: false }), undefined, { previewedLog });
     expect(decodeURIComponent(String(open.mock.calls[0][0]))).not.toContain('Recent ERD Studio log');
-    await submitFeedback(context, draft({ includeLog: true, includeDiagnostics: false }));
+    await submitFeedback(context, draft({ includeLog: true, includeDiagnostics: false }), undefined, { previewedLog });
     expect(decodeURIComponent(String(open.mock.calls[1][0]))).not.toContain('Recent ERD Studio log');
-    await submitFeedback(context, draft({ includeLog: true }));
+    await submitFeedback(context, draft({ includeLog: true }), undefined, { previewedLog });
     const url = new URL(String(open.mock.calls[2][0]));
     expect(url.searchParams.get('diagnostics')).toContain('Recent ERD Studio log (3 lines):');
     expect(url.searchParams.get('description')).not.toContain('Recent ERD Studio log');
+  });
+
+  it('the report carries exactly the lines the dialog previewed, never one logged while it was open', async () => {
+    log.info('[Canvas] shown line');
+    const previewedLog = buildFeedbackContext(context).log;
+    // Logged after the dialog opened (another canvas, the warm-up, a failed analysis request).
+    log.info('[Canvas] Opening secret_area.dbml');
+    hostErrorLog.record('feedbackAnalysis.request', new Error('table secret_customer failed'));
+    const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+    await submitFeedback(context, draft({ includeLog: true }), undefined, { previewedLog });
+    const diagnostics = new URL(String(open.mock.calls[0][0])).searchParams.get('diagnostics')!;
+    expect(diagnostics).toContain('Recent ERD Studio log (1 line):');
+    expect(diagnostics).toContain('shown line');
+    expect(diagnostics).not.toContain('secret_area');
+    const write = vi.spyOn(vscode.env.clipboard, 'writeText').mockResolvedValue(undefined);
+    await copyFeedbackReport(context, draft({ includeLog: true }), undefined, { previewedLog });
+    const report = String(write.mock.calls[0][0]);
+    expect(report).toContain('shown line');
+    expect(report).not.toContain('secret_area');
+    // With no preview, no log at all.
+    await copyFeedbackReport(context, draft({ includeLog: true }));
+    expect(String(write.mock.calls[1][0])).not.toContain('Recent ERD Studio log');
   });
 
   it('the analysis prompt never carries the log (it takes no diagnostics at all)', () => {
