@@ -343,7 +343,7 @@ describe('undo / redo (H27)', () => {
     vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (cmd: string) => {
       if (cmd === 'undo' || cmd === 'redo') {
         doc._setText(doc.getText());
-        await changeListener!({ document: doc });
+        await changeListener!({ document: doc, contentChanges: [{ text: 'x' }] });
       }
       return undefined;
     }) as any);
@@ -361,7 +361,7 @@ describe('undo / redo (H27)', () => {
     const { doc, panel } = await openShowcase();
     const before = counters(panel, doc);
     doc._setText(doc.getText());
-    await changeListener!({ document: doc });
+    await changeListener!({ document: doc, contentChanges: [{ text: 'x' }] });
     const after = counters(panel, doc);
     expect(after.saves - before.saves).toBe(1);
     expect(after.loads - before.loads).toBe(1);
@@ -383,7 +383,7 @@ describe('applySubjectAreaEdit pipeline (H35)', () => {
     // An external change after the failure must still be picked up.
     const before = counters(panel, doc);
     doc._setText(doc.getText());
-    await changeListener!({ document: doc });
+    await changeListener!({ document: doc, contentChanges: [{ text: 'x' }] });
     expect(counters(panel, doc).loads - before.loads).toBe(1);
   });
 

@@ -697,6 +697,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** Per panel: the pending flush after VS Code's own undo/redo (see scheduleNativeUndoFlush). */
   private readonly nativeUndoTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /**
+   * Per panel: the DBML diagram's layout file when an undo/redo on the canvas
+   * rewound it since the last flush. Only then does the flush save it: a
+   * `.dbdiagram` the user is hand-editing in another tab is never force-saved.
+   */
+  private readonly undoRewoundLayout = new Map<string, Set<string>>();
+
   /** The background read of the table library (extension.ts), told about foreground work so it steps aside. */
   private libraryWarmUp: { noteForegroundWork(): void } | undefined;
   /** Delay before a canvas open's relationship survey; tests set 0. */
@@ -2044,19 +2051,30 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }),
     );
 
+    const layoutPath = this.isDbmlDocument(document) ? layoutFilePathOf(document.uri.fsPath) : undefined;
     const changeSubscription = vscode.workspace.onDidChangeTextDocument(async (e) => {
-      if (this.pendingUpdates.get(panelKey)) {
-        return;
-      }
       // Cmd+Z / Cmd+Shift+Z on the canvas is VS Code's own undo, not the
       // toolbar's message: it rewinds the domain file and the model files the
       // edit wrote in memory only. Flush them as the toolbar's Undo does.
       const undoRedo = e.reason === vscode.TextDocumentChangeReason.Undo
         || e.reason === vscode.TextDocumentChangeReason.Redo;
+      // The diagram's layout file rewound by an undo/redo from this canvas
+      // (the toolbar's, while it holds `pendingUpdates`, or Cmd+Z with the
+      // canvas focused): the flush saves it. Any other dirty layout is the user's.
+      const layoutRewound = undoRedo && layoutPath !== undefined && e.document.uri.fsPath === layoutPath
+        && (webviewPanel.active || this.pendingUpdates.get(panelKey) === true);
+      if (layoutRewound) {
+        const rewound = this.undoRewoundLayout.get(panelKey) ?? new Set<string>();
+        rewound.add(layoutPath);
+        this.undoRewoundLayout.set(panelKey, rewound);
+      }
+      if (this.pendingUpdates.get(panelKey)) {
+        return;
+      }
       if (e.document.uri.toString() !== document.uri.toString()) {
         // A model file this canvas wrote — while the canvas has focus, so an
         // undo typed in that file's own tab stays the user's to save.
-        if (undoRedo && webviewPanel.active && this.editedTablePaths.get(panelKey)?.has(e.document.uri.fsPath)) {
+        if (layoutRewound || (undoRedo && webviewPanel.active && this.editedTablePaths.get(panelKey)?.has(e.document.uri.fsPath))) {
           this.scheduleNativeUndoFlush(document, webviewPanel.webview, panelKey);
         }
         return;
@@ -2065,6 +2083,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.scheduleNativeUndoFlush(document, webviewPanel.webview, panelKey);
         return;
       }
+      // No text changed: the dirty state did (a save, including the flush's
+      // own after an undo). Nothing to save or send again.
+      if (e.contentChanges.length === 0) return;
       // A file deleted outside ERD Studio is not saved back into existence (#161).
       if (document.isDirty && fs.existsSync(document.uri.fsPath)) {
         await document.save();
@@ -2078,6 +2099,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.disposedWebviews.add(webviewPanel.webview);
       this.openPanels.delete(panelKey);
       this.editedTablePaths.delete(panelKey);
+      this.undoRewoundLayout.delete(panelKey);
       clearTimeout(this.nativeUndoTimers.get(panelKey));
       this.nativeUndoTimers.delete(panelKey);
       this.lastLoadError.delete(panelKey);
@@ -2715,9 +2737,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * open in another tab with unsaved hand edits is never force-saved — those
    * bytes are theirs to keep or discard.
    *
-   * Returns the paths that could not be saved.
+   * Returns the paths that could not be saved (and, in `saved`, those that were).
    */
-  private async saveDirtyTableDocuments(panelKey: string, onFailure: (reason: SaveFailure) => void, alsoPaths: readonly string[] = []): Promise<string[]> {
+  private async saveDirtyTableDocuments(
+    panelKey: string,
+    onFailure: (reason: SaveFailure) => void,
+    alsoPaths: readonly string[] = [],
+    saved: string[] = [],
+  ): Promise<string[]> {
     const ourPaths = new Set([...(this.editedTablePaths.get(panelKey) ?? []), ...alsoPaths]);
     if (ourPaths.size === 0) return [];
     const unsaved: string[] = [];
@@ -2726,6 +2753,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (!ourPaths.has(doc.uri.fsPath)) continue;
       if (await saveDocument(doc, onFailure)) {
         this.ownWriteTracker.recordWrite(doc.uri.fsPath);
+        saved.push(doc.uri.fsPath);
       } else {
         unsaved.push(doc.uri.fsPath);
       }
@@ -2769,12 +2797,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const saveFailures = new Set<SaveFailure>();
     const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
     const unsaved: string[] = [];
-    // A DBML diagram's layout file is always flushed with it: VS Code's undo
-    // stack outlives this panel's `editedTablePaths` (cleared when the canvas
-    // closes), and an undo that rewound the layout must never leave it dirty
-    // in the background, where VS Code would show it as an unsaved tab.
-    const layoutPaths = this.isDbmlDocument(document) ? [layoutFilePathOf(document.uri.fsPath)] : [];
+    // A DBML diagram's layout file is flushed with it when this step rewound
+    // it: VS Code's undo stack outlives this panel's `editedTablePaths`
+    // (cleared when the canvas closes), and an undo that rewound the layout
+    // must never leave it dirty in the background, where VS Code would show
+    // it as an unsaved tab. A layout the step did not touch is never saved:
+    // unsaved hand edits in its own tab are the user's to keep or discard.
+    const layoutPaths = [...(this.undoRewoundLayout.get(panelKey) ?? [])];
+    this.undoRewoundLayout.delete(panelKey);
     const expected = [document.uri.fsPath, ...layoutPaths, ...(this.editedTablePaths.get(panelKey) ?? [])];
+    // The undo of a move rewinds the diagram's one-character anchor (its text
+    // stays as on disk) and the layout file: nothing either tree shows, and
+    // nothing in the table library.
+    const diagramUnchanged = this.isDbmlDocument(document) && document.getText() === this.diskTextOf(document.uri.fsPath);
+    const savedOthers: string[] = [];
     const expectation = this.ownWriteTracker.expectWrite(expected);
     let unsavedTables: string[];
     try {
@@ -2783,7 +2819,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       } else {
         unsaved.push(document.uri.fsPath);
       }
-      unsavedTables = await this.saveDirtyTableDocuments(panelKey, onSaveFailure, layoutPaths);
+      unsavedTables = await this.saveDirtyTableDocuments(panelKey, onSaveFailure, layoutPaths, savedOthers);
     } finally {
       this.ownWriteTracker.settleWrites(expectation);
     }
@@ -2793,6 +2829,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       for (const code of saveFailureCodes(saveFailures, { modelFile, undoRedo: true })) telemetry.error(code);
       void webview.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
     }
+    const layoutOnly = diagramUnchanged && layoutPaths.length > 0 && unsavedTables.length === 0
+      && savedOthers.every((p) => layoutPaths.includes(p));
+    if (layoutOnly) {
+      await this.sendSubjectAreaData(document, webview, panelKey);
+      this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: false, layoutOnly: true });
+      return;
+    }
     // Only what this canvas wrote can have changed (an undo of a create
     // deletes, of a delete creates): those files' parses, and the library
     // index, which is rebuilt from one listing.
@@ -2800,6 +2843,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.tableLibraryService.invalidateIndex();
     await this.sendSubjectAreaData(document, webview, panelKey);
     this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: true });
+  }
+
+  /** What `filePath` holds on disk, or undefined when it cannot be read. */
+  private diskTextOf(filePath: string): string | undefined {
+    try {
+      return fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      return undefined;
+    }
   }
 
   /**

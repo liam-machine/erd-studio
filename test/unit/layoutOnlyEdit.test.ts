@@ -21,6 +21,8 @@ import * as vscode from 'vscode';
 import {
   _appliedEdits,
   _clearMockFileWatchers,
+  _fireDidChangeTextDocument,
+  TextDocumentChangeReason,
   _mockFileWatchers,
   _resetMockWorkspace,
   createMockTextDocument,
@@ -151,6 +153,82 @@ describe('isLayoutOnlyChange', () => {
     expect(isLayoutOnlyChange(base, edges)).toBe(false);
     const noteGone = clone(); noteGone.viewConfig.annotations = [];
     expect(isLayoutOnlyChange(base, noteGone)).toBe(false);
+  });
+});
+
+describe('undo/redo flushes the layout file only when the step rewound it', () => {
+  function openLayoutTab(): ReturnType<typeof createMockTextDocument> {
+    const layoutPath = at('gold/sales.dbdiagram');
+    const layoutDoc = createMockTextDocument(layoutPath, fs.readFileSync(layoutPath, 'utf-8'), { persist: true });
+    (vscode.workspace.textDocuments as unknown[]).push(layoutDoc);
+    return layoutDoc;
+  }
+
+  it('a .dbdiagram with unsaved hand edits the step did not touch is neither saved nor recorded as ours', async () => {
+    const h = await open();
+    const layoutDoc = openLayoutTab();
+    const diskBefore = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8');
+    layoutDoc._setText(diskBefore.replace(/\}\s*$/, ', "handEdit": tr'));
+    const recordWrite = vi.spyOn(h.tracker, 'recordWrite');
+    await h.panel._simulateMessage({ type: 'undo' });
+    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(diskBefore);
+    expect(layoutDoc.isDirty).toBe(true);
+    expect(recordWrite.mock.calls.map((c) => relOf(c[0]))).not.toContain('gold/sales.dbdiagram');
+  });
+
+  it('a .dbdiagram the undo rewound is saved, even when this canvas never wrote it (the step is from before it opened)', async () => {
+    const h = await open();
+    const layoutDoc = openLayoutTab();
+    const rewound = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8').replace('"x": ', '"x": 1');
+    const undo = vscode.commands.registerCommand('undo', async () => {
+      layoutDoc._setText(rewound);
+      await _fireDidChangeTextDocument(layoutDoc, TextDocumentChangeReason.Undo);
+    });
+    try {
+      await h.panel._simulateMessage({ type: 'undo' });
+    } finally {
+      undo.dispose();
+    }
+    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(rewound);
+    expect(layoutDoc.isDirty).toBe(false);
+    // The next undo that does not touch it leaves a later hand edit alone.
+    layoutDoc._setText(`${rewound} `);
+    await h.panel._simulateMessage({ type: 'undo' });
+    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(rewound);
+  });
+
+  it('the undo of a move is layout-only: one send, no library invalidation, no tree refresh; the save\'s dirty-state event sends nothing', async () => {
+    const h = await open();
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+    const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('gold/sales.dbdiagram')) as unknown as ReturnType<typeof createMockTextDocument>;
+    expect(layoutDoc).toBeDefined();
+    const moved = layoutDoc.getText();
+    const undoneText = moved.replace('"x": 420, "y": 220', '"x": 40, "y": 20');
+    const undo = vscode.commands.registerCommand('undo', async () => {
+      // VS Code rewinds the anchor (the .dbml text as on disk) and the layout file.
+      h.document._setText(h.document.getText());
+      await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
+      layoutDoc._setText(undoneText);
+      await _fireDidChangeTextDocument(layoutDoc, TextDocumentChangeReason.Undo);
+    });
+    h.events.length = 0;
+    h.panel._postedMessages.length = 0;
+    const invalidateIndex = vi.spyOn(h.tables, 'invalidateIndex');
+    const invalidatePaths = vi.spyOn(h.tables, 'invalidatePaths');
+    try {
+      await h.panel._simulateMessage({ type: 'undo' });
+    } finally {
+      undo.dispose();
+    }
+    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(undoneText);
+    expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: false, layoutOnly: true }]);
+    expect(invalidateIndex).not.toHaveBeenCalled();
+    expect(invalidatePaths).not.toHaveBeenCalled();
+    const sends = (): number => h.panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
+    expect(sends()).toBe(1);
+    // The save's dirty-state change events (no content change) arrive after the hold: nothing is sent again.
+    await _fireDidChangeTextDocument(h.document, undefined, []);
+    expect(sends()).toBe(1);
   });
 });
 

@@ -61,8 +61,13 @@ const _textDocumentChangeListeners: Array<(e: unknown) => unknown> = [];
  * `document` — e.g. `reason: TextDocumentChangeReason.Undo` for the native
  * undo Cmd+Z runs. Resolves once every (async) listener has finished.
  */
-export async function _fireDidChangeTextDocument(document: unknown, reason?: TextDocumentChangeReason): Promise<void> {
-  await Promise.all([..._textDocumentChangeListeners].map((listener) => listener({ document, contentChanges: [], reason })));
+export async function _fireDidChangeTextDocument(
+  document: unknown,
+  reason?: TextDocumentChangeReason,
+  /** The changes; `[]` is a dirty-state event (a save), as VS Code fires it. Defaults to one text change. */
+  contentChanges: unknown[] = [{ rangeOffset: 0, rangeLength: 0, text: '' }],
+): Promise<void> {
+  await Promise.all([..._textDocumentChangeListeners].map((listener) => listener({ document, contentChanges, reason })));
 }
 
 export enum TextDocumentChangeReason {
