@@ -1561,7 +1561,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const logicalModelChangedSubscription = fileWatcherService.onTableChanged(
     async ({ modelName }) => {
       tableLibraryService.invalidateCache(modelName);
-      await editorProvider.refreshSubjectAreasReferencingTable(modelName);
+      // Batched: a bulk change (git checkout, an assistant's edit) redraws each canvas once.
+      editorProvider.queueTableRefresh(modelName);
       treeProvider.refresh();
       tableLibraryProvider.refresh();
       // Re-evaluate context key so the Model Library view appears if logical-models/ was just created

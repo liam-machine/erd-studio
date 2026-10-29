@@ -531,6 +531,9 @@ export const NAMING_MIGRATION_DECLINED_KEY = 'erdStudio.namingMigrationDeclined'
  * to DBML (native DBML storage, §6.4). Per workspace.
  */
 export const DBML_CONVERSION_DECLINED_KEY = 'erdStudio.dbmlConversionDeclined';
+
+/** How long outside changes to table files are collected into one canvas refresh. */
+export const TABLE_REFRESH_BATCH_MS = 150;
 /** The Convert offer's dialog (§6.4): its title and its two buttons (VS Code adds Cancel, which is Not Now). */
 export const DBML_CONVERSION_OFFER_TITLE = 'Convert this project to DBML?';
 export const DBML_CONVERSION_OFFER_CONVERT = 'Convert…';
@@ -695,6 +698,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * never force-saved on their behalf.
    */
   private readonly editedTablePaths = new Map<string, Set<string>>();
+
+  /** Tables changed outside ERD Studio, waiting for one batched canvas refresh (see queueTableRefresh). */
+  private readonly queuedTableRefresh = new Set<string>();
+  private tableRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Per webview: the log lines its Send Feedback dialog last previewed (the only ones a report may carry). */
   private readonly feedbackLogShown = new WeakMap<vscode.Webview, string[]>();
@@ -3071,10 +3078,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       ...(modelFiles?.save ?? []).map((entry) => entry.model.name),
       ...(modelFiles?.delete ?? []),
     ];
-    for (const name of new Set(touchedModels)) {
-      this.tableLibraryService.invalidateCache(name);
-      await this.refreshSubjectAreasReferencingTable(name, panelKey);
-    }
+    for (const name of new Set(touchedModels)) this.tableLibraryService.invalidateCache(name);
+    await this.refreshSubjectAreasReferencingTables(new Set(touchedModels), panelKey);
     this._onDidWriteSubjectArea.fire({
       uri: document.uri,
       modelLibraryChanged: created.length > 0 || deleted.length > 0,
@@ -3221,9 +3226,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       ...(modelFiles?.save ?? []).map((entry) => entry.model.name),
       ...(modelFiles?.delete ?? []),
     ];
-    for (const name of new Set(touchedModels)) {
-      await this.refreshSubjectAreasReferencingTable(name, panelKey);
-    }
+    await this.refreshSubjectAreasReferencingTables(new Set(touchedModels), panelKey);
     this._onDidWriteSubjectArea.fire({
       uri: document.uri,
       modelLibraryChanged: applied.created.length > 0 || applied.deleted.length > 0,
@@ -4128,7 +4131,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * cross-panel refresh has to be driven from here).
    */
   async refreshSubjectAreasReferencingTable(modelName: string, exceptPanelKey?: string): Promise<void> {
+    await this.refreshSubjectAreasReferencingTables([modelName], exceptPanelKey);
+  }
+
+  /**
+   * {@link refreshSubjectAreasReferencingTable} for several tables at once:
+   * each open canvas naming any of them is sent once, however many of them
+   * it names (a branch switch or an assistant's bulk edit changes hundreds).
+   */
+  async refreshSubjectAreasReferencingTables(modelNames: Iterable<string>, exceptPanelKey?: string): Promise<void> {
     if (this.refreshHolds > 0) return;
+    const wanted = new Set([...modelNames].map(normaliseName));
+    if (wanted.size === 0) return;
+    const label = wanted.size === 1 ? `model "${[...modelNames][0]}"` : `${wanted.size} models`;
     for (const [panelKey, { document, webview }] of Array.from(this.openPanels.entries())) {
       if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey) || this.forgetIfGone(panelKey)) {
         continue;
@@ -4139,22 +4154,37 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         continue;
       }
       try {
-        // Check if this domain references the changed model. The shared
+        // Check if this domain references a changed model. The shared
         // raw membership reader handles v5 name strings, v4/hybrid inline
         // objects, legacy top-level `models` and a DBML diagram's `use`
         // lines — and tolerates junk entries.
         const names = subjectAreaTableNames(document.getText(), document.uri.fsPath);
         if (names === null) throw new Error(`${this.shownSubjectAreaPath(document.uri.fsPath)} does not parse`);
-        const referencesModel = names.some((n) => sameName(n, modelName));
-
-        if (referencesModel) {
+        if (names.some((n) => wanted.has(normaliseName(n)))) {
           await this.sendSubjectAreaData(document, webview, panelKey);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        log.error(`[SemanticEditorProvider] Refresh for model "${modelName}" failed: ${message}`);
+        log.error(`[SemanticEditorProvider] Refresh for ${label} failed: ${message}`);
       }
     }
+  }
+
+  /**
+   * A table file changed outside ERD Studio: refresh the canvases naming it,
+   * together with every other table that changes within
+   * {@link TABLE_REFRESH_BATCH_MS} (one send per canvas for a burst, as the
+   * sidebar trees already batch theirs).
+   */
+  queueTableRefresh(modelName: string): void {
+    this.queuedTableRefresh.add(modelName);
+    if (this.tableRefreshTimer !== undefined) return;
+    this.tableRefreshTimer = setTimeout(() => {
+      this.tableRefreshTimer = undefined;
+      const names = [...this.queuedTableRefresh];
+      this.queuedTableRefresh.clear();
+      void this.refreshSubjectAreasReferencingTables(names);
+    }, TABLE_REFRESH_BATCH_MS);
   }
 
   /**

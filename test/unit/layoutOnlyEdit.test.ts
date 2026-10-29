@@ -29,7 +29,7 @@ import {
   createMockWebviewPanel,
 } from '../__mocks__/vscode';
 import type { MockEditOp, WorkspaceEdit as MockWorkspaceEdit } from '../__mocks__/vscode';
-import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { SemanticEditorProvider, TABLE_REFRESH_BATCH_MS } from '../../src/providers/SemanticEditorProvider';
 import type { SubjectAreaWriteEvent } from '../../src/providers/SemanticEditorProvider';
 import { applyFileWrites, undoAnchor } from '../../src/providers/applyFileWrites';
 import { isLayoutOnlyChange } from '../../src/providers/subjectAreaCodec';
@@ -497,5 +497,25 @@ describe('a canvas whose panel is gone is never refreshed again', () => {
     expect(panelsOf(h.provider).has(h.document.uri.toString())).toBe(false);
     await h.provider.refreshAllOpenSubjectAreas();
     expect(loads(h.panel)).toBe(0);
+  });
+});
+
+describe('outside changes to many table files redraw each canvas once', () => {
+  const loads = (panel: ReturnType<typeof createMockWebviewPanel>): number =>
+    panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
+
+  it('a burst of queued table changes is one refresh per canvas naming any of them, none for a canvas naming none', async () => {
+    const h = await open();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const send = vi.spyOn(h.provider as unknown as { sendSubjectAreaData: (...a: unknown[]) => Promise<void> }, 'sendSubjectAreaData');
+    for (const name of ['fct_order', 'dim_date', 'dim_customer', 'FCT_ORDER', 'not_in_this_diagram']) h.provider.queueTableRefresh(name);
+    expect(send).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(TABLE_REFRESH_BATCH_MS);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(loads(h.panel)).toBe(1);
+    send.mockClear();
+    await h.provider.refreshSubjectAreasReferencingTables(['not_in_this_diagram']);
+    expect(send).not.toHaveBeenCalled();
   });
 });
