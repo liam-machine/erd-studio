@@ -6,6 +6,9 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 // Mock fs before importing FileWatcherService
@@ -671,23 +674,37 @@ describe('FileWatcherService', () => {
       expect(listener).not.toHaveBeenCalled();
     });
 
-    it('consumes the record so the next event for the same file is reported', () => {
-      const listener = vi.fn();
-      service.onTableChanged(listener);
+    it('consumes the record: a late event while the file holds our bytes stays ours, a change to other bytes is reported', () => {
+      const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-watch-'));
+      try {
+        _clearMockFileWatchers();
+        service = new FileWatcherService(ws, '.erd-studio', undefined, tracker);
+        const listener = vi.fn();
+        service.onTableChanged(listener);
+        const modelPath = path.join(ws, '.erd-studio', 'logical-models', 'dim_customer.yml');
+        fs.mkdirSync(path.dirname(modelPath), { recursive: true });
+        fs.writeFileSync(modelPath, 'name: dim_customer\n');
+        tracker.recordWrite(modelPath);
 
-      const modelPath = '/test/workspace/.erd-studio/logical-models/dim_customer.yml';
-      tracker.recordWrite(modelPath);
+        const modelWatcher = _mockFileWatchers[3];
+        modelWatcher._simulateChange(vscode.Uri.file(modelPath));
+        vi.advanceTimersByTime(300);
+        expect(listener).not.toHaveBeenCalled();
 
-      const modelWatcher = _mockFileWatchers[3];
-      modelWatcher._simulateChange(vscode.Uri.file(modelPath));
-      vi.advanceTimersByTime(300);
-      expect(listener).not.toHaveBeenCalled();
+        // Past the grace, a second event of the same save (a host stall) is still ours…
+        vi.advanceTimersByTime(CONSUMED_GRACE_MS);
+        modelWatcher._simulateChange(vscode.Uri.file(modelPath));
+        vi.advanceTimersByTime(300);
+        expect(listener).not.toHaveBeenCalled();
 
-      // Past the grace a duplicate event of the same save gets, the next event is reported.
-      vi.advanceTimersByTime(CONSUMED_GRACE_MS);
-      modelWatcher._simulateChange(vscode.Uri.file(modelPath));
-      vi.advanceTimersByTime(300);
-      expect(listener).toHaveBeenCalledTimes(1);
+        // …and the next change to other bytes is reported.
+        fs.writeFileSync(modelPath, 'name: dim_customer\ndescription: edited elsewhere\n');
+        modelWatcher._simulateChange(vscode.Uri.file(modelPath));
+        vi.advanceTimersByTime(300);
+        expect(listener).toHaveBeenCalledTimes(1);
+      } finally {
+        fs.rmSync(ws, { recursive: true, force: true });
+      }
     });
 
     it('drops an own domain delete from the coalesced delete event', () => {
