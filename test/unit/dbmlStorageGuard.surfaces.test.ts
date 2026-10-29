@@ -14,6 +14,7 @@ import * as vscode from 'vscode';
 import { runDoctor } from '../../src/cli/doctor';
 import { main } from '../../src/cli/index';
 import { DBML_STORAGE_MESSAGE } from '../../src/services/dbmlStorageGuard';
+import { STORAGE_CHECKED_CONTEXT_KEY } from '../../src/providers/dbmlStorageGuardUi';
 import { SelectorsService } from '../../src/services/selectorsService';
 import { DBML_GUARD_ALLOWED_MESSAGE_TYPES, SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { SubjectAreaService } from '../../src/services/domainService';
@@ -296,14 +297,24 @@ describe('package.json', () => {
       expect(dbml[0].contents).not.toContain('Update ERD Studio');
     }
     const noTables = pkg.contributes.viewsWelcome.find((w) => w.contents.startsWith('No tables found'))!;
-    expect(noTables.when).toBe('!erdStudio.dbmlStorage');
+    expect(noTables.when).toBe('erdStudio.storageChecked && !erdStudio.dbmlStorage');
     // A DBML folder without dbt_project.yml (2.0 works in any folder) gets the DBML message, not "No dbt project".
     const noProject = pkg.contributes.viewsWelcome.find((w) => w.contents.startsWith('No dbt project in this folder yet'))!;
-    expect(noProject.when).toBe('!erdStudio.hasDbtProject && !erdStudio.dbmlStorage');
+    expect(noProject.when).toBe('erdStudio.storageChecked && !erdStudio.hasDbtProject && !erdStudio.dbmlStorage');
     const noDiagrams = pkg.contributes.viewsWelcome.find((w) => w.contents.startsWith('No diagrams yet'))!;
-    expect(noDiagrams.when).toBe('erdStudio.hasDbtProject && !erdStudio.dbmlStorage');
+    expect(noDiagrams.when).toBe('erdStudio.storageChecked && erdStudio.hasDbtProject && !erdStudio.dbmlStorage');
     const library = pkg.contributes.views['erd-studio'].find((v) => v.id === 'erdStudio.modelLibrary')!;
     expect(library.when).toBe('erdStudio.hasLogicalModelsDir || erdStudio.dbmlStorage');
+  });
+
+  it('no welcome text that tests for a missing key can match before activation decides the keys', () => {
+    // Before activation every context key is undefined, so `!erdStudio.dbmlStorage`
+    // is true: "No dbt project in this folder yet" flashed over a DBML project.
+    const negating = pkg.contributes.viewsWelcome.filter((w) => /!\s*erdStudio\./.test(w.when ?? ''));
+    expect(negating.length).toBeGreaterThanOrEqual(3);
+    for (const welcome of negating) {
+      expect(welcome.when!.split('&&').map((t) => t.trim()), welcome.contents.slice(0, 40)).toContain(STORAGE_CHECKED_CONTEXT_KEY);
+    }
   });
 
   it('hides the view title buttons that write', () => {

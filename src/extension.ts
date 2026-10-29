@@ -77,7 +77,9 @@ import { exportSubjectAreaFile } from './services/diagramExport';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
 import { saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles } from './providers/dirtyDocuments';
-import { DBML_STORAGE_MESSAGE, DbmlStorageGuard, OPEN_EXTENSION_PAGE_COMMAND, openExtensionPage } from './providers/dbmlStorageGuardUi';
+import {
+  DBML_STORAGE_MESSAGE, DbmlStorageGuard, OPEN_EXTENSION_PAGE_COMMAND, STORAGE_CHECKED_CONTEXT_KEY, openExtensionPage,
+} from './providers/dbmlStorageGuardUi';
 import { detectDbmlStorage } from './services/dbmlStorageGuard';
 
 /**
@@ -562,6 +564,18 @@ function guardDbmlStorageWithoutProject(context: vscode.ExtensionContext): void 
   );
 }
 
+/**
+ * The keys that pick the sidebar welcome text (package.json viewsWelcome).
+ * Called once `erdStudio.dbmlStorage` is published (it stays unset in a
+ * folder with neither a dbt project nor DBML storage), and in this order:
+ * `erdStudio.storageChecked` last, because every welcome that tests a key's
+ * absence also requires it, and VS Code applies setContext calls in order.
+ */
+function publishProjectContextKeys(hasDbtProject: boolean): void {
+  void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', hasDbtProject);
+  void vscode.commands.executeCommand('setContext', STORAGE_CHECKED_CONTEXT_KEY, true);
+}
+
 // ---------------------------------------------------------------------------
 // Shared helper functions
 // ---------------------------------------------------------------------------
@@ -845,8 +859,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const projectResolution = resolveWorkspaceProject(context);
   const workspaceRoot = projectResolution.root;
-  // Picks which sidebar welcome text shows (package.json viewsWelcome).
-  void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', Boolean(workspaceRoot));
   if (!workspaceRoot) {
     telemetry.activation('no_project', false, 0);
     recordDetectedAssistants();
@@ -856,7 +868,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     registerFallbackCommands(context);
     // The 1.9 pre-release and 2.0 work in a folder without dbt_project.yml,
     // and may have stored it as DBML: say that, not "No dbt project".
+    // Before the welcome keys, so "No dbt project" never shows first.
     guardDbmlStorageWithoutProject(context);
+    publishProjectContextKeys(false);
     // A fresh install first activated without a dbt project (usually by
     // clicking the ERD Studio icon) still starts on the Get Started
     // walkthrough: the video, the sample project and how to open one.
@@ -938,7 +952,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ones. Checked fresh on every refusal; a YAML / JSON project is unaffected.
   const dbmlGuard = new DbmlStorageGuard(path.join(workspaceRoot, semanticDir));
   context.subscriptions.push(dbmlGuard);
+  // Publishes erdStudio.dbmlStorage before the welcome keys, so "No diagrams
+  // yet" never shows over a DBML project first.
   dbmlGuard.isActive();
+  publishProjectContextKeys(true);
   dbmlGuard.watch();
   /** registerCommand for a DBML_GUARDED_COMMANDS entry: refused while the project is stored as DBML. */
   const registerGuarded = (command: string, handler: (...args: any[]) => unknown): vscode.Disposable => {

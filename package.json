@@ -328,12 +328,12 @@
       {
         "view": "erdStudio.domainTree",
         "contents": "No dbt project in this folder yet.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video, a sample project to try, and how to open your own.",
-        "when": "!erdStudio.hasDbtProject && !erdStudio.dbmlStorage"
+        "when": "erdStudio.storageChecked && !erdStudio.hasDbtProject && !erdStudio.dbmlStorage"
       },
       {
         "view": "erdStudio.domainTree",
         "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
-        "when": "erdStudio.hasDbtProject && !erdStudio.dbmlStorage"
+        "when": "erdStudio.storageChecked && erdStudio.hasDbtProject && !erdStudio.dbmlStorage"
       },
       {
         "view": "erdStudio.domainTree",
@@ -348,7 +348,7 @@
       {
         "view": "erdStudio.modelLibrary",
         "contents": "No tables found.\n\nTables are stored as YAML files in .erd-studio/logical-models/, grouped into one folder per layer.\n\nAdd tables to a subject area using the ERD editor to create them here.",
-        "when": "!erdStudio.dbmlStorage"
+        "when": "erdStudio.storageChecked && !erdStudio.dbmlStorage"
       },
       {
         "view": "erdStudio.modelLibrary",

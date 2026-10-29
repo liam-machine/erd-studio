@@ -25,6 +25,15 @@ export { DBML_STORAGE_MESSAGE } from '../services/dbmlStorageGuard';
 /** True while the open project is stored as DBML (package.json `when` clauses). */
 export const DBML_STORAGE_CONTEXT_KEY = 'erdStudio.dbmlStorage';
 
+/**
+ * True once activation has decided both `erdStudio.hasDbtProject` and
+ * `erdStudio.dbmlStorage`. Before activation every key is undefined, so a
+ * welcome text that tests for a key's absence (`!erdStudio.dbmlStorage`)
+ * would match and flash — "No dbt project in this folder yet" over a DBML
+ * project — until the keys arrive. Every such welcome also requires this key.
+ */
+export const STORAGE_CHECKED_CONTEXT_KEY = 'erdStudio.storageChecked';
+
 /** Code-only command behind the views' "Open ERD Studio in Extensions" link: opens this extension's page. */
 export const OPEN_EXTENSION_PAGE_COMMAND = 'erdStudio.openExtensionPage';
 

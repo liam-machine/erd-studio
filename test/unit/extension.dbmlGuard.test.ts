@@ -17,6 +17,7 @@ import {
   DBML_STORAGE_MESSAGE,
   OPEN_EXTENSION_PAGE_COMMAND,
   OPEN_EXTENSION_PAGE_BUTTON,
+  STORAGE_CHECKED_CONTEXT_KEY,
   _resetDbmlStorageNoticeForTests,
 } from '../../src/providers/dbmlStorageGuardUi';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
@@ -71,6 +72,10 @@ let registerEditor: ReturnType<typeof vi.spyOn>;
 let createTreeView: ReturnType<typeof vi.spyOn>;
 
 const dbmlWarnings = () => warn.mock.calls.filter((c) => c[0] === DBML_STORAGE_MESSAGE);
+/** The sidebar welcome keys in the order activation set them. */
+const welcomeKeys = () => exec.mock.calls
+  .filter((c) => c[0] === 'setContext' && [DBML_STORAGE_CONTEXT_KEY, 'erdStudio.hasDbtProject', STORAGE_CHECKED_CONTEXT_KEY].includes(c[1] as string))
+  .map((c) => `${c[1]}=${c[2]}`);
 const contextKey = () => exec.mock.calls.filter((c) => c[0] === 'setContext' && c[1] === DBML_STORAGE_CONTEXT_KEY).map((c) => c[2]);
 
 function treeProvider(viewId: string): { getChildren(): unknown[] | undefined } {
@@ -145,6 +150,14 @@ describe('a project a newer ERD Studio stored as DBML', () => {
     expect(contextKey()).toEqual([true]);
     expect(dbmlWarnings()).toEqual([[DBML_STORAGE_MESSAGE, OPEN_EXTENSION_PAGE_BUTTON]]);
     expect(snapshot(project)).toEqual(before);
+  });
+
+  it('decides erdStudio.dbmlStorage before the welcome keys, so "No diagrams yet" never shows first', async () => {
+    context = makeContext(project);
+    await activate(context);
+    expect(welcomeKeys().slice(0, 3)).toEqual([
+      'erdStudio.dbmlStorage=true', 'erdStudio.hasDbtProject=true', 'erdStudio.storageChecked=true',
+    ]);
   });
 
   it('offers no harness install or update: those skill files describe YAML / JSON', async () => {
@@ -247,12 +260,21 @@ describe('a folder a newer ERD Studio stored as DBML, with no dbt_project.yml', 
     expect(snapshot(project)).toEqual(before);
   });
 
+  it('decides erdStudio.dbmlStorage before the welcome keys, so "No dbt project" never shows first', async () => {
+    context = makeContext(project);
+    await activate(context);
+    expect(welcomeKeys()).toEqual([
+      'erdStudio.dbmlStorage=true', 'erdStudio.hasDbtProject=false', 'erdStudio.storageChecked=true',
+    ]);
+  });
+
   it('a plain folder with no dbt project and no DBML gets the no-project welcome as before', async () => {
     fs.rmSync(path.join(project, '.erd-studio'), { recursive: true, force: true });
     context = makeContext(project);
     await activate(context);
     expect(contextKey()).toEqual([]);
     expect(dbmlWarnings()).toEqual([]);
+    expect(welcomeKeys()).toEqual(['erdStudio.hasDbtProject=false', 'erdStudio.storageChecked=true']);
   });
 });
 
@@ -266,6 +288,9 @@ describe('a YAML / JSON project is unaffected', () => {
     context = makeContext(project);
     await activate(context);
     expect(contextKey().every((v) => v === false)).toBe(true);
+    expect(welcomeKeys().slice(0, 3)).toEqual([
+      'erdStudio.dbmlStorage=false', 'erdStudio.hasDbtProject=true', 'erdStudio.storageChecked=true',
+    ]);
     expect(dbmlWarnings()).toEqual([]);
     expect(treeProvider('erdStudio.domainTree').getChildren()!.length).toBeGreaterThan(0);
     expect(treeProvider('erdStudio.modelLibrary').getChildren()!.length).toBeGreaterThan(0);
