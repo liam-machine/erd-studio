@@ -308,6 +308,121 @@ describe('undo/redo flushes the layout file only when the step rewound it', () =
   });
 });
 
+describe('a Cmd+Z that arrives while the canvas is still flushing the last one', () => {
+  /**
+   * Live at 1,100 tables: two Cmd+Z 78 ms apart after moves. The second
+   * undo's events reached the listener while the first one's flush held
+   * `pendingUpdates` (it had saved, and was redrawing): they were dropped,
+   * so nothing saved the rewound .dbml and .dbdiagram, and VS Code's
+   * TextFileEditorTracker opened the dirty .dbdiagram as a tab 800 ms later.
+   */
+  it('is flushed after it, so neither file is left dirty and the layout holds the second rewind', async () => {
+    const h = await open();
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 520, y: 320 } } } });
+    const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('gold/sales.dbdiagram')) as unknown as ReturnType<typeof createMockTextDocument>;
+    expect(layoutDoc).toBeDefined();
+    const second = layoutDoc.getText();
+    const first = second.replace('"x": 520, "y": 320', '"x": 420, "y": 220');
+    const original = second.replace('"x": 520, "y": 320', '"x": 40, "y": 20');
+    expect(first).not.toBe(second);
+    const nativeUndo = async (text: string): Promise<void> => {
+      // VS Code rewinds the anchor (the .dbml keeps its text, but is dirty) and the layout file.
+      h.document._setText(h.document.getText());
+      await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
+      layoutDoc._setText(text);
+      await _fireDidChangeTextDocument(layoutDoc, TextDocumentChangeReason.Undo);
+    };
+    // The second Cmd+Z lands while the first one's flush redraws the canvas.
+    const provider = h.provider as unknown as { sendSubjectAreaData: (...args: unknown[]) => Promise<unknown> };
+    const send = provider.sendSubjectAreaData.bind(h.provider);
+    let secondFired = false;
+    const spy = vi.spyOn(provider, 'sendSubjectAreaData').mockImplementation(async (...args: unknown[]) => {
+      if (!secondFired) {
+        secondFired = true;
+        await nativeUndo(original);
+      }
+      return send(...args);
+    });
+    await nativeUndo(first);
+    await vi.waitFor(() => expect(secondFired).toBe(true), { timeout: 2000, interval: 10 });
+    await vi.waitFor(() => {
+      expect(layoutDoc.isDirty).toBe(false);
+      expect(h.document.isDirty).toBe(false);
+    }, { timeout: 2000, interval: 10 });
+    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(original);
+    expect(spy.mock.calls.length).toBe(2);
+    expect(h.errors()).toEqual([]);
+  });
+
+  it('a rewind that lands while the last flush is saving the layout is saved, though VS Code then reports the layout saved', async () => {
+    // Live, the same two quick Cmd+Z: the second rewound the .dbdiagram while
+    // the first flush's save of it was in flight. VS Code wrote the earlier
+    // text and kept its own copy dirty, but its saved event marked the
+    // extension's copy clean (and no dirty event followed), so a flush that
+    // skips clean documents left it dirty, and VS Code opened it as a tab.
+    const h = await open();
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 520, y: 320 } } } });
+    const layoutPath = at('gold/sales.dbdiagram');
+    const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === layoutPath) as unknown as ReturnType<typeof createMockTextDocument>;
+    const second = layoutDoc.getText();
+    const first = second.replace('"x": 520, "y": 320', '"x": 420, "y": 220');
+    const original = second.replace('"x": 520, "y": 320', '"x": 40, "y": 20');
+    const nativeUndo = async (text: string): Promise<void> => {
+      h.document._setText(h.document.getText());
+      await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
+      layoutDoc._setText(text);
+      await _fireDidChangeTextDocument(layoutDoc, TextDocumentChangeReason.Undo);
+    };
+    let vsCodeDirty = false;
+    let inFlight = true;
+    layoutDoc.save = async () => {
+      if (inFlight) {
+        inFlight = false;
+        const snapshot = layoutDoc.getText();
+        await nativeUndo(original);
+        fs.writeFileSync(layoutPath, snapshot, 'utf-8');
+        vsCodeDirty = true;
+        layoutDoc.isDirty = false;
+        return true;
+      }
+      fs.writeFileSync(layoutPath, layoutDoc.getText(), 'utf-8');
+      vsCodeDirty = false;
+      layoutDoc.isDirty = false;
+      return true;
+    };
+    await nativeUndo(first);
+    await vi.waitFor(() => expect(inFlight).toBe(false), { timeout: 2000, interval: 10 });
+    await vi.waitFor(() => expect(vsCodeDirty).toBe(false), { timeout: 2000, interval: 10 });
+    expect(fs.readFileSync(layoutPath, 'utf-8')).toBe(original);
+    expect(h.document.isDirty).toBe(false);
+    expect(h.errors()).toEqual([]);
+  });
+
+  it('the toolbar\'s own Undo is flushed once, by itself', async () => {
+    const h = await open();
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+    const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('gold/sales.dbdiagram')) as unknown as ReturnType<typeof createMockTextDocument>;
+    const undoneText = layoutDoc.getText().replace('"x": 420, "y": 220', '"x": 40, "y": 20');
+    const undo = vscode.commands.registerCommand('undo', async () => {
+      h.document._setText(h.document.getText());
+      await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
+      layoutDoc._setText(undoneText);
+      await _fireDidChangeTextDocument(layoutDoc, TextDocumentChangeReason.Undo);
+    });
+    h.panel._postedMessages.length = 0;
+    try {
+      await h.panel._simulateMessage({ type: 'undo' });
+    } finally {
+      undo.dispose();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(undoneText);
+    expect(h.panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded')).toHaveLength(1);
+  });
+});
+
 describe('a drag on a DBML diagram writes the layout file alone', () => {
   it('one edit: the .dbdiagram and a one-character undo anchor on the .dbml, whose bytes stay', async () => {
     const h = await open();

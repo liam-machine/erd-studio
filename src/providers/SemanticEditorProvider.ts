@@ -678,6 +678,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private readonly heldPanels = new Set<string>();
   private readonly undoWhileHeld = new Set<string>();
+  /** Panels whose toolbar Undo / Redo command is rewinding the documents (it flushes them itself). */
+  private readonly toolbarUndoRedo = new Set<string>();
   /** The move-to-library offer is made at most once per session (#126). */
   private relationshipMoveOffered = false;
   /** The naming migration's offer (#182): at most once per session, before the relationship offers. */
@@ -2096,12 +2098,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.undoRewoundLayout.set(panelKey, rewound);
       }
       if (this.pendingUpdates.get(panelKey)) {
-        // Pending only because a hold marked it (Convert, a bulk change), not
-        // for an edit of this canvas: a native undo/redo it would flush below
-        // is flushed when the hold releases, never dropped.
-        if (heldByHold && undoRedo && (e.document.uri.toString() === document.uri.toString() || layoutRewound
-          || (webviewPanel.active && this.editedTablePaths.get(panelKey)?.has(e.document.uri.fsPath)))) {
+        const ours = undoRedo && (e.document.uri.toString() === document.uri.toString() || layoutRewound
+          || (webviewPanel.active && this.editedTablePaths.get(panelKey)?.has(e.document.uri.fsPath)));
+        if (!ours) return;
+        if (heldByHold) {
+          // Pending only because a hold marked it (Convert, a bulk change), not
+          // for an edit of this canvas: a native undo/redo it would flush below
+          // is flushed when the hold releases, never dropped.
           this.undoWhileHeld.add(panelKey);
+        } else if (!this.toolbarUndoRedo.has(panelKey)) {
+          // A Cmd+Z while this canvas's own edit or flush is under way (a
+          // second Cmd+Z during the first one's save, or one straight after a
+          // drag): flushed once that work is done, never dropped. Dropped, it
+          // left the .dbml and the .dbdiagram dirty, and VS Code opened the
+          // dirty layout file as a tab 800 ms later. The toolbar's own
+          // Undo / Redo flushes what its command rewinds.
+          this.scheduleNativeUndoFlush(document, webviewPanel.webview, panelKey);
         }
         return;
       }
@@ -2797,10 +2809,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<string[]> {
     const ourPaths = new Set([...(this.editedTablePaths.get(panelKey) ?? []), ...alsoPaths]);
     if (ourPaths.size === 0) return [];
+    const rewound = new Set(alsoPaths);
     const unsaved: string[] = [];
     for (const doc of vscode.workspace.textDocuments) {
-      if (!doc.isDirty) continue;
       if (!ourPaths.has(doc.uri.fsPath)) continue;
+      // A file an undo rewound (the layout) is saved even when this host
+      // thinks it clean: a rewind that lands while an earlier save of it is
+      // in flight leaves VS Code's copy dirty, yet that save's event marks
+      // this host's copy saved, and no dirty event follows. Left unsaved,
+      // VS Code opens it as a tab. Saving a clean document writes nothing.
+      if (!doc.isDirty && !rewound.has(doc.uri.fsPath)) continue;
       if (await saveDocument(doc, onFailure)) {
         this.ownWriteTracker.recordWrite(doc.uri.fsPath);
         saved.push(doc.uri.fsPath);
@@ -2828,7 +2846,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.refuseIfSubjectAreaFileGone(document);
     this.pendingUpdates.set(panelKey, true);
     try {
-      await vscode.commands.executeCommand(command);
+      // What this command rewinds is flushed just below; a Cmd+Z that
+      // arrives during that flush is the user's and gets its own.
+      this.toolbarUndoRedo.add(panelKey);
+      try {
+        await vscode.commands.executeCommand(command);
+      } finally {
+        this.toolbarUndoRedo.delete(panelKey);
+      }
       await this.flushUndoRedo(document, webview, panelKey);
     } finally {
       this.pendingUpdates.delete(panelKey);
@@ -2927,6 +2952,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.nativeUndoTimers.delete(panelKey);
       void this.queueEdit(panelKey, async () => {
         if (this.disposedWebviews.has(webview)) return;
+        // Work outside the edit queue still holds this canvas (a hold, or the
+        // toolbar's Undo / Redo): flush after it, never under it.
+        if (this.pendingUpdates.get(panelKey)) {
+          if (this.heldPanels.has(panelKey)) this.undoWhileHeld.add(panelKey);
+          else this.scheduleNativeUndoFlush(document, webview, panelKey);
+          return;
+        }
         this.pendingUpdates.set(panelKey, true);
         try {
           await this.flushUndoRedo(document, webview, panelKey);
