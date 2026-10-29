@@ -2827,6 +2827,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // stays as on disk) and the layout file: nothing either tree shows, and
     // nothing in the table library.
     const diagramUnchanged = this.isDbmlDocument(document) && document.getText() === this.diskTextOf(document.uri.fsPath);
+    // An undo VS Code refused ("changes were made to …") rewinds nothing: every
+    // edit anchors the diagram, so a step that ran leaves it dirty.
+    const nothingRewound = !document.isDirty && layoutPaths.length === 0;
     const savedOthers: string[] = [];
     const expectation = this.ownWriteTracker.expectWrite(expected);
     let unsavedTables: string[];
@@ -2846,7 +2849,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       for (const code of saveFailureCodes(saveFailures, { modelFile, undoRedo: true })) telemetry.error(code);
       void webview.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
     }
-    const layoutOnly = diagramUnchanged && layoutPaths.length > 0 && unsavedTables.length === 0
+    const layoutOnly = diagramUnchanged && (layoutPaths.length > 0 || nothingRewound) && unsavedTables.length === 0
       && savedOthers.every((p) => layoutPaths.includes(p));
     if (layoutOnly) {
       await this.sendSubjectAreaData(document, webview, panelKey);
@@ -3302,10 +3305,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.ownWriteTracker.recordWrite(to);
       }
       const ourPaths = this.editedTablePaths.get(panelKey) ?? new Set<string>();
+      // The diagram's layout file is left out: an undo/redo saves it only when
+      // that step rewound it (`undoRewoundLayout`), never because an earlier
+      // move wrote it — its tab may hold the user's unsaved hand edits since.
+      const layoutPath = this.isDbmlDocument(document) ? layoutFilePathOf(fsPath) : undefined;
       for (const uri of applied.replaced) {
-        // Remember what WE edited for this diagram, layout files included, so
-        // an undo/redo only ever flushes those.
-        ourPaths.add(uri.fsPath);
+        // Remember what WE edited for this diagram, so an undo/redo only ever
+        // flushes those.
+        if (uri.fsPath !== layoutPath) ourPaths.add(uri.fsPath);
         if (await saveDocumentByUri(uri, onSaveFailure)) {
           this.ownWriteTracker.recordWrite(uri.fsPath);
         } else {
@@ -3313,7 +3320,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           if (this.isLibraryPath(uri.fsPath)) modelFileUnsaved = true;
         }
       }
-      for (const filePath of applied.created) ourPaths.add(filePath);
+      for (const filePath of applied.created) if (filePath !== layoutPath) ourPaths.add(filePath);
       if (ourPaths.size > 0) this.editedTablePaths.set(panelKey, ourPaths);
       if (unsaved.length > 0) {
         for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);

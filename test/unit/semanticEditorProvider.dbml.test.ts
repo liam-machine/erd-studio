@@ -23,9 +23,11 @@ import * as vscode from 'vscode';
 
 import {
   _appliedEdits,
+  _fireDidChangeTextDocument,
   _resetMockWorkspace,
   createMockTextDocument,
   createMockWebviewPanel,
+  TextDocumentChangeReason,
 } from '../__mocks__/vscode';
 import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { SubjectAreaService } from '../../src/services/domainService';
@@ -149,13 +151,14 @@ function expectWrote(r: Run, paths: string[]): void {
   // Every file still compiles everywhere, with nothing new to report.
   const before = new Set(diagnosticsOf(r.before));
   expect(diagnosticsOf(r.after).filter((d) => !before.has(d))).toEqual([]);
-  // Undo flushes, and the watchers skip, every path this edit wrote.
+  // Undo flushes, and the watchers skip, every path this edit wrote (a
+  // diagram's layout file only when the undo step rewound it).
   const edited = [...((r.provider as unknown as { editedTablePaths: Map<string, Set<string>> }).editedTablePaths.values())]
     .flatMap((set) => [...set]).map(relOf);
   for (const p of paths) {
     const deleted = !(p in r.after);
     expect(r.recorded, `own write for ${p}`).toContain(p);
-    if (!deleted && p !== 'gold/sales.dbml' && p !== 'silver/staging.dbml') expect(edited, `editedTablePaths has ${p}`).toContain(p);
+    if (!deleted && p !== 'gold/sales.dbml' && p !== 'silver/staging.dbml' && !p.endsWith('.dbdiagram')) expect(edited, `editedTablePaths has ${p}`).toContain(p);
   }
   // Nothing outside the written paths changed.
   for (const file of new Set([...Object.keys(r.before), ...Object.keys(r.after)])) {
@@ -474,14 +477,24 @@ describe('undo (§5.8): the toolbar Undo flushes every file the canvas wrote, la
     await panel._simulateMessage(message);
     const changed = Object.keys(before).filter((p) => snapshot()[p] !== before[p]);
     expect(changed.length).toBeGreaterThan(0);
-    // VS Code's undo rewinds each edited document in memory (the mock's `undo` command does nothing):
-    // do that by hand, then press the toolbar's Undo, which must save every one of them.
-    for (const p of changed) {
+    // VS Code's undo rewinds each edited document in memory, each change an
+    // Undo-reason event; the toolbar's Undo must then save every one of them.
+    const docs = changed.map((p) => {
       const doc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at(p)) as unknown as { _setText(t: string): void } | undefined;
       expect(doc, `${p} was edited through an open document`).toBeDefined();
-      doc!._setText(before[p]);
+      return [p, doc!] as const;
+    });
+    const undo = vscode.commands.registerCommand('undo', async () => {
+      for (const [p, doc] of docs) {
+        doc._setText(before[p]);
+        await _fireDidChangeTextDocument(doc, TextDocumentChangeReason.Undo);
+      }
+    });
+    try {
+      await panel._simulateMessage({ type: 'undo' });
+    } finally {
+      undo.dispose();
     }
-    await panel._simulateMessage({ type: 'undo' });
     expect(snapshot()).toEqual(before);
   });
 });

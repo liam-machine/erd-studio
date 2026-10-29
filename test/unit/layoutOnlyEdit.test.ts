@@ -197,6 +197,30 @@ describe('undo/redo flushes the layout file only when the step rewound it', () =
     expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(rewound);
   });
 
+  it('after a move, an undo VS Code refuses (the .dbdiagram was hand-edited since) leaves the hand edit unsaved and refreshes nothing', async () => {
+    const h = await open();
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+    const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('gold/sales.dbdiagram')) as unknown as ReturnType<typeof createMockTextDocument>;
+    expect(layoutDoc).toBeDefined();
+    const diskBefore = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8');
+    layoutDoc._setText(`${diskBefore} `);
+    h.events.length = 0;
+    const recordWrite = vi.spyOn(h.tracker, 'recordWrite');
+    const invalidateIndex = vi.spyOn(h.tables, 'invalidateIndex');
+    // "Could not undo 'Workspace Edit' across all files": nothing rewinds.
+    const refused = vscode.commands.registerCommand('undo', async () => {});
+    try {
+      await h.panel._simulateMessage({ type: 'undo' });
+    } finally {
+      refused.dispose();
+    }
+    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(diskBefore);
+    expect(layoutDoc.isDirty).toBe(true);
+    expect(recordWrite.mock.calls.map((c) => relOf(c[0]))).not.toContain('gold/sales.dbdiagram');
+    expect(invalidateIndex).not.toHaveBeenCalled();
+    expect(h.events.filter((e) => !e.layoutOnly)).toEqual([]);
+  });
+
   it('the undo of a move is layout-only: one send, no library invalidation, no tree refresh; the save\'s dirty-state event sends nothing', async () => {
     const h = await open();
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
@@ -256,10 +280,11 @@ describe('a drag on a DBML diagram writes the layout file alone', () => {
     expect(invalidatePaths).not.toHaveBeenCalled();
     expect(invalidateCache).not.toHaveBeenCalled();
     expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: false, layoutOnly: true }]);
-    // Saved, not left dirty, and the layout is one of this canvas's files for Undo.
+    // Saved, not left dirty; the layout is not remembered for Undo, which
+    // saves it only when its own step rewound it.
     expect(vscode.workspace.textDocuments.filter((d) => d.isDirty)).toEqual([]);
     const edited = (h.provider as unknown as { editedTablePaths: Map<string, Set<string>> }).editedTablePaths.get(h.document.uri.toString());
-    expect([...(edited ?? [])].map(relOf)).toContain('gold/sales.dbdiagram');
+    expect([...(edited ?? [])].map(relOf)).not.toContain('gold/sales.dbdiagram');
   });
 
   it('a note moved in the same drag, and a note resized, are layout-only too', async () => {
