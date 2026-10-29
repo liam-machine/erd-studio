@@ -77,6 +77,8 @@ Edit on the canvas or in the files, by hand or with AI, and the other follows: E
 
 **Can teammates on an older ERD Studio open it?** A YAML/JSON project, yes, as long as nobody converts it. A DBML project (a converted one, or a new one) needs ERD Studio 2.0 or later (or the 1.9 pre-release): an older version shows no diagrams and an empty Table Library. Agree on the version before you convert, and run **Set Up My AI Helper** again afterwards so your AI assistant writes DBML too.
 
+**Something is slow or not working. Where do I look?** Run **ERD Studio: Show Logs**. The **ERD Studio** channel in the Output view says what ERD Studio did and how long it took: opening each diagram, saving a moved table, each step of a conversion, and any file it could not read, with its line. **Send Feedback** can add the recent lines to your report if you tick **Include the recent ERD Studio log**; check them first, as they can name your tables.
+
 ## Work with your AI assistant
 
 Run **ERD Studio: Set Up My AI Helper** (also on the Welcome tab). It finds the assistants on your computer and teaches them ERD Studio's files. Then ask:
