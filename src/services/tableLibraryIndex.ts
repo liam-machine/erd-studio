@@ -12,9 +12,10 @@
  * directory's mtime, so a lookup re-stats that handful of paths and rebuilds
  * the index when any differs — an AI assistant writing files, a `git
  * checkout` or another window is seen without any watcher event. A
- * directory changed within {@link RACY_MS} of a build is "racy" (a file
- * system's clock may give two changes in one tick the same mtime), and the
- * index is rebuilt on its next use until no directory is.
+ * directory changed within {@link RACY_MS} of a build ({@link COARSE_RACY_MS}
+ * on a whole-second file system) is "racy" (a file system's clock may give
+ * two changes in one tick the same mtime), and the index is rebuilt on its
+ * next use until no directory is ({@link isRacyBuild}).
  *
  * No `vscode`: the CLI bundles it.
  */
@@ -118,11 +119,30 @@ function statSignature(filePath: string): { sig: string; mtimeMs: number } {
 /**
  * How long after a directory changed an index built from it is not trusted
  * on its signature alone: a change in the same clock tick could leave the
- * mtime as it was. Covers coarse kernel clocks (Linux's jiffy); a file
- * system with whole-second times (HFS+, FAT) is covered by the watchers,
- * which invalidate explicitly.
+ * mtime as it was. Covers coarse kernel clocks (Linux's jiffy).
  */
 export const RACY_MS = 50;
+
+/**
+ * The window for a file system that records whole-second (HFS+) or
+ * two-second (FAT) times, seen as a newest mtime on a whole second.
+ */
+export const COARSE_RACY_MS = 2000;
+
+/**
+ * Whether an index built at `startedAt` from directories whose newest mtime
+ * is `newestMtimeMs` must be listed again on its next use: the newest change
+ * falls inside the racy window around the build. A whole-second mtime widens
+ * the window to {@link COARSE_RACY_MS}. An mtime well ahead of the clock (a
+ * VM or WSL2 clock behind the machine that stamped the files, a network
+ * share, a restored archive) is outside the window and still a valid
+ * signature: any later change stamps the directory again.
+ */
+export function isRacyBuild(newestMtimeMs: number, startedAt: number): boolean {
+  if (newestMtimeMs <= 0) return false;
+  const window = newestMtimeMs % 1000 === 0 ? COARSE_RACY_MS : RACY_MS;
+  return Math.abs(newestMtimeMs - startedAt) <= window;
+}
 
 /** A table-file candidate in one directory, for the §3.4 lookup. */
 interface Candidate {
@@ -336,7 +356,7 @@ export class TableLibraryIndex {
       lookup: this.lookupOf(v5, v6, v6.exists && !v6IsLayer),
     };
     this.data = data;
-    this.validation = { paths, sigs, racy: newest >= startedAt - RACY_MS };
+    this.validation = { paths, sigs, racy: isRacyBuild(newest, startedAt) };
     this.builds++;
     indexLog.debug(`Library index built: ${data.tableFiles.size} table file(s), ${paths.length} folder(s) watched, ${Date.now() - startedAt} ms`);
     return data;

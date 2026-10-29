@@ -160,6 +160,19 @@ describe('Table Library tree with the real library', () => {
     provider.dispose();
   });
 
+  it('validates the library index once per render (and once per background slice), not once per row', async () => {
+    const { subjectAreaService, tableLibraryService } = services();
+    const provider = new TableLibraryTreeProvider(tableLibraryService, subjectAreaService, root, '.erd-studio');
+    // Just written, so every build is racy: an index used outside a snapshot is listed again on each lookup.
+    const before = tableLibraryService.indexBuilds;
+    nodes(provider);
+    expect(tableLibraryService.indexBuilds - before).toBe(1);
+    await settle();
+    // The background read of the 21 unread files is one slice here, and the broken file re-renders the tree once.
+    expect(tableLibraryService.indexBuilds - before).toBeLessThanOrEqual(3);
+    provider.dispose();
+  });
+
   it('renders nothing again when every file it had not read is fine', async () => {
     fs.rmSync(path.join(semantic, 'tables/gold/broken.dbml'));
     const { subjectAreaService, tableLibraryService } = services();

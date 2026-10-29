@@ -202,7 +202,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     if (cold) this.setLoading(true);
     const start = Date.now();
     try {
-      const children = this.rootChildren();
+      // One check of the library index for the whole render, not one per row.
+      const children = this.withIndexSnapshot(() => this.rootChildren());
       treeLog.debug(`Listed ${plural(children.length, 'row')} in ${elapsedMs(start)} ms${cold ? ' (library read from scratch)' : ''}`);
       return children;
     } finally {
@@ -296,6 +297,11 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
   // Private helpers
   // -------------------------------------------------------------------------
 
+  /** Run `fn` against one validated library index (when the service offers one). */
+  private withIndexSnapshot<T>(fn: () => T): T {
+    return typeof this.tableLibraryService.withIndexSnapshot === 'function' ? this.tableLibraryService.withIndexSnapshot(fn) : fn();
+  }
+
   /** Whether `filePath` is in `logical-models/` (the v5 library). */
   private isInV5Library(filePath: string): boolean {
     const rel = path.relative(path.resolve(this.tableLibraryService.getTablesDir()), path.resolve(filePath));
@@ -359,9 +365,11 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     const step = (): void => {
       this.unreadCheck = undefined;
       const started = Date.now();
-      while (queue.length > 0 && Date.now() - started < UNREAD_SLICE_MS) {
-        if (this.tableLibraryService.getTableFileError(queue.shift()!)) broken = true;
-      }
+      this.withIndexSnapshot(() => {
+        while (queue.length > 0 && Date.now() - started < UNREAD_SLICE_MS) {
+          if (this.tableLibraryService.getTableFileError(queue.shift()!)) broken = true;
+        }
+      });
       if (queue.length > 0) {
         this.unreadCheck = setTimeout(step, 0);
       } else if (broken) {

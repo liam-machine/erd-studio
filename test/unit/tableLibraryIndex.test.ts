@@ -15,7 +15,7 @@ import * as path from 'path';
 
 import { LOGICAL_MODELS_DIR, TABLES_DIR, classifySemanticFile } from '@erd-studio/core';
 import { TableLibraryService, hasTablesLibrary, tablesDirIsLayer } from '../../src/services/logicalModelService';
-import { RACY_MS, TableLibraryIndex } from '../../src/services/tableLibraryIndex';
+import { COARSE_RACY_MS, RACY_MS, TableLibraryIndex, isRacyBuild } from '../../src/services/tableLibraryIndex';
 
 let root: string;
 let semantic: string;
@@ -334,6 +334,48 @@ describe('the index sees changes made outside ERD Studio, with no invalidate cal
     expect(index.isCold()).toBe(false);
     index.invalidate();
     expect(index.isCold()).toBe(true);
+  });
+
+  it('a directory dated ahead of the host clock is trusted on its signature, not rebuilt on every lookup', () => {
+    for (let i = 0; i < 20; i++) write(`tables/gold/t${i}.dbml`, dbmlTable(`t${i}`));
+    ageLibrary();
+    // A VM or WSL2 clock behind the machine that stamped the files, or a restored archive.
+    const future = new Date(Date.now() + 120_000);
+    fs.utimesSync(path.join(semantic, 'tables', 'gold'), future, future);
+    const lib = service();
+    lib.findTableFile('t0');
+    const builds = lib.indexBuilds;
+    for (let i = 0; i < 20; i++) expect(lib.findTableFile(`t${i}`)).not.toBeNull();
+    expect(lib.indexBuilds).toBe(builds);
+    expect(lib.indexIsCold()).toBe(false);
+    // A later change still re-stamps the directory and is seen.
+    write('tables/gold/t_new.dbml', dbmlTable('t_new'));
+    expect(lib.findTableFile('t_new')).not.toBeNull();
+  });
+
+  it('isRacyBuild: inside the window either side of the build, wider for whole-second mtimes', () => {
+    const now = 1_800_000_000_123;
+    expect(isRacyBuild(now - RACY_MS + 1, now)).toBe(true);
+    expect(isRacyBuild(now - RACY_MS - 1, now)).toBe(false);
+    expect(isRacyBuild(now + RACY_MS - 1, now)).toBe(true);
+    expect(isRacyBuild(now + 120_000, now)).toBe(false);
+    // A whole-second volume floors the mtime: a change 0.9 s ago in the same second is racy.
+    expect(isRacyBuild(1_800_000_000_000, 1_800_000_000_900)).toBe(true);
+    expect(isRacyBuild(1_800_000_000_000, 1_800_000_000_000 + COARSE_RACY_MS + 1)).toBe(false);
+    expect(isRacyBuild(0, now)).toBe(false);
+  });
+
+  it('on a whole-second volume, a same-second rename after a build is still seen', () => {
+    write('logical-models/old_name.yml', yamlTable('old_name'));
+    const lib = path.join(semantic, LOGICAL_MODELS_DIR);
+    const sec = Math.floor(Date.now() / 1000);
+    fs.utimesSync(lib, sec, sec);
+    const svc = service();
+    expect(svc.listTableNames()).toEqual(['old_name']);
+    fs.renameSync(path.join(lib, 'old_name.yml'), path.join(lib, 'new_name.yml'));
+    fs.utimesSync(lib, sec, sec);
+    expect(svc.listTableNames()).toEqual(['new_name']);
+    expect(svc.findTableFile('new_name')).not.toBeNull();
   });
 });
 
