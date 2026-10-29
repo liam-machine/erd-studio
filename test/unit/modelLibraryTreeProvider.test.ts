@@ -227,6 +227,8 @@ describe('TableLibraryTreeProvider', () => {
       expect(item.label).toBe('dim_date');
       expect(item.description).toBe('(unused)');
       expect(item.tooltip).toBe('Not used in any diagram');
+      // A screen reader hears the table's name, not only the tooltip.
+      expect(item.accessibilityInformation).toEqual({ label: 'dim_date, not used in any diagram' });
       expect((item.iconPath as ThemeIcon).id).toBe('warning');
       expect(item.collapsibleState).toBe(TreeItemCollapsibleState.None);
       expect(item.contextValue).toBe('logicalModel');
@@ -462,6 +464,7 @@ describe('TableLibraryTreeProvider', () => {
       expect(item.contextValue).toBe('logicalModelDuplicate');
       expect((item.iconPath as ThemeIcon).id).toBe('error');
       expect(item.description).toBe('(duplicate — ignored)');
+      expect(item.accessibilityInformation).toEqual({ label: 'dim_customer, duplicate, ignored' });
       expect(String(item.tooltip)).toContain(winner);
       // Clicking opens the duplicate itself, so the user can fix it.
       expect(item.command?.command).toBe('vscode.open');
@@ -523,6 +526,7 @@ describe('TableLibraryTreeProvider: a model file that needs fixing (#164)', () =
     const item = itemFor(provider, 'dim_customer');
     expect((item.iconPath as ThemeIcon).id).toBe('error');
     expect(item.description).toBe('(YAML error — line 4)');
+    expect(item.accessibilityInformation).toEqual({ label: 'dim_customer, YAML error — line 4' });
   });
 
   it('calls a .dbml table file\'s error a DBML error, and keeps the YAML and unreadable wording', () => {

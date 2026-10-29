@@ -155,6 +155,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       item.tooltip = `Another file already defines "${element.name}" and is the one diagrams use:\n${element.shadowedBy}\n\n` +
         'Table names are unique across all folders, as dbt model names are. Use "Give Duplicate Table Its Own Name" ' +
         `to make this copy "${element.folder ? `${element.folder}_` : ''}${element.name}" with the warehouse name (alias) "${element.name}".`;
+      item.accessibilityInformation = { label: `${element.name}, duplicate, ignored` };
       item.resourceUri = vscode.Uri.file(element.filePath);
       item.command = openTableCommand(item.resourceUri);
       return item;
@@ -173,6 +174,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     if (isOrphan) {
       item.description = '(unused)';
       item.tooltip = 'Not used in any diagram';
+      // A plain-string tooltip is what a screen reader announces: name the table first.
+      item.accessibilityInformation = { label: `${element.name}, not used in any diagram` };
     } else {
       const count = element.referencingDomains.length;
       item.description = `${count} ${count === 1 ? 'diagram' : 'diagrams'}`;
@@ -325,6 +328,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       item.description = error.mergeConflict ? `(merge conflict${at})` : error.kind === 'read' ? '(can\'t be read)' : `(${error.kind.startsWith('dbml') ? 'DBML' : 'YAML'} error${at})`;
       item.tooltip = 'This file can\'t be read, so the table is missing from every diagram. Open it to fix it.';
     }
+    item.accessibilityInformation = { label: `${element.name}, ${String(item.description).replace(/^\(|\)$/g, '')}` };
     item.resourceUri = vscode.Uri.file(element.filePath);
     const at0 = new vscode.Position(error.line !== undefined && error.line >= 1 ? error.line - 1 : 0, 0);
     item.command = openTableCommand(item.resourceUri, { selection: new vscode.Range(at0, at0), preview: false });
