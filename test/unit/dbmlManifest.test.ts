@@ -2,7 +2,7 @@
  * The manifest contributions native DBML storage reads through (§5.6 of
  * docs/plans/native-dbml-storage.md): the canvas opens `.dbml` diagrams in a
  * layer folder, and a `.dbdiagram` layout file opens as JSON (with
- * highlighting, no new language and no schema). Stands in for the dev-host
+ * highlighting, no language of its own and no schema). Stands in for the dev-host
  * check "a .dbdiagram file opens as JSON with highlighting" (§9.7 check 6).
  */
 
@@ -23,9 +23,12 @@ describe('package.json for native DBML storage', () => {
     ]);
   });
 
-  it('.dbdiagram files are the json language (no new language, no grammar)', () => {
-    expect(pkg.contributes.languages).toEqual([{ id: 'json', extensions: ['.dbdiagram'] }]);
-    expect(pkg.contributes.grammars).toBeUndefined();
+  it('.dbdiagram files are the json language (no language or grammar of their own); only .dbml is dbml', () => {
+    const languages = pkg.contributes.languages as Array<{ id: string; extensions?: string[] }>;
+    expect(languages.filter((l) => l.extensions?.includes('.dbdiagram'))).toEqual([{ id: 'json', extensions: ['.dbdiagram'] }]);
+    expect(languages.map((l) => l.id)).toEqual(['json', 'dbml']);
+    expect(languages.find((l) => l.id === 'dbml')?.extensions).toEqual(['.dbml']);
+    expect(pkg.contributes.grammars.map((g: { language: string }) => g.language)).toEqual(['dbml']);
   });
 
   it('no JSON or YAML schema is contributed for .dbml or .dbdiagram files', () => {

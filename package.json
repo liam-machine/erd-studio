@@ -516,8 +516,32 @@
         "extensions": [
           ".dbdiagram"
         ]
+      },
+      {
+        "id": "dbml",
+        "aliases": [
+          "DBML"
+        ],
+        "extensions": [
+          ".dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json"
       }
     ],
+    "grammars": [
+      {
+        "language": "dbml",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[dbml]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      }
+    },
     "menus": {
       "view/item/context": [
         {
@@ -812,7 +836,9 @@
     "jsdom": "^25.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
   },
   "dependencies": {
     "@dbml/parse": "11.0.0",
