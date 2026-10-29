@@ -4079,8 +4079,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.lastLoadError.set(errorKey, payload.message);
     telemetry.error('domainLoad');
     telemetry.error(subjectAreaLoadErrorCode(failure));
-    hostErrorLog.record('sendDomainData', err ?? payload.message);
-    log.error(`[SemanticEditorProvider] Failed to load domain: ${payload.message}`);
+    if (failure === 'missing') {
+      // The canvas's file was removed (an Undo of Convert, a delete or a
+      // `git checkout` outside ERD Studio): expected, and the screen says
+      // so. Not an error: no error line, nothing for a bug report.
+      log.info(`[SemanticEditorProvider] ${payload.message} The canvas shows the "deleted or renamed" screen.`);
+    } else {
+      hostErrorLog.record('sendDomainData', err ?? payload.message);
+      log.error(`[SemanticEditorProvider] Failed to load domain: ${payload.message}`);
+    }
     this.post(webview, { type: 'error', payload });
   }
 
