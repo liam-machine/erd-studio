@@ -1050,7 +1050,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 
   <section class="gs-noproject" aria-label="Open a folder">
     <h2 class="gs-sample__title">Open the folder your data model lives in</h2>
-    <p class="gs-sample__text">Any folder works: your design is saved as DBML, an open format, in <code>.erd-studio/</code>, next to your code. If the folder holds a dbt project (<code>dbt_project.yml</code>), ERD Studio also shows what dbt built.</p>
+    <p class="gs-sample__text">Any folder works: your design is saved in <code>.erd-studio/</code>, next to your code (a new project as DBML, an open format; a project from an older ERD Studio keeps its YAML and JSON files). If the folder holds a dbt project (<code>dbt_project.yml</code>), ERD Studio also shows what dbt built.</p>
     <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">Open a folder&hellip;</button>
   </section>
   <section class="gs-sample" aria-label="Try the sample project">
@@ -1140,7 +1140,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
             <button class="gs-btn" type="button" data-action="refreshStatus">Re-check</button>
           </div>
           <p class="gs-get" data-when="none" hidden>Also supported: ${otherLinks}</p>
-          <p class="gs-recheck" data-when="found" hidden>Use another one? Install it, then <button class="gs-link" type="button" data-action="refreshStatus">Re-check</button>. Already installed but not listed? Command Palette &rarr; <em>ERD Studio: Install AI Coding Harness</em> &rarr; <em>Agent Skills</em>.</p>
+          <p class="gs-recheck" data-when="found" hidden>Use another one? Install it, then <button class="gs-link" type="button" data-action="refreshStatus">Re-check</button>. Already installed but not listed? Command Palette &rarr; <em>ERD Studio: Install AI Helper Files…</em> &rarr; <em>Agent Skills</em>.</p>
         </div>
       </section>
 

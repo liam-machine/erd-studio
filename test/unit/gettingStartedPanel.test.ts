@@ -305,7 +305,7 @@ describe('panel script', () => {
       expect(visible('.gs-launch__row')).toEqual([]);
       expect(visible('[data-step="start"] .gs-btn')).toEqual([]);
       expect(visible('[data-step="start"] .gs-step__hint').join()).toContain('First press Set up my AI helper above: it installs the guide your assistant runs.');
-      expect(visible('[data-step="assistant"] .gs-recheck').join()).toContain('ERD Studio: Install AI Coding Harness → Agent Skills');
+      expect(visible('[data-step="assistant"] .gs-recheck').join()).toContain('ERD Studio: Install AI Helper Files… → Agent Skills');
       send({ type: 'status', payload: { ...STATUS, assistants: ['claude'], helper: 'ready' } });
       expect(visible('.gs-launch__name')).toEqual(['Claude Code']);
       expect(visible('[data-step="start"] .gs-step__hint').join()).not.toContain('First press');
@@ -322,6 +322,13 @@ describe('panel script', () => {
     } finally {
       dom.window.close();
     }
+  });
+
+  it('the open-a-folder card says a new project is DBML and an older one keeps YAML/JSON, not "saved as DBML" for every folder', () => {
+    const html = buildGettingStartedHtml(HTML_INPUT);
+    const card = html.slice(html.indexOf('<section class="gs-noproject"'), html.indexOf('<section class="gs-sample"'));
+    expect(card).toContain('a new project as DBML, an open format; a project from an older ERD Studio keeps its YAML and JSON files');
+    expect(card).not.toContain('saved as DBML');
   });
 
   it('offers the sample project: a card with no project, a small link with one', () => {

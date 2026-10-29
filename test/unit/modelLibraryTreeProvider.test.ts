@@ -226,7 +226,7 @@ describe('TableLibraryTreeProvider', () => {
       const item = provider.getTreeItem(node);
       expect(item.label).toBe('dim_date');
       expect(item.description).toBe('(unused)');
-      expect(item.tooltip).toBe('Not referenced by any subject area');
+      expect(item.tooltip).toBe('Not used in any diagram');
       expect((item.iconPath as ThemeIcon).id).toBe('warning');
       expect(item.collapsibleState).toBe(TreeItemCollapsibleState.None);
       expect(item.contextValue).toBe('logicalModel');
@@ -242,7 +242,7 @@ describe('TableLibraryTreeProvider', () => {
 
       const item = provider.getTreeItem(node);
       expect(item.label).toBe('dim_customer');
-      expect(item.description).toBe('2 subject areas');
+      expect(item.description).toBe('2 diagrams');
       expect((item.iconPath as ThemeIcon).id).toBe('symbol-class');
       expect(item.tooltip).toBeInstanceOf(MarkdownString);
       expect((item.tooltip as MarkdownString).value).toContain('customer-360');
@@ -258,7 +258,7 @@ describe('TableLibraryTreeProvider', () => {
       };
 
       const item = provider.getTreeItem(node);
-      expect(item.description).toBe('1 subject area');
+      expect(item.description).toBe('1 diagram');
     });
 
     it('sets click command to open the .yml file', () => {
@@ -542,7 +542,7 @@ describe('TableLibraryTreeProvider: a model file that needs fixing (#164)', () =
     const provider = providerWith({ dim_customer: { kind: 'yamlScalar', line: 4 } });
     const item = itemFor(provider, 'fct_orders');
     expect((item.iconPath as ThemeIcon).id).toBe('symbol-class');
-    expect(item.description).toBe('2 subject areas');
+    expect(item.description).toBe('2 diagrams');
   });
 });
 
@@ -589,11 +589,37 @@ describe('TableLibraryTreeProvider: native DBML storage (§5.5)', () => {
     const yml: TableFileEntry = { name: 'dim_old', folder: '', filePath: `${DIR}/dim_old.yml`, storage: 'yaml' };
     const mixed = providerFor([dbmlEntry('fct_order', 'gold'), yml], 'mixed');
     const items = tableNodes(mixed).map((n) => mixed.getTreeItem(n));
-    expect(items.find((i) => i.label === 'fct_order')?.description).toBe('1 subject area · DBML');
+    expect(items.find((i) => i.label === 'fct_order')?.description).toBe('1 diagram · DBML');
     expect(items.find((i) => i.label === 'dim_old')?.description).toBe('(unused) · YAML');
     expect(items.find((i) => i.label === 'dim_old')?.command?.command).toBe('vscode.open');
 
     const dbml = providerFor([dbmlEntry('fct_order', 'gold')], 'dbml');
-    expect(dbml.getTreeItem(tableNodes(dbml)[0]).description).toBe('1 subject area');
+    expect(dbml.getTreeItem(tableNodes(dbml)[0]).description).toBe('1 diagram');
+  });
+
+  it('lists a flat DBML library as the library itself, never as a "tables/" folder', () => {
+    const provider = providerFor([dbmlEntry('fct_order'), dbmlEntry('dim_date')], 'dbml');
+    const roots = provider.getChildren() as TableLibraryNode[];
+    expect(roots.map((n) => n.type)).toEqual(['model', 'model']);
+    expect(roots.map((n) => (n as TableLibraryTableNode).name)).toEqual(['dim_date', 'fct_order']);
+  });
+
+  it('shows a foldered DBML library\'s folders by layer, with the real tables/ path in the tooltip', () => {
+    const provider = new TableLibraryTreeProvider(
+      createMockTableLibraryServiceFromEntries([dbmlEntry('fct_order', 'gold'), dbmlEntry('dim_date')]),
+      createMockSubjectAreaService([SALES]),
+      '/project',
+      '.erd-studio',
+      () => LAYERS,
+    );
+    const roots = provider.getChildren() as TableLibraryNode[];
+    expect(roots.map((n) => (n.type === 'folder' ? `folder:${n.folder}` : n.name))).toEqual(['folder:gold', 'dim_date']);
+    const gold = roots[0] as TableLibraryFolderNode;
+    expect(gold.filePath).toBe(`${TABLES}/gold`);
+    const item = provider.getTreeItem(gold);
+    expect(item.label).toBe('Gold');
+    // The only library: no "· tables/" tag, and never "logical-models/" in the tooltip.
+    expect(item.description).toBe('1 table');
+    expect(item.tooltip).toBe('tables/gold/ — tables created in Gold diagrams');
   });
 });

@@ -1,7 +1,7 @@
 {
   "name": "erd-studio",
   "displayName": "ERD Studio",
-  "description": "Logical data modeling in Git: draw ERDs in VS Code, saved as DBML, an open format your AI assistant can read. Import from dbdiagram.io, compare with dbt.",
+  "description": "Logical data modeling in Git: draw ERDs in VS Code as plain files your AI assistant can read. New projects are DBML, an open format; YAML/JSON projects keep working. Import from dbdiagram.io, compare with dbt.",
   "version": "1.7.2",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
@@ -173,7 +173,7 @@
       },
       {
         "command": "erdStudio.installCodingHarness",
-        "title": "Install AI Coding Harness",
+        "title": "Install AI Helper Files…",
         "category": "ERD Studio",
         "icon": "$(hubot)"
       },
@@ -373,7 +373,13 @@
       },
       {
         "view": "erdStudio.modelLibrary",
-        "contents": "No tables found.\n\nEach table is a file in .erd-studio/ you can commit.\n\nAdd tables to a subject area using the ERD editor to create them here."
+        "contents": "Loading tables…",
+        "when": "erdStudio.tablesLoading"
+      },
+      {
+        "view": "erdStudio.modelLibrary",
+        "contents": "No tables yet.\n\nEach table is a file in .erd-studio/ you can commit.\n\nOpen a diagram and add a table on the canvas, or ask your AI assistant to add one: it shows here, ready to use in any diagram.",
+        "when": "!erdStudio.tablesLoading"
       }
     ],
     "walkthroughs": [
@@ -415,7 +421,7 @@
             "when": "!erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/new-diagram.svg",
-              "altText": "A new diagram with its first table, saved as DBML files in .erd-studio."
+              "altText": "A new diagram with its first table, and the DBML files a new project keeps it in under .erd-studio."
             },
             "completionEvents": [
               "onCommand:erdStudio.createDomain",
@@ -622,6 +628,10 @@
           "when": "erdStudio.storage != dbml"
         },
         {
+          "command": "erdStudio.migrateToV5",
+          "when": "erdStudio.storage != dbml"
+        },
+        {
           "command": "erdStudio.migrateToTableNaming",
           "when": "erdStudio.storage != dbml"
         },
@@ -666,7 +676,7 @@
         "erdStudio.semanticDir": {
           "type": "string",
           "default": ".erd-studio",
-          "description": "Relative path to ERD Studio subject area files within the project. Changing this requires a window reload."
+          "description": "Folder, relative to the project, that holds ERD Studio's tables and diagrams. Changing this requires a window reload."
         },
         "erdStudio.claudeSync.skipPermissions": {
           "type": "boolean",
@@ -758,7 +768,7 @@
         "dbtSemantic.semanticDir": {
           "type": "string",
           "markdownDeprecationMessage": "Deprecated: use `#erdStudio.semanticDir#` instead. Legacy values are still honoured.",
-          "description": "Relative path to ERD Studio subject area files within the project"
+          "description": "Folder, relative to the project, that holds ERD Studio's tables and diagrams"
         }
       }
     }

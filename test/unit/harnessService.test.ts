@@ -181,7 +181,7 @@ describe('HarnessService', () => {
       expect(content).toContain('read `erd.storage`');
       expect(content).toContain('follow `.agents/skills/erd-studio/DBML.md`');
       expect(content).toContain('follow `.agents/skills/erd-studio/LEGACY.md`');
-      expect(content).toContain('if they are missing, ask the user to run **ERD Studio: Install AI Coding Harness** → OpenAI Codex');
+      expect(content).toContain('if they are missing, ask the user to run **ERD Studio: Install AI Helper Files…** → OpenAI Codex');
       // The two long parts are not inline.
       expect(content).not.toContain('# ERD Studio — the DBML format');
       expect(content).not.toContain('# ERD Studio — YAML and JSON files');
@@ -867,8 +867,8 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 36 (native DBML storage, with erd_unlinked_tables and pending relationships; 35 shipped in pre-release 1.9.0)', () => {
-      expect(HARNESS_VERSION).toBe('36');
+    it('is 37 (native DBML storage; 36 shipped in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
+      expect(HARNESS_VERSION).toBe('37');
     });
 
     it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {

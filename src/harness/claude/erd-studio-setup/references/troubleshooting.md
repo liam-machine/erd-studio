@@ -89,7 +89,7 @@ read `.agents/skills/` (Copilot and Cursor also read `.claude/skills/`). Usual c
 3. The skill was installed for a different assistant (only `.claude/skills/` exists, but they use
    Codex or Gemini CLI) → run **ERD Studio: Set Up My AI Helper** again; it installs for every
    assistant it detects. If it still does not detect theirs (an assistant installed where VS Code
-   cannot see it), run **ERD Studio: Install AI Coding Harness** instead and tick
+   cannot see it), run **ERD Studio: Install AI Helper Files…** instead and tick
    "Agent Skills — GitHub Copilot, Codex, Gemini CLI, Cursor".
 4. Gemini CLI has no per-skill command — ask it in a sentence: "Set up ERD Studio for this
    project."

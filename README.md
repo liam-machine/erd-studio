@@ -69,6 +69,14 @@ Table fct_order [grain: 'One row per order'] {
 
 Edit on the canvas or in the files, by hand or with AI, and the other follows: ERD Studio edits the files in place, so your comments and hand edits stay ([file format reference](docs/semantic-domain-json-reference.md)). A project from before ERD Studio 2.0 keeps its YAML and JSON files and works as before; run **ERD Studio: Convert Project to DBML** to move it over.
 
+### Common questions
+
+**Do I have to convert my project to DBML?** No. A YAML/JSON project from before 2.0 keeps working, and its new tables and diagrams are still written as YAML and JSON. Only a new project starts as DBML. **ERD Studio: Convert Project to DBML** is up to you: it shows every change before it writes anything.
+
+**How do I go back?** Straight after converting, **Edit > Undo** (with the diagram Convert opens in front) puts every file back. After that, use Git: commit before you convert, and revert that commit to return. A converted project needs ERD Studio 2.0 or later (or the 1.9 pre-release).
+
+**Can teammates on an older ERD Studio open it?** A YAML/JSON project, yes, as long as nobody converts it. A DBML project (a converted one, or a new one) needs ERD Studio 2.0 or later (or the 1.9 pre-release): an older version shows no diagrams and an empty Table Library. Agree on the version before you convert, and run **Set Up My AI Helper** again afterwards so your AI assistant writes DBML too.
+
 ## Work with your AI assistant
 
 Run **ERD Studio: Set Up My AI Helper** (also on the Welcome tab). It finds the assistants on your computer and teaches them ERD Studio's files. Then ask:

@@ -182,7 +182,7 @@ export type ReadDbmlResult =
  */
 export const IMPORT_MULTI_FILE_MESSAGE =
   // Plain text: a VS Code notification renders no Markdown.
-  'This DBML file imports other files (use lines), so it is part of a multi-file project, such as another ERD Studio 2.0 project. ' +
+  'This DBML file imports other files (use lines), so it is part of a multi-file project, such as another ERD Studio project stored as DBML. ' +
   'Import reads one self-contained file: open that project\'s diagram in ERD Studio and use Export Diagram… → DBML (rich), then import the exported file.';
 
 /**
