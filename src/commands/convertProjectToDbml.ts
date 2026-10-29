@@ -43,7 +43,7 @@ import {
 import { dbmlConversionIsEmpty, describeDbmlConversion, isDbmlSelfCheckRefusal, planDbmlConversion } from '../services/dbmlConversion';
 import type { DbmlConversionPhase, DbmlConversionPlan } from '../services/dbmlConversion';
 import { buildConvertReview } from '../services/dbmlConversionReview';
-import { dbmlConversionFingerprint, readDbmlConversionInput } from '../services/dbmlConversionFiles';
+import { dbmlConversionFingerprint, dbmlConversionOfferFingerprint, readDbmlConversionInput } from '../services/dbmlConversionFiles';
 import type { FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
 import { ownWrites } from '../services/ownWriteTracker';
@@ -90,6 +90,38 @@ export interface ConvertProjectDeps {
    * every written file make one refresh, not thousands; returns the release.
    */
   holdViewRefreshes?: () => () => void;
+  /**
+   * Where Convert remembers a project it can do nothing more for (refused,
+   * or only files to fix): the offer stays silent until a file changes
+   * ({@link dbmlConversionGoesNowhere}). The workspace's state.
+   */
+  workspaceState?: Pick<vscode.Memento, 'get' | 'update'>;
+}
+
+/** The fingerprint of a project Convert last stopped on with nothing it could write (refused, or only files to fix). */
+export const DBML_CONVERSION_DEAD_END_KEY = 'erdStudio.dbmlConversionDeadEnd';
+
+/**
+ * Whether Convert is known to go nowhere for the project as it is: the last
+ * run was refused or could only list files to fix, and no file Convert reads
+ * changed since (§6.4: the offer is not made again until they are fixed).
+ */
+export function dbmlConversionGoesNowhere(
+  state: Pick<vscode.Memento, 'get'> | undefined,
+  workspaceRoot: string,
+  semanticDir: string,
+): boolean {
+  const remembered = state?.get<string>(DBML_CONVERSION_DEAD_END_KEY);
+  return typeof remembered === 'string' && remembered === dbmlConversionOfferFingerprint(workspaceRoot, semanticDir);
+}
+
+/** Remember the project as it is now as a dead end for the offer (or forget one). */
+async function rememberDeadEnd(deps: ConvertProjectDeps, deadEnd: boolean): Promise<void> {
+  try {
+    await deps.workspaceState?.update(DBML_CONVERSION_DEAD_END_KEY, deadEnd ? dbmlConversionOfferFingerprint(deps.workspaceRoot, deps.semanticDir) : undefined);
+  } catch (err) {
+    convertLog.warn('could not remember the outcome for the offer:', err);
+  }
 }
 
 /** The user cancelled while Convert was reading or planning: nothing was written. */
@@ -363,6 +395,7 @@ async function runConversion(
   // What stops it, in the panel: Check Again plans again; Close (or closing the tab) ends the run.
   const refused = async (): Promise<ConvertProjectOutcome> => {
     telemetry.feature('convertToDbmlRefused');
+    await rememberDeadEnd(deps, true);
     convertLog.warn(`Stopped before writing: ${plural(plan.refusals.length, 'problem')}, ${plural(plan.leftAsIs.length, 'file')} left as is`);
     for (const refusal of plan.refusals) convertLog.warn(`Problem: ${refusal}`);
     for (const left of plan.leftAsIs) convertLog.info(`Left as is: ${abs(left.path)}${left.line !== undefined ? ` line ${left.line}` : ''}: ${left.problem}`);
@@ -390,6 +423,7 @@ async function runConversion(
   // 4. Nothing to convert. Files left as they are until fixed (D26/D27) are listed, with Check Again.
   if (dbmlConversionIsEmpty(plan) && plan.leftAsIs.length > 0) return refused();
   if (dbmlConversionIsEmpty(plan)) {
+    await rememberDeadEnd(deps, true);
     void vscode.window.showInformationMessage(deps.tableLibraryService.projectStorage() === 'dbml'
       ? 'This project is already stored as DBML.'
       : `${CONVERT_TO_DBML_TITLE}: there is nothing to convert (no YAML tables and no JSON diagrams).`);
@@ -583,6 +617,9 @@ async function applyConversion(
     release();
     await deps.onConverted([...writes.map((w) => w.path)]);
     releaseViews();
+    // Files left as they are until fixed: the project is mixed, and the offer
+    // would only lead back here until one of them changes.
+    await rememberDeadEnd(deps, plan.leftAsIs.length > 0);
     telemetry.feature('convertToDbml');
     progress.counted = true;
     if (unsaved.length > 0) {

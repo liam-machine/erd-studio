@@ -26,6 +26,8 @@ import {
   CONVERT_WHAT_LINE,
   convertedUndoSentence,
   convertProjectToDbml,
+  DBML_CONVERSION_DEAD_END_KEY,
+  dbmlConversionGoesNowhere,
   planProjectDbmlConversion,
   type ConvertProjectDeps,
 } from '../../src/commands/convertProjectToDbml';
@@ -39,7 +41,7 @@ import {
 } from '../../src/providers/SemanticEditorProvider';
 import { MIGRATE_TO_V5_COMMAND_TITLE, UNSAVED_TAG, type ConvertReviewView } from '../../src/services/dbmlConversionReview';
 import { SubjectAreaService } from '../../src/services/domainService';
-import { countDbmlConversionCandidates, dbmlConversionFingerprint } from '../../src/services/dbmlConversionFiles';
+import { FINGERPRINT_RACY_MS, countDbmlConversionCandidates, dbmlConversionFingerprint, dbmlConversionOfferFingerprint } from '../../src/services/dbmlConversionFiles';
 import * as dbmlConversion from '../../src/services/dbmlConversion';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
@@ -104,8 +106,19 @@ function answerConvert(other: string | undefined = undefined) {
   return vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation(async () => other as never);
 }
 
+/** Every file under `dir` dated a minute ago, as a checked-out project is: its stamps are not racy (FINGERPRINT_RACY_MS). */
+function ageFiles(dir: string): void {
+  const past = new Date(Date.now() - 60_000);
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) ageFiles(p);
+    else fs.utimesSync(p, past, past);
+  }
+}
+
 function useFixture(name: string): void {
   fs.cpSync(path.join(CORE_FIXTURES, name, '.erd-studio'), erd, { recursive: true });
+  ageFiles(erd);
 }
 
 beforeEach(() => {
@@ -626,7 +639,7 @@ describe('the canvas offer (§6.4)', () => {
     const run = vi.fn(async () => true);
     const namingRun = vi.fn(async () => true);
     const candidates = vi.fn(() => countDbmlConversionCandidates(root, '.erd-studio'));
-    provider.setDbmlConversion(candidates, run);
+    provider.setDbmlConversion(candidates, run, () => dbmlConversionGoesNowhere(context.workspaceState, root, '.erd-studio'));
     provider.setNamingMigration(
       () => ({ moves: [{ from: 'logical-models/x.yml', to: 'tables/x.yml', keys: [] }], rewrites: [], refusals: [], v4SubjectAreas: [], notes: [] }),
       () => 'v5',
@@ -700,6 +713,53 @@ describe('the canvas offer (§6.4)', () => {
       'Your project keeps working as it is — converting is optional. It is stored as DBML, but 3 files are YAML or JSON ' +
         "(probably written by an AI helper set up with an older ERD Studio, or by a teammate on one). Convert them to DBML? (You'll see the full list first.)" }));
     expect(feature).toHaveBeenCalledWith('convertToDbmlNotNow');
+  });
+
+  it('is not made again after a Convert that left files to fix, until one of those files changes', async () => {
+    useFixture('composite-and-self');
+    const broken = path.join(erd, 'logical-models', 'gold', 'employee.yml');
+    const good = fs.readFileSync(broken, 'utf-8');
+    fs.writeFileSync(broken, `${good}name: twice\n`);
+    const state = new Map<string, unknown>();
+    const workspaceState = { get: (k: string) => state.get(k), update: async (k: string, v: unknown) => { state.set(k, v); } };
+    answerConvert();
+    expect(await convertProjectToDbml(deps({ workspaceState: workspaceState as never }))).toBe('converted');
+    expect(state.get(DBML_CONVERSION_DEAD_END_KEY)).toEqual(expect.any(String));
+    // Still mixed: the listing alone would offer it, but it would only lead back to the file to fix.
+    expect(countDbmlConversionCandidates(root, '.erd-studio').files).toBeGreaterThan(0);
+    expect(dbmlConversionGoesNowhere(workspaceState, root, '.erd-studio')).toBe(true);
+    const diagram = fs.readdirSync(path.join(erd, 'gold')).find((f) => f.endsWith('.dbml'))!;
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    await openWith(state).open(`gold/${diagram}`);
+    expect(offers(info)).toEqual([]);
+    // Fixed: offered again.
+    fs.writeFileSync(broken, good);
+    info.mockClear();
+    await openWith(state).open(`gold/${diagram}`);
+    expect(offers(info)).toHaveLength(1);
+  });
+
+  it('a run that can only list files to fix is remembered; a conversion that leaves nothing to fix forgets it', async () => {
+    useFixture('composite-and-self');
+    const broken = path.join(erd, 'logical-models', 'gold', 'employee.yml');
+    const good = fs.readFileSync(broken, 'utf-8');
+    fs.writeFileSync(broken, `${good}name: twice\n`);
+    const state = new Map<string, unknown>();
+    const workspaceState = { get: (k: string) => state.get(k), update: async (k: string, v: unknown) => { state.set(k, v); } };
+    answerConvert();
+    await convertProjectToDbml(deps({ workspaceState: workspaceState as never }));
+    // Run again: only the file to fix is left, so the panel can only list it (refused).
+    state.clear();
+    vi.mocked(ConvertToDbmlPanel.show).mockRestore();
+    answerPanel((panel) => panel._simulateMessage({ type: 'cancel' }));
+    expect(await convertProjectToDbml(deps({ workspaceState: workspaceState as never }))).toBe('refused');
+    expect(dbmlConversionGoesNowhere(workspaceState, root, '.erd-studio')).toBe(true);
+    // Fixed and converted: nothing is left, and the memory is dropped.
+    fs.writeFileSync(broken, good);
+    vi.mocked(ConvertToDbmlPanel.show).mockRestore();
+    answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+    expect(await convertProjectToDbml(deps({ workspaceState: workspaceState as never }))).toBe('converted');
+    expect(state.get(DBML_CONVERSION_DEAD_END_KEY)).toBeUndefined();
   });
 
   it('is not made when the conversion would be refused, and the naming offer is then still made', async () => {
@@ -940,9 +1000,41 @@ describe('the cheap offer check and the fingerprint', () => {
     fs.rmSync(path.join(erd, 'gold', 'new.json'));
     expect(fp()).not.toBe(added);
     // A file Convert never reads (outside the semantic dir) changes nothing.
+    ageFiles(erd);
     const now = fp();
     fs.writeFileSync(path.join(root, 'README.md'), 'hello');
     expect(fp()).toBe(now);
+  });
+
+  it('a file written within the racy window makes a fingerprint no later one equals (a coarse clock may not have moved)', () => {
+    useFixture('composite-and-self');
+    const yml = path.join(erd, 'logical-models', 'gold', fs.readdirSync(path.join(erd, 'logical-models', 'gold'))[0]);
+    // A whole-second stamp, as HFS+ or FAT records it, a moment ago.
+    const second = Math.floor(Date.now() / 1000);
+    fs.utimesSync(yml, second, second);
+    const before = dbmlConversionFingerprint(root, '.erd-studio');
+    // The same size, the same stamp: only the racy rule can see it.
+    fs.writeFileSync(yml, fs.readFileSync(yml, 'utf-8').replace(/INT/, 'BIG'));
+    fs.utimesSync(yml, second, second);
+    expect(dbmlConversionFingerprint(root, '.erd-studio')).not.toBe(before);
+    // Older than the window: trusted.
+    const old = new Date(Date.now() - FINGERPRINT_RACY_MS - 1000);
+    fs.utimesSync(yml, old, old);
+    expect(dbmlConversionFingerprint(root, '.erd-studio')).toBe(dbmlConversionFingerprint(root, '.erd-studio'));
+  });
+
+  it('the offer\'s fingerprint ignores layout files and DBML stamps, and sees a YAML or JSON file change', () => {
+    fs.cpSync(path.resolve(__dirname, '../fixtures/dbml-convert/mixed/.erd-studio'), erd, { recursive: true });
+    const fp = (): string => dbmlConversionOfferFingerprint(root, '.erd-studio');
+    const first = fp();
+    fs.utimesSync(path.join(erd, 'gold', 'sales.dbml'), new Date(), new Date(Date.now() + 5000));
+    fs.writeFileSync(path.join(erd, 'gold', 'sales.dbdiagram'), '{}');
+    expect(fp()).toBe(first);
+    fs.utimesSync(path.join(erd, 'silver', 'visits.json'), new Date(), new Date(Date.now() + 5000));
+    const json = fp();
+    expect(json).not.toBe(first);
+    fs.appendFileSync(path.join(erd, 'tables', 'fct_visit.yml'), '# fixed\n');
+    expect(fp()).not.toBe(json);
   });
 });
 

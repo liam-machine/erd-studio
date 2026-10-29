@@ -51,7 +51,7 @@ import { layoutFilePathOf, normaliseSubjectAreaDocument, parseTableText, toTable
 import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
-import { convertProjectToDbml } from './commands/convertProjectToDbml';
+import { convertProjectToDbml, dbmlConversionGoesNowhere } from './commands/convertProjectToDbml';
 import { countDbmlConversionCandidates } from './services/dbmlConversionFiles';
 import { RefreshGate } from './services/refreshGate';
 import { projectNamingOf } from './services/projectNaming';
@@ -1688,6 +1688,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     migrateToV5,
     holdRefreshes: () => editorProvider.holdRefreshes(),
     holdViewRefreshes: () => viewRefreshes.hold(),
+    workspaceState: context.workspaceState,
     onConverted: async (paths) => {
       for (const p of paths) {
         if (p.endsWith('.yml') || p.endsWith('.json')) convertedSourcesHere.add(path.resolve(p));
@@ -1704,6 +1705,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   editorProvider.setDbmlConversion(
     () => countDbmlConversionCandidates(workspaceRoot, semanticDir),
     async () => (await convertToDbml()) === 'converted',
+    () => dbmlConversionGoesNowhere(context.workspaceState, workspaceRoot, semanticDir),
   );
 
   // After Draw from dbt or Import DBML writes a new diagram and its tables.

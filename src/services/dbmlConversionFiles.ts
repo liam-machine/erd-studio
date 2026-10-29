@@ -90,23 +90,65 @@ function walkConversionFiles(semanticRoot: string, tablesIsLayer: boolean, visit
 }
 
 /**
+ * How close to the moment a fingerprint is taken a file's modification time
+ * may be before its stamp is not trusted: a file system that records whole
+ * seconds (HFS+) or two seconds (FAT, exFAT, some network mounts) can give
+ * two writes in one tick the same time, and a same-size edit the same stamp.
+ */
+export const FINGERPRINT_RACY_MS = 3000;
+
+/**
  * A fingerprint of everything Convert reads: each file's path, modification
  * time and size, and whether `tables/` is a layer. Equal fingerprints mean
  * the plan made from the first still holds, so Convert applies it without
  * planning again; any file added, removed or written (by ERD Studio, git, an
- * AI helper or another window) changes it.
+ * AI helper or another window) changes it. A file written within
+ * {@link FINGERPRINT_RACY_MS} of `now` (git's "racy clean" rule) makes the
+ * fingerprint one no later one equals, so Convert plans again rather than
+ * trust a stamp a coarse clock may not have moved.
  */
-export function dbmlConversionFingerprint(workspaceRoot: string, semanticDir: string): string {
+export function dbmlConversionFingerprint(workspaceRoot: string, semanticDir: string, now: number = Date.now()): string {
   const semanticRoot = path.join(workspaceRoot, semanticDir);
   const tablesIsLayer = fs.existsSync(path.join(semanticRoot, TABLES_DIR)) && tablesDirIsLayer(semanticRoot);
   const hash = crypto.createHash('sha256');
   hash.update(`tablesIsLayer:${tablesIsLayer}\n`);
+  let racy = false;
   walkConversionFiles(semanticRoot, tablesIsLayer, (rel) => {
     let stamp = 'unreadable';
     try {
       const stat = fs.statSync(path.join(semanticRoot, ...rel.split('/')));
       stamp = `${stat.mtimeMs}:${stat.size}`;
+      if (stat.mtimeMs > now - FINGERPRINT_RACY_MS) racy = true;
     } catch { /* gone since it was listed */ }
+    hash.update(`${rel}\u0000${stamp}\n`);
+  });
+  if (racy) hash.update(`racy:${crypto.randomUUID()}`);
+  return hash.digest('hex');
+}
+
+/**
+ * The fingerprint the Convert offer remembers a dead end by (a run that was
+ * refused or could only list files to fix): every file's path, and the
+ * time and size of each YAML table and JSON diagram, the files Convert
+ * converts and lists to fix. A DBML file's stamp is left out, and layout
+ * files entirely, so opening and arranging a diagram does not bring the
+ * offer back; fixing, adding or removing a file does.
+ */
+export function dbmlConversionOfferFingerprint(workspaceRoot: string, semanticDir: string): string {
+  const semanticRoot = path.join(workspaceRoot, semanticDir);
+  const tablesIsLayer = fs.existsSync(path.join(semanticRoot, TABLES_DIR)) && tablesDirIsLayer(semanticRoot);
+  const hash = crypto.createHash('sha256');
+  hash.update(`tablesIsLayer:${tablesIsLayer}\n`);
+  walkConversionFiles(semanticRoot, tablesIsLayer, (rel) => {
+    const lower = rel.toLowerCase();
+    if (lower.endsWith('.dbdiagram')) return;
+    let stamp = '';
+    if (!lower.endsWith('.dbml')) {
+      try {
+        const stat = fs.statSync(path.join(semanticRoot, ...rel.split('/')));
+        stamp = `${stat.mtimeMs}:${stat.size}`;
+      } catch { stamp = 'unreadable'; }
+    }
     hash.update(`${rel}\u0000${stamp}\n`);
   });
   return hash.digest('hex');

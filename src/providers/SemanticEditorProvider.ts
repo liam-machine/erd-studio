@@ -560,6 +560,8 @@ interface DbmlConversionHooks {
   candidates: () => DbmlConversionCandidates;
   /** Run the command, with its own modal; true when it converted. */
   run: () => Promise<boolean>;
+  /** The last run was refused or left only files to fix, and nothing changed since: offering would lead nowhere. */
+  goesNowhere?: () => boolean;
 }
 
 /** What the canvas needs to offer the naming migration (#182), wired by the extension. */
@@ -2372,8 +2374,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /** Wire Convert Project to DBML's offer (§6.4); the extension calls it once. */
-  setDbmlConversion(candidates: DbmlConversionHooks['candidates'], run: DbmlConversionHooks['run']): void {
-    this.dbmlConversion = { candidates, run };
+  setDbmlConversion(
+    candidates: DbmlConversionHooks['candidates'],
+    run: DbmlConversionHooks['run'],
+    goesNowhere?: DbmlConversionHooks['goesNowhere'],
+  ): void {
+    this.dbmlConversion = { candidates, run, ...(goesNowhere ? { goesNowhere } : {}) };
   }
 
   /**
@@ -2382,9 +2388,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Convert… runs the command, whose panel lists the whole plan. It decides
    * from the file listing alone, so opening a canvas never waits for a plan:
    * not made when there is no YAML table or JSON diagram, when a layer is
-   * called `tables` (Convert would refuse; any other refusal the command
-   * shows when it runs), after "Don't Ask Again" in this workspace, or with
-   * `erdStudio.dbml.offerConvert` off. True when it was shown.
+   * called `tables` (Convert would refuse), when the last run was refused or
+   * left only files to fix and none of the files changed since (a project
+   * Convert left mixed is not offered again until they are fixed), after
+   * "Don't Ask Again" in this workspace, or with `erdStudio.dbml.offerConvert`
+   * off. True when it was shown.
    */
   private async maybeOfferDbmlConversion(): Promise<boolean> {
     const hooks = this.dbmlConversion;
@@ -2397,6 +2405,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (storage === 'dbml') return false;
       const candidates = hooks.candidates();
       if (candidates.tablesDirIsLayer || candidates.files === 0) return false;
+      if (hooks.goesNowhere?.()) return false;
       this.dbmlConversionEligible = true;
       telemetry.feature('convertToDbmlOffered');
       const message = dbmlConversionOfferDetail(storage, candidates.files);
