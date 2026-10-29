@@ -58,6 +58,21 @@ describe('AddExistingTableDialog with rows not read yet', () => {
     expect(screen.queryByText('Reading table details…')).toBeNull();
   });
 
+  it('asks again when a refresh while it is open brings rows back pending, and never twice for one request', () => {
+    useEditorStore.getState().setExistingModels([row('x', true)]);
+    render(<AddExistingTableDialog />);
+    act(() => { useEditorStore.getState().setAddExistingModelDialogOpen(true); });
+    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+    // Still pending (another refresh before the answer): not asked again.
+    act(() => { useEditorStore.getState().setExistingModels([row('x', true), row('y', true)]); });
+    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+    // The answer, then an outside change to many table files: the next refresh lists them by name only.
+    act(() => { useEditorStore.getState().setExistingModels([row('x'), row('y')]); });
+    act(() => { useEditorStore.getState().setExistingModels([row('x', true), row('y', true)]); });
+    expect(mockPostMessage).toHaveBeenCalledTimes(2);
+    expect(mockPostMessage).toHaveBeenLastCalledWith({ type: 'requestExistingTables' });
+  });
+
   it('asks again on the next opening if rows are still pending', () => {
     useEditorStore.getState().setExistingModels([row('x', true)]);
     render(<AddExistingTableDialog />);

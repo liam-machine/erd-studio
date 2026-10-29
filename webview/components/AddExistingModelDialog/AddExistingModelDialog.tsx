@@ -21,7 +21,7 @@
  * its `existingTables` answer arrives.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
@@ -110,11 +110,20 @@ export function AddExistingTableDialog() {
     () => existingModels.some((m) => m.detailsPending === true),
     [existingModels],
   );
+  // Asked when the dialog opens with rows pending, and again when a refresh
+  // while it is open brings rows back pending (an outside change to many
+  // table files); never twice while a request is outstanding.
+  const asked = useRef(false);
   useEffect(() => {
-    if (isOpen && detailsPending) send({ type: 'requestExistingTables' });
-    // Only on opening: the answer clears `detailsPending`.
+    if (!isOpen || !detailsPending) {
+      asked.current = false;
+      return;
+    }
+    if (asked.current) return;
+    asked.current = true;
+    send({ type: 'requestExistingTables' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [isOpen, detailsPending]);
 
   // Escape closes the dialog through the store, not handleClose: start the
   // next opening clean either way, so no tick survives into it unseen.
