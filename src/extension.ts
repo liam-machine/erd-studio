@@ -1027,7 +1027,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       'Migrate Now',
       'Later',
     ).then((choice) => {
+      // The notification can wait in the Notification Center past a checkout
+      // of a converted branch: check again when the button is clicked.
       if (choice === 'Migrate Now') {
+        if (dbmlGuard.refuse()) { return; }
         const result = migrationService.migrate();
         const details: string[] = [];
         if (result.domainsConverted > 0) details.push(`${result.domainsConverted} subject area(s) converted`);
@@ -2791,6 +2794,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         'Dismiss',
       ).then(choice => {
         if (choice === 'Update All') {
+          // Checked again: a pull while the prompt waited may have brought the
+          // newer version's DBML skills, which this would overwrite.
+          if (dbmlGuard.refuse()) { return; }
           const results = staleTargets.map(target => harnessService.install(workspaceRoot, target, true));
           recordHarnessInstalls(results);
           const failed = results.filter(r => !r.success);
@@ -2861,6 +2867,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         'Save Config', 'Later',
       ).then(async (choice) => {
         if (choice === 'Save Config') {
+          if (dbmlGuard.refuse()) { return; }
           try {
             await layerService.saveConfig(detected);
           } catch (err) {

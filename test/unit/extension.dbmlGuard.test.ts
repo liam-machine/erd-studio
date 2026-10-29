@@ -266,6 +266,49 @@ describe('a YAML / JSON project is unaffected', () => {
     expect(contextKey().every((v) => v === false)).toBe(true);
   });
 
+  it("activation prompts check again when clicked: a pull while they waited can bring DBML (and the newer version's skills)", async () => {
+    // A YAML project that gets all three prompts: v4 diagrams (Migrate Now),
+    // no layers.json (Save Config) and an outdated skill (Update All).
+    fs.rmSync(path.join(project, '.erd-studio', 'layers.json'));
+    fs.writeFileSync(path.join(project, '.erd-studio', 'silver', 'legacy.json'), JSON.stringify({
+      schemaVersion: 4, domain: 'legacy', layer: 'silver',
+      logical: { models: [{ name: 'stg_legacy', columns: [{ name: 'id', dataType: 'INT' }] }], relationships: [], viewConfig: {} },
+    }, null, 2));
+    const skill = path.join(project, '.claude', 'skills', 'erd-studio', 'SKILL.md');
+    fs.writeFileSync(skill, '<!-- erd-studio-harness: 20 -->\n# old\n');
+    const answers = new Map<string, (choice: string) => void>();
+    const waitFor = (button: string) => () => new Promise<string | undefined>((resolve) => { answers.set(button, resolve); });
+    const info = vscode.window.showInformationMessage as unknown as ReturnType<typeof vi.spyOn>;
+    info.mockImplementation(((message: string) => {
+      if (message.includes('Migrate subject area files now?')) return waitFor('Migrate Now')();
+      if (message.startsWith('Detected layers:')) return waitFor('Save Config')();
+      return Promise.resolve(undefined);
+    }) as never);
+    warn.mockImplementation(((message: string) => {
+      if (message.includes('outdated')) return waitFor('Update All')();
+      return Promise.resolve(undefined);
+    }) as never);
+
+    context = makeContext(project);
+    await activate(context);
+    expect([...answers.keys()].sort()).toEqual(['Migrate Now', 'Save Config', 'Update All']);
+    expect(dbmlWarnings()).toEqual([]);
+
+    // A teammate's Convert arrives by git pull, with the 1.9 skills.
+    fs.mkdirSync(path.join(project, '.erd-studio', 'tables'), { recursive: true });
+    fs.writeFileSync(path.join(project, '.erd-studio', 'tables', '_relationships.dbml'), '// ERD Studio relationships.\n');
+    fs.writeFileSync(skill, '<!-- erd-studio-harness: 37 -->\n# ERD Studio (DBML)\n');
+    const before = snapshot(project);
+
+    for (const [button, answer] of answers) { answer(button); }
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(dbmlWarnings().length).toBeGreaterThanOrEqual(3);
+    expect(fs.readFileSync(skill, 'utf-8')).toContain('erd-studio-harness: 37');
+    expect(fs.existsSync(path.join(project, '.erd-studio', 'layers.json'))).toBe(false);
+    expect(snapshot(project)).toEqual(before);
+  });
+
   it('becoming DBML mid-session (a checkout) flips the key, tells the user and refuses from then on', async () => {
     context = makeContext(project);
     await activate(context);
