@@ -766,13 +766,27 @@ export class TableLibraryService {
       this.index.invalidate();
       return;
     }
+    this.invalidateTables([name]);
+  }
+
+  /**
+   * {@link invalidateCache} of each of `names` (a watcher's batch of table
+   * files changed outside ERD Studio), against one look at the library: the
+   * names are resolved inside one index snapshot, then their files dropped
+   * together, so the index is listed again at most once for the batch.
+   * Resolving them one by one while the files are still changing (Edit >
+   * Undo of Convert deleting 1,100) listed it again for every name.
+   */
+  invalidateTables(names: readonly string[]): void {
+    if (names.length === 0) return;
     // An unsafe name was never cached (nothing was read for it), so there is
     // nothing to drop — and dropping a cache entry must never throw.
-    const filePath = this.resolveTablePath(name);
+    const filePaths = this.index.withSnapshot(() => names.map((name) => this.resolveTablePath(name)));
     this.namingMemo = undefined;
     this.storageMemo = undefined;
-    if (filePath !== null) this.invalidatePaths([filePath]);
-    else this.tableCacheGeneration++;
+    const found = filePaths.filter((p): p is string => p !== null);
+    if (found.length > 0) this.invalidatePaths(found);
+    if (found.length < filePaths.length) this.tableCacheGeneration++;
   }
 
   /**

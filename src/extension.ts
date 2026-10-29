@@ -1233,7 +1233,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let knownStorage: ProjectStorage = 'yaml';
   // `tablesLayerConflict` (§3.3) is shown once per session.
   let tablesLayerConflictShown = false;
-  const refreshContextKeysNow = (): void => {
+  // Its three questions about the library are answered from one look at it.
+  const refreshContextKeysNow = (): void => tableLibraryService.withIndexSnapshot(() => {
     const hasSemanticDir = fs.existsSync(fullSemanticDirPath);
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', hasSemanticDir);
     knownStorage = projectStorageOf(tableLibraryService);
@@ -1251,7 +1252,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.window.showWarningMessage(`ERD Studio: ${conflict}`);
       }
     }
-  };
+  });
   const refreshContextKeys = viewRefreshes.gate('contextKeys', refreshContextKeysNow);
   refreshContextKeys();
   logProjectSummary({
@@ -1567,18 +1568,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     warnIfLayerConfigBroken();
   });
 
-  // Logical model file changed → refresh domains referencing that model + model library
-  const logicalModelChangedSubscription = fileWatcherService.onTableChanged(
-    async ({ modelName }) => {
-      tableLibraryService.invalidateCache(modelName);
-      // Batched: a bulk change (git checkout, an assistant's edit) redraws each canvas once.
-      editorProvider.queueTableRefresh(modelName);
-      treeProvider.refresh();
-      tableLibraryProvider.refresh();
-      // Re-evaluate context key so the Model Library view appears if logical-models/ was just created
-      refreshContextKeys();
-    },
-  );
+  // Table files changed outside ERD Studio → refresh the diagrams that use
+  // them and the views, once per watcher batch: Edit > Undo of Convert
+  // reports 1,100 tables in one batch while it is still deleting files, and
+  // per-table work listed the library again for every one of them.
+  const logicalModelChangedSubscription = fileWatcherService.onTablesChanged(({ tables: changed }) => {
+    const names = changed.map((t) => t.modelName);
+    tableLibraryService.invalidateTables(names);
+    // Batched: a bulk change (git checkout, an assistant's edit) redraws each canvas once.
+    for (const name of names) editorProvider.queueTableRefresh(name);
+    treeProvider.refresh();
+    tableLibraryProvider.refresh();
+    // Re-evaluate context key so the Model Library view appears if logical-models/ was just created
+    refreshContextKeys();
+  });
 
   // Many project files changing at once (Edit > Undo of Convert Project to
   // DBML, a branch switch): the watcher holds its events until the files are

@@ -934,6 +934,38 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(sends() - sendsBefore).toBe(1);
   });
 
+  it('a burst of outside table-file deletions (Edit > Undo of Convert) whose folder changed just now builds the library index O(1) times, not once per table', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    // 120 tables of the library, written before the window opened.
+    const gold = path.join(ws, '.erd-studio', 'tables', 'gold');
+    const N = 120;
+    const tableFiles = Array.from({ length: N }, (_, i) => path.join(gold, `t_${i}.dbml`));
+    for (const [i, tableFile] of tableFiles.entries()) fs.writeFileSync(tableFile, `Table t_${i} {\n  id int [pk]\n}\n`);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const tables = (provider as unknown as { tableLibraryService: { indexBuilds: number } }).tableLibraryService;
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{yml,dbml}'))!;
+
+    // VS Code's Undo deletes them; the folder's mtime is a whole second (a
+    // coarse file system clock), so every index built in the next 2 s is
+    // racy: listed again on its next use, as when the Undo is still
+    // deleting while the batch runs.
+    for (const tableFile of tableFiles) {
+      fs.rmSync(tableFile);
+      tableWatcher._simulateDelete(vscode.Uri.file(tableFile));
+    }
+    const wholeSecond = Math.floor(Date.now() / 1000) + 1;
+    fs.utimesSync(gold, wholeSecond, wholeSecond);
+    const buildsBefore = tables.indexBuilds;
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    // One look at the library for the batch, one for the context keys when
+    // the burst settles, and the background warm-up's few while the folder is
+    // still racy — never one (or four) per table, as before (489 here).
+    expect(tables.indexBuilds - buildsBefore).toBeLessThanOrEqual(10);
+  });
+
   it('a canvas redraw asked for during a burst of ERD Studio\'s own writes (Convert) is made once the burst settles', async () => {
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     await activate(context);

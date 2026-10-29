@@ -22,7 +22,8 @@
  * produces one event rather than N.
  *
  * Table file events are coalesced too: one debounce for every table file,
- * one log line for the batch, then one `onTableChanged` per table.
+ * one log line for the batch, then one `onTableChanged` per table and one
+ * `onTablesChanged` with them all.
  *
  * A bulk change (at least {@link BULK_CHANGE_MIN_EVENTS} events on the
  * project's files in a row, each within the debounce of the last: Edit >
@@ -183,6 +184,7 @@ export class FileWatcherService implements vscode.Disposable {
   private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uris: vscode.Uri[] }>();
   private readonly _onLayerConfigChanged = new vscode.EventEmitter<void>();
   private readonly _onTableChanged = new vscode.EventEmitter<{ uri: vscode.Uri; modelName: string }>();
+  private readonly _onTablesChanged = new vscode.EventEmitter<{ tables: Array<{ uri: vscode.Uri; modelName: string }> }>();
   private readonly _onRelationshipsChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onForeignFormatCreated = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onDbtYmlChanged = new vscode.EventEmitter<void>();
@@ -211,6 +213,13 @@ export class FileWatcherService implements vscode.Disposable {
   readonly onLayerConfigChanged = this._onLayerConfigChanged.event;
   /** Fires when a YAML model file in {semanticDir}/logical-models/ (or one of its layer folders) changes. */
   readonly onTableChanged = this._onTableChanged.event;
+  /**
+   * Fires once per batch of table files changed outside ERD Studio, after
+   * that batch's `onTableChanged` events, with every one of them: the work a
+   * batch needs once (the library index, the views, the context keys) is
+   * done once, not once per table.
+   */
+  readonly onTablesChanged = this._onTablesChanged.event;
   /**
    * Fires when a DBML relationships file (`tables/[<folder>/]_relationships.dbml`)
    * is created, changed or deleted externally. Never an `onTableChanged`:
@@ -570,6 +579,7 @@ export class FileWatcherService implements vscode.Disposable {
           if (t.wasCreated) this.safeFireEvent(() => this._onForeignFormatCreated.fire({ uri: t.uri }));
           this.report(() => this._onTableChanged.fire({ uri: t.uri, modelName: t.modelName }));
         }
+        this.safeFireEvent(() => this._onTablesChanged.fire({ tables: outside.map(({ uri: u, modelName }) => ({ uri: u, modelName })) }));
       });
     };
 
@@ -752,6 +762,7 @@ export class FileWatcherService implements vscode.Disposable {
     this._onSemanticFileDeleted.dispose();
     this._onLayerConfigChanged.dispose();
     this._onTableChanged.dispose();
+    this._onTablesChanged.dispose();
     this._onRelationshipsChanged.dispose();
     this._onForeignFormatCreated.dispose();
     this._onDbtYmlChanged.dispose();

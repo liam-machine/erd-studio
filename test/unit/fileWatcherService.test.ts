@@ -631,6 +631,30 @@ describe('FileWatcherService', () => {
       expect(listener.mock.calls[0][0].modelName).toBe('dim_x');
     });
 
+    it('reports a batch of outside table changes once more as a whole, after its per-table events, leaving out own writes', () => {
+      const order: string[] = [];
+      service.onTableChanged(({ modelName }) => order.push(modelName));
+      const batches: string[][] = [];
+      service.onTablesChanged(({ tables }) => { batches.push(tables.map((t) => t.modelName)); order.push('batch'); });
+
+      const modelWatcher = _mockFileWatchers[3];
+      const own = '/test/workspace/.erd-studio/tables/gold/own.dbml';
+      tracker.recordWrite(own);
+      for (const name of ['dim_a', 'dim_b', 'dim_c']) {
+        modelWatcher._simulateDelete(vscode.Uri.file(`/test/workspace/.erd-studio/tables/gold/${name}.dbml`));
+      }
+      modelWatcher._simulateChange(vscode.Uri.file(own));
+      vi.advanceTimersByTime(300);
+
+      expect(batches).toEqual([['dim_a', 'dim_b', 'dim_c']]);
+      expect(order).toEqual(['dim_a', 'dim_b', 'dim_c', 'batch']);
+      // Only own writes: no batch at all.
+      tracker.recordWrite(own);
+      modelWatcher._simulateChange(vscode.Uri.file(own));
+      vi.advanceTimersByTime(300);
+      expect(batches).toHaveLength(1);
+    });
+
     it('watches the logical-models/ top level and its layer folders (issue #76)', () => {
       const pattern = _mockFileWatchers[3]._pattern as vscode.RelativePattern;
       // …and v6's tables/ library (#162), in the same glob.
