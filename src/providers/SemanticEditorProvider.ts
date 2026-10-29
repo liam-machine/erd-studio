@@ -3462,7 +3462,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (primary.kind !== 'delete' && primary.text !== original) out.push(primary);
       } catch (err) {
         // A diagram the writer will not touch (it does not read, or holds a second Project) is left as it is.
-        log.warn(`[SemanticEditorProvider] ${path.basename(summary.filePath)} left as it is: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[SemanticEditorProvider] ${summary.filePath} left as it is: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     if (out.length > 0) {
@@ -4074,7 +4074,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       return await save();
     } catch (err) {
       if (err instanceof EditRefused || err instanceof DbmlEditRefused || err instanceof DbdiagramLayoutRefused) {
-        log.warn(`[SemanticEditorProvider] Positions for ${path.basename(document.uri.fsPath)} not saved: ${err.message}`);
+        log.warn(`[SemanticEditorProvider] Positions for ${document.uri.fsPath} not saved: ${err.message}`);
         return false;
       }
       throw err;

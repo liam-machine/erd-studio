@@ -126,7 +126,7 @@ export function settleDbmlDiagramWrites(input: SettleInput): FileWrite[] {
         }
       }
     } catch (err) {
-      log.warn(`[ERD Studio] ${path.basename(filePath)} left as it is: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[ERD Studio] ${filePath} left as it is: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   return out;

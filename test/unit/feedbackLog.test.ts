@@ -8,6 +8,8 @@
  * - an error recorded for Send Feedback reaches the log channel, not the console.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { buildAnalysisPrompt } from '../../src/services/feedbackAnalysisService';
@@ -183,5 +185,34 @@ describe('errors recorded for Send Feedback', () => {
     expect(console.error).not.toHaveBeenCalled();
     expect(recentLogLines().at(-1)).toMatch(/\[error\] \[feedbackAnalysis\.request\] HTTP 503$/);
     expect(hostErrorLog.recent()).toHaveLength(1);
+  });
+});
+
+describe('log lines name a diagram by its path, so the redacted copy shows its shape, not its name', () => {
+  it('no buffered log line in src names a file by its basename', () => {
+    const srcRoot = path.resolve(__dirname, '../../src');
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) { walk(full); continue; }
+        if (!entry.name.endsWith('.ts')) continue;
+        const text = fs.readFileSync(full, 'utf-8');
+        for (const m of text.matchAll(/\b\w*[lL]og\.(?:info|warn|error)\(`[^`]*\$\{path\.(?:posix\.)?basename\(/g)) {
+          offenders.push(`${path.relative(srcRoot, full)}: ${m[0]}`);
+        }
+      }
+    };
+    walk(srcRoot);
+    expect(offenders).toEqual([]);
+  });
+
+  it('a warning that logs the diagram\'s full path reaches the report as {layer}/{domain}.dbml', () => {
+    log.warn(`[SemanticEditorProvider] Positions for ${FILE} not saved: disk full`);
+    log.warn(`[ERD Studio] ${FILE} left as it is: bad Ref`);
+    const lines = collectDiagnostics(context, undefined, [], { includeLog: true }).recentLog!;
+    expect(lines.join('\n')).not.toContain('sales');
+    expect(lines.join('\n')).not.toContain('khaidirhasan');
+    expect(lines[0]).toContain('{project}/.erd-studio/{layer}/{domain}.dbml not saved');
   });
 });
