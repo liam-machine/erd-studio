@@ -5,7 +5,7 @@ import * as path from 'path';
 import { TreeItemCollapsibleState } from 'vscode';
 import { SubjectAreaTreeProvider, type TreeElement } from '../../src/providers/DomainTreeProvider';
 import type { SubjectAreaService } from '../../src/services/domainService';
-import type { LayerService } from '../../src/services/layerService';
+import { LayersFileUnreadableError, type LayerService } from '../../src/services/layerService';
 import type { LayerConfig } from '../../src/types/layer';
 import type { SubjectAreaSummary, UnifiedSubjectArea, StageData } from '../../src/types/semantic';
 
@@ -41,6 +41,7 @@ function createMockLayerService(): LayerService {
     getAbbreviation: (id: string) => layers.find(l => l.id === id)?.abbreviation ?? id.substring(0, 3).toUpperCase(),
     getColor: (id: string) => layers.find(l => l.id === id)?.color ?? '#808080',
     isCreatable: (id: string) => layers.find(l => l.id === id)?.creatable ?? false,
+    getConfigPath: () => path.join(PROJECT_PATH, '.erd-studio', 'layers.json'),
   } as LayerService;
 }
 
@@ -375,11 +376,11 @@ describe('SubjectAreaTreeProvider', () => {
   });
 
   describe('handleDrop', () => {
-    it('surfaces a refused reorder (unreadable layers.json, H18) to the user', async () => {
+    it('surfaces a refused reorder (unreadable layers.json, H18) to the user, in words with Open File (#229)', async () => {
       const vscode = await import('vscode');
       const errorSpy = vi.spyOn(vscode.window, 'showErrorMessage');
       (layerService as { reorderLayers: (ids: string[]) => Promise<void> }).reorderLayers =
-        vi.fn(async () => { throw new Error('layers.json could not be loaded (Invalid JSON)'); });
+        vi.fn(async () => { throw new LayersFileUnreadableError('Invalid JSON'); });
 
       const transfer = new vscode.DataTransfer();
       transfer.set('application/vnd.code.tree.dbtsemantic.layer', new vscode.DataTransferItem('gold'));
@@ -388,8 +389,10 @@ describe('SubjectAreaTreeProvider', () => {
       await provider.handleDrop(target, transfer as never, {} as never);
 
       expect(errorSpy).toHaveBeenCalledTimes(1);
-      expect(String(errorSpy.mock.calls[0][0])).toContain('Failed to reorder layers');
-      expect(String(errorSpy.mock.calls[0][0])).toContain('layers.json could not be loaded');
+      expect(errorSpy.mock.calls[0]).toEqual([
+        "Reorder Layers: .erd-studio/layers.json has a mistake in it, so the layers weren't reordered. Fix the file, then try again.",
+        'Open File',
+      ]);
       errorSpy.mockRestore();
     });
   });

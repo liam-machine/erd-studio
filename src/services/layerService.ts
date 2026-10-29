@@ -53,6 +53,17 @@ function cloneLayers(layers: LayerConfig[]): LayerConfig[] {
   return layers.map(l => ({ ...l }));
 }
 
+/**
+ * `saveConfig` refused to overwrite a layers.json it could not read (a JSON
+ * mistake, an invalid layer): the user's file to fix, not ERD Studio's (#229).
+ */
+export class LayersFileUnreadableError extends Error {
+  constructor(readonly reason: string) {
+    super(`${LAYERS_CONFIG_FILE} could not be loaded (${reason}). Fix or remove the file before changing layers.`);
+    this.name = 'LayersFileUnreadableError';
+  }
+}
+
 export class LayerService {
   private config: LayersConfigFile | null = null;
   private readonly configPath: string;
@@ -366,10 +377,7 @@ export class LayerService {
     // are defaults, and writing them would silently destroy the user's file.
     this.loadConfig();
     if (this.loadError && this.fileSignature() !== NO_FILE_SIGNATURE) {
-      throw new Error(
-        `${LAYERS_CONFIG_FILE} could not be loaded (${this.loadError}). ` +
-        'Fix or remove the file before changing layers.',
-      );
+      throw new LayersFileUnreadableError(this.loadError);
     }
 
     // Ensure semantic directory exists
