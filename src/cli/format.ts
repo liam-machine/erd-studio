@@ -5,6 +5,7 @@
 
 import { describeUnreadable, mergeConflictHumanHint, type DiffResult, type SubjectAreaDiff, type Fix } from './diff';
 import { foreignKeyAtTo } from '@erd-studio/core';
+import { DBML_STORAGE_MESSAGE } from '../services/dbmlStorageGuard';
 import type { DoctorResult } from './doctor';
 import type { InventoryResult } from './inventory';
 
@@ -108,8 +109,13 @@ export function formatDiff(r: DiffResult, p: Paint): string {
 export function formatDoctor(r: DoctorResult, p: Paint): string {
   const ok = (b: boolean) => (b ? p.green('✓') : p.yellow('–'));
   const lines: string[] = [];
+  const dbmlLine = (file: string): string => `${p.red('✗')} ${DBML_STORAGE_MESSAGE} (found ${file})`;
   if (!r.project.found) {
     lines.push(`${ok(false)} No dbt project found (looked for dbt_project.yml near ${r.projectRoot})`);
+    if (r.erd.dbmlStorage) {
+      lines.push(dbmlLine(r.erd.dbmlStorage.file), '', 'Next steps:');
+      r.nextSteps.forEach((s, i) => { lines.push(`  ${i + 1}. ${s.title}`); });
+    }
     return lines.join('\n') + '\n';
   }
   lines.push(`${ok(true)} dbt project ${r.project.name ?? '(unnamed)'} at ${r.projectRoot}`);
@@ -124,9 +130,15 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   lines.push(`${ok(r.artifacts.manifest.status === 'ok')} manifest ${r.artifacts.manifest.status}`
     + (r.artifacts.manifest.models !== null ? ` (${plural(r.artifacts.manifest.models, 'model')})` : ''));
   lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
-  lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'subject area')}, ${plural(r.erd.logicalModels, 'table')}`
-    + (r.erd.semanticDirExists ? ` — file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}` : ''));
-  const migration = r.erd.namingMigration;
+  // A DBML project's counts and naming would read as an empty, healthy YAML one.
+  if (r.erd.dbmlStorage) {
+    lines.push(`${ok(false)} ERD Studio not read: stored as DBML`, dbmlLine(r.erd.dbmlStorage.file));
+  } else {
+    lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'subject area')}, ${plural(r.erd.logicalModels, 'table')}`
+      + (r.erd.semanticDirExists ? ` — file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}` : ''));
+  }
+  // Not in a DBML project: the migration would write YAML / JSON into it.
+  const migration = r.erd.dbmlStorage ? undefined : r.erd.namingMigration;
   if (migration && migration.moves + migration.rewrites > 0) {
     lines.push(`${p.yellow('!')} "Migrate to the New File Naming" in VS Code would `
       + [migration.moves > 0 ? `move ${plural(migration.moves, 'table file')} to tables/` : '',
@@ -163,7 +175,10 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     lines.push(`${p.yellow('!')} ${ends(b.fromModel, b.fromColumns)} → ${ends(b.toModel, b.toColumns)} looks drawn backwards`
       + ` (it starts at ${foreignKeyAtTo(b.cardinality) ? b.toModel : b.fromModel}'s key) — in ${b.domains.join(', ')}`);
   }
-  lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
+  lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`
+    + (r.erd.dbmlStorage && (r.harness.schemaSkill === 'outdated' || r.harness.setupSkill === 'outdated')
+      ? ' — not this version\'s: leave them, the newer ERD Studio keeps them up to date'
+      : ''));
   lines.push('', 'Next steps:');
   r.nextSteps.forEach((s, i) => {
     lines.push(`  ${i + 1}. ${s.title}${s.command ? ` — ${s.command}` : ''}`);

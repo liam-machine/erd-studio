@@ -422,6 +422,24 @@ import {
   type AnnotationPositionPayload,
 } from './payloadValidation';
 import { sameName } from '../types/naming';
+import { DBML_STORAGE_MESSAGE, showDbmlStoragePage } from './dbmlStorageGuardUi';
+
+/**
+ * Canvas messages still handled while the project is stored as DBML by a
+ * newer ERD Studio (see `src/services/dbmlStorageGuard.ts`): the ones that
+ * write nothing into the ERD Studio folder. Everything else is refused with
+ * {@link DBML_STORAGE_MESSAGE}. A canvas only meets this when the project
+ * became DBML while it was open (a git checkout); one opened on such a
+ * project shows the message instead.
+ */
+export const DBML_GUARD_ALLOWED_MESSAGE_TYPES: ReadonlySet<string> = new Set([
+  'ready', 'switchStage', 'toggleDiscrepancy', 'refreshManifest', 'dismissWelcome',
+  'viewFile', 'runDbtCompile', 'runDbtParse',
+  'requestReload', 'openGettingStarted', 'closeEditor', 'openAnotherDomain',
+  'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
+  'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
+  'openModelFile', 'layoutFinished', 'exportDiagram',
+]);
 
 /** A parsed domain file's `logical.relationships`, as a list the rename helpers can rewrite in place. */
 function stageRelationships(parsed: Record<string, unknown>): Array<Record<string, unknown>> {
@@ -645,6 +663,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   setCatalogService(catalogService: CatalogService | undefined): void {
     this.catalogService = catalogService;
   }
+
+  /**
+   * The stable DBML guard (`dbmlStorageGuardUi.ts`), injected after
+   * construction. Undefined in tests that do not set it: nothing is refused.
+   */
+  private dbmlGuard: { isActive(): boolean } | undefined;
+
+  /** @see dbmlGuard */
+  setDbmlStorageGuard(guard: { isActive(): boolean } | undefined): void {
+    this.dbmlGuard = guard;
+  }
+
 
   /**
    * Load the warehouse catalog, if a reader was injected and an artifact exists.
@@ -1042,6 +1072,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.showForeignProject(webviewPanel, document.uri.fsPath, foreignOwner);
       return;
     }
+    // A project a newer ERD Studio stored as DBML: this version would draw it
+    // wrong and could write YAML / JSON beside the DBML files.
+    if (this.dbmlGuard?.isActive()) {
+      showDbmlStoragePage(webviewPanel);
+      return;
+    }
 
     webviewPanel.webview.options = {
       enableScripts: true,
@@ -1087,6 +1123,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           this.post(webviewPanel.webview, { type: 'error', payload: { message: PHYSICAL_READ_ONLY_MESSAGE } });
           return;
         }
+        // The project became DBML storage while this canvas was open.
+        const dbmlStorage = this.dbmlGuard?.isActive() === true;
+        if (dbmlStorage && !DBML_GUARD_ALLOWED_MESSAGE_TYPES.has(message.type)) {
+          console.warn(`[SemanticEditorProvider] Dropped "${message.type}": the project is stored as DBML`);
+          this.post(webviewPanel.webview, { type: 'error', payload: { message: DBML_STORAGE_MESSAGE } });
+          return;
+        }
 
         // Usage telemetry: one edit request of this kind (EDIT_FEATURES).
         const editFeature = EDIT_FEATURES[message.type];
@@ -1104,7 +1147,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             this.lastLoadError.delete(panelKey);
             // The initial load is the one refresh path allowed to persist
             // auto-computed positions for models that lack them.
-            await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: true });
+            await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: !dbmlStorage });
             void this.offerRelationshipPrompts(document, webviewPanel.webview, panelKey);
             break;
           case 'requestReload':
@@ -2410,6 +2453,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const { refreshWebview = true, webview, stage, modelFiles, errorLabel, onSuccess } = options;
     const panelKey = document.uri.toString();
 
+    // Backstop for the DBML guard: never write YAML / JSON into a project a
+    // newer ERD Studio stored as DBML.
+    if (this.dbmlGuard?.isActive()) throw new EditRefused(DBML_STORAGE_MESSAGE);
     // The open document outlives its file: saving this edit would bring back a
     // diagram an AI assistant, git or the file explorer just removed (#161).
     this.refuseIfSubjectAreaFileGone(document);

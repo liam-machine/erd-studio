@@ -42,6 +42,7 @@ import {
   type ProfilesInfo,
 } from '../services/dbtEnv';
 import { HARNESS_VERSION, HarnessService } from '../services/harnessService';
+import { DBML_STORAGE_MESSAGE, detectDbmlStorage } from '../services/dbmlStorageGuard';
 import {
   buildCliContext,
   makeEnvelope,
@@ -55,6 +56,7 @@ import {
 import { toUnreadableTableFile, unreadableHint, type UnreadableTableFile } from './diff';
 
 export type NextStepId =
+  | 'update-erd-studio'
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
   | 'resolve-merge-conflicts' | 'fix-model-yaml' | 'resolve-naming-conflicts' | 'fix-subject-area-naming' | 'migrate-v5' | 'turn-round-relationships' | 'update-harness' | 'ready';
 
@@ -97,6 +99,14 @@ export interface DoctorResult extends Envelope {
   projectFiles: { schemaYmlFiles: number; sourceFiles: number; modelsDiscovered: number };
   erd: {
     semanticDirExists: boolean;
+    /**
+     * Set when a newer ERD Studio (the 1.9 pre-release or 2.0) stored this
+     * project as DBML, which this version cannot read: the first file that
+     * shows it, project-relative. Absent otherwise. Nothing else in `erd`
+     * describes such a project, and nothing may be written to its ERD Studio
+     * folder by this version's conventions.
+     */
+    dbmlStorage?: { file: string };
     layers: string[];
     domains: number;
     logicalModels: number;
@@ -301,6 +311,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   return {
     backwardsRelationships: backwardsRelationshipsOf(ctx, domains.map((d) => d.filePath).filter((f) => !issues.some((i) => i.file === relPath(ctx.root, f)))),
     semanticDirExists: true,
+    ...dbmlStorageOf(ctx.root, ctx.semanticDir),
     layers: ctx.layerService.getValidLayerIds(),
     domains: domains.length,
     logicalModels: ctx.tableLibraryService.listTableNames().length,
@@ -360,9 +371,41 @@ function backwardsRelationshipsOf(ctx: CliContext, domainFiles: string[]): Backw
   return [...byLink.values()];
 }
 
+/**
+ * The step for a project a newer ERD Studio stored as DBML. Nothing else in
+ * this report describes such a project, and writing YAML / JSON files into it
+ * would put them beside the DBML ones.
+ */
+function dbmlStorageStep(file: string, semanticDir: string): NextStep {
+  return {
+    id: 'update-erd-studio',
+    title: 'Open this project with a newer ERD Studio',
+    why: `${DBML_STORAGE_MESSAGE} (${file} is a DBML file.) Until then, don't create or change files in `
+      + `${semanticDir}/ by this version's conventions: they would sit beside the DBML files, and the newer version would `
+      + "report them as conflicts. Leave the AI helper's skill files as they are too: this version's describe YAML / JSON. "
+      + 'In VS Code: Extensions view → ERD Studio → Switch to Pre-Release Version (or Update, once 2.0 is released).',
+    command: null,
+  };
+}
+
+/** `erd.dbmlStorage` for the ERD Studio folder under `root`, or nothing. */
+function dbmlStorageOf(root: string, semanticDir: string): { dbmlStorage?: { file: string } } {
+  const semanticRoot = path.join(root, semanticDir);
+  const evidence = detectDbmlStorage(semanticRoot);
+  return evidence ? { dbmlStorage: { file: relPath(root, path.join(semanticRoot, evidence.file)) } } : {};
+}
+
 function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boolean; installPath: string; invocation: string | null }): NextStep[] {
   const steps: NextStep[] = [];
   const { dbt, profiles, artifacts } = r;
+  // In a DBML project the format, naming and skill checks below read only
+  // what this version understands: their advice would write YAML / JSON into
+  // it, or replace the newer version's skills with older ones.
+  const dbml = r.erd.dbmlStorage !== undefined;
+
+  if (r.erd.dbmlStorage) {
+    steps.push(dbmlStorageStep(r.erd.dbmlStorage.file, r.semanticDir));
+  }
 
   if (dbt.untrustedVenvDbt) {
     steps.push({
@@ -480,7 +523,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
   }
   const namingMix = r.erd.domainFormatIssues.filter((i) => i.namingMix);
   const older = r.erd.domainFormatIssues.length - namingMix.length;
-  if (namingMix.length > 0) {
+  if (!dbml && namingMix.length > 0) {
     steps.push({
       id: 'fix-subject-area-naming',
       title: `Fix ${namingMix.length === 1 ? 'a subject area file that mixes' : `${namingMix.length} subject area files that mix`} the old and new key names`,
@@ -490,7 +533,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: null,
     });
   }
-  if (older > 0) {
+  if (!dbml && older > 0) {
     steps.push({
       id: 'migrate-v5',
       title: 'Migrate older subject area files',
@@ -510,7 +553,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: null,
     });
   }
-  if (r.harness.schemaSkill === 'outdated' || r.harness.setupSkill === 'outdated') {
+  if (!dbml && (r.harness.schemaSkill === 'outdated' || r.harness.setupSkill === 'outdated')) {
     steps.push({
       id: 'update-harness',
       title: 'Update the ERD Studio skills',
@@ -531,6 +574,9 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
   if (!root) {
     // Not an error for doctor: saying so is its job. inventory/diff exit 3 instead.
     const cwdRoot = path.resolve(opts.cwd ?? process.cwd(), opts.project ?? '.');
+    // The 1.9 pre-release and 2.0 work without dbt, so a folder they stored
+    // as DBML is reported even here.
+    const dbml = dbmlStorageOf(cwdRoot, opts.semanticDir);
     const base: Omit<DoctorResult, 'nextSteps'> = {
       ...makeEnvelope(cwdRoot, opts.semanticDir),
       runtime: runtimeInfo(),
@@ -547,13 +593,14 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       },
       projectFiles: { schemaYmlFiles: 0, sourceFiles: 0, modelsDiscovered: 0 },
       erd: {
-        semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
+        semanticDirExists: dbml.dbmlStorage !== undefined, ...dbml,
+        layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
         conflictedDomainFiles: [], dataTypeAliasFiles: [], backwardsRelationships: [],
         naming: 'v6', tablesFolderIsLayer: false, namingConflicts: [],
       },
       harness: { schemaSkill: 'missing', setupSkill: 'missing', version: harnessVersion },
     };
-    return { ...base, nextSteps: [] };
+    return { ...base, nextSteps: dbml.dbmlStorage ? [dbmlStorageStep(dbml.dbmlStorage.file, opts.semanticDir)] : [] };
   }
 
   const [ctx, probed] = await Promise.all([

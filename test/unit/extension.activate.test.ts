@@ -193,7 +193,7 @@ describe('activate() without a dbt project', () => {
       resolveCustomTextEditor(doc: unknown, panel: unknown): void;
     };
     const panel = vscode.createMockWebviewPanel();
-    stub.resolveCustomTextEditor({}, panel);
+    stub.resolveCustomTextEditor({ uri: vscode.Uri.file('/nowhere/analytics/.erd-studio/silver/showcase.json') }, panel);
     expect(panel.webview.html).toContain('ERD Studio is inactive');
     expect(panel.webview.options).toEqual({ enableScripts: false });
   });

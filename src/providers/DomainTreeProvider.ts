@@ -239,8 +239,18 @@ export class SubjectAreaTreeProvider
     }
   }
 
+  /**
+   * While this returns true the view is empty, so its welcome text (the DBML
+   * guard's message, see `dbmlStorageGuardUi.ts`) shows instead.
+   */
+  setHiddenWhen(hidden: () => boolean): void {
+    this.hiddenWhen = hidden;
+  }
+  private hiddenWhen: () => boolean = () => false;
+
   getChildren(element?: TreeElement): TreeElement[] | undefined {
     if (!element) {
+      if (this.hiddenWhen()) { return []; }
       const fullSemanticDir = path.join(this.projectPath, this.semanticDir);
       if (!fs.existsSync(fullSemanticDir)) {
         return [];

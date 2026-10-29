@@ -98,6 +98,12 @@ export interface SelectorsServiceHooks {
    * happens with a `_2`/`_3` suffix; surface this so the user can rename.
    */
   onNameCollision?: (info: NameCollisionInfo) => void;
+  /**
+   * Return true to leave `selectors.yml` alone entirely (`noop`): the project
+   * is stored as DBML by a newer ERD Studio, whose diagrams this version does
+   * not list, so a regenerate would drop their selectors.
+   */
+  isBlocked?: () => boolean;
 }
 
 export interface NameCollisionInfo {
@@ -171,6 +177,10 @@ export class SelectorsService {
    */
   regenerate(): RegenerateResult {
     const filePath = path.join(this.workspaceRoot, SELECTORS_FILENAME);
+
+    if (this.hooks?.isBlocked?.()) {
+      return { status: 'noop', filePath };
+    }
 
     // Skip #1: open with unsaved edits.
     if (this.hooks?.isFileDirtyInEditor?.(filePath)) {
