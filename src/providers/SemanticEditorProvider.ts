@@ -5217,22 +5217,32 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (dirty.length > 0) {
       throw new EditRefused(`${path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again.`);
     }
-    const applied = await applyFileWrites(writes, {});
-    // Not applied: `unrestored` lists the files the reconcile could not put back (its modal already named them).
-    if (!applied.ok) return { ok: false, unrestored: applied.unrestored };
+    // The watchers wait for these files instead of deciding while the saves
+    // run (one per diagram listing the table), so none is taken for an
+    // outside change before its record is made.
+    const expectation = this.ownWriteTracker.expectWrite(writes.map((w) => w.path));
     const unsaved: string[] = [];
     const saveFailures = new Set<SaveFailure>();
     let modelFileUnsaved = false;
-    for (const uri of applied.replaced) {
-      if (await saveDocumentByUri(uri, (reason) => saveFailures.add(reason))) {
-        this.ownWriteTracker.recordWrite(uri.fsPath);
-      } else {
-        unsaved.push(uri.fsPath);
-        if (this.isLibraryPath(uri.fsPath)) modelFileUnsaved = true;
+    let applied: AppliedFileWrites;
+    try {
+      applied = await applyFileWrites(writes, {});
+      // Not applied: `unrestored` lists the files the reconcile could not put back (its modal already named them).
+      if (!applied.ok) return { ok: false, unrestored: applied.unrestored };
+      // Creates and deletes landed with the edit itself: recorded before the saves.
+      for (const filePath of applied.created) this.ownWriteTracker.recordWrite(filePath);
+      for (const filePath of applied.deleted) this.ownWriteTracker.recordDelete(filePath);
+      for (const uri of applied.replaced) {
+        if (await saveDocumentByUri(uri, (reason) => saveFailures.add(reason))) {
+          this.ownWriteTracker.recordWrite(uri.fsPath);
+        } else {
+          unsaved.push(uri.fsPath);
+          if (this.isLibraryPath(uri.fsPath)) modelFileUnsaved = true;
+        }
       }
+    } finally {
+      this.ownWriteTracker.settleWrites(expectation);
     }
-    for (const filePath of applied.created) this.ownWriteTracker.recordWrite(filePath);
-    for (const filePath of applied.deleted) this.ownWriteTracker.recordDelete(filePath);
     if (unsaved.length > 0) {
       for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
       void vscode.window.showErrorMessage(this.describeUnsaved(unsaved));

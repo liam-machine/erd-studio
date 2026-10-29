@@ -608,28 +608,36 @@ async function applyLifecycleWrites(
   renames: ReadonlyArray<{ from: string; to: string }> = [],
   onSaveFailure?: (reason: SaveFailure) => void,
 ): Promise<{ ok: boolean; unsaved: string[]; unrestored: string[] }> {
-  const applied = await applyFileWrites(writes, {
-    ensureDir: (filePath) => {
-      const rel = path.relative(libraryRoot, filePath);
-      if (!rel.startsWith('..') && !path.isAbsolute(rel)) fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    },
-    renames,
-  });
-  // The reconcile's modal already named any file it could not put back: the
-  // caller says "nothing was changed" only when `unrestored` is empty.
-  if (!applied.ok) return { ok: false, unsaved: [], unrestored: applied.unrestored };
-  const unsaved: string[] = [];
-  for (const uri of applied.replaced) {
-    if (await saveDocumentByUri(uri, onSaveFailure)) ownWrites.recordWrite(uri.fsPath);
-    else unsaved.push(uri.fsPath);
+  // The watchers wait for these files (both ends of each rename) instead of
+  // deciding while the saves run, so none is taken for an outside change.
+  const expectation = ownWrites.expectWrite([...writes.map((w) => w.path), ...renames.flatMap((r) => [r.from, r.to])]);
+  try {
+    const applied = await applyFileWrites(writes, {
+      ensureDir: (filePath) => {
+        const rel = path.relative(libraryRoot, filePath);
+        if (!rel.startsWith('..') && !path.isAbsolute(rel)) fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      },
+      renames,
+    });
+    // The reconcile's modal already named any file it could not put back: the
+    // caller says "nothing was changed" only when `unrestored` is empty.
+    if (!applied.ok) return { ok: false, unsaved: [], unrestored: applied.unrestored };
+    // Creates, deletes and renames landed with the edit itself: recorded before the saves.
+    for (const filePath of applied.created) ownWrites.recordWrite(filePath);
+    for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
+    for (const { from, to } of applied.renamed) {
+      ownWrites.recordWrite(to);
+      ownWrites.recordDelete(from);
+    }
+    const unsaved: string[] = [];
+    for (const uri of applied.replaced) {
+      if (await saveDocumentByUri(uri, onSaveFailure)) ownWrites.recordWrite(uri.fsPath);
+      else unsaved.push(uri.fsPath);
+    }
+    return { ok: true, unsaved, unrestored: [] };
+  } finally {
+    ownWrites.settleWrites(expectation);
   }
-  for (const filePath of applied.created) ownWrites.recordWrite(filePath);
-  for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
-  for (const { from, to } of applied.renamed) {
-    ownWrites.recordWrite(to);
-    ownWrites.recordDelete(from);
-  }
-  return { ok: true, unsaved, unrestored: [] };
 }
 
 function findMatchingTabs(fileUri: vscode.Uri): vscode.Tab[] {

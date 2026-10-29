@@ -686,6 +686,31 @@ describe('Delete Table (File): the D16 cascade', () => {
     expect(diagnosticsOf(after).filter((d) => !diagnostics.has(d))).toEqual([]);
   });
 
+  it('announces its writes before the edit and records the delete before saving the diagrams, so no watcher takes them for outside changes', async () => {
+    const tracker = new OwnWriteTracker();
+    const events: string[] = [];
+    const deleted = at('tables/dim_date.dbml');
+    const expectWrite = tracker.expectWrite.bind(tracker);
+    vi.spyOn(tracker, 'expectWrite').mockImplementation((paths) => {
+      const list = [...paths];
+      events.push(`expect:${list.some((p) => path.resolve(p) === deleted) ? 'deleted-file' : 'other'}`);
+      return expectWrite(list);
+    });
+    const recordWrite = tracker.recordWrite.bind(tracker);
+    vi.spyOn(tracker, 'recordWrite').mockImplementation((p) => { events.push(`write:${relOf(p)}`); recordWrite(p); });
+    const recordDelete = tracker.recordDelete.bind(tracker);
+    vi.spyOn(tracker, 'recordDelete').mockImplementation((p) => { events.push(`delete:${relOf(p)}`); recordDelete(p); });
+    const { provider } = buildProvider(tracker);
+    expect(await provider.deleteTablesWithCascade(['dim_date'])).toEqual({ ok: true, unrestored: [] });
+    expect(events[0]).toBe('expect:deleted-file');
+    const firstSave = events.findIndex((e) => e.startsWith('write:'));
+    expect(events.indexOf('delete:tables/dim_date.dbml')).toBeGreaterThan(0);
+    expect(events.indexOf('delete:tables/dim_date.dbml')).toBeLessThan(firstSave);
+    // Settled: nothing is left holding a watcher back.
+    expect(tracker.isPending(deleted)).toBe(false);
+    expect(tracker.isPending(at('gold/sales.dbml'))).toBe(false);
+  });
+
   it('the fs Delete Table (TableLibraryService.deleteTable) with a YAML owner deletes too, leaving the yml as it is', () => {
     const before = snapshot();
     library().deleteTable('dim_date');

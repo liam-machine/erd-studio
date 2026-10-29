@@ -366,6 +366,32 @@ describe('in a native DBML project', () => {
     compilesClean();
   });
 
+  it('Organise announces every write and both ends of each rename before the edit, and records the moves before saving', async () => {
+    fs.writeFileSync(erd('tables', 'dim_only_gold.dbml'), 'Table dim_only_gold {\n  id INT [pk]\n}\n');
+    fs.mkdirSync(erd('logical-models'), { recursive: true });
+    fs.writeFileSync(erd('logical-models', 'dim_yaml_gold.yml'), 'name: dim_yaml_gold\ncolumns: []\n');
+    fs.writeFileSync(erd('gold', 'mixed.json'), JSON.stringify({ schemaVersion: 5, domain: 'mixed', layer: 'gold', logical: { models: ['dim_yaml_gold', 'dim_only_gold'], relationships: [] } }));
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+      (args.includes('Move Files') ? 'Move Files' : undefined)) as never);
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const events: string[] = [];
+    const expectWrite = vi.spyOn(ownWrites, 'expectWrite');
+    const applyEdit = vscode.workspace.applyEdit.bind(vscode.workspace);
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => { events.push('applyEdit'); return applyEdit(edit); });
+    const recordDelete = ownWrites.recordDelete.bind(ownWrites);
+    vi.spyOn(ownWrites, 'recordDelete').mockImplementation((p) => { events.push(`delete:${path.basename(p)}`); recordDelete(p); });
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+    expect(errors).not.toHaveBeenCalled();
+    const announced = expectWrite.mock.calls.flatMap((c) => [...c[0]]);
+    for (const p of [erd('tables', 'dim_only_gold.dbml'), erd('logical-models', 'dim_yaml_gold.yml'), erd('logical-models', 'gold', 'dim_yaml_gold.yml')]) {
+      expect(announced).toContain(p);
+    }
+    expect(events.indexOf('applyEdit')).toBe(0);
+    expect(events).toContain('delete:dim_yaml_gold.yml');
+    for (const p of announced) expect(ownWrites.isPending(p)).toBe(false);
+  });
+
   it('Organise: when VS Code rejects the edit part way, every file is put back and it says nothing was changed', async () => {
     fs.writeFileSync(erd('tables', 'dim_only_gold.dbml'), 'Table dim_only_gold {\n  id INT [pk]\n  date_key INT\n}\n');
     fs.appendFileSync(erd('tables', '_relationships.dbml'), "use { table dim_only_gold } from './dim_only_gold.dbml'\nRef: dim_only_gold.date_key >? dim_date.date_key\n");
