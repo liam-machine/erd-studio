@@ -9,7 +9,8 @@ import { removedSubjectAreaPaths } from './services/removedSubjectAreas';
 import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, type SubjectAreaSummary, type Layer, type Stage, type UnifiedSubjectArea, type StageData } from './types/semantic';
 import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
 import { TemplateService } from './services/templateService';
-import { SubjectAreaTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
+import { LAYER_DRAG_MIME_TYPE, SubjectAreaTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
+import { DeferredTreeDataProvider } from './providers/deferredTreeDataProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
@@ -937,6 +938,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // the rest of activation runs ahead of the view.
   if (workspaceRoot) void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', true);
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasProject', Boolean(workspaceRoot));
+  // The ERD Studio view gets its provider now, before the services it lists
+  // from exist: it answers with no rows, so the view shows "Loading
+  // diagrams…" (viewsWelcome needs a registered provider that returned
+  // nothing) rather than VS Code's "There is no data provider registered"
+  // and then a blank pane while activation and the first listing run. The
+  // real provider is attached below; the view then lists once.
+  const domainTreeData = workspaceRoot
+    ? new DeferredTreeDataProvider<TreeElement>([LAYER_DRAG_MIME_TYPE], [LAYER_DRAG_MIME_TYPE])
+    : undefined;
+  const domainTreeView = domainTreeData
+    ? vscode.window.createTreeView('erdStudio.domainTree', {
+      treeDataProvider: domainTreeData,
+      dragAndDropController: domainTreeData,
+      canSelectMany: false,
+    })
+    : undefined;
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', hasDbt);
   if (!workspaceRoot) {
     telemetry.activation('no_project', false, 0);
@@ -1786,11 +1803,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     dbtYmlChangedSubscription,
     projectChangedSubscription,
     (() => {
-      const treeView = vscode.window.createTreeView('erdStudio.domainTree', {
-        treeDataProvider: treeProvider,
-        dragAndDropController: treeProvider,
-        canSelectMany: false,
-      });
+      domainTreeData!.attach(treeProvider);
       // Whenever there is a choice to make, the first row of the tree names
       // the open project and switches it on click — always visible, unlike
       // the view-title icon, which VS Code only shows on hover (#82).
@@ -1805,7 +1818,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
         showProjectName();
       });
-      return vscode.Disposable.from(treeView, foldersChanged);
+      return vscode.Disposable.from(domainTreeView!, domainTreeData!, foldersChanged);
     })(),
     vscode.window.registerCustomEditorProvider(SUBJECT_AREA_EDITOR_VIEW_TYPE, editorProvider, {
       // Keep the webview (React tree, ELK worker, in-progress discrepancy /

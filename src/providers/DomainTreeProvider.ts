@@ -22,7 +22,7 @@ import { createLogger, elapsedMs, log, plural } from '../services/logger';
 const treeLog = createLogger('Subject Areas');
 
 /** MIME type for layer drag-drop within the tree. */
-const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer';
+export const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer';
 
 // ---------------------------------------------------------------------------
 // Tree element types (discriminated union)

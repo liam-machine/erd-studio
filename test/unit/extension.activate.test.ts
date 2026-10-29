@@ -440,23 +440,48 @@ describe('activate() with a dbt project', () => {
     expect(refreshes).toBeGreaterThanOrEqual(2);
   });
 
-  it('the ERD Studio view is "loading" from before hasProject until its first listing, so "No diagrams yet" never flashes', async () => {
+  it('the ERD Studio view has a provider from where hasProject is set and shows "Loading diagrams…" (no rows) until the real listing, so neither "no data provider" nor "No diagrams yet" shows', async () => {
+    const order: string[] = [];
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
-    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    exec.mockImplementation((async (command: string, ...args: unknown[]) => {
+      if (command === 'setContext') order.push(`${String(args[0])}=${String(args[1])}`);
+      return undefined;
+    }) as never);
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView').mockImplementation(((id: string) => {
+      order.push(`createTreeView:${id}`);
+      return { dispose: () => {} };
+    }) as never);
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     await activate(context);
-    const contextCalls = (): string[] => exec.mock.calls
-      .filter((c) => c[0] === 'setContext' && /^erdStudio\.(hasProject|diagramsLoading)$/.test(String(c[1])))
-      .map((c) => `${String(c[1])}=${String(c[2])}`);
-    expect(contextCalls()).toEqual(['erdStudio.diagramsLoading=true', 'erdStudio.hasProject=true']);
+    // Registered once, right where hasProject is set: before any service,
+    // the canvas's editor provider or any other view.
+    expect(createTreeView.mock.calls.filter((c) => c[0] === 'erdStudio.domainTree')).toHaveLength(1);
+    const at = (entry: string): number => order.indexOf(entry);
+    expect(at('erdStudio.diagramsLoading=true')).toBeLessThan(at('createTreeView:erdStudio.domainTree'));
+    expect(at('erdStudio.hasProject=true')).toBeLessThan(at('createTreeView:erdStudio.domainTree'));
+    expect(at('createTreeView:erdStudio.domainTree')).toBeLessThan(at('erdStudio.hasMultipleDbtProjects=false'));
+    expect(at('createTreeView:erdStudio.domainTree')).toBeLessThan(at('erdStudio.tablesLoading=true'));
+    expect(createTreeView.mock.invocationCallOrder[0]).toBeLessThan(registerEditor.mock.invocationCallOrder[0]);
 
     const tree = (createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.domainTree')![1] as {
-      treeDataProvider: { getChildren(element?: unknown): unknown[] | undefined };
+      treeDataProvider: { getChildren(element?: unknown): unknown[] | undefined; onDidChangeTreeData(cb: () => void): void };
     }).treeDataProvider;
-    tree.getChildren();
-    expect(contextCalls()).toEqual(['erdStudio.diagramsLoading=true', 'erdStudio.hasProject=true', 'erdStudio.diagramsLoading=false']);
+    let changes = 0;
+    tree.onDidChangeTreeData(() => { changes++; });
+    const loadingKeys = (): string[] => order.filter((o) => o.startsWith('erdStudio.diagramsLoading'));
+    // VS Code's first request, once activation yields: no rows, so the
+    // "Loading diagrams…" welcome shows; the key stays set.
+    expect(tree.getChildren()).toEqual([]);
+    expect(loadingKeys()).toEqual(['erdStudio.diagramsLoading=true']);
+    expect(changes).toBe(0);
+    // A turn later the view is told to list again, and lists the diagrams.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(changes).toBe(1);
+    expect((tree.getChildren() ?? []).length).toBeGreaterThan(0);
+    expect(loadingKeys()).toEqual(['erdStudio.diagramsLoading=true', 'erdStudio.diagramsLoading=false']);
     // Once only: later listings leave the key alone.
     tree.getChildren();
-    expect(contextCalls()).toHaveLength(3);
+    expect(loadingKeys()).toHaveLength(2);
   });
 
   it('routes erdStudio.reportBug through the focused canvas instead of input boxes', async () => {
