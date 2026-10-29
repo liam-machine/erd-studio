@@ -11,7 +11,7 @@
 
 import type { DbmlDiagnostic } from '../types/dbmlStorage.js';
 import type { DbmlParserModule } from './parserModule.js';
-import { PINNED_PARSER, diagnosticOf, stripBom } from './parser.js';
+import { PINNED_PARSER, diagnosticOf, stripBom, withKeptFilepathKeys } from './parser.js';
 
 /** The virtual root every file is mounted under. */
 const VIRTUAL_ROOT = '/erd-studio/';
@@ -45,19 +45,22 @@ export function compileDbmlProject(
   const compiler = new parser.Compiler(layout);
   const result: Record<string, DbmlDiagnostic[]> = {};
   const seen = new Set<string>();
-  for (const entry of entries) {
-    const clean = entry.replace(/^\/+/, '');
-    result[clean] ??= [];
-    const errors = (compiler.parse.errors(parser.Filepath.from(`${VIRTUAL_ROOT}${clean}`)) ?? []) as unknown[];
-    for (const error of errors) {
-      const e = error as { filepath?: { absolute?: string }; nodeOrToken?: { filepath?: { absolute?: string } } };
-      const file = relativeTo(e.filepath?.absolute ?? e.nodeOrToken?.filepath?.absolute, clean);
-      const d = diagnosticOf(error, texts.get(file) ?? '');
-      const key = `${file}\u0000${d.code}\u0000${d.line}\u0000${d.column}\u0000${d.message}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      (result[file] ??= []).push({ code: d.code, message: d.message, line: d.line, column: d.column });
+  // The Compiler rebuilds each file's cache key per query: kept once each while it runs.
+  withKeptFilepathKeys(parser, () => {
+    for (const entry of entries) {
+      const clean = entry.replace(/^\/+/, '');
+      result[clean] ??= [];
+      const errors = (compiler.parse.errors(parser.Filepath.from(`${VIRTUAL_ROOT}${clean}`)) ?? []) as unknown[];
+      for (const error of errors) {
+        const e = error as { filepath?: { absolute?: string }; nodeOrToken?: { filepath?: { absolute?: string } } };
+        const file = relativeTo(e.filepath?.absolute ?? e.nodeOrToken?.filepath?.absolute, clean);
+        const d = diagnosticOf(error, texts.get(file) ?? '');
+        const key = `${file}\u0000${d.code}\u0000${d.line}\u0000${d.column}\u0000${d.message}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        (result[file] ??= []).push({ code: d.code, message: d.message, line: d.line, column: d.column });
+      }
     }
-  }
+  });
   return result;
 }

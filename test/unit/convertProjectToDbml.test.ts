@@ -15,7 +15,11 @@ import * as vscode from 'vscode';
 
 import {
   CONVERT_ALREADY_RUNNING_MESSAGE,
+  CONVERT_CANCELLED_MESSAGE,
   CONVERT_GIT_LINE,
+  CONVERT_OPTIONAL_LINE,
+  CONVERT_PROGRESS,
+  CONVERTED_TEAMMATES_SENTENCE,
   CONVERT_RESUME_LINE,
   CONVERT_TEAMMATES_LINE,
   CONVERT_UNDO_LINE,
@@ -35,6 +39,8 @@ import {
 } from '../../src/providers/SemanticEditorProvider';
 import { MIGRATE_TO_V5_COMMAND_TITLE, UNSAVED_TAG, type ConvertReviewView } from '../../src/services/dbmlConversionReview';
 import { SubjectAreaService } from '../../src/services/domainService';
+import { countDbmlConversionCandidates, dbmlConversionFingerprint } from '../../src/services/dbmlConversionFiles';
+import * as dbmlConversion from '../../src/services/dbmlConversion';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
 import { ManifestService } from '../../src/services/manifestService';
@@ -138,8 +144,10 @@ describe('convertProjectToDbml', () => {
     expect(panel._disposed).toBe(true);
     expect(view.mode).toBe('review');
     expect(view.heading).toBe('Convert this project to DBML?');
-    expect(view.intro).toEqual([CONVERT_WHAT_LINE, CONVERT_TEAMMATES_LINE, CONVERT_GIT_LINE, CONVERT_UNDO_LINE]);
-    expect(html).toContain('Everyone who opens this project needs ERD Studio 2.0 or later.');
+    expect(view.intro).toEqual([CONVERT_OPTIONAL_LINE, CONVERT_WHAT_LINE, CONVERT_TEAMMATES_LINE, CONVERT_GIT_LINE, CONVERT_UNDO_LINE]);
+    expect(html).toContain('Converting is optional: if you cancel, your project keeps working exactly as it is.');
+    expect(html).toContain('everyone who opens this project needs ERD Studio 1.9 pre-release or 2.0 and later');
+    expect(html).not.toContain('2.0 or later');
     expect(html).not.toContain('An earlier conversion stopped part way');
     // Every path of the plan is listed, project-relative.
     for (const p of [...plan.creates.map((c) => c.path), ...plan.replaces.map((r) => r.path), ...plan.deletes]) {
@@ -153,7 +161,11 @@ describe('convertProjectToDbml', () => {
     expect(fs.existsSync(path.join(erd, 'logical-models'))).toBe(false);
     expect(d.onConverted).toHaveBeenCalledTimes(1);
     expect(feature).toHaveBeenCalledWith('convertToDbml');
-    expect(info.mock.calls.at(-1)![0]).toBe('Converted to DBML: 3 tables, 1 diagram. Edit > Undo, straight away, with this diagram in front, puts every file back.');
+    expect(info.mock.calls.at(-1)![0]).toBe(
+      'Converted to DBML: 3 tables, 1 diagram. Edit > Undo, straight away, with this diagram in front, puts every file back. ' +
+        "Teammates and other VS Code windows on an older ERD Studio (1.7.x) can't open the converted project until they update.",
+    );
+    expect(CONVERTED_TEAMMATES_SENTENCE).toContain('1.7.x');
 
     info.mockClear();
     expect(await convertProjectToDbml(deps())).toBe('nothing');
@@ -559,7 +571,7 @@ describe('convertProjectToDbml', () => {
 });
 
 describe('the canvas offer (§6.4)', () => {
-  const YAML_OFFER = 'This project is stored as YAML and JSON. ERD Studio 2.0 stores projects as DBML, an open format.';
+  const YAML_OFFER = 'Your project keeps working as YAML and JSON — converting is optional.';
   /** The offer's dialogs among the information messages. */
   const offers = (info: { mock: { calls: unknown[][] } }): unknown[][] => info.mock.calls.filter((c) => c[0] === DBML_CONVERSION_OFFER_TITLE);
   const NAMING_OFFER = 'ERD Studio now says "table" and "subject area"';
@@ -583,7 +595,8 @@ describe('the canvas offer (§6.4)', () => {
     );
     const run = vi.fn(async () => true);
     const namingRun = vi.fn(async () => true);
-    provider.setDbmlConversion(() => planProjectDbmlConversion({ workspaceRoot: root, semanticDir: '.erd-studio', tableLibraryService }), run);
+    const candidates = vi.fn(() => countDbmlConversionCandidates(root, '.erd-studio'));
+    provider.setDbmlConversion(candidates, run);
     provider.setNamingMigration(
       () => ({ moves: [{ from: 'logical-models/x.yml', to: 'tables/x.yml', keys: [] }], rewrites: [], refusals: [], v4SubjectAreas: [], notes: [] }),
       () => 'v5',
@@ -599,7 +612,7 @@ describe('the canvas offer (§6.4)', () => {
       await new Promise((r) => setTimeout(r, 60));
       return panel;
     };
-    return { open, run, namingRun };
+    return { open, run, namingRun, candidates };
   }
 
   it('is made once a session on a YAML project, before (and instead of) the naming offer, and writes nothing until asked', async () => {
@@ -615,7 +628,8 @@ describe('the canvas offer (§6.4)', () => {
     const options = info.mock.calls[0][1] as { modal: boolean; detail: string };
     expect(options.modal).toBe(true);
     expect(options.detail.startsWith(YAML_OFFER)).toBe(true);
-    expect(options.detail).toContain('Everyone who opens it will need ERD Studio 2.0 or later afterwards.');
+    expect(options.detail).toContain('Afterwards, everyone who opens it needs ERD Studio 1.9 pre-release or 2.0 and later.');
+    expect(options.detail).not.toContain('2.0 or later');
     expect(info.mock.calls[0].slice(2)).toEqual(['Convert…', "Don't Ask Again"]);
     expect([DBML_CONVERSION_OFFER_CONVERT, DBML_CONVERSION_OFFER_DECLINE]).toEqual(['Convert…', "Don't Ask Again"]);
     expect(feature).toHaveBeenCalledWith('convertToDbmlOffered');
@@ -653,8 +667,8 @@ describe('the canvas offer (§6.4)', () => {
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
     await openWith(new Map()).open('gold/sales.dbml');
     expect(offers(info).map((c) => (c[1] as { modal: boolean; detail: string }))).toContainEqual(expect.objectContaining({ modal: true, detail:
-      'This project is stored as DBML, but 3 files are YAML or JSON (probably written by an AI helper set up before 2.0). ' +
-        "Convert them to DBML? (You'll see the full list first.)" }));
+      'Your project keeps working as it is — converting is optional. It is stored as DBML, but 3 files are YAML or JSON ' +
+        "(probably written by an AI helper set up before 2.0). Convert them to DBML? (You'll see the full list first.)" }));
     expect(feature).toHaveBeenCalledWith('convertToDbmlNotNow');
   });
 
@@ -668,5 +682,275 @@ describe('the canvas offer (§6.4)', () => {
     expect(offers(info)).toEqual([]);
     expect(calls.filter((c) => c.startsWith(NAMING_OFFER))).toHaveLength(1);
     expect(feature).not.toHaveBeenCalledWith('convertToDbmlOffered');
+  });
+});
+
+describe('progress, cancel and plan once (pre-release feedback)', () => {
+  type Report = { cancellable: boolean; messages: string[] };
+
+  /**
+   * Record every progress notification (cancellable or not) and its messages.
+   * `cancelAt`: the planning notification's token reports cancelled once this message was shown.
+   */
+  function recordProgress(cancelAt?: string): Report[] {
+    const notes: Report[] = [];
+    vi.spyOn(vscode.window, 'withProgress').mockImplementation((async (
+      options: { cancellable?: boolean },
+      task: (progress: { report: (v: { message?: string }) => void }, token: vscode.CancellationToken) => Promise<unknown>,
+    ) => {
+      const note: Report = { cancellable: options.cancellable === true, messages: [] };
+      notes.push(note);
+      const token = {
+        get isCancellationRequested() { return cancelAt !== undefined && note.cancellable && note.messages.includes(cancelAt); },
+        onCancellationRequested: () => ({ dispose: () => {} }),
+      } as unknown as vscode.CancellationToken;
+      return task({ report: (v) => { if (v.message) note.messages.push(v.message); } }, token);
+    }) as never);
+    return notes;
+  }
+
+  it('reads and plans in a cancellable notification, then writes in one that cannot be cancelled, naming each phase, also in the panel', async () => {
+    useFixture('composite-and-self');
+    const notes = recordProgress();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const shown = answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+    const plan = await planProjectDbmlConversion(deps());
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+
+    const writes = plan.creates.length + plan.replaces.length + plan.deletes.length;
+    expect(notes.map((n) => n.cancellable)).toEqual([true, false]);
+    expect(notes[0].messages).toEqual([CONVERT_PROGRESS.reading, CONVERT_PROGRESS.planning(3, 1), CONVERT_PROGRESS.checking]);
+    expect(notes[1].messages).toEqual([CONVERT_PROGRESS.writing(writes), CONVERT_PROGRESS.reopening, CONVERT_PROGRESS.refreshing]);
+    // Once Convert was chosen, the panel shows what it is doing until it closes.
+    const posted = shown[0].panel._postedMessages as Array<{ type: string; text: string }>;
+    expect(posted).toContainEqual({ type: 'progress', text: CONVERT_PROGRESS.writing(writes) });
+    expect(shown[0].html).toContain('class="cdb__status" role="status" aria-live="polite"');
+  });
+
+  it('numbers in the messages read as people write them', () => {
+    expect(CONVERT_PROGRESS.planning(1100, 21)).toBe('Planning 1,100 tables and 21 diagrams…');
+    expect(CONVERT_PROGRESS.planning(1, 1)).toBe('Planning 1 table and 1 diagram…');
+    expect(CONVERT_PROGRESS.writing(2266)).toBe('Writing 2,266 files…');
+  });
+
+  it.each([
+    ['while reading', () => CONVERT_PROGRESS.reading],
+    ['while planning', () => CONVERT_PROGRESS.planning(3, 1)],
+    ['while checking the DBML', () => CONVERT_PROGRESS.checking],
+  ])('Cancel %s writes nothing, shows no panel and says so', async (_label, at) => {
+    useFixture('composite-and-self');
+    recordProgress(at());
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const shown = answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+    const before = snapshot();
+    expect(await convertProjectToDbml(deps())).toBe('cancelled');
+    expect(shown).toHaveLength(0);
+    expect(info).toHaveBeenCalledWith(CONVERT_CANCELLED_MESSAGE);
+    expect(feature).toHaveBeenCalledWith('convertToDbmlCancelled');
+    expect(telemetryError).not.toHaveBeenCalled();
+    expect(vscode._appliedEdits).toHaveLength(0);
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('Cancel while it plans again after Convert (the project changed) writes nothing', async () => {
+    useFixture('composite-and-self');
+    const notes = recordProgress();
+    let planningNotes = 0;
+    // The second planning notification is cancelled straight away.
+    vi.mocked(vscode.window.withProgress).mockImplementation((async (options: { cancellable?: boolean }, task: (p: unknown, t: unknown) => Promise<unknown>) => {
+      const cancelled = options.cancellable === true && ++planningNotes === 2;
+      notes.push({ cancellable: options.cancellable === true, messages: [] });
+      return task({ report: () => {} }, { isCancellationRequested: cancelled, onCancellationRequested: () => ({ dispose: () => {} }) });
+    }) as never);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    answerPanel((panel) => {
+      const file = path.join(erd, 'logical-models', 'gold');
+      for (const f of fs.readdirSync(file)) fs.utimesSync(path.join(file, f), new Date(), new Date(Date.now() + 5000));
+      return panel._simulateMessage({ type: 'convert' });
+    });
+    const before = snapshot();
+    expect(await convertProjectToDbml(deps())).toBe('cancelled');
+    expect(planningNotes).toBe(2);
+    expect(vscode._appliedEdits).toHaveLength(0);
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('plans once: Convert applies the plan the panel showed when no file changed meanwhile', async () => {
+    useFixture('composite-and-self');
+    const notes = recordProgress();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    expect(notes.filter((n) => n.cancellable)).toHaveLength(1);
+  });
+
+  it('plans again when a file it reads changed meanwhile (only its time), and still converts when the plan is the same', async () => {
+    useFixture('composite-and-self');
+    const notes = recordProgress();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    answerPanel((panel) => {
+      const dir = path.join(erd, 'logical-models', 'gold');
+      const first = fs.readdirSync(dir)[0];
+      fs.utimesSync(path.join(dir, first), new Date(), new Date(Date.now() + 5000));
+      return panel._simulateMessage({ type: 'convert' });
+    });
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    expect(notes.filter((n) => n.cancellable)).toHaveLength(2);
+    expect(snapshot()).toEqual(snapshot(TWIN));
+  });
+
+  it('holds the sidebar views and context keys while it writes, and refreshes each once after onConverted', async () => {
+    useFixture('composite-and-self');
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+    const { RefreshGate } = await import('../../src/services/refreshGate');
+    const gate = new RefreshGate();
+    const treeRefresh = vi.fn();
+    const contextKeys = vi.fn();
+    const refreshTree = gate.gate('tree', treeRefresh);
+    const refreshKeys = gate.gate('keys', contextKeys);
+    // The watcher reports every written file while the edit applies.
+    const realApply = vscode.workspace.applyEdit;
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      for (let i = 0; i < 500; i++) { refreshTree(); refreshKeys(); }
+      return realApply(edit);
+    });
+    let heldDuringOnConverted = false;
+    const d = deps({
+      holdViewRefreshes: () => gate.hold(),
+      onConverted: vi.fn(async () => {
+        heldDuringOnConverted = gate.held;
+        refreshTree();
+        refreshKeys();
+        expect(treeRefresh).not.toHaveBeenCalled();
+      }),
+    });
+    expect(await convertProjectToDbml(d)).toBe('converted');
+    expect(heldDuringOnConverted).toBe(true);
+    expect(gate.held).toBe(false);
+    expect(treeRefresh).toHaveBeenCalledTimes(1);
+    expect(contextKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the view hold when VS Code refuses the edit', async () => {
+    useFixture('composite-and-self');
+    vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
+    vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValue(false);
+    const { RefreshGate } = await import('../../src/services/refreshGate');
+    const gate = new RefreshGate();
+    expect(await convertProjectToDbml(deps({ holdViewRefreshes: () => gate.hold() }))).toBe('failed');
+    expect(gate.held).toBe(false);
+  });
+});
+
+describe('the cheap offer check and the fingerprint', () => {
+  it('counts the YAML tables and JSON diagrams from the listing, and none in a DBML project', () => {
+    useFixture('composite-and-self');
+    expect(countDbmlConversionCandidates(root, '.erd-studio')).toEqual({ files: 4, tablesDirIsLayer: false });
+    fs.rmSync(erd, { recursive: true, force: true });
+    fs.cpSync(TWIN, erd, { recursive: true });
+    expect(countDbmlConversionCandidates(root, '.erd-studio')).toEqual({ files: 0, tablesDirIsLayer: false });
+  });
+
+  it('says when a layer is called tables', () => {
+    useFixture('library-relationships');
+    fs.mkdirSync(path.join(erd, 'tables'), { recursive: true });
+    fs.writeFileSync(path.join(erd, 'tables', 'old.json'), '{}');
+    expect(countDbmlConversionCandidates(root, '.erd-studio').tablesDirIsLayer).toBe(true);
+  });
+
+  it('the fingerprint changes with any file Convert reads: added, removed, rewritten or touched', () => {
+    useFixture('composite-and-self');
+    const fp = (): string => dbmlConversionFingerprint(root, '.erd-studio');
+    const first = fp();
+    expect(fp()).toBe(first);
+    const yml = path.join(erd, 'logical-models', 'gold', fs.readdirSync(path.join(erd, 'logical-models', 'gold'))[0]);
+    fs.utimesSync(yml, new Date(), new Date(Date.now() + 10_000));
+    const touched = fp();
+    expect(touched).not.toBe(first);
+    fs.appendFileSync(yml, '# more\n');
+    const rewritten = fp();
+    expect(rewritten).not.toBe(touched);
+    fs.writeFileSync(path.join(erd, 'gold', 'new.json'), '{}');
+    const added = fp();
+    expect(added).not.toBe(rewritten);
+    fs.rmSync(path.join(erd, 'gold', 'new.json'));
+    expect(fp()).not.toBe(added);
+    // A file Convert never reads (outside the semantic dir) changes nothing.
+    const now = fp();
+    fs.writeFileSync(path.join(root, 'README.md'), 'hello');
+    expect(fp()).toBe(now);
+  });
+});
+
+describe('the canvas offer: cheap, and switched off by a setting', () => {
+  function openWith(state: Map<string, unknown>) {
+    const layerService = new LayerService(root, '.erd-studio');
+    const subjectAreaService = new SubjectAreaService(layerService);
+    const tableLibraryService = new TableLibraryService(root, '.erd-studio');
+    subjectAreaService.setTableLibraryService(tableLibraryService);
+    const selectorsService = new SelectorsService(subjectAreaService, root, '.erd-studio');
+    vi.spyOn(selectorsService, 'scheduleRegenerate').mockImplementation(() => undefined);
+    const context = {
+      extensionUri: vscode.Uri.file(root),
+      globalState: { get: () => true, update: async () => {} },
+      workspaceState: { get: (k: string) => state.get(k), update: async (k: string, v: unknown) => { state.set(k, v); } },
+      secrets: vscode.createMockSecretStorage(),
+    } as unknown as vscode.ExtensionContext;
+    const provider = new SemanticEditorProvider(
+      context, subjectAreaService, new ManifestService(), new YmlParserService(), new TemplateService(),
+      layerService, root, selectorsService, tableLibraryService,
+    );
+    const candidates = vi.fn(() => countDbmlConversionCandidates(root, '.erd-studio'));
+    provider.setDbmlConversion(candidates, vi.fn(async () => true));
+    const open = async (relative: string) => {
+      const file = path.join(erd, relative);
+      const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'), { persist: true });
+      const panel = vscode.createMockWebviewPanel();
+      await provider.resolveCustomTextEditor(doc as never, panel as never, {} as vscode.CancellationToken);
+      await panel._simulateMessage({ type: 'ready' });
+      await new Promise((r) => setTimeout(r, 60));
+      return panel;
+    };
+    return { open, candidates };
+  }
+
+  afterEach(() => vscode._resetMockConfiguration());
+
+  it('decides from the file listing: it never plans or shows progress', async () => {
+    useFixture('composite-and-self');
+    const progress = vi.spyOn(vscode.window, 'withProgress');
+    const plan = vi.spyOn(dbmlConversion, 'planDbmlConversion');
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const { open, candidates } = openWith(new Map());
+    await open('gold/vault.json');
+    expect(info.mock.calls.filter((c) => c[0] === DBML_CONVERSION_OFFER_TITLE)).toHaveLength(1);
+    expect(candidates).toHaveBeenCalledTimes(1);
+    expect(progress).not.toHaveBeenCalled();
+    expect(plan).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['in the user settings', { globalValue: false }],
+    ['in the workspace settings', { workspaceValue: false }],
+  ])('erdStudio.dbml.offerConvert off %s: no offer, and nothing is listed', async (_label, values) => {
+    useFixture('composite-and-self');
+    vscode._setMockConfiguration('erdStudio', 'dbml.offerConvert', values);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const { open, candidates } = openWith(new Map());
+    await open('gold/vault.json');
+    expect(info.mock.calls.filter((c) => c[0] === DBML_CONVERSION_OFFER_TITLE)).toEqual([]);
+    expect(candidates).not.toHaveBeenCalled();
+    expect(feature).not.toHaveBeenCalledWith('convertToDbmlOffered');
+  });
+
+  it('the setting is contributed, on by default, with a plain description', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as {
+      contributes: { configuration: { properties: Record<string, { type: string; default: unknown; markdownDescription: string }> } };
+    };
+    const setting = pkg.contributes.configuration.properties['erdStudio.dbml.offerConvert'];
+    expect(setting).toMatchObject({ type: 'boolean', default: true });
+    expect(setting.markdownDescription).toMatch(/keeps working as it is/);
   });
 });

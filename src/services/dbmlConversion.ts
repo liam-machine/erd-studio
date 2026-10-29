@@ -55,6 +55,7 @@ import {
 import type {
   Annotation,
   DbmlAttachTable,
+  DbmlStorageReader,
   DbmlDiagnostic,
   DbmlRelationshipsReading,
   NodePosition,
@@ -79,6 +80,7 @@ import {
   subjectAreaMembersDbml,
 } from '@erd-studio/core/dbml';
 
+import { DbmlFileCompileMemo, compileDbmlFilesSeparately, compileDbmlFilesSeparatelyAsync } from './dbmlFileCompile';
 import { planDbmlLibraryWrites } from './dbmlLibraryWrites';
 import type { DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
 import { planMoveToLibrary } from './libraryRelationships';
@@ -183,10 +185,38 @@ export function isDbmlSelfCheckRefusal(refusal: string): boolean {
   return refusal.endsWith(DBML_SELF_CHECK_REFUSAL_END);
 }
 
-/** Test seams. */
+/** What the planner is doing, for a progress message. */
+export type DbmlConversionPhase = 'planning' | 'checking';
+
+/** Test seams, and the hooks a long plan reports through. */
 export interface DbmlConversionOptions {
-  /** The multi-file compile of the self-check (default: core's, with the pinned parser). */
-  compile?: (files: Readonly<Record<string, string>>, entries: readonly string[]) => Record<string, DbmlDiagnostic[]>;
+  /**
+   * The multi-file compile of the self-check: `compileDbmlProject`'s contract.
+   * Default: `compileDbmlFilesSeparately` (the same diagnostics, file by file,
+   * in time that grows with the project rather than its square).
+   */
+  compile?: (files: Readonly<Record<string, string>>, entries: readonly string[]) => Record<string, DbmlDiagnostic[]> | Promise<Record<string, DbmlDiagnostic[]>>;
+  /** Called as each phase starts (it may be called again for another round). */
+  onPhase?: (phase: DbmlConversionPhase) => void | Promise<void>;
+  /**
+   * Awaited every few tens of milliseconds of planning, so the extension host
+   * can handle other events (a progress notification, its Cancel button). It
+   * may throw to stop the plan; the error reaches the caller and nothing is planned.
+   */
+  pause?: () => Promise<void>;
+}
+
+/** How long the planner works between two {@link DbmlConversionOptions.pause}s. */
+const PAUSE_EVERY_MS = 50;
+
+/** An awaitable that calls `pause` when {@link PAUSE_EVERY_MS} have passed since the last time (nothing without one). */
+function breather(pause: DbmlConversionOptions['pause']): () => Promise<void> {
+  let last = Date.now();
+  return async () => {
+    if (!pause || Date.now() - last < PAUSE_EVERY_MS) return;
+    await pause();
+    last = Date.now();
+  };
 }
 
 /** The comment block's first line (§2.8). */
@@ -344,6 +374,8 @@ function secondColumnLine(text: string, name: string): number | undefined {
 
 /** Every comment's offset in a YAML text, from the CST (never from a `#` inside a scalar). */
 function yamlCommentOffsets(text: string): number[] {
+  // A comment starts with `#`: a text without one has none (and skips the CST).
+  if (!text.includes('#')) return [];
   const out: number[] = [];
   const walk = (node: unknown): void => {
     if (!node || typeof node !== 'object') return;
@@ -616,6 +648,7 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
   }
   const left = new Map<string, LeftFile>();
   for (let round = 0; round < MAX_ROUNDS; round++) {
+    await options.onPhase?.('planning');
     const attempt = await planOnce(input, options, left);
     if (attempt.leaveMore.size === 0) return attempt.plan;
     for (const [p, why] of attempt.leaveMore) if (!left.has(p)) left.set(p, why);
@@ -633,6 +666,7 @@ async function planOnce(
 ): Promise<{ plan: DbmlConversionPlan; leaveMore: Map<string, LeftFile> }> {
   const plan = emptyPlan();
   const { refusals, notes } = plan;
+  const breathe = breather(options.pause);
   const leaveMore = new Map<string, LeftFile>();
   const leave = (path: string, problem: string, line?: number): void => {
     if (!left.has(path) && !leaveMore.has(path)) leaveMore.set(path, { problem, ...(line !== undefined ? { line } : {}) });
@@ -668,6 +702,7 @@ async function planOnce(
   /** Converted tables whose identical duplicate keys were read once: the before-display's warning is not a difference. */
   const dedupedKeys = new Set<string>();
   for (const f of yamlTables) {
+    await breathe();
     const cls = classifySemanticFile(f.path, { tablesDirIsLayer: false });
     const stem = cls.name ?? stemOf(f.path);
     if (left.has(f.path)) {
@@ -825,6 +860,7 @@ async function planOnce(
     library.set(lower(t.name), t);
   }
 
+  await breathe();
   // ---- 2. Relationships files already there --------------------------------------------------
   const relationshipsReadings = new Map<string, DbmlRelationshipsReading>();
   /** Relationships files that do not read (path → why and line): never edited. */
@@ -850,6 +886,7 @@ async function planOnce(
   const lookup = dbmlTableLookup(attachTables);
   const attachment = attachRelationships([...relationshipsReadings].map(([path, reading]) => ({ path, reading })), lookup);
 
+  await breathe();
   // ---- 3. The relationships pool: every owner's list, respelled, deduped, canonical ----------
   const tableOf = (name: string): LibraryTable | undefined => library.get(lower(name));
   const columnOf = (t: LibraryTable, column: string): string | undefined => {
@@ -978,6 +1015,7 @@ async function planOnce(
     return out;
   };
 
+  await breathe();
   // ---- 4. Diagrams: read, and the relationships they hold moved to the library (§6.3) --------
   interface JsonDiagram { file: DbmlConversionFile; raw: Record<string, unknown>; obj: Record<string, unknown>; layer: string; name: string; target: string }
   const jsonDiagrams: JsonDiagram[] = [];
@@ -1188,6 +1226,7 @@ async function planOnce(
     );
   }
 
+  await breathe();
   // ---- 5. The library plan (§4.6): tables, then relationships files -----------------------------
   const plannedTableText = new Map<string, string>();
   for (const t of library.values()) if (t.converted) plannedTableText.set(t.path, t.converted.text);
@@ -1296,6 +1335,7 @@ async function planOnce(
   }
   if (leaveMore.size > 0) return again();
 
+  await breathe();
   // ---- 6. Diagrams ----------------------------------------------------------------------------
   const convertedNames = new Set([...library.values()].filter((t) => t.converted).map((t) => lower(t.name)));
   const pathChanged = new Set<string>(convertedNames);
@@ -1311,6 +1351,7 @@ async function planOnce(
   const unlinkedOf = new Map<string, string[]>();
   /** Members the self-check treats as missing or unreadable (names, lower-case), per diagram source. */
   for (const d of jsonDiagrams) {
+    await breathe();
     const text = [] as string[];
     const logical = isObject(d.obj.logical) ? d.obj.logical : {};
     // The view config as the loader reads it: the top level, else the stage-level one older versions wrote,
@@ -1539,21 +1580,27 @@ async function planOnce(
   }
 
   // ---- 8. The self-check -------------------------------------------------------------------------
+  await options.onPhase?.('checking');
+  await breathe();
   const before: Record<string, string> = {};
   for (const f of files) before[f.path] = f.text;
   const after: Record<string, string> = { ...before };
   for (const p of plan.deletes) delete after[p];
   for (const c of plan.creates) after[c.path] = c.text;
   for (const r of plan.replaces) after[r.path] = r.text;
-  const compile = options.compile ?? ((fs, list) => compileDbmlProject(fs, list));
+  const compileMemo = new DbmlFileCompileMemo();
+  const pause = options.pause;
+  const compile = options.compile ?? (pause
+    ? (fs: Readonly<Record<string, string>>, list: readonly string[]) => compileDbmlFilesSeparatelyAsync(fs, list, pause, compileDbmlProject, compileMemo)
+    : (fs: Readonly<Record<string, string>>, list: readonly string[]) => compileDbmlFilesSeparately(fs, list, compileDbmlProject, compileMemo));
   const dbmlPaths = (set: Record<string, string>): string[] => Object.keys(set).filter((p) => lower(p).endsWith('.dbml'));
   const dbmlOnly = (set: Record<string, string>): Record<string, string> => Object.fromEntries(dbmlPaths(set).map((p) => [p, set[p]]));
   const diagnosticKey = (file: string, d: DbmlDiagnostic): string => `${file}\u0000${d.code}\u0000${d.message}`;
   const already = new Set<string>();
   if (dbmlPaths(before).length > 0) {
-    for (const [file, list] of Object.entries(compile(dbmlOnly(before), dbmlPaths(before)))) for (const d of list) already.add(diagnosticKey(file, d));
+    for (const [file, list] of Object.entries(await compile(dbmlOnly(before), dbmlPaths(before)))) for (const d of list) already.add(diagnosticKey(file, d));
   }
-  const compiled = compile(dbmlOnly(after), dbmlPaths(after));
+  const compiled = await compile(dbmlOnly(after), dbmlPaths(after));
   for (const [file, list] of Object.entries(compiled)) {
     const fresh = list.find((d) => !already.has(diagnosticKey(file, d)));
     if (fresh) {
@@ -1581,10 +1628,13 @@ async function planOnce(
     ...[...library.values()].map((t) => t.folder),
     ...files.filter((f) => f.kind === 'table').map((f) => classifySemanticFile(f.path, { tablesDirIsLayer: false }).folder ?? ''),
   ].filter((f) => f !== ''))].sort();
+  // Every diagram reads the same tables and relationships files: each text is parsed once.
+  const reader = memoisedDbmlReader();
   for (const { from, to } of comparisons) {
-    const was = await displayOf(before, from, libraryFolders, input.layers);
+    await breathe();
+    const was = await displayOf(before, from, libraryFolders, input.layers, reader);
     if (was === null) continue;
-    const now = await displayOf(after, to, libraryFolders, input.layers);
+    const now = await displayOf(after, to, libraryFolders, input.layers, reader);
     if (now === null) {
       refusals.push(`Convert would write ${to} so that it no longer loads. ${DBML_SELF_CHECK_REFUSAL_END}`);
       return { plan: withoutWrites(plan), leaveMore: new Map() };
@@ -1799,11 +1849,37 @@ function orderCreates(creates: Array<{ path: string; text: string }>): Array<{ p
  * finds a table file by its stem without case), before and after alike.
  * Null when it does not load.
  */
+/**
+ * Core's DBML readers, each text read once: the self-check loads every
+ * diagram before and after, and they share their tables and relationships
+ * files. A reading is copied out, so a caller that changes one changes no other.
+ */
+export function memoisedDbmlReader(base: DbmlStorageReader = dbmlStorageReader): DbmlStorageReader {
+  const tables = new Map<string, ReturnType<DbmlStorageReader['parseTable']>>();
+  const relationships = new Map<string, ReturnType<DbmlStorageReader['readRelationships']>>();
+  return {
+    parseTable: (text, fileStem) => {
+      const key = `${fileStem}\u0000${text}`;
+      let reading = tables.get(key);
+      if (!reading) { reading = base.parseTable(text, fileStem); tables.set(key, reading); }
+      return structuredClone(reading);
+    },
+    readRelationships: (text) => {
+      let reading = relationships.get(text);
+      if (!reading) { reading = base.readRelationships(text); relationships.set(text, reading); }
+      return structuredClone(reading);
+    },
+    parseSubjectArea: (text, filePath, layoutText) => base.parseSubjectArea(text, filePath, layoutText),
+    subjectAreaMembers: (text) => base.subjectAreaMembers(text),
+  };
+}
+
 async function displayOf(
   set: Readonly<Record<string, string>>,
   domainPath: string,
   libraryFolders: readonly string[],
   layerIds: readonly string[],
+  reader: DbmlStorageReader = dbmlStorageReader,
 ): Promise<Record<string, unknown> | null> {
   const layers = parseLayersText(set['layers.json'] ?? null, () => { /* the same either way */ });
   const known = new Set(layers.map((l) => l.id));
@@ -1822,7 +1898,7 @@ async function displayOf(
     const display = await loadDisplaySubjectArea({
       domainPath,
       readOnly: true,
-      dbml: dbmlStorageReader,
+      dbml: reader,
       warn: () => { /* compared, not shown */ },
       readFile: async (p) => (p === 'layers.json' ? layersText : read(p)),
     });

@@ -298,8 +298,15 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
 }
 
 // ---------------------------------------------------------------------------
-// The protocol (webview → host); the host posts nothing back
+// The protocol: the panel's choices (webview → host), and the one thing the
+// host posts back, what Convert is doing once the user chose Convert
 // ---------------------------------------------------------------------------
+
+/** Host → panel: the phase Convert is in ("Writing 2,266 files…"), shown on the Convert button and in a status line. */
+export interface ConvertPanelProgress {
+  type: 'progress';
+  text: string;
+}
 
 export type ConvertPanelToHost =
   | { type: 'convert' }
@@ -391,6 +398,8 @@ body {
 }
 .cdb-item__open:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
 .cdb-item__open:focus { outline: 1px solid var(--vscode-focusBorder); }
+.cdb__status { flex: 1; align-self: center; margin: 0; color: var(--vscode-descriptionForeground); }
+.cdb__status:empty { display: none; }
 .cdb__actions {
   position: sticky; bottom: 0; flex: none; display: flex; gap: 8px; justify-content: flex-end;
   padding: 12px 24px; background: var(--vscode-editor-background);
@@ -415,6 +424,14 @@ const SCRIPT = `
     buttons.forEach(function (b) { b.disabled = true; });
     if (label) { button.textContent = label; }
   }
+  var status = document.querySelector('.cdb__status');
+  window.addEventListener('message', function (event) {
+    var data = event.data;
+    if (!data || data.type !== 'progress' || typeof data.text !== 'string') { return; }
+    buttons.forEach(function (b) { b.disabled = true; });
+    buttons.forEach(function (b) { if (b.getAttribute('data-action') === 'convert') { b.textContent = data.text; } });
+    if (status) { status.textContent = data.text; }
+  });
   document.addEventListener('click', function (event) {
     var target = event.target instanceof Element ? event.target.closest('[data-action]') : null;
     if (!target || target.disabled) { return; }
@@ -486,7 +503,7 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
   </header>
   <section class="cdb__list" tabindex="0" aria-label="${view.mode === 'review' ? 'Changes' : 'Problems'}">${sections}
   </section>
-  <footer class="cdb__actions">${actions}</footer>
+  <footer class="cdb__actions"><p class="cdb__status" role="status" aria-live="polite"></p>${actions}</footer>
 </main>
 <script nonce="${n}">${SCRIPT}</script>
 </body>

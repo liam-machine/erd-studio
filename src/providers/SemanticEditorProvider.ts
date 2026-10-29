@@ -188,8 +188,7 @@ import {
 import type { RelationshipWriteInput, RelationshipWriteOp } from '../services/libraryRelationships';
 import { auditRelationshipWrite, surveyLibrary } from '../services/relationshipHealth';
 import { namingMigrationIsEmpty } from '../services/namingMigration';
-import { dbmlConversionIsEmpty } from '../services/dbmlConversion';
-import type { DbmlConversionPlan } from '../services/dbmlConversion';
+import type { DbmlConversionCandidates } from '../services/dbmlConversionFiles';
 import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
@@ -532,10 +531,28 @@ export const DBML_CONVERSION_OFFER_TITLE = 'Convert this project to DBML?';
 export const DBML_CONVERSION_OFFER_CONVERT = 'Convert…';
 export const DBML_CONVERSION_OFFER_DECLINE = "Don't Ask Again";
 
+/** The setting that turns the Convert offer off everywhere (`erdStudio.dbml.offerConvert`, default on). */
+export const DBML_OFFER_CONVERT_SETTING = 'dbml.offerConvert';
+
+/**
+ * The Convert offer's explanation (§6.4): converting is optional, and what a
+ * converted project needs from everyone who opens it. `files` is how many
+ * YAML/JSON files a mixed project still has.
+ */
+export function dbmlConversionOfferDetail(storage: 'yaml' | 'mixed', files: number): string {
+  if (storage === 'mixed') {
+    return `Your project keeps working as it is — converting is optional. It is stored as DBML, but ${files} file${files === 1 ? ' is' : 's are'} ` +
+      'YAML or JSON (probably written by an AI helper set up before 2.0). Convert them to DBML? (You\'ll see the full list first.)';
+  }
+  return 'Your project keeps working as YAML and JSON — converting is optional. ERD Studio can store it as DBML instead, an open format. ' +
+    'Afterwards, everyone who opens it needs ERD Studio 1.9 pre-release or 2.0 and later. ' +
+    "Convert now? (You'll see the full list of changes first.)";
+}
+
 /** What the canvas needs to offer Convert Project to DBML (§6.4), wired by the extension. */
 interface DbmlConversionHooks {
-  /** The conversion's plan for the project as it is on disk. */
-  plan: () => Promise<DbmlConversionPlan>;
+  /** What there is to convert, from the file listing alone (no plan: that waits until the user asks). */
+  candidates: () => DbmlConversionCandidates;
   /** Run the command, with its own modal; true when it converted. */
   run: () => Promise<boolean>;
 }
@@ -2310,16 +2327,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /** Wire Convert Project to DBML's offer (§6.4); the extension calls it once. */
-  setDbmlConversion(plan: DbmlConversionHooks['plan'], run: DbmlConversionHooks['run']): void {
-    this.dbmlConversion = { plan, run };
+  setDbmlConversion(candidates: DbmlConversionHooks['candidates'], run: DbmlConversionHooks['run']): void {
+    this.dbmlConversion = { candidates, run };
   }
 
   /**
    * Offer, once a session, to convert a YAML or mixed project to DBML
    * (§6.4), in a modal dialog. Nothing is written without the user's choice:
-   * Convert… runs the command, whose panel lists the whole plan. Not made when the conversion
-   * would be refused (the command says why when it is run), when there is
-   * nothing to convert, or after "Don't Ask Again". True when it was shown.
+   * Convert… runs the command, whose panel lists the whole plan. It decides
+   * from the file listing alone, so opening a canvas never waits for a plan:
+   * not made when there is no YAML table or JSON diagram, when a layer is
+   * called `tables` (Convert would refuse; any other refusal the command
+   * shows when it runs), after "Don't Ask Again" in this workspace, or with
+   * `erdStudio.dbml.offerConvert` off. True when it was shown.
    */
   private async maybeOfferDbmlConversion(): Promise<boolean> {
     const hooks = this.dbmlConversion;
@@ -2327,18 +2347,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.dbmlConversionOffered = true;
     try {
       if (this.context.workspaceState?.get<boolean>(DBML_CONVERSION_DECLINED_KEY)) return false;
+      if (!getErdStudioSetting<boolean>(DBML_OFFER_CONVERT_SETTING, true)) return false;
       const storage = this.tableLibraryService.projectStorage();
       if (storage === 'dbml') return false;
-      const plan = await hooks.plan();
-      if (plan.refusals.length > 0 || (dbmlConversionIsEmpty(plan) && plan.v4SubjectAreas.length === 0)) return false;
+      const candidates = hooks.candidates();
+      if (candidates.tablesDirIsLayer || candidates.files === 0) return false;
       this.dbmlConversionEligible = true;
       telemetry.feature('convertToDbmlOffered');
-      const files = plan.deletes.length;
-      const message = storage === 'mixed'
-        ? `This project is stored as DBML, but ${files} file${files === 1 ? ' is' : 's are'} YAML or JSON (probably written by an AI helper set up before 2.0). ` +
-          "Convert them to DBML? (You'll see the full list first.)"
-        : 'This project is stored as YAML and JSON. ERD Studio 2.0 stores projects as DBML, an open format. Everyone who opens it will need ' +
-          "ERD Studio 2.0 or later afterwards. Convert now? (You'll see the full list of changes first.)";
+      const message = dbmlConversionOfferDetail(storage, candidates.files);
       // A dialog the user must answer (after pre-release 1.9.0): VS Code adds
       // its own Cancel, and Cancel, Escape or closing it is Not Now.
       const choice = await vscode.window.showInformationMessage(

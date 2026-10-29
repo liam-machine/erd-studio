@@ -24,6 +24,40 @@ export type AstNode = Record<string, any>;
 /** The pinned DBML parser (11.0.0). */
 export const PINNED_PARSER: DbmlParserModule = { Compiler, MemoryProjectLayout, Filepath };
 
+/** Set while {@link withKeptFilepathKeys} has a parser's method replaced. */
+let keepingFilepathKeys = false;
+
+/**
+ * Run `work` with each of `parser`'s `Filepath`s computing its cache key
+ * once. The 11.0 Compiler rebuilds the key (every path segment through
+ * `encodeURIComponent`) for every query it caches, about a third of a
+ * compile; a Filepath's root and segments are set in its constructor and
+ * never change, so the key is kept for it (in a WeakMap, never on the
+ * object). The parser's own method is put back afterwards, also when `work`
+ * throws; a parser without the method, or a call nested in another, runs as is.
+ */
+export function withKeptFilepathKeys<T>(parser: DbmlParserModule, work: () => T): T {
+  const proto = (parser.Filepath as { prototype?: { toKey?: () => string } }).prototype;
+  const original = proto?.toKey;
+  if (!proto || typeof original !== 'function' || keepingFilepathKeys) return work();
+  const kept = new WeakMap<object, string>();
+  keepingFilepathKeys = true;
+  proto.toKey = function keptKey(this: object): string {
+    let key = kept.get(this);
+    if (key === undefined) {
+      key = original.call(this);
+      kept.set(this, key);
+    }
+    return key;
+  };
+  try {
+    return work();
+  } finally {
+    proto.toKey = original;
+    keepingFilepathKeys = false;
+  }
+}
+
 /** Where a single file is compiled: fixed, and free of spaces. */
 export const VIRTUAL_PATH = '/erd-studio/file.dbml';
 
@@ -161,14 +195,16 @@ export function compileOne(
   const entry = parser.Filepath.from(virtualPath);
   layout.setSource(entry, text);
   const compiler = new parser.Compiler(layout);
-  const ast = compiler.parse.ast(entry) as AstNode;
-  const errors = ((compiler.parse.errors(entry) ?? []) as unknown[]).map((d) => diagnosticOf(d, text));
+  const [ast, errors] = withKeptFilepathKeys(parser, () => [
+    compiler.parse.ast(entry) as AstNode,
+    ((compiler.parse.errors(entry) ?? []) as unknown[]).map((d) => diagnosticOf(d, text)),
+  ] as const);
   let db: AstNode | undefined | null = null;
   const compiled: CompiledFile = {
     ast: (ast && typeof ast === 'object' && 'ast' in ast && ast.ast ? ast.ast : ast) as AstNode,
     errors,
     rawDb: () => {
-      if (db === null) db = errors.length > 0 ? undefined : (compiler.parse.rawDb(entry) as AstNode | undefined);
+      if (db === null) db = errors.length > 0 ? undefined : withKeptFilepathKeys(parser, () => compiler.parse.rawDb(entry) as AstNode | undefined);
       return db;
     },
   };

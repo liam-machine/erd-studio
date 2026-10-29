@@ -6,6 +6,7 @@
  * bundles it.
  */
 
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -56,26 +57,85 @@ export function readDbmlConversionInput(workspaceRoot: string, semanticDir: stri
     if (cls.kind === 'other' || cls.kind === 'template') return;
     files.push({ path: rel, text: read.text, hadBom: read.hadBom, kind: cls.kind, ...(cls.storage ? { storage: cls.storage } : {}) });
   };
+  walkConversionFiles(semanticRoot, tablesIsLayer, add);
+  const layersText = files.find((f) => f.kind === 'layers')?.text ?? null;
+  const layers = parseLayersText(layersText, () => { /* doctor reports layers.json itself */ }).map((l) => l.id);
+  return { semanticDir, layers, tablesDirIsLayer: tablesIsLayer, files, ...(misnamedTables.length > 0 ? { misnamedTables } : {}) };
+}
+
+/**
+ * Every file Convert reads, in the order it reads them (relative, posix):
+ * `layers.json`, and every file in a top-level folder of the semantic dir and,
+ * in the library (`logical-models/`, and `tables/` unless it is a layer), one
+ * folder down. `inLibrary` says which.
+ */
+function walkConversionFiles(semanticRoot: string, tablesIsLayer: boolean, visit: (rel: string, inLibrary: boolean) => void): void {
   for (const entry of listDir(semanticRoot).sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.isFile()) {
-      if (entry.name === LAYERS_CONFIG_FILE) add(entry.name);
+      if (entry.name === LAYERS_CONFIG_FILE) visit(entry.name, false);
       continue;
     }
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
     const library = entry.name === LOGICAL_MODELS_DIR || (entry.name === TABLES_DIR && !tablesIsLayer);
     for (const child of listDir(path.join(semanticRoot, entry.name)).sort((a, b) => a.name.localeCompare(b.name))) {
       if (child.isFile()) {
-        add(`${entry.name}/${child.name}`, library);
+        visit(`${entry.name}/${child.name}`, library);
       } else if (library && child.isDirectory() && !child.name.startsWith('.')) {
         for (const leaf of listDir(path.join(semanticRoot, entry.name, child.name)).sort((a, b) => a.name.localeCompare(b.name))) {
-          if (leaf.isFile()) add(`${entry.name}/${child.name}/${leaf.name}`, true);
+          if (leaf.isFile()) visit(`${entry.name}/${child.name}/${leaf.name}`, true);
         }
       }
     }
   }
-  const layersText = files.find((f) => f.kind === 'layers')?.text ?? null;
-  const layers = parseLayersText(layersText, () => { /* doctor reports layers.json itself */ }).map((l) => l.id);
-  return { semanticDir, layers, tablesDirIsLayer: tablesIsLayer, files, ...(misnamedTables.length > 0 ? { misnamedTables } : {}) };
+}
+
+/**
+ * A fingerprint of everything Convert reads: each file's path, modification
+ * time and size, and whether `tables/` is a layer. Equal fingerprints mean
+ * the plan made from the first still holds, so Convert applies it without
+ * planning again; any file added, removed or written (by ERD Studio, git, an
+ * AI helper or another window) changes it.
+ */
+export function dbmlConversionFingerprint(workspaceRoot: string, semanticDir: string): string {
+  const semanticRoot = path.join(workspaceRoot, semanticDir);
+  const tablesIsLayer = fs.existsSync(path.join(semanticRoot, TABLES_DIR)) && tablesDirIsLayer(semanticRoot);
+  const hash = crypto.createHash('sha256');
+  hash.update(`tablesIsLayer:${tablesIsLayer}\n`);
+  walkConversionFiles(semanticRoot, tablesIsLayer, (rel) => {
+    let stamp = 'unreadable';
+    try {
+      const stat = fs.statSync(path.join(semanticRoot, ...rel.split('/')));
+      stamp = `${stat.mtimeMs}:${stat.size}`;
+    } catch { /* gone since it was listed */ }
+    hash.update(`${rel}\u0000${stamp}\n`);
+  });
+  return hash.digest('hex');
+}
+
+/** What the Convert offer needs to know, without reading or planning anything. */
+export interface DbmlConversionCandidates {
+  /** `.yml` tables in the library and `.json` diagrams in layer folders: the files Convert would convert. */
+  files: number;
+  /** A layer called `tables`: Convert would refuse, so it is not offered. */
+  tablesDirIsLayer: boolean;
+}
+
+/**
+ * The files Convert would convert, counted from the listing alone (§6.4's
+ * offer): no file is read and nothing is planned, so it costs a few
+ * directory reads however big the project is. The full plan is made only
+ * when the user asks to convert.
+ */
+export function countDbmlConversionCandidates(workspaceRoot: string, semanticDir: string): DbmlConversionCandidates {
+  const semanticRoot = path.join(workspaceRoot, semanticDir);
+  const tablesIsLayer = fs.existsSync(path.join(semanticRoot, TABLES_DIR)) && tablesDirIsLayer(semanticRoot);
+  let files = 0;
+  walkConversionFiles(semanticRoot, tablesIsLayer, (rel) => {
+    if (rel.toLowerCase().endsWith('.dbml')) return;
+    const cls = classifySemanticFile(rel, { tablesDirIsLayer: tablesIsLayer });
+    if ((cls.kind === 'table' && cls.storage === 'yaml') || (cls.kind === 'diagram' && cls.storage === 'json')) files++;
+  });
+  return { files, tablesDirIsLayer: tablesIsLayer };
 }
 
 /**
