@@ -170,7 +170,7 @@ export interface DbmlLibraryWritePlan {
   relationshipsImportsFor(members: Iterable<string>, current?: readonly string[]): string[];
   /**
    * {@link relationshipsImportsFor} with no current imports.
-   * @deprecated 2.0-switch: S7 (newSubjectAreaWriter) and S8a (Convert) move their last callers to `relationshipsImportsFor`.
+   * @deprecated 2.0-switch: S8a (Convert moves its last caller to `relationshipsImportsFor`).
    */
   relationshipsFilesFor(names: readonly string[]): string[];
   /** The table pairs (`pairKey`) whose set of files holding a live Ref the plan changes. */

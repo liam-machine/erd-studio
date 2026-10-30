@@ -1087,11 +1087,11 @@ describe('describeDbmlImportPlan', () => {
   it('in a DBML project, names the relationships files instead of "the tables\' files", and the layout goes in the diagram file', () => {
     const p = salesPlan({ libraryRelationships: true });
     expect(p.report.relationshipsInLibrary).toBe(p.report.relationships);
-    const one = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['tables/gold/_relationships.dbml']} });
-    expect(one).toContain(`• ${p.report.relationships} relationships saved in tables/gold/_relationships.dbml.`);
+    const one = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['gold/relationships/gold.dbml']} });
+    expect(one).toContain(`• ${p.report.relationships} relationships saved in gold/relationships/gold.dbml.`);
     expect(one).not.toContain('the tables\' files');
-    const many = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['tables/gold/_relationships.dbml', 'tables/silver/_relationships.dbml']} });
-    expect(many).toContain('saved in tables/gold/_relationships.dbml, tables/silver/_relationships.dbml.');
+    const many = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['gold/relationships/gold.dbml', 'silver/relationships/silver.dbml']} });
+    expect(many).toContain('saved in gold/relationships/gold.dbml, silver/relationships/silver.dbml.');
     expect(describeDbmlImportPlan(p, { dbml: { relationshipsFiles: []} }))
       .toContain('saved in the Table Library\'s relationships files.');
     // The YAML wording is unchanged.
@@ -1102,6 +1102,26 @@ describe('describeDbmlImportPlan', () => {
       .toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
     expect(describeDbmlImportPlan(salesPlan({ layout: { positions: {}, stickies: [] } }), { dbml: { relationshipsFiles: []} }))
       .toContain('• The file\'s erd_layout has no positions for these tables: the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
+  });
+
+  it('in a DBML project, says once per schema which spelling the layer\'s existing folder gives it, naming its tables (respelledSchemas)', () => {
+    const p = salesPlan({ libraryRelationships: true });
+    const none = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: [] } });
+    expect(none).not.toContain('• Schema ');
+    const one = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: [], respelledSchemas: [
+      { table: 'deals', from: 'Sales', to: 'sales' },
+      { table: 'quotes', from: 'Sales', to: 'sales' },
+    ] } }).split('\n').filter((l) => l.startsWith('• Schema '));
+    expect(one).toEqual(['• Schema Sales is written sales, as the layer\'s existing sales/ folder spells it: deals, quotes.']);
+    const two = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: [], respelledSchemas: [
+      { table: 'deals', from: 'Sales', to: 'sales' },
+      { table: 'ledger', from: 'FINANCE', to: 'Finance' },
+      { table: 'quotes', from: 'Sales', to: 'sales' },
+    ] } }).split('\n').filter((l) => l.startsWith('• Schema '));
+    expect(two).toEqual([
+      '• Schema Sales is written sales, as the layer\'s existing sales/ folder spells it: deals, quotes.',
+      '• Schema FINANCE is written Finance, as the layer\'s existing Finance/ folder spells it: ledger.',
+    ]);
   });
 
   it('summarises a foreign file: optional refs, meta, renames and what is left out', () => {

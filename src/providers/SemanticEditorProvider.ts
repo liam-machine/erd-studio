@@ -166,6 +166,7 @@ import {
   markDraftKeys,
   relationshipsForAddedTables,
   seedTableFromDbt,
+  configuredSchemaOf,
   type DraftSkipped,
 } from '../services/dbtDraft';
 import { pickDraftScope } from './dbtDraftPicker';
@@ -202,7 +203,7 @@ import { applyFileWrites, writtenPaths } from './applyFileWrites';
 import { primeLayoutOnlyReading } from '../services/dbmlDiagramReadings';
 import { changedMemberPath, dbmlResolverOf, problemOf, settleDbmlDiagramWrites, settleSignalsOf, settlesNothing, unsettledDiagramRefusal } from '../services/dbmlDiagramSettle';
 import { diagramSummaryForFile } from '../services/dbmlDiagramSummaries';
-import type { DbmlTableHome } from '../services/dbmlLibraryWrites';
+import type { DbmlDraftTable, DbmlTableHome } from '../services/dbmlLibraryWrites';
 import type { AppliedFileWrites } from './applyFileWrites';
 import {
   NotASubjectAreaObject,
@@ -5858,6 +5859,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             return;
           }
           seededModel = { ...seed, name: payload.modelName };
+          // A DBML diagram's new table goes in its dbt custom schema's folder, when the model has one (§2.4).
+          const configuredSchema = this.isDbmlDocument(document) ? configuredSchemaOf(payload.modelName, ymlData, manifest) : undefined;
+          if (configuredSchema !== undefined) seededModel = { ...seededModel, configuredSchema } as DbmlDraftTable;
         }
 
         // Relationships from the yml and manifest relationship tests together,
@@ -6161,7 +6165,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.post(webview, { type: 'error', payload: { message: `No tables were added${from}. ${dbmlProblems[0]}${dbmlProblems.length > 1 ? ` (and ${dbmlProblems.length - 1} more)` : ''}` } });
         return;
       }
-      const routed = this.routeAddedRelationships(document, draft.relationships, draft.newModels);
+      // A DBML diagram's new tables go in their dbt custom schema's folder, when they have one (§2.4).
+      const newModels = this.isDbmlDocument(document)
+        ? draft.newModels.map((m) => {
+          const configuredSchema = configuredSchemaOf(m.name, ymlData, manifest);
+          return configuredSchema !== undefined ? { ...m, configuredSchema } : m;
+        })
+        : draft.newModels;
+      const routed = this.routeAddedRelationships(document, draft.relationships, newModels);
       await this.applySubjectAreaEdit(
         document,
         (sec, p) => {

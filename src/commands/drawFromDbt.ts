@@ -63,6 +63,7 @@ import {
   UnsavedFilesRefused,
   type RefusedWrite,
 } from '../services/newSubjectAreaWriter';
+import { diagramFilePath } from '@erd-studio/core';
 import { DbmlEditRefused } from '@erd-studio/core/dbml';
 import type { CatalogData } from '../types/catalog';
 import type { ManifestData } from '../types/manifest';
@@ -234,7 +235,9 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   }
 
   const layerDir = path.join(workspaceRoot, semanticDir, chosenLayer);
-  const domainPath = path.join(layerDir, `${slug}.${dbml ? 'dbml' : 'json'}`);
+  // A DBML diagram is `<layer>/diagrams/<slug>.dbml` (§1.1); a JSON one `<layer>/<slug>.json`.
+  const dbmlDiagramPath = path.join(workspaceRoot, semanticDir, ...diagramFilePath(chosenLayer, slug).split('/'));
+  const domainPath = dbml ? dbmlDiagramPath : path.join(layerDir, `${slug}.json`);
   const again: DrawFromDbtResume = { pick, layer: chosenLayer, name: slug };
   const tryAgain = (): unknown => drawFromDbt(deps, again);
   // The name box already refuses a name in use; this is a diagram that
@@ -243,8 +246,8 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     [OPEN_IT_BUTTON]: () => vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE),
     [CHOOSE_ANOTHER_NAME_BUTTON]: () => drawFromDbt(deps, { pick, layer: chosenLayer }),
   });
-  // A name is taken in either format: `<slug>.json` and `<slug>.dbml` would be one diagram's name twice.
-  if (fs.existsSync(path.join(layerDir, `${slug}.json`)) || fs.existsSync(path.join(layerDir, `${slug}.dbml`))) {
+  // A name is taken in either format: `<slug>.json` and `diagrams/<slug>.dbml` would be one diagram's name twice.
+  if (fs.existsSync(path.join(layerDir, `${slug}.json`)) || fs.existsSync(dbmlDiagramPath)) {
     nameTaken();
     return undefined;
   }
@@ -344,7 +347,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
       modelNames: draft.modelNames,
       relationships: [],
     }) as unknown as Record<string, unknown>,
-  }, { layerService, tableLibraryService, subjectAreaService, readText: openOrDiskText, dirtyFiles });
+  }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
   if (!outcome.ok) {
     const { error: err, undone } = outcome;
     if (outcome.nameTaken) {

@@ -1342,11 +1342,13 @@ export interface DescribeDbmlImportOptions {
   layerLabel?: string;
   /**
    * A project that stores DBML: where its relationships are written, as the
-   * user sees the paths (`tables/silver/_relationships.dbml`). Absent for a
+   * user sees the paths (`gold/relationships/gold.dbml`). Absent for a
    * YAML project, whose relationships go in the tables' own files. Either
    * way the layout goes in the diagram file (a DBML diagram's `erd_layout`).
+   * `respelledSchemas`: new tables whose schema is written as the layer's
+   * existing folder spells it (§1.2 One spelling).
    */
-  dbml?: { relationshipsFiles: readonly string[] };
+  dbml?: { relationshipsFiles: readonly string[]; respelledSchemas?: ReadonlyArray<{ table: string; from: string; to: string }> };
 }
 
 /**
@@ -1381,6 +1383,15 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
       ? ` ${plural(report.relationshipsAlreadyInLibrary, 'is', 'are')} already in your Table Library and kept as it has them.`
       : '';
     lines.push(`• ${plural(report.relationships, 'relationship')}${where}.${already}`);
+  }
+  // One spelling per schema folder: a file's `Table Sales.x` joins the layer's `sales/` as `Table sales.x`.
+  const respelled = new Map<string, { to: string; tables: string[] }>();
+  for (const r of options.dbml?.respelledSchemas ?? []) {
+    const key = `${r.from}\u0000${r.to}`;
+    respelled.set(key, { to: r.to, tables: [...(respelled.get(key)?.tables ?? []), r.table] });
+  }
+  for (const [key, { to, tables }] of respelled) {
+    lines.push(`• Schema ${key.split('\u0000')[0]} is written ${to}, as the layer's existing ${to}/ folder spells it: ${someOf(tables)}.`);
   }
   if (report.optionalRefs > 0 && !report.erdStudioExport) {
     lines.push(`• ${plural(report.optionalRefs, 'reference is', 'references are')} optional (?). ERD Studio doesn't record that, so they are imported as plain relationships.`);

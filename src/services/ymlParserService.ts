@@ -488,6 +488,7 @@ export class YmlParserService {
     compositeForeignKeys.push(...this.extractCompositeForeignKeys(name, modelNode));
 
     const meta = this.extractMeta(doc, modelNode);
+    const configSchema = this.extractConfigSchema(modelNode);
     models.set(name, {
       name,
       description,
@@ -495,7 +496,16 @@ export class YmlParserService {
       filePath,
       tags,
       ...(meta ? { meta } : {}),
+      ...(configSchema ? { configSchema } : {}),
     });
+  }
+
+  /** The custom schema a model's `config: schema:` sets, when it is a non-empty string. */
+  private extractConfigSchema(modelNode: YAMLMap): string | undefined {
+    const configNode = modelNode.get('config');
+    if (!isMap(configNode)) return undefined;
+    const schema = (configNode as YAMLMap).get('schema');
+    return typeof schema === 'string' && schema.trim() !== '' ? schema.trim() : undefined;
   }
 
   /**

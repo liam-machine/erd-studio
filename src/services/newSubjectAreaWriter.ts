@@ -14,11 +14,12 @@
  * folder the write created removed again.
  *
  * In a project that writes DBML (§3.2) the subject area is a `.dbml` diagram
- * (`domainPath` ends in `.dbml`): its table files, relationships files,
- * diagram (positions in its `erd_layout`) and the settle re-render of other DBML diagrams are planned
- * up front and written by `writeFilesWithRollback`, which restores a snapshot
- * of every file it wrote on failure (§5.7) — never a `deleteTable`, which for
- * DBML is the D16 cascade and would edit other owners' files.
+ * (`<layer>/diagrams/<name>.dbml`): its table files, relationships files,
+ * diagram (positions in its `erd_layout`), the settle re-render of other DBML
+ * diagrams and a new project's `README.md` are one library batch
+ * (`applyDbmlBatch`), written by `writeFilesWithRollback`, which restores a
+ * snapshot of every file it wrote on failure — never a `deleteTable`, which
+ * for DBML is the D16 cascade and would edit other owners' files.
  *
  * Neither a direct `fs` write in a provider handler nor a canvas edit: these
  * are new files a command creates, which is why they are not an
@@ -30,7 +31,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { subjectAreaStorageOf } from '@erd-studio/core';
+import { diagramPathOf, subjectAreaStorageOf } from '@erd-studio/core';
 import type { Annotation, NodePosition } from '@erd-studio/core';
 import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
 import { renderNewSubjectAreaDbml } from './dbmlWriters';
@@ -44,22 +45,27 @@ import {
   type TableLibraryService,
 } from './logicalModelService';
 import type { LayerService } from './layerService';
-import type { SubjectAreaService } from './domainService';
 import type { FileWrite } from './fileWrites';
-import { FileWriteExists, FileWriteRollbackFailed, writeFilesWithRollback, type FileWriteIo } from './fsFileWrites';
+import { FileWriteExists, FileWriteRollbackFailed, type FileWriteIo } from './fsFileWrites';
 import { UnsavedFilesRefused } from './fileWrites';
-import { settleDbmlDiagramWrites } from './dbmlDiagramSettle';
+import type { DbmlLibraryWritePlan } from './dbmlLibraryWrites';
+import { semanticReadmeCreate } from './semanticReadme';
 import type { SemanticTable } from '../types/semantic';
 
 export interface NewSubjectAreaWrite {
   workspaceRoot: string;
   semanticDir: string;
-  /** The new subject area file: `<workspaceRoot>/<semanticDir>/<layer>/<name>.json`. */
+  /** The new subject area file: `<semanticDir>/<layer>/<name>.json`, or `<semanticDir>/<layer>/diagrams/<name>.dbml`. */
   domainPath: string;
   /** Table files to create, each with `saveTable(table, folder)`. */
   newTables: readonly SemanticTable[];
   /** The library folder new tables go in (a layer folder), or undefined for the top level. */
   folder?: string;
+  /**
+   * New DBML tables keep the schema they bring as their schema folder
+   * (Import: the source's qualifier), instead of the diagram layer's (§2.4).
+   */
+  schemaFromSource?: boolean;
   /**
    * Existing library tables that gained relationships, saved after the
    * subject area file is on disk. One that is also in `newTables` is skipped
@@ -85,8 +91,6 @@ export interface NewSubjectAreaWriteServices {
   tableLibraryService: Pick<TableLibraryService, 'saveTable' | 'deleteTable' | 'tablePath' | 'writesTableNaming'>
     /** Every file a save writes (a DBML table's relationships files too), to snapshot before it; the DBML plan. */
     & Partial<Pick<TableLibraryService, 'planTableWrites' | 'invalidateCache' | 'applyDbmlBatch' | 'writesTableAsDbml' | 'dbmlHomeOf'>>;
-  /** The other diagrams, for the DBML settle pass (§5.7). */
-  subjectAreaService?: Pick<SubjectAreaService, 'listSubjectAreas'>;
   /** The file operations of the DBML write (a test makes one fail). */
   io?: FileWriteIo;
   /**
@@ -233,11 +237,13 @@ export async function writeNewSubjectArea(
 }
 
 /**
- * {@link writeNewSubjectArea} for a `.dbml` diagram (§5.7): every table file,
- * relationships file, the diagram (its positions and sticky-note boxes in
- * its Project's `erd_layout`) and the settle re-render of other DBML diagrams, planned before
- * the first write and written all or nothing by `writeFilesWithRollback`
- * (new files with `wx`).
+ * {@link writeNewSubjectArea} for a `.dbml` diagram (`<layer>/diagrams/<name>.dbml`,
+ * §2.8): every table file (in `<layer>/tables/<schema>/`), relationships
+ * file, the diagram (its positions and sticky-note boxes in its Project's
+ * `erd_layout`), the settle re-render of other DBML diagrams and, when this
+ * write starts the project, its `README.md`: ONE library batch
+ * (`applyDbmlBatch`: one plan, one settle, one all-or-nothing write; new
+ * files with `wx`).
  */
 async function writeNewDbmlSubjectArea(
   write: NewSubjectAreaWrite,
@@ -248,84 +254,76 @@ async function writeNewDbmlSubjectArea(
   const semanticRoot = path.join(write.workspaceRoot, write.semanticDir);
   const createdRoot = !fs.existsSync(semanticRoot);
   const changedNames = write.changedTables.filter((t) => !write.newTables.includes(t)).map((t) => t.name);
-  let writes: FileWrite[];
+  const rel = path.relative(semanticRoot, domainPath).split(path.sep).join('/');
+  /** Every file was put back; the folder this write made goes with them. */
+  const removeCreatedRoot = (): boolean => {
+    if (!createdRoot) return true;
+    try {
+      fs.rmSync(semanticRoot, { recursive: true, force: true });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  let planned = false;
   try {
     if (createdRoot) await layerService.saveConfig(layerService.getAllLayers());
-    if (!tableLibraryService.planTableWrites) throw new Error('A DBML diagram needs the library planner.');
+    if (!tableLibraryService.applyDbmlBatch) throw new Error('A DBML diagram needs the library planner.');
+    // New tables go in the diagram's layer, its name as the schema (§2.4), unless they bring their own.
+    const layer = diagramPathOf(rel)?.layer ?? write.folder;
     const saves = [
       ...write.newTables.map((model) => ({ model })),
       ...write.changedTables.filter((t) => !write.newTables.includes(t)).map((model) => ({ model })),
     ];
-    const lib = tableLibraryService.planTableWrites({ save: saves }, write.folder, { dbml: true });
-    const plan = lib.plan!;
-    const rel = path.relative(semanticRoot, domainPath).split(path.sep).join('/');
-    const doc = write.document?.() ?? {};
-    const logical = (doc.logical ?? {}) as { models?: unknown };
-    const names = Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
-    // A DBML diagram's members are DBML tables (D20): a `use` line cannot point at a `.yml`.
-    const members = names.map((name) => {
-      const table = plan.resolveTable(name);
-      if (!table || table.storage !== 'dbml') {
-        throw new DbmlEditRefused(rel, `"${name}" is a YAML table, and a DBML diagram can only hold DBML tables. ${DBML_CONVERT_FIRST_MESSAGE}.`);
-      }
-      return { name: table.name, reference: table.reference, path: table.path };
-    });
-    const view = (doc.viewConfig ?? {}) as { positions?: Record<string, NodePosition>; annotations?: Annotation[] };
-    const annotations = Array.isArray(view.annotations) ? view.annotations : [];
-    const text = renderNewSubjectAreaDbml({
-      filePath: rel,
-      domain: typeof doc.domain === 'string' ? doc.domain : path.basename(domainPath, '.dbml'),
-      ...(typeof doc.description === 'string' ? { description: doc.description } : {}),
-      ...(typeof doc.modelFolder === 'string' ? { modelFolder: doc.modelFolder } : {}),
-      members,
-      relationshipsFiles: plan.relationshipsFilesFor(members.map((m) => m.name)),
-      annotations,
-      ...(view.positions ? { positions: view.positions } : {}),
-    });
-    const readText = services.readText ?? ((filePath: string): string | null => {
-      try {
-        return fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
-      } catch {
-        return null;
-      }
-    });
-    const others = (services.subjectAreaService?.listSubjectAreas(write.workspaceRoot, write.semanticDir) ?? [])
-      .filter((s) => s.storage === 'dbml' && path.resolve(s.filePath) !== path.resolve(domainPath))
-      .map((s) => s.filePath);
-    writes = [
-      ...lib.writes,
-      { kind: 'create', path: domainPath, text },
-      ...settleDbmlDiagramWrites({ semanticRoot, diagrams: others, plan, readText }),
-    ];
-    // Nothing is written under the user's unsaved edits: not a library file,
-    // and not another diagram the settle pass re-renders.
-    const dirty = services.dirtyFiles?.(writes.map((w) => w.path)) ?? [];
-    if (dirty.length > 0) throw new UnsavedFilesRefused(dirty);
-  } catch (error) {
-    let undone = true;
-    if (createdRoot) {
-      try { fs.rmSync(semanticRoot, { recursive: true, force: true }); } catch { undone = false; }
-    }
-    return { ok: false, error, undone, nameTaken: false };
-  }
-  try {
-    writeFilesWithRollback(writes, {
-      ...(services.io ? { io: services.io } : {}),
-      onWritten: (filePath, kind) => {
-        if (kind === 'delete') ownWrites.recordDelete(filePath);
-        else ownWrites.recordWrite(filePath);
+    const diagramWrites = (plan: DbmlLibraryWritePlan): FileWrite[] => {
+      planned = true;
+      const doc = write.document?.() ?? {};
+      const logical = (doc.logical ?? {}) as { models?: unknown };
+      const names = Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
+      // A DBML diagram's members are DBML tables (D20): a `use` line cannot point at a `.yml`.
+      const members = names.map((name) => {
+        const table = plan.resolveTable(name);
+        if (!table || table.storage !== 'dbml') {
+          throw new DbmlEditRefused(rel, `"${name}" is a YAML table, and a DBML diagram can only hold DBML tables. ${DBML_CONVERT_FIRST_MESSAGE}.`);
+        }
+        return { name: table.name, reference: table.reference, path: table.path };
+      });
+      const view = (doc.viewConfig ?? {}) as { positions?: Record<string, NodePosition>; annotations?: Annotation[] };
+      const text = renderNewSubjectAreaDbml({
+        filePath: rel,
+        domain: typeof doc.domain === 'string' ? doc.domain : path.basename(domainPath, '.dbml'),
+        ...(typeof doc.description === 'string' ? { description: doc.description } : {}),
+        ...(typeof doc.modelFolder === 'string' ? { modelFolder: doc.modelFolder } : {}),
+        members,
+        relationshipsFiles: plan.relationshipsImportsFor(members.map((m) => m.name), []),
+        annotations: Array.isArray(view.annotations) ? view.annotations : [],
+        ...(view.positions ? { positions: view.positions } : {}),
+      });
+      // A project this write starts gets the README that says what the folder is (§1.7).
+      const readme = createdRoot ? semanticReadmeCreate(semanticRoot, (p) => fs.existsSync(p)) : null;
+      return [{ kind: 'create', path: domainPath, text }, ...(readme ? [readme] : [])];
+    };
+    tableLibraryService.applyDbmlBatch({
+      ops: {
+        save: saves,
+        ...(tableLibraryService.dbmlHomeOf ? { newTableHome: tableLibraryService.dbmlHomeOf(layer) } : {}),
+        ...(write.schemaFromSource ? { schemaFromSource: true } : {}),
       },
+      exceptDiagrams: [domainPath],
+      extraWrites: diagramWrites,
+      // Nothing is written under the user's unsaved edits: not a library file,
+      // and not another diagram the settle pass re-renders.
+      ...(services.dirtyFiles ? { dirtyFiles: services.dirtyFiles } : {}),
+      ...(services.readText ? { readText: services.readText } : {}),
+      ...(services.io ? { io: services.io } : {}),
     });
   } catch (error) {
-    const undone = !(error instanceof FileWriteRollbackFailed);
-    if (undone && createdRoot) {
-      try { fs.rmSync(semanticRoot, { recursive: true, force: true }); } catch { /* leave it */ }
-    }
-    // The diagram's own exclusive create: the name was taken since it was checked.
-    const nameTaken = error instanceof FileWriteExists && path.resolve(error.filePath) === path.resolve(domainPath);
-    return { ok: false, error, undone, nameTaken };
-  } finally {
+    // A refusal before the first write (planned or not) left nothing; a failed write was put back unless it says so.
+    const undone = !(error instanceof FileWriteRollbackFailed) && removeCreatedRoot();
     tableLibraryService.invalidateCache?.();
+    // The diagram's own exclusive create: the name was taken since it was checked.
+    const nameTaken = planned && error instanceof FileWriteExists && path.resolve(error.filePath) === path.resolve(domainPath);
+    return { ok: false, error, undone, nameTaken };
   }
   return { ok: true, written: write.newTables.map((t) => t.name), changed: changedNames };
 }

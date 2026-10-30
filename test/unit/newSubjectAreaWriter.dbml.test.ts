@@ -14,6 +14,8 @@ import * as path from 'path';
 import { writeNewSubjectArea } from '../../src/services/newSubjectAreaWriter';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
+import { semanticReadmeText } from '../../src/services/semanticReadme';
+import type { FileWriteIo } from '../../src/services/fsFileWrites';
 import type { SemanticTable } from '../../src/types/semantic';
 
 let root: string;
@@ -109,5 +111,55 @@ describe('writeNewSubjectArea saves the DBML tables as one batch', () => {
     const result = await writeNew(new TableLibraryService(root, '.erd-studio'), false);
     expect(result).toMatchObject({ ok: false, undone: true });
     expect(snapshot()).toEqual(before);
+  });
+});
+
+describe('writeNewSubjectArea for a DBML diagram in a project it starts: the README (§1.7)', () => {
+  let plain: string;
+  beforeEach(() => {
+    plain = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-new-sa-readme-'));
+  });
+  afterEach(() => {
+    fs.rmSync(plain, { recursive: true, force: true });
+  });
+
+  const write = (io?: FileWriteIo): ReturnType<typeof writeNewSubjectArea> => writeNewSubjectArea({
+    workspaceRoot: plain,
+    semanticDir: '.erd-studio',
+    domainPath: path.join(plain, '.erd-studio', 'gold', 'diagrams', 'shop.dbml'),
+    newTables: [{ name: 'customers', columns: [{ name: 'id', dataType: 'INT', description: '', isPrimaryKey: true }] }],
+    changedTables: [],
+    folder: 'gold',
+    documentText: () => '',
+    document: () => ({ domain: 'shop', logical: { models: ['customers'] }, viewConfig: {} }),
+  }, { layerService: new LayerService(plain, '.erd-studio'), tableLibraryService: new TableLibraryService(plain, '.erd-studio'), ...(io ? { io } : {}) });
+
+  it('creates README.md with the tree\'s description, last, in the same batch as the diagram', async () => {
+    const result = await write();
+    expect(result).toMatchObject({ ok: true, written: ['customers'] });
+    expect(fs.readFileSync(path.join(plain, '.erd-studio', 'README.md'), 'utf-8')).toBe(semanticReadmeText());
+    expect(fs.existsSync(path.join(plain, '.erd-studio', 'gold', 'tables', 'gold', 'customers.dbml'))).toBe(true);
+  });
+
+  it('a failed README write rolls everything back, the folder it made included', async () => {
+    let renames = 0;
+    const io: FileWriteIo = {
+      readFile: (p) => fs.readFileSync(p),
+      writeFile: (p, d) => fs.writeFileSync(p, d),
+      rename: (from, to) => {
+        renames++;
+        if (path.basename(to) === 'README.md') throw Object.assign(new Error('ENOSPC: no space left'), { code: 'ENOSPC', path: to });
+        fs.renameSync(from, to);
+      },
+      unlink: (p) => fs.unlinkSync(p),
+      exists: (p) => fs.existsSync(p),
+      mkdir: (p) => fs.mkdirSync(p),
+      rmdir: (p) => fs.rmdirSync(p),
+    };
+    const result = await write(io);
+    expect(result).toMatchObject({ ok: false, undone: true });
+    // The README is the last create: the table and the diagram landed first and were put back.
+    expect(renames).toBe(3);
+    expect(fs.existsSync(path.join(plain, '.erd-studio'))).toBe(false);
   });
 });

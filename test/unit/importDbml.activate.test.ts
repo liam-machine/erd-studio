@@ -92,7 +92,7 @@ describe('erdStudio.importDbml in activate()', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Open a folder first'), 'Open Folder…', 'Open Settings');
   });
 
-  it('in a plain folder (no dbt_project.yml, no .erd-studio): makes layers.json and the diagram in tables/', async () => {
+  it('in a plain folder (no dbt_project.yml, no .erd-studio): makes layers.json, the README, the diagram in gold/diagrams/ and its table in gold/tables/gold/', async () => {
     const plain = path.join(root, 'plain');
     fs.mkdirSync(plain);
     vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(plain), name: 'plain', index: 0 }];
@@ -116,9 +116,10 @@ describe('erdStudio.importDbml in activate()', () => {
 
     expect(fs.existsSync(path.join(plain, '.erd-studio', 'layers.json'))).toBe(true);
     // A new project stores its model as DBML (native DBML storage, §3.2).
-    const diagram = path.join(plain, '.erd-studio', 'gold', 'shop.dbml');
+    expect(fs.existsSync(path.join(plain, '.erd-studio', 'README.md'))).toBe(true);
+    const diagram = path.join(plain, '.erd-studio', 'gold', 'diagrams', 'shop.dbml');
     expect(subjectAreaTableNames(fs.readFileSync(diagram, 'utf-8'), diagram)).toEqual(['shop_customer']);
-    expect(fs.existsSync(path.join(plain, '.erd-studio', 'tables', 'gold', 'shop_customer.dbml'))).toBe(true);
+    expect(fs.readFileSync(path.join(plain, '.erd-studio', 'gold', 'tables', 'gold', 'shop_customer.dbml'), 'utf-8')).toMatch(/^Table gold\.shop_customer \{/);
   });
 
   it('with a project: picks the file, reads it (positions in its erd_layout) through workspace.fs, writes the diagram and opens it', async () => {

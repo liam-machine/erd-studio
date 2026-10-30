@@ -194,6 +194,15 @@ export const IMPORT_MULTI_FILE_MESSAGE =
  * undefined.
  */
 export function firstUseDeclarationLine(text: string): number | undefined {
+  return useDeclarationLines(text, true)[0];
+}
+
+/**
+ * The 1-based lines of every `use` declaration in `text`, in order, by the
+ * rule {@link firstUseDeclarationLine} applies; only the first when `first`.
+ */
+export function useDeclarationLines(text: string, first = false): number[] {
+  const found: number[] = [];
   let line = 1;
   let atLineStart = true;
   // Bracket depth outside comments and strings: `{`, `[` and `(` together.
@@ -231,13 +240,16 @@ export function firstUseDeclarationLine(text: string): number | undefined {
       atLineStart = false;
       continue;
     }
-    if (atLineStart && depth === 0 && /^use(?=[\s{*'"])/.test(text.slice(i, i + 4))) return line;
+    if (atLineStart && depth === 0 && /^use(?=[\s{*'"])/.test(text.slice(i, i + 4))) {
+      found.push(line);
+      if (first) return found;
+    }
     if (c === '{' || c === '[' || c === '(') depth++;
     else if ((c === '}' || c === ']' || c === ')') && depth > 0) depth--;
     atLineStart = false;
     i++;
   }
-  return undefined;
+  return found;
 }
 
 /**

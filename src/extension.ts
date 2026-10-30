@@ -49,7 +49,7 @@ import { TableLibraryTreeProvider, type TableLibraryNode } from './providers/Mod
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
-import { SubjectAreaFileError, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
+import { RELATIONSHIPS_DIR, SubjectAreaFileError, dbmlTablePath, diagramFilePath, isDbmlLayerName, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
 import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
@@ -116,7 +116,8 @@ import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportD
 import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
 import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
-import { currentDbmlResolver, newDbmlSubjectAreaText, planDbmlDuplicateRename, planDbmlSubjectAreaRename, planDbmlTableMoves } from './commands/dbmlLifecycle';
+import { newDbmlSubjectAreaText, planDbmlDuplicateRename, planDbmlSubjectAreaRename, planDbmlTableMoves } from './commands/dbmlLifecycle';
+import { semanticReadmeCreate } from './services/semanticReadme';
 import { applyFileWrites } from './providers/applyFileWrites';
 import type { FileWrite } from './services/fileWrites';
 import { saveDocumentByUri } from './providers/documentSave';
@@ -621,6 +622,30 @@ export function mostRecentlyModified(domains: readonly SubjectAreaSummary[]): Su
 }
 
 /**
+ * How many `.dbml` files a layer folder's `tables/` (any depth) and
+ * `relationships/` hold: Remove Layer deletes the folder, so it refuses while
+ * there are any. Other files (Finder's `.DS_Store`, a `.gitkeep`) do not count.
+ */
+function layerLibraryFiles(layerDir: string): { tables: number; relationships: number } {
+  const count = (dir: string, deep: boolean): number => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return 0;
+    }
+    let n = 0;
+    for (const e of entries) {
+      // Only what the tree reads: a .DS_Store or .gitkeep is not a table.
+      if (e.isFile() && /\.dbml$/i.test(e.name)) n++;
+      else if (deep && e.isDirectory()) n += count(path.join(dir, e.name), true);
+    }
+    return n;
+  };
+  return { tables: count(path.join(layerDir, TABLES_DIR), true), relationships: count(path.join(layerDir, RELATIONSHIPS_DIR), false) };
+}
+
+/**
  * Apply a lifecycle command's DBML writes (§5.7) as ONE WorkspaceEdit
  * (`applyFileWrites`), save every replaced document and record own writes
  * after the bytes land. Returns false when VS Code did not apply it
@@ -642,6 +667,8 @@ async function applyLifecycleWrites(
         if (!rel.startsWith('..') && !path.isAbsolute(rel)) fs.mkdirSync(path.dirname(filePath), { recursive: true });
       },
       renames,
+      // DBML creates in the tree's order: tables, relationships files, diagrams (§2.8). YAML keeps its order.
+      ...(writes.some((w) => /\.dbml$/i.test(w.path)) ? { semanticRoot: libraryRoot } : {}),
     });
     // The reconcile's modal already named any file it could not put back: the
     // caller says "nothing was changed" only when `unrestored` is empty.
@@ -1841,7 +1868,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const createDiagramFile = async (layer: string, slug: string, description: string, modelFolder: string | undefined): Promise<void> => {
     const layerDir = path.join(workspaceRoot, semanticDir, layer);
     const dbml = tableLibraryService.writesDbml();
-    const filePath = path.join(layerDir, `${slug}.${dbml ? 'dbml' : 'json'}`);
+    // A DBML diagram is `<layer>/diagrams/<slug>.dbml` (§1.1); a JSON one `<layer>/<slug>.json`.
+    const jsonPath = path.join(layerDir, `${slug}.json`);
+    const dbmlPath = path.join(fullSemanticDirPath, ...diagramFilePath(layer, slug).split('/'));
+    const filePath = dbml ? dbmlPath : jsonPath;
+    const fileDir = path.dirname(filePath);
     const retry = (): Promise<void> => createDiagramFile(layer, slug, description, modelFolder);
     // The name box checked the diagrams it knew; this one appeared since, or
     // is a file the sidebar cannot list.
@@ -1856,8 +1887,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
       );
     };
-    // One name per diagram, whatever its format: `<slug>.json` beside `<slug>.dbml` would be two.
-    const otherFormat = path.join(layerDir, `${slug}.${dbml ? 'json' : 'dbml'}`);
+    // One name per diagram, whatever its format: `<slug>.json` beside `diagrams/<slug>.dbml` would be two.
+    const otherFormat = dbml ? jsonPath : dbmlPath;
     if (fs.existsSync(otherFormat)) {
       nameTaken(otherFormat);
       return;
@@ -1868,13 +1899,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // ERD folder, with the default layers.json first, as Draw from dbt and
     // Import DBML do. Removed again if the diagram cannot be written, as is
     // a layer folder made for it.
+    // (Its README.md too, in a DBML project: removed with the folder.)
     const createdSemanticDir = !fs.existsSync(fullSemanticDirPath);
     const createdLayerDir = !fs.existsSync(layerDir);
+    const createdFileDir = fileDir !== layerDir && !fs.existsSync(fileDir);
     const undoFolders = (): void => {
       if (createdSemanticDir) {
         try { fs.rmSync(fullSemanticDirPath, { recursive: true, force: true }); } catch { /* leave it */ }
         layerService.invalidateCache();
-      } else if (createdLayerDir) {
+        return;
+      }
+      if (createdFileDir) {
+        try { fs.rmdirSync(fileDir); } catch { /* not empty, or never made: leave it */ }
+      }
+      if (createdLayerDir) {
         try { fs.rmdirSync(layerDir); } catch { /* not empty, or never made: leave it */ }
       }
     };
@@ -1891,8 +1929,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await layerService.saveConfig(layerService.getAllLayers());
         layerService.invalidateCache();
       }
-      if (createdLayerDir) {
-        fs.mkdirSync(layerDir, { recursive: true });
+      // A DBML project this command starts gets the README that says what the folder is (§1.7): only ever created.
+      if (createdSemanticDir && dbml) {
+        const readme = semanticReadmeCreate(fullSemanticDirPath, (p) => fs.existsSync(p));
+        if (readme && readme.kind === 'create') fs.writeFileSync(readme.path, readme.text, { encoding: 'utf-8', flag: 'wx' });
+      }
+      if (createdLayerDir || createdFileDir) {
+        fs.mkdirSync(fileDir, { recursive: true });
       }
     } catch (err) {
       failed(err, 'while creating the folder for it');
@@ -2085,13 +2128,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
       }
       const modelsDir = tableLibraryService.getTablesDir();
+      // A DBML table's folder is its layer (`<layer>/tables/<schema>/`, §1.1): it moves to another layer's
+      // tables, keeping its schema as that layer lists it.
+      const entries = tableLibraryService.listTableFiles();
+      const dbmlEntries = new Map(entries.filter((e) => e.layer !== undefined).map((e) => [e.filePath, e]));
       const plan = planOrganizeByLayer(
-        tableLibraryService.listTableFiles(),
+        entries.map((e) => (e.layer !== undefined ? { ...e, folder: e.layer } : e)),
         usage,
         // Each file is organised within its own library: `logical-models/` or v6's `tables/` (#182). Extensions are kept.
-        (name, layer, from) => TableLibraryService.isTableFolderName(layer)
-          ? path.join(tableLibraryService.isTableNamingFile(from) ? path.join(path.dirname(modelsDir), TABLES_DIR) : modelsDir, layer, `${name}${from.toLowerCase().endsWith('.dbml') ? '.dbml' : '.yml'}`)
-          : null,
+        (name, layer, from) => {
+          if (!TableLibraryService.isTableFolderName(layer)) return null;
+          const dbmlEntry = dbmlEntries.get(from);
+          if (dbmlEntry) {
+            if (!isDbmlLayerName(layer)) return null;
+            const schema = tableLibraryService.schemaAsListed(layer, dbmlEntry.folder);
+            return path.join(fullSemanticDirPath, ...dbmlTablePath(layer, schema, path.basename(from, path.extname(from))).split('/'));
+          }
+          return path.join(tableLibraryService.isTableNamingFile(from) ? path.join(path.dirname(modelsDir), TABLES_DIR) : modelsDir, layer, `${name}${from.toLowerCase().endsWith('.dbml') ? '.dbml' : '.yml'}`);
+        },
         new Set(layerService.getAllLayers().map((l) => l.id)),
       );
       if (plan.moves.length === 0) {
@@ -2100,25 +2154,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         return;
       }
-      const choice = await vscode.window.showInformationMessage(
-        'Organise Table Library by Layer?',
-        { modal: true, detail: describeOrganizePlan(plan) },
-        'Move Files',
-      );
-      if (choice !== 'Move Files') return;
 
-      // A `.dbml` table moves with its Refs and every `use` line that names it
-      // (§5.7, §4.6 step 3): one WorkspaceEdit through applyFileWrites, YAML
-      // moves in it as file renames (every byte kept, whatever the encoding).
-      const dbmlMoves = plan.moves.filter((m) => m.from.toLowerCase().endsWith('.dbml'));
+      // A `.dbml` table moves alone: its Refs stay where they are, and every
+      // `use` line naming it (and every Ref end, when its qualifier changes)
+      // follows (§2.8). One WorkspaceEdit through applyFileWrites, YAML moves
+      // in it as file renames (every byte kept, whatever the encoding).
+      // Planned before the question, so it can name every re-qualified table.
+      const dbmlMoves = plan.moves.filter((m) => dbmlEntries.has(m.from));
+      let dbmlPlan: ReturnType<typeof planDbmlTableMoves> | undefined;
       if (dbmlMoves.length > 0) {
-        let writes: FileWrite[];
-        const yamlRenames = plan.moves.filter((m) => !m.from.toLowerCase().endsWith('.dbml')).map((m) => ({ from: m.from, to: m.to }));
         try {
           const diagrams = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).filter((d) => d.storage === 'dbml').map((d) => d.filePath);
-          writes = planDbmlTableMoves({
+          dbmlPlan = planDbmlTableMoves({
             tableLibraryService,
-            moves: dbmlMoves.map((m) => ({ name: m.name, toFolder: m.layer })),
+            moves: dbmlMoves.map((m) => ({ name: m.name, toLayer: m.layer })),
             diagrams,
             readText: openOrDiskText,
           });
@@ -2130,6 +2179,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           }
           return;
         }
+      }
+      const requalifiedNote = dbmlPlan && dbmlPlan.requalified.length > 0
+        ? `\n${dbmlPlan.requalified.length === 1 ? 'Its schema is spelled' : 'Their schemas are spelled'} as the new layer's folder spells it, so every Ref naming ${dbmlPlan.requalified.length === 1 ? 'it' : 'them'} is re-spelled too: ${dbmlPlan.requalified.join(', ')}.`
+        : '';
+      const choice = await vscode.window.showInformationMessage(
+        'Organise Table Library by Layer?',
+        { modal: true, detail: `${describeOrganizePlan(plan)}${requalifiedNote}` },
+        'Move Files',
+      );
+      if (choice !== 'Move Files') return;
+
+      if (dbmlPlan) {
+        const writes = dbmlPlan.writes;
+        const yamlRenames = plan.moves.filter((m) => !dbmlEntries.has(m.from)).map((m) => ({ from: m.from, to: m.to }));
         const dirty = dirtyFiles([...writes.map((w) => w.path), ...yamlRenames.map((r) => r.from)]);
         if (dirty.length > 0) {
           void vscode.window.showErrorMessage(`Organise Table Library: ${path.relative(workspaceRoot, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again. Nothing was changed.`);
@@ -2233,7 +2296,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const newName = (await vscode.window.showInputBox({
           title: `Give ${libPath(dup.filePath)} its own name`,
           prompt: `Table names are unique, as dbt model names are. The warehouse table name stays "${copyReading.table.alias || copyName}" (set as the table's alias).`,
-          value: suggestDuplicateName(copyName, dup.folder, new Set(entries.map((e) => e.name))),
+          value: suggestDuplicateName(copyName, dup.layer ?? dup.folder, new Set(entries.map((e) => e.name))),
           ignoreFocusOut: true,
           validateInput: (value) => validateNewDbmlTableName(value) ?? validateTableName(value)
             ?? (taken.has(value.trim().toLowerCase()) ? `"${value.trim()}" already exists in the Table Library.` : null),
@@ -2709,17 +2772,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const newSlug = newDomainSlug.trim();
         if (newSlug === oldDomainName) { return; }
 
-        // A `.dbml` diagram moves with its layout file (§5.7); a JSON diagram
-        // is the one file. Either way it is one WorkspaceEdit through
-        // applyFileWrites (D23): a partial apply is put back, and own writes
-        // are recorded after the bytes land.
+        // A diagram is one file, its positions included: `<layer>/diagrams/<new>.dbml`
+        // (§2.8) or `<layer>/<new>.json`. Either way it is one WorkspaceEdit
+        // through applyFileWrites (D23): a partial apply is put back, and own
+        // writes are recorded after the bytes land.
         const isDbml = oldFilePath.endsWith('.dbml');
-        const newFilePath = isDbml
-          ? path.join(path.dirname(oldFilePath), `${newSlug}.dbml`)
-          : path.join(workspaceRoot, semanticDir, layer, `${newSlug}.json`);
+        const jsonPath = path.join(workspaceRoot, semanticDir, layer, `${newSlug}.json`);
+        const dbmlPath = path.join(fullSemanticDirPath, ...diagramFilePath(layer, newSlug).split('/'));
+        const newFilePath = isDbml ? path.join(path.dirname(oldFilePath), `${newSlug}.dbml`) : jsonPath;
         const newFileUri = vscode.Uri.file(newFilePath);
-        // One name per diagram, whatever its format: `<new>.json` beside `<new>.dbml` would be two.
-        const otherFormatPath = newFilePath.replace(/\.(dbml|json)$/, isDbml ? '.json' : '.dbml');
+        // One name per diagram, whatever its format: `<new>.json` beside `diagrams/<new>.dbml` would be two.
+        const otherFormatPath = isDbml ? jsonPath : dbmlPath;
         const openRenamed = async (): Promise<void> => {
           selectorsService.scheduleRegenerate();
           await vscode.commands.executeCommand('vscode.openWith', newFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE);
@@ -2730,7 +2793,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // edits). Throws the file's problem (#186) or a refused write.
         const planRename = (): FileWrite[] => {
           if (isDbml) {
-            const read = openOrDiskText;
             let text: string;
             try {
               text = fs.readFileSync(oldFilePath, 'utf-8').replace(/^\uFEFF/, '');
@@ -2744,7 +2806,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               newPath: newFilePath,
               newSlug,
               text,
-              resolver: currentDbmlResolver(tableLibraryService, read).resolver,
             });
           }
           // Validate via SubjectAreaService, but rewrite the RAW document so v5 model
@@ -2793,7 +2854,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
           const created = writes.filter((w) => w.kind === 'create').map((w) => w.path);
           for (const p of created) subjectAreasCreatedHere.add(p);
-          const applied = await applyFileWrites(writes);
+          const applied = await applyFileWrites(writes, isDbml ? { semanticRoot: fullSemanticDirPath } : {});
           if (applied.ok) {
             afterSubjectAreaRename(oldFilePath, created, applied);
             return true;
@@ -2973,8 +3034,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const defaultLayers = layerService.getAllLayers();
 
         try {
-          if (!fs.existsSync(fullSemanticDir)) {
+          const createdSemanticDir = !fs.existsSync(fullSemanticDir);
+          if (createdSemanticDir) {
             fs.mkdirSync(fullSemanticDir, { recursive: true });
+          }
+          // A DBML project (a new, empty one is, §3.2) starts with the README that says what the folder is (§1.7).
+          if (createdSemanticDir && tableLibraryService.writesDbml()) {
+            const readme = semanticReadmeCreate(fullSemanticDir, (p) => fs.existsSync(p));
+            if (readme && readme.kind === 'create') fs.writeFileSync(readme.path, readme.text, { encoding: 'utf-8', flag: 'wx' });
           }
 
           // Create layer directories
@@ -3226,6 +3293,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (layerDomains.length > 0) {
           void vscode.window.showErrorMessage(
             `Cannot remove layer "${layer.label}" — it contains ${layerDomains.length} subject area(s). Delete or move subject areas first.`,
+          );
+          return;
+        }
+
+        // Its folder is deleted with everything in it: never a layer's tables or relationships files (§2.8).
+        const held = layerLibraryFiles(path.join(workspaceRoot, semanticDir, layerId));
+        if (held.tables > 0 || held.relationships > 0) {
+          void vscode.window.showErrorMessage(
+            `Cannot remove layer "${layer.label}": it holds ${held.tables} table(s) and ${held.relationships} relationships file(s). Move or delete them first.`,
           );
           return;
         }

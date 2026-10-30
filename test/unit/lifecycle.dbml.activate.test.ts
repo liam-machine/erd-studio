@@ -1,13 +1,14 @@
 /**
- * Native DBML storage, S6 (§5.7, §9.6 "Lifecycle"): the lifecycle commands
+ * The lifecycle commands in the layer-first DBML tree (ERD Studio 2.0, §2.8),
  * through `activate()` on a copy of `test/fixtures/dbml-native` — New
  * Diagram, Rename and Delete Subject Area, Set Up, Delete Table (the D16
- * cascade), Organise Table Library and Give Duplicate Its Own Name — and in
- * a new, empty folder.
+ * cascade), Remove Layer, Organise Table Library and Give Duplicate Its Own
+ * Name — and in a new, empty folder (the README on create).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
+import { createRequire, syncBuiltinESMExports } from 'module';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -17,6 +18,7 @@ import { compileDbmlProject, parseSubjectAreaDbml, type DbmlParserModule } from 
 import * as v9 from 'dbml-parse-v9';
 import * as v10 from 'dbml-parse-v10';
 import { formatWrittenDbml } from '../../src/services/dbmlWriters';
+import { semanticReadmeText } from '../../src/services/semanticReadme';
 
 /** The expected text in the canonical layout ERD Studio writes every .dbml in (every write is formatted). */
 function canonical(text: string): string {
@@ -63,7 +65,7 @@ function files(): string[] {
 /** Every `.dbml` under the semantic dir compiles from each diagram, with no diagnostic, in 9.1.1, 10.3.1 and 11.0.0. */
 function compilesClean(): void {
   const texts = Object.fromEntries(files().filter((f) => f.endsWith('.dbml')).map((f) => [f, fs.readFileSync(erd(f), 'utf-8')]));
-  const diagrams = Object.keys(texts).filter((f) => !f.startsWith('tables/'));
+  const diagrams = Object.keys(texts).filter((f) => f.split('/')[1] === 'diagrams' && f.split('/').length === 3);
   const parsers: Array<[string, DbmlParserModule | undefined]> = [
     ['9.1.1', v9 as unknown as DbmlParserModule], ['10.3.1', v10 as unknown as DbmlParserModule], ['11.0.0', undefined],
   ];
@@ -121,14 +123,15 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     openWorkspace();
   });
 
-  it('New Diagram writes .dbml and layers.json, and the first table goes to tables/<layer>/x.dbml', async () => {
+  it('New Diagram writes <layer>/diagrams/x.dbml, layers.json and the README, and nothing else', async () => {
     await activate(context);
     vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value: string }>) => items.find((i) => i.value === 'gold')) as never);
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('orders').mockResolvedValueOnce('Orders');
     await vscode.commands.executeCommand('erdStudio.createDomain');
-    expect(files()).toEqual(['gold/orders.dbml', 'layers.json']);
-    const text = fs.readFileSync(erd('gold', 'orders.dbml'), 'utf-8');
-    expect(parseSubjectAreaDbml(text, 'gold/orders.dbml').obj).toMatchObject({ domain: 'orders', description: 'Orders', logical: { models: [] } });
+    expect(files()).toEqual(['README.md', 'gold/diagrams/orders.dbml', 'layers.json']);
+    expect(fs.readFileSync(erd('README.md'), 'utf-8')).toBe(semanticReadmeText());
+    const text = fs.readFileSync(erd('gold', 'diagrams', 'orders.dbml'), 'utf-8');
+    expect(parseSubjectAreaDbml(text, 'gold/diagrams/orders.dbml').obj).toMatchObject({ domain: 'orders', description: 'Orders', logical: { models: [] } });
   });
 
   /** Import DBML's file dialog and reads, from disk. */
@@ -145,7 +148,9 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
       (typeof args[1] === 'object' && (args[1] as { modal?: boolean }).modal ? 'Import' : undefined)) as never);
   }
 
-  it('Import DBML writes the source erd_layout positions into the new diagram\'s own erd_layout', async () => {
+  const IMPORTED = ['README.md', 'gold/diagrams/shop.dbml', 'gold/relationships/gold.dbml', 'gold/tables/gold/customers.dbml', 'gold/tables/gold/orders.dbml', 'layers.json'];
+
+  it('Import DBML writes the tables in <layer>/tables/<layer>/, the Ref in the layer\'s relationships file, and the source erd_layout into the new diagram\'s own', async () => {
     const inbox = path.join(root, 'inbox');
     fs.mkdirSync(inbox);
     fs.writeFileSync(path.join(inbox, 'shop.dbml'), 'Table customers {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n  customer_id int [ref: > customers.id]\n}\n'
@@ -153,13 +158,13 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     await activate(context);
     importFrom(path.join(inbox, 'shop.dbml'));
     await vscode.commands.executeCommand('erdStudio.importDbml');
-    expect(files()).toEqual([
-      'gold/shop.dbml', 'layers.json',
-      'tables/gold/_relationships.dbml', 'tables/gold/customers.dbml', 'tables/gold/orders.dbml',
-    ]);
-    const shop = parseSubjectAreaDbml(fs.readFileSync(erd('gold', 'shop.dbml'), 'utf-8'), 'gold/shop.dbml').obj as { viewConfig: { positions: unknown } };
+    expect(files()).toEqual(IMPORTED);
+    const shopText = fs.readFileSync(erd('gold', 'diagrams', 'shop.dbml'), 'utf-8');
+    const shop = parseSubjectAreaDbml(shopText, 'gold/diagrams/shop.dbml').obj as { viewConfig: { positions: unknown } };
     expect(shop.viewConfig.positions).toEqual({ customers: { x: 40, y: 60 }, orders: { x: 400, y: 60 } });
-    expect(fs.readFileSync(erd('gold', 'shop.dbml'), 'utf-8')).toMatch(/Project shop \{[^]*erd_layout: '''\n    customers 40 60\n    orders 400 60\n  '''\n\}\n$/);
+    expect(shopText).toMatch(/Project shop \{[^]*erd_layout: '''\n    customers 40 60\n    orders 400 60\n  '''\n\}\n$/);
+    expect(shopText).toContain("use * from '../relationships/gold.dbml'");
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'orders.dbml'), 'utf-8')).toMatch(/^Table gold\.orders \{/);
     compilesClean();
   });
 
@@ -173,15 +178,12 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     const modal = (vscode.window.showInformationMessage as unknown as { mock: { calls: unknown[][] } }).mock.calls
       .find((c) => typeof c[1] === 'object' && (c[1] as { modal?: boolean }).modal)!;
     const detail = (modal[1] as { detail: string }).detail;
-    expect(detail).toContain('• 1 relationship saved in tables/gold/_relationships.dbml.');
+    expect(detail).toContain('• 1 relationship saved in gold/relationships/gold.dbml.');
     expect(detail).not.toContain('the tables\' files');
     expect(detail).toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
     // The import itself writes no positions: the first open's auto layout does, as a JSON diagram's first open writes its positions.
-    expect(fs.readFileSync(erd('gold', 'shop.dbml'), 'utf-8')).not.toContain('erd_layout');
-    expect(files()).toEqual([
-      'gold/shop.dbml', 'layers.json',
-      'tables/gold/_relationships.dbml', 'tables/gold/customers.dbml', 'tables/gold/orders.dbml',
-    ]);
+    expect(fs.readFileSync(erd('gold', 'diagrams', 'shop.dbml'), 'utf-8')).not.toContain('erd_layout');
+    expect(files()).toEqual(IMPORTED);
   });
 
   it('Import DBML refuses a file with use lines, naming the export route, and writes nothing', async () => {
@@ -195,32 +197,47 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     expect(files()).toEqual([]);
   });
 
-  it('a dbdiagram single-file .dbml dropped into a layer folder is imported from its own URI (the banner\'s Import, §9.7 check 7)', async () => {
-    fs.mkdirSync(erd('gold'), { recursive: true });
-    const dropped = erd('gold', 'pulled.dbml');
+  it('a dbdiagram single-file .dbml dropped into a layer\'s diagrams folder is imported from its own URI (the banner\'s Import, §9.7 check 7)', async () => {
+    fs.mkdirSync(erd('gold', 'diagrams'), { recursive: true });
+    const dropped = erd('gold', 'diagrams', 'pulled.dbml');
     fs.writeFileSync(dropped, 'Project pulled {\n  database_type: \'PostgreSQL\'\n}\nTable customers {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n  customer_id int [ref: > customers.id]\n}\n');
     await activate(context);
     importFrom(dropped);
     await vscode.commands.executeCommand('erdStudio.importDbml', vscode.Uri.file(dropped));
     expect(errors).not.toHaveBeenCalled();
     // The dropped file is left as it is; the import is a new DBML diagram beside it, with its tables in the library.
-    const created = files().filter((f) => f.startsWith('gold/') && f.endsWith('.dbml') && f !== 'gold/pulled.dbml');
+    const created = files().filter((f) => f.startsWith('gold/diagrams/') && f !== 'gold/diagrams/pulled.dbml');
     expect(created).toHaveLength(1);
-    expect(files()).toEqual(expect.arrayContaining(['tables/gold/customers.dbml', 'tables/gold/orders.dbml', 'tables/gold/_relationships.dbml']));
+    expect(files()).toEqual(expect.arrayContaining(['gold/tables/gold/customers.dbml', 'gold/tables/gold/orders.dbml', 'gold/relationships/gold.dbml']));
     const text = fs.readFileSync(erd(created[0]), 'utf-8');
     expect(parseSubjectAreaDbml(text, created[0]).obj).toMatchObject({ logical: { models: ['customers', 'orders'] } });
   });
 
-  it('Set Up writes layers.json and makes no table library folder', async () => {
+  it('Set Up writes layers.json, the layer folders and the README, and makes no table library folder', async () => {
     await activate(context);
     vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
     vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue(undefined);
     const run = vscode.commands.executeCommand('erdStudio.setupSemanticDirectory');
     await vi.advanceTimersByTimeAsync(200);
     await run;
-    expect(fs.existsSync(erd('layers.json'))).toBe(true);
+    expect(files()).toEqual(['README.md', 'layers.json']);
+    expect(fs.readFileSync(erd('README.md'), 'utf-8')).toBe(semanticReadmeText());
+    for (const layer of (JSON.parse(fs.readFileSync(erd('layers.json'), 'utf-8')) as { layers: Array<{ id: string }> }).layers) {
+      expect(fs.statSync(erd(layer.id)).isDirectory(), layer.id).toBe(true);
+    }
     expect(fs.existsSync(erd('logical-models'))).toBe(false);
     expect(fs.existsSync(erd('tables'))).toBe(false);
+  });
+
+  it('Set Up in a folder whose ERD folder exists already writes no README', async () => {
+    fs.mkdirSync(erd(), { recursive: true });
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue(undefined);
+    const run = vscode.commands.executeCommand('erdStudio.setupSemanticDirectory');
+    await vi.advanceTimersByTimeAsync(200);
+    await run;
+    expect(files()).toEqual(['layers.json']);
   });
 });
 
@@ -230,39 +247,68 @@ describe('in a native DBML project', () => {
     openWorkspace();
   });
 
-  it('New Diagram writes a .dbml (no layout file) and writes a missing layers.json; a name taken in either format is refused', async () => {
+  const salesPath = (): string => erd('gold', 'diagrams', 'sales.dbml');
+  const stagingPath = (): string => erd('silver', 'diagrams', 'staging.dbml');
+
+  it('New Diagram writes <layer>/diagrams/x.dbml and a missing layers.json, no README in a project that has one folder already; a name taken in either format is refused', async () => {
     fs.rmSync(erd('layers.json'));
+    fs.rmSync(erd('README.md'));
     await activate(context);
     vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value: string }>) => items.find((i) => i.value === 'gold')) as never);
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('returns').mockResolvedValueOnce('');
     await vscode.commands.executeCommand('erdStudio.createDomain');
-    expect(fs.existsSync(erd('gold', 'returns.dbml'))).toBe(true);
-    expect(fs.existsSync(erd('gold', 'returns.dbdiagram'))).toBe(false);
+    expect(fs.existsSync(erd('gold', 'diagrams', 'returns.dbml'))).toBe(true);
+    expect(fs.existsSync(erd('gold', 'returns.dbml'))).toBe(false);
     expect(fs.existsSync(erd('layers.json'))).toBe(true);
+    expect(fs.existsSync(erd('README.md'))).toBe(false);
     expect(fs.existsSync(erd('gold', 'returns.json'))).toBe(false);
 
     // A JSON file of the same name (an older teammate's) blocks the name.
     fs.writeFileSync(erd('gold', 'refunds.json'), '{"schemaVersion":5,"domain":"refunds","layer":"gold","logical":{"models":[]}}\n');
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('refunds').mockResolvedValueOnce('');
     await vscode.commands.executeCommand('erdStudio.createDomain');
-    expect(fs.existsSync(erd('gold', 'refunds.dbml'))).toBe(false);
+    expect(fs.existsSync(erd('gold', 'diagrams', 'refunds.dbml'))).toBe(false);
+  });
+
+  it('New Diagram in a layer with no diagrams folder yet makes it, and removes it again when the diagram cannot be written', async () => {
+    await activate(context);
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value: string }>) => items.find((i) => i.value === 'silver')) as never);
+    fs.rmSync(erd('silver', 'diagrams'), { recursive: true });
+    // The disk refuses the diagram itself (the services use the ESM namespace of `fs`, whose bindings follow the CommonJS module once synced).
+    const cjsFs = createRequire(import.meta.url)('fs') as { writeFileSync: (...a: unknown[]) => unknown };
+    const real = cjsFs.writeFileSync;
+    cjsFs.writeFileSync = (...args: unknown[]) => {
+      if (String(args[0]).endsWith('lost.dbml')) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES', path: String(args[0]) });
+      return real(...args);
+    };
+    syncBuiltinESMExports();
+    try {
+      vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('lost').mockResolvedValueOnce('');
+      await vscode.commands.executeCommand('erdStudio.createDomain');
+    } finally {
+      cjsFs.writeFileSync = real;
+      syncBuiltinESMExports();
+    }
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(erd('silver', 'diagrams'))).toBe(false);
+    expect(fs.existsSync(erd('silver'))).toBe(true);
   });
 
   it('Rename Subject Area renames the .dbml in one edit, splicing only the Project name (its erd_layout goes with it)', async () => {
     await activate(context);
-    const before = fs.readFileSync(erd('gold', 'sales.dbml'), 'utf-8');
+    const before = fs.readFileSync(salesPath(), 'utf-8');
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
     await vscode.commands.executeCommand('erdStudio.renameDomain', {
-      type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: erd('gold', 'sales.dbml'), storage: 'dbml' },
+      type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: salesPath(), storage: 'dbml' },
     });
     expect(errors).not.toHaveBeenCalled();
-    expect(fs.existsSync(erd('gold', 'sales.dbml'))).toBe(false);
+    expect(fs.existsSync(salesPath())).toBe(false);
+    const revenue = erd('gold', 'diagrams', 'revenue.dbml');
     // The Project name spliced, then the file in the canonical layout (every DBML write is formatted).
-    expect(fs.readFileSync(erd('gold', 'revenue.dbml'), 'utf-8')).toBe(canonical(before.replace('Project sales {', 'Project revenue {')));
-    expect(fs.readFileSync(erd('gold', 'revenue.dbml'), 'utf-8')).toContain('    fct_order 400 200\n');
-    expect(fs.existsSync(erd('gold', 'revenue.dbdiagram'))).toBe(false);
-    expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: erd('gold', 'revenue.dbml') }), expect.any(String));
+    expect(fs.readFileSync(revenue, 'utf-8')).toBe(canonical(before.replace('Project sales {', 'Project revenue {')));
+    expect(fs.readFileSync(revenue, 'utf-8')).toContain('    fct_order 400 200\n');
+    expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: revenue }), expect.any(String));
     compilesClean();
   });
 
@@ -272,27 +318,27 @@ describe('in a native DBML project', () => {
     vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
     await vscode.commands.executeCommand('erdStudio.renameDomain', {
-      type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: erd('gold', 'sales.dbml'), storage: 'dbml' },
+      type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: salesPath(), storage: 'dbml' },
     });
     expect(errors).toHaveBeenCalledTimes(1);
     expect(errors).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*Restore these from source control\.$/), { modal: true });
   });
 
-  it('Delete Subject Area deletes the .dbml (its positions are in it), recorded as an own delete', async () => {
+  it('Delete Subject Area deletes the one .dbml (its positions are in it), recorded as an own delete', async () => {
     await activate(context);
     warn.mockResolvedValue('Delete' as never);
     const del = vi.spyOn(vscode.workspace.fs, 'delete').mockResolvedValue(undefined as never);
     const { ownWrites } = await import('../../src/services/ownWriteTracker');
     const recorded = vi.spyOn(ownWrites, 'recordDelete');
     await vscode.commands.executeCommand('erdStudio.deleteDomain', {
-      type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: erd('gold', 'sales.dbml'), storage: 'dbml' },
+      type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: salesPath(), storage: 'dbml' },
     });
-    expect(del.mock.calls.map((c) => (c[0] as { fsPath: string }).fsPath)).toEqual([erd('gold', 'sales.dbml')]);
-    expect(recorded.mock.calls.map((c) => c[0])).toEqual(expect.arrayContaining([erd('gold', 'sales.dbml')]));
+    expect(del.mock.calls.map((c) => (c[0] as { fsPath: string }).fsPath)).toEqual([salesPath()]);
+    expect(recorded.mock.calls.map((c) => c[0])).toEqual(expect.arrayContaining([salesPath()]));
   });
 
   describe('the diagram commands\' failures (#229) on a .dbml diagram', () => {
-    const sales = () => ({ type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: erd('gold', 'sales.dbml'), storage: 'dbml' } });
+    const sales = () => ({ type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: salesPath(), storage: 'dbml' } });
     const toasts = () => errors.mock.calls.map((call: unknown[]) => ({
       message: String(call[0]), buttons: call.slice(1).filter((a): a is string => typeof a === 'string'),
     }));
@@ -308,7 +354,7 @@ describe('in a native DBML project', () => {
       await vscode.commands.executeCommand('erdStudio.createDomain');
       await settle();
       expect(toasts()).toEqual([{ message: 'A diagram named "refunds" already exists in the Gold layer.', buttons: ['Open It', 'Choose Another Name'] }]);
-      expect(fs.existsSync(erd('gold', 'refunds.dbml'))).toBe(false);
+      expect(fs.existsSync(erd('gold', 'diagrams', 'refunds.dbml'))).toBe(false);
       expect(exec.mock.calls.some((c) => c[0] === 'vscode.openWith' && (c[1] as vscode.Uri).fsPath === erd('gold', 'refunds.json'))).toBe(true);
     });
 
@@ -337,26 +383,26 @@ describe('in a native DBML project', () => {
       expect(bytes()).toEqual(before);
     });
 
-    it('Rename: a .dbdiagram under the new name (left by 1.9) is not in the way, and is left as it is', async () => {
-      fs.writeFileSync(erd('gold', 'revenue.dbdiagram'), '{}\n');
+    it('Rename: a 1.9 diagram of the new name in the layer folder (gold/revenue.dbml) is not in the way, and is left as it is', async () => {
+      fs.writeFileSync(erd('gold', 'revenue.dbml'), 'Project revenue {\n}\n');
       await activate(context);
       vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
       await vscode.commands.executeCommand('erdStudio.renameDomain', sales());
       expect(toasts()).toEqual([]);
-      expect(fs.existsSync(erd('gold', 'revenue.dbml'))).toBe(true);
-      expect(fs.readFileSync(erd('gold', 'revenue.dbdiagram'), 'utf-8')).toBe('{}\n');
+      expect(fs.existsSync(erd('gold', 'diagrams', 'revenue.dbml'))).toBe(true);
+      expect(fs.readFileSync(erd('gold', 'revenue.dbml'), 'utf-8')).toBe('Project revenue {\n}\n');
     });
 
     it('Rename: a .dbml with a DBML mistake says where, with Open File', async () => {
-      fs.appendFileSync(erd('gold', 'sales.dbml'), '\nTable broken {\n');
+      fs.appendFileSync(salesPath(), '\nTable broken {\n');
       await activate(context);
       vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
       await vscode.commands.executeCommand('erdStudio.renameDomain', sales());
       expect(toasts()).toEqual([{
-        message: expect.stringMatching(/^\.erd-studio\/gold\/sales\.dbml can't be renamed because the diagram file has a problem: there is a DBML mistake at line \d+/),
+        message: expect.stringMatching(/^\.erd-studio\/gold\/diagrams\/sales\.dbml can't be renamed because the diagram file has a problem: there is a DBML mistake at line \d+/),
         buttons: ['Open File'],
       }]);
-      expect(fs.existsSync(erd('gold', 'revenue.dbml'))).toBe(false);
+      expect(fs.existsSync(erd('gold', 'diagrams', 'revenue.dbml'))).toBe(false);
     });
 
     it('Rename: VS Code refusing the edit offers Try Again, which moves the .dbml without asking again', async () => {
@@ -372,8 +418,8 @@ describe('in a native DBML project', () => {
         buttons: ['Try Again', 'Send Feedback'],
       }]);
       expect(input).toHaveBeenCalledTimes(1);
-      expect(fs.existsSync(erd('gold', 'sales.dbml'))).toBe(false);
-      expect(fs.existsSync(erd('gold', 'revenue.dbml'))).toBe(true);
+      expect(fs.existsSync(salesPath())).toBe(false);
+      expect(fs.existsSync(erd('gold', 'diagrams', 'revenue.dbml'))).toBe(true);
       compilesClean();
     });
   });
@@ -382,11 +428,11 @@ describe('in a native DBML project', () => {
     await activate(context);
     warn.mockResolvedValue('Delete' as never);
     await vscode.commands.executeCommand('erdStudio.deleteLogicalModel', {
-      type: 'model', name: 'dim_region', filePath: erd('tables', 'gold', 'dim_region.dbml'),
+      type: 'model', name: 'dim_region', filePath: erd('gold', 'tables', 'gold', 'dim_region.dbml'),
     });
     const prompt = String(warn.mock.calls.find((c) => String(c[0]).startsWith('Delete table "dim_region"'))?.[0]);
     expect(prompt).toMatch(/This removes the table's file, its \d+ relationships? and its place in 1 diagram\./);
-    expect(fs.existsSync(erd('tables', 'gold', 'dim_region.dbml'))).toBe(false);
+    expect(fs.existsSync(erd('gold', 'tables', 'gold', 'dim_region.dbml'))).toBe(false);
     for (const f of files().filter((p) => p.endsWith('.dbml'))) {
       expect(fs.readFileSync(erd(f), 'utf-8'), f).not.toMatch(/\bdim_region\b/);
     }
@@ -404,11 +450,47 @@ describe('in a native DBML project', () => {
     );
   });
 
-  it('Organise Table Library moves a .dbml table into its layer folder with its Refs and use lines, in one edit', async () => {
-    fs.writeFileSync(erd('tables', 'dim_only_gold.dbml'), 'Table dim_only_gold {\n  id INT [pk]\n  date_key INT\n}\n');
-    fs.appendFileSync(erd('tables', '_relationships.dbml'), "use { table dim_only_gold } from './dim_only_gold.dbml'\nRef: dim_only_gold.date_key >? dim_date.date_key\n");
-    const sales = erd('gold', 'sales.dbml');
-    fs.writeFileSync(sales, fs.readFileSync(sales, 'utf-8').replace("use * from '../tables/_relationships.dbml'", "use { table dim_only_gold } from '../tables/dim_only_gold.dbml'\nuse * from '../tables/_relationships.dbml'"));
+  it('Remove Layer refuses while the layer holds tables or relationships files, and deletes nothing', async () => {
+    const layers = JSON.parse(fs.readFileSync(erd('layers.json'), 'utf-8')) as { layers: Array<Record<string, unknown>> };
+    layers.layers.unshift({ id: 'bronze', label: 'Bronze', abbreviation: 'BRZ', color: '#cd7f32', creatable: true, order: 0 });
+    fs.writeFileSync(erd('layers.json'), `${JSON.stringify(layers, null, 2)}\n`);
+    fs.mkdirSync(erd('bronze', 'tables', 'raw'), { recursive: true });
+    fs.writeFileSync(erd('bronze', 'tables', 'raw', 'orders_raw.dbml'), 'Table raw.orders_raw {\n  id INT [pk]\n}\n');
+    fs.mkdirSync(erd('bronze', 'relationships'), { recursive: true });
+    fs.writeFileSync(erd('bronze', 'relationships', 'bronze.dbml'), '// nothing yet\n');
+    const before = bytes();
+    await activate(context);
+    const del = vi.spyOn(vscode.workspace.fs, 'delete');
+    await vscode.commands.executeCommand('erdStudio.removeLayer', { type: 'layer', layer: 'bronze' });
+    expect(errors).toHaveBeenCalledWith('Cannot remove layer "Bronze": it holds 1 table(s) and 1 relationships file(s). Move or delete them first.');
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Remove layer'), expect.anything(), expect.anything());
+    expect(del).not.toHaveBeenCalled();
+    expect(bytes()).toEqual(before);
+
+    // With its .dbml files gone, the layer can go: a .DS_Store or .gitkeep left behind is not a table.
+    fs.rmSync(erd('bronze', 'tables', 'raw', 'orders_raw.dbml'));
+    fs.writeFileSync(erd('bronze', 'tables', 'raw', '.DS_Store'), '');
+    fs.rmSync(erd('bronze', 'relationships', 'bronze.dbml'));
+    fs.writeFileSync(erd('bronze', 'relationships', '.gitkeep'), '');
+    warn.mockResolvedValue('Remove' as never);
+    await vscode.commands.executeCommand('erdStudio.removeLayer', { type: 'layer', layer: 'bronze' });
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect((JSON.parse(fs.readFileSync(erd('layers.json'), 'utf-8')) as { layers: Array<{ id: string }> }).layers.map((l) => l.id)).toEqual(['silver', 'gold']);
+  });
+
+  /** gold/tables/gold/dim_rate.dbml: only the silver diagram shows it, and gold's relationships file holds its Ref. */
+  function seedRate(): void {
+    fs.writeFileSync(erd('gold', 'tables', 'gold', 'dim_rate.dbml'), 'Table gold.dim_rate {\n  rate_key INT [pk]\n  date_key INT\n}\n');
+    const goldRels = erd('gold', 'relationships', 'gold.dbml');
+    fs.writeFileSync(goldRels, fs.readFileSync(goldRels, 'utf-8')
+      .replace("use { table gold.dim_region }", "use { table gold.dim_rate } from '../tables/gold/dim_rate.dbml'\nuse { table gold.dim_region }")
+      .concat('\nRef: gold.dim_rate.date_key >? calendar.dim_date.date_key\n'));
+    fs.writeFileSync(stagingPath(), fs.readFileSync(stagingPath(), 'utf-8').replace("use * from '../../gold/relationships/gold.dbml'", "use { table gold.dim_rate } from '../../gold/tables/gold/dim_rate.dbml'\nuse * from '../../gold/relationships/gold.dbml'"));
+  }
+
+  it('Organise Table Library moves a .dbml table to the layer whose diagrams show it, in one edit: no Ref moves, every use line follows', async () => {
+    seedRate();
+    const goldRelsRefs = fs.readFileSync(erd('gold', 'relationships', 'gold.dbml'), 'utf-8').split('\n').filter((l) => l.startsWith('Ref'));
     await activate(context);
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
       (args.includes('Move Files') ? 'Move Files' : undefined)) as never);
@@ -416,21 +498,50 @@ describe('in a native DBML project', () => {
     await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
     expect(errors).not.toHaveBeenCalled();
     expect(applyEdit).toHaveBeenCalledTimes(1);
-    expect(fs.existsSync(erd('tables', 'dim_only_gold.dbml'))).toBe(false);
-    expect(fs.existsSync(erd('tables', 'gold', 'dim_only_gold.dbml'))).toBe(true);
-    expect(fs.readFileSync(erd('tables', 'gold', '_relationships.dbml'), 'utf-8')).toContain('dim_only_gold.date_key');
-    expect(fs.readFileSync(sales, 'utf-8')).toMatch(/^use \{ table dim_only_gold \} +from '\.\.\/tables\/gold\/dim_only_gold\.dbml'$/m);
+    const modal = info.mock.calls.find((c) => c[0] === 'Organise Table Library by Layer?')!;
+    expect((modal[1] as { detail: string }).detail).toContain('Move 1 table into layer folders (1 → silver/).');
+    expect((modal[1] as { detail: string }).detail).not.toContain('re-spelled');
+    expect(fs.existsSync(erd('gold', 'tables', 'gold', 'dim_rate.dbml'))).toBe(false);
+    expect(fs.readFileSync(erd('silver', 'tables', 'gold', 'dim_rate.dbml'), 'utf-8')).toMatch(/^Table gold\.dim_rate \{/);
+    // No Ref moved: gold's file holds the same Refs, and silver has no relationships file of its own for it.
+    const goldRels = fs.readFileSync(erd('gold', 'relationships', 'gold.dbml'), 'utf-8');
+    expect(goldRels.split('\n').filter((l) => l.startsWith('Ref'))).toEqual(goldRelsRefs);
+    expect(goldRels).toMatch(/^use \{ table gold\.dim_rate \} +from '\.\.\/\.\.\/silver\/tables\/gold\/dim_rate\.dbml'$/m);
+    expect(fs.existsSync(erd('silver', 'relationships', 'silver.dbml'))).toBe(false);
+    expect(fs.readFileSync(stagingPath(), 'utf-8')).toMatch(/^use \{ table gold\.dim_rate \} +from '\.\.\/tables\/gold\/dim_rate\.dbml'$/m);
     expect(info).toHaveBeenCalledWith('Moved 1 table file into layer folders.');
     compilesClean();
   });
 
-  it('Organise in a mixed project moves .dbml and YAML tables in ONE edit, the YAML file renamed byte for byte', async () => {
-    fs.writeFileSync(erd('tables', 'dim_only_gold.dbml'), 'Table dim_only_gold {\n  id INT [pk]\n}\n');
+  it('Organise lists a table it re-qualifies (its schema spelled as the new layer\'s folder spells it)', async () => {
+    fs.mkdirSync(erd('gold', 'tables', 'Calendar'), { recursive: true });
+    fs.writeFileSync(erd('gold', 'tables', 'Calendar', 'dim_holiday.dbml'), 'Table Calendar.dim_holiday {\n  holiday_key INT [pk]\n}\n');
+    fs.writeFileSync(stagingPath(), fs.readFileSync(stagingPath(), 'utf-8').replace("use * from '../../gold/relationships/gold.dbml'", "use { table Calendar.dim_holiday } from '../../gold/tables/Calendar/dim_holiday.dbml'\nuse * from '../../gold/relationships/gold.dbml'"));
+    await activate(context);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+      (args.includes('Move Files') ? 'Move Files' : undefined)) as never);
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+    expect(errors).not.toHaveBeenCalled();
+    const modal = info.mock.calls.find((c) => c[0] === 'Organise Table Library by Layer?')!;
+    expect((modal[1] as { detail: string }).detail).toContain("Its schema is spelled as the new layer's folder spells it, so every Ref naming it is re-spelled too: dim_holiday.");
+    expect(fs.readFileSync(erd('silver', 'tables', 'calendar', 'dim_holiday.dbml'), 'utf-8')).toMatch(/^Table calendar\.dim_holiday \{/);
+    expect(fs.existsSync(erd('gold', 'tables', 'Calendar'))).toBe(false);
+    compilesClean();
+  });
+
+  /** A DBML table in silver and a flat YAML table, both shown only by a gold JSON diagram. */
+  function seedMixed(yamlText: string | Buffer = 'name: dim_yaml_gold\ncolumns: []\n'): void {
+    fs.mkdirSync(erd('silver', 'tables', 'silver'), { recursive: true });
+    fs.writeFileSync(erd('silver', 'tables', 'silver', 'dim_only_gold.dbml'), 'Table silver.dim_only_gold {\n  id INT [pk]\n}\n');
     fs.mkdirSync(erd('logical-models'), { recursive: true });
-    // A BOM, CRLF and a Latin-1 byte (0xE9) that is not UTF-8: a text round trip would change it.
-    const yamlBytes = Buffer.concat([Buffer.from('\uFEFFname: dim_yaml_gold\r\ndescription: caf', 'utf-8'), Buffer.from([0xe9]), Buffer.from('\r\ncolumns: []\r\n', 'utf-8')]);
-    fs.writeFileSync(erd('logical-models', 'dim_yaml_gold.yml'), yamlBytes);
+    fs.writeFileSync(erd('logical-models', 'dim_yaml_gold.yml'), yamlText);
     fs.writeFileSync(erd('gold', 'mixed.json'), JSON.stringify({ schemaVersion: 5, domain: 'mixed', layer: 'gold', logical: { models: ['dim_yaml_gold', 'dim_only_gold'], relationships: [] } }));
+  }
+
+  it('Organise in a mixed project moves .dbml and YAML tables in ONE edit, the YAML file renamed byte for byte', async () => {
+    // A BOM, CRLF and a Latin-1 byte (0xE9) that is not UTF-8: a text round trip would change it.
+    const yamlBytes = Buffer.concat([Buffer.from('﻿name: dim_yaml_gold\r\ndescription: caf', 'utf-8'), Buffer.from([0xe9]), Buffer.from('\r\ncolumns: []\r\n', 'utf-8')]);
+    seedMixed(yamlBytes);
     await activate(context);
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
       (args.includes('Move Files') ? 'Move Files' : undefined)) as never);
@@ -440,17 +551,15 @@ describe('in a native DBML project', () => {
     expect(applyEdit).toHaveBeenCalledTimes(1);
     const ops = (applyEdit.mock.calls[0][0] as unknown as { _ops: Array<{ kind: string }> })._ops.map((o) => o.kind);
     expect(ops).toContain('renameFile');
-    expect(fs.existsSync(erd('tables', 'gold', 'dim_only_gold.dbml'))).toBe(true);
+    expect(fs.readFileSync(erd('gold', 'tables', 'silver', 'dim_only_gold.dbml'), 'utf-8')).toMatch(/^Table silver\.dim_only_gold \{/);
+    expect(fs.existsSync(erd('silver', 'tables', 'silver'))).toBe(false);
     expect(fs.existsSync(erd('logical-models', 'dim_yaml_gold.yml'))).toBe(false);
     expect(fs.readFileSync(erd('logical-models', 'gold', 'dim_yaml_gold.yml')).equals(yamlBytes)).toBe(true);
     compilesClean();
   });
 
   it('Organise announces every write and both ends of each rename before the edit, and records the moves before saving', async () => {
-    fs.writeFileSync(erd('tables', 'dim_only_gold.dbml'), 'Table dim_only_gold {\n  id INT [pk]\n}\n');
-    fs.mkdirSync(erd('logical-models'), { recursive: true });
-    fs.writeFileSync(erd('logical-models', 'dim_yaml_gold.yml'), 'name: dim_yaml_gold\ncolumns: []\n');
-    fs.writeFileSync(erd('gold', 'mixed.json'), JSON.stringify({ schemaVersion: 5, domain: 'mixed', layer: 'gold', logical: { models: ['dim_yaml_gold', 'dim_only_gold'], relationships: [] } }));
+    seedMixed();
     await activate(context);
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
       (args.includes('Move Files') ? 'Move Files' : undefined)) as never);
@@ -464,7 +573,7 @@ describe('in a native DBML project', () => {
     await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
     expect(errors).not.toHaveBeenCalled();
     const announced = expectWrite.mock.calls.flatMap((c) => [...c[0]]);
-    for (const p of [erd('tables', 'dim_only_gold.dbml'), erd('logical-models', 'dim_yaml_gold.yml'), erd('logical-models', 'gold', 'dim_yaml_gold.yml')]) {
+    for (const p of [erd('silver', 'tables', 'silver', 'dim_only_gold.dbml'), erd('gold', 'tables', 'silver', 'dim_only_gold.dbml'), erd('logical-models', 'dim_yaml_gold.yml'), erd('logical-models', 'gold', 'dim_yaml_gold.yml')]) {
       expect(announced).toContain(p);
     }
     expect(events.indexOf('applyEdit')).toBe(0);
@@ -473,10 +582,7 @@ describe('in a native DBML project', () => {
   });
 
   it('Organise: when VS Code rejects the edit part way, every file is put back and it says nothing was changed', async () => {
-    fs.writeFileSync(erd('tables', 'dim_only_gold.dbml'), 'Table dim_only_gold {\n  id INT [pk]\n  date_key INT\n}\n');
-    fs.appendFileSync(erd('tables', '_relationships.dbml'), "use { table dim_only_gold } from './dim_only_gold.dbml'\nRef: dim_only_gold.date_key >? dim_date.date_key\n");
-    const sales = erd('gold', 'sales.dbml');
-    fs.writeFileSync(sales, fs.readFileSync(sales, 'utf-8').replace("use * from '../tables/_relationships.dbml'", "use { table dim_only_gold } from '../tables/dim_only_gold.dbml'\nuse * from '../tables/_relationships.dbml'"));
+    seedRate();
     const before = bytes();
     await activate(context);
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
@@ -489,38 +595,59 @@ describe('in a native DBML project', () => {
     expect(bytes()).toEqual(before);
   });
 
+  /**
+   * A second dim_customer in silver/tables/silver/ (`silver.dim_customer`): gold's comes first in
+   * the listing and wins, so the silver one is the copy. silver's relationships file and the
+   * staging diagram use the copy.
+   */
+  function seedDuplicate(): void {
+    fs.mkdirSync(erd('silver', 'tables', 'silver'), { recursive: true });
+    fs.writeFileSync(erd('silver', 'tables', 'silver', 'dim_customer.dbml'), 'Table silver.dim_customer {\n  customer_key INT [pk]\n}\n');
+    fs.writeFileSync(erd('silver', 'tables', 'silver', 'fct_visit.dbml'), 'Table silver.fct_visit {\n  visit_key INT [pk]\n  customer_key INT\n}\n');
+    fs.writeFileSync(erd('silver', 'relationships', 'silver.dbml'), [
+      "use { table silver.dim_customer } from '../tables/silver/dim_customer.dbml'",
+      "use { table silver.fct_visit } from '../tables/silver/fct_visit.dbml'",
+      '',
+      'Ref: silver.fct_visit.customer_key >? silver.dim_customer.customer_key',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(stagingPath(), fs.readFileSync(stagingPath(), 'utf-8').replace("use * from '../../gold/relationships/gold.dbml'", "use { table silver.dim_customer } from '../tables/silver/dim_customer.dbml'\nuse * from '../../gold/relationships/gold.dbml'"));
+  }
+  const COPY = (): string => erd('silver', 'tables', 'silver', 'dim_customer.dbml');
+
   it('Give Duplicate Its Own Name: when VS Code rejects the edit, every file is put back and it says nothing was changed', async () => {
-    fs.writeFileSync(erd('tables', 'gold', 'dim_date.dbml'), 'Table dim_date {\n  date_key INT [pk]\n}\n');
-    const staging = erd('silver', 'staging.dbml');
-    fs.writeFileSync(staging, fs.readFileSync(staging, 'utf-8').replace("from '../tables/dim_date.dbml'", "from '../tables/gold/dim_date.dbml'"));
+    seedDuplicate();
     const before = bytes();
     await activate(context);
     vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
       (args.includes('Rename') ? 'Rename' : undefined)) as never);
     vscode._mockWorkspaceState.applyEditPrefixes.push(1);
-    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', erd('tables', 'gold', 'dim_date.dbml'));
-    expect(errors).toHaveBeenCalledWith('Could not rename tables/gold/dim_date.dbml; nothing was changed.');
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', COPY());
+    expect(errors).toHaveBeenCalledWith('Could not rename silver/tables/silver/dim_customer.dbml; nothing was changed.');
     for (const doc of vscode.workspace.textDocuments) if (doc.isDirty) await doc.save();
     expect(bytes()).toEqual(before);
   });
 
-  it('Give Duplicate Its Own Name renames a .dbml copy and repoints only the diagram that uses it', async () => {
-    fs.writeFileSync(erd('tables', 'gold', 'dim_date.dbml'), 'Table dim_date {\n  date_key INT [pk]\n}\n');
-    const staging = erd('silver', 'staging.dbml');
-    fs.writeFileSync(staging, fs.readFileSync(staging, 'utf-8').replace("from '../tables/dim_date.dbml'", "from '../tables/gold/dim_date.dbml'"));
-    const salesBefore = fs.readFileSync(erd('gold', 'sales.dbml'), 'utf-8');
+  it('Give Duplicate Its Own Name renames a .dbml copy (named after its layer), re-spells its own Ref ends and repoints only the diagram that uses it', async () => {
+    seedDuplicate();
+    const salesBefore = fs.readFileSync(salesPath(), 'utf-8');
+    const goldRelsBefore = fs.readFileSync(erd('gold', 'relationships', 'gold.dbml'), 'utf-8');
     await activate(context);
-    vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
       (args.includes('Rename') ? 'Rename' : undefined)) as never);
-    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', erd('tables', 'gold', 'dim_date.dbml'));
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', COPY());
     expect(errors).not.toHaveBeenCalled();
-    expect(fs.existsSync(erd('tables', 'gold', 'dim_date.dbml'))).toBe(false);
-    expect(fs.readFileSync(erd('tables', 'gold', 'gold_dim_date.dbml'), 'utf-8')).toMatch(/^Table gold_dim_date \[alias: 'dim_date'\]/m);
-    expect(fs.readFileSync(staging, 'utf-8')).toContain("use { table gold_dim_date } from '../tables/gold/gold_dim_date.dbml'");
-    expect(fs.readFileSync(erd('gold', 'sales.dbml'), 'utf-8')).toBe(salesBefore);
-    expect(info).toHaveBeenCalledWith(expect.stringContaining('is now its own table, "gold_dim_date"'));
+    expect((input.mock.calls[0][0] as { value?: string }).value).toBe('silver_dim_customer');
+    expect(fs.existsSync(COPY())).toBe(false);
+    expect(fs.readFileSync(erd('silver', 'tables', 'silver', 'silver_dim_customer.dbml'), 'utf-8')).toMatch(/^Table silver\.silver_dim_customer \[alias: 'dim_customer'\]/m);
+    expect(fs.readFileSync(erd('silver', 'relationships', 'silver.dbml'), 'utf-8')).toContain('Ref: silver.fct_visit.customer_key >? silver.silver_dim_customer.customer_key');
+    expect(fs.readFileSync(stagingPath(), 'utf-8')).toMatch(/^use \{ table silver\.silver_dim_customer \} +from '\.\.\/tables\/silver\/silver_dim_customer\.dbml'$/m);
+    expect(fs.readFileSync(salesPath(), 'utf-8')).toBe(salesBefore);
+    expect(fs.readFileSync(erd('gold', 'relationships', 'gold.dbml'), 'utf-8')).toBe(goldRelsBefore);
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('is now its own table, "silver_dim_customer"'));
+    compilesClean();
   });
 
   describe('a refused write shows a modal naming the file, with Open File at the line (§4.7)', () => {
@@ -533,12 +660,9 @@ describe('in a native DBML project', () => {
     }
 
     it('Organise Table Library', async () => {
-      fs.writeFileSync(erd('tables', 'dim_only_gold.dbml'), 'Table dim_only_gold {\n  id INT [pk]\n  date_key INT\n}\n');
-      fs.appendFileSync(erd('tables', '_relationships.dbml'), "use { table dim_only_gold } from './dim_only_gold.dbml'\nRef: dim_only_gold.date_key >? dim_date.date_key\n");
-      // The folder the table moves to has a relationships file that does not read: its Ref cannot be written there.
-      fs.appendFileSync(erd('tables', 'gold', '_relationships.dbml'), 'Ref: fct_order.customer_key >\n');
-      const sales = erd('gold', 'sales.dbml');
-      fs.writeFileSync(sales, fs.readFileSync(sales, 'utf-8').replace("use * from '../tables/_relationships.dbml'", "use { table dim_only_gold } from '../tables/dim_only_gold.dbml'\nuse * from '../tables/_relationships.dbml'"));
+      seedRate();
+      // The relationships file that names the moving table does not read: its use line cannot follow.
+      fs.appendFileSync(erd('gold', 'relationships', 'gold.dbml'), 'Ref: gold.fct_order.customer_key >\n');
       const before = bytes();
       await activate(context);
       vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
@@ -547,40 +671,40 @@ describe('in a native DBML project', () => {
       errors.mockResolvedValueOnce('Open File' as never);
       await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
       const modal = refusalModal();
-      expect(modal.message).toMatch(/^Organise Table Library: Fix the DBML in tables\/gold\/_relationships\.dbml first .* Nothing was changed\.$/);
-      expect(modal.detail).toMatch(/^File: \.erd-studio\/tables\/gold\/_relationships\.dbml, line \d+$/);
+      expect(modal.message).toMatch(/^Organise Table Library: .*gold\/relationships\/gold\.dbml.* Nothing was changed\.$/);
+      expect(modal.detail).toMatch(/^File: \.erd-studio\/gold\/relationships\/gold\.dbml/);
       expect(modal.buttons).toEqual(['Open File']);
-      await vi.waitFor(() => expect(open).toHaveBeenCalledWith(expect.objectContaining({ fsPath: erd('tables', 'gold', '_relationships.dbml') })));
+      await vi.waitFor(() => expect(open).toHaveBeenCalledWith(expect.objectContaining({ fsPath: erd('gold', 'relationships', 'gold.dbml') })));
       expect(bytes()).toEqual(before);
     });
 
     it('Give Duplicate Its Own Name', async () => {
-      fs.writeFileSync(erd('tables', 'gold', 'dim_date.dbml'), "use { table dim_customer } from './dim_customer.dbml'\nTable dim_date {\n  date_key INT [pk]\n}\n");
+      seedDuplicate();
+      fs.writeFileSync(COPY(), "use { table gold.dim_region } from '../../../gold/tables/gold/dim_region.dbml'\nTable silver.dim_customer {\n  customer_key INT [pk]\n}\n");
       const before = bytes();
       await activate(context);
       vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
       vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
         (args.includes('Rename') ? 'Rename' : undefined)) as never);
-      await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', erd('tables', 'gold', 'dim_date.dbml'));
+      await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', COPY());
       const modal = refusalModal();
-      expect(modal.message).toMatch(/^Give Duplicate Its Own Name: tables\/gold\/dim_date\.dbml: .* Nothing was changed\.$/);
-      expect(modal.detail).toBe('File: .erd-studio/tables/gold/dim_date.dbml, line 1');
+      expect(modal.message).toMatch(/^Give Duplicate Its Own Name: silver\/tables\/silver\/dim_customer\.dbml: .* Nothing was changed\.$/);
+      expect(modal.detail).toBe('File: .erd-studio/silver/tables/silver/dim_customer.dbml, line 1');
       expect(modal.buttons).toEqual(['Open File']);
       expect(bytes()).toEqual(before);
     });
 
     it('Rename Subject Area', async () => {
-      const sales = erd('gold', 'sales.dbml');
-      fs.appendFileSync(sales, '\nProject second {\n  Note: \'again\'\n}\n');
+      fs.appendFileSync(salesPath(), '\nProject second {\n  Note: \'again\'\n}\n');
       const before = bytes();
       await activate(context);
       vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('revenue');
       await vscode.commands.executeCommand('erdStudio.renameDomain', {
-        type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: sales, storage: 'dbml' },
+        type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: salesPath(), storage: 'dbml' },
       });
       const modal = refusalModal();
-      expect(modal.message).toMatch(/^Rename Diagram: gold\/sales\.dbml: .* Nothing was changed\.$/);
-      expect(modal.detail).toBe('File: .erd-studio/gold/sales.dbml');
+      expect(modal.message).toMatch(/^Rename Diagram: gold\/diagrams\/sales\.dbml: .* Nothing was changed\.$/);
+      expect(modal.detail).toBe('File: .erd-studio/gold/diagrams/sales.dbml');
       expect(modal.buttons).toEqual(['Open File']);
       expect(bytes()).toEqual(before);
     });

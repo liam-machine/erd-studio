@@ -632,9 +632,51 @@ describe('Import DBML — the project\'s naming', () => {
     const result = await importDbml(deps(ui));
 
     expect(result).toBeDefined();
-    // A new project stores its model as DBML (native DBML storage, §3.2): the relationship in its folder's relationships file.
-    expect(erdFiles()).toEqual(['layers.json', 'silver/shop.dbml', 'tables/silver/_relationships.dbml', 'tables/silver/customers.dbml', 'tables/silver/orders.dbml']);
+    // A new project stores its model as DBML (native DBML storage, §3.2), in the layer-first tree: the
+    // relationship in the layer's relationships file, and the README a new project starts with.
+    expect(erdFiles()).toEqual([
+      'README.md', 'layers.json', 'silver/diagrams/shop.dbml', 'silver/relationships/silver.dbml',
+      'silver/tables/silver/customers.dbml', 'silver/tables/silver/orders.dbml',
+    ]);
     expect(subjectAreaTableNames(fs.readFileSync(result!.domainPath, 'utf-8'), result!.domainPath)).toEqual(['customers', 'orders']);
+  });
+
+  it('a table the file qualifies keeps its schema as its folder, spelled as the layer lists it, and the preview says so', async () => {
+    // A DBML project whose gold layer already lists the schema as sales/.
+    fs.mkdirSync(erd('gold', 'tables', 'sales'), { recursive: true });
+    fs.writeFileSync(erd('layers.json'), LAYERS_JSON);
+    fs.writeFileSync(erd('gold', 'tables', 'sales', 'dim_rep.dbml'), 'Table sales.dim_rep {\n  rep_id int [pk]\n}\n');
+    makeProject('none');
+    const file = dbmlFile('deals.dbml', 'Table Sales.deals {\n  id int [pk]\n  rep_id int\n}\nTable customers {\n  id int [pk]\n}\n');
+    const ui = fakeUi({ file, layer: 'gold' });
+    const result = await importDbml(deps(ui));
+
+    expect(ui.errors).toEqual([]);
+    expect(result).toBeDefined();
+    expect(fs.readFileSync(erd('gold', 'tables', 'sales', 'deals.dbml'), 'utf-8')).toMatch(/^Table sales\.deals \{/);
+    // A table the file does not qualify goes in the layer's own schema.
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'customers.dbml'), 'utf-8')).toMatch(/^Table gold\.customers \{/);
+    expect(ui.confirms[0].detail).toContain("• Schema Sales is written sales, as the layer's existing sales/ folder spells it: deals.");
+    const diagram = fs.readFileSync(result!.domainPath, 'utf-8');
+    expect(diagram).toMatch(/^use \{ table sales\.deals \} +from '\.\.\/tables\/sales\/deals\.dbml'$/m);
+  });
+
+  it('a mixed project (flat YAML library beside DBML layers): the import goes to the chosen layer\'s tables', async () => {
+    fs.mkdirSync(erd(), { recursive: true });
+    fs.writeFileSync(erd('layers.json'), `${JSON.stringify({ schemaVersion: 1, layers: ['bronze', 'silver', 'gold'].map((id, order) => ({ id, label: id[0].toUpperCase() + id.slice(1), color: '#888888', creatable: true, order })) }, null, 2)}\n`);
+    fs.mkdirSync(erd('logical-models'), { recursive: true });
+    fs.writeFileSync(erd('logical-models', 'dim_a.yml'), 'name: dim_a\ncolumns:\n  - name: id\n    dataType: int\n    description: ""\n');
+    fs.mkdirSync(erd('gold', 'tables', 'gold'), { recursive: true });
+    fs.writeFileSync(erd('gold', 'tables', 'gold', 'fct_x.dbml'), 'Table gold.fct_x {\n  id int [pk]\n}\n');
+    makeProject('none');
+    const file = dbmlFile('shop.dbml', SHOP_DBML);
+    const result = await importDbml(deps(fakeUi({ file, layer: 'gold' })));
+
+    expect(result!.domainPath).toBe(erd('gold', 'diagrams', 'shop.dbml'));
+    expect(fs.existsSync(erd('gold', 'tables', 'gold', 'customers.dbml'))).toBe(true);
+    expect(fs.existsSync(erd('gold', 'tables', 'gold', 'orders.dbml'))).toBe(true);
+    expect(fs.existsSync(erd('gold', 'relationships', 'gold.dbml'))).toBe(true);
+    expect(fs.existsSync(erd('logical-models', 'gold'))).toBe(false);
   });
 
   it('an empty v5 library: grouped by layer from its first file', async () => {
@@ -671,7 +713,8 @@ describe('Import DBML — where relationships go', () => {
 
   it('a library that holds DBML keeps them in the library, even when a diagram file holds some (native DBML, §5.1)', async () => {
     makeProject('v6');
-    fs.writeFileSync(erd('tables', 'dim_other.dbml'), 'Table dim_other {\n  id INT [pk]\n}\n');
+    fs.mkdirSync(erd('gold', 'tables', 'gold'), { recursive: true });
+    fs.writeFileSync(erd('gold', 'tables', 'gold', 'dim_other.dbml'), 'Table gold.dim_other {\n  id INT [pk]\n}\n');
     fs.mkdirSync(erd('silver'), { recursive: true });
     fs.writeFileSync(erd('silver', 'legacy.json'), `${JSON.stringify({
       schemaVersion: 5, domain: 'legacy', layer: 'silver',
@@ -863,9 +906,8 @@ describe('Import DBML — a write that fails', () => {
 
   it('a project with no ERD folder: a failed import also removes the folder it created', async () => {
     makeProject('none');
-    // A new project writes DBML (§3.2): the write's own plan fails (the first plan is the pre-write check).
-    const plan = lms.planTableWrites.bind(lms);
-    vi.spyOn(lms, 'planTableWrites').mockImplementationOnce(plan).mockImplementation(() => { throw fsError('ENOSPC', erd('x')); });
+    // A new project writes DBML (§3.2): the write's own batch fails (planTableWrites is only the pre-write check).
+    vi.spyOn(lms, 'applyDbmlBatch').mockImplementation(() => { throw fsError('ENOSPC', erd('x')); });
     const file = dbmlFile('shop.dbml', SHOP_DBML);
     const ui = fakeUi({ file, layer: 'silver' });
 

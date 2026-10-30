@@ -30,9 +30,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { DBML_RELATIONSHIPS_FILE_NAME, isReservedTableName } from '@erd-studio/core';
+import { classifySemanticFile, diagramFilePath } from '@erd-studio/core';
 import { DBML_CONVERT_FIRST_MESSAGE } from '@erd-studio/core/dbml';
-import { RESERVED_TABLE_NAME_MESSAGE } from '../types/naming';
 
 import {
   analyseDbml,
@@ -74,6 +73,7 @@ import { telemetry } from '../services/telemetryService';
 import type { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import type { TableLibraryService } from '../services/logicalModelService';
+import type { SemanticTable } from '../types/semantic';
 import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
@@ -296,7 +296,9 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   // A project that writes DBML (§3.2) gets a `.dbml` diagram whose relationships all live in the library (D5).
   const dbml = tableLibraryService.writesDbml?.() ?? false;
   const layerDir = path.join(workspaceRoot, semanticDir, chosenLayer);
-  const domainPath = path.join(layerDir, `${slug}.${dbml ? 'dbml' : 'json'}`);
+  // A DBML diagram is `<layer>/diagrams/<slug>.dbml` (§1.1); a JSON one `<layer>/<slug>.json`.
+  const dbmlDiagramPath = path.join(workspaceRoot, semanticDir, ...diagramFilePath(chosenLayer, slug).split('/'));
+  const domainPath = dbml ? dbmlDiagramPath : path.join(layerDir, `${slug}.json`);
   const tryAgain = again({ layer: chosenLayer, name: slug });
   // The name box already refuses a name in use; this is a diagram that
   // appeared since (another window, git), so the choices are kept.
@@ -304,8 +306,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     [OPEN_IT_BUTTON]: () => ui.openDiagram(domainPath),
     [CHOOSE_ANOTHER_NAME_BUTTON]: again({ layer: chosenLayer }),
   });
-  // A name is taken in either format: `<slug>.json` and `<slug>.dbml` would be one diagram's name twice.
-  if (fs.existsSync(path.join(layerDir, `${slug}.json`)) || fs.existsSync(path.join(layerDir, `${slug}.dbml`))) {
+  // A name is taken in either format: `<slug>.json` and `diagrams/<slug>.dbml` would be one diagram's name twice.
+  if (fs.existsSync(path.join(layerDir, `${slug}.json`)) || fs.existsSync(dbmlDiagramPath)) {
     nameTaken();
     return undefined;
   }
@@ -319,6 +321,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   let dirty: string[];
   /** Every file a DBML project's save writes (empty for a YAML project). */
   let planned: string[] = [];
+  /** New tables whose schema is written as the layer's existing folder spells it. */
+  let respelled: Array<{ table: string; from: string; to: string }> = [];
   try {
     // A DBML table always goes to the chosen layer's folder: groupsByFolder speaks for YAML libraries only.
     folder = dbml || tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
@@ -354,11 +358,13 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         return undefined;
       }
     }
-    planned = dbml && tableLibraryService.planTableWrites
-      // Every file the DBML save writes (relationships files too); a refusal surfaces here, before any write.
-      ? tableLibraryService.planTableWrites({ save: [...plan.newTables, ...plan.changedLibraryTables].map((model) => ({ model })) }, folder, { dbml: true })
-        .writes.map((w) => w.path)
-      : [];
+    // Every file the DBML save writes (relationships files too); a refusal surfaces here, before any write.
+    // Each new table keeps the schema the file gives it (its qualifier), as the layer's folder spells it (§2.4).
+    const planWrites = dbml && tableLibraryService.planTableWrites
+      ? tableLibraryService.planTableWrites({ save: [...plan.newTables, ...plan.changedLibraryTables].map((model) => ({ model })) }, folder, { dbml: true, schemaFromSource: true })
+      : undefined;
+    planned = (planWrites?.writes ?? []).map((w) => w.path);
+    if (planWrites?.plan) respelled = respelledSchemas(plan.newTables, (name) => planWrites.plan!.resolveTable(name)?.reference);
     dirty = dirtyFiles([
       ...plan.newTables.map((t) => tableLibraryService.tablePath(t.name, folder)),
       ...plan.changedLibraryTables.map((t) => tableLibraryService.tablePath(t.name)),
@@ -398,10 +404,11 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     layerLabel,
     ...(dbml ? {
       dbml: {
-        // Where the relationships go: the library's `_relationships.dbml` files this save writes.
+        // Where the relationships go: the `<layer>/relationships/` files this save writes.
         relationshipsFiles: planned
-          .filter((p) => path.basename(p) === DBML_RELATIONSHIPS_FILE_NAME)
-          .map((p) => path.relative(semanticRoot, p).split(path.sep).join('/')),
+          .map((p) => path.relative(semanticRoot, p).split(path.sep).join('/'))
+          .filter((rel) => classifySemanticFile(rel, { tablesDirIsLayer: false }).kind === 'relationships'),
+        respelledSchemas: respelled,
       },
     } : {}),
   }).split('\n');
@@ -414,11 +421,12 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     domainPath,
     newTables: plan.newTables,
     folder,
+    ...(dbml ? { schemaFromSource: true } : {}),
     changedTables: plan.changedLibraryTables,
     documentText: (tableNaming) => serializeDbmlImportDocument(plan.document, tableNaming),
     // The source's positions and sticky-note boxes go where the project keeps a new diagram's layout.
     document: () => ({ ...plan.document, logical: { ...plan.document.logical, relationships: [] } }) as unknown as Record<string, unknown>,
-  }, { layerService, tableLibraryService, subjectAreaService, readText: openOrDiskText, dirtyFiles });
+  }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
   if (!outcome.ok) {
     const { error: err, undone } = outcome;
     if (outcome.nameTaken) {
@@ -472,18 +480,39 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
 }
 
 /**
- * Why a plan cannot become a DBML diagram, or undefined (§5.7, D20): a table
- * it would reuse is stored as YAML (a `use` line cannot import a `.yml`), or
- * a table it would create is named `_relationships` (§2.1).
+ * Why a plan cannot become a DBML diagram, or undefined (D20): a table it
+ * would reuse is stored as YAML (a `use` line cannot import a `.yml`). In
+ * the layer-first tree any table name is a table's (`_relationships`
+ * included): relationships files live in their own folder.
  */
 export function dbmlImportRefusal(plan: DbmlImportPlan, tableStorage: (name: string) => 'yaml' | 'dbml' | undefined): string | undefined {
   const yaml = plan.reusedTables.filter((n) => tableStorage(n) === 'yaml');
   if (yaml.length > 0) {
     return `${yaml.join(', ')} ${yaml.length === 1 ? 'is a YAML table' : 'are YAML tables'} in the Table Library, and a YAML table can't join a DBML diagram. ${DBML_CONVERT_FIRST_MESSAGE}.`;
   }
-  const reserved = plan.newTables.find((t) => isReservedTableName(t.name));
-  if (reserved) return RESERVED_TABLE_NAME_MESSAGE;
   return undefined;
+}
+
+/**
+ * The new tables whose schema is written in another spelling (§1.2 One
+ * spelling: a layer that already has `sales/` gets `Table sales.x` for the
+ * file's `Table Sales.x`), from each one's reference as the plan writes it.
+ */
+export function respelledSchemas(
+  tables: readonly SemanticTable[],
+  referenceOf: (name: string) => string | undefined,
+): Array<{ table: string; from: string; to: string }> {
+  const out: Array<{ table: string; from: string; to: string }> = [];
+  for (const table of tables) {
+    const reference = referenceOf(table.name);
+    if (!table.schema || reference === undefined) continue;
+    const dot = reference.lastIndexOf('.');
+    const written = dot > 0 ? reference.slice(0, dot).replace(/^"(.*)"$/, '$1') : undefined;
+    if (written !== undefined && written !== table.schema && written.toLowerCase() === table.schema.toLowerCase()) {
+      out.push({ table: table.name, from: table.schema, to: written });
+    }
+  }
+  return out;
 }
 
 function stripBom(text: string): string {

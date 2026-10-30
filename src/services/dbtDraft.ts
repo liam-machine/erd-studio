@@ -22,6 +22,7 @@ import type { ColumnDef, Relationship, SemanticTable } from '../types/semantic';
 import type { YmlData } from '../types/ymlData';
 import type { ManifestData } from '../types/manifest';
 import type { CatalogColumn, CatalogData } from '../types/catalog';
+import type { DbmlDraftTable } from './dbmlLibraryWrites';
 import { validateTableNameSafety } from '../providers/payloadValidation';
 import { derivePhysicalRelationships, mergeCompositeGroups, mergeUniqueMaps } from './domainService';
 import { normaliseName } from './nameUtils';
@@ -135,7 +136,9 @@ export interface BuildDbtDraftInput {
   /**
    * The draft is for a DBML diagram (native DBML storage, §5.7): a library
    * table stored as YAML is skipped (`yaml-table`, D20), and so is a new
-   * table named `_relationships` (`reserved-name`, §2.1).
+   * table named `_relationships` (`reserved-name`, §2.1). Each new table
+   * carries its dbt custom schema as `configuredSchema` ({@link configuredSchemaOf}),
+   * which picks its schema folder (§2.4).
    */
   dbml?: { tableStorage(name: string): 'yaml' | 'dbml' | undefined };
 }
@@ -143,8 +146,8 @@ export interface BuildDbtDraftInput {
 export interface DbtDraft {
   /** Every accepted name, in order: what the domain's `logical.models` gains. */
   modelNames: string[];
-  /** Library files to create (seeded from dbt). */
-  newModels: SemanticTable[];
+  /** Library files to create (seeded from dbt); for a DBML diagram each with its `configuredSchema`, when it has one. */
+  newModels: DbmlDraftTable[];
   /** Accepted names the library already has — only referenced. */
   reusedModels: string[];
   relationships: Relationship[];
@@ -505,6 +508,24 @@ export function seedTableFromDbt(
 }
 
 /**
+ * The schema a dbt model's developer configured (§2.4, `configuredSchema`):
+ * the manifest node's `config.schema` (from `+schema:` or
+ * `config(schema=…)`) when the manifest lists the model, else the schema yml
+ * model's `config: schema:`, which is what dbt compiles it from. Never the schema the model is built in
+ * (`dbt_liam_finance` in dev, `finance` in prod), which differs per machine:
+ * a model with no custom schema has none, and goes in its layer's schema.
+ */
+export function configuredSchemaOf(name: string, ymlData?: YmlData, manifest?: ManifestData): string | undefined {
+  const key = normaliseName(name);
+  const man = manifest?.models.get(name)
+    ?? [...(manifest?.models.values() ?? [])].find((m) => normaliseName(m.name) === key);
+  const yml = ymlData?.models.get(name)
+    ?? [...(ymlData?.models.values() ?? [])].find((m) => normaliseName(m.name) === key);
+  // The manifest is dbt's own resolution (yml, dbt_project.yml and config() merged): the yml only without it.
+  return man ? man.configSchema : yml?.configSchema;
+}
+
+/**
  * Key flags for a seeded model, from what dbt tests today: a column is the
  * primary key when it is the model's ONLY column with a standalone `unique`
  * test (and no composite key is declared); a column is a foreign key when a
@@ -630,6 +651,8 @@ export function buildDbtDraft(input: BuildDbtDraftInput): DbtDraft {
     if (!inLibrary) {
       model = seed(name);
       if (!model) { skipped.push({ name, reason: 'not-found' }); continue; }
+      const configuredSchema = input.dbml ? configuredSchemaOf(name, input.ymlData, input.manifest) : undefined;
+      if (configuredSchema !== undefined) model = { ...model, configuredSchema } as DbmlDraftTable;
     }
     if (accepted.length >= limit) {
       truncated = true;

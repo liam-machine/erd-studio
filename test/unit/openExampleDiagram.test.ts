@@ -197,7 +197,7 @@ describe('Open Example Diagram', () => {
     const result = await openExampleDiagram(deps(ui));
 
     // A new project stores the example as DBML (native DBML storage, §3.2).
-    const domainPath = erd(EXAMPLE_LAYER, 'coffee-shop.dbml');
+    const domainPath = erd(EXAMPLE_LAYER, 'diagrams', 'coffee-shop.dbml');
     expect(result?.domainPath).toBe(domainPath);
     // No Open dialog, no layer pick (the default layers have gold), no read from disk.
     expect(ui.dialogs).toBe(0);
@@ -211,12 +211,16 @@ describe('Open Example Diagram', () => {
     expect(ui.confirms[0].detail).not.toContain('Left out');
     expect(ui.errors).toEqual([]);
     expect(ui.opened).toEqual([domainPath]);
-    // A project with no library yet writes DBML (§3.2), in a layer folder, with the relationships in its folder's file.
+    // A project with no library yet writes DBML (§3.2) in the layer-first tree: the tables in gold/tables/gold/
+    // (layer gold, schema gold), the Refs in gold's relationships file, and the README a new project starts with.
     expect(erdFiles()).toEqual([
-      'gold/coffee-shop.dbml',
+      'README.md',
+      'gold/diagrams/coffee-shop.dbml',
+      'gold/relationships/gold.dbml',
+      ...SAMPLE_TABLES.map((t) => `gold/tables/gold/${t}.dbml`).sort(),
       'layers.json',
-      ...[...SAMPLE_TABLES.map((t) => `tables/gold/${t}.dbml`), 'tables/gold/_relationships.dbml'].sort(),
     ]);
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'fct_orders.dbml'), 'utf-8')).toMatch(/^Table gold\.fct_orders \[/m);
     // Counted as the example only: the Import DBML counts stay the user's own files.
     expect(features()).toEqual(['exampleDiagram']);
   });
@@ -275,7 +279,8 @@ describe('Open Example Diagram', () => {
     const result = await openExampleDiagram(deps(ui));
     expect(ui.picks).toEqual([['staging', 'marts']]);
     // A project with no tables yet writes DBML (§3.2).
-    expect(result?.domainPath).toBe(erd('marts', 'coffee-shop.dbml'));
+    expect(result?.domainPath).toBe(erd('marts', 'diagrams', 'coffee-shop.dbml'));
+    expect(fs.existsSync(erd('marts', 'tables', 'marts', 'fct_orders.dbml'))).toBe(true);
   });
 
   it('exampleDbmlUi reads only the example, which has no erd_layout', async () => {

@@ -16,7 +16,9 @@
  * the "file" is a name that is never opened, and its DBML has no
  * `erd_layout`, so the canvas lays the diagram out when it opens. The diagram goes
  * in the `gold` layer when the project has it (the default layers do), else
- * the import asks for a layer as usual.
+ * the import asks for a layer as usual. Its tables are unqualified, so in a
+ * DBML project they take the layer's name as their schema
+ * (`gold/tables/gold/`).
  */
 
 import * as path from 'path';

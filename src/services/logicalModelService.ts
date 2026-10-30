@@ -34,7 +34,7 @@ import { sameName } from '../types/naming';
 import { keepLineEndings } from './lineEndings';
 import type { FileWrite } from './fileWrites';
 import { UnsavedFilesRefused } from './fileWrites';
-import { writeFilesWithRollback } from './fsFileWrites';
+import { writeFilesWithRollback, type FileWriteIo } from './fsFileWrites';
 import { planDbmlLibraryWrites, relationshipsIndexOf } from './dbmlLibraryWrites';
 import type { DbmlDraftTable, DbmlLibraryOps, DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable, DbmlTableHome } from './dbmlLibraryWrites';
 import { placeNewRef } from './dbmlRelationshipsIndex';
@@ -1477,9 +1477,16 @@ export class TableLibraryService {
     readText?: (filePath: string) => string | null;
     /** Diagrams the caller writes itself (absolute): left out of the settle. */
     exceptDiagrams?: readonly string[];
+    /**
+     * More files the caller writes in the same batch, from the plan (a new
+     * diagram and its README: `writeNewSubjectArea`), absolute: checked for
+     * unsaved edits with the rest.
+     */
+    extraWrites?: (plan: DbmlLibraryWritePlan) => FileWrite[];
   }): { writes: FileWrite[]; plan: DbmlLibraryWritePlan } {
     const plan = planDbmlLibraryWrites(this.dbmlSnapshot(input.readText), input.ops);
     const writes = plan.writes.map((w) => ({ ...w, path: this.semanticAbsolute(w.path) }) as FileWrite);
+    if (input.extraWrites) writes.push(...input.extraWrites(plan));
     // §2.6 step 0: an edit that changes no path and no Ref pair settles nothing (no listing, no reads).
     const settles = plan.pathChanged.size > 0 || plan.createdTables.length > 0 || plan.requalified.size > 0 || plan.changedPairs.size > 0;
     if (settles) {
@@ -1512,6 +1519,10 @@ export class TableLibraryService {
     ops: DbmlLibraryOps;
     dirtyFiles?: (paths: readonly string[]) => readonly string[];
     readText?: (filePath: string) => string | null;
+    exceptDiagrams?: readonly string[];
+    extraWrites?: (plan: DbmlLibraryWritePlan) => FileWrite[];
+    /** The file operations (a test makes one fail). */
+    io?: FileWriteIo;
   }): { plan: DbmlLibraryWritePlan; writes: FileWrite[]; before: Map<string, string | null> } {
     const { writes, plan } = this.planDbmlBatch(input);
     const before = new Map<string, string | null>();
@@ -1527,6 +1538,7 @@ export class TableLibraryService {
     try {
       writeFilesWithRollback(writes, {
         semanticRoot: this.semanticRoot,
+        ...(input.io ? { io: input.io } : {}),
         onWritten: (filePath, kind) => {
           if (kind === 'delete') this.ownWriteTracker.recordDelete(filePath);
           else this.ownWriteTracker.recordWrite(filePath);
