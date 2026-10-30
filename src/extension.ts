@@ -24,6 +24,7 @@ import { LibraryWarmUp } from './services/libraryWarmUp';
 import { projectStorageOf } from './services/projectStorage';
 import type { ProjectStorage } from '@erd-studio/core';
 import { ownWrites } from './services/ownWriteTracker';
+import { ownFileOperations } from './services/ownFileOperations';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import {
   DRAW_FROM_DBT_NEEDS_DBT_MESSAGE,
@@ -118,6 +119,7 @@ import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagra
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
 import { newDbmlSubjectAreaText, planDbmlDuplicateRename, planDbmlSubjectAreaRename, planDbmlTableMoves } from './commands/dbmlLifecycle';
 import { MOVE_DIAGRAM_COMMAND, MOVE_TABLE_COMMAND, moveDiagramCommand, moveTableCommand, type MoveDbmlDeps } from './commands/moveDbml';
+import { onDbmlFilesRenamed, type ExplorerMoveDeps } from './commands/explorerMoves';
 import { semanticReadmeCreate } from './services/semanticReadme';
 import { applyFileWrites } from './providers/applyFileWrites';
 import type { FileWrite } from './services/fileWrites';
@@ -1596,6 +1598,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   };
 
+  // A .dbml file (or a folder of them) moved or renamed in the Explorer: the
+  // files that point at it follow, by `erdStudio.dbml.updateReferencesOnMove`.
+  // ERD Studio's own edits are left alone (`ownFileOperations`).
+  const explorerMoveDeps: ExplorerMoveDeps = {
+    workspaceRoot,
+    semanticRoot: fullSemanticDirPath,
+    tableLibraryService,
+    layers: moveDbmlDeps.layers,
+    storage: () => projectStorageOf(tableLibraryService),
+    readText: openOrDiskText,
+    dirtyFiles,
+    takeOwnRename: (from, to) => ownFileOperations.takeOwnRename(from, to),
+    applyWrites: (writes, renames = []) => applyLifecycleWrites(writes, fullSemanticDirPath, renames),
+    afterUpdated: moveDbmlDeps.afterTablesMoved,
+  };
+  context.subscriptions.push(vscode.workspace.onDidRenameFiles((event) => onDbmlFilesRenamed(explorerMoveDeps, event.files).catch((err) => {
+    log.error('[ERD Studio] Following an Explorer move failed:', err);
+  })));
+
   // The editor wrote a domain (and possibly model files) itself. Those writes
   // are recorded as own writes so the watchers skip them (a watcher-driven
   // refresh would send a second, identical domainLoaded and clear the user's
@@ -2271,7 +2292,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         tableLibraryService.ensureDir(move.to);
         edit.renameFile(vscode.Uri.file(move.from), vscode.Uri.file(move.to), { overwrite: false });
       }
-      if (!(await vscode.workspace.applyEdit(edit))) {
+      const endOwn = ownFileOperations.begin(plan.moves);
+      let moved: boolean;
+      try {
+        moved = await vscode.workspace.applyEdit(edit);
+      } finally {
+        endOwn();
+      }
+      if (!moved) {
         // Leave no empty layer folders behind for a move that did not happen.
         for (const folder of newFolders) {
           try { fs.rmdirSync(folder); } catch { /* not empty, or already gone */ }

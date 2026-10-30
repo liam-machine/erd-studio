@@ -17,6 +17,7 @@ import {
 } from '@erd-studio/core';
 import type { ColumnPair, DbtKeyIndex, KeyedTable } from '@erd-studio/core';
 import type { TableRelationship, Relationship, SemanticTable } from '../types/semantic';
+import { sameName } from '../types/naming';
 
 type RelationshipEnds = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
 
@@ -344,6 +345,52 @@ export function renameTableInSubjectAreaRelationships(
     }
     if (same(rel.toModel, oldName)) {
       rel.toModel = newName;
+      touched = true;
+    }
+  }
+  return touched;
+}
+
+/**
+ * Follow a model rename in another v5 domain file, in place (#133 L5): its
+ * `logical.models` entry, its stored position and its own relationship
+ * copies, matched without case. A DBML diagram (`storage: 'dbml'`) also has
+ * each sticky note linked to the table re-pointed (its `linked_table`,
+ * §2.8). Returns whether anything changed.
+ */
+export function renameTableInSubjectArea(parsed: Record<string, unknown>, oldName: string, newName: string, storage: 'json' | 'dbml' = 'json'): boolean {
+  let touched = storage === 'dbml' && relinkSticky(parsed, oldName, newName);
+  const logical = parsed.logical as Record<string, unknown> | undefined;
+  if (logical && Array.isArray(logical.models)) {
+    logical.models = (logical.models as unknown[]).map((m) => {
+      if (typeof m !== 'string' || !sameName(m, oldName)) return m;
+      touched = true;
+      return newName;
+    });
+  }
+  const positions = ((parsed.viewConfig ?? {}) as Record<string, unknown>).positions as Record<string, unknown> | undefined;
+  if (positions && typeof positions === 'object') {
+    const key = Object.keys(positions).find((k) => sameName(k, oldName));
+    if (key !== undefined && !(newName in positions)) {
+      positions[newName] = positions[key];
+      delete positions[key];
+      touched = true;
+    }
+  }
+  const relationships = logical && Array.isArray(logical.relationships) ? logical.relationships as Array<Record<string, unknown>> : [];
+  return renameTableInSubjectAreaRelationships(relationships, oldName, newName) || touched;
+}
+
+/** Re-point every sticky note linked to `oldName` (`sameName`) at `newName`; true when any changed. DBML diagrams only. */
+export function relinkSticky(parsed: Record<string, unknown>, oldName: string, newName: string): boolean {
+  const annotations = ((parsed.viewConfig ?? {}) as Record<string, unknown>).annotations;
+  if (!Array.isArray(annotations)) return false;
+  let touched = false;
+  for (const annotation of annotations) {
+    if (!annotation || typeof annotation !== 'object') continue;
+    const ann = annotation as Record<string, unknown>;
+    if (typeof ann.linkedModel === 'string' && sameName(ann.linkedModel, oldName)) {
+      ann.linkedModel = newName;
       touched = true;
     }
   }

@@ -14,11 +14,11 @@
 
 import * as path from 'path';
 
-import { classifySemanticFile, dbmlName, dbmlTreePathOf, diagramFilePath } from '@erd-studio/core';
+import { DIAGRAMS_DIR, RELATIONSHIPS_DIR, TABLES_DIR, classifySemanticFile, dbmlName, dbmlTreePathOf, diagramFilePath, isDbmlLayerName } from '@erd-studio/core';
 import type { DbmlRelationshipsReading } from '@erd-studio/core';
-import { DbmlEditRefused, diagramSummaryDbml, parseSubjectAreaDbml, parseTableDbml, readRelationshipsDbml, usePathBetween } from '@erd-studio/core/dbml';
+import { DbmlEditRefused, diagramSummaryDbml, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, readRelationshipsDbml, usePathBetween } from '@erd-studio/core/dbml';
 import type { DbmlResolvedTable } from '@erd-studio/core/dbml';
-import { sameName } from '../types/naming';
+import { TABLE_NAME_PATTERN, sameName } from '../types/naming';
 import { editRelationshipsDbml, editSubjectAreaDbml, editTableDbml, renderNewSubjectAreaDbml } from '../services/dbmlWriters';
 import { useDeclarationLines } from '../services/dbmlImportParse';
 
@@ -26,6 +26,8 @@ import type { FileWrite } from '../services/fileWrites';
 import { dbmlResolverOf, settleDbmlDiagramWrites, type SubjectAreaResolver } from '../services/dbmlDiagramSettle';
 import { buildRelationshipsIndex, refEntriesOf, relationshipsImportsFor } from '../services/dbmlRelationshipsIndex';
 import type { TableLibraryService } from '../services/logicalModelService';
+import { isSchemaFolderName, ownedRelationshipsOf } from '../services/dbmlLibraryWrites';
+import { renameTableInRelationships, renameTableInSubjectArea } from '../services/libraryRelationships';
 import type { SemanticTable } from '../types/semantic';
 
 /** A path relative to `root`, posix. */
@@ -168,25 +170,61 @@ export function planDbmlSubjectAreaRename(input: {
 }
 
 /**
- * A diagram's move to another layer (§2.8; Move Diagram to Layer): create
- * `newRel` with every `use` line's path re-derived from it to the file the
- * line imports now (`usePathBetween`), its specifier kept, and delete
- * `oldRel`. The Project name is unchanged. Pure: both paths are posix and
- * relative to the semantic dir, and so are the writes' paths.
+ * `text` (a diagram or relationships file that was at `oldRel` and is at
+ * `newRel`) with every `use` line's path re-derived from `newRel` to the
+ * file the line imports (`usePathBetween`), its specifier kept: the file it
+ * resolved to from `oldRel`, or where `moved` (old path, lower-case → new
+ * path) says that file went. A line whose path cannot be found refuses when
+ * the file itself moved, and is left as it is otherwise. With `exists`
+ * (whether a semantic-relative path holds a file), a line whose file is not
+ * found from `oldRel` but is from `newRel` is already right (an undone move,
+ * a file put back) and is left as it is. Paths are posix and relative to the
+ * semantic dir.
  */
-export function planDbmlDiagramMove(input: { oldRel: string; newRel: string; text: string }): FileWrite[] {
+export function repointUseLines(input: {
+  oldRel: string;
+  newRel: string;
+  text: string;
+  moved?: ReadonlyMap<string, string>;
+  exists?: (rel: string) => boolean;
+}): string {
+  let text = input.text;
+  for (const { path: span } of useLineSpans(input.text).reverse()) {
+    if (!span) {
+      if (input.oldRel === input.newRel) continue;
+      throw new DbmlEditRefused(input.oldRel, `${input.oldRel} has a use declaration whose path cannot be found, so it cannot be moved; fix it first.`);
+    }
+    const resolved = resolveUse(input.oldRel, span.path);
+    const target = input.moved?.get(resolved.toLowerCase()) ?? resolved;
+    if (input.exists && !input.exists(target) && input.exists(resolveUse(input.newRel, span.path))) continue;
+    const repointed = usePathBetween(input.newRel, target);
+    if (repointed === span.path) continue;
+    text = text.slice(0, span.start) + repointed + text.slice(span.end);
+  }
+  return text;
+}
+
+/**
+ * A diagram's move to another layer (§2.8; Move Diagram to Layer, and a
+ * diagram moved in the Explorer): create `newRel` with every `use` line
+ * re-derived from it ({@link repointUseLines}, `moved` naming files that
+ * moved with it, `exists` leaving lines already right), and delete `oldRel`. The Project name is unchanged. Pure:
+ * both paths are posix and relative to the semantic dir, and so are the
+ * writes' paths.
+ */
+export function planDbmlDiagramMove(input: {
+  oldRel: string;
+  newRel: string;
+  text: string;
+  moved?: ReadonlyMap<string, string>;
+  exists?: (rel: string) => boolean;
+}): FileWrite[] {
   // Refuses a file that is not a diagram, or does not parse, before anything is planned.
   if (diagramSummaryDbml(input.text, input.oldRel) === null) {
     throw new DbmlEditRefused(input.oldRel, `${input.oldRel} does not read as a DBML diagram, so its use lines cannot be moved; fix it first.`);
   }
-  let text = input.text;
-  for (const { path: span } of useLineSpans(input.text).reverse()) {
-    // A diagram that reads gives every use declaration a path.
-    if (!span) throw new DbmlEditRefused(input.oldRel, `${input.oldRel} has a use declaration whose path cannot be found, so it cannot be moved; fix it first.`);
-    const moved = usePathBetween(input.newRel, resolveUse(input.oldRel, span.path));
-    if (moved === span.path) continue;
-    text = text.slice(0, span.start) + moved + text.slice(span.end);
-  }
+  // A diagram that reads gives every use declaration a path.
+  const text = repointUseLines(input);
   return [
     { kind: 'create', path: input.newRel, text },
     { kind: 'delete', path: input.oldRel },
@@ -482,4 +520,360 @@ function repointMember(obj: Record<string, unknown>, from: string, to: string): 
     }
   }
   return changed;
+}
+
+
+// ---------------------------------------------------------------------------
+// Moves and renames made in the Explorer
+// ---------------------------------------------------------------------------
+
+/** One `.dbml` file moved or renamed outside ERD Studio (the Explorer): it is already at `to`. Absolute paths. */
+export interface MovedDbmlFile {
+  from: string;
+  to: string;
+}
+
+/** What a DBML file is in the layer-first tree. */
+export type DbmlFileKind = 'table' | 'relationships' | 'diagram';
+
+/**
+ * What following the Explorer's moves takes ({@link planDbmlExplorerMoves}):
+ *
+ * - `none`: nothing points at the moved files and nothing in them changes
+ *   (an undone move, or a file put back where the files that point at it
+ *   say it is, included).
+ * - `badName`: a file landed where ERD Studio would read it but for one
+ *   name: its layer folder's (`what: 'layer'`), its schema folder's
+ *   (`'schema'`; Move Table's rule, `isSchemaFolderName`) or its extension
+ *   (`'extension'`: `.dbml` in lower case). `name` is that name, `folder`
+ *   the folder (semantic-relative, posix); nothing is planned.
+ * - `misplaced`: a file landed where ERD Studio does not read a file of its
+ *   kind (`expected` is where it does; `more`, the other moved files that
+ *   did too; `count`, how many DBML files moved in all); nothing is planned,
+ *   for any of them.
+ * - `badRename`: a table file renamed to a name the table cannot take
+ *   (`invalid`, not a table name; `taken`, another table's, any case;
+ *   `caseOnly`, the same name in other case; `renameAndMove`, renamed and
+ *   moved in one step); nothing is planned.
+ * - `update`: the replaces that make every reference follow (absolute
+ *   paths), the table renames among them, and how many other files change.
+ */
+export type DbmlExplorerMovesPlan =
+  | { kind: 'none' }
+  | { kind: 'badName'; move: MovedDbmlFile; what: 'layer' | 'schema' | 'extension'; name: string; folder: string }
+  | { kind: 'misplaced'; move: MovedDbmlFile; fileKind: DbmlFileKind; expected: string; more: MovedDbmlFile[]; count: number }
+  | { kind: 'badRename'; move: MovedDbmlFile; from: string; to: string; reason: 'invalid' | 'taken' | 'caseOnly' | 'renameAndMove'; taken?: string }
+  | { kind: 'update'; writes: FileWrite[]; moved: MovedDbmlFile[]; tableRenames: Array<{ from: string; to: string }>; others: string[] };
+
+/** A diagram's name: the rule New Diagram and Rename Subject Area hold a name to. */
+function isDiagramSlug(name: string): boolean {
+  return /^[a-z][a-z0-9_-]*$/.test(name) && name.length <= 64;
+}
+
+/** Where ERD Studio reads a file of `kind`, for a message. */
+export function dbmlHomeOf(kind: DbmlFileKind): string {
+  return kind === 'table' ? '<layer>/tables/<schema>/' : kind === 'relationships' ? '<layer>/relationships/' : '<layer>/diagrams/';
+}
+
+/**
+ * What a `.dbml` file's text says it is: a table file declares one Table
+ * (`table`, its declared name), a diagram has a Project, a relationships
+ * file Refs (a diagram's pending Ref lines sit beside its Project). Else, or
+ * when the text does not parse, `pathKind`.
+ */
+function dbmlKindOfText(text: string | null, pathKind: DbmlFileKind | undefined): { kind?: DbmlFileKind; table?: string } {
+  if (text === null) return { kind: pathKind };
+  const outline = outlineDbmlFile(text, 'file.dbml');
+  if (!outline.parses) return { kind: pathKind };
+  const tables = outline.tables ?? [];
+  if (tables.length === 1) return { kind: 'table', table: tables[0] };
+  if (/^[ \t﻿]*Project\b/m.test(text)) return { kind: 'diagram' };
+  if (/^[ \t﻿]*Ref\b/m.test(text)) return { kind: 'relationships' };
+  return { kind: pathKind };
+}
+
+/**
+ * The one name that keeps ERD Studio from reading a `.dbml` file at `rel`
+ * (posix, semantic-relative) shaped as a tree path: a layer folder that is
+ * not a layer name, a schema folder Move Table refuses, or an extension not
+ * spelled `.dbml`. Undefined when there is none, or `rel` has no tree shape.
+ */
+function badNameAt(rel: string): { what: 'layer' | 'schema' | 'extension'; name: string; folder: string } | undefined {
+  const segments = rel.split('/');
+  const file = segments[segments.length - 1];
+  const shaped = (segments.length === 3 && (segments[1] === DIAGRAMS_DIR || segments[1] === RELATIONSHIPS_DIR))
+    || (segments.length === 4 && segments[1] === TABLES_DIR);
+  if (!shaped || !/\.dbml$/i.test(file)) return undefined;
+  if (!isDbmlLayerName(segments[0])) return { what: 'layer', name: segments[0], folder: segments[0] };
+  if (segments.length === 4 && !isSchemaFolderName(segments[2])) return { what: 'schema', name: segments[2], folder: segments.slice(0, 3).join('/') };
+  if (!file.endsWith('.dbml')) return { what: 'extension', name: file, folder: segments.slice(0, -1).join('/') };
+  return undefined;
+}
+
+/** A moved file as the planner sees it. */
+interface ConsideredMove {
+  /** The user's move. */
+  user: MovedDbmlFile;
+  /** The move to follow: from where the files that point at it say it is (absolute), to where it is. */
+  move: MovedDbmlFile;
+  kind: DbmlFileKind;
+  /** Its place before: `move.from` in the tree, as a file of `kind`. */
+  old: { kind: DbmlFileKind; layer: string; schema?: string; name: string };
+  /** Its place now in the tree, if it has one. */
+  now: ReturnType<typeof dbmlTreePathOf>;
+  toRel: string | undefined;
+  text: string | null;
+}
+
+/**
+ * The writes that make every reference follow `.dbml` files the user moved
+ * or renamed in the Explorer (§2.8; spec M2). The files are already at their
+ * new paths; each is planned as if it were moving from its old one, through
+ * the planners the commands use, given a read view in which the moved files
+ * are still where they were (`TableLibraryService.planDbmlLibraryOps`'s
+ * `moved`), and every planned create (new place) / delete (old place) of a
+ * moved file becomes an in-place edit of the file at its new path:
+ *
+ * - a table file to another `<layer>/tables/<schema>/` folder: Move Table's
+ *   plan (`planDbmlLibraryOps({ move })` + the settle): its declaration
+ *   re-qualified to the folder's spelling, every `use` line and Ref end
+ *   following;
+ * - a table file renamed: the table is renamed (its name is its file's
+ *   stem), as the canvas renames one: `planDbmlLibraryOps({ save: [{ model,
+ *   fromName }] })` with the relationships it owns, and the settle with each
+ *   diagram's member, position and sticky notes following
+ *   (`renameTableInSubjectArea`);
+ * - a relationships file or diagram: its own `use` lines re-derived from its
+ *   new place (`planDbmlDiagramMove` / {@link repointUseLines}), and every
+ *   other file's `use` line that named its old path; a renamed diagram's
+ *   Project name follows when the new name is a diagram name.
+ *
+ * A file is what its text says (a Table, a Project, Refs), not what its old
+ * path was, and its old place is where the files that point at it say it
+ * is: after a move or rename ERD Studio did not follow (a file dropped in
+ * the wrong folder, a refused rename), moving or renaming it again by hand
+ * follows from there, and putting it back plans nothing. So does an undone
+ * move: a table already declared as its folder says, with nothing pointing
+ * at its old path, and `use` lines already right from the new place, are
+ * left as they are.
+ *
+ * A file that does not read refuses (`DbmlEditRefused`, naming it) before
+ * anything is planned. No `vscode`: tests drive it directly.
+ */
+export function planDbmlExplorerMoves(input: {
+  semanticRoot: string;
+  tableLibraryService: Pick<TableLibraryService, 'planDbmlLibraryOps' | 'dbmlSnapshot' | 'getTablesDir' | 'listDbmlDiagrams' | 'listRelationshipsFiles' | 'listTableFiles'>;
+  moves: readonly MovedDbmlFile[];
+  /** A file's text (an open document's, else the disk's), byte-order mark stripped; null when there is none. */
+  readText(filePath: string): string | null;
+}): DbmlExplorerMovesPlan {
+  const { semanticRoot, tableLibraryService: library } = input;
+  const rel = (p: string): string => relPosix(semanticRoot, p);
+  const abs = (r: string): string => path.resolve(semanticRoot, ...r.split('/'));
+  const inside = (p: string): boolean => {
+    const r = path.relative(semanticRoot, p);
+    return r !== '' && !r.startsWith('..') && !path.isAbsolute(r);
+  };
+  const known = new Map<string, boolean>();
+  const exists = (r: string): boolean => {
+    if (!known.has(r)) known.set(r, input.readText(abs(r)) !== null);
+    return known.get(r)!;
+  };
+
+  // Where every use line of every diagram and relationships file points. A moved file's line is
+  // read from where it was, unless only its new place finds the file (it was already right there).
+  const movedFrom = new Map(input.moves.map((m) => [path.resolve(m.to), rel(m.from)]));
+  let targets: string[] | undefined;
+  const useTargets = (): string[] => {
+    targets ??= [...new Set([...library.listDbmlDiagrams(), ...library.listRelationshipsFiles()].map((p) => path.resolve(p)))].flatMap((filePath) => {
+      const text = input.readText(filePath);
+      if (text === null) return [];
+      const was = movedFrom.get(filePath);
+      return useLineSpans(text).flatMap(({ path: span }) => {
+        if (!span) return [];
+        const target = resolveUse(was ?? rel(filePath), span.path);
+        if (was === undefined || exists(target)) return [target];
+        const here = resolveUse(rel(filePath), span.path);
+        return [exists(here) ? here : target];
+      });
+    });
+    return targets;
+  };
+  /** The paths, holding no file, that use lines name for a `kind` file called `name` (any case); never `toRel`. */
+  const stale = (kind: DbmlFileKind, name: string, toRel: string | undefined): string[] => {
+    const found = new Map<string, string>();
+    for (const t of useTargets()) {
+      const tree = dbmlTreePathOf(t);
+      if (tree?.kind !== kind || !sameName(tree.name, name) || t === toRel || exists(t)) continue;
+      found.set(t.toLowerCase(), t);
+    }
+    return [...found.values()];
+  };
+
+  // Only a DBML file of the tree can have files pointing at it.
+  const considered = input.moves.flatMap((m): ConsideredMove[] => {
+    if (!inside(m.from) || !/\.dbml$/i.test(m.from)) return [];
+    const fromRel = rel(m.from);
+    const toRel = inside(m.to) ? rel(m.to) : undefined;
+    const fromTree = dbmlTreePathOf(fromRel);
+    const now = toRel !== undefined ? dbmlTreePathOf(toRel) : undefined;
+    const text = input.readText(m.to);
+    const { kind, table } = dbmlKindOfText(text, fromTree?.kind ?? now?.kind);
+    if (!kind) return [];
+    // Where the files that point at it say it is: where it was, unless that was not its place.
+    let originRel = fromRel;
+    if (kind === 'table' && table !== undefined && !(fromTree?.kind === 'table' && sameName(fromTree.name, table))) {
+      const found = stale('table', table, toRel);
+      if (found.length === 1) originRel = found[0];
+      else if (found.length === 0 && now?.kind === 'table') originRel = `${path.posix.dirname(toRel!)}/${table}.dbml`;
+    } else if (kind === 'relationships' && fromTree?.kind !== 'relationships') {
+      const found = stale('relationships', path.posix.basename(fromRel).replace(/\.dbml$/i, ''), toRel);
+      if (found.length === 1) originRel = found[0];
+    }
+    const origin = dbmlTreePathOf(originRel);
+    // Not a file ERD Studio read where it was: nothing points at it. (A diagram or relationships
+    // file read from the other's folder resolves its use lines alike: same depth.)
+    if (!origin || (origin.kind !== kind && (kind === 'table' || origin.kind === 'table'))) return [];
+    return [{ user: m, move: { from: abs(originRel), to: m.to }, kind, old: { ...origin, kind }, now, toRel, text }];
+  });
+  if (considered.length === 0) return { kind: 'none' };
+  for (const c of considered) {
+    const bad = c.toRel !== undefined ? badNameAt(c.toRel) : undefined;
+    if (bad) return { kind: 'badName', move: c.user, ...bad };
+  }
+  const misplaced = considered.filter((c) => c.now?.kind !== c.kind);
+  if (misplaced.length > 0) {
+    const [first, ...rest] = misplaced;
+    return { kind: 'misplaced', move: first.user, fileKind: first.kind, expected: dbmlHomeOf(first.kind), more: rest.map((c) => c.user), count: considered.length };
+  }
+
+  // Already where the files that point at it say it is (a move undone, a file put back): nothing to follow.
+  const isHome = (c: ConsideredMove): boolean => {
+    const originRel = rel(c.move.from);
+    if (originRel === c.toRel) return true;
+    // A diagram's or relationships file's own lines, and the lines naming it, are checked line by line below.
+    if (c.kind !== 'table' || !c.now || c.text === null) return false;
+    if (useTargets().some((t) => t !== c.toRel && t.toLowerCase() === originRel.toLowerCase())) return false;
+    const reading = parseTableDbml(c.text, c.now.name, { schemaFolder: c.now.schema });
+    return reading.ok && reading.declaredName === c.now.name && !reading.problems.some((p) => p.code === 'schemaFolderMismatch');
+  };
+  const active = considered.filter((c) => !isHome(c));
+  if (active.length === 0) return { kind: 'none' };
+
+  // Tables: a move to another schema folder, or a rename (the stem is the table's name).
+  const tableMoves: Array<{ name: string; toLayer: string; toSchema: string }> = [];
+  const tableRenames: Array<{ move: MovedDbmlFile; from: string; to: string; schema: string }> = [];
+  for (const { user, move, old, now } of active) {
+    if (old.kind !== 'table' || !now) continue;
+    const sameFolder = old.layer === now.layer && old.schema === now.schema;
+    if (old.name === now.name) {
+      if (!sameFolder) tableMoves.push({ name: old.name, toLayer: now.layer, toSchema: now.schema! });
+      continue;
+    }
+    const bad = (reason: 'invalid' | 'taken' | 'caseOnly' | 'renameAndMove', taken?: string): DbmlExplorerMovesPlan =>
+      ({ kind: 'badRename', move: user, from: old.name, to: now.name, reason, ...(taken !== undefined ? { taken } : {}) });
+    if (sameName(old.name, now.name)) return bad('caseOnly');
+    if (!sameFolder) return bad('renameAndMove');
+    if (!TABLE_NAME_PATTERN.test(now.name)) return bad('invalid');
+    const taken = library.listTableFiles().find((e) => sameName(e.name, now.name) && path.resolve(e.filePath) !== path.resolve(move.to));
+    if (taken) return bad('taken', taken.name);
+    tableRenames.push({ move, from: old.name, to: now.name, schema: old.schema! });
+  }
+
+  // The read view: every moved file still at its old path (diagrams included, for the settle).
+  const nowAt = new Map(active.map(({ move }) => [path.resolve(move.from), move.to]));
+  const wasAt = new Map(active.map(({ move }) => [path.resolve(move.to), move.from]));
+  const readBefore = (filePath: string): string | null => {
+    const r = path.resolve(filePath);
+    return nowAt.has(r) ? input.readText(nowAt.get(r)!) : wasAt.has(r) ? null : input.readText(filePath);
+  };
+  const libraryMoves = active.filter(({ old }) => old.kind !== 'diagram').map(({ move }) => move);
+
+  let planned: FileWrite[] = [];
+  if (tableMoves.length > 0 || tableRenames.length > 0) {
+    // A renamed table keeps every relationship it owns (a save's list is its complete list).
+    const snapshot = tableRenames.length > 0 ? library.dbmlSnapshot(input.readText, libraryMoves) : undefined;
+    const saves = tableRenames.map((r) => {
+      const text = readBefore(r.move.from);
+      const reading = text === null ? null : parseTableDbml(text, r.from, { schemaFolder: r.schema });
+      if (!reading?.ok) {
+        throw new DbmlEditRefused(rel(r.move.to), `${rel(r.move.to)} does not read as the table ${r.from}${reading && !reading.ok ? ` (${reading.error.message})` : ''}; fix it first, then rename it.`);
+      }
+      const model: SemanticTable = { ...structuredClone(reading.table), name: r.to, relationships: ownedRelationshipsOf(snapshot!, r.from) };
+      // Its own self-references follow, as on the canvas.
+      renameTableInRelationships([model], r.from, r.to);
+      return { model, fromName: r.from };
+    });
+    const { writes, plan } = library.planDbmlLibraryOps(
+      { move: tableMoves, save: saves, delete: tableRenames.map((r) => r.from) },
+      input.readText,
+      libraryMoves,
+    );
+    const diagrams = library.listDbmlDiagrams().map((d) => wasAt.get(path.resolve(d)) ?? d);
+    const settled = settleDbmlDiagramWrites({
+      semanticRoot,
+      diagrams,
+      plan,
+      readText: readBefore,
+      // A moved diagram's summary is read from its text (its old path holds no file).
+      openText: (filePath) => (nowAt.has(path.resolve(filePath)) ? readBefore(filePath) ?? undefined : undefined),
+      ...(tableRenames.length > 0
+        ? { mutate: (_filePath: string, obj: Record<string, unknown>) => tableRenames.reduce((changed, r) => renameTableInSubjectArea(obj, r.from, r.to, 'dbml') || changed, false) }
+        : {}),
+    });
+    planned = [...writes, ...settled];
+  }
+
+  // Each planned write onto the file where it is now: a moved file's create (its new place) and its
+  // edits at its old path are its new text; the delete of its old path is the move already made.
+  const texts = new Map<string, string>();
+  const extra: FileWrite[] = [];
+  for (const w of planned) {
+    const r = path.resolve(w.path);
+    if (w.kind === 'delete') {
+      if (!nowAt.has(r)) extra.push(w);
+      continue;
+    }
+    const landed = active.find(({ move }) => rel(move.to).toLowerCase() === rel(w.path).toLowerCase());
+    if (w.kind === 'create' && landed) texts.set(path.resolve(landed.move.to), w.text);
+    else if (w.kind === 'create') extra.push(w);
+    else texts.set(path.resolve(nowAt.get(r) ?? w.path), w.text);
+  }
+
+  // Every use line naming a moved file follows it; a moved diagram or relationships file re-derives its own.
+  const movedRel = new Map(active.map(({ move }) => [rel(move.from).toLowerCase(), rel(move.to)]));
+  const candidates = new Set([...texts.keys(), ...library.listDbmlDiagrams(), ...library.listRelationshipsFiles()].map((p) => path.resolve(p)));
+  const writes: FileWrite[] = [];
+  for (const filePath of [...candidates].sort()) {
+    const current = input.readText(filePath);
+    let text = texts.get(filePath) ?? current;
+    if (text === null) continue;
+    const own = active.find(({ move }) => path.resolve(move.to) === filePath);
+    if (own?.old.kind !== 'table') {
+      const oldRel = own ? rel(own.move.from) : rel(filePath);
+      const newRel = rel(filePath);
+      if (own?.old.kind === 'diagram') {
+        text = (planDbmlDiagramMove({ oldRel, newRel, text, moved: movedRel, exists })[0] as { text: string }).text;
+        // A renamed diagram's Project name follows, when the new name is one.
+        if (own.now && own.old.name !== own.now.name && isDiagramSlug(own.now.name)) {
+          try {
+            text = (planDbmlSubjectAreaRename({ semanticRoot, oldPath: filePath, newPath: filePath, newSlug: own.now.name, text })[0] as { text: string }).text;
+          } catch { /* a Project the writer cannot splice keeps its name */ }
+        }
+      } else if (own || useLineSpans(text).some((l) => l.path && movedRel.has(resolveUse(oldRel, l.path.path).toLowerCase()))) {
+        text = repointUseLines({ oldRel, newRel, text, moved: movedRel, exists });
+      }
+    }
+    if (text !== current) writes.push({ kind: 'replace', path: filePath, text });
+  }
+  writes.push(...extra);
+  if (writes.length === 0) return { kind: 'none' };
+  const movedTo = new Set(active.map(({ move }) => path.resolve(move.to)));
+  return {
+    kind: 'update',
+    writes,
+    moved: active.map(({ user }) => user),
+    tableRenames: tableRenames.map((r) => ({ from: r.from, to: r.to })),
+    others: writes.filter((w) => !movedTo.has(path.resolve(w.path))).map((w) => w.path),
+  };
 }

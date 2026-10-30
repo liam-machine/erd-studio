@@ -906,6 +906,21 @@
           "default": true,
           "markdownDescription": "When you open a diagram in a YAML/JSON project, offer once a session to convert it to DBML. Your project keeps working as it is either way; turn this off to stop the offer in every workspace. **ERD Studio: Convert Project to DBML** still works from the Command Palette."
         },
+        "erdStudio.dbml.updateReferencesOnMove": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Ask each time, with Update, Always and Never.",
+            "Update the files that point at it without asking.",
+            "Leave every file as it is, and ask nothing. A file moved where ERD Studio does not read it is still pointed out."
+          ],
+          "default": "prompt",
+          "markdownDescription": "When you move or rename a `.dbml` file (or a folder of them) in the Explorer in a DBML project, update the diagrams and relationships files that point at it: their `use` lines, and the table's schema (`Table crm.fct_order`) when it lands in another schema folder. Renaming a table file renames the table everywhere, since its file name is its name. Each update is one step for **Edit > Undo**. **Move Table…** and **Move Diagram to Layer…** always update them, whatever this says."
+        },
         "dbtSemantic.projectPath": {
           "type": "string",
           "markdownDeprecationMessage": "Deprecated: use `#erdStudio.projectPath#` instead. Legacy values are still honoured.",

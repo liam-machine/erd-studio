@@ -56,7 +56,7 @@ export interface MoveDbmlDeps {
   /** Apply the writes as one WorkspaceEdit, save and record own writes. */
   applyWrites(writes: readonly FileWrite[]): Promise<{ ok: boolean; unsaved: string[]; unrestored: string[] }>;
   /** After a table move landed: the views and open canvases refresh. */
-  afterTablesMoved(writes: readonly FileWrite[]): Promise<void>;
+  afterTablesMoved(writes: ReadonlyArray<{ path: string }>): Promise<void>;
   /** After a diagram move landed (before it is reopened): the views refresh. */
   afterDiagramMoved(oldPath: string, newPath: string): Promise<void>;
 }

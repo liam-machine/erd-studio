@@ -18,7 +18,7 @@ import type { Alias, Node, Scalar, ScalarTag, Tags } from 'yaml';
 
 import {
   DIAGRAMS_DIR, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, RELATIONSHIPS_DIR, TABLES_DIR, TableDbmlError, classifySemanticFile, classifyTableLoadError,
-  dbmlName, dbmlTablePath, isDbmlLayerName, isLibraryFolderName, linkKey, tableLoadWarningOf, parseTableText, writesDbml, writesTableNaming,
+  dbmlName, dbmlTablePath, dbmlTreePathOf, isDbmlLayerName, isLibraryFolderName, linkKey, tableLoadWarningOf, parseTableText, writesDbml, writesTableNaming,
 } from '@erd-studio/core';
 import { attachRelationships, dbmlTableLookup, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
 import { projectNamingOf } from './projectNaming';
@@ -1269,19 +1269,40 @@ export class TableLibraryService {
    * relationships file's reading; every table and relationships file path.
    * `readText` reads a file by absolute path (the editor passes one that
    * prefers an open document); by default the disk, byte-order mark stripped.
+   *
+   * `moved` (an Explorer move, §2.8): files already at `to` on disk that the
+   * snapshot reads as if they were still at `from` (absolute paths), so the
+   * planner plans the move from the old place; `to` itself is not listed.
    */
-  dbmlSnapshot(readText?: (filePath: string) => string | null): DbmlLibrarySnapshot {
+  dbmlSnapshot(readText?: (filePath: string) => string | null, moved: ReadonlyArray<{ from: string; to: string }> = []): DbmlLibrarySnapshot {
     const tables = new Map<string, DbmlSnapshotTable>();
     const files = new Set<string>();
+    const read = readText ?? ((filePath: string): string | null => {
+      try {
+        return fs.readFileSync(filePath, 'utf-8');
+      } catch {
+        return null;
+      }
+    });
+    const wasAt = new Map(moved.map((m) => [path.resolve(m.to), path.resolve(m.from)]));
+    const nowAt = new Map(moved.map((m) => [path.resolve(m.from), path.resolve(m.to)]));
     for (const entry of this.listTableFiles()) {
-      files.add(this.semanticRelative(entry.filePath));
+      const was = wasAt.get(path.resolve(entry.filePath));
+      files.add(this.semanticRelative(was ?? entry.filePath));
       if (entry.shadowedBy) continue;
+      // A moved table file is read from its new place, as its old file name and folder.
+      const tree = was !== undefined ? dbmlTreePathOf(this.semanticRelative(was)) : undefined;
+      const folder = tree?.kind === 'table' && tree.schema !== undefined ? tree.schema : entry.folder;
+      const layer = tree?.kind === 'table' ? tree.layer : entry.layer;
       let model: SemanticTable | null = null;
       let reference: string | undefined;
       let alias: string | undefined;
       try {
         if (entry.storage === 'dbml') {
-          const reading = this.readDbmlTableFile(entry.filePath);
+          const movedText = was !== undefined ? read(entry.filePath) : null;
+          const reading = was === undefined
+            ? this.readDbmlTableFile(entry.filePath)
+            : movedText === null ? null : parseTableDbml(movedText.replace(/^\uFEFF/, ''), dbmlStem(path.basename(was)));
           if (reading?.ok) {
             model = reading.table;
             reference = reading.declaredReference;
@@ -1293,18 +1314,18 @@ export class TableLibraryService {
       } catch {
         model = null;
       }
-      const name = model?.name ?? entry.name;
+      const name = model?.name ?? tree?.name ?? entry.name;
       const columns = (model?.columns ?? []).map((c) => c.name);
       // A DBML table its file does not declare (it does not read) is spelled as its writer would: `<schema>.<name>`.
-      const dbmlTree = entry.storage === 'dbml' && entry.layer !== undefined;
-      const fallbackReference = dbmlTree ? `${dbmlName(entry.folder)}.${dbmlName(name)}` : dbmlName(name);
+      const dbmlTree = entry.storage === 'dbml' && layer !== undefined;
+      const fallbackReference = dbmlTree ? `${dbmlName(folder)}.${dbmlName(name)}` : dbmlName(name);
       tables.set(name.toLowerCase(), {
         name,
         reference: reference ?? fallbackReference,
-        path: this.semanticRelative(entry.filePath),
+        path: this.semanticRelative(was ?? entry.filePath),
         storage: entry.storage,
-        folder: entry.folder,
-        ...(dbmlTree ? { layer: entry.layer, schema: entry.folder } : {}),
+        folder,
+        ...(dbmlTree ? { layer, schema: folder } : {}),
         columns,
         primaryKey: (model?.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name),
         ...(alias !== undefined ? { dbmlAlias: alias } : {}),
@@ -1314,24 +1335,18 @@ export class TableLibraryService {
     for (const filePath of this.listRelationshipsFiles()) {
       const reading = this.readRelationshipsFile(filePath);
       if (reading === null) continue;
-      const rel = this.semanticRelative(filePath);
+      const rel = this.semanticRelative(wasAt.get(path.resolve(filePath)) ?? filePath);
       relationshipsFiles.set(rel, reading);
       files.add(rel);
     }
-    const read = readText ?? ((filePath: string): string | null => {
-      try {
-        return fs.readFileSync(filePath, 'utf-8');
-      } catch {
-        return null;
-      }
-    });
     return {
       semanticDir: this.semanticRoot,
       tables,
       relationshipsFiles,
       files,
       readText: (rel) => {
-        const text = read(this.semanticAbsolute(rel));
+        const filePath = path.resolve(this.semanticAbsolute(rel));
+        const text = nowAt.has(filePath) ? read(nowAt.get(filePath)!) : wasAt.has(filePath) ? null : read(filePath);
         return text === null ? null : text.replace(/^\uFEFF/, '');
       },
       schemaAsListed: (layer, schema) => this.schemaAsListed(layer, schema),
@@ -1420,10 +1435,15 @@ export class TableLibraryService {
 
   /**
    * `planDbmlLibraryWrites` over this library for any ops (moves included),
-   * with absolute paths: Organise Table Library's moves (§5.7).
+   * with absolute paths: Organise Table Library's moves (§5.7). `moved`: as
+   * {@link dbmlSnapshot}'s (an Explorer move, planned from the old places).
    */
-  planDbmlLibraryOps(ops: DbmlLibraryOps, readText?: (filePath: string) => string | null): { writes: FileWrite[]; plan: DbmlLibraryWritePlan } {
-    const plan = planDbmlLibraryWrites(this.dbmlSnapshot(readText), ops);
+  planDbmlLibraryOps(
+    ops: DbmlLibraryOps,
+    readText?: (filePath: string) => string | null,
+    moved: ReadonlyArray<{ from: string; to: string }> = [],
+  ): { writes: FileWrite[]; plan: DbmlLibraryWritePlan } {
+    const plan = planDbmlLibraryWrites(this.dbmlSnapshot(readText, moved), ops);
     return { writes: plan.writes.map((w) => ({ ...w, path: this.semanticAbsolute(w.path) }) as FileWrite), plan };
   }
 

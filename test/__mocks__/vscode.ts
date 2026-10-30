@@ -70,6 +70,18 @@ export async function _fireDidChangeTextDocument(
   await Promise.all([..._textDocumentChangeListeners].map((listener) => listener({ document, contentChanges, reason })));
 }
 
+/** Listeners registered through workspace.onDidRenameFiles. */
+const _renameFilesListeners: Array<(e: unknown) => unknown> = [];
+
+/**
+ * Fire workspace.onDidRenameFiles as VS Code does after the Explorer (a drag
+ * and drop, F2) or a WorkspaceEdit moved files. Resolves once every (async)
+ * listener has finished.
+ */
+export async function _fireDidRenameFiles(files: ReadonlyArray<{ oldUri: unknown; newUri: unknown }>): Promise<void> {
+  await Promise.all([..._renameFilesListeners].map((listener) => listener({ files })));
+}
+
 export enum TextDocumentChangeReason {
   Undo = 1,
   Redo = 2,
@@ -121,6 +133,16 @@ export const workspace = {
       dispose: () => {
         const idx = _textDocumentChangeListeners.indexOf(listener);
         if (idx !== -1) _textDocumentChangeListeners.splice(idx, 1);
+      },
+    };
+  },
+  /** Registers a listener; `_fireDidRenameFiles` (and a WorkspaceEdit's renameFile) calls it. */
+  onDidRenameFiles: (listener: (e: unknown) => unknown) => {
+    _renameFilesListeners.push(listener);
+    return {
+      dispose: () => {
+        const idx = _renameFilesListeners.indexOf(listener);
+        if (idx !== -1) _renameFilesListeners.splice(idx, 1);
       },
     };
   },
@@ -790,6 +812,7 @@ export function _resetMockWorkspace(): void {
   _mockWorkspaceState.applyEditPrefixes.length = 0;
   workspace.textDocuments = [];
   _textDocumentChangeListeners.length = 0;
+  _renameFilesListeners.length = 0;
 }
 
 /**
@@ -856,6 +879,8 @@ async function applyMockEdit(edit: WorkspaceEdit): Promise<boolean> {
     return false;
   }
   const prefix = typeof scripted === 'number' ? scripted : edit._ops.length;
+  // The files the edit moved: VS Code fires onDidRenameFiles for them, as for the Explorer's moves.
+  const renamed: Array<{ oldUri: MockUri; newUri: MockUri }> = [];
   for (const op of edit._ops.slice(0, prefix)) {
     switch (op.kind) {
       case 'replace':
@@ -889,10 +914,12 @@ async function applyMockEdit(edit: WorkspaceEdit): Promise<boolean> {
       case 'renameFile': {
         fs.mkdirSync(path.dirname(op.newUri.fsPath), { recursive: true });
         fs.renameSync(op.oldUri.fsPath, op.newUri.fsPath);
+        renamed.push({ oldUri: op.oldUri, newUri: op.newUri });
         break;
       }
     }
   }
+  if (renamed.length > 0) void _fireDidRenameFiles(renamed);
   return prefix >= edit._ops.length;
 }
 

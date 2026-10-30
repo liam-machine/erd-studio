@@ -38,6 +38,7 @@ import * as vscode from 'vscode';
 
 import type { FileWrite } from '../services/fileWrites';
 import { mergeFileWrites, orderFileWrites } from '../services/fileWrites';
+import { ownFileOperations } from '../services/ownFileOperations';
 import { saveWithoutFormatting } from './documentSave';
 
 /** What {@link applyFileWrites} did. */
@@ -205,7 +206,15 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
 
   if (renamed.length < renames.length) addRenames();
 
-  if (await vscode.workspace.applyEdit(edit)) return { ok: true, replaced, created, deleted, renamed, unrestored: [] };
+  // Its renames are ERD Studio's own: the Explorer-move listener leaves them alone.
+  const endOwn = ownFileOperations.begin(renamed);
+  let appliedOk: boolean;
+  try {
+    appliedOk = await vscode.workspace.applyEdit(edit);
+  } finally {
+    endOwn();
+  }
+  if (appliedOk) return { ok: true, replaced, created, deleted, renamed, unrestored: [] };
 
   // --- Reconcile: put back whatever landed --------------------------------------------
   const planned = new Map<string, FileWrite>();
@@ -255,7 +264,13 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
   }
   let unrestored: string[] = [];
   if (anything) {
-    const ok = await vscode.workspace.applyEdit(undo);
+    const endUndo = ownFileOperations.begin(renames.map((r) => ({ from: r.to, to: r.from })));
+    let ok: boolean;
+    try {
+      ok = await vscode.workspace.applyEdit(undo);
+    } finally {
+      endUndo();
+    }
     if (ok) {
       for (const uri of undoSaves) {
         try {

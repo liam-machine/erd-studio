@@ -277,6 +277,17 @@ function attachTablesOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables'>): DbmlAtta
 }
 
 /**
+ * The relationships `name` owns in the snapshot's relationships files, as
+ * the planner's own attach step reads them (a table's complete list, for a
+ * save that keeps them: a rename planned from a snapshot, not a canvas).
+ */
+export function ownedRelationshipsOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'relationshipsFiles'>, name: string): TableRelationship[] {
+  const readings = [...snapshot.relationshipsFiles.entries()].map(([path, reading]) => ({ path, reading }));
+  const owned = attachRelationships(readings, dbmlTableLookup(attachTablesOf(snapshot))).byOwner.get(lower(name));
+  return owned ? structuredClone(owned) : [];
+}
+
+/**
  * The index of the snapshot's relationships files (§2.4 "one snapshot, one
  * index"): their Refs and pending lines, which files do not read, and the
  * tables each file's `use` lines name.
