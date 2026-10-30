@@ -457,7 +457,7 @@ export class LayerService {
   async addLayer(layer: Omit<LayerConfig, 'order'>): Promise<void> {
     const layers = this.loadConfig();
 
-    // A `_` name is never a layer: `_relationships` is the DBML relationships file's (§2.1).
+    // A `_` name is never a layer (kept from 1.9, whose relationships files were `_relationships.dbml`).
     if (layer.id.startsWith('_')) {
       throw new Error(`Layer ID "${layer.id}" may not start with "_"`);
     }

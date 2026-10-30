@@ -5,7 +5,7 @@ description: >-
   holds DBML tables, relationships and diagrams (YAML/JSON for older
   projects) with strict format rules you must read before editing. Use this
   skill whenever the task touches files in .erd-studio/ (.dbml tables,
-  _relationships.dbml, .dbml diagrams, older .yml tables and .json diagrams,
+  relationships .dbml files, .dbml diagrams, older .yml tables and .json diagrams,
   or .sync-plan.json), asks to add/edit/remove tables, columns,
   relationships, or cardinality in a data model or ERD diagram, mentions
   dim_/fct_/ref_/brg_ prefixed tables in an erd-studio context, or involves
@@ -25,7 +25,7 @@ ERD Studio keeps a project's logical data model in `.erd-studio/` as plain text 
 - **`dbml`, or no `.erd-studio/` folder yet** (a new project) → write DBML: follow `DBML.md`.
 - **`yaml`** → write YAML tables and JSON diagrams: follow `LEGACY.md`, in the file naming doctor's `erd.naming` reports.
 - **`mixed`** (a project half-way to DBML) → new tables and new diagrams are DBML; an existing file keeps its format (edit a `.yml` table as YAML and a `.json` diagram as JSON, by `LEGACY.md`). A JSON diagram may list DBML tables; a DBML diagram may list only DBML tables, and a DBML table's Refs may name only DBML tables. A relationship between a DBML table and a YAML table cannot be stored yet: leave it out, and tell the user it needs **ERD Studio: Convert Project to DBML** first. Suggest **ERD Studio: Convert Project to DBML** to the user rather than converting anything yourself.
-- **The doctor result has no `erd.storage` field** (an ERD Studio CLI older than 2.0, perhaps a teammate's) → write what the files already are: if `.erd-studio/tables/` holds `.dbml` table files, DBML; otherwise follow `LEGACY.md`. Tell the user their ERD Studio is older than these instructions.
+- **The doctor result has no `erd.storage` field** (an ERD Studio CLI older than 2.0, perhaps a teammate's) → write what the files already are: if a layer folder holds `.dbml` files in `<layer>/tables/`, `<layer>/relationships/` or `<layer>/diagrams/`, DBML; otherwise follow `LEGACY.md`. Tell the user their ERD Studio is older than these instructions.
 - **No CLI** (the command is not found, exit 127) → the same rule from the files: any `.erd-studio/**/*.dbml`, or no `.erd-studio/` folder at all, means DBML; only `.yml` tables and `.json` diagrams means `LEGACY.md`.
 
 **Never convert files between the formats by hand**, and never write a `.yml` table or a `.json` diagram into a DBML project. The user converts a project with **ERD Studio: Convert Project to DBML**, one undoable step that doctor's `erd.dbmlConversion` previews. ERD Studio versions before 2.0 cannot read DBML, so converting is the user's decision, never yours.
@@ -34,19 +34,21 @@ ERD Studio keeps a project's logical data model in `.erd-studio/` as plain text 
 
 ```
 .erd-studio/
+├── README.md                       ← explains the folders; ERD Studio writes it once, leave it
 ├── layers.json                     ← the layers (JSON); write it first in a new project
 ├── modelling-approach.md           ← optional: the team's modelling rules (see below)
-├── tables/                         ← the table library: one Table per file
-│   ├── dim_date.dbml
-│   ├── _relationships.dbml         ← Refs owned by the top-level tables
-│   └── gold/                       ← optional folder, one level only
-│       ├── dim_customer.dbml
-│       ├── fct_order.dbml
-│       └── _relationships.dbml     ← Refs owned by the tables in tables/gold/
-└── gold/                           ← a layer folder
-    ├── sales.dbml                  ← a diagram: its tables by use lines, sticky notes
-    └── sales.dbdiagram             ← its layout (positions); omit it for auto layout
+└── gold/                           ← a layer folder (bronze, silver, gold, …), named by its id
+    ├── tables/                     ← the layer's tables: one Table per file
+    │   └── sales/                  ← a schema folder
+    │       ├── dim_customer.dbml   ← Table sales.dim_customer
+    │       └── fct_order.dbml      ← Table sales.fct_order
+    ├── relationships/              ← Refs only, split across files however the team likes
+    │   └── gold.dbml               ← the layer's default relationships file
+    └── diagrams/
+        └── sales.dbml              ← a diagram: use lines, sticky notes, then its Project (positions in erd_layout)
 ```
+
+Every DBML file sits at one of three depths: `<layer>/tables/<schema>/<name>.dbml`, `<layer>/relationships/<file>.dbml` or `<layer>/diagrams/<name>.dbml`, with `tables`, `relationships` and `diagrams` spelled in lower case. A `.dbml` anywhere else is not read (doctor: `dbmlOutsideKnownFolders`, naming where it belongs).
 
 A new project also needs `.erd-studio/layers.json`, which lists the layer folders. Write it first, with every field of each layer (ids are lowercase letters, digits, `-` and `_`; `color` is a six-digit hex):
 
@@ -60,18 +62,22 @@ A new project also needs `.erd-studio/layers.json`, which lists the layer folder
 }
 ```
 
-- A table's **name is its identity everywhere** and is unique across the whole library, ignoring case: never create a second file with a name that exists in another folder. Folders are organisational only. `tables/` is never a layer.
-- **To find a table**, look at `tables/{name}.dbml` first, then in each folder (`tables/*/{name}.dbml`).
-- **Folders are opt-in per project.** If a folder named after a layer in `layers.json` (`tables/{layer}/`) already holds a table file (or `tables/` is empty), create a new table in the folder of the layer of the diagram you are adding it to (adding `fct_sale` to `gold/reporting.dbml` creates `tables/gold/fct_sale.dbml`). If every table file is at the top level, create the new file at the top level too. Keep an existing table's file in the folder it is in.
+- **Schema folders.** Each table file is `<layer>/tables/<schema>/<name>.dbml` and declares `Table <schema>.<name>`, the qualifier spelled exactly as its folder (case included). The schema is free: a source system, a domain or the warehouse schema.
+- A table's **name is its identity everywhere** and is unique across the whole project, every layer and schema, ignoring case: never create a second file with a name that exists in another folder. Tables that share a warehouse name get unique names (`silver_customer`, `gold_customer`), with the warehouse name in `alias`.
+- **To find a table**, look for `*/tables/*/{name}.dbml`.
+- **Where a new table goes.** In the layer of the diagram you are adding it to. Its schema folder: for a dbt model with a custom schema, dbt's configured schema (`+schema` / `config.schema`; for a source, its `schema:`), never the built schema in `manifest.json`; otherwise the layer's name (adding `fct_sale` to `gold/diagrams/reporting.dbml` creates `gold/tables/gold/fct_sale.dbml` holding `Table gold.fct_sale`). When the layer already has a schema folder spelled differently in case, use its spelling. Keep an existing table's file where it is.
+- `tables`, `templates` and `logical-models` are never layer names; `layers.json` ids are lower-case, and the display name is the layer's `label`.
 
 ## Edit rules
 
 - **Edit in place and never reformat.** Change only the lines you mean to change; keep comments, order, spacing and every setting you do not understand exactly as they are. ERD Studio does the same.
-- **Add a table to a diagram** = a new table file (when no file has that name) + a table `use` line in the diagram (+ the `use` line of that table's folder's `_relationships.dbml`, when the diagram does not import it yet).
-- **Add a relationship** = one `Ref` line in the `_relationships.dbml` of the foreign-key table's folder, + a `use` line there for every table the Ref names that the file does not import yet.
-- **Remove a table from a diagram** = delete its `use` line there (and its position in the layout file). The table file and its Refs stay: the diagram just stops showing them.
-- **Never hand-merge a conflicted file.** When a file holds git conflict markers (`<<<<<<<` … `>>>>>>>`), show the user the file and line and ask which side to keep; never pick a side yourself or run git commands.
-- **Check your work** with `erd-studio doctor` (its `erd.dbmlProblems` names every problem with its file, line and the exact line to write) and `erd-studio export --domain .erd-studio/<layer>/<name>.dbml --format dbml` (the diagram's path from the project folder, `.erd-studio/` included). Fix every `fix-dbml-file` error before anything else. Then fix every `missingUse`, `missingRelationshipsUse`, `unquotedValue` and `usePathMismatch` warning in a file you wrote (the message gives the exact line): ERD Studio reads on without the fix, but other DBML tools reject the file and every diagram that imports it. Fix a `foreignMetadata` warning too: a Metadata block outside the table's own file, whose values the canvas never shows while other DBML tools apply them; do what its message says: move its properties into the table file (as inline settings in a `.dbml` one) and remove the block. Other warnings are information.
+- **Add a table to a diagram** = a new table file (when no file has that name) + a `use { table <schema>.<name> } from '…'` line in the diagram + a `use * from '…'` line for every relationships file holding a Ref between that table and another table of the diagram, when the diagram does not import it yet.
+- **Add a relationship.** First make sure no relationships file already holds a Ref between the same columns of the same two tables: if one does, change it there. Otherwise write one `Ref` line in the relationships file that already holds the most Refs of the foreign-key table (any layer; ties go to the first path), else in the foreign-key table's layer's default file `<layer>/relationships/<layer>.dbml` (create it when missing), + a `use` line there for every table the Ref names that the file does not import yet. Then add `use * from '…'` for that file to every diagram that shows both tables and does not import it yet.
+- **Change a relationship** (columns, cardinality, role) in the file that holds it. Never move a Ref to another file.
+- **Remove a table from a diagram** = delete its `use` line there and its line in the diagram's `erd_layout`. The table file and its Refs stay: the diagram just stops showing them.
+- **Rename, move or delete a table**: prefer the canvas or the Table Library (one undoable step). By hand, update every file that points at it in the same change: the table file's path and `Table` line, the `use` lines in relationships files and diagrams, every Ref end, the `erd_layout` lines and sticky notes' `linked_table`.
+- **Never hand-merge a conflicted file.** When a file holds git conflict markers (`<<<<<<<` … `>>>>>>>`), show the user the file and line and ask which side to keep; never pick a side yourself or run git commands. A conflict inside a diagram's `erd_layout` only differs in positions: keep either side whole, never a mix of lines.
+- **Check your work** with `erd-studio doctor` (its `erd.dbmlProblems` names every problem with its file, line and the exact line to write) and `erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml` (the diagram's path from the project folder, `.erd-studio/` included). Fix every `fix-dbml-file` error before anything else. Then fix every `missingUse`, `missingRelationshipsUse`, `unquotedValue` and `usePathMismatch` warning in a file you wrote (the message gives the exact line): ERD Studio reads on without the fix, but other DBML tools reject the file and every diagram that imports it. Fix a `foreignMetadata` warning too: a Metadata block outside the table's own file, whose values the canvas never shows while other DBML tools apply them; do what its message says: move its properties into the table file (as inline settings in a `.dbml` one) and remove the block. Other warnings are information.
 
 ## Team Modelling Approach
 
@@ -152,7 +158,7 @@ State which of those columns you intend to build, in plain English.
 Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
 
 ### Step 3 — Build
-Write the table's file — the existing file if the table already exists (in whichever folder it is in), otherwise a new file: in a DBML project `.erd-studio/tables/{layer}/{name}.dbml` for the layer of the target diagram when the project uses layer folders, else `.erd-studio/tables/{name}.dbml` (see "Layout" above); in a YAML project the `.yml` path `LEGACY.md` gives. When the source is a dbt model and the team's metadata list has `dbt` keys, copy those too (see "The team's metadata list").
+Write the table's file — the existing file if the table already exists (in whichever folder it is in), otherwise a new file: in a DBML project `.erd-studio/{layer}/tables/{schema}/{name}.dbml` for the layer of the target diagram (see "Where a new table goes" above); in a YAML project the `.yml` path `LEGACY.md` gives. When the source is a dbt model and the team's metadata list has `dbt` keys, copy those too (see "The team's metadata list").
 
 ### Step 4 — Reconcile via set-difference
 Re-read the table file you just wrote. Compute the set-difference between source columns and the file's columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
@@ -238,6 +244,6 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 1. Read `SYNC.md` in the same directory as this skill file for the full action reference and execution guide
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
-4. Write each logical-side change in the project's format: SYNC.md gives the DBML lines (a column line in the Table block, a Ref line in `relationshipsPath`) and the YAML ones (legacy)
+4. Write each logical-side change in the project's format: SYNC.md gives the DBML lines (a column line in the Table block, a new Ref line in `relationshipsPath`, a change to an existing Ref in `storedIn`) and the YAML ones (legacy)
 
-<!-- erd-studio-harness: 38 -->
+<!-- erd-studio-harness: 39 -->

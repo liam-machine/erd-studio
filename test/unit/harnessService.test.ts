@@ -164,6 +164,11 @@ describe('HarnessService', () => {
       expect(content).toContain('### ERD Studio DBML files');
       expect(content).toContain("**Custom values are quoted strings**, even `'true'` and numbers");
       expect(content).toContain('**One Table per table file**');
+      // The layer-first tree (2.0): qualified Tables, relationships files per layer, Refs never moved.
+      expect(content).toContain('declared `Table <schema>.<name>`');
+      expect(content).toContain('`Ref` lines in `<layer>/relationships/*.dbml` files');
+      expect(content).toContain('an existing Ref is never moved to another file');
+      expect(content).toContain('never hand-merge `erd_layout`');
       expect(content).not.toContain('**Schema version** must be `5`');
     });
 
@@ -867,8 +872,8 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 38 (the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
-      expect(HARNESS_VERSION).toBe('38');
+    it('is 39 (the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
+      expect(HARNESS_VERSION).toBe('39');
     });
 
     it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {
@@ -888,15 +893,19 @@ describe('HarnessService', () => {
       expect(cli('context.ts')).toContain('dbtProject: boolean');
     });
 
-    it('points assistants at Import DBML…, the dbdiagram.io export and the CLI formats, and keeps meta.dbml', () => {
+    it('points assistants at Import DBML…, the Rich DBML export and the CLI formats, and keeps meta.dbml', () => {
       const content = guideOf(service, 'claude');
       expect(content).toContain('## DBML: import and export');
       expect(content).toContain('**ERD Studio: Import DBML…**');
       expect(content).toContain('**ERD Studio: Export All Diagrams…**');
-      expect(content).toContain('**DBML for dbdiagram.io**');
-      for (const flag of ['--format dbml-rich', '--format dbml-layout', '`--all`']) {
+      expect(content).toContain('**Rich DBML**');
+      for (const flag of ['--format dbml-rich', '`--all`']) {
         expect(content, flag).toContain(flag);
       }
+      // The dbdiagram.io layout sidecar is gone (2.0): positions travel in erd_layout.
+      expect(content).not.toContain('dbml-layout');
+      expect(content).not.toContain('.dbdiagram');
+      expect(content).toContain("the positions in its Project's `erd_layout`");
       // The CLI stays read-only: the assistant writes the files itself.
       expect(content).toContain('stdout only; it never writes a file');
       // Pushing uploads the model to a third party: only on request.
@@ -1314,7 +1323,7 @@ describe('HarnessService', () => {
 
     it('rewrites the data directory for a custom semanticDir in the .agents copies too', () => {
       new HarnessService('docs/erd').install(tmpDir, AGENTS);
-      expect(read(tmpDir, AGENTS_SCHEMA_SKILL)).toContain('docs/erd/tables/');
+      expect(read(tmpDir, AGENTS_SCHEMA_SKILL)).toContain('docs/erd/{layer}/tables/');
       expect(read(tmpDir, '.agents/skills/erd-studio/LEGACY.md')).toContain('docs/erd/logical-models/');
       for (const file of ['SKILL.md', 'SYNC.md', 'DBML.md', 'LEGACY.md']) {
         expect(read(tmpDir, `.agents/skills/erd-studio/${file}`), file).not.toContain('.erd-studio/');
@@ -1720,7 +1729,7 @@ describe('HarnessService', () => {
         expect(content, id).toContain('Then fix every `missingUse`, `missingRelationshipsUse`, `unquotedValue` and `usePathMismatch` warning in a file you wrote');
         expect(content, id).not.toContain('warnings raise no next step');
         // The CLI takes the diagram's path from the project folder.
-        expect(content, id).toContain('`erd-studio export --domain .erd-studio/<layer>/<name>.dbml --format dbml`');
+        expect(content, id).toContain('`erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml`');
         // A DBML↔YAML relationship in a mixed project has no home yet.
         expect(content, id).toContain('A relationship between a DBML table and a YAML table cannot be stored yet: leave it out');
       }
@@ -1779,6 +1788,12 @@ describe('HarnessService', () => {
         'paths **relative to the diagram file**',
         '**Omit it, or leave a table out of it, for auto layout**',
         '**ERD Studio: Import DBML…**',
+        // The layer-first tree (2.0): where a new Ref goes, and the erd_layout rules.
+        'declared `Table <schema>.<name>`',
+        'the file that already holds the most Refs of its foreign-key table',
+        'An existing Ref stays in the file that holds it: change it there, never move it.',
+        '**Never hand-merge `erd_layout`.**',
+        '**Never end a line inside `erd_layout` with `\\`**: DBML joins it with the next line.',
       ]) {
         expect(dbml, text).toContain(text);
       }

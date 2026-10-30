@@ -28,8 +28,9 @@ describe('native DBML storage docs', () => {
 
   it('the format reference runs diff on a .dbml diagram and names the DBML files a fix changes', () => {
     const text = flat(read('docs/semantic-domain-json-reference.md'));
-    expect(text).toContain('`erd-studio diff --domain .erd-studio/{layer}/{domain}.dbml --json` (the `.json` diagram in a YAML project)');
-    expect(text).toContain("the FK table's folder's `_relationships.dbml`");
+    expect(text).toContain('`erd-studio diff --domain .erd-studio/{layer}/diagrams/{domain}.dbml --json` (the `.json` diagram in a YAML project)');
+    expect(text).toContain('the relationships file that holds the Ref (or, for a new one, the file a new Ref of the FK table goes in)');
+    expect(text).not.toContain('_relationships.dbml`, the FK');
     expect(text).not.toContain('`erd-studio diff --domain .erd-studio/{layer}/{domain}.json --json`');
   });
 

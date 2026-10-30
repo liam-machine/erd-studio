@@ -22,8 +22,8 @@ for each difference. Your job is to execute those choices.
   "modelContext": {
     "dim_customer": {
       "modelName": "dim_customer",
-      "logicalModelPath": ".erd-studio/tables/silver/dim_customer.dbml",
-      "relationshipsPath": ".erd-studio/tables/silver/_relationships.dbml",
+      "logicalModelPath": ".erd-studio/silver/tables/crm/dim_customer.dbml",
+      "relationshipsPath": ".erd-studio/silver/relationships/silver.dbml",
       "dbtSqlPath": "models/silver/dim_customer.sql",
       "dbtSchemaPath": "models/silver/dim_customer.yml"
     }
@@ -46,7 +46,7 @@ for each difference. Your job is to execute those choices.
 ```
 
 Key fields:
-- **modelContext**: File paths for every model referenced — use these to locate files to edit. `logicalModelPath` is the table's file (a `.dbml` table file, or a `.yml` in a project from before 2.0, or the path a new one gets); `relationshipsPath`, present only for a DBML table, is the `_relationships.dbml` that holds the Refs it owns
+- **modelContext**: File paths for every model referenced — use these to locate files to edit. `logicalModelPath` is the table's file (a `.dbml` table file, or a `.yml` in a project from before 2.0, or the path a new one gets); `relationshipsPath`, present only for a DBML table, is the relationships file where a **new** Ref of this foreign-key table goes. A relationship entry that is already stored carries `storedIn`, the relationships file that holds its Ref: change or remove it there
 - **models/columns/relationships**: Arrays of resolved discrepancies with concrete actions
 - **requiresCompile**: If `true`, run `dbt compile` after making physical-side changes
 - **resolvedDataType**: The type to WRITE. Always use this for the two
@@ -67,14 +67,14 @@ Write each change in the format of the file it touches (the schema skill's "What
 
 | Action | What to do (DBML) |
 |--------|-----------|
-| `add-to-logical` | Add a `use { table <name> } from '…'` line for the table to the diagram (and the `use *` line of its folder's `_relationships.dbml` when the diagram lacks it), and create the table file at `logicalModelPath` from manifest data unless a file for that name already exists in any folder. Copy the dbt `meta` keys the team's metadata list names, reading them from the schema yml or `erd-studio inventory`, not from the manifest (the schema skill's "The team's metadata list") |
-| `remove-from-logical` | Delete the table's `use` line from the diagram (and its position from the layout file). The table file and its Refs stay |
+| `add-to-logical` | Add a `use { table <schema>.<name> } from '…'` line for the table to the diagram (and a `use * from '…'` line for every relationships file holding a Ref between it and another table of the diagram, when the diagram lacks it), and create the table file at `logicalModelPath` from manifest data unless a file for that name already exists in any folder. Copy the dbt `meta` keys the team's metadata list names, reading them from the schema yml or `erd-studio inventory`, not from the manifest (the schema skill's "The team's metadata list") |
+| `remove-from-logical` | Delete the table's `use` line from the diagram and its line in the diagram's `erd_layout`, and any `use *` line only it needed. The table file and its Refs stay |
 | `add-column-to-logical` | Add a column line to the Table block in `logicalModelPath` (`name TYPE [note: '…']`), with the dbt column `meta` keys the team's metadata list names |
-| `remove-column-from-logical` | Delete the column's line from `logicalModelPath`, and every Ref in a `_relationships.dbml` that names it |
+| `remove-column-from-logical` | Delete the column's line from `logicalModelPath`, and every Ref in a relationships file that names it |
 | `update-type-in-logical` | Change the column's type in `logicalModelPath` to `resolvedDataType` (double-quoted when it is not a plain identifier: `"DECIMAL(18,2)"`) |
-| `add-relationship-to-logical` | Add one Ref line to `relationshipsPath` of the many-side (FK) table — `Ref: fk_table.fk_col >? pk_table.pk_col` for many-to-one, `Ref: pk_table.pk_col ?- fk_table.fk_col` for one-to-one, `<>?` for many-to-many — plus a `use { table x }` line there for each table it names that the file does not import. A `one-to-many` is written from the other end as `>?` |
-| `remove-relationship-from-logical` | Delete the matching Ref line from the `_relationships.dbml` that holds it (leave the `use` lines; doctor reports nothing for an unused one) |
-| `update-cardinality-in-logical` | Rewrite the matching Ref's operator to `targetCardinality`; a change to `one-to-many` turns it round: `>?` from the other end, in the relationships file of that end's folder |
+| `add-relationship-to-logical` | When the entry has `storedIn`, the Ref is already there: leave it. Otherwise add one Ref line to `relationshipsPath` of the many-side (FK) table — `Ref: s.fk_table.fk_col >? s.pk_table.pk_col` for many-to-one, `Ref: s.pk_table.pk_col ?- s.fk_table.fk_col` for one-to-one, `<>?` for many-to-many, each end spelled as its table declares itself — plus a `use { table s.x }` line there for each table it names that the file does not import, and a `use * from '…'` line for that file in every diagram that shows both tables and lacks it. A `one-to-many` is written from the other end as `>?` |
+| `remove-relationship-from-logical` | Delete the matching Ref line from the relationships file that holds it (`storedIn`). Leave the `use` lines; a diagram's `use *` line for a file that no longer holds a Ref between its tables can go (doctor: `extraRelationshipsUse`) |
+| `update-cardinality-in-logical` | Rewrite the matching Ref's operator to `targetCardinality`, in place in `storedIn`; a change to `one-to-many` turns it round: `>?` from the other end, in the same file |
 
 **Legacy (a `.yml` table or `.json` diagram, projects from before 2.0):**
 
@@ -130,9 +130,9 @@ models:
 
 ## Important Notes
 
-- **Preserve positions**: Never clear or overwrite layout positions (a DBML diagram's `.dbdiagram` file, a JSON diagram's `viewConfig.positions`)
+- **Preserve positions**: Never clear or overwrite layout positions (a DBML diagram's `erd_layout` in its Project, a JSON diagram's `viewConfig.positions`)
 - **Match existing patterns**: When editing dbt YAML, follow the formatting and test patterns already present in the file
 - **Cascade deletions**: When removing a model from a JSON domain, also remove the domain JSON's relationships referencing it. When renaming or deleting a table or column, update every Ref (DBML) or model YAML `relationships:` entry that points at it
 - **Column ordering**: When adding columns, append them after the table's last column (before its `indexes` block in DBML; to the end of the columns array in YAML)
 
-<!-- erd-studio-harness: 38 -->
+<!-- erd-studio-harness: 39 -->

@@ -2,6 +2,8 @@
 
 Branch `feat/native-dbml-storage` (from `origin/develop` at cf0113b). This is the plan every stage works from. It names the decisions (§0) and the format, which is normative (§2). The stages are in §10. Read the root `CLAUDE.md`, `packages/CLAUDE.md` and the `docs/dev/*.md` it points at before you start a stage. Where this spec and those files disagree about **storage**, this spec wins, and stage S9 rewrites those files to match it. On anything else, those files win.
 
+> **Revised 2026-10-29/30 for the layer-first tree** (decisions D28–D33). §0, §2.1–§2.6, §3.3–§3.5, §4.4–§4.6, §5 and §9 are rewritten to it, and §10 ends with its stage list. §6–§8, the first build's stages and the appendices are kept as history: where they name `tables/[<folder>/]`, `_relationships.dbml`, `<layer>/<name>.dbml` diagrams or `.dbdiagram` files, they describe the 1.9 pre-release tree, which 2.0 no longer reads (D33).
+
 The words *must*, *never* and *always* are normative. "Diagram" and "subject area" mean the same thing. "Table" and "model" mean the same thing (`SemanticTable`). Paths are relative to the semantic dir (`erdStudio.semanticDir`, default `.erd-studio`) unless they start with `src/`, `packages/`, `test/`, `docs/` or `mcp-server/`.
 
 Parser facts verified for this spec, all under `@dbml/parse` 9.1.1, 10.3.1 and 11.0.0 unless a version is named:
@@ -34,23 +36,23 @@ Parser facts verified for this spec, all under `@dbml/parse` 9.1.1, 10.3.1 and 1
 
 | # | Decision | Why (one line) |
 |---|---|---|
-| D1 | Tables go in `tables/[<folder>/]<name>.dbml` (one Table each, self-contained). Relationships go in `tables/[<folder>/]_relationships.dbml`, one per library folder. Diagrams go in `<layer>/<name>.dbml`, with the layout in `<layer>/<name>.dbdiagram` beside it. `layers.json` and `templates/*.json` stay JSON. Only the name `_relationships` is reserved, and only for new `.dbml` tables (§2.1). | This keeps the `.erd-studio` shape. The relationships file sits inside `tables/`, so it is never mistaken for a layer folder (§2.3), and reserving one name (not every `_` stem) keeps `_x` tables and diagrams that dbt and 1.x allow. |
-| D2 | Table names are **unqualified**: `Table fct_order [schema: 'gold']`. The writer names a new file exactly as the Table. The reader compares the file stem and the declared name **case-insensitively**; the table's identity is the **declared** spelling, and paths always come from the directory listing's real file name (never from the name being looked up). | Library names are unique project-wide, so qualifying adds nothing. A schema edit stays an edit to one file. A case-only rename that `core.ignorecase` does not apply on macOS/Windows must not make a table unreadable on those machines only; `doctor` warns when stem and name differ in case. |
-| D3 | A relationship belongs to its **foreign-key table** (the canonical `fromModel`, as today), and it is stored as one Ref line in the relationships file of **that table's folder**. The reader canonicalises every Ref and attaches it to its owner **from any relationships file it reads**; a Ref found in another folder's file is "misplaced" (a warning), and the next write that changes the owner's relationships, name or folder moves it home in the same edit. | `planRelationshipWrite` keeps choosing an owner table. Only the codec maps the owner to a file. A `git mv` or a hand-placed Ref must never make a relationship vanish or be written twice (`[5001]`). |
-| D4 | A diagram's members are its **table `use` lines**, in order: the member is the **stem** of any `use` path whose stem passes `isSafeTableName` and is not `_relationships`. Members are resolved **by name**, in the shared candidate order (§3.4). A diagram's `use` lines for relationships files are output the writer maintains for other DBML tools; they are never read for meaning. | One answer in every host. A missing, dangling or wrongly spelled `use` path degrades to a placeholder or a `doctor` warning, never to a vanished member or a dead diagram. No path in the repo is ever trusted for reads. |
+| D1 | **Superseded by D28 (the layer-first tree) and D29 (`erd_layout`, no `.dbdiagram`); `_relationships` is no longer reserved.** Tables go in `tables/[<folder>/]<name>.dbml` (one Table each, self-contained). Relationships go in `tables/[<folder>/]_relationships.dbml`, one per library folder. Diagrams go in `<layer>/<name>.dbml`, with the layout in `<layer>/<name>.dbdiagram` beside it. `layers.json` and `templates/*.json` stay JSON. Only the name `_relationships` is reserved, and only for new `.dbml` tables (§2.1). | This keeps the `.erd-studio` shape. The relationships file sits inside `tables/`, so it is never mistaken for a layer folder (§2.3), and reserving one name (not every `_` stem) keeps `_x` tables and diagrams that dbt and 1.x allow. |
+| D2 | **Superseded in part by D30: names stay unique project-wide and stems compare case-insensitively, but a table is declared qualified, `Table <schema>.<name>`, the schema being its folder.** Table names are **unqualified**: `Table fct_order [schema: 'gold']`. The writer names a new file exactly as the Table. The reader compares the file stem and the declared name **case-insensitively**; the table's identity is the **declared** spelling, and paths always come from the directory listing's real file name (never from the name being looked up). | Library names are unique project-wide, so qualifying adds nothing. A schema edit stays an edit to one file. A case-only rename that `core.ignorecase` does not apply on macOS/Windows must not make a table unreadable on those machines only; `doctor` warns when stem and name differ in case. |
+| D3 | **Superseded by D31: a relationship is stored once in any relationships file; a new one is placed by the two-step rule and an existing one is never moved, so nothing is "misplaced".** A relationship belongs to its **foreign-key table** (the canonical `fromModel`, as today), and it is stored as one Ref line in the relationships file of **that table's folder**. The reader canonicalises every Ref and attaches it to its owner **from any relationships file it reads**; a Ref found in another folder's file is "misplaced" (a warning), and the next write that changes the owner's relationships, name or folder moves it home in the same edit. | `planRelationshipWrite` keeps choosing an owner table. Only the codec maps the owner to a file. A `git mv` or a hand-placed Ref must never make a relationship vanish or be written twice (`[5001]`). |
+| D4 | **Superseded in part by D32: members are still the table `use` lines by stem, but a member resolves by its `use` path first, and the relationships `use` lines are read: a diagram draws exactly the files it imports.** A diagram's members are its **table `use` lines**, in order: the member is the **stem** of any `use` path whose stem passes `isSafeTableName` and is not `_relationships`. Members are resolved **by name**, in the shared candidate order (§3.4). A diagram's `use` lines for relationships files are output the writer maintains for other DBML tools; they are never read for meaning. | One answer in every host. A missing, dangling or wrongly spelled `use` path degrades to a placeholder or a `doctor` warning, never to a vanished member or a dead diagram. No path in the repo is ever trusted for reads. |
 | D5 | DBML diagrams hold **no** Refs. Every relationship edit on a DBML diagram uses `home = 'library'`. | Liam's layout. The library rule "drawn when both ends are in the diagram" (`domain.ts:796`) is unchanged. |
 | D6 | Reading is **tolerant and per file**: each table file is parsed on its own (inline `ref:` settings, `use` and `Ref` lines blanked first), each relationships file is read Ref by Ref from the AST, and diagrams are read with every `use`, `Table`, `Ref`, `TableGroup`, `Enum`, `TablePartial`, `Metadata`, repeated `Note` and repeated `Project` span blanked. Display never uses a multi-file `rawDb`. A leading BOM is stripped before parsing. | `rawDb` is all-or-nothing. One deleted table file or one hand-written construct must not blank every diagram and relationship. |
 | D7 | Writing is **splicing at parser node offsets**. A no-op write is byte-identical. A file that does not parse is **refused, never regenerated**. A derived block (`use` lines, `meta_json`, the PK form) is touched only when its inputs changed in this edit. A BOM the file had is kept. | The CLAUDE.md in-place rule, carried over to DBML. |
 | D8 | `CURRENT_SCHEMA_VERSION` = 7 (the newest version core reads, in any format). New `DBML_SCHEMA_VERSION` = 7 is written as `erd_schema_version: '7'` on a diagram's Project. New `CURRENT_JSON_SCHEMA_VERSION` = 6 is the JSON ceiling, with the **same** refusal text. The in-memory v5 object a DBML diagram is read into carries `schemaVersion: WRITTEN_SCHEMA_VERSION` (5); the DBML version travels **beside** it (`DbmlSubjectAreaReading.schemaVersion`, `ParsedSubjectArea.dbmlSchemaVersion`) and is applied only to the Unified and Display `schemaVersion`. | A JSON file that declares 7 is still refused, exactly as today, and goldens do not churn. `detectSubjectAreaFormat`, `mixesTableNaming` and `validateSubjectAreaDocument` keep seeing a plain v5 document at every call site (`SemanticEditorProvider.ts:1860`, `:2633`, `:3011`, `:5303`, `domainService`, `diff.ts`, `doctor.ts`, `moveRelationshipsToLibrary.ts`) instead of a `hybrid` one. |
 | D9 | One storage detector, `detectProjectStorage(evidence): 'yaml' \| 'dbml' \| 'mixed'`, sits in core beside `detectProjectNaming`, with its own type. An empty project answers `'dbml'`. **Only library evidence** (table and relationships files, and an existing `logical-models/` folder) decides it; a `.dbml` diagram on its own never turns a YAML project into DBML. `'dbml'` and `'mixed'` write DBML for **new** files, except when `tables/` is a layer. The empty-project default reaches the host's create paths in one stage (S6). | It is the single answer shared by the canvas, commands, the offer, the context keys and `doctor`. Keeping it out of `ProjectNaming` stops existing exhaustive switches from breaking. A stray export in a layer folder must not make a team project write files 1.x teammates cannot read. |
 | D10 | One file classifier, `classifySemanticFile()`, lives in core (parser-free). Every host site that asks "is this a diagram, table, relationships file or layout?" calls it. | It replaces three ad-hoc `.json` checks that would otherwise each need the `tables/` exclusion. |
-| D11 | Add the custom-editor selector `**/.erd-studio/*/*.dbml` at priority `default`. A `file:` `.dbml` the classifier says is not a diagram is **rerouted** to the text editor inside `resolveCustomTextEditor`; other schemes (SCM diff, merge editor) are never rerouted (§5.9). The Table Library opens `.dbml` with `openWith 'default'`. | A glob cannot exclude `tables/x.dbml` or `tables/_relationships.dbml`. The fallback is in §5.9. |
+| D11 | **Superseded: the selector is `**/.erd-studio/*/diagrams/*.dbml`, so nothing is rerouted; a `.dbml` that is not a diagram gets the not-a-diagram page (§5.9).** Add the custom-editor selector `**/.erd-studio/*/*.dbml` at priority `default`. A `file:` `.dbml` the classifier says is not a diagram is **rerouted** to the text editor inside `resolveCustomTextEditor`; other schemes (SCM diff, merge editor) are never rerouted (§5.9). The Table Library opens `.dbml` with `openWith 'default'`. | A glob cannot exclude `tables/x.dbml` or `tables/_relationships.dbml`. The fallback is in §5.9. |
 | D12 | All parser-dependent code lives under `packages/core/src/dbml/` and is exported as the subpath **`@erd-studio/core/dbml`**. The main entry stays parser-free. `loadDisplaySubjectArea` gains an optional `dbml` reader option. The subpath exports only APIs typed with ERD Studio's own types; the parser wrappers stay internal. | The webview and renderer never pay for the 560 KB parser (it has no `sideEffects:false`; an unused import still costs about 169 KB). The renderer's `editor/store/sizing` subpaths are the precedent. `@dbml/parse`'s own `.d.ts` imports the uninstalled `monaco-editor-core`, so a leaked type fails strict consumers. |
 | D13 | `@dbml/parse` becomes an **exact `"11.0.0"` runtime dependency** of core and is external in `packages/core/build.mjs`, which builds both entries in **one** esbuild call with `splitting: true` so the main entry and the subpath share module instances (the four error classes stay one class each). The root `@dbml/parse` pin moves from 10.3.1 to **11.0.0 in the same stage (S2)**, so the extension, CLI and MCP bundles hold one copy, and Import DBML reads with 11.0.0 too (§4.1 "Parser pin"). The writer still quotes every value, so 9.x and 10.x tools read every file ERD Studio writes; the reader also accepts 11.0's unquoted numbers and booleans. Tests keep reading with 9.1.1, 10.3.1 and 11.0.0. core and renderer **stay at 0.4.0**: 0.4.0 is unpublished (npm and `main` are at 0.3.0), so 0.3.0 → 0.4.0 is the pinned MINOR. The breaks go into the existing 0.4.0 changelog sections. | Liam chose 11.0.0 (Appendix, question 1): it reads the `natural_key: true` / `scd_type: 2` that assistants write naturally and has no space-in-path bug. No version is skipped. The Confluence app has zero users. Two bundled copies of `domain.ts` would break `instanceof` on the public error classes. |
 | D14 | The extension changelog heading becomes `## Unreleased — 2.0.0` (Liam asked). The root `package.json` version is never edited. | `releasing.md` and `scripts/release.mjs:110`. |
-| D15 | A relationships file is **never deleted automatically**. Once it has no Refs left, it keeps its header comment and no `use` lines. | Diagrams `use` it. Deleting it would break them with 4001 for DBML tools. |
+| D15 | **Still holds (never deleted automatically); the reason changed with D32: a diagram imports a relationships file only while it holds a Ref between the diagram's tables.** A relationships file is **never deleted automatically**. Once it has no Refs left, it keeps its header comment and no `use` lines. | Diagrams `use` it. Deleting it would break them with 4001 for DBML tools. |
 | D16 | **Delete Table** in a DBML project cascades in one WorkspaceEdit. It removes the file, the Refs the table owns, other owners' Refs to it, and every `use` line that names it, in diagrams and in relationships files. It also prunes positions and sticky links in the diagrams. | Dangling `use` and Ref lines break whole files for other DBML tools. Reads stay tolerant of external deletes (D6). |
-| D17 | A table file has no `use` lines. A relationships file has a `use` line for every table its Refs name. A diagram has `use` lines for its member tables and for their folders' relationships files. The writer writes **selective** lines, `use { table <declared reference> } from '<relative path with .dbml>'`, for tables, and `use * from '…'` only for relationships files (which declare nothing). The reader also accepts `use * from …` for tables and a path without the extension. | `use` is not transitive (verified). `use *` would also import Enums, so two tables declaring the same Enum name would break every file importing both (`[3003]`). A rename regenerates the whole line anyway. Enums do not travel into diagrams; the column type still reads as its name. Liam confirmed selective lines (Appendix, question 3). |
+| D17 | **Superseded in part by D32: selective `use` lines for tables still hold; a diagram imports exactly the relationships files of §2.4, not one per member folder.** A table file has no `use` lines. A relationships file has a `use` line for every table its Refs name. A diagram has `use` lines for its member tables and for their folders' relationships files. The writer writes **selective** lines, `use { table <declared reference> } from '<relative path with .dbml>'`, for tables, and `use * from '…'` only for relationships files (which declare nothing). The reader also accepts `use * from …` for tables and a path without the extension. | `use` is not transitive (verified). `use *` would also import Enums, so two tables declaring the same Enum name would break every file importing both (`[3003]`). A rename regenerates the whole line anyway. Enums do not travel into diagrams; the column type still reads as its name. Liam confirmed selective lines (Appendix, question 3). |
 | D18 | The writer marks the **FK end as possibly null on every Ref it writes**, in a form that depends on no other file: `from.fc >? to.tc`, `to.tc ?- from.fc`, `from.fc <>? to.tc`. The reader ignores `?` for cardinality and uses it only for a one-to-one's direction (§2.3). A Ref already in the file keeps its marks (or their absence) byte for byte unless the unit changes. | ERD Studio records no nullability, and DBML 9+ reads a bare `>` as NOT NULL (`docs/dev/dbml.md`, Rules), which would claim a NOT NULL foreign key to every DBML or SQL tool. The export's per-key `?` rule needs primary keys from other files; a constant FK-side mark does not. Liam confirmed (Appendix, question 2). |
 | D19 | Import DBML into a DBML project reuses `planDbmlImport`. DBML-only settings stay in `meta.dbml`, written as `meta_json`, exactly as in a YAML project. Hoisting them to native DBML settings is a follow-up, not 2.0. | This is lossless with no new mapping. The dbdiagram parity work comes later (Liam). |
 | D20 | In a mixed project a DBML diagram can only contain **DBML** tables, and a DBML-owned Ref can only name **DBML** tables. Adding a YAML table to a DBML diagram, and adding, editing or renaming a relationship from a DBML owner to a YAML table, are refused: "Convert the project to DBML first (ERD Studio: Convert Project to DBML)". An existing DBML-diagram member that resolves to a `.yml` keeps its `use` line bytes and shows a warning. A JSON diagram can contain both kinds, because it references tables by name, and a YAML owner may still name a DBML table (its yml holds the relationship). | A `use` line cannot point at a `.yml`, and a Ref with no `use` target fails `[4000]` and breaks its whole relationships file in every DBML tool. Mixed is a transitional state. |
@@ -61,6 +63,12 @@ Parser facts verified for this spec, all under `@dbml/parse` 9.1.1, 10.3.1 and 1
 | D25 | **`Metadata` blocks** (`Metadata Table t { … }`, `Metadata Column t.c { … }`, DBML 9.1+) are never written by ERD Studio and never used as sidecar files, but a hand-written table file may contain them. The reader needs nothing new (rawDb already merges block values over inline ones). The **writer edits a property where it is set**: if a property being changed is set by a `Metadata` block in the same file, the splice edits (or removes) that block entry in place instead of the inline setting, so the edit sticks. Built-ins a block can set (`note`, `headercolor`) follow the same rule. A block whose target is missing gives the precise load error of §4.7. | A block value silently overrides an inline one (precedence: inline < imported-file blocks < current-file blocks, later wins), so an inline-only splice would look like an edit that does not stick. Liam, 2026-10-28; sidecar metadata files rejected (cross-file all-or-nothing breakage, two homes for one value, invisible to dbdiagram/dbdocs). |
 | D26 | **A diagram member with no `.dbml` table file to `use`** (no table file at all, or a table still stored as YAML) is recorded on the diagram's Project as **`erd_unlinked_tables`**: one quoted, comma-separated string of names in member order (`erd_unlinked_tables: 'gld_fct_risk_child, gld_fct_risk_parent'`; Project keys take no lists, `[3006]`). The reader appends those names to the members after the `use` members; they resolve by name through the normal probe (§3.4), so no file draws as missing exactly as a JSON diagram's missing member does, a YAML table draws from its `.yml` (its load error included), and the positions stay in the `.dbdiagram`. Writers keep the key in sync: a name whose table now has a `.dbml` file moves to a `use` line on any edit that changes something (a table new in a library plan, `createdTables`, reaches every diagram that lists it through the settle pass), a removed member leaves it, and the key is never written empty. Only Convert adds a name (a canvas add of a table with no file, or a YAML one, is still refused, D20). Other DBML tools ignore the key: such a member is simply absent for them. | Liam (after pre-release 1.9.0, on a real project with 14 dbt-only members): keep them as missing, exactly as the YAML diagram draws them, and create them later with Add from dbt. A `use` line to a file that does not exist breaks the diagram in every DBML tool, so the names cannot be `use` lines. The order on read is use members first; Convert's self-check compares the members in that order (positions, and so the drawing, are the same). |
 | D27 | **A relationship that cannot be a live Ref yet** (an end with no `.dbml` table file, a YAML end, or a column the table does not have) is a **pending line**, `// erd-studio pending: Ref: <the Ref as the writer writes it>`: in its FK table's relationships file (it belongs to that table like a Ref, is attached and drawn by every host, and needs no `use` line), or, when its FK table has no table file (a relationship a JSON diagram held), in that diagram, as one of its own relationships (`logical.relationships`, the only ones a DBML diagram holds, drawn only there, as before). The relationships writer keeps a pending line while it is wanted and cannot be live, cuts it when its owner is listed without it or deleted, and turns it into a live Ref, with its `use` line, on any write to the file once both ends have `.dbml` files with those columns. Only Convert writes a new one (`writePending`); a canvas edit that would need one is refused as before. Convert moves a diagram's pending line to the library once its FK table has a file. `doctor`: `pendingRelationship` (a warning). | A Ref naming a table with no file fails `[4000]` and breaks the whole relationships file in every DBML parser. What 1.x drew for these relationships (a line to the missing table's placeholder) must still be drawn, and nothing the user wrote may be lost, so they are kept as comments ERD Studio reads back. |
+| D28 | **Layer-first tree** (Liam, 2026-10-29, Gerhard Brueckl's request): every DBML file lives under a layer folder, `<layer>/tables/<schema>/<name>.dbml`, `<layer>/relationships/<file>.dbml`, `<layer>/diagrams/<name>.dbml`, all three depths fixed; the kind comes from the path alone (§2.1). A layer folder is a lower-case layer id, its display name the `label` (2026-10-30); `tables`, `templates` and `logical-models` are reserved layer names, `relationships` and `diagrams` are not (2026-10-30). A root `README.md` explains the folders. | You usually work within one layer. The custom-editor glob can never match a table or relationships file, and `gold/` means one thing. |
+| D29 | **Positions live in the diagram's `Project` as `erd_layout: '''…'''`** (§2.6), written last; the `.dbdiagram` file is removed completely (storage, export sidecar, import sidecar, `--format dbml-layout`). The `Project` is written last in a new diagram (2026-10-30). | One file per diagram, an open format only, native undo for drags, no undo anchor across files. `Project` is the only DBML block that takes custom keys and belongs to one diagram. |
+| D30 | **`Table <schema>.<name>`**: the schema is the qualifier and the schema folder, spelled once (`schemaAsListed`). Names stay unique across the whole project; repeated warehouse names get unique names with the warehouse name in `alias`. A canvas table goes into the diagram's layer, in dbt's configured schema (`+schema` / `config.schema` / a source's `schema:`, never the built schema, 2026-10-30) or else the layer's name; Import keeps the source's qualifier. | It mirrors the warehouse and is native DBML; identity by `schema.name` would break dbt matching and hit DBML's case-sensitive schemas. |
+| D31 | **Placement**: a new Ref goes to the file (any layer) already holding the most Refs of its FK table, else `<FK layer>/relationships/<FK layer>.dbml`; Convert uses the second rule only. An existing Ref is never moved; a link any file already holds is refused. | Hand-made splits survive; the index is built once per plan so placement never depends on edit order. |
+| D32 | **Exact imports**: a diagram imports exactly the relationships files holding a live Ref between two of its `use` members, or a pending line between two tables it draws (2026-10-30), kept up to date for every diagram in the same edit (the settle, §5.3). Core, the canvas, Convert and `doctor` draw and check through the same rule. | A missing import silently drops a Ref in other tools; an import of a missing file breaks the diagram; the same link in two imported files breaks every diagram importing both. |
+| D33 | **No read path for the 1.9 pre-release tree** (Liam, 2026-10-29): it is recognised (path only) and never read; `doctor`, the editor and Convert say to restore the YAML/JSON from git and convert again. The one exception to "never drop a read path" (`docs/dev/compatibility.md`). | It shipped only as pre-releases, and core 0.4.0, the only core that read it, was never published. |
 
 ---
 
@@ -68,7 +76,7 @@ Parser facts verified for this spec, all under `@dbml/parse` 9.1.1, 10.3.1 and 1
 
 ### Goals
 
-1. A new ERD Studio project stores its logical model as DBML, an open format. Tables, relationships and diagrams are `.dbml` files that DBML parsers 9.1 and 11+ read as a multi-file project (10.x too, except that it drops imported tables when any folder in the project's path contains a space; `doctor` warns about such a path), and their positions are in a dbdiagram-style `.dbdiagram` JSON file.
+1. A new ERD Studio project stores its logical model as DBML, an open format. Tables, relationships and diagrams are `.dbml` files that DBML parsers 9.1 and 11+ read as a multi-file project (10.x too, except that it drops imported tables when any folder in the project's path contains a space; `doctor` warns about such a path), laid out layer first (`<layer>/tables/<schema>/`, `<layer>/relationships/`, `<layer>/diagrams/`, D28), with each diagram's positions in its own `Project` (`erd_layout`, D29).
 2. Existing projects keep loading **and** stay fully editable, whatever their shape:
    - schema v4 (with the v4 → v5 prompt), v5 or v6;
    - a flat or foldered library, in `logical-models/` or `tables/`;
@@ -90,7 +98,7 @@ Parser facts verified for this spec, all under `@dbml/parse` 9.1.1, 10.3.1 and 1
 
 ### Non-goals
 
-- **dbdiagram parity.** Pushing the split multi-file project straight to dbdiagram.io is out of scope. So is exact `.dbdiagram` sticky-note layout parity, and hoisting `meta.dbml` to native settings (D19). The single-file Export (`dbml-rich` + `.dbdiagram`) stays the route to dbdiagram.io and does not change.
+- **dbdiagram parity.** Pushing the split multi-file project straight to dbdiagram.io is out of scope. So is hoisting `meta.dbml` to native settings (D19). The single-file Export (`dbml-rich`, its positions in `erd_layout`, which dbdiagram.io ignores) stays the route to dbdiagram.io. Reading the 1.9 pre-release tree is a non-goal too (D33).
 - **The physical stage.** It is derived at runtime and never persisted. Nothing in it changes.
 - **The Confluence app** (private repo `liam-machine/erd-studio-pro`) is not touched. It needs these follow-ups, recorded in `packages/core/CHANGELOG.md` and the PR body:
   - bump `@erd-studio/core` and `@erd-studio/renderer` to 0.4.0;
@@ -108,38 +116,47 @@ Parser facts verified for this spec, all under `@dbml/parse` 9.1.1, 10.3.1 and 1
 
 ### 2.1 Layout
 
+> **Superseded 2026-10-29/30 (D28–D33).** The 1.9 pre-releases wrote the tree of D1 (`tables/[<folder>/]<name>.dbml`, `tables/[<folder>/]_relationships.dbml`, `<layer>/<name>.dbml` + `<layer>/<name>.dbdiagram`). 2.0 writes and reads the **layer-first tree** below, and reads nothing of the 1.9 tree (D33).
+
 ```
 .erd-studio/
-├── layers.json                          JSON, unchanged
-├── templates/*.json                     JSON, unchanged
-├── tables/                              the table library (never a layer in a DBML project)
-│   ├── dim_date.dbml                    one Table per file, top level
-│   ├── _relationships.dbml              Refs owned by top-level tables (only if any)
-│   └── gold/                            optional folder, one level (any non-dot name, as listFoldersOf reads it)
-│       ├── dim_customer.dbml
-│       ├── dim_region.dbml
-│       ├── customer_profile.dbml
-│       ├── fct_order.dbml
-│       ├── bridge_empty.dbml            zero-column table → placeholder column
-│       └── _relationships.dbml          Refs owned by tables in tables/gold/
-└── gold/                                a layer folder
-    ├── sales.dbml                       diagram
-    └── sales.dbdiagram                  its layout (positions, sticky-note boxes); absent until something is placed
+├── README.md                              what the folders are; only ever created, never replaced
+├── layers.json                            JSON, unchanged
+├── templates/*.json                       JSON, unchanged
+└── <layer>/                               bronze / silver / gold / … (a layer id, lower case)
+    ├── tables/<schema>/<name>.dbml        one Table per file, declared Table <schema>.<name>
+    ├── relationships/<file>.dbml          Refs only, plus the use lines they need; flat
+    └── diagrams/<name>.dbml               use lines, sticky Notes, then the Project (positions in erd_layout)
 ```
 
-Path rules:
+**Path grammar** (posix, relative to the semantic dir; `L` a layer folder, `S` a schema folder, `n` a stem):
 
-- **Table file**: `tables/<name>.dbml` or `tables/<folder>/<name>.dbml`. A new file is named exactly as the table, and `<folder>` follows the library's existing folder rules (`groupsByFolder`, `newTablePath`). A library folder is any one-level directory whose name does not start with `.`, the rule `listFoldersOf` (`logicalModelService.ts:744-753`) already applies (`Finance` and `SAP FI` included). `TABLE_FOLDER_PATTERN` stays the rule for folders ERD Studio **creates**, never for folders it reads.
-- **Relationships file**: `tables/_relationships.dbml` or `tables/<folder>/_relationships.dbml`. The constant is `DBML_RELATIONSHIPS_FILE_NAME = '_relationships.dbml'`.
+| Path | Kind | Notes |
+|---|---|---|
+| `layers.json` | `layers` | unchanged |
+| `README.md` | `readme` | root only, exact name |
+| `templates/**` | `template` | unchanged |
+| `logical-models/[f/]n.yml` | YAML `table` | unchanged |
+| `tables/[f/]n.yml` (when `tables/` is not a layer) | YAML `table` | unchanged (the v6 YAML library) |
+| `L/n.json` | JSON `diagram` | unchanged rule; still covers YAML layers named `diagrams` or `relationships` |
+| `L/diagrams/n.dbml` | DBML `diagram` | exactly 3 segments; `layer = L` |
+| `L/tables/S/n.dbml` | DBML `table` | exactly 4 segments; `layer = L`, `schema = S` |
+| `L/relationships/n.dbml` | DBML `relationships` | exactly 3 segments; flat |
+| any other `.dbml`, any `.dbdiagram` | `other` | also `legacy` when it has a 1.9 shape (§3.5) |
 
-  The name `_relationships` (in any case) is reserved **only where a `.dbml` table would be created in `tables/`**: Add, Rename, Draw from dbt, Add Existing, Import and Convert refuse it there with "‘_relationships’ is the name of the relationships file; choose another table name." It is checked by the new `validateNewDbmlTableName` on create paths only, never by `validateTableNameSafety` (which also checks messages about **existing** tables, `payloadValidation.ts:642,687`). An existing YAML table `logical-models/_relationships.yml` or `tables/_relationships.yml` stays listed and editable. Convert refuses a project holding one, naming it.
+**Which folders are a DBML layer** (`isDbmlLayerName(L)`): not empty, no separator, no NUL, not dot-leading; not in `RESERVED_LAYER_NAMES` = `{tables, templates, logical-models}` (case-insensitive); not in `NON_SUBJECT_AREA_DIRS` (unchanged, public); and matching the layer-id pattern `^[a-z][a-z0-9_-]*$`. `relationships` and `diagrams` are allowed layer names: the grammar is by depth. The folder is the layer id and the display name is its `label` in `layers.json` (Liam, 2026-10-30): a `Silver/` folder is not a layer, and `doctor` hints "layer folders are lower-case ids; rename Silver/ to silver/ and set its label in layers.json". A layer need not be in `layers.json` for its tables and relationships to be read; a diagram needs its layer configured to open.
 
-  The file is never mistaken for a layer, a diagram or a table:
-  - it is inside `tables/`, which is never a layer in a DBML project (§3.3);
-  - `classifySemanticFile` (§3.5) names it by its exact reserved stem.
-- **Diagram**: `<layer>/<name>.dbml` where `<layer>` is not in `NON_SUBJECT_AREA_DIRS` and not the table library. Any stem is a diagram, `_x` included; only a stem equal to `_relationships` (in any case) is `other`. A file whose first line starts with the export header `ERD_STUDIO_DBML_HEADER_PREFIX` is `other` where the caller can read it (§3.5).
-- **Layout**: `<layer>/<name>.dbdiagram` beside its diagram, named `layoutFilePathOf(diagramPath)`.
-- **BOM**: every reader strips a leading U+FEFF before parsing (all three parsers reject it, `[1000]`). Host writes go through the document text, which never holds the mark (VS Code writes it back on save). The fs paths (§5.1) put it back when the file had one. Every splice offset is computed on the text without the mark.
+**Fixed names compare exactly.** `diagrams`, `tables`, `relationships` and `.dbml` match byte for byte. VS Code matches globs case-insensitively, so `gold/Diagrams/x.dbml` opens the canvas (its not-a-diagram page) while the classifier says `other`: accepted and pinned (`dbmlGrammar.test.ts`).
+
+**Mixed projects.** JSON diagrams stay at `L/n.json` beside `L/diagrams/`, `L/tables/` and `L/relationships/`. A stem that is both `L/n.json` and `L/diagrams/n.dbml` is listed twice, each `formatConflict`.
+
+**Path builders** (core `storage.ts`, used by every writer): `dbmlTablePath(L, S, n)`, `relationshipsFilePath(L, stem)`, `diagramFilePath(L, n)`. **`use` paths** are always `usePathBetween(fromFile, toFile)`, the shortest relative path, `./` added when it does not start with `../`: `../tables/S/n.dbml` within a layer, `../../L2/tables/S/n.dbml` across layers, spelled exactly as the listing spells the target.
+
+**Reserved layer names.** Add Layer and Convert refuse `tables`, `templates` and `logical-models` (any case), in every project, with "`<name>` is reserved for ERD Studio's own folders; pick another name." (`reservedLayerNameMessage`). Existing layers with those names keep loading.
+
+**README.md** (`semanticReadmeText()` in `src/services/semanticReadme.ts`) is only ever a `create` of an absent root `README.md`: by New Diagram and Set Up when they created the semantic dir of a DBML project, by `writeNewDbmlSubjectArea` when it created the root (Draw from dbt, Import, Open Example), and by Convert when the input has none (nor a `readme.md` in another case). Never on activation, never in a YAML project; the PreToolUse hook is unchanged.
+
+**BOM**: every reader strips a leading U+FEFF before parsing (all three parsers reject it, `[1000]`). Host writes go through the document text; the fs paths put the mark back when the file had one.
 
 ### 2.2 Table file
 
@@ -152,19 +169,20 @@ Path rules:
 
 Two kinds of deviation, handled differently:
 
-- **Readable with a warning; writes refused until fixed.** A `use` line, a `Ref` line, or a column `[ref: …]` setting (the most common hand-written DBML foreign key). The reader blanks their spans before compiling (offsets kept): a `ref:` setting together with its separating comma, and the `[ … ]` brackets as well when nothing else is left in them. The table loads, with the problem `inlineRefInTableFile` / `useInTableFile` / `refInTableFile`. Its message carries the exact line to add instead, for example "Move this to tables/gold/_relationships.dbml as `Ref: fct_order.customer_key >? dim_customer.customer_key`". The Ref is **not** attached as a relationship. Every write to the file is refused with that message until the line is removed.
+- **Readable with a warning; writes refused until fixed.** A `use` line, a `Ref` line, or a column `[ref: …]` setting (the most common hand-written DBML foreign key). The reader blanks their spans before compiling (offsets kept): a `ref:` setting together with its separating comma, and the `[ … ]` brackets as well when nothing else is left in them. The table loads, with the problem `inlineRefInTableFile` / `useInTableFile` / `refInTableFile`. Its message carries the exact line to add instead, for example "Move this to a relationships file (gold/relationships/) as `Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key`". The Ref is **not** attached as a relationship. Every write to the file is refused with that message until the line is removed.
 - **A `dbmlStructure` load error** (§4.7), and the writer refuses the file: `Project`, `TableGroup`, a top-level `Note`, `TablePartial`, `Records`, `DiagramView`, no `Table` or a second `Table`, or a declared name (its table part, with any schema qualifier removed) that differs from the stem **other than in case**.
 
 The Table **must** have at least one column (`[3018]`), which is why the placeholder exists.
 
+**Schema (D30, 2026-10-29).** The table is declared `Table S.n`, `dbmlName` applied to each part (`Table "SAP FI".afih`): `S` spelled exactly as its schema folder is listed, `n` the table name (the stem, compared case-insensitively, D2). `parseTableDbml(text, stem, { schemaFolder })` reads `SemanticTable.schema` from the qualifier, else from `schemaFolder`. A qualifier that differs from the folder reads with the qualifier and adds `schemaFolderMismatch`; an unqualified Table adds `unqualifiedTable` (not under `public/`). The 1.9 `[schema: '…']` setting is ignored on read (never the schema, never `meta`), adds `schemaProperty` when it differs, and keeps its bytes. `DBML_RICH_TABLE_PROPERTIES.schema` stays for the rich export and Import.
+
 **Names and aliases.** The stem and the declared name are compared case-insensitively (D2). The table's in-memory `name` is the declared spelling. A hand-written DBML alias (`Table fct_order as FO`) is read and kept; Refs may use it (§2.4). The writer never writes `as`.
 
-**Example: `tables/gold/fct_order.dbml`**
+**Example: `gold/tables/gold/fct_order.dbml`**
 
 ```dbml
 // Order lines from the shop. Hand-written comments like this one survive every save.
-Table fct_order [
-  schema: 'gold',
+Table gold.fct_order [
   role: 'transaction-fact',
   grain: 'One row per order line',
   alias: 'orders',
@@ -187,13 +205,10 @@ Table fct_order [
 }
 ```
 
-**Example: `tables/gold/dim_customer.dbml`** (composite key, SCD and a self-reference)
+**Example: `gold/tables/gold/dim_customer.dbml`** (composite key, SCD and a self-reference)
 
 ```dbml
-Table dim_customer [
-  schema: 'gold',
-  role: 'conformed-dim'
-] {
+Table gold.dim_customer [role: 'conformed-dim'] {
   customer_key        INT     [note: 'Surrogate key']
   valid_from          DATE    [scd_type: '2']
   customer_id         VARCHAR [natural_key: 'true']
@@ -205,10 +220,10 @@ Table dim_customer [
 }
 ```
 
-**Example: `tables/gold/bridge_empty.dbml`** (zero columns)
+**Example: `gold/tables/gold/bridge_empty.dbml`** (zero columns)
 
 ```dbml
-Table bridge_empty {
+Table gold.bridge_empty {
   _erd_no_columns unknown [
     erd_placeholder: 'true',
     note: 'ERD Studio: this table has no columns yet, and DBML needs one'
@@ -220,8 +235,8 @@ Table bridge_empty {
 
 | `SemanticTable` / `ColumnDef` | DBML (written) | Read also accepts |
 |---|---|---|
-| `name` | `Table <ident(name)>`. The file stem equals `name` exactly. | `Table <schema>.<name>` (schema read from the qualifier, §2.2 schema rule) |
-| `schema` | `schema: '<schema>'` table property when set; absent when unset | the qualifier |
+| `name` | the name part of `Table <ident(schema)>.<ident(name)>`. The file stem equals `name` exactly. | an unqualified `Table <name>` (schema from the folder, with `unqualifiedTable`) |
+| `schema` | the qualifier, spelled as the schema folder (never a setting) | the folder when unqualified; a `[schema: …]` setting is ignored (`schemaProperty`) |
 | `description` | body `Note: '<text>'`, the first element of the body, followed by a blank line (1.9.x wrote it last; an edit keeps it where it is) | header setting `[note: '…']` (the writer edits it where it is) |
 | `modelRole` | `role` | `erd_role` |
 | `grain` | `grain` | `erd_grain` |
@@ -247,197 +262,155 @@ Table bridge_empty {
 - A flag is written as `'true'` only when it is set. Unsetting it removes the property.
 - Names are bare when they are a plain identifier and not a DBML keyword, else double-quoted with `\"` and `\\` escapes. These are the `ident()` and `KEYWORDS` of `exportDbmlRich.ts`, moved to `dbmlText.ts`.
 - Notes and descriptions go through `noteText()`: leading whitespace is dropped (§2.8).
-- A new file: one Table with an unqualified name, its settings inline when there is one, else as a multi-line list; the body `Note` **first**, followed by one blank line; one column per line; an `indexes` block only for a composite PK; two-space indents and `\n` line endings; then the formatter (§2.9). A column's settings go in the canonical order: `pk`, DBML's own (`not null`, `unique`, `increment`, `default`; the writer emits none of these today), ERD Studio's properties (`natural_key`, `scd_type`, `additive_type`, `foreign_key`), meta (`meta_<key>` / `meta_json`, in the map's key order), then `note` **last**. (Until 1.9.x the Note was last and the column `note` came second; such files read and edit as before.)
+- A new file: one Table with a qualified name (`Table S.n`), its settings inline when there is one, else as a multi-line list; the body `Note` **first**, followed by one blank line; one column per line; an `indexes` block only for a composite PK; two-space indents and `\n` line endings; then the formatter (§2.9). A column's settings go in the canonical order: `pk`, DBML's own (`not null`, `unique`, `increment`, `default`; the writer emits none of these today), ERD Studio's properties (`natural_key`, `scd_type`, `additive_type`, `foreign_key`), meta (`meta_<key>` / `meta_json`, in the map's key order), then `note` **last**. (Until 1.9.x the Note was last and the column `note` came second; such files read and edit as before.)
 - A setting an edit **adds** to an existing list goes straight after the last setting there that sorts at or before it in that order (before every setting when none does), so a list in canonical order stays in it and a `note` that was last stays last; every meta setting already there (`meta_json` included) sorts as one, so the meta map keeps its key order. A description an edit adds to a table with no `Note` goes first in the body, with a blank line after it; a composite-PK `indexes` block it adds goes last in the body (before a `Note` that comes after every column, the 1.9.x layout).
 - When editing an existing file, take the indent from the first column line and the EOL from the file (`\r\n` if it holds any).
 
-**Schema rule.** A table written by ERD Studio carries its schema as a property. A hand-written `Table gold.x` is read with schema `gold`. A schema edit on such a table is **refused** with: "tables/…/x.dbml names its schema in the Table name (`Table gold.x`). Change it there, or remove the qualifier and use `[schema: 'gold']`." Ref ends and `use { table … }` specifiers in other files spell the table as declared (its **declared reference**, `gold.x`: §4.5 `resolve`), so changing the qualifier would be a cross-file rename.
+**Schema rule (D30).** The schema is the qualifier and the folder. `renderNewTableDbml` requires a schema; `editTableDbml` keeps the schema unless it is asked to **re-qualify** (a move to another schema folder, `requalify: true`), which rewrites the qualifier of the Table and of its `Metadata` blocks, while the planner re-spells every Ref end and `use` specifier naming the table in the same edit. A schema change any other way is refused: "The schema of a DBML table is its folder: move the table to change it." Ref ends and `use { table … }` specifiers spell the table as declared (its **declared reference**, `gold.x`), so an unqualified hand-written table's ends stay unqualified.
 
 **Settings ERD Studio does not model** (`not null`, `unique`, `increment`, `default`, `headercolor`, `check`, `indexes` other than the PK, enums, comments, custom properties it does not know) are never read into memory and are preserved byte for byte by splicing. An `Enum` used as a column type reads as the type name.
 
 ### 2.3 Relationships file
 
-One file per library folder holds every Ref whose **owner** (§2.4) is a DBML table in that folder.
+A relationships file is `L/relationships/<file>.dbml`, flat, with any stem. Each layer has one **default** file, `L/relationships/L.dbml` (spelled as the layer folder is listed); a team may split Refs across more files by hand. ERD Studio reads every relationships file of every layer and never moves an existing Ref, so a hand-made split survives (D31).
 
-**Example: `tables/gold/_relationships.dbml`**
+**Example: `gold/relationships/gold.dbml`**
 
 ```dbml
-// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
-use { table dim_date }         from '../dim_date.dbml'
-use { table customer_profile } from './customer_profile.dbml'
-use { table dim_customer }     from './dim_customer.dbml'
-use { table dim_region }       from './dim_region.dbml'
-use { table fct_order }        from './fct_order.dbml'
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table calendar.dim_date } from '../../silver/tables/calendar/dim_date.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.dim_region }   from '../tables/gold/dim_region.dbml'
+use { table gold.fct_order }    from '../tables/gold/fct_order.dbml'
 
-Ref: dim_customer.customer_key ?- customer_profile.customer_key
-
-Ref "parent": dim_customer.parent_customer_key >? dim_customer.customer_key
-
-Ref: fct_order.customer_key >? dim_customer.customer_key
-Ref "order date": fct_order.order_date_key >? dim_date.date_key
-Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
-Ref: fct_order.(region_code, country_code) >? dim_region.(region_code, country_code)
+Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key
+Ref "order date": gold.fct_order.order_date_key >? calendar.dim_date.date_key
+Ref "ship date": gold.fct_order.ship_date_key >? calendar.dim_date.date_key
+Ref region: gold.fct_order.(region_code, country_code) >? gold.dim_region.(region_code, country_code)
 ```
 
-(The one-to-one above is owned by `customer_profile`, its FK and second end, which also lives in `gold/`.)
+**Grammar, in order:**
 
-**Grammar:**
+1. **Header.** One line, `DBML_RELATIONSHIPS_FILE_HEADER` (above). Written when the writer creates the file; the writer's header floor recognises any first line starting with `// ERD Studio relationships`.
+2. **`use` lines**, one per table a Ref names, sorted by path (byte order): `use { table <reference> } from '<usePathBetween(file, tablePath)>'`, where `<reference>` is the target's `declaredReference`, exactly as its file spells it.
+3. **Refs**, as before: FK end first, `?` marks (D18), one line per unit, sorted, a blank line between FK-table groups. Ends are `<reference>.<col>` or `<reference>.(<c1>, <c2>)`: `Ref: sap.afih.(MANDT, EQUNR) >? sap.equi.(MANDT, EQUNR)`.
+4. **Pending lines** (D27), unchanged.
 
-- **Header.** The first line is the comment `DBML_RELATIONSHIPS_FILE_HEADER` (the text above). It is written only when the writer creates the file, and never required on read.
-- **`use` lines.** There is one `use { table <declared reference> } from '<posix path relative to this file, with .dbml>'` for **every table named by any Ref in the file**, sorted by path string (byte order) in one block after the header (D17). This is required: `use` is not transitive, and without it the file fails `[4000]` and breaks every diagram that imports it. The reader accepts `use *` too.
-- **Ref lines.** `Ref[ <ident(role)>]: <end> <op> <end>[ <settings as found>]`, one per relationship unit (a composite is one unit), sorted (§4.5), with **one blank line between the Refs of different foreign-key tables** (the sort's first key, so each table's Refs are one group). Every write that changes the file adds a missing one (only a line break, after a Ref whose next Ref, with nothing but comment lines between, belongs to another table); a blank line already there stays, and a no-op write adds nothing. Each end is spelled `<declared reference>.col` or `<declared reference>.(c1, c2)`, using the table's declared spelling (the library's real case, with its schema qualifier if it has one) and each column's **real spelling** from its table file, with `ident()` for every name.
-
-**Operators.** The writer never writes `<`. It always marks the FK end with `?` (D18). The reader accepts every form. A `?` never changes the cardinality; it only decides a one-to-one's direction (below).
+**Operators** are unchanged (the table below holds); the role is the Ref name; composite FKs are one Ref; Ref settings are kept.
 
 | Cardinality (canonical, `from` = FK side) | Written | Read back |
 |---|---|---|
 | many-to-one | `Ref: from.fc >? to.tc` | `>`: from = left |
-| one-to-one | `Ref: to.tc ?- from.fc` (the **FK is the second end**, as DBML, its SQL export and `exportDbmlRich`/`dbmlImport` read it; the `?` also marks it) | `-`, in order: (1) exactly one end marked possibly null (`?-` marks the right end, `-?` the left) → that end is the FK, so everything the writer writes reads back by its mark, whatever the keys say (the shared-primary-key pattern included); (2) a bare or doubly marked `-` → Import's foreign-file rule: from = **right**, unless only the right end is its table's whole primary key, then from = left (so an assistant's FK-first `Ref: fct.fk - dim.pk` reads as meant); (3) an end whose table the reader does not have → from = right. |
+| one-to-one | `Ref: to.tc ?- from.fc` (the FK is the second end) | `-`: the `?`-marked end is the FK; a bare `-` uses Import's foreign-file rule |
 | many-to-many | `Ref: from.fc <>? to.tc` | `<>`: from = left |
-| (one-to-many) | never written: `canonicalRelationship` turns it into many-to-one | `<` (hand-written) is read as `many-to-one` with from = **right**, the canonical reading |
+| (one-to-many) | never written | `<` is read as many-to-one with from = right |
 
-**Other parts of a Ref:**
+**Rules.**
 
-- **Role**: the Ref name. Duplicate names are allowed (verified). There is no role when the Ref is unnamed. Any name is a role, as Import already reads it (`dbmlImport.ts:1023`, `normaliseRelationshipRole`), so `SCHEMA_CONTENT` and the format reference say: "Name a Ref only to give it a role; the name is shown on the line." A constraint name such as `fk_orders_customer` is therefore shown.
-- **Composite FK**: one Ref, `a.(x, y) > b.(u, v)`. In memory it is N entries sharing a `compositeKey`, **derived on read** (§2.4).
-- **Settings**: `[delete: cascade]`, `[color: …]` and any other Ref settings are never read and are kept when the Ref is rewritten (§4.5). Refs take no custom properties (`[3035]`), which is why the role is the name.
+- A relationships file is never deleted automatically (D15).
+- An existing Ref is never moved to another file. It is edited in the file that holds it: a cardinality or role change in place, a column change (a composite gaining a column, `a.b_id > b.id` retargeted to `b.code`) rewritten in place too (`columnChanges`).
+- A link (`linkKey`) held in any relationships file, live or pending, is refused when an edit would write it again: "`<file>` line `<n>` already holds the relationship `<from> → <to>`; edit it there." Two copies after a plan are refused as before (`[5001]` in every DBML tool).
+- An end is re-spelled in place when its table is renamed or **re-qualified** (a move to another schema, `requalified`).
+- **Every `use` line naming a table whose path changes, or that is deleted, is rewritten or cut**, even when no Ref in the file names that table (an orphaned or hand-added line): the index records each file's resolved `use` targets and the planner opens every file holding such a line. Without this a stale line breaks every importing diagram with `[4001]` / `[4000]`.
+- **Only `use`, `Ref`, comments and pending lines belong here.** A diagram imports the whole file (`use *`), so a `Table`, `Enum` or `TableGroup` here reaches every importing diagram in other tools. The reader records them (`DbmlRelationshipsReading.otherElements`), `doctor` reports `relationshipsFileHoldsOther`, and the writer keeps their bytes.
+- A Ref from a DBML owner whose other end is a YAML table is refused (D20).
 
-**Constraints the writer enforces** (`DbmlEditRefused`):
+### 2.4 Ownership, placement and imports
 
-- A Ref whose two ends are the same columns: DBML refuses it.
-- Two units joining the same column sets, either way round (`[5001]`), **in any two relationships files**, not only in one: a diagram importing both files fails the same way. `planDbmlLibraryWrites` checks `linkKey` across every relationships file of the library (§4.6). Convert dedupes double-stored links (§6.1).
-- A Ref from a DBML owner whose other end is a YAML table (D20).
+- **Ends.** A Ref end is matched to a table by its table part, case-insensitively, against the library; a qualified end (`gold.fct_order`) is matched by its name part, its qualifier kept as `ownerQualifier` / `targetQualifier`. Columns are matched case-insensitively and respelled to the table file's real spelling.
+- **Owner.** The owner of a Ref is its canonical `fromModel`, as before.
+- **Attachment.** Every Ref the reader reads, from **any** relationships file, is attached to its owner when the owner is a DBML table (`attachRelationships`; readings processed in path byte order; `locations` maps each link to the file and line that holds it). There is no "home" file and nothing is misplaced (D3 superseded). A Ref owned by a YAML table or by no table is orphaned: not attached, reported by `doctor`.
+- **Duplicates across files** keep one copy by the `mergeLibraryRelationships` ranking, warn, and `doctor` reports `duplicateRef`.
+- **Composite keys** and **dangling ends** are unchanged.
 
-### 2.4 Ownership and reading Refs into memory
+**The relationships index** (`src/services/dbmlRelationshipsIndex.ts`, host-side: its consumers are the planner, Convert, `doctor`, `diff` and the sync plan; core's loader needs only a diagram's own imports). It is built **once per plan from the pre-edit snapshot** (`refEntriesOf` over every relationships file) and never updated while placing, so placement does not depend on edit order and Convert stays byte-deterministic.
 
-- **Ends.** A Ref end is matched to a table by its table part with any schema qualifier removed, case-insensitively, against the library; a DBML alias declared in the referenced table file (`as FO`) is mapped to its table. Columns are matched case-insensitively and respelled to the table file's real spelling (`respellRelationship` semantics).
-- **Owner.** The owner of a Ref is its canonical `fromModel` after the operator table above.
-- **Attachment.** Every Ref the reader reads, from **any** relationships file, is attached to its owner when the owner is a **DBML** table. A Ref that sits in a file other than its owner's folder file is **misplaced**: it is attached and drawn, with a warning, and the next write that changes the owner's relationships, name or folder moves it to its home file in the same edit (§4.6). A Ref owned by a YAML table or by no table is **orphaned**: not attached, reported by `doctor` (§7.1), and never touched by the writer.
-- **Duplicates across files.** When the same link (`linkKey`) is read from two files, or twice from one (a git auto-merge), the reader keeps one with the `mergeLibraryRelationships` ranking (`domain.ts:770-797`), warns, and `doctor` reports the files.
-- **Which files are read.** The host reads every relationships file in the library. Core's loader reads the relationships files of every folder in its probe set (§4.4 step 6), which holds every member's folder; a misplaced Ref in the file of a folder with no member and no layer is the one case only the host draws, and `doctor` reports it as misplaced.
-- **Composite keys.** Refs are attached in file order. For one owner, a composite Ref's members share `compositeKey = nextCompositeKey(entriesSoFar, toModel)`: the planner's own function, **moved to core** (`packages/core/src/relationships.ts`) and re-exported from `src/services/libraryRelationships.ts` (`fk_<to>`, then `_2`, `_3`, …), applied in file order. A one-column Ref gets no `compositeKey`.
-- **Dangling ends.** A dangling end (a target with no table file, or a target column that is gone) is kept in the owner's list: it is not drawn, and a no-op write keeps it byte for byte, exactly like YAML today. Convert never **writes** one (§6.1).
+**Placement of a new Ref** (decision 5, Liam's two-step rule, 2026-10-29), `placeNewRef({ table, layer }, index)`:
+
+1. the file, in any layer, already holding the most Refs of the same FK table (ties: path byte order);
+2. otherwise the FK table's layer default file `<FK layer>/relationships/<FK layer>.dbml`, created when missing.
+
+Convert uses rule 2 only (`newRefsToLayerDefault`). The sync plan's `relationshipsPath` is this placement ("where a new Ref of this FK table goes"); `storedIn` (additive) is the file holding an existing Ref.
+
+**Imports** (decision 6), `relationshipsImportsFor({ members, unlinked }, index, { current, exists })`: a diagram imports **exactly** the relationships files holding a live Ref with both ends among its `use` members, or a pending line (D27) with both ends among the tables it draws (members and `erd_unlinked_tables`; an unlinked member whose table has a `.dbml` file counts as a `use` member), sorted by path; an unreadable file is never added, but one the diagram already imports is kept. The same rule feeds the planner, the settle pass (§5.3), core's writer, the display filter, Convert and `doctor` (`missingRelationshipsUse`, `extraRelationshipsUse`), so they never disagree. A `use *` line to anything other than a relationships file (`otherUses`) is kept verbatim and never dropped.
+
+**Which relationships a diagram draws.** Core's loader reads only the files the diagram imports (`relationshipsUses`). The host filters the same way (`SubjectAreaService` drops a relationship no imported file holds), so the canvas, the CLI and core agree; a file the rule wants but the diagram lacks is logged and toasted once per session (`unimportedRelationshipsMessage`), and every non-layout edit of the diagram heals it.
 
 ### 2.5 Diagram file
 
-**Example: `gold/sales.dbml`**
+**Example: `gold/diagrams/sales.dbml`**
 
 ```dbml
-Project sales {
-  Note: 'Sales star schema'
-  erd_schema_version: '7'
-  erd_show_fk_edges: 'false'
-  erd_layout_options: '{"elk.direction":"RIGHT"}'
-}
-
-use { table fct_order }    from '../tables/gold/fct_order.dbml'
-use { table dim_customer } from '../tables/gold/dim_customer.dbml'
-use { table dim_date }     from '../tables/dim_date.dbml'
-use * from '../tables/_relationships.dbml'
-use * from '../tables/gold/_relationships.dbml'
+use { table gold.fct_order }    from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table calendar.dim_date } from '../../silver/tables/calendar/dim_date.dbml'
+use * from '../../silver/relationships/calendar.dbml'
+use * from '../relationships/gold.dbml'
 
 Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_order'] {
   'Check the grain with finance'
 }
 
-Note "9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f" [color: #3b82f6] {
-  ''
+Project sales {
+  Note: 'Sales star schema'
+  erd_schema_version: '7'
+  erd_show_fk_edges: 'false'
+  erd_layout: '''
+    dim_customer 40 60
+    dim_date 40 360
+    fct_order 400 200
+    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 720 40 220 120
+  '''
 }
 ```
 
-**Grammar, in the order the writer creates it:**
+**Grammar, in the order the writer creates it** (Project LAST, Liam 2026-10-30, so the file opens on what the diagram contains):
 
-1. **`Project <ident(domain)> { … }`.** `domain` is the JSON `domain` value; for a new diagram that is the slug, as `createDomain` writes it today.
-   - Its body holds `Note: '<description>'` (only when the description is non-empty), then the custom keys from the table below, in that order. Each key is written only when the in-memory value is defined.
-   - `erd_schema_version` is always written.
-   - Unknown Project keys (`database_type`, a team's own) are kept byte for byte.
-2. **Table `use` lines**, one per `logical.models` entry, in list order: `use { table <declared reference> } from '<posix path from this diagram to the table file>'` (D17).
-3. **Relationships `use` lines.** There is one `use * from '…'` for the `_relationships.dbml` of **every library folder holding at least one member table**, when that file exists after the edit. They come after the table uses, sorted by path. (The `use` lines of each relationships file are not transitive, so a diagram imports exactly the Refs whose two tables it imports itself; the others are dropped silently by every parser, verified.)
-4. **Notes**: one `Note "<annotation id>" [color: <hex>, linked_table: '<name>'] { '<text>' }` per annotation, in `viewConfig.annotations` order, appended at the end of the file.
-   - The name is always the id passed through `ident()`, so a UUID is quoted (verified).
-   - `color` is the `DBML_RICH_STICKY_COLOURS` hex of the swatch, present only when set. `linked_table` (`DBML_RICH_NOTE_PROPERTIES.linkedTable`) is present only when `linkedModel` is set.
-   - The body is `str(noteText(text))`, and an empty text is `''`.
-   - On read, the colour goes back through `stickyColourOfHex`.
+1. Optional header comments, kept as they are.
+2. **Table `use` lines**, in member order: `use { table <reference> } from '<path>'`.
+3. **Relationships imports**: `use * from '<path>'`, sorted by path, exactly the files of §2.4.
+4. Pending lines (D27), unchanged.
+5. **`Note` blocks**, in annotation order, unchanged.
+6. A blank line.
+7. **`Project <dbmlName(domain)> { … }`**, last, its keys in this order: `Note`, `erd_schema_version: '7'`, `erd_model_folder`, `erd_show_fk_edges`, `erd_layout_options`, `erd_stub_columns`, `erd_unlinked_tables`, then **`erd_layout`** (§2.6). An unset key is not written.
 
-**Project keys.** New constants in `dbmlRichProperties.ts` as `DBML_DIAGRAM_PROPERTIES`:
+**Position rules.** Readers accept the `Project` anywhere (all three parsers do). Writers that create or render a diagram in full put it last. A splice (a layout write, a `use` line change, a settle) leaves an existing `Project` where it is, so a hand-written diagram with `Project` first stays that way. New `use` lines go after the last `use` line (else before the first `Note`, else before `Project`, else at the end), never inside or after the `Project`. The rich export and its goldens are not changed by this rule.
 
-| In memory (v5 object) | Project key | Value |
-|---|---|---|
-| `schemaVersion` | (none in the v5 object, which always holds `WRITTEN_SCHEMA_VERSION` = 5, D8) | |
-| (beside the object) `DbmlSubjectAreaReading.schemaVersion` | `erd_schema_version` | `'7'` (missing on read → 7; not a whole number → `SubjectAreaValidationError`; > `CURRENT_SCHEMA_VERSION` → the "Please update the extension" refusal). Applied only to the Unified and Display `schemaVersion`. |
-| `domain` | Project name | missing Project or name → the file stem |
-| `description` | Project `Note` | `''` when absent |
-| `modelFolder` | `erd_model_folder` | text |
-| `viewConfig.showFkEdges` | `erd_show_fk_edges` | `'true'` / `'false'` |
-| `viewConfig.layoutOptions` | `erd_layout_options` | JSON of the `Record<string,string>` |
-| `stubColumns` | `erd_stub_columns` | JSON array of strings |
-| `logical.models` entries with no `.dbml` table file (D26) | `erd_unlinked_tables` | comma-separated names, in order, after the `use` members on read; never written empty |
-| `layer` | (none) | **always the parent folder name**. A `layer` change is refused by the writer; no handler makes one. |
-| `logical.models` | table `use` lines | names = path stems (§3.4) |
-| `logical.relationships` | (none) | always `[]` on read. A non-empty value is refused by the writer (D5). |
-| `viewConfig.positions` | `.dbdiagram` `tablePositions` | §2.6 |
-| `viewConfig.annotations[i].{id,text,color,linkedModel}` | `Note` blocks | as above |
-| `viewConfig.annotations[i].{x,y,width,height}` | `.dbdiagram` `stickyNoteLayouts` | §2.6. `Annotation.x/y` are required numbers, so the reader places a Note with no layout entry itself, deterministically and parser-free (`placeUnlaidNotes` in `dbdiagramLayout.ts`): in a column to the right of every laid-out table position and Note, 40 px apart, in file order. It never writes; the next layout write persists whatever the canvas holds. Notes an assistant adds therefore never stack on the origin. |
+**Reading** (`parseSubjectAreaDbml(text, filePath)`). `diagramPathOf(filePath)` takes the last three segments; when `segment[-2] !== 'diagrams'` or the layer is not a DBML layer name, the reader throws `SubjectAreaValidationError` with the not-a-diagram message (§3.5). Each `use` path is resolved against the diagram's directory and classified:
 
-**Diagram reading rules** (D6). The reader parses the AST, then **blanks** (replaces with spaces, line breaks kept) the spans of: every `use` declaration; every `Table`, `Ref`, `TableGroup`, `Enum`, `TablePartial`, `Records` and `DiagramView` element; every `Metadata` block (D25: its target is an imported or declared table, gone once those are blanked, so it would be a `[4000]`); every `Note` whose name repeats an earlier Note's (case-insensitive, as `[3003]` compares); and every `Project` after the first. It compiles the rest on its own and reads the Project and Notes from `rawDb`. Only **syntax** errors (1xxx) and errors left after blanking make the file unreadable (`invalid-dbml`).
+- a selective `use { table … }` of a `table` path, or a `use *` of a `table` path: a **member**, named by the file stem;
+- a `use *` of a `relationships` path: `relationshipsUses` (resolved, de-duplicated, file order);
+- a selective `use { table … }` of any other path whose stem passes `isSafeTableName`: still a member, with `usePathMismatch` (D4 tolerance);
+- any other `use *`: `otherUses` (kept verbatim by every writer, reported by `doctor`);
+- anything else: ignored with a warning, bytes kept.
 
-- A blanked `Table`, `Ref`, `TableGroup`, `Enum` or `TablePartial` is not a member and is not drawn. Each gives one warning ("declared in the diagram file; ERD Studio shows only tables from the library through `use` lines") and a `doctor` problem, and is kept byte for byte.
-- A blanked `Metadata` block gives one warning ("a Metadata block is declared in the diagram file; ERD Studio reads table properties only from the table file") and is kept byte for byte. Its values are not applied: ERD Studio reads a table's properties from its table file alone (D6). Other DBML tools, which compile the project, do apply them.
-- A diagram that declares at least one `Table` and has **no** table `use` lines is most likely a dropped-in single-file DBML (a dbdiagram download or a rich export). The canvas shows a banner, "This file holds its own tables. **Import these tables…**", which runs Import DBML on it, and `doctor` raises the next step `import-dbml-file` (§7.1).
-- A repeated Note name or a second Project gives a warning and is kept byte for byte; the first wins. The writer refuses to edit such a diagram (§4.5) until it is fixed, because it cannot tell which copy is meant.
-- **Members.** The member named by a table `use` line is its path's **stem**, when the stem passes `isSafeTableName` and is not `_relationships`, whatever the folders in the path (D4). It is resolved by name in §3.4 order. A path that does not point at the file the name resolves to (a semantic-dir-relative `tables/gold/x.dbml`, a wrong folder, a case difference) is a `doctor` warning `usePathMismatch`. Core's reader sees the path shape and a specifier that names another table (compared without case, since a file may declare its name in another case than its stem, D2); a case difference from the file on disk needs a listing, so only the host and `doctor` see it, and the writer rewrites it on the next edit (§4.5, the target does not exist at that path). Relationships-file `use` lines (stem `_relationships`) are recognised and skipped. A `use` line whose stem fails `isSafeTableName` is ignored with a warning.
-- **Folders.** Every folder named by a member's `use` path that is a library folder by the §2.1 rule goes into `useFolders`.
-- A table listed twice (two `use` lines) is listed twice, as JSON allows.
+`obj.layer` is the layer folder; `useTableDirs` (the distinct `L/tables/S` directories of the member uses, sorted) replaces `useFolders`; `erd_layout` is read per §2.6. The members are the `use` members followed by `erd_unlinked_tables` (D26). Everything else of the old §2.5 holds: the Project keys table (`DBML_DIAGRAM_PROPERTIES` gains `layout: 'erd_layout'`), the blanking rules (D6), the warnings for Tables, Refs, TableGroups and Metadata declared in a diagram, the **Import these tables…** banner, `writable: false` for a repeated Note name or a second Project, and a table listed twice.
 
-### 2.6 Layout file (`<name>.dbdiagram`)
+### 2.6 Positions: `erd_layout` (the `.dbdiagram` layout file is removed)
 
-This is the JSON shape `dbdiagramLayout.ts` documents (version `"3.0.0"`). ERD Studio owns two lists in it:
+> **The 1.9 layout file is gone (D29).** Until 2.0, positions lived in `<layer>/<name>.dbdiagram`, dbdiagram's own layout JSON, beside the diagram. It was removed completely, read and write, with the dbdiagram.io export/import sidecar and the CLI's `--format dbml-layout` (now a usage error pointing at `dbml-rich`). `editDiagramLayout`, `readDbdiagramLayout`, `toDbdiagramLayout` and the rest of `dbdiagramLayout.ts` are deleted (core 0.4.0, unpublished).
 
-```json
-{
-  "version": "3.0.0",
-  "gridEnabling": false,
-  "currentViewName": null,
-  "defaultView": {
-    "detailLevel": "All",
-    "relationshipMode": "All",
-    "tablePositions": [
-      { "name": "fct_order", "schemaName": "public", "x": 400, "y": 200 },
-      { "name": "dim_customer", "schemaName": "public", "x": 40, "y": 40 },
-      { "name": "dim_date", "schemaName": "public", "x": 40, "y": 360 }
-    ],
-    "tableGroupCollapseStates": [],
-    "stickyNoteLayouts": [
-      { "name": "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c", "x": 720, "y": 40, "width": 220, "height": 120 },
-      { "name": "9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f", "x": 720, "y": 200 }
-    ],
-    "referencePaths": []
-  },
-  "views": {}
-}
+**Where it lives.** The first entry whose key matches `erd_layout` (case-insensitive) in the first `Project` of a diagram, written as the Project's last key. `viewConfig.positions` and the annotations' `x`, `y`, `width`, `height` come from it.
+
+**Text format** (the decoded value):
+
+```
+<eol><I>  <line 1><eol><I>  <line 2>…<eol><I>
 ```
 
-**`tablePositions`** mirror `viewConfig.positions` in order:
+`I` is the Project body's indentation (the first existing entry's, else two spaces): the key line is `<I>erd_layout: '''`, each entry line is indented `I + 2`, the closing `'''` sits at `I`. `<eol>` is the file's own line ending. The literal is always triple-quoted; `\` is written `\\` and `'` is written `\'`; nothing else is escaped.
 
-- `name` is the position key exactly, and `schemaName` is always `"public"` because names are unqualified (D2).
-- x and y are canvas pixels rounded to two decimals.
-- On read, entries are keyed by `name`; `schemaName` is ignored, and the first of a repeated name wins (`readDbdiagramLayout`). Stray positions (names not in the diagram) are kept, as JSON keeps them.
+**Lines.** Table lines first, sorted by name in code-unit order: `<name> <x> <y>`. Then note lines, sorted by id: `note/<id> <x> <y>`, or `note/<id> <x> <y> <w> <h>` when a size is set (a missing or non-positive dimension is written `0` and reads back as absent). Numbers are `roundLayoutNumber(n)`: two decimals in the shortest form (`40`, `1.5`, `-2`), `-0` as `0`, and `Math.round` from 1e12 up (idempotence). A table line uses the member's spelling and drops any case variant of it. An unrepresentable name (empty, padded, holding a line break, or a table name starting `note/`) is skipped with a log line (Convert keeps it in the diagram's `// Kept from` block). With no entry the key is cut or never written. **Every write rewrites the whole value**; a write whose canonical entries equal the current ones (`sameErdLayout`) returns the text byte for byte.
 
-**`stickyNoteLayouts`** is the **documented best-guess shape** `{ name, x, y, width?, height? }`, which `readDbdiagramLayout` already reads:
+**Reading** (`readErdLayout(value, noteIds?)`, pure; `readErdLayoutDbml(text)`, AST):
 
-- `name` is the Note's name (the annotation id);
-- `width` and `height` are written only when they are defined and > 0.
+- The value is the parser's **decoded literal from the AST**, never re-decoded by regex (verified in 9.1.1, 10.3.1 and 11.0.0: `\'` decodes to `'`; `rawDb` keeps the LAST key, so the first is taken from the AST). A non-string value is `layoutBadValue`, an error (other tools reject the diagram).
+- **Hand edits must never end a line inside the value with `\`**: DBML joins it with the next line. The writer never produces one.
+- Lines are split on `\r?\n` and trimmed; empty lines and conflict-marker lines are skipped. A table line is `^(.*?\S)\s+(NUM)\s+(NUM)$` (names may hold spaces: parsed from the right). A note line tries the 4-number and 2-number forms, choosing by the known note ids. The first line for a name wins (`layoutBadLine` for a later one); any other line is `layoutBadLine` and that table is placed automatically. A repeated key is `layoutDuplicateKey`: only the first is read or rewritten.
+- Lines map to members exact first, then case-insensitively. Table lines for non-members are **kept** (they are in `viewConfig.positions`); every handler that removes a member deletes its key, case-insensitively. Note lines with no `Note` block are dropped on the next write. Unplaced notes are placed by `placeUnlaidStickies`.
+- **Conflict markers** inside the value are `layoutMergeConflict` (an error, `mergeConflict: true`): read best effort (markers skipped, first copy wins), and **every write that would change `erd_layout` is refused** while they remain, when the conflicted diagram is the one being edited (`DbmlEditRefused`: "… has a merge conflict in erd_layout (line n). Only positions differ: keep either side, then try again. Positions are not saved until then."). An edit that leaves the layout unchanged still writes. **Cascades and settles never refuse on it**: a conflicted diagram re-rendered as another diagram keeps its `erd_layout` byte-identical (`keepLayoutIfConflicted`).
 
-dbdiagram may not read this shape, and parity is a non-goal.
-
-**Writing (`editDiagramLayout`, parser-free, main entry):**
-
-- When the text parses as a JSON object, ERD Studio replaces only `defaultView.tablePositions` and `defaultView.stickyNoteLayouts` and keeps every other key and value as parsed. It writes `JSON.stringify(obj, null, 2) + '\n'`.
-- It returns `null` (no write) when both lists are deep-equal to what is there.
-- A missing file is created only when there is at least one position or sticky layout.
-- A file that does not parse as a JSON object is **refused** for writing. The read ignores it with a warning (D7).
-
-The layout file is machine JSON: the two-space re-serialisation is its canonical form, and a file written by ERD Studio round-trips byte-identically.
+**A drag is one splice** of the diagram's `erd_layout` (§5.3), one native undo step: no layout file, no undo anchor, no cross-file undo.
 
 ### 2.7 `layers.json` and `templates/`
 
@@ -489,7 +462,7 @@ Every `.dbml` ERD Studio writes is in one layout, produced by **one whitespace-o
 - **F8** A line break is significant in DBML, so breaks are only added or removed inside settings lists; anything the formatter does not explicitly understand is only re-indented.
 - **Never inside a token**: string literals (a triple-quoted note's inner indentation is part of its value), quote styles, backtick expressions, quoted names and block comments stay byte for byte. Long notes are never wrapped.
 
-**Where it runs (W4).** Host modules write DBML only through `src/services/dbmlWriters.ts` (`test/unit/dbmlWriters.test.ts` fails if another module imports a writer from core): core's splicer, then `formatDbml`. An edit whose splice returns the text it was given returns it **unformatted**, so a no-op stays byte-identical and callers keep detecting it by comparing texts; a file is reformatted only by a write that changes it. When the formatter declines (it should not for ERD Studio's own output) the unformatted text is written and the reason logged at `info`. **Never on the layout-only path**: a canvas move writes the `.dbdiagram` and a one-character undo anchor that leaves the diagram's bytes identical (`applyFileWrites`); neither goes near the formatter (`test/unit/layoutOnlyEdit.test.ts`). Convert's composed texts (a table or diagram with the YAML's kept `//` lines above it) are formatted once more as a whole; Convert recognises a half-applied earlier run written in the 1.9.x layout as resumed (`sameConvertedTable`: the same characters apart from white space, and the same table) and leaves those files as they are.
+**Where it runs (W4).** Host modules write DBML only through `src/services/dbmlWriters.ts` (`test/unit/dbmlWriters.test.ts` fails if another module imports a writer from core): core's splicer, then `formatDbml`. An edit whose splice returns the text it was given returns it **unformatted**, so a no-op stays byte-identical and callers keep detecting it by comparing texts; a file is reformatted only by a write that changes it. When the formatter declines (it should not for ERD Studio's own output) the unformatted text is written and the reason logged at `info`. **Never on the layout-only path**: a canvas move splices only the diagram's `erd_layout`, unformatted (`layoutOnlyText`); it never goes near the formatter (`test/unit/layoutOnlyEdit.test.ts`). Convert's composed texts (a table or diagram with the YAML's kept `//` lines above it) are formatted once more as a whole; Convert recognises a half-applied earlier run written in the 1.9.x layout as resumed (`sameConvertedTable`: the same characters apart from white space, and the same table) and leaves those files as they are.
 
 **Order is the writer's, not the formatter's (W1–W3).** The formatter never moves an element or a setting. New content follows §2.2 (Note first, canonical settings order) and §2.3 (blank lines between foreign-key tables); an edit of an existing file keeps its element and setting order. The blank line between foreign-key tables' Refs is the relationships writer's (`separateRefGroups`), added by any write that changes a relationships file, and a Ref an edit adds joins its own table's group (after that table's last Ref, never below the blank line before the next table's); Format Document keeps blank lines but adds none, so it does not group a hand-written file's Refs.
 
@@ -559,89 +532,25 @@ An empty `logical-models/` is YAML evidence exactly as `projectNamingOf` treats 
 
 ### 3.3 `tables/`: library or layer
 
-`tablesDirIsLayer()` (`logicalModelService.ts:41`) gains one input, *DBML evidence in `tables/`*: a `*.dbml` file at the top level or one folder down (no content sniff). With *json* = a `*.json` file at the top of `tables/` and *listed* = `layers.json` lists `tables`:
-
-| DBML evidence | json | listed | `tables/` is | `doctor` |
-|---|---|---|---|---|
-| no | any | any | a layer when json or listed (**today's rule, unchanged**) | |
-| yes | no | no | the library | |
-| yes | no | yes | **the library**: the DBML evidence beats a `tables` entry that a 1.x first-run layer prompt or **Initialize Layer Config** wrote (both count only `.yml`, `logicalModelService.ts:62-71`, `extension.ts:2541-2547`, `:2941-2966`) | error `tablesLayerConflict`: "layers.json lists `tables`, but tables/ is the DBML table library. Remove the `tables` layer from layers.json." |
-| yes | yes | no | **the library**; each `tables/*.json` is classified `other` | error `tablesLayerConflict` naming the `.json` files |
-| yes | yes | yes | a layer (the YAML project's explicit layer wins; its `.dbml` files are `other`) | error `tablesLayerConflict` naming the `.dbml` files |
-
-- `hasTablesLibrary()` (`:62`) becomes: `tables/` exists, is not a layer, and holds a `*.yml` **or a `*.dbml` (relationships files included)** at the top level or one level down.
-- `LayerService.detectLayersFromFilesystem` therefore never offers a DBML `tables/` as a layer, and `addLayer` refuses `tables` (as today) in every project.
-- The canvas shows the `tablesLayerConflict` text as a warning toast once per session in a project where it holds. Nothing reclassifies silently.
-- Every way a 2.0 project is created writes `layers.json` (`setupSemanticDirectory`, `createDomain`, the harness's new-project instructions, §7.3), and `doctor` raises a warning `missingLayersConfig` when a project with a DBML library has none.
+In the layer-first tree a top-level `tables/` folder is **never DBML storage**: it is the v6 YAML library, or a YAML project's `tables` layer, exactly as before 2.0 (`tablesDirIsLayer()` keeps today's rule, with no DBML input; `hasDbmlEvidence` is gone). A `.dbml` under it is a 1.9 shape (§3.5), and `tables` is a reserved layer name (Add Layer and Convert refuse it). `detectLayersFromFilesystem` never offers `tables` when `tables/` holds any `.dbml`. `tablesLayerConflict` is gone; `doctor` raises `missingLayersConfig` when a project with DBML tables has no `layers.json`, and `dbmlLayerNotConfigured` for a layer folder holding tables or relationships that `layers.json` does not list.
 
 ### 3.4 Table resolution order (parity between core and host)
 
-One function in core decides where a name lives:
+**YAML tables** keep `tableFileCandidates` (`logical-models/` first, then `tables/`, each top level before folders; its `dbml` option is removed). **DBML tables** are found by path, not by probing:
 
-```ts
-export function tableFileCandidates(prefix: string, name: string, folders: readonly string[], options: { dbml: boolean }): string[];
-```
-
-The candidates are:
-
-1. `logical-models/<name>.yml`, then `logical-models/<f>/<name>.yml` for each `f` in `folders`;
-2. then, for each `sub` in `['', ...folders]`: `tables/<sub><name>.dbml` (only when `options.dbml`), then `tables/<sub><name>.yml`.
-
-`folders` is sorted with `localeCompare` and de-duplicated. Within one directory `.dbml` beats `.yml`; across directories the existing rule holds (`logical-models/` first, top level before folders).
-
-**Using it:**
-
-- **Core** uses it in `loadDisplaySubjectArea` (`loadDisplayDomain.ts:276-286`). `folders` is the domain layer, plus every layer id, plus (for a DBML diagram) every library folder named in its `use` lines (`useFolders`). Core has only `readFile`, so it probes with the member's spelling, which on a case-sensitive file system finds exactly what the YAML probe finds today; the file's declared name then sets the identity (D2).
-- **The host** (`findTableFile`, `listTableFiles` shadowing) applies the same precedence over the folders it lists, with `.dbml` probed in the same order. It **resolves from the directory listing**, never with `fs.existsSync`: on macOS and Windows `existsSync('tables/dim_x.dbml')` is true for `tables/Dim_X.dbml`, and the looked-up spelling would leak into `parseTableDbml` (a false `nameMismatch`) and into `use` paths that then fail on Linux. `findTableFile` matches the listing case-insensitively (as `findTableNameIgnoringCase` already does) and always returns, and passes on, the **listed** stem and path.
-- A name found in two places is a reported conflict, as today (`shadowedBy`). `doctor` adds the cross-format case "x.yml and x.dbml".
-- **Parity of folders.** Core's probe set is narrower than the host's listing (a member in a non-layer folder that no `use` path names, which only a JSON diagram can have). That is today's YAML behaviour, unchanged. Convert's self-check therefore resolves both sides from the input file **listing** (§6.1), never through core's probe.
+- **Core's loader**, for a DBML diagram's member: the resolved `use` path (only when it stays inside the semantic dir), then `<dir>/<name>.dbml` for each of the diagram's `useTableDirs`, then the YAML candidates. An `erd_unlinked_tables` member goes straight to the `useTableDirs` probe, then YAML. A table is parsed with `schemaFolder` = its path's schema folder. JSON diagrams read no DBML tables and no relationships (an accepted parity gap; the extension draws them).
+- **The host** lists everything once (the library index: the semantic dir, both YAML libraries, each layer's `tables/<schema>/` and `relationships/`; `1 + layers × (2 + schemas)` directories in a DBML project) and resolves a name from the listing, never with `existsSync`. A DBML table is shadowed by any earlier file of the same name, YAML or DBML, in any case; a DBML table shadowed by a YAML file is a cross-library duplicate (a project part-way through Convert), one shadowed by another DBML table an ordinary duplicate (`duplicateTableName`, **Give Duplicate Its Own Name**). On a DBML diagram, the canvas resolves a member by its `use` path first, when that is a listed table file other than the by-name winner.
+- Table names stay **unique across the whole project** (all layers and schemas, D30).
 
 ### 3.5 File classification (single classifier)
 
-In the parser-free core module `packages/core/src/storage.ts`:
+`classifySemanticFile(relPath, { tablesDirIsLayer })` (core `storage.ts`, parser-free) implements the §2.1 grammar. `SemanticFileKind` gains `'readme'` and loses `'layout'`; `SemanticFileClass` gains `schema` and `legacy`; DBML tables and relationships files carry `layer`. `firstLine` is gone (the path decides). New path helpers: `dbmlTablePath`, `relationshipsFilePath`, `diagramFilePath`, `diagramPathOf`, `dbmlTreePathOf`, `usePathBetween`, `isDbmlLayerName`, `RESERVED_LAYER_NAMES`, `isReservedLayerName`, `SEMANTIC_README_NAME`, `dbmlNotADiagramMessage`. Removed: `layoutFilePathOf`, `diagramPathOfLayout`, `relationshipsFilePathOf`, `isReservedTableName`, `DBML_RELATIONSHIPS_FILE_STEM` / `_NAME`.
 
-```ts
-export type SemanticFileKind = 'diagram' | 'table' | 'relationships' | 'layout' | 'layers' | 'template' | 'other';
-export interface SemanticFileClass { kind: SemanticFileKind; storage?: 'json' | 'dbml' | 'yaml'; layer?: string; folder?: string; name?: string; }
-/** `relPath`: posix, relative to the semantic dir. `firstLine`: the file's first line, when the caller has read it. */
-export function classifySemanticFile(relPath: string, options: { tablesDirIsLayer: boolean; firstLine?: string }): SemanticFileClass;
-export function subjectAreaStorageOf(path: string): 'json' | 'dbml' | undefined; // by extension
-export function relationshipsFilePathOf(tableFilePath: string): string;     // same dir + DBML_RELATIONSHIPS_FILE_NAME
-export function layoutFilePathOf(diagramPath: string): string;              // .dbml → .dbdiagram
-export function diagramPathOfLayout(layoutPath: string): string;            // .dbdiagram → .dbml
-export function isReservedTableName(name: string): boolean;                 // sameName(name, '_relationships')
-export function isLibraryFolderName(name: string): boolean;                 // non-empty, no '/', '\\', NUL, not '.'-leading: the listFoldersOf rule
-// posix helpers (core may not import node:path): normalisePosix, joinPosix, dirnamePosix, relativePosix, resolvePosix, isInsidePosix
-```
+**The 1.9 pre-release tree** (D33): `legacyDbmlShapeOf(relPath)` is path-only and returns `'layout'` for any `.dbdiagram`; `'relationships'` / `'table'` for `tables/n.dbml` or `tables/f/n.dbml` (by the `_relationships` stem); `'diagram'` for a two-segment `d/n.dbml` (not hidden, not `templates`). The classifier returns `{ kind: 'other', legacy }` for these, so a 1.9 `_relationships.dbml` is never read as a table. The host verdict, `detectLegacyDbmlTree(semanticRoot)` (`src/services/legacyDbmlTree.ts`), is bounded (one listing of the root, of each top-level folder, of `tables/` and its folders), memoised by directory signatures, and true when there is a `.dbml` under top-level `tables/` or a depth-2 `.dbdiagram`. It drives one `doctor` error (`legacyDbmlTree`, next step `reconvert-dbml-project`, silencing every per-file check of the listed files), a once-per-session toast, Convert's refusal while the files remain, and the custom editor's not-a-diagram page. Core's loader throws `legacyDbmlFileMessage(rel)` for a legacy shape.
 
-`ERD_STUDIO_DBML_HEADER_PREFIX` moves from `src/services/dbmlImportParse.ts:196` to `packages/core/src/dbmlRichProperties.ts` and is re-exported there, so the classifier can use it.
+**The not-a-diagram texts** (`dbmlNotADiagramMessage`, shared by core's loader, `parseSubjectArea`, the CLI and the editor page, which adds "To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor."): a legacy shape gets the 1.9 text; a table or relationships file gets "`<path>` is a DBML table or relationships file, not a diagram. Open a diagram in `<layer>/diagrams/`."; any other `.dbml` gets "`<path>` is not a DBML diagram. ERD Studio diagrams live in `<layer>/diagrams/<name>.dbml` (the folder names are lower-case)."
 
-**Rules**, with `relPath` split into segments (folders by `isLibraryFolderName`):
-
-- `layers.json` → `layers`.
-- `templates/**` → `template`.
-- `logical-models/<n>.yml` or `logical-models/<f>/<n>.yml` → `table` (yaml).
-- When `tables/` is not a layer (§3.3):
-  - `tables/[<f>/]<n>.dbml` with `isReservedTableName(n)` → `relationships`;
-  - `tables/[<f>/]<n>.dbml` → `table` (dbml);
-  - `tables/[<f>/]<n>.yml` → `table` (yaml), `_relationships.yml` included (an existing YAML table, §2.1);
-  - anything else under `tables/` → `other`.
-- `<d>/<n>.json` → `diagram` (json) when `d` ∉ `NON_SUBJECT_AREA_DIRS` and `d` is not the library.
-- `<d>/<n>.dbml` → `diagram` (dbml) when the `.json` rule holds, `<n>` is not reserved, **and** `firstLine` (when given) does not start with `ERD_STUDIO_DBML_HEADER_PREFIX` (a rich export saved there is `other`). Callers that list diagrams (`listSubjectAreas`, `doctor`, `inventory`, Convert's input reader) read the first line and pass it; the watchers and the decoration provider classify by path only.
-- `<d>/<n>.dbdiagram` → `layout`, under the path conditions of the `.dbml` rule.
-- Everything else → `other`.
-
-**`NON_SUBJECT_AREA_DIRS` is not changed.** It is a public export, and the library exclusion depends on `tablesDirIsLayer`.
-
-**Users:**
-
-- `isSubjectAreaFilePath` (`domainService.ts:68`);
-- `classifySemanticPath` (`FileWatcherService.ts:73`);
-- `SemanticFileDecorationProvider`;
-- `listSubjectAreas`, `listTableFiles`;
-- the custom-editor reroute;
-- `doctor`, `inventory`;
-- the Convert input reader.
+**Users:** `isSubjectAreaFilePath`, the watchers, `SemanticFileDecorationProvider`, the library index, `listSubjectAreas`, `orderFileWrites`, the custom editor, `doctor`, `inventory`, Convert's input reader (`listSemanticFiles`), the feedback redaction.
 
 ### 3.6 Behaviour of older software on a DBML project
 
@@ -657,6 +566,8 @@ export function isLibraryFolderName(name: string): boolean;                 // n
 ## 4. Architecture
 
 ### 4.1 Module map
+
+> The map below is the first build's. The layer-first tree (2026-10-29) deleted `dbdiagramLayout.ts` and added `packages/core/src/erdLayout.ts` (the parser-free codec), `packages/core/src/dbml/erdLayoutDbml.ts`, the tree helpers in `storage.ts`, `src/services/dbmlRelationshipsIndex.ts`, `src/services/dbmlDiagramSummaries.ts`, `src/services/legacyDbmlTree.ts`, `src/services/semanticReadme.ts`, `src/services/semanticFiles.ts` and `src/providers/dbmlFileKinds.ts`; `dbmlDiagramSettle.ts` holds the one settle rule. §2–§5 and §9 are current.
 
 **Core, main entry (parser-free, imports no `@dbml/parse`):**
 
@@ -810,25 +721,34 @@ Every reader strips a leading BOM first (§2.1) and takes an optional last `pars
 
 ### 4.4 `loadDisplaySubjectArea` with DBML
 
-The new options are `dbml?: DbmlStorageReader` and `maxRelationshipsChars?: number` (default `Infinity`, checked by the same finite-limit rule as the others). A `.dbml` `domainPath` without `dbml` throws `SubjectAreaValidationError("<path> is a DBML diagram; pass dbml: dbmlStorageReader from '@erd-studio/core/dbml' to read it.")`.
+The options `dbml?: DbmlStorageReader` and `maxRelationshipsChars?: number` are unchanged. A `.dbml` `domainPath` without `dbml` still throws the "pass dbml" `SubjectAreaValidationError`.
 
-**Not a diagram.** Before reading, core classifies `domainPath` relative to the semantic dir by path shape: a `.dbml` under `tables/` (top level or one folder down, whatever `layers.json` says: a `.dbml` there is DBML evidence, so §3.3 makes `tables/` either the library, where it is a table, or a YAML project's layer, where it is `other`; `classifySemanticFile` never calls it a diagram under either answer, so core needs no listing), or a stem equal to `_relationships`, throws `SubjectAreaValidationError("<path> is a DBML table or relationships file, not a diagram. Open a diagram in a layer folder.")`. This is what the `errors.dbml-not-a-diagram` golden records.
+**Not a diagram.** Before reading anything, a `.dbml` whose path is not `<L>/diagrams/<n>.dbml` is refused with `dbmlNotADiagramMessage(domainPath)` (§3.5): the 1.9 text for a legacy shape, the table-or-relationships text, or the not-a-diagram text.
 
 The steps for a DBML diagram:
 
-1. Read the diagram and check `maxDomainChars`. Read `layoutFilePathOf(domainPath)`; if it is over `maxDomainChars`, ignore it with a warning.
-2. Call `dbml.parseSubjectArea`.
-3. Read `layers.json` as today. `resolveSubjectAreaLayer(obj.layer = folder, …)`.
-4. `maxModels` counts `members`.
-5. Resolve each unique, filtered name through `tableFileCandidates(prefix, name, folders, {dbml: true})`, where `folders` = the sorted, unique union of the domain layer, the layer ids and `useFolders`. Parse with `parseTableText` (`.yml`) or `dbml.parseTable` (`.dbml`). `maxYamlChars` limits a `.dbml` table file as written; over it, the table is a placeholder, like `YamlCharLimitError`. `maxYamlNodes` does not apply to DBML (document this on the option). A member that resolves to a `.yml` is drawn and gets a warning (D20).
-6. Read the relationships file of **every folder in the probe set** (`''` and every entry of `folders`) that exists; that set holds every folder where a member resolved to a `.dbml`. Apply `maxRelationshipsChars`; over it, read no Refs from **that file** and warn "tables/…/_relationships.dbml is larger than the limit; its relationships are not drawn". Call `dbml.readRelationships` on each, then one `attachRelationships` over all of them onto the DBML tables read in step 5 (§2.4: misplaced Refs attach too, duplicates are removed), with `partial: true`: core read only the members, so a Ref whose owner it did not read (a table off this diagram, or one whose file did not read) is skipped without a warning rather than reported orphaned. The host passes the whole library and leaves `partial` unset. Unreadable files and problems become warnings.
+1. Read the diagram and check `maxDomainChars`. There is no layout file: positions come from `erd_layout`.
+2. Call `dbml.parseSubjectArea(text, domainPath)`.
+3. Read `layers.json` as today; `resolveSubjectAreaLayer(obj.layer = L, …)` throws for an unconfigured layer.
+4. `maxModels` counts members.
+5. Resolve each member (§3.4): its resolved `use` path inside the semantic dir, then each `useTableDirs` entry, then YAML. A path holding `\` is never read. Parse with `dbml.parseTable(text, stem, { schemaFolder })`.
+6. Read exactly the diagram's `relationshipsUses` (byte-sorted), each under `maxRelationshipsChars`; a missing one warns "`<domainPath>`: imports `<rel>`, which does not exist; its relationships are not drawn". Attach them (`attachRelationships`).
 7. Build and place positions as today. Set the Unified and Display `schemaVersion` from `reading.schemaVersion` (D8).
 
-**JSON diagrams** with the `dbml` option also probe `.dbml` candidates and run step 6 when any member is found as `.dbml`, so a JSON diagram in a mixed project draws DBML tables and their library relationships. Without the option, JSON loading is byte-for-byte today's behaviour.
+**JSON diagrams** read no DBML tables and no relationships files, with or without the option (a JSON diagram listing DBML tables is a mixed project the extension draws; core does not).
 
-The four error classes are unchanged. `'invalid-dbml'` is a new `SubjectAreaFileError` reason: a public type change, noted in the 0.4.0 "Changed (breaking)" section.
+The four error classes and `'invalid-dbml'` are unchanged.
 
 ### 4.5 Writers (splicer design)
+
+> **2.0 tree deltas (D28–D33), which win over the text below where they differ:**
+> - `renderNewTableDbml(table)` requires `table.schema` (non-empty, a library folder name; else `Error('renderNewTableDbml: a DBML table needs a schema')`) and writes `Table <dbmlName(schema)>.<dbmlName(name)>`; `schema` is never a setting.
+> - `editTableDbml(text, desired, { rename?, requalify?, schemaFolder? })`: `desired.schema` undefined, or equal to the effective schema, keeps it; a different schema is refused ("The schema of a DBML table is its folder: move the table to change it.") unless `requalify`, which replaces (or inserts) the qualifier leaf of the Table name and of every `Metadata Table` / `Metadata Column` block in the file. The old "schema in the Table name" refusal is deleted.
+> - **One spelling.** Every writer that creates or re-qualifies a table first sets `schema = schemaAsListed(layer, schema)` (an existing `L/tables/S'/` matching case-insensitively wins) and uses that one string for the folder, the header, the reference, every `use` specifier and every Ref end: a header spelled differently from a specifier fails all three parsers with `[4000]`.
+> - `editRelationshipsDbml`: the header is `DBML_RELATIONSHIPS_FILE_HEADER`'s new text; `incoming` is removed (no Ref ever moves between files); `requalified` re-spells the ends and `use` specifiers of re-qualified tables; `columnChanges` (stored line → desired unit) rewrites a Ref in place for a column change, keeping its position, settings and comment; a table in `pathChanged` (or `requalified`) has every `use` line rewritten or cut, even with no Ref naming it.
+> - `editSubjectAreaDbml`: `relationshipsFilesFor` is replaced by `relationshipsImportsFor(memberNames, current, unlinked)` (§2.4); positions and sticky boxes go into `erd_layout` in the same splice (§2.6), refused on a conflicted value unless `keepLayoutIfConflicted`; new `use` lines and a new `Project` follow §2.5's position rules. `renderNewSubjectAreaDbml` writes the Project last, with `positions`.
+> - The layout file and `editDiagramLayout` are gone: there is no second file per diagram.
+
 
 All writers live in `packages/core/src/dbml/`. They are pure, deterministic and never touch disk. The common contract:
 
@@ -953,56 +873,18 @@ The layout file is handled separately by `editDiagramLayout(oldLayoutText, after
 
 ### 4.6 Library write planner (host, pure)
 
-`src/services/dbmlLibraryWrites.ts`:
+`src/services/dbmlLibraryWrites.ts`, `planDbmlLibraryWrites(snapshot, ops)`; throws `DbmlEditRefused`.
 
-```ts
-export interface DbmlLibrarySnapshot {
-  semanticDir: string;
-  /** Every table file the library lists (TableLibraryService.listTableFiles), winners only, keyed lower-case; paths and stems from the listing (D2). */
-  tables: Map<string, { name: string; reference: string; path: string; storage: 'yaml' | 'dbml'; folder: string; columns: string[] }>;
-  /** Every relationships file in the library, with its reading (cached AST, §5.1). */
-  relationshipsFiles: Map<string /* path */, DbmlRelationshipsReading>;
-  /** Every existing path the snapshot knows (tables, relationships files, diagrams, layouts). */
-  files: ReadonlySet<string>;
-  readText(path: string): string | null;          // open document text first, else disk; BOM stripped
-}
-export interface DbmlLibraryOps {
-  save: Array<{ model: SemanticTable; fromName?: string }>;   // DBML tables only; YAML saves stay on today's path
-  delete: string[];
-  move?: Array<{ name: string; toFolder: string }>;          // organise
-  newTableFolder?: string;                                    // where new tables go (newTablePath rules)
-}
-export interface DbmlLibraryWritePlan {
-  writes: FileWrite[];
-  /** Resolver AFTER the plan: real name, declared reference, real column spellings, path, storage. */
-  resolveTable(name: string): { name: string; reference: string; columns: (col: string) => string | undefined; path: string; storage: 'yaml' | 'dbml' } | undefined;
-  relationshipsFilesFor(names: readonly string[]): string[];
-  fileExists(path: string): boolean;
-  /** Relationships files this plan creates (diagrams with members in that folder need a use line). */
-  createdRelationshipsFiles: string[];
-  /** Tables whose path changed (rename/move) or that were deleted: diagrams using them need a re-render. */
-  pathChanged: Map<string /*old lower*/, string | null /*new path, null = deleted*/>;
-}
-export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLibraryOps): DbmlLibraryWritePlan; // throws DbmlEditRefused
-```
+- **Snapshot.** `DbmlSnapshotTable` carries `layer` and `schema` (from the listing path) and `reference` = the declared reference (fallback `${dbmlName(schema)}.${dbmlName(name)}`). `relationshipsFiles` lists every `L/relationships/*.dbml`, readable or not, with each file's `use` targets.
+- **Ops.** `save` (each may carry `home?: { layer, schema }`), `delete`, `move: Array<{ name, toLayer?, toSchema? }>`, `newTableHome?: { layer, schema }`, `schemaFromSource?`, plus Convert's `gainFile`, `writePending` and `newRefsToLayerDefault`. A new table's layer is the home's; its schema is `model.schema` with `schemaFromSource` (Import, Convert), else the draft's transient `configuredSchema` (dbt's configured schema: the manifest node's `config.schema`, else the schema yml's `config.schema`; a source's `schema:`; Liam 2026-10-30; never the built schema in `manifest.json`, which differs per target, and never written to disk), else the home's schema (the diagram's layer name); a requested schema that is not a safe folder name falls back to the home's. Then `model.schema = schemaAsListed(layer, schema)` and the path is `dbmlTablePath(layer, model.schema, name)`. `saveTable` with no home: the first `layers.json` layer that is a DBML layer, else the first DBML layer folder, else `main`; schema = the layer.
+- **Moves.** The target is `dbmlTablePath(toLayer ?? layer, schemaAsListed(…, toSchema ?? schema), stem)`; when the target schema differs from the declared qualifier the text is re-qualified and the table goes into `requalified` (Organise lists them). A case-only move and an existing target are refused. A move changes the table's path, never its Refs' files.
+- **Partition in place, per affected owner.** Desired units (`relationshipUnitsWithMembers`) are matched against the owner's stored units across **all** files: (1) the same identity; (2) the same ends and column pairs (a cardinality or role change); (3) the same link set as a unit cut in this plan by any owner (a turn-round, which takes that unit's file); (4) a column change: among the still-unmatched stored units of the same unordered table pair, the one sharing the most column pairs (ties: file byte order, then line), rewritten in place. Every stored copy of an identical unit is assigned, so a pre-existing duplicate still reaches the refusal. Unmatched desired units are **placed** by the index (§2.4).
+- **Re-spelling.** Every file whose Refs name a table in `pathChanged ∪ requalified ∪ renamed columns` is opened, plus every file with a `use` line resolving to a moved, renamed or deleted table's old path.
+- **Refusals.** While any relationships file does not read, every plan that adds a unit or changes a unit's ends or columns is refused, naming it ("… does not read (…); fix it first: it may already hold this relationship."); a rename, move or delete that must re-spell an unreadable file whose text names the table is refused too. A new link any file already holds is refused with its file and line; two copies after the plan are refused as before. D20 holds.
+- **Output.** `writes`, `resolveTable`, `pathChanged`, `requalified`, `createdTables`, `createdRelationshipsFiles`, `changedPairs` (the pairs whose holding files changed, pending lines included) and `relationshipsImportsFor(members, current, unlinked)` over the after-index. `relationshipsFilesFor` is gone. No relationships file is ever deleted (D15).
+- **Batches.** Non-editor writes (`saveTable`, `deleteTable`, Draw from dbt, Import, Open Example, migration, Convert's own path) go through `TableLibraryService.applyDbmlBatch` / `planDbmlBatch`: one plan, one settle (§5.3), one `writeFilesWithRollback`, then the relationships cache primed with each written file's reading.
 
-**Algorithm:**
-
-0. **Normalise the ops.** A `delete` entry that names a `save` entry's `fromName` is folded into that rename and dropped from `delete`: `handleRenameModel` passes `save: [{model, fromName: old}]` **and** `delete: [old]` (`SemanticEditorProvider.ts:3985-3991`), and acting on both would either throw in `mergeFileWrites` or drop every Ref the renamed table owns. A test covers exactly this ops shape.
-1. Build the path overlay. A new name gets `newTablePath(name, newTableFolder)` with `.dbml`. A rename gets the old folder with the new stem. A move gets `toFolder`. A delete gets null.
-2. Write each table file:
-   - an existing table → `editTableDbml(readText(oldPath), model, {rename})`; on a rename or move, `create(newPath, text)` + `delete(oldPath)`; else `replace(path, text)` when the text changed;
-   - a new table → `create(path, renderNewTableDbml(model))`;
-   - a delete → `delete(path)`.
-3. Group owners by the relationships file of their folder **after** the plan. A saved model whose `relationships` changed, a renamed owner (every owned Ref re-spelled), a moved owner and a deleted owner (`null`) each contribute to the right file's `RelationshipsFileEdit`:
-   - **Moving Refs between files** (a moved owner, and every **misplaced** Ref of an owner whose relationships, name or folder this plan changes, §2.4; a column-only save moves nothing): the Ref is cut from the file it is in (`owners` there drops it) and its **original text** is passed as `incoming` to the home file, re-spelled only where an end was renamed, so `[delete: cascade]`, `?` marks and its trailing comment survive (Law 4). A misplaced Ref of any other owner is left where it is.
-   - One `editRelationshipsDbml` call per affected file yields **one** write per file: a replace, or a create when `oldText` is `null`.
-4. Any table whose path changes is passed in `pathChanged` to **every** relationships file whose Refs name it, even when no owner there changed, so the `use` paths stay valid.
-5. **Cross-file duplicates.** After placing, the planner computes `linkKey` over every Ref in every relationships file as it will be after the plan. A link present twice (in any two files, or twice in one) throws `DbmlEditRefused("<a> and <b> both hold the relationship <from.col → to.col>. Remove one of them first.")` unless this plan is removing one of the copies.
-6. **YAML ends.** A Ref this plan inserts or regenerates whose other end is a YAML table throws the D20 refusal (also raised by `editRelationshipsDbml`; checked here first so the message names the diagram action).
-7. `mergeFileWrites` makes sure no path is written twice.
-
-This planner only **places** tables and Refs in files. It never decides orientation, ownership or which relationships exist; that stays with `planRelationshipWrite` and the cascades in `libraryRelationships.ts`. Convert (§6.1), `resolveDuplicateModel` and the fs paths (§5.1) call it too; nothing else calls `editRelationshipsDbml`.
+This planner only places tables and Refs in files. It never decides orientation, ownership or which relationships exist; that stays with `planRelationshipWrite` and the cascades in `libraryRelationships.ts`.
 
 ### 4.7 Errors and messages
 
@@ -1026,204 +908,82 @@ This planner only **places** tables and Refs in files. It never decides orientat
 
 ## 5. Host integration
 
+> Rewritten 2026-10-29 for the layer-first tree (D28–D33). Line numbers are dropped: search by symbol.
+
 ### 5.1 `TableLibraryService` (`src/services/logicalModelService.ts`)
 
-- **`listTableFiles()`**:
-  - accept `.yml` and `.dbml` (via `classifySemanticFile`), in every library folder by the §2.1 rule (`listFoldersOf`);
-  - skip relationships files (`.dbml` with the reserved stem); a `_relationships.yml` is an ordinary YAML table (§2.1);
-  - give each entry `storage: 'yaml' | 'dbml'`;
-  - apply the §3.4 shadowing (within one directory `.dbml` wins and the `.yml` gets `shadowedBy`);
-  - for a `.dbml`, take the name from the **listed** stem; the declared name must match it case-insensitively, else it is a load error at read time (D2). Once the file is read, the entry's display name is the declared spelling.
-- **`findTableFile` / `v5FileIgnoringCase` / `tablePath` / `renamedTablePath`** probe both extensions in §3.4 order **against the directory listing** (case-insensitive match, listed stem and path returned), never with `fs.existsSync` (§3.4).
-- **`newTablePath(name, folder)`** stays private; a new public wrapper **`pathForNewTable(name, folder?)`** is what `syncPlanBuilder` (§5.7) and `diff` (§7.1) call. From S6 it chooses `.dbml` in `tables/` when `writesDbml(projectStorageOf())`, else today's rule (§3.2, one switch-over stage).
-- **`findTableNameIgnoringCase`** already lists files, so it covers `.dbml`. It does not refuse reserved names (§2.1: only create paths do).
-- **One private reader, `readTableEntry(entry)`**, is the only place a table file is read. `getTable`, `listTables()` (`:757-771`) and `hasUnreadableRelationships()` (`:786-797`) all go through it, so `listTables()`, which feeds `planRelationshipWrite` (`SemanticEditorProvider.ts:3834`), `usesLibraryRelationships`, `routeAddedRelationships` (`:1953`), `otherLibraryTables` and the state-space harness, returns DBML tables **with** their relationships. A test asserts that.
-  - `.yml` → today's `readTableFile`; `.dbml` → `parseTableDbml` (subpath), cached by `mtime:size` as today;
-  - relationships are **not** part of that cache entry;
-  - a new `relationshipsCache: Map<path, {key, text, reading}>` caches every relationships file's reading (and through `parser.ts`, its AST, which the writers reuse for the same text);
-  - the attachment (one `attachRelationships` over **every** relationships file, §2.4) is memoised against the set of cache keys and recomputed at call time when any changed, so a relationships-file change needs no table-cache flush;
-  - `invalidateCache()` clears all three.
-- **`getTable` failures** for DBML build a `TableFileError` with the DBML kinds and codes (`:128-174`).
-- **`hasUnreadableRelationships()`** is also true when any relationships file is unreadable (§4.3).
-- **`usesLibraryRelationships`** (`libraryRelationships.ts:34`) is true whenever any DBML table or relationships file exists.
-- **`planTableWrites(ops: TableFileOps, layerFolder?): { writes: FileWrite[]; plan?: DbmlLibraryWritePlan }`** is the one entry for the provider and commands:
-  - YAML tables go through today's `serializeTable` / `renamedTablePath` / `tablePath` rules, as replace or create writes;
-  - DBML tables go through `planDbmlLibraryWrites`; a new table added through a **DBML diagram** is always DBML (D20), from S5 on;
-  - a save whose old file is YAML and target is DBML never happens outside Convert: an existing table keeps its format.
-- **New helpers:**
-  - `relationshipsFileFor(tableName): string | undefined` (for `diff` fixes);
-  - `tableStorage(name)`;
-  - `dbmlSnapshot()`.
-- **`saveTable` / `renameTable` / `deleteTable`** (the non-editor fs paths used by `newSubjectAreaWriter`, `deleteLogicalModel`, organise and resolve duplicate) route DBML tables through `planDbmlLibraryWrites` and apply the writes with **`writeFilesWithRollback`** (§4.1): it snapshots every target before the first write and, on any failure, restores every snapshot (deleting what was created, re-creating what was deleted, putting back replaced text), then removes folders it made. A partial failure can therefore never leave table files, relationships files and `use` lines out of step. ownWrites are recorded after each write lands.
-- **`ensureDir`** already accepts `tables/[folder/]`. It is called **only for library paths**; a diagram or layout create (`<layer>/<name>.dbdiagram`) creates its folder with a plain `mkdir` of the layer folder, which already exists for any open diagram.
-- **BOM.** The fs paths keep a BOM a file had (§2.1).
+- **One library index** (`src/services/tableLibraryIndex.ts`, no `vscode`, shared with the CLI): one listing of the semantic dir, `logical-models/` and `tables/` (YAML, top level and one folder down) and, for each layer-shaped folder, `L/tables/<schema>/` and `L/relationships/` (listed only when a `stat` says they are directories). It answers `findTableFile`, `listTableFiles` (duplicates included), the relationships files, `dbmlLayers` (`{ layer, schemas, hasTables, hasRelationships }`), `tablesDirIsLayer` and `groupsByFolder` (YAML entries only), and re-validates itself by the signatures of what it listed. An absent direct child (`layers.json`, `logical-models/`, `tables/`) is seen through the semantic dir's own signature.
+- **Entries.** A DBML entry carries `layer`, `folder` = `schema`, no `library` tag; shadowing per §3.4; `isCrossLibraryDuplicate(entry)` is the one rule for "a copy in another kind of library".
+- **Reading.** `readTableEntry` reads a `.dbml` table with `parseTableDbml(text, stem, { schemaFolder })`, cached by signature; `relationshipsCache` caches every relationships file's reading; one memoised `attachRelationships` over every relationships file (`locations` included). `getTableAt(path)` reads a specific listed file (the canvas's `use`-path resolution). `relationshipHolders(owner, rel)` lists the files holding every stored copy (the display filter).
+- **Placement helpers**: `defaultDbmlLayer()`, `schemaAsListed(layer, schema)`, `defaultDbmlHome()`, `dbmlHomeOf(home | layer | undefined)`, `newTablePath` / `pathForNewTable` (DBML: `dbmlHomeOf(layer)`), `writesTableAsDbml(name)`, `listDbmlDiagrams()`.
+- **Relationships helpers**: `relationshipsIndex()`, `relationshipsFileForNewRef(table)` (sync plan `relationshipsPath`, `diff` add fixes), `relationshipsFileHolding(rel)` (sync plan `storedIn`, `diff` remove and cardinality fixes, `doctor`'s turn-round fix), `primeRelationshipsFiles(paths)` (after an edit lands, from the saved bytes).
+- **Writes outside the editor**: `planTableWrites(ops, home?: DbmlTableHome | string, { dbml?, readText?, schemaFromSource? })`, `planDbmlBatch({ ops, dirtyFiles?, readText?, exceptDiagrams?, extraWrites? })` and `applyDbmlBatch(…) → { plan, writes, before }`: one plan, one settle (§5.3), one `writeFilesWithRollback`, `invalidatePaths(written)`, and the relationships cache primed under each written file's new signature. `saveTable` / `deleteTable` are a batch of one; the looping callers (`newSubjectAreaWriter`, `migrationService`) make one batch.
+- **BOM.** The fs paths keep a BOM a file had.
 
 ### 5.2 Subject-area codec (`src/providers/subjectAreaCodec.ts`)
 
-```ts
-interface ParsedSubjectArea {
-  storage: 'json' | 'dbml';
-  parsed: Record<string, unknown>;      // a v5 object with schemaVersion 5 for DBML (D8), so every detector call site sees v5
-  snapshot: Record<string, unknown>;
-  dbmlSchemaVersion?: number;           // DBML only: erd_schema_version, never written back by an edit
-  writable?: boolean;                   // DBML only: the reader's writable flag
-  layoutPath?: string; layoutText?: string | null;
-}
-interface SubjectAreaCodec {
-  parse(text: string, filePath: string, layoutText: string | null): ParsedSubjectArea;   // throws EditRefused (SubjectAreaFileError mapped as today)
-  render(p: ParsedSubjectArea, text: string, resolver: SubjectAreaResolver): FileWrite[];  // FIRST entry is always the primary replace, even when identical
-  tableNames(text: string, filePath: string): string[] | null;
-}
-function codecFor(filePath: string): SubjectAreaCodec;   // by subjectAreaStorageOf
-```
-
-- **The JSON codec** is today's `parseSubjectAreaDocument` + `serialiseSubjectArea` + `tableNamingDocuments`, moved behind the interface with **no behaviour change**.
-- **The DBML codec:**
-  - takes the layout text from an open `TextDocument` for `layoutFilePathOf(path)` if there is one, else from disk;
-  - `parse` uses the subpath `parseSubjectAreaDbml`, with `snapshot = structuredClone(parsed)`;
-  - `render` uses `editSubjectAreaDbml` for the primary (always returned) and `editDiagramLayout` for the layout (a replace, a create, or nothing).
-- **The shared helper `subjectAreaTableNames(text, path)`** (JSON: `getRawSubjectAreaTableNames(JSON.parse)`; DBML: `subjectAreaMembersDbml`) is the **only** raw membership reader. It replaces the ad-hoc parses in:
-  - `ModelLibraryTreeProvider.buildUsageMap`;
-  - `organizeModelLibrary`, `resolveDuplicateModel`;
-  - `countSubjectAreaFileRelationships` (DBML → 0);
-  - `readSubjectAreaRelationships` (DBML → []);
-  - `refreshSubjectAreasReferencingTable` (`:3154-3180`);
-  - `recordCanvasOpen` / `recordRelationshipState`;
-  - `cli/inventory.ts:228`;
-  - MCP `read_domain`.
-
-  It lives in `src/services/domainService.ts` so the CLI and MCP bundle it.
+`codecFor(path)` parses a `.dbml` diagram (`parseSubjectAreaDbml(text, path)`, positions from `erd_layout`) into the v5 object every handler mutates, and renders it back with **one** splice of the diagram (`renderDbmlDiagram` → `editSubjectAreaDbml` with `dbmlResolverOf(plan, semanticRoot)`: `relationshipsImportsFor`, `pathChanged ∪ requalified`, `refreshRelationshipsUses` on every non-layout edit). There is no second file. `layoutOnlyText(file, text, fsPath, semanticRoot)` is the unformatted `editDiagramLayoutDbml` a drag writes; `sameOutsideErdLayout(x, y)` is true when two texts differ only inside `erd_layout`. Parsed readings are memoised per diagram (`dbmlDiagramReadings.ts`), and `primeLayoutOnlyReading` derives the next reading from a drag's text with no compile (line numbers after the changed region shifted).
 
 ### 5.3 `SemanticEditorProvider` edit pipeline
 
-`applySubjectAreaEdit` keeps its order and adds three steps:
-
-1. **Parse** with `codecFor(path)`, then mutate (unchanged).
-2. **Plan the library**: `const lib = tableLibraryService.planTableWrites(modelFiles, layerFolder)`.
-3. **Render** the primary with `resolver = lib.plan ?? libraryResolver()`. For `otherDomains`, `rewriteOtherSubjectAreas` becomes codec-aware: it lists `.json` **and** `.dbml` diagrams, parses each from its open document or disk, runs the same v5 callback (`renameTableInSubjectArea` works unchanged), and renders with the resolver.
-4. **Settle pass**: every other DBML diagram (not the primary, not already in `otherDomains`) gets a no-mutation re-render with `refreshRelationshipsUses: true` and the plan's `pathChanged` when it has a member in a folder from `lib.plan.createdRelationshipsFiles`, or a member in `lib.plan.pathChanged`. Its writes are included when the text changed. This keeps `use` lines valid project-wide inside the same WorkspaceEdit.
-5. **Dirty check**: refuse by name (`EditRefused`) when **any** path in the combined `FileWrite[]` is open with unsaved changes. This replaces `dirtyTableFile`.
-6. **One WorkspaceEdit, applied by `applyFileWrites`** (D23, `src/providers/applyFileWrites.ts`). Before building it, the helper records the text of every path it will replace or delete (document text, else disk). Order:
-   - the primary full-range replace first (always, for undo grouping, the existing `:2228` rationale; it is a text edit, so it fails only with the whole edit);
-   - then every create, **relationships files before table files before layout files**: `createFile(uri, {overwrite:false, contents})`, after `ensureDir` for library paths only (§5.1);
-   - then every other replace: `openTextDocument` + a full-range replace;
-   - then every delete: `deleteFile(uri, {ignoreIfNotExists:true})`.
-7. **When `applyEdit` returns `false`** the helper reconciles, because VS Code keeps what ran before a failing resource step:
-   - a planned create whose file exists with exactly the planned bytes is deleted; one that is absent or differs is left alone;
-   - a planned delete whose file is gone is re-created with the recorded text;
-   - a replaced document whose text equals the planned text is set back to the recorded text with one **text-only** WorkspaceEdit (all-or-nothing) and saved only if it was saved before;
-   - the reconcile itself is one WorkspaceEdit through the same helper. If it fails too, a modal lists every file it could not put back and says "Restore these from source control"; nothing is retried.
-   - Then the usual `EditRefused` toast: "The edit could not be applied; nothing was changed." (or the modal's list).
-8. **After `applyEdit` succeeds**: save the primary, then `saveDocumentByUri` for every replaced path. Record `ownWriteTracker.recordWrite` for every replaced or created path and `recordDelete` for every deleted path, **after** the bytes land. Add every replaced path, layout files included, to `editedTablePaths`.
-9. **Refresh** as today. Other panels are refreshed by **diagram** URI; a layout path maps to its diagram with `diagramPathOfLayout`.
-
-**A pure YAML/JSON project keeps its existing `addTableFileEdits` WorkspaceEdit**, a rename's create plus delete included (review log, S5 implementation: the existing provider tests pin its op order). The new path (`planTableWrites`, codec render, settle pass, `applyFileWrites`) is taken when the diagram is DBML, the library holds a DBML table or relationships file, or an `otherDomains` rewrite would reach a DBML diagram, so a mixed project's YAML writes go through `applyFileWrites` with the DBML ones. Outside `applySubjectAreaEdit`, the canvas's **Delete Table File** follow-up applies through `applyFileWrites` for YAML tables as for DBML ones (closing pass), so a partial apply is put back before "no table file was deleted" is said.
-
-**Handler categories on a DBML diagram:**
-
-| Handler(s) | Effect (all in the one WorkspaceEdit) |
-|---|---|
-| addColumn, updateColumn, removeColumn, toggleColumnKey, reorderColumns, rationale, description, grain, alias, meta, role (`applyTableEdit`) | Splice the table file. The primary replace is identical text. `updateColumn` / `removeColumn` relationship cascades re-render the owners' relationships files. |
-| addRelationship, updateRelationship, editRelationship, removeRelationship(s), Turn Round (`commitRelationshipWrite`) | `home = 'library'` is **forced** when the doc is DBML (`:3835`). `plan.domainRelationships` must be `[]` (asserted). `plan.changed` owners go into their folder's relationships file. |
-| addModel, addExistingModel, addExistingModels, addModelsFromDbt (`applyDbtModels`) | New table files (always DBML on a DBML diagram, D20; a name `_relationships` refused, §2.1), plus `use` lines (resolver sees the pending creates), relationships `use` lines and positions in the layout. `routeAddedRelationships(...).kept` is `[]` for DBML (`:1948`): everything routes to the library. Adding an existing YAML table is refused (D20), and so is a routed relationship from a DBML owner to a YAML table. |
-| renameModel | Table file create + delete with a header splice. The ops' `delete: [old]` is folded into the rename (§4.6 step 0). The owner's Refs are re-spelled, and the `pointingAtIt` owners' Refs re-resolved. `use` lines change in this diagram, `otherDomains` and every relationships file, and so do the layout position keys. |
-| removeModel(s) | The `use` line and positions are removed, `linkedModel` is pruned, and the relationships `use` line goes when it is no longer needed. The optional "Delete Table File" follow-up runs the D16 cascade as its own WorkspaceEdit (its own undo step, as today). |
-| updatePositions, addAnnotation, updateAnnotation, removeAnnotation(s) | Notes in the `.dbml` and/or the layout file. A drag changes only the layout, and the primary replace is identical. |
-| `ready` load persistence (`autoPositionNewTables`) | Writes the layout only, and only for a partially positioned diagram (unchanged rule). |
-| undo / redo | `flushUndoRedo` saves `editedTablePaths`. The model-file test `/\.ya?ml$/` (`:2405`) becomes `/\.(ya?ml\|dbml\|dbdiagram)$/`. |
-
-**Other provider changes:**
-
-- **`isSubjectAreaV5`** and every other `detectSubjectAreaFormat` call site need no change: the codec's object is a plain v5 document (D8). A test runs each of the listed call sites' paths on a DBML doc and asserts `v5`, never `hybrid`.
-- **`relationshipsInLibrary`** returns true for DBML docs.
-- **The import banner** (§2.5): when the reading has declared Tables and no table `use` lines, the provider posts `dbmlEmbeddedTables` (a new message type with a sender, a handler and payload validation, as every message needs) and the webview shows "This file holds its own tables. **Import these tables…**", whose button posts `importEmbeddedTables` back; the handler runs Import DBML on the diagram file.
-- **`recordCanvasOpen`** must not `JSON.parse` a `.dbml`. It records format `'v5'` plus `recordFeatureOnce('dbmlProject')`.
-- **`handleGenerateSyncPlan`** reads `parsed.domain` / `parsed.layer` from the codec object (filled per §2.5).
-- **`NON_MUTATION_TYPES`** does not change.
-- **The change listener** (`:1793-1817`) treats a layout path in `editedTablePaths` like any library doc for the native undo flush.
+- **Every canvas write** still goes through `applySubjectAreaEdit` / `applyTableEdit`: one `WorkspaceEdit` via `applyFileWrites`, one save pass, one undo step.
+- **A drag** (`isLayoutOnlyChange`, a writable diagram that does not hold its own tables) takes `applyLayoutOnlyEdit`: `primaryText = layoutOnlyText(…)`; a conflicted `erd_layout` is a toast (`EditRefused`); a drop in place returns with no edit; otherwise one minimal-range replace of the diagram alone (`minimalPrimary`, `saveWithoutFormatting`, `refreshWebview: false`, the `layoutOnly` event), then `primeLayoutOnlyReading`. Native Cmd+Z rewinds that one edit.
+- **Every other DBML edit** plans the library once (`planTableWrites` / `planDbmlLibraryWrites`), renders the primary with `refreshRelationshipsUses: true` (healing drift), runs the **settle** (`settleDbmlDiagrams` → `settleDbmlDiagramWrites`, `src/services/dbmlDiagramSettle.ts`) and writes everything as one `WorkspaceEdit` (`applyFileWrites` with `semanticRoot`, so creates go tables → relationships files → diagrams → README).
+- **The settle** (one rule for every write path: the editor, `applyDbmlBatch`, Convert): (0) nothing when `pathChanged`, `createdTables`, `requalified` and `changedPairs` are all empty — no listing, no reads; (1) the primary is rendered as above; (2) every other DBML diagram's syntax-only summary (memoised by signature or open text) is checked with `needsSettle`: a member or unlinked name in `pathChanged ∪ createdTables ∪ requalified`, or a changed pair with both ends drawn **and** an imports set that differs; (3) each such diagram is read and rendered with `refreshRelationshipsUses` and `keepLayoutIfConflicted`; a diagram that cannot be settled **refuses the whole edit when a member's path changes** ("`<file>` does not read (`<problem>`); fix it first, or it would keep a use line to `<old path>`."), and is left as it is (logged) when only its imports would change. A dirty diagram that would change refuses the edit by name.
+- **The rename / delete cascade over other diagrams** (`rewriteOtherSubjectAreaWrites`) uses the same render and the same refuse-not-skip rule; it re-points sticky notes' `linkedModel` in DBML diagrams; a conflicted `erd_layout` there is kept byte-identical.
+- **Delete Table** (D16) prunes the deleted table's positions and links case-insensitively in DBML documents only (`pruneViewConfigForRemovedTables(…, caseInsensitive)`).
+- **New tables** from a DBML diagram go into `{ layer, schema: schemaAsListed(L, L) }` (`newTableFolder`), or the dbt configured schema for Add from dbt.
+- After an edit lands, the provider primes the relationships cache from disk (`primeRelationshipsFiles`).
+- **Own writes** are recorded after the bytes land, as before.
+- `refreshSubjectAreaPanel` is kept (the YAML/JSON guard suite calls it).
 
 ### 5.4 Watchers (`src/watchers/FileWatcherService.ts`)
 
-- **The semantic watcher** glob becomes `${semanticDir}/**/*.{json,dbml,dbdiagram}`. Each event is classified with `classifySemanticFile`:
-  - **`diagram`**: the existing domain events;
-  - **`layout`**: mapped to its diagram's URI as a `changed` event, skipped on own writes;
-  - **`table`**: **ignored here**; the table watcher alone handles table files, so one change raises one table event;
-  - **`relationships`**: a new event `onRelationshipsChanged(path)`. It invalidates the relationships cache and refreshes every open panel (every panel: a misplaced Ref can attach to any member, §2.4). It never calls `onTableChanged('_relationships')`;
-  - **`other`**: ignored. A deleted table or relationships file never raises the "Subject area file deleted" toast (`extension.ts:1281`).
-- **The table watcher** glob becomes `{logical-models,tables}/**/*.{yml,dbml}`, skipping relationships files. The name is the listed stem.
-- **Foreign-format writes.** In a project whose storage is `dbml`, a **create** of a `.yml` table or a `.json` diagram that is not an own write shows one toast per session: "A YAML/JSON file was just added to this DBML project (<file>), probably by an AI helper set up before ERD Studio 2.0. Update the AI helper files so it writes DBML?", with [Update AI Helper Files] (runs the existing harness update for every outdated target) and [Not Now]. It never converts or deletes the file. Telemetry: the feature `dbmlForeignFormatWarned`.
+- **The semantic watcher** is `${semanticDir}/**/*.{json,dbml}`, classified by path: a `diagram` raises the domain events (positions included: a change to `erd_layout` is a diagram change); a `relationships` file raises `onRelationshipsChanged` (debounced per file), which invalidates its reading and redraws every open canvas; a `table` is ignored here; `other` is ignored. There is no `.dbdiagram` event.
+- **The table watcher** watches `{logical-models,tables}/**/*.yml` and `*/tables/*/*.dbml`; every table file shares one debounce.
+- **Foreign-format writes.** In a `dbml` project, a create of a `.yml` table or `.json` diagram that is not an own write shows one toast per session, as before.
+- A deleted diagram's "Subject area file deleted" toast names its other-format counterpart `L/n.json` ↔ `L/diagrams/n.dbml` (`removedSubjectAreas.ts`).
 
 ### 5.5 Discovery, trees and decorations
 
-- **`SubjectAreaService.listSubjectAreas`**:
-  - lists `*.json` and `*.dbml` diagrams through the classifier;
-  - `SubjectAreaSummary` gains `storage: 'json' | 'dbml'` (additive) and `conflict?: true` when the same stem exists in both formats in one layer;
-  - `domain` is the stem;
-  - the tree shows both with a "(JSON)" / "(DBML)" description only when they conflict.
-- **`getSubjectArea`** dispatches by extension. For DBML it reads the diagram and layout from disk, calls `parseSubjectAreaDbml`, then `buildUnifiedSubjectArea` with `getModel` from `TableLibraryService` (relationships attached, §5.1).
-- **`DomainTreeProvider`** needs no logic change. **`SemanticFileDecorationProvider`** decorates `diagram` only.
-- **`ModelLibraryTreeProvider`**:
-  - entries show their storage only when the project is `mixed`;
-  - the open command for `.dbml` is `vscode.openWith(uri, 'default')`;
-  - library folder labels name the real root (`tables`, or `logical-models` for v5);
-  - the usage map uses `subjectAreaTableNames`.
-- **`LayerService.detectLayersFromFilesystem`** is fixed by §3.3. **`addLayer`** keeps refusing `tables` and also refuses a name starting with `_`.
+- **`listSubjectAreas`** lists `L/*.json` and `L/diagrams/*.dbml` (the latter only when the layer's listing shows `diagrams/`); `SubjectAreaSummary.storage` and `conflict` as before.
+- **`getSubjectArea`** for DBML reads the diagram (`parseSubjectAreaDbml`), resolves members by their `use` path first (`getTableAt`), and keeps only the relationships held in files the diagram imports (§2.4); the drift (a file it should import) is `relationshipsImportDrift(path)`, logged on every read and toasted once per (diagram, file) per session.
+- **Trees.** DBML diagram rows get the `dbml-diagram` icon pair, healthy DBML table rows the `dbml-table` pair (`src/providers/dbmlFileKinds.ts`); DBML schema folders show as `<schema> (<layer>)`. `.dbml` tables open with `openWith 'default'`.
+- **`LayerService`**: `detectLayersFromFilesystem` never offers `tables` when `tables/` holds a `.dbml` (§3.3); `addLayer` refuses `RESERVED_LAYER_NAMES` and a name starting with `_`; **Remove Layer** refuses a layer whose `L/tables/**` or `L/relationships/` holds any `.dbml`.
+- **A once-per-session toast** names a 1.9 pre-release tree (§3.5), from `refreshContextKeysNow`.
 
 ### 5.6 Activation, context keys and `package.json`
 
-- **`refreshContextKeys`** (`extension.ts:1090`):
-  - `erdStudio.storage` = `projectStorageOf()`;
-  - `hasLogicalModelsDir` = `dirExists() || writesTableNaming() || storage !== 'yaml'`.
-- **`package.json`:**
-  - `customEditors[0].selector` adds `{ "filenamePattern": "**/.erd-studio/*/*.dbml" }`;
-  - the new command `erdStudio.convertProjectToDbml`, title "Convert Project to DBML", category "ERD Studio", shown in the palette when `erdStudio.hasProject` (in a DBML project it settles pending relationships and unlinked members whose tables have files now, D26/D27, or says the project is already DBML), and in the Table Library `view/title` `…` menu while `erdStudio.storage != dbml`;
-  - the `when` clause of `erdStudio.migrateToTableNaming` and `erdStudio.moveRelationshipsToLibrary` gains `&& erdStudio.storage != dbml`;
-  - `contributes.languages` gains `{ "id": "json", "extensions": [".dbdiagram"] }`, so a layout file opens as JSON, and a new `dbml` language for `.dbml` with its grammar (§2.10);
-  - `jsonValidation` and `yamlValidation` are unchanged.
-- **`NO_LEGACY_ALIAS`** (`src/extension.ts:461`) gains `erdStudio.convertProjectToDbml`.
-- There are still no writes on activation. The Convert offer is a prompt only (§6.4).
+- `erdStudio.storage` = `projectStorageOf()`, as before.
+- **`package.json`**: the custom-editor selector is `**/.erd-studio/*/*.json`, the legacy `**/erd-studio/*/*.json` and **`**/.erd-studio/*/diagrams/*.dbml`**; `contributes.languages` keeps `dbml` (`.dbml`) and adds `dbml-diagram`, `dbml-table` and `dbml-relationships`, chosen by `filenamePatterns` alone (the `dbml-diagram` pattern equals the selector), sharing `dbml`'s grammar, configuration and `configurationDefaults`, each with its own light/dark icon (`media/file-icons/`); the `.dbdiagram` → `json` language entry is removed. The formatter is registered once for all four ids.
+- There are still no writes on activation.
 
 ### 5.7 Create, rename, delete, import and other paths
 
-| Path | DBML behaviour (when `writesDbml(projectStorageOf())`) |
+| Path | DBML behaviour |
 |---|---|
-| `createDomain` (`extension.ts:1889`) | Writes `<layer>/<slug>.dbml` from `renderNewSubjectAreaDbml({domain: slug, description, modelFolder})` with the `wx` flag, and `layers.json` when it is missing. No layout file. `subjectAreasCreatedHere` tracks the `.dbml`. Before writing, the slug is refused if `<slug>.json` or `<slug>.dbml` exists. |
-| `setupSemanticDirectory` (`:2287`) | Creates `layers.json` only. `tables/` is created with the first table. |
-| `renameDomain` (`:2077`) | Through `applyFileWrites`: `create(<new>.dbml)` whose text is `editSubjectAreaDbml(old, {after.domain = new})` (no hand splice, §4.5) + `delete(<old>.dbml)` + `create(<new>.dbdiagram)` / `delete(<old>.dbdiagram)` when it exists. Relative `use` paths stay valid (same folder). The new slug is checked against both extensions. A JSON diagram's rename (create + delete) goes through `applyFileWrites` too, recording both as own writes (closing pass). |
-| `deleteDomain` (`:2032`) | Deletes the `.dbml` and its `.dbdiagram`, with `recordDelete` for both. |
-| `deleteLogicalModel` (`:1527`) | D16 cascade as one WorkspaceEdit (`applyFileWrites`) built from `planDbmlLibraryWrites({delete:[name], save: owners filtered by the new pure helper dropRelationshipsTo(models, name)})` plus a codec re-render of every diagram that uses it (`removeTableFromSubjectArea`, reusing `pruneViewConfigForRemovedTables`). The confirm text: "This removes the table's file, its N relationships and its place in M diagrams." The YAML path keeps today's behaviour and text, made format-neutral ("removes the table's file"). |
-| `organizeModelLibrary` (`:1551`, `modelLibraryOrganizer.ts`) | A DBML table move is `planDbmlLibraryWrites({move})` + a settle re-render of the diagrams that use it, in one WorkspaceEdit (`applyFileWrites`, not a bare `renameFile`). Its Refs move verbatim (§4.6 step 3). When any move is DBML, the whole organise is that one edit, its YAML moves carried as byte-for-byte file renames (`applyFileWrites`' `renames`); a YAML-only organise keeps its `renameFile` edit (review log, S6 implementation and review). Extensions are kept. |
-| `resolveDuplicateModel` (`:1629`, `duplicateModelResolver.ts`) | For a DBML copy: `planDbmlDuplicateRename` (`src/commands/dbmlLifecycle.ts`, not `planDbmlLibraryWrites`, whose snapshot lists winners only: review log, S6 implementation) splices **that copy** with `editTableDbml(copyText, …, {rename: true})` (alias set), so no caller splices by hand; deletes the old copy; and repoints only the diagrams whose `use` line resolves to **that copy's path** (codec render with an overridden resolver and the copy in `pathChanged`) and their layout keys. Refs naming the old spelling stay with the remaining copy. A YAML copy's rename (create + delete + the repointed JSON diagrams) goes through `applyFileWrites` too (closing pass). |
-| `newSubjectAreaWriter.ts` (Draw from dbt, Import DBML, Open Example) | `documentText` is replaced by a storage-aware `buildNewSubjectArea(storage)`. For DBML it returns the diagram text, layout text (positions and sticky layouts, present only when any exist), table writes and relationships-file writes, all from `planDbmlLibraryWrites` on a snapshot, **plus the settle re-render** of every other DBML diagram that has a member in a folder whose relationships file the plan creates (as §5.3 step 4). It applies them with `writeFilesWithRollback` (`wx` for new files), which restores a **snapshot** of every file written on failure. It no longer rolls back through `deleteTable(name)` (`newSubjectAreaWriter.ts:131`), which for DBML is the D16 cascade and would edit other owners' files. `changedTables` / `routeToLibrary` / `planDbmlImport.changedLibraryTables` feed `save` ops. `usesLibraryRelationships` is true. |
-| `drawFromDbt.ts`, `importDbml.ts`, `openExampleDiagram.ts` | The path is `<layer>/<slug>.dbml` (`freeSubjectAreaSlug` checks both extensions). Import writes the source `.dbdiagram` positions and sticky layouts into the new layout file. Existing **YAML** library tables matched by name are skipped with the reason "a YAML table can't join a DBML diagram; convert the project first" (D20). A model named `_relationships` is skipped with the §2.1 reason. |
-| `dbmlImportParse.ts` (`readDbml`) | `Parser.parse` rejects `use`. Before parsing, Import DBML checks for a `use` declaration (a line starting `use ` outside a comment or string) and refuses with: "This DBML file imports other files (`use`), so it is part of a multi-file project, such as another ERD Studio 2.0 project. Import reads one self-contained file: open that project's diagram in ERD Studio and use **Export Diagram… → DBML (rich)**, then import the exported file." Telemetry: `importDbmlInvalid` (existing). |
-| `exportDiagram.ts`, `exportAllDiagrams.ts` | A Save As target **inside the semantic dir** is refused in every project ("Save the export outside .erd-studio/: files there are your diagrams' own storage"), and the default Save As folder becomes the workspace root when `defaultSaveFolder` is unset and the diagram is in the semantic dir (it was `path.dirname(domainPath)`, `exportDiagram.ts:323`). This keeps an export from overwriting `<layer>/<name>.dbml` and its `.dbdiagram`, or appearing as a diagram. |
-| `moveRelationshipsToLibrary.ts` | Hidden by `when` in DBML projects. If invoked anyway: "Nothing to move: relationships in a DBML project are already in the table library." In a mixed project it stops with a named message when a target table is DBML ("… moves relationships into YAML table files only. Convert the project to DBML … to move them."), and never writes DBML owners; Convert (§6.3) moves diagram-held relationships (review log, S6 implementation). |
-| `migrateNaming.ts`, `namingMigrationFiles.ts` | The input reader keeps only `.json` diagrams and `.yml` tables (DBML texts are never fed to `planNamingMigration`). The editor offer (`maybeOfferNamingMigration`) is skipped when storage ≠ `yaml` or the DBML offer is eligible (§6.4). |
-| `syncPlanBuilder.ts:233` | Option `newTableFilePath(name): string`. The host passes `tableLibraryService.pathForNewTable`, so a DBML project gets `tables/[folder/]<m>.dbml`. `modelContext[m].relationshipsPath?` is added (additive) from `relationshipsFileFor`. |
-| `physicalTooling.ts:37` | Excludes the configured `semanticDir` (not only the literal `.erd-studio`) from the `*.dbml` physical-tool marker search. |
-| `payloadValidation.ts` | New `validateNewDbmlTableName(name)` (safety plus the reserved name, §2.1), called only by the create handlers (add, add existing, add from dbt, rename's new name) when the table will be DBML. `validateTableNameSafety` is unchanged. |
-
-A `DbmlEditRefused` raised inside any of these commands (Organise Table Library, Give Duplicate Its Own Name, Rename Subject Area, Draw from dbt, Import DBML) names its file and line; the lifecycle commands show it as a modal with an **Open File** button at that line (§4.7, `showRefusedWrite` in `openModelFile.ts`, through the shared `refusalLocation`; closing pass).
+| New Diagram (`createDiagramFile`) | `L/diagrams/<slug>.dbml` (Project last), `layers.json` when missing, README when it created the semantic dir; on failure it removes the `diagrams/`, layer folder or semantic dir it made |
+| Set Up (`setupSemanticDirectory`) | `layers.json`, and README when it created the semantic dir of a DBML project |
+| Rename Subject Area | `planDbmlSubjectAreaRename`: create `L/diagrams/<new>.dbml` (Project name spliced) + delete the old file; `use` paths unchanged |
+| Move diagram between layers | `planDbmlDiagramMove` (pure, every `use` path re-derived); unit-tested, wired to no command yet (Liam) |
+| Delete Subject Area | one delete |
+| Delete Table (D16) | the file, Refs naming it cut in place in every file that holds them, every `use` line resolving to it (`filesUsing`), its `erd_layout` lines and `linked_table`, and every diagram's imports recomputed by the settle |
+| Rename Table | create the new file (name leaf spliced) + delete the old; Ref ends and `use` lines re-spelled in place; `erd_layout` key and `linked_table` re-pointed; no Ref moves |
+| Organise Table Library by Layer | `move` ops (`toLayer`); the target schema spelled as the new layer lists it; re-qualified tables named in the confirm; an emptied `L/tables/S/` removed |
+| Give Duplicate Its Own Name | `planDbmlDuplicateRename`: Ref ends spelled exactly as the copy's declared reference re-spelled; ends that cannot be told apart stay with the winner; diagrams whose `use` path resolves to the copy re-pointed; suggested name `<layer>_<name>` |
+| Draw from dbt, Import DBML, Open Example (`newSubjectAreaWriter`) | one `applyDbmlBatch`: tables, relationships files, the settle, the new diagram (`wx`) and README; new tables in the diagram's layer; Draw from dbt and Add from dbt carry `configuredSchema`; Import uses the source's qualifier (`schemaFromSource`) and lists every schema re-spelled to an existing folder |
+| Export / Export All | one file per diagram for every format; Rich DBML carries `erd_layout`; Save As inside the semantic dir is refused |
+| `syncPlanBuilder` | `relationshipsPath` = where a new Ref goes; `storedIn` (additive) = where an existing one is |
+| `diff` fixes | add → `relationshipsPath`; remove / cardinality → `storedIn`, in place, no `movesFrom` |
 
 ### 5.8 Undo
 
-- Canvas edits: unchanged mechanism. Every replaced path, the layout included, is in `editedTablePaths`. **Verify in the dev host** (S5) that Cmd+Z and the toolbar Undo rewind a drag (a layout-only change) and a relationship edit (a relationships file plus a table).
-- If a layout-only edit does not undo, the fallback is: `handleUndoRedo` and the native-undo listener also run `undo` / `redo` against the layout document of the panel's diagram whenever the last edit for that panel touched only the layout. Track this as `lastEditLayoutOnly` per panel, set in `applySubjectAreaEdit` when every non-primary write is the layout and the primary text is unchanged. Record the outcome in the PR.
-- File operations (create, delete, rename) take part in VS Code's workspace undo while the editor stays open, as the naming migration already relies on. Messages never promise more than that.
+- A drag is one native undo step of the diagram document (§5.3); `flushUndoRedo` sees a layout-only rewind (`sameOutsideErdLayout(disk, document)`) and, when nothing else was rewound, re-sends the canvas and fires `layoutOnly` with no invalidation and no tree refresh. The undo anchor (`undoAnchor`) remains only for an edit that changes other files and leaves the diagram's text as it is.
+- File operations take part in VS Code's workspace undo while the editor stays open, as before.
 
-### 5.9 Custom-editor reroute
+### 5.9 Custom editor: the not-a-diagram page
 
-In `resolveCustomTextEditor(document, panel)`, when `document.uri.scheme === 'file'`, `document.uri.fsPath` ends in `.dbml` and `classifySemanticFile(rel, …).kind !== 'diagram'`. Any other scheme (`git:` in the SCM diff, the merge editor's inputs) is **never** rerouted: disposing that panel would break the diff and merge views of `tables/_relationships.dbml`, the file most likely to conflict. Such a document gets the not-a-domain page with the **Open as Text** button instead (below).
-
-```ts
-const column = panel.viewColumn;
-panel.dispose();
-await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default', { viewColumn: column, preview: false });
-return;
-```
-
-**Verify in the dev host** (S4) by double-clicking `tables/x.dbml` and `tables/_relationships.dbml` in the Explorer, and by opening each from the Source Control view's diff and from a merge conflict in the merge editor. If a blank tab or flicker remains, fall back to the existing not-a-domain page (`SemanticEditorProvider.ts:2862-2875`) with one button, **Open as Text**, which runs the same `openWith`. Record the outcome in the PR.
+There is no reroute. The selector `**/.erd-studio/*/diagrams/*.dbml` keeps table and relationships files out of the canvas from the Explorer. VS Code matches it case-insensitively, a tab restored from 1.9 keeps its editor, and `vscode.openWith` ignores the selector, so `resolveCustomTextEditor` shows **the not-a-diagram page** for any `.dbml` the classifier says is not a diagram: `notADiagramMessage(fsPath, semanticRoot)` (§3.5) plus "To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor." (text only: no new message type or button).
 
 ---
 
@@ -1666,208 +1426,45 @@ The heading becomes `## Unreleased — 2.0.0`. Reconcile the unreleased lines in
 
 ## 9. Test plan
 
-All of these run in `npm test` unless marked otherwise. Run every multi-parser check with `packages/core/test/exportParsers.ts` (or a sibling helper) over `@dbml/parse` 9.1.1, 10.3.1 and 11.0.0: the `dbml-parse-v9` and `dbml-parse-v10` aliases and the pinned `@dbml/parse`. A test that asserts an error **code** (the quote hint) runs with the pin only, because 9.1.1 numbers its codes differently.
+All of these run in `npm test` unless marked otherwise. Multi-parser checks use `packages/core/test/exportParsers.ts` (or a sibling helper) over `@dbml/parse` 9.1.1, 10.3.1 and 11.0.0. **The YAML/JSON guard** (the editor, library-relationships, state-space, naming, sync-plan, logical-model, domain and loader suites) passes unchanged at every stage, and the 59 stable goldens shipped in v1.7.3 are never regenerated.
 
-### 9.1 Core: parser-free (S1)
+> Rewritten 2026-10-29 for the layer-first tree (D28–D33). The original per-stage plan (S1–S9 of the first build) is history; what holds now:
 
-- **`packages/core/test/unit/storage.test.ts`:**
-  - `classifySemanticFile` over every row of §3.5, both `tablesDirIsLayer` states, `_`-prefixed stems (`_x.dbml` in a layer is a diagram; `_relationships.dbml` / `_Relationships.dbml` in `tables/` are relationships; `tables/_relationships.yml` is a table), folders like `Finance` and `SAP FI`, the export-header `firstLine`, and depth 1 and 2;
-  - `tableFileCandidates` order, with a snapshot of the list;
-  - the posix helpers, including `..` and confinement;
-  - the reserved name, and `toSubjectAreaSlug` never yielding `_relationships`.
-- **`packages/core/test/unit/projectStorage.test.ts`:** the full §3.2 rule table, including an empty `logical-models/` (YAML) and `.dbml` diagrams beside JSON ones (still `yaml`).
-- **`dbdiagramLayout.test.ts`:**
-  - `editDiagramLayout` returns null when unchanged;
-  - unknown keys are kept;
-  - it creates only when non-empty and refuses non-JSON;
-  - `read(edit(x))` gives back positions and sticky layouts;
-  - `placeUnlaidNotes` is deterministic and never overlaps laid-out positions.
-- **`storageEquivalence.test.ts`:** each §2.8 row in isolation (and that nothing else is normalised: a changed column type, role or member is still a difference).
-- **`relationships.test.ts`:** `nextCompositeKey` moved, and the host re-export is the same function.
-- **`domainFormat.test.ts` / `domain.test.ts`:**
-  - a JSON file with `schemaVersion: 7` is still refused with the identical message;
-  - `classifyTableLoadError` / `describeTableLoadError` for the DBML kinds, including the `3025` / `3075` quote hint and no hint for `3073`;
-  - the neutral "not found in the table library" text (also in `loadDisplayDomain.test.ts`).
-- **`exportDbmlRich` goldens** are byte-identical after the `dbmlText.ts` move.
+### 9.1 Core: parser-free
 
-### 9.2 Core: readers and loader (S2)
+- `erdLayout.test.ts`: the codec (§2.6): rounding and idempotence, escaping, sorting, case variants, names with spaces, note forms, strays, conflict markers, a seeded 2,000-case property test.
+- `storage.test.ts` / `storageTree.test.ts`: the §2.1 grammar row by row (depth, exact folder names, layer ids, reserved names, `legacyDbmlShapeOf`, `usePathBetween`, the path builders, `dbmlNotADiagramMessage`).
+- `storageEquivalence.test.ts`: the §2.8 rows plus `convertSchemaFallback`.
 
-- **`dbmlReadTable.test.ts`:**
-  - every §2.2 mapping row;
-  - the `erd_` prefix;
-  - 9/10/11 property shapes (the pin reads 11.0's `{value, type}`; feed the v9 and v10 aliases through the injectable parser parameter);
-  - the placeholder;
-  - the inline `ref:` / `use` / `Ref` cases: the table loads, `writable: false`, the problem holds the exact Ref line to add;
-  - a stem that differs from the declared name only in case loads, with the declared spelling; one that differs otherwise is `nameMismatch`;
-  - schema-qualified names and an `as` alias (`declaredReference`, `alias`);
-  - a leading BOM;
-  - syntax, invalid and binding classification, and the `3025`/`3075` "quote the value" hint under the pin (unquoted `role: fact`, `grain: one row`, `k: null`);
-  - typed values under the pin: `natural_key: true`, `TRUE` and `false`, `scd_type: 2`, `meta_owner: 007` and `w: 1.50` read as `true`, `true`, unset, 2, `'007'` and `'1.50'`, each with an `unquotedValue` warning; the same files fail `[3025]` under the v9 and v10 aliases (no hint asserted there);
-  - conflict markers;
-  - a path with a space is irrelevant (fixed virtual path), under the v10 alias as well as the pin;
-  - `meta_json` precedence and invalid JSON.
-- **`dbmlReadRelationships.test.ts`** (with `attachRelationships`):
-  - every operator row, including `<` and the `?` marks, and the three one-to-one direction cases (mark, keys, position), the shared-primary-key pattern included;
-  - composites;
-  - roles, including duplicate names;
-  - a self-reference;
-  - a dangling target;
-  - a missing `use` target or a deleted table file, where every Ref is still read (the 4000/4001 tolerance);
-  - a syntax error, which reads as unreadable (with `mergeConflict` for markers);
-  - `compositeKey` derivation calls `nextCompositeKey` itself;
-  - a misplaced Ref attaches with a warning; an orphaned one does not;
-  - the same link in two files, and twice in one, is attached once by the ranking, with a warning naming both;
-  - schema-qualified ends (`gold.x.col`) and alias ends map to their table.
-- **`dbmlReadDiagram.test.ts`:**
-  - Project keys, including unknown ones; the v5 object's `schemaVersion` is 5 and `reading.schemaVersion` is 7, and `detectSubjectAreaFormat(obj)` is `v5`;
-  - members and their order, including duplicates;
-  - member stems from semantic-dir-relative, wrong-folder and wrong-case paths, with `usePathMismatch` warnings; an unsafe stem is ignored with a warning; a `_x` table is a member;
-  - Notes, with colour mapping and an empty body;
-  - layout merge, including a Note with no layout (`placeUnlaidNotes`);
-  - version refusal;
-  - `invalid-dbml` transient vs merge conflict;
-  - a declared `Table`, `Ref` and `TableGroup`, a repeated Note name and a second Project each read with a warning (`writable: false` for the last two), confirmed against all three parsers;
-  - the import-banner condition (Tables declared, no table `use` lines);
-  - a leading BOM.
-- **`loadDisplayDomain.dbml.test.ts`:**
-  - the `dbml` option is required for `.dbml`;
-  - a table file and a relationships file passed as `domainPath` throw the not-a-diagram error;
-  - probe order and `useFolders`;
-  - `maxModels`, `maxYamlChars`, `maxRelationshipsChars` and `maxDomainChars` on DBML files;
-  - a misplaced Ref in a member folder's file is drawn;
-  - a JSON diagram in a mixed project draws DBML tables plus their relationships;
-  - a DBML member that resolves to a `.yml` is drawn with a warning;
-  - JSON without the option is unchanged (the existing tests pass untouched).
-- **Goldens:**
-  - DBML twins `packages/core/test/fixtures/dbml/<case>/.erd-studio/…` for `showcase`, `library-relationships`, `composite-and-self`, `missing-positions` and `missing-model`. They are hand-written in S2 and checked in S7 to be byte-equal to Convert's output (§9.6), except `missing-model`, which is not a Convert result (see §9.6).
-  - `displayDomainGolden.test.ts` and `loadDisplayDomain.golden.test.ts` assert, for each twin, that `normaliseForStorageEquivalence(twin display)` **equals** `normaliseForStorageEquivalence(YAML case's golden)` (D24), which covers the `schemaVersion` override (the naming-v6 twin pattern, `displayDomainGolden.test.ts:441-461`). Each case lists in the test, with a one-line reason each, which §2.8 rows it exercises: `composite-and-self` (composite-key names, the lone `fk_lonely` key at `composite-and-self.unified.json:55`, respelled `Mentor_ID` / `Employee` / `EMPLOYEE_ID` at `:110-112`), `showcase` (note whitespace, position rounding, if its data has them), and none for the rest. A row a case does not list must not change that case. **Enforced (S2 review):** the test compares each twin with only its listed rows applied (`normaliseStorageRows`, internal to `storageEquivalence.ts`) and checks that dropping any listed row makes the two differ. On the Display shape core compares, the lists are: `showcase` and `missing-positions` relationship order, empty sticky-note list, schemaVersion; `library-relationships` one-to-many, schemaVersion; `composite-and-self` and `missing-model` schemaVersion only. The composite-and-self rows above touch only the Unified shape, which the host compares in S4.
-  - The only allowed exception beyond those rows is `library-relationships`: its YAML fixture has a disagreeing domain-file copy that DBML cannot hold. It gets its own flat golden `dbml-library-relationships.host.json` / `.unified.json`, with the one-line reason in the test.
-  - New error goldens (flat, in `golden/`, all added to `EXPECTED_FILES` and to `SUBJECT_AREA_CASES` / `ERROR_CASES` in **both** `loadDisplayDomain.golden.test.ts` and `exportDiagram.golden.test.ts`): `errors.dbml-syntax.host.json`, `errors.dbml-future.host.json`, `errors.dbml-not-a-diagram.host.json` (a table file passed as `domainPath`), `errors.dbml-conflict.host.json`.
-  - **No sub-directories under `golden/`**, because of `:496` and `rmSync` at `:306`.
-- **Boundaries:**
-  - `packagesBoundary.test.ts` enforces the §4.1 rules 1–3;
-  - `packagesNodeNext.test.ts` compiles a consumer importing `@erd-studio/core/dbml` with `skipLibCheck: false` (`@dbml` added to its symlink list, `:110`), and asserts that no emitted `dist/dbml/*.d.ts` names `@dbml/parse` (§4.1 rule 6);
-  - a test loads the **built** `dist/index.js` and `dist/dbml/index.js` and asserts that a `SubjectAreaFileError` thrown through `dbmlStorageReader.parseSubjectArea` passes `instanceof` against the main entry's class (the `splitting` build, D13);
-  - `npm run build:packages` emits `dist/dbml/`.
+### 9.2 Core: readers, writers and the loader
 
-### 9.3 Core: writers (S3)
+- `erdLayoutDbml.test.ts`: reading from the AST, the splice (block and non-string forms rewritten), a 1,100-line value within budget, every output compiling in the three parsers.
+- `dbmlReadTable` / `dbmlWriteTable`: `Table S.n`, `schemaFolder`, `unqualifiedTable`, `schemaFolderMismatch`, `schemaProperty`, `requalify` (Metadata blocks included), the no-schema throw.
+- `dbmlReadRelationships` / `dbmlWriteRelationships` / the writer cases: the new header, qualified ends, `requalified`, `columnChanges`, stale `use` lines rewritten or cut, `otherElements`, attach order and `locations`.
+- `dbmlReadDiagram` / `dbmlWriteDiagram`: members, `relationshipsUses`, `otherUses`, `useTableDirs`, Project last on create, a Project-first file kept through a drag, an add-member and a settle, `keepLayoutIfConflicted`, merge-conflict detection with and without a syntax error, pending-to-unlinked imports.
+- `dbmlCodecLaws.test.ts`: Laws 1–5 over the twins, the generators (schemas incl. `SAP FI`, requalifying moves) and `test/fixtures/dbml-native`.
+- `loadDisplayDomain.golden.test.ts` and `exportDiagram.golden.test.ts`: the DBML twins (`packages/core/test/fixtures/dbml/*`, layer-first, README included) equal their YAML twins through the comparator; each rich golden's `erd_layout` places only tables it writes; `errors.dbml-legacy` and `errors.dbml-not-a-diagram`.
+- `dbmlCompileProject.test.ts`: `test/fixtures/dbml-native` compiles clean in the three parsers.
 
-- **`dbmlWriteTable.test.ts`:**
-  - one test per §4.5 table operation;
-  - inline vs multi-line settings;
-  - the `erd_` spelling kept;
-  - PK size transitions 0 ↔ 1 ↔ 2;
-  - placeholder in and out;
-  - reorder with comments above columns;
-  - removing a column with comment lines above it keeps those comments, and removing or editing the **first** Table never touches the file's header comment (the `fullStart` trap);
-  - a new attribute list on `Table x as X {` goes after the alias;
-  - a rename (qualifier and alias kept);
-  - the qualified-schema refusal;
-  - an unparseable file, and a `writable: false` one (inline ref), are refused with the reader's message;
-  - a BOM kept;
-  - Law 1 on `indexes { id [pk] }`, `primary key` flags and a `meta_<key>` overriding `meta_json` (untouched);
-  - CRLF preserved;
-  - quoting of keywords, uppercase, digit-leading and odd names (all names `validateTableNameSafety` allows);
-  - 2000-character meta values with quotes, backslashes and newlines;
-  - typed values (§2.2): a file holding `natural_key: true` and `scd_type: 2` keeps both byte for byte through a no-op and through an edit to another column; changing `scd_type` writes `scd_type: '1'`; nothing is requoted unasked.
-- **`dbmlWriteRelationships.test.ts`:**
-  - insert at the sorted position into sorted and unsorted files;
-  - unchanged Refs keep their bytes, including `?`, `[delete: cascade]` and trailing comments;
-  - regeneration keeps the settings;
-  - owner rename and move; an `incoming` Ref keeps `[delete: cascade]`, `?` and its trailing comment;
-  - `use` lines added, removed and kept; hand-added extra `use` lines and missing ones are left alone unless their table is in this edit (Law 1);
-  - `use` block insertion after a header comment followed by a blank line, and at offset 0 when the comment runs into the first Ref;
-  - selective `use { table <reference> }` lines, with a schema-qualified reference;
-  - real column spellings on inserted Refs;
-  - the file is never deleted;
-  - create from null;
-  - one-to-one writes the FK second with `?-`; many-to-one `>?`; many-to-many `<>?`;
-  - composite;
-  - the refusals (same columns, duplicate endpoint sets, YAML other end).
-- **`dbmlWriteDiagram.test.ts`:**
-  - every §2.5 mapping;
-  - each refusal, `writable: false` and a `schemaVersion` change included;
-  - a member path rewrite on rename and on a stale path; **no** rewrite when the line's target exists but the name resolves to another copy;
-  - an existing YAML-resolving member keeps its bytes;
-  - relationships `use` maintenance only on a membership change or `refreshRelationshipsUses`;
-  - Note add, edit and remove;
-  - the Project block inserted when missing (both `headerEnd` shapes);
-  - a diagram rename through `after.domain`.
-- **`dbmlCodecLaws.test.ts`:**
-  - Laws 1–5 over every table, relationships file and diagram in `packages/core/test/fixtures/dbml/**` and `test/fixtures/dbml-native/**`;
-  - a **seeded generator** (no new dependency: a small mulberry32 PRNG, about 300 cases per run, the seed printed on failure) builds random `SemanticTable`s and relationship lists and random edits over them, and checks Laws 1–5.
-- **`dbmlMultiParser.test.ts`:** every text any writer test produces from an input that parses in all three (or from `null`), collected through a helper, is compiled multi-file with its `use` targets under 9.1.1, 10.3.1 and 11.0.0 with **zero** errors and warnings.
+### 9.3 Host
 
-- **Metadata blocks (D25):** for a table file with `Metadata Table` / `Metadata Column` blocks (before and after the Table, triple-quoted values): editing a block-set property changes the block entry and the re-read value equals the edit in 9.1.1, 10.3.1 and 11.0.0; clearing removes the entry; an inline duplicate shadowed by a block is removed on clear; column and table renames retarget the blocks; column delete removes its blocks; a no-op save is byte-identical; a block in another file, when passed as `foreignMetadata`, refuses with `DbmlEditRefused` (the writer's own test; the 2.0 planner passes none, §4.5.x); `note`/`headercolor` via block.
+- `tableLibraryIndex.test.ts`: what one listing costs, absent children seen later, shadowing.
+- `dbmlRelationshipsIndex.test.ts`: placement (both rules, ties, the layer default spelled as listed), `relationshipsImportsFor` (live, pending, unlinked, unreadable), `changedPairs`, `ownerQualifier`.
+- `dbmlLibraryWrites.test.ts`, `logicalModelService.dbml.test.ts`, `syncPlanBuilder.dbml.test.ts`: homes, `configuredSchema`, moves and requalify, the four match steps, refusals, batches, `storedIn`.
+- `dbmlDiagramSettle.test.ts`, `semanticEditorProvider.dbml.test.ts`, `dbmlDisplayParity.test.ts`: step 0, `needsSettle`, refuse-not-skip, display filter and drift, a converted project keeping its pending-line import.
+- `layoutOnlyEdit.test.ts`, `applyFileWrites.test.ts`, `dbmlDiagramReadings.test.ts`: a drag is one minimal replace, Cmd+Z one step, a primed reading equal to a fresh parse with nothing compiled.
+- `legacyDbmlTree.test.ts`, `layerService.test.ts`: the 1.9 verdict and its memo; reserved layer names refused in a YAML project too, `diagrams` and `relationships` allowed.
+- `lifecycle.dbml*.test.ts`, `drawFromDbt.dbml.test.ts`, `importDbml.test.ts`, `semanticReadme.test.ts`: create paths, README, Remove Layer, Organise, Give Duplicate, mixed projects.
+- `dbmlConversion*.test.ts`: homes and notes, byte-identical twins (`dbmlConversion.golden`), resume, the 1.9 refusal, README.
+- `cli.doctor*.test.ts`, `cli.diff.test.ts`, `cli.export.test.ts`: the new codes and hints, `reconvert-dbml-project`, fixes in place.
+- `dbmlGrammar.test.ts`, `dbmlManifest.test.ts`, the tree-provider tests: the four language ids, the glob table (with the pinned case disagreements), icons.
+- `largeLibraryScaling.test.ts`, `dbmlPerformance.test.ts`, `relationshipStateSpace.dbml.test.ts`: work counts and budgets.
+- `harnessService.test.ts`, `harnessAssets.test.ts`, `dbmlDocsWording.test.ts`, `dbmlDocExamples.test.ts`, `claudeMdPointers.test.ts`: the guidance and docs say what the code does.
+- `npm run test:e2e:dbml` (not in `npm test`): converts a copy of `dbt-project` and compares `doctor`, `diff`, `export` and every display before and after.
 
-### 9.4 Host: read (S4)
+### 9.4 Manual dev-host checks (recorded in the PR)
 
-- **`logicalModelService.dbml.test.ts`:**
-  - listing and shadowing (`.dbml` over `.yml` in one dir; `logical-models/` over `tables/`), folders `Finance` and `SAP FI`, a YAML `_relationships.yml` still listed;
-  - `findTableFile` parity with core's `tableFileCandidates` (a table-driven test over the same fixtures);
-  - **case**: a wrong-case lookup returns the listed stem and path, never the probe's spelling (simulated case-insensitive listing), and a stem/name case drift loads;
-  - `listTables()` returns DBML tables **with** their relationships, misplaced Refs attached;
-  - cache invalidation on a table vs a relationships-file change;
-  - DBML `TableFileError`s;
-  - `hasTablesLibrary` / `tablesDirIsLayer` with `.dbml`, every row of the §3.3 table.
-- **`domainService.dbml.test.ts`:** `listSubjectAreas` storage and conflict (an export-headed `.dbml` in a layer is not listed), `getSubjectArea` equivalence with core `loadDisplaySubjectArea` on `dbml-native`, and `subjectAreaTableNames`.
-- **Existing suites with DBML cases added:** `fileWatcherService.test.ts` (each classification, layout → diagram, a relationships event, **one** table event per table-file change, no delete toast for tables, the foreign-format toast), `layerService.test.ts`, `semanticFileDecorationProvider.test.ts`, `modelLibraryTreeProvider.test.ts` (`openWith 'default'`), `projectStorage.host.test.ts`, `physicalTooling` tests.
-- **`semanticEditorProvider.dbmlRead.test.ts`:** a DBML diagram renders; the reroute for `file:` table and relationships files and **no** reroute for a `git:` URI; `recordCanvasOpen` makes no `JSON.parse`; the cross-panel refresh on a table change; every `detectSubjectAreaFormat` call site sees `v5`; the import banner message.
-- **CLI read (S4):** `cli.doctor.test.ts` lists DBML diagrams (no `parseSubjectAreaJson` on `.dbml`), `cli.diff.test.ts` resolves a `.dbml` `--domain` (`resolveSubjectAreaPath`, the `basename` at `diff.ts:495`), `cli.export.test.ts` exports a `.dbml` diagram.
-
-### 9.5 Host: write (S5)
-
-- **`dbmlLibraryWrites.test.ts`:** each op kind, one write per file, `pathChanged`, `createdRelationshipsFiles`, and refusals passing through; **the rename ops shape** `save: [{model, fromName: old}]` + `delete: [old]` (folded, the owner's Refs re-spelled, not dropped); a misplaced Ref moved home verbatim in the owner's write; a moved owner's Refs carried verbatim; the cross-file duplicate refusal (two folders' files, and twice in one); the D20 refusal for a YAML other end.
-- **`applyFileWrites.test.ts`:** the order (creates with relationships files first, replaces, deletes); a `false` from `applyEdit` after some creates and a delete has landed (the mock applies a prefix) is reconciled to the exact prior state; a failing reconcile shows the restore-from-source-control modal.
-- **`fsFileWrites.test.ts`:** `writeFilesWithRollback` restores every snapshot when the n-th write fails, for every n; BOM kept.
-- **`semanticEditorProvider.dbml.test.ts`** runs every row of the §5.3 handler table on a copy of `dbml-native` and asserts:
-  - exactly one `applyEdit`;
-  - the expected set of written paths;
-  - each written file parses (multi-parser);
-  - re-reading gives the intended state;
-  - a no-op edit leaves every byte unchanged;
-  - dirty-file refusal by name;
-  - `editedTablePaths` and ownWrites cover every written path;
-  - D20 refusals in a mixed project (YAML member, and a DBML-owner relationship to a YAML table);
-  - the reserved-name refusal on add and rename.
-- **`relationshipStateSpace.dbml.test.ts`:** a DBML variant of `relationshipStateSpace.harness.ts` that materialises `tables/**.dbml` + `_relationships.dbml` and reads back through `TableLibraryService`. The universes (`relationshipStateSpace.universes.ts:5-16`) store links either way round, as partials, as one-to-many records and in diagram files D1–D3, which DBML cannot hold. So each universe state is **projected through the DBML codec** (diagram copies dropped, orientation canonicalised, partials and one-to-many records as the reader would read them); states the projection changes beyond §2.8 are skipped and counted (the count is printed, and a floor is asserted so the suite cannot silently skip everything). The invariants that still apply are named in the test: one link per `linkKey`, ownership by the FK side, every write lands in the owner's folder file, every planner output is **representable** (writing it and reading it back gives the planner's state modulo §2.8), and Laws 1–5 on every file written.
-- The existing `semanticEditorProvider*.test.ts`, `libraryRelationships`, `planRelationshipWrites` and `relationshipStateSpace.*` tests pass **unchanged**, proving the YAML path is untouched.
-
-### 9.6 Lifecycle, Convert and CLI (S6–S8)
-
-- **Lifecycle (S6):**
-  - DBML-project cases in `drawFromDbt.writes.test.ts`, `importDbml.test.ts`, `openExampleDiagram.test.ts`, `extension.test.ts` (createDomain, renameDomain, deleteDomain, setup), `modelLibraryOrganizer.test.ts`, the duplicate resolver test, a delete-table cascade test, and `syncPlanBuilder` paths;
-  - rollback of every write kind in `newSubjectAreaWriter`.
-- **`dbmlConversion.test.ts`** (S7): one test per refusal; notes for comments, unknown keys and anchors (the comment block content asserted); moved relationships listed with their diagrams; v4 surfaced; and each normalisation of §6.1 step 3 with its note: column respelling (the `composite-and-self` `employee.yml`), a dangling target table and a dangling target column (commented Ref), a link stored in both ends' files (`>`, reversed `-` and `<>`), a library `one-to-many`, disagreeing composite roles, duplicate sticky-note ids. Also:
-  - **mixed**: a fixture with an existing `tables/gold/_relationships.dbml`, a DBML diagram and YAML tables added beside them; the plan `replaces` the relationships file and the DBML diagram (new `use` lines) and compiles clean;
-  - **resume**: a half-applied run (some targets written with the planned bytes, the sources still there) plans the rest, with `resumed` listed, and `doctor` raises `finish-dbml-conversion`; a target with different bytes is refused;
-  - a library folder that is not a layer gives no false self-check refusal;
-  - a forced self-check failure produces the named refusal.
-- **`dbmlConversion.golden.test.ts`:** the planner over each core YAML fixture equals `packages/core/test/fixtures/dbml/<case>` **byte for byte**. `library-relationships` is expected to refuse because of its disagreeing copy; the test asserts the refusal, and the twin is compared against a variant fixture without the domain copy. `missing-model` is excluded from the byte check: its twin is a reader tolerance case (a hand-made `broken.dbml` syntax error, which Convert cannot write from an unreadable `broken.yml`; no `nameless` table; the diagram's two relationships from `dim_missing` and `broken` absent, where Convert would write commented-out Refs). S7 asserts Convert's own result for that fixture instead (a refusal or its documented notes), not byte equality with the twin.
-- **`dbmlConversion.dbtProject.test.ts`:** a temp copy of `test/fixtures/dbt-project` minus `gold/finance.json` is planned and written. For every diagram the display (through `SubjectAreaService`), passed through the comparator, is equal before and after, apart from the documented moved relationships. Every file passes the multi-parser compile.
-- **`convertProjectToDbml.test.ts`:** the command flow, driving the Convert to DBML panel (v4 chain, the refusals page with Open, Check Again and an unsaved fix, dirty refusal, re-plan mismatch, the teammate and git-history lines in the review, sticky Convert clicked twice, Cancel and closing the tab, a run started while another converts, one `applyFileWrites`, the reconcile after a partial `false`, folder cleanup, tab reopen, telemetry for success, failure, refusal, cancel and Not Now), modelled on `migrateNaming*.test.ts`. `migrateNaming*.test.ts` gains the reconcile case for the shared helper.
-- **CLI (S8):**
-  - `cli.doctor.test.ts`: `storage`, `dbmlConversion`, `dbmlProblems` (each check, with its severity from the §7.1 table, and the exact line in the message where the table says so), `mergeConflict` routing to `resolve-merge-conflicts`, the new next steps, warnings raising no next step, `update-harness` for an outdated `.agents` / Copilot / Gemini / `AGENTS.md` target alone, a newer marker reported as `'newer'` and never as `update-harness`, `pathWithSpace`, `tablesLayerConflict`, `missingLayersConfig`, and storage `dbml` with no `.erd-studio`;
-  - `cli.inventory.test.ts`: `format`, members from `use` lines with a missing table file;
-  - `cli.diff.test.ts`: DBML fix paths, the `fix-dbml-file` FixKind, `dbml-invalid`, `not-a-diagram`, and YAML/DBML twin parity on the converted dbt-project copy;
-  - `cli.export.test.ts`: the usage text, and a DBML diagram export equals its YAML twin;
-  - `cli.logicalOnly.test.ts`: `dbml-native`;
-  - `cli.noVscode.test.ts`: inverted (§7.1).
-- **Harness:** `harnessService.test.ts` and `harnessAssets.test.ts` updated: every generated skill file ≤ 500 lines and ≤ 48 KB, the `DBML.md` / `LEGACY.md` companions marked and covered by `fileState`, `detectStale` and Update All, the single-file targets carrying the full text, the `'newer'` state never replaced, the setup `SKILL.md` still < 500 with the new ids routed, the route-2 Glob skipping the semantic dir. `fileSchemas.test.ts` rows. `telemetryPayload.test.ts` parity and order, and `node --test telemetry/test/worker.test.mjs`.
-- **Export:** `exportDiagram.test.ts` / `exportAllDiagrams.test.ts`: a Save As target inside the semantic dir is refused, and the default folder is the workspace root.
-- **Import:** `importDbml.test.ts`: a file with `use` lines is refused with the multi-file message.
-- **MCP:** `cd mcp-server && npm run build && node test-smoke.mjs`.
-- **End to end:** `npm run test:e2e:dbml` (§7.6, run in CI).
-
-### 9.7 Manual dev-host checks (recorded in the PR)
-
-1. Explorer double-click on `tables/x.dbml` and `tables/_relationships.dbml` opens text (§5.9), and the Source Control diff and the merge editor of `tables/_relationships.dbml` (make a conflict on a scratch branch) both work.
-2. Cmd+Z and toolbar Undo after a drag (layout only), a column edit, a relationship add, and a rename.
-3. Convert on a copy of `dbt-project` (with its v4 file): the preview (teammate and git-history lines), then apply, then the reopened tabs, then Undo. Then Convert on a mixed copy.
-4. Old-project flow: open a YAML project. The offer appears once, Don't-ask-again holds, and nothing is written on activation.
-5. A new empty folder: New Diagram writes `.dbml` and `layers.json`, and the first table creates `tables/<layer>/x.dbml`.
-6. A `.dbdiagram` file opens as JSON with highlighting.
-7. Drop a dbdiagram single-file `.dbml` into a layer folder: the import banner shows and Import works.
+Drag then Cmd+Z (one step, sidebars not refreshed); a relationship between `gold` and `silver` tables (the other diagram gains its import in the same edit); the icons under Seti in the Explorer, tabs and both trees; `test/fixtures/dbml-1.9-tree` (one toast, one `doctor` error); a restored 1.9 canvas tab (the legacy page); Format Document in all four language modes.
 
 ---
 
@@ -2081,6 +1678,31 @@ The body lists:
 - the Confluence follow-up (§1);
 - the media needing a re-shoot (`demo.gif`, `readme-workflow.png`, `how-it-works.mp4`, the getting-started mp4);
 - the breaking items called out for a major (§8.2).
+
+---
+
+### The layer-first tree (2026-10-29/30): stages
+
+Built on `feat/native-dbml-storage` after pre-release 1.9.3, each stage ending with `npm run compile`, the YAML/JSON guard and the full `npm test` green (a stage's own declared red set aside, until the stage that fixes it):
+
+| Stage | What |
+|---|---|
+| S1 | the `erd_layout` codec, parser-free and on the AST (additive) |
+| S2a | the dbdiagram.io export/import sidecar and `--format dbml-layout` removed; the rich export carries `erd_layout` |
+| S2b | positions move into `erd_layout` in storage; `.dbdiagram` removed completely; drags are one splice and one native undo step |
+| S3 | pure building blocks for the new tree: placement, imports, diagram summaries, the 1.9 detector, README text |
+| S4a | core codecs on the layer-first tree (`Table S.n`, qualified ends, `relationshipsUses`, `otherUses`) |
+| S4b | core loader, attachment and the DBML twins on the new tree |
+| S5 | host read side: the library index, discovery, the editor's not-a-diagram page, the fixtures (`dbml-native` rebuilt, `dbml-1.9-tree` kept) |
+| S6a | the library planner: placement, in-place matching, refusals, batches, `configuredSchema` |
+| S6b | the editor pipeline: one settle rule, refuse-not-skip cascades, display parity with core |
+| S7 | lifecycle commands and create paths: README on create, Remove Layer, Organise, Give Duplicate |
+| S8a | Convert on the layer-first tree (homes, notes, byte-identical twins, the 1.9 refusal) |
+| S8b | `doctor`, `diff`, export paths, feedback redaction, the MCP server and the end-to-end script |
+| S9 | the three language modes and their icons |
+| P1 | pending-line imports: a diagram imports a file holding a pending line between two tables it draws, in the one shared rule (orchestrator decision, 2026-10-30) |
+| S10 | the harness (v39), docs, this spec and the changelogs |
+| S11 | verification, then pre-release 1.9.4 from the branch |
 
 ---
 
@@ -2355,3 +1977,8 @@ Three reviews (compat-data-loss, architecture-feasibility, product-ai-cli) were 
   - **Measured** on fresh copies of the synthetic projects (100 / 500 / 1,100 tables, YAML and DBML), median of three, f9a5bee (the 1.9.2 pre-release) against this branch: the numbers are in `docs/dev/dbml.md` → "Performance on a large library". At 1,100 tables every target holds: both trees under 0.5 s, the 500-table diagram under 0.4 s cold and 0.05 s warm, a move under 10 ms with no tree refresh, and Convert's plan at 4.9 s (just under 5 s; what is left is @dbml/parse's own compile of each file and diagram).
   - **`doctor` compiles file by file too.** `collectDbmlProblems` now uses `compileDbmlFilesSeparately`, as Convert's self-check does, and reports the parser's diagnostics in the project's file order (the separate compile keys its result in another order). `test/unit/cli.doctor.fileCompile.test.ts` checks the report is identical to the whole-project compile's on a project broken across files. `doctor` at 1,100 DBML tables: 54.6 s (f9a5bee) → 11.1 s (before this change) → 4.6 s. At 100 tables the file-by-file compile costs about 0.1 s more than one whole-project compile (0.65 → 0.76 s; 1.5 s at f9a5bee), which was left as is: one code path, exercised by every doctor test.
   - **Locked in by counting work:** `test/unit/largeLibraryScaling.test.ts` generates a 1,100-table library and bounds the directory listings, table-file reads and DBML compiles of lookups, both tree renders, a cold and a warm open and a move. With the index's validity check disabled, 7 of its 8 tests fail; with the layout-only path disabled, 2 fail.
+- 2026-10-29 (the layer-first tree, decisions D28–D33):
+  - **Why.** Pre-release testers (Gerhard Brueckl first) work within one layer at a time, and the 1.9 tree mixed tables and diagrams (`gold/` meant two things) and kept positions in a vendor format (`.dbdiagram`). Liam settled the tree on 2026-10-29: layer first, `Table <schema>.<name>`, positions in the diagram's `Project`, two-step Ref placement, exact imports, no read path for 1.9.
+  - **Probes behind it** (9.1.1, 10.3.1, 11.0.0): a `Project` anywhere in the file reads the same; `erd_layout` read from the AST decodes `\'` and `\\` (rawDb keeps the last key, so the first is taken from the AST); conflict markers inside a triple-quoted string compile; a non-string `erd_layout` fails the diagram; a line ending in `\` inside the string joins the next; a `Table` header spelled differently from a `use` specifier fails with `[4000]`; a stale `use` line breaks every importing diagram (`[4001]` / `[4000]`).
+  - **2026-10-30 additions:** reserved layer names are `tables`, `templates` and `logical-models` only (`relationships` and `diagrams` are valid layers, the grammar being by depth); layer folders stay lower-case ids with a `label`; canvas dbt adds use dbt's configured schema, never the built one; the `Project` is written last; a pending relationship keeps its relationships file imported on every diagram that draws both ends, so Convert, the editor and `doctor` agree.
+  - **Not in this build:** moving a diagram between layers has a tested planner but no command; the Confluence app must find diagrams at `*/diagrams/*.dbml` (a follow-up in the private repo); a stable 1.7.x guard that recognises the 2.0 tree is Liam's call.

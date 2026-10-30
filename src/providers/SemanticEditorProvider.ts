@@ -4425,9 +4425,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this subject area.` } });
           return;
         }
-        // A new table's name follows the authoring rule (a letter first), so it
-        // is never `_relationships` (§2.1); the planner refuses that name for
-        // every other caller.
+        // A new table's name follows the authoring rule (a letter first).
         // The model library is shared across domains — never overwrite a
         // logical-models/{name}.yml that another domain may depend on. Case is
         // ignored: `DimDate` next to `dimdate.yml` is one file on macOS/Windows.

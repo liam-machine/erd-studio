@@ -5,7 +5,7 @@ All notable changes to `@erd-studio/renderer`. While `0.x`, a breaking change bu
 ## 0.4.0
 
 ### Added
-- Re-exports core's rich DBML export and its dbdiagram layout file: `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `toDbdiagramLayout`, `serializeDbdiagramLayout`, `dbdiagramLayoutFileName` and the `DbmlRichOptions`, `DbdiagramLayout` and `DbdiagramTablePosition` types.
+- Re-exports core's rich DBML export: `toDbmlRich`, `DBML_RICH_EXPORT_HEADER` and the `DbmlRichOptions` type. A rich export is one file per diagram, its table and sticky-note positions in its `Project`'s `erd_layout`.
 
 ### Changed
 - After a domain update, the canvas keeps the existing React Flow node and edge objects for everything that came out the same, so dragging a table re-renders only the tables that moved and their edges instead of every node. What is drawn is unchanged; no API change.

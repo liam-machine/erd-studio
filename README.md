@@ -22,7 +22,7 @@
   <sub>Free to use, source available under the <a href="https://github.com/liam-machine/erd-studio/blob/main/LICENSE">PolyForm Shield License</a>.</sub>
 </p>
 
-<!-- TODO: re-shoot as a logical-only hero: a folder with no dbt_project.yml, no Physical tab, the Explorer showing .erd-studio/tables/*.dbml beside the canvas, ideally one frame of the Import DBML summary. The current GIF is a dbt project and cycles to the Physical stage and the discrepancy overlay, which a reader without dbt will never see. Rewrite the alt text with it. -->
+<!-- TODO: re-shoot as a logical-only hero: a folder with no dbt_project.yml, no Physical tab, the Explorer showing .erd-studio/gold/tables/gold/*.dbml beside the canvas, ideally one frame of the Import DBML summary. The current GIF is a dbt project and cycles to the Physical stage and the discrepancy overlay, which a reader without dbt will never see. Rewrite the alt text with it. -->
 <p align="center">
   <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/demo.gif" width="800" alt="ERD Studio open in VS Code, showing four views of the same star schema. Logical stage: dim_customer, dim_date, dim_project and dim_task around the fct_order and fct_task_event facts, each dimension showing a PK surrogate key and an NK business key. Detail panel: dim_customer's columns, role and relationships opened for editing. Physical stage: the same diagram in green, built from the dbt project with the warehouse's own column types. Discrepancy overlay: columns that exist only in the design struck through against those only in the warehouse." />
 </p>
@@ -31,7 +31,7 @@
 
 - **In your repo.** Plain DBML files, reviewed in the same pull request as your code. No account, server or database.
 - **Works with the AI you already use.** Claude Code, GitHub Copilot, Codex, Gemini CLI and Cursor read and write the same files. Review their proposals on the canvas before anyone writes SQL.
-- **No lock-in.** Your files are [DBML](https://dbml.dbdiagram.io/docs), the open-source schema language behind dbdiagram.io; DBML parsers read your files as a multi-file project (the versions are in [Leaving ERD Studio](docs/leaving-erd-studio.md)). Import DBML from any DBML tool, and export a single file for dbdiagram.io (keys, grain and notes, with table positions in a `.dbdiagram` layout file) or Mermaid any time.
+- **No lock-in.** Your files are [DBML](https://dbml.dbdiagram.io/docs), the open-source schema language behind dbdiagram.io; DBML parsers read your files as a multi-file project (the versions are in [Leaving ERD Studio](docs/leaving-erd-studio.md)). Import DBML from any DBML tool, and export a single file for dbdiagram.io (keys, grain and notes) or Mermaid any time.
 - **Checked against dbt.** A read-only **Physical** view shows what your dbt project has; **⊕ Diff** highlights every difference from your design and makes a sync plan your AI applies. More stacks later.
 
 ## Get started
@@ -39,7 +39,7 @@
 1. [Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) (VS Code 1.85+, or [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) for VSCodium, Cursor and Windsurf). Open any folder and click **ERD Studio** in the Activity Bar.
 2. Make your first diagram:
    - **From scratch:** click **New Diagram** in the ERD Studio sidebar, choose a layer and a name, then use **+ Add → New Design Table** and **+ Add → New Relationship** on the canvas. (The commands call a diagram a *subject area*, so in the Command Palette it is **ERD Studio: New Subject Area**.)
-   - **From DBML:** click **Import DBML** in the sidebar (or run **ERD Studio: Import DBML…**) and pick a `.dbml` file. You see what it will create before anything is written. A `.dbdiagram` layout file beside it keeps your tables in place.
+   - **From DBML:** click **Import DBML** in the sidebar (or run **ERD Studio: Import DBML…**) and pick a `.dbml` file. You see what it will create before anything is written. Positions an ERD Studio export saved in the file keep your tables in place.
    - **From an example:** run **ERD Studio: Open Example Diagram** for a coffee-shop model.
 3. Commit the `.erd-studio/` folder. That's your data model.
 
@@ -49,19 +49,22 @@ To export, click **⤓** on the canvas toolbar or run **ERD Studio: Export All D
 
 ```text
 .erd-studio/
+├── README.md                       ← what the folders are
 ├── layers.json
-├── tables/
-│   ├── dim_customer.dbml       ← one DBML file per table, shared by every diagram
-│   ├── fct_order.dbml
-│   └── _relationships.dbml     ← the relationships, one Ref line each
-└── silver/
-    ├── orders.dbml             ← one file per diagram: the tables it shows
-    └── orders.dbdiagram        ← its layout (table positions)
+└── gold/                           ← a layer (bronze, silver, gold, …)
+    ├── tables/
+    │   └── sales/                  ← a schema
+    │       ├── dim_customer.dbml   ← one DBML file per table, shared by every diagram
+    │       └── fct_order.dbml
+    ├── relationships/
+    │   └── gold.dbml               ← the relationships, one Ref line each
+    └── diagrams/
+        └── orders.dbml             ← one file per diagram: the tables it shows and where they sit
 ```
 
 ```dbml
-// .erd-studio/tables/fct_order.dbml
-Table fct_order [grain: 'One row per order'] {
+// .erd-studio/gold/tables/sales/fct_order.dbml
+Table sales.fct_order [grain: 'One row per order'] {
   order_id    INTEGER [pk]
   customer_id INTEGER [foreign_key: 'true']
 }
@@ -73,9 +76,9 @@ Edit on the canvas or in the files, by hand or with AI, and the other follows: E
 
 **Do I have to convert my project to DBML?** No. A YAML/JSON project from before 2.0 keeps working, and its new tables and diagrams are still written as YAML and JSON. Only a new project starts as DBML. **ERD Studio: Convert Project to DBML** is up to you: it shows every change before it writes anything.
 
-**How do I go back?** Straight after converting, **Edit > Undo** (with the diagram Convert opens in front) puts every file back. After that, use Git: commit before you convert, and revert that commit to return. A converted project needs ERD Studio 2.0 or later (or the 1.9 pre-release).
+**How do I go back?** Straight after converting, **Edit > Undo** (with the diagram Convert opens in front) puts every file back. After that, use Git: commit before you convert, and revert that commit to return. A converted project needs ERD Studio 2.0 or later.
 
-**Can teammates on an older ERD Studio open it?** A YAML/JSON project, yes, as long as nobody converts it. A DBML project (a converted one, or a new one) needs ERD Studio 2.0 or later (or the 1.9 pre-release): an older version shows no diagrams and an empty Table Library. Agree on the version before you convert, and run **Set Up My AI Helper** again afterwards so your AI assistant writes DBML too.
+**Can teammates on an older ERD Studio open it?** A YAML/JSON project, yes, as long as nobody converts it. A DBML project (a converted one, or a new one) needs ERD Studio 2.0 or later: an older version (the 1.9 pre-releases included) shows no diagrams and an empty Table Library. Agree on the version before you convert, and run **Set Up My AI Helper** again afterwards so your AI assistant writes DBML too.
 
 **Something is slow or not working. Where do I look?** Run **ERD Studio: Show Logs**. The **ERD Studio** channel in the Output view says what ERD Studio did and how long it took: opening each diagram, saving a moved table, each step of a conversion, and any file it could not read, with its line. **Send Feedback** can add the recent lines to your report if you tick **Include the recent ERD Studio log**; check them first, as they can name your tables.
 

@@ -583,20 +583,20 @@ describe('setup skill: native DBML storage (§7.3)', () => {
     expect(flat(body())).toContain('a `fix-model-yaml` or `fix-dbml-file` whose file entry has `mergeConflict: true`, or a `dbmlProblems` entry with `mergeConflict: true`, at any stage): git left two versions in a file.');
     expect(body()).toContain('run `doctor` and fix each `fix-model-yaml` / `fix-dbml-file` file:line it lists first (usually a value to quote) —');
     expect(body()).toContain('- **`fix-model-yaml` / `fix-dbml-file`** first, always: the file does not parse — fix that line (DBML: `references/troubleshooting.md`)');
-    expect(body()).toContain('1. Glob `.erd-studio/*/*.{dbml,json}` and propose one domain (');
+    expect(body()).toContain('1. Glob `.erd-studio/*/diagrams/*.dbml` and `.erd-studio/*/*.json` and propose one domain (');
   });
 
   it('the dbt route names the DBML diagram first, never a bare .json diagram (S9 review)', () => {
     const text = flat(body());
     // Every mention of a `<domain>.json` path is the YAML-project alternative of a `.dbml` one.
     expect(text).not.toMatch(/<domain>\.json/);
-    expect(text).toContain('It is saved as `.erd-studio/<layer>/<domain>.dbml` (`.json` in a `yaml` project).');
-    expect(text).toContain('the diagram, `.erd-studio/<layer>/<domain>.dbml` (`.json` in a `yaml` project), listing the models; the inventory `relationships` are copied exactly (DBML: into `_relationships.dbml`).');
+    expect(text).toContain('It is saved as `.erd-studio/<layer>/diagrams/<domain>.dbml` (`.json` in a `yaml` project).');
+    expect(text).toContain('the diagram, `.erd-studio/<layer>/diagrams/<domain>.dbml` (`.json` in a `yaml` project), listing the models; the inventory `relationships` are copied exactly (DBML: into a `<layer>/relationships/` file).');
     expect(text).toContain('run `diff --domain` on the diagram file you wrote (`.dbml`, or `.json`).');
     expect(text).toContain('Never delete a table file in the library.');
     expect(text).not.toContain('under `logical-models/`');
     const verify = ref('verify-and-fix.md');
-    expect(verify).toContain('diff --domain .erd-studio/<layer>/<domain>.dbml --json');
+    expect(verify).toContain('diff --domain .erd-studio/<layer>/diagrams/<domain>.dbml --json');
     expect(verify).not.toMatch(/diff --domain \S*<domain>\.json/);
     expect(flat(verify)).toContain('In a `yaml` project the diagram is the `.json` file.');
   });

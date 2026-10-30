@@ -272,7 +272,7 @@ three lines: how many models, which folders, and how many ERD Studio already has
 
 Explain two terms, one line each:
 - A **domain** is one focused diagram of related tables for one business area — for example
-  "orders". It is saved as `.erd-studio/<layer>/<domain>.dbml` (`.json` in a `yaml` project).
+  "orders". It is saved as `.erd-studio/<layer>/diagrams/<domain>.dbml` (`.json` in a `yaml` project).
 - A **layer** is a folder for organising diagrams, usually matching a stage of the warehouse such
   as silver or gold. It can be changed later.
 
@@ -376,8 +376,8 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
      style, only what section 4 allows), **plus the metadata list's values from dbt**
      (`references/metadata.md` section 5). The approach never renames, adds or removes a column
      or a relationship: those come from dbt, and the diff checks them;
-   - the diagram, `.erd-studio/<layer>/<domain>.dbml` (`.json` in a `yaml` project), listing the
-     models; the inventory `relationships` are copied exactly (DBML: into `_relationships.dbml`).
+   - the diagram, `.erd-studio/<layer>/diagrams/<domain>.dbml` (`.json` in a `yaml` project), listing the
+     models; the inventory `relationships` are copied exactly (DBML: into a `<layer>/relationships/` file).
    Models that already have a model file (in any folder) are **referenced by name, never rewritten** —
    they may be someone's careful design and other domains may share them.
 7. Keep a list, **created this session**, of every model file you wrote (Stage 5 needs it). Then
@@ -467,7 +467,7 @@ changes in the logical model; never rename a model; never edit dbt files.
 The diagram's columns and connections already mirror dbt; what is missing is the design dbt does
 not record. Add it — never rebuild, rename, or change a column, type or relationship.
 
-1. Glob `.erd-studio/*/*.{dbml,json}` and propose one domain (the one named, else the largest): "You
+1. Glob `.erd-studio/*/diagrams/*.dbml` and `.erd-studio/*/*.json` and propose one domain (the one named, else the largest): "You
    already have the **orders** diagram (8 models). I'll add what dbt doesn't record — keys,
    grain, roles and why — and leave its columns and connections alone. OK?"
 2. Load the format rules and prepare the approval prompts (Stage 4 steps 1–2). Read the domain

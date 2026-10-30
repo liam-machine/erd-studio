@@ -21,16 +21,16 @@ in its own format. Never convert a file between the formats yourself.
 | File (DBML) | Write it when |
 |---|---|
 | `.erd-studio/layers.json` | It does not exist (a new project), or it lacks the chosen layer |
-| `.erd-studio/tables/<layer>/<name>.dbml` (or `tables/<name>.dbml` in a flat library — see below) | Once per chosen model that is **not** in `alreadyModelled` |
-| `.erd-studio/tables/<layer>/_relationships.dbml` | Once per library folder whose tables hold foreign keys: one Ref per relationship (add to it when it exists) |
-| `.erd-studio/<layer>/<domain>.dbml` | Once per domain (the diagram) |
+| `.erd-studio/<layer>/tables/<schema>/<name>.dbml` (see below) | Once per chosen model that is **not** in `alreadyModelled` |
+| `.erd-studio/<layer>/relationships/<layer>.dbml` | When the chosen models hold foreign keys: one Ref per relationship (add to it when it exists; see "Relationships (DBML)") |
+| `.erd-studio/<layer>/diagrams/<domain>.dbml` | Once per domain (the diagram) |
 
-**Where a new model file goes.** Table files may sit at the top of `tables/` or one folder down
-in a folder named after a layer. Use the domain's layer folder (`tables/<layer>/`) when the library
-is empty or a `tables/<layer>/` folder already holds a table file; if every existing table file is
-at the top level, the library is flat — write at the top level and leave the choice to organise to
-the user (**ERD Studio: Organise Table Library by Layer**). Table names are unique across all
-folders, and the diagram lists tables by name (its `use` lines), never by anything else.
+**Where a new model file goes.** In the domain's layer: `.erd-studio/<layer>/tables/<schema>/`.
+The schema folder is the model's dbt custom schema when it has one (`config: schema:` in its yml
+or `config()`, or `+schema:` for its folder in `dbt_project.yml`), never the inventory's `schema`
+(the built schema, which differs per dbt target); otherwise the layer's name. When the layer
+already has a schema folder spelled differently in case, use that spelling. Table names are unique
+across the whole project, and the diagram lists tables by their `use` lines.
 
 Models in `alreadyModelled` are referenced by name in the diagram and their file is left
 alone, wherever it is. Someone may have designed them by hand, and other domains may share them. If their content
@@ -97,15 +97,14 @@ Layers are only folders for organising diagrams; tell the user they can move a d
 
 ## Table file (DBML) — field by field
 
-For each `InventoryModel` in the `inventory --models` output, one `tables/[<layer>/]<name>.dbml`
-holding one Table named exactly `name`. **Quote every custom value**, even `'true'` and numbers
+For each `InventoryModel` in the `inventory --models` output, one `<layer>/tables/<schema>/<name>.dbml`
+holding one Table declared `Table <schema>.<name>`, with `name` exactly. **Quote every custom value**, even `'true'` and numbers
 (the schema skill's `DBML.md`): an unquoted word breaks the file everywhere, an unquoted `true`
 or `2` breaks it in other DBML tools.
 
 | DBML | Comes from |
 |---|---|
-| `Table <name>` | `name`, exactly (double-quoted only when it is not a plain identifier) |
-| `schema: '<schema>'` (table setting) | `schema`, if not empty; otherwise leave it out |
+| `Table <schema>.<name>` | the schema folder, then `name`, exactly (each part double-quoted only when it is not a plain identifier) |
 | `Note: '<text>'` (first line of the block, then a blank line) | `description`; if empty, a one-line plain draft ending in "(draft)" |
 | column lines, in order | `columns[].name` — an all-UPPERCASE warehouse spelling in lowercase, mixed case kept |
 | the column's type | `columns[].dataType`, copied exactly, double-quoted when it is not a plain identifier (`"NUMBER(38,0)"`). If it is `''`, see "When dbt has no type" |
@@ -121,10 +120,12 @@ table file holds no `use`, `Ref` or `[ref: …]` — relationships go in the rel
 
 ## Relationships (DBML)
 
-The inventory's `relationships`, **copied verbatim** — including `cardinality` — each as one Ref
-in the `_relationships.dbml` of the folder that holds its foreign-key (`fromModel`) table, with
-a `use { table x } from './x.dbml'` (or `'../x.dbml'`) line for every table the Refs name:
-`Ref: fct.fk >? dim.pk` (`many-to-one`), `Ref: dim.pk ?- fct.fk` (`one-to-one`, key end first),
+The inventory's `relationships`, **copied verbatim** — including `cardinality` — each as one Ref,
+its ends qualified as the tables declare themselves. A Ref goes in the relationships file that
+already holds the most Refs of its foreign-key (`fromModel`) table, else in that table's layer's
+`<layer>/relationships/<layer>.dbml`; never add one that a relationships file already holds. The
+file has a `use { table s.x } from '../tables/s/x.dbml'` line for every table its Refs name:
+`Ref: s.fct.fk >? s.dim.pk` (`many-to-one`), `Ref: s.dim.pk ?- s.fct.fk` (`one-to-one`, key end first),
 `Ref: a.x <>? b.y` (`many-to-many`); a `one-to-many` is written from the other end as `>?`; a
 composite key is one Ref with both column lists. Do not add connections you inferred from column
 names: a connection dbt does not test would be drift. Offer those as dbt tests in Stage 6 instead.
@@ -132,16 +133,16 @@ names: a connection dbt does not test would be drift. Offer those as dbt tests i
 ## Diagram file (DBML)
 
 ```dbml
+use { table gold.fct_order }    from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.dim_product }  from '../tables/gold/dim_product.dbml'
+use * from '../relationships/gold.dbml'
+
 Project orders {
   Note: 'Orders and the customers and products they reference'
   erd_schema_version: '7'
   erd_model_folder: 'models/marts'
 }
-
-use { table fct_order }    from '../tables/gold/fct_order.dbml'
-use { table dim_customer } from '../tables/gold/dim_customer.dbml'
-use { table dim_product }  from '../tables/gold/dim_product.dbml'
-use * from '../tables/gold/_relationships.dbml'
 ```
 
 - The Project name matches the file name; lowercase letters, digits, `-` and `_`, starting with a
@@ -149,23 +150,23 @@ use * from '../tables/gold/_relationships.dbml'
   ERD Studio reject the file. `erd_schema_version: '7'` always; `erd_model_folder` is optional (the common folder of
   the chosen models' files).
 - One table `use` line per chosen name, including already-modelled ones, with the path from the
-  diagram to the table's file; then one `use *` line per `_relationships.dbml` of those tables'
-  folders.
-- Write no `.dbdiagram` layout file: ERD Studio auto-arranges a new diagram the first time it opens
-  and saves the result. Never write positions yourself.
+  diagram to the table's file; then one `use *` line per relationships file holding a Ref between
+  two of those tables. The `Project` block comes last.
+- Write no `erd_layout`: ERD Studio auto-arranges a new diagram the first time it opens and saves
+  the positions in its Project. Never write positions yourself.
 - Do not set `erd_stub_columns`. It hides differences, and the point of this walkthrough is to see
   them.
 
 If the diagram already exists (a re-run), add `use` lines for new names and new Refs where they
-belong (skip any already there), and never touch its `.dbdiagram` — that is the user's layout.
+belong (skip any already there), and never touch its `erd_layout` — that is the user's layout.
 
 ## Worked example (DBML)
 
 For the inventory in "Legacy worked example" below, with the Kimball approach, you write
-`tables/gold/fct_order.dbml`:
+`gold/tables/gold/fct_order.dbml`:
 
 ```dbml
-Table fct_order [
+Table gold.fct_order [
   role: 'transaction-fact',
   grain: 'One row per order',
   rationale_design: 'Kimball transaction fact, per .erd-studio/modelling-approach.md'
@@ -182,16 +183,16 @@ Table fct_order [
 }
 ```
 
-and `tables/gold/_relationships.dbml`:
+and `gold/relationships/gold.dbml`:
 
 ```dbml
-// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
-use { table dim_customer } from './dim_customer.dbml'
-use { table dim_product }  from './dim_product.dbml'
-use { table fct_order }    from './fct_order.dbml'
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.dim_product }  from '../tables/gold/dim_product.dbml'
+use { table gold.fct_order }    from '../tables/gold/fct_order.dbml'
 
-Ref: fct_order.customer_id >? dim_customer.customer_id
-Ref: fct_order.product_id >? dim_product.product_id
+Ref: gold.fct_order.customer_id >? gold.dim_customer.customer_id
+Ref: gold.fct_order.product_id >? gold.dim_product.product_id
 ```
 
 Both are in the layout ERD Studio writes (the schema skill's `DBML.md`, "Layout"): Note first,

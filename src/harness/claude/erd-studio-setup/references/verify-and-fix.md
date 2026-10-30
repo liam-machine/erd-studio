@@ -19,7 +19,7 @@ on the canvas.
 ## 1. Reading `diff --json`
 
 ```
-~/.erd-studio-cli/bin/erd-studio diff --domain .erd-studio/<layer>/<domain>.dbml --json --semantic-dir .erd-studio
+~/.erd-studio-cli/bin/erd-studio diff --domain .erd-studio/<layer>/diagrams/<domain>.dbml --json --semantic-dir .erd-studio
 ```
 
 In a `yaml` project the diagram is the `.json` file. Exit code 0 means clean, 1 means differences were found (not a failure), 3 means the domain
@@ -82,11 +82,11 @@ Each fix:
 | kind | Edit (DBML) |
 |---|---|
 | `add-column` | Add a column line to the Table block in `file`, after the last column (before any `indexes` block): `name TYPE [note: '…']`, the type double-quoted when it is not a plain identifier (`"DECIMAL(18,2)"`) |
-| `remove-column` | Delete the column's line from `file`, **and** every Ref in a `_relationships.dbml` that names it |
+| `remove-column` | Delete the column's line from `file`, **and** every Ref in a relationships file (`<layer>/relationships/`) that names it |
 | `set-type` | Change the column's type to `to` |
-| `add-relationship` | Add one Ref line to `file` (the `_relationships.dbml` of the foreign-key table's folder): `Ref: from_table.from_col >? to_table.to_col` for `many-to-one`, `Ref: to_table.to_col ?- from_table.from_col` for `one-to-one` (key end first), `<>?` for `many-to-many`; a composite as `from_table.(a, b) >? to_table.(x, y)`. Add a `use { table x } from '…'` line there for each table it names that the file does not import, and `foreign_key: 'true'` on the foreign-key column in its table file |
-| `remove-relationship` | Delete the Ref line `relationship` names from `file` (either way round). It is shared by every diagram holding both tables, so say so — always a question first (section 3) |
-| `set-cardinality` | Rewrite that Ref's operator for the new cardinality; when `movesFrom` is set, delete it there and write it in `file` from the other end |
+| `add-relationship` | Add one Ref line to `file` (the relationships file a new Ref of the foreign-key table goes in), each end spelled as its table declares itself (`gold.fct_order.customer_id`): `Ref: from_table.from_col >? to_table.to_col` for `many-to-one`, `Ref: to_table.to_col ?- from_table.from_col` for `one-to-one` (key end first), `<>?` for `many-to-many`; a composite as `from_table.(a, b) >? to_table.(x, y)`. Add a `use { table s.x } from '…'` line there for each table it names that the file does not import, `foreign_key: 'true'` on the foreign-key column in its table file, and a `use * from '…'` line for `file` in every diagram that shows both tables and lacks it |
+| `remove-relationship` | Delete the Ref line `relationship` names from `file`, the relationships file that holds it (either way round). It is shared by every diagram holding both tables, so say so — always a question first (section 3) |
+| `set-cardinality` | Rewrite that Ref's operator for the new cardinality in place in `file`, the file that holds it (a DBML fix has no `movesFrom`; a turn-round is written from the other end in the same file) |
 | `resolve-phantom` | The same question; renaming means rewriting its `use` line in the diagram (and its Refs). **Never** delete its table file |
 
 For `missingModelFiles`: if the model exists in dbt, write its table file (`.dbml`, or `.yml` in a
@@ -94,7 +94,7 @@ YAML project) from `inventory --models <name>` (building-the-model.md). If it do
 like a phantom and ask.
 
 Edit the files with Edit, keeping everything else in the file untouched — comments, key
-order, other columns, and especially the positions (a `.dbdiagram` layout file, or `viewConfig.positions`).
+order, other columns, and especially the positions (a DBML diagram's `erd_layout`, or `viewConfig.positions`).
 
 ## 3. Who decides: the fix rules
 

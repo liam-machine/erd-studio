@@ -350,6 +350,17 @@ describe('LayerService', () => {
       expect(fs.existsSync(configPath)).toBe(false);
     });
 
+    it.each(['templates', 'Logical-Models'])('%s is refused in a YAML/JSON project too (the one change it can see in 2.0)', async (id) => {
+      // A YAML project: a model library and a JSON diagram, no .dbml anywhere.
+      fs.mkdirSync(path.join(semanticDir, 'logical-models'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'logical-models', 'dim_customer.yml'), 'name: dim_customer\ncolumns: []\n');
+      fs.mkdirSync(path.join(semanticDir, 'silver'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'silver', 'sales.json'), '{"schemaVersion":5,"domain":"sales","layer":"silver","logical":{"models":[]}}\n');
+      await expect(service.addLayer({ id, label: 'X', abbreviation: 'X', color: '#123456', creatable: true }))
+        .rejects.toThrow(`"${id}" is reserved for ERD Studio's own folders; pick another name.`);
+      expect(fs.existsSync(configPath)).toBe(false);
+    });
+
     it.each(['diagrams', 'relationships'])('%s is a valid layer name (the tree is read by depth)', async (id) => {
       await service.addLayer({ id, label: 'X', abbreviation: 'X', color: '#123456', creatable: true });
       expect(service.getAllLayers().map((l) => l.id)).toContain(id);
