@@ -450,7 +450,8 @@ describe('the laws over every DBML fixture', () => {
         const resolveTable = diagramResolver(library);
         const lookups = {
           resolveTable,
-          relationshipsFilesFor: (names: readonly string[]) => names.map((n) => resolveTable(n)).filter((t) => t?.storage === 'dbml').map((t) => relationshipsFilePathOf(t!.path)),
+          // 2.0-switch: S4b (the folder-based imports until this generator writes the layer-first tree)
+          relationshipsImportsFor: (names: readonly string[]) => names.map((n) => resolveTable(n)).filter((t) => t?.storage === 'dbml').map((t) => relationshipsFilePathOf(t!.path)),
           fileExists: (p: string) => p in project.files,
         };
         expect(editSubjectAreaDbml(text, { filePath: file, before, after: before, ...lookups })).toBe(text); // Law 1
@@ -814,7 +815,8 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         const resolveTable = diagramResolver(lib);
         const lookups = {
           resolveTable,
-          relationshipsFilesFor: (names: readonly string[]) => names.map((n) => resolveTable(n)).filter((t) => t?.storage === 'dbml').map((t) => relationshipsFilePathOf(t!.path)),
+          // 2.0-switch: S4b (the folder-based imports until this generator writes the layer-first tree)
+          relationshipsImportsFor: (names: readonly string[]) => names.map((n) => resolveTable(n)).filter((t) => t?.storage === 'dbml').map((t) => relationshipsFilePathOf(t!.path)),
           fileExists: (p: string) => p in library,
         };
         const file = pick(rng, ['gold/sales.dbml', 'silver/My Diagram.dbml']);
@@ -846,7 +848,7 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
           ...(chance(rng, 0.3) ? { layoutOptions: { 'elk.direction': 'RIGHT' } } : {}),
           ...(chance(rng, 0.2) ? { stubColumns: ['a_key'] } : {}),
           members: members.map((m) => ({ name: m, path: resolveTable(m)!.path })),
-          relationshipsFiles: lookups.relationshipsFilesFor(members),
+          relationshipsFiles: lookups.relationshipsImportsFor(members),
           annotations: Array.from({ length: Math.floor(rng() * 3) }, (_, k) => makeNote(k)),
           ...(chance(rng, 0.7) ? { positions: positionsOf(members) } : {}),
         });

@@ -75,8 +75,8 @@ export const loaded: Promise<DisplaySubjectArea> = loadDisplaySubjectArea(option
 export const loadedDbml: Promise<DisplaySubjectArea> = loadDisplaySubjectArea({ ...options, domainPath: 'a/b/c.dbml', dbml: dbmlStorageReader });
 export const tableReading = parseTableDbml('Table a { id int }', 'a');
 export const relationshipsReading = readRelationshipsDbml('');
-export const diagramReading = () => parseSubjectAreaDbml('Project a {}', 'a/b/a.dbml');
-export const members: string[] | null = subjectAreaMembersDbml('');
+export const diagramReading = () => parseSubjectAreaDbml('Project a {}', 'a/diagrams/a.dbml');
+export const members: string[] | null = subjectAreaMembersDbml('', 'a/diagrams/a.dbml');
 export const diagnostics = compileDbmlProject({ 'tables/a.dbml': 'Table a { id int }' }, ['tables/a.dbml']);
 export const attach = attachRelationships;
 export const refused: Error = new DbmlEditRefused('tables/a.dbml', 'no');

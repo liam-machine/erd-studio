@@ -105,7 +105,8 @@ export function settleDbmlDiagramWrites(input: SettleInput): FileWrite[] {
         before,
         after: obj,
         resolveTable: (name) => resolver.resolveTable(name),
-        relationshipsFilesFor: (names) => resolver.relationshipsFilesFor(names),
+        // 2.0-switch: S6b (the folder-based resolver gives the imports until the planner's index does)
+        relationshipsImportsFor: (names) => resolver.relationshipsFilesFor(names),
         fileExists: (relPath) => resolver.fileExists(relPath),
         ...(resolver.pathChanged ? { pathChanged: resolver.pathChanged } : {}),
         refreshRelationshipsUses: true,

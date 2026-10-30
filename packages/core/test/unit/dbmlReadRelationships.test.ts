@@ -1,46 +1,53 @@
 /**
  * `readRelationshipsDbml` and `attachRelationships` (§2.3, §2.4, §4.3 of the
- * native DBML storage spec): a relationships file read Ref by Ref from the
- * AST (binding errors never hide a Ref), and the Refs attached to their
- * DBML owners — oriented, respelled, deduplicated and grouped.
+ * native DBML storage spec; §1.3 of the 2.0 tree design): a relationships
+ * file (`<layer>/relationships/<f>.dbml`) read Ref by Ref from the AST
+ * (binding errors never hide a Ref), each end's qualifier kept, and the Refs
+ * attached to their DBML owners — oriented, respelled, deduplicated and
+ * grouped, from whichever relationships file holds them.
  */
 import { describe, it, expect, vi } from 'vitest';
 
 import { readRelationshipsDbml } from '../../src/dbml/readRelationships';
-import { attachRelationships, dbmlTableLookup, relationshipsFileFolder } from '../../src/dbmlAttach';
+import { attachRelationships, dbmlTableLookup } from '../../src/dbmlAttach';
+import { DBML_RELATIONSHIPS_FILE_HEADER } from '../../src/dbmlRichProperties';
 import * as relationships from '../../src/relationships';
 import type { DbmlAttachTable, DbmlRelationshipsReading } from '../../src/types/dbmlStorage';
 import type { ColumnDef } from '../../src/types/semantic';
 import { STORAGE_PARSERS } from '../dbmlParsers';
 
 const col = (name: string, isPrimaryKey = false): ColumnDef => ({ name, dataType: 'int', description: '', ...(isPrimaryKey ? { isPrimaryKey } : {}) });
-const table = (name: string, folder: string, columns: ColumnDef[], extra: Partial<DbmlAttachTable> = {}): DbmlAttachTable =>
-  ({ table: { name, columns }, folder, storage: 'dbml', ...extra });
+// 2.0-switch: S6a drops DbmlAttachTable.folder; no Ref has a home folder in the layer-first tree.
+// Each table carries its schema folder, as the classifier gives it, so a folder check would show.
+const table = (name: string, columns: ColumnDef[], extra: Partial<DbmlAttachTable> = {}): DbmlAttachTable =>
+  ({ table: { name, columns }, folder: 'gold', storage: 'dbml', ...extra });
 
 const TABLES: DbmlAttachTable[] = [
-  table('fct_order', 'gold', [col('order_line_id', true), col('customer_key'), col('order_date_key'), col('ship_date_key'), col('region_code'), col('country_code')]),
-  table('dim_customer', 'gold', [col('customer_key', true), col('parent_customer_key')]),
-  table('customer_profile', 'gold', [col('customer_key', true)]),
-  table('dim_date', '', [col('date_key', true)]),
-  table('dim_region', 'gold', [col('region_code', true), col('country_code', true)]),
+  table('fct_order', [col('order_line_id', true), col('customer_key'), col('order_date_key'), col('ship_date_key'), col('region_code'), col('country_code')]),
+  table('dim_customer', [col('customer_key', true), col('parent_customer_key')]),
+  table('customer_profile', [col('customer_key', true)]),
+  table('dim_date', [col('date_key', true)], { folder: 'shared' }),
+  table('dim_region', [col('region_code', true), col('country_code', true)]),
 ];
 const lookup = dbmlTableLookup(TABLES);
 
 const read = (text: string): DbmlRelationshipsReading => readRelationshipsDbml(text);
 
-const GOLD = `// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
-use { table dim_date } from '../dim_date.dbml'
-use { table customer_profile } from './customer_profile.dbml'
-use { table dim_customer } from './dim_customer.dbml'
-use { table dim_region } from './dim_region.dbml'
-use { table fct_order } from './fct_order.dbml'
+/** `gold/relationships/gold.dbml`: gold's Refs, one of them to a table of another layer (`shared.dim_date`, in silver). */
+const GOLD_PATH = 'gold/relationships/gold.dbml';
+const GOLD = `${DBML_RELATIONSHIPS_FILE_HEADER}
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.dim_region } from '../tables/gold/dim_region.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 
-Ref: dim_customer.customer_key ?- customer_profile.customer_key
-Ref "parent": dim_customer.parent_customer_key >? dim_customer.customer_key
-Ref: fct_order.customer_key >? dim_customer.customer_key
-Ref "order date": fct_order.order_date_key >? dim_date.date_key
-Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
-Ref: fct_order.(region_code, country_code) >? dim_region.(region_code, country_code)
+Ref: gold.dim_customer.customer_key ?- gold.customer_profile.customer_key
+Ref "parent": gold.dim_customer.parent_customer_key >? gold.dim_customer.customer_key
+Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key
+Ref "order date": gold.fct_order.order_date_key >? shared.dim_date.date_key
+Ref "ship date": gold.fct_order.ship_date_key >? shared.dim_date.date_key
+Ref: gold.fct_order.(region_code, country_code) >? gold.dim_region.(region_code, country_code)
 `;
 
 describe('readRelationshipsDbml', () => {
@@ -58,6 +65,11 @@ describe('readRelationshipsDbml', () => {
       ['fct_order', 'dim_region', ['region_code>region_code:many-to-one', 'country_code>country_code:many-to-one'], 13],
     ]);
     expect(reading.refs[0].oneToOneDirection).toBe('mark');
+    // Each end's qualifier as written; ends are matched by table name alone.
+    expect(reading.refs.map((r) => [r.ownerQualifier, r.targetQualifier])).toEqual([
+      ['gold', 'gold'], ['gold', 'gold'], ['gold', 'gold'], ['gold', 'shared'], ['gold', 'shared'], ['gold', 'gold'],
+    ]);
+    expect(reading.otherElements).toBeUndefined();
     for (const ref of reading.refs) {
       expect(GOLD.slice(ref.start, ref.fullEnd).startsWith('Ref')).toBe(true);
       expect(ref.relationships.every((r) => r.compositeKey === undefined)).toBe(true);
@@ -99,11 +111,16 @@ describe('readRelationshipsDbml', () => {
       const reading = readRelationshipsDbml(`Ref fk { gold.fct_order.customer_key > gold.dim_customer.customer_key }
 Ref "fk": "order line".x > "dim x".y
 Ref "fk": a.b > c.d
+Ref: "SAP FI".afih.(MANDT, EQUNR) >? sap.equi.(MANDT, EQUNR)
+Ref: sap.equi.x < a.y
 `, parser);
-      expect(reading.refs.map((r) => [r.owner, r.target, r.relationships[0].role])).toEqual([
-        ['fct_order', 'dim_customer', 'fk'],
-        ['order line', 'dim x', 'fk'],
-        ['a', 'c', 'fk'],
+      expect(reading.refs.map((r) => [r.owner, r.target, r.relationships[0].role, r.ownerQualifier, r.targetQualifier])).toEqual([
+        ['fct_order', 'dim_customer', 'fk', 'gold', 'gold'],
+        ['order line', 'dim x', 'fk', undefined, undefined],
+        ['a', 'c', 'fk', undefined, undefined],
+        ['afih', 'equi', undefined, 'SAP FI', 'sap'],
+        // `<`: the right end is the foreign key, so its qualifier is the owner's.
+        ['a', 'equi', undefined, undefined, 'sap'],
       ]);
     });
   });
@@ -129,6 +146,25 @@ Ref "fk": a.b > c.d
   it('a leading byte-order mark is stripped', () => {
     expect(read('\uFEFFRef: a.x > b.y\n').refs).toHaveLength(1);
   });
+
+  it.each(STORAGE_PARSERS)('records the elements a relationships file should not hold, with their lines (§1.3) (%s)', (_label, parser) => {
+    const text = `use { table gold.a } from '../tables/gold/a.dbml'
+Ref: gold.a.x > gold.b.y
+Table gold.local {
+  id int
+}
+Enum status {
+  open
+}
+TableGroup g {
+  gold.local
+}
+`;
+    const reading = readRelationshipsDbml(text, parser);
+    expect(reading.readable).toBe(true);
+    expect(reading.refs).toHaveLength(1);
+    expect(reading.otherElements).toEqual([{ kind: 'Table', line: 3 }, { kind: 'Enum', line: 6 }, { kind: 'TableGroup', line: 9 }]);
+  });
 });
 
 describe('attachRelationships', () => {
@@ -136,7 +172,7 @@ describe('attachRelationships', () => {
     attachRelationships(Object.entries(files).map(([path, text]) => ({ path, reading: read(text) })), tables);
 
   it('attaches the spec example to its owners, respelled, with derived composite keys', () => {
-    const result = attach({ 'tables/gold/_relationships.dbml': GOLD });
+    const result = attach({ [GOLD_PATH]: GOLD });
     expect(result.warnings).toEqual([]);
     expect(Object.fromEntries(result.byOwner)).toEqual({
       customer_profile: [{ fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'one-to-one' }],
@@ -154,7 +190,7 @@ describe('attachRelationships', () => {
   it('derives composite keys with the planner\'s own nextCompositeKey', () => {
     const spy = vi.spyOn(relationships, 'nextCompositeKey');
     try {
-      const result = attach({ 'tables/gold/_relationships.dbml': 'Ref: fct_order.(region_code, country_code) > dim_region.(region_code, country_code)\nRef: fct_order.(customer_key, order_date_key) > dim_region.(region_code, country_code)\n' });
+      const result = attach({ [GOLD_PATH]: 'Ref: fct_order.(region_code, country_code) > dim_region.(region_code, country_code)\nRef: fct_order.(customer_key, order_date_key) > dim_region.(region_code, country_code)\n' });
       expect(result.byOwner.get('fct_order')!.map((r) => r.compositeKey)).toEqual(['fk_dim_region', 'fk_dim_region', 'fk_dim_region_2', 'fk_dim_region_2']);
       expect(spy).toHaveBeenCalledTimes(2);
     } finally {
@@ -165,18 +201,18 @@ describe('attachRelationships', () => {
   });
 
   it('respells ends to the real table and column spelling, and maps schema qualifiers and DBML aliases', () => {
-    const tables = dbmlTableLookup([...TABLES, table('fct_sales', 'gold', [col('id', true), col('Customer_Key')], { dbmlAlias: 'FS' })]);
-    const result = attach({ 'tables/gold/_relationships.dbml': 'Ref: FS.customer_key > GOLD.Dim_Customer.CUSTOMER_KEY\n' }, tables);
+    const tables = dbmlTableLookup([...TABLES, table('fct_sales', [col('id', true), col('Customer_Key')], { dbmlAlias: 'FS' })]);
+    const result = attach({ [GOLD_PATH]: 'Ref: FS.customer_key > GOLD.Dim_Customer.CUSTOMER_KEY\n' }, tables);
     expect(result.byOwner.get('fct_sales')).toEqual([{ fromColumn: 'Customer_Key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' }]);
   });
 
   it('a self-reference attaches to its one table', () => {
-    const result = attach({ 'tables/gold/_relationships.dbml': 'Ref: dim_customer.parent_customer_key > dim_customer.customer_key\n' });
+    const result = attach({ [GOLD_PATH]: 'Ref: dim_customer.parent_customer_key > dim_customer.customer_key\n' });
     expect(result.byOwner.get('dim_customer')).toHaveLength(1);
   });
 
   it('keeps a dangling end (a target with no table, a column it lacks) in the owner\'s list', () => {
-    const result = attach({ 'tables/gold/_relationships.dbml': 'Ref: fct_order.customer_key > dim_gone.id\nRef: fct_order.region_code > dim_customer.gone\n' });
+    const result = attach({ [GOLD_PATH]: 'Ref: fct_order.customer_key > dim_gone.id\nRef: fct_order.region_code > dim_customer.gone\n' });
     expect(result.byOwner.get('fct_order')).toEqual([
       { fromColumn: 'customer_key', toModel: 'dim_gone', toColumn: 'id', cardinality: 'many-to-one' },
       { fromColumn: 'region_code', toModel: 'dim_customer', toColumn: 'gone', cardinality: 'many-to-one' },
@@ -186,39 +222,42 @@ describe('attachRelationships', () => {
   describe('a one-to-one\'s direction (§2.3)', () => {
     it('(1) a single ? mark decides, whatever the keys say (the shared-primary-key pattern)', () => {
       // customer_profile.customer_key is its whole key; the mark still makes it the FK.
-      const result = attach({ 'tables/gold/_relationships.dbml': 'Ref: dim_customer.customer_key ?- customer_profile.customer_key\n' });
+      const result = attach({ [GOLD_PATH]: 'Ref: dim_customer.customer_key ?- customer_profile.customer_key\n' });
       expect([...result.byOwner.keys()]).toEqual(['customer_profile']);
     });
 
     it('(2) a bare `-`: the second end is the FK, unless only it is its table\'s whole key', () => {
       // FK-first, as an assistant writes it: the right end is dim_customer's whole key, the left is not fct_order's.
-      const fkFirst = attach({ 'tables/gold/_relationships.dbml': 'Ref: fct_order.customer_key - dim_customer.customer_key\n' });
+      const fkFirst = attach({ [GOLD_PATH]: 'Ref: fct_order.customer_key - dim_customer.customer_key\n' });
       expect([...fkFirst.byOwner.keys()]).toEqual(['fct_order']);
       // Key-first, as DBML reads it: the second end is the FK.
-      const keyFirst = attach({ 'tables/gold/_relationships.dbml': 'Ref: dim_customer.customer_key - fct_order.customer_key\n' });
+      const keyFirst = attach({ [GOLD_PATH]: 'Ref: dim_customer.customer_key - fct_order.customer_key\n' });
       expect([...keyFirst.byOwner.keys()]).toEqual(['fct_order']);
       // Both ends whole keys: by position, the second end.
-      const both = attach({ 'tables/gold/_relationships.dbml': 'Ref: dim_customer.customer_key - customer_profile.customer_key\n' });
+      const both = attach({ [GOLD_PATH]: 'Ref: dim_customer.customer_key - customer_profile.customer_key\n' });
       expect([...both.byOwner.keys()]).toEqual(['customer_profile']);
     });
 
     it('(3) an end whose table the reader does not have: the second end is the FK', () => {
-      const result = attach({ 'tables/gold/_relationships.dbml': 'Ref: fct_order.customer_key - dim_gone.id\n' });
+      const result = attach({ [GOLD_PATH]: 'Ref: fct_order.customer_key - dim_gone.id\n' });
       expect(result.byOwner.size).toBe(0);
       expect(result.orphaned.map((o) => o.owner)).toEqual(['dim_gone']);
     });
   });
 
-  it('a misplaced Ref attaches, with a warning naming its home', () => {
-    const result = attach({ 'tables/_relationships.dbml': 'Ref: fct_order.customer_key >? dim_customer.customer_key\n' });
-    expect(result.byOwner.get('fct_order')).toHaveLength(1);
-    expect(result.misplaced).toEqual([{ path: 'tables/_relationships.dbml', line: 1, owner: 'fct_order', target: 'dim_customer', home: 'gold' }]);
-    expect(result.warnings[0]).toContain('tables/gold/');
+  it('a Ref in any relationships file attaches, with no warning (decision 5: a file is no table\'s home)', () => {
+    const result = attach({
+      'silver/relationships/silver.dbml': 'Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key\n',
+      'gold/relationships/by-hand.dbml': 'Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key\n',
+    });
+    expect(result.byOwner.get('fct_order')).toHaveLength(2);
+    expect(result.warnings).toEqual([]);
+    expect(result.misplaced ?? []).toEqual([]);
   });
 
   it('an orphaned Ref (a YAML owner, or no owner) is not attached', () => {
-    const tables = dbmlTableLookup([...TABLES, { table: { name: 'yaml_fact', columns: [col('customer_key')] }, folder: 'gold', storage: 'yaml' }]);
-    const result = attach({ 'tables/gold/_relationships.dbml': 'Ref: yaml_fact.customer_key > dim_customer.customer_key\nRef: nobody.x > dim_customer.customer_key\n' }, tables);
+    const tables = dbmlTableLookup([...TABLES, { table: { name: 'yaml_fact', columns: [col('customer_key')] }, folder: '', storage: 'yaml' }]);
+    const result = attach({ [GOLD_PATH]: 'Ref: yaml_fact.customer_key > dim_customer.customer_key\nRef: nobody.x > dim_customer.customer_key\n' }, tables);
     expect(result.byOwner.size).toBe(0);
     expect(result.orphaned.map((o) => o.owner)).toEqual(['yaml_fact', 'nobody']);
     expect(result.warnings).toHaveLength(2);
@@ -226,9 +265,9 @@ describe('attachRelationships', () => {
 
   it('partial: a Ref whose owner the lookup does not hold is skipped without a warning; a YAML owner is still orphaned', () => {
     // Core's loader holds only a diagram's members; the owner may be a DBML table off the diagram.
-    const tables = dbmlTableLookup([...TABLES, { table: { name: 'yaml_fact', columns: [col('customer_key')] }, folder: 'gold', storage: 'yaml' }]);
+    const tables = dbmlTableLookup([...TABLES, { table: { name: 'yaml_fact', columns: [col('customer_key')] }, folder: '', storage: 'yaml' }]);
     const text = 'Ref: yaml_fact.customer_key > dim_customer.customer_key\nRef: not_on_diagram.x > dim_customer.customer_key\nRef: fct_order.customer_key >? dim_customer.customer_key\n';
-    const result = attachRelationships([{ path: 'tables/gold/_relationships.dbml', reading: read(text) }], tables, { partial: true });
+    const result = attachRelationships([{ path: GOLD_PATH, reading: read(text) }], tables, { partial: true });
     expect(result.orphaned.map((o) => o.owner)).toEqual(['yaml_fact']);
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain('a YAML table');
@@ -237,33 +276,28 @@ describe('attachRelationships', () => {
 
   it('the same link in two files, or twice in one, is attached once, with a warning naming both places', () => {
     const twoFiles = attach({
-      'tables/gold/_relationships.dbml': 'Ref: fct_order.customer_key >? dim_customer.customer_key\n',
-      'tables/_relationships.dbml': 'Ref "buyer": dim_customer.customer_key < fct_order.customer_key\n',
+      [GOLD_PATH]: 'Ref: fct_order.customer_key >? dim_customer.customer_key\n',
+      'silver/relationships/silver.dbml': 'Ref "buyer": dim_customer.customer_key < fct_order.customer_key\n',
     });
     expect(twoFiles.byOwner.get('fct_order')).toEqual([
       { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer' },
     ]);
     expect(twoFiles.duplicates).toHaveLength(1);
-    expect(twoFiles.warnings.some((w) => w.includes('tables/gold/_relationships.dbml line 1') && w.includes('tables/_relationships.dbml line 1'))).toBe(true);
+    expect(twoFiles.warnings.some((w) => w.includes('gold/relationships/gold.dbml line 1') && w.includes('silver/relationships/silver.dbml line 1'))).toBe(true);
 
-    const oneFile = attach({ 'tables/gold/_relationships.dbml': 'Ref: fct_order.customer_key > dim_customer.customer_key\nRef: fct_order.customer_key > dim_customer.customer_key\n' });
+    const oneFile = attach({ [GOLD_PATH]: 'Ref: fct_order.customer_key > dim_customer.customer_key\nRef: fct_order.customer_key > dim_customer.customer_key\n' });
     expect(oneFile.byOwner.get('fct_order')).toHaveLength(1);
     expect(oneFile.duplicates.map((d) => [d.kept.line, d.dropped.line])).toEqual([[1, 2]]);
   });
 
   it('skips an unreadable file and reads the others', () => {
     const result = attach({
-      'tables/gold/_relationships.dbml': 'Ref: fct_order.customer_key >\n',
-      'tables/_relationships.dbml': 'Ref: fct_order.order_date_key > dim_date.date_key\n',
+      [GOLD_PATH]: 'Ref: fct_order.customer_key >\n',
+      'silver/relationships/silver.dbml': 'Ref: fct_order.order_date_key > dim_date.date_key\n',
     });
     expect(result.byOwner.get('fct_order')).toHaveLength(1);
   });
 
-  it('relationshipsFileFolder names the folder of a relationships file', () => {
-    expect(relationshipsFileFolder('tables/_relationships.dbml')).toBe('');
-    expect(relationshipsFileFolder('.erd-studio/tables/gold/_relationships.dbml')).toBe('gold');
-    expect(relationshipsFileFolder('C:\\p\\.erd-studio\\tables\\SAP FI\\_relationships.dbml')).toBe('SAP FI');
-  });
 });
 
 describe('line numbers in a large file (§7.6)', () => {
@@ -290,7 +324,7 @@ describe('line numbers in a large file (§7.6)', () => {
 });
 
 describe('pending relationships (D27)', () => {
-  const FILE = `use { table fct } from './fct.dbml'
+  const FILE = `use { table gold.fct } from '../tables/gold/fct.dbml'
 
 Ref: fct.a >? dim.a
 // erd-studio pending: Ref: fct.b >? dim_missing.b
@@ -321,7 +355,7 @@ Ref: fct.a >? dim.a
     const table = (name: string, columns: string[]): DbmlAttachTable => ({
       table: { name, columns: columns.map((c) => ({ name: c, dataType: 'int', description: '' }) as ColumnDef) }, folder: '', storage: 'dbml',
     });
-    const result = attachRelationships([{ path: 'tables/_relationships.dbml', reading: readRelationshipsDbml(FILE) }], dbmlTableLookup([table('fct', ['a', 'b', 'k']), table('dim', ['a', 'k'])]));
+    const result = attachRelationships([{ path: 'silver/relationships/silver.dbml', reading: readRelationshipsDbml(FILE) }], dbmlTableLookup([table('fct', ['a', 'b', 'k']), table('dim', ['a', 'k'])]));
     expect(result.byOwner.get('fct')).toEqual([
       { fromColumn: 'a', toModel: 'dim', toColumn: 'a', cardinality: 'many-to-one' },
       { fromColumn: 'b', toModel: 'dim_missing', toColumn: 'b', cardinality: 'many-to-one' },

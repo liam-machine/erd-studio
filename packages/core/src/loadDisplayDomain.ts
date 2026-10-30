@@ -353,17 +353,17 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
       .filter((name) => modelNameFilter(name));
     // Alphabetical, like the extension's TableLibraryService, so a name that
     // (wrongly) exists in two folders resolves to the same file in both hosts.
-    // A DBML diagram adds the library folders its `use` lines name (§3.4).
     // (`''`, the top of the library, is always probed first.)
-    const folders = [...new Set([domainLayer, ...layers.map((l) => l.id), ...(reading?.useFolders ?? [])])]
+    const folders = [...new Set([domainLayer, ...layers.map((l) => l.id)])]
       .filter((f) => f !== '')
       .sort((a, b) => a.localeCompare(b));
-    // `logical-models/` then `tables/` (#162), each top level first; with the
-    // DBML readers, a `tables/` folder's `.dbml` before its `.yml` (§3.4).
+    // `logical-models/` then `tables/` (#162), each top level first.
+    // 2.0-switch: S4b reads a DBML diagram's members from its resolved `use` paths
+    // (`reading.uses`, then `reading.useTableDirs`); until then only the YAML probe runs.
     const found = new Map<string, FoundTable>();
     await mapWithLimit(names, maxParallelReads, async (name) => {
       // One lane probes one candidate at a time, so maxParallelReads holds.
-      const candidates = tableFileCandidates(prefix, name, folders, { dbml: dbml !== undefined });
+      const candidates = tableFileCandidates(prefix, name, folders);
       let text: string | null | undefined;
       let path = '';
       for (let i = 0; (text === null || text === undefined) && i < candidates.length; i++) {

@@ -8,11 +8,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   classifySemanticFile,
+  dbmlNotADiagramMessage,
   dirnamePosix,
   isInsidePosix,
   isLibraryFolderName,
   isReservedTableName,
   joinPosix,
+  legacyDbmlFileMessage,
   normalisePosix,
   relationshipsFilePathOf,
   relativePosix,
@@ -29,16 +31,23 @@ const LIBRARY = { tablesDirIsLayer: false };
 const LAYER = { tablesDirIsLayer: true };
 
 describe('classifySemanticFile', () => {
+  const LEGACY_TABLE: SemanticFileClass = { kind: 'other', legacy: 'table' };
+  const LEGACY_RELATIONSHIPS: SemanticFileClass = { kind: 'other', legacy: 'relationships' };
+  const LEGACY_DIAGRAM: SemanticFileClass = { kind: 'other', legacy: 'diagram' };
+  const LEGACY_LAYOUT: SemanticFileClass = { kind: 'other', legacy: 'layout' };
   // [path, expected while tables/ is the library, expected while tables/ is a layer]
   const rows: Array<[string, SemanticFileClass, SemanticFileClass]> = [
     // depth 1
     ['layers.json', { kind: 'layers' }, { kind: 'layers' }],
+    ['README.md', { kind: 'readme' }, { kind: 'readme' }],
     ['readme.md', { kind: 'other' }, { kind: 'other' }],
     ['sales.json', { kind: 'other' }, { kind: 'other' }],
     ['sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['sales.dbdiagram', LEGACY_LAYOUT, LEGACY_LAYOUT],
     // templates
     ['templates/dim.json', { kind: 'template' }, { kind: 'template' }],
     ['templates/a/b.json', { kind: 'template' }, { kind: 'template' }],
+    ['templates/diagrams/x.dbml', { kind: 'template' }, { kind: 'template' }],
     // logical-models
     ['logical-models/dim_date.yml', { kind: 'table', storage: 'yaml', name: 'dim_date' }, { kind: 'table', storage: 'yaml', name: 'dim_date' }],
     ['logical-models/gold/fct.yml', { kind: 'table', storage: 'yaml', folder: 'gold', name: 'fct' }, { kind: 'table', storage: 'yaml', folder: 'gold', name: 'fct' }],
@@ -46,46 +55,88 @@ describe('classifySemanticFile', () => {
     ['logical-models/SAP FI/fct.yml', { kind: 'table', storage: 'yaml', folder: 'SAP FI', name: 'fct' }, { kind: 'table', storage: 'yaml', folder: 'SAP FI', name: 'fct' }],
     ['logical-models/.git/fct.yml', { kind: 'other' }, { kind: 'other' }],
     ['logical-models/a/b/fct.yml', { kind: 'other' }, { kind: 'other' }],
-    ['logical-models/fct.dbml', { kind: 'other' }, { kind: 'other' }],
+    // A two-segment .dbml has the 1.9 pre-release's diagram shape, wherever it is (§1.8).
+    ['logical-models/fct.dbml', LEGACY_DIAGRAM, LEGACY_DIAGRAM],
     ['logical-models/fct.json', { kind: 'other' }, { kind: 'other' }],
-    // tables/: the library
-    ['tables/dim_date.dbml', { kind: 'table', storage: 'dbml', name: 'dim_date' }, { kind: 'other' }],
-    ['tables/gold/fct_order.dbml', { kind: 'table', storage: 'dbml', folder: 'gold', name: 'fct_order' }, { kind: 'other' }],
-    ['tables/Finance/x.dbml', { kind: 'table', storage: 'dbml', folder: 'Finance', name: 'x' }, { kind: 'other' }],
-    ['tables/SAP FI/x.dbml', { kind: 'table', storage: 'dbml', folder: 'SAP FI', name: 'x' }, { kind: 'other' }],
-    ['tables/_relationships.dbml', { kind: 'relationships', storage: 'dbml' }, { kind: 'other' }],
-    ['tables/_Relationships.dbml', { kind: 'relationships', storage: 'dbml' }, { kind: 'other' }],
-    ['tables/gold/_relationships.dbml', { kind: 'relationships', storage: 'dbml', folder: 'gold' }, { kind: 'other' }],
-    ['tables/_x.dbml', { kind: 'table', storage: 'dbml', name: '_x' }, { kind: 'other' }],
+    ['logical-models/diagrams/x.dbml', { kind: 'other' }, { kind: 'other' }],
+    // tables/: the YAML library, or a YAML layer; a .dbml in it is the 1.9 pre-release's
+    ['tables/dim_date.dbml', LEGACY_TABLE, LEGACY_TABLE],
+    ['tables/gold/fct_order.dbml', LEGACY_TABLE, LEGACY_TABLE],
+    ['tables/Finance/x.dbml', LEGACY_TABLE, LEGACY_TABLE],
+    ['tables/SAP FI/x.dbml', LEGACY_TABLE, LEGACY_TABLE],
+    ['tables/_relationships.dbml', LEGACY_RELATIONSHIPS, LEGACY_RELATIONSHIPS],
+    ['tables/_Relationships.dbml', LEGACY_RELATIONSHIPS, LEGACY_RELATIONSHIPS],
+    ['tables/gold/_relationships.dbml', LEGACY_RELATIONSHIPS, LEGACY_RELATIONSHIPS],
+    ['tables/_x.dbml', LEGACY_TABLE, LEGACY_TABLE],
     ['tables/_relationships.yml', { kind: 'table', storage: 'yaml', name: '_relationships' }, { kind: 'other' }],
     ['tables/dim.yml', { kind: 'table', storage: 'yaml', name: 'dim' }, { kind: 'other' }],
     ['tables/gold/dim.yml', { kind: 'table', storage: 'yaml', folder: 'gold', name: 'dim' }, { kind: 'other' }],
     ['tables/sales.json', { kind: 'other' }, { kind: 'diagram', storage: 'json', layer: 'tables', name: 'sales' }],
-    ['tables/sales.dbdiagram', { kind: 'other' }, { kind: 'other' }],
+    ['tables/sales.dbdiagram', LEGACY_LAYOUT, LEGACY_LAYOUT],
     ['tables/.hidden/x.dbml', { kind: 'other' }, { kind: 'other' }],
     ['tables/a/b/x.dbml', { kind: 'other' }, { kind: 'other' }],
     ['tables/gold/notes.txt', { kind: 'other' }, { kind: 'other' }],
-    // layer folders
+    // `tables` is no DBML layer (reserved: tables/tables/S/x.dbml would look like the 1.9 tree).
+    ['tables/tables/gold/x.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['tables/diagrams/x.dbml', LEGACY_TABLE, LEGACY_TABLE],
+    // JSON diagrams in layer folders (unchanged; `diagrams` and `relationships` are layers like any other)
     ['gold/sales.json', { kind: 'diagram', storage: 'json', layer: 'gold', name: 'sales' }, { kind: 'diagram', storage: 'json', layer: 'gold', name: 'sales' }],
-    ['gold/sales.dbml', { kind: 'diagram', storage: 'dbml', layer: 'gold', name: 'sales' }, { kind: 'diagram', storage: 'dbml', layer: 'gold', name: 'sales' }],
-    ['gold/_x.dbml', { kind: 'diagram', storage: 'dbml', layer: 'gold', name: '_x' }, { kind: 'diagram', storage: 'dbml', layer: 'gold', name: '_x' }],
     ['gold/_x.json', { kind: 'diagram', storage: 'json', layer: 'gold', name: '_x' }, { kind: 'diagram', storage: 'json', layer: 'gold', name: '_x' }],
-    ['gold/_relationships.dbml', { kind: 'other' }, { kind: 'other' }],
-    ['gold/_RELATIONSHIPS.dbml', { kind: 'other' }, { kind: 'other' }],
-    // Positions live in the diagram's erd_layout: a .dbdiagram is no file of the project.
-    ['gold/sales.dbdiagram', { kind: 'other' }, { kind: 'other' }],
-    ['gold/_relationships.dbdiagram', { kind: 'other' }, { kind: 'other' }],
-    ['SAP FI/sales.dbml', { kind: 'diagram', storage: 'dbml', layer: 'SAP FI', name: 'sales' }, { kind: 'diagram', storage: 'dbml', layer: 'SAP FI', name: 'sales' }],
+    ['diagrams/x.json', { kind: 'diagram', storage: 'json', layer: 'diagrams', name: 'x' }, { kind: 'diagram', storage: 'json', layer: 'diagrams', name: 'x' }],
+    ['relationships/x.json', { kind: 'diagram', storage: 'json', layer: 'relationships', name: 'x' }, { kind: 'diagram', storage: 'json', layer: 'relationships', name: 'x' }],
+    ['SAP FI/sales.json', { kind: 'diagram', storage: 'json', layer: 'SAP FI', name: 'sales' }, { kind: 'diagram', storage: 'json', layer: 'SAP FI', name: 'sales' }],
     ['gold/sales.yml', { kind: 'other' }, { kind: 'other' }],
     ['gold/.sales.json', { kind: 'other' }, { kind: 'other' }],
     ['.git/sales.json', { kind: 'other' }, { kind: 'other' }],
-    ['gold/sub/sales.dbml', { kind: 'other' }, { kind: 'other' }],
     ['logical/sales.json', { kind: 'other' }, { kind: 'other' }],
-    ['physical/sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['gold/diagrams/sales.json', { kind: 'other' }, { kind: 'other' }],
+    // The 1.9 pre-release's diagrams and layout files (§1.8)
+    ['gold/sales.dbml', LEGACY_DIAGRAM, LEGACY_DIAGRAM],
+    ['gold/_x.dbml', LEGACY_DIAGRAM, LEGACY_DIAGRAM],
+    ['gold/_relationships.dbml', LEGACY_DIAGRAM, LEGACY_DIAGRAM],
+    ['gold/_RELATIONSHIPS.dbml', LEGACY_DIAGRAM, LEGACY_DIAGRAM],
+    ['SAP FI/sales.dbml', LEGACY_DIAGRAM, LEGACY_DIAGRAM],
+    ['physical/sales.dbml', LEGACY_DIAGRAM, LEGACY_DIAGRAM],
+    ['gold/sales.dbdiagram', LEGACY_LAYOUT, LEGACY_LAYOUT],
+    ['gold/_relationships.dbdiagram', LEGACY_LAYOUT, LEGACY_LAYOUT],
+    ['gold/diagrams/sales.dbdiagram', LEGACY_LAYOUT, LEGACY_LAYOUT],
+    ['.git/sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['gold/sub/sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    // The layer-first DBML tree (§1.1)
+    ['gold/diagrams/sales.dbml', { kind: 'diagram', storage: 'dbml', layer: 'gold', name: 'sales' }, { kind: 'diagram', storage: 'dbml', layer: 'gold', name: 'sales' }],
+    ['gold/diagrams/_x.dbml', { kind: 'diagram', storage: 'dbml', layer: 'gold', name: '_x' }, { kind: 'diagram', storage: 'dbml', layer: 'gold', name: '_x' }],
+    ['gold-old/diagrams/x.dbml', { kind: 'diagram', storage: 'dbml', layer: 'gold-old', name: 'x' }, { kind: 'diagram', storage: 'dbml', layer: 'gold-old', name: 'x' }],
+    ['diagrams/diagrams/x.dbml', { kind: 'diagram', storage: 'dbml', layer: 'diagrams', name: 'x' }, { kind: 'diagram', storage: 'dbml', layer: 'diagrams', name: 'x' }],
+    ['gold/tables/sales/fct.dbml', { kind: 'table', storage: 'dbml', layer: 'gold', folder: 'sales', schema: 'sales', name: 'fct' }, { kind: 'table', storage: 'dbml', layer: 'gold', folder: 'sales', schema: 'sales', name: 'fct' }],
+    ['gold/tables/SAP FI/afih.dbml', { kind: 'table', storage: 'dbml', layer: 'gold', folder: 'SAP FI', schema: 'SAP FI', name: 'afih' }, { kind: 'table', storage: 'dbml', layer: 'gold', folder: 'SAP FI', schema: 'SAP FI', name: 'afih' }],
+    ['gold/tables/relationships/x.dbml', { kind: 'table', storage: 'dbml', layer: 'gold', folder: 'relationships', schema: 'relationships', name: 'x' }, { kind: 'table', storage: 'dbml', layer: 'gold', folder: 'relationships', schema: 'relationships', name: 'x' }],
+    ['gold/tables/sales/_relationships.dbml', { kind: 'table', storage: 'dbml', layer: 'gold', folder: 'sales', schema: 'sales', name: '_relationships' }, { kind: 'table', storage: 'dbml', layer: 'gold', folder: 'sales', schema: 'sales', name: '_relationships' }],
+    ['gold/relationships/gold.dbml', { kind: 'relationships', storage: 'dbml', layer: 'gold', name: 'gold' }, { kind: 'relationships', storage: 'dbml', layer: 'gold', name: 'gold' }],
+    ['relationships/relationships/relationships.dbml', { kind: 'relationships', storage: 'dbml', layer: 'relationships', name: 'relationships' }, { kind: 'relationships', storage: 'dbml', layer: 'relationships', name: 'relationships' }],
+    ['gold/relationships/sub/x.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['gold/tables/x.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['gold/tables/.hidden/x.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['gold/tables/a/b/x.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['gold/tables/sales/fct.yml', { kind: 'other' }, { kind: 'other' }],
+    ['gold/diagrams/sales.DBML', { kind: 'other' }, { kind: 'other' }],
+    ['gold/diagrams/.sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['gold/diagrams/sub/sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    // The fixed folder names are compared exactly, and a layer folder is a layer id (§1.1).
+    ['gold/Diagrams/sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['gold/Tables/sales/fct.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['Gold/diagrams/sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['sales area/diagrams/sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['gold.old/diagrams/sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['1gold/diagrams/sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['logical/diagrams/sales.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['physical/tables/s/x.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['logical-models/relationships/x.dbml', { kind: 'other' }, { kind: 'other' }],
+    ['.git/diagrams/sales.dbml', { kind: 'other' }, { kind: 'other' }],
     // paths that leave the semantic dir, or are not relative posix paths
     ['../gold/sales.json', { kind: 'other' }, { kind: 'other' }],
     ['/abs/gold/sales.json', { kind: 'other' }, { kind: 'other' }],
     ['gold\\sales.json', { kind: 'other' }, { kind: 'other' }],
+    ['../gold/diagrams/sales.dbml', { kind: 'other' }, { kind: 'other' }],
     ['', { kind: 'other' }, { kind: 'other' }],
   ];
 
@@ -98,52 +149,64 @@ describe('classifySemanticFile', () => {
     for (const dir of NON_SUBJECT_AREA_DIRS) {
       expect(classifySemanticFile(`${dir}/x.json`, LIBRARY).kind).not.toBe('diagram');
       expect(classifySemanticFile(`${dir}/x.dbml`, LIBRARY).kind).not.toBe('diagram');
+      expect(classifySemanticFile(`${dir}/diagrams/x.dbml`, LIBRARY).kind).not.toBe('diagram');
     }
   });
 
-  it('a .dbml in a layer whose first line is the export header is an export, not a diagram', () => {
+  it('a .dbml is classified by its path alone: the first line is ignored (2.0-switch: S5 removes the option)', () => {
     expect(DBML_RICH_EXPORT_HEADER.startsWith(ERD_STUDIO_DBML_HEADER_PREFIX)).toBe(true);
-    expect(classifySemanticFile('gold/sales.dbml', { ...LIBRARY, firstLine: DBML_RICH_EXPORT_HEADER })).toEqual({ kind: 'other' });
-    expect(classifySemanticFile('gold/sales.dbml', { ...LIBRARY, firstLine: '// erd-studio dbml-export v1' })).toEqual({ kind: 'other' });
-    expect(classifySemanticFile('gold/sales.dbml', { ...LIBRARY, firstLine: `\uFEFF${DBML_RICH_EXPORT_HEADER}` })).toEqual({ kind: 'other' });
-    expect(classifySemanticFile('gold/sales.dbml', { ...LIBRARY, firstLine: 'Project sales {' })).toEqual({
+    expect(classifySemanticFile('gold/diagrams/sales.dbml', { ...LIBRARY, firstLine: DBML_RICH_EXPORT_HEADER })).toEqual({
       kind: 'diagram', storage: 'dbml', layer: 'gold', name: 'sales',
     });
-    expect(classifySemanticFile('gold/sales.dbml', { ...LIBRARY, firstLine: '' }).kind).toBe('diagram');
-    // A JSON diagram and a table file are classified by path; the line does not matter.
-    expect(classifySemanticFile('gold/sales.json', { ...LIBRARY, firstLine: DBML_RICH_EXPORT_HEADER }).kind).toBe('diagram');
-    expect(classifySemanticFile('tables/x.dbml', { ...LIBRARY, firstLine: DBML_RICH_EXPORT_HEADER }).kind).toBe('table');
+    expect(classifySemanticFile('gold/sales.dbml', { ...LIBRARY, firstLine: 'Project sales {' })).toEqual(LEGACY_DIAGRAM);
   });
 
   it('normalises ./ and inner .. before classifying', () => {
-    expect(classifySemanticFile('./gold/sales.dbml', LIBRARY).kind).toBe('diagram');
-    expect(classifySemanticFile('tables/../gold/sales.dbml', LIBRARY).kind).toBe('diagram');
+    expect(classifySemanticFile('./gold/diagrams/sales.dbml', LIBRARY).kind).toBe('diagram');
+    expect(classifySemanticFile('tables/../gold/diagrams/sales.dbml', LIBRARY).kind).toBe('diagram');
+    expect(classifySemanticFile('gold/diagrams/../tables/s/x.dbml', LIBRARY).kind).toBe('table');
+  });
+});
+
+describe('dbmlNotADiagramMessage (§1.8)', () => {
+  it('names a 1.9 shape, a table or relationships file, or where diagrams live', () => {
+    expect(dbmlNotADiagramMessage('gold/sales.dbml')).toBe(legacyDbmlFileMessage('gold/sales.dbml'));
+    expect(dbmlNotADiagramMessage('tables/gold/fct.dbml')).toBe(legacyDbmlFileMessage('tables/gold/fct.dbml'));
+    expect(dbmlNotADiagramMessage('/p/.erd-studio/gold/sales.dbml')).toBe(legacyDbmlFileMessage('/p/.erd-studio/gold/sales.dbml'));
+    expect(dbmlNotADiagramMessage('.erd-studio/gold/sales.dbml')).toBe(legacyDbmlFileMessage('.erd-studio/gold/sales.dbml'));
+    expect(dbmlNotADiagramMessage('gold/tables/sales/fct.dbml'))
+      .toBe('gold/tables/sales/fct.dbml is a DBML table or relationships file, not a diagram. Open a diagram in gold/diagrams/.');
+    expect(dbmlNotADiagramMessage('C:\\p\\x\\silver\\relationships\\silver.dbml'))
+      .toBe('C:\\p\\x\\silver\\relationships\\silver.dbml is a DBML table or relationships file, not a diagram. Open a diagram in silver/diagrams/.');
+    expect(dbmlNotADiagramMessage('gold/Diagrams/sales.dbml'))
+      .toBe('gold/Diagrams/sales.dbml is not a DBML diagram. ERD Studio diagrams live in <layer>/diagrams/<name>.dbml (the folder names are lower-case).');
+    // An absolute path with no semantic dir in it is never called a 1.9 file by its last two segments.
+    expect(dbmlNotADiagramMessage('/somewhere/gold/sales.dbml')).toMatch(/is not a DBML diagram/);
+    // A table or relationships file is known by its last segments behind any semantic dir (`model/`),
+    // and behind an `erd-studio` folder that is not the semantic dir.
+    for (const p of ['model/gold/tables/s/x.dbml', '/home/u/erd-studio/model/gold/tables/s/x.dbml', 'model/silver/relationships/silver.dbml']) {
+      expect(dbmlNotADiagramMessage(p)).toContain('is a DBML table or relationships file, not a diagram');
+    }
   });
 });
 
 describe('tableFileCandidates', () => {
-  it('probes logical-models first, then tables/ with .dbml before .yml in each directory', () => {
-    expect(tableFileCandidates('/p/.erd-studio/', 'fct', ['silver', 'gold', 'gold'], { dbml: true })).toEqual([
+  it('probes logical-models first, then tables/, each top level first: the YAML probe the core loader has always made', () => {
+    expect(tableFileCandidates('/p/.erd-studio/', 'fct', ['silver', 'gold', 'gold'])).toEqual([
       '/p/.erd-studio/logical-models/fct.yml',
       '/p/.erd-studio/logical-models/gold/fct.yml',
       '/p/.erd-studio/logical-models/silver/fct.yml',
-      '/p/.erd-studio/tables/fct.dbml',
       '/p/.erd-studio/tables/fct.yml',
-      '/p/.erd-studio/tables/gold/fct.dbml',
       '/p/.erd-studio/tables/gold/fct.yml',
-      '/p/.erd-studio/tables/silver/fct.dbml',
       '/p/.erd-studio/tables/silver/fct.yml',
     ]);
-  });
-
-  it('without dbml, is the YAML probe the core loader has always made', () => {
     const folders = ['silver', 'gold'];
     const legacy = ['logical-models', 'tables'].flatMap((dir) => ['', 'gold/', 'silver/'].map((sub) => `${dir}/${sub}fct.yml`));
-    expect(tableFileCandidates('', 'fct', folders, { dbml: false })).toEqual(legacy);
+    expect(tableFileCandidates('', 'fct', folders)).toEqual(legacy);
   });
 
   it('sorts folders with localeCompare and de-duplicates them', () => {
-    const list = tableFileCandidates('', 'x', ['SAP FI', 'Finance', 'finance', 'Finance'], { dbml: false });
+    const list = tableFileCandidates('', 'x', ['SAP FI', 'Finance', 'finance', 'Finance']);
     expect(list.slice(0, 4)).toEqual([
       'logical-models/x.yml',
       ...['Finance', 'finance', 'SAP FI'].sort((a, b) => a.localeCompare(b)).map((f) => `logical-models/${f}/x.yml`),
@@ -152,7 +215,7 @@ describe('tableFileCandidates', () => {
 
   it('does not change the folders it is given', () => {
     const folders = ['b', 'a'];
-    tableFileCandidates('', 'x', folders, { dbml: true });
+    tableFileCandidates('', 'x', folders);
     expect(folders).toEqual(['b', 'a']);
   });
 });

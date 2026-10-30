@@ -17,7 +17,7 @@ export function edited(text: string, change: (t: SemanticTable) => void, stem = 
   return editTableDbml(text, desired, { fileStem: stem, ...options });
 }
 
-const path = (stem: string): string => `tables/${stem}.dbml`;
+const path = (stem: string): string => `gold/tables/gold/${stem}.dbml`;
 
 function tableCase(
   name: string,
@@ -127,9 +127,11 @@ export const TABLE_CASES: WriterCase[] = [
   tableCase('a setting added to an inline list is appended', 'fct_order', INLINE, (t) => { t.grain = 'One row per order'; }, (out) => {
     expect(out).toBe(INLINE.replace("[role: 'transaction-fact']", "[role: 'transaction-fact', grain: 'One row per order']"));
   }),
-  tableCase('a setting added to an inline list goes before the settings that sort after it', 'fct_order', INLINE, (t) => { t.schema = 'gold'; }, (out) => {
-    expect(out).toBe(INLINE.replace("[role: 'transaction-fact']", "[schema: 'gold', role: 'transaction-fact']"));
-  }),
+  // The schema is the Table's qualifier (§1.2 of the 2.0 tree design), never a setting.
+  tableCase('a new schema (requalify) is a qualifier put before an unqualified name, never a setting', 'fct_order', INLINE, (t) => { t.schema = 'gold'; }, (out) => {
+    expect(out).toBe(INLINE.replace('Table fct_order [', 'Table gold.fct_order ['));
+    expect(readTable(out, 'fct_order').table.schema).toBe('gold');
+  }, undefined, { requalify: true }),
   tableCase('the last setting removed from an inline list removes the brackets', 'fct_order', INLINE, (t) => { delete t.modelRole; }, (out) => {
     expect(out).toBe(INLINE.replace(" [role: 'transaction-fact']", ''));
   }),
@@ -331,10 +333,10 @@ export const TABLE_CASES: WriterCase[] = [
     expect(out).toBe("Table fct_order {\n  _erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']\n}\n");
     expect(readTable(out, 'fct_order').table.columns).toEqual([]);
   }),
-  tableCase('the placeholder goes when a column is added', 'fct_order', renderNewTableDbml({ name: 'fct_order', columns: [] }), (t) => {
+  tableCase('the placeholder goes when a column is added', 'fct_order', renderNewTableDbml({ name: 'fct_order', schema: 'gold', columns: [] }), (t) => {
     t.columns = [{ name: 'id', dataType: 'int', description: '' }];
   }, (out) => {
-    expect(out).toBe('Table fct_order {\n  id int\n}\n');
+    expect(out).toBe('Table gold.fct_order {\n  id int\n}\n');
   }),
 
   // --- Names ------------------------------------------------------------------------
@@ -349,11 +351,36 @@ export const TABLE_CASES: WriterCase[] = [
   }, (out) => {
     expect(out).toBe(BARE.replace('Table fct_order {', "Table fct_order [grain: 'g'] {"));
   }),
-  tableCase('a schema-qualified name with a schema property edits the property', 'fct_order', "Table gold.fct_order [schema: 'gold'] {\n  id int\n}\n", (t) => {
+  tableCase('a schema-qualified name with an old schema property: requalify replaces the qualifier, the property\'s bytes stay', 'fct_order', "Table gold.fct_order [schema: 'gold'] {\n  id int\n}\n", (t) => {
     t.schema = 'silver';
   }, (out) => {
-    expect(out).toBe("Table gold.fct_order [schema: 'silver'] {\n  id int\n}\n");
-  }),
+    expect(out).toBe("Table silver.fct_order [schema: 'gold'] {\n  id int\n}\n");
+    const read = readTable(out, 'fct_order');
+    expect(read.table.schema).toBe('silver');
+    expect(read.problems.map((p) => p.code)).toEqual(['schemaProperty']);
+  }, undefined, { requalify: true }),
+  tableCase('requalify retargets the Metadata blocks of the file, beside a rename', 'fct_order',
+    "Table gold.fct_order {\n  id int\n}\nMetadata Table gold.fct_order {\n  grain: 'g'\n}\nMetadata Column gold.fct_order.id {\n  note: 'the key'\n}\n", (t) => {
+      t.schema = 'sales';
+      t.name = 'fct_order_line';
+    }, (out) => {
+      expect(out).toBe("Table sales.fct_order_line {\n  id int\n}\nMetadata Table sales.fct_order_line {\n  grain: 'g'\n}\nMetadata Column sales.fct_order_line.id {\n  note: 'the key'\n}\n");
+      const read = readTable(out, 'fct_order_line').table;
+      expect(read).toMatchObject({ name: 'fct_order_line', schema: 'sales', grain: 'g' });
+      expect(read.columns![0].description).toBe('the key');
+    }, undefined, { requalify: true, rename: true }),
+  tableCase('requalify of an unqualified table qualifies its unqualified Metadata blocks too', 'fct_order',
+    "Table fct_order {\n  id int\n}\nMetadata Table fct_order {\n  grain: 'g'\n}\n", (t) => {
+      t.schema = 'gold';
+    }, (out) => {
+      expect(out).toBe("Table gold.fct_order {\n  id int\n}\nMetadata Table gold.fct_order {\n  grain: 'g'\n}\n");
+    }, undefined, { requalify: true }),
+  tableCase('the schema the file reads as (its folder, for an unqualified Table) is no change', 'fct_order', BARE, (t) => {
+    t.schema = 'gold';
+    t.grain = 'g';
+  }, (out) => {
+    expect(out).toBe(BARE.replace('Table fct_order {', "Table fct_order [grain: 'g'] {"));
+  }, undefined, { schemaFolder: 'gold' }),
   tableCase('keywords, upper case, digit-leading and odd names are quoted', 'fct_order', BARE, (t) => {
     t.columns!.push(
       { name: 'note', dataType: 'int', description: '' },
@@ -371,11 +398,11 @@ export const TABLE_CASES: WriterCase[] = [
   {
     name: 'a table named as a keyword, with odd characters, is written and edited',
     run: (): WriterOutcome => {
-      const created = renderNewTableDbml({ name: 'Order Lines (v2)', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] });
-      return { path: 'tables/Order Lines (v2).dbml', input: created, output: edited(created, (t) => { t.grain = 'g'; }, 'Order Lines (v2)') };
+      const created = renderNewTableDbml({ name: 'Order Lines (v2)', schema: 'SAP FI', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] });
+      return { path: 'gold/tables/SAP FI/Order Lines (v2).dbml', input: created, output: edited(created, (t) => { t.grain = 'g'; }, 'Order Lines (v2)') };
     },
     check: (o) => {
-      expect(o.output).toBe("Table \"Order Lines (v2)\" [grain: 'g'] {\n  id int [pk]\n}\n");
+      expect(o.output).toBe("Table \"SAP FI\".\"Order Lines (v2)\" [grain: 'g'] {\n  id int [pk]\n}\n");
     },
   },
 
@@ -503,13 +530,13 @@ const READ_BACK_TABLE: SemanticTable = {
 export const NEW_TABLE_CASES: WriterCase[] = [
   {
     name: 'a new table reads back as the table it was given',
-    run: () => ({ path: 'tables/dim_customer.dbml', input: null, output: renderNewTableDbml(READ_BACK_TABLE) }),
+    run: () => ({ path: 'silver/tables/silver/dim_customer.dbml', input: null, output: renderNewTableDbml(READ_BACK_TABLE) }),
     check: (o) => { expect(readTable(o.output, 'dim_customer').table).toEqual(READ_BACK_TABLE); },
   },
   {
     name: 'a new table follows the §2.2 layout',
     run: () => ({
-      path: 'tables/gold/fct_order.dbml',
+      path: 'gold/tables/gold/fct_order.dbml',
       input: null,
       output: renderNewTableDbml({
         name: 'fct_order',
@@ -526,8 +553,7 @@ export const NEW_TABLE_CASES: WriterCase[] = [
       }),
     }),
     check: (o) => {
-      expect(o.output).toBe(`Table fct_order [
-  schema: 'gold',
+      expect(o.output).toBe(`Table gold.fct_order [
   role: 'transaction-fact',
   grain: 'One row per order line',
   rationale_purpose: 'Revenue',
@@ -546,32 +572,33 @@ export const NEW_TABLE_CASES: WriterCase[] = [
   {
     name: 'a new table with a composite key writes an indexes block',
     run: () => ({
-      path: 'tables/sat.dbml',
+      path: 'gold/tables/gold/sat.dbml',
       input: null,
-      output: renderNewTableDbml({ name: 'sat', columns: [
+      output: renderNewTableDbml({ name: 'sat', schema: 'gold', columns: [
         { name: 'hk', dataType: 'binary', description: '', isPrimaryKey: true },
         { name: 'load_date', dataType: 'timestamp', description: '', isPrimaryKey: true },
       ] }),
     }),
     check: (o) => {
-      expect(o.output).toBe('Table sat {\n  hk binary\n  load_date timestamp\n  indexes {\n    (hk, load_date) [pk]\n  }\n}\n');
+      expect(o.output).toBe('Table gold.sat {\n  hk binary\n  load_date timestamp\n  indexes {\n    (hk, load_date) [pk]\n  }\n}\n');
     },
   },
   {
     // Stress round 1: `{ owner: 'x', contains_pii: true }` read back as `{ contains_pii, owner }`.
     name: 'a new table keeps its meta in key order (meta_json where its first entry is)',
     run: () => ({
-      path: 'tables/dim_employee.dbml',
+      path: 'gold/tables/gold/dim_employee.dbml',
       input: null,
       output: renderNewTableDbml({
         name: 'dim_employee',
+        schema: 'gold',
         meta: { owner: 'people', contains_pii: true, exposure: 'crm' },
         columns: [{ name: 'id', dataType: 'int', description: '', meta: { a: 'x', b: true, c: 'y', d: ['p', 'q'], e: 'z' } }],
       }),
     }),
     check: (o) => {
       expect(o.output).toBe(
-        "Table dim_employee [\n  meta_owner: 'people',\n  meta_json: '{\"contains_pii\":true}',\n  meta_exposure: 'crm'\n] {\n" +
+        "Table gold.dim_employee [\n  meta_owner: 'people',\n  meta_json: '{\"contains_pii\":true}',\n  meta_exposure: 'crm'\n] {\n" +
           "  id int [meta_a: 'x', meta_json: '{\"b\":true,\"c\":\"y\",\"d\":[\"p\",\"q\"]}', meta_e: 'z']\n}\n",
       );
       const read = readTable(o.output, 'dim_employee').table;
@@ -584,7 +611,7 @@ export const NEW_TABLE_CASES: WriterCase[] = [
   // Review of the stress fixes: an edit keeps the meta key order as YAML does.
   ...((): WriterCase[] => {
     const input = (meta: Record<string, unknown>, columnMeta?: Record<string, unknown>): string => renderNewTableDbml({
-      name: 'fct_m', meta: meta as SemanticTable['meta'],
+      name: 'fct_m', schema: 'gold', meta: meta as SemanticTable['meta'],
       columns: [{ name: 'id', dataType: 'int', description: '', ...(columnMeta ? { meta: columnMeta as SemanticTable['meta'] } : {}) }],
     });
     const order = (out: string, keys: string[], columnKeys?: string[]): void => {

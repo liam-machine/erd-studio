@@ -1,9 +1,11 @@
 /**
- * The diagram writer (§2.5 and §4.5 of the native DBML storage spec): a new
- * `<layer>/<name>.dbml` diagram, and an edit that diffs the v5 object a
- * diagram was read into (`before`) against the one a handler produced
- * (`after`) and splices only what changed — Project values, table `use`
- * lines, the relationships `use` lines, sticky-note `Note` blocks, and the
+ * The diagram writer (§2.5 and §4.5 of the native DBML storage spec, §1.4 of
+ * the 2.0 tree design): a new `<layer>/diagrams/<name>.dbml` diagram, and an
+ * edit that diffs the v5 object a diagram was read into (`before`) against
+ * the one a handler produced (`after`) and splices only what changed —
+ * Project values, table `use` lines, the relationships `use *` lines (each
+ * line read by `diagramUseRole`, as the reader reads it; every other `use *`
+ * line is kept as written), sticky-note `Note` blocks, and the
  * positions and sticky-note boxes in the Project's `erd_layout` (§1.6,
  * `erdLayoutTextEdit`). A DBML diagram holds no Refs (D5).
  *
@@ -19,7 +21,6 @@ import { DBML_SCHEMA_VERSION } from '../types/semantic.js';
 import { SubjectAreaFileError, SubjectAreaValidationError } from '../domain.js';
 import {
   DBML_DIAGRAM_PROPERTIES,
-  DBML_RELATIONSHIPS_FILE_STEM,
   DBML_RICH_NOTE_PROPERTIES,
   DBML_RICH_STICKY_COLOURS,
   formatUnlinkedTables,
@@ -29,7 +30,6 @@ import { readPendingRefs } from './readRelationships.js';
 import { dbmlName, dbmlNoteText, dbmlString } from '../dbmlText.js';
 import { erdLayoutOf, renderErdLayoutValue, sameErdLayout, withMemberSpelling, type ErdLayout } from '../erdLayout.js';
 import type { NodePosition } from '../types/semantic.js';
-import { isSafeTableName } from '../logicalModel.js';
 import { normalisePosix } from '../storage.js';
 import { DbmlEditRefused } from './errors.js';
 import type { DbmlParserModule } from './parserModule.js';
@@ -44,7 +44,7 @@ import {
   topLevel,
   type AstNode,
 } from './parser.js';
-import { parseSubjectAreaDbml } from './readDiagram.js';
+import { diagramUseRole, parseSubjectAreaDbml } from './readDiagram.js';
 import { erdLayoutTextEdit } from './erdLayoutDbml.js';
 import {
   applyTextEdits,
@@ -84,8 +84,13 @@ export interface SubjectAreaDbmlEdit {
   resolveTable(name: string): DbmlDiagramTable | undefined;
   /** Tables whose file moved, was renamed or was deleted in this edit (lower-case). */
   pathChanged?: ReadonlySet<string>;
-  /** The relationships files (paths after this edit, relative to the semantic dir) of the library folders holding these DBML tables. */
-  relationshipsFilesFor(memberNames: readonly string[]): string[];
+  /**
+   * The relationships files (paths after this edit, relative to the semantic
+   * dir) the diagram should import for these members; `current` is what it
+   * imports now (its `use *` lines of relationships files, resolved), so an
+   * implementation can keep one it cannot read.
+   */
+  relationshipsImportsFor(memberNames: readonly string[], current: readonly string[]): string[];
   /** Recompute the relationships `use` lines even when membership did not change (the settle pass). */
   refreshRelationshipsUses?: boolean;
   /**
@@ -356,7 +361,7 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   // the library) is the same relationship: it takes the place of the one it was, with the same cardinality
   // and role, and its line is re-spelled. Anything else new is refused: a DBML diagram holds no Refs (D5).
   const respelledTo = new Map<string, Relationship>();
-  const notOwn = (): never => refuse(file, `${file} is a DBML diagram, which holds no relationships: they live in the table library, in the relationships file of the foreign-key table's folder.`);
+  const notOwn = (): never => refuse(file, `${file} is a DBML diagram, which holds no relationships: they live in the table library, in the project's relationships files.`);
   afterOwn.forEach((r, i) => {
     if (!isObject(r)) notOwn();
     if (pendingIds.has(relationshipIdentity(r))) return;
@@ -404,9 +409,11 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   const firstUses: string[] = [];
 
   // --- Members: use lines and erd_unlinked_tables (D26) -----------------------------------
+  // Each use line by the reader's rule (§1.4): members, relationships imports, and the rest (kept as written).
   const uses = useLinesOf(ast, text, file);
-  const memberUses = uses.filter((u) => lower(u.stem) !== DBML_RELATIONSHIPS_FILE_STEM && isSafeTableName(u.stem));
-  const relUses = uses.filter((u) => lower(u.stem) === DBML_RELATIONSHIPS_FILE_STEM);
+  const roleOf = (u: (typeof uses)[number]): string => diagramUseRole(u.resolved, u.wildcard, u.tables.length > 0, u.stem).role;
+  const memberUses = uses.filter((u) => roleOf(u) === 'member' || roleOf(u) === 'mismatch');
+  const relUses = uses.filter((u) => roleOf(u) === 'relationships');
   const allOldMembers = modelsOf(before);
   const allNewMembers = modelsOf(after);
   // `before` must be what the text reads as: members are paired with their use lines by position,
@@ -625,7 +632,8 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
 
   // --- Relationships use lines (only on a membership change or the settle pass) -------
   if (membershipChanged || edit.refreshRelationshipsUses) {
-    const wanted = [...new Set(edit.relationshipsFilesFor(newMembers).map(normalisePosix))].filter((p) => edit.fileExists(p));
+    const current = [...new Set(relUses.map((u) => u.resolved))];
+    const wanted = [...new Set(edit.relationshipsImportsFor(newMembers, current).map(normalisePosix))].filter((p) => edit.fileExists(p));
     const keptRel = relUses.filter((u) => wanted.includes(u.resolved));
     for (const u of relUses) if (!wanted.includes(u.resolved)) edits.push(cutEdit(text, u.node));
     const have = new Set(keptRel.map((u) => u.resolved));

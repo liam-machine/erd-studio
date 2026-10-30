@@ -356,6 +356,17 @@ describe('DBML TableFileErrors', () => {
 });
 
 describe('DBML table writes outside the editor (S5: planDbmlLibraryWrites + writeFilesWithRollback)', () => {
+  // Moved from the YAML/JSON guard (tableNaming.host.test.ts, the design's one guard exception), rewritten
+  // for the 2.0 tree's saveTable default (§2.4): no layers.json and no DBML layer folder → main/tables/main/.
+  it('a project with no library folder at all writes its first table as DBML, to main/tables/main/ (§2.4)', () => {
+    fs.rmSync(semantic, { recursive: true });
+    service().saveTable({ name: 'dim_first', columns: [], modelRole: 'reference' });
+    expect(fs.readFileSync(path.join(semantic, 'main', 'tables', 'main', 'dim_first.dbml'), 'utf-8')).toMatch(/^Table main\.dim_first \[role: 'reference'\]/m);
+    expect(fs.existsSync(path.join(semantic, 'main', 'tables', 'main', 'dim_first.yml'))).toBe(false);
+    expect(fs.existsSync(path.join(semantic, 'tables'))).toBe(false);
+    expect(fs.existsSync(path.join(semantic, 'logical-models'))).toBe(false);
+  });
+
   it('serializeTable never renders a .dbml table as YAML; saveTable splices it in place', () => {
     const file = write('tables/dim_date.dbml', '// keep me\n' + dbmlTable('dim_date', '  id INT [pk]\n  label VARCHAR'));
     const lib = service();

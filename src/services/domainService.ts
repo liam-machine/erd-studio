@@ -113,7 +113,7 @@ export function isSubjectAreaFilePath(fsPath: string, firstLine?: string): boole
 export function subjectAreaTableNames(text: string, filePath: string): string[] | null {
   if (subjectAreaStorageOf(filePath) === 'dbml') {
     // A diagram just read (or just dragged) has its members remembered: no parse.
-    return rememberedDbmlMembers(text, filePath) ?? subjectAreaMembersDbml(text);
+    return rememberedDbmlMembers(text, filePath) ?? subjectAreaMembersDbml(text, filePath);
   }
   try {
     return getRawSubjectAreaTableNames(JSON.parse(text.replace(/^\uFEFF/, '')) as unknown);
@@ -336,7 +336,7 @@ export class SubjectAreaService {
   countSubjectAreaTablesInText(raw: string, filePath: string): number {
     if (subjectAreaStorageOf(filePath) === 'dbml') {
       // A diagram just read (or just dragged) has its members remembered: no parse.
-      const members = rememberedDbmlMembers(raw, filePath) ?? subjectAreaMembersDbml(raw);
+      const members = rememberedDbmlMembers(raw, filePath) ?? subjectAreaMembersDbml(raw, filePath);
       if (members === null) throw new SubjectAreaValidationError(`${filePath} has a DBML syntax error`);
       return members.length;
     }

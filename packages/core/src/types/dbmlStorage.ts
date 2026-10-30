@@ -19,7 +19,8 @@ export interface DbmlProblem {
    * A DBML diagnostic's numeric code, or one of ERD Studio's own names:
    * `useInTableFile`, `refInTableFile`, `inlineRefInTableFile`,
    * `unquotedValue`, `metaJson`, `unreadableRef`, `declaredInDiagram`,
-   * `repeatedNote`, `secondProject`, `usePathMismatch`, `unsafeUse`, …
+   * `repeatedNote`, `secondProject`, `usePathMismatch`, `unsafeUse`,
+   * `schemaFolderMismatch`, `unqualifiedTable`, `schemaProperty`, …
    */
   code?: number | string;
   message: string;
@@ -57,6 +58,10 @@ export interface DbmlStoredRef {
   owner: string;
   /** The other end's table part, spelled the same way. */
   target: string;
+  /** The owner end's schema qualifier as written (`gold` in `gold.x.id`); absent for an unqualified end. Ends are matched by table name alone. */
+  ownerQualifier?: string;
+  /** The other end's schema qualifier as written; absent for an unqualified end. */
+  targetQualifier?: string;
   /** Canonical (`fromModel` = owner), one per column pair, in the Ref's column order, with no `compositeKey` yet. */
   relationships: Relationship[];
   /** The Ref element's span (writers re-read the file; readers ignore it). */
@@ -86,6 +91,15 @@ export interface DbmlRelationshipsReading {
    * of the file. Optional: a reader older than 2.0's leaves it unset.
    */
   pending?: DbmlStoredRef[];
+  /**
+   * Top-level elements that do not belong in a relationships file (anything
+   * but `use` lines and Refs: a `Table`, `Enum`, `TableGroup`, …), each with
+   * its kind as written and its 1-based line. The writer keeps their bytes;
+   * `doctor` reports them, since every diagram importing the file gets them
+   * in other DBML tools. Optional: absent when there is none, and from a
+   * reader older than 2.0's.
+   */
+  otherElements?: Array<{ kind: string; line: number }>;
 }
 
 /** A table `use` line of a diagram: the member it names and where its path points. */
@@ -108,8 +122,20 @@ export interface DbmlSubjectAreaReading {
   schemaVersion: number;
   /** The members, in `use` order (= `obj.logical.models`); a table listed twice is listed twice. */
   members: string[];
-  /** Library folders the table `use` lines name (`''` = the top of `tables/`). */
-  useFolders: string[];
+  /** The distinct table folders (`<layer>/tables/<schema>`) the member `use` lines resolve into, sorted. */
+  useTableDirs: string[];
+  /**
+   * The relationships files the diagram imports (`use * from` a
+   * `<layer>/relationships/<f>.dbml`), resolved (posix, relative to the
+   * semantic dir), without repeats, in file order.
+   */
+  relationshipsUses: string[];
+  /**
+   * Every other `use *` line's path (a relationships file in a subfolder, a
+   * shared Enum file, …), resolved, in file order: never a member nor a
+   * relationships import, and kept as written by every writer.
+   */
+  otherUses: string[];
   /** False with a repeated Note name or a second Project: the writer refuses the file until it is fixed (§2.5). */
   writable: boolean;
   warnings: string[];
@@ -144,12 +170,13 @@ export interface DbmlSubjectAreaReading {
 
 /** The DBML readers `loadDisplaySubjectArea` needs; `dbmlStorageReader` from `@erd-studio/core/dbml` is one. */
 export interface DbmlStorageReader {
-  parseTable(text: string, fileStem: string): DbmlTableReading;
+  /** `schemaFolder`: the table file's schema folder (`<layer>/tables/<schema>/`), its schema when the Table is unqualified. */
+  parseTable(text: string, fileStem: string, options?: { schemaFolder?: string }): DbmlTableReading;
   readRelationships(text: string): DbmlRelationshipsReading;
   /** Throws `SubjectAreaFileError` / `SubjectAreaValidationError`. */
   parseSubjectArea(text: string, filePath: string): DbmlSubjectAreaReading;
-  /** The members from the AST only, with no compile; null when the text does not parse. */
-  subjectAreaMembers(text: string): string[] | null;
+  /** The members from a syntax parse alone (no binding); null when the text does not parse or `filePath` is not a diagram's. */
+  subjectAreaMembers(text: string, filePath: string): string[] | null;
 }
 
 /** A `use` line of a `.dbml` file, as `outlineDbmlFile` reads it. */
@@ -201,7 +228,11 @@ export interface DbmlDiagnostic {
 export interface DbmlAttachTable {
   /** The table as read: its `name` is the real spelling, its columns give the real column spellings and the key. */
   table: Pick<SemanticTable, 'name' | 'columns'>;
-  /** Its library folder (`''` = the top of `tables/`). */
+  /**
+   * Its library folder (`''` = the top of `tables/`). Not read: no Ref has a
+   * home folder in the layer-first tree.
+   * @deprecated 2.0-switch: S6a deletes it.
+   */
   folder: string;
   storage: 'yaml' | 'dbml';
   /** A DBML alias (`Table fct_order as FO`) Ref ends may use. */
@@ -222,12 +253,22 @@ export interface DbmlRefLocation {
 export interface DbmlAttachResult {
   /** Each DBML owner's relationships (lower-case name → list), in file order, with `compositeKey`s derived. */
   byOwner: Map<string, TableRelationship[]>;
-  /** Refs attached from a file other than their owner's folder's. */
-  misplaced: Array<DbmlRefLocation & { home: string }>;
+  /**
+   * Always empty: in the layer-first tree a Ref may sit in any relationships
+   * file (decision 5), so none is misplaced. Optional, for its one reader.
+   * @deprecated 2.0-switch: S8b deletes it with doctor's `misplacedRef`.
+   */
+  misplaced?: Array<DbmlRefLocation & { home: string }>;
   /** Refs owned by a YAML table or by no table: not attached, never touched. */
   orphaned: DbmlRefLocation[];
   /** Links read more than once; `kept` is the copy attached, `dropped` the other. */
   duplicates: Array<{ link: string; kept: DbmlRefLocation; dropped: DbmlRefLocation }>;
-  /** One sentence per misplaced, orphaned or duplicate Ref. */
+  /** One sentence per orphaned or duplicate Ref. */
   warnings: string[];
+  /**
+   * Where each attached link is stored (core `linkKey` → the copy kept, the
+   * duplicate winner for a link read twice). Optional: an attach step older
+   * than 2.0's leaves it unset.
+   */
+  locations?: Map<string, DbmlRefLocation>;
 }

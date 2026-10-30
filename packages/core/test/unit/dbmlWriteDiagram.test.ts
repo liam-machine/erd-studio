@@ -35,7 +35,7 @@ describe('editSubjectAreaDbml refusals', () => {
 
   it('a position change while erd_layout holds a merge conflict (§1.6): positions are not saved until one side is kept', () => {
     expect(refused(SALES_CONFLICTED, (a) => { a.viewConfig.positions.dim_customer = { x: 9, y: 9 }; }))
-      .toBe('gold/sales.dbml has a merge conflict in erd_layout (line 8). Only positions differ: keep either side, then try again. Positions are not saved until then.');
+      .toBe('gold/diagrams/sales.dbml has a merge conflict in erd_layout (line 8). Only positions differ: keep either side, then try again. Positions are not saved until then.');
   });
 
   it('relationships in the diagram', () => {
@@ -64,13 +64,65 @@ describe('editSubjectAreaDbml refusals', () => {
     const after = clone(stale);
     after.logical.models = ['dim_customer'];
     expect(() => editSubjectAreaDbml(SALES, { filePath: DIAGRAM_PATH, before: stale, after, ...lookups(DIAGRAM_LIBRARY) }))
-      .toThrow(/could not line up the use lines of gold\/sales\.dbml with its members \(the diagram changed since it was read\)/);
+      .toThrow(/could not line up the use lines of gold\/diagrams\/sales\.dbml with its members \(the diagram changed since it was read\)/);
   });
 
   it('a file that does not parse', () => {
     expect(() => editSubjectAreaDbml('Project x {\n', {
       filePath: DIAGRAM_PATH, before: {}, after: {}, ...lookups(DIAGRAM_LIBRARY),
-    })).toThrow(/^Fix the DBML in gold\/sales\.dbml first/);
+    })).toThrow(/^Fix the DBML in gold\/diagrams\/sales\.dbml first/);
+  });
+});
+
+describe('editSubjectAreaDbml in the layer-first tree (§1.4)', () => {
+  const OTHER_USES = SALES.replace(
+    "use * from '../relationships/gold.dbml'\n",
+    "use * from '../relationships/gold.dbml'\nuse * from '../../shared/enums.dbml'\nuse * from '../relationships/sub/old.dbml'\n",
+  );
+
+  it('every other use * line is kept verbatim through a membership change, and is never a member', () => {
+    const out = diagramEdit(OTHER_USES, (a) => { a.logical.models.push('dim_date'); });
+    expect(out).toContain("use * from '../../shared/enums.dbml'\nuse * from '../relationships/sub/old.dbml'\n");
+    expect(out).toContain("use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\n");
+    expect(readDiagram(out).logical.models).toEqual(['fct_order', 'dim_customer', 'dim_date']);
+    // …and through the settle pass, which recomputes only the relationships imports.
+    expect(diagramEdit(OTHER_USES, () => undefined, { extra: { refreshRelationshipsUses: true } })).toBe(OTHER_USES);
+  });
+
+  it('relationshipsImportsFor gets the members after the edit and the relationships files the diagram imports now', () => {
+    const calls: Array<[string[], string[]]> = [];
+    const before = readDiagram(OTHER_USES);
+    const after = clone(before);
+    after.logical.models.push('dim_date');
+    const base = lookups(DIAGRAM_LIBRARY);
+    editSubjectAreaDbml(OTHER_USES, {
+      filePath: DIAGRAM_PATH, before, after, ...base,
+      relationshipsImportsFor: (names, current) => { calls.push([[...names], [...current]]); return base.relationshipsImportsFor(names, current); },
+    });
+    expect(calls).toEqual([[['fct_order', 'dim_customer', 'dim_date'], ['gold/relationships/gold.dbml']]]);
+  });
+
+  it('an import the resolver keeps (a relationships file that does not read) stays; one it drops goes', () => {
+    const library = { ...DIAGRAM_LIBRARY, 'gold/relationships/broken.dbml': 'Ref: gold.fct_order.Customer_Key >\n' };
+    const text = SALES.replace("use * from '../relationships/gold.dbml'\n", "use * from '../relationships/broken.dbml'\nuse * from '../relationships/gold.dbml'\n");
+    const out = diagramEdit(text, (a) => { a.logical.models.push('dim_date'); }, { library });
+    expect(out).toContain("use * from '../relationships/broken.dbml'\nuse * from '../relationships/dates.dbml'\nuse * from '../relationships/gold.dbml'\n");
+    const dropped = diagramEdit(text, (a) => { a.logical.models = ['dim_customer']; }, { library });
+    expect(dropped).toContain("use * from '../relationships/broken.dbml'\n");
+    expect(dropped).not.toContain('relationships/gold.dbml');
+  });
+
+  it('a relationships file named like a table is an import, never a member', () => {
+    const library = { ...DIAGRAM_LIBRARY, 'gold/relationships/fct_order.dbml': DIAGRAM_LIBRARY['gold/relationships/gold.dbml'] };
+    const text = SALES.replace("use * from '../relationships/gold.dbml'\n", "use * from '../relationships/fct_order.dbml'\n");
+    expect(readDiagram(text).logical.models).toEqual(['fct_order', 'dim_customer']);
+    const out = diagramEdit(text, (a) => { a.logical.models.push('dim_date'); }, { library });
+    expect(out).toContain("use * from '../relationships/dates.dbml'\nuse * from '../relationships/fct_order.dbml'\nuse * from '../relationships/gold.dbml'\n");
+  });
+
+  it('a diagram path that is not <layer>/diagrams/<name>.dbml does not read, so it is refused', () => {
+    expect(() => editSubjectAreaDbml(SALES, { filePath: 'gold/sales.dbml', before: {}, after: {}, ...lookups(DIAGRAM_LIBRARY) }))
+      .toThrow(/^Fix the DBML in gold\/sales\.dbml first \(gold\/sales\.dbml was written by an ERD Studio 1\.9 pre-release/);
   });
 });
 

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { editTableDbml } from '../../src/dbml/writeTable';
+import { editTableDbml, renderNewTableDbml } from '../../src/dbml/writeTable';
 import { DbmlEditRefused } from '../../src/dbml/errors';
 import { applyTextEdits, refuseOverlaps } from '../../src/dbml/splice';
 import * as DbmlParse from '@dbml/parse';
@@ -52,12 +52,18 @@ describe('editTableDbml refusals', () => {
     expect(() => editTableDbml(text, { name: 'fct_order', columns: [] })).toThrow(DbmlEditRefused);
   });
 
-  it('a schema change on a schema-qualified name is refused with the qualifier advice', () => {
+  it('a schema change without requalify is refused: a DBML table\'s schema is its folder (§1.2)', () => {
     const text = 'Table gold.fct_order {\n  id int\n}\n';
     const table = readTable(text, 'fct_order').table;
     expect(table.schema).toBe('gold');
-    const err = refusal(() => editTableDbml(text, { ...table, schema: 'silver' }, { file: 'tables/gold/fct_order.dbml' }));
-    expect(err.message).toBe("tables/gold/fct_order.dbml names its schema in the Table name (`Table gold.fct_order`). Change it there, or remove the qualifier and use `[schema: 'gold']`.");
+    const err = refusal(() => editTableDbml(text, { ...table, schema: 'silver' }, { file: 'gold/tables/gold/fct_order.dbml' }));
+    expect(err.message).toBe('The schema of a DBML table is its folder: move the table to change it.');
+    expect(err.line).toBe(1);
+    // An unqualified Table reads its schema from its folder: another one is refused too.
+    const bare = refusal(() => editTableDbml(BARE_TABLE, { name: 'fct_order', schema: 'silver', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] }, { schemaFolder: 'gold' }));
+    expect(bare.message).toBe('The schema of a DBML table is its folder: move the table to change it.');
+    // An unset schema keeps the qualifier.
+    expect(editTableDbml(text, { ...table, schema: undefined })).toBe(text);
   });
 
   it('a name that differs from the declared one is refused unless the edit is a rename', () => {
@@ -99,7 +105,7 @@ describe('Metadata blocks (D25) read back the same in every parser', () => {
     desired.columns![0].description = 'new note';
     desired.columns![0].meta = { owner: 'z' };
     const out = editTableDbml(METADATA_TABLE(), desired, { parser });
-    const reading = parseTableDbml(out, 'fct_order', parser);
+    const reading = parseTableDbml(out, 'fct_order', {}, parser);
     expect(reading.ok).toBe(true);
     if (!reading.ok) return;
     expect(reading.table.grain).toBe('from the edit');
@@ -108,7 +114,7 @@ describe('Metadata blocks (D25) read back the same in every parser', () => {
     // Clearing removes the block entry and the shadowed inline value: nothing resurfaces.
     delete desired.grain;
     const clearedText = editTableDbml(out, desired, { parser });
-    const cleared = parseTableDbml(clearedText, 'fct_order', parser);
+    const cleared = parseTableDbml(clearedText, 'fct_order', {}, parser);
     expect(cleared.ok && cleared.table.grain).toBeUndefined();
     // Law 5: both outputs compile with no error or warning in every parser.
     for (const text of [out, clearedText]) expect(projectDiagnostics({ 'tables/fct_order.dbml': text })).toEqual([]);
@@ -117,4 +123,10 @@ describe('Metadata blocks (D25) read back the same in every parser', () => {
 
 describe('renderNewTableDbml', () => {
   for (const c of NEW_TABLE_CASES) it(c.name, () => c.check(c.run()));
+
+  it('needs a schema: a DBML table\'s schema is its folder and its qualifier', () => {
+    expect(() => renderNewTableDbml({ name: 'x', columns: [] })).toThrow('renderNewTableDbml: a DBML table needs a schema');
+    expect(() => renderNewTableDbml({ name: 'x', schema: '', columns: [] })).toThrow('renderNewTableDbml: a DBML table needs a schema');
+    expect(() => renderNewTableDbml({ name: 'x', schema: 'a/b', columns: [] })).toThrow('renderNewTableDbml: a DBML table needs a schema');
+  });
 });

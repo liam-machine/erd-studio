@@ -73,6 +73,23 @@ describe('refEntriesOf', () => {
     expect(entries[0].links).toEqual(['dim_customer.id\u0000fct_order.customer_id']);
   });
 
+  it('keeps the owner end\'s qualifier as written, the other end\'s for a bare `-` the keys turn round', () => {
+    const text = [
+      'Ref: sap.afih.(MANDT, EQUNR) >? sap_raw.equi.(MANDT, EQUNR)',
+      'Ref: dim_customer.id < gold.fct_order.customer_id',
+      'Ref: gold.fct_order.customer_id - crm.dim_customer.id',
+      '',
+    ].join('\n');
+    const tables: DbmlAttachTable[] = [
+      { table: { name: 'fct_order', columns: [{ name: 'customer_id', dataType: 'int', description: '' }] }, folder: '', storage: 'dbml' },
+      { table: { name: 'dim_customer', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] }, folder: '', storage: 'dbml' },
+    ];
+    const entries = refEntriesOf('gold/relationships/gold.dbml', readRelationshipsDbml(text), dbmlTableLookup(tables));
+    expect(entries.map((e) => [e.owner, e.ownerQualifier])).toEqual([['afih', 'sap'], ['fct_order', 'gold'], ['fct_order', 'gold']]);
+    const bare = refEntriesOf('gold/relationships/gold.dbml', readRelationshipsDbml('Ref: x.a - y.b\n'), () => undefined);
+    expect(bare[0].ownerQualifier).toBeUndefined();
+  });
+
   it('gives nothing for a file that does not read', () => {
     const reading = readRelationshipsDbml('Ref: a.b >');
     expect(reading.readable).toBe(false);

@@ -1,7 +1,8 @@
 /**
  * The relationships-file writer cases (§9.3 `dbmlWriteRelationships`): each
- * one edits (or creates) `tables/gold/_relationships.dbml` against a small
- * library and checks the text. `dbmlWriteRelationships.test.ts` runs the
+ * one edits (or creates) `gold/relationships/gold.dbml` against a small
+ * layer-first library (gold's tables in `gold/tables/gold/`, `dim_date` in
+ * `silver/tables/shared/`, every Table qualified) and checks the text. `dbmlWriteRelationships.test.ts` runs the
  * checks; `dbmlMultiParser.test.ts` compiles every output again, with the
  * table files its `use` lines name, under 9.1.1, 10.3.1 and 11.0.0. Not a
  * test file.
@@ -19,128 +20,169 @@ import {
   type WriterOutcome,
 } from '../dbmlWriterSupport';
 
-export const REL_PATH = 'tables/gold/_relationships.dbml';
+export const REL_PATH = 'gold/relationships/gold.dbml';
 
 /** The library the cases resolve against: a schema-qualified table, real column spellings that differ in case, a composite key. */
 export const LIBRARY: Readonly<Record<string, string>> = {
-  'tables/dim_date.dbml': 'Table dim_date {\n  date_key int [pk]\n}\n',
-  'tables/gold/dim_customer.dbml': 'Table gold.dim_customer {\n  customer_key int [pk]\n  parent_key int\n}\n',
-  'tables/gold/dim_region.dbml': 'Table dim_region {\n  region_code varchar\n  country_code varchar\n  indexes {\n    (region_code, country_code) [pk]\n  }\n}\n',
-  'tables/gold/fct_order.dbml': 'Table fct_order {\n  order_id int [pk]\n  Customer_Key int\n  region_code varchar\n  country_code varchar\n  order_date_key int\n  ship_date_key int\n}\n',
-  'tables/gold/customer_profile.dbml': 'Table customer_profile {\n  customer_key int [pk]\n}\n',
-  'tables/gold/bridge.dbml': 'Table bridge {\n  a_key int\n  b_key int\n}\n',
+  'silver/tables/shared/dim_date.dbml': 'Table shared.dim_date {\n  date_key int [pk]\n}\n',
+  'gold/tables/gold/dim_customer.dbml': 'Table gold.dim_customer {\n  customer_key int [pk]\n  parent_key int\n}\n',
+  'gold/tables/gold/dim_region.dbml': 'Table gold.dim_region {\n  region_code varchar\n  country_code varchar\n  indexes {\n    (region_code, country_code) [pk]\n  }\n}\n',
+  'gold/tables/gold/fct_order.dbml': 'Table gold.fct_order {\n  order_id int [pk]\n  Customer_Key int\n  region_code varchar\n  country_code varchar\n  order_date_key int\n  ship_date_key int\n}\n',
+  'gold/tables/gold/customer_profile.dbml': 'Table gold.customer_profile {\n  customer_key int [pk]\n}\n',
+  'gold/tables/gold/bridge.dbml': 'Table gold.bridge {\n  a_key int\n  b_key int\n}\n',
 };
 
 /** The library with `fct_order` renamed to `fct_order_line`. */
 export const RENAMED_LIBRARY: Readonly<Record<string, string>> = (() => {
   const out: Record<string, string> = { ...LIBRARY };
-  delete out['tables/gold/fct_order.dbml'];
-  out['tables/gold/fct_order_line.dbml'] = LIBRARY['tables/gold/fct_order.dbml'].replace('Table fct_order', 'Table fct_order_line');
+  delete out['gold/tables/gold/fct_order.dbml'];
+  out['gold/tables/gold/fct_order_line.dbml'] = LIBRARY['gold/tables/gold/fct_order.dbml'].replace('Table gold.fct_order', 'Table gold.fct_order_line');
   return out;
 })();
 
 /** A hand-written file: a header comment, extra and unsorted lines, settings, marks and comments. */
-export const HAND_WRITTEN = `// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
-use { table dim_date } from '../dim_date.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
-use { table fct_order } from './fct_order.dbml'
-use { table customer_profile } from './customer_profile.dbml'
+export const HAND_WRITTEN = `// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
 
 // the customer of an order
-Ref: fct_order.Customer_Key > gold.dim_customer.customer_key [delete: cascade] // keep me
-Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
+Ref: gold.fct_order.Customer_Key > gold.dim_customer.customer_key [delete: cascade] // keep me
+Ref "ship date": gold.fct_order.ship_date_key >? shared.dim_date.date_key
 
-Ref: gold.dim_customer.customer_key - customer_profile.customer_key
+Ref: gold.dim_customer.customer_key - gold.customer_profile.customer_key
 `;
 
 /** A 1.9.x relationships file: the Refs of every table run together, with no blank line between tables. */
-const OLD_LAYOUT = `use { table customer_profile } from './customer_profile.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
-use { table fct_order } from './fct_order.dbml'
-use { table dim_date } from '../dim_date.dbml'
+const OLD_LAYOUT = `use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
 
-Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
 // the parent
 Ref: gold.dim_customer.parent_key >? gold.dim_customer.customer_key
-Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
 `;
 
 /** A composite Ref with settings and a trailing comment. */
-const COMPOSITE_REF = `use { table dim_region } from './dim_region.dbml'
-use { table fct_order } from './fct_order.dbml'
+const COMPOSITE_REF = `use { table gold.dim_region } from '../tables/gold/dim_region.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 
-Ref: fct_order.(region_code, country_code) > dim_region.(region_code, country_code) [delete: cascade] // keep
+Ref: gold.fct_order.(region_code, country_code) > gold.dim_region.(region_code, country_code) [delete: cascade] // keep
 `;
 
 /** A block-form Ref with a comment inside. */
-const BLOCK_REF = `use { table gold.dim_customer } from './dim_customer.dbml'
-use { table fct_order } from './fct_order.dbml'
+const BLOCK_REF = `use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 
 Ref fk {
   // explain
-  fct_order.Customer_Key > gold.dim_customer.customer_key [delete: cascade]
+  gold.fct_order.Customer_Key > gold.dim_customer.customer_key [delete: cascade]
 }
 `;
 
 /** A bare \`-\` written foreign key first. */
-const FK_FIRST = `use { table fct_order } from './fct_order.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
+const FK_FIRST = `use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
 
-Ref: fct_order.Customer_Key - gold.dim_customer.customer_key
+Ref: gold.fct_order.Customer_Key - gold.dim_customer.customer_key
 `;
 
 /** Two sorted Refs; renaming bridge to zz_bridge puts its Ref last. */
-const SORTED_FOR_RENAME = `use { table bridge } from './bridge.dbml'
-use { table customer_profile } from './customer_profile.dbml'
-use { table dim_date } from '../dim_date.dbml'
+const SORTED_FOR_RENAME = `use { table gold.bridge } from '../tables/gold/bridge.dbml'
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
 
-Ref: bridge.a_key >? dim_date.date_key // a tail
-Ref: customer_profile.customer_key >? dim_date.date_key
+Ref: gold.bridge.a_key >? shared.dim_date.date_key // a tail
+Ref: gold.customer_profile.customer_key >? shared.dim_date.date_key
 `;
 
 /** The library with \`bridge\` renamed to \`zz_bridge\`. */
 const BRIDGE_RENAMED: Readonly<Record<string, string>> = (() => {
   const out: Record<string, string> = { ...LIBRARY };
-  delete out['tables/gold/bridge.dbml'];
-  out['tables/gold/zz_bridge.dbml'] = LIBRARY['tables/gold/bridge.dbml'].replace('Table bridge', 'Table zz_bridge');
+  delete out['gold/tables/gold/bridge.dbml'];
+  out['gold/tables/gold/zz_bridge.dbml'] = LIBRARY['gold/tables/gold/bridge.dbml'].replace('Table gold.bridge', 'Table gold.zz_bridge');
   return out;
 })();
 
+/** The library with `fct_order` moved to silver's `sales` schema and `dim_customer` to gold's (a requalifying move each). */
+const REQUALIFIED_LIBRARY: Readonly<Record<string, string>> = (() => {
+  const out: Record<string, string> = { ...LIBRARY };
+  delete out['gold/tables/gold/fct_order.dbml'];
+  delete out['gold/tables/gold/dim_customer.dbml'];
+  out['silver/tables/sales/fct_order.dbml'] = LIBRARY['gold/tables/gold/fct_order.dbml'].replace('Table gold.fct_order', 'Table sales.fct_order');
+  out['gold/tables/sales/dim_customer.dbml'] = LIBRARY['gold/tables/gold/dim_customer.dbml'].replace('Table gold.dim_customer', 'Table sales.dim_customer');
+  return out;
+})();
+
+/** A file with a hand-added `use` line no Ref needs (bridge's). */
+const STALE_USE = `use { table gold.bridge } from '../tables/gold/bridge.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
+`;
+
+/** The library with `bridge` moved to the silver layer (same schema). */
+const BRIDGE_MOVED: Readonly<Record<string, string>> = (() => {
+  const out: Record<string, string> = { ...LIBRARY };
+  out['silver/tables/gold/bridge.dbml'] = out['gold/tables/gold/bridge.dbml'];
+  delete out['gold/tables/gold/bridge.dbml'];
+  return out;
+})();
+
+/** The library with `bridge` deleted. */
+const BRIDGE_DELETED: Readonly<Record<string, string>> = (() => {
+  const out: Record<string, string> = { ...LIBRARY };
+  delete out['gold/tables/gold/bridge.dbml'];
+  return out;
+})();
+
+/** A file under the 1.9 pre-release's header line. */
+const HEADER_19 = `// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
+`;
+
 /** A relationships file with a live Ref and two pending lines (D27): one to a table with no file, one from another owner. */
-export const PENDING_FILE = `use { table gold.dim_customer } from './dim_customer.dbml'
-use { table fct_order } from './fct_order.dbml'
+export const PENDING_FILE = `use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 
-Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
 
-// erd-studio pending: Ref: fct_order.order_date_key >? dim_missing.date_key
-// erd-studio pending: Ref: customer_profile.customer_key >? dim_gone.k
+// erd-studio pending: Ref: gold.fct_order.order_date_key >? dim_missing.date_key
+// erd-studio pending: Ref: gold.customer_profile.customer_key >? dim_gone.k
 `;
 
 /** A pending line to a column its target table does not have. */
-const PENDING_TO_COLUMN = `use { table gold.dim_customer } from './dim_customer.dbml'
-use { table customer_profile } from './customer_profile.dbml'
+const PENDING_TO_COLUMN = `use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
 
-Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
 
-// erd-studio pending: Ref: customer_profile.customer_key >? dim_date.nope
+// erd-studio pending: Ref: gold.customer_profile.customer_key >? shared.dim_date.nope
 `;
 
 /** The library with \`dim_date\` renamed to \`dim_day\`. */
 const DIM_DAY_LIBRARY: Readonly<Record<string, string>> = (() => {
   const out: Record<string, string> = { ...LIBRARY };
-  delete out['tables/dim_date.dbml'];
-  out['tables/dim_day.dbml'] = LIBRARY['tables/dim_date.dbml'].replace('Table dim_date', 'Table dim_day');
+  delete out['silver/tables/shared/dim_date.dbml'];
+  out['silver/tables/shared/dim_day.dbml'] = LIBRARY['silver/tables/shared/dim_date.dbml'].replace('Table shared.dim_date', 'Table shared.dim_day');
   return out;
 })();
 
 /** The library with fct_order's \`order_date_key\` renamed to \`order_day_key\`. */
 const ORDER_DAY_LIBRARY: Readonly<Record<string, string>> = {
   ...LIBRARY,
-  'tables/gold/fct_order.dbml': LIBRARY['tables/gold/fct_order.dbml'].replace('order_date_key', 'order_day_key'),
+  'gold/tables/gold/fct_order.dbml': LIBRARY['gold/tables/gold/fct_order.dbml'].replace('order_date_key', 'order_day_key'),
 };
 
 /** The library with a file for dim_missing. */
-const WITH_DIM_MISSING: Readonly<Record<string, string>> = { ...LIBRARY, 'tables/dim_missing.dbml': 'Table dim_missing {\n  date_key int [pk]\n}\n' };
+const WITH_DIM_MISSING: Readonly<Record<string, string>> = { ...LIBRARY, 'silver/tables/shared/dim_missing.dbml': 'Table shared.dim_missing {\n  date_key int [pk]\n}\n' };
 
 const M21 = (fromColumn: string, toModel: string, toColumn: string, extra: Partial<TableRelationship> = {}): TableRelationship =>
   ({ fromColumn, toModel, toColumn, cardinality: 'many-to-one', ...extra });
@@ -220,8 +262,8 @@ export const RELATIONSHIPS_CASES: WriterCase[] = [
     ...list, M21('ORDER_DATE_KEY', 'dim_date', 'Date_Key', { role: 'order date' }),
   ]), (out) => {
     expect(out).toBe(HAND_WRITTEN.replace(
-      'Ref "ship date": fct_order.ship_date_key >? dim_date.date_key\n',
-      'Ref "order date": fct_order.order_date_key >? dim_date.date_key\nRef "ship date": fct_order.ship_date_key >? dim_date.date_key\n',
+      'Ref "ship date": gold.fct_order.ship_date_key >? shared.dim_date.date_key\n',
+      'Ref "order date": gold.fct_order.order_date_key >? shared.dim_date.date_key\nRef "ship date": gold.fct_order.ship_date_key >? shared.dim_date.date_key\n',
     ));
   }),
   relCase('a composite Ref is one line, `a.(x, y) >? b.(u, v)`, and its table gets a use line in path order', HAND_WRITTEN, () => changed(HAND_WRITTEN, 'fct_order', (list) => [
@@ -229,124 +271,124 @@ export const RELATIONSHIPS_CASES: WriterCase[] = [
     M21('region_code', 'dim_region', 'region_code', { compositeKey: 'fk_dim_region' }),
     M21('country_code', 'dim_region', 'country_code', { compositeKey: 'fk_dim_region' }),
   ]), (out) => {
-    expect(out).toContain("use { table gold.dim_customer } from './dim_customer.dbml'\nuse { table dim_region } from './dim_region.dbml'\nuse { table fct_order } from './fct_order.dbml'\n");
-    expect(out).toContain('Ref: fct_order.(region_code, country_code) >? dim_region.(region_code, country_code)\n');
+    expect(out).toContain("use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table gold.dim_region } from '../tables/gold/dim_region.dbml'\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n");
+    expect(out).toContain('Ref: gold.fct_order.(region_code, country_code) >? gold.dim_region.(region_code, country_code)\n');
     // No Ref after it in the (unsorted) file has a greater key, so it goes after the last one.
-    expect(out.endsWith('Ref: fct_order.(region_code, country_code) >? dim_region.(region_code, country_code)\n')).toBe(true);
+    expect(out.endsWith('Ref: gold.fct_order.(region_code, country_code) >? gold.dim_region.(region_code, country_code)\n')).toBe(true);
   }),
-  relCase('a bare `-` whose foreign key is its first end (the keys decide, §2.3) keeps its bytes when its owner is listed', `use { table fct_order } from './fct_order.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
+  relCase('a bare `-` whose foreign key is its first end (the keys decide, §2.3) keeps its bytes when its owner is listed', `use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
 
-Ref: fct_order.Customer_Key - gold.dim_customer.customer_key
+Ref: gold.fct_order.Customer_Key - gold.dim_customer.customer_key
 `, () => ({
     owners: new Map([['fct_order', { name: 'fct_order', relationships: [{ fromColumn: 'Customer_Key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'one-to-one' }] }]]),
   }), (out) => {
-    expect(out).toBe(`use { table fct_order } from './fct_order.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
+    expect(out).toBe(`use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
 
-Ref: fct_order.Customer_Key - gold.dim_customer.customer_key
+Ref: gold.fct_order.Customer_Key - gold.dim_customer.customer_key
 `);
   }),
-  relCase('a Ref inserted into an unsorted file goes before the first Ref whose key is greater', `use { table fct_order } from './fct_order.dbml'
-use { table dim_date } from '../dim_date.dbml'
+  relCase('a Ref inserted into an unsorted file goes before the first Ref whose key is greater', `use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
 
-Ref: fct_order.ship_date_key >? dim_date.date_key
-Ref: fct_order.order_date_key >? dim_date.date_key
+Ref: gold.fct_order.ship_date_key >? shared.dim_date.date_key
+Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
 `, () => ({
     owners: new Map([['bridge', { name: 'bridge', relationships: [{ fromColumn: 'a_key', toModel: 'fct_order', toColumn: 'order_id', cardinality: 'many-to-many' }] }]]),
   }), (out) => {
-    expect(out).toBe(`use { table bridge } from './bridge.dbml'
-use { table fct_order } from './fct_order.dbml'
-use { table dim_date } from '../dim_date.dbml'
+    expect(out).toBe(`use { table gold.bridge } from '../tables/gold/bridge.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
 
-Ref: bridge.a_key <>? fct_order.order_id
+Ref: gold.bridge.a_key <>? gold.fct_order.order_id
 
-Ref: fct_order.ship_date_key >? dim_date.date_key
-Ref: fct_order.order_date_key >? dim_date.date_key
+Ref: gold.fct_order.ship_date_key >? shared.dim_date.date_key
+Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
 `);
   }),
   relCase('a changed cardinality is rewritten in place, keeping the settings and the trailing comment', HAND_WRITTEN, () => changed(HAND_WRITTEN, 'fct_order', (list) =>
     list.map((r) => (r.toModel === 'dim_customer' ? { ...r, cardinality: 'one-to-one' } : r))), (out) => {
     expect(out).toBe(HAND_WRITTEN.replace(
-      'Ref: fct_order.Customer_Key > gold.dim_customer.customer_key [delete: cascade] // keep me',
-      'Ref: gold.dim_customer.customer_key ?- fct_order.Customer_Key [delete: cascade] // keep me',
+      'Ref: gold.fct_order.Customer_Key > gold.dim_customer.customer_key [delete: cascade] // keep me',
+      'Ref: gold.dim_customer.customer_key ?- gold.fct_order.Customer_Key [delete: cascade] // keep me',
     ));
   }),
   relCase('a changed role is rewritten in place', HAND_WRITTEN, () => changed(HAND_WRITTEN, 'fct_order', (list) =>
     list.map((r) => (r.toModel === 'dim_date' ? { ...r, role: 'shipped' } : r))), (out) => {
-    expect(out).toBe(HAND_WRITTEN.replace('Ref "ship date": fct_order.ship_date_key >? dim_date.date_key', 'Ref shipped: fct_order.ship_date_key >? dim_date.date_key'));
+    expect(out).toBe(HAND_WRITTEN.replace('Ref "ship date": gold.fct_order.ship_date_key >? shared.dim_date.date_key', 'Ref shipped: gold.fct_order.ship_date_key >? shared.dim_date.date_key'));
   }),
   relCase('a removed Ref is cut (its comment above stays), and its table\'s use line goes when no Ref names it', HAND_WRITTEN, () => changed(HAND_WRITTEN, 'fct_order', (list) =>
     list.filter((r) => r.toModel !== 'dim_date')), (out) => {
     expect(out).toBe(HAND_WRITTEN
-      .replace("use { table dim_date } from '../dim_date.dbml'\n", '')
-      .replace('Ref "ship date": fct_order.ship_date_key >? dim_date.date_key\n', ''));
+      .replace("use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\n", '')
+      .replace('Ref "ship date": gold.fct_order.ship_date_key >? shared.dim_date.date_key\n', ''));
   }),
   relCase('owners not listed keep their Refs byte for byte, the bare `-` included', HAND_WRITTEN, () => changed(HAND_WRITTEN, 'fct_order', () => []), (out) => {
-    expect(out).toBe(`// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
-use { table gold.dim_customer } from './dim_customer.dbml'
-use { table customer_profile } from './customer_profile.dbml'
+    expect(out).toBe(`// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
 
 // the customer of an order
 
-Ref: gold.dim_customer.customer_key - customer_profile.customer_key
+Ref: gold.dim_customer.customer_key - gold.customer_profile.customer_key
 `);
   }),
   relCase('a file left with no Refs keeps its header and comments and loses its use lines (never deleted)', HAND_WRITTEN, () => ({
     owners: new Map([['fct_order', null], ['customer_profile', null]]),
   }), (out) => {
-    expect(out).toBe(`// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
+    expect(out).toBe(`// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
 
 // the customer of an order
 
 `);
   }),
-  relCase('hand-added and missing use lines are left alone when their table is not in the edit (Law 1)', `use { table bridge } from './bridge.dbml'
-use { table fct_order } from './fct_order.dbml'
+  relCase('hand-added and missing use lines are left alone when their table is not in the edit (Law 1)', `use { table gold.bridge } from '../tables/gold/bridge.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 
-Ref: fct_order.ship_date_key >? dim_date.date_key
-Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+Ref: gold.fct_order.ship_date_key >? shared.dim_date.date_key
+Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
 `, () => ({
     owners: new Map([['customer_profile', { name: 'customer_profile', relationships: [M21('customer_key', 'dim_customer', 'customer_key', { role: 'profile of' })] }]]),
   }), (out) => {
     // dim_date's use line stays missing and bridge's extra one stays; the edited Ref's tables get theirs.
-    expect(out).toBe(`use { table bridge } from './bridge.dbml'
-use { table customer_profile } from './customer_profile.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
-use { table fct_order } from './fct_order.dbml'
+    expect(out).toBe(`use { table gold.bridge } from '../tables/gold/bridge.dbml'
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 
-Ref: fct_order.ship_date_key >? dim_date.date_key
+Ref: gold.fct_order.ship_date_key >? shared.dim_date.date_key
 
-Ref "profile of": customer_profile.customer_key >? gold.dim_customer.customer_key
+Ref "profile of": gold.customer_profile.customer_key >? gold.dim_customer.customer_key
 `);
   }),
   relCase('the use block of a file with none goes after a header comment followed by a blank line', `// my header
 
-Ref: fct_order.order_date_key >? dim_date.date_key
+Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
 `, () => ({
     owners: new Map([['customer_profile', { name: 'customer_profile', relationships: [M21('customer_key', 'dim_customer', 'customer_key')] }]]),
   }), (out) => {
     expect(out).toBe(`// my header
-use { table customer_profile } from './customer_profile.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
 
-Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
 
-Ref: fct_order.order_date_key >? dim_date.date_key
+Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
 `);
   }),
   relCase('…and at offset 0 when the comment runs straight into the first Ref', `// about this Ref
-Ref: fct_order.order_date_key >? dim_date.date_key
+Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
 `, () => ({
     owners: new Map([['customer_profile', { name: 'customer_profile', relationships: [M21('customer_key', 'dim_customer', 'customer_key')] }]]),
   }), (out) => {
-    expect(out).toBe(`use { table customer_profile } from './customer_profile.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
+    expect(out).toBe(`use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
 
-Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
 
 // about this Ref
-Ref: fct_order.order_date_key >? dim_date.date_key
+Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
 `);
   }),
   relCase('one-to-one writes the foreign key second with `?-`; many-to-many `<>?`', null, () => ({
@@ -355,13 +397,13 @@ Ref: fct_order.order_date_key >? dim_date.date_key
       ['bridge', { name: 'bridge', relationships: [{ fromColumn: 'b_key', toModel: 'fct_order', toColumn: 'order_id', cardinality: 'many-to-many' }] }],
     ]),
   }), (out) => {
-    expect(out).toContain('Ref: bridge.b_key <>? fct_order.order_id\n');
-    expect(out).toContain('Ref: gold.dim_customer.customer_key ?- customer_profile.customer_key\n');
+    expect(out).toContain('Ref: gold.bridge.b_key <>? gold.fct_order.order_id\n');
+    expect(out).toContain('Ref: gold.dim_customer.customer_key ?- gold.customer_profile.customer_key\n');
   }),
   relCase('a one-to-many is stored canonically, as many-to-one from the other end', null, () => ({
     owners: new Map([['dim_date', { name: 'dim_date', relationships: [{ fromColumn: 'date_key', toModel: 'fct_order', toColumn: 'order_date_key', cardinality: 'one-to-many' }] }]]),
   }), (out) => {
-    expect(out).toContain('Ref: fct_order.order_date_key >? dim_date.date_key\n');
+    expect(out).toContain('Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key\n');
   }),
   relCase('a new file from null: the header, sorted selective use lines, sorted Refs', null, () => ({
     owners: new Map([['fct_order', { name: 'fct_order', relationships: [
@@ -370,14 +412,14 @@ Ref: fct_order.order_date_key >? dim_date.date_key
       M21('order_date_key', 'dim_date', 'date_key', { role: 'order date' }),
     ] }]]),
   }), (out) => {
-    expect(out).toBe(`// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
-use { table dim_date } from '../dim_date.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
-use { table fct_order } from './fct_order.dbml'
+    expect(out).toBe(`// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 
-Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
-Ref "order date": fct_order.order_date_key >? dim_date.date_key
-Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
+Ref "order date": gold.fct_order.order_date_key >? shared.dim_date.date_key
+Ref "ship date": gold.fct_order.ship_date_key >? shared.dim_date.date_key
 `);
   }),
   {
@@ -394,26 +436,79 @@ Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
     },
     check: (o) => {
       expect(o.output).toBe(HAND_WRITTEN
-        .replace("use { table fct_order } from './fct_order.dbml'", "use { table fct_order_line } from './fct_order_line.dbml'")
-        .replace('Ref: fct_order.Customer_Key', 'Ref: fct_order_line.Customer_Key')
-        .replace('Ref "ship date": fct_order.ship_date_key', 'Ref "ship date": fct_order_line.ship_date_key'));
+        .replace("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'", "use { table gold.fct_order_line } from '../tables/gold/fct_order_line.dbml'")
+        .replace('Ref: gold.fct_order.Customer_Key', 'Ref: gold.fct_order_line.Customer_Key')
+        .replace('Ref "ship date": gold.fct_order.ship_date_key', 'Ref "ship date": gold.fct_order_line.ship_date_key'));
     },
   },
   {
-    name: 'an owner moved out of the folder takes its Refs with it',
+    name: 'an owner listed with null loses its Refs here, and its use line with them, even when its path changed (§1.3: a line per table a Ref names)',
     run: (): WriterOutcome => {
       const output = relEdit(HAND_WRITTEN, { owners: new Map([['fct_order', null]]), pathChanged: new Set(['fct_order']) });
       return { path: REL_PATH, input: HAND_WRITTEN, output, context: { ...LIBRARY } };
     },
     check: (o) => {
       expect(o.output).not.toContain('fct_order');
-      expect(o.output).toContain('Ref: gold.dim_customer.customer_key - customer_profile.customer_key');
+      expect(o.output).toContain('Ref: gold.dim_customer.customer_key - gold.customer_profile.customer_key');
     },
   },
+
+  // --- The layer-first tree (§1.3): moves to another schema, stale use lines, the header -------
+  {
+    name: 'a requalify (a move to another schema) re-spells owner and target ends in place, and their use lines',
+    run: (): WriterOutcome => {
+      const output = relEdit(HAND_WRITTEN, {
+        owners: new Map(),
+        requalified: new Set(['fct_order', 'dim_customer']),
+        pathChanged: new Set(['fct_order', 'dim_customer']),
+      }, REQUALIFIED_LIBRARY);
+      // The input names the tables where they were, so only the output is compiled (with the library after).
+      return { path: REL_PATH, output, context: { ...REQUALIFIED_LIBRARY }, parsers: ['9.1.1', '10.3.1', '11.0.0'] };
+    },
+    check: (o) => {
+      expect(o.output).toBe(HAND_WRITTEN
+        .replace("use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'", "use { table sales.dim_customer } from '../tables/sales/dim_customer.dbml'")
+        .replace("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'", "use { table sales.fct_order } from '../../silver/tables/sales/fct_order.dbml'")
+        .replace('Ref: gold.fct_order.Customer_Key > gold.dim_customer.customer_key [delete: cascade] // keep me', 'Ref: sales.fct_order.Customer_Key > sales.dim_customer.customer_key [delete: cascade] // keep me')
+        .replace('Ref "ship date": gold.fct_order.ship_date_key', 'Ref "ship date": sales.fct_order.ship_date_key')
+        .replace('Ref: gold.dim_customer.customer_key - gold.customer_profile', 'Ref: sales.dim_customer.customer_key - gold.customer_profile'));
+      // What the file means is unchanged: ends are matched by name.
+      expect(meaning(o.output, REQUALIFIED_LIBRARY)).toEqual(meaning(HAND_WRITTEN));
+    },
+  },
+  relCase('a stale use line no Ref needs is rewritten when its table moves (filesUsing)', STALE_USE, () => ({
+    owners: new Map(),
+    pathChanged: new Set(['bridge']),
+  }), (out) => {
+    expect(out).toBe(STALE_USE.replace("use { table gold.bridge } from '../tables/gold/bridge.dbml'", "use { table gold.bridge } from '../../silver/tables/gold/bridge.dbml'"));
+  }, BRIDGE_MOVED, true),
+  ...(['bridge', 'zz_bridge'] as const).map((key) => relCase(
+    `a stale use line no Ref needs is rewritten when its table is renamed (pathChanged names it ${key === 'bridge' ? 'by its old name' : 'by its new name'})`,
+    STALE_USE,
+    () => ({ owners: new Map(), renamedOwners: new Map([['bridge', 'zz_bridge']]), pathChanged: new Set([key]) }),
+    (out) => {
+      expect(out).toBe(STALE_USE.replace("use { table gold.bridge } from '../tables/gold/bridge.dbml'", "use { table gold.zz_bridge } from '../tables/gold/zz_bridge.dbml'"));
+    },
+    BRIDGE_RENAMED,
+    true,
+  )),
+  relCase('…and cut when its table is deleted', STALE_USE, () => ({
+    owners: new Map(),
+    pathChanged: new Set(['bridge']),
+  }), (out) => {
+    expect(out).toBe(STALE_USE.replace("use { table gold.bridge } from '../tables/gold/bridge.dbml'\n", ''));
+  }, BRIDGE_DELETED, true),
+  relCase('a use line added above the first one goes below a 1.9 header too (the header floor is the prefix)', HEADER_19, () => changed(HEADER_19, 'fct_order', (list) => [
+    ...list, M21('order_date_key', 'dim_date', 'date_key'),
+  ]), (out) => {
+    expect(out).toBe(HEADER_19
+      .replace('here.\n', "here.\nuse { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\n")
+      .replace('customer_key\n', 'customer_key\nRef: gold.fct_order.order_date_key >? shared.dim_date.date_key\n'));
+  }),
   {
     name: 'an incoming Ref keeps `[delete: cascade]`, its `?` marks and its trailing comment',
     run: (): WriterOutcome => {
-      const incoming = 'Ref: fct_order.ship_date_key > dim_date.date_key [delete: cascade] // moved here';
+      const incoming = 'Ref: gold.fct_order.ship_date_key > shared.dim_date.date_key [delete: cascade] // moved here';
       const output = relEdit('// header\n', {
         owners: new Map([['fct_order', { name: 'fct_order', relationships: [M21('ship_date_key', 'dim_date', 'date_key')] }]]),
         incoming: [{ text: incoming, unit: { from: 'fct_order', to: 'dim_date', fromColumns: ['ship_date_key'], toColumns: ['date_key'], cardinality: 'many-to-one' } }],
@@ -421,13 +516,13 @@ Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
       return { path: REL_PATH, input: '// header\n', output, context: { ...LIBRARY } };
     },
     check: (o) => {
-      expect(o.output).toBe("// header\nuse { table dim_date } from '../dim_date.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.ship_date_key > dim_date.date_key [delete: cascade] // moved here\n");
+      expect(o.output).toBe("// header\nuse { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nRef: gold.fct_order.ship_date_key > shared.dim_date.date_key [delete: cascade] // moved here\n");
     },
   },
   {
     name: 'an incoming Ref whose owner was renamed is re-spelled only at that end',
     run: (): WriterOutcome => {
-      const incoming = 'Ref: fct_order.ship_date_key >? dim_date.date_key [delete: cascade] // moved';
+      const incoming = 'Ref: gold.fct_order.ship_date_key >? shared.dim_date.date_key [delete: cascade] // moved';
       const output = relEdit(null, {
         owners: new Map([['fct_order_line', { name: 'fct_order_line', relationships: [M21('ship_date_key', 'dim_date', 'date_key')] }]]),
         renamedOwners: new Map([['fct_order', 'fct_order_line']]),
@@ -436,7 +531,7 @@ Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
       return { path: REL_PATH, input: null, output, context: { ...RENAMED_LIBRARY } };
     },
     check: (o) => {
-      expect(o.output).toContain('Ref: fct_order_line.ship_date_key >? dim_date.date_key [delete: cascade] // moved\n');
+      expect(o.output).toContain('Ref: gold.fct_order_line.ship_date_key >? shared.dim_date.date_key [delete: cascade] // moved\n');
     },
   },
   // --- Round 1 review: link identity, moves, block form, owner keys -------------------
@@ -450,7 +545,7 @@ Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
     const list = currentOwners(COMPOSITE_REF).get('fct_order')!;
     return { owners: new Map([['fct_order', { name: 'fct_order', relationships: [...list].reverse().map((r) => ({ ...r, cardinality: 'many-to-many' as const })) }]]) };
   }, (out) => {
-    expect(out).toBe(COMPOSITE_REF.replace(') > dim_region.', ') <>? dim_region.'));
+    expect(out).toBe(COMPOSITE_REF.replace(') > gold.dim_region.', ') <>? gold.dim_region.'));
   }),
   {
     name: 'a Ref regenerated with a renamed end moves to its sorted place, with its trailing comment',
@@ -463,13 +558,13 @@ Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
       return { path: REL_PATH, output, context: { ...BRIDGE_RENAMED }, parsers: ['9.1.1', '10.3.1', '11.0.0'] };
     },
     check: (o) => {
-      expect(o.output).toBe(`use { table zz_bridge } from './zz_bridge.dbml'
-use { table customer_profile } from './customer_profile.dbml'
-use { table dim_date } from '../dim_date.dbml'
+      expect(o.output).toBe(`use { table gold.zz_bridge } from '../tables/gold/zz_bridge.dbml'
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
 
-Ref: customer_profile.customer_key >? dim_date.date_key
+Ref: gold.customer_profile.customer_key >? shared.dim_date.date_key
 
-Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
+Ref r: gold.zz_bridge.a_key >? shared.dim_date.date_key // a tail
 `);
     },
   },
@@ -498,9 +593,9 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
     },
     check: (o) => {
       expect(o.output).toBe(HAND_WRITTEN
-        .replace("use { table fct_order } from './fct_order.dbml'", "use { table fct_order_line } from './fct_order_line.dbml'")
-        .replace('Ref: fct_order.Customer_Key', 'Ref: fct_order_line.Customer_Key')
-        .replace('Ref "ship date": fct_order.ship_date_key', 'Ref "ship date": fct_order_line.ship_date_key'));
+        .replace("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'", "use { table gold.fct_order_line } from '../tables/gold/fct_order_line.dbml'")
+        .replace('Ref: gold.fct_order.Customer_Key', 'Ref: gold.fct_order_line.Customer_Key')
+        .replace('Ref "ship date": gold.fct_order.ship_date_key', 'Ref "ship date": gold.fct_order_line.ship_date_key'));
     },
   },
   relCase('a listed owner\'s one-to-many record matches the Ref stored from the other end', HAND_WRITTEN, () => ({
@@ -544,7 +639,7 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
     check: (o) => {
       expect(o.output.startsWith('﻿')).toBe(true);
       expect(o.output.replace(/\r\n/g, '')).not.toContain('\n');
-      expect(o.output).toContain('Ref: bridge.a_key >? dim_date.date_key\r\n');
+      expect(o.output).toContain('Ref: gold.bridge.a_key >? shared.dim_date.date_key\r\n');
     },
   },
 
@@ -554,19 +649,19 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
   }),
   relCase('a pending line goes when its owner is listed without it; another owner\'s stays', PENDING_FILE,
     () => changed(PENDING_FILE, 'fct_order', (list) => list.filter((r) => r.toModel !== 'dim_missing')), (out) => {
-      expect(out).toBe(PENDING_FILE.replace('// erd-studio pending: Ref: fct_order.order_date_key >? dim_missing.date_key\n', ''));
+      expect(out).toBe(PENDING_FILE.replace('// erd-studio pending: Ref: gold.fct_order.order_date_key >? dim_missing.date_key\n', ''));
     }),
   relCase('a pending line becomes a live Ref (with its use line) once both ends have files with those columns', PENDING_FILE,
     () => changed(PENDING_FILE, 'fct_order', (list) => list, WITH_DIM_MISSING), (out) => {
       expect(out).toBe([
-        "use { table dim_missing } from '../dim_missing.dbml'",
-        "use { table gold.dim_customer } from './dim_customer.dbml'",
-        "use { table fct_order } from './fct_order.dbml'",
+        "use { table shared.dim_missing } from '../../silver/tables/shared/dim_missing.dbml'",
+        "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'",
+        "use { table gold.fct_order } from '../tables/gold/fct_order.dbml'",
         '',
-        'Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key',
-        'Ref: fct_order.order_date_key >? dim_missing.date_key',
+        'Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key',
+        'Ref: gold.fct_order.order_date_key >? shared.dim_missing.date_key',
         '',
-        '// erd-studio pending: Ref: customer_profile.customer_key >? dim_gone.k',
+        '// erd-studio pending: Ref: gold.customer_profile.customer_key >? dim_gone.k',
         '',
       ].join('\n'));
     }, WITH_DIM_MISSING),
@@ -583,13 +678,13 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
     }),
     check: (o) => {
       expect(o.output).toBe([
-        '// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.',
-        "use { table gold.dim_customer } from './dim_customer.dbml'",
-        "use { table fct_order } from './fct_order.dbml'",
+        '// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.',
+        "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'",
+        "use { table gold.fct_order } from '../tables/gold/fct_order.dbml'",
         '',
-        'Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key',
+        'Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key',
         '',
-        '// erd-studio pending: Ref: fct_order.order_date_key >? dim_missing.date_key',
+        '// erd-studio pending: Ref: gold.fct_order.order_date_key >? dim_missing.date_key',
         '',
       ].join('\n'));
     },
@@ -604,9 +699,9 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
       pathChanged: new Set(['fct_order', 'fct_order_line']),
     };
   }, (out) => {
-    expect(out).toContain('// erd-studio pending: Ref: fct_order_line.order_date_key >? dim_missing.date_key\n');
-    expect(out).toContain('// erd-studio pending: Ref: customer_profile.customer_key >? dim_gone.k\n');
-    expect(out).toContain('Ref: fct_order_line.Customer_Key >? gold.dim_customer.customer_key\n');
+    expect(out).toContain('// erd-studio pending: Ref: gold.fct_order_line.order_date_key >? dim_missing.date_key\n');
+    expect(out).toContain('// erd-studio pending: Ref: gold.customer_profile.customer_key >? dim_gone.k\n');
+    expect(out).toContain('Ref: gold.fct_order_line.Customer_Key >? gold.dim_customer.customer_key\n');
     expect(out).not.toMatch(/\bfct_order\./);
   }, RENAMED_LIBRARY, true),
   relCase('renaming a pending line\'s target table re-spells it, its owner not listed', PENDING_TO_COLUMN, () => ({
@@ -614,7 +709,7 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
     renamedOwners: new Map([['dim_date', 'dim_day']]),
     pathChanged: new Set(['dim_date', 'dim_day']),
   }), (out) => {
-    expect(out).toBe(PENDING_TO_COLUMN.replace('>? dim_date.nope', '>? dim_day.nope'));
+    expect(out).toBe(PENDING_TO_COLUMN.replace('>? shared.dim_date.nope', '>? shared.dim_day.nope'));
   }, DIM_DAY_LIBRARY, true),
   relCase('renaming a pending line\'s column re-spells only that column', PENDING_FILE, () => {
     const list = (currentOwners(PENDING_FILE).get('fct_order') ?? []).map((r) => (r.fromColumn === 'order_date_key' ? { ...r, fromColumn: 'order_day_key' } : r));
@@ -632,8 +727,8 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
       { from: 'fct_order', to: 'dim_date', fromColumns: ['ship_date_key'], toColumns: ['nope'], cardinality: 'many-to-one' },
     ],
   }), (out) => {
-    expect(out).toContain('// erd-studio pending: Ref: fct_order.order_date_key >? dim_missing.date_key\n');
-    expect(out).toContain('// erd-studio pending: Ref: fct_order.ship_date_key >? dim_date.nope\n');
+    expect(out).toContain('// erd-studio pending: Ref: gold.fct_order.order_date_key >? dim_missing.date_key\n');
+    expect(out).toContain('// erd-studio pending: Ref: gold.fct_order.ship_date_key >? shared.dim_date.nope\n');
     expect(out).not.toMatch(/^Ref: fct_order\.(order|ship)_date_key/m);
   }),
   relCase('an owner listed with a pending relationship whose other table was renamed outside the edit (a YAML table): the line is re-spelled in place', PENDING_FILE,
@@ -648,37 +743,37 @@ Ref r: zz_bridge.a_key >? dim_date.date_key // a tail
       ['customer_profile', { name: 'customer_profile', relationships: [M21('customer_key', 'dim_customer', 'customer_key')] }],
     ]),
   }), (out) => {
-    expect(out.slice(out.indexOf('\nRef') + 1)).toBe(`Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+    expect(out.slice(out.indexOf('\nRef') + 1)).toBe(`Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
 
-Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
-Ref: fct_order.order_date_key >? dim_date.date_key
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
+Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
 `);
   }),
   relCase('an edit of a pre-2.0 file with no blank lines between tables adds them; Refs of one table stay together', OLD_LAYOUT, () => changed(OLD_LAYOUT, 'fct_order', (list) => [
     ...list, M21('order_date_key', 'dim_date', 'date_key'),
   ]), (out) => {
-    expect(out).toBe(`use { table customer_profile } from './customer_profile.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
-use { table fct_order } from './fct_order.dbml'
-use { table dim_date } from '../dim_date.dbml'
+    expect(out).toBe(`use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
 
-Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
+Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
 
 // the parent
 Ref: gold.dim_customer.parent_key >? gold.dim_customer.customer_key
 
-Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
-Ref: fct_order.order_date_key >? dim_date.date_key
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
+Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
 `);
   }),
   relCase('a Ref added to the first of two tables joins its group: the file reads as a fresh render does', W3_TWO_GROUPS, () => changed(W3_TWO_GROUPS, 'customer_profile', (list) => [
     ...list, W3_TO_DATE,
   ]), (out) => {
     expect(out).toBe(w3Fresh([...W3_PROFILE, W3_TO_DATE]));
-    expect(out.slice(out.indexOf('\nRef') + 1)).toBe(`Ref: customer_profile.customer_key >? gold.dim_customer.customer_key
-Ref: customer_profile.customer_key >? dim_date.date_key
+    expect(out.slice(out.indexOf('\nRef') + 1)).toBe(`Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
+Ref: gold.customer_profile.customer_key >? shared.dim_date.date_key
 
-Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
 `);
   }),
   relCase('a third Ref added to that first group still joins it (no drift builds up)', W3_FIRST_GROUP_GROWN, () => changed(W3_FIRST_GROUP_GROWN, 'customer_profile', (list) => [

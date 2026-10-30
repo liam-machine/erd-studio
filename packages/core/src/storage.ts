@@ -13,29 +13,32 @@
 import { NON_SUBJECT_AREA_DIRS } from './domain.js';
 import { LAYERS_CONFIG_FILE } from './layers.js';
 import { LOGICAL_MODELS_DIR, TABLES_DIR } from './logicalModel.js';
-import {
-  DBML_RELATIONSHIPS_FILE_NAME,
-  DBML_RELATIONSHIPS_FILE_STEM,
-  ERD_STUDIO_DBML_HEADER_PREFIX,
-} from './dbmlRichProperties.js';
+import { DBML_RELATIONSHIPS_FILE_NAME, DBML_RELATIONSHIPS_FILE_STEM } from './dbmlRichProperties.js';
 
 /** The folder of table templates; never a layer. */
 export const TEMPLATES_DIR = 'templates';
 
+/** The semantic dir's own explanation of its folders: `README.md` at the root, this exact name. */
+export const SEMANTIC_README_NAME = 'README.md';
+
 /** What a file under the semantic dir is. */
-export type SemanticFileKind = 'diagram' | 'table' | 'relationships' | 'layers' | 'template' | 'other';
+export type SemanticFileKind = 'diagram' | 'table' | 'relationships' | 'layers' | 'template' | 'readme' | 'other';
 
 /** The answer of {@link classifySemanticFile}. */
 export interface SemanticFileClass {
   kind: SemanticFileKind;
   /** A diagram's (`json` / `dbml`), a table's (`yaml` / `dbml`) or a relationships file's (`dbml`) storage. */
   storage?: 'json' | 'dbml' | 'yaml';
-  /** A diagram's layer folder. */
+  /** The layer folder of a diagram, and of a DBML table or relationships file. */
   layer?: string;
-  /** A table's or relationships file's library folder; absent at the top level. */
+  /** A table's library folder (a DBML table's: its schema folder); absent at the top of a YAML library. */
   folder?: string;
-  /** A diagram's or table's file stem. */
+  /** A DBML table's schema folder, as listed (the same as `folder`). */
+  schema?: string;
+  /** A diagram's, table's or DBML relationships file's stem. */
   name?: string;
+  /** An `other` file with a shape only the ERD Studio 1.9 pre-release wrote ({@link legacyDbmlShapeOf}). */
+  legacy?: LegacyDbmlShape;
 }
 
 /** Options for {@link classifySemanticFile}. */
@@ -43,9 +46,9 @@ export interface ClassifySemanticFileOptions {
   /** The project keeps a layer folder called `tables` (a pre-v6 project): it is then no table library. */
   tablesDirIsLayer: boolean;
   /**
-   * The file's first line, when the caller has read it. A `.dbml` in a layer
-   * folder that starts with the rich export's header is an export saved
-   * there, not a diagram. Watchers and decorations classify by path only.
+   * Ignored: the layer-first tree tells a diagram from an export saved in
+   * the semantic dir by its path alone.
+   * @deprecated 2.0-switch: S5 removes it, with its callers.
    */
   firstLine?: string;
 }
@@ -68,19 +71,14 @@ export function isLibraryFolderName(name: string): boolean {
 }
 
 /**
- * Whether `name` is the reserved relationships-file stem `_relationships`,
- * as `sameName` compares names (case-insensitive, surrounding white space
- * ignored), so a create path that trims a name after validating it cannot
- * slip past. A new `.dbml` table may not take it; an existing YAML table
- * called that stays a table.
+ * Whether `name` is the 1.9 pre-release's relationships-file stem
+ * `_relationships`, as `sameName` compares names (case-insensitive,
+ * surrounding white space ignored).
+ * @deprecated 2.0-switch: S8b deletes it with its last callers: the layer-first
+ * tree reserves no table name.
  */
 export function isReservedTableName(name: string): boolean {
   return typeof name === 'string' && name.trim().toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM;
-}
-
-/** Whether a listed file stem, exactly as listed (any case, never trimmed), is the relationships file's. */
-function isRelationshipsStem(stem: string): boolean {
-  return stem.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM;
 }
 
 /** `name` without its final extension, and the extension (with its dot), or `''` when it has none. */
@@ -96,78 +94,78 @@ function isPlainFileName(name: string): boolean {
 
 /**
  * The one answer to "what is this file?" for every host: watchers,
- * decorations, listings, the custom editor's reroute, `doctor`, `inventory`
- * and Convert. `relPath` is posix and relative to the semantic dir.
+ * decorations, listings, the custom editor's guard, `doctor`, `inventory`
+ * and Convert. `relPath` is posix and relative to the semantic dir (§1.1 of
+ * the 2.0 tree design).
  *
- * - `layers.json` → `layers`; `templates/**` → `template`;
+ * - `layers.json` → `layers`; `README.md` (the root's, this exact name) →
+ *   `readme`; `templates/**` → `template`;
  * - `logical-models/[<f>/]<n>.yml` → a YAML `table`;
- * - while `tables/` is the library: `tables/[<f>/]_relationships.dbml` (any
- *   case) → `relationships`, `tables/[<f>/]<n>.dbml` → a DBML `table`,
- *   `tables/[<f>/]<n>.yml` → a YAML `table` (`_relationships.yml` included),
- *   anything else under `tables/` → `other`;
- * - `<d>/<n>.json` → a JSON `diagram` and `<d>/<n>.dbml` → a DBML `diagram`
- *   (unless `<n>` is reserved or `firstLine` is the export header), when
- *   `<d>` is a layer: not hidden, not in `NON_SUBJECT_AREA_DIRS` and not the
- *   library (a `tables` layer holds JSON diagrams only);
- * - everything else → `other` (a `.dbdiagram` included: positions live in
- *   the diagram's `erd_layout`).
+ * - while `tables/` is the YAML library: `tables/[<f>/]<n>.yml` → a YAML
+ *   `table`; anything else under `tables/` → `other`;
+ * - `<L>/<n>.json` → a JSON `diagram`, when `<L>` is a layer: not hidden,
+ *   not in `NON_SUBJECT_AREA_DIRS` and not the library (`diagrams` and
+ *   `relationships` are layers like any other here);
+ * - the layer-first DBML tree ({@link dbmlTreePathOf}):
+ *   `<L>/diagrams/<n>.dbml` → a DBML `diagram`, `<L>/tables/<S>/<n>.dbml` →
+ *   a DBML `table` of the schema `<S>`, `<L>/relationships/<n>.dbml` → a
+ *   `relationships` file, each with `layer = <L>`;
+ * - everything else → `other`, with `legacy` when the path has a shape only
+ *   the 1.9 pre-release wrote (`tables/**.dbml`, `<d>/<n>.dbml`, any
+ *   `.dbdiagram`; {@link legacyDbmlShapeOf}), so `tables/<f>/_relationships.dbml`
+ *   is never read as a table.
  */
 export function classifySemanticFile(relPath: string, options: ClassifySemanticFileOptions): SemanticFileClass {
-  const other: SemanticFileClass = { kind: 'other' };
-  if (typeof relPath !== 'string' || relPath === '' || relPath.includes('\\')) return other;
-  if (relPath.startsWith('/')) return other;
+  if (typeof relPath !== 'string' || relPath === '' || relPath.includes('\\')) return { kind: 'other' };
+  if (relPath.startsWith('/')) return { kind: 'other' };
   const normalised = normalisePosix(relPath);
-  if (normalised === '.' || normalised === '..' || normalised.startsWith('../')) return other;
+  if (normalised === '.' || normalised === '..' || normalised.startsWith('../')) return { kind: 'other' };
+  const known = classifyKnown(normalised, options);
+  if (known) return known;
+  const legacy = legacyDbmlShapeOf(normalised);
+  return legacy !== undefined ? { kind: 'other', legacy } : { kind: 'other' };
+}
+
+/** {@link classifySemanticFile} for a normalised relative path: undefined for an `other` file. */
+function classifyKnown(normalised: string, options: ClassifySemanticFileOptions): SemanticFileClass | undefined {
   const segments = normalised.split('/');
   const fileName = segments[segments.length - 1];
 
   if (segments.length === 1) {
-    return fileName === LAYERS_CONFIG_FILE ? { kind: 'layers' } : other;
+    if (fileName === LAYERS_CONFIG_FILE) return { kind: 'layers' };
+    return fileName === SEMANTIC_README_NAME ? { kind: 'readme' } : undefined;
   }
   if (segments[0] === TEMPLATES_DIR) {
     return { kind: 'template' };
   }
-  if (!isPlainFileName(fileName)) return other;
+  if (!isPlainFileName(fileName)) return undefined;
   const { stem, ext } = splitExtension(fileName);
-  if (stem === '') return other;
+  if (stem === '') return undefined;
 
   const libraryFolder = segments.length === 3 ? segments[1] : undefined;
   const inLibraryShape = segments.length === 2 || (segments.length === 3 && isLibraryFolderName(segments[1]));
   const folderPart = libraryFolder !== undefined ? { folder: libraryFolder } : {};
 
   if (segments[0] === LOGICAL_MODELS_DIR) {
-    return inLibraryShape && ext === '.yml' ? { kind: 'table', storage: 'yaml', ...folderPart, name: stem } : other;
+    return inLibraryShape && ext === '.yml' ? { kind: 'table', storage: 'yaml', ...folderPart, name: stem } : undefined;
   }
 
   if (segments[0] === TABLES_DIR && !options.tablesDirIsLayer) {
-    if (!inLibraryShape) return other;
-    if (ext === '.dbml') {
-      return isRelationshipsStem(stem)
-        ? { kind: 'relationships', storage: 'dbml', ...folderPart }
-        : { kind: 'table', storage: 'dbml', ...folderPart, name: stem };
-    }
-    if (ext === '.yml') return { kind: 'table', storage: 'yaml', ...folderPart, name: stem };
-    return other;
+    return inLibraryShape && ext === '.yml' ? { kind: 'table', storage: 'yaml', ...folderPart, name: stem } : undefined;
   }
 
-  if (segments.length !== 2) return other;
-  const layer = segments[0];
-  if (layer.startsWith('.') || NON_SUBJECT_AREA_DIRS.has(layer)) return other;
+  if (segments.length === 2) {
+    const layer = segments[0];
+    if (layer.startsWith('.') || NON_SUBJECT_AREA_DIRS.has(layer)) return undefined;
+    return ext === '.json' ? { kind: 'diagram', storage: 'json', layer, name: stem } : undefined;
+  }
 
-  if (ext === '.json') {
-    return { kind: 'diagram', storage: 'json', layer, name: stem };
+  const tree = dbmlTreePathOf(normalised);
+  if (tree === undefined) return undefined;
+  if (tree.kind === 'table') {
+    return { kind: 'table', storage: 'dbml', layer: tree.layer, folder: tree.schema, schema: tree.schema, name: tree.name };
   }
-  // A `tables` layer belongs to a YAML project: its `.dbml` files are not
-  // diagrams (doctor's tablesLayerConflict names them).
-  if (layer === TABLES_DIR) return other;
-  if (ext === '.dbml') {
-    if (isRelationshipsStem(stem)) return other;
-    if (options.firstLine !== undefined && options.firstLine.replace(/^﻿/, '').startsWith(ERD_STUDIO_DBML_HEADER_PREFIX)) {
-      return other;
-    }
-    return { kind: 'diagram', storage: 'dbml', layer, name: stem };
-  }
-  return other;
+  return { kind: tree.kind, storage: 'dbml', layer: tree.layer, name: tree.name };
 }
 
 /** A subject area file's storage, by its extension: `json`, `dbml`, or undefined for anything else. */
@@ -182,29 +180,27 @@ function lastSeparator(path: string): number {
   return Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
 }
 
-/** The relationships file of a table file's folder: the same directory, `_relationships.dbml`. */
+/**
+ * The 1.9 pre-release's relationships file of a table file's folder.
+ * @deprecated 2.0-switch: S4b deletes it with its last callers.
+ */
 export function relationshipsFilePathOf(tableFilePath: string): string {
   return tableFilePath.slice(0, lastSeparator(tableFilePath) + 1) + DBML_RELATIONSHIPS_FILE_NAME;
 }
 
 /**
- * Where a table name may live, in the order every host looks (§3.4 of the
- * native DBML storage spec): `logical-models/<name>.yml`, then each of its
- * folders; then, for the top level and each folder in turn, `tables/…/<name>.dbml`
- * (only when `options.dbml`) before `tables/…/<name>.yml`. `folders` is
- * de-duplicated and sorted with `localeCompare`, so a name that (wrongly)
- * exists in two folders resolves to the same file in every host. `prefix` is
- * the semantic dir with its trailing separator (or `''`).
+ * Where a YAML table name may live, in the order every host looks:
+ * `logical-models/<name>.yml`, then each of its folders, then
+ * `tables/<name>.yml`, then each of its folders. `folders` is de-duplicated
+ * and sorted with `localeCompare`, so a name that (wrongly) exists in two
+ * folders resolves to the same file in every host. `prefix` is the semantic
+ * dir with its trailing separator (or `''`). A DBML table is found by its
+ * diagram's `use` path, never by this probe.
  */
-export function tableFileCandidates(prefix: string, name: string, folders: readonly string[], options: { dbml: boolean }): string[] {
+export function tableFileCandidates(prefix: string, name: string, folders: readonly string[]): string[] {
   const sorted = [...new Set(folders)].sort((a, b) => a.localeCompare(b));
   const subs = ['', ...sorted.map((f) => `${f}/`)];
-  const candidates = subs.map((sub) => `${prefix}${LOGICAL_MODELS_DIR}/${sub}${name}.yml`);
-  for (const sub of subs) {
-    if (options.dbml) candidates.push(`${prefix}${TABLES_DIR}/${sub}${name}.dbml`);
-    candidates.push(`${prefix}${TABLES_DIR}/${sub}${name}.yml`);
-  }
-  return candidates;
+  return [LOGICAL_MODELS_DIR, TABLES_DIR].flatMap((dir) => subs.map((sub) => `${prefix}${dir}/${sub}${name}.yml`));
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +367,33 @@ export function legacyDbmlShapeOf(relPath: string): LegacyDbmlShape | undefined 
 export function legacyDbmlFileMessage(rel: string): string {
   return `${rel} was written by an ERD Studio 1.9 pre-release, whose folder layout 2.0 does not read. `
     + 'Run erd-studio doctor in the project for the steps to convert it again.';
+}
+
+/**
+ * Why a `.dbml` path is not a diagram, for a reader asked to open one as a
+ * diagram (§1.8): the 1.9 pre-release's message for its shapes, the table
+ * and relationships file message for the rest of the layer-first tree, else
+ * where diagrams live. `path` names the file in the message as given; the
+ * 1.9 shape is read from it when it is relative to the semantic dir, or from
+ * what follows its `.erd-studio` / `erd-studio` segment; a table or
+ * relationships file is also recognised by its last segments, whatever
+ * precedes them (an absolute path, a semantic dir with another name).
+ */
+export function dbmlNotADiagramMessage(path: string): string {
+  const posix = typeof path === 'string' ? path.split('\\').join('/') : '';
+  const absolute = posix.startsWith('/') || /^[A-Za-z]:\//.test(posix);
+  const all = posix.split('/');
+  const at = Math.max(all.lastIndexOf('.erd-studio'), all.lastIndexOf('erd-studio'));
+  const rel: string | undefined = at >= 0 ? all.slice(at + 1).join('/') : absolute ? undefined : posix;
+  if (rel !== undefined && legacyDbmlShapeOf(rel) !== undefined) return legacyDbmlFileMessage(path);
+  const segments = posix.split('/').filter((s) => s !== '');
+  // By its last segments too, whatever precedes them: a semantic dir with another name (`model/…`).
+  const tree = (rel !== undefined ? dbmlTreePathOf(rel) : undefined)
+    ?? dbmlTreePathOf(segments.slice(-4).join('/')) ?? dbmlTreePathOf(segments.slice(-3).join('/'));
+  if (tree !== undefined && tree.kind !== 'diagram') {
+    return `${path} is a DBML table or relationships file, not a diagram. Open a diagram in ${tree.layer}/${DIAGRAMS_DIR}/.`;
+  }
+  return `${path} is not a DBML diagram. ERD Studio diagrams live in <layer>/${DIAGRAMS_DIR}/<name>.dbml (the folder names are lower-case).`;
 }
 
 // ---------------------------------------------------------------------------

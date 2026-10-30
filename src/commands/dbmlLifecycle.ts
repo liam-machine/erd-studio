@@ -69,7 +69,8 @@ export function planDbmlSubjectAreaRename(input: {
     before,
     after,
     resolveTable: (name) => input.resolver.resolveTable(name),
-    relationshipsFilesFor: (names) => input.resolver.relationshipsFilesFor(names),
+    // 2.0-switch: S7 (the folder-based resolver gives the imports until the planner's index does)
+    relationshipsImportsFor: (names) => input.resolver.relationshipsFilesFor(names),
     fileExists: (p) => input.resolver.fileExists(p),
   });
   return [

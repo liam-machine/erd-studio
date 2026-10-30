@@ -1,27 +1,30 @@
 /**
  * The relationships-file writer (§2.3 and §4.5 of the native DBML storage
- * spec): `tables/[<folder>/]_relationships.dbml`, one Ref line per
- * relationship unit, kept sorted, with a `use` line for every table a Ref
- * names.
+ * spec, §1.3 of the 2.0 tree design): `<layer>/relationships/<f>.dbml`, one
+ * Ref line per relationship unit, kept sorted, with a `use` line for every
+ * table a Ref names, its ends spelled as the table declares itself
+ * (`sap.afih.(MANDT, EQUNR)`).
  *
  * Only the owners an edit lists are touched. A Ref that is the same as
  * before keeps its bytes (its `?` marks, `[delete: cascade]` and trailing
  * comment included); one whose cardinality or role changed is rewritten in
  * place with its settings and comment kept; one an end of which was
  * renamed (the table, or a column the edit renames) is re-spelled in place,
- * only the renamed names changing; one that is gone is cut, and a
- * new one is inserted at its sorted place. `use` lines are maintained only
- * for the tables this edit touches, so hand-added or missing lines for
- * other tables stay as they are (Law 1). The file is never deleted (D15).
+ * only the renamed names changing (a table moved to another schema is
+ * re-spelled the same way); one that is gone is cut, and a new one is
+ * inserted at its sorted place. `use` lines are maintained only for the
+ * tables this edit touches, so hand-added or missing lines for other tables
+ * stay as they are (Law 1); a line naming a table whose path changed is
+ * rewritten (or, for a deleted table, cut) even when no Ref here names it.
+ * The file is never deleted (D15).
  */
 
 import type { Cardinality, Relationship, TableRelationship } from '../types/semantic.js';
-import { DBML_RELATIONSHIPS_FILE_HEADER, DBML_RELATIONSHIPS_FILE_STEM, pendingRefLine } from '../dbmlRichProperties.js';
+import { DBML_RELATIONSHIPS_FILE_HEADER, pendingRefLine } from '../dbmlRichProperties.js';
 import { dbmlName } from '../dbmlText.js';
 import { canonicalRelationship } from '../relationships.js';
 import { reverseBareOneToOne } from '../dbmlAttach.js';
-import { TABLES_DIR } from '../logicalModel.js';
-import { dirnamePosix, normalisePosix, relativePosix, resolvePosix } from '../storage.js';
+import { classifySemanticFile, dirnamePosix, normalisePosix, relativePosix, resolvePosix } from '../storage.js';
 import { DbmlEditRefused } from './errors.js';
 import type { DbmlParserModule } from './parserModule.js';
 import {
@@ -96,8 +99,18 @@ export interface RelationshipsFileEdit {
   renamedColumns?: ReadonlyMap<string, ReadonlyMap<string, string>>;
   /** Ref texts moving INTO this file from another file, carried verbatim. */
   incoming?: ReadonlyArray<{ text: string; unit: RefUnit }>;
-  /** Tables whose path changed in this edit (rename, move, delete), lower-case: their `use` lines are re-resolved. */
+  /**
+   * Tables whose path changed in this edit (rename, move, delete), lower-case:
+   * their `use` lines are re-resolved, a line no Ref needs included
+   * (rewritten while the table has a file, else cut).
+   */
   pathChanged?: ReadonlySet<string>;
+  /**
+   * Tables this edit moves to another schema (their qualifier changes),
+   * lower-case, named as after the edit: every Ref end naming one is
+   * re-spelled with its new reference, and its `use` line rewritten.
+   */
+  requalified?: ReadonlySet<string>;
   /** A table as it is AFTER this edit; undefined when it has no file. */
   resolve(name: string): DbmlResolvedTable | undefined;
   /**
@@ -325,11 +338,18 @@ export function useLinesOf(ast: AstNode, text: string, filePath: string): UseLin
   return lines;
 }
 
-/** Whether a resolved path points into the table library (`tables/…`). */
+/** Whether a resolved path is a table file (`<layer>/tables/<schema>/<n>.dbml`). */
 function inLibrary(resolved: string): boolean {
-  const segments = normalisePosix(resolved).split('/');
-  return segments[0] === TABLES_DIR && segments.length >= 2 && segments.length <= 3;
+  return classifySemanticFile(resolved, { tablesDirIsLayer: false }).kind === 'table';
 }
+
+/** Whether a resolved path is a relationships file (`<layer>/relationships/<f>.dbml`). */
+function isRelationshipsPath(resolved: string): boolean {
+  return classifySemanticFile(resolved, { tablesDirIsLayer: false }).kind === 'relationships';
+}
+
+/** What every ERD Studio relationships-file header starts with (2.0's and the 1.9 pre-release's). */
+const RELATIONSHIPS_HEADER_PREFIX = '// ERD Studio relationships';
 
 /** A Ref's parts in the file: its node, its application (the line with the ends) and its ends. */
 interface RefNode {
@@ -398,6 +418,9 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     const after = renamed.get(lower(name)) ?? name;
     return edit.resolve(after)?.name ?? after;
   };
+  const requalified = new Set([...(edit.requalified ?? [])].map(lower));
+  /** Whether a table, as the file spells it, moves to another schema in this edit. */
+  const isRequalified = (name: string): boolean => requalified.size > 0 && (requalified.has(lower(name)) || requalified.has(lower(canonical(name))));
   const columnSpelling = (table: string, column: string): string => edit.resolve(table)?.columns(column) ?? column;
   const columnRenames = new Map<string, ReadonlyMap<string, string>>();
   for (const [table, columns] of edit.renamedColumns ?? []) if (columns.size > 0) columnRenames.set(lower(canonical(table)), columns);
@@ -541,7 +564,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const cut: Array<{ unit: RefUnit; ref: RefNode; spelledNames: string[] }> = [];
   type KeptInput = Omit<Kept, 'keyBefore'>;
   const touched = new Set<string>();
-  const renamedEnd = (names: readonly string[]): boolean => names.some((n) => renamed.has(lower(n)));
+  const renamedEnd = (names: readonly string[]): boolean => names.some((n) => renamed.has(lower(n)) || isRequalified(n));
   const unmatched = (test: (d: RefUnit) => boolean): RefUnit | undefined => desired.find((d) => !matched.has(d) && test(d));
 
   for (const entry of current) {
@@ -772,7 +795,11 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     ...moving,
   ].sort((a, b) => (refUnitSortKey(a.unit) < refUnitSortKey(b.unit) ? -1 : refUnitSortKey(a.unit) > refUnitSortKey(b.unit) ? 1 : 0));
   // --- use lines (§4.5 step 5): only for the tables this edit touched -------------------
-  for (const name of edit.pathChanged ?? []) touched.add(lower(name));
+  const pathChanged = new Set([...(edit.pathChanged ?? []), ...requalified].map(lower));
+  // A renamed table may be named by its old name: its new name is what resolves after the edit
+  // (and finds the old line through oldNamesOf), so it is handled under that name first.
+  for (const [from, to] of renamed) if (pathChanged.has(from)) pathChanged.add(lower(to));
+  for (const name of pathChanged) touched.add(name);
   const remaining = new Set<string>();
   for (const k of staying) for (const n of [k.unit.from, k.unit.to]) remaining.add(lower(n));
   for (const a of additions) for (const n of [a.unit.from, a.unit.to]) remaining.add(lower(n));
@@ -783,7 +810,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const linesFor = (name: string): UseLine[] => {
     const names = new Set([lower(name), ...oldNamesOf(name).map(lower)]);
     const target = edit.resolve(name)?.path;
-    return uses.filter((u) => !handled.has(u.node) && lower(u.stem) !== DBML_RELATIONSHIPS_FILE_STEM && (
+    return uses.filter((u) => !handled.has(u.node) && !isRelationshipsPath(u.resolved) && (
       u.tables.some((t) => names.has(t.name))
       || (u.wildcard && names.has(lower(u.stem)))
       || (target !== undefined && u.resolved === normalisePosix(target))
@@ -792,11 +819,20 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   /** A line that imports only this table (so deleting or rewriting it takes nothing else away). */
   const only = (u: UseLine): boolean => u.wildcard || u.specifierCount <= 1;
   const newUses: Array<{ path: string; line: string }> = [];
+  // Tables a Ref in the file named before the edit (as read, and as named after it).
+  const namedBefore = new Set<string>();
+  for (const c of current) for (const n of [c.unit.from, c.unit.to, ...c.spelledNames]) namedBefore.add(lower(n));
+  // A table no Ref here names, before or after the edit, whose path changed but which still has a
+  // file: its line (a hand-added or orphaned one) is rewritten, never left pointing at the old path
+  // (§1.3). A table whose last Ref this edit cuts loses its line, wherever it moved.
+  const stillFiled = (name: string): boolean =>
+    !remaining.has(name) && !namedBefore.has(name) && pathChanged.has(name) && edit.resolve(name) !== undefined;
+  const rank = (name: string): number => (remaining.has(name) ? 2 : stillFiled(name) ? 1 : 0);
   // Tables a Ref still names first, so a renamed table's old line is rewritten, not cut and re-added.
-  const order = [...touched].sort((a, b) => Number(remaining.has(b)) - Number(remaining.has(a)) || (a < b ? -1 : a > b ? 1 : 0));
+  const order = [...touched].sort((a, b) => rank(b) - rank(a) || (a < b ? -1 : a > b ? 1 : 0));
   for (const name of order) {
     const lines = linesFor(name);
-    if (remaining.has(name)) {
+    if (remaining.has(name) || stillFiled(name)) {
       const table = edit.resolve(name);
       if (!table) continue; // a dangling end: no file to point at
       const path = usePathBetween(file, table.path);
@@ -815,7 +851,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
         for (const u of rewritable.slice(1)) { handled.add(u.node); useEdits.push(cutEdit(text, u.node)); }
         continue;
       }
-      newUses.push({ path, line });
+      if (remaining.has(name)) newUses.push({ path, line });
     } else {
       for (const u of lines) {
         if (!only(u) || !inLibrary(u.resolved)) continue;
@@ -827,7 +863,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   newUses.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const keptUses = uses.filter((u) => !useEdits.some((e) => e.text === '' && e.start <= u.node.start && e.end >= u.node.end));
   // ERD Studio's own header comment sits right above the first use line; it describes the file, not that line.
-  const headerFloor = text.startsWith(DBML_RELATIONSHIPS_FILE_HEADER) && text.indexOf('\n') >= 0 ? text.indexOf('\n') + 1 : 0;
+  const headerFloor = text.startsWith(RELATIONSHIPS_HEADER_PREFIX) && text.indexOf('\n') >= 0 ? text.indexOf('\n') + 1 : 0;
   for (const added of newUses) {
     const before = keptUses.find((u) => u.importPath > added.path);
     if (before) {
@@ -913,7 +949,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
 
   /** An incoming Ref's text with each renamed end spelled anew; everything else kept verbatim. */
   function respellIncoming(refLine: string): string {
-    if (renamed.size === 0 && columnRenames.size === 0) return refLine;
+    if (renamed.size === 0 && columnRenames.size === 0 && requalified.size === 0) return refLine;
     let compiled;
     try {
       compiled = compileOne(refLine, parser);
@@ -928,8 +964,9 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
 
   /**
    * The spans that re-spell Ref ends (offsets less `base`): an end whose table
-   * was renamed is written anew; otherwise only its renamed column tokens are,
-   * so a qualifier, alias or quoting the file uses for the table stays.
+   * was renamed or moved to another schema is written anew; otherwise only
+   * its renamed column tokens are, so a qualifier, alias or quoting the file
+   * uses for the table stays.
    */
   function endRespellings(sides: Array<AstNode | undefined>, base: number): TextEdit[] {
     const spans: TextEdit[] = [];
@@ -938,7 +975,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
       if (!parts || !side) continue;
       const table = canonical(parts.table);
       const after = parts.columns.map((c) => columnAfter(table, c));
-      if (renamed.has(lower(parts.table))) {
+      if (renamed.has(lower(parts.table)) || isRequalified(parts.table)) {
         spans.push({ start: side.start - base, end: side.end - base, text: endText(table, after) });
         continue;
       }

@@ -1,15 +1,17 @@
 /**
- * Read one `.dbml` table file (§2.2 of the native DBML storage spec) into a
- * {@link SemanticTable}, on its own: a table file needs no other file, so a
- * deleted neighbour never breaks it. A `use` line, a `Ref` or a column
- * `[ref: …]` is blanked out before compiling (offsets kept) and reported:
- * the table still loads, but writes are refused until the line moves to the
- * folder's relationships file.
+ * Read one `.dbml` table file (`<layer>/tables/<schema>/<name>.dbml`, §1.2
+ * of the 2.0 tree design) into a {@link SemanticTable}, on its own: a table
+ * file needs no other file, so a deleted neighbour never breaks it. A `use`
+ * line, a `Ref` or a column `[ref: …]` is blanked out before compiling
+ * (offsets kept) and reported: the table still loads, but writes are refused
+ * until the line moves to a relationships file. The table's schema is its
+ * qualifier (`Table gold.x`), else its schema folder.
  */
 
 import type { ColumnDef, Rationale, SemanticTable } from '../types/semantic.js';
 import type { DbmlProblem, DbmlTableReading } from '../types/dbmlStorage.js';
 import {
+  DBML_DEFAULT_SCHEMA,
   DBML_RICH_COLUMN_PROPERTIES,
   DBML_RICH_META_JSON_PROPERTY,
   DBML_RICH_META_PREFIX,
@@ -19,7 +21,7 @@ import {
   bareDbmlProperty,
   rationaleKeyOf,
 } from '../dbmlRichProperties.js';
-import { dbmlName } from '../dbmlText.js';
+import { dbmlName, dbmlString } from '../dbmlText.js';
 import { readMeta } from '../meta.js';
 import { findConflictMarkers } from '../mergeConflict.js';
 import { DBML_QUOTE_HINT, DBML_TABLE_QUOTE_HINT_CODES, classifyDbmlTableError, type DbmlTableStructureRule } from '../domain.js';
@@ -167,16 +169,35 @@ function noteText(value: unknown): string {
   return value && typeof value === 'object' && typeof (value as AstNode).value === 'string' ? (value as AstNode).value : '';
 }
 
+/** Options for {@link parseTableDbml}. */
+export interface ParseTableDbmlOptions {
+  /**
+   * The file's schema folder as listed (`S` of `<layer>/tables/<S>/<n>.dbml`):
+   * the schema of an unqualified Table. A qualifier that differs from it
+   * (`schemaFolderMismatch`) and an unqualified Table (`unqualifiedTable`)
+   * are warned about. Without it, the schema is the qualifier alone.
+   */
+  schemaFolder?: string;
+}
+
 /**
  * Read a `.dbml` table file. `fileStem` is the file name without `.dbml`,
  * as the directory listing spells it; the Table's declared name must equal
- * it but for case (D2), and is the table's name.
+ * it but for case (D2), and is the table's name. The schema is the Table's
+ * qualifier (`Table gold.x`), else `options.schemaFolder`; an old
+ * `[schema: '…']` property is never read as the schema (`schemaProperty`
+ * when it says something else; its bytes stay).
  *
  * Never throws for bad DBML: a file that cannot be read comes back as
  * `{ ok: false }` with the `TableLoadError` the canvas shows and a message
  * for logs. `parser` is the pinned DBML parser unless a test passes another.
  */
-export function parseTableDbml(rawText: string, fileStem: string, parser: DbmlParserModule = PINNED_PARSER): DbmlTableReading {
+export function parseTableDbml(
+  rawText: string,
+  fileStem: string,
+  options: ParseTableDbmlOptions = {},
+  parser: DbmlParserModule = PINNED_PARSER,
+): DbmlTableReading {
   const text = stripBom(rawText);
   if (text.trim() === '') {
     return { ok: false, error: { kind: 'read', message: `${fileStem}.dbml is empty` } };
@@ -217,7 +238,7 @@ export function parseTableDbml(rawText: string, fileStem: string, parser: DbmlPa
       writable = false;
       problems.push({
         code: 'refInTableFile', severity: 'warning', line: lineAt(text, node.start),
-        message: `Relationships live in the folder's _relationships.dbml: move \`${sourceOf(text, node)}\` there. It is not drawn from here, and ERD Studio will not edit the file until it is moved.`,
+        message: `Relationships live in a relationships file (<layer>/relationships/): move \`${sourceOf(text, node)}\` there. It is not drawn from here, and ERD Studio will not edit the file until it is moved.`,
       });
       continue;
     }
@@ -252,6 +273,22 @@ export function parseTableDbml(rawText: string, fileStem: string, parser: DbmlPa
   }
   const qualifier = nameParts.length === 2 ? nameParts[0] : undefined;
   const declaredReference = nameParts.map(dbmlName).join('.');
+  const schemaFolder = options.schemaFolder;
+  if (schemaFolder !== undefined) {
+    const line = lineAt(text, tableNode.start);
+    if (qualifier !== undefined && qualifier !== schemaFolder) {
+      problems.push({
+        code: 'schemaFolderMismatch', severity: 'warning', line,
+        message: `${fileStem}.dbml declares \`Table ${declaredReference}\` but sits in tables/${schemaFolder}/; move the file or change the qualifier: other DBML tools resolve use lines by the qualifier.`,
+      });
+    } else if (qualifier === undefined && schemaFolder !== DBML_DEFAULT_SCHEMA) {
+      // DBML already reads an unqualified table as `public.<n>`, which is what `tables/public/` means.
+      problems.push({
+        code: 'unqualifiedTable', severity: 'warning', line,
+        message: `write \`Table ${dbmlName(schemaFolder)}.${dbmlName(declaredName)}\`: other DBML tools read an unqualified table as \`public.${dbmlName(declaredName)}\`.`,
+      });
+    }
+  }
   const aliasParts = plainNames(tableNode.alias);
   const dbmlAlias = aliasParts && aliasParts.length === 1 ? aliasParts[0] : undefined;
 
@@ -272,8 +309,8 @@ export function parseTableDbml(rawText: string, fileStem: string, parser: DbmlPa
       problems.push({
         code: 'inlineRefInTableFile', severity: 'warning', line: lineAt(text, attribute.start),
         message: line
-          ? `Move \`${sourceOf(text, attribute)}\` on ${declaredName}.${columnName} to the folder's _relationships.dbml as \`${line}\`, then remove it here. It is not drawn from here, and ERD Studio will not edit the file until it is moved.`
-          : `Move \`${sourceOf(text, attribute)}\` on ${declaredName}.${columnName} to the folder's _relationships.dbml as a Ref line, then remove it here.`,
+          ? `Move \`${sourceOf(text, attribute)}\` on ${declaredName}.${columnName} to a relationships file (<layer>/relationships/) as \`${line}\`, then remove it here. It is not drawn from here, and ERD Studio will not edit the file until it is moved.`
+          : `Move \`${sourceOf(text, attribute)}\` on ${declaredName}.${columnName} to a relationships file (<layer>/relationships/) as a Ref line, then remove it here.`,
       });
     });
     if (remove.size > 0) {
@@ -317,7 +354,7 @@ export function parseTableDbml(rawText: string, fileStem: string, parser: DbmlPa
   if (!rawTable) {
     return failure(`${fileStem}.dbml declares no Table`, { rule: 'notOneTable' });
   }
-  const table = mapTable(rawTable, declaredName, qualifier, text, problems);
+  const table = mapTable(rawTable, declaredName, qualifier ?? schemaFolder, text, problems, schemaPropertyLine(tableNode, text));
   return {
     ok: true,
     table,
@@ -330,11 +367,30 @@ export function parseTableDbml(rawText: string, fileStem: string, parser: DbmlPa
   };
 }
 
-/** The raw Table as a {@link SemanticTable}, the way `yamlToTable` normalises a model file (§2.2 field mapping). */
-function mapTable(raw: AstNode, name: string, qualifier: string | undefined, text: string, problems: DbmlProblem[]): SemanticTable {
+/** The line of the Table's `[schema: …]` setting (any `erd_` prefix), else the Table's own line. */
+function schemaPropertyLine(tableNode: AstNode, text: string): number {
+  const list = tableNode.attributeList;
+  const elements: AstNode[] = Array.isArray(list?.elementList) ? list.elementList : [];
+  const setting = elements.find((a) => a?.kind === '<attribute>' && bareDbmlProperty(attributeName(a)) === DBML_RICH_TABLE_PROPERTIES.schema);
+  return lineAt(text, (setting ?? tableNode).start);
+}
+
+/**
+ * The raw Table as a {@link SemanticTable}, the way `yamlToTable` normalises
+ * a model file (§2.2 field mapping). `schema` is the effective schema (the
+ * qualifier, else the schema folder); an old `[schema: …]` property is read
+ * only to warn when it says something else.
+ */
+function mapTable(raw: AstNode, name: string, schema: string | undefined, text: string, problems: DbmlProblem[], schemaLine: number): SemanticTable {
   const props = readProperties(raw.metadata, text, `Table ${name}`, problems);
   const table: SemanticTable = { name };
-  const schema = props.get(DBML_RICH_TABLE_PROPERTIES.schema) ?? qualifier;
+  const schemaProperty = props.get(DBML_RICH_TABLE_PROPERTIES.schema);
+  if (schemaProperty !== undefined && schemaProperty !== schema) {
+    problems.push({
+      code: 'schemaProperty', severity: 'warning', line: schemaLine,
+      message: `the schema is the Table's qualifier; remove \`[schema: ${dbmlString(schemaProperty)}]\`.`,
+    });
+  }
   const alias = props.get(DBML_RICH_TABLE_PROPERTIES.alias)?.trim();
   const description = noteText(raw.note);
   const grain = props.get('grain');

@@ -18,7 +18,6 @@ import type {
 import type { DbtKeyIndex } from './keyEvidence.js';
 import { libraryCopyRank } from './domain.js';
 import { linkKey, nextCompositeKey, reverseRelationship } from './relationships.js';
-import { TABLES_DIR } from './logicalModel.js';
 
 const lower = (s: string): string => s.toLowerCase();
 
@@ -39,16 +38,6 @@ export function dbmlTableLookup(tables: Iterable<DbmlAttachTable>): (name: strin
     }
   }
   return (name) => byName.get(lower(name)) ?? byAlias.get(lower(name));
-}
-
-/**
- * The library folder a relationships file sits in: `tables/_relationships.dbml`
- * → `''`, `tables/gold/_relationships.dbml` → `gold`. Any prefix (the
- * semantic dir, an absolute path) and either separator are allowed.
- */
-export function relationshipsFileFolder(path: string): string {
-  const segments = path.split(/[\\/]/).filter((s) => s !== '');
-  return segments.length >= 3 && segments[segments.length - 3] === TABLES_DIR ? segments[segments.length - 2] : '';
 }
 
 /** Whether `columns` are exactly the key `key` (without case); an empty key is no key. */
@@ -106,8 +95,9 @@ function at(location: DbmlRefLocation): string {
  *   reads its first end as the foreign key only when the second end alone is
  *   its table's whole primary key; with a table missing it stays as read
  *   (the second end is the foreign key);
- * - a Ref in a file other than its owner's folder's is attached and reported
- *   `misplaced`; one owned by a YAML table or by no table is `orphaned`;
+ * - a Ref is attached from whichever relationships file holds it (no file is
+ *   a table's home, decision 5): `misplaced` is always empty; a Ref owned by
+ *   a YAML table or by no table is `orphaned`;
  * - a link read more than once (`linkKey`, in any files, either way round) is
  *   attached once, the copy {@link libraryCopyRank} ranks first, and
  *   reported in `duplicates`;
@@ -127,6 +117,7 @@ function at(location: DbmlRefLocation): string {
  * The host, which passes the whole library, leaves it unset.
  */
 export function attachRelationships(
+  // 2.0-switch: S6a drops `folder` (ignored: no Ref has a home folder in the layer-first tree).
   readings: ReadonlyArray<{ path: string; folder?: string; reading: DbmlRelationshipsReading }>,
   tables: (name: string) => DbmlAttachTable | undefined,
   options: { dbt?: DbtKeyIndex; partial?: boolean } = {},
@@ -137,9 +128,8 @@ export function attachRelationships(
   let unit = 0;
   let index = 0;
 
-  for (const { path, folder: givenFolder, reading } of readings) {
+  for (const { path, reading } of readings) {
     if (!reading || !reading.readable) continue;
-    const folder = givenFolder ?? relationshipsFileFolder(path);
     // Pending relationships (D27) belong to their owner exactly like live Refs: drawn when both ends are shown.
     for (const ref of [...reading.refs, ...(reading.pending ?? [])]) {
       if (ref.relationships.length === 0) continue;
@@ -168,14 +158,6 @@ export function attachRelationships(
           ? `Ref ${describeLink(rels[0])} in ${at(location)} belongs to ${location.owner}, a YAML table, which keeps its relationships in its own file; it is not drawn from here`
           : `Ref ${describeLink(rels[0])} in ${at(location)} names no table in the library as its foreign-key end (${location.owner}); it is not drawn`);
         continue;
-      }
-      if (ownerEntry.folder !== folder) {
-        const home = ownerEntry.folder;
-        result.misplaced.push({ ...location, home });
-        result.warnings.push(
-          `Ref ${describeLink(rels[0])} in ${at(location)} belongs to ${location.owner}, whose relationships file is in ` +
-          `${home === '' ? 'tables/' : `tables/${home}/`}; it is drawn, and the next edit of ${location.owner}'s relationships moves it there`,
-        );
       }
       unit++;
       for (const raw of rels) {

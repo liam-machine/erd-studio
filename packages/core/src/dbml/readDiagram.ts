@@ -1,7 +1,7 @@
 /**
- * Read a `.dbml` diagram (§2.5 of the native DBML storage spec) into the v5
- * subject-area object the rest of core reads, beside its DBML schema version
- * (D8). Tolerant (D6): every `use` line, every `Table`, `Ref`, `TableGroup`,
+ * Read a `.dbml` diagram (`<layer>/diagrams/<name>.dbml`, §2.5 of the native
+ * DBML storage spec, §1.4 of the 2.0 tree design) into the v5 subject-area
+ * object the rest of core reads, beside its DBML schema version (D8). Tolerant (D6): every `use` line, every `Table`, `Ref`, `TableGroup`,
  * `Enum`, `TablePartial`, `Records`, `DiagramView` and `Metadata` block,
  * every repeated Note name and every Project after the first is blanked out
  * (offsets and line breaks kept) before the rest is compiled on its own, so a
@@ -19,7 +19,6 @@ import {
 } from '../domain.js';
 import {
   DBML_DIAGRAM_PROPERTIES,
-  DBML_RELATIONSHIPS_FILE_STEM,
   DBML_RICH_NOTE_PROPERTIES,
   parseUnlinkedTables,
   stickyColourOfHex,
@@ -31,8 +30,7 @@ import { erdLayoutView } from '../erdLayout.js';
 import { erdLayoutSpanInAst, readErdLayoutFromAst } from './erdLayoutDbml.js';
 import { findConflictMarkers } from '../mergeConflict.js';
 import { isSafeTableName } from '../logicalModel.js';
-import { TABLES_DIR } from '../logicalModel.js';
-import { dbmlTreePathOf, diagramPathOf, isLibraryFolderName, normalisePosix, resolvePosix } from '../storage.js';
+import { classifySemanticFile, dbmlNotADiagramMessage, diagramPathOf, dirnamePosix, resolvePosix } from '../storage.js';
 import type { DbmlParserModule } from './parserModule.js';
 import {
   PINNED_PARSER,
@@ -66,14 +64,6 @@ const METADATA_ELEMENT = 'metadata';
 /** The diagram-quote hint: the example is an error in every parser (Project keys must be quoted). */
 const DIAGRAM_QUOTE_HINT = "Quote the value, as in erd_schema_version: '7'.";
 
-/** Split a diagram path into its parent folder name and its stem, either separator. */
-function pathParts(filePath: string): { folder: string; stem: string } {
-  const segments = filePath.split(/[\\/]/).filter((s) => s !== '');
-  const file = segments[segments.length - 1] ?? '';
-  const stem = file.toLowerCase().endsWith('.dbml') ? file.slice(0, -'.dbml'.length) : file;
-  return { folder: segments.length >= 2 ? segments[segments.length - 2] : '', stem };
-}
-
 /** The stem of a `use` path: its last segment without `.dbml` (the extension is optional in DBML). */
 function useStem(importPath: string): string {
   const segments = importPath.split('/').filter((s) => s !== '');
@@ -86,16 +76,36 @@ function withExtension(path: string): string {
   return path.toLowerCase().endsWith('.dbml') ? path : `${path}.dbml`;
 }
 
+/** What one `use` line of a diagram is (§1.4), from {@link diagramUseRole}. */
+export interface DiagramUseRole {
+  /**
+   * `member`: a table of the diagram, by a selective `use { table … }` or a
+   * `use *` line whose path is a table file; `mismatch`: a member too, by a
+   * selective line whose path is not a table file (D4 tolerance, warned as
+   * `usePathMismatch`); `relationships`: a `use *` of a relationships file;
+   * `other`: any other `use *` line, never a member nor a relationships
+   * import, kept as written; `ignored`: anything else (a selective import of
+   * no table, or of a name ERD Studio cannot read), kept as written.
+   */
+  role: 'member' | 'mismatch' | 'relationships' | 'other' | 'ignored';
+  /** A member's name: the table file's stem. */
+  name?: string;
+}
+
 /**
- * The library folder a resolved `use` path names (`tables/gold/x.dbml` →
- * `gold`, `tables/x.dbml` → `''`), or undefined when it does not point into
- * the library by the §2.1 shape.
+ * The §1.4 rule for one `use` line of a diagram, shared by every reader and
+ * the writer so they agree on what is a member: `resolved` is its path
+ * resolved against the diagram's folder (relative to the semantic dir) and
+ * classified by its shape; `importsTables` whether a selective line names a
+ * table; `stem` its path's stem.
  */
-function libraryFolderOf(resolved: string): string | undefined {
-  const segments = normalisePosix(resolved).split('/');
-  if (segments[0] === TABLES_DIR && segments.length === 2) return '';
-  if (segments[0] === TABLES_DIR && segments.length === 3 && isLibraryFolderName(segments[1])) return segments[1];
-  return undefined;
+export function diagramUseRole(resolved: string, wildcard: boolean, importsTables: boolean, stem: string): DiagramUseRole {
+  const shape = classifySemanticFile(resolved, { tablesDirIsLayer: false });
+  if (shape.kind === 'table' && shape.storage === 'dbml' && (wildcard || importsTables) && isSafeTableName(shape.name!)) {
+    return { role: 'member', name: shape.name! };
+  }
+  if (wildcard) return { role: shape.kind === 'relationships' ? 'relationships' : 'other' };
+  return importsTables && isSafeTableName(stem) ? { role: 'mismatch', name: stem } : { role: 'ignored' };
 }
 
 /** The table names a selective `use { table x }` line names (unqualified), or [] for `use *`. */
@@ -163,8 +173,12 @@ const isStringRecord = (v: unknown): v is Record<string, string> =>
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
 
 /**
- * Read a DBML diagram. `filePath` names it in messages, and its parent
- * folder is the diagram's layer. Table positions and sticky-note boxes are
+ * Read a DBML diagram. `filePath` (absolute or relative, either separator)
+ * names it in messages; its last three segments must be
+ * `<layer>/diagrams/<name>.dbml` (`diagramPathOf`), which give the layer and
+ * the folder each `use` path resolves against. Its `use` lines are read by
+ * {@link diagramUseRole}: the members, the relationships files it imports
+ * (`relationshipsUses`) and every other `use *` (`otherUses`). Table positions and sticky-note boxes are
  * read from the first Project's `erd_layout` (§1.6): its problems are
  * `layoutProblems` (and warnings), and a value holding git conflict markers
  * is read best effort and sets `layoutConflictLine`. A hand edit must never
@@ -172,8 +186,8 @@ const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every
  *
  * Throws `SubjectAreaFileError` (`empty`; `invalid-dbml`, transient unless
  * the file holds git conflict markers) and `SubjectAreaValidationError` (a
- * schema version that is not a whole number, or newer than this core
- * reads). `parser` is the pinned DBML parser unless a test passes another.
+ * path that is not a diagram's, after the empty and syntax checks; a schema
+ * version that is not a whole number, or newer than this core reads). `parser` is the pinned DBML parser unless a test passes another.
  */
 export function parseSubjectAreaDbml(
   rawText: string,
@@ -202,13 +216,17 @@ export function parseSubjectAreaDbml(
     }
   }
   if (syntax.length > 0) throw invalidDbml(filePath, syntax[0]);
+  const where = diagramPathOf(filePath);
+  if (where === undefined) throw new SubjectAreaValidationError(dbmlNotADiagramMessage(filePath));
 
-  const { folder: layer, stem } = pathParts(filePath);
+  const { layer, name: stem } = where;
   const warnings: string[] = [];
   const blanks: Array<{ start: number; end: number }> = [];
   const members: string[] = [];
   const uses: DbmlMemberUse[] = [];
-  const useFolders = new Set<string>();
+  const tableDirs = new Set<string>();
+  const relationshipsUses: string[] = [];
+  const otherUses: string[] = [];
   const noteNames = new Set<string>();
   let writable = true;
   let projects = 0;
@@ -219,25 +237,34 @@ export function parseSubjectAreaDbml(
     if (isUseDeclaration(node)) {
       blanks.push({ start: node.start, end: node.end });
       const importPath = typeof node.importPath?.value === 'string' ? node.importPath.value as string : '';
-      const name = useStem(importPath);
-      if (name.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM) continue; // a relationships file: output only (D4)
-      if (!isSafeTableName(name)) {
-        warnings.push(`Line ${line}: the use line for '${importPath}' does not name a table ERD Studio can read; it is ignored`);
+      const resolved = resolvePosix(where.dir, withExtension(importPath));
+      const specified = specifiedTables(node);
+      const use = diagramUseRole(resolved, isWildcardUse(node), specified.length > 0, useStem(importPath));
+      if (use.role === 'relationships') {
+        if (!relationshipsUses.includes(resolved)) relationshipsUses.push(resolved);
         continue;
       }
-      const resolved = resolvePosix(layer, withExtension(importPath));
-      const folder = libraryFolderOf(resolved);
-      if (folder !== undefined) useFolders.add(folder);
-      const specified = specifiedTables(node);
-      // DBML names are case-sensitive, but a table file may declare its name
-      // in another case than its stem (D2), and the specifier spells the
-      // declared name: only a different name is a mismatch. A path whose case
-      // differs from the file on disk needs a listing (host, doctor; §3.4).
-      const misnamed = specified.find((n) => n.toLowerCase() !== name.toLowerCase());
-      if (folder === undefined) {
-        warnings.push(`Line ${line}: the use line for ${name} points at '${importPath}', not at a table file in ${TABLES_DIR}/ (usePathMismatch); the table is still read by name`);
-      } else if (misnamed !== undefined) {
-        warnings.push(`Line ${line}: the use line imports table ${misnamed} from '${importPath}', whose file is named ${name} (usePathMismatch); the table is read by its file name`);
+      if (use.role === 'other') {
+        otherUses.push(resolved);
+        continue;
+      }
+      if (use.role === 'ignored') {
+        warnings.push(`Line ${line}: the use line for '${importPath}' does not import a table ERD Studio can read; it is ignored`);
+        continue;
+      }
+      const name = use.name!;
+      if (use.role === 'member') {
+        tableDirs.add(dirnamePosix(resolved)); // its `<layer>/tables/<schema>` folder
+        // DBML names are case-sensitive, but a table file may declare its name
+        // in another case than its stem (D2), and the specifier spells the
+        // declared name: only a different name is a mismatch. A path whose case
+        // differs from the file on disk needs a listing (host, doctor; §3.4).
+        const misnamed = specified.find((n) => n.toLowerCase() !== name.toLowerCase());
+        if (misnamed !== undefined) {
+          warnings.push(`Line ${line}: the use line imports table ${misnamed} from '${importPath}', whose file is named ${name} (usePathMismatch); the table is read by its file name`);
+        }
+      } else {
+        warnings.push(`Line ${line}: the use line for ${name} points at '${importPath}', not at a table file in <layer>/tables/<schema>/ (usePathMismatch); the table is still read by name`);
       }
       members.push(name);
       uses.push({ name, path: importPath, resolved, line });
@@ -403,7 +430,9 @@ export function parseSubjectAreaDbml(
     obj,
     schemaVersion,
     members,
-    useFolders: [...useFolders].sort((a, b) => a.localeCompare(b)),
+    useTableDirs: [...tableDirs].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+    relationshipsUses,
+    otherUses,
     writable,
     warnings,
     uses,
@@ -464,36 +493,25 @@ function pendingRelationships(refs: ReadonlyArray<readonly Relationship[]>): Rel
 }
 
 /**
- * A diagram's members from its `use` lines, from the AST alone (no compile
- * of the rest): the stem of every table `use` path, in order. Null when the
- * text has a syntax error.
+ * A diagram's members from a syntax parse alone (no binding, no compile of
+ * the rest): its `use` members ({@link diagramUseRole}), then
+ * `erd_unlinked_tables` (D26). Null when the text has a syntax error, or
+ * when `filePath` is not a diagram's.
  */
-export function subjectAreaMembersDbml(rawText: string, parser: DbmlParserModule = PINNED_PARSER): string[] | null {
-  const text = stripBom(rawText);
-  let compiled: CompiledFile;
-  try {
-    compiled = compileOne(text, parser, undefined, { diagram: true });
-  } catch {
-    return null;
-  }
-  if (compiled.errors.some((d) => d.errorClass === 'syntax')) return null;
-  return diagramMembersFromAst(compiled.ast, text);
+export function subjectAreaMembersDbml(rawText: string, filePath: string, parser: DbmlParserModule = PINNED_PARSER): string[] | null {
+  const summary = diagramSummaryDbml(rawText, filePath, parser);
+  return summary === null ? null : [...summary.members, ...summary.unlinked];
 }
 
 /**
  * {@link subjectAreaMembersDbml} from a diagram already parsed (`ast` of
- * `text`, without its byte-order mark): the table `use` stems, then
- * `erd_unlinked_tables`. The `erd_layout` writer spells lines by them.
+ * `text`, without its byte-order mark): the `use` members, then
+ * `erd_unlinked_tables`. The `erd_layout` writer spells lines by them. When
+ * `filePath` is not a diagram's, only selective table imports are members.
  */
-export function diagramMembersFromAst(ast: AstNode, text: string): string[] {
-  const members: string[] = [];
-  for (const node of topLevel(ast)) {
-    if (!isUseDeclaration(node)) continue;
-    const importPath = typeof node.importPath?.value === 'string' ? node.importPath.value as string : '';
-    const name = useStem(importPath);
-    if (name.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM || !isSafeTableName(name)) continue;
-    members.push(name);
-  }
+export function diagramMembersFromAst(ast: AstNode, text: string, filePath?: string): string[] {
+  const dir = filePath !== undefined ? diagramPathOf(filePath)?.dir : undefined;
+  const members = usesOf(ast, text, dir).members;
   const unlinked = projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value;
   members.push(...unlinkedMembers(unlinked, members, []));
   return members;
@@ -514,11 +532,38 @@ export interface DbmlDiagramSummary {
 }
 
 /**
+ * The `use` lines of a parsed diagram by {@link diagramUseRole}, resolved
+ * against `dir` (`L/diagrams`); with no `dir`, no path is resolved and only
+ * selective table imports are members.
+ */
+function usesOf(ast: AstNode, text: string, dir: string | undefined): Omit<DbmlDiagramSummary, 'unlinked'> {
+  const members: string[] = [];
+  const memberUses: DbmlMemberUse[] = [];
+  const relationshipsUses: string[] = [];
+  const otherUses: string[] = [];
+  for (const node of topLevel(ast)) {
+    if (!isUseDeclaration(node)) continue;
+    const importPath = typeof node.importPath?.value === 'string' ? node.importPath.value as string : '';
+    const resolved = dir !== undefined ? resolvePosix(dir, withExtension(importPath)) : '';
+    const use = diagramUseRole(resolved, isWildcardUse(node), specifiedTables(node).length > 0, useStem(importPath));
+    if (use.role === 'member' || use.role === 'mismatch') {
+      members.push(use.name!);
+      memberUses.push({ name: use.name!, path: importPath, resolved, line: lineAt(text, node.start) });
+    } else if (use.role === 'relationships') {
+      if (!relationshipsUses.includes(resolved)) relationshipsUses.push(resolved);
+    } else if (use.role === 'other' && dir !== undefined) {
+      otherUses.push(resolved);
+    }
+  }
+  return { members, memberUses, relationshipsUses, otherUses };
+}
+
+/**
  * A layer-first diagram's imports, from a lex and parse alone (no binding,
  * no compile of the rest): for the settle rule, which must know whether a
  * diagram needs rewriting before it pays for a full read. Each `use` path is
- * resolved against the diagram's folder (`L/diagrams`) and classified by
- * its shape ({@link dbmlTreePathOf}):
+ * resolved against the diagram's folder (`L/diagrams`) and read by
+ * {@link diagramUseRole}, as {@link parseSubjectAreaDbml} reads it:
  *
  * - a selective `use { table … }` line or a `use *` line whose path is a
  *   table file is a member, named by the file stem;
@@ -545,31 +590,9 @@ export function diagramSummaryDbml(rawText: string, filePath: string, parser: Db
   } catch {
     return null;
   }
-  const members: string[] = [];
-  const memberUses: DbmlMemberUse[] = [];
-  const relationshipsUses: string[] = [];
-  const otherUses: string[] = [];
-  for (const node of topLevel(ast)) {
-    if (!isUseDeclaration(node)) continue;
-    const importPath = typeof node.importPath?.value === 'string' ? node.importPath.value as string : '';
-    const resolved = resolvePosix(where.dir, withExtension(importPath));
-    const shape = dbmlTreePathOf(resolved);
-    const wildcard = isWildcardUse(node);
-    const selective = !wildcard && specifiedTables(node).length > 0;
-    let member: string | undefined;
-    if (shape?.kind === 'table' && (wildcard || selective)) member = shape.name;
-    else if (selective && isSafeTableName(useStem(importPath))) member = useStem(importPath);
-    if (member !== undefined) {
-      members.push(member);
-      memberUses.push({ name: member, path: importPath, resolved, line: lineAt(text, node.start) });
-    } else if (wildcard && shape?.kind === 'relationships') {
-      if (!relationshipsUses.includes(resolved)) relationshipsUses.push(resolved);
-    } else if (wildcard) {
-      otherUses.push(resolved);
-    }
-  }
-  const unlinked = unlinkedMembers(projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value, members, []);
-  return { members, memberUses, relationshipsUses, otherUses, unlinked };
+  const uses = usesOf(ast, text, where.dir);
+  const unlinked = unlinkedMembers(projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value, uses.members, []);
+  return { ...uses, unlinked };
 }
 
 /** Whether a `use` line imports everything (`use * from …`). */

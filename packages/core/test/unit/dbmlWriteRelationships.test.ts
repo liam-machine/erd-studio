@@ -64,19 +64,19 @@ describe('editRelationshipsDbml refusals', () => {
     })();
     // No such table at all: a new Ref to it would not compile, so it is refused too.
     expect(err).toBeInstanceOf(DbmlEditRefused);
-    expect(err!.message).toBe('The relationship fct_order.(order_id) → yml_table.(id) names yml_table, which has no table file, so it cannot be written to tables/gold/_relationships.dbml.');
+    expect(err!.message).toBe('The relationship fct_order.(order_id) → yml_table.(id) names yml_table, which has no table file, so it cannot be written to gold/relationships/gold.dbml.');
     // A dangling Ref already in the file is kept as it is.
-    const dangling = `${HAND_WRITTEN}Ref: fct_order.order_id > nowhere.id\n`;
+    const dangling = `${HAND_WRITTEN}Ref: gold.fct_order.order_id > nowhere.id\n`;
     expect(relEdit(dangling, owner([...currentOwners(dangling).get('fct_order')!]))).toBe(dangling);
     expect(() => editRelationshipsDbml(HAND_WRITTEN, {
-      filePath: 'tables/gold/_relationships.dbml',
+      filePath: 'gold/relationships/gold.dbml',
       resolve: relationshipsResolver(libraryOf(LIBRARY, { yml_table: 'tables/yml_table.yml' })),
       ...owner([{ fromColumn: 'order_id', toModel: 'yml_table', toColumn: 'id', cardinality: 'many-to-one' }]),
     })).toThrow(/Convert the project to DBML first \(ERD Studio: Convert Project to DBML\)/);
   });
 
   it('a file with a syntax error or conflict markers', () => {
-    expect(() => relEdit('Ref: a.b > \n', owner([]))).toThrow(/^Fix the DBML in tables\/gold\/_relationships\.dbml first/);
+    expect(() => relEdit('Ref: a.b > \n', owner([]))).toThrow(/^Fix the DBML in gold\/relationships\/gold\.dbml first/);
     expect(() => relEdit('<<<<<<< HEAD\nRef: a.b > c.d\n=======\n>>>>>>> x\n', owner([]))).toThrow(DbmlEditRefused);
   });
 });

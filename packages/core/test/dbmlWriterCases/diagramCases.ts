@@ -1,6 +1,7 @@
 /**
  * The diagram writer cases (§9.3 `dbmlWriteDiagram`): each one edits (or
- * creates) `gold/sales.dbml` against a small library and checks the text.
+ * creates) `gold/diagrams/sales.dbml` against a small layer-first library
+ * (§1.4 of the 2.0 tree design) and checks the text.
  * `dbmlWriteDiagram.test.ts` runs the checks; `dbmlMultiParser.test.ts`
  * compiles every output again, with the files its `use` lines name, under
  * 9.1.1, 10.3.1 and 11.0.0. Not a test file.
@@ -9,22 +10,26 @@ import { expect } from 'vitest';
 
 import { parseSubjectAreaDbml } from '../../src/dbml/readDiagram';
 import { editSubjectAreaDbml, renderNewSubjectAreaDbml, type SubjectAreaDbmlEdit } from '../../src/dbml/writeDiagram';
-import { relationshipsFilePathOf } from '../../src/storage';
+import { readRelationshipsDbml } from '../../src/dbml/readRelationships';
 import { detectSubjectAreaFormat } from '../../src/types/semantic';
-import { clone, diagramResolver, libraryOf, type WriterCase, type WriterOutcome } from '../dbmlWriterSupport';
+import { clone, diagramResolver, libraryOf, relationshipsFilesOf, type WriterCase, type WriterOutcome } from '../dbmlWriterSupport';
 import { LIBRARY } from './relationshipsCases';
 
-export const DIAGRAM_PATH = 'gold/sales.dbml';
+export const DIAGRAM_PATH = 'gold/diagrams/sales.dbml';
 
-/** The library plus its two relationships files. */
+/** The library plus two relationships files: gold's own, and a hand split holding fct_order's date Ref (to silver's `shared.dim_date`). */
 export const DIAGRAM_LIBRARY: Readonly<Record<string, string>> = {
   ...LIBRARY,
-  'tables/gold/_relationships.dbml': `use { table gold.dim_customer } from './dim_customer.dbml'
-use { table fct_order } from './fct_order.dbml'
+  'gold/relationships/gold.dbml': `use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 
-Ref: fct_order.Customer_Key >? gold.dim_customer.customer_key
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
 `,
-  'tables/_relationships.dbml': '// ERD Studio relationships.\n',
+  'gold/relationships/dates.dbml': `use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+
+Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
+`,
 };
 
 export const SALES = `// The sales star.
@@ -35,9 +40,9 @@ Project sales {
   database_type: 'Snowflake'
 }
 
-use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
-use * from '../tables/gold/_relationships.dbml'
+use * from '../relationships/gold.dbml'
 
 Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_order'] {
   'Check the grain with finance'
@@ -53,9 +58,9 @@ export const SALES_CONFLICTED = SALES.replace("  database_type: 'Snowflake'\n", 
 /** SALES as a new diagram is written: the Project last, erd_layout its last key (§1.4). */
 export const SALES_LAST = `// The sales star.
 
-use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
-use * from '../tables/gold/_relationships.dbml'
+use * from '../relationships/gold.dbml'
 
 Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_order'] {
   'Check the grain with finance'
@@ -83,17 +88,17 @@ export const SALES_UNLINKED = SALES_MISSING.replace("erd_unlinked_tables: 'gld_f
 /** The library with \`dim_customer\` renamed to \`dim_client\` (its relationships file following). */
 const CLIENT_LIBRARY: Readonly<Record<string, string>> = (() => {
   const out: Record<string, string> = { ...DIAGRAM_LIBRARY };
-  delete out['tables/gold/dim_customer.dbml'];
-  out['tables/gold/dim_client.dbml'] = DIAGRAM_LIBRARY['tables/gold/dim_customer.dbml'].replace('gold.dim_customer', 'gold.dim_client');
-  out['tables/gold/_relationships.dbml'] = DIAGRAM_LIBRARY['tables/gold/_relationships.dbml'].replace(/dim_customer/g, 'dim_client');
+  delete out['gold/tables/gold/dim_customer.dbml'];
+  out['gold/tables/gold/dim_client.dbml'] = DIAGRAM_LIBRARY['gold/tables/gold/dim_customer.dbml'].replace('gold.dim_customer', 'gold.dim_client');
+  out['gold/relationships/gold.dbml'] = DIAGRAM_LIBRARY['gold/relationships/gold.dbml'].replace(/dim_customer/g, 'dim_client');
   return out;
 })();
 
 /** The library with dim_customer's \`customer_key\` renamed to \`customer_id\` (its relationships file following). */
 const CUSTOMER_ID_LIBRARY: Readonly<Record<string, string>> = {
   ...DIAGRAM_LIBRARY,
-  'tables/gold/dim_customer.dbml': DIAGRAM_LIBRARY['tables/gold/dim_customer.dbml'].replace('customer_key int [pk]', 'customer_id int [pk]'),
-  'tables/gold/_relationships.dbml': DIAGRAM_LIBRARY['tables/gold/_relationships.dbml'].replace('gold.dim_customer.customer_key', 'gold.dim_customer.customer_id'),
+  'gold/tables/gold/dim_customer.dbml': DIAGRAM_LIBRARY['gold/tables/gold/dim_customer.dbml'].replace('customer_key int [pk]', 'customer_id int [pk]'),
+  'gold/relationships/gold.dbml': DIAGRAM_LIBRARY['gold/relationships/gold.dbml'].replace('gold.dim_customer.customer_key', 'gold.dim_customer.customer_id'),
 };
 
 type Obj = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -103,15 +108,27 @@ export function readDiagram(text: string, path = DIAGRAM_PATH): Obj {
   return parseSubjectAreaDbml(text, path).obj;
 }
 
+/**
+ * The relationships files of `library` a diagram of `members` imports (§2.4
+ * `relationshipsImportsFor`): each one holding a live Ref with both ends
+ * among the members (a self-reference included); one that does not read is
+ * kept when the diagram imports it now (`current`), never added.
+ */
+export function importsOver(library: Readonly<Record<string, string>>, members: readonly string[], current: readonly string[]): string[] {
+  const names = new Set(members.map((m) => m.toLowerCase()));
+  return relationshipsFilesOf(library).filter((file) => {
+    const reading = readRelationshipsDbml(library[file]);
+    if (!reading.readable) return current.includes(file);
+    return reading.refs.some((r) => names.has(r.owner.toLowerCase()) && names.has(r.target.toLowerCase()));
+  });
+}
+
 /** The edit's lookups over `library`. */
-export function lookups(library: Readonly<Record<string, string>>, yaml: Record<string, string> = {}): Pick<SubjectAreaDbmlEdit, 'resolveTable' | 'relationshipsFilesFor' | 'fileExists'> {
+export function lookups(library: Readonly<Record<string, string>>, yaml: Record<string, string> = {}): Pick<SubjectAreaDbmlEdit, 'resolveTable' | 'relationshipsImportsFor' | 'fileExists'> {
   const resolveTable = diagramResolver(libraryOf(library, yaml));
   return {
     resolveTable,
-    relationshipsFilesFor: (names) => names
-      .map((n) => resolveTable(n))
-      .filter((t): t is NonNullable<typeof t> => t !== undefined && t.storage === 'dbml')
-      .map((t) => relationshipsFilePathOf(t.path)),
+    relationshipsImportsFor: (names, current) => importsOver(library, names, current),
     fileExists: (p) => Object.prototype.hasOwnProperty.call(library, p),
   };
 }
@@ -196,72 +213,75 @@ export const DIAGRAM_CASES: WriterCase[] = [
     expect(out).toBe(SALES.replace('Project sales {', 'Project "sales v2" {'));
   }),
   diagramCase('a diagram with no Project gets one at the end, after a blank line (§1.4, Project last)',
-    "// The sales star.\n\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n", (a) => { a.description = 'Sales'; }, (out) => {
-      expect(out).toBe("// The sales star.\n\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n\nProject sales {\n  Note: 'Sales'\n  erd_schema_version: '7'\n}\n");
+    "// The sales star.\n\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n", (a) => { a.description = 'Sales'; }, (out) => {
+      expect(out).toBe("// The sales star.\n\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nProject sales {\n  Note: 'Sales'\n  erd_schema_version: '7'\n}\n");
     }),
   diagramCase('…and a comment that runs straight into the first line stays with it',
-    "// about fct_order\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n", (a) => { a.domain = 'renamed'; }, (out) => {
-      expect(out).toBe("// about fct_order\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n\nProject renamed {\n  erd_schema_version: '7'\n}\n");
+    "// about fct_order\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n", (a) => { a.domain = 'renamed'; }, (out) => {
+      expect(out).toBe("// about fct_order\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nProject renamed {\n  erd_schema_version: '7'\n}\n");
     }),
   diagramCase('…holding erd_layout last when a position changed too',
-    "use { table fct_order } from '../tables/gold/fct_order.dbml'\n", (a) => { a.domain = 'renamed'; a.viewConfig.positions = { fct_order: { x: 1.006, y: -0 } }; }, (out) => {
-      expect(out).toBe("use { table fct_order } from '../tables/gold/fct_order.dbml'\n\nProject renamed {\n  erd_schema_version: '7'\n  erd_layout: '''\n    fct_order 1.01 0\n  '''\n}\n");
+    "use { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n", (a) => { a.domain = 'renamed'; a.viewConfig.positions = { fct_order: { x: 1.006, y: -0 } }; }, (out) => {
+      expect(out).toBe("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nProject renamed {\n  erd_schema_version: '7'\n  erd_layout: '''\n    fct_order 1.01 0\n  '''\n}\n");
     }),
 
   // --- Members --------------------------------------------------------------------
-  diagramCase('a member added goes after the last table use line, with its folder\'s relationships file', SALES, (a) => {
+  diagramCase('a member added goes after the last table use line, with the relationships file holding a Ref between members (§2.4)', SALES, (a) => {
     a.logical.models.push('dim_date');
   }, (out) => {
     expect(out).toBe(SALES.replace(
-      "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse * from '../tables/gold/_relationships.dbml'\n",
-      "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table dim_date } from '../tables/dim_date.dbml'\nuse * from '../tables/_relationships.dbml'\nuse * from '../tables/gold/_relationships.dbml'\n",
+      "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse * from '../relationships/gold.dbml'\n",
+      "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\nuse * from '../relationships/dates.dbml'\nuse * from '../relationships/gold.dbml'\n",
     ));
   }),
   diagramCase('a member added in the middle goes before the next member\'s line', SALES, (a) => {
     a.logical.models.splice(1, 0, 'dim_region');
   }, (out) => {
-    expect(out).toContain("use { table fct_order } from '../tables/gold/fct_order.dbml'\nuse { table dim_region } from '../tables/gold/dim_region.dbml'\nuse { table gold.dim_customer }");
+    expect(out).toContain("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'\nuse { table gold.dim_region } from '../tables/gold/dim_region.dbml'\nuse { table gold.dim_customer }");
     expect(readDiagram(out).logical.models).toEqual(['fct_order', 'dim_region', 'dim_customer']);
   }),
-  diagramCase('a member removed is cut; a relationships file no member needs goes', SALES, (a) => {
+  diagramCase('a member removed is cut; a relationships file holding no Ref between the members left goes', SALES, (a) => {
     a.logical.models = ['dim_date'];
   }, (out) => {
-    expect(out).toContain("use { table dim_date } from '../tables/dim_date.dbml'\nuse * from '../tables/_relationships.dbml'\n\nNote");
-    expect(out).not.toContain('gold/_relationships');
+    expect(out).toContain("use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\n\nNote");
+    expect(out).not.toContain('relationships/');
     expect(out).not.toContain('fct_order.dbml');
   }),
   diagramCase('a new member order rebuilds the table use lines', SALES, (a) => {
     a.logical.models.reverse();
   }, (out) => {
-    expect(out).toContain("use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\nuse * from");
+    expect(out).toContain("use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\nuse * from");
   }),
   diagramCase('a new member order keeps each line\'s trailing comment and the comment lines above', SALES
     .replace("'../tables/gold/fct_order.dbml'", "'../tables/gold/fct_order.dbml' // the facts")
     .replace("use { table gold.dim_customer }", "// customers\nuse { table gold.dim_customer }"), (a) => {
     a.logical.models.reverse();
   }, (out) => {
-    expect(out).toContain("// customers\nuse { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table fct_order } from '../tables/gold/fct_order.dbml' // the facts\nuse * from");
+    expect(out).toContain("// customers\nuse { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml' // the facts\nuse * from");
   }),
   diagramCase('a member whose table was deleted (pathChanged, no file now) loses its line, even with nothing else changed', SALES, () => undefined, (out) => {
-    expect(out).toBe(SALES.replace("use { table fct_order } from '../tables/gold/fct_order.dbml'\n", ''));
+    expect(out).toBe(SALES.replace("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n", ''));
   }, {
     library: (() => {
       const lib: Record<string, string> = { ...DIAGRAM_LIBRARY };
-      delete lib['tables/gold/fct_order.dbml'];
-      lib['tables/gold/_relationships.dbml'] = "use { table gold.dim_customer } from './dim_customer.dbml'\n";
+      delete lib['gold/tables/gold/fct_order.dbml'];
+      lib['gold/relationships/gold.dbml'] = "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\n";
+      delete lib['gold/relationships/dates.dbml'];
       return lib;
     })(),
     extra: { pathChanged: new Set(['fct_order']) },
     // The input compiled clean against the library before the delete.
     parsers: ['9.1.1', '10.3.1', '11.0.0'],
   }),
-  diagramCase('a member whose table moved is rewritten (pathChanged)', SALES, () => undefined, (out) => {
-    expect(out).toBe(SALES.replace("use { table fct_order } from '../tables/gold/fct_order.dbml'", "use { table fct_order } from '../tables/fct_order.dbml'"));
+  diagramCase('a member whose table moved to another layer is rewritten (pathChanged)', SALES, () => undefined, (out) => {
+    expect(out).toBe(SALES.replace("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'", "use { table gold.fct_order } from '../../silver/tables/gold/fct_order.dbml'"));
   }, {
     library: (() => {
-      const lib: Record<string, string> = { ...DIAGRAM_LIBRARY, 'tables/fct_order.dbml': LIBRARY['tables/gold/fct_order.dbml'] };
-      delete lib['tables/gold/fct_order.dbml'];
-      lib['tables/gold/_relationships.dbml'] = lib['tables/gold/_relationships.dbml'].replace("'./fct_order.dbml'", "'../fct_order.dbml'");
+      const lib: Record<string, string> = { ...DIAGRAM_LIBRARY, 'silver/tables/gold/fct_order.dbml': LIBRARY['gold/tables/gold/fct_order.dbml'] };
+      delete lib['gold/tables/gold/fct_order.dbml'];
+      for (const f of ['gold/relationships/gold.dbml', 'gold/relationships/dates.dbml']) {
+        lib[f] = lib[f].replace("'../tables/gold/fct_order.dbml'", "'../../silver/tables/gold/fct_order.dbml'");
+      }
       return lib;
     })(),
     extra: { pathChanged: new Set(['fct_order']) },
@@ -271,12 +291,12 @@ export const DIAGRAM_CASES: WriterCase[] = [
   diagramCase('a member renamed with its table (pathChanged) gets its new line where the old one was', SALES, (a) => {
     a.logical.models[0] = 'fct_order_line';
   }, (out) => {
-    expect(out).toBe(SALES.replace("use { table fct_order } from '../tables/gold/fct_order.dbml'", "use { table fct_order_line } from '../tables/gold/fct_order_line.dbml'"));
+    expect(out).toBe(SALES.replace("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'", "use { table gold.fct_order_line } from '../tables/gold/fct_order_line.dbml'"));
   }, {
     library: (() => {
-      const lib: Record<string, string> = { ...DIAGRAM_LIBRARY, 'tables/gold/fct_order_line.dbml': LIBRARY['tables/gold/fct_order.dbml'].replace('Table fct_order', 'Table fct_order_line') };
-      delete lib['tables/gold/fct_order.dbml'];
-      lib['tables/gold/_relationships.dbml'] = lib['tables/gold/_relationships.dbml'].replace(/fct_order/g, 'fct_order_line');
+      const lib: Record<string, string> = { ...DIAGRAM_LIBRARY, 'gold/tables/gold/fct_order_line.dbml': LIBRARY['gold/tables/gold/fct_order.dbml'].replace('Table gold.fct_order', 'Table gold.fct_order_line') };
+      delete lib['gold/tables/gold/fct_order.dbml'];
+      for (const f of ['gold/relationships/gold.dbml', 'gold/relationships/dates.dbml']) lib[f] = lib[f].replace(/fct_order/g, 'fct_order_line');
       return lib;
     })(),
     extra: { pathChanged: new Set(['fct_order']) },
@@ -287,37 +307,37 @@ export const DIAGRAM_CASES: WriterCase[] = [
   erd_schema_version: '7'
 }
 
-use { table fct_order } from '../tables/old/fct_order.dbml'
-use { table dim_date } from '../tables/dim_date.dbml'
+use { table gold.fct_order } from '../tables/old/fct_order.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
 `, (a) => { a.description = 'x'; }, (out) => {
-    expect(out).toContain("use { table fct_order } from '../tables/gold/fct_order.dbml'\n");
-    // dim_date resolves to another copy (tables/gold/dim_date.dbml) first, but its line's target exists: kept.
-    expect(out).toContain("use { table dim_date } from '../tables/dim_date.dbml'\n");
+    expect(out).toContain("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n");
+    // dim_date has another copy (gold/tables/gold/dim_date.dbml), but its line's target exists: kept.
+    expect(out).toContain("use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\n");
   }, {
-    library: { ...DIAGRAM_LIBRARY, 'tables/gold/dim_date.dbml': 'Table dim_date {\n  date_key int [pk]\n}\n' },
+    library: { ...DIAGRAM_LIBRARY, 'gold/tables/gold/dim_date.dbml': 'Table shared.dim_date {\n  date_key int [pk]\n}\n' },
   }),
   diagramCase('an existing member that resolves to a YAML table keeps its line bytes (D20)', `Project sales {
   erd_schema_version: '7'
 }
 
 use { table yml_t } from '../tables/yml_t.dbml'
-use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 `, (a) => { a.description = 'x'; }, (out) => {
     expect(out).toContain("use { table yml_t } from '../tables/yml_t.dbml'\n");
   }, { yaml: { yml_t: 'logical-models/yml_t.yml' } }),
 
   // --- Relationships use lines ----------------------------------------------------------
-  diagramCase('relationships use lines are left alone when membership does not change', SALES.replace("use * from '../tables/gold/_relationships.dbml'\n", ''), (a) => {
+  diagramCase('relationships use lines are left alone when membership does not change', SALES.replace("use * from '../relationships/gold.dbml'\n", ''), (a) => {
     a.description = 'x';
   }, (out) => {
-    expect(out).not.toContain('_relationships');
+    expect(out).not.toContain('relationships/gold.dbml');
   }),
   {
     name: '…and recomputed by the settle pass (refreshRelationshipsUses) with no other change',
     run: (): WriterOutcome => ({
       path: DIAGRAM_PATH,
-      input: SALES.replace("use * from '../tables/gold/_relationships.dbml'\n", ''),
-      output: diagramEdit(SALES.replace("use * from '../tables/gold/_relationships.dbml'\n", ''), () => undefined, { extra: { refreshRelationshipsUses: true } }),
+      input: SALES.replace("use * from '../relationships/gold.dbml'\n", ''),
+      output: diagramEdit(SALES.replace("use * from '../relationships/gold.dbml'\n", ''), () => undefined, { extra: { refreshRelationshipsUses: true } }),
       context: { ...DIAGRAM_LIBRARY },
     }),
     check: (o) => {
@@ -370,15 +390,15 @@ use { table fct_order } from '../tables/gold/fct_order.dbml'
     a.logical.models.push('dim_date');
     a.viewConfig.annotations.push({ id: 'n2', text: 'two', x: 5, y: 6 });
   }, (out) => {
-    expect(out).toContain("use { table dim_date } from '../tables/dim_date.dbml'\nuse * from '../tables/_relationships.dbml'\nuse * from '../tables/gold/_relationships.dbml'\n");
+    expect(out).toContain("use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\nuse * from '../relationships/dates.dbml'\nuse * from '../relationships/gold.dbml'\n");
     expect(out).toContain("Note n2 {\n  'two'\n}\n\nProject sales {");
     expect(out.trimEnd().endsWith('}')).toBe(true);
     expect(out.indexOf('Project sales')).toBeGreaterThan(out.indexOf('Note n2'));
     expect(out).toContain('    note/n2 5 6\n');
   }),
   diagramCase('a diagram with no use line gets its first ones before the first Note, else before the Project',
-    "Project sales {\n  erd_schema_version: '7'\n}\n", (a) => { a.logical.models = ['fct_order']; }, (out) => {
-      expect(out).toBe("use { table fct_order } from '../tables/gold/fct_order.dbml'\nuse * from '../tables/gold/_relationships.dbml'\n\nProject sales {\n  erd_schema_version: '7'\n}\n");
+    "Project sales {\n  erd_schema_version: '7'\n}\n", (a) => { a.logical.models = ['fct_order', 'dim_customer']; }, (out) => {
+      expect(out).toBe("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'\nuse { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse * from '../relationships/gold.dbml'\n\nProject sales {\n  erd_schema_version: '7'\n}\n");
     }),
 
   // --- Notes ---------------------------------------------------------------------------------
@@ -435,7 +455,7 @@ use { table fct_order } from '../tables/gold/fct_order.dbml'
     check: (o) => {
       expect(o.output.startsWith('﻿')).toBe(true);
       expect(o.output.replace(/\r\n/g, '')).not.toContain('\n');
-      expect(o.output).toContain("use { table dim_date } from '../tables/dim_date.dbml'\r\n");
+      expect(o.output).toContain("use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\r\n");
     },
   },
 
@@ -448,8 +468,8 @@ use { table fct_order } from '../tables/gold/fct_order.dbml'
     expect(out).toBe(SALES_UNLINKED
       .replace("Note: 'Sales star schema'", "Note: 'Revenue star'")
       .replace("erd_unlinked_tables: 'gld_fct_risk_child, dim_date'", "erd_unlinked_tables: 'gld_fct_risk_child'")
-      .replace("use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\n", "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table dim_date } from '../tables/dim_date.dbml'\n")
-      .replace("use * from '../tables/gold/_relationships.dbml'\n", "use * from '../tables/_relationships.dbml'\nuse * from '../tables/gold/_relationships.dbml'\n"));
+      .replace("use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\n", "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\n")
+      .replace("use * from '../relationships/gold.dbml'\n", "use * from '../relationships/dates.dbml'\nuse * from '../relationships/gold.dbml'\n"));
     expect(readDiagram(out).logical.models).toEqual(['fct_order', 'dim_customer', 'dim_date', 'gld_fct_risk_child']);
   }),
   diagramCase('removing the last unlinked member drops the key (never written empty), and its pending line goes with its relationship', SALES_MISSING, (a) => {
@@ -500,11 +520,11 @@ export const NEW_DIAGRAM_CASES: WriterCase[] = [
         showFkEdges: false,
         layoutOptions: { 'elk.direction': 'RIGHT' },
         members: [
-          { name: 'fct_order', path: 'tables/gold/fct_order.dbml' },
-          { name: 'dim_customer', reference: 'gold.dim_customer', path: 'tables/gold/dim_customer.dbml' },
-          { name: 'dim_date', path: 'tables/dim_date.dbml' },
+          { name: 'fct_order', reference: 'gold.fct_order', path: 'gold/tables/gold/fct_order.dbml' },
+          { name: 'dim_customer', reference: 'gold.dim_customer', path: 'gold/tables/gold/dim_customer.dbml' },
+          { name: 'dim_date', reference: 'shared.dim_date', path: 'silver/tables/shared/dim_date.dbml' },
         ],
-        relationshipsFiles: ['tables/gold/_relationships.dbml', 'tables/_relationships.dbml'],
+        relationshipsFiles: ['gold/relationships/gold.dbml', 'gold/relationships/dates.dbml'],
         annotations: [
           { id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', text: 'Check the grain with finance', x: 720, y: 40, width: 220, height: 120, color: 'yellow', linkedModel: 'fct_order' },
           { id: '9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f', text: '', x: 0, y: 0, color: 'blue' },
@@ -514,11 +534,11 @@ export const NEW_DIAGRAM_CASES: WriterCase[] = [
       context: { ...DIAGRAM_LIBRARY },
     }),
     check: (o) => {
-      expect(o.output).toBe(`use { table fct_order } from '../tables/gold/fct_order.dbml'
+      expect(o.output).toBe(`use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
-use { table dim_date } from '../tables/dim_date.dbml'
-use * from '../tables/_relationships.dbml'
-use * from '../tables/gold/_relationships.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
+use * from '../relationships/dates.dbml'
+use * from '../relationships/gold.dbml'
 
 Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_order'] {
   'Check the grain with finance'
@@ -553,7 +573,7 @@ Project sales {
   },
   {
     name: 'a new empty diagram is just its Project',
-    run: () => ({ path: 'silver/empty.dbml', input: null, output: renderNewSubjectAreaDbml({ filePath: 'silver/empty.dbml', domain: 'empty', members: [], relationshipsFiles: [] }) }),
+    run: () => ({ path: 'silver/diagrams/empty.dbml', input: null, output: renderNewSubjectAreaDbml({ filePath: 'silver/diagrams/empty.dbml', domain: 'empty', members: [], relationshipsFiles: [] }) }),
     check: (o) => { expect(o.output).toBe("Project empty {\n  erd_schema_version: '7'\n}\n"); },
   },
 ];

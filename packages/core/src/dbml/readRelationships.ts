@@ -1,13 +1,14 @@
 /**
- * Read one relationships file (`tables/[<folder>/]_relationships.dbml`, §2.3
- * of the native DBML storage spec) Ref by Ref, from the AST alone. Binding
+ * Read one relationships file (`<layer>/relationships/<f>.dbml`, §1.3 of the
+ * 2.0 tree design) Ref by Ref, from the AST alone. Binding
  * errors — a `use` target that is gone, a deleted table file, a wrong-case
  * name — never hide a Ref: the AST still holds every Ref node with its
  * offsets, so each one is read on its own. Only a syntax error or git
  * conflict markers make the file unreadable.
  *
  * The Refs come back canonical (the foreign-key end is `fromModel`) with
- * their table parts as spelled in the file; `attachRelationships`
+ * their table parts as spelled in the file and each end's schema qualifier
+ * as written (ends are matched by table name alone); `attachRelationships`
  * (main entry) maps them onto tables, orients the one-to-ones that need keys,
  * respells and dedupes.
  */
@@ -22,6 +23,7 @@ import {
   PINNED_PARSER,
   compileOne,
   elementType,
+  isUseDeclaration,
   lineAt,
   nameFragments,
   plainNames,
@@ -31,13 +33,14 @@ import {
   type CompiledFile,
 } from './parser.js';
 
-/** One end of a Ref: its table part (qualifier removed) and its columns. */
+/** One end of a Ref: its table part (qualifier removed), the qualifier as written, and its columns. */
 interface RefEnd {
   table: string;
+  qualifier?: string;
   columns: string[];
 }
 
-/** `gold.x.col`, `x.col`, `x.(a, b)` → the table part and its columns; null for anything else. */
+/** `gold.x.col`, `x.col`, `x.(a, b)` → the table part, its qualifier and its columns; null for anything else. */
 function refEnd(expr: AstNode | undefined): RefEnd | null {
   const fragments = nameFragments(expr);
   if (!fragments || fragments.length < 2 || fragments.length > 3) return null;
@@ -47,7 +50,7 @@ function refEnd(expr: AstNode | undefined): RefEnd | null {
   if (fragments.length === 3 && typeof fragments[0] !== 'string') return null;
   const columns = typeof last === 'string' ? [last] : last;
   if (columns.length === 0 || columns.some((c) => c === '')) return null;
-  return { table, columns };
+  return fragments.length === 3 ? { table, qualifier: fragments[0] as string, columns } : { table, columns };
 }
 
 /** The `<function-application>` holding a Ref's ends: the short form's body, or the block form's one line. */
@@ -154,7 +157,29 @@ export function readRelationshipsDbml(rawText: string, parser: DbmlParserModule 
 
   const refs = refsOf(text, compiled, problems);
   const pending = readPendingRefs(text, parser, problems, topLevel(compiled.ast));
-  return { readable: true, refs, problems, ...(pending.length > 0 ? { pending } : {}) };
+  const otherElements = otherElementsOf(text, compiled);
+  return {
+    readable: true,
+    refs,
+    problems,
+    ...(pending.length > 0 ? { pending } : {}),
+    ...(otherElements.length > 0 ? { otherElements } : {}),
+  };
+}
+
+/**
+ * The top-level elements a relationships file should not hold (§1.3):
+ * anything but `use` lines and Refs, each with its kind as written.
+ */
+function otherElementsOf(text: string, compiled: CompiledFile): Array<{ kind: string; line: number }> {
+  const out: Array<{ kind: string; line: number }> = [];
+  for (const node of topLevel(compiled.ast)) {
+    if (isUseDeclaration(node)) continue;
+    const kind = elementType(node);
+    if (kind?.toLowerCase() === 'ref') continue;
+    out.push({ kind: kind ?? 'element', line: lineAt(text, node.start) });
+  }
+  return out;
 }
 
 /** Every Ref of a compiled text, Ref by Ref (a Ref that cannot be read is skipped with a problem). */
@@ -206,6 +231,8 @@ function refsOf(text: string, compiled: CompiledFile, problems: DbmlProblem[], l
     refs.push({
       owner: oriented.from.table,
       target: oriented.to.table,
+      ...(oriented.from.qualifier !== undefined ? { ownerQualifier: oriented.from.qualifier } : {}),
+      ...(oriented.to.qualifier !== undefined ? { targetQualifier: oriented.to.qualifier } : {}),
       relationships,
       start: node.start,
       fullEnd: typeof node.fullEnd === 'number' ? node.fullEnd : node.end,

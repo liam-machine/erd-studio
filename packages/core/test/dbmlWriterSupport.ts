@@ -12,7 +12,8 @@ import * as DbmlParseV10 from 'dbml-parse-v10';
 
 import { parseTableDbml } from '../src/dbml/readTable';
 import { readRelationshipsDbml } from '../src/dbml/readRelationships';
-import { attachRelationships, dbmlTableLookup, relationshipsFileFolder } from '../src/dbmlAttach';
+import { attachRelationships, dbmlTableLookup } from '../src/dbmlAttach';
+import { classifySemanticFile } from '../src/storage';
 import type { DbmlResolvedTable } from '../src/dbml/writeRelationships';
 import type { DbmlDiagramTable } from '../src/dbml/writeDiagram';
 import type { DbmlAttachTable } from '../src/types/dbmlStorage';
@@ -91,9 +92,14 @@ export function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-/** The library's table files in `files` (`tables/[<folder>/]<name>.dbml`, not relationships files). */
+/** What a path relative to the semantic dir is, in the layer-first tree. */
+function kindOf(path: string): ReturnType<typeof classifySemanticFile> {
+  return classifySemanticFile(path, { tablesDirIsLayer: false });
+}
+
+/** The library's table files in `files` (`<layer>/tables/<schema>/<name>.dbml`). */
 export function tableFilesOf(files: Readonly<Record<string, string>>): Array<[string, string]> {
-  return Object.entries(files).filter(([path]) => /^tables\/([^/]+\/)?[^/]+\.dbml$/.test(path) && stemOf(path).toLowerCase() !== '_relationships');
+  return Object.entries(files).filter(([path]) => kindOf(path).kind === 'table' && kindOf(path).storage === 'dbml');
 }
 
 /** A table the writers resolve: read from its file, plus extra YAML tables by name. */
@@ -110,14 +116,14 @@ interface LibraryTable {
 export function libraryOf(files: Readonly<Record<string, string>>, yaml: Readonly<Record<string, string>> = {}): LibraryTable[] {
   const out: LibraryTable[] = [];
   for (const [path, text] of tableFilesOf(files)) {
-    const reading = parseTableDbml(text, stemOf(path));
+    const reading = parseTableDbml(text, stemOf(path), { schemaFolder: kindOf(path).schema });
     if (!reading.ok) continue;
-    const segments = path.split('/');
     out.push({
       table: reading.table,
       reference: reading.declaredReference,
       path,
-      folder: segments.length === 3 ? segments[1] : '',
+      // 2.0-switch: S6a drops the attach folder; no Ref has a home folder in the layer-first tree.
+      folder: kindOf(path).schema ?? '',
       ...(reading.alias !== undefined ? { alias: reading.alias } : {}),
       storage: 'dbml',
     });
@@ -155,14 +161,14 @@ export function diagramResolver(library: readonly LibraryTable[]): (name: string
   };
 }
 
-/** The relationships files in `files`. */
+/** The relationships files in `files` (`<layer>/relationships/<f>.dbml`), in path byte order. */
 export function relationshipsFilesOf(files: Readonly<Record<string, string>>): string[] {
-  return Object.keys(files).filter((p) => /^tables\/([^/]+\/)?_relationships\.dbml$/i.test(p)).sort();
+  return Object.keys(files).filter((p) => kindOf(p).kind === 'relationships').sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /** Each owner's relationships, read from every relationships file of `files` and attached (§2.4), keyed lower-case. */
 export function ownersOf(files: Readonly<Record<string, string>>, library: readonly LibraryTable[] = libraryOf(files)): Map<string, TableRelationship[]> {
-  const readings = relationshipsFilesOf(files).map((path) => ({ path, folder: relationshipsFileFolder(path), reading: readRelationshipsDbml(files[path]) }));
+  const readings = relationshipsFilesOf(files).map((path) => ({ path, folder: '', reading: readRelationshipsDbml(files[path]) }));
   const attach: DbmlAttachTable[] = library.map((t) => ({
     table: t.table,
     folder: t.folder,
@@ -174,7 +180,7 @@ export function ownersOf(files: Readonly<Record<string, string>>, library: reado
 
 /** Each owner's relationships as ONE relationships file holds them (attached against the whole library), keyed lower-case. */
 export function ownersOfFile(files: Readonly<Record<string, string>>, file: string, library: readonly LibraryTable[] = libraryOf(files)): Map<string, TableRelationship[]> {
-  const others = Object.fromEntries(Object.entries(files).filter(([p]) => !/_relationships\.dbml$/i.test(p)));
+  const others = Object.fromEntries(Object.entries(files).filter(([p]) => kindOf(p).kind !== 'relationships'));
   return ownersOf({ ...others, [file]: files[file] }, library);
 }
 

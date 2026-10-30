@@ -30,6 +30,7 @@ import {
 } from '../dbmlRichProperties.js';
 import { dbmlColumnType, dbmlName, dbmlNoteText, dbmlString } from '../dbmlText.js';
 import { readMeta } from '../meta.js';
+import { isLibraryFolderName } from '../storage.js';
 import { DbmlEditRefused } from './errors.js';
 import type { DbmlParserModule } from './parserModule.js';
 import {
@@ -125,10 +126,9 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
-/** The table's settings, in the order a new file writes them. */
+/** The table's settings, in the order a new file writes them (the schema is the Table's qualifier, never a setting). */
 function tableSettings(table: SemanticTable): string[] {
   const settings: string[] = [];
-  if (present(table.schema)) settings.push(`${DBML_RICH_TABLE_PROPERTIES.schema}: ${dbmlString(table.schema!)}`);
   if (present(table.modelRole)) settings.push(`${DBML_RICH_TABLE_PROPERTIES.role}: ${dbmlString(table.modelRole!)}`);
   if (present(table.grain)) settings.push(`${DBML_RICH_TABLE_PROPERTIES.grain}: ${dbmlString(table.grain!)}`);
   if (present(table.alias)) settings.push(`${DBML_RICH_TABLE_PROPERTIES.alias}: ${dbmlString(table.alias!)}`);
@@ -170,22 +170,29 @@ function columnLine(column: ColumnDef, isPk: boolean): string {
 const PLACEHOLDER_LINE = `${DBML_RICH_PLACEHOLDER_COLUMN} unknown [${DBML_RICH_PLACEHOLDER_PROPERTY}: 'true', note: ${dbmlString(DBML_STORAGE_PLACEHOLDER_NOTE)}]`;
 
 /**
- * A new table file (§2.2 layout): one Table named exactly as `table.name`,
- * settings inline when there is one and one per line otherwise, the `Note`
- * first in the body followed by a blank line, one column per line, an
- * `indexes` block only for a composite primary key, two-space indents and
- * `\n` line endings. A table with no columns gets the placeholder column
- * DBML needs. Relationships are not written: they live in the folder's
- * relationships file. The host runs the result through `formatDbml`, which
- * aligns the columns and wraps long settings lists.
+ * A new table file (§2.2 layout, §1.2 of the 2.0 tree design): one Table
+ * declared `Table <schema>.<name>` (each part as DBML writes a name), its
+ * schema being `table.schema`, which it needs (it is the table's folder):
+ * without one this throws. Settings inline when there is one and one per
+ * line otherwise, the `Note` first in the body followed by a blank line,
+ * one column per line, an `indexes` block only for a composite primary key,
+ * two-space indents and `\n` line endings. A table with no columns gets the
+ * placeholder column DBML needs. Relationships are not written: they live
+ * in relationships files. The host runs the result through `formatDbml`,
+ * which aligns the columns and wraps long settings lists.
  */
 export function renderNewTableDbml(table: SemanticTable): string {
+  const schema = table.schema;
+  if (typeof schema !== 'string' || !isLibraryFolderName(schema)) {
+    throw new Error('renderNewTableDbml: a DBML table needs a schema');
+  }
+  const header = `Table ${dbmlName(schema)}.${dbmlName(table.name)}`;
   const lines: string[] = [];
   const settings = tableSettings(table);
   if (settings.length <= 1) {
-    lines.push(`Table ${dbmlName(table.name)}${bracket(settings)} {`);
+    lines.push(`${header}${bracket(settings)} {`);
   } else {
-    lines.push(`Table ${dbmlName(table.name)} [`, ...settings.map((s, i) => `  ${s}${i < settings.length - 1 ? ',' : ''}`), '] {');
+    lines.push(`${header} [`, ...settings.map((s, i) => `  ${s}${i < settings.length - 1 ? ',' : ''}`), '] {');
   }
   const description = noteValue(table.description);
   if (description !== undefined) lines.push(`  Note: ${dbmlString(description)}`, '');
@@ -225,6 +232,19 @@ export interface EditTableDbmlOptions {
   file?: string;
   /** The file's stem now (before a rename). Default: the declared name. */
   fileStem?: string;
+  /**
+   * The file's schema folder as listed (`S` of `<layer>/tables/<S>/`), read
+   * as the schema of an unqualified Table (`parseTableDbml`), so `desired`
+   * compares with the schema the host read.
+   */
+  schemaFolder?: string;
+  /**
+   * The edit moves the table to `desired.schema`: the Table's qualifier is
+   * replaced (an unqualified name gains one), and so is every Metadata
+   * block's in the file. Without it, a schema that differs from the one the
+   * file reads as is refused: a DBML table's schema is its folder.
+   */
+  requalify?: boolean;
   /** Metadata blocks in other files that target this table (D25). */
   foreignMetadata?: readonly ForeignDbmlMetadata[];
   /** The DBML parser; the pinned one unless a test passes another. */
@@ -247,7 +267,7 @@ interface Setter {
 }
 
 const TABLE_KEY_ORDER: readonly string[] = [
-  'schema', 'role', 'grain', 'alias',
+  'role', 'grain', 'alias',
   ...RATIONALE_KEYS.map((k) => rationaleProperty(k)),
 ];
 /**
@@ -390,6 +410,11 @@ function refuse(file: string, message: string, line?: number): never {
   throw new DbmlEditRefused(file, message, line);
 }
 
+/** The reader's options for an edit's file: its schema folder, when the caller named it. */
+function schemaOptions(options: EditTableDbmlOptions): { schemaFolder?: string } {
+  return options.schemaFolder !== undefined ? { schemaFolder: options.schemaFolder } : {};
+}
+
 /**
  * Edit an existing table file so it reads as `desired` (§4.5), splicing
  * only what changes. Laws 1–5 hold: `editTableDbml(t, read(t))` is `t`
@@ -399,8 +424,9 @@ function refuse(file: string, message: string, line?: number): never {
  *
  * Throws {@link DbmlEditRefused} for a file the reader cannot read or will
  * not let ERD Studio edit (a `use`, `Ref` or inline `ref:` line to move
- * first), a schema change on a schema-qualified name (`Table gold.x`), and a
- * change to a property another file's Metadata block sets.
+ * first), a schema change without `options.requalify` (a DBML table's
+ * schema is its folder: moving the table changes it), and a change to a
+ * property another file's Metadata block sets.
  */
 export function editTableDbml(oldText: string, desired: SemanticTable, options: EditTableDbmlOptions = {}): string {
   return refuseOverlaps(options.file ?? `${options.fileStem ?? desired.name}.dbml`, () => editTable(oldText, desired, options));
@@ -423,7 +449,7 @@ function editTable(oldText: string, desired: SemanticTable, options: EditTableDb
   const out = editTableOnce(oldText, desired, options, new Set(), touched);
   if (touched.size === 0) return out;
   const stem = options.fileStem ?? desired.name;
-  const readBack = parseTableDbml(stripBom(out), stem, options.parser ?? PINNED_PARSER);
+  const readBack = parseTableDbml(stripBom(out), stem, schemaOptions(options), options.parser ?? PINNED_PARSER);
   if (!readBack.ok) return out;
   const keysOf = (meta: Meta | undefined): string => JSON.stringify(Object.keys(readMeta(meta) ?? {}));
   const reordered = new Set<string>();
@@ -462,7 +488,7 @@ function editTableOnce(
   const stem = options.fileStem ?? (declared && declared.length > 0 ? declared[declared.length - 1] : desired.name);
   const file = options.file ?? `${stem}.dbml`;
 
-  const reading = parseTableDbml(text, stem, parser);
+  const reading = parseTableDbml(text, stem, schemaOptions(options), parser);
   if (!reading.ok) {
     const line = reading.error.line;
     const where = line !== undefined && !/^line \d/i.test(reading.error.message) ? `line ${line}: ` : '';
@@ -633,33 +659,36 @@ function editTableOnce(
     order: TABLE_KEY_ORDER,
   };
 
-  // --- Table name ----------------------------------------------------------
-  // Spliced only on a rename; a case-only difference without one keeps the file's spelling.
+  // --- Table name and schema ----------------------------------------------------
+  // The name is spliced only on a rename; a case-only difference without one keeps the file's spelling.
   const renaming = desired.name !== reading.declaredName && options.rename === true;
   if (desired.name !== reading.declaredName && !renaming && desired.name.toLowerCase() !== reading.declaredName.toLowerCase()) {
     refuse(file, `${file} declares Table ${reading.declaredName}, not ${desired.name}; a rename must say so.`);
   }
-  if (renaming) {
+  // The schema is the Table's qualifier (§1.2): unset or the same (exactly) keeps it; another one is a move.
+  const desiredSchema = present(desired.schema);
+  const requalifyTo = desiredSchema !== undefined && desiredSchema !== current.schema ? desiredSchema : undefined;
+  if (requalifyTo !== undefined && options.requalify !== true) {
+    refuse(file, 'The schema of a DBML table is its folder: move the table to change it.', lineAt(text, tableNode.start));
+  }
+  /** A table name's leaves re-spelled: the qualifier replaced (or put before an unqualified name), the name renamed. */
+  const respellName = (leaves: readonly AstNode[], nameAt: number): void => {
+    const leaf = leaves[nameAt];
+    if (!leaf) return;
+    const qualifierLeaf = nameAt > 0 ? leaves[nameAt - 1] : undefined;
+    if (requalifyTo !== undefined && qualifierLeaf) edits.push({ start: qualifierLeaf.start, end: qualifierLeaf.end, text: dbmlName(requalifyTo) });
+    const prefix = requalifyTo !== undefined && !qualifierLeaf ? `${dbmlName(requalifyTo)}.` : '';
+    if (renaming || prefix !== '') {
+      edits.push({ start: leaf.start, end: leaf.end, text: `${prefix}${renaming ? dbmlName(desired.name) : text.slice(leaf.start, leaf.end)}` });
+    }
+  };
+  {
     const leaves = nameLeaves(tableNode.name);
-    const last = leaves[leaves.length - 1];
-    if (last) edits.push({ start: last.start, end: last.end, text: dbmlName(desired.name) });
+    respellName(leaves, leaves.length - 1);
     // The Metadata blocks are retargeted below, once the blocks of removed columns are known.
   }
 
   // --- Table properties ------------------------------------------------------
-  const desiredSchema = present(desired.schema);
-  if (desiredSchema !== present(current.schema)) {
-    const schemaSetters = tableSetters.filter((s) => s.key === DBML_RICH_TABLE_PROPERTIES.schema);
-    if (reading.schemaQualified && (desiredSchema === undefined || schemaSetters.length === 0)) {
-      const qualifier = declared && declared.length > 1 ? declared.slice(0, -1).join('.') : 'gold';
-      refuse(
-        file,
-        `${file} names its schema in the Table name (\`Table ${reading.declaredReference}\`). Change it there, or remove the qualifier and use \`[schema: '${qualifier}']\`.`,
-        lineAt(text, tableNode.start),
-      );
-    }
-    setProperty(tableSetters, DBML_RICH_TABLE_PROPERTIES.schema, desiredSchema === undefined ? undefined : dbmlString(desiredSchema), tableOwner);
-  }
   const simple: Array<[string, string | undefined, string | undefined]> = [
     [DBML_RICH_TABLE_PROPERTIES.role, present(desired.modelRole), present(current.modelRole)],
     [DBML_RICH_TABLE_PROPERTIES.grain, present(desired.grain), present(current.grain)],
@@ -784,12 +813,11 @@ function editTableOnce(
       edits.push(cutEdit(text, block.node));
     }
   }
-  // A table rename retargets every Metadata block that stays (a cut one goes whole).
-  if (renaming) {
+  // A table rename or a new qualifier retargets every Metadata block that stays (a cut one goes whole).
+  if (renaming || requalifyTo !== undefined) {
     for (const block of blocks) {
       if (removedNodes.has(block.node)) continue;
-      const leaf = block.kind === 'table' ? block.leaves[block.leaves.length - 1] : block.leaves[block.leaves.length - 2];
-      if (leaf) edits.push({ start: leaf.start, end: leaf.end, text: dbmlName(desired.name) });
+      respellName(block.leaves, block.kind === 'table' ? block.leaves.length - 1 : block.leaves.length - 2);
     }
   }
 

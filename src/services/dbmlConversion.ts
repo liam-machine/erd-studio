@@ -1524,7 +1524,7 @@ async function planOnce(
   // unlinked members that gain a table file (D26) and the pending relationships that move to the library (D27).
   for (const d of dbmlDiagrams) {
     const f = d.file;
-    const members = subjectAreaMembersDbml(f.text);
+    const members = subjectAreaMembersDbml(f.text, f.path);
     const ownBefore = dbmlDiagramRelationships(d);
     const ownAfter = ownPending(f.path, ownBefore);
     const affected = members === null
@@ -1547,7 +1547,8 @@ async function planOnce(
         before,
         after,
         resolveTable: (name) => libraryPlan.resolveTable(name),
-        relationshipsFilesFor,
+        // 2.0-switch: S8a (the folder-based plan gives the imports until the planner's index does)
+        relationshipsImportsFor: (names) => relationshipsFilesFor(names),
         fileExists: fileExistsAfter,
         pathChanged,
         refreshRelationshipsUses: true,
@@ -1607,7 +1608,7 @@ async function planOnce(
     const logical = isObject(d.obj.logical) ? d.obj.logical : {};
     membersAfter.set(d.target, Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string').map(lower) : []);
   }
-  for (const d of dbmlDiagrams) membersAfter.set(d.file.path, (subjectAreaMembersDbml(d.file.text) ?? []).map(lower));
+  for (const d of dbmlDiagrams) membersAfter.set(d.file.path, (subjectAreaMembersDbml(d.file.text, d.file.path) ?? []).map(lower));
   for (const f of files.filter((x) => x.kind === 'diagram' && x.storage === 'json' && left.has(x.path))) {
     try {
       const raw = parseSubjectAreaJson(f.text, f.path) as Record<string, unknown>;
@@ -1924,7 +1925,7 @@ export function memoisedDbmlReader(base: DbmlStorageReader = dbmlStorageReader):
       return structuredClone(reading);
     },
     parseSubjectArea: (text, filePath) => base.parseSubjectArea(text, filePath),
-    subjectAreaMembers: (text) => base.subjectAreaMembers(text),
+    subjectAreaMembers: (text, filePath) => base.subjectAreaMembers(text, filePath),
   };
 }
 

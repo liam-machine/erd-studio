@@ -47,7 +47,7 @@ export interface IndexedRef {
   pending: boolean;
   /** 1-based line in the file. */
   line: number;
-  /** The owner end's schema qualifier as written (`sap` in `sap.afih.x`), once the reader keeps qualifiers. */
+  /** The owner end's schema qualifier as written (`sap` in `sap.afih.x`); absent for an unqualified end. */
   ownerQualifier?: string;
 }
 
@@ -94,7 +94,12 @@ export function refEntriesOf(file: string, reading: DbmlRelationshipsReading, lo
   const add = (ref: DbmlStoredRef, pending: boolean): void => {
     const read = storedUnit(ref, lookup);
     if (!read) return;
-    out.push({ file, owner: lower(read.unit.from), target: lower(read.unit.to), unit: read.unit, links: unitLinks(read.unit), pending, line: ref.line });
+    // A bare `-` the keys turned round: its owner is the end the file wrote second.
+    const ownerQualifier = read.rels === ref.relationships ? ref.ownerQualifier : ref.targetQualifier;
+    out.push({
+      file, owner: lower(read.unit.from), target: lower(read.unit.to), unit: read.unit, links: unitLinks(read.unit), pending, line: ref.line,
+      ...(ownerQualifier !== undefined ? { ownerQualifier } : {}),
+    });
   };
   for (const ref of reading.refs) add(ref, false);
   for (const ref of reading.pending ?? []) add(ref, true);

@@ -144,15 +144,21 @@ export function pendingRefLine(refLine: string): string {
   return `${DBML_PENDING_REF_PREFIX}${refLine}`;
 }
 
-/** The stem reserved for a library folder's relationships file, in any case. */
+/**
+ * The 1.9 pre-release's relationships-file stem (`tables/[<f>/]_relationships.dbml`), in any case.
+ * @deprecated 2.0-switch: S8b deletes it with its last callers: relationships files live in `<layer>/relationships/`, under any name.
+ */
 export const DBML_RELATIONSHIPS_FILE_STEM = '_relationships';
 
-/** One per library folder: `tables/_relationships.dbml`, `tables/<folder>/_relationships.dbml`. */
+/**
+ * The 1.9 pre-release's relationships file name.
+ * @deprecated 2.0-switch: S8b deletes it with its last callers.
+ */
 export const DBML_RELATIONSHIPS_FILE_NAME = `${DBML_RELATIONSHIPS_FILE_STEM}.dbml`;
 
 /** The first line of a relationships file, written only when the writer creates it and never required on read. */
 export const DBML_RELATIONSHIPS_FILE_HEADER =
-  '// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.';
+  '// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.';
 
 /** The property for one rationale key: `scdStrategy` → `rationale_scd_strategy`. */
 export function rationaleProperty(key: keyof Rationale): string {

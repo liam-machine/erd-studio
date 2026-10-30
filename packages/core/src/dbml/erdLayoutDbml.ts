@@ -217,7 +217,7 @@ export function erdLayoutTextEdit(
 ): TextEdit | null {
   const project = firstProject(ast);
   const current = readErdLayoutFromAst(ast, text);
-  const wanted = withMemberSpelling(desired, members ?? diagramMembersFromAst(ast, text));
+  const wanted = withMemberSpelling(desired, members ?? diagramMembersFromAst(ast, text, file));
   if (sameErdLayout(current, wanted)) return null;
   if (current.conflictLine !== undefined) {
     throw new DbmlEditRefused(
