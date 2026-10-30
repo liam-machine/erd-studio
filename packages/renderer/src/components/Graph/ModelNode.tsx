@@ -31,6 +31,7 @@ import { DataTypeSelect } from '../common/DataTypeSelect';
 import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
 import { useHoverTip } from './HoverTip';
 import { metaRows } from '../../lib/metaFormat';
+import { tableFocusRole } from '../../lib/canvasFocus';
 import { STAGE_HEX } from '../../lib/stageColors';
 import { getDataTypeColor } from '../../lib/dataTypeColors';
 import {
@@ -570,9 +571,12 @@ function describeLoadWarning(warning: TableLoadWarning): string {
   return `${key} is written twice (line ${warning.line}) — the last one is shown. Remove the other copy to edit this table.`;
 }
 
-function TableNodeComponent({ data, selected }: NodeProps<TableFlowNode>) {
+function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
   const { modelName, label, stage, layer, layerConfig, schema, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
+  // Hover preview (useHoverFocus): the hovered table and its related tables
+  // stay bright. A primitive, so a table outside the focus never re-renders.
+  const focusRole = useEditorStore((s) => tableFocusRole(s.hoverFocus, id));
   const send = useSend();
   const viewer = useIsViewer();
 
@@ -669,7 +673,7 @@ function TableNodeComponent({ data, selected }: NodeProps<TableFlowNode>) {
 
   return (
     <div
-      className={`model-node model-node--${stageClass}${ghostReason ? ` model-node--ghost-${ghostReason}` : ''}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}`}
+      className={`model-node model-node--${stageClass}${ghostReason ? ` model-node--ghost-${ghostReason}` : ''}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}${focusRole ? ` model-node--focus-${focusRole}` : ''}`}
       data-model-name={modelName}
       // Viewer: no context menu, so leave right-click to the browser.
       onContextMenu={viewer ? undefined : handleContextMenu}

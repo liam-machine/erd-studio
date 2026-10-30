@@ -1,7 +1,8 @@
 /**
  * Legend — collapsible panel explaining the visual language of the graph.
  *
- * Shows stage colours, relationship types, cardinality notation, the node
+ * Shows stage colours, relationship types, cardinality notation (and the
+ * moving direction arrows a hovered or clicked table's lines carry), the node
  * header badges (schema abbreviation and physical provenance chips) and the
  * column badges. The badge vocabulary is imported from lib/badgeLabels so the
  * legend cannot fall out of step with what TableNode actually renders. Positioned in the bottom-left corner, collapsible
@@ -20,7 +21,28 @@ import {
   SCD_TITLE,
   ADDITIVE_TITLE,
 } from '../../lib/badgeLabels';
+import { EdgeFlowGlyphs } from '../Graph/EdgeFlow';
+import type { FlowMode } from '../../lib/edgeFlow';
 import './Legend.css';
+
+/**
+ * Samples of the relationship flow, drawn with the canvas's own glyphs
+ * between the same `1` / `*` end labels the cardinality rows use.
+ */
+const FLOW_SAMPLES: { mode: FlowMode; from: '1' | '*'; to: '1' | '*'; desc: string }[] = [
+  { mode: 'forward', from: '1', to: '*', desc: 'Arrows run 1 → *' },
+  { mode: 'both', from: '*', to: '*', desc: 'Both ways: many-to-many' },
+  { mode: 'meet', from: '1', to: '1', desc: 'Dots meet: one-to-one' },
+];
+const FLOW_SAMPLE_PATH = 'M2,6 H46';
+
+function cardinalityLabel(label: '1' | '*') {
+  return (
+    <span className={`legend__cardinality-label${label === '*' ? ' legend__cardinality-label--many' : ''}`}>
+      {label}
+    </span>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -177,6 +199,22 @@ export function Legend() {
               </div>
               <span className="legend__item-desc">Many-to-many</span>
             </div>
+          </div>
+          <h4 className="legend__subsection-title">Hover or click a table</h4>
+          <div className="legend__items legend__items--flow">
+            {FLOW_SAMPLES.map(({ mode, from, to, desc }) => (
+              <div className="legend__item" key={mode}>
+                <div className="legend__cardinality">
+                  {cardinalityLabel(from)}
+                  <svg className="legend__flow-line" viewBox="0 0 48 12" aria-hidden="true">
+                    <path d={FLOW_SAMPLE_PATH} className="legend__edge legend__edge--logical" />
+                    <EdgeFlowGlyphs d={FLOW_SAMPLE_PATH} mode={mode} animate statusKey="logical" />
+                  </svg>
+                  {cardinalityLabel(to)}
+                </div>
+                <span className="legend__item-desc">{desc}</span>
+              </div>
+            ))}
           </div>
           <h4 className="legend__subsection-title">Line colour follows the stage</h4>
           <div className="legend__items legend__items--disc-edges">

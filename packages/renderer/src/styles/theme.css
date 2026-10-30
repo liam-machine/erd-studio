@@ -85,6 +85,10 @@ body {
   --stage-ghost:    #9ca3af;
   --stage-ghost-bg: rgba(156, 163, 175, 0.08);
 
+  /* Halo around the moving relationship arrows (EdgeFlow): the canvas
+     background, so a glyph reads against the line it shares a colour with. */
+  --edge-flow-halo: var(--editor-bg);
+
   /* -----------------------------------------------------------------------
      Design tokens — discrepancy overlay colours
      ----------------------------------------------------------------------- */

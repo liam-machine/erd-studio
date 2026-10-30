@@ -12,6 +12,10 @@
  *   - The handlers open the detail panel on a model click, select annotations,
  *     highlight an FK edge's columns and clear selection on a pane click.
  *
+ * Hover preview and the moving relationship arrows are `useHoverFocus`, a
+ * separate hook: it needs React Flow's store, and this one must keep working
+ * without a `ReactFlowProvider`. Hover never comes through the overlay pass.
+ *
  * Must run inside a `CanvasStoreProvider`.
  */
 

@@ -17,6 +17,7 @@ import { createContext, createElement, useContext, type ReactNode } from 'react'
 import { createStore, useStore, type StoreApi } from 'zustand';
 import type { DisplaySubjectArea, ExistingTablePreview } from '@erd-studio/core';
 import type { TableFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
+import { sameFocus, type CanvasFocus } from '../lib/canvasFocus';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -113,6 +114,17 @@ export interface CanvasState {
   editingColumn: string | null;
   /** Currently selected annotation ID, or null. */
   selectedAnnotation: string | null;
+  /**
+   * Hover preview focus: the table the pointer rests on, its related tables
+   * and lines (`useHoverFocus`). Ephemeral UI state: never persisted, never
+   * posted to the host, never written to a file.
+   */
+  hoverFocus: CanvasFocus | null;
+  /**
+   * What carries the moving relationship arrows: `hoverFocus`, else the
+   * focus of the clicked table or line. Ephemeral, like `hoverFocus`.
+   */
+  flowFocus: CanvasFocus | null;
 }
 
 export interface CanvasActions {
@@ -175,6 +187,10 @@ export interface CanvasActions {
   setEditingColumn: (name: string | null) => void;
   /** Select an annotation (clears model selection). */
   selectAnnotation: (annotationId: string | null) => void;
+  /** Set the hover preview focus; a focus equal by value is not written. */
+  setHoverFocus: (focus: CanvasFocus | null) => void;
+  /** Set the flowing focus; a focus equal by value is not written. */
+  setFlowFocus: (focus: CanvasFocus | null) => void;
 }
 
 export type CanvasStore = CanvasState & CanvasActions;
@@ -215,6 +231,8 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
     lastSelectedColumn: null,
     editingColumn: null,
     selectedAnnotation: null,
+    hoverFocus: null,
+    flowFocus: null,
 
     // Actions
     setSearchQuery: (query) => set({ searchQuery: query }),
@@ -326,6 +344,10 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
       lastSelectedColumn: null,
       editingColumn: null,
     }),
+
+    // Hover focus and relationship flow (ephemeral, see useHoverFocus)
+    setHoverFocus: (focus) => set((s) => (sameFocus(s.hoverFocus, focus) ? s : { hoverFocus: focus })),
+    setFlowFocus: (focus) => set((s) => (sameFocus(s.flowFocus, focus) ? s : { flowFocus: focus })),
   };
 }
 
@@ -360,4 +382,23 @@ export function useEditorStoreApi(): CanvasStoreApi {
 /** Select a value from the nearest canvas store; re-renders when it changes. */
 export function useEditorStore<T>(selector: (s: CanvasStore) => T): T {
   return useStore(useEditorStoreApi(), selector);
+}
+
+const NO_STORE = {
+  getState: () => undefined,
+  getInitialState: () => undefined,
+  subscribe: () => () => {},
+};
+
+/**
+ * Like `useEditorStore`, but returns `fallback` instead of throwing when no
+ * `CanvasStoreProvider` is above. For presentation-only reads in components
+ * that are also rendered on their own (an `FkEdge` in a unit test).
+ */
+export function useEditorStoreOr<T>(selector: (s: CanvasStore) => T, fallback: T): T {
+  const store = useContext(CanvasStoreContext);
+  return useStore(
+    (store ?? NO_STORE) as unknown as CanvasStoreApi,
+    store ? selector : () => fallback,
+  );
 }

@@ -19,6 +19,8 @@
   font-size: 12px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
   overflow: hidden;
+  /* On the base so un-dimming fades too, not just dimming. */
+  transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
 /* -----------------------------------------------------------------------
@@ -71,7 +73,6 @@
 .model-node--dimmed {
   opacity: 0.25;
   filter: grayscale(0.4);
-  transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
 .model-node--dimmed:hover {
@@ -650,4 +651,53 @@
   box-shadow:
     0 0 0 2px var(--vscode-focusBorder, #007fd4),
     0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* -----------------------------------------------------------------------
+   Hover preview (useHoverFocus)
+   The root .erd-flow--hover-focus class is on while the pointer rests on a
+   table: it and its related tables stay bright, the rest fade. Kept at the
+   end of the file so these rules win over --dimmed, --dimmed:hover and
+   --ghost.--dimmed (test/unit/hoverFocusCss.test.ts pins the order). No
+   grayscale here (a filter transition would repaint every node each frame),
+   and none left over from click dimming either, so every faded table has
+   the same tint.
+   ----------------------------------------------------------------------- */
+
+.erd-flow--hover-focus .model-node {
+  opacity: 0.22;
+  filter: none;
+}
+
+/* The clicked table stays findable while a hover fades it, without competing
+   with the hovered group. */
+.erd-flow--hover-focus .model-node--selected {
+  opacity: 0.4;
+}
+
+.erd-flow--hover-focus .model-node.model-node--focus-origin,
+.erd-flow--hover-focus .model-node.model-node--focus-related {
+  opacity: 1;
+  filter: none;
+}
+
+.erd-flow--hover-focus .model-node--ghost.model-node--focus-related {
+  opacity: 0.65;
+}
+
+/* The hovered table's ring. Never over the selection ring, and never over
+   the amber discrepancy-extra glow, which keeps priority as it does over
+   selected: hovering an extra table must not hide why it is amber. */
+.model-node--logical.model-node--focus-origin:not(.model-node--selected):not(.model-node--disc-extra) {
+  box-shadow: 0 0 0 3px var(--stage-logical-ring);
+}
+
+.model-node--physical.model-node--focus-origin:not(.model-node--selected):not(.model-node--disc-extra) {
+  box-shadow: 0 0 0 3px var(--stage-physical-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-node {
+    transition: none;
+  }
 }

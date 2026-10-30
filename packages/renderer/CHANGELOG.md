@@ -6,6 +6,7 @@ All notable changes to `@erd-studio/renderer`. While `0.x`, a breaking change bu
 
 ### Added
 - Re-exports core's rich DBML export: `toDbmlRich`, `DBML_RICH_EXPORT_HEADER` and the `DbmlRichOptions` type. A rich export is one file per diagram, its table and sticky-note positions in its `Project`'s `erd_layout`.
+- Hover focus and relationship flow: `useHoverFocus()` (hover preview handlers and a root class; a host that builds on `/editor` must call it, or nothing flows even on click), `EdgeFlow` / `EdgeFlowGlyphs`, `usePrefersReducedMotion`, `computeCanvasFocus`. `CanvasState` gains the ephemeral `hoverFocus` and `flowFocus` (a host that hand-builds `CanvasState` instead of using `createCanvasSlice` must add them). No `DisplaySubjectArea` change and no new `--vscode-*` variables.
 
 ### Changed
 - After a domain update, the canvas keeps the existing React Flow node and edge objects for everything that came out the same, so dragging a table re-renders only the tables that moved and their edges instead of every node. What is drawn is unchanged; no API change.

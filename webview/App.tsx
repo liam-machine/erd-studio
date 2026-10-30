@@ -26,6 +26,7 @@ import {
   useColumnExpansion,
   NODE_THRESHOLD,
   useCanvasGraph,
+  useHoverFocus,
   CanvasBackdrop,
   canvasNodeTypes,
   canvasEdgeTypes,
@@ -345,6 +346,10 @@ function EditorCanvas() {
   // Nodes/edges from the domain (transform + overlay effects) and the
   // click/selection handlers — the shared canvas core in @erd-studio/renderer.
   const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange } = useCanvasGraph({ discrepancyVisible, discrepancyReport });
+  // Hover a table to preview its relationships; the lines of the hovered or
+  // selected table carry moving direction arrows. Ephemeral: never persisted
+  // or posted.
+  const { hoverHandlers, flowClassName } = useHoverFocus();
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
@@ -666,6 +671,7 @@ function EditorCanvas() {
       <EmbeddedTablesBanner />
 
       <ReactFlow
+        className={flowClassName}
         // flex basis 0 rather than the default height:100%, so the notice's
         // height comes off the flow area instead of overflowing the editor.
         style={{ flex: '1 1 0', minHeight: 0 }}
@@ -682,6 +688,7 @@ function EditorCanvas() {
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
         onEdgeContextMenu={onEdgeContextMenu}
+        {...hoverHandlers}
         fitView={!shouldSkipFitView}
         minZoom={0.05}
         selectionMode={SelectionMode.Partial}

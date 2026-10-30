@@ -18,6 +18,11 @@
  * `onLayoutModifiedChange` reports whether the layout differs from the
  * domain's, and `resetLayout()` (through a ref) puts everything back.
  *
+ * Resting the pointer on a table previews what it connects to (the rest of
+ * the diagram fades) and the relationship lines of the hovered or clicked
+ * table carry moving direction arrows (`useHoverFocus`). Both are local,
+ * ephemeral presentation: nothing is posted and no prop is needed.
+ *
  * Derived from the extension webview's `EditorCanvas` (`webview/App.tsx`),
  * keeping its React Flow configuration.
  */
@@ -51,6 +56,7 @@ import {
 } from './store/editorStore';
 import { CanvasEnvironmentProvider, NOOP_CANVAS_HOST } from './host/canvasEnvironment';
 import { useCanvasGraph } from './canvas/useCanvasGraph';
+import { useHoverFocus } from './canvas/useHoverFocus';
 import { CanvasBackdrop } from './canvas/CanvasBackdrop';
 import { canvasNodeTypes, canvasEdgeTypes } from './canvas/flowTypes';
 import { useColumnExpansion, NODE_THRESHOLD } from './hooks/useColumnExpansion';
@@ -255,6 +261,8 @@ function ErdCanvasInner({
   );
 
   const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange } = useCanvasGraph({ onTransformed });
+  // Hover preview and relationship flow (ephemeral, no posts).
+  const { hoverHandlers, flowClassName } = useHoverFocus();
 
   // Apply React Flow's node changes (selection, measurement, drags). A drag
   // re-picks the sides of the edges on the moved nodes; nothing is saved.
@@ -331,6 +339,7 @@ function ErdCanvasInner({
       style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', ...style }}
     >
       <ReactFlow
+        className={flowClassName}
         style={{ flex: '1 1 0', minHeight: 0 }}
         nodes={nodes}
         edges={edges}
@@ -341,6 +350,7 @@ function ErdCanvasInner({
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
         onSelectionChange={onSelectionChange}
+        {...hoverHandlers}
         fitView
         minZoom={0.05}
         selectionMode={SelectionMode.Partial}

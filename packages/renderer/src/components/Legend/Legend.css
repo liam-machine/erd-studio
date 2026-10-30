@@ -98,6 +98,11 @@
   max-height: min(60vh, 520px);
   overflow-y: auto;
   overflow-x: hidden;
+  /* Outside VS Code (a host page embedding the viewer) the native scrollbar
+     would be a light bar in a dark panel; keep it thin and in the theme's
+     muted tone. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--dim-fg) transparent;
 }
 
 /* ---------------------------------------------------------------------------
@@ -232,6 +237,19 @@
 
 .legend__edge {
   stroke-width: 2;
+}
+
+/* Relationship flow samples (EdgeFlowGlyphs). The glyph colours and halo come
+   from FkEdge.css, so the legend draws exactly what the canvas does. */
+.legend__flow-line {
+  width: 48px;
+  height: 12px;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.legend__items--flow {
+  gap: 6px;
 }
 
 .legend__edge--logical {
