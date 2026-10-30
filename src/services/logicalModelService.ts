@@ -1659,6 +1659,15 @@ export class TableLibraryService {
     return this.index.get().dbmlLayers[0]?.layer ?? 'main';
   }
 
+  /**
+   * Every DBML layer folder of the semantic dir with its schema folders
+   * (`<layer>/tables/<schema>/`, empty ones too), layers and schemas sorted:
+   * the destinations Move Table offers.
+   */
+  listDbmlLayerFolders(): ReadonlyArray<{ layer: string; schemas: readonly string[] }> {
+    return this.index.get().dbmlLayers.map((l) => ({ layer: l.layer, schemas: l.schemas }));
+  }
+
   /** Whether `<layer>/tables/` already holds a schema folder spelled exactly `schema`. */
   listsSchemaFolder(layer: string, schema: string): boolean {
     return (this.index.get().dbmlLayers.find((l) => l.layer === layer)?.schemas ?? []).includes(schema);

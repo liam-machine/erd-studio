@@ -45,7 +45,7 @@ import {
   type ManifestMissingReason,
   type ManifestMissingReasonDeps,
 } from './services/manifestMissingReasons';
-import { TableLibraryTreeProvider, type TableLibraryNode } from './providers/ModelLibraryTreeProvider';
+import { TableLibraryTreeProvider, type TableLibraryNode, type TableLibraryTableNode } from './providers/ModelLibraryTreeProvider';
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
@@ -117,6 +117,7 @@ import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './command
 import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
 import { newDbmlSubjectAreaText, planDbmlDuplicateRename, planDbmlSubjectAreaRename, planDbmlTableMoves } from './commands/dbmlLifecycle';
+import { MOVE_DIAGRAM_COMMAND, MOVE_TABLE_COMMAND, moveDiagramCommand, moveTableCommand, type MoveDbmlDeps } from './commands/moveDbml';
 import { semanticReadmeCreate } from './services/semanticReadme';
 import { applyFileWrites } from './providers/applyFileWrites';
 import type { FileWrite } from './services/fileWrites';
@@ -534,6 +535,8 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.migrateToTableNaming',
   'erdStudio.convertProjectToDbml',
   'erdStudio.showLogs',
+  'erdStudio.moveTable',
+  'erdStudio.moveDiagram',
 ]);
 
 /**
@@ -1569,6 +1572,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     refreshContextKeys();
   };
 
+  // Move Table and Move Diagram to Layer: the host's half (apply, refresh).
+  const moveDbmlDeps: MoveDbmlDeps = {
+    workspaceRoot,
+    semanticRoot: fullSemanticDirPath,
+    tableLibraryService,
+    layers: () => layerService.getAllLayers().map((l) => ({ id: l.id, label: l.label })),
+    readText: openOrDiskText,
+    dirtyFiles,
+    applyWrites: (writes) => applyLifecycleWrites(writes, fullSemanticDirPath),
+    afterTablesMoved: async (writes) => {
+      // Own writes, so the watchers skip them: the refreshes they would drive happen here.
+      for (const w of writes) treeProvider.invalidateSubjectArea(w.path);
+      tableLibraryService.invalidateCache();
+      tableLibraryProvider.refresh();
+      treeProvider.refresh();
+      refreshContextKeys();
+      await editorProvider.refreshAllOpenSubjectAreas();
+    },
+    afterDiagramMoved: async (oldPath) => {
+      afterSubjectAreaRename(oldPath, [], { created: [], deleted: [] });
+      selectorsService.scheduleRegenerate();
+    },
+  };
+
   // The editor wrote a domain (and possibly model files) itself. Those writes
   // are recorded as own writes so the watchers skip them (a watcher-driven
   // refresh would send a second, identical domainLoaded and clear the user's
@@ -2054,7 +2081,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     (() => {
       return vscode.window.createTreeView('erdStudio.modelLibrary', {
         treeDataProvider: tableLibraryProvider,
-        canSelectMany: false,
+        // Move Table moves every selected table to one folder.
+        canSelectMany: true,
       });
     })(),
     trackingService,
@@ -2074,39 +2102,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('erdStudio.openTrackedReport', (node?: MyReportNode) => {
       if (node?.report?.url) { void vscode.env.openExternal(vscode.Uri.parse(node.report.url)); }
     }),
-    vscode.commands.registerCommand('erdStudio.deleteLogicalModel', async (node: TableLibraryNode | undefined) => {
+    vscode.commands.registerCommand('erdStudio.deleteLogicalModel', async (node: TableLibraryNode | undefined, selection?: readonly TableLibraryNode[]) => {
       if (!node || node.type !== 'model') {
         void vscode.window.showErrorMessage('Delete Table: No table selected. Right-click a table in the Table Library.');
         return;
       }
+      // The Table Library selects several rows (for Move Table): a selection
+      // holding the right-clicked row deletes every table in it, after one
+      // question naming them. A duplicate row is left out: it acts by name and
+      // would remove the file that IS in use.
+      const nodes = (selection?.includes(node) ? selection : [node])
+        .filter((n): n is TableLibraryTableNode => n.type === 'model' && !n.shadowedBy);
+      const names = [...new Set(nodes.map((n) => n.name))];
       // A DBML table goes with its relationships and every DBML diagram's use
       // line and positions for it (D16), as one WorkspaceEdit: the canvas's
       // Delete Table File cascade, so a diagram never imports a deleted file.
-      const dbml = tableLibraryService.tableStorage(node.name) === 'dbml';
+      const dbmlNames = names.filter((n) => tableLibraryService.tableStorage(n) === 'dbml');
+      const yamlNames = names.filter((n) => !dbmlNames.includes(n));
+      const subject = names.length === 1 ? `table "${names[0]}"` : `${names.length} tables (${names.join(', ')})`;
       const confirm = await vscode.window.showWarningMessage(
-        dbml
-          ? `Delete table "${node.name}"?${editorProvider.describeDbmlDeleteCascade([node.name], false)}`
-          : `Delete table "${node.name}"? This removes the table's file — subject area references are not cleaned up.`,
+        yamlNames.length === 0
+          ? `Delete ${subject}?${editorProvider.describeDbmlDeleteCascade(dbmlNames, false)}`
+          : dbmlNames.length === 0
+            ? `Delete ${subject}? This removes the ${names.length === 1 ? "table's file" : "tables' files"} — subject area references are not cleaned up.`
+            : `Delete ${subject}?${editorProvider.describeDbmlDeleteCascade(dbmlNames, false)} The YAML ${yamlNames.length === 1 ? 'table' : 'tables'} (${yamlNames.join(', ')}) ${yamlNames.length === 1 ? 'loses its file' : 'lose their files'}; subject area references to ${yamlNames.length === 1 ? 'it' : 'them'} are not cleaned up.`,
         { modal: true },
         'Delete',
       );
       if (confirm === 'Delete') {
         try {
-          if (dbml) {
-            const result = await editorProvider.deleteTablesWithCascade([node.name]);
+          if (dbmlNames.length > 0) {
+            const result = await editorProvider.deleteTablesWithCascade(dbmlNames);
             if (!result.ok) {
               // Files the reconcile could not put back are already named in its modal; saying nothing was deleted would contradict it.
               if (result.unrestored.length === 0) {
-                void vscode.window.showErrorMessage(`Delete Table: VS Code did not apply the change, so "${node.name}" was not deleted.`);
+                void vscode.window.showErrorMessage(`Delete Table: VS Code did not apply the change, so ${dbmlNames.length === 1 ? `"${dbmlNames[0]}" was` : `${dbmlNames.map((n) => `"${n}"`).join(', ')} were`} not deleted.`);
               }
               return;
             }
-            tableLibraryProvider.refresh();
-            return;
           }
-          tableLibraryService.deleteTable(node.name);
+          for (const name of yamlNames) tableLibraryService.deleteTable(name);
         } catch (err) {
           void vscode.window.showErrorMessage(`Delete Table: ${err instanceof Error ? err.message : String(err)}`);
+          tableLibraryProvider.refresh();
           return;
         }
         tableLibraryProvider.refresh();
@@ -2262,6 +2300,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         `Moved ${plan.moves.length} table file${plan.moves.length === 1 ? '' : 's'} into layer folders.`,
       );
     }),
+    // Move a DBML table to another schema folder (any layer), or a DBML diagram
+    // to another layer (§2.8): every use line and Ref end follows, one edit.
+    vscode.commands.registerCommand(MOVE_TABLE_COMMAND, (arg?: unknown, selection?: unknown) =>
+      moveTableCommand(moveDbmlDeps, arg, selection)),
+    vscode.commands.registerCommand(MOVE_DIAGRAM_COMMAND, (arg?: unknown) => moveDiagramCommand(moveDbmlDeps, arg)),
     // A second file with a name the library already has is ignored (names are
     // identities). Give it its own name — `{layer}_{name}` — with an alias that
     // keeps the table name, and repoint the domains of its layer at it.

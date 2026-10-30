@@ -1,8 +1,9 @@
 /**
  * The DBML halves of the lifecycle commands in the layer-first tree (ERD
  * Studio 2.0, §2.8): New Diagram's diagram text, Rename Subject Area's
- * writes, a diagram's move to another layer, Organise Table Library's moves
- * and Give Duplicate Its Own Name's rename of one `.dbml` copy. Each returns
+ * writes, Move Diagram to Layer's move, the table moves Organise Table
+ * Library and Move Table share, and Give Duplicate Its Own Name's rename of
+ * one `.dbml` copy. Each returns
  * the {@link FileWrite}s for the command to apply as one WorkspaceEdit
  * (`applyFileWrites`); nothing here writes. Built only from core's writers
  * (through `dbmlWriters`), the library planner and the one settle
@@ -13,7 +14,7 @@
 
 import * as path from 'path';
 
-import { dbmlName, dbmlTreePathOf } from '@erd-studio/core';
+import { classifySemanticFile, dbmlName, dbmlTreePathOf, diagramFilePath } from '@erd-studio/core';
 import type { DbmlRelationshipsReading } from '@erd-studio/core';
 import { DbmlEditRefused, diagramSummaryDbml, parseSubjectAreaDbml, parseTableDbml, readRelationshipsDbml, usePathBetween } from '@erd-studio/core/dbml';
 import type { DbmlResolvedTable } from '@erd-studio/core/dbml';
@@ -167,7 +168,7 @@ export function planDbmlSubjectAreaRename(input: {
 }
 
 /**
- * A diagram's move to another layer (§2.8; no command uses it yet): create
+ * A diagram's move to another layer (§2.8; Move Diagram to Layer): create
  * `newRel` with every `use` line's path re-derived from it to the file the
  * line imports now (`usePathBetween`), its specifier kept, and delete
  * `oldRel`. The Project name is unchanged. Pure: both paths are posix and
@@ -190,6 +191,35 @@ export function planDbmlDiagramMove(input: { oldRel: string; newRel: string; tex
     { kind: 'create', path: input.newRel, text },
     { kind: 'delete', path: input.oldRel },
   ];
+}
+
+/**
+ * Move Diagram to Layer (§2.8): {@link planDbmlDiagramMove} for the diagram
+ * at `filePath` (`<layer>/diagrams/<name>.dbml`, absolute) to `toLayer`'s
+ * `diagrams/` folder, its name kept. The writes and `newPath` are absolute.
+ */
+export function planDbmlDiagramLayerMove(input: { semanticRoot: string; filePath: string; toLayer: string; text: string }): { writes: FileWrite[]; newPath: string } {
+  const oldRel = relPosix(input.semanticRoot, input.filePath);
+  const newRel = diagramFilePath(input.toLayer, path.basename(input.filePath).replace(/\.dbml$/i, ''));
+  const writes = planDbmlDiagramMove({ oldRel, newRel, text: input.text })
+    .map((w) => ({ ...w, path: path.join(input.semanticRoot, ...w.path.split('/')) }) as FileWrite);
+  return { writes, newPath: path.join(input.semanticRoot, ...newRel.split('/')) };
+}
+
+/**
+ * The files a table move changes besides the moving tables' own (a move
+ * writes no other table file): the diagrams and relationships files whose
+ * `use` lines (or Ref ends) follow, for the question Move Table asks.
+ */
+export function dbmlMoveTouches(input: { semanticRoot: string; writes: readonly FileWrite[] }): { diagrams: string[]; relationships: string[] } {
+  const diagrams: string[] = [];
+  const relationships: string[] = [];
+  for (const w of input.writes) {
+    const kind = classifySemanticFile(relPosix(input.semanticRoot, w.path), { tablesDirIsLayer: false }).kind;
+    if (kind === 'diagram') diagrams.push(w.path);
+    else if (kind === 'relationships') relationships.push(w.path);
+  }
+  return { diagrams, relationships };
 }
 
 /**

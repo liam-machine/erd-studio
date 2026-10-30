@@ -230,6 +230,16 @@
         "icon": "$(wand)"
       },
       {
+        "command": "erdStudio.moveTable",
+        "title": "Move Table…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.moveDiagram",
+        "title": "Move Diagram to Layer…",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.reportBug",
         "title": "Send Feedback",
         "category": "ERD Studio",
@@ -621,9 +631,14 @@
           "group": "7_modification@1"
         },
         {
+          "command": "erdStudio.moveDiagram",
+          "when": "view == erdStudio.domainTree && viewItem == domain && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "7_modification@2"
+        },
+        {
           "command": "erdStudio.deleteDomain",
           "when": "view == erdStudio.domainTree && viewItem == domain",
-          "group": "7_modification@2"
+          "group": "7_modification@3"
         },
         {
           "command": "erdStudio.editLayer",
@@ -641,6 +656,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "erdStudio.moveTable",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "7_modification@0"
+        },
+        {
           "command": "erdStudio.deleteLogicalModel",
           "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
           "group": "7_modification@1"
@@ -654,6 +674,18 @@
           "command": "erdStudio.resolveDuplicateModel",
           "when": "view == erdStudio.modelLibrary && viewItem == logicalModelDuplicate",
           "group": "7_modification@0"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "erdStudio.moveTable",
+          "when": "resourceLangId == dbml-table && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "7_modification@9"
+        },
+        {
+          "command": "erdStudio.moveDiagram",
+          "when": "resourceLangId == dbml-diagram && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "7_modification@9"
         }
       ],
       "view/title": [
@@ -768,6 +800,14 @@
         {
           "command": "erdStudio.stripLegacyDomainTags",
           "when": "erdStudio.hasDbtProject"
+        },
+        {
+          "command": "erdStudio.moveTable",
+          "when": "erdStudio.storage =~ /^(dbml|mixed)$/"
+        },
+        {
+          "command": "erdStudio.moveDiagram",
+          "when": "erdStudio.storage =~ /^(dbml|mixed)$/"
         }
       ]
     },

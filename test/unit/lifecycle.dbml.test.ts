@@ -32,7 +32,7 @@ import type { YmlData } from '../../src/types/ymlData';
 import { firstUseDeclarationLine, readDbml, IMPORT_MULTI_FILE_MESSAGE } from '../../src/services/dbmlImportParse';
 import { dbmlImportRefusal } from '../../src/commands/importDbml';
 import { describeDbmlImportPlan, planDbmlImport } from '../../src/services/dbmlImport';
-import { newDbmlSubjectAreaText, planDbmlDiagramMove, planDbmlDuplicateRename, planDbmlSubjectAreaRename, planDbmlTableMoves } from '../../src/commands/dbmlLifecycle';
+import { dbmlMoveTouches, newDbmlSubjectAreaText, planDbmlDiagramLayerMove, planDbmlDiagramMove, planDbmlDuplicateRename, planDbmlSubjectAreaRename, planDbmlTableMoves } from '../../src/commands/dbmlLifecycle';
 import type { FileWrite } from '../../src/services/fileWrites';
 import { exportDiagramCommand, exportInsideSemanticDirMessage, type ExportDiagramUi } from '../../src/commands/exportDiagram';
 import { exportAllDiagramsCommand, type ExportAllDiagramsUi } from '../../src/commands/exportAllDiagrams';
@@ -519,6 +519,29 @@ describe('the lifecycle planners (src/commands/dbmlLifecycle.ts)', () => {
     expect(moved).not.toContain("'../tables/gold/");
     const files = Object.fromEntries(Object.entries(dbmlFiles()).filter(([p]) => p !== 'gold/diagrams/sales.dbml'));
     expectCompilesInEveryParser({ ...files, 'silver/diagrams/sales.dbml': moved }, ['silver/diagrams/sales.dbml']);
+  });
+
+  it('Move Diagram to Layer: the move with absolute paths, to <layer>/diagrams/ (planDbmlDiagramLayerMove)', () => {
+    copyNative();
+    const filePath = erd('gold', 'diagrams', 'sales.dbml');
+    const text = fs.readFileSync(filePath, 'utf-8');
+    const planned = planDbmlDiagramLayerMove({ semanticRoot: erd(), filePath, toLayer: 'silver', text });
+    expect(planned.newPath).toBe(erd('silver', 'diagrams', 'sales.dbml'));
+    expect(planned.writes.map((w) => `${w.kind} ${rel(w.path)}`)).toEqual(['create silver/diagrams/sales.dbml', 'delete gold/diagrams/sales.dbml']);
+    expect(textOf(planned.writes[0])).toBe(textOf(planDbmlDiagramMove({ oldRel: 'gold/diagrams/sales.dbml', newRel: 'silver/diagrams/sales.dbml', text })[0]));
+  });
+
+  it('Move Table: a move to a new schema folder in another layer re-qualifies it; the other files it changes are counted (dbmlMoveTouches)', () => {
+    copyNative();
+    const { tableLibraryService, subjectAreaService } = services();
+    const planned = planDbmlTableMoves({ tableLibraryService, moves: [{ name: 'fct_order', toLayer: 'silver', toSchema: 'crm' }], diagrams: diagramsOf(subjectAreaService), readText });
+    expect(planned.requalified).toEqual(['fct_order']);
+    const touches = dbmlMoveTouches({ semanticRoot: erd(), writes: planned.writes });
+    expect(touches.diagrams.map(rel).sort()).toEqual(ALL_DIAGRAMS);
+    expect(touches.relationships.map(rel)).toEqual(['gold/relationships/gold.dbml']);
+    expect(textOf(byPathOf(planned.writes).get('silver/tables/crm/fct_order.dbml'))).toMatch(/^Table crm\.fct_order \[/m);
+    apply(planned.writes);
+    expectCompilesInEveryParser(dbmlFiles(), ALL_DIAGRAMS);
   });
 
   it('Organise: a table moves to another layer with its schema kept; no Ref moves, every use line follows', () => {

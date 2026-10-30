@@ -5445,7 +5445,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
     const rels = `${relationships} relationship${relationships === 1 ? '' : 's'}`;
     const places = `${diagrams} ${other ? 'other ' : ''}diagram${diagrams === 1 ? '' : 's'}`;
-    return ` This removes the table's file, its ${rels} and its place in ${places}.`;
+    return names.length === 1
+      ? ` This removes the table's file, its ${rels} and its place in ${places}.`
+      : ` This removes their files, their ${rels} and their places in ${places}.`;
   }
 
   /**

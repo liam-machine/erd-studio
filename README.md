@@ -80,6 +80,8 @@ Edit on the canvas or in the files, by hand or with AI, and the other follows: E
 
 **Can teammates on an older ERD Studio open it?** A YAML/JSON project, yes, as long as nobody converts it. A DBML project (a converted one, or a new one) needs ERD Studio 2.0 or later: an older version (the 1.9 pre-releases included) shows no diagrams and an empty Table Library. Agree on the version before you convert, and run **Set Up My AI Helper** again afterwards so your AI assistant writes DBML too.
 
+**How do I move a table to another schema or layer?** In a DBML project, right-click it in the Table Library, or its file in the Explorer, and choose **Move Table…**. Every diagram and relationships file that uses it follows in the same step, and **Edit > Undo** puts it all back. **Move Diagram to Layer…** does the same for a diagram. A YAML/JSON project has neither: **Organise Table Library by Layer** moves each table file into the folder of the layer that uses it, and **Convert Project to DBML** brings both commands.
+
 **Something is slow or not working. Where do I look?** Run **ERD Studio: Show Logs**. The **ERD Studio** channel in the Output view says what ERD Studio did and how long it took: opening each diagram, saving a moved table, each step of a conversion, and any file it could not read, with its line. **Send Feedback** can add the recent lines to your report if you tick **Include the recent ERD Studio log**; check them first, as they can name your tables.
 
 ## Work with your AI assistant
