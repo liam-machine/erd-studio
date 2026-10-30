@@ -18,7 +18,8 @@ import { parseSubjectAreaDbml, subjectAreaMembersDbml } from './readDiagram.js';
 
 export { parseTableDbml } from './readTable.js';
 export { readRelationshipsDbml } from './readRelationships.js';
-export { parseSubjectAreaDbml, subjectAreaMembersDbml } from './readDiagram.js';
+export { parseSubjectAreaDbml, subjectAreaMembersDbml, diagramSummaryDbml } from './readDiagram.js';
+export type { DbmlDiagramSummary } from './readDiagram.js';
 export { compileDbmlProject } from './compileProject.js';
 export { outlineDbmlFile } from './outline.js';
 export { renderNewTableDbml, editTableDbml, renamedColumnsOf } from './writeTable.js';

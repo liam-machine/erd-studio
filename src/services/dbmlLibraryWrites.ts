@@ -24,10 +24,8 @@ import {
   dbmlName,
   dbmlTableLookup,
   isReservedTableName,
-  linkKey,
-  reverseBareOneToOne,
 } from '@erd-studio/core';
-import type { DbmlAttachTable, DbmlRelationshipsReading, DbmlStoredRef } from '@erd-studio/core';
+import type { DbmlAttachTable, DbmlRelationshipsReading } from '@erd-studio/core';
 import {
   DBML_CONVERT_FIRST_MESSAGE,
   DbmlEditRefused,
@@ -36,11 +34,12 @@ import {
   renamedColumnsOf,
 } from '@erd-studio/core/dbml';
 import { editRelationshipsDbml, editTableDbml, renderNewTableDbml } from './dbmlWriters';
+import { storedUnit, unitLinks } from './dbmlRelationshipsIndex';
 import type { DbmlResolvedTable, RefUnit, RelationshipsFileEdit } from '@erd-studio/core/dbml';
 
 import type { FileWrite } from './fileWrites';
 import { mergeFileWrites } from './fileWrites';
-import type { Relationship, SemanticTable, TableRelationship } from '../types/semantic';
+import type { SemanticTable, TableRelationship } from '../types/semantic';
 import { RESERVED_TABLE_NAME_MESSAGE } from '../types/naming';
 
 /** A table the library lists (the winner of its name). */
@@ -158,41 +157,9 @@ function unitIdentity(unit: RefUnit): string {
   return [lower(unit.from), lower(unit.to), pairs.join(','), unit.cardinality, unit.role ?? ''].join('\u0000');
 }
 
-/** The per-pair link keys of a unit (core's `linkKey`, order-free). */
-function unitLinks(unit: RefUnit): string[] {
-  return unit.fromColumns.map((c, i) => linkKey({ fromModel: unit.from, fromColumn: c, toModel: unit.to, toColumn: unit.toColumns[i] ?? '' }));
-}
-
 function describeUnit(unit: RefUnit): string {
   const cols = (cs: string[]): string => (cs.length === 1 ? cs[0] : `(${cs.join(', ')})`);
   return `${unit.from}.${cols(unit.fromColumns)} → ${unit.to}.${cols(unit.toColumns)}`;
-}
-
-/** A stored Ref's unit, oriented as `attachRelationships` reads it. */
-function storedUnit(ref: DbmlStoredRef, lookup: (name: string) => DbmlAttachTable | undefined): { unit: RefUnit; rels: Relationship[] } | null {
-  let rels = ref.relationships;
-  if (rels.length === 0) return null;
-  if (ref.oneToOneDirection === 'keys') {
-    const pk = (name: string): string[] | undefined => {
-      const entry = lookup(name);
-      return entry ? (entry.table.columns ?? []).filter((c) => c?.isPrimaryKey).map((c) => c.name) : undefined;
-    };
-    if (reverseBareOneToOne(pk(rels[0].fromModel), rels.map((r) => r.fromColumn), pk(rels[0].toModel), rels.map((r) => r.toColumn))) {
-      rels = rels.map((r) => ({ ...r, fromModel: r.toModel, fromColumn: r.toColumn, toModel: r.fromModel, toColumn: r.fromColumn }));
-    }
-  }
-  const from = lookup(rels[0].fromModel)?.table.name ?? rels[0].fromModel;
-  const to = lookup(rels[0].toModel)?.table.name ?? rels[0].toModel;
-  return {
-    rels,
-    unit: {
-      from, to,
-      fromColumns: rels.map((r) => r.fromColumn),
-      toColumns: rels.map((r) => r.toColumn),
-      cardinality: rels[0].cardinality,
-      ...(rels[0].role !== undefined && rels[0].role !== '' ? { role: rels[0].role } : {}),
-    },
-  };
 }
 
 /**

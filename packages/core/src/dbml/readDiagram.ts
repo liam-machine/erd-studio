@@ -31,7 +31,7 @@ import { placeUnlaidNotes, readDbdiagramLayout } from '../dbdiagramLayout.js';
 import { findConflictMarkers } from '../mergeConflict.js';
 import { isSafeTableName } from '../logicalModel.js';
 import { TABLES_DIR } from '../logicalModel.js';
-import { isLibraryFolderName, normalisePosix, resolvePosix } from '../storage.js';
+import { dbmlTreePathOf, diagramPathOf, isLibraryFolderName, normalisePosix, resolvePosix } from '../storage.js';
 import type { DbmlParserModule } from './parserModule.js';
 import {
   PINNED_PARSER,
@@ -40,6 +40,7 @@ import {
   elementType,
   isUseDeclaration,
   lineAt,
+  parseSyntax,
   plainNames,
   propertyText,
   stripBom,
@@ -487,6 +488,84 @@ export function diagramMembersFromAst(ast: AstNode, text: string): string[] {
   const unlinked = projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value;
   members.push(...unlinkedMembers(unlinked, members, []));
   return members;
+}
+
+/** What {@link diagramSummaryDbml} reads from a diagram of the layer-first tree. */
+export interface DbmlDiagramSummary {
+  /** The `use` members, in file order: each named by its file stem. */
+  members: string[];
+  /** The `use` line of each member, in the same order. */
+  memberUses: DbmlMemberUse[];
+  /** The relationships files the diagram imports (`use *`), resolved, without repeats, in file order. */
+  relationshipsUses: string[];
+  /** Every other `use *` line's path (a relationships file in a subfolder, `../../shared/enums.dbml`, …), resolved, in file order. */
+  otherUses: string[];
+  /** The `erd_unlinked_tables` members (D26), after the `use` members. */
+  unlinked: string[];
+}
+
+/**
+ * A layer-first diagram's imports, from a lex and parse alone (no binding,
+ * no compile of the rest): for the settle rule, which must know whether a
+ * diagram needs rewriting before it pays for a full read. Each `use` path is
+ * resolved against the diagram's folder (`L/diagrams`) and classified by
+ * its shape ({@link dbmlTreePathOf}):
+ *
+ * - a selective `use { table … }` line or a `use *` line whose path is a
+ *   table file is a member, named by the file stem;
+ * - a `use *` line whose path is a relationships file is one of
+ *   `relationshipsUses`;
+ * - a selective `use { table … }` line whose path is anything else is still
+ *   a member when its stem is a safe table name (D4 tolerance);
+ * - any other `use *` line is one of `otherUses`: never a member, never a
+ *   relationships import;
+ * - any other line is ignored.
+ *
+ * Null when the text has a syntax error, or when `filePath` (absolute or
+ * relative, either separator) is not a diagram's (`diagramPathOf`).
+ */
+export function diagramSummaryDbml(rawText: string, filePath: string, parser: DbmlParserModule = PINNED_PARSER): DbmlDiagramSummary | null {
+  const where = diagramPathOf(filePath);
+  if (where === undefined) return null;
+  const text = stripBom(rawText);
+  let ast: AstNode;
+  try {
+    const parsed = parseSyntax(text, parser);
+    if (parsed.errors.length > 0) return null;
+    ast = parsed.ast;
+  } catch {
+    return null;
+  }
+  const members: string[] = [];
+  const memberUses: DbmlMemberUse[] = [];
+  const relationshipsUses: string[] = [];
+  const otherUses: string[] = [];
+  for (const node of topLevel(ast)) {
+    if (!isUseDeclaration(node)) continue;
+    const importPath = typeof node.importPath?.value === 'string' ? node.importPath.value as string : '';
+    const resolved = resolvePosix(where.dir, withExtension(importPath));
+    const shape = dbmlTreePathOf(resolved);
+    const wildcard = isWildcardUse(node);
+    const selective = !wildcard && specifiedTables(node).length > 0;
+    let member: string | undefined;
+    if (shape?.kind === 'table' && (wildcard || selective)) member = shape.name;
+    else if (selective && isSafeTableName(useStem(importPath))) member = useStem(importPath);
+    if (member !== undefined) {
+      members.push(member);
+      memberUses.push({ name: member, path: importPath, resolved, line: lineAt(text, node.start) });
+    } else if (wildcard && shape?.kind === 'relationships') {
+      if (!relationshipsUses.includes(resolved)) relationshipsUses.push(resolved);
+    } else if (wildcard) {
+      otherUses.push(resolved);
+    }
+  }
+  const unlinked = unlinkedMembers(projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value, members, []);
+  return { members, memberUses, relationshipsUses, otherUses, unlinked };
+}
+
+/** Whether a `use` line imports everything (`use * from …`). */
+function isWildcardUse(node: AstNode): boolean {
+  return node.specifiers?.kind === '<wildcard>';
 }
 
 /**
