@@ -255,7 +255,7 @@ describe('relationships (§2.4): every <layer>/relationships/*.dbml, a hand spli
     write('silver/relationships/calendar.dbml', `${HEADER}use { table calendar.dim_date } from '../tables/calendar/dim_date.dbml'\n\nRef "previous day": calendar.dim_date.previous_date_key > calendar.dim_date.date_key\n`);
   });
 
-  it('listTables() returns DBML tables WITH their relationships, respelled, from whichever file holds each Ref (no misplaced Refs)', () => {
+  it('listTables() returns DBML tables WITH their relationships, respelled, from whichever file holds each Ref', () => {
     // A Ref of dim_date (silver) held in gold's file: attached all the same.
     const goldFile = path.join(semantic, 'gold/relationships/gold.dbml');
     fs.writeFileSync(path.join(semantic, 'silver/relationships/calendar.dbml'), HEADER);
@@ -272,7 +272,7 @@ describe('relationships (§2.4): every <layer>/relationships/*.dbml, a hand spli
       { fromColumn: 'previous_date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one', role: 'previous day' },
     ]);
     expect(tables.get('dim_customer')?.relationships).toBeUndefined();
-    expect(lib.libraryAttachment()?.misplaced ?? []).toEqual([]);
+    expect(lib.libraryAttachment()?.orphaned ?? []).toEqual([]);
     // getTable agrees with listTables.
     expect(lib.getTable('dim_date')?.relationships).toEqual(tables.get('dim_date')?.relationships);
   });
@@ -547,7 +547,6 @@ describe('DBML table writes outside the editor (one batch: planDbmlLibraryWrites
     expect(rel(lib.relationshipsFileForNewRef('fct_new') ?? null)).toBe('gold/relationships/gold.dbml');
     expect(rel(lib.relationshipsFileForNewRef('STG_X') ?? null)).toBe('silver/relationships/silver.dbml');
     expect(lib.relationshipsFileForNewRef('dim_old')).toBeUndefined();
-    expect(lib.relationshipsFileFor('stg_x')).toBe(lib.relationshipsFileForNewRef('stg_x'));
     expect(rel(lib.relationshipsFileHolding({ fromModel: 'fct_x', fromColumn: 'id', toModel: 'dim_date', toColumn: 'id' }) ?? null)).toBe('gold/relationships/hand.dbml');
     expect(rel(lib.relationshipsFileHolding({ fromModel: 'DIM_DATE', fromColumn: 'ID', toModel: 'fct_x', toColumn: 'date_id' }) ?? null)).toBe('gold/relationships/gold.dbml');
     expect(lib.relationshipsFileHolding({ fromModel: 'stg_x', fromColumn: 'date_id', toModel: 'dim_date', toColumn: 'id' })).toBeUndefined();

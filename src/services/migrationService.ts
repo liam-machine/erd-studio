@@ -339,7 +339,7 @@ export class MigrationService {
     // Decided once, before anything is written: layer folders only when the
     // library already uses them or is empty — a flat library stays flat.
     const layerIds = new Set(this.layerService.getAllLayers().map((l) => l.id));
-    const useFolders = this.tableLibraryService.groupsByFolder(layerIds);
+    const groupByFolder = this.tableLibraryService.groupsByFolder(layerIds);
     // The DBML tables are one batch (§2.6): one plan, one settle, one write.
     const dbmlSaves: Array<{ model: SemanticTable; home: { layer: string; schema: string } }> = [];
     for (const [name, { model, sources }] of allModels) {
@@ -355,7 +355,7 @@ export class MigrationService {
           continue;
         }
         // Never create a folder for a directory that is not a configured layer.
-        const folder = useFolders ? configured : undefined;
+        const folder = groupByFolder ? configured : undefined;
         this.tableLibraryService.saveTable(model, folder);
         result.modelsCreated++;
       }

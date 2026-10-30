@@ -31,7 +31,7 @@ import {
 import { clearLogBuffer, log, recentLogLines, setLogSink, type LogSink } from '../../src/services/logger';
 import { FEEDBACK_LOG_LABEL, FEEDBACK_LOG_NOTE, type FeedbackDraft } from '../../src/types/feedback';
 
-const FILE = '/Users/khaidirhasan/Documents/Codes/medical/.erd-studio/silver/sales.dbml';
+const FILE = '/Users/khaidirhasan/Documents/Codes/medical/.erd-studio/silver/diagrams/sales.dbml';
 const context = { extension: { packageJSON: { version: '2.0.0' } } } as never;
 
 const draft = (overrides: Partial<FeedbackDraft> = {}): FeedbackDraft => ({
@@ -63,14 +63,14 @@ describe('the log in the diagnostics', () => {
 
   it('asked for: every line is redacted, and it is the last section of the text', () => {
     log.info(`[Canvas] Opened ${FILE}: 500 tables posted 5012 ms after ready`);
-    log.warn(`[LogicalModelService] /Users/khaidirhasan/Documents/Codes/medical/.erd-studio/tables/gold/fct_order.dbml:4: bad`);
+    log.warn(`[LogicalModelService] /Users/khaidirhasan/Documents/Codes/medical/.erd-studio/gold/tables/finance/fct_order.dbml:4: bad`);
     const d = collectDiagnostics(context, undefined, [], { includeLog: true });
     expect(d.recentLog).toHaveLength(2);
     const text = formatDiagnostics(d);
     expect(text).toContain('Recent ERD Studio log (2 lines):');
-    expect(text).toContain('{project}/.erd-studio/{layer}/{domain}.dbml: 500 tables posted 5012 ms after ready');
-    expect(text).toContain('{project}/.erd-studio/tables/{table}.dbml');
-    for (const secret of ['khaidirhasan', 'medical']) expect(text).not.toContain(secret);
+    expect(text).toContain('{project}/.erd-studio/{layer}/diagrams/{diagram}.dbml: 500 tables posted 5012 ms after ready');
+    expect(text).toContain('{project}/.erd-studio/{layer}/tables/{schema}/{table}.dbml');
+    for (const secret of ['khaidirhasan', 'medical', 'finance', 'fct_order']) expect(text).not.toContain(secret);
     // The buffer itself stays raw: it is local.
     expect(recentLogLines()[0]).toContain(FILE);
   });
@@ -80,7 +80,7 @@ describe('the log in the diagnostics', () => {
     const view = buildFeedbackContext(context);
     expect(view.text).not.toContain('Recent ERD Studio log');
     expect(view.log).toHaveLength(1);
-    expect(view.log![0]).toContain('{project}/.erd-studio/{layer}/{domain}.dbml');
+    expect(view.log![0]).toContain('{project}/.erd-studio/{layer}/diagrams/{diagram}.dbml');
     expect(view.log![0]).not.toContain('khaidirhasan');
   });
 
@@ -207,12 +207,12 @@ describe('log lines name a diagram by its path, so the redacted copy shows its s
     expect(offenders).toEqual([]);
   });
 
-  it('a warning that logs the diagram\'s full path reaches the report as {layer}/{domain}.dbml', () => {
+  it('a warning that logs the diagram\'s full path reaches the report as {layer}/diagrams/{diagram}.dbml', () => {
     log.warn(`[SemanticEditorProvider] Positions for ${FILE} not saved: disk full`);
     log.warn(`[ERD Studio] ${FILE} left as it is: bad Ref`);
     const lines = collectDiagnostics(context, undefined, [], { includeLog: true }).recentLog!;
     expect(lines.join('\n')).not.toContain('sales');
     expect(lines.join('\n')).not.toContain('khaidirhasan');
-    expect(lines[0]).toContain('{project}/.erd-studio/{layer}/{domain}.dbml not saved');
+    expect(lines[0]).toContain('{project}/.erd-studio/{layer}/diagrams/{diagram}.dbml not saved');
   });
 });

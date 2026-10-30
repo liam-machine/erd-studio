@@ -23,6 +23,7 @@ export function outlineDbmlFile(rawText: string, filePath: string): DbmlFileOutl
     line: lineAt(text, use.node.start),
     wildcard: use.wildcard,
     tables: use.tables.map((t) => t.name),
+    specifiers: use.tables.map((t) => t.reference),
   }));
   const enums: DbmlFileOutline['enums'] = [];
   const metadata: NonNullable<DbmlFileOutline['metadata']> = [];

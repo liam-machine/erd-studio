@@ -42,15 +42,15 @@ function brokenProject(): string {
     expect(after, rel).not.toBe(before);
     fs.writeFileSync(at(rel), after);
   };
-  // The same Ref in both relationships files the diagram reads with `use *`.
-  edit('tables/_relationships.dbml', (t) => `${t.trimEnd()}\nuse { table fct_order } from './gold/fct_order.dbml'\nuse { table dim_customer } from './gold/dim_customer.dbml'\nRef: fct_order.customer_key >? dim_customer.customer_key\n`);
+  // The same Ref in two relationships files the diagram reads with `use *`.
+  edit('gold/relationships/customers.dbml', (t) => `${t.trimEnd()}\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\nRef: gold.fct_order.customer_key >? gold.dim_customer.customer_key\n`);
   // An unquoted value, and a syntax error in another table.
-  edit('tables/dim_date.dbml', (t) => t.replace("role: 'conformed-dim'", 'role: conformed'));
-  edit('tables/gold/dim_region.dbml', (t) => t.replace('{', '{\n  broken column [pk,'));
+  edit('silver/tables/calendar/dim_date.dbml', (t) => t.replace("role: 'conformed-dim'", 'role: conformed'));
+  edit('gold/tables/gold/dim_region.dbml', (t) => t.replace('{', '{\n  broken column [pk,'));
   // A diagram use path that names no file, and a TableGroup (crosses files the old way).
-  edit('gold/sales.dbml', (t) => t
-    .replace("use { table bridge_empty } from '../tables/gold/bridge_empty.dbml'", "use { table bridge_empty } from '../tables/gold/bridge_missing.dbml'")
-    .concat('\nTableGroup orders {\n  fct_order\n  dim_customer\n}\n'));
+  edit('gold/diagrams/sales.dbml', (t) => t
+    .replace("use { table gold.bridge_empty } from '../tables/gold/bridge_empty.dbml'", "use { table gold.bridge_empty } from '../tables/gold/bridge_missing.dbml'")
+    .concat('\nTableGroup orders {\n  gold.fct_order\n  gold.dim_customer\n}\n'));
   return root;
 }
 

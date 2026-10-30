@@ -567,12 +567,12 @@ describe('setup skill: native DBML storage (§7.3)', () => {
     // Each id is in SKILL.md or a reference SKILL.md links.
     const linked = [...body().matchAll(/`references\/([\w-]+\.md)`/g)].map((m) => m[1]);
     const reachable = [body(), ...[...new Set(linked)].map(ref)].join('\n');
-    for (const id of ['fix-dbml-file', 'resolve-format-conflicts', 'finish-dbml-conversion', 'import-dbml-file', 'dbml-invalid', 'not-a-diagram']) {
+    for (const id of ['fix-dbml-file', 'resolve-format-conflicts', 'finish-dbml-conversion', 'import-dbml-file', 'reconvert-dbml-project', 'dbml-invalid', 'not-a-diagram']) {
       expect(reachable, id).toContain(`\`${id}\``);
     }
     // The CLI really emits them.
     const cli = (name: string): string => fs.readFileSync(path.resolve(__dirname, '../../src/cli', name), 'utf-8');
-    for (const id of ['fix-dbml-file', 'resolve-format-conflicts', 'finish-dbml-conversion', 'import-dbml-file']) {
+    for (const id of ['fix-dbml-file', 'resolve-format-conflicts', 'finish-dbml-conversion', 'import-dbml-file', 'reconvert-dbml-project']) {
       expect(cli('doctor.ts'), id).toContain(`'${id}'`);
     }
     expect(cli('diff.ts')).toContain("'dbml-invalid'");

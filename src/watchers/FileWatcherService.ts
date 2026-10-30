@@ -54,7 +54,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { classifySemanticFile, isReservedTableName } from '@erd-studio/core';
+import { classifySemanticFile } from '@erd-studio/core';
 
 import { LOGICAL_MODELS_DIR, TABLES_DIR, tablesDirIsLayer } from '../services/logicalModelService';
 import { NON_SUBJECT_AREA_DIRS } from '../services/domainService';
@@ -530,8 +530,6 @@ export class FileWatcherService implements vscode.Disposable {
       if (dbml && classifySemanticPath(this.semanticRoot, uri.fsPath) !== 'table') return;
       // The model name is the listed stem.
       const modelName = fileName.replace(/\.(yml|dbml)$/, '');
-      // 2.0-switch: S8b deletes the reserved-name skip with `isReservedTableName`.
-      if (dbml && isReservedTableName(modelName)) return;
       if (created && !dbml) createdPending.add(uri.toString());
       this.pendingTables.delete(modelName);
       this.pendingTables.set(modelName, uri);

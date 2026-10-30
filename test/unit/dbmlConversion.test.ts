@@ -133,11 +133,11 @@ describe('planDbmlConversion: the two refusals left (D26/D27)', () => {
 });
 
 describe('planDbmlConversion: a file it cannot convert stays as it is, and the rest converts (D26/D27)', () => {
-  it('a table named _relationships stays YAML', async () => {
+  it('a table named _relationships converts like any other: the layer-first tree reserves no table name', async () => {
     const plan = await planDbmlConversion(inputOf({ 'logical-models/_relationships.yml': yml('_relationships', ['id']), 'logical-models/dim.yml': DIM }));
     expect(plan.refusals).toEqual([]);
-    expect(leftOf(plan, 'logical-models/_relationships.yml')?.problem).toMatch(/‘_relationships’ is the name of the relationships file/);
-    expect(plan.creates.map((c) => c.path)).toEqual(['silver/tables/public/dim.dbml']);
+    expect(leftOf(plan, 'logical-models/_relationships.yml')).toBeUndefined();
+    expect(plan.creates.map((c) => c.path)).toEqual(['silver/tables/public/_relationships.dbml', 'silver/tables/public/dim.dbml']);
   });
 
   it.each([
@@ -1826,8 +1826,11 @@ describe('planDbmlConversion: the layer-first tree (ERD Studio 2.0)', () => {
         `Delete these ERD Studio 1.9 pre-release files first (they are not converted and would be left beside the new tree): ${leftovers.join(', ')}.`,
       ]);
       expect(new LayerService(root, '.erd-studio').detectLayersFromFilesystem().map((l) => l.id)).not.toContain('tables');
-      // 2.0-switch: S8b adds doctor's legacyDbmlTree code; assert here (§1.8) runDoctor gives exactly one
-      // legacyDbmlTree error and no per-file DBML problem for the leftovers.
+      // doctor (§1.8): exactly one legacyDbmlTree error, and nothing about each leftover file.
+      const doctor = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: { PATH: '' }, homeDir: path.join(root, 'home') });
+      expect(doctor.erd.dbmlProblems.filter((p) => p.code === 'legacyDbmlTree')).toHaveLength(1);
+      expect(doctor.erd.dbmlProblems.filter((p) => leftovers.some((rel) => p.file.endsWith(`/${rel}`)))).toEqual([]);
+      expect(doctor.nextSteps.map((s) => s.id)).toContain('reconvert-dbml-project');
 
       for (const rel of leftovers) fs.rmSync(path.join(sem, rel));
       fs.rmSync(path.join(sem, 'tables'), { recursive: true });

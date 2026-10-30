@@ -7,8 +7,8 @@ export const list_models = {
   config: {
     title: 'List logical models',
     description:
-      'List all logical model definitions in the table library — .dbml table files in .erd-studio/tables/ ' +
-      '(or older .yml files in .erd-studio/logical-models/ or tables/, from before ERD Studio 2.0) — files at the top level and one folder down (per-layer folders such as gold/). ' +
+      'List all logical model definitions in the table library — one .dbml table file per table, in .erd-studio/<layer>/tables/<schema>/ ' +
+      '(or older .yml files in .erd-studio/logical-models/ or tables/, from before ERD Studio 2.0, at the top level and one folder down). ' +
       'Names are unique across folders. ' +
       'Each model is one table (dimension, fact, bridge, etc.) reusable across domains. ' +
       'Returns model names + light metadata. Call read_model for full column-level detail.',

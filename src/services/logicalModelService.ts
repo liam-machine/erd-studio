@@ -283,7 +283,7 @@ function fileSignature(filePath: string): string | null {
   }
 }
 
-/** A `.dbml` file name's stem (`_relationships.dbml` → `_relationships`). */
+/** A `.dbml` file name's stem (`fct_order.dbml` → `fct_order`). */
 function dbmlStem(fileName: string): string {
   return fileName.slice(0, -'.dbml'.length);
 }
@@ -1046,7 +1046,7 @@ export class TableLibraryService {
   /**
    * One `attachRelationships` over every relationships file of the library
    * onto every table that reads (§2.4, §5.1): what each DBML table owns,
-   * misplaced Refs included, duplicates removed, orphans reported. Memoised
+   * from whichever file holds each Ref, duplicates removed, orphans reported. Memoised
    * against the signatures of every file it read, so it is recomputed at
    * call time when any of them changed. Undefined when the library has no
    * relationships file (no DBML table owns anything then).
@@ -1241,14 +1241,6 @@ export class TableLibraryService {
     } catch {
       return null;
     }
-  }
-
-  /**
-   * {@link relationshipsFileForNewRef}.
-   * @deprecated 2.0-switch: S8b moves doctor's last call to `relationshipsFileHolding`.
-   */
-  relationshipsFileFor(tableName: string): string | undefined {
-    return this.relationshipsFileForNewRef(tableName);
   }
 
   /** The project's relationships files as one index (`relationshipsIndexOf` over {@link dbmlSnapshot}). */

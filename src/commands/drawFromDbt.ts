@@ -68,7 +68,6 @@ import { DbmlEditRefused } from '@erd-studio/core/dbml';
 import type { CatalogData } from '../types/catalog';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
-import { RESERVED_TABLE_NAME_MESSAGE } from '../types/naming';
 import { log } from '../services/logger';
 
 export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
@@ -415,12 +414,11 @@ export function describeDraftNotice(draft: Pick<DbtDraft, 'modelNames' | 'skippe
 }
 
 /** A repeated pick or the cap is not worth a sentence; these are. */
-const SKIP_REASONS_WORTH_NAMING = new Set<DraftSkipped['reason']>(['invalid-name', 'not-found', 'disabled', 'yaml-table', 'reserved-name']);
+const SKIP_REASONS_WORTH_NAMING = new Set<DraftSkipped['reason']>(['invalid-name', 'not-found', 'disabled', 'yaml-table']);
 
 /** The reasons a DBML diagram adds (§5.7), each with its own sentence. */
 const DBML_SKIP_REASONS: Partial<Record<DraftSkipped['reason'], string>> = {
   'yaml-table': "a YAML table can't join a DBML diagram; convert the project first",
-  'reserved-name': RESERVED_TABLE_NAME_MESSAGE.replace(/; choose another table name\.$/, ''),
 };
 
 function describeSkipped(skipped: readonly DraftSkipped[]): string {

@@ -97,8 +97,8 @@ function at(location: DbmlRefLocation): string {
  *   its table's whole primary key; with a table missing it stays as read
  *   (the second end is the foreign key);
  * - a Ref is attached from whichever relationships file holds it (no file is
- *   a table's home, decision 5): `misplaced` is always empty; a Ref owned by
- *   a YAML table or by no table is `orphaned`;
+ *   a table's home, decision 5); a Ref owned by a YAML table or by no table
+ *   is `orphaned`;
  * - a link read more than once (`linkKey`, in any files, either way round) is
  *   attached once, the copy {@link libraryCopyRank} ranks first, and
  *   reported in `duplicates`;
@@ -123,7 +123,7 @@ export function attachRelationships(
   tables: (name: string) => DbmlAttachTable | undefined,
   options: { dbt?: DbtKeyIndex; partial?: boolean } = {},
 ): DbmlAttachResult {
-  const result: DbmlAttachResult = { byOwner: new Map(), misplaced: [], orphaned: [], duplicates: [], warnings: [], locations: new Map() };
+  const result: DbmlAttachResult = { byOwner: new Map(), orphaned: [], duplicates: [], warnings: [], locations: new Map() };
   interface Candidate { rel: Relationship; unit: number; at: DbmlRefLocation; rank: string; owner: string }
   const candidates: Candidate[] = [];
   let unit = 0;

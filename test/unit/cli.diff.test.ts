@@ -624,8 +624,11 @@ describe('end to end on native DBML storage: inventory → DBML logical model �
     const models = ['fct_order', 'dim_customer', 'dim_project', 'dim_task', 'fct_task_event', 'fct_sale', 'dim_region', 'dim_date'];
     const inventory = JSON.parse((await run(['inventory', '--models', models.join(','), '--json'], root)).out) as InventoryResult;
     const semantic = path.join(root, '.erd-studio');
-    fs.mkdirSync(path.join(semantic, 'tables'), { recursive: true });
-    fs.mkdirSync(path.join(semantic, 'silver'), { recursive: true });
+    // The layer-first tree: silver/tables/silver/<name>.dbml, silver/relationships/silver.dbml, silver/diagrams/orders.dbml.
+    fs.mkdirSync(path.join(semantic, 'silver', 'tables', 'silver'), { recursive: true });
+    fs.mkdirSync(path.join(semantic, 'silver', 'relationships'), { recursive: true });
+    fs.mkdirSync(path.join(semantic, 'silver', 'diagrams'), { recursive: true });
+    const tablePath = (name: string): string => `silver/tables/silver/${name}.dbml`;
 
     const tables = new Map<string, SemanticTable>();
     for (const m of inventory.models) {
@@ -633,6 +636,7 @@ describe('end to end on native DBML storage: inventory → DBML logical model �
       const fk = new Set(m.foreignKeys);
       const table: SemanticTable = {
         name: m.name,
+        schema: 'silver',
         description: m.description || `${m.name} (draft)`,
         columns: m.columns!.map((c) => ({
           name: c.name,
@@ -643,7 +647,7 @@ describe('end to end on native DBML storage: inventory → DBML logical model �
         })),
       };
       tables.set(m.name.toLowerCase(), table);
-      fs.writeFileSync(path.join(semantic, 'tables', `${m.name}.dbml`), renderNewTableDbml(table));
+      fs.writeFileSync(path.join(semantic, ...tablePath(m.name).split('/')), renderNewTableDbml(table));
     }
     const owners = new Map<string, { name: string; relationships: TableRelationship[] }>();
     for (const rel of inventory.relationships.map(canonicalRelationship)) {
@@ -652,34 +656,34 @@ describe('end to end on native DBML storage: inventory → DBML logical model �
       entry.relationships.push(rest);
       owners.set(fromModel.toLowerCase(), entry);
     }
-    fs.writeFileSync(path.join(semantic, 'tables', '_relationships.dbml'), editRelationshipsDbml(null, {
-      filePath: 'tables/_relationships.dbml',
+    fs.writeFileSync(path.join(semantic, 'silver', 'relationships', 'silver.dbml'), editRelationshipsDbml(null, {
+      filePath: 'silver/relationships/silver.dbml',
       owners,
       resolve: (name) => {
         const table = tables.get(name.toLowerCase());
         return table && {
           name: table.name,
-          reference: table.name,
+          reference: `silver.${table.name}`,
           columns: (c: string) => table.columns.find((col) => col.name.toLowerCase() === c.toLowerCase())?.name,
-          path: `tables/${table.name}.dbml`,
+          path: tablePath(table.name),
           storage: 'dbml' as const,
           primaryKey: table.columns.filter((c) => c.isPrimaryKey).map((c) => c.name),
         };
       },
     }));
-    const diagram = path.join(semantic, 'silver', 'orders.dbml');
+    const diagram = path.join(semantic, 'silver', 'diagrams', 'orders.dbml');
     fs.writeFileSync(diagram, renderNewSubjectAreaDbml({
-      filePath: 'silver/orders.dbml',
+      filePath: 'silver/diagrams/orders.dbml',
       domain: 'orders',
       description: 'Built from inventory',
-      members: inventory.models.map((m) => ({ name: m.name, path: `tables/${m.name}.dbml` })),
-      relationshipsFiles: ['tables/_relationships.dbml'],
+      members: inventory.models.map((m) => ({ name: m.name, reference: `silver.${m.name}`, path: tablePath(m.name) })),
+      relationshipsFiles: ['silver/relationships/silver.dbml'],
     }));
 
     const diff = await run(['diff', '--domain', path.relative(root, diagram), '--json'], root);
     const result = JSON.parse(diff.out) as DiffResult;
     const d = result.domains[0];
-    expect(d).toMatchObject({ file: '.erd-studio/silver/orders.dbml', domain: 'orders', layer: 'silver' });
+    expect(d).toMatchObject({ file: '.erd-studio/silver/diagrams/orders.dbml', domain: 'orders', layer: 'silver' });
     expect(d.fixes.filter((f) => f.severity === 'blocking')).toEqual([]);
     expect(diff.code).toBe(0);
     expect(result.clean).toBe(true);
@@ -693,17 +697,18 @@ describe('diff names a DBML diagram\'s errors', () => {
   it('a .dbml that does not parse is dbml-invalid with its file and line; a table file is not-a-diagram', async () => {
     const root = copyProject('dbt-project');
     const semantic = path.join(root, '.erd-studio');
-    fs.mkdirSync(path.join(semantic, 'tables'), { recursive: true });
-    fs.writeFileSync(path.join(semantic, 'tables', 'dim_x.dbml'), 'Table dim_x {\n  id INT\n}\n');
-    fs.writeFileSync(path.join(semantic, 'silver', 'broken.dbml'), "Project broken {\n  erd_schema_version: '7'\n");
+    fs.mkdirSync(path.join(semantic, 'silver', 'tables', 'silver'), { recursive: true });
+    fs.mkdirSync(path.join(semantic, 'silver', 'diagrams'), { recursive: true });
+    fs.writeFileSync(path.join(semantic, 'silver', 'tables', 'silver', 'dim_x.dbml'), 'Table silver.dim_x {\n  id INT\n}\n');
+    fs.writeFileSync(path.join(semantic, 'silver', 'diagrams', 'broken.dbml'), "Project broken {\n  erd_schema_version: '7'\n");
 
-    const broken = await run(['diff', '--domain', '.erd-studio/silver/broken.dbml', '--json'], root);
+    const broken = await run(['diff', '--domain', '.erd-studio/silver/diagrams/broken.dbml', '--json'], root);
     expect(broken.code).toBe(3);
     const error = JSON.parse(broken.out).error;
     expect(error.code).toBe('dbml-invalid');
-    expect(error.message).toMatch(/^\.erd-studio\/silver\/broken\.dbml:\d+: /);
+    expect(error.message).toMatch(/^\.erd-studio\/silver\/diagrams\/broken\.dbml:\d+: /);
 
-    const table = await run(['diff', '--domain', '.erd-studio/tables/dim_x.dbml', '--json'], root);
+    const table = await run(['diff', '--domain', '.erd-studio/silver/tables/silver/dim_x.dbml', '--json'], root);
     expect(table.code).toBe(3);
     expect(JSON.parse(table.out).error.code).toBe('not-a-diagram');
   });
@@ -714,8 +719,8 @@ describe('diff on native DBML storage (§7.1, S8): fix paths and kinds', () => {
     generatedAt: '', domain: 'd', layer: 'gold', sourceStage: 'logical', targetStage: 'physical',
     models: [], requiresCompile: false,
     modelContext: {
-      f: { modelName: 'f', logicalModelPath: '.erd-studio/tables/gold/f.dbml', relationshipsPath: '.erd-studio/tables/gold/_relationships.dbml', dbtSqlPath: null, dbtSchemaPath: null },
-      m: { modelName: 'm', logicalModelPath: '.erd-studio/tables/m.dbml', relationshipsPath: '.erd-studio/tables/_relationships.dbml', dbtSqlPath: null, dbtSchemaPath: null },
+      f: { modelName: 'f', logicalModelPath: '.erd-studio/gold/tables/gold/f.dbml', relationshipsPath: '.erd-studio/gold/relationships/gold.dbml', dbtSqlPath: null, dbtSchemaPath: null },
+      m: { modelName: 'm', logicalModelPath: '.erd-studio/silver/tables/silver/m.dbml', relationshipsPath: '.erd-studio/silver/relationships/silver.dbml', dbtSqlPath: null, dbtSchemaPath: null },
     },
     columns: [
       { modelName: 'm', columnName: 'c', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-column-to-logical', targetDataType: 'DATE', resolvedDataType: 'DATE' },
@@ -726,22 +731,41 @@ describe('diff on native DBML storage (§7.1, S8): fix paths and kinds', () => {
   };
   const library = { inLibrary: new Map<string, Relationship>(), addToLibrary: true };
 
-  it('a column fix names the .dbml table file and a relationship fix the owner folder\'s _relationships.dbml', () => {
-    const fixes = fixesFromPlan(plan, '.erd-studio/gold/d.dbml', '.erd-studio', [], [], library);
-    expect(fixes.find((f) => f.kind === 'add-column')).toMatchObject({ file: '.erd-studio/tables/m.dbml' });
-    expect(fixes.find((f) => f.kind === 'add-relationship')).toMatchObject({ file: '.erd-studio/tables/gold/_relationships.dbml', model: 'f' });
+  it('a column fix names the .dbml table file and a new relationship the file the project places it in (relationshipsPath)', () => {
+    const fixes = fixesFromPlan(plan, '.erd-studio/gold/diagrams/d.dbml', '.erd-studio', [], [], library);
+    expect(fixes.find((f) => f.kind === 'add-column')).toMatchObject({ file: '.erd-studio/silver/tables/silver/m.dbml' });
+    expect(fixes.find((f) => f.kind === 'add-relationship')).toMatchObject({ file: '.erd-studio/gold/relationships/gold.dbml', model: 'f' });
   });
 
-  it('a cardinality fix that turns a link round moves it between relationships files', () => {
+  it('a stored Ref is fixed where it is held (storedIn): a cardinality change turns it round in place, with no movesFrom', () => {
     const rel = { fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k', cardinality: 'many-to-one' as const };
-    const toOneToMany: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], discrepancyStatus: 'cardinality-mismatch', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-many' }] };
+    const storedIn = '.erd-studio/gold/relationships/by-hand.dbml';
+    const toOneToMany: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], discrepancyStatus: 'cardinality-mismatch', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-many', storedIn }] };
     const [fix] = fixesFromPlan(toOneToMany, 'd.dbml', '.erd-studio', [], [], { inLibrary: new Map([[linkKey(rel), rel]]), addToLibrary: true });
-    expect(fix).toMatchObject({ kind: 'set-cardinality', file: '.erd-studio/tables/_relationships.dbml', movesFrom: '.erd-studio/tables/gold/_relationships.dbml' });
+    expect(fix).toMatchObject({ kind: 'set-cardinality', file: storedIn, relationship: { fromModel: 'm', toModel: 'f' } });
+    expect(fix.movesFrom).toBeUndefined();
+    const removal: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], discrepancyStatus: 'extra', action: 'remove-relationship-from-logical', sourceCardinality: 'many-to-one', storedIn }] };
+    expect(fixesFromPlan(removal, 'd.dbml', '.erd-studio', [], [], { inLibrary: new Map([[linkKey(rel), rel]]), addToLibrary: true })[0])
+      .toMatchObject({ kind: 'remove-relationship', file: storedIn });
+  });
+
+  it('a YAML entry a cardinality fix turns round still moves to its many side\'s file (movesFrom)', () => {
+    const yamlPlan: SyncPlan = {
+      ...plan, columns: [],
+      modelContext: {
+        f: { modelName: 'f', logicalModelPath: '.erd-studio/logical-models/f.yml', dbtSqlPath: null, dbtSchemaPath: null },
+        m: { modelName: 'm', logicalModelPath: '.erd-studio/logical-models/m.yml', dbtSqlPath: null, dbtSchemaPath: null },
+      },
+      relationships: [{ ...plan.relationships[0], discrepancyStatus: 'cardinality-mismatch', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-many' }],
+    };
+    const rel = { fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k', cardinality: 'many-to-one' as const };
+    const [fix] = fixesFromPlan(yamlPlan, 'd.json', '.erd-studio', [], [], { inLibrary: new Map([[linkKey(rel), rel]]), addToLibrary: true });
+    expect(fix).toMatchObject({ kind: 'set-cardinality', file: '.erd-studio/logical-models/m.yml', movesFrom: '.erd-studio/logical-models/f.yml' });
   });
 
   it('an unreadable .dbml table is fix-dbml-file, a .yml one fix-model-yaml', () => {
     const unreadable = [
-      { name: 'm', file: '.erd-studio/tables/m.dbml', kind: 'dbmlInvalid' as const, line: 2, code: '3075', message: 'x' },
+      { name: 'm', file: '.erd-studio/silver/tables/silver/m.dbml', kind: 'dbmlInvalid' as const, line: 2, code: '3075', message: 'x' },
       { name: 'y', file: '.erd-studio/logical-models/y.yml', kind: 'yamlScalar' as const, line: 3, message: 'y' },
     ];
     const fixes = fixesFromPlan({ ...plan, columns: [], relationships: [] }, 'd.dbml', '.erd-studio', [], unreadable);
@@ -754,12 +778,14 @@ describe('diff on native DBML storage (§7.1, S8): fix paths and kinds', () => {
     fs.rmSync(path.join(root, '.erd-studio', 'gold', 'finance.json'));
     const plan = await planDbmlConversion(readDbmlConversionInput(root, '.erd-studio'));
     writeConversion(root, plan);
-    const file = path.join(root, '.erd-studio', 'tables', 'dim_customer.dbml');
+    const target = plan.targets.find((t) => t.target.endsWith('/dim_customer.dbml'))!.target;
+    expect(target).toMatch(/^[^/]+\/tables\/[^/]+\/dim_customer\.dbml$/);
+    const file = path.join(root, '.erd-studio', ...target.split('/'));
     fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').replace(/\[([^\]]*)role: '([^']*)'/, '[$1role: $2 x'));
     const r = JSON.parse((await run(['diff', '--all', '--json'], root)).out) as DiffResult;
     const fixes = r.domains.flatMap((d) => d.fixes).filter((f) => f.model === 'dim_customer');
     expect(fixes.length).toBeGreaterThan(0);
-    expect(fixes.every((f) => f.kind === 'fix-dbml-file' && f.file === '.erd-studio/tables/dim_customer.dbml')).toBe(true);
+    expect(fixes.every((f) => f.kind === 'fix-dbml-file' && f.file === `.erd-studio/${target}`)).toBe(true);
   });
 });
 
@@ -787,8 +813,9 @@ describe('YAML/DBML twin parity: diff on the converted dbt-project copy (§9.6)'
 
     const before = JSON.parse((await run(['diff', '--all', '--json'], yaml)).out) as DiffResult;
     const after = JSON.parse((await run(['diff', '--all', '--json'], dbml)).out) as DiffResult;
-    const moved = new Set(plan.movedRelationships.flatMap((m) => m.diagrams.map((d) => d.replace(/\.(json|dbml)$/, ''))));
-    const key = (file: string): string => file.replace(/^\.erd-studio\//, '').replace(/\.(json|dbml)$/, '');
+    // A diagram is `<layer>/<name>` on both sides: `gold/sales.json` before, `gold/diagrams/sales.dbml` after.
+    const key = (file: string): string => file.replace(/^\.erd-studio\//, '').replace(/^([^/]+)\/diagrams\/([^/]+)$/, '$1/$2').replace(/\.(json|dbml)$/, '');
+    const moved = new Set(plan.movedRelationships.flatMap((m) => m.diagrams.map(key)));
     const shape = (d: DiffResult['domains'][number]) => ({
       domain: d.domain, layer: d.layer, clean: d.clean, error: d.error?.code,
       phantoms: d.phantoms, missingModelFiles: d.missingModelFiles, modelsWithoutColumns: d.modelsWithoutColumns,
@@ -800,12 +827,13 @@ describe('YAML/DBML twin parity: diff on the converted dbt-project copy (§9.6)'
     let compared = 0;
     for (const b of before.domains) {
       const a = after.domains.find((d) => key(d.file) === key(b.file))!;
-      expect(a.file).toBe(b.file.replace(/\.json$/, '.dbml'));
-      // Every DBML fix names a .dbml file: a table file, or the owner folder's relationships file.
+      expect(a.file).toBe(b.file.replace(/^(\.erd-studio\/[^/]+)\/([^/]+)\.json$/, '$1/diagrams/$2.dbml'));
+      // Every DBML fix names a .dbml file: a table file, or a relationships file for a relationship.
       for (const f of a.fixes) {
         if (f.kind === 'resolve-phantom') continue;
         expect(f.file, `${a.file} ${f.kind}`).toMatch(/\.dbml$/);
-        if (/relationship|cardinality/.test(f.kind) && f.file.includes('/tables/')) expect(f.file).toMatch(/\/_relationships\.dbml$/);
+        if (/relationship|cardinality/.test(f.kind) && f.kind !== 'declare-composite-foreign-key') expect(f.file).toMatch(/^\.erd-studio\/[^/]+\/relationships\/[^/]+\.dbml$/);
+        else expect(f.file).toMatch(/^\.erd-studio\/[^/]+\/(tables\/[^/]+|diagrams)\/[^/]+\.dbml$/);
       }
       if (moved.has(key(b.file))) continue; // these gain the relationships Convert moved into the library
       // An older (v4) file with no inline table converts straight to a DBML diagram: no migration left to ask for.

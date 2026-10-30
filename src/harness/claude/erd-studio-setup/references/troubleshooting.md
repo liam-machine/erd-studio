@@ -182,14 +182,18 @@ Other warnings are information.
   message says "Quote the value"). Others: a `use`, `Ref` or inline
   `[ref: …]` inside a table file (move it to the folder's `_relationships.dbml`, as the message
   says), a table file holding two Tables or a name other than its file's, a Ref that is stored
-  twice (`duplicateRef`: delete one), or a `tables` layer in `layers.json`. Fix the line, then
-  re-run doctor. Never "fix" a file by reformatting it.
+  twice (`duplicateRef`: delete one), or a table name in two table files (`duplicateTableName`). Fix
+  the line, then re-run doctor. Never "fix" a file by reformatting it.
 - **`resolve-format-conflicts`** — the same table (or diagram) exists as both YAML/JSON and DBML
   (`x.yml` and `x.dbml`); only one is read. Show the user both files and ask which to keep;
   never delete or convert either yourself.
 - **`finish-dbml-conversion`** — a **Convert Project to DBML** stopped part way (some files
   converted, their YAML/JSON sources still there). Ask the user to run **ERD Studio: Convert
   Project to DBML** again in VS Code: it checks every file and finishes. Never finish it by hand.
+- **`reconvert-dbml-project`** — the DBML files are from an ERD Studio 1.9 pre-release, whose folder
+  layout 2.0 does not read. Show the user doctor's message; undoing that conversion and running
+  **ERD Studio: Convert Project to DBML** again is theirs to do (git, then VS Code). Never move,
+  edit or delete the 1.9 files yourself.
 - **`import-dbml-file`** — a `.dbml` in a layer folder declares its own Tables and imports none:
   it is a single-file DBML (a dbdiagram.io download or an export), not an ERD Studio diagram. Ask
   the user to run **ERD Studio: Import DBML…** on it.

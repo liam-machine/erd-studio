@@ -12,7 +12,6 @@ import {
   dirnamePosix,
   isInsidePosix,
   isLibraryFolderName,
-  isReservedTableName,
   joinPosix,
   legacyDbmlFileMessage,
   normalisePosix,
@@ -232,21 +231,6 @@ describe('paths that belong together', () => {
   it('isLibraryFolderName is the listFoldersOf rule', () => {
     for (const ok of ['gold', 'Finance', 'SAP FI', '_x', 'a-b']) expect(isLibraryFolderName(ok)).toBe(true);
     for (const bad of ['', '.git', '.', '..', 'a/b', 'a\\b', 'a\u0000b']) expect(isLibraryFolderName(bad)).toBe(false);
-  });
-});
-
-describe('the reserved name', () => {
-  it('is _relationships in any case, and nothing else', () => {
-    expect(isReservedTableName('_relationships')).toBe(true);
-    expect(isReservedTableName('_Relationships')).toBe(true);
-    expect(isReservedTableName('_RELATIONSHIPS')).toBe(true);
-    // As sameName compares: surrounding white space is ignored.
-    for (const padded of [' _relationships ', '_relationships ', ' _Relationships', '\t_relationships\n']) {
-      expect(isReservedTableName(padded)).toBe(true);
-    }
-    for (const name of ['relationships', '_relationships_x', '_x', '__relationships', '_relationship']) {
-      expect(isReservedTableName(name)).toBe(false);
-    }
   });
 });
 

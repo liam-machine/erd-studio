@@ -24,11 +24,19 @@ describe('outlineDbmlFile', () => {
       metadata: [],
       tables: [],
       uses: [
-        { path: '../../silver/tables/shared/dim_date.dbml', resolved: 'silver/tables/shared/dim_date.dbml', line: 2, wildcard: false, tables: ['dim_date'] },
-        { path: '../tables/gold/fct_order', resolved: 'gold/tables/gold/fct_order.dbml', line: 3, wildcard: false, tables: ['fct_order'] },
-        { path: './calendar.dbml', resolved: 'gold/relationships/calendar.dbml', line: 4, wildcard: true, tables: [] },
+        { path: '../../silver/tables/shared/dim_date.dbml', resolved: 'silver/tables/shared/dim_date.dbml', line: 2, wildcard: false, tables: ['dim_date'], specifiers: ['shared.dim_date'] },
+        { path: '../tables/gold/fct_order', resolved: 'gold/tables/gold/fct_order.dbml', line: 3, wildcard: false, tables: ['fct_order'], specifiers: ['gold.fct_order'] },
+        { path: './calendar.dbml', resolved: 'gold/relationships/calendar.dbml', line: 4, wildcard: true, tables: [], specifiers: [] },
       ],
     });
+  });
+
+  it('keeps each table specifier in its case as written, quoted only where DBML needs it, for an exact compare with a declared reference', () => {
+    const text = "use { table Gold.Fct_Order } from '../tables/gold/fct_order.dbml'\nuse { table \"SAP FI\".afih } from '../tables/SAP FI/afih.dbml'\n"
+      + "use { table \"gold\".\"dim_date\" } from '../tables/gold/dim_date.dbml'\n";
+    const uses = outlineDbmlFile(text, 'gold/diagrams/sales.dbml').uses;
+    expect(uses.map((u) => u.tables)).toEqual([['fct_order'], ['afih'], ['dim_date']]);
+    expect(uses.map((u) => u.specifiers)).toEqual([['Gold.Fct_Order'], ['"SAP FI".afih'], ['gold.dim_date']]);
   });
 
   it('lists the Enums a table file declares, with their lines; a leading byte-order mark is ignored', () => {

@@ -1480,7 +1480,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   // A DBML relationships file changed externally: its Refs may belong to any
-  // table (a misplaced Ref attaches wherever its owner is), so every open
+  // table (a Ref attaches wherever its owner is, from any file), so every open
   // canvas is redrawn (§5.4). Never a table event.
   const relationshipsChangedSubscription = fileWatcherService.onRelationshipsChanged(async () => {
     tableLibraryService.invalidateRelationships();

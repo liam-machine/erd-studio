@@ -63,12 +63,12 @@ import {
   type Envelope,
 } from './context';
 import { toUnreadableTableFile, unreadableHint, type UnreadableTableFile } from './diff';
-import { collectDbmlProblems, FORMAT_CONFLICT_CODE, type DbmlProblemEntry } from './dbmlProblems';
+import { collectDbmlProblems, FORMAT_CONFLICT_CODE, LEGACY_DBML_TREE_CODE, type DbmlProblemEntry } from './dbmlProblems';
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
   | 'resolve-merge-conflicts' | 'fix-model-yaml' | 'resolve-naming-conflicts' | 'fix-subject-area-naming' | 'migrate-v5' | 'turn-round-relationships' | 'update-harness'
-  | 'finish-dbml-conversion' | 'fix-dbml-file' | 'resolve-format-conflicts' | 'import-dbml-file' | 'ready';
+  | 'finish-dbml-conversion' | 'fix-dbml-file' | 'resolve-format-conflicts' | 'import-dbml-file' | 'reconvert-dbml-project' | 'ready';
 
 export interface NextStep {
   id: NextStepId;
@@ -135,7 +135,7 @@ export interface DoctorResult extends Envelope {
     /**
      * How the project stores its logical model (native DBML storage, §3.2):
      * `dbml` (also when there is no `.erd-studio` yet), `yaml` or `mixed`.
-     * When it is `dbml`, `naming` says nothing: the library is `tables/`.
+     * When it is `dbml`, `naming` says nothing: the tables are in each layer's `tables/`.
      */
     storage: ProjectStorage;
     /** Every diagram, project-relative, with its file format (`json` or `dbml`, by the classifier). */
@@ -351,21 +351,23 @@ async function probe(
 
 /**
  * Where `turn-round-relationships` says to rewrite a backwards relationship:
- * the relationships file of that column's table when it is DBML, its own
- * file when it is YAML (undefined keeps the YAML wording). The rewritten
- * relationship starts at the column that is not a key, the stored `toModel`.
+ * in place, in the relationships file that holds it (§2.4: a turn-round
+ * stays in its file), or in its own file when its table is YAML (undefined
+ * keeps the YAML wording).
  */
 function backwardsHomeOf(ctx: CliContext, erd: DoctorResult['erd']): string | undefined {
   const homes = new Set<string>();
   let yaml = false;
   for (const b of erd.backwardsRelationships) {
-    const file = ctx.tableLibraryService.relationshipsFileFor(b.toModel);
+    const file = ctx.tableLibraryService.relationshipsFileHolding({
+      fromModel: b.fromModel, fromColumn: b.fromColumns[0], toModel: b.toModel, toColumn: b.toColumns[0],
+    });
     if (file === undefined) { yaml = true; continue; }
     homes.add(ctx.tableLibraryService.libraryRelativePath(file));
   }
   if (homes.size === 0) return undefined;
   const list = [...homes].sort().join(', ');
-  return `in the relationships file of that column's table (${list})${yaml ? ", or in that column's table file for a YAML table" : ''}`;
+  return `in place, in the relationships file that holds it (${list})${yaml ? ", or in that column's table file for a YAML table" : ''}`;
 }
 
 /** The naming migration's plan (#182), as doctor reports it. */
@@ -638,6 +640,18 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
       command: null,
     });
   }
+  // A project still in the 1.9 pre-release's tree (§1.8): nothing of its DBML
+  // reads until it is converted again, which is the user's to do (git, then
+  // VS Code), so it is raised before anything that edits a file.
+  const legacyTree = r.erd.dbmlProblems.find((p) => p.code === LEGACY_DBML_TREE_CODE);
+  if (legacyTree) {
+    steps.push({
+      id: 'reconvert-dbml-project',
+      title: 'Convert the project to DBML again',
+      why: `${legacyTree.message} Show the user this message; don't edit, move or delete the 1.9 files yourself, and don't run git commands.`,
+      command: null,
+    });
+  }
   // A model file that does not parse renders as an empty model whatever
   // state dbt is in, so it comes before the dbt steps too — as the step's
   // own why says, it is to be fixed before anything else.
@@ -661,7 +675,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
   }
   // A DBML file that does not parse, or breaks every other DBML tool: like a
   // YAML file that does not parse, it is fixed before anything else.
-  const dbmlErrors = r.erd.dbmlProblems.filter((p) => p.severity === 'error' && !p.mergeConflict && p.code !== FORMAT_CONFLICT_CODE);
+  const dbmlErrors = r.erd.dbmlProblems.filter((p) => p.severity === 'error' && !p.mergeConflict && p.code !== FORMAT_CONFLICT_CODE && p.code !== LEGACY_DBML_TREE_CODE);
   if (dbmlErrors.length > 0) {
     const files = new Set(dbmlErrors.map((p) => p.file));
     steps.push({

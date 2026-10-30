@@ -11,7 +11,7 @@
  */
 
 import type { Cardinality, ColumnDef, TableRole, Stage } from '../types/semantic';
-import { COLUMN_NAME_PATTERN, RESERVED_TABLE_NAME_MESSAGE, TABLE_NAME_PATTERN, TABLE_NAME_RULE, findDuplicateNames } from '../types/naming';
+import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN, TABLE_NAME_RULE, findDuplicateNames } from '../types/naming';
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
 import { ADD_EXISTING_TABLES_LIMIT } from '../types/messages';
 import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, isValidTableAlias } from '@erd-studio/core';
@@ -55,12 +55,6 @@ export function validateTableNameSafety(name: unknown): string | null {
  * Do NOT use this for names discovered in the dbt project — see
  * {@link validateTableNameSafety}.
  */
-/**
- * The 1.9 pre-release's refusal for a table named like its relationships file.
- * @deprecated 2.0-switch: S8b deletes it with its last callers; the layer-first tree reserves no table name.
- */
-export { RESERVED_TABLE_NAME_MESSAGE };
-
 /**
  * Validate the name of a table about to be CREATED as a `.dbml` file in
  * `<layer>/tables/<schema>/`: the path-safety rule. The layer-first tree

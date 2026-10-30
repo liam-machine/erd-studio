@@ -3,7 +3,7 @@
  * (`TableLibraryService.readingTables`, `memberAttachment`): each member's
  * relationships must be exactly what an attach over the whole library gives
  * — same entries, same order, same composite keys — whatever the library
- * holds (misplaced Refs, links stored twice, composites, bare one-to-ones,
+ * holds (Refs in another layer's file, links stored twice, composites, bare one-to-ones,
  * pending Refs, labels, a DBML alias, a dangling end, a file that does not
  * read). And the index is checked once per read, not once per lookup.
  */

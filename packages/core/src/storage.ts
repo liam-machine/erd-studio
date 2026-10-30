@@ -12,7 +12,6 @@
 import { NON_SUBJECT_AREA_DIRS } from './domain.js';
 import { LAYERS_CONFIG_FILE } from './layers.js';
 import { LOGICAL_MODELS_DIR, TABLES_DIR } from './logicalModel.js';
-import { DBML_RELATIONSHIPS_FILE_STEM } from './dbmlRichProperties.js';
 
 /** The folder of table templates; never a layer. */
 export const TEMPLATES_DIR = 'templates';
@@ -61,17 +60,6 @@ export function isLibraryFolderName(name: string): boolean {
     !name.includes('\\') &&
     !name.includes('\u0000')
   );
-}
-
-/**
- * Whether `name` is the 1.9 pre-release's relationships-file stem
- * `_relationships`, as `sameName` compares names (case-insensitive,
- * surrounding white space ignored).
- * @deprecated 2.0-switch: S8b deletes it with its last callers: the layer-first
- * tree reserves no table name.
- */
-export function isReservedTableName(name: string): boolean {
-  return typeof name === 'string' && name.trim().toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM;
 }
 
 /** `name` without its final extension, and the extension (with its dot), or `''` when it has none. */

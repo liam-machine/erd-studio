@@ -279,7 +279,7 @@ describe('attachRelationships', () => {
     });
     expect(result.byOwner.get('fct_order')).toHaveLength(2);
     expect(result.warnings).toEqual([]);
-    expect(result.misplaced ?? []).toEqual([]);
+    expect('misplaced' in result).toBe(false);
   });
 
   it('an orphaned Ref (a YAML owner, or no owner) is not attached', () => {

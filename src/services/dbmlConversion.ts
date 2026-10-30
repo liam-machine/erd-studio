@@ -52,7 +52,6 @@ import {
   isErdLayoutName,
   isLibraryFolderName,
   isReservedLayerName,
-  isReservedTableName,
   libraryCopyRank,
   linkKey,
   loadDisplaySubjectArea,
@@ -802,10 +801,6 @@ async function planOnce(
       if (held) addLeftTable(held.name, f.path);
       continue;
     }
-    if (isReservedTableName(stem)) {
-      leave(f.path, '‘_relationships’ is the name of the relationships file in a DBML project. Rename the table (its file and its name: key).');
-      continue;
-    }
     let model: SemanticTable | null;
     try {
       model = parseTableText(f.text, stem);
@@ -847,10 +842,6 @@ async function planOnce(
     }
     if (lower(model.name) !== lower(stem)) {
       leave(f.path, `It holds the table "${model.name}", and a DBML table file is named exactly as its table. Rename the file or the name: key.`, yamlLineOf(f.text, ['name']));
-      continue;
-    }
-    if (isReservedTableName(model.name)) {
-      leave(f.path, '‘_relationships’ is the name of the relationships file in a DBML project. Rename the table (its file and its name: key).');
       continue;
     }
     // DBML refuses two columns of one name ([3023]), compared exactly as written.

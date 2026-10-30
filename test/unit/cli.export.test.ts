@@ -141,7 +141,7 @@ describe('parseArgs — export', () => {
     expect(USAGE).toMatch(/--all +every subject area, as a JSON list of \{ fileName, content \}/);
     expect(USAGE).not.toContain('--out');
     // Native DBML storage (§7.1): the example names a DBML diagram.
-    expect(USAGE).toContain('erd-studio export --domain .erd-studio/gold/sales.dbml --format dbml');
+    expect(USAGE).toContain('erd-studio export --domain .erd-studio/gold/diagrams/sales.dbml --format dbml');
     expect(USAGE).not.toContain('sales.json');
     expect(() => parseArgs(['exprt'])).toThrow(/doctor, inventory, diff, export, version/);
   });
@@ -428,7 +428,7 @@ describe('export on native DBML storage (§7.1, S4)', () => {
   const NATIVE = path.join(ROOT, 'test/fixtures/dbml-native');
 
   it.each(CLI_EXPORT_FORMATS)('--domain a .dbml diagram exports it as %s', async (format) => {
-    const r = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/gold/sales.dbml', '--format', format], NATIVE);
+    const r = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/gold/diagrams/sales.dbml', '--format', format], NATIVE);
     expect(r.code).toBe(0);
     expect(r.out.startsWith(FIRST_LINE[format])).toBe(true);
     expect(r.out).toContain('fct_order');
@@ -439,14 +439,14 @@ describe('export on native DBML storage (§7.1, S4)', () => {
     expect(r.code).toBe(0);
     const result = JSON.parse(r.out) as ExportAllResult;
     expect(result.files.map((f) => [f.domain, f.fileName])).toEqual([
-      ['.erd-studio/gold/sales.dbml', 'sales.dbml'],
-      ['.erd-studio/silver/staging.dbml', 'staging.dbml'],
+      ['.erd-studio/gold/diagrams/sales.dbml', 'sales.dbml'],
+      ['.erd-studio/silver/diagrams/staging.dbml', 'staging.dbml'],
     ]);
     expect(result.skipped).toEqual([]);
   });
 
   it('--domain a table file is not-a-diagram (exit 3)', async () => {
-    const r = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/tables/gold/fct_order.dbml', '--format', 'dbml', '--json'], NATIVE);
+    const r = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/gold/tables/gold/fct_order.dbml', '--format', 'dbml', '--json'], NATIVE);
     expect(r.code).toBe(3);
     expect(JSON.parse(r.out).error.code).toBe('not-a-diagram');
   });
@@ -459,16 +459,47 @@ describe('export: a DBML diagram exports as its YAML twin does (§9.6, S8)', () 
     expect(r.code, `${project} ${format}`).toBe(0);
     return r.out;
   };
+  /**
+   * The schema Convert gave each table whose yml has none (its schema folder in the twin,
+   * `<layer>/tables/<schema>/<name>.dbml`): the one documented difference (convertSchemaFallback).
+   */
+  const givenSchemas = (yamlRoot: string, dbmlRoot: string): Map<string, string> => {
+    const given = new Map<string, string>();
+    const yamlSchema = (name: string): boolean => fs.readdirSync(path.join(yamlRoot, '.erd-studio', 'logical-models'), { recursive: true, encoding: 'utf-8' })
+      .filter((f) => path.basename(f) === `${name}.yml`)
+      .some((f) => /^schema:/m.test(fs.readFileSync(path.join(yamlRoot, '.erd-studio', 'logical-models', f), 'utf-8')));
+    for (const f of fs.readdirSync(path.join(dbmlRoot, '.erd-studio'), { recursive: true, encoding: 'utf-8' })) {
+      const m = /^[^/\\]+[/\\]tables[/\\]([^/\\]+)[/\\]([^/\\]+)\.dbml$/.exec(f);
+      if (m && !yamlSchema(m[2])) given.set(m[2], m[1]);
+    }
+    return given;
+  };
+  /** An export with the schemas Convert gave taken out again (`Table gold.x` → `Table x`, Mermaid's schema line). */
+  const withoutGivenSchemas = (text: string, given: ReadonlyMap<string, string>): string => {
+    let out = text;
+    for (const [name, schema] of given) {
+      out = out.replace(new RegExp(`(^|[^\\w.])${schema}\\.${name}(?!\\w)`, 'gm'), `$1${name}`);
+      out = out.replace(new RegExp(`(Table ${name}) \\[schema: '${schema}'\\]`, 'g'), '$1');
+      out = out.replace(new RegExp(`(Table ${name} \\[)schema: '${schema}', `, 'g'), '$1');
+      out = out.replace(new RegExp(`(%% Table ${name}\\n)  %%   schema: ${schema}\\n`, 'g'), '$1');
+    }
+    return out;
+  };
 
-  it.each(CLI_EXPORT_FORMATS)('composite-and-self: byte for byte as %s', async (format) => {
+  it.each(CLI_EXPORT_FORMATS)('composite-and-self: byte for byte as %s, apart from the schema Convert gave each table', async (format) => {
     const yaml = await exportOf(path.join(CORE, 'composite-and-self'), '.erd-studio/gold/vault.json', format);
-    const dbml = await exportOf(path.join(CORE, 'dbml/composite-and-self'), '.erd-studio/gold/vault.dbml', format);
-    expect(dbml).toBe(yaml);
+    const dbml = await exportOf(path.join(CORE, 'dbml/composite-and-self'), '.erd-studio/gold/diagrams/vault.dbml', format);
+    const given = givenSchemas(path.join(CORE, 'composite-and-self'), path.join(CORE, 'dbml/composite-and-self'));
+    expect([...given].sort()).toEqual([['employee', 'gold'], ['pit_customer', 'gold'], ['sat_customer', 'gold']]);
+    expect(dbml).not.toBe(yaml);
+    expect(withoutGivenSchemas(dbml, given)).toBe(yaml);
   });
 
-  it.each(CLI_EXPORT_FORMATS)('showcase: the same lines as %s (relationships come in the library\'s sorted order, §2.8)', async (format) => {
+  it.each(CLI_EXPORT_FORMATS)('showcase: the same lines as %s, apart from the schema Convert gave a table (relationships come in the library\'s sorted order, §2.8)', async (format) => {
     const yaml = await exportOf(path.join(CORE, 'showcase'), '.erd-studio/silver/showcase.json', format);
-    const dbml = await exportOf(path.join(CORE, 'dbml/showcase'), '.erd-studio/silver/showcase.dbml', format);
-    expect(dbml.split('\n').sort()).toEqual(yaml.split('\n').sort());
+    const dbml = await exportOf(path.join(CORE, 'dbml/showcase'), '.erd-studio/silver/diagrams/showcase.dbml', format);
+    const given = givenSchemas(path.join(CORE, 'showcase'), path.join(CORE, 'dbml/showcase'));
+    expect([...given]).toEqual([['fct_order', 'public']]);
+    expect(withoutGivenSchemas(dbml, given).split('\n').sort()).toEqual(yaml.split('\n').sort());
   });
 });

@@ -339,15 +339,15 @@ describe('command errors see through a rollback that could not finish', () => {
 });
 
 describe('Draw from dbt and Import DBML in a DBML project (§5.7)', () => {
-  it('Draw skips a library table stored as YAML and a new table named _relationships, with their reasons', () => {
+  it('Draw skips a library table stored as YAML, with its reason; a new table named _relationships is an ordinary table', () => {
     const draft = buildDbtDraft({
       modelNames: ['dim_yaml', '_relationships', 'fct_new'],
       libraryHas: (n) => n === 'dim_yaml',
       seed: (n) => ({ name: n, columns: [col('id')] } as SemanticTable),
       dbml: { tableStorage: (n) => (n === 'dim_yaml' ? 'yaml' : undefined) },
     });
-    expect(draft.modelNames).toEqual(['fct_new']);
-    expect(draft.skipped).toEqual([{ name: 'dim_yaml', reason: 'yaml-table' }, { name: '_relationships', reason: 'reserved-name' }]);
+    expect(draft.modelNames).toEqual(['_relationships', 'fct_new']);
+    expect(draft.skipped).toEqual([{ name: 'dim_yaml', reason: 'yaml-table' }]);
     // Outside DBML both are drawn as before.
     const plain = buildDbtDraft({ modelNames: ['dim_yaml', 'fct_new'], libraryHas: (n) => n === 'dim_yaml', seed: (n) => ({ name: n, columns: [col('id')] } as SemanticTable) });
     expect(plain.modelNames).toEqual(['dim_yaml', 'fct_new']);

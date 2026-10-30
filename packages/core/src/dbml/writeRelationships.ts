@@ -326,8 +326,11 @@ interface UseLine {
   resolved: string;
   stem: string;
   wildcard: boolean;
-  /** Selective specifiers: each table's unqualified name, lower-case, and its source text. */
-  tables: Array<{ name: string; text: string }>;
+  /**
+   * Selective specifiers: each table's unqualified name, lower-case, its source text, and its
+   * name parts as DBML writes a name (`reference`, the form of a table's declared reference).
+   */
+  tables: Array<{ name: string; text: string; reference: string }>;
   /** How many specifiers the line has (tables and other kinds). */
   specifierCount: number;
 }
@@ -352,7 +355,11 @@ export function useLinesOf(ast: AstNode, text: string, filePath: string): UseLin
         if (lower(String(specifier?.importKind?.value ?? '')) !== 'table') continue;
         const parts = plainNames(specifier.name);
         if (parts && parts.length > 0) {
-          tables.push({ name: lower(parts[parts.length - 1]), text: text.slice(specifier.name.start, specifier.name.end) });
+          tables.push({
+            name: lower(parts[parts.length - 1]),
+            text: text.slice(specifier.name.start, specifier.name.end),
+            reference: parts.map(dbmlName).join('.'),
+          });
         }
       }
     }

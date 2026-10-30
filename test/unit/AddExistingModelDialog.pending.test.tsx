@@ -21,7 +21,7 @@ import { useEditorStore } from '../../webview/store/editorStore';
 
 const row = (name: string, pending = false) => ({
   name, schema: '', description: '', columnCount: pending ? 0 : 3, source: 'logical' as const,
-  sourcePath: `.erd-studio/tables/${name}.dbml`,
+  sourcePath: `.erd-studio/gold/tables/gold/${name}.dbml`,
   ...(pending ? { detailsPending: true as const } : {}),
 });
 

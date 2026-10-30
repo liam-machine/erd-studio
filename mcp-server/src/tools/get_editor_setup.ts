@@ -42,7 +42,7 @@ export const get_editor_setup = {
       'ERD Studio: New Subject Area',
       '```',
       '',
-      'This creates `.erd-studio/` with `layers.json` and the diagram (a `.dbml` file in a layer folder); the table library (`tables/`, one `.dbml` file per table) comes with the first table.',
+      'This creates `.erd-studio/` with `layers.json` and the diagram (`<layer>/diagrams/<name>.dbml`); the table library (`<layer>/tables/<schema>/`, one `.dbml` file per table) comes with the first table.',
       '',
       '## 3. Set up your AI helper (writes the skill files)',
       '',

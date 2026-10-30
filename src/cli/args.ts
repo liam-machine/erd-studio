@@ -4,7 +4,7 @@
  *
  * Flags may appear before or after the subcommand, as `--flag value` or
  * `--flag=value`. Every flag is checked against the subcommand's allowlist:
- * an unknown or misplaced flag is a usage error (exit 2), never ignored,
+ * an unknown flag, or one given to the wrong subcommand, is a usage error (exit 2), never ignored,
  * because a silently dropped `--domain` would diff the wrong thing.
  */
 
@@ -16,8 +16,8 @@ export const CLI_COMMANDS: readonly CliCommand[] = ['doctor', 'inventory', 'diff
 
 /**
  * What `export --format` takes: every diagram format. (`dbml-layout`, the
- * `.dbdiagram` file of a `dbml-rich` export, was removed: the positions are
- * in the rich export's own Project, `erd_layout`.)
+ * dbdiagram.io layout file of a `dbml-rich` export, was removed: the positions
+ * are in the rich export's own Project, `erd_layout`.)
  */
 export type CliExportFormat = DiagramExportFormat;
 
@@ -247,7 +247,7 @@ Shared options:
   --verbose             show internal diagnostics on stderr
 
 export prints a subject area's logical (design) diagram on stdout and writes no file:
-  erd-studio export --domain .erd-studio/gold/sales.dbml --format dbml > sales.dbml
+  erd-studio export --domain .erd-studio/gold/diagrams/sales.dbml --format dbml > sales.dbml
   dbml         DBML any tool reads; ERD Studio's fields go in notes
   dbml-rich    rich DBML: every ERD Studio field as a property, the table positions
                in the Project's erd_layout (DBML 9.1+, as dbdiagram.io reads)

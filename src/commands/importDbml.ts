@@ -3,8 +3,8 @@
  * subject area: ERD Studio's own rich export (`toDbmlRich`, "Rich DBML") or
  * a file from dbdiagram.io or any other DBML tool. No dbt needed: it reads
  * only the chosen file. Its Project's `erd_layout`, when it has one (the rich
- * export writes it), places the tables and sticky notes; a `.dbdiagram` file
- * beside it is not read.
+ * export writes it), places the tables and sticky notes; a dbdiagram.io
+ * layout file beside it is not read.
  *
  * Steps: file → read it (`workspace.fs`) → `readDbml` (a file that is not
  * valid DBML is reported with its line numbers and an Open File button) →

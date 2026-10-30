@@ -45,8 +45,14 @@ describe('redactPaths', () => {
     ['/home/jo/acme/.erd-studio/tables/gold/dim_customer.yml bad', '{project}/.erd-studio/tables/{table}.yml bad'],
     ['/home/jo/acme/.erd-studio/tables/dim_customer.yml bad', '{project}/.erd-studio/tables/{table}.yml bad'],
     ['/home/jo/acme/.erd-studio/tables/orders.json bad', '{project}/.erd-studio/{layer}/{domain}.json bad'],
-    // Native DBML storage (2.0): a diagram, its layout file, a table file and a
-    // relationships file (a fixed name, so it is kept), top level and in a folder.
+    // The layer-first DBML tree (2.0): a diagram, a table file in its schema folder and a
+    // relationships file, each by its role; every name (layer, schema, table, file) is dropped.
+    ['/home/jo/acme/.erd-studio/gold/diagrams/sales.dbml:3:1 bad', '{project}/.erd-studio/{layer}/diagrams/{diagram}.dbml:3:1 bad'],
+    ['C:\\Users\\Jo\\acme\\.erd-studio\\gold\\diagrams\\sales report.dbml bad', '{project}/.erd-studio/{layer}/diagrams/{diagram}.dbml bad'],
+    ['/home/jo/acme/.erd-studio/gold/tables/finance/fct_order.dbml bad', '{project}/.erd-studio/{layer}/tables/{schema}/{table}.dbml bad'],
+    ['/home/jo/acme/.erd-studio/silver/relationships/calendar.dbml line 4', '{project}/.erd-studio/{layer}/relationships/{file}.dbml line 4'],
+    // The 1.9 pre-release's tree, still redacted by shape: a diagram, its layout file, a table file
+    // and a relationships file (a fixed name, so it is kept), top level and in a folder.
     ['/home/jo/acme/.erd-studio/gold/sales.dbml:3:1 bad', '{project}/.erd-studio/{layer}/{domain}.dbml:3:1 bad'],
     ['/home/jo/acme/.erd-studio/gold/sales.dbdiagram is not JSON', '{project}/.erd-studio/{layer}/{domain}.dbdiagram is not JSON'],
     ['/home/jo/acme/.erd-studio/tables/gold/fct_order.dbml bad', '{project}/.erd-studio/tables/{table}.dbml bad'],

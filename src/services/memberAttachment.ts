@@ -35,7 +35,7 @@ class NeedsWholeLibrary extends Error {}
  * file does not read). Null when the whole library is needed.
  *
  * Only the members' lists in `byOwner` are complete; the reports
- * (`misplaced`, `orphaned`, `duplicates`, `warnings`) cover only the Refs
+ * (`orphaned`, `duplicates`, `warnings`) cover only the Refs
  * read here.
  */
 export function memberAttachment(

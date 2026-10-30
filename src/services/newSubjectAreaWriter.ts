@@ -189,8 +189,8 @@ export async function writeNewSubjectArea(
     // Existing library tables that gained a relationship, once the subject area is on disk.
     for (const table of write.changedTables) {
       if (write.newTables.includes(table) || dbmlChanged.includes(table)) continue;
-      // A DBML table's save also writes its folder's relationships file (and
-      // moves misplaced Refs home): snapshot every file the save plans.
+      // A DBML table's save also writes the relationships files holding its
+      // Refs: snapshot every file the save plans.
       const paths = tableLibraryService.planTableWrites
         ? tableLibraryService.planTableWrites({ save: [{ model: table }] }).writes.map((w) => w.path)
         : [tableLibraryService.tablePath(table.name)];

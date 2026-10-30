@@ -198,6 +198,14 @@ export interface DbmlUseOutline {
   wildcard: boolean;
   /** A selective line's table specifiers: each unqualified name, lower-case. */
   tables: string[];
+  /**
+   * The same specifiers in their case as written, each part re-rendered as
+   * DBML writes a name (`gold.fct_order`, `"SAP FI".afih`; `"gold"."x"` is
+   * `gold.x`), in order, for an exact-case compare with a table's declared
+   * reference that quoting alone never fails. Optional: an older core leaves
+   * it unset.
+   */
+  specifiers?: string[];
 }
 
 /** What `doctor` checks in a `.dbml` file: its `use` lines and the Enums it declares (`outlineDbmlFile`). */
@@ -254,12 +262,6 @@ export interface DbmlRefLocation {
 export interface DbmlAttachResult {
   /** Each DBML owner's relationships (lower-case name → list), in file order, with `compositeKey`s derived. */
   byOwner: Map<string, TableRelationship[]>;
-  /**
-   * Always empty: in the layer-first tree a Ref may sit in any relationships
-   * file (decision 5), so none is misplaced. Optional, for its one reader.
-   * @deprecated 2.0-switch: S8b deletes it with doctor's `misplacedRef`.
-   */
-  misplaced?: Array<DbmlRefLocation & { home: string }>;
   /** Refs owned by a YAML table or by no table: not attached, never touched. */
   orphaned: DbmlRefLocation[];
   /** Links read more than once; `kept` is the copy attached, `dropped` the other. */

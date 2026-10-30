@@ -18,10 +18,12 @@ import type { DbmlConversionInput } from '../../src/services/dbmlConversion';
 import { classifySemanticFile } from '@erd-studio/core';
 
 /**
- * A converted project shaped like Convert's output: tables in two library
- * folders, one relationships file per folder with enough Refs and `use`
- * lines to be compiled in chunks, and diagrams that read both relationships
- * files with `use *` (one with enough `use` lines to be chunked too).
+ * A converted project in the layer-first tree: tables in two layers
+ * (`<layer>/tables/<layer>/`), one relationships file per layer
+ * (`<layer>/relationships/<layer>.dbml`) with enough Refs and `use` lines to
+ * be compiled in chunks, and diagrams (`<layer>/diagrams/`) that read both
+ * relationships files with `use *` (one with enough `use` lines to be
+ * chunked too).
  */
 function project(): Record<string, string> {
   const files: Record<string, string> = {};
@@ -32,7 +34,7 @@ function project(): Record<string, string> {
     for (let i = 0; i < 40; i++) {
       const name = `${folder}_t${String(i).padStart(2, '0')}`;
       names[folder].push(name);
-      files[`tables/${folder}/${name}.dbml`] =
+      files[`${folder}/tables/${folder}/${name}.dbml`] =
         `Table ${name} [note: 'table ${i}'] {\n  ${name}_key int [pk]\n  other_key int\n  label varchar [note: 'a label']\n}\n`;
     }
   }
@@ -49,74 +51,76 @@ function project(): Record<string, string> {
     });
     for (const name of [...used].sort()) {
       const inFolder = names[folder].includes(name);
-      lines.push(`use { table ${name} } from '${inFolder ? `./${name}.dbml` : `../${other}/${name}.dbml`}'`);
+      lines.push(`use { table ${name} } from '${inFolder ? `../tables/${folder}/${name}.dbml` : `../../${other}/tables/${other}/${name}.dbml`}'`);
     }
-    files[`tables/${folder}/_relationships.dbml`] = `${[...lines, ...refs].join('\n')}\n`;
+    files[`${folder}/relationships/${folder}.dbml`] = `${[...lines, ...refs].join('\n')}\n`;
   }
   const diagramOf = (name: string, members: string[]): string => [
     `Project ${name} {`,
     "  erd_schema_version: '7'",
     '}',
     '',
-    ...members.map((m) => `use { table ${m} } from '../tables/${m.split('_')[0]}/${m}.dbml'`),
-    "use * from '../tables/gold/_relationships.dbml'",
-    "use * from '../tables/silver/_relationships.dbml'",
+    ...members.map((m) => `use { table ${m} } from '../../${m.split('_')[0]}/tables/${m.split('_')[0]}/${m}.dbml'`),
+    "use * from '../../gold/relationships/gold.dbml'",
+    "use * from '../../silver/relationships/silver.dbml'",
     '',
   ].join('\n');
-  files['gold/big.dbml'] = diagramOf('big', [...names.gold, ...names.silver.slice(0, 20)]);
-  files['gold/small.dbml'] = diagramOf('small', names.gold.slice(0, 5));
-  files['silver/area.dbml'] = diagramOf('area', names.silver.slice(10, 30));
+  files['gold/diagrams/big.dbml'] = diagramOf('big', [...names.gold, ...names.silver.slice(0, 20)]);
+  files['gold/diagrams/small.dbml'] = diagramOf('small', names.gold.slice(0, 5));
+  files['silver/diagrams/area.dbml'] = diagramOf('area', names.silver.slice(10, 30));
   return files;
 }
 
 type Mutation = (files: Record<string, string>) => void;
 
-const GOLD_REL = 'tables/gold/_relationships.dbml';
-const SILVER_REL = 'tables/silver/_relationships.dbml';
+const GOLD_REL = 'gold/relationships/gold.dbml';
+const SILVER_REL = 'silver/relationships/silver.dbml';
+const SMALL = 'gold/diagrams/small.dbml';
+const table = (name: string): string => `${name.split('_')[0]}/tables/${name.split('_')[0]}/${name}.dbml`;
 const firstRef = (text: string): string => text.split('\n').find((l) => l.startsWith('Ref'))!;
 const lastRef = (text: string): string => text.split('\n').filter((l) => l.startsWith('Ref')).pop()!;
 
 const MUTATIONS: Record<string, Mutation> = {
-  'a syntax error in a table': (f) => { f['tables/gold/gold_t00.dbml'] = f['tables/gold/gold_t00.dbml'].replace('{', '{ ((('); },
-  'a table a diagram uses is gone': (f) => { delete f['tables/gold/gold_t01.dbml']; },
-  'a table only a relationships file uses is gone': (f) => { delete f['tables/silver/silver_t39.dbml']; },
-  'a table renamed inside its file': (f) => { f['tables/gold/gold_t02.dbml'] = f['tables/gold/gold_t02.dbml'].replace('Table gold_t02', 'Table gold_t02_x'); },
+  'a syntax error in a table': (f) => { f[table('gold_t00')] = f[table('gold_t00')].replace('{', '{ ((('); },
+  'a table a diagram uses is gone': (f) => { delete f[table('gold_t01')]; },
+  'a table only a relationships file uses is gone': (f) => { delete f[table('silver_t39')]; },
+  'a table renamed inside its file': (f) => { f[table('gold_t02')] = f[table('gold_t02')].replace('Table gold_t02', 'Table gold_t02_x'); },
   'a Ref to a column that does not exist': (f) => { f[GOLD_REL] = f[GOLD_REL].replace(firstRef(f[GOLD_REL]), firstRef(f[GOLD_REL]).replace('.other_key', '.nope')); },
   'a Ref to a table with no use line': (f) => { f[GOLD_REL] += 'Ref: gold_t00.other_key > nowhere.id\n'; },
   'two use lines import one name from two files (in different chunks)': (f) => {
-    f['tables/silver/clash.dbml'] = 'Table gold_t00 { id int }\n';
-    f[GOLD_REL] += "use { table gold_t00 } from '../silver/clash.dbml'\n";
+    f['silver/tables/silver/clash.dbml'] = 'Table gold_t00 { id int }\n';
+    f[GOLD_REL] += "use { table gold_t00 } from '../../silver/tables/silver/clash.dbml'\n";
   },
-  'a diagram declares a table it imports': (f) => { f['gold/small.dbml'] += 'Table gold_t00 { id int }\n'; },
-  'a use line names a table its file does not declare': (f) => { f['gold/small.dbml'] = f['gold/small.dbml'].replace('use { table gold_t00 }', 'use { table not_here }'); },
+  'a diagram declares a table it imports': (f) => { f[SMALL] += 'Table gold_t00 { id int }\n'; },
+  'a use line names a table its file does not declare': (f) => { f[SMALL] = f[SMALL].replace('use { table gold_t00 }', 'use { table not_here }'); },
   'a relationships file a diagram reads is gone': (f) => { delete f[SILVER_REL]; },
   'the same Ref twice in one file, chunks apart': (f) => { f[GOLD_REL] += `${firstRef(f[GOLD_REL])}\n`; },
   'the same Ref reversed in one file': (f) => {
     const m = firstRef(f[GOLD_REL]).match(/Ref: (\S+) >\? (\S+)/)!;
     f[GOLD_REL] += `Ref: ${m[2]} < ${m[1]}\n`;
   },
-  'a diagram Ref that repeats a relationships file Ref': (f) => { f['gold/small.dbml'] += `${firstRef(f[GOLD_REL])}\n`; },
+  'a diagram Ref that repeats a relationships file Ref': (f) => { f[SMALL] += `${firstRef(f[GOLD_REL])}\n`; },
   'the same Ref in two relationships files a diagram reads together': (f) => {
     const ref = firstRef(f[GOLD_REL]);
-    const uses = f[GOLD_REL].split('\n').filter((l) => l.startsWith('use')).map((l) => l.replace("'./", "'../gold/"));
+    const uses = f[GOLD_REL].split('\n').filter((l) => l.startsWith('use')).map((l) => l.replace("'../tables/gold/", "'../../gold/tables/gold/"));
     f[SILVER_REL] = `${uses.join('\n')}\n${f[SILVER_REL]}${ref}\n`;
   },
   'a Ref block over several lines': (f) => { f[GOLD_REL] += `Ref {\n  ${lastRef(f[GOLD_REL]).replace('Ref: ', '')}\n}\n`; },
   'an inline ref that repeats a relationships file Ref': (f) => {
     const m = firstRef(f[GOLD_REL]).match(/Ref: (\w+)\.(\w+) >\? (\w+)\.(\w+)/)!;
-    const file = `tables/gold/${m[1]}.dbml`;
+    const file = table(m[1]);
     f[file] = f[file].replace(`  ${m[2]} int`, `  ${m[2]} int [ref: > ${m[3]}.${m[4]}]`);
   },
   'one table in two TableGroups in two files': (f) => {
-    f['gold/small.dbml'] += 'TableGroup g1 { gold_t00 }\n';
-    f['tables/gold/gold_t00.dbml'] += 'TableGroup g2 { gold_t00 }\n';
+    f[SMALL] += 'TableGroup g1 { gold_t00 }\n';
+    f[table('gold_t00')] += 'TableGroup g2 { gold_t00 }\n';
   },
   'a reuse line': (f) => { f[GOLD_REL] = f[GOLD_REL].replace('use { table', 'reuse { table'); },
   'a syntax error in a relationships file': (f) => { f[GOLD_REL] = f[GOLD_REL].replace('Ref:', 'Ref:: ((('); },
   'a use line whose path differs only in case': (f) => {
-    f['gold/small.dbml'] = f['gold/small.dbml'].replace('/gold_t00.dbml', '/GOLD_T00.dbml');
+    f[SMALL] = f[SMALL].replace('/gold_t00.dbml', '/GOLD_T00.dbml');
   },
-  'a byte-order mark': (f) => { f['tables/gold/gold_t03.dbml'] = `﻿${f['tables/gold/gold_t03.dbml']}`; },
+  'a byte-order mark': (f) => { f[table('gold_t03')] = `﻿${f[table('gold_t03')]}`; },
 };
 
 const keys = (result: Record<string, DbmlDiagnostic[]>): string[] =>
@@ -159,10 +163,10 @@ describe('compileDbmlFilesSeparately reports what the whole-project compile repo
 
   it('only the entries asked for, and the files they reach, are compiled', () => {
     const files = project();
-    files['gold/unrelated.dbml'] = 'Table broken {\n';
-    const result = compileDbmlFilesSeparately(files, ['gold/small.dbml']);
-    expect(result['gold/unrelated.dbml']).toBeUndefined();
-    expect(keys(result)).toEqual(keys(compileDbmlProject(files, ['gold/small.dbml'])));
+    files['gold/diagrams/unrelated.dbml'] = 'Table broken {\n';
+    const result = compileDbmlFilesSeparately(files, [SMALL]);
+    expect(result['gold/diagrams/unrelated.dbml']).toBeUndefined();
+    expect(keys(result)).toEqual(keys(compileDbmlProject(files, [SMALL])));
   });
 
   it('an entry that is not in the set is reported missing, as the whole-project compile does', () => {
@@ -182,14 +186,14 @@ describe('compileDbmlFilesSeparately reports what the whole-project compile repo
     expect(first).toBeGreaterThan(0);
     compileDbmlFilesSeparately(files, Object.keys(files), counting, memo);
     expect(calls).toBe(first);
-    files['gold/small.dbml'] += '// changed\n';
+    files[SMALL] += '// changed\n';
     compileDbmlFilesSeparately(files, Object.keys(files), counting, memo);
     expect(calls).toBe(first + 1);
   });
 
   it('the asynchronous form gives the same result, pausing as it works, and stops when the pause throws', async () => {
     const files = project();
-    files['tables/gold/gold_t05.dbml'] = files['tables/gold/gold_t05.dbml'].replace('{', '{ (((');
+    files[table('gold_t05')] = files[table('gold_t05')].replace('{', '{ (((');
     let pauses = 0;
     const slow = (subset: Readonly<Record<string, string>>, entries: readonly string[]): Record<string, DbmlDiagnostic[]> => {
       const until = Date.now() + 3;
@@ -200,6 +204,22 @@ describe('compileDbmlFilesSeparately reports what the whole-project compile repo
     expect(keys(result)).toEqual(keys(compileDbmlFilesSeparately(files, Object.keys(files))));
     expect(pauses).toBeGreaterThan(0);
     await expect(compileDbmlFilesSeparatelyAsync(files, Object.keys(files), async () => { throw new Error('cancelled'); }, slow)).rejects.toThrow('cancelled');
+  });
+
+  it('a diagram compile mounts only its imports: the diagram, its member tables and its relationships files, read as empty', () => {
+    const files = project();
+    const mounted: Array<Record<string, string>> = [];
+    compileDbmlFilesSeparately(files, [SMALL], (subset, entries) => {
+      if (entries.includes(SMALL)) mounted.push({ ...subset });
+      return compileDbmlProject(subset, entries);
+    });
+    const members = ['gold_t00', 'gold_t01', 'gold_t02', 'gold_t03', 'gold_t04'].map(table);
+    expect(mounted).toHaveLength(1);
+    expect(Object.keys(mounted[0]).sort()).toEqual([SMALL, ...members, GOLD_REL, SILVER_REL].sort());
+    // A relationships file of only use lines and Refs declares nothing a diagram imports: it is mounted empty.
+    expect(mounted[0][GOLD_REL]).toBe('');
+    expect(mounted[0][SILVER_REL]).toBe('');
+    for (const m of members) expect(mounted[0][m]).toBe(files[m]);
   });
 
   it('compiles many small layouts, never the whole project at once', () => {
@@ -264,9 +284,9 @@ describe('notes and comments that mention reuse or ref: are not code', () => {
   }
   const withNote = (note: string): Record<string, string> => {
     const files = project();
-    files['tables/gold/gold_t00.dbml'] = files['tables/gold/gold_t00.dbml'].replace("note: 'a label'", `note: '${note}'`);
-    files['tables/gold/gold_t01.dbml'] = `// ${note}\n${files['tables/gold/gold_t01.dbml']}`;
-    files['tables/gold/gold_t02.dbml'] = files['tables/gold/gold_t02.dbml'].replace("[note: 'table 2']", `[note: '''${note}''']`);
+    files[table('gold_t00')] = files[table('gold_t00')].replace("note: 'a label'", `note: '${note}'`);
+    files[table('gold_t01')] = `// ${note}\n${files[table('gold_t01')]}`;
+    files[table('gold_t02')] = files[table('gold_t02')].replace("[note: 'table 2']", `[note: '''${note}''']`);
     return files;
   };
 

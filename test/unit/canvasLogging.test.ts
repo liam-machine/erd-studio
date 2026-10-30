@@ -102,10 +102,9 @@ describe('opening a diagram is logged', () => {
     expect(lines).toContain(`[Canvas] Opening ${file}`);
     expect(lines.some((l) => l.startsWith(`[Canvas] Open ${file}: reading the diagram and its tables took `))).toBe(true);
     expect(lines.some((l) => l.startsWith(`[Canvas] Open ${file}: posted 6 tables in `))).toBe(true);
-    // Sent with a report, a line names the diagram by its shape only (S8b names the
-    // layer-first shapes, `{layer}/diagrams/{diagram}.dbml`; until then a generic one).
+    // Sent with a report, a line names the diagram by its shape only: `{layer}/diagrams/{diagram}.dbml`.
     const redacted = redactPaths(lines.find((l) => l.startsWith(`[Canvas] Opened `))!);
-    expect(redacted).toMatch(/^\[Canvas\] Opened \{project\}\/\.erd-studio\/\{[a-z]+\}\/(diagrams\/)?\{[a-z]+\}\.dbml: 6 tables posted/);
+    expect(redacted).toMatch(/^\[Canvas\] Opened \{project\}\/\.erd-studio\/\{layer\}\/diagrams\/\{diagram\}\.dbml: 6 tables posted/);
     expect(redacted).not.toMatch(/gold|sales/);
     expect(lines.some((l) => new RegExp(`^\\[Canvas\\] Opened ${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: 6 tables posted \\d+ ms after ready$`).test(l))).toBe(true);
   });

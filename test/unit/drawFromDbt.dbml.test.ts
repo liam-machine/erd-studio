@@ -88,7 +88,7 @@ beforeEach(() => {
       // Its many side has no readable file: a DBML diagram has nowhere to keep it.
       { fromModel: 'ghost', fromColumn: 'store_key', toModel: 'dim_store', toColumn: 'store_key', cardinality: 'many-to-one' },
     ],
-    skipped: [{ name: 'dim_yaml', reason: 'yaml-table' }, { name: '_relationships', reason: 'reserved-name' }],
+    skipped: [{ name: 'dim_yaml', reason: 'yaml-table' }],
     truncated: false,
   } satisfies DbtDraft;
   vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('visits' as never);
@@ -122,7 +122,6 @@ describe('Draw from dbt in a DBML project', () => {
     // The skip reasons and the relationship it could not store, in one notice.
     const notice = String(info.mock.calls.at(-1)?.[0]);
     expect(notice).toContain("Skipped dim_yaml: a YAML table can't join a DBML diagram; convert the project first.");
-    expect(notice).toContain('Skipped _relationships:');
     expect(notice).toContain("Not stored, because a table's file could not be read: ghost.store_key → dim_store.store_key.");
 
     const texts = Object.fromEntries([...snapshot()].filter(([f]) => f.endsWith('.dbml')));

@@ -63,8 +63,8 @@ All tools take a `project_path` argument: the **absolute path** to the dbt proje
 | Tool | Returns |
 |---|---|
 | `list_domains` | All ERDs grouped by layer, each with its `file_format` (`dbml`, or `json` before 2.0). Filter optional by `layer`. |
-| `read_domain` | Full domain: models + columns + relationships + cardinality + rationale. `domain` is the diagram's file name without `.dbml` or `.json`. |
-| `list_models` | All logical model definitions: the `.dbml` table files in `.erd-studio/tables/` (or older `.yml` files), each with its `file_format`. |
+| `read_domain` | Full domain: models + columns + relationships + cardinality + rationale. `domain` is the diagram's file name without `.dbml` or `.json` (a DBML diagram is `<layer>/diagrams/<name>.dbml`). |
+| `list_models` | All logical model definitions: the `.dbml` table files in `.erd-studio/<layer>/tables/<schema>/` (or older `.yml` files), each with its `file_format`. |
 | `read_model` | Single logical model with column-level metadata, grain, SCD types, rationale. |
 | `list_manifest_models` | Models from `target/manifest.json` (what dbt actually built), with unique/relationship test coverage. Filter optional by `name_contains`. |
 | `get_editor_setup` | Returns install instructions for the ERD Studio VS Code extension. Use this when the user wants to edit, design, or build (this MCP server is read-only). |

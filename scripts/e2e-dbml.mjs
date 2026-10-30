@@ -103,7 +103,9 @@ const originalDoctor = JSON.parse(cli(original, ['doctor', '--json', '--no-dbt']
 if (originalDoctor.erd.storage !== 'yaml') fail(`the original copy reads as ${originalDoctor.erd.storage}, not yaml`);
 
 // Which diagrams the plan names: a moved relationship now also draws there; a note mentions it or one of its tables.
-const key = (file) => file.replace(/^\.erd-studio\//, '').replace(/\.(json|dbml)$/i, '');
+// A diagram's key is `<layer>/<name>` on both sides: `gold/sales.json` before, `gold/diagrams/sales.dbml` after.
+const key = (file) => file.replace(/^\.erd-studio\//, '').replace(/^([^/]+)\/diagrams\/([^/]+)$/, '$1/$2').replace(/\.(json|dbml)$/i, '');
+const rekey = (byPath) => Object.fromEntries(Object.entries(byPath).map(([k, v]) => [key(k), v]));
 const movedInto = new Map();
 const linksOf = (from, to) => {
   const parse = (end) => {
@@ -124,8 +126,8 @@ for (const m of plan.movedRelationships) {
 // The diagrams whose own file held relationships: Convert moves those into the library (§6.3).
 const movedLinks = new Set(plan.movedRelationships.flatMap((m) => linksOf(m.from, m.to)));
 const holders = new Set();
-const before = runHelper('displays', original);
-const after = runHelper('displays', converted);
+const before = rekey(runHelper('displays', original));
+const after = rekey(runHelper('displays', converted));
 for (const diagram of Object.keys(before)) {
   const file = path.join(original, '.erd-studio', `${diagram}.json`);
   try {
@@ -141,7 +143,10 @@ for (const diagram of Object.keys(before)) {
 // export holds them, so that note changes no export byte.
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const mentions = (note, name) => new RegExp(`(^|[^\\w])${escapeRe(name)}([^\\w]|$)`, 'i').test(note);
-const drawingNotes = plan.notes.filter((note) => !/ are kept as \/\/ lines /.test(note));
+// Where Convert put a table (its layer and schema folder) changes no drawing; the schema it gives a table with
+// none is the one documented difference, compared through schemaFallback (displays) and withoutGivenSchemas (exports).
+const drawingNotes = plan.notes.filter((note) => !/ are kept as \/\/ lines /.test(note)
+  && !/ go in the [^ ]+ layer \(/.test(note) && !/ has no schema .*, so it is written as Table /.test(note) && !/ have no schema .*, so they are written as Table /.test(note));
 const touched = (diagram) => {
   if (movedInto.has(diagram) || holders.has(diagram)) return true;
   const display = before[diagram];
@@ -149,8 +154,21 @@ const touched = (diagram) => {
   return drawingNotes.some((note) => names.some((n) => mentions(note, n)));
 };
 
-// diff --all: equal after normalising the paths (and schemaVersion)
-const normalisePath = (p) => typeof p !== 'string' ? p : p.replace(/\.yml$/, '.dbml').replace('/logical-models/', '/tables/').replace(/\.json$/, '.dbml');
+// diff --all: equal after normalising the paths (and schemaVersion). Each source path becomes the file Convert
+// wrote for it (plan.targets: logical-models/x.yml → <layer>/tables/<schema>/x.dbml, <layer>/x.json →
+// <layer>/diagrams/x.dbml); a relationship fix names its owner's table file on both sides (YAML keeps a table's
+// relationships in its own file; DBML in a relationships file, where a cardinality change stays in place).
+const targetOf = new Map(plan.targets.map((t) => [t.source, t.target]));
+const tableTargetByName = new Map(plan.targets
+  .filter((t) => /^[^/]+\/tables\/[^/]+\/[^/]+\.dbml$/.test(t.target))
+  .map((t) => [t.target.replace(/^.*\//, '').replace(/\.dbml$/, '').toLowerCase(), t.target]));
+const normalisePath = (p) => {
+  if (typeof p !== 'string') return p;
+  const rel = p.replace(/^\.erd-studio\//, '');
+  const target = targetOf.get(rel);
+  return target === undefined ? p : `.erd-studio/${target}`;
+};
+const isRelationshipsFile = (p) => /^\.erd-studio\/[^/]+\/relationships\/[^/]+\.dbml$/.test(p);
 function normaliseDiff(result) {
   const out = {};
   for (const d of result.domains) {
@@ -161,9 +179,9 @@ function normaliseDiff(result) {
         return { ...f, file: '(moved to the library)', movesFrom: undefined, explain: undefined };
       }
       const file = normalisePath(f.file);
-      // A relationship fix names the owner's yml in YAML and its folder's relationships file in DBML.
-      const owner = /\/_relationships\.dbml$/.test(file) ? file.replace(/_relationships\.dbml$/, `${f.model}.dbml`) : file;
-      return { ...f, file: owner, ...(f.movesFrom ? { movesFrom: normalisePath(f.movesFrom).replace(/\/_relationships\.dbml$/, '/…') } : {}), explain: undefined };
+      const ownerTable = tableTargetByName.get(f.model.toLowerCase());
+      const owner = isRelationshipsFile(file) && ownerTable !== undefined ? `.erd-studio/${ownerTable}` : file;
+      return { ...f, file: owner, movesFrom: undefined, explain: undefined };
     });
     out[key(d.file)] = {
       clean: d.clean, error: d.error?.code, needsMigration: d.needsMigration ?? false, counts: d.counts, phantoms: d.phantoms,
@@ -207,6 +225,17 @@ const stableJson = (value) => JSON.stringify(value, (_k, v) => (v && typeof v ==
   ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]]))
   : v));
 const linkKeyOf = (r) => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`.toLowerCase();
+// The schema Convert gave each table that had none (its library folder, else public),
+// by diagram: what the converted side draws, and what the YAML side is compared as (convertSchemaFallback).
+const givenSchemas = new Map();
+for (const diagram of Object.keys(before)) {
+  const given = new Map();
+  for (const m of after[diagram]?.models ?? []) {
+    const was = before[diagram]?.models?.find((w) => w.name.toLowerCase() === m.name.toLowerCase());
+    if (was && !was.schema && m.schema) given.set(m.name, m.schema);
+  }
+  givenSchemas.set(diagram, given);
+}
 for (const diagram of Object.keys(before).sort()) {
   const was = before[diagram];
   const now = after[diagram];
@@ -230,8 +259,10 @@ for (const diagram of Object.keys(before).sort()) {
       if (nowCol && wasCol) nowCol.isForeignKey = wasCol.isForeignKey;
     }
   }
-  const a = stableJson(compare(was, { convert: true }));
-  const b = stableJson(compare(now, { convert: true }));
+  const given = givenSchemas.get(diagram) ?? new Map();
+  const schemaFallback = (name) => given.get(name);
+  const a = stableJson(compare(was, { convert: true, schemaFallback }));
+  const b = stableJson(compare(now, { convert: true, schemaFallback }));
   if (a !== b) {
     let i = 0;
     while (i < a.length && a[i] === b[i]) i++;
@@ -240,7 +271,20 @@ for (const diagram of Object.keys(before).sort()) {
 }
 pass(`displays compared on ${Object.keys(before).length} diagrams through normaliseForStorageEquivalence, positions included`);
 
-// export --all: byte-equal for diagrams the notes do not touch
+// export --all: byte-equal for diagrams the notes do not touch, once the schema Convert gave a table is taken
+// out again (`Table public.x [schema: 'public']` → `Table x`, `public.x.col` → `x.col`, Mermaid's schema line).
+function withoutGivenSchemas(text, given) {
+  let out = text;
+  for (const [name, schema] of given) {
+    const n = escapeRe(name);
+    const q = escapeRe(schema);
+    out = out.replace(new RegExp(`(^|[^\\w.])${q}\\.${n}(?![\\w])`, 'gm'), `$1${name}`);
+    out = out.replace(new RegExp(`(Table ${n}) \\[schema: '${q}'\\]`, 'g'), '$1');
+    out = out.replace(new RegExp(`(Table ${n} \\[)schema: '${q}', `, 'g'), '$1');
+    out = out.replace(new RegExp(`(%% Table ${n}\\n)  %%   schema: ${q}\\n`, 'g'), '$1');
+  }
+  return out;
+}
 const exportsOf = (project, format) => {
   const r = cli(project, ['export', '--all', '--format', format, '--json']);
   if (r.code !== 0) fail(`export --all --format ${format} exited ${r.code}`, r.err || r.out);
@@ -257,6 +301,7 @@ for (const format of FORMATS) {
     const [diagram] = k.split('\u0000');
     if (diffBefore[diagram]?.needsMigration || before[diagram]?.loadError) continue;
     if (!b.has(k)) { fail(`export ${format}: ${diagram} is missing after Convert`); continue; }
+    b.set(k, withoutGivenSchemas(b.get(k), givenSchemas.get(diagram) ?? new Map()));
     if (movedInto.has(diagram)) {
       // It gains the moved relationships, whose export lines differ per format: checked on its display above.
       skippedMoved.add(diagram);

@@ -40,9 +40,10 @@ export interface Fix {
   model: string;
   column?: string;
   /**
-   * The file to edit, project-relative: the table's file (`tables/…/<m>.dbml`, or
-   * `logical-models/<m>.yml` before 2.0), its folder's `_relationships.dbml` for a
-   * relationship a DBML table owns, or the domain JSON.
+   * The file to edit, project-relative: the table's file (`<layer>/tables/<schema>/<m>.dbml`,
+   * or `logical-models/<m>.yml` before 2.0); for a relationship a DBML table owns, the
+   * relationships file that holds it (a removal or a cardinality change, in place) or
+   * where a new one goes (an addition); or the domain JSON.
    */
   file: string;
   /** Types (set-type) or cardinalities (set-cardinality). */
@@ -58,7 +59,7 @@ export interface Fix {
     pairs?: ColumnPair[];
     compositeKey?: string;
   };
-  /** set-cardinality: the file the link is stored in now, when the fix moves it to `file`. */
+  /** set-cardinality: the file the link is stored in now, when the fix moves it to `file` (YAML only: a DBML Ref is changed in place). */
   movesFrom?: string;
   /** fix-model-yaml / fix-dbml-file: where the parser stopped (1-based). */
   line?: number;
@@ -334,8 +335,9 @@ export function fixesFromPlan(
 ): Fix[] {
   const ymlFile = (model: string): string =>
     plan.modelContext[model]?.logicalModelPath ?? `${semanticDir}/logical-models/${model}.yml`;
-  // The file a table's relationships are stored in: its folder's
-  // `_relationships.dbml` for a DBML table (§2.3), its own yml otherwise.
+  // Where a table's NEW relationship goes: the relationships file the project
+  // places it in for a DBML table (§2.4), its own yml otherwise. A stored DBML
+  // Ref is edited where it is (`storedIn`).
   const ownerFile = (model: string): string => plan.modelContext[model]?.relationshipsPath ?? ymlFile(model);
   // A relationship is fixed where it is defined (#126): the yml of the model
   // holding its foreign key when the library holds it, else the domain file.
@@ -450,7 +452,7 @@ export function fixesFromPlan(
         const stored = relationshipHome.inLibrary.get(linkKey(rel));
         const entry = stored ?? { ...rel, ...(r.sourceCardinality ? { cardinality: r.sourceCardinality } : {}) };
         fixes.push({
-          severity: 'blocking', kind: 'remove-relationship', model: entry.fromModel, column: entry.fromColumn, file: relationshipFile(entry, false),
+          severity: 'blocking', kind: 'remove-relationship', model: entry.fromModel, column: entry.fromColumn, file: r.storedIn ?? relationshipFile(entry, false),
           relationship: pickRelationship(entry),
           explain: `The logical stage draws ${link}, but dbt has no relationships test for it — remove it, or add the test to dbt.`,
         });
@@ -468,9 +470,10 @@ export function fixesFromPlan(
             entry = reverseRelationship(entry);
           }
           entry = canonicalRelationship(entry);
-          if (!same(stored.fromModel, entry.fromModel)) movesFrom = ownerFile(stored.fromModel);
+          // A DBML Ref is changed in place, turned round or not; a YAML entry moves to its many side's file.
+          if (r.storedIn === undefined && !same(stored.fromModel, entry.fromModel)) movesFrom = ownerFile(stored.fromModel);
         }
-        const file = stored ? ownerFile(entry.fromModel) : domainFile;
+        const file = r.storedIn ?? (stored ? ownerFile(entry.fromModel) : domainFile);
         // A composite's pairs, read from the end the entry is stored from.
         const entryPairs = pairs && (same(entry.fromModel, r.fromModel) && same(entry.fromColumn, r.fromColumn) ? [...pairs] : pairs && reversePairs(pairs));
         fixes.push({
