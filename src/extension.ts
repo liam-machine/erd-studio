@@ -1574,6 +1574,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     refreshContextKeys();
   };
 
+  // A DBML move's edit, with every open canvas held while it applies. Half-way
+  // through, a moved table's new file exists and its old one is not deleted
+  // yet; a canvas redrawn then (an open diagram the edit changes) would warn
+  // that the table is defined twice, and a warning shown is never taken back.
+  // The callers redraw every canvas once after.
+  const applyHeldLifecycleWrites = async (...args: Parameters<typeof applyLifecycleWrites>): ReturnType<typeof applyLifecycleWrites> => {
+    const release = editorProvider.holdRefreshes();
+    let result: Awaited<ReturnType<typeof applyLifecycleWrites>> | undefined;
+    try {
+      result = await applyLifecycleWrites(...args);
+      return result;
+    } finally {
+      // A rejected edit was put back: the callers return without redrawing.
+      if (release() && !result?.ok) void editorProvider.refreshAllOpenSubjectAreas();
+    }
+  };
+
   // Move Table and Move Diagram to Layer: the host's half (apply, refresh).
   const moveDbmlDeps: MoveDbmlDeps = {
     workspaceRoot,
@@ -1582,7 +1599,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     layers: () => layerService.getAllLayers().map((l) => ({ id: l.id, label: l.label })),
     readText: openOrDiskText,
     dirtyFiles,
-    applyWrites: (writes) => applyLifecycleWrites(writes, fullSemanticDirPath),
+    applyWrites: (writes) => applyHeldLifecycleWrites(writes, fullSemanticDirPath),
     afterTablesMoved: async (writes) => {
       // Own writes, so the watchers skip them: the refreshes they would drive happen here.
       for (const w of writes) treeProvider.invalidateSubjectArea(w.path);
@@ -1610,7 +1627,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     readText: openOrDiskText,
     dirtyFiles,
     takeOwnRename: (from, to) => ownFileOperations.takeOwnRename(from, to),
-    applyWrites: (writes, renames = []) => applyLifecycleWrites(writes, fullSemanticDirPath, renames),
+    applyWrites: (writes, renames = []) => applyHeldLifecycleWrites(writes, fullSemanticDirPath, renames),
     afterUpdated: moveDbmlDeps.afterTablesMoved,
   };
   context.subscriptions.push(vscode.workspace.onDidRenameFiles((event) => onDbmlFilesRenamed(explorerMoveDeps, event.files).catch((err) => {
@@ -2261,7 +2278,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void vscode.window.showErrorMessage(`Organise Table Library: ${path.relative(workspaceRoot, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again. Nothing was changed.`);
           return;
         }
-        const result = await applyLifecycleWrites(writes, path.dirname(modelsDir), yamlRenames);
+        const result = await applyHeldLifecycleWrites(writes, path.dirname(modelsDir), yamlRenames);
         if (!result.ok) {
           if (result.unrestored.length === 0) void vscode.window.showErrorMessage('Organise Table Library: VS Code rejected the file moves; nothing was changed.');
           return;

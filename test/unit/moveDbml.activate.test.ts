@@ -264,6 +264,40 @@ describe('Move Table…', () => {
     expect(edges(after)).toContain('fct_order>dim_customer');
   });
 
+  it('an open canvas redrawn half-way through the edit does not warn that the moved table is defined twice', async () => {
+    const register = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    const provider = register.mock.calls[0][1] as unknown as vscode.CustomTextEditorProvider;
+    const sales = erd('gold', 'diagrams', 'sales.dbml');
+    const document = vscode.createMockTextDocument(sales, fs.readFileSync(sales, 'utf-8'), { persist: true });
+    (vscode.workspace.textDocuments as unknown[]).push(document);
+    const panel = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(document as never, panel as never, {} as vscode.CancellationToken);
+    await panel._simulateMessage({ type: 'ready' });
+    const warn = vscode.window.showWarningMessage as unknown as ReturnType<typeof vi.spyOn>;
+    warn.mockClear();
+
+    // VS Code applies the edit in steps: the new file lands before the old one
+    // is deleted, and the open diagram the edit changes redraws in between.
+    const applyEdit = vscode.workspace.applyEdit.bind(vscode.workspace);
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      const halfWay = erd('silver', 'tables', 'crm', 'fct_order.dbml');
+      fs.mkdirSync(path.dirname(halfWay), { recursive: true });
+      fs.copyFileSync(erd('gold', 'tables', 'gold', 'fct_order.dbml'), halfWay);
+      await panel._simulateMessage({ type: 'ready' });
+      fs.rmSync(halfWay);
+      return applyEdit(edit);
+    });
+    pickDestination('$(add) New schema in Silver…');
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('crm');
+    answerMove();
+    await vscode.commands.executeCommand('erdStudio.moveTable', row('gold/tables/gold/fct_order.dbml'));
+
+    expect(errors).not.toHaveBeenCalled();
+    expect(fs.existsSync(erd('silver', 'tables', 'crm', 'fct_order.dbml'))).toBe(true);
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('is defined twice'))).toEqual([]);
+  });
+
   it('moves a table no other file uses without asking, and removes the schema folder it empties', async () => {
     fs.mkdirSync(erd('gold', 'tables', 'scratch'), { recursive: true });
     fs.writeFileSync(erd('gold', 'tables', 'scratch', 'dim_unused.dbml'), 'Table scratch.dim_unused {\n  id INT [pk]\n}\n');
