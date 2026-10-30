@@ -467,15 +467,24 @@ export function subjectAreaMembersDbml(rawText: string, parser: DbmlParserModule
     return null;
   }
   if (compiled.errors.some((d) => d.errorClass === 'syntax')) return null;
+  return diagramMembersFromAst(compiled.ast, text);
+}
+
+/**
+ * {@link subjectAreaMembersDbml} from a diagram already parsed (`ast` of
+ * `text`, without its byte-order mark): the table `use` stems, then
+ * `erd_unlinked_tables`. The `erd_layout` writer spells lines by them.
+ */
+export function diagramMembersFromAst(ast: AstNode, text: string): string[] {
   const members: string[] = [];
-  for (const node of topLevel(compiled.ast)) {
+  for (const node of topLevel(ast)) {
     if (!isUseDeclaration(node)) continue;
     const importPath = typeof node.importPath?.value === 'string' ? node.importPath.value as string : '';
     const name = useStem(importPath);
     if (name.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM || !isSafeTableName(name)) continue;
     members.push(name);
   }
-  const unlinked = projectEntry(compiled.ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value;
+  const unlinked = projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value;
   members.push(...unlinkedMembers(unlinked, members, []));
   return members;
 }

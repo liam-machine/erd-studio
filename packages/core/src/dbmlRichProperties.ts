@@ -108,6 +108,12 @@ export const DBML_DIAGRAM_PROPERTIES = Object.freeze({
    * Project keys take no lists ([3006]), hence the one string (D26).
    */
   unlinkedTables: 'erd_unlinked_tables',
+  /**
+   * Table positions and sticky-note boxes, one line each in one
+   * triple-quoted string, always the Project's last key (`erdLayout.ts`).
+   * The first entry of the key (any case) is read and written.
+   */
+  layout: 'erd_layout',
 } as const);
 
 /** The names an `erd_unlinked_tables` value lists: split on commas, trimmed, empty parts dropped, in order. */

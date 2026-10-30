@@ -43,6 +43,7 @@ export * from './displayDomain.js';
 export * from './loadDisplayDomain.js';
 export * from './exportDiagram.js';
 export * from './dbdiagramLayout.js';
+export * from './erdLayout.js';
 export * from './dbmlRichProperties.js';
 export * from './dbmlText.js';
 export * from './storage.js';
