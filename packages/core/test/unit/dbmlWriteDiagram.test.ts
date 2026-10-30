@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 
 import { DbmlEditRefused } from '../../src/dbml/errors';
 import { editSubjectAreaDbml } from '../../src/dbml/writeDiagram';
-import { DIAGRAM_CASES, DIAGRAM_LIBRARY, DIAGRAM_PATH, NEW_DIAGRAM_CASES, SALES, diagramEdit, lookups, readDiagram } from '../dbmlWriterCases/diagramCases';
+import { DIAGRAM_CASES, DIAGRAM_LIBRARY, DIAGRAM_PATH, NEW_DIAGRAM_CASES, SALES, SALES_CONFLICTED, diagramEdit, lookups, readDiagram } from '../dbmlWriterCases/diagramCases';
 import { clone } from '../dbmlWriterSupport';
 
 describe('editSubjectAreaDbml', () => {
@@ -31,6 +31,11 @@ describe('editSubjectAreaDbml refusals', () => {
     const repeated = `${SALES}\nNote "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" {\n  'again'\n}\n`;
     expect(refused(repeated, (a) => { a.description = 'x'; })).toMatch(/used twice/);
     expect(refused(`${SALES}\nProject other {\n  Note: 'x'\n}\n`, (a) => { a.description = 'x'; })).toMatch(/second Project/);
+  });
+
+  it('a position change while erd_layout holds a merge conflict (§1.6): positions are not saved until one side is kept', () => {
+    expect(refused(SALES_CONFLICTED, (a) => { a.viewConfig.positions.dim_customer = { x: 9, y: 9 }; }))
+      .toBe('gold/sales.dbml has a merge conflict in erd_layout (line 8). Only positions differ: keep either side, then try again. Positions are not saved until then.');
   });
 
   it('relationships in the diagram', () => {

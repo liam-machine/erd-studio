@@ -1,10 +1,11 @@
 /**
  * applyFileWrites (D23, §5.3 steps 6–7 of docs/plans/native-dbml-storage.md,
  * §9.5): one WorkspaceEdit in a fixed order — the primary replace, then
- * creates (relationships files before table files before layout files), then
- * replaces, then deletes — and, when VS Code applies only part of it (the
- * mock applies a prefix), a reconcile back to the exact prior state; a
- * reconcile that fails too names the files in a modal.
+ * creates (relationships files before table files before anything else),
+ * then replaces, then deletes — and, when VS Code applies only part of it
+ * (the mock applies a prefix), a reconcile back to the exact prior state; a
+ * reconcile that fails too names the files in a modal. The primary is a
+ * full-range replace, except with `minimalPrimary` (a DBML drag only).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -49,7 +50,7 @@ function plannedWrites(): FileWrite[] {
   return [
     { kind: 'delete', path: at('tables/gold/old.dbml') },
     { kind: 'replace', path: at('tables/gold/fct.dbml'), text: 'Table fct {\n  id INT [pk]\n  x INT\n}\n' },
-    { kind: 'create', path: at('gold/sales.dbdiagram'), text: '{}\n' },
+    { kind: 'create', path: at('gold/notes.md'), text: 'notes\n' },
     { kind: 'create', path: at('tables/gold/new.dbml'), text: 'Table new {\n  id INT\n}\n' },
     { kind: 'delete', path: at('tables/gold/older.dbml') },
     { kind: 'create', path: at('tables/gold/_relationships.dbml'), text: '// rels\n' },
@@ -71,7 +72,7 @@ afterEach(() => {
 });
 
 describe('the order of one WorkspaceEdit', () => {
-  it('primary replace, creates (relationships, tables, layouts), replaces, deletes', async () => {
+  it('primary replace, creates (relationships, tables, anything else), replaces, deletes', async () => {
     const doc = primary();
     const result = await applyFileWrites(plannedWrites(), { primary: { document: doc as unknown as vscode.TextDocument, text: 'Project sales {\n  Note: \'x\'\n}\n' } });
     expect(result.ok).toBe(true);
@@ -82,14 +83,43 @@ describe('the order of one WorkspaceEdit', () => {
       'replace gold/sales.dbml',
       'createFile tables/gold/_relationships.dbml',
       'createFile tables/gold/new.dbml',
-      'createFile gold/sales.dbdiagram',
+      'createFile gold/notes.md',
       'replace tables/gold/fct.dbml',
       'deleteFile tables/gold/old.dbml',
       'deleteFile tables/gold/older.dbml',
     ]);
-    expect(result.created.map((p) => path.basename(p))).toEqual(['_relationships.dbml', 'new.dbml', 'sales.dbdiagram']);
+    expect(result.created.map((p) => path.basename(p))).toEqual(['_relationships.dbml', 'new.dbml', 'notes.md']);
     expect(result.deleted.map((p) => path.basename(p))).toEqual(['old.dbml', 'older.dbml']);
     expect(result.replaced.map((u) => path.basename(u.fsPath))).toEqual(['fct.dbml']);
+  });
+});
+
+describe('the primary\'s range', () => {
+  const primaryOp = () => (_appliedEdits[0] as unknown as { _ops: Array<{ range: { start: unknown; end: unknown }; newText: string }> })._ops[0];
+
+  it('is the full range by default (every caller but a DBML drag, a JSON primary included)', async () => {
+    write('gold/plain.json', '{\n  "a": 1\n}\n');
+    const doc = createMockTextDocument(at('gold/plain.json'), fs.readFileSync(at('gold/plain.json'), 'utf-8'), { persist: true });
+    const result = await applyFileWrites([], { primary: { document: doc as unknown as vscode.TextDocument, text: '{\n  "a": 2\n}\n' } });
+    expect(result.ok).toBe(true);
+    expect(doc.offsetAt(primaryOp().range.start as never)).toBe(0);
+    expect(doc.offsetAt(primaryOp().range.end as never)).toBe('{\n  "a": 1\n}\n'.length);
+    expect(primaryOp().newText).toBe('{\n  "a": 2\n}\n');
+  });
+
+  it('with minimalPrimary, only the changed range (common prefix and suffix kept), and the result is the new text', async () => {
+    const doc = primary();
+    const next = 'Project sales {\n  Note: \'x\'\n}\n';
+    const result = await applyFileWrites(plannedWrites(), { primary: { document: doc as unknown as vscode.TextDocument, text: next }, minimalPrimary: true });
+    expect(result.ok).toBe(true);
+    expect(primaryOp().newText).toBe("  Note: 'x'\n");
+    expect(doc.getText()).toBe(next);
+  });
+
+  it('with minimalPrimary and an unchanged primary, still the one-character undo anchor', async () => {
+    const doc = primary();
+    await applyFileWrites([], { primary: { document: doc as unknown as vscode.TextDocument, text: doc.getText() }, minimalPrimary: true });
+    expect(primaryOp().newText).toBe('P');
   });
 });
 
@@ -116,7 +146,7 @@ describe('a partial apply (D23)', () => {
     const result = await applyFileWrites(plannedWrites(), { primary: { document: doc as unknown as vscode.TextDocument, text: 'Project sales {}\n' } });
     expect(result.ok).toBe(false);
     expect(result.unrestored.map((p) => path.relative(root, p).split(path.sep).join('/')).sort()).toEqual([
-      'gold/sales.dbdiagram', 'gold/sales.dbml', 'tables/gold/_relationships.dbml', 'tables/gold/new.dbml',
+      'gold/notes.md', 'gold/sales.dbml', 'tables/gold/_relationships.dbml', 'tables/gold/new.dbml',
     ]);
     expect(error).toHaveBeenCalledTimes(1);
     const [message, options] = error.mock.calls[0] as unknown as [string, { modal?: boolean }];

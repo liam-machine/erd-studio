@@ -18,8 +18,8 @@
  * same input always gives the same plan.
  *
  * Tables are written by core's `renderNewTableDbml`, relationships only
- * through `planDbmlLibraryWrites` (§4.6), diagrams by
- * `renderNewSubjectAreaDbml` and the layout by `editDiagramLayout`. No
+ * through `planDbmlLibraryWrites` (§4.6), and diagrams, their positions in
+ * the Project's `erd_layout`, by `renderNewSubjectAreaDbml`. No
  * `vscode`, no `fs`: the CLI bundles it.
  */
 
@@ -38,9 +38,9 @@ import {
   dbmlName,
   describeUnsupportedSubjectAreaFormat,
   detectSubjectAreaFormat,
-  editDiagramLayout,
+  ERD_LAYOUT_NOTE_PREFIX,
+  isErdLayoutName,
   isReservedTableName,
-  layoutFilePathOf,
   libraryCopyRank,
   linkKey,
   loadDisplaySubjectArea,
@@ -48,7 +48,6 @@ import {
   parseLayersText,
   parseSubjectAreaJson,
   parseTableText,
-  stickyLayoutsOf,
   subjectAreaViewConfig,
   validateSubjectAreaDocument,
 } from '@erd-studio/core';
@@ -125,8 +124,8 @@ export interface DbmlConversionInput {
   /**
    * Every file under the semantic dir the classifier names (§3.5), with its
    * text: `.yml` tables, `.json` diagrams, `layers.json` and, in a mixed or
-   * half-converted project, the `.dbml` tables, relationships files, `.dbml`
-   * diagrams and `.dbdiagram` layouts already there. The listing is also the
+   * half-converted project, the `.dbml` tables, relationships files and
+   * `.dbml` diagrams already there. The listing is also the
    * resolver of the self-check.
    */
   files: DbmlConversionFile[];
@@ -140,7 +139,7 @@ export interface DbmlConversionInput {
 }
 
 export interface DbmlConversionPlan {
-  /** Tables, relationships files, diagrams and layout files (paths relative to the semantic dir). */
+  /** Tables, relationships files and diagrams (paths relative to the semantic dir). */
   creates: Array<{ path: string; text: string }>;
   /** Existing relationships files and DBML diagrams that gain Refs or `use` lines (mixed projects). */
   replaces: Array<{ path: string; text: string }>;
@@ -1093,7 +1092,7 @@ async function planOnce(
     .filter((f) => !jsonDiagrams.some((d) => lower(d.target) === lower(f.path)))
     .map((f) => {
       try {
-        return { file: f, reading: parseSubjectAreaDbml(f.text, f.path, fileAt.get(layoutFilePathOf(f.path))?.text ?? null) };
+        return { file: f, reading: parseSubjectAreaDbml(f.text, f.path) };
       } catch (err) {
         return { file: f, reading: null, error: err instanceof Error ? err.message : String(err) };
       }
@@ -1265,7 +1264,7 @@ async function planOnce(
     // An unreadable relationships file is known to exist: the planner never creates one beside it.
     ...unreadableRelationships.keys(),
     ...[...library.values()].map((t) => t.path),
-    ...files.filter((f) => f.storage === 'dbml' || f.kind === 'layout').map((f) => f.path),
+    ...files.filter((f) => f.storage === 'dbml').map((f) => f.path),
   ]);
   const snapshot: DbmlLibrarySnapshot = {
     semanticDir: sd,
@@ -1368,6 +1367,18 @@ async function planOnce(
   const diagramTargets = new Map<string, string>(); // lower target path → source json
   /** Members with no DBML table file to use, per diagram source: kept unlinked (D26). */
   const unlinkedOf = new Map<string, string[]>();
+  /** Position keys the canvas never drew that a converted diagram keeps as // lines, not in erd_layout, per target. */
+  const keptPositionKeys = new Map<string, Set<string>>();
+  /** What a diagram draws before this run (only asked for when its positions must be pinned). */
+  let beforeSet: Record<string, string> | undefined;
+  const displayBeforeOf = (from: string): Promise<Record<string, unknown> | null> => {
+    beforeSet ??= Object.fromEntries(files.map((f) => [f.path, f.text]));
+    const folders = [...new Set([
+      ...[...library.values()].map((t) => t.folder),
+      ...files.filter((f) => f.kind === 'table').map((f) => classifySemanticFile(f.path, { tablesDirIsLayer: false }).folder ?? ''),
+    ].filter((f) => f !== ''))].sort();
+    return displayOf(beforeSet, from, folders, input.layers);
+  };
   /** Members the self-check treats as missing or unreadable (names, lower-case), per diagram source. */
   for (const d of jsonDiagrams) {
     await breathe();
@@ -1379,16 +1390,21 @@ async function planOnce(
     const rawView = viewAt === 'viewConfig' ? d.obj.viewConfig : logical.viewConfig;
     const view = subjectAreaViewConfig(d.obj);
     const ignored: Array<[string, unknown]> = [];
+    // A position erd_layout cannot hold (a name with a line break or white space at an end, or one
+    // starting note/) is kept as a // line too: never dropped silently (§1.6).
+    const unrepresentable = (key: string): boolean => !isErdLayoutName(key) || key.startsWith(ERD_LAYOUT_NOTE_PREFIX);
+    const unheld: Array<[string, unknown]> = [];
     if (isObject(rawView)) {
       if (isObject(rawView.positions)) {
-        for (const [key, value] of Object.entries(rawView.positions)) if (!view.positions || !Object.prototype.hasOwnProperty.call(view.positions, key)) ignored.push([`${viewAt}.positions.${key}`, value]);
+        for (const [key, value] of Object.entries(rawView.positions)) {
+          if (!view.positions || !Object.prototype.hasOwnProperty.call(view.positions, key)) ignored.push([`${viewAt}.positions.${key}`, value]);
+          else if (unrepresentable(key)) unheld.push([`${viewAt}.positions.${key}`, value]);
+        }
       } else if (rawView.positions !== undefined) ignored.push([`${viewAt}.positions`, rawView.positions]);
       if (Array.isArray(rawView.annotations)) {
         rawView.annotations.forEach((a: unknown, i: number) => { if (!(view.annotations ?? []).includes(a as Annotation)) ignored.push([`${viewAt}.annotations[${i}]`, a]); });
       } else if (rawView.annotations !== undefined) ignored.push([`${viewAt}.annotations`, rawView.annotations]);
     }
-    const kept = keptJsonLines(d.file.path, d.raw, viewAt, ignored);
-    const unknown = kept.keys.filter((k) => !ignored.some(([i]) => i === k));
     const names = Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
     // A table with no .dbml file listed twice in different case draws twice in 1.x (one box per spelling), and
     // a DBML diagram names each member once: keeping one would lose the other's box, so the diagram stays JSON.
@@ -1420,17 +1436,40 @@ async function planOnce(
     }
     if (missing.length > 0) plan.keptMissing.push({ diagram: d.target, tables: missing });
     unlinkedOf.set(d.file.path, unlinked);
+    const unheldKeys = new Set(unheld.map(([k]) => k.slice(`${viewAt}.positions.`.length)));
+    if (unheldKeys.size > 0) keptPositionKeys.set(d.target, unheldKeys);
+    const kept = keptJsonLines(d.file.path, d.raw, viewAt, [...ignored, ...unheld]);
+    const unknown = kept.keys.filter((k) => ![...ignored, ...unheld].some(([i]) => i === k));
     const seenIds = new Set<string>();
     const annotations = (view.annotations ?? []).map((a, i) => {
-      if (typeof a.id !== 'string' || !seenIds.has(lower(a.id))) {
-        if (typeof a.id === 'string') seenIds.add(lower(a.id));
+      if (typeof a.id !== 'string') return a;
+      // erd_layout holds a note's box on one line by its id (§1.6): an id it cannot hold gets a new one.
+      const representable = isErdLayoutName(a.id);
+      if (representable && !seenIds.has(lower(a.id))) {
+        seenIds.add(lower(a.id));
         return a;
       }
       const id = derivedUuid(d.file.path, a.id, String(i));
       seenIds.add(lower(id));
-      notes.push(`${d.file.path}: a second sticky note with the id ${a.id} gets a new id (DBML names each Note once).`);
+      notes.push(representable
+        ? `${d.file.path}: a second sticky note with the id ${a.id} gets a new id (DBML names each Note once).`
+        : `${d.file.path}: the sticky note with the id ${JSON.stringify(a.id)} gets a new id (erd_layout holds each note's box on one line, by an id with no line break or white space at either end).`);
       return { ...a, id };
     });
+    const positions: Record<string, NodePosition> = {};
+    for (const [key, value] of Object.entries(view.positions ?? {})) if (!unheldKeys.has(key)) positions[key] = value;
+    // The canvas places a table with no position of its own beside the others, every stored position
+    // counted. Two things would move it: a position kept as a // line (no longer counted), and a key
+    // spelled as the table is in another case, which erd_layout's reader maps onto the table when it has
+    // no line of its own (§1.6). Then each unplaced table is written where the canvas places it now.
+    const drawn = [...members.map((m) => m.name), ...unlinked];
+    const unplaced = drawn.filter((name) => !Object.prototype.hasOwnProperty.call(positions, name));
+    const variantOnly = unplaced.some((name) => Object.keys(positions).some((key) => lower(key) === lower(name)));
+    if (unplaced.length > 0 && (unheldKeys.size > 0 || variantOnly)) {
+      const was = await displayBeforeOf(d.file.path);
+      const placedNow = isObject(was?.viewConfig) ? (was!.viewConfig as { positions?: Record<string, NodePosition> }).positions ?? {} : {};
+      for (const name of unplaced) if (Object.prototype.hasOwnProperty.call(placedNow, name)) positions[name] = placedNow[name];
+    }
     // The diagram's own relationships that stay its own: pending lines, their table has no file (D27).
     const pendingLines = pendingRefLines(ownPending(d.file.path, diagramRelationships(d)));
     if (pendingLines.length > 0) {
@@ -1450,40 +1489,26 @@ async function planOnce(
       ...(pendingLines.length > 0 ? { pendingRefs: pendingLines } : {}),
       relationshipsFiles: relationshipsFilesFor(members.map((m) => m.name)),
       annotations,
+      positions,
     }));
     const diagramText = kept.block.length > 0 ? formatWrittenDbml(text.join('\n'), d.target) : text.join('\n');
-    const positions: Record<string, NodePosition> = view.positions ?? {};
-    const layout = editDiagramLayout(null, positions, stickyLayoutsOf(annotations));
     const there = (target: string): DbmlConversionFile | undefined => fileAt.get(target) ?? fileAtLower.get(lower(target));
-    const clash = [d.target, ...(layout !== null ? [layoutFilePathOf(d.target)] : [])].map(there).find((f, i) => {
-      if (!f) return false;
-      const body = i === 0 ? diagramText : layout!;
-      // An earlier run's diagram in an older layout holds the same tokens: formatted, it is this run's text.
-      // Read only, never written here: compared without formatWrittenDbml's "was written" log line.
-      const same = f.text === body || (i === 0 && canonicalDbml(f.text) === body);
-      return !(f.path === (i === 0 ? d.target : layoutFilePathOf(d.target)) && same);
-    });
-    if (clash) {
-      leave(d.file.path, `${clash.path} is also in ${d.layer}/, and holds something other than this file converts to. Keep one of them.`);
+    const existing = there(d.target);
+    // An earlier run's diagram in an older layout holds the same tokens: formatted, it is this run's text.
+    // Read only, never written here: compared without formatWrittenDbml's "was written" log line.
+    if (existing && !(existing.path === d.target && (existing.text === diagramText || canonicalDbml(existing.text) === diagramText))) {
+      leave(d.file.path, `${existing.path} is also in ${d.layer}/, and holds something other than this file converts to. Keep one of them.`);
       continue;
-    }
-    if (layout === null) {
-      // No layout to write, and a stale one beside the target would be read as this diagram's.
-      const stale = there(layoutFilePathOf(d.target));
-      if (stale) {
-        leave(d.file.path, `${stale.path} already exists, and this diagram has no positions or sticky notes to put in it, so the converted diagram would read that file's layout. Delete ${stale.path} (or move it).`);
-        continue;
-      }
     }
     if (unknown.length > 0) notes.push(`${d.file.path}: keys a DBML diagram does not store (${unknown.join(', ')}) are kept as // lines above the Project in ${d.target}.`);
     if (ignored.length > 0) notes.push(`${d.file.path}: positions and sticky notes ERD Studio does not draw (${ignored.map(([k]) => k).join(', ')}: no id, or no numeric x and y) are kept as // lines above the Project in ${d.target}.`);
+    if (unheld.length > 0) notes.push(`${d.file.path}: positions erd_layout cannot hold (${unheld.map(([k]) => k).join(', ')}: a name with a line break or white space at either end, or one starting note/) are kept as // lines above the Project in ${d.target}.`);
     const place = (target: string, body: string): void => {
       const existing = there(target);
       if (!existing) creates.set(target, body);
       else plan.resumed.push(target);
     };
     place(d.target, diagramText);
-    if (layout !== null) place(layoutFilePathOf(d.target), layout);
     // Opening it writes nothing only when every table already has a place (isFreshLayout / computeMissingPositions read exact names).
     const placed = (name: string): boolean => {
       const p = Object.prototype.hasOwnProperty.call(positions, name) ? positions[name] : undefined;
@@ -1526,6 +1551,7 @@ async function planOnce(
         fileExists: fileExistsAfter,
         pathChanged,
         refreshRelationshipsUses: true,
+        keepLayoutIfConflicted: true,
       });
       if (text !== f.text) replaces.set(f.path, text);
     } catch (err) {
@@ -1689,6 +1715,12 @@ async function planOnce(
         if (nowColumn && wasColumn) nowColumn.isForeignKey = wasColumn.isForeignKey;
       }
     }
+    // The positions kept as // lines (a name erd_layout cannot hold: never a table's) are not in the
+    // converted diagram's view config.
+    const keptKeys = keptPositionKeys.get(to);
+    const wasPositions = isObject(was.viewConfig) && isObject((was.viewConfig as Record<string, unknown>).positions)
+      ? (was.viewConfig as Record<string, Record<string, unknown>>).positions : undefined;
+    if (keptKeys && wasPositions) for (const key of keptKeys) delete wasPositions[key];
     const a = normaliseForStorageEquivalence(was, { convert: true });
     const b = normaliseForStorageEquivalence(now, { convert: true });
     const difference = firstDifference(a, b) ?? danglingDifference(was, now);
@@ -1851,7 +1883,7 @@ function withoutWrites(plan: DbmlConversionPlan): DbmlConversionPlan {
   return { ...plan, creates: [], replaces: [], deletes: [], resumed: [] };
 }
 
-/** Creates in the order they are applied (D23): relationships files, tables, diagrams, layouts. */
+/** Creates in the order they are applied (D23): relationships files, tables, diagrams, anything else. */
 function orderCreates(creates: Array<{ path: string; text: string }>): Array<{ path: string; text: string }> {
   const rank = (p: string): number => {
     const name = lower(p.slice(p.lastIndexOf('/') + 1));
@@ -1891,7 +1923,7 @@ export function memoisedDbmlReader(base: DbmlStorageReader = dbmlStorageReader):
       if (!reading) { reading = base.readRelationships(text); relationships.set(text, reading); }
       return structuredClone(reading);
     },
-    parseSubjectArea: (text, filePath, layoutText) => base.parseSubjectArea(text, filePath, layoutText),
+    parseSubjectArea: (text, filePath) => base.parseSubjectArea(text, filePath),
     subjectAreaMembers: (text) => base.subjectAreaMembers(text),
   };
 }

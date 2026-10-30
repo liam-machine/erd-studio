@@ -36,8 +36,8 @@ describe('compileOne caches', () => {
   });
 
   it('reading a diagram after 100 table compiles reads the same as before', () => {
-    const before = parseSubjectAreaDbml(DIAGRAM, 'gold/d.dbml', null);
+    const before = parseSubjectAreaDbml(DIAGRAM, 'gold/d.dbml');
     for (let i = 0; i < 100; i++) compileOne(`Table u${i} {\n  id INT [pk]\n}\n`);
-    expect(parseSubjectAreaDbml(DIAGRAM, 'gold/d.dbml', null)).toEqual(before);
+    expect(parseSubjectAreaDbml(DIAGRAM, 'gold/d.dbml')).toEqual(before);
   });
 });

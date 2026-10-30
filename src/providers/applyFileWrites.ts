@@ -4,19 +4,22 @@
  *
  * Order: the primary document's replace first (a text edit, so the custom
  * editor's undo groups the step under it), then every create (relationships
- * files before table files before layout files), then every other replace,
- * then every file rename (`renames`, bytes kept), then every delete.
+ * files before table files), then every other replace, then every file
+ * rename (`renames`, bytes kept), then every delete.
+ *
+ * The primary is a full-range replace, except with `minimalPrimary` (set
+ * only by a DBML diagram's layout-only edit, a drag), where only the range
+ * that changed is replaced, so its undo is that one span.
  *
  * Nothing is sent that changes nothing: a replace whose text is what the
  * file (or its open document) already holds is left out — no edit, no save,
  * no watcher event. The primary is the exception, because it anchors the
  * undo step: VS Code's Undo on the canvas undoes the last edit of the
- * canvas's own document, so an edit that touched only other files (a drag
- * that wrote only the `.dbdiagram` layout, a column edit that wrote only a
- * table file) would otherwise not be undone from the canvas. When the
- * primary's text is unchanged its anchor is the smallest edit that is still
- * one ({@link undoAnchor}: one character replaced by itself), never a
- * full-range replace of the whole diagram.
+ * canvas's own document, so an edit that touched only other files (a
+ * column edit that wrote only a table file) would otherwise not be undone
+ * from the canvas. When the primary's text is unchanged its anchor is the
+ * smallest edit that is still one ({@link undoAnchor}: one character
+ * replaced by itself), never a full-range replace of the whole diagram.
  *
  * VS Code's `applyEdit` is all-or-nothing only for text edits: an edit with
  * file creations or deletions keeps the steps that ran before the one that
@@ -63,6 +66,12 @@ export function writtenPaths(applied: Pick<AppliedFileWrites, 'replaced' | 'crea
 export interface ApplyFileWritesOptions {
   /** The document whose full-range replace goes first (always, for undo grouping), and its new text. */
   primary?: { document: vscode.TextDocument; text: string };
+  /**
+   * Replace only the primary's changed range (the common prefix and suffix
+   * kept), not its full range. Set ONLY by a DBML diagram's layout-only edit:
+   * every other caller (a JSON drag included) keeps the full-range replace.
+   */
+  minimalPrimary?: boolean;
   /** Called before each create (and each rename's target), to make its folder where only a plain mkdir is wrong (library paths). */
   ensureDir?(filePath: string): void;
   /**
@@ -88,6 +97,29 @@ function currentText(filePath: string): { text: string | null; dirty: boolean } 
 
 function fullRange(doc: vscode.TextDocument): vscode.Range {
   return new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length));
+}
+
+/**
+ * The smallest replace that turns `doc`'s text into `text`: the range
+ * between their common prefix and common suffix (never splitting a
+ * surrogate pair or a CRLF), and the new text for it.
+ */
+export function minimalReplace(doc: vscode.TextDocument, text: string): { range: vscode.Range; text: string } {
+  const old = doc.getText();
+  const max = Math.min(old.length, text.length);
+  let start = 0;
+  while (start < max && old.charCodeAt(start) === text.charCodeAt(start)) start++;
+  let suffix = 0;
+  while (suffix < max - start && old.charCodeAt(old.length - 1 - suffix) === text.charCodeAt(text.length - 1 - suffix)) suffix++;
+  // Keep a surrogate pair or a CRLF whole on both sides of the range.
+  const splits = (s: string, i: number): boolean => i > 0 && i < s.length
+    && ((s.charCodeAt(i) >= 0xdc00 && s.charCodeAt(i) <= 0xdfff) || (s[i - 1] === '\r' && s[i] === '\n'));
+  while (start > 0 && (splits(old, start) || splits(text, start))) start--;
+  while (suffix > 0 && (splits(old, old.length - suffix) || splits(text, text.length - suffix))) suffix--;
+  return {
+    range: new vscode.Range(doc.positionAt(start), doc.positionAt(old.length - suffix)),
+    text: text.slice(start, text.length - suffix),
+  };
 }
 
 /**
@@ -128,6 +160,9 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
     if (text === document.getText()) {
       const anchor = undoAnchor(document);
       edit.replace(document.uri, anchor.range, anchor.text);
+    } else if (options.minimalPrimary) {
+      const change = minimalReplace(document, text);
+      edit.replace(document.uri, change.range, change.text);
     } else {
       edit.replace(document.uri, fullRange(document), text);
     }

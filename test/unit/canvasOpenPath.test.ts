@@ -231,23 +231,20 @@ describe('Add Existing Table rows on a large library', () => {
 });
 
 describe('a partly placed diagram', () => {
-  it('DBML: the computed positions are written to the layout and the diagram is read once', async () => {
+  it('DBML: the computed positions are written to erd_layout and the diagram is read once', async () => {
     // fct_order loses its position; the other five keep theirs.
-    const layoutPath = at('gold/sales.dbdiagram');
-    const layout = JSON.parse(fs.readFileSync(layoutPath, 'utf-8'));
-    layout.defaultView.tablePositions = layout.defaultView.tablePositions.filter((p: { name: string }) => p.name !== 'fct_order');
-    fs.writeFileSync(layoutPath, JSON.stringify(layout, null, 2));
+    const diagramPath = at('gold/sales.dbml');
+    fs.writeFileSync(diagramPath, fs.readFileSync(diagramPath, 'utf-8').replace('    fct_order 400 200\n', ''));
     const h = buildProvider(root);
-    const { panel } = await open(h, 'gold/sales.dbml');
+    const { doc, panel } = await open(h, 'gold/sales.dbml');
     const reads = vi.spyOn(h.subjectAreaService, 'getSubjectArea');
     const before = _appliedEdits.length;
     await panel._simulateMessage({ type: 'ready' });
     expect(reads).toHaveBeenCalledTimes(1);
     expect(_appliedEdits.length).toBe(before + 1);
-    const saved = JSON.parse(fs.readFileSync(layoutPath, 'utf-8'));
-    const placed = saved.defaultView.tablePositions.find((p: { name: string }) => p.name === 'fct_order');
-    expect(placed).toBeDefined();
-    expect(loadedPayload(panel).viewConfig.positions.fct_order).toEqual({ x: placed.x, y: placed.y });
+    const placed = /\n {4}fct_order (-?[\d.]+) (-?[\d.]+)\n/.exec(doc.getText());
+    expect(placed).not.toBeNull();
+    expect(loadedPayload(panel).viewConfig.positions.fct_order).toEqual({ x: Number(placed![1]), y: Number(placed![2]) });
   });
 
   it('JSON: the same, written to the diagram file', async () => {

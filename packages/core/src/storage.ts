@@ -2,7 +2,7 @@
  * Where things live in a semantic dir, for every storage ERD Studio reads:
  * the single file classifier ({@link classifySemanticFile}), the order a
  * table name is looked up in ({@link tableFileCandidates}), the paths that
- * belong together (a table's relationships file, a diagram's layout file),
+ * belong together (a table's relationships file),
  * the shapes and path builders of the layer-first DBML tree (2.0) and of
  * the 1.9 pre-release's tree it replaces, and the posix path helpers core
  * needs because it may not import `node:path`.
@@ -23,18 +23,18 @@ import {
 export const TEMPLATES_DIR = 'templates';
 
 /** What a file under the semantic dir is. */
-export type SemanticFileKind = 'diagram' | 'table' | 'relationships' | 'layout' | 'layers' | 'template' | 'other';
+export type SemanticFileKind = 'diagram' | 'table' | 'relationships' | 'layers' | 'template' | 'other';
 
 /** The answer of {@link classifySemanticFile}. */
 export interface SemanticFileClass {
   kind: SemanticFileKind;
   /** A diagram's (`json` / `dbml`), a table's (`yaml` / `dbml`) or a relationships file's (`dbml`) storage. */
   storage?: 'json' | 'dbml' | 'yaml';
-  /** A diagram's or layout file's layer folder. */
+  /** A diagram's layer folder. */
   layer?: string;
   /** A table's or relationships file's library folder; absent at the top level. */
   folder?: string;
-  /** A diagram's, layout file's or table's file stem. */
+  /** A diagram's or table's file stem. */
   name?: string;
 }
 
@@ -105,12 +105,12 @@ function isPlainFileName(name: string): boolean {
  *   case) → `relationships`, `tables/[<f>/]<n>.dbml` → a DBML `table`,
  *   `tables/[<f>/]<n>.yml` → a YAML `table` (`_relationships.yml` included),
  *   anything else under `tables/` → `other`;
- * - `<d>/<n>.json` → a JSON `diagram`, `<d>/<n>.dbml` → a DBML `diagram`
- *   (unless `<n>` is reserved or `firstLine` is the export header) and
- *   `<d>/<n>.dbdiagram` → its `layout`, when `<d>` is a layer: not hidden,
- *   not in `NON_SUBJECT_AREA_DIRS` and not the library (a `tables` layer
- *   holds JSON diagrams only);
- * - everything else → `other`.
+ * - `<d>/<n>.json` → a JSON `diagram` and `<d>/<n>.dbml` → a DBML `diagram`
+ *   (unless `<n>` is reserved or `firstLine` is the export header), when
+ *   `<d>` is a layer: not hidden, not in `NON_SUBJECT_AREA_DIRS` and not the
+ *   library (a `tables` layer holds JSON diagrams only);
+ * - everything else → `other` (a `.dbdiagram` included: positions live in
+ *   the diagram's `erd_layout`).
  */
 export function classifySemanticFile(relPath: string, options: ClassifySemanticFileOptions): SemanticFileClass {
   const other: SemanticFileClass = { kind: 'other' };
@@ -167,9 +167,6 @@ export function classifySemanticFile(relPath: string, options: ClassifySemanticF
     }
     return { kind: 'diagram', storage: 'dbml', layer, name: stem };
   }
-  if (ext === '.dbdiagram') {
-    return isRelationshipsStem(stem) ? other : { kind: 'layout', layer, name: stem };
-  }
   return other;
 }
 
@@ -188,16 +185,6 @@ function lastSeparator(path: string): number {
 /** The relationships file of a table file's folder: the same directory, `_relationships.dbml`. */
 export function relationshipsFilePathOf(tableFilePath: string): string {
   return tableFilePath.slice(0, lastSeparator(tableFilePath) + 1) + DBML_RELATIONSHIPS_FILE_NAME;
-}
-
-/** A DBML diagram's layout file, beside it: `sales.dbml` → `sales.dbdiagram`. */
-export function layoutFilePathOf(diagramPath: string): string {
-  return (diagramPath.endsWith('.dbml') ? diagramPath.slice(0, -'.dbml'.length) : diagramPath) + '.dbdiagram';
-}
-
-/** The diagram a layout file belongs to: `sales.dbdiagram` → `sales.dbml`. */
-export function diagramPathOfLayout(layoutPath: string): string {
-  return (layoutPath.endsWith('.dbdiagram') ? layoutPath.slice(0, -'.dbdiagram'.length) : layoutPath) + '.dbml';
 }
 
 /**

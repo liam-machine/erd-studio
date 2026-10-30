@@ -512,12 +512,6 @@
     ],
     "languages": [
       {
-        "id": "json",
-        "extensions": [
-          ".dbdiagram"
-        ]
-      },
-      {
         "id": "dbml",
         "aliases": [
           "DBML"

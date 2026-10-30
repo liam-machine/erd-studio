@@ -117,16 +117,9 @@ function diagramTarget(relPath: string): string {
 export const thousands = (n: number): string => n.toLocaleString('en-US');
 const plural = (n: number, one: string, many = `${one}s`): string => `${thousands(n)} ${n === 1 ? one : many}`;
 
-function kindOf(relPath: string): 'table' | 'relationships' | 'diagram' | 'layout' | 'other' {
-  if (relPath.endsWith('.dbdiagram')) return 'layout';
+function kindOf(relPath: string): 'table' | 'relationships' | 'diagram' | 'other' {
   const kind = classifySemanticFile(relPath, { tablesDirIsLayer: false }).kind;
-  return kind === 'table' || kind === 'relationships' || kind === 'diagram' || kind === 'layout' ? kind : 'other';
-}
-
-/** A diagram and its layout file side by side: sort by the path without its extension. */
-function byStem(a: ConvertReviewItem & { rel: string }, b: ConvertReviewItem & { rel: string }): number {
-  const stem = (p: string): string => p.replace(/\.(dbml|dbdiagram)$/, '');
-  return stem(a.rel).localeCompare(stem(b.rel)) || a.rel.localeCompare(b.rel);
+  return kind === 'table' || kind === 'relationships' || kind === 'diagram' ? kind : 'other';
 }
 
 /**
@@ -247,10 +240,10 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
   const other: Array<ConvertReviewItem & { rel: string }> = [];
   const place = (rel: string, tag: string): void => {
     const kind = kindOf(rel);
-    const item = { rel, path: display(rel), tag: kind === 'layout' ? (tag === 'new' ? 'new layout' : 'updated layout') : tag };
+    const item = { rel, path: display(rel), tag };
     if (kind === 'table') tables.push(item);
     else if (kind === 'relationships') relationships.push(item);
-    else if (kind === 'diagram' || kind === 'layout') diagrams.push(item);
+    else if (kind === 'diagram') diagrams.push(item);
     else other.push(item);
   };
   for (const c of plan.creates) place(c.path, 'new');
@@ -271,7 +264,7 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
     missingSection,
     { id: 'tables', title: 'Tables', items: strip(tables.sort((a, b) => a.rel.localeCompare(b.rel))) },
     { id: 'relationships', title: 'Relationships files', items: strip(relationships.sort((a, b) => a.rel.localeCompare(b.rel))) },
-    { id: 'diagrams', title: 'Diagrams and their .dbdiagram layout files', items: strip(diagrams.sort(byStem)) },
+    { id: 'diagrams', title: 'Diagrams', items: strip(diagrams.sort((a, b) => a.rel.localeCompare(b.rel))) },
     { id: 'other', title: 'Other files', items: strip(other) },
     { id: 'removed', title: 'Files removed', items: plan.deletes.map((d) => ({ path: display(d), tag: 'removed' })) },
     { id: 'moved', title: 'Relationships moving from diagram files to the table library', items: moved },

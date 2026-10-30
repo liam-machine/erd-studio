@@ -12,7 +12,7 @@
 
 import * as path from 'path';
 
-import { dbmlName, layoutFilePathOf } from '@erd-studio/core';
+import { dbmlName } from '@erd-studio/core';
 import { sameName } from '../types/naming';
 import { parseSubjectAreaDbml, parseTableDbml } from '@erd-studio/core/dbml';
 import { editRelationshipsDbml, editSubjectAreaDbml, editTableDbml, renderNewSubjectAreaDbml } from '../services/dbmlWriters';
@@ -49,8 +49,9 @@ export function newDbmlSubjectAreaText(input: {
 /**
  * Rename Subject Area for a `.dbml` diagram (§5.7): create `<new>.dbml`, whose
  * text is `editSubjectAreaDbml(old, {after.domain = new})` (the Project name
- * spliced, nothing else), delete `<old>.dbml`, and move its `.dbdiagram` when
- * there is one. The `use` paths stay valid: the file stays in its folder.
+ * spliced, nothing else) and delete `<old>.dbml`. The positions go with it
+ * (they are the Project's `erd_layout`), and the `use` paths stay valid: the
+ * file stays in its folder.
  */
 export function planDbmlSubjectAreaRename(input: {
   semanticRoot: string;
@@ -58,11 +59,10 @@ export function planDbmlSubjectAreaRename(input: {
   newPath: string;
   newSlug: string;
   text: string;
-  layoutText: string | null;
   resolver: DbmlDiagramResolver;
 }): FileWrite[] {
   const rel = relPosix(input.semanticRoot, input.oldPath);
-  const before = parseSubjectAreaDbml(input.text, rel, input.layoutText).obj;
+  const before = parseSubjectAreaDbml(input.text, rel).obj;
   const after = { ...structuredClone(before), domain: input.newSlug };
   const text = editSubjectAreaDbml(input.text, {
     filePath: rel,
@@ -72,15 +72,10 @@ export function planDbmlSubjectAreaRename(input: {
     relationshipsFilesFor: (names) => input.resolver.relationshipsFilesFor(names),
     fileExists: (p) => input.resolver.fileExists(p),
   });
-  const writes: FileWrite[] = [
+  return [
     { kind: 'create', path: input.newPath, text },
     { kind: 'delete', path: input.oldPath },
   ];
-  if (input.layoutText !== null) {
-    writes.push({ kind: 'create', path: layoutFilePathOf(input.newPath), text: input.layoutText });
-    writes.push({ kind: 'delete', path: layoutFilePathOf(input.oldPath) });
-  }
-  return writes;
 }
 
 /** The library as it is now, for rendering a diagram against it. */
@@ -175,7 +170,7 @@ export function planDbmlDuplicateRename(input: {
     const text = input.readText(diagram);
     if (text === null) continue;
     try {
-      const uses = parseSubjectAreaDbml(text, relPosix(semanticRoot, diagram), null).uses ?? [];
+      const uses = parseSubjectAreaDbml(text, relPosix(semanticRoot, diagram)).uses ?? [];
       if (uses.some((u) => u.resolved.toLowerCase() === copyRel.toLowerCase())) repointed.push(diagram);
     } catch {
       // A diagram that does not read is left as it is.

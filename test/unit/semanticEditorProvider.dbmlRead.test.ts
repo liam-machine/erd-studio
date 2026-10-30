@@ -113,33 +113,29 @@ describe('a DBML diagram on the canvas', () => {
     expect(panel._postedMessages.some((m) => (m as { type: string }).type === 'dbmlEmbeddedTables')).toBe(false);
   });
 
-  it('places a diagram with no layout file without writing one, and asks the canvas for an ELK layout (S5)', async () => {
+  it('places a diagram with no erd_layout without writing one, and asks the canvas for an ELK layout (S5)', async () => {
     const provider = buildProvider(root);
     const panel = await resolve(provider, openDoc('silver/staging.dbml'));
     await panel._simulateMessage({ type: 'ready' });
     const loaded = panel._postedMessages.find((m) => (m as { type: string }).type === 'domainLoaded') as { payload: Record<string, any> };
     expect(Object.keys(loaded.payload.viewConfig.positions).sort()).toEqual(['dim_date', 'fct_order']);
-    expect(fs.existsSync(at('silver/staging.dbdiagram'))).toBe(false);
+    expect(fs.readFileSync(at('silver/staging.dbml'), 'utf-8')).not.toContain('erd_layout');
     expect(_appliedEdits).toHaveLength(0);
-    // A fresh layout: the webview's ELK pass persists through updatePositions, which writes the layout file.
+    // A fresh layout: the webview's ELK pass persists through updatePositions, which writes erd_layout.
     expect((loaded as { autoLayout?: boolean }).autoLayout).toBe(true);
     expect(panel._postedMessages.some((m) => (m as { type: string }).type === 'error')).toBe(false);
   });
 
-  it('an edit is written (S5): a drag writes the layout file only, the diagram keeps its bytes', async () => {
+  it('an edit is written (S5): a drag rewrites the moved table\'s erd_layout line, every other byte stays', async () => {
     const provider = buildProvider(root);
-    const panel = await resolve(provider, openDoc('gold/sales.dbml'));
+    const doc = openDoc('gold/sales.dbml');
+    const panel = await resolve(provider, doc);
     const diagram = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
-    const layoutBefore = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8');
     await panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 10, y: 20 } } } });
     const errors = panel._postedMessages.filter((m) => (m as { type: string }).type === 'error');
     expect(errors).toEqual([]);
     expect(_appliedEdits).toHaveLength(1);
-    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(diagram);
-    // Only the moved table's line changes, in the file's one-line style.
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(
-      layoutBefore.replace('{ "name": "fct_order", "schemaName": "public", "x": 400, "y": 200 }', '{ "name": "fct_order", "schemaName": "public", "x": 10, "y": 20 }'),
-    );
+    expect(doc.getText()).toBe(diagram.replace('    fct_order 400 200\n', '    fct_order 10 20\n'));
   });
 
   it('every handler reads a DBML diagram as a plain v5 object (D8): detectSubjectAreaFormat says v5', () => {
@@ -152,8 +148,8 @@ describe('a DBML diagram on the canvas', () => {
     expect(parsed.logical.models).toEqual(['fct_order', 'dim_customer', 'dim_date', 'dim_region', 'customer_profile', 'bridge_empty']);
     expect(parsed.logical.relationships).toEqual([]);
     expect(provider.parseSubjectAreaFile(doc)).toMatchObject({ storage: 'dbml', dbmlSchemaVersion: 7, writable: true });
-    // The layout the edit pipeline will write through is beside the real file, never the shown relative path.
-    expect(provider.parseSubjectAreaFile(doc).layoutPath).toBe(at('gold/sales.dbdiagram'));
+    // Positions are the diagram's own (erd_layout): there is no file beside it.
+    expect(provider.parseSubjectAreaFile(doc).parsed.viewConfig.positions.fct_order).toEqual({ x: 400, y: 200 });
   });
 
   it('the relationship survey reads a DBML diagram as v5 through the codec: the library is surveyed, nothing JSON.parsed or failed', () => {

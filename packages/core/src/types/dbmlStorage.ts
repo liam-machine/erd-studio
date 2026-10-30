@@ -130,6 +130,16 @@ export interface DbmlSubjectAreaReading {
    * Optional: absent from a reader older than 2.0's.
    */
   pending?: Array<{ line: number; relationships: Relationship[] }>;
+  /**
+   * What reading the Project's `erd_layout` found (§1.6): `layoutBadLine`
+   * and `layoutDuplicateKey` (warnings), `layoutBadValue` (an error: other
+   * DBML tools reject the file) and `layoutMergeConflict` (an error,
+   * `mergeConflict`). Optional: absent when there is none, and from a
+   * reader older than 2.0's.
+   */
+  layoutProblems?: DbmlProblem[];
+  /** 1-based file line of the first git conflict marker inside `erd_layout`: positions are not saved until it is resolved. */
+  layoutConflictLine?: number;
 }
 
 /** The DBML readers `loadDisplaySubjectArea` needs; `dbmlStorageReader` from `@erd-studio/core/dbml` is one. */
@@ -137,7 +147,7 @@ export interface DbmlStorageReader {
   parseTable(text: string, fileStem: string): DbmlTableReading;
   readRelationships(text: string): DbmlRelationshipsReading;
   /** Throws `SubjectAreaFileError` / `SubjectAreaValidationError`. */
-  parseSubjectArea(text: string, filePath: string, layoutText: string | null): DbmlSubjectAreaReading;
+  parseSubjectArea(text: string, filePath: string): DbmlSubjectAreaReading;
   /** The members from the AST only, with no compile; null when the text does not parse. */
   subjectAreaMembers(text: string): string[] | null;
 }

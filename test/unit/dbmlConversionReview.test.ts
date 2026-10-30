@@ -63,8 +63,6 @@ describe('buildConvertReview', () => {
       { path: 'tables/gold/dim_b.dbml', text: '' },
       { path: 'tables/gold/dim_a.dbml', text: '' },
       { path: 'gold/sales.dbml', text: '' },
-      { path: 'gold/sales.dbdiagram', text: '' },
-      { path: 'gold/aaa.dbdiagram', text: '' },
       { path: 'gold/aaa.dbml', text: '' },
     ],
     replaces: [{ path: 'tables/silver/_relationships.dbml', text: '' }],
@@ -74,7 +72,7 @@ describe('buildConvertReview', () => {
     summary: { tables: 2, diagrams: 2, relationshipsFiles: 2, relationships: 3 },
   });
 
-  it('groups the plan into sections, every path project-relative, each diagram beside its layout file', () => {
+  it('groups the plan into sections, every path project-relative, diagrams in path order', () => {
     const { view, locations } = buildConvertReview(review, { display, introLines: ['intro'] });
     expect(view.mode).toBe('review');
     expect(locations).toEqual([]);
@@ -88,10 +86,10 @@ describe('buildConvertReview', () => {
       { path: '.erd-studio/tables/gold/_relationships.dbml', tag: 'new' },
       { path: '.erd-studio/tables/silver/_relationships.dbml', tag: 'updated' },
     ]);
-    expect(section('diagrams').items.map((i) => i.path)).toEqual([
-      '.erd-studio/gold/aaa.dbdiagram', '.erd-studio/gold/aaa.dbml', '.erd-studio/gold/sales.dbdiagram', '.erd-studio/gold/sales.dbml',
+    expect(section('diagrams').items).toEqual([
+      { path: '.erd-studio/gold/aaa.dbml', tag: 'new' },
+      { path: '.erd-studio/gold/sales.dbml', tag: 'new' },
     ]);
-    expect(section('diagrams').items[0].tag).toBe('new layout');
     expect(section('removed').items).toHaveLength(4);
     // Each diagram as the .dbml it becomes, project-relative, in the path style.
     expect(section('moved').items).toEqual([
@@ -102,7 +100,7 @@ describe('buildConvertReview', () => {
     expect(section('notes').items[0].text).toContain('are kept as // lines');
     expect(view.counts).toEqual([
       { label: 'tables', value: 2 }, { label: 'diagrams', value: 2 }, { label: 'relationships', value: 3 },
-      { label: 'files created', value: 7 }, { label: 'file updated', value: 1 }, { label: 'files removed', value: 4 },
+      { label: 'files created', value: 5 }, { label: 'file updated', value: 1 }, { label: 'files removed', value: 4 },
     ]);
   });
 
@@ -325,7 +323,7 @@ describe('buildConvertReview: what Convert handles, leaves and keeps missing (D2
       ['left', 'Left as YAML until fixed'],
       ['missing', 'Kept as missing on their diagrams'],
       ['tables', 'Tables'],
-      ['diagrams', 'Diagrams and their .dbdiagram layout files'],
+      ['diagrams', 'Diagrams'],
       ['removed', 'Files removed'],
       ['notes', 'Notes'],
     ]);

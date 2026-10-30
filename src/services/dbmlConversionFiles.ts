@@ -37,8 +37,8 @@ function listDir(dir: string): fs.Dirent[] {
 /**
  * The planner's input for the semantic dir at `semanticRoot`: `layers.json`,
  * every table (`logical-models/` and `tables/`, top level and one folder
- * down), every relationships file, and every diagram and layout file in a
- * layer folder. An unreadable file is left out.
+ * down), every relationships file, and every diagram in a layer folder.
+ * An unreadable file is left out.
  */
 export function readDbmlConversionInput(workspaceRoot: string, semanticDir: string): DbmlConversionInput {
   const semanticRoot = path.join(workspaceRoot, semanticDir);
@@ -130,9 +130,9 @@ export function dbmlConversionFingerprint(workspaceRoot: string, semanticDir: st
  * The fingerprint the Convert offer remembers a dead end by (a run that was
  * refused or could only list files to fix): every file's path, and the
  * time and size of each YAML table and JSON diagram, the files Convert
- * converts and lists to fix. A DBML file's stamp is left out, and layout
- * files entirely, so opening and arranging a diagram does not bring the
- * offer back; fixing, adding or removing a file does.
+ * converts and lists to fix. A DBML file's stamp is left out (its diagram's
+ * positions are in it), so opening and arranging a diagram does not bring
+ * the offer back; fixing, adding or removing a file does.
  */
 export function dbmlConversionOfferFingerprint(workspaceRoot: string, semanticDir: string): string {
   const semanticRoot = path.join(workspaceRoot, semanticDir);
@@ -141,7 +141,6 @@ export function dbmlConversionOfferFingerprint(workspaceRoot: string, semanticDi
   hash.update(`tablesIsLayer:${tablesIsLayer}\n`);
   walkConversionFiles(semanticRoot, tablesIsLayer, (rel) => {
     const lower = rel.toLowerCase();
-    if (lower.endsWith('.dbdiagram')) return;
     let stamp = '';
     if (!lower.endsWith('.dbml')) {
       try {

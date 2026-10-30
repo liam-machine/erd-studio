@@ -47,18 +47,17 @@ export function mergeFileWrites(writes: readonly FileWrite[]): FileWrite[] {
   return out;
 }
 
-/** What a write's file is, for ordering: relationships files, then tables, then layouts, then anything else. */
+/** What a write's file is, for ordering: relationships files, then tables (and diagrams), then anything else. */
 function createRank(p: string): number {
   const name = pathKey(p).split('/').pop()?.toLowerCase() ?? '';
   if (name === '_relationships.dbml') return 0;
-  if (name.endsWith('.dbdiagram')) return 2;
   if (name.endsWith('.dbml') || name.endsWith('.yml')) return 1;
-  return 3;
+  return 2;
 }
 
 /**
  * The order a set of writes is applied in (D23, §5.3 step 6): every create
- * first (relationships files before table files before layout files, so a
+ * first (relationships files before table files before anything else, so a
  * half-applied edit never leaves a table without its relationships file),
  * then every replace, then every delete. Stable within each group.
  */

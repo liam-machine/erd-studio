@@ -134,7 +134,7 @@ describe('writeNewSubjectArea for a .dbml diagram (§5.7)', () => {
     viewConfig: { positions: { orders: { x: 10, y: 20 }, customers: { x: 300, y: 20 } }, annotations: [] },
   });
 
-  it('writes the tables, the relationships file, the diagram and its layout, all of which compile', async () => {
+  it('writes the tables, the relationships file and the diagram (positions in its erd_layout, Project last), all of which compile', async () => {
     const s = services();
     const domainPath = erd('silver', 'shop.dbml');
     const result = await writeNewSubjectArea({
@@ -144,10 +144,11 @@ describe('writeNewSubjectArea for a .dbml diagram (§5.7)', () => {
     }, s);
     expect(result).toEqual({ ok: true, written: ['orders', 'customers'], changed: [] });
     expect([...snapshot().keys()].sort()).toEqual([
-      'layers.json', 'silver/shop.dbdiagram', 'silver/shop.dbml',
+      'layers.json', 'silver/shop.dbml',
       'tables/silver/_relationships.dbml', 'tables/silver/customers.dbml', 'tables/silver/orders.dbml',
     ]);
     const text = fs.readFileSync(domainPath, 'utf-8');
+    expect(text).toMatch(/\nProject shop \{\n[^]*  erd_layout: '''\n    customers 300 20\n    orders 10 20\n  '''\n\}\n$/);
     expect(subjectAreaTableNames(text, domainPath)).toEqual(['orders', 'customers']);
     expect(text).toContain("use * from '../tables/silver/_relationships.dbml'");
     expectCompilesInEveryParser(dbmlFiles(), ['silver/shop.dbml']);
@@ -225,7 +226,7 @@ describe('writeNewSubjectArea for a .dbml diagram (§5.7)', () => {
     };
   }
 
-  it('a failure at any write puts every file back: table, relationships file, diagram, layout, other diagrams (rollback of every write kind)', async () => {
+  it('a failure at any write puts every file back: table, relationships file, diagram, other diagrams (rollback of every write kind)', async () => {
     // A project with a diagram that the new one settles, and a relationships file the new one changes.
     const seed = services();
     await writeNewSubjectArea({
@@ -233,8 +234,8 @@ describe('writeNewSubjectArea for a .dbml diagram (§5.7)', () => {
       documentText: () => '', document: () => ({ domain: 'one', logical: { models: ['customers'] }, viewConfig: {} }),
     }, seed);
     const before = snapshot();
-    // Creates: relationships file, two tables (one new, the orders table), diagram, layout; replaces: one.dbml (settle).
-    for (let n = 1; n <= 5; n++) {
+    // Creates: relationships file, the orders table, diagram; replaces: one.dbml (settle).
+    for (let n = 1; n <= 4; n++) {
       const s = services();
       const result = await writeNewSubjectArea({
         workspaceRoot: tmp, semanticDir: '.erd-studio', domainPath: erd('silver', 'shop.dbml'), newTables: [ORDERS], folder: 'silver', changedTables: [],
@@ -253,7 +254,8 @@ describe('writeNewSubjectArea for a .dbml diagram (§5.7)', () => {
     expect(ok.ok).toBe(true);
     const after = snapshot();
     expect(after.get('silver/one.dbml')).not.toBe(before.get('silver/one.dbml'));
-    for (const p of ['silver/shop.dbml', 'silver/shop.dbdiagram', 'tables/silver/orders.dbml', 'tables/silver/_relationships.dbml']) expect(after.has(p), p).toBe(true);
+    for (const p of ['silver/shop.dbml', 'tables/silver/orders.dbml', 'tables/silver/_relationships.dbml']) expect(after.has(p), p).toBe(true);
+    expect(after.has('silver/shop.dbdiagram')).toBe(false);
   });
 
   it('a project with no ERD folder: a failed write removes the folder and its layers.json', async () => {
@@ -378,26 +380,23 @@ describe('the lifecycle planners (src/commands/dbmlLifecycle.ts)', () => {
   it('New Diagram: a Project with its Note and keys and no members, that reads back', () => {
     const filePath = erd('gold', 'orders.dbml');
     const text = newDbmlSubjectAreaText({ semanticRoot: erd(), filePath, domain: 'orders', description: 'Orders', modelFolder: 'marts' });
-    const obj = parseSubjectAreaDbml(text, 'gold/orders.dbml', null).obj;
+    const obj = parseSubjectAreaDbml(text, 'gold/orders.dbml').obj;
     expect(obj).toMatchObject({ domain: 'orders', layer: 'gold', description: 'Orders', modelFolder: 'marts', logical: { models: [] } });
   });
 
-  it('Rename Subject Area: the Project name spliced, the use lines and the layout kept byte for byte', () => {
+  it('Rename Subject Area: the Project name spliced, the use lines and erd_layout kept', () => {
     copyNative();
     const { tableLibraryService } = services();
     const oldPath = erd('gold', 'sales.dbml');
     const text = fs.readFileSync(oldPath, 'utf-8');
-    const layoutText = fs.readFileSync(erd('gold', 'sales.dbdiagram'), 'utf-8');
     const writes = planDbmlSubjectAreaRename({
-      semanticRoot: erd(), oldPath, newPath: erd('gold', 'revenue.dbml'), newSlug: 'revenue', text, layoutText,
+      semanticRoot: erd(), oldPath, newPath: erd('gold', 'revenue.dbml'), newSlug: 'revenue', text,
       resolver: currentDbmlResolver(tableLibraryService).resolver,
     });
-    expect(writes.map((w) => `${w.kind} ${path.relative(erd(), w.path)}`)).toEqual([
-      'create gold/revenue.dbml', 'delete gold/sales.dbml', 'create gold/revenue.dbdiagram', 'delete gold/sales.dbdiagram',
-    ]);
+    expect(writes.map((w) => `${w.kind} ${path.relative(erd(), w.path)}`)).toEqual(['create gold/revenue.dbml', 'delete gold/sales.dbml']);
     const created = writes[0] as { text: string };
     expect(created.text).toBe(canonical(text.replace('Project sales {', 'Project revenue {')));
-    expect((writes[2] as { text: string }).text).toBe(layoutText);
+    expect(created.text).toContain("  erd_layout: '''\n    bridge_empty 760 400\n");
   });
 
   it('Organise: a top-level .dbml table moves into its layer\'s folder with its Refs and every use line', () => {

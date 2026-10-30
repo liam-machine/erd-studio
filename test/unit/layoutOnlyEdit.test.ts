@@ -1,11 +1,13 @@
 /**
  * Moving a table is cheap, and its save never comes back as an external change
- * (Lane A step 2):
+ * (Lane A step 2, §2.7 of the 2.0 design):
  *
- * - a layout-only edit (positions, sticky-note boxes) writes a DBML diagram's
- *   `.dbdiagram` alone, with a one-character undo anchor on the `.dbml`, and
- *   plans nothing against the table library; a JSON diagram's write is its own
- *   file, as before; `onDidWriteSubjectArea` carries `layoutOnly`;
+ * - a layout-only edit (positions, sticky-note boxes) rewrites a DBML
+ *   diagram's `erd_layout` alone, as ONE minimal-range edit of the `.dbml`
+ *   (never formatted), and plans nothing against the table library; native
+ *   Cmd+Z rewinds that edit and is layout-only too; a JSON diagram's write is
+ *   its own file, a full-range replace, as before; `onDidWriteSubjectArea`
+ *   carries `layoutOnly`;
  * - `applyFileWrites` leaves out a replace that changes nothing;
  * - drags that queue up while the host is busy are saved as one edit;
  * - the watchers take the saves for our own however late their debounced
@@ -32,7 +34,7 @@ import {
 import type { MockEditOp, WorkspaceEdit as MockWorkspaceEdit } from '../__mocks__/vscode';
 import { SemanticEditorProvider, TABLE_REFRESH_BATCH_MS } from '../../src/providers/SemanticEditorProvider';
 import type { SubjectAreaWriteEvent } from '../../src/providers/SemanticEditorProvider';
-import { applyFileWrites, undoAnchor } from '../../src/providers/applyFileWrites';
+import { applyFileWrites, minimalReplace, undoAnchor } from '../../src/providers/applyFileWrites';
 import { isLayoutOnlyChange } from '../../src/providers/subjectAreaCodec';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
@@ -44,6 +46,8 @@ import type { ManifestService } from '../../src/services/manifestService';
 import type { YmlParserService } from '../../src/services/ymlParserService';
 import type { TemplateService } from '../../src/services/templateService';
 import { formatWrittenDbml } from '../../src/services/dbmlWriters';
+import { clearDbmlDiagramReadings } from '../../src/services/dbmlDiagramReadings';
+import { erdLayoutEntrySpan } from '@erd-studio/core/dbml';
 import { registerDbmlFormatting } from '../../src/providers/dbmlFormattingProvider';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -116,6 +120,7 @@ const pathsOf = (edit: unknown): string[] => [...new Set(opsOf(edit).map((op) =>
 
 beforeEach(() => {
   _resetMockWorkspace();
+  clearDbmlDiagramReadings();
   _clearMockFileWatchers();
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-layout-only-'));
   fs.cpSync(NATIVE, root, { recursive: true });
@@ -159,108 +164,199 @@ describe('isLayoutOnlyChange', () => {
   });
 });
 
-describe('undo/redo flushes the layout file only when the step rewound it', () => {
-  function openLayoutTab(): ReturnType<typeof createMockTextDocument> {
-    const layoutPath = at('gold/sales.dbdiagram');
-    const layoutDoc = createMockTextDocument(layoutPath, fs.readFileSync(layoutPath, 'utf-8'), { persist: true });
-    (vscode.workspace.textDocuments as unknown[]).push(layoutDoc);
-    return layoutDoc;
-  }
+/** The diagram's text with its erd_layout entry cut out: what a drag must leave byte for byte. */
+function outsideLayout(text: string): string {
+  const span = erdLayoutEntrySpan(text)!;
+  return text.slice(0, span.start) + text.slice(span.end);
+}
 
-  it('a .dbdiagram with unsaved hand edits the step did not touch is neither saved nor recorded as ours', async () => {
+/** The erd_layout entry of a diagram's text (its whole lines). */
+function layoutEntry(text: string): string {
+  const span = erdLayoutEntrySpan(text)!;
+  return text.slice(span.start, span.end);
+}
+
+describe('a drag on a DBML diagram rewrites its erd_layout alone', () => {
+  it('one edit of the diagram, a minimal-range replace inside erd_layout; every other byte and file stays', async () => {
     const h = await open();
-    const layoutDoc = openLayoutTab();
-    const diskBefore = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8');
-    layoutDoc._setText(diskBefore.replace(/\}\s*$/, ', "handEdit": tr'));
-    const recordWrite = vi.spyOn(h.tracker, 'recordWrite');
-    await h.panel._simulateMessage({ type: 'undo' });
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(diskBefore);
-    expect(layoutDoc.isDirty).toBe(true);
-    expect(recordWrite.mock.calls.map((c) => relOf(c[0]))).not.toContain('gold/sales.dbdiagram');
+    const planTableWrites = vi.spyOn(h.tables, 'planTableWrites');
+    const invalidatePaths = vi.spyOn(h.tables, 'invalidatePaths');
+    const invalidateCache = vi.spyOn(h.tables, 'invalidateCache');
+    const listTables = vi.spyOn(h.tables, 'listTables');
+    const dbmlBefore = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    // The fixture is not in the canonical layout, so a formatted write would show: a move never formats.
+    expect(formatWrittenDbml(dbmlBefore, 'gold/sales.dbml')).not.toBe(dbmlBefore);
+    const othersBefore = new Map(['tables/gold/fct_order.dbml', 'tables/gold/_relationships.dbml', 'silver/staging.dbml'].map((p) => [p, fs.readFileSync(at(p), 'utf-8')]));
+
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+
+    expect(h.errors()).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(pathsOf(_appliedEdits[0])).toEqual(['gold/sales.dbml']);
+    const ops = opsOf(_appliedEdits[0]) as Array<{ kind: string; range: { start: unknown; end: unknown }; newText: string }>;
+    expect(ops).toHaveLength(1);
+    // The replaced range lies inside the erd_layout entry, and is far smaller than the file.
+    const span = erdLayoutEntrySpan(dbmlBefore)!;
+    const start = h.document.offsetAt(ops[0].range.start as never);
+    expect(start).toBeGreaterThanOrEqual(span.start);
+    expect(ops[0].newText.length).toBeLessThan(40);
+    const after = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    expect(outsideLayout(after)).toBe(outsideLayout(dbmlBefore));
+    expect(layoutEntry(after)).toContain('    fct_order 420 220\n');
+    // A Project-first diagram keeps its order (§1.4).
+    expect(after.startsWith('Project sales {')).toBe(true);
+    for (const [p, text] of othersBefore) expect(fs.readFileSync(at(p), 'utf-8'), p).toBe(text);
+    // Nothing planned against, or dropped from, the table library.
+    expect(planTableWrites).not.toHaveBeenCalled();
+    expect(listTables).not.toHaveBeenCalled();
+    expect(invalidatePaths).not.toHaveBeenCalled();
+    expect(invalidateCache).not.toHaveBeenCalled();
+    expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: false, layoutOnly: true }]);
+    expect(vscode.workspace.textDocuments.filter((d) => d.isDirty)).toEqual([]);
   });
 
-  it('a .dbdiagram the undo rewound is saved, even when this canvas never wrote it (the step is from before it opened)', async () => {
+  it('with editor.formatOnSave on, the drag\'s save does not format the .dbml; the user\'s own save still formats', async () => {
+    const subscriptions: vscode.Disposable[] = [];
+    registerDbmlFormatting({ subscriptions } as unknown as vscode.ExtensionContext);
+    _mockFormatOnSave.enabled = true;
+    try {
+      const h = await open();
+      const dbmlBefore = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+      expect(formatWrittenDbml(dbmlBefore, 'gold/sales.dbml')).not.toBe(dbmlBefore);
+
+      await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+
+      expect(h.errors()).toEqual([]);
+      const after = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+      expect(outsideLayout(after)).toBe(outsideLayout(dbmlBefore));
+      expect(h.document.getText()).toBe(after);
+      expect(vscode.workspace.textDocuments.filter((d) => d.isDirty)).toEqual([]);
+
+      // The format-on-save participant is live: a save that is not ERD Studio's formats.
+      h.document._setText(after);
+      await h.document.save();
+      expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(formatWrittenDbml(after, 'gold/sales.dbml'));
+    } finally {
+      for (const d of subscriptions) d.dispose();
+    }
+  });
+
+  it('a note moved in the same drag, and a note resized, are layout-only too', async () => {
     const h = await open();
-    const layoutDoc = openLayoutTab();
-    const rewound = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8').replace('"x": ', '"x": 1');
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 60, y: 380 } }, annotations: [{ id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', x: 1200, y: 80 }] } });
+    await h.panel._simulateMessage({ type: 'updateAnnotation', payload: { id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', width: 300, height: 160 } });
+    expect(h.errors()).toEqual([]);
+    expect(h.events.map((e) => e.layoutOnly)).toEqual([true, true]);
+    expect(_appliedEdits.every((e) => pathsOf(e).join() === 'gold/sales.dbml')).toBe(true);
+    const layout = layoutEntry(fs.readFileSync(at('gold/sales.dbml'), 'utf-8'));
+    expect(layout).toContain('    dim_date 60 380\n');
+    expect(layout).toContain('    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 1200 80 300 160\n');
+  });
+
+  it('a note text change is not layout-only: the .dbml is written and the trees are told', async () => {
+    const h = await open();
+    await h.panel._simulateMessage({ type: 'updateAnnotation', payload: { id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', text: 'Grain agreed' } });
+    expect(h.errors()).toEqual([]);
+    expect(h.events).toHaveLength(1);
+    expect(h.events[0].layoutOnly).toBeUndefined();
+    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toContain("'Grain agreed'");
+  });
+
+  it('a drop where the table already was writes nothing: no edit, no save, no undo step', async () => {
+    const h = await open();
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 400, y: 200 } } } });
+    // A sub-pixel move that rounds to the same erd_layout line is no edit either.
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 400.001, y: 200 } } } });
+    expect(h.errors()).toEqual([]);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(h.events).toEqual([]);
+  });
+
+  it('a git conflict in erd_layout refuses the drag with the §1.6 text, and writes nothing', async () => {
+    const conflicted = fs.readFileSync(at('gold/sales.dbml'), 'utf-8')
+      .replace('    fct_order 400 200\n', '<<<<<<< HEAD\n    fct_order 400 200\n=======\n    fct_order 500 200\n>>>>>>> theirs\n');
+    fs.writeFileSync(at('gold/sales.dbml'), conflicted);
+    const h = await open();
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 1, y: 2 } } } });
+    expect(h.errors().join(' ')).toContain('gold/sales.dbml has a merge conflict in erd_layout (line 12). Only positions differ: keep either side, then try again. Positions are not saved until then.');
+    expect(_appliedEdits).toHaveLength(0);
+    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(conflicted);
+  });
+
+  it('the next drag, and the next open, read the diagram without compiling it (the drag\'s reading is remembered)', async () => {
+    const h = await open();
+    await h.panel._simulateMessage({ type: 'ready' });
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+    const core = await import('@erd-studio/core/dbml');
+    const compiles = vi.spyOn(core, 'parseSubjectAreaDbml');
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 430, y: 230 } } } });
+    h.panel._postedMessages.length = 0;
+    await h.panel._simulateMessage({ type: 'ready' });
+    expect(compiles).not.toHaveBeenCalled();
+    const loaded = h.panel._postedMessages.find((m) => (m as { type: string }).type === 'domainLoaded') as { payload: { viewConfig: { positions: Record<string, unknown> } } };
+    expect(loaded.payload.viewConfig.positions.fct_order).toEqual({ x: 430, y: 230 });
+    expect(h.errors()).toEqual([]);
+  });
+});
+
+describe('undo and redo of a drag', () => {
+  async function dragged() {
+    const h = await open();
+    const original = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+    const moved = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    expect(moved).not.toBe(original);
+    h.events.length = 0;
+    h.panel._postedMessages.length = 0;
+    return { h, original, moved };
+  }
+  const sends = (h: Harness): number => h.panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
+
+  it('Cmd+Z rewinds the diagram\'s own edit and is layout-only: saved, one send, no library invalidation, no tree refresh', async () => {
+    const { h, original } = await dragged();
+    const invalidateIndex = vi.spyOn(h.tables, 'invalidateIndex');
+    const invalidatePaths = vi.spyOn(h.tables, 'invalidatePaths');
+    h.document._setText(original);
+    await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
+    await vi.waitFor(() => expect(h.events).toHaveLength(1), { timeout: 2000, interval: 10 });
+    expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: false, layoutOnly: true }]);
+    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(original);
+    expect(h.document.isDirty).toBe(false);
+    expect(invalidateIndex).not.toHaveBeenCalled();
+    expect(invalidatePaths).not.toHaveBeenCalled();
+    expect(sends(h)).toBe(1);
+    // The save's dirty-state change event (no content change) sends nothing again.
+    await _fireDidChangeTextDocument(h.document, undefined, []);
+    expect(sends(h)).toBe(1);
+    expect(h.errors()).toEqual([]);
+  });
+
+  it('the toolbar\'s Undo is the same layout-only flush, by itself', async () => {
+    const { h, original } = await dragged();
+    const invalidateIndex = vi.spyOn(h.tables, 'invalidateIndex');
     const undo = vscode.commands.registerCommand('undo', async () => {
-      layoutDoc._setText(rewound);
-      await _fireDidChangeTextDocument(layoutDoc, TextDocumentChangeReason.Undo);
+      h.document._setText(original);
+      await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
     });
     try {
       await h.panel._simulateMessage({ type: 'undo' });
     } finally {
       undo.dispose();
     }
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(rewound);
-    expect(layoutDoc.isDirty).toBe(false);
-    // The next undo that does not touch it leaves a later hand edit alone.
-    layoutDoc._setText(`${rewound} `);
-    await h.panel._simulateMessage({ type: 'undo' });
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(rewound);
-  });
-
-  /**
-   * After a move, a hand edit in the .dbdiagram's own tab, then an undo of
-   * the move, which VS Code refuses across files ("Could not undo 'Workspace
-   * Edit' across all files because changes were made to …dbdiagram"). What
-   * VS Code really emits (UndoRedoService._tryToSplitAndUndo): the hand
-   * edit's change event (no reason), then the step SPLIT and this diagram's
-   * part undone alone — the one-character anchor, so the .dbml keeps its
-   * text but turns dirty, and one Undo event for it. The .dbdiagram gets no
-   * Undo event.
-   */
-  async function refusedUndoAfterMove() {
-    const h = await open();
-    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
-    const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('gold/sales.dbdiagram')) as unknown as ReturnType<typeof createMockTextDocument>;
-    expect(layoutDoc).toBeDefined();
-    const diskBefore = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8');
-    const dbmlBefore = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
-    layoutDoc._setText(`${diskBefore}\n`);
-    await _fireDidChangeTextDocument(layoutDoc);
-    h.events.length = 0;
-    h.panel._postedMessages.length = 0;
-    const spies = {
-      recordWrite: vi.spyOn(h.tracker, 'recordWrite'),
-      invalidateIndex: vi.spyOn(h.tables, 'invalidateIndex'),
-      invalidatePaths: vi.spyOn(h.tables, 'invalidatePaths'),
-    };
-    const splitUndo = async (): Promise<void> => {
-      h.document._setText(h.document.getText());
-      await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
-    };
-    const expectNothingRefreshed = (): void => {
-      expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(diskBefore);
-      expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(dbmlBefore);
-      expect(layoutDoc.isDirty).toBe(true);
-      expect(h.document.isDirty).toBe(false);
-      expect(spies.recordWrite.mock.calls.map((c) => relOf(c[0]))).not.toContain('gold/sales.dbdiagram');
-      expect(spies.invalidateIndex).not.toHaveBeenCalled();
-      expect(spies.invalidatePaths).not.toHaveBeenCalled();
-      expect(h.events).toEqual([]);
-      expect(h.panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded')).toEqual([]);
-      expect(h.errors()).toEqual([]);
-    };
-    return { h, splitUndo, expectNothingRefreshed };
-  }
-
-  it('after a move, Cmd+Z on the canvas that VS Code refuses across files (the .dbdiagram was hand-edited since) leaves the hand edit unsaved and refreshes nothing', async () => {
-    const { splitUndo, expectNothingRefreshed } = await refusedUndoAfterMove();
-    await splitUndo();
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expectNothingRefreshed();
+    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(original);
+    expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: false, layoutOnly: true }]);
+    expect(invalidateIndex).not.toHaveBeenCalled();
+    expect(sends(h)).toBe(1);
   });
 
-  it('the same refused undo from the toolbar refreshes nothing either', async () => {
-    const { h, splitUndo, expectNothingRefreshed } = await refusedUndoAfterMove();
-    const refused = vscode.commands.registerCommand('undo', splitUndo);
-    try {
-      await h.panel._simulateMessage({ type: 'undo' });
-    } finally {
-      refused.dispose();
-    }
-    expectNothingRefreshed();
+  it('an undo that changes more than erd_layout refreshes the library as before', async () => {
+    const { h, original } = await dragged();
+    const invalidateIndex = vi.spyOn(h.tables, 'invalidateIndex');
+    h.document._setText(original.replace("Note: 'Sales star schema'", "Note: 'Edited'"));
+    await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
+    await vi.waitFor(() => expect(invalidateIndex).toHaveBeenCalled(), { timeout: 2000, interval: 10 });
+    expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: true }]);
   });
 
   it('an anchor-only undo that took away a file this canvas created still refreshes the library', async () => {
@@ -276,38 +372,17 @@ describe('undo/redo flushes the layout file only when the step rewound it', () =
     expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: true }]);
   });
 
-  it('the undo of a move is layout-only: one send, no library invalidation, no tree refresh; the save\'s dirty-state event sends nothing', async () => {
-    const h = await open();
-    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
-    const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('gold/sales.dbdiagram')) as unknown as ReturnType<typeof createMockTextDocument>;
-    expect(layoutDoc).toBeDefined();
-    const moved = layoutDoc.getText();
-    const undoneText = moved.replace('"x": 420, "y": 220', '"x": 40, "y": 20');
-    const undo = vscode.commands.registerCommand('undo', async () => {
-      // VS Code rewinds the anchor (the .dbml text as on disk) and the layout file.
-      h.document._setText(h.document.getText());
-      await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
-      layoutDoc._setText(undoneText);
-      await _fireDidChangeTextDocument(layoutDoc, TextDocumentChangeReason.Undo);
-    });
-    h.events.length = 0;
-    h.panel._postedMessages.length = 0;
+  it('an anchor-only undo with nothing rewound (VS Code split a refused step) saves and refreshes nothing', async () => {
+    const { h, moved } = await dragged();
     const invalidateIndex = vi.spyOn(h.tables, 'invalidateIndex');
-    const invalidatePaths = vi.spyOn(h.tables, 'invalidatePaths');
-    try {
-      await h.panel._simulateMessage({ type: 'undo' });
-    } finally {
-      undo.dispose();
-    }
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(undoneText);
-    expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: false, layoutOnly: true }]);
+    h.document._setText(h.document.getText());
+    await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(moved);
+    expect(h.document.isDirty).toBe(false);
     expect(invalidateIndex).not.toHaveBeenCalled();
-    expect(invalidatePaths).not.toHaveBeenCalled();
-    const sends = (): number => h.panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
-    expect(sends()).toBe(1);
-    // The save's dirty-state change events (no content change) arrive after the hold: nothing is sent again.
-    await _fireDidChangeTextDocument(h.document, undefined, []);
-    expect(sends()).toBe(1);
+    expect(h.events).toEqual([]);
+    expect(sends(h)).toBe(0);
   });
 });
 
@@ -316,25 +391,18 @@ describe('a Cmd+Z that arrives while the canvas is still flushing the last one',
    * Live at 1,100 tables: two Cmd+Z 78 ms apart after moves. The second
    * undo's events reached the listener while the first one's flush held
    * `pendingUpdates` (it had saved, and was redrawing): they were dropped,
-   * so nothing saved the rewound .dbml and .dbdiagram, and VS Code's
-   * TextFileEditorTracker opened the dirty .dbdiagram as a tab 800 ms later.
+   * so nothing saved the rewound diagram.
    */
-  it('is flushed after it, so neither file is left dirty and the layout holds the second rewind', async () => {
+  it('is flushed after it, so the diagram is not left dirty and holds the second rewind', async () => {
     const h = await open();
+    const original = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
+    const first = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 520, y: 320 } } } });
-    const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('gold/sales.dbdiagram')) as unknown as ReturnType<typeof createMockTextDocument>;
-    expect(layoutDoc).toBeDefined();
-    const second = layoutDoc.getText();
-    const first = second.replace('"x": 520, "y": 320', '"x": 420, "y": 220');
-    const original = second.replace('"x": 520, "y": 320', '"x": 40, "y": 20');
-    expect(first).not.toBe(second);
+    expect(first).not.toBe(original);
     const nativeUndo = async (text: string): Promise<void> => {
-      // VS Code rewinds the anchor (the .dbml keeps its text, but is dirty) and the layout file.
-      h.document._setText(h.document.getText());
+      h.document._setText(text);
       await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
-      layoutDoc._setText(text);
-      await _fireDidChangeTextDocument(layoutDoc, TextDocumentChangeReason.Undo);
     };
     // The second Cmd+Z lands while the first one's flush redraws the canvas.
     const provider = h.provider as unknown as { sendSubjectAreaData: (...args: unknown[]) => Promise<unknown> };
@@ -350,177 +418,11 @@ describe('a Cmd+Z that arrives while the canvas is still flushing the last one',
     await nativeUndo(first);
     await vi.waitFor(() => expect(secondFired).toBe(true), { timeout: 2000, interval: 10 });
     await vi.waitFor(() => {
-      expect(layoutDoc.isDirty).toBe(false);
       expect(h.document.isDirty).toBe(false);
+      expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(original);
     }, { timeout: 2000, interval: 10 });
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(original);
     expect(spy.mock.calls.length).toBe(2);
     expect(h.errors()).toEqual([]);
-  });
-
-  it('a rewind that lands while the last flush is saving the layout is saved, though VS Code then reports the layout saved', async () => {
-    // Live, the same two quick Cmd+Z: the second rewound the .dbdiagram while
-    // the first flush's save of it was in flight. VS Code wrote the earlier
-    // text and kept its own copy dirty, but its saved event marked the
-    // extension's copy clean (and no dirty event followed), so a flush that
-    // skips clean documents left it dirty, and VS Code opened it as a tab.
-    const h = await open();
-    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
-    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 520, y: 320 } } } });
-    const layoutPath = at('gold/sales.dbdiagram');
-    const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === layoutPath) as unknown as ReturnType<typeof createMockTextDocument>;
-    const second = layoutDoc.getText();
-    const first = second.replace('"x": 520, "y": 320', '"x": 420, "y": 220');
-    const original = second.replace('"x": 520, "y": 320', '"x": 40, "y": 20');
-    const nativeUndo = async (text: string): Promise<void> => {
-      h.document._setText(h.document.getText());
-      await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
-      layoutDoc._setText(text);
-      await _fireDidChangeTextDocument(layoutDoc, TextDocumentChangeReason.Undo);
-    };
-    let vsCodeDirty = false;
-    let inFlight = true;
-    layoutDoc.save = async () => {
-      if (inFlight) {
-        inFlight = false;
-        const snapshot = layoutDoc.getText();
-        await nativeUndo(original);
-        fs.writeFileSync(layoutPath, snapshot, 'utf-8');
-        vsCodeDirty = true;
-        layoutDoc.isDirty = false;
-        return true;
-      }
-      fs.writeFileSync(layoutPath, layoutDoc.getText(), 'utf-8');
-      vsCodeDirty = false;
-      layoutDoc.isDirty = false;
-      return true;
-    };
-    await nativeUndo(first);
-    await vi.waitFor(() => expect(inFlight).toBe(false), { timeout: 2000, interval: 10 });
-    await vi.waitFor(() => expect(vsCodeDirty).toBe(false), { timeout: 2000, interval: 10 });
-    expect(fs.readFileSync(layoutPath, 'utf-8')).toBe(original);
-    expect(h.document.isDirty).toBe(false);
-    expect(h.errors()).toEqual([]);
-  });
-
-  it('the toolbar\'s own Undo is flushed once, by itself', async () => {
-    const h = await open();
-    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
-    const layoutDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('gold/sales.dbdiagram')) as unknown as ReturnType<typeof createMockTextDocument>;
-    const undoneText = layoutDoc.getText().replace('"x": 420, "y": 220', '"x": 40, "y": 20');
-    const undo = vscode.commands.registerCommand('undo', async () => {
-      h.document._setText(h.document.getText());
-      await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
-      layoutDoc._setText(undoneText);
-      await _fireDidChangeTextDocument(layoutDoc, TextDocumentChangeReason.Undo);
-    });
-    h.panel._postedMessages.length = 0;
-    try {
-      await h.panel._simulateMessage({ type: 'undo' });
-    } finally {
-      undo.dispose();
-    }
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toBe(undoneText);
-    expect(h.panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded')).toHaveLength(1);
-  });
-});
-
-describe('a drag on a DBML diagram writes the layout file alone', () => {
-  it('one edit: the .dbdiagram and a one-character undo anchor on the .dbml, whose bytes stay', async () => {
-    const h = await open();
-    const planTableWrites = vi.spyOn(h.tables, 'planTableWrites');
-    const invalidatePaths = vi.spyOn(h.tables, 'invalidatePaths');
-    const invalidateCache = vi.spyOn(h.tables, 'invalidateCache');
-    const listTables = vi.spyOn(h.tables, 'listTables');
-    const dbmlBefore = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
-    // The fixture is not in the canonical layout, so a formatted write would show: a move never formats.
-    expect(formatWrittenDbml(dbmlBefore, 'gold/sales.dbml')).not.toBe(dbmlBefore);
-    const dbmlFilesBefore = new Map(['gold/sales.dbml', 'tables/gold/fct_order.dbml', 'tables/gold/_relationships.dbml'].map((p) => [p, fs.readFileSync(at(p), 'utf-8')]));
-
-    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
-
-    expect(h.errors()).toEqual([]);
-    expect(_appliedEdits).toHaveLength(1);
-    expect(pathsOf(_appliedEdits[0])).toEqual(['gold/sales.dbdiagram', 'gold/sales.dbml']);
-    const anchor = opsOf(_appliedEdits[0]).find((op) => relOf((op as { uri: { fsPath: string } }).uri.fsPath) === 'gold/sales.dbml') as { newText: string };
-    expect(anchor.newText).toHaveLength(1);
-    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(dbmlBefore);
-    for (const [p, text] of dbmlFilesBefore) expect(fs.readFileSync(at(p), 'utf-8'), p).toBe(text);
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toContain('"name": "fct_order", "schemaName": "public", "x": 420, "y": 220');
-    // Nothing planned against, or dropped from, the table library.
-    expect(planTableWrites).not.toHaveBeenCalled();
-    expect(listTables).not.toHaveBeenCalled();
-    expect(invalidatePaths).not.toHaveBeenCalled();
-    expect(invalidateCache).not.toHaveBeenCalled();
-    expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: false, layoutOnly: true }]);
-    // Saved, not left dirty; the layout is not remembered for Undo, which
-    // saves it only when its own step rewound it.
-    expect(vscode.workspace.textDocuments.filter((d) => d.isDirty)).toEqual([]);
-    const edited = (h.provider as unknown as { editedTablePaths: Map<string, Set<string>> }).editedTablePaths.get(h.document.uri.toString());
-    expect([...(edited ?? [])].map(relOf)).not.toContain('gold/sales.dbdiagram');
-  });
-
-  it('with editor.formatOnSave on, the anchor\'s save does not format the .dbml: its bytes stay, and the user\'s own save still formats', async () => {
-    const subscriptions: vscode.Disposable[] = [];
-    registerDbmlFormatting({ subscriptions } as unknown as vscode.ExtensionContext);
-    _mockFormatOnSave.enabled = true;
-    try {
-      const h = await open();
-      const dbmlBefore = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
-      expect(formatWrittenDbml(dbmlBefore, 'gold/sales.dbml')).not.toBe(dbmlBefore);
-
-      await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
-
-      expect(h.errors()).toEqual([]);
-      expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(dbmlBefore);
-      expect(h.document.getText()).toBe(dbmlBefore);
-      expect(vscode.workspace.textDocuments.filter((d) => d.isDirty)).toEqual([]);
-
-      // The format-on-save participant is live: a save that is not ERD Studio's formats.
-      h.document._setText(dbmlBefore);
-      await h.document.save();
-      expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(formatWrittenDbml(dbmlBefore, 'gold/sales.dbml'));
-    } finally {
-      for (const d of subscriptions) d.dispose();
-    }
-  });
-
-  it('a note moved in the same drag, and a note resized, are layout-only too', async () => {
-    const h = await open();
-    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 60, y: 380 } }, annotations: [{ id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', x: 1200, y: 80 }] } });
-    await h.panel._simulateMessage({ type: 'updateAnnotation', payload: { id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', width: 300, height: 160 } });
-    expect(h.errors()).toEqual([]);
-    expect(h.events.map((e) => e.layoutOnly)).toEqual([true, true]);
-    const layout = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8');
-    expect(layout).toContain('"x": 1200, "y": 80, "width": 300, "height": 160');
-  });
-
-  it('a note text change is not layout-only: the .dbml is written and the trees are told', async () => {
-    const h = await open();
-    await h.panel._simulateMessage({ type: 'updateAnnotation', payload: { id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', text: 'Grain agreed' } });
-    expect(h.errors()).toEqual([]);
-    expect(h.events).toHaveLength(1);
-    expect(h.events[0].layoutOnly).toBeUndefined();
-    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toContain("'Grain agreed'");
-  });
-
-  it('a layout file open with unsaved changes refuses the drag by name, writing nothing', async () => {
-    const h = await open();
-    const layoutDoc = createMockTextDocument(at('gold/sales.dbdiagram'), fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8'), { persist: true });
-    (vscode.workspace.textDocuments as unknown[]).push(layoutDoc);
-    layoutDoc._setText(`${layoutDoc.getText()}\n`);
-    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
-    expect(h.errors().join(' ')).toContain('gold/sales.dbdiagram has unsaved changes');
-    expect(_appliedEdits).toHaveLength(0);
-  });
-
-  it('a drop where the table already was writes nothing', async () => {
-    const h = await open();
-    await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 400, y: 200 } } } });
-    expect(h.errors()).toEqual([]);
-    expect(_appliedEdits).toHaveLength(0);
-    expect(h.events).toEqual([]);
   });
 });
 
@@ -536,6 +438,10 @@ describe('a drag on a JSON diagram', () => {
     expect(h.errors()).toEqual([]);
     expect(_appliedEdits).toHaveLength(1);
     expect(pathsOf(_appliedEdits[0])).toEqual(['gold/plain.json']);
+    // A JSON diagram is still replaced whole (full range), as every caller but the DBML drag.
+    const op = opsOf(_appliedEdits[0])[0] as { range: { start: unknown; end: unknown }; newText: string };
+    expect(h.document.offsetAt(op.range.start as never)).toBe(0);
+    expect(op.newText).toBe(fs.readFileSync(at('gold/plain.json'), 'utf-8'));
     expect(JSON.parse(fs.readFileSync(at('gold/plain.json'), 'utf-8')).viewConfig.positions.fct_order).toEqual({ x: 90, y: 30 });
     expect(planTableWrites).not.toHaveBeenCalled();
     expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: false, layoutOnly: true }]);
@@ -546,16 +452,45 @@ describe('applyFileWrites', () => {
   it('leaves out a replace whose text the file already holds (no edit, no save)', async () => {
     const primary = createMockTextDocument(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8'), { persist: true });
     const same = fs.readFileSync(at('tables/dim_date.dbml'), 'utf-8');
+    const staging = fs.readFileSync(at('silver/staging.dbml'), 'utf-8');
     const applied = await applyFileWrites(
-      [{ kind: 'replace', path: at('tables/dim_date.dbml'), text: same }, { kind: 'replace', path: at('gold/sales.dbdiagram'), text: '{}\n' }],
+      [{ kind: 'replace', path: at('tables/dim_date.dbml'), text: same }, { kind: 'replace', path: at('silver/staging.dbml'), text: `${staging}// y\n` }],
       { primary: { document: primary as unknown as vscode.TextDocument, text: `${primary.getText()}// x\n` } },
     );
     expect(applied.ok).toBe(true);
-    expect(applied.replaced.map((u) => relOf(u.fsPath))).toEqual(['gold/sales.dbdiagram']);
-    expect(pathsOf(_appliedEdits[0])).toEqual(['gold/sales.dbdiagram', 'gold/sales.dbml']);
+    expect(applied.replaced.map((u) => relOf(u.fsPath))).toEqual(['silver/staging.dbml']);
+    expect(pathsOf(_appliedEdits[0])).toEqual(['gold/sales.dbml', 'silver/staging.dbml']);
     // A changed primary is still replaced whole.
-    const full = opsOf(_appliedEdits[0])[0] as { newText: string };
+    const full = opsOf(_appliedEdits[0])[0] as { newText: string; range: { start: unknown } };
     expect(full.newText.endsWith('// x\n')).toBe(true);
+    expect(primary.offsetAt(full.range.start as never)).toBe(0);
+  });
+
+  it('minimalPrimary replaces only the primary\'s changed range; the document ends up with the new text', async () => {
+    const text = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    const primary = createMockTextDocument(at('gold/sales.dbml'), text, { persist: true });
+    const next = text.replace('    fct_order 400 200\n', '    fct_order 401 200\n');
+    const applied = await applyFileWrites([], { primary: { document: primary as unknown as vscode.TextDocument, text: next }, minimalPrimary: true });
+    expect(applied.ok).toBe(true);
+    const op = opsOf(_appliedEdits[0])[0] as { newText: string; range: { start: unknown; end: unknown } };
+    expect(op.newText).toBe('1');
+    expect(primary.getText()).toBe(next);
+  });
+
+  it('minimalReplace never splits a CRLF or a surrogate pair', () => {
+    const crlf = createMockTextDocument(at('gold/crlf.dbml'), 'a\r\nb');
+    const change = minimalReplace(crlf as unknown as vscode.TextDocument, 'a\nb');
+    const start = crlf.offsetAt(change.range.start as never);
+    const end = crlf.offsetAt(change.range.end as never);
+    expect('a\r\nb'.slice(0, start) + change.text + 'a\r\nb'.slice(end)).toBe('a\nb');
+    expect(start).toBeLessThanOrEqual(1);
+    const emoji = createMockTextDocument(at('gold/emoji.dbml'), 'x\u{1F600}y');
+    const swap = minimalReplace(emoji as unknown as vscode.TextDocument, 'x\u{1F601}y');
+    const s0 = emoji.offsetAt(swap.range.start as never);
+    const s1 = emoji.offsetAt(swap.range.end as never);
+    expect(s0).toBe(1);
+    expect(s1).toBe(3);
+    expect(swap.text).toBe('\u{1F601}');
   });
 
   it('anchors an unchanged primary with one character, skipping line breaks', () => {
@@ -590,10 +525,10 @@ describe('drags that queue up while the host is busy', () => {
     expect(h.errors()).toEqual([]);
     // The first drag, then ONE edit for the two that waited.
     expect(spy).toHaveBeenCalledTimes(2);
-    const layout = fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8');
-    expect(layout).toContain('"name": "fct_order", "schemaName": "public", "x": 401, "y": 201');
-    expect(layout).toContain('"name": "dim_date", "schemaName": "public", "x": 55, "y": 375');
-    expect(layout).toContain('"name": "dim_region", "schemaName": "public", "x": 700, "y": 50');
+    const layout = layoutEntry(fs.readFileSync(at('gold/sales.dbml'), 'utf-8'));
+    expect(layout).toContain('    fct_order 401 201\n');
+    expect(layout).toContain('    dim_date 55 375\n');
+    expect(layout).toContain('    dim_region 700 50\n');
   });
 
   it('are not folded across another edit queued between them, so edits stay in order', async () => {
@@ -615,15 +550,15 @@ describe('drags that queue up while the host is busy', () => {
     await Promise.all([a, b, c, d]);
     expect(h.errors()).toEqual([]);
     expect(spy).toHaveBeenCalledTimes(4);
-    expect(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8')).toContain('"name": "dim_date", "schemaName": "public", "x": 55, "y": 375');
+    expect(layoutEntry(fs.readFileSync(at('gold/sales.dbml'), 'utf-8'))).toContain('    dim_date 55 375\n');
   });
 });
 
 describe('own-write echo after a busy host (watchers)', () => {
-  const semanticWatcher = () => _mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('dbdiagram'))!;
+  const semanticWatcher = () => _mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{json,dbml}'))!;
   const tableWatcher = () => _mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{yml,dbml}'))!;
 
-  it('a drag\'s .dbdiagram and .dbml saves are ours even when the watcher callback runs 12 s later', async () => {
+  it('a drag\'s .dbml save (its only write) is ours even when the watcher callback runs 12 s later', async () => {
     const tracker = new OwnWriteTracker();
     const h = await open('gold/sales.dbml', tracker);
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
@@ -634,7 +569,6 @@ describe('own-write echo after a busy host (watchers)', () => {
     const changed = vi.fn();
     watcher.onSemanticFileChanged(changed);
     try {
-      semanticWatcher()._simulateChange(vscode.Uri.file(at('gold/sales.dbdiagram')));
       semanticWatcher()._simulateChange(vscode.Uri.file(at('gold/sales.dbml')));
       // The host was blocked: the debounced callbacks run long after the 5 s the old tracker allowed.
       vi.setSystemTime(Date.now() + 12_000);
@@ -643,11 +577,11 @@ describe('own-write echo after a busy host (watchers)', () => {
 
       // A real change made afterwards is still reported.
       vi.advanceTimersByTime(5_000);
-      fs.appendFileSync(at('gold/sales.dbdiagram'), '\n');
-      semanticWatcher()._simulateChange(vscode.Uri.file(at('gold/sales.dbdiagram')));
+      fs.appendFileSync(at('gold/sales.dbml'), '\n');
+      semanticWatcher()._simulateChange(vscode.Uri.file(at('gold/sales.dbml')));
       vi.advanceTimersByTime(300);
       expect(changed).toHaveBeenCalledTimes(1);
-      expect(changed.mock.calls[0][0]).toMatchObject({ layout: true });
+      expect(Object.keys(changed.mock.calls[0][0])).toEqual(['uri']);
     } finally {
       watcher.dispose();
     }
@@ -682,7 +616,7 @@ describe('own-write echo after a busy host (watchers)', () => {
     const changed = vi.fn();
     watcher.onSemanticFileChanged(changed);
     try {
-      const file = at('gold/sales.dbdiagram');
+      const file = at('gold/sales.dbml');
       tracker.expectWrite([file]);
       fs.appendFileSync(file, '\n');
       semanticWatcher()._simulateChange(vscode.Uri.file(file));

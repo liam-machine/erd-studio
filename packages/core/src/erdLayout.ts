@@ -370,3 +370,57 @@ export function placeUnlaidStickies(
   }
   return placed;
 }
+
+/** What a diagram shows from its `erd_layout` ({@link erdLayoutView}). */
+export interface ErdLayoutView {
+  /** Table positions, keyed by member where a line names one (in any case); a stray keeps its own name. */
+  positions: Record<string, NodePosition>;
+  /** A box for each Note id: its sticky line, else a place beside everything laid out. */
+  boxes: Record<string, ErdLayoutSticky>;
+}
+
+/**
+ * A layout as the diagram reader maps it onto the diagram: each table line
+ * is matched to a member exactly first, then case-insensitively (a member is
+ * a file stem, which may differ in case from the declared name, D2), and
+ * re-keyed to the member's spelling. An exact line wins over a case variant,
+ * which then stays a stray under its own name, as does a line that matches
+ * no member (strays are kept: the next write keeps them too). Each Note in
+ * `noteIds` (file order) gets its sticky line's box, else a place from
+ * {@link placeUnlaidStickies}. Pure and parser-free.
+ */
+export function erdLayoutView(layout: ErdLayout, members: readonly string[], noteIds: readonly string[]): ErdLayoutView {
+  const memberOf = new Map<string, string>();
+  for (const member of members) {
+    if (typeof member === 'string' && !memberOf.has(member.toLowerCase())) memberOf.set(member.toLowerCase(), member);
+  }
+  const names = Object.keys(layout.positions);
+  const taken = new Set(names.filter((name) => memberOf.get(name.toLowerCase()) === name).map((name) => name.toLowerCase()));
+  const positions: Record<string, NodePosition> = {};
+  for (const name of names) {
+    const key = name.toLowerCase();
+    const member = memberOf.get(key);
+    if (member !== undefined && member !== name && !taken.has(key)) {
+      taken.add(key);
+      setEntry(positions, member, layout.positions[name]);
+    } else {
+      setEntry(positions, name, layout.positions[name]);
+    }
+  }
+  const laid = new Map(layout.stickies.map((s) => [s.id, s] as const));
+  const placed = placeUnlaidStickies(noteIds, positions, layout.stickies);
+  const boxes: Record<string, ErdLayoutSticky> = {};
+  for (const id of noteIds) {
+    if (Object.prototype.hasOwnProperty.call(boxes, id)) continue;
+    const sticky = laid.get(id);
+    const place = sticky ?? placed[id] ?? { x: 0, y: 0 };
+    setEntry(boxes, id, {
+      id,
+      x: place.x,
+      y: place.y,
+      ...(sticky?.width !== undefined ? { width: sticky.width } : {}),
+      ...(sticky?.height !== undefined ? { height: sticky.height } : {}),
+    });
+  }
+  return { positions, boxes };
+}

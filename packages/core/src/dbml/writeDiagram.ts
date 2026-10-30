@@ -3,9 +3,15 @@
  * `<layer>/<name>.dbml` diagram, and an edit that diffs the v5 object a
  * diagram was read into (`before`) against the one a handler produced
  * (`after`) and splices only what changed — Project values, table `use`
- * lines, the relationships `use` lines, sticky-note `Note` blocks. Positions
- * and sticky-note boxes live in the layout file (`editDiagramLayout`), not
- * here. A DBML diagram holds no Refs (D5).
+ * lines, the relationships `use` lines, sticky-note `Note` blocks, and the
+ * positions and sticky-note boxes in the Project's `erd_layout` (§1.6,
+ * `erdLayoutTextEdit`). A DBML diagram holds no Refs (D5).
+ *
+ * A new diagram is written with its Project last (§1.4), so the file opens
+ * on what the diagram holds and the `erd_layout` lines sit at the bottom.
+ * An edit leaves an existing Project where it is; new `use` lines go after
+ * the last `use` line, else before the first Note, else before the
+ * Project, never inside or after it.
  */
 
 import type { Annotation, AnnotationColor, Relationship } from '../types/semantic.js';
@@ -21,6 +27,8 @@ import {
 } from '../dbmlRichProperties.js';
 import { readPendingRefs } from './readRelationships.js';
 import { dbmlName, dbmlNoteText, dbmlString } from '../dbmlText.js';
+import { erdLayoutOf, renderErdLayoutValue, sameErdLayout, withMemberSpelling, type ErdLayout } from '../erdLayout.js';
+import type { NodePosition } from '../types/semantic.js';
 import { isSafeTableName } from '../logicalModel.js';
 import { normalisePosix } from '../storage.js';
 import { DbmlEditRefused } from './errors.js';
@@ -37,6 +45,7 @@ import {
   type AstNode,
 } from './parser.js';
 import { parseSubjectAreaDbml } from './readDiagram.js';
+import { erdLayoutTextEdit } from './erdLayoutDbml.js';
 import {
   applyTextEdits,
   attachedStart,
@@ -79,6 +88,14 @@ export interface SubjectAreaDbmlEdit {
   relationshipsFilesFor(memberNames: readonly string[]): string[];
   /** Recompute the relationships `use` lines even when membership did not change (the settle pass). */
   refreshRelationshipsUses?: boolean;
+  /**
+   * Leave `erd_layout` byte-identical when it holds a git merge conflict,
+   * instead of refusing a change to it (§1.6): set for every diagram an edit
+   * re-renders that is not the one being edited (a rename or delete cascade,
+   * the settle), so one conflicted diagram never blocks the project. Its
+   * other changes (`use` lines, Note `linked_table`) are still written.
+   */
+  keepLayoutIfConflicted?: boolean;
   /** Whether a file exists AFTER this edit (posix, relative to the semantic dir). */
   fileExists(path: string): boolean;
   /** The DBML parser; the pinned one unless a test passes another. */
@@ -111,7 +128,10 @@ export interface NewSubjectAreaDbml {
   pendingRefs?: readonly string[];
   /** The relationships files (relative to the semantic dir) the diagram imports. */
   relationshipsFiles: readonly string[];
+  /** Sticky notes: a `Note` block each, and each one's box in `erd_layout`. */
   annotations?: readonly Annotation[];
+  /** Table positions, written in `erd_layout` (§1.6); omitted or empty with no notes: no key, placed when it opens. */
+  positions?: Record<string, NodePosition>;
 }
 
 const lower = (s: string): string => s.toLowerCase();
@@ -136,7 +156,11 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
-/** The Project keys after the Note, in the order a new diagram writes them. */
+/**
+ * The Project keys after the Note, in the order a new diagram writes them.
+ * `erd_layout` is always last; it is written by `erdLayoutTextEdit` (§1.6),
+ * never by the string compare of {@link projectValues}, which leaves it out.
+ */
 const PROJECT_KEYS = [
   DBML_DIAGRAM_PROPERTIES.schemaVersion,
   DBML_DIAGRAM_PROPERTIES.modelFolder,
@@ -144,7 +168,14 @@ const PROJECT_KEYS = [
   DBML_DIAGRAM_PROPERTIES.layoutOptions,
   DBML_DIAGRAM_PROPERTIES.stubColumns,
   DBML_DIAGRAM_PROPERTIES.unlinkedTables,
+  DBML_DIAGRAM_PROPERTIES.layout,
 ] as const;
+
+/** The Project's `erd_layout` line for `layout` (§1.6), indented by `indent`; undefined when there is nothing to place. */
+function layoutLine(layout: ErdLayout, eol: string, indent: string): string | undefined {
+  const value = renderErdLayoutValue(layout, { eol, indent });
+  return value === undefined ? undefined : `${indent}${DBML_DIAGRAM_PROPERTIES.layout}: ${dbmlString(value)}`;
+}
 
 /**
  * The Project values a diagram object holds (§2.5), as the text each key is
@@ -165,13 +196,15 @@ function projectValues(obj: Json, unlinked: readonly string[] = []): Record<stri
   };
 }
 
-function projectLines(domain: string, values: Record<string, string | undefined>): string[] {
+/** A Project block's lines: its Note, every key that is set, and `layout` (an `erd_layout` line) last. */
+function projectLines(domain: string, values: Record<string, string | undefined>, layout?: string): string[] {
   const lines = [`Project ${dbmlName(domain)} {`];
   if (values.note !== undefined) lines.push(`  Note: ${dbmlString(values.note)}`);
   for (const key of PROJECT_KEYS) {
     const value = values[key];
     if (value !== undefined) lines.push(`  ${key}: ${dbmlString(value)}`);
   }
+  if (layout !== undefined) lines.push(layout);
   lines.push('}');
   return lines;
 }
@@ -216,10 +249,11 @@ function tableUseLine(reference: string, fromFile: string, toFile: string): stri
 }
 
 /**
- * A new diagram file (§2.5, in order): the Project (its Note, then
- * `erd_schema_version` and every other key that is set), one table `use`
- * line per member in list order, one `use *` per relationships file sorted
- * by path, then one `Note` block per sticky note.
+ * A new diagram file (§1.4, in order): one table `use` line per member in
+ * list order, one `use *` per relationships file sorted by path, the pending
+ * lines, one `Note` block per sticky note, then the Project, last (its Note,
+ * `erd_schema_version` and every other key that is set, and `erd_layout`
+ * last when there is a position or a sticky-note box to place).
  */
 export function renderNewSubjectAreaDbml(input: NewSubjectAreaDbml): string {
   const view: Json = {};
@@ -231,17 +265,19 @@ export function renderNewSubjectAreaDbml(input: NewSubjectAreaDbml): string {
     ...(input.stubColumns !== undefined ? { stubColumns: input.stubColumns } : {}),
     viewConfig: view,
   }, input.unlinked ?? []);
-  const out: string[] = [...projectLines(input.domain, values)];
+  const blocks: string[][] = [];
   const uses = input.members.map((m) => tableUseLine(m.reference ?? dbmlName(m.name), input.filePath, m.path));
   const relationships = [...new Set(input.relationshipsFiles.map(normalisePosix))]
     .map((path) => usePathBetween(input.filePath, path))
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     .map((path) => `use * from '${path}'`);
-  if (uses.length + relationships.length > 0) out.push('', ...uses, ...relationships);
+  if (uses.length + relationships.length > 0) blocks.push([...uses, ...relationships]);
   const pending = (input.pendingRefs ?? []).map((line) => pendingRefLine(line));
-  if (pending.length > 0) out.push('', ...pending);
-  for (const annotation of input.annotations ?? []) out.push('', noteBlock(annotation, '\n'));
-  return `${out.join('\n')}\n`;
+  if (pending.length > 0) blocks.push(pending);
+  for (const annotation of input.annotations ?? []) blocks.push([noteBlock(annotation, '\n')]);
+  const layout = layoutLine(erdLayoutOf(input.positions, input.annotations), '\n', '  ');
+  blocks.push(projectLines(input.domain, values, layout));
+  return `${blocks.map((lines) => lines.join('\n')).join('\n\n')}\n`;
 }
 
 /** The keys of a diagram object the DBML diagram stores (§2.5). Anything else cannot be written. */
@@ -259,6 +295,13 @@ function annotationsOf(obj: Json): Annotation[] {
   return Array.isArray(view.annotations) ? (view.annotations as Annotation[]).filter((a) => isObject(a) && typeof a.id === 'string') : [];
 }
 
+/** What a diagram object's `erd_layout` holds: its table positions and its sticky notes' boxes. */
+function layoutOfObject(obj: Json): ErdLayout {
+  const view = isObject(obj.viewConfig) ? obj.viewConfig : {};
+  const positions = isObject(view.positions) ? view.positions as Record<string, NodePosition> : {};
+  return erdLayoutOf(positions, annotationsOf(obj));
+}
+
 /**
  * Edit a diagram so it reads as `edit.after` (§4.5), splicing only what
  * changed from `edit.before`. Laws 1–5 hold; a no-op edit returns the text
@@ -267,8 +310,9 @@ function annotationsOf(obj: Json): Annotation[] {
  * Throws {@link DbmlEditRefused} for a file that does not read, one with a
  * repeated Note name or a second Project, relationships in `after` (they
  * live in the table library), a change of layer or schema version or of
- * anything a DBML diagram does not store, and a new member that is not a
- * DBML table (D20).
+ * anything a DBML diagram does not store, a new member that is not a DBML
+ * table (D20), and a change of positions while `erd_layout` holds a merge
+ * conflict (unless `keepLayoutIfConflicted`, which leaves it as it is).
  */
 export function editSubjectAreaDbml(oldText: string, edit: SubjectAreaDbmlEdit): string {
   return refuseOverlaps(edit.filePath, () => editSubjectArea(oldText, edit));
@@ -282,7 +326,7 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   const eol = eolOf(text);
   let reading;
   try {
-    reading = parseSubjectAreaDbml(text, file, null, parser);
+    reading = parseSubjectAreaDbml(text, file, parser);
   } catch (err) {
     if (err instanceof SubjectAreaFileError || err instanceof SubjectAreaValidationError) {
       const line = err instanceof SubjectAreaFileError ? err.line : undefined;
@@ -357,7 +401,7 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   const edits: TextEdit[] = [];
   const lateEdits: TextEdit[] = [];
   const plans: ListPlan[] = [];
-  let firstUseDone = false;
+  const firstUses: string[] = [];
 
   // --- Members: use lines and erd_unlinked_tables (D26) -----------------------------------
   const uses = useLinesOf(ast, text, file);
@@ -428,55 +472,54 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   const valuesBefore = projectValues(before, oldUnlinked);
   const valuesAfter = projectValues(after, newUnlinked);
   const projectChanged = domainBefore !== domainAfter || Object.keys(valuesAfter).some((k) => valuesAfter[k] !== valuesBefore[k]);
-  if (projectChanged) {
-    if (!project) {
-      const at = headerEnd(text);
-      const block = projectLines(domainAfter, valuesAfter).join(eol);
-      const following = text.slice(at).trim() !== '';
-      // After a header comment the blank line that ends it stays below the block; at the top, one is added.
-      edits.push({ start: at, end: at, text: `${at > 0 && text[at - 1] !== '\n' ? eol : ''}${block}${eol}${following && at === 0 ? eol : ''}` });
-    } else {
-      if (domainBefore !== domainAfter) {
-        if (project.name) edits.push({ start: project.name.start, end: project.name.end, text: dbmlName(domainAfter) });
-        else edits.push({ start: project.type.end, end: project.type.end, text: ` ${dbmlName(domainAfter)}` });
+  // The first erd_layout entry (any case): a key added before `}` goes above it, so erd_layout stays last.
+  const layoutEntry = (Array.isArray(project?.body?.body) ? project!.body.body as AstNode[] : [])
+    .find((n) => lower(String(n?.type?.value ?? '')) === DBML_DIAGRAM_PROPERTIES.layout);
+  // With no Project, one is added at the end, after everything else (below, with erd_layout in it).
+  if (projectChanged && project) {
+    if (domainBefore !== domainAfter) {
+      if (project.name) edits.push({ start: project.name.start, end: project.name.end, text: dbmlName(domainAfter) });
+      else edits.push({ start: project.type.end, end: project.type.end, text: ` ${dbmlName(domainAfter)}` });
+    }
+    const body: AstNode[] = Array.isArray(project.body?.body) ? project.body.body : [];
+    // A repeated key is read from its last entry (as the readers read it), so that is the one edited.
+    const entryOf = (key: string): AstNode | undefined => [...body].reverse().find((n) => lower(String(n?.type?.value ?? '')) === key);
+    const close = project.body.blockCloseBrace as AstNode;
+    const indent = body.length > 0 ? text.slice(text.lastIndexOf('\n', body[0].start - 1) + 1, body[0].start) : '  ';
+    const order = ['note', ...PROJECT_KEYS];
+    const closeAt = text.lastIndexOf('\n', close.start - 1) + 1;
+    const closeAlone = /^[ \t]*$/.test(text.slice(closeAt, close.start));
+    for (const key of order) {
+      if (valuesAfter[key] === valuesBefore[key]) continue;
+      const entry = entryOf(key);
+      const value = valuesAfter[key];
+      if (value === undefined) {
+        if (entry) edits.push(cutEdit(text, entry));
+        continue;
       }
-      const body: AstNode[] = Array.isArray(project.body?.body) ? project.body.body : [];
-      // A repeated key is read from its last entry (as the readers read it), so that is the one edited.
-      const entryOf = (key: string): AstNode | undefined => [...body].reverse().find((n) => lower(String(n?.type?.value ?? '')) === key);
-      const close = project.body.blockCloseBrace as AstNode;
-      const indent = body.length > 0 ? text.slice(text.lastIndexOf('\n', body[0].start - 1) + 1, body[0].start) : '  ';
-      const order = ['note', ...PROJECT_KEYS];
-      const closeAt = text.lastIndexOf('\n', close.start - 1) + 1;
-      const closeAlone = /^[ \t]*$/.test(text.slice(closeAt, close.start));
-      for (const key of order) {
-        if (valuesAfter[key] === valuesBefore[key]) continue;
-        const entry = entryOf(key);
-        const value = valuesAfter[key];
-        if (value === undefined) {
-          if (entry) edits.push(cutEdit(text, entry));
-          continue;
-        }
-        const written = dbmlString(value);
-        if (entry) {
-          const valueNode = key === 'note' && entry.body?.kind === '<block-expression>'
-            ? (entry.body.body as AstNode[]).find((n) => n?.kind === '<function-application>')
-            : entry.body;
-          if (valueNode) edits.push({ start: valueNode.start, end: valueNode.end, text: written });
-          continue;
-        }
-        // A key added goes in after the last known key before it in the order (or before `}`).
-        const line = `${indent}${key === 'note' ? 'Note' : key}: ${written}`;
-        const previous = order.slice(0, order.indexOf(key)).map(entryOf).filter((n): n is AstNode => n !== undefined).pop();
-        if (previous) {
-          const at = Math.max(previous.fullEnd, previous.end);
-          edits.push({ start: at, end: at, text: `${text[at - 1] === '\n' ? '' : eol}${line}${eol}` });
-        } else if (key === 'note' && body.length > 0) {
-          const at = attachedStart(text, body[0], project.body.start + 1);
-          edits.push({ start: at, end: at, text: `${line}${eol}` });
-        } else {
-          const at = closeAlone ? closeAt : close.start;
-          edits.push({ start: at, end: at, text: `${closeAlone ? '' : eol}${line}${eol}` });
-        }
+      const written = dbmlString(value);
+      if (entry) {
+        const valueNode = key === 'note' && entry.body?.kind === '<block-expression>'
+          ? (entry.body.body as AstNode[]).find((n) => n?.kind === '<function-application>')
+          : entry.body;
+        if (valueNode) edits.push({ start: valueNode.start, end: valueNode.end, text: written });
+        continue;
+      }
+      // A key added goes in after the last known key before it in the order (or before `}`).
+      const line = `${indent}${key === 'note' ? 'Note' : key}: ${written}`;
+      const previous = order.slice(0, order.indexOf(key)).map(entryOf).filter((n): n is AstNode => n !== undefined).pop();
+      if (previous) {
+        const at = Math.max(previous.fullEnd, previous.end);
+        edits.push({ start: at, end: at, text: `${text[at - 1] === '\n' ? '' : eol}${line}${eol}` });
+      } else if (key === 'note' && body.length > 0) {
+        const at = attachedStart(text, body[0], project.body.start + 1);
+        edits.push({ start: at, end: at, text: `${line}${eol}` });
+      } else if (layoutEntry && key !== DBML_DIAGRAM_PROPERTIES.layout) {
+        const at = attachedStart(text, layoutEntry, project.body.start + 1);
+        edits.push({ start: at, end: at, text: `${line}${eol}` });
+      } else {
+        const at = closeAlone ? closeAt : close.start;
+        edits.push({ start: at, end: at, text: `${closeAlone ? '' : eol}${line}${eol}` });
       }
     }
   }
@@ -575,7 +618,8 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
         lateEdits.push({ start: at, end: at, text: `${text[at - 1] === '\n' ? '' : eol}${line}${eol}` });
         return;
       }
-      lateEdits.push(firstUseInsert(`${line}${eol}`));
+      const first = firstUseInsert(`${line}${eol}`);
+      if (first) lateEdits.push(first);
     });
   }
 
@@ -603,7 +647,20 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
         lateEdits.push({ start: at, end: at, text: `${text[at - 1] === '\n' ? '' : eol}${line}${eol}` });
         continue;
       }
-      lateEdits.push(firstUseInsert(`${line}${eol}`));
+      const first = firstUseInsert(`${line}${eol}`);
+      if (first) lateEdits.push(first);
+    }
+  }
+
+  // The first use lines of a diagram that had none: one block, a blank line after it (§1.4).
+  if (firstUses.length > 0) {
+    const anchor = nodes.find((n) => lower(elementType(n) ?? '') === 'note') ?? project;
+    if (anchor) {
+      const at = attachedStart(text, anchor, headerEnd(text));
+      lateEdits.push({ start: at, end: at, text: `${firstUses.join('')}${eol}` });
+    } else {
+      const lead = text.trim() === '' ? '' : text.endsWith('\n') ? eol : `${eol}${eol}`;
+      lateEdits.push({ start: text.length, end: text.length, text: `${lead}${firstUses.join('')}` });
     }
   }
 
@@ -666,31 +723,54 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   }
   for (const plan of plans) edits.push(...renderListPlan(text, plan, eol));
   if (appended.length > 0) {
-    const at = text.length;
-    const lead = text === '' ? '' : text.endsWith('\n') ? eol : `${eol}${eol}`;
-    lateEdits.push({ start: at, end: at, text: `${lead}${appended.join(`${eol}${eol}`)}${eol}` });
+    // New notes go after the others: before a Project that ends the file (§1.4, Project last), else at the end.
+    if (project && nodes[nodes.length - 1] === project) {
+      const at = attachedStart(text, project, headerEnd(text));
+      lateEdits.push({ start: at, end: at, text: `${appended.join(`${eol}${eol}`)}${eol}${eol}` });
+    } else {
+      const at = text.length;
+      const lead = text === '' ? '' : text.endsWith('\n') ? eol : `${eol}${eol}`;
+      lateEdits.push({ start: at, end: at, text: `${lead}${appended.join(`${eol}${eol}`)}${eol}` });
+    }
+  }
+
+  // --- erd_layout (§1.6): positions and sticky-note boxes ------------------------------
+  // Written only when the canvas's positions or boxes changed, so an edit that moved nothing
+  // leaves the value's bytes as they are (even where the reader placed a note the file does not).
+  const layoutAfter = layoutOfObject(after);
+  const layoutChanged = !sameErdLayout(layoutOfObject(before), layoutAfter);
+  const keepLayout = edit.keepLayoutIfConflicted === true && reading.layoutConflictLine !== undefined;
+  if (!project) {
+    // No Project: one goes at the end (Project last), holding whatever this edit sets.
+    const layout = layoutChanged ? layoutLine(withMemberSpelling(layoutAfter, allNewMembers), eol, '  ') : undefined;
+    if (projectChanged || layout !== undefined) {
+      const block = projectLines(domainAfter, projectChanged ? valuesAfter : {}, layout).join(eol);
+      const lead = text.trim() === '' && !appendsAtEnd() ? '' : text.endsWith('\n') || appendsAtEnd() ? eol : `${eol}${eol}`;
+      lateEdits.push({ start: text.length, end: text.length, text: `${lead}${block}${eol}` });
+    }
+  } else if (layoutChanged && !keepLayout) {
+    const change = erdLayoutTextEdit(text, ast, layoutAfter, eol, file, allNewMembers);
+    if (change) lateEdits.push(change);
   }
 
   const out = applyTextEdits(text, [...edits, ...pendingEdits, ...pendingLineCuts(text, pendingCuts), ...lateEdits]);
   return hadBom ? `﻿${out}` : out;
 
-  /** The first `use` line of a diagram that has none: after the Project (one blank line between), else after the header. */
-  function firstUseInsert(line: string): TextEdit {
+  /** Whether an edit so far appends text at the very end of the file (a note, a first `use` line). */
+  function appendsAtEnd(): boolean {
+    return lateEdits.some((e) => e.start === text.length && e.end === text.length && e.text !== '');
+  }
+
+  /**
+   * A new `use` line where there is no `use` line to place it by: after the
+   * last `use` line when the file has one; else null, and the line joins the
+   * first `use` lines, which go in one block before the first Note, else
+   * before the Project, else at the end (§1.4).
+   */
+  function firstUseInsert(line: string): TextEdit | null {
     const at = afterUses();
     if (at >= 0) return { start: at, end: at, text: `${text[at - 1] === '\n' ? '' : eol}${line}` };
-    const first = !firstUseDone;
-    firstUseDone = true;
-    const projectNode = nodes.find((n) => lower(elementType(n) ?? '') === 'project');
-    if (projectNode) {
-      const end = Math.max(projectNode.fullEnd, projectNode.end);
-      return { start: end, end, text: first ? `${text[end - 1] === '\n' ? '' : eol}${eol}${line}` : line };
-    }
-    if (!first) {
-      const start = headerEnd(text);
-      return { start, end: start, text: line };
-    }
-    const start = headerEnd(text);
-    const following = text.slice(start).trim() !== '';
-    return { start, end: start, text: `${line}${following && start === 0 ? eol : ''}` };
+    firstUses.push(line);
+    return null;
   }
 }

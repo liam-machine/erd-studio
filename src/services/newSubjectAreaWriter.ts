@@ -15,7 +15,7 @@
  *
  * In a project that writes DBML (§3.2) the subject area is a `.dbml` diagram
  * (`domainPath` ends in `.dbml`): its table files, relationships files,
- * diagram, layout and the settle re-render of other DBML diagrams are planned
+ * diagram (positions in its `erd_layout`) and the settle re-render of other DBML diagrams are planned
  * up front and written by `writeFilesWithRollback`, which restores a snapshot
  * of every file it wrote on failure (§5.7) — never a `deleteTable`, which for
  * DBML is the D16 cascade and would edit other owners' files.
@@ -30,7 +30,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { editDiagramLayout, layoutFilePathOf, stickyLayoutsOf, subjectAreaStorageOf } from '@erd-studio/core';
+import { subjectAreaStorageOf } from '@erd-studio/core';
 import type { Annotation, NodePosition } from '@erd-studio/core';
 import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
 import { renderNewSubjectAreaDbml } from './dbmlWriters';
@@ -216,8 +216,8 @@ export async function writeNewSubjectArea(
 
 /**
  * {@link writeNewSubjectArea} for a `.dbml` diagram (§5.7): every table file,
- * relationships file, the diagram, its layout (only when something is
- * placed) and the settle re-render of other DBML diagrams, planned before
+ * relationships file, the diagram (its positions and sticky-note boxes in
+ * its Project's `erd_layout`) and the settle re-render of other DBML diagrams, planned before
  * the first write and written all or nothing by `writeFilesWithRollback`
  * (new files with `wx`).
  */
@@ -262,8 +262,8 @@ async function writeNewDbmlSubjectArea(
       members,
       relationshipsFiles: plan.relationshipsFilesFor(members.map((m) => m.name)),
       annotations,
+      ...(view.positions ? { positions: view.positions } : {}),
     });
-    const layout = editDiagramLayout(null, view.positions ?? {}, stickyLayoutsOf(annotations));
     const readText = services.readText ?? ((filePath: string): string | null => {
       try {
         return fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
@@ -277,7 +277,6 @@ async function writeNewDbmlSubjectArea(
     writes = [
       ...lib.writes,
       { kind: 'create', path: domainPath, text },
-      ...(layout !== null ? [{ kind: 'create' as const, path: layoutFilePathOf(domainPath), text: layout }] : []),
       ...settleDbmlDiagramWrites({ semanticRoot, diagrams: others, plan, readText }),
     ];
     // Nothing is written under the user's unsaved edits: not a library file,

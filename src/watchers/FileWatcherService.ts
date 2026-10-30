@@ -4,8 +4,8 @@
  * Watches:
  * - {target-path}/{manifest.json,catalog.json} (dbt artifacts) → manifest and
  *   catalog cache invalidation, as two separate events off one watcher
- * - {semanticDir}/**\/*.{json,dbml,dbdiagram} (diagrams, layouts and DBML
- *   relationships files, default .erd-studio) → tree and editor refresh
+ * - {semanticDir}/**\/*.{json,dbml} (diagrams and DBML relationships files,
+ *   default .erd-studio) → tree and editor refresh
  * - {semanticDir}/layers.json → layer config reload (onLayerConfigChanged)
  * - {model,seed,snapshot-paths}/**\/*.{yml,yaml,sql,py,csv} (dbt sources) →
  *   physical stage refresh (onDbtYmlChanged)
@@ -52,7 +52,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { DBML_RELATIONSHIPS_FILE_STEM, classifySemanticFile, diagramPathOfLayout, isReservedTableName } from '@erd-studio/core';
+import { DBML_RELATIONSHIPS_FILE_STEM, classifySemanticFile, isReservedTableName } from '@erd-studio/core';
 
 import { LOGICAL_MODELS_DIR, TABLES_DIR, tablesDirHasDbml, tablesDirIsLayer } from '../services/logicalModelService';
 import { NON_SUBJECT_AREA_DIRS } from '../services/domainService';
@@ -95,18 +95,18 @@ const PROJECT_PATH_KEY_RE =
   /^(target-path|model-paths|source-paths|seed-paths|data-paths|snapshot-paths)\s*:/;
 
 /** What {@link classifySemanticPath} says a path under the semantic directory is. */
-export type SemanticPathKind = 'domain' | 'layout' | 'table' | 'relationships' | 'layer-config' | 'other';
+export type SemanticPathKind = 'domain' | 'table' | 'relationships' | 'layer-config' | 'other';
 
 /**
  * Classify a path under the semantic directory.
  *
  * A JSON domain file is exactly `{semanticDir}/{layer}/{domain}.json` where
  * the layer segment is not hidden and not one of the reserved directories
- * (nor the DBML table library, §3.3). A `.dbml` or `.dbdiagram` file is
- * classified by core's single classifier (`classifySemanticFile`, by path
- * only): a `{layer}/{name}.dbml` diagram is a `domain` too, its
- * `{layer}/{name}.dbdiagram` a `layout`, `tables/[<folder>/]<name>.dbml` a
- * `table` and `tables/[<folder>/]_relationships.dbml` `relationships`.
+ * (nor the DBML table library, §3.3). A `.dbml` file is classified by
+ * core's single classifier (`classifySemanticFile`, by path only): a
+ * `{layer}/{name}.dbml` diagram is a `domain` too,
+ * `tables/[<folder>/]<name>.dbml` a `table` and
+ * `tables/[<folder>/]_relationships.dbml` `relationships`.
  */
 export function classifySemanticPath(
   semanticRoot: string,
@@ -121,12 +121,11 @@ export function classifySemanticPath(
     return segments[0] === LAYERS_CONFIG_FILE ? 'layer-config' : 'other';
   }
   const file = segments[segments.length - 1];
-  if (file.endsWith('.dbml') || file.endsWith('.dbdiagram') || (file.endsWith('.yml') && segments.length <= 3)) {
+  if (file.endsWith('.dbml') || (file.endsWith('.yml') && segments.length <= 3)) {
     // Only a path under `tables/` depends on whether `tables` is a layer: nothing else lists the folder.
     const kind = classifySemanticFile(segments.join('/'), { tablesDirIsLayer: segments[0] === TABLES_DIR && tablesDirIsLayer(semanticRoot) }).kind;
     switch (kind) {
       case 'diagram': return 'domain';
-      case 'layout': return 'layout';
       case 'table': return 'table';
       case 'relationships': return 'relationships';
       default: return 'other';
@@ -148,7 +147,7 @@ export function classifySemanticPath(
 
 /**
  * {@link classifySemanticPath} for the semantic watcher, which must not list
- * `tables/` per event: a `.dbml` or `.dbdiagram` under `tables/` that is not
+ * `tables/` per event: a `.dbml` under `tables/` that is not
  * a relationships file is a table (or, when `tables` is a layer, `other`),
  * and the watcher ignores both alike, so it is answered `table` from the
  * path alone. A burst of N table writes (Convert, a checkout, an assistant)
@@ -159,7 +158,7 @@ export function classifyWatchedSemanticPath(semanticRoot: string, fsPath: string
   const segments = rel.split(path.sep);
   const file = segments[segments.length - 1];
   if (segments.length >= 2 && segments[0] === TABLES_DIR && !rel.startsWith('..') && !path.isAbsolute(rel)
-    && (file.endsWith('.dbml') || file.endsWith('.dbdiagram'))
+    && file.endsWith('.dbml')
     && file.slice(0, file.lastIndexOf('.')).toLowerCase() !== DBML_RELATIONSHIPS_FILE_STEM) {
     return 'table';
   }
@@ -174,13 +173,8 @@ export class FileWatcherService implements vscode.Disposable {
   // Event emitters (private — fire events internally)
   private readonly _onManifestChanged = new vscode.EventEmitter<void>();
   private readonly _onCatalogChanged = new vscode.EventEmitter<void>();
-  /**
-   * `created` is true when the file was created (not changed) and is a `{layer}/{domain}.json`.
-   * `layout` is true when the change was to a DBML diagram's `.dbdiagram` layout, reported as
-   * a change to its diagram (`uri`): the one change an open canvas does not see through its
-   * own document (§5.4).
-   */
-  private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri; created?: boolean; layout?: boolean }>();
+  /** `created` is true when the file was created (not changed) and is a `{layer}/{domain}.json`. */
+  private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri; created?: boolean }>();
   private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uris: vscode.Uri[] }>();
   private readonly _onLayerConfigChanged = new vscode.EventEmitter<void>();
   private readonly _onTableChanged = new vscode.EventEmitter<{ uri: vscode.Uri; modelName: string }>();
@@ -333,19 +327,19 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch {semanticDir}/**\/*.{json,dbml,dbdiagram} for changes. Each event
-   * is classified ({@link classifySemanticPath}):
-   * - a domain (JSON or DBML diagram): created, modified or deleted externally;
-   * - a layout (`.dbdiagram`): a change to its diagram;
+   * Watch {semanticDir}/**\/*.{json,dbml} for changes. Each event is
+   * classified ({@link classifySemanticPath}):
+   * - a domain (JSON or DBML diagram, its positions included): created,
+   *   modified or deleted externally;
    * - a relationships file: `onRelationshipsChanged`;
    * - a table: ignored here (the table watcher alone raises one event per table file);
-   * - anything else that is `.dbml` / `.dbdiagram`: ignored. A non-domain
-   *   `.json` (a template, `.sync-plan.json`) still raises a change, as before.
+   * - any other `.dbml`: ignored. A non-domain `.json` (a template,
+   *   `.sync-plan.json`) still raises a change, as before.
    */
   private setupSemanticWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      `${this.semanticDir}/**/*.{json,dbml,dbdiagram}`,
+      `${this.semanticDir}/**/*.{json,dbml}`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
@@ -365,19 +359,6 @@ export class FileWatcherService implements vscode.Disposable {
       if (kind === 'table') return;
       const isJson = uri.fsPath.endsWith('.json');
       if (kind === 'other' && !isJson) return;
-      if (kind === 'layout') {
-        // A layout change is a change to its diagram, skipped on our own write.
-        this.debounceOwnWrite(`layout:${uri.toString()}`, () => [uri.fsPath], () => {
-          if (this.ownWriteTracker.consume(uri.fsPath)) {
-            log.trace(`[FileWatcherService] Own write, ignored: ${uri.fsPath}`);
-            return;
-          }
-          const diagram = vscode.Uri.file(diagramPathOfLayout(uri.fsPath));
-          log.debug(`[FileWatcherService] External change to a layout file: ${uri.fsPath}`);
-          this.report(() => this._onSemanticFileChanged.fire({ uri: diagram, layout: true }));
-        });
-        return;
-      }
       if (created && kind === 'domain') { createdPending.add(uri.toString()); }
       // Per-file debounce key allows parallel updates to different files
       this.debounceOwnWrite(`semantic:${uri.toString()}`, () => [uri.fsPath], () => {
@@ -400,11 +381,6 @@ export class FileWatcherService implements vscode.Disposable {
       }
       if (kind === 'relationships') {
         this.handleRelationshipsEvent(uri);
-        return;
-      }
-      if (kind === 'layout') {
-        // The diagram lost its layout: redraw it (its tables are placed again).
-        handleChange(uri);
         return;
       }
       if (kind !== 'domain') {
@@ -681,7 +657,7 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * An event on a project file (a diagram, layout, table, relationships file
+   * An event on a project file (a diagram, table, relationships file
    * or layers.json) arrived: count it towards a bulk change, and (re)start
    * the wait for the files to settle.
    */

@@ -44,6 +44,34 @@ Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_
 }
 `;
 
+/** An erd_layout value git left two versions of (markers at the start of their lines). */
+const CONFLICTED_LAYOUT = "  erd_layout: '''\n<<<<<<< HEAD\n    dim_customer 1 2\n=======\n    dim_customer 5 6\n>>>>>>> theirs\n  '''\n";
+
+/** SALES whose erd_layout holds a git merge conflict. */
+export const SALES_CONFLICTED = SALES.replace("  database_type: 'Snowflake'\n", `  database_type: 'Snowflake'\n${CONFLICTED_LAYOUT}`);
+
+/** SALES as a new diagram is written: the Project last, erd_layout its last key (§1.4). */
+export const SALES_LAST = `// The sales star.
+
+use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use * from '../tables/gold/_relationships.dbml'
+
+Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_order'] {
+  'Check the grain with finance'
+}
+
+Project sales {
+  Note: 'Sales star schema'
+  erd_schema_version: '7'
+  erd_layout: '''
+    dim_customer 40 60
+    fct_order 400 200
+    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 720 40
+  '''
+}
+`;
+
 /** SALES with a member that has no table file and its pending relationship (D26/D27). */
 export const SALES_MISSING = SALES
   .replace("  database_type: 'Snowflake'\n", "  database_type: 'Snowflake'\n  erd_unlinked_tables: 'gld_fct_risk_child'\n")
@@ -72,7 +100,7 @@ type Obj = Record<string, any>; // eslint-disable-line @typescript-eslint/no-exp
 
 /** Read `text` as the diagram at `path`. */
 export function readDiagram(text: string, path = DIAGRAM_PATH): Obj {
-  return parseSubjectAreaDbml(text, path, null).obj;
+  return parseSubjectAreaDbml(text, path).obj;
 }
 
 /** The edit's lookups over `library`. */
@@ -167,13 +195,17 @@ export const DIAGRAM_CASES: WriterCase[] = [
   diagramCase('a diagram rename (after.domain) splices the Project name', SALES, (a) => { a.domain = 'sales v2'; }, (out) => {
     expect(out).toBe(SALES.replace('Project sales {', 'Project "sales v2" {'));
   }),
-  diagramCase('a diagram with no Project gets one after a header comment followed by a blank line',
+  diagramCase('a diagram with no Project gets one at the end, after a blank line (§1.4, Project last)',
     "// The sales star.\n\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n", (a) => { a.description = 'Sales'; }, (out) => {
-      expect(out).toBe("// The sales star.\nProject sales {\n  Note: 'Sales'\n  erd_schema_version: '7'\n}\n\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n");
+      expect(out).toBe("// The sales star.\n\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n\nProject sales {\n  Note: 'Sales'\n  erd_schema_version: '7'\n}\n");
     }),
-  diagramCase('…and at the top when the comment runs straight into the first line',
+  diagramCase('…and a comment that runs straight into the first line stays with it',
     "// about fct_order\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n", (a) => { a.domain = 'renamed'; }, (out) => {
-      expect(out).toBe("Project renamed {\n  erd_schema_version: '7'\n}\n\n// about fct_order\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n");
+      expect(out).toBe("// about fct_order\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n\nProject renamed {\n  erd_schema_version: '7'\n}\n");
+    }),
+  diagramCase('…holding erd_layout last when a position changed too',
+    "use { table fct_order } from '../tables/gold/fct_order.dbml'\n", (a) => { a.domain = 'renamed'; a.viewConfig.positions = { fct_order: { x: 1.006, y: -0 } }; }, (out) => {
+      expect(out).toBe("use { table fct_order } from '../tables/gold/fct_order.dbml'\n\nProject renamed {\n  erd_schema_version: '7'\n  erd_layout: '''\n    fct_order 1.01 0\n  '''\n}\n");
     }),
 
   // --- Members --------------------------------------------------------------------
@@ -293,11 +325,72 @@ use { table fct_order } from '../tables/gold/fct_order.dbml'
     },
   },
 
+  // --- erd_layout (§1.6) and the Project-last order (§1.4) ----------------------------------
+  diagramCase('a position change writes erd_layout as the Project\'s last key, every other byte kept', SALES, (a) => {
+    a.viewConfig.positions = { fct_order: { x: 10.123, y: 20 }, dim_customer: { x: -5, y: 1e3 } };
+  }, (out) => {
+    expect(out).toBe(SALES.replace("  database_type: 'Snowflake'\n", `  database_type: 'Snowflake'
+  erd_layout: '''
+    dim_customer -5 1000
+    fct_order 10.12 20
+    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 0 0
+  '''
+`));
+  }),
+  diagramCase('an existing erd_layout is rewritten in place; a key added goes above it, and a member removed loses its line',
+    SALES.replace("  database_type: 'Snowflake'\n", "  database_type: 'Snowflake'\n  erd_layout: '''\n    dim_customer 1 2\n    fct_order 3 4\n  '''\n"), (a) => {
+      a.logical.models = ['dim_customer'];
+      delete a.viewConfig.positions.fct_order;
+      a.viewConfig.showFkEdges = true;
+    }, (out) => {
+      expect(out).toContain("  erd_schema_version: '7'\n  erd_show_fk_edges: 'true'\n  database_type: 'Snowflake'\n  erd_layout: '''\n    dim_customer 1 2\n    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 323 2\n  '''\n}");
+      expect(out).not.toContain('fct_order 3 4');
+      expect(readDiagram(out).viewConfig.positions).toEqual({ dim_customer: { x: 1, y: 2 } });
+    }),
+  diagramCase('a position change keeps a member\'s spelling and drops its case variant',
+    SALES.replace("  database_type: 'Snowflake'\n", "  database_type: 'Snowflake'\n  erd_layout: '''\n    DIM_CUSTOMER 1 2\n    gone 5 6\n  '''\n"), (a) => {
+      a.viewConfig.positions.dim_customer = { x: 7, y: 8 };
+    }, (out) => {
+      expect(out).toContain("  erd_layout: '''\n    dim_customer 7 8\n    gone 5 6\n");
+      expect(out).not.toContain('DIM_CUSTOMER');
+    }),
+  diagramCase('an edit that moves nothing leaves a conflicted erd_layout as it is and still writes', SALES_CONFLICTED, (a) => {
+    a.description = 'Revenue star';
+  }, (out) => {
+    expect(out).toBe(SALES_CONFLICTED.replace("Note: 'Sales star schema'", "Note: 'Revenue star'"));
+  }),
+  diagramCase('keepLayoutIfConflicted: a conflicted erd_layout stays byte-identical while a member\'s use line goes', SALES_CONFLICTED, (a) => {
+    a.logical.models = ['fct_order'];
+    delete a.viewConfig.positions.dim_customer;
+  }, (out) => {
+    expect(out).not.toContain('gold.dim_customer } from');
+    expect(out).toContain(CONFLICTED_LAYOUT);
+  }, { extra: { keepLayoutIfConflicted: true } }),
+  diagramCase('a Project-last diagram: a member\'s use line goes after the last use line, a new note before the Project', SALES_LAST, (a) => {
+    a.logical.models.push('dim_date');
+    a.viewConfig.annotations.push({ id: 'n2', text: 'two', x: 5, y: 6 });
+  }, (out) => {
+    expect(out).toContain("use { table dim_date } from '../tables/dim_date.dbml'\nuse * from '../tables/_relationships.dbml'\nuse * from '../tables/gold/_relationships.dbml'\n");
+    expect(out).toContain("Note n2 {\n  'two'\n}\n\nProject sales {");
+    expect(out.trimEnd().endsWith('}')).toBe(true);
+    expect(out.indexOf('Project sales')).toBeGreaterThan(out.indexOf('Note n2'));
+    expect(out).toContain('    note/n2 5 6\n');
+  }),
+  diagramCase('a diagram with no use line gets its first ones before the first Note, else before the Project',
+    "Project sales {\n  erd_schema_version: '7'\n}\n", (a) => { a.logical.models = ['fct_order']; }, (out) => {
+      expect(out).toBe("use { table fct_order } from '../tables/gold/fct_order.dbml'\nuse * from '../tables/gold/_relationships.dbml'\n\nProject sales {\n  erd_schema_version: '7'\n}\n");
+    }),
+
   // --- Notes ---------------------------------------------------------------------------------
-  diagramCase('a sticky note added is a Note block at the end', SALES, (a) => {
+  diagramCase('a sticky note added is a Note block at the end, and its box goes in erd_layout', SALES, (a) => {
     a.viewConfig.annotations.push({ id: '9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f', text: '', x: 1, y: 2, color: 'blue' });
   }, (out) => {
-    expect(out).toBe(`${SALES}\nNote "9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f" [color: #3b82f6] {\n  ''\n}\n`);
+    expect(out).toBe(`${SALES.replace("  database_type: 'Snowflake'\n", `  database_type: 'Snowflake'
+  erd_layout: '''
+    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 0 0
+    note/9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f 1 2
+  '''
+`)}\nNote "9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f" [color: #3b82f6] {\n  ''\n}\n`);
   }),
   diagramCase('a sticky note\'s text, colour and link are spliced', SALES, (a) => {
     const note = a.viewConfig.annotations[0];
@@ -413,21 +506,15 @@ export const NEW_DIAGRAM_CASES: WriterCase[] = [
         ],
         relationshipsFiles: ['tables/gold/_relationships.dbml', 'tables/_relationships.dbml'],
         annotations: [
-          { id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', text: 'Check the grain with finance', x: 0, y: 0, color: 'yellow', linkedModel: 'fct_order' },
+          { id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', text: 'Check the grain with finance', x: 720, y: 40, width: 220, height: 120, color: 'yellow', linkedModel: 'fct_order' },
           { id: '9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f', text: '', x: 0, y: 0, color: 'blue' },
         ],
+        positions: { fct_order: { x: 400.499, y: 200 }, dim_customer: { x: 40, y: 60 } },
       }),
       context: { ...DIAGRAM_LIBRARY },
     }),
     check: (o) => {
-      expect(o.output).toBe(`Project sales {
-  Note: 'Sales star schema'
-  erd_schema_version: '7'
-  erd_show_fk_edges: 'false'
-  erd_layout_options: '{"elk.direction":"RIGHT"}'
-}
-
-use { table fct_order } from '../tables/gold/fct_order.dbml'
+      expect(o.output).toBe(`use { table fct_order } from '../tables/gold/fct_order.dbml'
 use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
 use { table dim_date } from '../tables/dim_date.dbml'
 use * from '../tables/_relationships.dbml'
@@ -440,10 +527,28 @@ Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_
 Note "9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f" [color: #3b82f6] {
   ''
 }
+
+Project sales {
+  Note: 'Sales star schema'
+  erd_schema_version: '7'
+  erd_show_fk_edges: 'false'
+  erd_layout_options: '{"elk.direction":"RIGHT"}'
+  erd_layout: '''
+    dim_customer 40 60
+    fct_order 400.5 200
+    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 720 40 220 120
+    note/9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f 0 0
+  '''
+}
 `);
-      const read = parseSubjectAreaDbml(o.output, DIAGRAM_PATH, null);
+      const read = parseSubjectAreaDbml(o.output, DIAGRAM_PATH);
       expect(read.members).toEqual(['fct_order', 'dim_customer', 'dim_date']);
-      expect(read.obj.viewConfig).toMatchObject({ showFkEdges: false, layoutOptions: { 'elk.direction': 'RIGHT' } });
+      expect(read.obj.viewConfig).toMatchObject({
+        showFkEdges: false,
+        layoutOptions: { 'elk.direction': 'RIGHT' },
+        positions: { dim_customer: { x: 40, y: 60 }, fct_order: { x: 400.5, y: 200 } },
+      });
+      expect((read.obj.viewConfig as { annotations: unknown[] }).annotations[0]).toMatchObject({ x: 720, y: 40, width: 220, height: 120 });
     },
   },
   {

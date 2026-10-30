@@ -31,6 +31,7 @@ import { normaliseForStorageEquivalence } from '../../src/storageEquivalence';
 import { dbmlName, dbmlNoteText } from '../../src/dbmlText';
 import { readMeta } from '../../src/meta';
 import { relationshipsFilePathOf } from '../../src/storage';
+import { erdLayoutOf } from '../../src/erdLayout';
 import { readRelationshipsDbml } from '../../src/dbml/readRelationships';
 import { compileOne, elementType, isUseDeclaration, plainNames, topLevel, type AstNode } from '../../src/dbml/parser';
 import { cutSpan } from '../../src/dbml/splice';
@@ -95,10 +96,13 @@ function readOk(text: string, stem: string): SemanticTable {
   return r.table;
 }
 
-/** A diagram object as the diagram writer stores it (positions and sticky-note boxes are the layout file's). */
+/** A diagram object as the diagram writer stores it, positions and sticky-note boxes as `erd_layout` holds them (rounded). */
 function normDiagram(obj: Record<string, any>): unknown { // eslint-disable-line @typescript-eslint/no-explicit-any
   const view = obj.viewConfig ?? {};
+  const layout = erdLayoutOf(view.positions, view.annotations);
   return normaliseForStorageEquivalence({
+    positions: layout.positions,
+    boxes: layout.stickies,
     domain: obj.domain,
     layer: obj.layer,
     description: dbmlNoteText(obj.description ?? ''),
@@ -442,7 +446,7 @@ describe('the laws over every DBML fixture', () => {
     for (const [file, text] of Object.entries(project.files)) {
       if (file.startsWith('tables/') || !file.endsWith('.dbml')) continue;
       it(`${project.name}/${file}: Laws 1–5 for its diagram`, () => {
-        const before = parseSubjectAreaDbml(text, file, null).obj as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+        const before = parseSubjectAreaDbml(text, file).obj as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
         const resolveTable = diagramResolver(library);
         const lookups = {
           resolveTable,
@@ -456,8 +460,8 @@ describe('the laws over every DBML fixture', () => {
         after.viewConfig.annotations = [...(after.viewConfig.annotations ?? []), { id: 'law-note-1', text: "it's a note", x: 0, y: 0, color: 'green' }];
         after.logical.models = after.logical.models.filter((m: string) => resolveTable(m)?.storage === 'dbml').slice(1);
         const out = editSubjectAreaDbml(text, { filePath: file, before, after, ...lookups });
-        expect(normDiagram(parseSubjectAreaDbml(out, file, null).obj)).toEqual(normDiagram(after)); // Law 3
-        expect(editSubjectAreaDbml(out, { filePath: file, before: parseSubjectAreaDbml(out, file, null).obj, after, ...lookups })).toBe(out); // Law 2
+        expect(normDiagram(parseSubjectAreaDbml(out, file).obj)).toEqual(normDiagram(after)); // Law 3
+        expect(editSubjectAreaDbml(out, { filePath: file, before: parseSubjectAreaDbml(out, file).obj, after, ...lookups })).toBe(out); // Law 2
         expectPreserved(text, out, diagramRemovedSpans(text, out, after)); // Law 4
         expect(projectDiagnostics({ ...project.files, [file]: out }, [file], baseline)).toEqual([]); // Law 5
       });
@@ -817,13 +821,18 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         const all = ['fct_order', 'dim_customer', 'dim_date', 'bridge'];
         const members = all.filter(() => chance(rng, 0.6)).sort(() => rng() - 0.5);
         let noteCount = 0;
+        // Positions as the canvas sends them: whole, fractional or negative numbers.
+        const coordinate = (): number => (chance(rng, 0.3) ? -1 : 1) * (chance(rng, 0.5) ? Math.floor(rng() * 2000) : rng() * 2000);
+        const positionsOf = (names: readonly string[]): Record<string, { x: number; y: number }> =>
+          Object.fromEntries(names.filter(() => chance(rng, 0.7)).map((n) => [n, { x: coordinate(), y: coordinate() }]));
         const makeNote = (_k: number): Annotation => {
           const k = noteCount++; // ids are unique, as the canvas makes them
           return {
           id: chance(rng, 0.5) ? `0c0ffee0-${k}-4f7e-9c1b-2d5e6f7a8b9c` : `note_${k}`,
           text: randomText(rng),
-          x: 0,
-          y: 0,
+          x: coordinate(),
+          y: coordinate(),
+          ...(chance(rng, 0.3) ? { width: 100 + Math.floor(rng() * 200), height: chance(rng, 0.2) ? 0 : 50 + rng() * 99 } : {}),
           ...(chance(rng, 0.6) ? { color: pick(rng, COLOURS) } : {}),
           ...(chance(rng, 0.4) && members.length ? { linkedModel: pick(rng, members) } : {}),
           };
@@ -839,6 +848,7 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
           members: members.map((m) => ({ name: m, path: resolveTable(m)!.path })),
           relationshipsFiles: lookups.relationshipsFilesFor(members),
           annotations: Array.from({ length: Math.floor(rng() * 3) }, (_, k) => makeNote(k)),
+          ...(chance(rng, 0.7) ? { positions: positionsOf(members) } : {}),
         });
         trail = [];
         note('written', written);
@@ -846,11 +856,13 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         note('decorated', created);
         const files = { ...library, [file]: created };
         expect(projectDiagnostics(files, [file])).toEqual([]);
-        const before = parseSubjectAreaDbml(created, file, null).obj as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+        const before = parseSubjectAreaDbml(created, file).obj as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
         expect(editSubjectAreaDbml(created, { filePath: file, before, after: before, ...lookups })).toBe(created); // Law 1
         const after = clone(before);
         for (let k = 0; k < 1 + Math.floor(rng() * 3); k++) {
-          switch (Math.floor(rng() * 6)) {
+          switch (Math.floor(rng() * 8)) {
+            case 6: after.viewConfig.positions = { ...(chance(rng, 0.5) ? after.viewConfig.positions : {}), ...positionsOf(all) }; break;
+            case 7: after.viewConfig.annotations = (after.viewConfig.annotations ?? []).map((a: Annotation) => (chance(rng, 0.5) ? { ...a, x: coordinate(), y: coordinate(), ...(chance(rng, 0.3) ? { width: 120.5, height: 80 } : {}) } : a)); break;
             case 0: after.description = chance(rng, 0.3) ? '' : randomText(rng); break;
             case 1: after.domain = pick(rng, ['sales_v2', 'Other Name', 'table']); break;
             case 2: after.logical.models = all.filter(() => chance(rng, 0.5)).sort(() => rng() - 0.5); break;
@@ -862,7 +874,7 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         note('after', after);
         const out = editSubjectAreaDbml(created, { filePath: file, before, after, ...lookups });
         note('output', out);
-        const readBack = parseSubjectAreaDbml(out, file, null).obj;
+        const readBack = parseSubjectAreaDbml(out, file).obj;
         expect(normDiagram(readBack)).toEqual(normDiagram(after)); // Law 3
         expect(editSubjectAreaDbml(out, { filePath: file, before: readBack, after, ...lookups })).toBe(out); // Law 2
         expect(editSubjectAreaDbml(out, { filePath: file, before: readBack, after: readBack, ...lookups })).toBe(out); // Law 1 on the output

@@ -1084,24 +1084,24 @@ describe('describeDbmlImportPlan', () => {
     expect(text).toContain('saved in the tables\' files');
   });
 
-  it('in a DBML project, names the relationships files and the layout file instead of "the tables\' files"', () => {
+  it('in a DBML project, names the relationships files instead of "the tables\' files", and the layout goes in the diagram file', () => {
     const p = salesPlan({ libraryRelationships: true });
     expect(p.report.relationshipsInLibrary).toBe(p.report.relationships);
-    const one = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['tables/gold/_relationships.dbml'], layoutFileName: 'imported.dbdiagram' } });
+    const one = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['tables/gold/_relationships.dbml']} });
     expect(one).toContain(`• ${p.report.relationships} relationships saved in tables/gold/_relationships.dbml.`);
     expect(one).not.toContain('the tables\' files');
-    const many = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['tables/gold/_relationships.dbml', 'tables/silver/_relationships.dbml'], layoutFileName: 'imported.dbdiagram' } });
+    const many = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['tables/gold/_relationships.dbml', 'tables/silver/_relationships.dbml']} });
     expect(many).toContain('saved in tables/gold/_relationships.dbml, tables/silver/_relationships.dbml.');
-    expect(describeDbmlImportPlan(p, { dbml: { relationshipsFiles: [], layoutFileName: 'imported.dbdiagram' } }))
+    expect(describeDbmlImportPlan(p, { dbml: { relationshipsFiles: []} }))
       .toContain('saved in the Table Library\'s relationships files.');
     // The YAML wording is unchanged.
     expect(describeDbmlImportPlan(p)).toContain(`• ${p.report.relationships} relationships saved in the tables' files.`);
     // No layout: where the first open's layout is saved.
     const foreign = plan(fixture('foreign/ecommerce.dbml'), { layer: 'silver' });
-    expect(describeDbmlImportPlan(foreign, { dbml: { relationshipsFiles: [], layoutFileName: 'ecommerce.dbdiagram' } }))
-      .toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens, and that layout is saved in ecommerce.dbdiagram.');
-    expect(describeDbmlImportPlan(salesPlan({ layout: { positions: {}, stickies: [] } }), { dbml: { relationshipsFiles: [], layoutFileName: 'imported.dbdiagram' } }))
-      .toContain('• The file\'s erd_layout has no positions for these tables: the diagram is laid out automatically when it opens, and that layout is saved in imported.dbdiagram.');
+    expect(describeDbmlImportPlan(foreign, { dbml: { relationshipsFiles: []} }))
+      .toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
+    expect(describeDbmlImportPlan(salesPlan({ layout: { positions: {}, stickies: [] } }), { dbml: { relationshipsFiles: []} }))
+      .toContain('• The file\'s erd_layout has no positions for these tables: the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
   });
 
   it('summarises a foreign file: optional refs, meta, renames and what is left out', () => {

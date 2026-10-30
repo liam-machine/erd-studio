@@ -28,7 +28,7 @@ import { readDbmlConversionInput } from '../services/dbmlConversionFiles';
 import { tablesDirIsLayer, TABLES_DIR } from '../services/logicalModelService';
 import { normaliseName } from '../services/nameUtils';
 import { SubjectAreaFileError } from '../services/domainService';
-import { keysContradictedRelationships, layoutFilePathOf, linkKey, parseSubjectAreaJson, subjectAreaStorageOf } from '@erd-studio/core';
+import { keysContradictedRelationships, linkKey, parseSubjectAreaJson, subjectAreaStorageOf } from '@erd-studio/core';
 import type { ProjectStorage, Relationship } from '@erd-studio/core';
 import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import { projectStorageOf } from '../services/projectStorage';
@@ -141,7 +141,7 @@ export interface DoctorResult extends Envelope {
     /** Every diagram, project-relative, with its file format (`json` or `dbml`, by the classifier). */
     diagrams: Array<{ file: string; format: 'json' | 'dbml' }>;
     /**
-     * Every problem in the project's `.dbml` and `.dbdiagram` files (§7.1),
+     * Every problem in the project's `.dbml` files (§7.1),
      * each with a fixed severity. Errors raise `fix-dbml-file` (or, with
      * `mergeConflict`, `resolve-merge-conflicts`; a table or diagram in both
      * formats, `resolve-format-conflicts`); warnings never raise a next step.
@@ -452,15 +452,6 @@ async function withDbmlConversion(ctx: CliContext, erd: DoctorResult['erd']): Pr
   }
 }
 
-/** A DBML diagram's layout file text, or null when there is none. */
-function readLayoutFile(diagramPath: string): string | null {
-  try {
-    return fs.readFileSync(layoutFilePathOf(diagramPath), 'utf-8');
-  } catch {
-    return null;
-  }
-}
-
 function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   const semanticRoot = path.join(ctx.root, ctx.semanticDir);
   const exists = fs.existsSync(semanticRoot);
@@ -480,7 +471,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
       // its format is never a v4 / hybrid / legacy issue, and a conflict
       // throws like a JSON one.
       if (subjectAreaStorageOf(d.filePath) === 'dbml') {
-        parseSubjectAreaDbml(fs.readFileSync(d.filePath, 'utf-8'), d.filePath, readLayoutFile(d.filePath));
+        parseSubjectAreaDbml(fs.readFileSync(d.filePath, 'utf-8'), d.filePath);
         continue;
       }
       const raw = parseSubjectAreaJson(fs.readFileSync(d.filePath, 'utf-8'), d.filePath);
@@ -612,28 +603,44 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
   // diagram cannot load whatever state dbt is in, and only the user can say
   // which side to keep — an assistant working down this list must raise it
   // before it installs dbt or runs anything against the warehouse.
-  // Every conflicted DBML or layout file (table, relationships, diagram,
-  // .dbdiagram) joins the conflicted diagrams here, never fix-dbml-file.
+  // Every conflicted DBML file (table, relationships, diagram) joins the
+  // conflicted diagrams here, never fix-dbml-file. A diagram whose conflict
+  // is only inside its erd_layout (positions) still opens.
   const conflictedFiles = [...r.erd.conflictedDomainFiles];
+  const positionsOnly = new Set<string>();
   for (const p of r.erd.dbmlProblems) {
     if (p.mergeConflict && p.line !== undefined && !conflictedFiles.some((c) => c.file === p.file)) {
       conflictedFiles.push({ file: p.file, line: p.line });
+      if (p.code === 'layoutMergeConflict') positionsOnly.add(p.file);
     }
   }
   if (conflictedFiles.length > 0) {
     const n = conflictedFiles.length;
     const onlyDiagrams = conflictedFiles.every((c) => r.erd.conflictedDomainFiles.includes(c));
     const noun = onlyDiagrams ? 'diagram' : 'file';
+    const located = conflictedFiles.map((c) => `${c.file}:${c.line}`).join('; ');
+    const layoutOnly = conflictedFiles.every((c) => positionsOnly.has(c.file));
+    const askUser = 'Show the user ' + (n === 1 ? 'the file and line' : 'each file and line') + ': git left two versions there. ';
+    const whyText = layoutOnly
+      ? `${located}. ${n === 1 ? 'This diagram still holds' : 'Each of these diagrams still holds'} git conflict markers in its erd_layout: `
+        + "only positions differ: keep either side; the diagram still opens, but ERD Studio won't save positions until it is resolved. "
+        + askUser
+        + "Don't pick a side or run git commands yourself; "
+        + `once ${n === 1 ? 'the file is' : 'every file is'} saved and resolved, re-run doctor.`
+      : `${located}. `
+        + `${n === 1 ? 'This file still holds' : 'Each of these files still holds'} git conflict markers `
+        + `(<<<<<<< … ======= … >>>>>>>), so ${onlyDiagrams ? 'the diagram cannot load' : 'ERD Studio cannot read it'}. `
+        + askUser
+        + 'If only positions differ, tell them either side is safe to keep; otherwise ask the user which side to keep. '
+        + (positionsOnly.size > 0
+          ? `In ${[...positionsOnly].join(', ')} only positions differ: keep either side; the diagram still opens, but ERD Studio won't save positions until it is resolved. `
+          : '')
+        + "Don't pick a side or run git commands yourself; "
+        + `once ${n === 1 ? 'the file is' : 'every file is'} saved and resolved, re-run doctor.`;
     steps.push({
       id: 'resolve-merge-conflicts',
       title: `Resolve the git merge conflict${n === 1 ? ` in a ${noun}` : `s in ${n} ${noun}s`}`,
-      why: `${conflictedFiles.map((c) => `${c.file}:${c.line}`).join('; ')}. `
-        + `${n === 1 ? 'This file still holds' : 'Each of these files still holds'} git conflict markers `
-        + `(<<<<<<< … ======= … >>>>>>>), so ${onlyDiagrams ? 'the diagram cannot load' : 'ERD Studio cannot read it'}. `
-        + `Show the user ${n === 1 ? 'the file and line' : 'each file and line'}: git left two versions there. `
-        + 'If only positions differ, tell them either side is safe to keep; otherwise ask the user which side to keep. '
-        + "Don't pick a side or run git commands yourself; "
-        + `once ${n === 1 ? 'the file is' : 'every file is'} saved and resolved, re-run doctor.`,
+      why: whyText,
       command: null,
     });
   }

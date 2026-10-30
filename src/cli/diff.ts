@@ -281,8 +281,8 @@ export function describeSubjectAreaError(ctx: CliContext, file: string, err: unk
     }
     return { code: err.reason === 'missing' ? 'domain-missing' : 'domain-invalid', message };
   }
-  // A `--domain` that is a table, relationships or layout file, not a diagram.
-  if (/is a DBML table or relationships file, not a diagram/.test(raw) || file.endsWith('.dbdiagram')) {
+  // A `--domain` that is a table or relationships file, not a diagram.
+  if (/is a DBML table or relationships file, not a diagram/.test(raw)) {
     return { code: 'not-a-diagram', message };
   }
   if (/invalid layer/.test(raw)) { return { code: 'unknown-layer', message }; }

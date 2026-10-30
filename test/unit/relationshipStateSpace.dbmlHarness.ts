@@ -18,7 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { canonicalRelationship, editDiagramLayout } from '@erd-studio/core';
+import { canonicalRelationship } from '@erd-studio/core';
 import { readRelationshipsDbml, renderNewSubjectAreaDbml, renderNewTableDbml } from '@erd-studio/core/dbml';
 import { createMockTextDocument, createMockWebviewPanel } from '../__mocks__/vscode';
 import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
@@ -106,9 +106,8 @@ export function materialiseDbml(w: World): DbmlProject {
       filePath: `silver/${d}.dbml`, domain: d,
       members: members.map((name) => ({ name, path: TABLE_PATHS[name] })),
       relationshipsFiles,
+      positions: Object.fromEntries(members.map((m, i) => [m, { x: i * 300, y: 0 }])),
     }));
-    const layout = editDiagramLayout(null, Object.fromEntries(members.map((m, i) => [m, { x: i * 300, y: 0 }])), []);
-    if (layout) fs.writeFileSync(path.join(semantic, 'silver', `${d}.dbdiagram`), layout);
   }
   const subjectAreaService = new SubjectAreaService(new LayerService(root, SEMANTIC_DIR));
   subjectAreaService.setTableLibraryService(tableLibraryService);
@@ -303,9 +302,8 @@ export function materialiseDbmlG(w: GWorld, layout: GLayout): DbmlProject {
         filePath: `silver/${d}.dbml`, domain: d,
         members: members.map((name) => ({ name, path: layout.tablePaths[name] })),
         relationshipsFiles,
+        positions: Object.fromEntries(members.map((m, i) => [m, { x: i * 300, y: 0 }])),
       }));
-      const positions = editDiagramLayout(null, Object.fromEntries(members.map((m, i) => [m, { x: i * 300, y: 0 }])), []);
-      if (positions) fs.writeFileSync(path.join(semantic, 'silver', `${d}.dbdiagram`), positions);
     }
     const subjectAreaService = new SubjectAreaService(new LayerService(root, SEMANTIC_DIR));
     subjectAreaService.setTableLibraryService(tableLibraryService);

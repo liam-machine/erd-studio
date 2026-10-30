@@ -141,62 +141,6 @@ export function deleteFailure(name: string, filePath: string, err: unknown): Com
   };
 }
 
-/**
- * A DBML diagram was deleted but its `.dbdiagram` layout file was not (§5.7):
- * the diagram is gone, so this says what is left over. The user's to close or
- * unlock, as for the diagram itself; anything else is ours.
- */
-export function layoutDeleteFailure(name: string, layoutPath: string, err: unknown, workspaceRoot: string): CommandFailure {
-  const shown = projectRelative(workspaceRoot, layoutPath);
-  const message = err instanceof Error ? err.message : '';
-  const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
-  if (classifyWriteFailure(err) !== 'other' || code === 'EBUSY' || /\bEBUSY\b/.test(message)) {
-    return {
-      title: DELETE_DIAGRAM_TITLE,
-      message: `"${name}" was deleted, but its layout file ${shown} couldn't be: another program may have it open, ` +
-        "or ERD Studio isn't allowed to change that folder. Delete it yourself, or try again.",
-      buttons: [SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON],
-      target: layoutPath,
-    };
-  }
-  const doing = 'while deleting the layout file';
-  return {
-    title: DELETE_DIAGRAM_TITLE,
-    message: oursMessage(DELETE_DIAGRAM_TITLE, doing, `${shown} is still there (the diagram was deleted)`),
-    buttons: [SEND_FEEDBACK_BUTTON, TRY_AGAIN_BUTTON],
-    doing,
-  };
-}
-
-/**
- * A rename that moves more files than the diagram (a DBML diagram's layout
- * file) would write over one with unsaved changes in its tab.
- */
-export function renameUnsavedFile(filePath: string, workspaceRoot: string): CommandFailure {
-  return {
-    title: RENAME_DIAGRAM_TITLE,
-    message: `${RENAME_DIAGRAM_TITLE}: ${projectRelative(workspaceRoot, filePath)} has unsaved changes. Save or revert it, then try again. Nothing was changed.`,
-    buttons: [SHOW_FILE_BUTTON],
-    target: filePath,
-  };
-}
-
-/**
- * A DBML diagram's rename would move its layout file onto one already there
- * (a `.dbdiagram` left behind, say by a delete that couldn't remove it): VS
- * Code would refuse the edit every time, so this is said before anything
- * changes, and is the user's to tidy.
- */
-export function renameLayoutInTheWay(oldName: string, newName: string, layoutPath: string, workspaceRoot: string): CommandFailure {
-  return {
-    title: RENAME_DIAGRAM_TITLE,
-    message: `"${oldName}" can't be renamed to "${newName}": its layout file would replace ${projectRelative(workspaceRoot, layoutPath)}, ` +
-      'which is already there. Delete or move that file, then try again. Nothing was changed.',
-    buttons: [SHOW_FILE_BUTTON],
-    target: layoutPath,
-  };
-}
-
 /** Saving the diagram's unsaved changes failed, so the delete or rename stopped. */
 export function unsavedSaveFailure(name: string, operation: 'deleting' | 'renaming'): CommandFailure {
   return {

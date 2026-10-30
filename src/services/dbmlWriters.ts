@@ -14,9 +14,10 @@
  *   returns it unchanged, unformatted: a file is never rewritten just because
  *   an edit looked at it. Callers keep detecting no-op writes by comparing the
  *   result with the text they passed in.
- * - **Never the layout-only path.** A canvas move writes the `.dbdiagram`
- *   (and a one-character undo anchor on the diagram that leaves its bytes as
- *   they are, `applyFileWrites`); neither goes through here.
+ * - **Never the layout-only path.** A canvas move rewrites the diagram's
+ *   `erd_layout` value and nothing else ({@link editDiagramLayoutDbml},
+ *   passed through unformatted), so a drag changes one span of the file and
+ *   undoes as that one change.
  *
  * When the formatter refuses (a syntax error, or its own self-check — it
  * should never happen for text the splicers wrote), the unformatted text is
@@ -27,6 +28,7 @@
  */
 
 import {
+  editDiagramLayoutDbml as spliceLayout,
   editRelationshipsDbml as spliceRelationships,
   editSubjectAreaDbml as spliceSubjectArea,
   editTableDbml as spliceTable,
@@ -34,7 +36,7 @@ import {
   renderNewSubjectAreaDbml as renderSubjectArea,
   renderNewTableDbml as renderTable,
 } from '@erd-studio/core/dbml';
-import type { EditTableDbmlOptions, NewSubjectAreaDbml, RelationshipsFileEdit, SubjectAreaDbmlEdit } from '@erd-studio/core/dbml';
+import type { DiagramLayoutEdit, EditTableDbmlOptions, NewSubjectAreaDbml, RelationshipsFileEdit, SubjectAreaDbmlEdit } from '@erd-studio/core/dbml';
 import type { SemanticTable } from '@erd-studio/core';
 
 import { createLogger } from './logger';
@@ -96,4 +98,13 @@ export function renderNewSubjectAreaDbml(input: NewSubjectAreaDbml): string {
 /** An edit of a diagram file (core's `editSubjectAreaDbml`), formatted when it changed anything. */
 export function editSubjectAreaDbml(oldText: string, edit: SubjectAreaDbmlEdit): string {
   return finish(oldText, spliceSubjectArea(oldText, edit), edit.filePath);
+}
+
+/**
+ * A layout-only edit of a diagram (core's `editDiagramLayoutDbml`): only the
+ * `erd_layout` value changes. Deliberately NOT formatted, so a drag never
+ * re-lays the rest of a hand-written file and its undo is that one span.
+ */
+export function editDiagramLayoutDbml(oldText: string, edit: DiagramLayoutEdit): string {
+  return spliceLayout(oldText, edit);
 }

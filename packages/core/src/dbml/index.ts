@@ -43,6 +43,6 @@ export { attachRelationships, dbmlTableLookup, relationshipsFileFolder } from '.
 export const dbmlStorageReader: DbmlStorageReader = Object.freeze({
   parseTable: (text: string, fileStem: string) => parseTableDbml(text, fileStem),
   readRelationships: (text: string) => readRelationshipsDbml(text),
-  parseSubjectArea: (text: string, filePath: string, layoutText: string | null) => parseSubjectAreaDbml(text, filePath, layoutText),
+  parseSubjectArea: (text: string, filePath: string) => parseSubjectAreaDbml(text, filePath),
   subjectAreaMembers: (text: string) => subjectAreaMembersDbml(text),
 });

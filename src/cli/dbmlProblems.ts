@@ -1,6 +1,6 @@
 /**
  * `doctor`'s `erd.dbmlProblems` (native DBML storage, §7.1): every problem
- * in the project's `.dbml` and `.dbdiagram` files, each with a fixed
+ * in the project's `.dbml` files, each with a fixed
  * severity. Errors are what breaks a file for ERD Studio or for every other
  * DBML tool (doctor raises `fix-dbml-file`, `resolve-merge-conflicts` or
  * `resolve-format-conflicts` for them); warnings never raise a next step, so
@@ -25,18 +25,17 @@ import {
   DBML_TABLE_QUOTE_HINT_CODES,
   classifySemanticFile,
   findConflictMarkers,
-  layoutFilePathOf,
   parseTableText,
 } from '@erd-studio/core';
 import type { DbmlFileOutline, ProjectStorage, Relationship } from '@erd-studio/core';
-import { outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, usePathBetween } from '@erd-studio/core/dbml';
+import { erdLayoutEntrySpan, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, readErdLayoutDbml, usePathBetween } from '@erd-studio/core/dbml';
 import { listMisnamedTableFiles } from '../services/dbmlConversionFiles';
 import { compileDbmlFilesSeparately } from '../services/dbmlFileCompile';
 import { tablesDirIsLayer, tablesLayerConflict, TABLES_DIR } from '../services/logicalModelService';
 import type { CliContext } from './context';
 import { unreadableHint } from './diff';
 
-/** One problem in a DBML or layout file. */
+/** One problem in a DBML file. */
 export interface DbmlProblemEntry {
   /** Project-relative, forward slashes: the file, or the folder for a project-wide check. */
   file: string;
@@ -90,18 +89,23 @@ const SEVERITY: Readonly<Record<string, 'error' | 'warning'>> = {
   pendingRelationship: 'warning',
   // D25: a Metadata block naming a table or column the file does not declare.
   'structure:metadataTarget': 'warning',
+  // §1.6: a diagram's erd_layout (positions).
+  layoutBadLine: 'warning',
+  layoutDuplicateKey: 'warning',
+  layoutBadValue: 'error',
+  layoutMergeConflict: 'error',
 };
 
 /** D25's table-read code: a Metadata block whose target the file does not declare. */
 const METADATA_TARGET_CODE = 'structure:metadataTarget';
 
-/** A `.dbml` / `.dbdiagram` file of the project, classified. */
+/** A `.dbml` file of the project, classified. */
 interface ProjectFile {
   /** Posix, relative to the semantic dir. */
   rel: string;
   abs: string;
   text: string;
-  kind: 'table' | 'relationships' | 'diagram' | 'layout' | 'other';
+  kind: 'table' | 'relationships' | 'diagram' | 'other';
 }
 
 function readText(file: string): string | null {
@@ -121,21 +125,20 @@ function listDir(dir: string): fs.Dirent[] {
   }
 }
 
-/** Every `.dbml` and `.dbdiagram` file a project can hold: one level into each folder, two into `tables/`. */
+/** Every `.dbml` file a project can hold: one level into each folder, two into `tables/`. */
 function projectFiles(semanticRoot: string): ProjectFile[] {
   const tablesIsLayer = tablesDirIsLayer(semanticRoot);
   const out: ProjectFile[] = [];
   const add = (relParts: string[]): void => {
     const rel = relParts.join('/');
-    if (!/\.(dbml|dbdiagram)$/i.test(rel)) return;
+    if (!/\.dbml$/i.test(rel)) return;
     const abs = path.join(semanticRoot, ...relParts);
     const text = readText(abs);
     if (text === null) return;
     const firstLine = text.split(/\r?\n/, 1)[0];
     const cls = classifySemanticFile(rel, { tablesDirIsLayer: tablesIsLayer, firstLine });
     const kind = cls.kind === 'table' ? (cls.storage === 'dbml' ? 'table' : 'other')
-      : cls.kind === 'relationships' || cls.kind === 'diagram' || cls.kind === 'layout' ? cls.kind : 'other';
-    if (kind === 'diagram' && !rel.toLowerCase().endsWith('.dbml')) return;
+      : cls.kind === 'relationships' || cls.kind === 'diagram' ? cls.kind : 'other';
     out.push({ rel, abs, text, kind });
   };
   for (const top of listDir(semanticRoot)) {
@@ -158,7 +161,23 @@ function folderOf(rel: string): string {
   return parts.length === 3 ? parts[1] : '';
 }
 
-const stemOf = (rel: string): string => path.posix.basename(rel).replace(/\.(dbml|dbdiagram)$/i, '');
+const stemOf = (rel: string): string => path.posix.basename(rel).replace(/\.dbml$/i, '');
+
+/**
+ * The first line of git conflict markers in `f` that is not inside a
+ * diagram's `erd_layout` (§1.6): the value's span is blanked (its line
+ * breaks kept) before the search, since markers there only mean positions
+ * differ, and the reader reports them (`layoutMergeConflict`). A diagram
+ * that does not parse is searched whole.
+ */
+function conflictOutsideLayout(f: ProjectFile): number | null {
+  const line = findConflictMarkers(f.text);
+  if (line === null || f.kind !== 'diagram') return line;
+  const span = erdLayoutEntrySpan(f.text);
+  if (span === null || span.end <= span.start) return line;
+  const blanked = f.text.slice(0, span.start) + f.text.slice(span.start, span.end).replace(/[^\r\n]/g, '') + f.text.slice(span.end);
+  return findConflictMarkers(blanked);
+}
 
 /**
  * Every DBML problem of the project, in file order (project-wide checks
@@ -208,7 +227,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
   const conflicted = new Set<string>();
   for (const f of files) {
     if (f.kind === 'other') continue;
-    const line = findConflictMarkers(f.text);
+    const line = conflictOutsideLayout(f);
     if (line === null) continue;
     conflicted.add(f.rel);
     push({
@@ -574,12 +593,18 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     }
     let reading: ReturnType<typeof parseSubjectAreaDbml> | null = null;
     try {
-      const layoutPath = layoutFilePathOf(f.abs);
-      reading = parseSubjectAreaDbml(f.text, f.rel, readText(layoutPath));
+      reading = parseSubjectAreaDbml(f.text, f.rel);
     } catch {
       reading = null; // a load error: the compile above names it
     }
-    if (!reading) continue;
+    if (!reading) {
+      // An erd_layout that is not a string fails the compile in every parser; say what to write instead.
+      for (const p of readErdLayoutDbml(f.text)?.problemsAt ?? []) {
+        if (p.code !== 'layoutBadValue') continue;
+        push({ file: projectRel(f.rel), ...(p.line !== undefined ? { line: p.line } : {}), code: p.code, message: p.message });
+      }
+      continue;
+    }
     if (reading.holdsOwnTables) {
       push({
         file: projectRel(f.rel), code: 'declaresOwnTables',
@@ -587,9 +612,20 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
           + 'Run ERD Studio: Import DBML… on it.',
       });
     }
-    const layoutConflicted = conflicted.has(f.rel.replace(/\.dbml$/i, '.dbdiagram'));
+    // erd_layout (§1.6): its own codes; a conflict there is the user's to resolve (resolve-merge-conflicts).
+    const layoutWarnings = new Set<string>();
+    for (const p of reading.layoutProblems ?? []) {
+      layoutWarnings.add(p.line !== undefined ? `Line ${p.line}: ${p.message}` : p.message);
+      push({
+        file: projectRel(f.rel), ...(p.line !== undefined ? { line: p.line } : {}), code: String(p.code),
+        message: p.code === 'layoutMergeConflict'
+          ? `unresolved git merge conflict in erd_layout: only positions differ: keep either side; the diagram still opens, but ERD Studio won't save positions until it is resolved. Show the user the file and line (don't pick a side or run git commands yourself).`
+          : p.message,
+        ...(p.mergeConflict ? { mergeConflict: true as const } : {}),
+      });
+    }
     for (const w of reading.warnings) {
-      if (layoutConflicted && w.startsWith('Layout file:')) continue;
+      if (layoutWarnings.has(w)) continue;
       const lineMatch = /^Line (\d+): /.exec(w);
       const line = lineMatch ? Number(lineMatch[1]) : undefined;
       if (/\(usePathMismatch\)/.test(w) || /looks like a single-file DBML/.test(w) || /\[\d+\]$/.test(w)) continue;

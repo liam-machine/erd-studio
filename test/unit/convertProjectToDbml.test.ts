@@ -1082,12 +1082,13 @@ describe('the cheap offer check and the fingerprint', () => {
     expect(dbmlConversionFingerprint(root, '.erd-studio')).toBe(dbmlConversionFingerprint(root, '.erd-studio'));
   });
 
-  it('the offer\'s fingerprint ignores layout files and DBML stamps, and sees a YAML or JSON file change', () => {
+  it('the offer\'s fingerprint ignores DBML stamps (arranging a diagram rewrites its erd_layout), and sees a YAML or JSON file change', () => {
     fs.cpSync(path.resolve(__dirname, '../fixtures/dbml-convert/mixed/.erd-studio'), erd, { recursive: true });
     const fp = (): string => dbmlConversionOfferFingerprint(root, '.erd-studio');
     const first = fp();
-    fs.utimesSync(path.join(erd, 'gold', 'sales.dbml'), new Date(), new Date(Date.now() + 5000));
-    fs.writeFileSync(path.join(erd, 'gold', 'sales.dbdiagram'), '{}');
+    const sales = path.join(erd, 'gold', 'sales.dbml');
+    fs.writeFileSync(sales, `${fs.readFileSync(sales, 'utf-8')}\n// moved\n`);
+    fs.utimesSync(sales, new Date(), new Date(Date.now() + 5000));
     expect(fp()).toBe(first);
     fs.utimesSync(path.join(erd, 'silver', 'visits.json'), new Date(), new Date(Date.now() + 5000));
     const json = fp();

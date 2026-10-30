@@ -18,18 +18,20 @@ const LAYERS = JSON.stringify({ schemaVersion: 1, layers: [{ id: 'gold', label: 
 function project(extra: Files = {}): Files {
   return {
     '.erd-studio/layers.json': LAYERS,
-    '.erd-studio/gold/sales.dbml': `Project sales {
-  Note: 'Sales'
-  erd_schema_version: '7'
-}
-
-use { table fct_order } from '../tables/finance/fct_order.dbml'
+    '.erd-studio/gold/sales.dbml': `use { table fct_order } from '../tables/finance/fct_order.dbml'
 use { table dim_customer } from '../tables/finance/dim_customer.dbml'
 use { table dim_date } from '../tables/dim_date.dbml'
 use * from '../tables/_relationships.dbml'
 use * from '../tables/finance/_relationships.dbml'
+
+Project sales {
+  Note: 'Sales'
+  erd_schema_version: '7'
+  erd_layout: '''
+    fct_order 10 20
+  '''
+}
 `,
-    '.erd-studio/gold/sales.dbdiagram': JSON.stringify({ version: '3.0.0', defaultView: { tablePositions: [{ name: 'fct_order', schemaName: 'public', x: 10, y: 20 }] } }),
     // `finance` is a library folder, not a layer: only the use lines name it.
     '.erd-studio/tables/finance/fct_order.dbml': 'Table fct_order {\n  id int [pk]\n  customer_key int\n  date_key int\n}\n',
     '.erd-studio/tables/finance/dim_customer.dbml': 'Table dim_customer {\n  customer_key int [pk]\n}\n',
@@ -60,7 +62,7 @@ const links = (domain: { relationships: Array<{ fromModel: string; fromColumn: s
   domain.relationships.map((r) => `${r.fromModel}.${r.fromColumn}>${r.toModel}.${r.toColumn}`);
 
 describe('loadDisplaySubjectArea: DBML diagrams', () => {
-  it('draws a DBML diagram: members from use lines, layout positions, relationships from the library, schemaVersion 7', async () => {
+  it('draws a DBML diagram: members from use lines, erd_layout positions, relationships from the library, schemaVersion 7', async () => {
     const { promise } = load(project());
     const domain = await promise;
     expect(domain.schemaVersion).toBe(7);
@@ -170,13 +172,14 @@ describe('loadDisplaySubjectArea: DBML diagrams', () => {
       await expect(load(project(), { maxModels: 2 }).promise).rejects.toThrow(TooManyTablesError);
     });
 
-    it('maxDomainChars limits the diagram, and ignores a longer layout file with a warning', async () => {
+    it('maxDomainChars limits the diagram; a .dbdiagram beside it is never read (positions are its erd_layout)', async () => {
       await expect(load(project(), { maxDomainChars: 50 }).promise).rejects.toThrow(FileTooLargeError);
-      const files = project({ '.erd-studio/gold/sales.dbdiagram': ' '.repeat(5000) + JSON.stringify({ version: '3.0.0' }) });
+      const files = project({ '.erd-studio/gold/sales.dbdiagram': JSON.stringify({ version: '3.0.0', defaultView: { tablePositions: [{ name: 'fct_order', schemaName: 'public', x: 99, y: 99 }] } }) });
       const { promise, warnings } = load(files, { maxDomainChars: 1000 });
       const domain = await promise;
       expect(domain.models).toHaveLength(3);
-      expect(warnings.some((w) => w.includes('sales.dbdiagram is'))).toBe(true);
+      expect(domain.viewConfig.positions!.fct_order).toEqual({ x: 10, y: 20 });
+      expect(warnings.some((w) => w.includes('dbdiagram'))).toBe(false);
     });
 
     it('maxYamlChars limits a .dbml table file as written: over it, a placeholder', async () => {

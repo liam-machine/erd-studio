@@ -1,9 +1,3 @@
-Project showcase {
-  Note: 'Project task management — tracks projects, tasks, events, and customers'
-  erd_schema_version: '7'
-  erd_model_folder: 'models/silver'
-}
-
 use { table fct_task_event } from '../tables/fct_task_event.dbml'
 use { table dim_task }       from '../tables/dim_task.dbml'
 use { table dim_project }    from '../tables/dim_project.dbml'
@@ -11,3 +5,17 @@ use { table dim_customer }   from '../tables/dim_customer.dbml'
 use { table dim_date }       from '../tables/dim_date.dbml'
 use { table fct_order }      from '../tables/fct_order.dbml'
 use * from '../tables/_relationships.dbml'
+
+Project showcase {
+  Note: 'Project task management — tracks projects, tasks, events, and customers'
+  erd_schema_version: '7'
+  erd_model_folder: 'models/silver'
+  erd_layout: '''
+    dim_customer 40 60
+    dim_date 40 520
+    dim_project 980 60
+    dim_task 1026 586
+    fct_order 500 250
+    fct_task_event 438 544
+  '''
+}

@@ -30,7 +30,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { DBML_RELATIONSHIPS_FILE_NAME, isReservedTableName, layoutFilePathOf } from '@erd-studio/core';
+import { DBML_RELATIONSHIPS_FILE_NAME, isReservedTableName } from '@erd-studio/core';
 import { DBML_CONVERT_FIRST_MESSAGE } from '@erd-studio/core/dbml';
 import { RESERVED_TABLE_NAME_MESSAGE } from '../types/naming';
 
@@ -401,7 +401,6 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         relationshipsFiles: planned
           .filter((p) => path.basename(p) === DBML_RELATIONSHIPS_FILE_NAME)
           .map((p) => path.relative(semanticRoot, p).split(path.sep).join('/')),
-        layoutFileName: path.basename(layoutFilePathOf(domainPath)),
       },
     } : {}),
   }).split('\n');

@@ -9,7 +9,7 @@
  * unreadable. Only a syntax error, or an error left after blanking, does.
  */
 
-import type { Annotation, AnnotationColor, NodePosition, Relationship } from '../types/semantic.js';
+import type { Annotation, AnnotationColor, Relationship } from '../types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, DBML_SCHEMA_VERSION, WRITTEN_SCHEMA_VERSION } from '../types/semantic.js';
 import type { DbmlMemberUse, DbmlSubjectAreaReading } from '../types/dbmlStorage.js';
 import {
@@ -27,7 +27,8 @@ import {
 import { nextCompositeKey } from '../relationships.js';
 import { readPendingRefs } from './readRelationships.js';
 import type { DbmlProblem } from '../types/dbmlStorage.js';
-import { placeUnlaidNotes, readDbdiagramLayout } from '../dbdiagramLayout.js';
+import { erdLayoutView } from '../erdLayout.js';
+import { erdLayoutSpanInAst, readErdLayoutFromAst } from './erdLayoutDbml.js';
 import { findConflictMarkers } from '../mergeConflict.js';
 import { isSafeTableName } from '../logicalModel.js';
 import { TABLES_DIR } from '../logicalModel.js';
@@ -132,6 +133,13 @@ function compile(text: string, parser: DbmlParserModule, filePath: string): Comp
   }
 }
 
+/** `text` with its first `erd_layout` entry blanked (line breaks kept), for a conflict-marker search outside it. */
+function outsideErdLayout(ast: AstNode, text: string): string {
+  const span = erdLayoutSpanInAst(ast, text);
+  if (span.end <= span.start) return text;
+  return text.slice(0, span.start) + text.slice(span.start, span.end).replace(/[^\r\n]/g, '') + text.slice(span.end);
+}
+
 /** A Project or Note custom value as text (Project keys are plain strings in every parser; Notes may be typed in 11.0). */
 function textOf(value: unknown, text: string): string | undefined {
   return propertyText(value, text)?.text;
@@ -156,8 +164,11 @@ const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every
 
 /**
  * Read a DBML diagram. `filePath` names it in messages, and its parent
- * folder is the diagram's layer; `layoutText` is its `.dbdiagram` file, or
- * null when there is none.
+ * folder is the diagram's layer. Table positions and sticky-note boxes are
+ * read from the first Project's `erd_layout` (§1.6): its problems are
+ * `layoutProblems` (and warnings), and a value holding git conflict markers
+ * is read best effort and sets `layoutConflictLine`. A hand edit must never
+ * end a line inside that value with `\`: DBML joins it with the next line.
  *
  * Throws `SubjectAreaFileError` (`empty`; `invalid-dbml`, transient unless
  * the file holds git conflict markers) and `SubjectAreaValidationError` (a
@@ -167,7 +178,6 @@ const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every
 export function parseSubjectAreaDbml(
   rawText: string,
   filePath: string,
-  layoutText: string | null,
   parser: DbmlParserModule = PINNED_PARSER,
 ): DbmlSubjectAreaReading {
   const text = stripBom(rawText);
@@ -175,8 +185,12 @@ export function parseSubjectAreaDbml(
     throw new SubjectAreaFileError('empty', filePath, `Subject area file is empty: ${filePath}`);
   }
   const first = compile(text, parser, filePath);
+  const syntax = first.errors.filter((d) => d.errorClass === 'syntax').sort((a, b) => a.start - b.start);
   if (first.errors.length > 0) {
-    const conflict = findConflictMarkers(text);
+    // Markers inside erd_layout only mean positions differ: read best effort below (layoutConflictLine).
+    // Markers inside a well-formed ''' value never break the syntax, so after a syntax error the
+    // recovered AST's span is not trusted (it can swallow a `=======`) and the whole text is searched.
+    const conflict = findConflictMarkers(syntax.length > 0 ? text : outsideErdLayout(first.ast, text));
     if (conflict !== null) {
       throw new SubjectAreaFileError(
         'invalid-dbml',
@@ -187,7 +201,6 @@ export function parseSubjectAreaDbml(
       );
     }
   }
-  const syntax = first.errors.filter((d) => d.errorClass === 'syntax').sort((a, b) => a.start - b.start);
   if (syntax.length > 0) throw invalidDbml(filePath, syntax[0]);
 
   const { folder: layer, stem } = pathParts(filePath);
@@ -331,46 +344,40 @@ export function parseSubjectAreaDbml(
   const pending = pendingRefs.map((ref) => ({ line: ref.line, relationships: ref.relationships }));
   const ownRelationships = pendingRelationships(pending.map((p) => p.relationships));
 
-  // The layout file: table positions and sticky-note boxes.
-  const positions: Record<string, NodePosition> = {};
-  let stickies: ReturnType<typeof readDbdiagramLayout>['stickies'] = [];
-  if (layoutText !== null && layoutText !== undefined) {
-    const layout = readDbdiagramLayout(layoutText);
-    for (const problem of layout.problems) warnings.push(`Layout file: ${problem}`);
-    const seen = new Set<string>();
-    for (const p of layout.tables) {
-      if (seen.has(p.name)) continue;
-      seen.add(p.name);
-      positions[p.name] = { x: p.x, y: p.y };
-    }
-    stickies = layout.stickies;
-  }
-  viewConfig.positions = positions;
+  // erd_layout (§1.6): table positions and sticky-note boxes, from the first Project.
+  const notes = Array.isArray(db?.notes) ? (db!.notes as AstNode[]) : [];
+  const noteIds = notes.map((n) => (typeof n?.name === 'string' ? n.name : '')).filter((id) => id !== '');
+  const layout = readErdLayoutFromAst(first.ast, text, new Set(noteIds));
+  const layoutProblems: DbmlProblem[] = layout.problemsAt.map((p) => ({
+    code: p.code,
+    ...(p.line !== undefined ? { line: p.line } : {}),
+    message: p.message,
+    severity: p.code === 'layoutBadValue' || p.code === 'layoutMergeConflict' ? 'error' : 'warning',
+    ...(p.code === 'layoutMergeConflict' ? { mergeConflict: true as const } : {}),
+  }));
+  for (const problem of layoutProblems) warnings.push(problem.line !== undefined ? `Line ${problem.line}: ${problem.message}` : problem.message);
+  const view = erdLayoutView(layout, members, noteIds);
+  viewConfig.positions = view.positions;
 
   // Notes: sticky notes, in file order.
-  const notes = Array.isArray(db?.notes) ? (db!.notes as AstNode[]) : [];
   if (notes.length > 0) {
-    const ids = notes.map((n) => (typeof n?.name === 'string' ? n.name : ''));
-    const placed = placeUnlaidNotes(ids.filter((id) => id !== ''), positions, stickies);
-    const byName = new Map(stickies.map((s) => [s.name, s]));
     const annotations: Annotation[] = [];
     for (const note of notes) {
       const id = typeof note?.name === 'string' ? note.name : '';
       if (id === '') continue;
-      const laid = byName.get(id);
-      const place = laid ?? placed[id] ?? { x: 0, y: 0 };
+      const box = view.boxes[id] ?? { x: 0, y: 0 };
       const annotation: Annotation = {
         id,
         text: typeof note.content === 'string' ? note.content : '',
-        x: place.x,
-        y: place.y,
+        x: box.x,
+        y: box.y,
       };
       const colour: AnnotationColor | undefined = typeof note.color === 'string'
         ? stickyColourOfHex(note.color)
         : typeof note.headerColor === 'string' ? stickyColourOfHex(note.headerColor) : undefined;
       if (colour) annotation.color = colour;
-      if (laid?.width !== undefined) annotation.width = laid.width;
-      if (laid?.height !== undefined) annotation.height = laid.height;
+      if (box.width !== undefined) annotation.width = box.width;
+      if (box.height !== undefined) annotation.height = box.height;
       const linked = textOf(note.metadata?.[DBML_RICH_NOTE_PROPERTIES.linkedTable], text);
       if (linked !== undefined && linked !== '') annotation.linkedModel = linked;
       annotations.push(annotation);
@@ -403,6 +410,8 @@ export function parseSubjectAreaDbml(
     holdsOwnTables,
     ...(unlinked.length > 0 ? { unlinked } : {}),
     ...(pending.length > 0 ? { pending } : {}),
+    ...(layoutProblems.length > 0 ? { layoutProblems } : {}),
+    ...(layout.conflictLine !== undefined ? { layoutConflictLine: layout.conflictLine } : {}),
   };
 }
 

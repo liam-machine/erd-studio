@@ -8,13 +8,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   classifySemanticFile,
-  diagramPathOfLayout,
   dirnamePosix,
   isInsidePosix,
   isLibraryFolderName,
   isReservedTableName,
   joinPosix,
-  layoutFilePathOf,
   normalisePosix,
   relationshipsFilePathOf,
   relativePosix,
@@ -74,7 +72,8 @@ describe('classifySemanticFile', () => {
     ['gold/_x.json', { kind: 'diagram', storage: 'json', layer: 'gold', name: '_x' }, { kind: 'diagram', storage: 'json', layer: 'gold', name: '_x' }],
     ['gold/_relationships.dbml', { kind: 'other' }, { kind: 'other' }],
     ['gold/_RELATIONSHIPS.dbml', { kind: 'other' }, { kind: 'other' }],
-    ['gold/sales.dbdiagram', { kind: 'layout', layer: 'gold', name: 'sales' }, { kind: 'layout', layer: 'gold', name: 'sales' }],
+    // Positions live in the diagram's erd_layout: a .dbdiagram is no file of the project.
+    ['gold/sales.dbdiagram', { kind: 'other' }, { kind: 'other' }],
     ['gold/_relationships.dbdiagram', { kind: 'other' }, { kind: 'other' }],
     ['SAP FI/sales.dbml', { kind: 'diagram', storage: 'dbml', layer: 'SAP FI', name: 'sales' }, { kind: 'diagram', storage: 'dbml', layer: 'SAP FI', name: 'sales' }],
     ['gold/sales.yml', { kind: 'other' }, { kind: 'other' }],
@@ -164,14 +163,6 @@ describe('paths that belong together', () => {
     expect(relationshipsFilePathOf('/p/.erd-studio/tables/dim.dbml')).toBe('/p/.erd-studio/tables/_relationships.dbml');
     expect(relationshipsFilePathOf('C:\\p\\.erd-studio\\tables\\gold\\fct.dbml')).toBe('C:\\p\\.erd-studio\\tables\\gold\\_relationships.dbml');
     expect(relationshipsFilePathOf('fct.dbml')).toBe('_relationships.dbml');
-  });
-
-  it('layoutFilePathOf and diagramPathOfLayout are inverses', () => {
-    expect(layoutFilePathOf('gold/sales.dbml')).toBe('gold/sales.dbdiagram');
-    expect(diagramPathOfLayout('gold/sales.dbdiagram')).toBe('gold/sales.dbml');
-    for (const p of ['gold/sales.dbml', '/a b/.erd-studio/SAP FI/x.y.dbml']) {
-      expect(diagramPathOfLayout(layoutFilePathOf(p))).toBe(p);
-    }
   });
 
   it('subjectAreaStorageOf is by extension', () => {

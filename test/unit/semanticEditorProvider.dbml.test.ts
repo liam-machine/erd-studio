@@ -346,39 +346,44 @@ describe('relationship edits: always in the library (D5), in the owner\'s folder
   });
 });
 
+/** The erd_layout value of a diagram's text (its lines), or '' when it has none. */
+const layoutIn = (text: string | undefined): string => /erd_layout: '''([^]*?)'''/.exec(text ?? '')?.[1] ?? '';
+
 describe('adding, renaming and removing tables', () => {
   it('addModel: a new .dbml table in the layer\'s folder, its use line and its position', async () => {
     const r = await run({ type: 'addModel', payload: { name: 'dim_store', description: '', columns: [{ name: 'store_key', dataType: 'INT', description: '', isPrimaryKey: true }] } });
-    expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml', 'tables/gold/dim_store.dbml']);
+    expectWrote(r, ['gold/sales.dbml', 'tables/gold/dim_store.dbml']);
     expect(r.after['gold/sales.dbml']).toMatch(useLine('dim_store', '../tables/gold/dim_store.dbml'));
-    expect(r.after['gold/sales.dbdiagram']).toContain('"name": "dim_store"');
+    expect(layoutIn(r.after['gold/sales.dbml'])).toMatch(/\n {4}dim_store -?\d/);
     expect(table('dim_store').columns[0]).toMatchObject({ name: 'store_key', isPrimaryKey: true });
   });
 
-  it('addExistingModel: a use line, and a layout file created for its position', async () => {
+  it('addExistingModel: a use line, and erd_layout added to the Project for its position', async () => {
     const r = await run({ type: 'addExistingModel', payload: { modelName: 'dim_customer' } }, 'silver/staging.dbml');
-    expectWrote(r, ['silver/staging.dbdiagram', 'silver/staging.dbml']);
+    expectWrote(r, ['silver/staging.dbml']);
     expect(r.after['silver/staging.dbml']).toMatch(useLine('dim_customer', '../tables/gold/dim_customer.dbml'));
+    expect(layoutIn(r.after['silver/staging.dbml'])).toMatch(/\n {4}dim_customer -?\d/);
     expect(new SubjectAreaService(new LayerService(root, '.erd-studio')).listSubjectAreas(root, '.erd-studio').length).toBe(2);
   });
 
   it('addExistingModels: several in one edit', async () => {
     const r = await run({ type: 'addExistingModels', payload: { modelNames: ['dim_customer', 'dim_region'] } }, 'silver/staging.dbml');
-    expectWrote(r, ['silver/staging.dbdiagram', 'silver/staging.dbml']);
+    expectWrote(r, ['silver/staging.dbml']);
     expect(r.after['silver/staging.dbml']).toContain('use { table dim_customer }');
     expect(r.after['silver/staging.dbml']).toContain('use { table dim_region }');
   });
 
-  it('renameModel: the file, the Refs and use lines naming it, and the layout key follow', async () => {
+  it('renameModel: the file, the Refs and use lines naming it, and the erd_layout key follow', async () => {
     const r = await run({ type: 'renameModel', payload: { oldName: 'dim_region', newName: 'dim_area' } });
-    expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml', 'tables/gold/_relationships.dbml', 'tables/gold/dim_area.dbml', 'tables/gold/dim_region.dbml']);
+    expectWrote(r, ['gold/sales.dbml', 'tables/gold/_relationships.dbml', 'tables/gold/dim_area.dbml', 'tables/gold/dim_region.dbml']);
     expect('tables/gold/dim_region.dbml' in r.after).toBe(false);
     expect(r.after['tables/gold/dim_area.dbml']).toMatch(/^Table dim_area /);
     expect(r.after['tables/gold/_relationships.dbml']).toMatch(useLine('dim_area', './dim_area.dbml'));
     expect(r.after['tables/gold/_relationships.dbml']).toContain('dim_area.(region_code, country_code)');
     expect(r.after['tables/gold/_relationships.dbml']).not.toMatch(/dim_region/);
     expect(r.after['gold/sales.dbml']).toMatch(useLine('dim_area', '../tables/gold/dim_area.dbml'));
-    expect(r.after['gold/sales.dbdiagram']).toContain('"name": "dim_area"');
+    expect(layoutIn(r.after['gold/sales.dbml'])).toContain('\n    dim_area 760 40\n');
+    expect(layoutIn(r.after['gold/sales.dbml'])).not.toContain('dim_region');
     expect(table('fct_order').relationships?.some((rel) => rel.toModel === 'dim_area')).toBe(true);
   });
 
@@ -396,19 +401,19 @@ describe('adding, renaming and removing tables', () => {
 
   it('removeModels of a folder\'s last member: its relationships file\'s use line goes too', async () => {
     const r = await run({ type: 'removeModels', payload: { modelNames: ['dim_date'] } });
-    expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml']);
+    expectWrote(r, ['gold/sales.dbml']);
     expect(r.after['gold/sales.dbml']).not.toContain("use { table dim_date }");
     // No member is left at the top of tables/, so its relationships file is no longer imported;
     // the gold folder's still is.
     expect(r.after['gold/sales.dbml']).not.toContain("use * from '../tables/_relationships.dbml'");
     expect(r.after['gold/sales.dbml']).toContain("use * from '../tables/gold/_relationships.dbml'");
-    expect(r.after['gold/sales.dbdiagram']).not.toContain('"dim_date"');
+    expect(layoutIn(r.after['gold/sales.dbml'])).not.toContain('dim_date');
     expect('tables/dim_date.dbml' in r.after).toBe(true);
   });
 
   it('removeModels: the use line and the position go; the table file stays', async () => {
     const r = await run({ type: 'removeModels', payload: { modelNames: ['bridge_empty'] } });
-    expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml']);
+    expectWrote(r, ['gold/sales.dbml']);
     expect(r.after['gold/sales.dbml']).not.toContain('bridge_empty');
     expect('tables/gold/bridge_empty.dbml' in r.after).toBe(true);
   });
@@ -435,10 +440,10 @@ describe('the settle pass (§5.3 step 4)', () => {
 });
 
 describe('positions and sticky notes', () => {
-  it('updatePositions: the layout only', async () => {
+  it('updatePositions: erd_layout only', async () => {
     const r = await run({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
-    expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml']);
-    expect(r.after['gold/sales.dbml']).toBe(r.before['gold/sales.dbml']);
+    expectWrote(r, ['gold/sales.dbml']);
+    expect(r.after['gold/sales.dbml']).toBe(r.before['gold/sales.dbml'].replace('    fct_order 400 200\n', '    fct_order 420 220\n'));
   });
 
   it('updatePositions with the same positions writes nothing new', async () => {
@@ -449,8 +454,9 @@ describe('positions and sticky notes', () => {
 
   it('addAnnotation: a Note block and its box', async () => {
     const r = await run({ type: 'addAnnotation', payload: { id: '11111111-2222-4333-8444-555555555555', text: 'New note', x: 100, y: 900, color: 'yellow' } });
-    expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml']);
+    expectWrote(r, ['gold/sales.dbml']);
     expect(r.after['gold/sales.dbml']).toContain('Note "11111111-2222-4333-8444-555555555555"');
+    expect(layoutIn(r.after['gold/sales.dbml'])).toContain('\n    note/11111111-2222-4333-8444-555555555555 100 900');
   });
 
   it('updateAnnotation: the Note text', async () => {
@@ -461,47 +467,8 @@ describe('positions and sticky notes', () => {
 
   it('removeAnnotations: the Note block and its box', async () => {
     const r = await run({ type: 'removeAnnotations', payload: { ids: ['9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f'] } });
-    expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml']);
+    expectWrote(r, ['gold/sales.dbml']);
     expect(r.after['gold/sales.dbml']).not.toContain('9a0d2b77');
-    expect(r.after['gold/sales.dbdiagram']).not.toContain('9a0d2b77');
-  });
-});
-
-describe('undo (§5.8): the toolbar Undo flushes every file the canvas wrote, layout files included', () => {
-  it.each([
-    ['a drag (layout only)', { type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } }],
-    ['a column edit', { type: 'updateModelDescription', payload: { modelName: 'dim_region', description: 'Regions' } }],
-    ['a relationship add', { type: 'addRelationship', payload: { fromModel: 'customer_profile', fromColumn: 'loyalty_tier', toModel: 'dim_region', toColumn: 'region_name', cardinality: 'many-to-one' } }],
-  ] as const)('%s: rewinding the documents and pressing Undo puts every file back on disk', async (_label, message) => {
-    const tracker = new OwnWriteTracker();
-    const { provider } = buildProvider(tracker);
-    const document = createMockTextDocument(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8'), { persist: true });
-    (vscode.workspace.textDocuments as unknown[]).push(document);
-    const panel = createMockWebviewPanel();
-    await provider.resolveCustomTextEditor(document as unknown as vscode.TextDocument, panel as unknown as vscode.WebviewPanel, {} as vscode.CancellationToken);
-    const before = snapshot();
-    await panel._simulateMessage(message);
-    const changed = Object.keys(before).filter((p) => snapshot()[p] !== before[p]);
-    expect(changed.length).toBeGreaterThan(0);
-    // VS Code's undo rewinds each edited document in memory, each change an
-    // Undo-reason event; the toolbar's Undo must then save every one of them.
-    const docs = changed.map((p) => {
-      const doc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at(p)) as unknown as { _setText(t: string): void } | undefined;
-      expect(doc, `${p} was edited through an open document`).toBeDefined();
-      return [p, doc!] as const;
-    });
-    const undo = vscode.commands.registerCommand('undo', async () => {
-      for (const [p, doc] of docs) {
-        doc._setText(before[p]);
-        await _fireDidChangeTextDocument(doc, TextDocumentChangeReason.Undo);
-      }
-    });
-    try {
-      await panel._simulateMessage({ type: 'undo' });
-    } finally {
-      undo.dispose();
-    }
-    expect(snapshot()).toEqual(before);
   });
 });
 
@@ -606,11 +573,9 @@ describe('Turn Round (commitRelationshipWrite) on a DBML diagram', () => {
 });
 
 describe('the ready load\'s position save (autoPositionNewTables, §5.3)', () => {
-  /** sales.dbdiagram without bridge_empty's position: a partially positioned diagram. */
+  /** sales.dbml without bridge_empty's erd_layout line: a partially positioned diagram. */
   const dropPosition = (): void => {
-    const layout = JSON.parse(fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8'));
-    layout.defaultView.tablePositions = layout.defaultView.tablePositions.filter((p: { name: string }) => p.name !== 'bridge_empty');
-    fs.writeFileSync(at('gold/sales.dbdiagram'), `${JSON.stringify(layout, null, 2)}\n`);
+    fs.writeFileSync(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8').replace('    bridge_empty 760 400\n', ''));
   };
   async function openAndReady(prepare?: () => void): Promise<{ r: Run; posted: Array<{ type: string; payload?: unknown }> }> {
     const tracker = new OwnWriteTracker();
@@ -633,12 +598,13 @@ describe('the ready load\'s position save (autoPositionNewTables, §5.3)', () =>
     return { r: { errors, written, before, after: snapshot(), provider, tracker, recorded }, posted };
   }
 
-  it('a partially positioned diagram: only the layout changes, the .dbml keeps its bytes', async () => {
+  it('a partially positioned diagram: only erd_layout changes, every other byte of the .dbml stays', async () => {
     dropPosition();
     const { r, posted } = await openAndReady();
-    expectWrote(r, ['gold/sales.dbdiagram', 'gold/sales.dbml']);
-    expect(r.after['gold/sales.dbml']).toBe(r.before['gold/sales.dbml']);
-    expect(r.after['gold/sales.dbdiagram']).toContain('"name": "bridge_empty"');
+    expectWrote(r, ['gold/sales.dbml']);
+    const cut = (t: string): string => t.replace(/ {2}erd_layout: '''[^]*?'''\n/, '');
+    expect(cut(r.after['gold/sales.dbml'])).toBe(cut(r.before['gold/sales.dbml']));
+    expect(layoutIn(r.after['gold/sales.dbml'])).toMatch(/\n {4}bridge_empty -?\d/);
     expect(posted.some((m) => m.type === 'domainLoaded')).toBe(true);
   });
 
@@ -646,13 +612,9 @@ describe('the ready load\'s position save (autoPositionNewTables, §5.3)', () =>
     ['the diagram is read-only (a second Project)', () => {
       fs.appendFileSync(at('gold/sales.dbml'), "\nProject other {\n  Note: 'x'\n}\n");
     }, undefined],
-    ['its layout file is open with unsaved changes', undefined, () => {
-      const doc = createMockTextDocument(at('gold/sales.dbdiagram'), fs.readFileSync(at('gold/sales.dbdiagram'), 'utf-8'));
-      doc._setText(`${doc.getText()} `);
-      (vscode.workspace.textDocuments as unknown[]).push(doc);
-    }],
-    ['its layout file is not a JSON object', () => {
-      fs.writeFileSync(at('gold/sales.dbdiagram'), '[]\n');
+    ['its erd_layout holds a git merge conflict', () => {
+      fs.writeFileSync(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8')
+        .replace('    fct_order 400 200\n', '<<<<<<< HEAD\n    fct_order 400 200\n=======\n    fct_order 500 200\n>>>>>>> theirs\n'));
     }, undefined],
   ] as const)('%s: nothing is written, and the canvas still loads with the computed positions', async (_label, onDisk, whileOpen) => {
     dropPosition();

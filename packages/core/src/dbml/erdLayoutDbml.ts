@@ -163,10 +163,16 @@ export function erdLayoutEntrySpan(rawText: string, parser: DbmlParserModule = P
   const shift = rawText.length - text.length;
   const parsed = parseSyntax(text, parser);
   if (parsed.errors.length > 0) return null;
-  const entry = layoutEntries(firstProject(parsed.ast))[0];
+  const span = erdLayoutSpanInAst(parsed.ast, text);
+  return span.end > span.start ? { start: shift + span.start, end: shift + span.end } : span;
+}
+
+/** {@link erdLayoutEntrySpan} of a text already parsed (`ast` of `text`, without its byte-order mark). Internal. */
+export function erdLayoutSpanInAst(ast: AstNode, text: string): { start: number; end: number } {
+  const entry = layoutEntries(firstProject(ast))[0];
   if (!entry) return { start: 0, end: 0 };
   const end = Math.max(entry.end as number, typeof entry.body?.end === 'number' ? entry.body.end as number : 0);
-  return { start: shift + lineStartOf(text, entry.start), end: shift + nextLineStart(text, end - 1) };
+  return { start: lineStartOf(text, entry.start), end: nextLineStart(text, end - 1) };
 }
 
 /** The indent of a Project's entries: the first entry's, when it starts its line; else two spaces. */

@@ -24,7 +24,6 @@ import {
   detectSubjectAreaFormat,
   getRawSubjectAreaTableNames,
   groupKey,
-  layoutFilePathOf,
   linkKey,
   parseSubjectAreaJson,
   subjectAreaStorageOf,
@@ -32,7 +31,7 @@ import {
   validateSubjectAreaDocument,
 } from '@erd-studio/core';
 import { subjectAreaMembersDbml } from '@erd-studio/core/dbml';
-import { readDbmlDiagram } from './dbmlDiagramReadings';
+import { readDbmlDiagram, rememberedDbmlMembers } from './dbmlDiagramReadings';
 import type { DbmlSubjectAreaReading, DbtKeyIndex, SubjectAreaFormat } from '@erd-studio/core';
 import type { SubjectAreaSummary, SemanticSubjectArea, UnifiedSubjectArea } from '../types/semantic';
 import type { DisplaySubjectArea, DisplayTable, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
@@ -113,7 +112,8 @@ export function isSubjectAreaFilePath(fsPath: string, firstLine?: string): boole
  */
 export function subjectAreaTableNames(text: string, filePath: string): string[] | null {
   if (subjectAreaStorageOf(filePath) === 'dbml') {
-    return subjectAreaMembersDbml(text);
+    // A diagram just read (or just dragged) has its members remembered: no parse.
+    return rememberedDbmlMembers(text, filePath) ?? subjectAreaMembersDbml(text);
   }
   try {
     return getRawSubjectAreaTableNames(JSON.parse(text.replace(/^\uFEFF/, '')) as unknown);
@@ -335,7 +335,8 @@ export class SubjectAreaService {
   /** {@link countSubjectAreaTables} over a diagram's text (an open document's). */
   countSubjectAreaTablesInText(raw: string, filePath: string): number {
     if (subjectAreaStorageOf(filePath) === 'dbml') {
-      const members = subjectAreaMembersDbml(raw);
+      // A diagram just read (or just dragged) has its members remembered: no parse.
+      const members = rememberedDbmlMembers(raw, filePath) ?? subjectAreaMembersDbml(raw);
       if (members === null) throw new SubjectAreaValidationError(`${filePath} has a DBML syntax error`);
       return members.length;
     }
@@ -351,13 +352,13 @@ export class SubjectAreaService {
   }
 
   /**
-   * Read a `.dbml` diagram (§5.5): the diagram and its layout file from disk,
+   * Read a `.dbml` diagram (§5.5), positions from its `erd_layout`,
    * through core's `parseSubjectAreaDbml` (which throws `SubjectAreaFileError`
    * / `SubjectAreaValidationError`). A table or relationships file passed as
    * a diagram is refused with core's not-a-diagram message. Each member that
    * resolves to a `.yml` is drawn with a warning (D20).
    */
-  readDbmlSubjectArea(filePath: string, text?: string, layoutText?: string | null): DbmlSubjectAreaReading {
+  readDbmlSubjectArea(filePath: string, text?: string): DbmlSubjectAreaReading {
     const stem = path.basename(filePath, '.dbml');
     if (stem.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM || path.basename(path.dirname(filePath)) === TABLES_DIR
       || path.basename(path.dirname(path.dirname(filePath))) === TABLES_DIR) {
@@ -366,15 +367,7 @@ export class SubjectAreaService {
       );
     }
     const raw = text ?? fs.readFileSync(filePath, 'utf-8');
-    let layout = layoutText;
-    if (layout === undefined) {
-      try {
-        layout = fs.readFileSync(layoutFilePathOf(filePath), 'utf-8');
-      } catch {
-        layout = null;
-      }
-    }
-    const reading = readDbmlDiagram(raw, filePath, layout ?? null);
+    const reading = readDbmlDiagram(raw, filePath);
     for (const warning of reading.warnings) log.warn(`[DomainService] ${filePath}: ${warning}`);
     // Only a library that holds a YAML table can resolve a member to one.
     if (this.tableLibraryService?.hasYamlTableFiles()) {

@@ -3,6 +3,16 @@ Project sales {
   erd_schema_version: '7'
   erd_show_fk_edges: 'false'
   erd_layout_options: '{"elk.direction":"RIGHT"}'
+  erd_layout: '''
+    bridge_empty 760 400
+    customer_profile 40 640
+    dim_customer 40 40
+    dim_date 40 360
+    dim_region 760 40
+    fct_order 400 200
+    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 1120 40 220 120
+    note/9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f 1120 200
+  '''
 }
 
 use { table fct_order } from '../tables/gold/fct_order.dbml'

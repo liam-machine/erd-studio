@@ -48,7 +48,7 @@ import { TableLibraryTreeProvider, type TableLibraryNode } from './providers/Mod
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
-import { SubjectAreaFileError, layoutFilePathOf, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
+import { SubjectAreaFileError, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
 import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
@@ -81,12 +81,9 @@ import {
   SET_UP_TITLE,
   deleteFailure,
   layerGone,
-  layoutDeleteFailure,
   layersFailure,
   renameReadFailure,
-  renameLayoutInTheWay,
   renameRefused,
-  renameUnsavedFile,
   unsavedSaveFailure,
   writeFailure,
 } from './services/diagramCommandErrors';
@@ -1504,20 +1501,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   // Semantic file changed externally → refresh tree view + model library
-  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri, created, layout }) => {
-    // A DBML diagram's layout file lives beside it and is no open document of
-    // the canvas: its change arrives here as a change to the diagram (§5.4).
-    // A change to the diagram file itself reaches an open canvas through its
-    // document, so redrawing for it too would draw it twice.
-    if (layout) void editorProvider.refreshSubjectAreaPanel(uri.fsPath);
+  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri, created }) => {
+    // A change to a diagram file reaches an open canvas through its document
+    // (a DBML diagram's positions are in it too, in its erd_layout).
     // A domain file ERD Studio did not write appeared: an AI assistant, a hand
     // edit or a git pull. createDomain writes outside the own-write tracker,
     // so it marks its path in subjectAreasCreatedHere instead.
     if (created && !subjectAreasCreatedHere.delete(uri.fsPath)) { telemetry.feature('domainCreatedExternal'); }
     // A canvas showing "deleted or renamed" whose file is back redraws (#161).
     editorProvider.syncSubjectAreaFilePresence();
-    // A layout file holds positions only, which neither tree shows.
-    if (layout) return;
     treeProvider.invalidateSubjectArea(uri.fsPath);
     treeProvider.refresh();
     tableLibraryProvider.refresh();
@@ -2679,28 +2671,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           }
           ownWrites.recordDelete(filePath);
           treeProvider.invalidateSubjectArea(filePath);
-          // A DBML diagram's layout file goes with it (§5.7). The diagram is
-          // gone either way; a layout file left over is said, and Try Again
-          // deletes only it.
-          const layoutPath = filePath.endsWith('.dbml') ? layoutFilePathOf(filePath) : undefined;
-          if (layoutPath !== undefined) { await deleteLayoutFile(layoutPath); }
           treeProvider.refresh();
           refreshDiagramsStatus();
           selectorsService.scheduleRegenerate();
-        };
-        const deleteLayoutFile = async (layoutPath: string): Promise<void> => {
-          if (!fs.existsSync(layoutPath)) { return; }
-          try {
-            await vscode.workspace.fs.delete(vscode.Uri.file(layoutPath));
-          } catch (err) {
-            if (fs.existsSync(layoutPath)) {
-              showCommandFailure(layoutDeleteFailure(domainName, layoutPath, err, workspaceRoot), err, {
-                retry: () => deleteLayoutFile(layoutPath),
-              });
-              return;
-            }
-          }
-          ownWrites.recordDelete(layoutPath);
         };
         await deleteFile();
       },
@@ -2767,7 +2740,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               newPath: newFilePath,
               newSlug,
               text,
-              layoutText: read(layoutFilePathOf(oldFilePath)),
               resolver: currentDbmlResolver(tableLibraryService, read).resolver,
             });
           }
@@ -2811,25 +2783,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             );
             return false;
           }
-          // Nor may the layout file land on one already there (a `.dbdiagram`
-          // a delete left behind): VS Code would refuse the edit every time.
-          const deleted = new Set(writes.filter((w) => w.kind === 'delete').map((w) => w.path.toLowerCase()));
-          const inTheWay = writes.find((w) => w.kind === 'create' && w.path !== newFilePath && fs.existsSync(w.path) && !deleted.has(w.path.toLowerCase()));
-          if (inTheWay !== undefined) {
-            showCommandFailure(renameLayoutInTheWay(oldDomainName, newSlug, inTheWay.path, workspaceRoot), undefined);
-            return false;
-          }
-
-          // The layout file moves too: never under its unsaved edits. (The
-          // diagram's own were settled by handleUnsavedChanges.)
-          const dirty = dirtyFiles(writes.map((w) => w.path).filter((p) => path.resolve(p) !== path.resolve(oldFilePath)));
-          if (dirty.length > 0) {
-            showCommandFailure(renameUnsavedFile(dirty[0], workspaceRoot), undefined, {
-              showTab: () => vscode.window.showTextDocument(vscode.Uri.file(dirty[0])),
-            });
-            return false;
-          }
-
           // Close old editor tabs before applying the edit (file will be deleted)
           const oldTabs = findMatchingTabs(oldFileUri);
           if (oldTabs.length > 0) { await vscode.window.tabGroups.close(oldTabs, true); }

@@ -1342,12 +1342,11 @@ export interface DescribeDbmlImportOptions {
   layerLabel?: string;
   /**
    * A project that stores DBML: where its relationships are written, as the
-   * user sees the paths (`tables/silver/_relationships.dbml`), and the new
-   * diagram's own layout file (`stores.dbdiagram`). Absent for a YAML project,
-   * whose relationships go in the tables' own files and whose layout goes in
-   * the diagram file.
+   * user sees the paths (`tables/silver/_relationships.dbml`). Absent for a
+   * YAML project, whose relationships go in the tables' own files. Either
+   * way the layout goes in the diagram file (a DBML diagram's `erd_layout`).
    */
-  dbml?: { relationshipsFiles: readonly string[]; layoutFileName: string };
+  dbml?: { relationshipsFiles: readonly string[] };
 }
 
 /**
@@ -1386,9 +1385,9 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   if (report.optionalRefs > 0 && !report.erdStudioExport) {
     lines.push(`• ${plural(report.optionalRefs, 'reference is', 'references are')} optional (?). ERD Studio doesn't record that, so they are imported as plain relationships.`);
   }
-  // Opening it lays it out and saves that layout, as for any new diagram: in a DBML project, to its own layout file.
+  // Opening it lays it out and saves that layout, as for any new diagram: in a DBML project, in the diagram file's erd_layout.
   const laidOut = options.dbml
-    ? `the diagram is laid out automatically when it opens, and that layout is saved in ${options.dbml.layoutFileName}.`
+    ? 'the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.'
     : 'the diagram is laid out automatically when it opens.';
   if (!report.layoutRead) {
     lines.push(`• No erd_layout in the file: ${laidOut}`);

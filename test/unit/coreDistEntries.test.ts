@@ -45,7 +45,7 @@ describe('the built @erd-studio/core entries', () => {
     const dbml = await import(pathToFileURL(path.join(OUT, 'dbml/index.js')).href);
     let empty: unknown;
     try {
-      dbml.dbmlStorageReader.parseSubjectArea('', 'gold/sales.dbml', null);
+      dbml.dbmlStorageReader.parseSubjectArea('', 'gold/sales.dbml');
     } catch (err) {
       empty = err;
     }
@@ -54,7 +54,7 @@ describe('the built @erd-studio/core entries', () => {
 
     let future: unknown;
     try {
-      dbml.dbmlStorageReader.parseSubjectArea("Project p {\n  erd_schema_version: '99'\n}\n", 'gold/p.dbml', null);
+      dbml.dbmlStorageReader.parseSubjectArea("Project p {\n  erd_schema_version: '99'\n}\n", 'gold/p.dbml');
     } catch (err) {
       future = err;
     }

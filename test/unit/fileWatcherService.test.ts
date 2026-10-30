@@ -59,7 +59,7 @@ describe('FileWatcherService', () => {
       const logicalOnly = new FileWatcherService('/test/workspace', '.erd-studio', undefined, undefined, { dbt: false });
       const patterns = _mockFileWatchers.map(w => (w._pattern as vscode.RelativePattern).pattern);
       expect(patterns).toEqual([
-        '.erd-studio/**/*.{json,dbml,dbdiagram}',
+        '.erd-studio/**/*.{json,dbml}',
         '.erd-studio/{logical-models,tables}/**/*.{yml,dbml}',
       ]);
       expect(patterns.some(p => p.includes('manifest') || p.includes('dbt_project') || p.startsWith('{models'))).toBe(false);
@@ -801,8 +801,8 @@ describe('FileWatcherService', () => {
     });
   });
 
-  // Native DBML storage (§5.4): `.dbml` diagrams, `.dbdiagram` layouts,
-  // relationships files and `.dbml` tables, each classified by core's one
+  // Native DBML storage (§5.4): `.dbml` diagrams (their positions in
+  // erd_layout), relationships files and `.dbml` tables, each classified by core's one
   // classifier and raising exactly one event.
   describe('native DBML storage', () => {
     const ws = '/test/workspace/.erd-studio';
@@ -811,7 +811,7 @@ describe('FileWatcherService', () => {
 
     it('classifies each kind of file under the semantic dir', () => {
       expect(classifySemanticPath(ws, `${ws}/gold/sales.dbml`)).toBe('domain');
-      expect(classifySemanticPath(ws, `${ws}/gold/sales.dbdiagram`)).toBe('layout');
+      expect(classifySemanticPath(ws, `${ws}/gold/sales.dbdiagram`)).toBe('other');
       expect(classifySemanticPath(ws, `${ws}/tables/dim_date.dbml`)).toBe('table');
       expect(classifySemanticPath(ws, `${ws}/tables/gold/fct_order.dbml`)).toBe('table');
       expect(classifySemanticPath(ws, `${ws}/tables/gold/_relationships.dbml`)).toBe('relationships');
@@ -831,30 +831,18 @@ describe('FileWatcherService', () => {
       expect(listener).toHaveBeenCalledWith({ uri, created: true });
     });
 
-    it('a layout change is a change to its diagram; our own layout write is skipped', () => {
-      const tracker = new OwnWriteTracker();
-      _clearMockFileWatchers();
-      service = new FileWatcherService('/test/workspace', '.erd-studio', defaultDbtProjectConfig(), tracker);
+    it('a .dbdiagram is no file of the project: the watcher neither watches nor reports it', () => {
       const listener = vi.fn();
       service.onSemanticFileChanged(listener);
-      const layout = vscode.Uri.file(`${ws}/gold/sales.dbdiagram`);
-      semanticWatcher()._simulateChange(layout);
+      semanticWatcher()._simulateChange(vscode.Uri.file(`${ws}/gold/sales.dbdiagram`));
       vi.advanceTimersByTime(300);
-      expect(listener).toHaveBeenCalledTimes(1);
-      expect(listener.mock.calls[0][0].uri.fsPath).toBe(`${ws}/gold/sales.dbml`);
-      expect(listener.mock.calls[0][0].layout).toBe(true);
-      // The diagram file's own change carries no layout flag: its open canvas sees it through its document.
-      listener.mockClear();
+      expect(listener).not.toHaveBeenCalled();
+      // A change to the diagram (a drag rewrote its erd_layout) is a plain diagram change.
       semanticWatcher()._simulateChange(vscode.Uri.file(`${ws}/gold/sales.dbml`));
       vi.advanceTimersByTime(300);
       expect(listener).toHaveBeenCalledTimes(1);
-      expect(listener.mock.calls[0][0].layout).toBeUndefined();
-
-      listener.mockClear();
-      vi.spyOn(tracker, 'consume').mockReturnValue(true);
-      semanticWatcher()._simulateChange(layout);
-      vi.advanceTimersByTime(300);
-      expect(listener).not.toHaveBeenCalled();
+      expect(Object.keys(listener.mock.calls[0][0])).toEqual(['uri']);
+      expect(listener.mock.calls[0][0].uri.fsPath).toBe(`${ws}/gold/sales.dbml`);
     });
 
     it('a relationships file raises onRelationshipsChanged, never a table or domain event', () => {

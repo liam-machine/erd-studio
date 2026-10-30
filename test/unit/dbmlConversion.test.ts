@@ -395,8 +395,9 @@ describe('planDbmlConversion: what ERD Studio does not read is kept as a // bloc
       keptFromLine('gold/sales.json'),
       '// "$schema": "https://example.com/s.json"',
       '// "owner": {"team":"bi"}',
-      'Project sales {',
+      "use { table dim } from '../tables/dim.dbml'",
     ]);
+    expect(created(plan, 'gold/sales.dbml')!).toMatch(/\nProject sales \{[^]*\}\n$/);
     expect(plan.notes).toContain('gold/sales.json: keys a DBML diagram does not store ($schema, owner) are kept as // lines above the Project in gold/sales.dbml.');
   });
 });
@@ -549,8 +550,9 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
     // The diagram gains the use line of the relationships file this run creates (its member dim_region lives there).
     expect(written(plan, 'gold/sales.dbml')).toContain("use * from '../tables/_relationships.dbml'\n");
     expect(plan.creates.map((c) => c.path)).toEqual([
-      'tables/_relationships.dbml', 'tables/fct_visit.dbml', 'tables/gold/fct_refund.dbml', 'silver/visits.dbml', 'silver/visits.dbdiagram',
+      'tables/_relationships.dbml', 'tables/fct_visit.dbml', 'tables/gold/fct_refund.dbml', 'silver/visits.dbml',
     ]);
+    expect(written(plan, 'silver/visits.dbml')).toContain("  erd_layout: '''\n");
     expect(plan.deletes.sort()).toEqual(['silver/visits.json', 'tables/fct_visit.yml', 'tables/gold/fct_refund.yml']);
     expectCompilesEverywhere(input, plan);
   });
@@ -579,7 +581,7 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
     expect(plan.refusals).toEqual([]);
     // The relationships file the earlier run wrote first (D23) holds what this run would write there.
     expect(plan.resumed).toEqual(['tables/gold/employee.dbml', 'tables/gold/_relationships.dbml']);
-    expect(plan.creates.map((c) => c.path)).toEqual(['tables/gold/pit_customer.dbml', 'tables/gold/sat_customer.dbml', 'gold/vault.dbml', 'gold/vault.dbdiagram']);
+    expect(plan.creates.map((c) => c.path)).toEqual(['tables/gold/pit_customer.dbml', 'tables/gold/sat_customer.dbml', 'gold/vault.dbml']);
     expect(plan.replaces).toEqual([]);
     expect(plan.deletes).toContain('logical-models/gold/employee.yml');
     // The rest is exactly what a fresh run writes (the twin).
@@ -801,7 +803,7 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     expect(created(plan, 'tables/gold/_relationships.dbml')).toBeUndefined();
     const text = created(plan, 'gold/d.dbml')!;
     expect(text).toContain("erd_unlinked_tables: 'gone'");
-    expect(text).toMatch(/\n\n\/\/ erd-studio pending: Ref: gone\.dim_key >\? dim\.dim_key\n$/);
+    expect(text).toMatch(/\n\n\/\/ erd-studio pending: Ref: gone\.dim_key >\? dim\.dim_key\n\nProject d \{/);
     expect(plan.keptMissing).toEqual([{ diagram: 'gold/d.dbml', tables: ['gone'] }]);
     expect(plan.notes).toEqual(['gold/d.json: 1 relationship whose foreign-key table has no table file is kept in gold/d.dbml as pending lines; it draws as before.']);
     expectCompilesEverywhere(input, plan);
@@ -893,15 +895,35 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     expect(changed.notes.filter((n) => /stored twice/.test(n))).toEqual([]);
   });
 
-  it('a stale layout file beside a diagram with no positions: the diagram stays JSON', async () => {
+  it('a .dbdiagram beside a diagram is neither read nor in the way: the diagram converts, its positions (none) in erd_layout', async () => {
     const plan = await planDbmlConversion(inputOf({
       'logical-models/dim.yml': DIM,
       'gold/d.json': JSON.stringify({ schemaVersion: 5, domain: 'd', layer: 'gold', logical: { models: ['dim'], relationships: [] }, viewConfig: {} }),
       'gold/d.dbdiagram': JSON.stringify({ version: 1, tablePositions: [{ name: 'dim', schemaName: 'public', x: 999, y: 999 }] }),
     }));
     expect(plan.refusals).toEqual([]);
-    expect(plan.leftAsIs).toEqual([{ path: 'gold/d.json', problem: expect.stringMatching(/^gold\/d\.dbdiagram already exists, and this diagram has no positions or sticky notes to put in it/) }]);
-    expect(plan.deletes).toEqual(['logical-models/dim.yml']);
+    expect(plan.leftAsIs).toEqual([]);
+    expect(created(plan, 'gold/d.dbml')).not.toContain('erd_layout');
+    expect(plan.deletes.sort()).toEqual(['gold/d.json', 'logical-models/dim.yml']);
+  });
+
+  it('positions erd_layout cannot hold are kept as // lines, and a table they placed beside stays where it was (§1.6)', async () => {
+    const plan = await planDbmlConversion(inputOf({
+      'logical-models/dim.yml': DIM,
+      'gold/d.json': JSON.stringify({
+        schemaVersion: 5, domain: 'd', layer: 'gold', logical: { models: ['dim'], relationships: [] },
+        viewConfig: { positions: { DIM: { x: 7, y: 8 }, 'note/x': { x: 1, y: 1 }, ' padded': { x: 2, y: 2 } }, annotations: [{ id: ' n1', text: 'a', x: 3, y: 4 }] },
+      }),
+    }));
+    expect(plan.refusals).toEqual([]);
+    const text = created(plan, 'gold/d.dbml')!;
+    expect(text).toContain('// "viewConfig.positions.note/x": {"x":1,"y":1}\n');
+    expect(text).toContain('// "viewConfig.positions. padded": {"x":2,"y":2}\n');
+    // DIM stays a stray (dim is written where the canvas places it today, counting every stored position).
+    expect(text).toMatch(/erd_layout: '''\n {4}DIM 7 8\n {4}dim 420 \d+\n/);
+    expect(plan.notes.join('\n')).toMatch(/positions erd_layout cannot hold \(viewConfig\.positions\.note\/x, viewConfig\.positions\. padded/);
+    expect(plan.notes.join('\n')).toMatch(/the sticky note with the id " n1" gets a new id/);
+    expect(text).not.toContain('Note " n1"');
   });
 
   it('values the reader ignores are kept as // lines with a note, never dropped silently', async () => {
@@ -954,9 +976,9 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     const input = inputFn();
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    const layout = plan.creates.find((c) => c.path.endsWith('.dbdiagram'));
-    expect(layout?.text).toContain('"x": 520');
-    expect(plan.creates.find((c) => c.path.endsWith('.dbml') && !c.path.startsWith('tables/'))!.text).toMatch(/^Note a1/m);
+    const diagramText = plan.creates.find((c) => c.path.endsWith('.dbml') && !c.path.startsWith('tables/'))!.text;
+    expect(diagramText).toMatch(/^ {4}\w+ 520 40$/m);
+    expect(diagramText).toMatch(/^Note a1/m);
     expect(plan.notes.join('\n')).not.toMatch(/logical\.viewConfig/);
     expectCompilesEverywhere(input, plan);
   });
@@ -980,8 +1002,10 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     ]);
     const text = created(plan, 'gold/sales.dbml')!;
     expect(text).toContain("use { table dim } from '../tables/dim.dbml'\nuse { table fct } from '../tables/fct.dbml'\n");
-    // Positions keep their keys: renaming FCT's to fct would move fct from where the canvas places it today.
-    expect(JSON.parse(created(plan, 'gold/sales.dbdiagram')!).defaultView.tablePositions.map((p: { name: string }) => p.name)).toEqual(['dim', 'Dim', 'FCT']);
+    // Positions keep their keys. Alone, FCT's would be read as fct's (§1.6) and move fct from where the canvas
+    // places it today: fct is written where the canvas places it, so FCT's stays a stray, like Dim's.
+    expect(text).toMatch(/ {2}erd_layout: '''\n {4}Dim 500 500\n {4}FCT 900 900\n {4}dim 10 20\n {4}fct -?\d+(?:\.\d+)? -?\d+(?:\.\d+)?\n {2}'''\n/);
+    expect(text).not.toContain('// "viewConfig.positions');
     expect(describeDbmlConversion(plan)).toMatch(/^Handled for you:\n• gold\/sales\.json: It lists Dim/);
     expectCompilesEverywhere(input, plan);
   });
@@ -1157,21 +1181,23 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     expect(plan.refusals).toEqual([]);
     expect(plan.keptMissing).toEqual([{ diagram: 'gold/commercial.dbml', tables: missing }]);
     expect(created(plan, 'gold/commercial.dbml')).toBe([
-      'Project commercial {',
-      "  Note: 'commercial diagram'",
-      "  erd_schema_version: '7'",
-      "  erd_unlinked_tables: 'gld_fct_risk_child, gld_fct_risk_parent'",
-      '}',
-      '',
       "use { table gld_dim_project } from '../tables/gold/gld_dim_project.dbml'",
-      "use * from '../tables/gold/_relationships.dbml'",
       '',
       '// erd-studio pending: Ref: gld_fct_risk_child.project_id >? gld_dim_project.project_id',
       '// erd-studio pending: Ref: gld_fct_risk_parent.project_id >? gld_dim_project.project_id',
       '',
-    ].join('\n').replace("use * from '../tables/gold/_relationships.dbml'\n", ''));
-    const positions = JSON.parse(created(plan, 'gold/commercial.dbdiagram')!).defaultView.tablePositions.map((p: { name: string; x: number }) => [p.name, p.x]);
-    expect(positions).toEqual([['gld_dim_project', 40], ['gld_fct_risk_child', 340], ['gld_fct_risk_parent', 640]]);
+      'Project commercial {',
+      "  Note: 'commercial diagram'",
+      "  erd_schema_version: '7'",
+      "  erd_unlinked_tables: 'gld_fct_risk_child, gld_fct_risk_parent'",
+      "  erd_layout: '''",
+      '    gld_dim_project 40 40',
+      '    gld_fct_risk_child 340 40',
+      '    gld_fct_risk_parent 640 40',
+      "  '''",
+      '}',
+      '',
+    ].join('\n'));
     expect(plan.placedDiagrams).toEqual(['gold/commercial.dbml']);
     expectCompilesEverywhere(input, plan);
     const before = await displayOf(after(input, { ...plan, creates: [], replaces: [], deletes: [] }), 'gold/commercial.json');

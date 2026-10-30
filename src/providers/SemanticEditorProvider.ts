@@ -85,15 +85,14 @@ import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewTablePositions, findOpenPosition } from '../services/positionService';
 import {
-  DbdiagramLayoutRefused,
+  ERD_LAYOUT_NOTE_PREFIX,
   classifySemanticFile,
   computeMissingPositions,
-  diagramPathOfLayout,
+  isErdLayoutName,
   subjectAreaStorageOf,
   SubjectAreaValidationError,
   EMPTY_DBT_KEY_INDEX,
   backwardsRelationshipNote,
-  layoutFilePathOf,
   linkKey,
   normaliseSubjectAreaDocument,
   sameLink,
@@ -197,15 +196,16 @@ import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/db
 import type { FileWrite } from '../services/fileWrites';
 import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
 import { applyFileWrites, writtenPaths } from './applyFileWrites';
+import { primeLayoutOnlyReading } from '../services/dbmlDiagramReadings';
 import type { AppliedFileWrites } from './applyFileWrites';
 import {
   NotASubjectAreaObject,
   codecFor,
   isLayoutOnlyChange,
   isTableNamingDocument,
-  layoutWrite,
-  readLayoutText,
+  layoutOnlyText,
   markTableNamingDocument,
+  sameOutsideErdLayout,
   serialiseSubjectArea,
   subjectAreaFileObject,
 } from './subjectAreaCodec';
@@ -717,13 +717,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /** Per panel: the pending flush after VS Code's own undo/redo (see scheduleNativeUndoFlush). */
   private readonly nativeUndoTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-  /**
-   * Per panel: the DBML diagram's layout file when an undo/redo on the canvas
-   * rewound it since the last flush. Only then does the flush save it: a
-   * `.dbdiagram` the user is hand-editing in another tab is never force-saved.
-   */
-  private readonly undoRewoundLayout = new Map<string, Set<string>>();
 
   /** The background read of the table library (extension.ts), told about foreground work so it steps aside. */
   private libraryWarmUp: { noteForegroundWork(): void } | undefined;
@@ -2078,27 +2071,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }),
     );
 
-    const layoutPath = this.isDbmlDocument(document) ? layoutFilePathOf(document.uri.fsPath) : undefined;
     const changeSubscription = vscode.workspace.onDidChangeTextDocument(async (e) => {
       // Cmd+Z / Cmd+Shift+Z on the canvas is VS Code's own undo, not the
       // toolbar's message: it rewinds the domain file and the model files the
       // edit wrote in memory only. Flush them as the toolbar's Undo does.
       const undoRedo = e.reason === vscode.TextDocumentChangeReason.Undo
         || e.reason === vscode.TextDocumentChangeReason.Redo;
-      // The diagram's layout file rewound by an undo/redo from this canvas
-      // (the toolbar's, while it holds `pendingUpdates`, or Cmd+Z with the
-      // canvas focused): the flush saves it. Any other dirty layout is the user's.
       // A hold's mark (holdRefreshes) is not this canvas's undo.
       const heldByHold = this.heldPanels.has(panelKey);
-      const layoutRewound = undoRedo && layoutPath !== undefined && e.document.uri.fsPath === layoutPath
-        && (webviewPanel.active || (this.pendingUpdates.get(panelKey) === true && !heldByHold));
-      if (layoutRewound) {
-        const rewound = this.undoRewoundLayout.get(panelKey) ?? new Set<string>();
-        rewound.add(layoutPath);
-        this.undoRewoundLayout.set(panelKey, rewound);
-      }
       if (this.pendingUpdates.get(panelKey)) {
-        const ours = undoRedo && (e.document.uri.toString() === document.uri.toString() || layoutRewound
+        const ours = undoRedo && (e.document.uri.toString() === document.uri.toString()
           || (webviewPanel.active && this.editedTablePaths.get(panelKey)?.has(e.document.uri.fsPath)));
         if (!ours) return;
         if (heldByHold) {
@@ -2110,8 +2092,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           // A Cmd+Z while this canvas's own edit or flush is under way (a
           // second Cmd+Z during the first one's save, or one straight after a
           // drag): flushed once that work is done, never dropped. Dropped, it
-          // left the .dbml and the .dbdiagram dirty, and VS Code opened the
-          // dirty layout file as a tab 800 ms later. The toolbar's own
+          // left the documents it rewound dirty. The toolbar's own
           // Undo / Redo flushes what its command rewinds.
           this.scheduleNativeUndoFlush(document, webviewPanel.webview, panelKey);
         }
@@ -2120,7 +2101,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (e.document.uri.toString() !== document.uri.toString()) {
         // A model file this canvas wrote — while the canvas has focus, so an
         // undo typed in that file's own tab stays the user's to save.
-        if (layoutRewound || (undoRedo && webviewPanel.active && this.editedTablePaths.get(panelKey)?.has(e.document.uri.fsPath))) {
+        if (undoRedo && webviewPanel.active && this.editedTablePaths.get(panelKey)?.has(e.document.uri.fsPath)) {
           this.scheduleNativeUndoFlush(document, webviewPanel.webview, panelKey);
         }
         return;
@@ -2804,21 +2785,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async saveDirtyTableDocuments(
     panelKey: string,
     onFailure: (reason: SaveFailure) => void,
-    alsoPaths: readonly string[] = [],
     saved: string[] = [],
   ): Promise<string[]> {
-    const ourPaths = new Set([...(this.editedTablePaths.get(panelKey) ?? []), ...alsoPaths]);
+    const ourPaths = new Set(this.editedTablePaths.get(panelKey) ?? []);
     if (ourPaths.size === 0) return [];
-    const rewound = new Set(alsoPaths);
     const unsaved: string[] = [];
     for (const doc of vscode.workspace.textDocuments) {
       if (!ourPaths.has(doc.uri.fsPath)) continue;
-      // A file an undo rewound (the layout) is saved even when this host
-      // thinks it clean: a rewind that lands while an earlier save of it is
-      // in flight leaves VS Code's copy dirty, yet that save's event marks
-      // this host's copy saved, and no dirty event follows. Left unsaved,
-      // VS Code opens it as a tab. Saving a clean document writes nothing.
-      if (!doc.isDirty && !rewound.has(doc.uri.fsPath)) continue;
+      if (!doc.isDirty) continue;
       if (await saveDocument(doc, onFailure)) {
         this.ownWriteTracker.recordWrite(doc.uri.fsPath);
         saved.push(doc.uri.fsPath);
@@ -2872,27 +2846,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const saveFailures = new Set<SaveFailure>();
     const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
     const unsaved: string[] = [];
-    // A DBML diagram's layout file is flushed with it when this step rewound
-    // it: VS Code's undo stack outlives this panel's `editedTablePaths`
-    // (cleared when the canvas closes), and an undo that rewound the layout
-    // must never leave it dirty in the background, where VS Code would show
-    // it as an unsaved tab. A layout the step did not touch is never saved:
-    // unsaved hand edits in its own tab are the user's to keep or discard.
-    const layoutPaths = [...(this.undoRewoundLayout.get(panelKey) ?? [])];
-    this.undoRewoundLayout.delete(panelKey);
-    const expected = [document.uri.fsPath, ...layoutPaths, ...(this.editedTablePaths.get(panelKey) ?? [])];
-    // The undo of a move rewinds the diagram's one-character anchor (its text
-    // stays as on disk) and the layout file: nothing either tree shows, and
-    // nothing in the table library.
-    const diagramUnchanged = this.isDbmlDocument(document) && document.getText() === this.diskTextOf(document.uri.fsPath);
+    const expected = [document.uri.fsPath, ...(this.editedTablePaths.get(panelKey) ?? [])];
+    const isDbml = this.isDbmlDocument(document);
+    const diskText = isDbml ? this.diskTextOf(document.uri.fsPath) : undefined;
+    // The undo of a drag rewinds the diagram's erd_layout and nothing else
+    // (a minimal-range edit of the diagram alone): nothing the library or
+    // the trees show changed.
+    const layoutOnlyRewind = isDbml && diskText !== undefined
+      && sameOutsideErdLayout(diskText, document.getText());
     // An undo VS Code refused across files ("Could not undo 'Workspace Edit'
     // across all files because changes were made to …") is split, not
-    // dropped: VS Code rewinds this diagram's own part alone, the
-    // one-character anchor, which leaves its text as on disk (and the
-    // document dirty). With no layout rewound, nothing the canvas, the
-    // library or the trees show changed — unless a file this canvas created
-    // is gone (the undo of a create deletes it, with no text event).
-    const nothingRewound = diagramUnchanged && layoutPaths.length === 0
+    // dropped: VS Code rewinds this diagram's own part alone. When that is a
+    // one-character anchor, its text stays as on disk (and the document
+    // dirty): nothing the canvas, the library or the trees show changed —
+    // unless a file this canvas created is gone (the undo of a create deletes
+    // it, with no text event).
+    const diagramUnchanged = isDbml && document.getText() === diskText;
+    const nothingRewound = diagramUnchanged
       && [...(this.editedTablePaths.get(panelKey) ?? [])].every((p) => fs.existsSync(p));
     const savedOthers: string[] = [];
     const expectation = this.ownWriteTracker.expectWrite(expected);
@@ -2903,21 +2873,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       } else {
         unsaved.push(document.uri.fsPath);
       }
-      unsavedTables = await this.saveDirtyTableDocuments(panelKey, onSaveFailure, layoutPaths, savedOthers);
+      unsavedTables = await this.saveDirtyTableDocuments(panelKey, onSaveFailure, savedOthers);
     } finally {
       this.ownWriteTracker.settleWrites(expectation);
     }
     unsaved.push(...unsavedTables);
     if (unsaved.length > 0) {
-      const modelFile = unsavedTables.some((p) => /\.(ya?ml|dbml|dbdiagram)$/i.test(p));
+      const modelFile = unsavedTables.some((p) => /\.(ya?ml|dbml)$/i.test(p));
       for (const code of saveFailureCodes(saveFailures, { modelFile, undoRedo: true })) telemetry.error(code);
       void webview.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
     }
     // Saving the anchor's rewind cleared the dirty mark; the canvas stays as is.
     if (nothingRewound && unsavedTables.length === 0 && savedOthers.length === 0) return;
-    const layoutOnly = diagramUnchanged && layoutPaths.length > 0 && unsavedTables.length === 0
-      && savedOthers.every((p) => layoutPaths.includes(p));
-    if (layoutOnly) {
+    if (layoutOnlyRewind && unsavedTables.length === 0 && savedOthers.length === 0) {
       await this.sendSubjectAreaData(document, webview, panelKey);
       this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: false, layoutOnly: true });
       return;
@@ -3264,12 +3232,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const created = new Set(plan.createdRelationshipsFiles);
       const refresh = file.storage === 'dbml' && Array.isArray(members)
         && plan.relationshipsFilesFor(members.filter((m): m is string => typeof m === 'string')).some((f) => created.has(f));
-      const [primary, ...layout] = codecFor(fsPath).render(file, text, fsPath, refresh ? { ...resolver, refreshRelationshipsUses: true } : resolver);
+      const [primary] = codecFor(fsPath).render(file, text, fsPath, refresh ? { ...resolver, refreshRelationshipsUses: true } : resolver);
       primaryText = primary.kind === 'delete' ? text : primary.text;
       const others = options.otherDomains ? this.rewriteOtherSubjectAreaWrites(fsPath, options.otherDomains, resolver) : [];
-      const rewritten = new Set(others.map((w) => (w.path.toLowerCase().endsWith('.dbdiagram') ? diagramPathOfLayout(w.path) : w.path)));
+      const rewritten = new Set(others.map((w) => w.path));
       const settled = this.settleDbmlDiagrams(fsPath, rewritten, plan, resolver);
-      writes = [...layout, ...tableWrites, ...others, ...settled];
+      writes = [...tableWrites, ...others, ...settled];
     } catch (err) {
       throw this.refusalOf(err);
     }
@@ -3308,12 +3276,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       modelLibraryChanged: applied.created.length > 0 || applied.deleted.length > 0,
       ...(layoutOnly ? { layoutOnly: true } : {}),
     });
-    // Other diagrams this edit wrote (a layout path maps to its diagram).
+    // Other diagrams this edit wrote.
     const otherDiagrams = new Set<string>();
     for (const w of writes) {
       if (w.kind === 'delete' || this.isLibraryPath(w.path)) continue;
-      const diagram = w.path.toLowerCase().endsWith('.dbdiagram') ? diagramPathOfLayout(w.path) : w.path;
-      if (!samePath(diagram, fsPath)) otherDiagrams.add(diagram);
+      if (!samePath(w.path, fsPath)) otherDiagrams.add(w.path);
     }
     for (const diagram of otherDiagrams) {
       const uri = vscode.Uri.file(diagram);
@@ -3340,6 +3307,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     primaryText: string,
     writes: readonly FileWrite[],
     options: Parameters<SemanticEditorProvider['applySubjectAreaEdit']>[2],
+    /** Replace only the primary's changed range: the DBML layout-only path alone. */
+    minimalPrimary = false,
   ): Promise<AppliedFileWrites | null> {
     const { webview, errorLabel } = options;
     const panelKey = document.uri.toString();
@@ -3349,6 +3318,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       const applied = await applyFileWrites(writes, {
         primary: { document, text: primaryText },
+        ...(minimalPrimary ? { minimalPrimary: true } : {}),
         ensureDir: (filePath) => { if (this.isLibraryPath(filePath)) this.tableLibraryService.ensureDir(filePath); },
       });
       if (!applied.ok) {
@@ -3378,14 +3348,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.ownWriteTracker.recordWrite(to);
       }
       const ourPaths = this.editedTablePaths.get(panelKey) ?? new Set<string>();
-      // The diagram's layout file is left out: an undo/redo saves it only when
-      // that step rewound it (`undoRewoundLayout`), never because an earlier
-      // move wrote it — its tab may hold the user's unsaved hand edits since.
-      const layoutPath = this.isDbmlDocument(document) ? layoutFilePathOf(fsPath) : undefined;
       for (const uri of applied.replaced) {
         // Remember what WE edited for this diagram, so an undo/redo only ever
         // flushes those.
-        if (uri.fsPath !== layoutPath) ourPaths.add(uri.fsPath);
+        ourPaths.add(uri.fsPath);
         if (await saveDocumentByUri(uri, onSaveFailure)) {
           this.ownWriteTracker.recordWrite(uri.fsPath);
         } else {
@@ -3393,7 +3359,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           if (this.isLibraryPath(uri.fsPath)) modelFileUnsaved = true;
         }
       }
-      for (const filePath of applied.created) if (filePath !== layoutPath) ourPaths.add(filePath);
+      for (const filePath of applied.created) ourPaths.add(filePath);
       if (ourPaths.size > 0) this.editedTablePaths.set(panelKey, ourPaths);
       if (unsaved.length > 0) {
         for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
@@ -3413,16 +3379,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * can change, so nothing is planned against it: no `planTableWrites`, no
    * library plan or attachment, no settle pass, no diagram render.
    *
-   * - A DBML diagram writes its `.dbdiagram` alone. The `.dbml` keeps its
-   *   text; `applyFileWrites` gives it the one-character undo anchor so the
-   *   step still undoes from the canvas.
+   * - A DBML diagram rewrites its Project's `erd_layout` and nothing else
+   *   ({@link layoutOnlyText}, never formatted), sent as the diagram's
+   *   minimal-range replace: native Cmd+Z then rewinds that one edit. A
+   *   conflicted `erd_layout` refuses it (a toast). The reading of the text
+   *   it wrote is remembered (`primeLayoutOnlyReading`), so the next drag
+   *   compiles nothing.
    * - A JSON diagram holds its positions, so its own text is rendered as on
-   *   any edit (cheap: no library involved).
+   *   any edit (cheap: no library involved), as a full-range replace.
    *
-   * Still one WorkspaceEdit, one save pass, one undo step, own writes
-   * recorded after the bytes land. Nothing in the library is invalidated
-   * (a layout file is not a library file), and `onDidWriteSubjectArea`
-   * carries `layoutOnly`, so the sidebar trees are not refreshed.
+   * Still one WorkspaceEdit, one save, one undo step, own writes recorded
+   * after the bytes land. Nothing in the library is invalidated, and
+   * `onDidWriteSubjectArea` carries `layoutOnly`, so the sidebar trees are
+   * not refreshed.
    */
   private async applyLayoutOnlyEdit(
     document: vscode.TextDocument,
@@ -3433,36 +3402,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const { refreshWebview = true, webview, onSuccess } = options;
     const panelKey = document.uri.toString();
     const fsPath = document.uri.fsPath;
+    const dbml = file.storage === 'dbml';
     let primaryText: string;
-    let writes: FileWrite[];
     try {
-      if (file.storage === 'dbml') {
-        primaryText = text;
-        const layout = layoutWrite(file, fsPath);
-        writes = layout ? [layout] : [];
+      if (dbml) {
+        primaryText = layoutOnlyText(file, text, fsPath, path.dirname(this.tableLibraryService.getTablesDir()));
       } else {
         const [primary] = codecFor(fsPath).render(file, text, fsPath);
         primaryText = primary.kind === 'delete' ? text : primary.text;
-        writes = [];
       }
     } catch (err) {
       throw this.refusalOf(err);
     }
     // Nothing moved (a drop where it was): no edit, no save, no undo step.
-    if (primaryText === text && writes.length === 0) {
+    if (primaryText === text) {
       onSuccess?.();
       return true;
-    }
-    const dirty = dirtyFiles(writes.map((w) => w.path));
-    if (dirty.length > 0) {
-      const name = path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/');
-      throw new EditRefused(`${name} has unsaved changes. Save or revert it, then try again.`);
     }
 
     this.pendingUpdates.set(panelKey, true);
     try {
-      const applied = await this.applyAndSaveWrites(document, primaryText, writes, options);
+      const applied = await this.applyAndSaveWrites(document, primaryText, [], options, dbml);
       if (!applied) return false;
+      if (dbml) primeLayoutOnlyReading(text, primaryText, fsPath, file.parsed);
       if (refreshWebview && webview) {
         await this.sendSubjectAreaData(document, webview);
       }
@@ -3501,12 +3463,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (original === null) continue;
       let file: ParsedSubjectArea;
       try {
-        file = codecFor(summary.filePath).parse(original, summary.filePath, readLayoutText(summary.filePath));
+        file = codecFor(summary.filePath).parse(original, summary.filePath);
       } catch {
         continue;
       }
       if (!rewrite(file.parsed)) continue;
-      const rendered = codecFor(summary.filePath).render(file, original, summary.filePath, resolver);
+      // Not the diagram being edited: a conflicted erd_layout stays as it is (§1.6).
+      const rendered = codecFor(summary.filePath).render(file, original, summary.filePath, { ...resolver, keepLayoutIfConflicted: true });
       const changed = rendered.filter((w, i) => i > 0 || (w.kind !== 'delete' && w.text !== original));
       if (changed.length === 0) continue;
       const dirty = dirtyFiles(changed.map((w) => w.path));
@@ -3536,7 +3499,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (original === null) continue;
       let file: ParsedSubjectArea;
       try {
-        file = codecFor(summary.filePath).parse(original, summary.filePath, readLayoutText(summary.filePath));
+        file = codecFor(summary.filePath).parse(original, summary.filePath);
       } catch {
         continue;
       }
@@ -3546,7 +3509,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         || plan.relationshipsFilesFor([m]).some((f) => created.has(f)));
       if (!affected) continue;
       try {
-        const [primary] = codecFor(summary.filePath).render(file, original, summary.filePath, { ...resolver, refreshRelationshipsUses: true });
+        const [primary] = codecFor(summary.filePath).render(file, original, summary.filePath, { ...resolver, refreshRelationshipsUses: true, keepLayoutIfConflicted: true });
         if (primary.kind !== 'delete' && primary.text !== original) out.push(primary);
       } catch (err) {
         // A diagram the writer will not touch (it does not read, or holds a second Project) is left as it is.
@@ -3633,17 +3596,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * {@link parseSubjectAreaDocument} with what the codec knows besides the
-   * object (§5.2): the storage, and for a DBML diagram its version, writable
-   * flag and layout. A `.dbml` diagram reads into a plain v5 object (D8).
+   * object (§5.2): the storage, and for a DBML diagram its version and
+   * writable flag. A `.dbml` diagram reads into a plain v5 object (D8).
    */
   private parseSubjectAreaFile(document: vscode.TextDocument, text: string = document.getText()): ParsedSubjectArea {
     const shown = this.shownSubjectAreaPath(document.uri.fsPath);
     const codec = codecFor(document.uri.fsPath);
     try {
-      // Messages name the file project-relative; a DBML diagram's layout is
-      // read, and will be written (S5), beside the real path, never the shown one.
-      const file = codec.parse(text, shown, codec.storage === 'dbml' ? readLayoutText(document.uri.fsPath) : null);
-      return file.storage === 'dbml' ? { ...file, layoutPath: layoutFilePathOf(document.uri.fsPath) } : file;
+      // Messages name the file project-relative.
+      return codec.parse(text, shown);
     } catch (err) {
       if (err instanceof SubjectAreaFileError) {
         const fileProblem = this.subjectAreaFileProblemPayload(err, document.uri.fsPath);
@@ -3887,7 +3848,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // edit, one undo step). The simple placement below still goes out in the
       // payload so the first paint is never at (0,0), but it is not written:
       // should the ELK run fail, the next open simply asks again.
-      // A DBML diagram's positions live in its layout file (`.dbdiagram`),
+      // A DBML diagram's positions live in its Project's `erd_layout`,
       // written the same way.
       const autoLayout = activeStage === 'logical' && isFreshLayout(unifiedDomain);
 
@@ -3985,7 +3946,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** Whether a DBML diagram declares Tables of its own and has no table `use` line (§2.5). Never throws. */
   private holdsOwnTables(document: vscode.TextDocument): boolean {
     try {
-      return codecFor(document.uri.fsPath).parse(document.getText(), document.uri.fsPath, readLayoutText(document.uri.fsPath)).holdsOwnTables === true;
+      return codecFor(document.uri.fsPath).parse(document.getText(), document.uri.fsPath).holdsOwnTables === true;
     } catch {
       return false;
     }
@@ -4043,7 +4004,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       // A DBML diagram is read through its codec (a v5 object, D8), never `JSON.parse`d.
       const parsed = subjectAreaStorageOf(document.uri.fsPath) === 'dbml'
-        ? codecFor(document.uri.fsPath).parse(document.getText(), document.uri.fsPath, readLayoutText(document.uri.fsPath)).parsed
+        ? codecFor(document.uri.fsPath).parse(document.getText(), document.uri.fsPath).parsed
         : JSON.parse(document.getText()) as Record<string, unknown>;
       // Read only: a v6 file (#162) is surveyed like v5, through its v5 keys.
       const format = detectSubjectAreaFormat(parsed);
@@ -4160,15 +4121,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       return written ? (layoutOnly ? 'layout' : 'full') : false;
     };
     if (!this.isDbmlDocument(document)) return save();
-    // A DBML diagram's save writes its layout file, which can be refused (the
-    // diagram is read-only, the layout is open with unsaved changes or does
-    // not read). A refresh path never fails on a write: the canvas still
-    // loads with the computed positions, and the next open asks again.
+    // A DBML diagram's save rewrites its erd_layout, which can be refused (the
+    // diagram is read-only, or erd_layout holds a merge conflict). A refresh
+    // path never fails on a write: the canvas still loads with the computed
+    // positions, and the next open asks again.
     try {
       if (this.parseSubjectAreaFile(document).writable === false) return false;
       return await save();
     } catch (err) {
-      if (err instanceof EditRefused || err instanceof DbmlEditRefused || err instanceof DbdiagramLayoutRefused) {
+      if (err instanceof EditRefused || err instanceof DbmlEditRefused) {
         log.warn(`[SemanticEditorProvider] Positions for ${document.uri.fsPath} not saved: ${err.message}`);
         return false;
       }
@@ -4311,14 +4272,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Only this panel's entry: another canvas of the same file may have replaced it.
     if (this.openPanels.get(panelKey)?.webview === webview) this.openPanels.delete(panelKey);
     this.editedTablePaths.delete(panelKey);
-    this.undoRewoundLayout.delete(panelKey);
     this.undoWhileHeld.delete(panelKey);
     clearTimeout(this.nativeUndoTimers.get(panelKey));
     this.nativeUndoTimers.delete(panelKey);
     this.lastLoadError.delete(panelKey);
   }
 
-  /** Redraw every open canvas of the diagram at `fsPath` (its layout file changed outside the editor). */
+  /**
+   * Redraw every open canvas of the diagram at `fsPath`. Nothing in the
+   * extension calls it since positions moved into the diagram's `erd_layout`
+   * (a change to the diagram reaches its canvas through its document); kept
+   * for the callers outside it (the guard suite's held-refresh check).
+   */
   async refreshSubjectAreaPanel(fsPath: string): Promise<void> {
     if (this.refreshHolds > 0) { this.droppedRefreshes++; return; }
     for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
@@ -5623,6 +5588,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<void> {
     const start = Date.now();
     let layoutOnly = false;
+    if (this.isDbmlDocument(document)) {
+      // erd_layout holds one name per line (§1.6): a name it cannot hold is not saved.
+      const dropped = Object.keys(positions).filter((name) => !isErdLayoutName(name) || name.startsWith(ERD_LAYOUT_NOTE_PREFIX));
+      if (dropped.length > 0) log.warn(`[SemanticEditorProvider] Positions of ${plural(dropped.length, 'table')} not saved in ${document.uri.fsPath}: erd_layout cannot hold ${dropped.map((n) => JSON.stringify(n)).join(', ')}`);
+    }
     try {
       const written = await this.applySubjectAreaEdit(
         document,

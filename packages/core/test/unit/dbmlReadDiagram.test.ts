@@ -20,6 +20,12 @@ const SALES = `Project sales {
   erd_stub_columns: '["loaded_at"]'
   database_type: 'Snowflake'
   team_owner: 'sales'
+  erd_layout: '''
+    dim_customer 40 40
+    dim_date 40 360
+    fct_order 400 200
+    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 720 40 220 120
+  '''
 }
 
 use { table fct_order } from '../tables/gold/fct_order.dbml'
@@ -37,23 +43,11 @@ Note "9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f" [color: #3b82f6] {
 }
 `;
 
-const LAYOUT = JSON.stringify({
-  version: '3.0.0',
-  defaultView: {
-    tablePositions: [
-      { name: 'fct_order', schemaName: 'public', x: 400, y: 200 },
-      { name: 'dim_customer', schemaName: 'public', x: 40, y: 40 },
-      { name: 'dim_date', schemaName: 'public', x: 40, y: 360 },
-    ],
-    stickyNoteLayouts: [{ name: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', x: 720, y: 40, width: 220, height: 120 }],
-  },
-});
-
 const PATH = '.erd-studio/gold/sales.dbml';
 
 describe('parseSubjectAreaDbml: the §2.5 mapping', () => {
-  it.each(STORAGE_PARSERS)('reads the Project, members, Notes and layout into a v5 object (%s)', (_label, parser) => {
-    const reading = parseSubjectAreaDbml(SALES, PATH, LAYOUT, parser);
+  it.each(STORAGE_PARSERS)('reads the Project, members, Notes and erd_layout into a v5 object (%s)', (_label, parser) => {
+    const reading = parseSubjectAreaDbml(SALES, PATH, parser);
     expect(reading.schemaVersion).toBe(7);
     expect(reading.writable).toBe(true);
     expect(reading.members).toEqual(['fct_order', 'dim_customer', 'dim_date']);
@@ -70,7 +64,7 @@ describe('parseSubjectAreaDbml: the §2.5 mapping', () => {
       viewConfig: {
         showFkEdges: false,
         layoutOptions: { 'elk.direction': 'RIGHT' },
-        positions: { fct_order: { x: 400, y: 200 }, dim_customer: { x: 40, y: 40 }, dim_date: { x: 40, y: 360 } },
+        positions: { dim_customer: { x: 40, y: 40 }, dim_date: { x: 40, y: 360 }, fct_order: { x: 400, y: 200 } },
         annotations: [
           { id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', text: 'Check the grain with finance', x: 720, y: 40, width: 220, height: 120, color: 'yellow', linkedModel: 'fct_order' },
           // No layout entry: placed to the right of everything laid out, deterministically.
@@ -85,7 +79,7 @@ describe('parseSubjectAreaDbml: the §2.5 mapping', () => {
   });
 
   it('defaults: no Project gives the stem as domain, version 7 and an empty description', () => {
-    const reading = parseSubjectAreaDbml("use { table a } from '../tables/a.dbml'\n", '.erd-studio/silver/orders.dbml', null);
+    const reading = parseSubjectAreaDbml("use { table a } from '../tables/a.dbml'\n", '.erd-studio/silver/orders.dbml');
     expect(reading.obj).toMatchObject({ schemaVersion: 5, domain: 'orders', layer: 'silver', description: '', viewConfig: { positions: {} } });
     expect(reading.schemaVersion).toBe(7);
   });
@@ -95,7 +89,7 @@ describe('parseSubjectAreaDbml: the §2.5 mapping', () => {
 use { table b } from '../tables/b.dbml'
 use { table a } from '../tables/a.dbml'
 use { table _x } from '../tables/_x.dbml'
-`, PATH, null);
+`, PATH);
     expect(reading.members).toEqual(['a', 'b', 'a', '_x']);
     expect(reading.warnings).toEqual([]);
   });
@@ -105,7 +99,7 @@ use { table _x } from '../tables/_x.dbml'
 use { table dim_date } from './dim_date.dbml'
 use { table dim_account } from '../tables/gold/dim_customer.dbml'
 use { table ok } from '../tables/gold/ok.dbml'
-`, PATH, null);
+`, PATH);
     expect(reading.members).toEqual(['fct_order', 'dim_date', 'dim_customer', 'ok']);
     expect(reading.warnings.filter((w) => w.includes('usePathMismatch')).map((w) => w.slice(0, 7))).toEqual(['Line 1:', 'Line 2:', 'Line 3:']);
     expect(reading.uses!.map((u) => u.resolved)).toEqual(['gold/tables/gold/fct_order.dbml', 'gold/dim_date.dbml', 'tables/gold/dim_customer.dbml', 'tables/gold/ok.dbml']);
@@ -116,31 +110,30 @@ use { table ok } from '../tables/gold/ok.dbml'
     // listing, so core cannot see it; the host and doctor report it (§3.4).
     const reading = parseSubjectAreaDbml(`use { table Dim_Date } from '../tables/dim_date.dbml'
 use { table dim_customer } from '../tables/gold/Dim_Customer.dbml'
-`, PATH, null);
+`, PATH);
     expect(reading.members).toEqual(['dim_date', 'Dim_Customer']);
     expect(reading.warnings).toEqual([]);
   });
 
   it('ignores a use line whose stem is not a safe table name, with a warning', () => {
-    const reading = parseSubjectAreaDbml("use * from '../tables/..'\nuse { table a } from '../tables/a.dbml'\n", PATH, null);
+    const reading = parseSubjectAreaDbml("use * from '../tables/..'\nuse { table a } from '../tables/a.dbml'\n", PATH);
     expect(reading.members).toEqual(['a']);
     expect(reading.warnings).toHaveLength(1);
   });
 
   it('maps any Note colour to the nearest swatch, and leaves an uncoloured Note uncoloured', () => {
-    const reading = parseSubjectAreaDbml("Note a [color: #fef3c7] {\n  'x'\n}\nNote b [color: #ff0000] {\n  'y'\n}\nNote c {\n  'z'\n}\n", PATH, null);
+    const reading = parseSubjectAreaDbml("Note a [color: #fef3c7] {\n  'x'\n}\nNote b [color: #ff0000] {\n  'y'\n}\nNote c {\n  'z'\n}\n", PATH);
     const annotations = (reading.obj.viewConfig as { annotations: Array<{ id: string; color?: string }> }).annotations;
     expect(annotations.map((a) => [a.id, a.color])).toEqual([['a', 'yellow'], ['b', 'orange'], ['c', undefined]]);
   });
 
-  it('a layout file that is not JSON is ignored with a warning', () => {
-    const reading = parseSubjectAreaDbml("use { table a } from '../tables/a.dbml'\n", PATH, '{ not json');
-    expect(reading.obj.viewConfig).toEqual({ positions: {} });
-    expect(reading.warnings.some((w) => w.startsWith('Layout file:'))).toBe(true);
+  it('an erd_layout that is not a string does not read, as in every other DBML tool (the quote hint)', () => {
+    expect(() => parseSubjectAreaDbml("use { table a } from '../tables/a.dbml'\nProject p {\n  erd_layout: 42\n}\n", PATH))
+      .toThrow(/line 3.*Quote the value/);
   });
 
   it('a leading byte-order mark is stripped', () => {
-    expect(parseSubjectAreaDbml(`﻿${SALES}`, PATH, null).members).toHaveLength(3);
+    expect(parseSubjectAreaDbml(`﻿${SALES}`, PATH).members).toHaveLength(3);
   });
 });
 
@@ -158,7 +151,7 @@ TableGroup g {
   local
 }
 `;
-    const reading = parseSubjectAreaDbml(text, PATH, null, parser);
+    const reading = parseSubjectAreaDbml(text, PATH, parser);
     expect(reading.members).toEqual(['a']);
     expect(reading.writable).toBe(true);
     expect(reading.warnings.map((w) => w.slice(0, 7))).toEqual(['Line 5:', 'Line 8:', 'Line 9:']);
@@ -179,7 +172,7 @@ Note N {
   'two'
 }
 `;
-    const reading = parseSubjectAreaDbml(text, PATH, null, parser);
+    const reading = parseSubjectAreaDbml(text, PATH, parser);
     expect(reading.writable).toBe(false);
     expect(reading.obj.domain).toBe('p');
     expect(reading.obj.description).toBe('first');
@@ -205,7 +198,7 @@ Note n {
   'kept'
 }
 `;
-    const reading = parseSubjectAreaDbml(text, PATH, null, parser);
+    const reading = parseSubjectAreaDbml(text, PATH, parser);
     expect(reading.members).toEqual(['fct']);
     expect(reading.writable).toBe(true);
     expect(reading.obj.description).toBe('with metadata');
@@ -217,7 +210,7 @@ Note n {
   });
 
   it('Tables declared and no table use lines: holdsOwnTables, the import-banner condition', () => {
-    const reading = parseSubjectAreaDbml('Table a {\n  id int\n}\nTable b {\n  id int\n}\nRef: a.id > b.id\n', PATH, null);
+    const reading = parseSubjectAreaDbml('Table a {\n  id int\n}\nTable b {\n  id int\n}\nRef: a.id > b.id\n', PATH);
     expect(reading.holdsOwnTables).toBe(true);
     expect(reading.members).toEqual([]);
   });
@@ -234,13 +227,13 @@ describe('parseSubjectAreaDbml: refusals', () => {
   };
 
   it('an empty file is SubjectAreaFileError(empty)', () => {
-    const err = thrown(() => parseSubjectAreaDbml('\n  \n', PATH, null)) as SubjectAreaFileError;
+    const err = thrown(() => parseSubjectAreaDbml('\n  \n', PATH)) as SubjectAreaFileError;
     expect(err).toBeInstanceOf(SubjectAreaFileError);
     expect(err.reason).toBe('empty');
   });
 
   it.each(STORAGE_PARSERS)('a syntax error is invalid-dbml, transient, at its line and column (%s)', (_label, parser) => {
-    const err = thrown(() => parseSubjectAreaDbml("Project p {\n  Note: 'cut off'\n", PATH, null, parser)) as SubjectAreaFileError;
+    const err = thrown(() => parseSubjectAreaDbml("Project p {\n  Note: 'cut off'\n", PATH, parser)) as SubjectAreaFileError;
     expect(err).toBeInstanceOf(SubjectAreaFileError);
     expect(err).toMatchObject({ reason: 'invalid-dbml', transient: true, mergeConflict: false, line: 3, column: 1 });
     expect(err.message).toMatch(/^Invalid DBML in subject area file \.erd-studio\/gold\/sales\.dbml at line 3, column 1: /);
@@ -248,21 +241,21 @@ describe('parseSubjectAreaDbml: refusals', () => {
 
   it('git conflict markers are invalid-dbml with mergeConflict, not transient', () => {
     const text = "Project p {\n  Note: 'x'\n}\n<<<<<<< HEAD\nuse { table a } from '../tables/a.dbml'\n=======\nuse { table b } from '../tables/b.dbml'\n>>>>>>> other\n";
-    const err = thrown(() => parseSubjectAreaDbml(text, PATH, null)) as SubjectAreaFileError;
+    const err = thrown(() => parseSubjectAreaDbml(text, PATH)) as SubjectAreaFileError;
     expect(err).toMatchObject({ reason: 'invalid-dbml', mergeConflict: true, transient: false, line: 4 });
   });
 
   it('an unquoted Project key is invalid-dbml with the quote hint (every parser rejects it)', () => {
-    const err = thrown(() => parseSubjectAreaDbml('Project p {\n  erd_schema_version: 7\n}\n', PATH, null)) as SubjectAreaFileError;
+    const err = thrown(() => parseSubjectAreaDbml('Project p {\n  erd_schema_version: 7\n}\n', PATH)) as SubjectAreaFileError;
     expect(err.reason).toBe('invalid-dbml');
     expect(err.message).toContain("Quote the value, as in erd_schema_version: '7'.");
   });
 
   it('a newer erd_schema_version is refused; one that is not a whole number too', () => {
-    const future = thrown(() => parseSubjectAreaDbml("Project p {\n  erd_schema_version: '8'\n}\n", PATH, null));
+    const future = thrown(() => parseSubjectAreaDbml("Project p {\n  erd_schema_version: '8'\n}\n", PATH));
     expect(future).toBeInstanceOf(SubjectAreaValidationError);
     expect((future as Error).message).toBe(`${PATH} has erd_schema_version 8 but this extension only supports up to version 7. Please update the extension.`);
-    expect(thrown(() => parseSubjectAreaDbml("Project p {\n  erd_schema_version: 'seven'\n}\n", PATH, null))).toBeInstanceOf(SubjectAreaValidationError);
+    expect(thrown(() => parseSubjectAreaDbml("Project p {\n  erd_schema_version: 'seven'\n}\n", PATH))).toBeInstanceOf(SubjectAreaValidationError);
   });
 });
 
@@ -295,7 +288,7 @@ Note "n1" {
 `;
 
   it.each(STORAGE_PARSERS)('%s: reads the unlinked members after the use members, and the pending lines as the diagram\'s own relationships', (_label, parser) => {
-    const reading = parseSubjectAreaDbml(MISSING, 'gold/commercial.dbml', null, parser);
+    const reading = parseSubjectAreaDbml(MISSING, 'gold/commercial.dbml', parser);
     expect(reading.members).toEqual(['fct_order', 'gld_dim_project', 'gld_fct_risk_child', 'gld_fct_risk_parent']);
     expect(reading.unlinked).toEqual(['gld_fct_risk_child', 'gld_fct_risk_parent']);
     expect((reading.obj.logical as { models: string[] }).models).toEqual(reading.members);
@@ -324,18 +317,81 @@ Note "n1" {
   it.each(STORAGE_PARSERS)('%s: both readers read a double-quoted value and a repeated key alike, and the canvas reader warns about the repeat', (_label, parser) => {
     const use = "use { table a } from '../tables/a.dbml'\n";
     const quoted = `Project p {\n  erd_unlinked_tables: "x, y"\n}\n${use}`;
-    expect(parseSubjectAreaDbml(quoted, 'gold/p.dbml', null, parser).members).toEqual(['a', 'x', 'y']);
+    expect(parseSubjectAreaDbml(quoted, 'gold/p.dbml', parser).members).toEqual(['a', 'x', 'y']);
     expect(subjectAreaMembersDbml(quoted, parser)).toEqual(['a', 'x', 'y']);
     const twice = `Project p {\n  erd_unlinked_tables: 'x'\n  erd_unlinked_tables: 'y'\n}\n${use}`;
-    const reading = parseSubjectAreaDbml(twice, 'gold/p.dbml', null, parser);
+    const reading = parseSubjectAreaDbml(twice, 'gold/p.dbml', parser);
     expect(reading.members).toEqual(['a', 'y']);
     expect(subjectAreaMembersDbml(twice, parser)).toEqual(['a', 'y']);
     expect(reading.warnings).toContainEqual(expect.stringMatching(/names erd_unlinked_tables 2 times; only the last is read/));
   });
 
   it('a diagram whose members all have no table file is not a dropped-in single-file DBML', () => {
-    const reading = parseSubjectAreaDbml("Project p {\n  erd_unlinked_tables: 'a'\n}\n", 'gold/p.dbml', null);
+    const reading = parseSubjectAreaDbml("Project p {\n  erd_unlinked_tables: 'a'\n}\n", 'gold/p.dbml');
     expect(reading.members).toEqual(['a']);
     expect(reading.holdsOwnTables).toBe(false);
+  });
+});
+
+describe('parseSubjectAreaDbml: erd_layout (§1.6)', () => {
+  const USES = "use { table dim_customer } from '../tables/dim_customer.dbml'\nuse { table Fct_Order } from '../tables/Fct_Order.dbml'\n";
+  const project = (lines: string[]): string => `Project p {\n  erd_schema_version: '7'\n  erd_layout: '''\n${lines.map((l) => `    ${l}\n`).join('')}  '''\n}\n`;
+  const positionsOf = (text: string): Record<string, unknown> => (parseSubjectAreaDbml(text, PATH).obj.viewConfig as { positions: Record<string, unknown> }).positions;
+
+  it('maps lines to members exact first, then case-insensitively; an exact line wins and a variant or unknown name is a stray, kept', () => {
+    expect(positionsOf(`${USES}\n${project(['DIM_CUSTOMER 1 2', 'fct_order 3 4'])}`)).toEqual({ dim_customer: { x: 1, y: 2 }, Fct_Order: { x: 3, y: 4 } });
+    expect(positionsOf(`${USES}\n${project(['Dim_Customer 9 9', 'dim_customer 1 2', 'gone 5 6'])}`))
+      .toEqual({ Dim_Customer: { x: 9, y: 9 }, dim_customer: { x: 1, y: 2 }, gone: { x: 5, y: 6 } });
+  });
+
+  it('reads a sticky note\'s box from its note/ line; a note it does not place is placed beside the rest', () => {
+    const text = `${USES}\nNote a {\n  'x'\n}\nNote b {\n  'y'\n}\n\n${project(['dim_customer 0 0', 'note/a 400 10 200 100'])}`;
+    const annotations = (parseSubjectAreaDbml(text, PATH).obj.viewConfig as { annotations: Array<Record<string, unknown>> }).annotations;
+    expect(annotations[0]).toMatchObject({ id: 'a', x: 400, y: 10, width: 200, height: 100 });
+    expect(annotations[1]).toMatchObject({ id: 'b', x: 640, y: 0 });
+    expect(annotations[1].width).toBeUndefined();
+  });
+
+  it('reports a bad line and a repeated key as warnings, at their file lines', () => {
+    const text = `${USES}\nProject p {\n  erd_layout: '''\n    dim_customer 1 2\n    not a line\n  '''\n  ERD_LAYOUT: '''\n    dim_customer 9 9\n  '''\n}\n`;
+    const reading = parseSubjectAreaDbml(text, PATH);
+    expect(reading.layoutProblems?.map((p) => [p.code, p.severity, p.line])).toEqual([
+      ['layoutDuplicateKey', 'warning', 9],
+      ['layoutBadLine', 'warning', 7],
+    ]);
+    expect((reading.obj.viewConfig as { positions: unknown }).positions).toEqual({ dim_customer: { x: 1, y: 2 } });
+    expect(reading.layoutConflictLine).toBeUndefined();
+  });
+
+  it('a git conflict inside erd_layout still reads (best effort): layoutConflictLine and a layoutMergeConflict error', () => {
+    const text = `${USES}\nProject p {\n  erd_schema_version: '7'\n  erd_layout: '''\n<<<<<<< HEAD\n    dim_customer 1 2\n=======\n    dim_customer 5 6\n>>>>>>> theirs\n  '''\n}\n`;
+    const reading = parseSubjectAreaDbml(text, PATH);
+    expect((reading.obj.viewConfig as { positions: unknown }).positions).toEqual({ dim_customer: { x: 1, y: 2 } });
+    expect(reading.layoutConflictLine).toBe(7);
+    expect(reading.layoutProblems).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'layoutMergeConflict', severity: 'error', mergeConflict: true, line: 7 })]));
+  });
+
+  it('a conflict where both sides added erd_layout is a merge conflict, not a syntax error', () => {
+    const text = `${USES}\nProject p {\n  erd_schema_version: '7'\n<<<<<<< HEAD\n  erd_layout: '''\n    dim_customer 1 2\n  '''\n=======\n  erd_layout: '''\n    dim_customer 3 4\n  '''\n>>>>>>> theirs\n}\n`;
+    let err: unknown;
+    try { parseSubjectAreaDbml(text, PATH); } catch (e) { err = e; }
+    expect(err).toMatchObject({ reason: 'invalid-dbml', mergeConflict: true, transient: false, line: 6 });
+  });
+
+  it('a conflict hunk spanning the closing quote of erd_layout (Project first) is a merge conflict', () => {
+    const text = `Project p {\n  erd_schema_version: '7'\n  erd_layout: '''\n    dim_customer 1 2\n<<<<<<< HEAD\n  '''\n}\n=======\n    Fct_Order 3 4\n  '''\n}\n>>>>>>> theirs\n${USES}`;
+    let err: unknown;
+    try { parseSubjectAreaDbml(text, PATH); } catch (e) { err = e; }
+    expect(err).toMatchObject({ reason: 'invalid-dbml', mergeConflict: true, transient: false });
+  });
+
+  it.each(STORAGE_PARSERS)('a Project first or last reads the same (§1.4) (%s)', (_label, parser) => {
+    const notes = "Note n1 {\n  'hello'\n}\n";
+    const block = project(['dim_customer 1 2', 'Fct_Order 3 4', 'note/n1 5 6']);
+    const last = parseSubjectAreaDbml(`${USES}\n${notes}\n${block}`, PATH, parser);
+    const first = parseSubjectAreaDbml(`${block}\n${USES}\n${notes}`, PATH, parser);
+    expect(first.obj).toEqual(last.obj);
+    expect(first.members).toEqual(last.members);
+    expect(last.warnings).toEqual([]);
   });
 });

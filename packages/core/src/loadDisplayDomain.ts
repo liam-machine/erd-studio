@@ -46,7 +46,7 @@ import {
 import { LAYERS_CONFIG_FILE, parseLayersText } from './layers.js';
 import { TABLES_DIR, YamlCharLimitError, YamlNodeLimitError, isSafeTableName, parseTableTextWithUsage } from './logicalModel.js';
 import { DBML_RELATIONSHIPS_FILE_NAME, DBML_RELATIONSHIPS_FILE_STEM } from './dbmlRichProperties.js';
-import { layoutFilePathOf, tableFileCandidates } from './storage.js';
+import { tableFileCandidates } from './storage.js';
 import { attachRelationships, dbmlTableLookup } from './dbmlAttach.js';
 import { computeMissingPositions, toDisplaySubjectArea } from './displayDomain.js';
 import { checkLimit } from './limits.js';
@@ -319,13 +319,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
   let reading: ReturnType<DbmlStorageReader['parseSubjectArea']> | undefined;
   let document: unknown;
   if (isDbml && dbml) {
-    const layoutPath = layoutFilePathOf(domainPath);
-    let layoutText = await readFile(layoutPath);
-    if (layoutText !== null && layoutText !== undefined && layoutText.length > maxDomainChars) {
-      warn(`${layoutPath} is ${layoutText.length} characters long; at most ${maxDomainChars} are read. The diagram is placed without it`);
-      layoutText = null;
-    }
-    reading = dbml.parseSubjectArea(domainText, domainPath, layoutText ?? null);
+    reading = dbml.parseSubjectArea(domainText, domainPath);
     for (const message of reading.warnings) warn(`${domainPath}: ${message}`);
     document = reading.obj;
   } else {

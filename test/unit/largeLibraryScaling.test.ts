@@ -66,27 +66,17 @@ const LAYERS_JSON = JSON.stringify({
   layers: LAYERS.map((id, order) => ({ id, label: id[0].toUpperCase() + id.slice(1), abbreviation: id.slice(0, 3).toUpperCase(), color: '#a0a0a0', creatable: true, order })),
 }, null, 2);
 
-function layoutText(members: readonly number[]): string {
-  return `${JSON.stringify({
-    version: '3.0.0',
-    gridEnabling: false,
-    currentViewName: null,
-    defaultView: {
-      detailLevel: 'All',
-      relationshipMode: 'All',
-      tablePositions: members.map((i, k) => ({ name: tableName(i), schemaName: 'public', x: 60 + (k % 25) * 420, y: 60 + Math.floor(k / 25) * 320 })),
-      tableGroupCollapseStates: [],
-      stickyNoteLayouts: [],
-      referencePaths: [],
-    },
-    views: {},
-  }, null, 2)}\n`;
+/** The Project's erd_layout entry for `members`: one line per table, in name order. */
+function layoutEntry(members: readonly number[]): string {
+  const lines = members.map((i, k) => `${tableName(i)} ${60 + (k % 25) * 420} ${60 + Math.floor(k / 25) * 320}`)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return `  erd_layout: '''\n${lines.map((l) => `    ${l}\n`).join('')}  '''\n`;
 }
 
 function diagramText(name: string, members: readonly number[]): string {
   const uses = members.map((i) => `use { table ${tableName(i)} } from '../tables/${folderOf(i)}/${tableName(i)}.dbml'`);
   const rels = LAYERS.map((f) => `use * from '../tables/${f}/_relationships.dbml'`);
-  return `Project ${name} {\n  erd_schema_version: '7'\n  erd_show_fk_edges: 'true'\n}\n\n${uses.join('\n')}\n${rels.join('\n')}\n`;
+  return `Project ${name} {\n  erd_schema_version: '7'\n  erd_show_fk_edges: 'true'\n${layoutEntry(members)}}\n\n${uses.join('\n')}\n${rels.join('\n')}\n`;
 }
 
 /** Writes the library and its diagrams under `root/.erd-studio`. */
@@ -114,12 +104,10 @@ function writeDbmlProject(root: string): void {
     fs.writeFileSync(path.join(sem, 'tables', f, '_relationships.dbml'), `// ERD Studio relationships.\n${uses.join('\n')}\n\n${refLines.get(f)!.join('\n')}\n`);
   }
   fs.writeFileSync(path.join(sem, 'gold', 'big.dbml'), diagramText('big', bigMembers));
-  fs.writeFileSync(path.join(sem, 'gold', 'big.dbdiagram'), layoutText(bigMembers));
   LAYERS.forEach((f, li) => {
     for (let d = 0; d < SMALL_DIAGRAMS_PER_LAYER; d++) {
       const members = Array.from({ length: 30 }, (_, k) => (li * 300 + d * 40 + k * 3) % TABLES);
       fs.writeFileSync(path.join(sem, f, `${f}_area_${d}.dbml`), diagramText(`${f}_area_${d}`, members));
-      fs.writeFileSync(path.join(sem, f, `${f}_area_${d}.dbdiagram`), layoutText(members));
     }
   });
 }
@@ -492,8 +480,9 @@ describe(`opening a ${MEMBERS}-table DBML diagram in a ${TABLES}-table library, 
     expect(warm.counts.diagramCompiles).toBe(0);
     expect(warm.counts.readdir).toBeLessThanOrEqual(30);
 
-    // A drag writes the layout only: no table re-read or compiled, no
-    // library listing, one edit, and the write says layout-only (so
+    // A drag rewrites the diagram's erd_layout only: no table re-read or
+    // compiled, no library listing, at most one syntax parse of the diagram,
+    // one edit of the .dbml alone, and the write says layout-only (so
     // extension.ts refreshes neither tree).
     const victim = tableName(bigMembers[MEMBERS / 2]);
     _appliedEdits.length = 0;
@@ -505,19 +494,21 @@ describe(`opening a ${MEMBERS}-table DBML diagram in a ${TABLES}-table library, 
     expect(move.counts.tableReads).toBe(0);
     expect(move.counts.relationshipsReads).toBe(0);
     expect(move.counts.tableCompiles).toBe(0);
+    expect(move.counts.diagramCompiles).toBeLessThanOrEqual(1);
     expect(move.counts.readdir).toBe(0);
     expect(_appliedEdits).toHaveLength(1);
     const touched = new Set((_appliedEdits[0] as unknown as { _ops: Array<{ uri: { fsPath: string } }> })._ops.map((op) => path.basename(op.uri.fsPath)));
-    expect([...touched].sort()).toEqual(['big.dbdiagram', 'big.dbml']);
+    expect([...touched].sort()).toEqual(['big.dbml']);
     expect(h.writes).toHaveLength(1);
     expect(h.writes[0].layoutOnly).toBe(true);
-    expect(fs.readFileSync(path.join(dbmlRoot, '.erd-studio', 'gold', 'big.dbdiagram'), 'utf-8')).toContain('"x": 4321');
+    expect(fs.readFileSync(path.join(dbmlRoot, '.erd-studio', 'gold', 'big.dbml'), 'utf-8')).toContain(`\n    ${victim} 4321 1234\n`);
 
-    // The move dropped no cached reading: the next open still reads nothing.
+    // The move dropped no cached reading, and remembered the one it wrote: the next open reads and compiles nothing.
     panel._postedMessages.length = 0;
     const after = await measure('DBML: ready after the move', 1_000, () => panel._simulateMessage({ type: 'ready' }));
     expect(after.counts.tableReads).toBe(0);
     expect(after.counts.tableCompiles).toBe(0);
+    expect(after.counts.diagramCompiles).toBe(0);
     const moved = posted(panel).find((m) => m.type === 'domainLoaded')?.payload?.viewConfig?.positions?.[victim];
     expect(moved).toMatchObject({ x: 4321, y: 1234 });
   }, 60_000);

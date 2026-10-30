@@ -1,7 +1,6 @@
 /**
  * The traversal the diagram exporters share (`exportDbml.ts`,
- * `exportDbmlRich.ts`, `exportMermaid.ts`, and the `.dbdiagram` layout in
- * `dbdiagramLayout.ts`): one tolerant pass over a `DisplaySubjectArea` that settles
+ * `exportDbmlRich.ts` with its `erd_layout`, and `exportMermaid.ts`): one tolerant pass over a `DisplaySubjectArea` that settles
  * which models, columns and relationships an export describes, in what order,
  * and why anything was left out. The formats differ only in syntax and in how
  * much of each model they carry, so they always describe the same relationships.

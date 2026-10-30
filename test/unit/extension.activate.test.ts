@@ -612,7 +612,7 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(listTree(ws)).toEqual(before);
     expect(fs.existsSync(path.join(ws, 'selectors.yml'))).toBe(false);
     const patterns = vscode._mockFileWatchers.map((w) => (w._pattern as vscode.RelativePattern).pattern);
-    expect(patterns).toEqual(['.erd-studio/**/*.{json,dbml,dbdiagram}', '.erd-studio/{logical-models,tables}/**/*.{yml,dbml}']);
+    expect(patterns).toEqual(['.erd-studio/**/*.{json,dbml}', '.erd-studio/{logical-models,tables}/**/*.{yml,dbml}']);
   });
 
   /** Activate in `ws` (holding the logical-only fixture) and open its diagram in the real editor provider. */
@@ -710,7 +710,7 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(layers.layers.map((l) => l.id)).toContain('gold');
     // A new project stores its diagrams as DBML (native DBML storage, §3.2): no layout file until something is placed.
     const domainPath = path.join(ws, '.erd-studio', 'gold', 'orders.dbml');
-    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'gold/orders.dbml', null).obj;
+    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'gold/orders.dbml').obj;
     expect(domain).toMatchObject({ domain: 'orders', layer: 'gold', description: 'Orders and customers' });
     expect(listTree(ws)).toEqual(['.erd-studio/', '.erd-studio/gold/', '.erd-studio/gold/orders.dbml', '.erd-studio/layers.json']);
     const opened = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
@@ -858,7 +858,7 @@ describe('activate() in a native DBML project (S4)', () => {
   });
 
   /** The watcher over the semantic dir's diagrams and layouts. */
-  const semanticWatcher = () => vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('dbdiagram'))!;
+  const semanticWatcher = () => vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{json,dbml}'))!;
   const foreignToasts = () => warn.mock.calls.filter((c) => String(c[0]).includes('was just added to this DBML project'));
 
   it('the foreign-format toast is never raised by ERD Studio\'s own New Diagram (§5.4)', async () => {
@@ -1045,16 +1045,16 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(sends() - sendsBefore).toBe(1);
   });
 
-  it('a Cmd+Z on a canvas during a bulk change is flushed when it settles, never dropped; an undo in the layout\'s own tab stays the user\'s', async () => {
+  it('a Cmd+Z on a canvas during a bulk change is flushed when it settles, never dropped; an undo in another file\'s own tab stays the user\'s', async () => {
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     await activate(context);
     await vi.advanceTimersByTimeAsync(5_000);
     const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
     const file = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
-    const layoutFile = path.join(ws, '.erd-studio', 'gold', 'sales.dbdiagram');
+    const otherFile = path.join(ws, '.erd-studio', 'silver', 'staging.dbml');
     const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
-    const layoutDoc = vscode.createMockTextDocument(layoutFile, fs.readFileSync(layoutFile, 'utf-8'));
-    vscode.workspace.textDocuments.push(layoutDoc);
+    const otherDoc = vscode.createMockTextDocument(otherFile, fs.readFileSync(otherFile, 'utf-8'));
+    vscode.workspace.textDocuments.push(otherDoc);
     const panel = vscode.createMockWebviewPanel();
     await provider.resolveCustomTextEditor(
       doc as unknown as import('vscode').TextDocument,
@@ -1075,21 +1075,21 @@ describe('activate() in a native DBML project (S4)', () => {
       ownWrites.recordWrite(tableFile);
       tableWatcher._simulateCreate(vscode.Uri.file(tableFile));
     }
-    // Meanwhile: an undo typed in the layout file's own tab (the canvas is not
+    // Meanwhile: an undo typed in another diagram's own tab (the canvas is not
     // in front), then Cmd+Z on the canvas.
     panel.active = false;
-    (layoutDoc as unknown as { _setText(t: string): void })._setText(`${layoutDoc.getText()}\n`);
-    await vscode._fireDidChangeTextDocument(layoutDoc, vscode.TextDocumentChangeReason.Undo);
+    (otherDoc as unknown as { _setText(t: string): void })._setText(`${otherDoc.getText()}\n`);
+    await vscode._fireDidChangeTextDocument(otherDoc, vscode.TextDocumentChangeReason.Undo);
     panel.active = true;
     (doc as unknown as { _setText(t: string): void })._setText(`${doc.getText()}\n`);
     await vscode._fireDidChangeTextDocument(doc, vscode.TextDocumentChangeReason.Undo);
     expect(doc.isDirty).toBe(true);
 
     await vi.advanceTimersByTimeAsync(5_000);
-    // The canvas's undo is saved and drawn; the layout tab's is left for the user.
+    // The canvas's undo is saved and drawn; the other tab's is left for the user.
     expect(doc.isDirty).toBe(false);
     expect(sends() - sendsBefore).toBe(1);
-    expect(layoutDoc.isDirty).toBe(true);
+    expect(otherDoc.isDirty).toBe(true);
   });
 
   it('the foreign-format toast is not raised outside a DBML project', async () => {
@@ -1107,7 +1107,7 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(foreignToasts()).toHaveLength(0);
   });
 
-  it('a layout change redraws its diagram\'s canvas; a change to the diagram file itself does not (its document does)', async () => {
+  it('a change to a diagram (its erd_layout included) reaches its canvas through its document: the watcher redraws nothing; a .dbdiagram is not watched', async () => {
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     await activate(context);
     await vi.advanceTimersByTimeAsync(5_000);
@@ -1119,11 +1119,10 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(refresh).not.toHaveBeenCalled();
     semanticWatcher()._simulateChange(vscode.Uri.file(path.join(ws, '.erd-studio', 'gold', 'sales.dbdiagram')));
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(refresh).toHaveBeenCalledTimes(1);
-    expect(refresh).toHaveBeenCalledWith(diagram);
+    expect(refresh).not.toHaveBeenCalled();
   });
 
-  it('a layout change outside ERD Studio refreshes neither sidebar tree (positions are not shown there)', async () => {
+  it('a .dbdiagram changed outside ERD Studio refreshes neither sidebar tree (it is no file of the project)', async () => {
     const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     await activate(context);
@@ -2075,12 +2074,12 @@ describe('erdStudio.drawFromDbt', () => {
     expect(fs.existsSync(path.join(erd(), 'layers.json'))).toBe(true);
     // A new project is written as DBML (native DBML storage, §3.2).
     const domainPath = path.join(erd(), 'silver', 'silver.dbml');
-    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'silver/silver.dbml', null).obj as {
+    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'silver/silver.dbml').obj as {
       domain: string; layer: string; logical: { models: string[]; relationships: unknown[] };
     };
     expect(domain.domain).toBe('silver');
     expect(domain.layer).toBe('silver');
-    expect(fs.existsSync(path.join(erd(), 'silver', 'silver.dbdiagram'))).toBe(false); // fresh: the canvas lays it out on first open
+    expect(fs.readFileSync(domainPath, 'utf-8')).not.toContain('erd_layout'); // fresh: the canvas lays it out on first open
     expect(domain.logical.models.length).toBeGreaterThan(1);
     expect(domain.logical.models).not.toContain('dim_region'); // a .sql with no columns to copy
     // An empty library is grouped by layer from the start, in tables/.

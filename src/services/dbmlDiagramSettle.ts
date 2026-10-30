@@ -13,8 +13,6 @@
 
 import * as path from 'path';
 
-import { editDiagramLayout, layoutFilePathOf, stickyLayoutsOf } from '@erd-studio/core';
-import type { Annotation, NodePosition } from '@erd-studio/core';
 import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import { editSubjectAreaDbml } from './dbmlWriters';
 import type { DbmlDiagramTable } from '@erd-studio/core/dbml';
@@ -61,7 +59,8 @@ export interface SettleInput {
    * A change to make to a diagram's v5 object before it is rendered (Give
    * Duplicate Its Own Name repoints only the diagrams whose `use` line
    * resolves to one copy); true when it changed something. A changed
-   * position key also rewrites the layout file.
+   * position key is written in the diagram's `erd_layout` (unless that holds
+   * a merge conflict: then it is left as it is, §1.6).
    */
   mutate?(filePath: string, obj: Record<string, unknown>): boolean;
   /** The resolver to render with (default: the plan's). */
@@ -85,10 +84,8 @@ export function settleDbmlDiagramWrites(input: SettleInput): FileWrite[] {
     if (original === null) continue;
     const rel = path.relative(input.semanticRoot, filePath).split(path.sep).join('/');
     let obj: Record<string, unknown>;
-    const layoutPath = layoutFilePathOf(filePath);
-    const layoutText = input.readText(layoutPath);
     try {
-      obj = parseSubjectAreaDbml(original, rel, layoutText).obj;
+      obj = parseSubjectAreaDbml(original, rel).obj;
     } catch {
       continue;
     }
@@ -112,20 +109,9 @@ export function settleDbmlDiagramWrites(input: SettleInput): FileWrite[] {
         fileExists: (relPath) => resolver.fileExists(relPath),
         ...(resolver.pathChanged ? { pathChanged: resolver.pathChanged } : {}),
         refreshRelationshipsUses: true,
+        keepLayoutIfConflicted: true,
       });
       if (text !== original) out.push({ kind: 'replace', path: filePath, text });
-      if (mutated) {
-        const view = (o: Record<string, unknown>): { positions: Record<string, NodePosition>; annotations: Annotation[] } => {
-          const v = (o.viewConfig ?? {}) as { positions?: Record<string, NodePosition>; annotations?: Annotation[] };
-          return { positions: v.positions ?? {}, annotations: Array.isArray(v.annotations) ? v.annotations : [] };
-        };
-        const a = view(before);
-        const b = view(obj);
-        if (JSON.stringify(a.positions) !== JSON.stringify(b.positions)) {
-          const next = editDiagramLayout(layoutText, b.positions, stickyLayoutsOf(b.annotations));
-          if (next !== null) out.push(layoutText === null ? { kind: 'create', path: layoutPath, text: next } : { kind: 'replace', path: layoutPath, text: next });
-        }
-      }
     } catch (err) {
       log.warn(`[ERD Studio] ${filePath} left as it is: ${err instanceof Error ? err.message : String(err)}`);
     }

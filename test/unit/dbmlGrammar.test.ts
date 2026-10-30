@@ -367,9 +367,9 @@ describe('dbml.tmLanguage.json: structure', () => {
 });
 
 describe('package.json: the dbml language', () => {
-  it('contributes the dbml language for .dbml with its configuration, beside .dbdiagram as JSON', () => {
+  it('contributes the dbml language for .dbml with its configuration, and none for .dbdiagram (positions are erd_layout)', () => {
     const languages = pkg.contributes.languages as Array<Record<string, unknown>>;
-    expect(languages).toContainEqual({ id: 'json', extensions: ['.dbdiagram'] });
+    expect(languages.some((l) => (l.extensions as string[] | undefined)?.includes('.dbdiagram'))).toBe(false);
     const dbml = languages.find((l) => l.id === 'dbml');
     expect(dbml).toEqual({
       id: 'dbml',

@@ -11,6 +11,7 @@ import * as path from 'path';
 import { formatDbml, parseTableDbml } from '@erd-studio/core/dbml';
 
 import {
+  editDiagramLayoutDbml,
   canonicalDbml,
   editSubjectAreaDbml,
   editTableDbml,
@@ -168,5 +169,12 @@ describe('the writers', () => {
       fileExists: () => true,
     });
     expect(out).toBe(text);
+  });
+
+  it('a layout-only edit (a drag) is NOT formatted: only erd_layout changes, the rest keeps its hand layout', () => {
+    const text = "Project sales {\n    erd_schema_version: '7'\n    erd_layout: '''\n      fct_order 1 2\n    '''\n}\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\nuse { table dim_date } from '../tables/dim_date.dbml'\n";
+    expect(formatDbml(text).changed).toBe(true);
+    const out = editDiagramLayoutDbml(text, { filePath: 'gold/sales.dbml', positions: { fct_order: { x: 3, y: 4 } }, annotations: [] });
+    expect(out).toBe(text.replace('      fct_order 1 2\n', '      fct_order 3 4\n'));
   });
 });

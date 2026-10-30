@@ -811,10 +811,38 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(p.message).toContain('fct_extra is a YAML table (tables/gold/fct_extra.yml)');
   });
 
-  it("the layout file's problems are diagram warnings that raise no next step (diagramWarning)", async () => {
-    const r = await doctor(nativeWith({ 'gold/sales.dbdiagram': () => 'not json' }));
-    expect(problem(r, 'diagramWarning')).toEqual([expect.objectContaining({ severity: 'warning', file: '.erd-studio/gold/sales.dbml', message: 'Layout file: The layout file is not JSON.' })]);
+  it("erd_layout's bad lines and a repeated key are warnings with their own codes, raising no next step; a .dbdiagram is never read", async () => {
+    const r = await doctor(nativeWith({
+      'gold/sales.dbml': (t) => t.replace('    fct_order 400 200\n', '    fct_order 400 200\n    not a line\n').replace(/\n\}\n\nuse/, "\n  ERD_LAYOUT: '''\n    fct_order 1 1\n  '''\n}\n\nuse"),
+      'gold/sales.dbdiagram': () => 'not json',
+    }));
+    expect(problem(r, 'layoutBadLine')).toEqual([expect.objectContaining({ severity: 'warning', file: '.erd-studio/gold/sales.dbml', line: 13 })]);
+    expect(problem(r, 'layoutDuplicateKey')).toEqual([expect.objectContaining({ severity: 'warning', file: '.erd-studio/gold/sales.dbml', line: 17 })]);
+    expect(problem(r, 'diagramWarning')).toEqual([]);
+    expect(r.erd.dbmlProblems.filter((p) => p.file.endsWith('.dbdiagram'))).toEqual([]);
     expect(ids(r)).toEqual(['ready']);
+  });
+
+  it('an erd_layout that is not a string is a layoutBadValue error: write positions as a \'\'\'…\'\'\' string', async () => {
+    const r = await doctor(nativeWith({ 'gold/sales.dbml': (t) => t.replace(/ {2}erd_layout: '''[^]*?'''\n/, '  erd_layout: 42\n') }));
+    expect(problem(r, 'layoutBadValue')).toEqual([expect.objectContaining({ severity: 'error', file: '.erd-studio/gold/sales.dbml', line: 6 })]);
+    expect(problem(r, 'layoutBadValue')[0].message).toContain("other DBML tools reject the file; write positions as a '''…''' string");
+    expect(ids(r)).toContain('fix-dbml-file');
+  });
+
+  it('a git conflict only inside erd_layout is layoutMergeConflict (not mergeConflict): the diagram\'s other checks still run', async () => {
+    const r = await doctor(nativeWith({
+      'gold/sales.dbml': (t) => t
+        .replace('    fct_order 400 200\n', '<<<<<<< HEAD\n    fct_order 400 200\n=======\n    fct_order 500 200\n>>>>>>> theirs\n')
+        .replace("'../tables/dim_date.dbml'", "'../tables/silver/dim_date.dbml'"),
+    }));
+    expect(problem(r, 'mergeConflict')).toEqual([]);
+    expect(problem(r, 'layoutMergeConflict')).toEqual([expect.objectContaining({ severity: 'error', mergeConflict: true, file: '.erd-studio/gold/sales.dbml', line: 12 })]);
+    // Its other checks still run.
+    expect(problem(r, 'usePathMismatch').map((p) => p.file)).toEqual(['.erd-studio/gold/sales.dbml']);
+    expect(ids(r)[0]).toBe('resolve-merge-conflicts');
+    expect(r.nextSteps[0].why).toContain(".erd-studio/gold/sales.dbml:12. This diagram still holds git conflict markers in its erd_layout: only positions differ: keep either side; the diagram still opens, but ERD Studio won't save positions until it is resolved.");
+    expect(ids(r)).not.toContain('fix-dbml-file');
   });
 
   it('a diagram use path that misses its table and a missing relationships use line are warnings with the corrected line', async () => {
@@ -836,7 +864,7 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
         .replace("'../tables/gold/dim_customer.dbml'", "'../tables/gold/Dim_Customer.dbml'")
         .replace("'../tables/dim_date.dbml'", "'../tables/silver/dim_date.dbml'"),
     }));
-    expect(problem(r, 'usePathMismatch').map((p) => [p.line, p.severity])).toEqual([[9, 'warning'], [10, 'warning']]);
+    expect(problem(r, 'usePathMismatch').map((p) => [p.line, p.severity])).toEqual([[19, 'warning'], [20, 'warning']]);
     expect(r.erd.dbmlProblems.filter((p) => typeof p.code === 'number')).toEqual([]);
     expect(ids(r)).toEqual(['ready']);
   });
@@ -908,17 +936,17 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(problem(r, 'nameCaseDrift')).toEqual([expect.objectContaining({ severity: 'warning', file: '.erd-studio/tables/dim_date.dbml' })]);
   });
 
-  it('routes every conflicted DBML or layout file to resolve-merge-conflicts, never fix-dbml-file', async () => {
+  it('routes every conflicted DBML file to resolve-merge-conflicts, never fix-dbml-file', async () => {
     const conflict = (t: string): string => `<<<<<<< HEAD\n${t}=======\n${t}>>>>>>> other\n`;
-    const r = await doctor(nativeWith({ 'tables/gold/_relationships.dbml': conflict, 'gold/sales.dbdiagram': conflict, 'tables/dim_date.dbml': conflict }));
+    const r = await doctor(nativeWith({ 'tables/gold/_relationships.dbml': conflict, 'gold/sales.dbml': conflict, 'tables/dim_date.dbml': conflict }));
     const conflicted = r.erd.dbmlProblems.filter((p) => p.mergeConflict);
     expect(conflicted.map((p) => p.file).sort()).toEqual([
-      '.erd-studio/gold/sales.dbdiagram', '.erd-studio/tables/dim_date.dbml', '.erd-studio/tables/gold/_relationships.dbml',
+      '.erd-studio/gold/sales.dbml', '.erd-studio/tables/dim_date.dbml', '.erd-studio/tables/gold/_relationships.dbml',
     ]);
     expect(conflicted.every((p) => p.severity === 'error' && p.line === 1)).toBe(true);
     expect(ids(r)[0]).toBe('resolve-merge-conflicts');
     const step = r.nextSteps[0];
-    expect(step.why).toContain('.erd-studio/gold/sales.dbdiagram:1');
+    expect(step.why).toContain('.erd-studio/gold/sales.dbml:1');
     expect(step.why).toContain('.erd-studio/tables/dim_date.dbml:1');
     // No parser error is reported for a conflicted file, so no fix-dbml-file for it.
     expect(r.erd.dbmlProblems.filter((p) => !p.mergeConflict && conflicted.some((c) => c.file === p.file))).toEqual([]);
