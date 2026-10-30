@@ -1,0 +1,8 @@
+// The calendar, shared by every layer. Hand-written comments like this one survive every save.
+Table calendar.dim_date [role: 'conformed-dim', grain: 'One row per calendar day'] {
+  date_key INT [pk, note: 'yyyymmdd']
+  calendar_date DATE [not null]
+  previous_date_key INT [foreign_key: 'true', note: 'The day before']
+  is_weekend BOOLEAN [default: false]
+  Note: 'Calendar dimension'
+}

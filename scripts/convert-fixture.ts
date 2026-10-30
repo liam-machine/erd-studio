@@ -96,8 +96,7 @@ async function displays(projectRoot: string): Promise<void> {
   const layersText = JSON.stringify({ schemaVersion: 1, layers: [...layers, ...extra] });
   const out: Record<string, unknown> = {};
   for (const rel of files.sort()) {
-    const text = read(rel) ?? '';
-    const cls = classifySemanticFile(rel, { tablesDirIsLayer: false, firstLine: text.split(/\r?\n/, 1)[0] });
+    const cls = classifySemanticFile(rel, { tablesDirIsLayer: false });
     if (cls.kind !== 'diagram') continue;
     try {
       const display = await loadDisplaySubjectArea({

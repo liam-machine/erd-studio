@@ -51,8 +51,12 @@ export interface DbmlSnapshotTable {
   /** Its file, posix, relative to the semantic dir. */
   path: string;
   storage: 'yaml' | 'dbml';
-  /** Its library folder (`''` = the top level). */
+  /** Its library folder (`''` = the top level); a DBML table's schema folder. */
   folder: string;
+  /** A DBML table's layer folder (`<layer>/tables/<schema>/`), as listed. */
+  layer?: string;
+  /** A DBML table's schema folder, as listed (the same as `folder`). */
+  schema?: string;
   /** Its columns' real spellings. */
   columns: string[];
   /** Its primary-key columns. */

@@ -54,8 +54,19 @@ function rng(seed: number): () => number {
   };
 }
 
-const FOLDERS = ['', 'gold', 'silver'];
-const HEADER = '// ERD Studio relationships.\n';
+/** The homes a table may have: `<layer>/tables/<schema>/`, each with its layer's relationships file of that name. */
+const FOLDERS = ['gold/gold', 'gold/sales', 'silver/silver'];
+const HEADER = '// ERD Studio relationships: Refs only.\n';
+/** A home's table file. */
+const tablePath = (folder: string, name: string): string => {
+  const [layer, schema] = folder.split('/');
+  return path.posix.join(layer, 'tables', schema, `${name}.dbml`);
+};
+/** A home's relationships file (`gold/relationships/sales.dbml`). */
+const relationshipsPath = (folder: string): string => {
+  const [layer, schema] = folder.split('/');
+  return path.posix.join(layer, 'relationships', `${schema}.dbml`);
+};
 
 interface Built {
   names: string[];
@@ -64,9 +75,10 @@ interface Built {
 }
 
 /**
- * A random DBML library: tables in three folders (some with a composite key,
- * some declaring a DBML alias when `aliases`), and Refs of every kind spread
- * over the three relationships files — most at home, some misplaced, some
+ * A random DBML library in the layer-first tree: tables in three schema
+ * folders of two layers (some with a composite key, some declaring a DBML
+ * alias when `aliases`), and Refs of every kind spread over three
+ * relationships files — most beside their owner, some in another file, some
  * stored twice (either way round), composites, bare `-` one-to-ones, labels,
  * pending lines, and (when asked) a dangling end and a broken table file.
  */
@@ -86,7 +98,7 @@ function buildLibrary(seed: number, options: { aliases?: boolean; dangling?: boo
     const body = composite
       ? '  id INT\n  id2 INT\n  c0 INT\n  c1 INT\n  c2 INT\n  indexes {\n    (id, id2) [pk]\n  }'
       : '  id INT [pk]\n  c0 INT\n  c1 INT\n  c2 INT';
-    write(path.posix.join('tables', folder, `${name}.dbml`), `${header} {\n${body}\n}\n`);
+    write(tablePath(folder, name), `${header} {\n${body}\n}\n`);
   }
   const files = new Map<string, string[]>(FOLDERS.map((f) => [f, []]));
   const refAt = (folder: string, line: string): void => { files.get(folder)!.push(line); };
@@ -121,14 +133,14 @@ function buildLibrary(seed: number, options: { aliases?: boolean; dangling?: boo
   }
   if (options.aliases) {
     // Ends spelled by a DBML alias (t3 declares A3, t10 A10, …).
-    refAt('', 'Ref: A3.c0 > t1.id');
-    refAt('gold', 'Ref: t2.c1 > A10.id');
+    refAt('gold/gold', 'Ref: A3.c0 > t1.id');
+    refAt('gold/sales', 'Ref: t2.c1 > A10.id');
   }
-  if (options.dangling) refAt('silver', 'Ref: t4.c2 > ghost.id');
-  if (options.broken) write(path.posix.join('tables', folderOf.get('t6')!, 't6.dbml'), 'Table t6 {\n  id INT [pk\n');
+  if (options.dangling) refAt('silver/silver', 'Ref: t4.c2 > ghost.id');
+  if (options.broken) write(tablePath(folderOf.get('t6')!, 't6'), 'Table t6 {\n  id INT [pk\n');
   for (const [folder, lines] of files) {
     if (lines.length === 0) continue;
-    write(path.posix.join('tables', folder, '_relationships.dbml'), `${HEADER}${lines.join('\n')}\n`);
+    write(relationshipsPath(folder), `${HEADER}${lines.join('\n')}\n`);
   }
   return { names, folderOf };
 }
@@ -203,26 +215,27 @@ describe('readingTables: a diagram\'s tables get exactly the relationships the w
   });
 
   it('a relationships file changed between two reads is read again', () => {
-    write('tables/a.dbml', 'Table a {\n  id INT [pk]\n  b_id INT\n  c INT\n}\n');
-    write('tables/b.dbml', 'Table b {\n  id INT [pk]\n}\n');
-    write('tables/_relationships.dbml', `${HEADER}Ref: a.b_id > b.id\n`);
+    write('gold/tables/gold/a.dbml', 'Table gold.a {\n  id INT [pk]\n  b_id INT\n  c INT\n}\n');
+    write('gold/tables/gold/b.dbml', 'Table gold.b {\n  id INT [pk]\n}\n');
+    write('gold/relationships/gold.dbml', `${HEADER}Ref: gold.a.b_id > gold.b.id\n`);
     const library = service();
     expect(library.readingTables(['a'], () => library.getTable('a'))?.relationships).toHaveLength(1);
-    write('tables/_relationships.dbml', `${HEADER}Ref: a.b_id > b.id\nRef: a.c > b.id\n`);
+    write('gold/relationships/gold.dbml', `${HEADER}Ref: gold.a.b_id > gold.b.id\nRef: gold.a.c > gold.b.id\n`);
     const later = new Date(Date.now() + 5_000);
-    fs.utimesSync(path.join(semantic, 'tables/_relationships.dbml'), later, later);
+    fs.utimesSync(path.join(semantic, 'gold/relationships/gold.dbml'), later, later);
     expect(library.readingTables(['a'], () => library.getTable('a'))?.relationships).toHaveLength(2);
   });
 
   it('getSubjectArea reads a DBML diagram\'s members with the same relationships as before', () => {
-    const { names } = buildLibrary(9);
+    const { names, folderOf } = buildLibrary(9);
     const members = names.slice(0, 10);
-    write('gold/d.dbml', `Project d {\n  erd_schema_version: '7'\n}\n\n${members.map((m) => `use { table ${m} } from '../tables/${m}.dbml'`).join('\n')}\n`);
+    const useLine = (m: string): string => `use { table ${m} } from '${path.posix.relative('gold/diagrams', tablePath(folderOf.get(m)!, m))}'`;
+    write('gold/diagrams/d.dbml', `Project d {\n  erd_schema_version: '7'\n}\n\n${members.map(useLine).join('\n')}\n`);
     const layers = new LayerService(root, '.erd-studio');
     const domains = new SubjectAreaService(layers);
     const library = service();
     domains.setTableLibraryService(library);
-    const area = domains.getSubjectArea(path.join(semantic, 'gold/d.dbml'));
+    const area = domains.getSubjectArea(path.join(semantic, 'gold/diagrams/d.dbml'));
     const drawn = Object.fromEntries(area.logical.models.map((m) => [m.name, m.relationships ?? null]));
     expect(drawn).toEqual(wholeLibraryRelationships(area.logical.models.map((m) => m.name)));
   });
@@ -242,7 +255,7 @@ describe('memberAttachment', () => {
   it('resolves only the ends of Refs that name a member', () => {
     const asked: string[] = [];
     const resolve = (key: string) => { asked.push(key); return table(key); };
-    const result = memberAttachment([{ path: 'tables/_relationships.dbml', reading: reading([['a', 'b'], ['c', 'd'], ['e', 'a']]) as never }], new Set(['a']), resolve);
+    const result = memberAttachment([{ path: 'gold/relationships/gold.dbml', reading: reading([['a', 'b'], ['c', 'd'], ['e', 'a']]) as never }], new Set(['a']), resolve);
     expect(result?.byOwner.get('a')).toHaveLength(1);
     expect(result?.byOwner.get('e')).toHaveLength(1);
     expect(new Set(asked)).toEqual(new Set(['a', 'b', 'e']));
@@ -250,43 +263,43 @@ describe('memberAttachment', () => {
 
   it('gives up (null) when an end it needs does not resolve by name', () => {
     const resolve = (key: string) => (key === 'ghost' ? undefined : table(key));
-    expect(memberAttachment([{ path: 'tables/_relationships.dbml', reading: reading([['a', 'ghost']]) as never }], new Set(['a']), resolve)).toBeNull();
+    expect(memberAttachment([{ path: 'gold/relationships/gold.dbml', reading: reading([['a', 'ghost']]) as never }], new Set(['a']), resolve)).toBeNull();
     // A Ref that does not touch the members never asks.
-    expect(memberAttachment([{ path: 'tables/_relationships.dbml', reading: reading([['b', 'ghost']]) as never }], new Set(['a']), resolve)).not.toBeNull();
+    expect(memberAttachment([{ path: 'gold/relationships/gold.dbml', reading: reading([['b', 'ghost']]) as never }], new Set(['a']), resolve)).not.toBeNull();
   });
 });
 
 describe('TableLibraryIndex.withSnapshot', () => {
   it('trusts the index it checked for the rest of the snapshot, and checks again in the next one', () => {
-    write('tables/a.dbml', 'Table a {\n  id INT [pk]\n}\n');
+    write('gold/tables/gold/a.dbml', 'Table gold.a {\n  id INT [pk]\n}\n');
     const index = new TableLibraryIndex(semantic, path.join(semantic, 'logical-models'), path.join(semantic, 'tables'));
     const past = new Date(Date.now() - 60_000);
-    fs.utimesSync(path.join(semantic, 'tables'), past, past);
+    for (const dir of ['', 'gold', 'gold/tables', 'gold/tables/gold']) fs.utimesSync(path.join(semantic, dir), past, past);
     index.get();
     const later = new Date(Date.now() + 5_000);
     index.withSnapshot(() => {
       expect(index.find('b')).toBeNull();
       // A file added mid-snapshot: the snapshot keeps answering from the index it checked.
-      write('tables/b.dbml', 'Table b {\n  id INT [pk]\n}\n');
-      fs.utimesSync(path.join(semantic, 'tables'), later, later);
+      write('gold/tables/gold/b.dbml', 'Table gold.b {\n  id INT [pk]\n}\n');
+      fs.utimesSync(path.join(semantic, 'gold/tables/gold'), later, later);
       expect(index.find('b')).toBeNull();
     });
     // The next lookup checks the directories again and sees it.
-    expect(index.find('b')).toBe(path.join(semantic, 'tables', 'b.dbml'));
+    expect(index.find('b')).toBe(path.join(semantic, 'gold', 'tables', 'gold', 'b.dbml'));
   });
 
   it('sees a file added outside ERD Studio on the first lookup after the snapshot', () => {
-    write('tables/a.dbml', 'Table a {\n  id INT [pk]\n}\n');
+    write('gold/tables/gold/a.dbml', 'Table gold.a {\n  id INT [pk]\n}\n');
     const library = service();
     expect(library.withIndexSnapshot(() => library.findTableNameIgnoringCase('b'))).toBeNull();
-    write('tables/b.dbml', 'Table b {\n  id INT [pk]\n}\n');
+    write('gold/tables/gold/b.dbml', 'Table gold.b {\n  id INT [pk]\n}\n');
     const later = new Date(Date.now() + 5_000);
-    fs.utimesSync(path.join(semantic, 'tables'), later, later);
+    fs.utimesSync(path.join(semantic, 'gold/tables/gold'), later, later);
     expect(library.withIndexSnapshot(() => library.findTableNameIgnoringCase('b'))).toBe('b');
   });
 
   it('an invalidate inside a snapshot lists the library again', () => {
-    write('tables/a.dbml', 'Table a {\n  id INT [pk]\n}\n');
+    write('gold/tables/gold/a.dbml', 'Table gold.a {\n  id INT [pk]\n}\n');
     const index = new TableLibraryIndex(semantic, path.join(semantic, 'logical-models'), path.join(semantic, 'tables'));
     index.withSnapshot(() => {
       index.get();

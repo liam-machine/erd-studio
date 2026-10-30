@@ -94,22 +94,25 @@ afterEach(() => {
 describe('opening a diagram is logged', () => {
   it('logs the phases and how long after ready the tables were posted, with the member count', async () => {
     const provider = buildProvider(root);
-    const { panel } = await open(provider, 'gold/sales.dbml');
+    const { panel } = await open(provider, 'gold/diagrams/sales.dbml');
     await panel._simulateMessage({ type: 'ready' });
 
     const lines = recentLogLines().map((l) => l.replace(/^\S+ \[info\] /, ''));
-    const file = at('gold/sales.dbml');
+    const file = at('gold/diagrams/sales.dbml');
     expect(lines).toContain(`[Canvas] Opening ${file}`);
     expect(lines.some((l) => l.startsWith(`[Canvas] Open ${file}: reading the diagram and its tables took `))).toBe(true);
     expect(lines.some((l) => l.startsWith(`[Canvas] Open ${file}: posted 6 tables in `))).toBe(true);
-    // Sent with a report, a line names the diagram by its shape only.
-    expect(redactPaths(lines.find((l) => l.startsWith(`[Canvas] Opened `))!)).toMatch(/^\[Canvas\] Opened \{project\}\/\.erd-studio\/\{layer\}\/\{domain\}\.dbml: 6 tables posted/);
+    // Sent with a report, a line names the diagram by its shape only (S8b names the
+    // layer-first shapes, `{layer}/diagrams/{diagram}.dbml`; until then a generic one).
+    const redacted = redactPaths(lines.find((l) => l.startsWith(`[Canvas] Opened `))!);
+    expect(redacted).toMatch(/^\[Canvas\] Opened \{project\}\/\.erd-studio\/\{[a-z]+\}\/(diagrams\/)?\{[a-z]+\}\.dbml: 6 tables posted/);
+    expect(redacted).not.toMatch(/gold|sales/);
     expect(lines.some((l) => new RegExp(`^\\[Canvas\\] Opened ${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: 6 tables posted \\d+ ms after ready$`).test(l))).toBe(true);
   });
 
   it('a refresh logs its phases at debug only (not in the buffer Send Feedback offers)', async () => {
     const provider = buildProvider(root);
-    const { panel } = await open(provider, 'gold/sales.dbml');
+    const { panel } = await open(provider, 'gold/diagrams/sales.dbml');
     await panel._simulateMessage({ type: 'ready' });
     clearLogBuffer();
     sinkLines.length = 0;
@@ -118,9 +121,9 @@ describe('opening a diagram is logged', () => {
   });
 
   it('a diagram that fails to load says so, with how long it took', async () => {
-    fs.writeFileSync(at('gold/sales.dbml'), "Project sales {\n  erd_schema_version: '7'\n");
+    fs.writeFileSync(at('gold/diagrams/sales.dbml'), "Project sales {\n  erd_schema_version: '7'\n");
     const provider = buildProvider(root);
-    const { panel } = await open(provider, 'gold/sales.dbml');
+    const { panel } = await open(provider, 'gold/diagrams/sales.dbml');
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await panel._simulateMessage({ type: 'ready' });
     expect(recentLogLines().some((l) => /\[Canvas\] Opening .*sales\.dbml ended without a diagram after \d+ ms$/.test(l))).toBe(true);
@@ -130,7 +133,7 @@ describe('opening a diagram is logged', () => {
 describe('position saves are logged', () => {
   it('says how many tables moved and how long the save took', async () => {
     const provider = buildProvider(root);
-    const { panel } = await open(provider, 'gold/sales.dbml');
+    const { panel } = await open(provider, 'gold/diagrams/sales.dbml');
     await panel._simulateMessage({ type: 'ready' });
     clearLogBuffer();
     await panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 1234, y: 567 } } } });
@@ -146,7 +149,7 @@ describe('the showLogs message', () => {
     vscode.commands.registerCommand('erdStudio.showLogs', shown);
     const provider = buildProvider(root);
     provider.setLogicalOnly(false);
-    const { panel } = await open(provider, 'gold/sales.dbml');
+    const { panel } = await open(provider, 'gold/diagrams/sales.dbml');
     await panel._simulateMessage({ type: 'showLogs' });
     expect(shown).toHaveBeenCalledTimes(1);
     // No "Physical stage is read-only" refusal for it: it is on the allowlist.

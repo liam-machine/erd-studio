@@ -50,7 +50,7 @@ function inputOf(files: Record<string, string>, options: { tablesDirIsLayer?: bo
     layers: ['silver', 'gold'],
     tablesDirIsLayer: options.tablesDirIsLayer ?? false,
     files: Object.entries(all).flatMap(([p, text]) => {
-      const cls = classifySemanticFile(p, { tablesDirIsLayer: false, firstLine: text.split('\n')[0] });
+      const cls = classifySemanticFile(p, { tablesDirIsLayer: false });
       if (cls.kind === 'other' || cls.kind === 'template') return [];
       return [{ path: p, text, hadBom: false, kind: cls.kind, ...(cls.storage ? { storage: cls.storage } : {}) }];
     }),

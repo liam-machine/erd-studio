@@ -1,8 +1,9 @@
 /**
  * The manifest contributions native DBML storage reads through (§5.6 of
  * docs/plans/native-dbml-storage.md): the canvas opens `.dbml` diagrams in a
- * layer folder; positions are each diagram's `erd_layout`, so no `.dbdiagram`
- * language or schema is contributed.
+ * layer's `diagrams/` folder (never a table or relationships file); positions
+ * are each diagram's `erd_layout`, so no `.dbdiagram` language or schema is
+ * contributed.
  */
 
 import * as fs from 'fs';
@@ -12,14 +13,21 @@ import { describe, expect, it } from 'vitest';
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8'));
 
 describe('package.json for native DBML storage', () => {
-  it('the canvas selector adds **/.erd-studio/*/*.dbml at priority default, beside the JSON ones', () => {
+  it('the canvas selector adds **/.erd-studio/*/diagrams/*.dbml at priority default, beside the JSON ones', () => {
     const editor = pkg.contributes.customEditors[0];
     expect(editor.priority).toBe('default');
     expect(editor.selector.map((s: { filenamePattern: string }) => s.filenamePattern)).toEqual([
       '**/.erd-studio/*/*.json',
       '**/erd-studio/*/*.json',
-      '**/.erd-studio/*/*.dbml',
+      '**/.erd-studio/*/diagrams/*.dbml',
     ]);
+  });
+
+  it('Migrate to Table Naming is offered only in a YAML project (never mixed or DBML)', () => {
+    const menus = [...pkg.contributes.menus['view/title'], ...pkg.contributes.menus.commandPalette]
+      .filter((m: { command: string }) => m.command === 'erdStudio.migrateToTableNaming');
+    expect(menus.length).toBeGreaterThan(0);
+    for (const m of menus) expect(m.when).toContain('erdStudio.storage == yaml');
   });
 
   it('.dbdiagram has no language (positions are the diagram\'s erd_layout); only .dbml is dbml', () => {

@@ -6,6 +6,8 @@
  *   catalog cache invalidation, as two separate events off one watcher
  * - {semanticDir}/**\/*.{json,dbml} (diagrams and DBML relationships files,
  *   default .erd-studio) → tree and editor refresh
+ * - {semanticDir}/{logical-models,tables}/**\/*.yml and
+ *   {semanticDir}/*\/tables/*\/*.dbml (table files) → one batch per burst
  * - {semanticDir}/layers.json → layer config reload (onLayerConfigChanged)
  * - {model,seed,snapshot-paths}/**\/*.{yml,yaml,sql,py,csv} (dbt sources) →
  *   physical stage refresh (onDbtYmlChanged)
@@ -52,9 +54,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { DBML_RELATIONSHIPS_FILE_STEM, classifySemanticFile, isReservedTableName } from '@erd-studio/core';
+import { classifySemanticFile, isReservedTableName } from '@erd-studio/core';
 
-import { LOGICAL_MODELS_DIR, TABLES_DIR, tablesDirHasDbml, tablesDirIsLayer } from '../services/logicalModelService';
+import { LOGICAL_MODELS_DIR, TABLES_DIR, tablesDirIsLayer } from '../services/logicalModelService';
 import { NON_SUBJECT_AREA_DIRS } from '../services/domainService';
 import { LAYERS_CONFIG_FILE } from '../services/layerService';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
@@ -101,12 +103,12 @@ export type SemanticPathKind = 'domain' | 'table' | 'relationships' | 'layer-con
  * Classify a path under the semantic directory.
  *
  * A JSON domain file is exactly `{semanticDir}/{layer}/{domain}.json` where
- * the layer segment is not hidden and not one of the reserved directories
- * (nor the DBML table library, §3.3). A `.dbml` file is classified by
- * core's single classifier (`classifySemanticFile`, by path only): a
- * `{layer}/{name}.dbml` diagram is a `domain` too,
- * `tables/[<folder>/]<name>.dbml` a `table` and
- * `tables/[<folder>/]_relationships.dbml` `relationships`.
+ * the layer segment is not hidden and not one of the reserved directories.
+ * A `.dbml` file is classified by core's single classifier
+ * (`classifySemanticFile`, by path only): `{layer}/diagrams/{name}.dbml` is
+ * a `domain` too, `{layer}/tables/{schema}/{name}.dbml` a `table` and
+ * `{layer}/relationships/{name}.dbml` `relationships`; any other `.dbml`
+ * (a 1.9 pre-release file included) is `other`.
  */
 export function classifySemanticPath(
   semanticRoot: string,
@@ -138,28 +140,20 @@ export function classifySemanticPath(
   if (dir.startsWith('.') || NON_SUBJECT_AREA_DIRS.has(dir) || !file.endsWith('.json') || file.startsWith('.')) {
     return 'other';
   }
-  // A `tables/*.json` beside DBML tables is not a diagram unless `tables` is a layer (§3.3).
-  if (dir === TABLES_DIR && tablesDirHasDbml(semanticRoot) && !tablesDirIsLayer(semanticRoot)) {
-    return 'other';
-  }
   return 'domain';
 }
 
 /**
- * {@link classifySemanticPath} for the semantic watcher, which must not list
- * `tables/` per event: a `.dbml` under `tables/` that is not
- * a relationships file is a table (or, when `tables` is a layer, `other`),
- * and the watcher ignores both alike, so it is answered `table` from the
- * path alone. A burst of N table writes (Convert, a checkout, an assistant)
- * would otherwise read the library folder N times (O(N²) on a large library).
+ * {@link classifySemanticPath} for the semantic watcher, answered from the
+ * path alone for a table of the DBML tree (`{layer}/tables/{schema}/{name}.dbml`,
+ * which the watcher ignores: the table watcher has it), so a burst of N
+ * table writes (Convert, a checkout, an assistant) costs nothing per event.
  */
 export function classifyWatchedSemanticPath(semanticRoot: string, fsPath: string): SemanticPathKind {
   const rel = path.relative(semanticRoot, fsPath);
   const segments = rel.split(path.sep);
-  const file = segments[segments.length - 1];
-  if (segments.length >= 2 && segments[0] === TABLES_DIR && !rel.startsWith('..') && !path.isAbsolute(rel)
-    && file.endsWith('.dbml')
-    && file.slice(0, file.lastIndexOf('.')).toLowerCase() !== DBML_RELATIONSHIPS_FILE_STEM) {
+  if (segments.length === 4 && segments[1] === TABLES_DIR && segments[3].endsWith('.dbml')
+    && !rel.startsWith('..') && !path.isAbsolute(rel)) {
     return 'table';
   }
   return classifySemanticPath(semanticRoot, fsPath);
@@ -215,10 +209,10 @@ export class FileWatcherService implements vscode.Disposable {
    */
   readonly onTablesChanged = this._onTablesChanged.event;
   /**
-   * Fires when a DBML relationships file (`tables/[<folder>/]_relationships.dbml`)
+   * Fires when a DBML relationships file (`{layer}/relationships/{name}.dbml`)
    * is created, changed or deleted externally. Never an `onTableChanged`:
-   * the file holds Refs, not a table, and a misplaced Ref can attach to any
-   * table, so every open canvas is refreshed (§5.4).
+   * the file holds Refs, not a table, and a Ref in any file can attach to
+   * any table, so every open canvas is refreshed (§5.4).
    */
   readonly onRelationshipsChanged = this._onRelationshipsChanged.event;
   /**
@@ -505,8 +499,11 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch {semanticDir}/logical-models/**\/*.yml for changes — the top level
-   * and the layer folders (logical-models/{layer}/{name}.yml) alike.
+   * Watch the table files for changes, with two watchers sharing one
+   * handler: {semanticDir}/{logical-models,tables}/**\/*.yml (YAML: the top
+   * level and the layer folders alike; v6's `tables/` library too, #162) and
+   * {semanticDir}/*\/tables/*\/*.dbml (the DBML tree's
+   * `{layer}/tables/{schema}/{name}.dbml`).
    * Fires when model definition files are created, modified, or deleted.
    * Used to refresh open domain editors that reference the changed model.
    * Moving a file between folders arrives as a delete + create of the same
@@ -515,21 +512,25 @@ export class FileWatcherService implements vscode.Disposable {
    * one batch and one log line, not N.
    */
   private setupTableWatcher(): void {
-    const pattern = new vscode.RelativePattern(
+    const yamlWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(
       this.workspaceRoot,
-      // v6's `tables/` library too (#162), and its `.dbml` tables (native DBML
-      // storage); a `tables` layer folder holds no table files.
-      `${this.semanticDir}/{${LOGICAL_MODELS_DIR},${TABLES_DIR}}/**/*.{yml,dbml}`,
-    );
-    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+      `${this.semanticDir}/{${LOGICAL_MODELS_DIR},${TABLES_DIR}}/**/*.yml`,
+    ));
+    const dbmlWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(
+      this.workspaceRoot,
+      `${this.semanticDir}/*/${TABLES_DIR}/*/*.dbml`,
+    ));
 
     const createdPending = new Set<string>();
     const handleChange = (uri: vscode.Uri, created = false) => {
       const fileName = uri.fsPath.replace(/^.*[/\\]/, '');
       const dbml = fileName.endsWith('.dbml');
-      // The model name is the listed stem; a relationships file is no table
-      // (the semantic watcher raises onRelationshipsChanged for it).
+      // A `.dbml` is a table only where the single classifier says so (a
+      // DBML layer's schema folder: never `tables/tables/…`, a reserved layer).
+      if (dbml && classifySemanticPath(this.semanticRoot, uri.fsPath) !== 'table') return;
+      // The model name is the listed stem.
       const modelName = fileName.replace(/\.(yml|dbml)$/, '');
+      // 2.0-switch: S8b deletes the reserved-name skip with `isReservedTableName`.
       if (dbml && isReservedTableName(modelName)) return;
       if (created && !dbml) createdPending.add(uri.toString());
       this.pendingTables.delete(modelName);
@@ -559,11 +560,12 @@ export class FileWatcherService implements vscode.Disposable {
       });
     };
 
-    this.subscriptions.push(watcher.onDidChange((uri) => { this.noteProjectEvent(); handleChange(uri); }));
-    this.subscriptions.push(watcher.onDidCreate((uri) => { this.noteProjectEvent(); handleChange(uri, true); }));
-    this.subscriptions.push(watcher.onDidDelete((uri) => { this.noteProjectEvent(); handleChange(uri); }));
-
-    this.watchers.push(watcher);
+    for (const watcher of [yamlWatcher, dbmlWatcher]) {
+      this.subscriptions.push(watcher.onDidChange((uri) => { this.noteProjectEvent(); handleChange(uri); }));
+      this.subscriptions.push(watcher.onDidCreate((uri) => { this.noteProjectEvent(); handleChange(uri, true); }));
+      this.subscriptions.push(watcher.onDidDelete((uri) => { this.noteProjectEvent(); handleChange(uri); }));
+      this.watchers.push(watcher);
+    }
   }
 
   /**

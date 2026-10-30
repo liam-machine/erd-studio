@@ -1,7 +1,7 @@
 /**
- * SubjectAreaService reading native DBML storage (§5.5 of
- * docs/plans/native-dbml-storage.md): `.dbml` diagrams listed beside `.json`
- * ones through the single classifier, read into the same Unified shape core's
+ * SubjectAreaService reading native DBML storage in the layer-first tree:
+ * `<layer>/diagrams/*.dbml` diagrams listed beside `<layer>/*.json` ones
+ * through the single classifier, read into the same Unified shape core's
  * loader builds, and their members read from `use` lines.
  */
 
@@ -22,11 +22,12 @@ import { TableLibraryService } from '../../src/services/logicalModelService';
 import { buildLogicalDisplaySubjectArea } from '../../src/services/stageDisplay';
 
 const NATIVE = path.resolve(__dirname, '../fixtures/dbml-native');
+const OLD = path.resolve(__dirname, '../fixtures/dbml-1.9-tree');
 
-function services(root: string): { subjectAreaService: SubjectAreaService; tableLibraryService: TableLibraryService } {
-  const layerService = new LayerService(root, '.erd-studio');
+function services(root: string, semanticDir = '.erd-studio'): { subjectAreaService: SubjectAreaService; tableLibraryService: TableLibraryService } {
+  const layerService = new LayerService(root, semanticDir);
   const subjectAreaService = new SubjectAreaService(layerService);
-  const tableLibraryService = new TableLibraryService(root, '.erd-studio');
+  const tableLibraryService = new TableLibraryService(root, semanticDir);
   subjectAreaService.setTableLibraryService(tableLibraryService);
   return { subjectAreaService, tableLibraryService };
 }
@@ -54,12 +55,12 @@ describe('listSubjectAreas', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('lists .json and .dbml diagrams with their storage, and marks a stem found in both formats', () => {
-    write('gold/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n");
+  it('lists <layer>/*.json and <layer>/diagrams/*.dbml with their storage, and marks a stem found in both formats', () => {
+    write('gold/diagrams/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n");
     write('gold/sales.json', JSON.stringify({ schemaVersion: 5, domain: 'sales', layer: 'gold', logical: { models: [] } }));
     write('gold/finance.json', JSON.stringify({ schemaVersion: 5, domain: 'finance', layer: 'gold', logical: { models: [] } }));
-    write('silver/staging.dbml', "Project staging {\n  erd_schema_version: '7'\n}\n");
-    write('silver/staging.dbdiagram', '{}');
+    write('silver/diagrams/staging.dbml', "Project staging {\n  erd_schema_version: '7'\n}\n");
+    write('silver/diagrams/staging.dbdiagram', '{}');
     const summaries = services(root).subjectAreaService.listSubjectAreas(root, '.erd-studio')
       .map((s) => [s.layer, s.domain, s.storage, s.conflict ?? false, path.basename(s.filePath)])
       .sort((a, b) => String(a[4]).localeCompare(String(b[4])) || String(a[0]).localeCompare(String(b[0])));
@@ -71,19 +72,45 @@ describe('listSubjectAreas', () => {
     ]);
   });
 
-  it('does not list a rich DBML export saved in a layer folder, a relationships file, or a DBML library tables/', () => {
+  it('lists no table, relationships, 1.9 or other .dbml as a diagram', () => {
     write('gold/export.dbml', '// erd-studio dbml-export v1\nTable x {\n  id INT\n}\n');
     write('gold/_relationships.dbml', '// stray\n');
-    write('gold/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n");
-    // layers.json lists `tables`, but it holds DBML tables and no .json: the library, not a layer (§3.3).
+    write('gold/old.dbml', "Project old {\n  erd_schema_version: '7'\n}\n");
+    write('gold/diagrams/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n");
+    write('gold/diagrams/nested/deep.dbml', "Project deep {\n}\n");
+    write('gold/tables/gold/dim_x.dbml', 'Table gold.dim_x {\n  id INT\n}\n');
+    write('gold/relationships/gold.dbml', '// relationships\n');
     write('tables/dim_x.dbml', 'Table dim_x {\n  id INT\n}\n');
+    write('tables/diagrams/t.dbml', "Project t {\n}\n");
     const names = services(root).subjectAreaService.listSubjectAreas(root, '.erd-studio').map((s) => `${s.layer}/${s.domain}`);
     expect(names).toEqual(['gold/sales']);
   });
 
+  it('a YAML project with layers named diagrams and relationships holding JSON is listed exactly as before', () => {
+    write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [
+      { id: 'diagrams', label: 'Diagrams', abbreviation: 'DIA', color: '#a0a0a0', creatable: true, order: 1 },
+      { id: 'relationships', label: 'Relationships', abbreviation: 'REL', color: '#d4a800', creatable: true, order: 2 },
+    ] }));
+    write('diagrams/overview.json', JSON.stringify({ schemaVersion: 5, domain: 'overview', layer: 'diagrams', logical: { models: ['dim_x'] } }));
+    write('relationships/links.json', JSON.stringify({ schemaVersion: 5, domain: 'links', layer: 'relationships', logical: { models: [] } }));
+    write('logical-models/dim_x.yml', 'name: dim_x\ncolumns:\n  - name: id\n    dataType: INT\n');
+    const { subjectAreaService, tableLibraryService } = services(root);
+    const summaries = subjectAreaService.listSubjectAreas(root, '.erd-studio')
+      .map((s) => [s.layer, s.domain, s.storage, path.relative(semantic, s.filePath).split(path.sep).join('/')]);
+    expect(summaries).toEqual([
+      ['diagrams', 'overview', 'json', 'diagrams/overview.json'],
+      ['relationships', 'links', 'json', 'relationships/links.json'],
+    ]);
+    expect(isSubjectAreaFilePath(path.join(semantic, 'diagrams/overview.json'))).toBe(true);
+    expect(isSubjectAreaFilePath(path.join(semantic, 'relationships/links.json'))).toBe(true);
+    expect(tableLibraryService.listTableNames()).toEqual(['dim_x']);
+    expect(tableLibraryService.listRelationshipsFiles()).toEqual([]);
+    expect(subjectAreaService.getSubjectArea(path.join(semantic, 'diagrams/overview.json')).logical.models.map((m) => m.name)).toEqual(['dim_x']);
+  });
+
   it('counts no relationships in a DBML diagram (D5)', () => {
     // A Note the JSON fallback's text match would count, were the diagram not skipped.
-    write('gold/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n  Note: '\"relationships\": [x'\n}\n");
+    write('gold/diagrams/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n  Note: '\"relationships\": [x'\n}\n");
     write('gold/finance.json', JSON.stringify({ schemaVersion: 5, domain: 'finance', layer: 'gold', logical: { models: [], relationships: [{}, {}] } }));
     expect(services(root).subjectAreaService.countSubjectAreaFileRelationships(root, '.erd-studio')).toBe(2);
   });
@@ -97,7 +124,7 @@ describe('getSubjectArea on dbml-native', () => {
     vi.restoreAllMocks();
   });
 
-  it.each(['gold/sales.dbml', 'silver/staging.dbml'])('%s draws what core\'s loadDisplaySubjectArea draws', async (relative) => {
+  it.each(['gold/diagrams/sales.dbml', 'silver/diagrams/staging.dbml'])('%s draws what core\'s loadDisplaySubjectArea draws', async (relative) => {
     const { subjectAreaService } = services(NATIVE);
     const filePath = path.join(NATIVE, '.erd-studio', relative);
     const unified = subjectAreaService.getSubjectArea(filePath);
@@ -124,7 +151,7 @@ describe('getSubjectArea on dbml-native', () => {
   });
 
   it('reads the sales diagram: version, members in use order, library relationships, Notes with their layout', () => {
-    const unified = services(NATIVE).subjectAreaService.getSubjectArea(path.join(NATIVE, '.erd-studio/gold/sales.dbml'));
+    const unified = services(NATIVE).subjectAreaService.getSubjectArea(path.join(NATIVE, '.erd-studio/gold/diagrams/sales.dbml'));
     expect(unified).toMatchObject({ schemaVersion: 7, domain: 'sales', layer: 'gold', description: 'Sales star schema' });
     expect(unified.logical.models.map((m) => m.name)).toEqual(['fct_order', 'dim_customer', 'dim_date', 'dim_region', 'customer_profile', 'bridge_empty']);
     const relationships = unified.logical.relationships.map((r) => `${r.fromModel}.${r.fromColumn}>${r.toModel}.${r.toColumn}:${r.cardinality}${r.role ? `:${r.role}` : ''}`);
@@ -143,30 +170,80 @@ describe('getSubjectArea on dbml-native', () => {
     expect(unified.viewConfig.positions?.fct_order).toEqual({ x: 400, y: 200 });
   });
 
-  it('refuses a table or relationships file passed as a diagram', () => {
+  it('refuses a table or relationships file passed as a diagram, with the not-a-diagram text (§1.8)', () => {
     const { subjectAreaService } = services(NATIVE);
-    for (const file of ['tables/gold/fct_order.dbml', 'tables/gold/_relationships.dbml', 'tables/dim_date.dbml']) {
-      expect(() => subjectAreaService.getSubjectArea(path.join(NATIVE, '.erd-studio', file))).toThrow(/is a DBML table or relationships file, not a diagram/);
+    for (const file of ['gold/tables/gold/fct_order.dbml', 'gold/relationships/gold.dbml', 'silver/tables/calendar/dim_date.dbml']) {
+      expect(() => subjectAreaService.getSubjectArea(path.join(NATIVE, '.erd-studio', file))).toThrow(/is a DBML table or relationships file, not a diagram\. Open a diagram in (gold|silver)\/diagrams\//);
     }
+  });
+
+  it('refuses a 1.9 pre-release file with the 1.9 text, and any other .dbml with where diagrams live', () => {
+    const { subjectAreaService } = services(OLD);
+    expect(() => subjectAreaService.getSubjectArea(path.join(OLD, '.erd-studio', 'gold/sales.dbml')))
+      .toThrow('gold/sales.dbml was written by an ERD Studio 1.9 pre-release');
+    expect(() => subjectAreaService.getSubjectArea(path.join(OLD, '.erd-studio', 'tables/gold/_relationships.dbml')))
+      .toThrow('tables/gold/_relationships.dbml was written by an ERD Studio 1.9 pre-release');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-dbml-other-'));
+    try {
+      const other = path.join(tmp, '.erd-studio', 'gold', 'Diagrams', 'x.dbml');
+      fs.mkdirSync(path.dirname(other), { recursive: true });
+      fs.writeFileSync(other, "Project x {\n  erd_schema_version: '7'\n}\n");
+      expect(() => services(tmp).subjectAreaService.getSubjectArea(other)).toThrow(/is not a DBML diagram\. ERD Studio diagrams live in <layer>\/diagrams\/<name>\.dbml/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('names a file relative to a custom semantic dir, so a 1.9 shape gets the 1.9 text there too (as the editor page does)', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-dbml-custom-'));
+    try {
+      fs.cpSync(path.join(OLD, '.erd-studio'), path.join(tmp, 'model'), { recursive: true });
+      const { subjectAreaService } = services(tmp, 'model');
+      expect(() => subjectAreaService.getSubjectArea(path.join(tmp, 'model', 'gold/sales.dbml')))
+        .toThrow('gold/sales.dbml was written by an ERD Studio 1.9 pre-release');
+      expect(() => subjectAreaService.getSubjectArea(path.join(tmp, 'model', 'tables/gold/_relationships.dbml')))
+        .toThrow('tables/gold/_relationships.dbml was written by an ERD Studio 1.9 pre-release');
+      fs.mkdirSync(path.join(tmp, 'model', 'gold', 'relationships'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'model', 'gold', 'relationships', 'gold.dbml'), '// ERD Studio relationships: Refs only.\n');
+      expect(() => subjectAreaService.getSubjectArea(path.join(tmp, 'model', 'gold/relationships/gold.dbml')))
+        .toThrow('gold/relationships/gold.dbml is a DBML table or relationships file, not a diagram. Open a diagram in gold/diagrams/.');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('a 1.9 tree is never read as tables', () => {
+    const { tableLibraryService } = services(OLD);
+    expect(tableLibraryService.listTableFiles()).toEqual([]);
+    expect(tableLibraryService.listRelationshipsFiles()).toEqual([]);
+    expect(tableLibraryService.findTableFile('fct_order')).toBeNull();
   });
 });
 
 describe('isSubjectAreaFilePath and subjectAreaTableNames', () => {
-  it('a .dbml in a layer folder is a diagram; one in tables/ or named _relationships is not', () => {
+  it('a .dbml in <layer>/diagrams/ is a diagram; a table, relationships, 1.9 or other .dbml is not; JSON keeps develop\'s rule', () => {
     const at = (rel: string): string => path.join(NATIVE, '.erd-studio', rel);
-    expect(isSubjectAreaFilePath(at('gold/sales.dbml'))).toBe(true);
-    expect(isSubjectAreaFilePath(at('gold/sales.dbdiagram'))).toBe(false);
+    expect(isSubjectAreaFilePath(at('gold/diagrams/sales.dbml'))).toBe(true);
+    expect(isSubjectAreaFilePath(at('diagrams/diagrams/x.dbml'))).toBe(true);
+    expect(isSubjectAreaFilePath(at('gold/sales.dbml'))).toBe(false);
+    expect(isSubjectAreaFilePath(at('gold/Diagrams/sales.dbml'))).toBe(false);
+    expect(isSubjectAreaFilePath(at('Gold/diagrams/sales.dbml'))).toBe(false);
+    expect(isSubjectAreaFilePath(at('tables/diagrams/sales.dbml'))).toBe(false);
+    expect(isSubjectAreaFilePath(at('gold/diagrams/sales.dbdiagram'))).toBe(false);
+    expect(isSubjectAreaFilePath(at('gold/tables/gold/fct_order.dbml'))).toBe(false);
+    expect(isSubjectAreaFilePath(at('gold/relationships/gold.dbml'))).toBe(false);
     expect(isSubjectAreaFilePath(at('tables/dim_date.dbml'))).toBe(false);
-    expect(isSubjectAreaFilePath(at('tables/gold/fct_order.dbml'))).toBe(false);
-    expect(isSubjectAreaFilePath(at('gold/_relationships.dbml'))).toBe(false);
     expect(isSubjectAreaFilePath(at('templates/x.dbml'))).toBe(false);
     expect(isSubjectAreaFilePath(at('gold/sales.json'))).toBe(true);
+    expect(isSubjectAreaFilePath(at('tables/report.json'))).toBe(true);
+    expect(isSubjectAreaFilePath(at('templates/x.json'))).toBe(false);
+    expect(isSubjectAreaFilePath(at('gold/.draft.json'))).toBe(false);
   });
 
   it('reads a DBML diagram\'s members from its table use lines, and a JSON one\'s from logical.models', () => {
-    const sales = fs.readFileSync(path.join(NATIVE, '.erd-studio/gold/sales.dbml'), 'utf-8');
-    expect(subjectAreaTableNames(sales, 'gold/sales.dbml')).toEqual(['fct_order', 'dim_customer', 'dim_date', 'dim_region', 'customer_profile', 'bridge_empty']);
-    expect(subjectAreaTableNames('Project x {\n', 'gold/x.dbml')).toBeNull();
+    const sales = fs.readFileSync(path.join(NATIVE, '.erd-studio/gold/diagrams/sales.dbml'), 'utf-8');
+    expect(subjectAreaTableNames(sales, 'gold/diagrams/sales.dbml')).toEqual(['fct_order', 'dim_customer', 'dim_date', 'dim_region', 'customer_profile', 'bridge_empty']);
+    expect(subjectAreaTableNames('Project x {\n', 'gold/diagrams/x.dbml')).toBeNull();
     expect(subjectAreaTableNames('{"schemaVersion":5,"logical":{"models":["a","b"]}}', 'gold/x.json')).toEqual(['a', 'b']);
     expect(subjectAreaTableNames('{ nope', 'gold/x.json')).toBeNull();
   });

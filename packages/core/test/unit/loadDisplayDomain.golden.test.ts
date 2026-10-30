@@ -22,6 +22,8 @@ import { SubjectAreaFileError, SubjectAreaValidationError } from '../../src/doma
 import { STORAGE_EQUIVALENCE_ROWS, normaliseStorageRows, type StorageEquivalenceRow } from '../../src/storageEquivalence';
 import { dbmlStorageReader } from '../../src/dbml/index';
 
+/** The sentence the extension's not-a-diagram page ends with (§1.8), which core does not write. */
+const REOPEN_AS_TEXT = 'To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor.';
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const GOLDEN_DIR = path.join(FIXTURES, 'golden');
 
@@ -215,7 +217,8 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
         return;
       }
       const message = (caught as Error).message.replace(LINE_COLUMN, '');
-      expect(message).toBe(golden.message.split('<root>/').join(''));
+      // The extension's not-a-diagram page adds how to reopen the file as text (§1.8); core's own text has no such sentence.
+      expect(message).toBe(golden.message.split('<root>/').join('').replace(` ${REOPEN_AS_TEXT}`, ''));
     });
   });
 

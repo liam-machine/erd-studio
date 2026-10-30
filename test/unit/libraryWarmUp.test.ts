@@ -47,13 +47,13 @@ describe('LibraryWarmUp', () => {
     const order: string[] = [];
     const library = {
       ...fakeLibrary(4, clock, 1),
-      listRelationshipsFiles: () => ['tables/_relationships.dbml', 'tables/gold/_relationships.dbml'],
+      listRelationshipsFiles: () => ['gold/relationships/gold.dbml', 'silver/relationships/silver.dbml'],
       readRelationshipsFile: (file: string) => { order.push(file); clock.t += 50; },
       warmLibraryAttachment: () => { order.push('attach'); },
     };
     const warmUp = new LibraryWarmUp(library, { sliceMs: 10, quietMs: 0, now: () => clock.t });
     await warmUp.start(0);
-    expect(order).toEqual(['tables/_relationships.dbml', 'tables/gold/_relationships.dbml', 'attach']);
+    expect(order).toEqual(['gold/relationships/gold.dbml', 'silver/relationships/silver.dbml', 'attach']);
     // One slice of table files, then one per relationships file.
     expect(warmUp.slices).toBe(3);
   });
@@ -116,14 +116,16 @@ describe('LibraryWarmUp over a real library', () => {
   let root: string;
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-warm-up-'));
-    const tables = path.join(root, '.erd-studio', 'tables');
+    const tables = path.join(root, '.erd-studio', 'gold', 'tables', 'gold');
+    const relationships = path.join(root, '.erd-studio', 'gold', 'relationships');
     fs.mkdirSync(tables, { recursive: true });
+    fs.mkdirSync(relationships, { recursive: true });
     const refs: string[] = [];
     for (let i = 0; i < 300; i++) {
-      fs.writeFileSync(path.join(tables, `t${i}.dbml`), `Table t${i} {\n  id INT [pk]\n  parent_id INT\n  name VARCHAR [note: 'Table ${i}']\n}\n`);
-      if (i > 0) refs.push(`Ref: t${i}.parent_id > t${i - 1}.id`);
+      fs.writeFileSync(path.join(tables, `t${i}.dbml`), `Table gold.t${i} {\n  id INT [pk]\n  parent_id INT\n  name VARCHAR [note: 'Table ${i}']\n}\n`);
+      if (i > 0) refs.push(`Ref: gold.t${i}.parent_id > gold.t${i - 1}.id`);
     }
-    fs.writeFileSync(path.join(tables, '_relationships.dbml'), `// ERD Studio relationships.\n${refs.join('\n')}\n`);
+    fs.writeFileSync(path.join(relationships, 'gold.dbml'), `// ERD Studio relationships: Refs only.\n${refs.join('\n')}\n`);
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -154,8 +156,8 @@ describe('LibraryWarmUp over a real library', () => {
   it('a file changed after it was read is read again by whoever needs it', async () => {
     const library = new TableLibraryService(root, '.erd-studio');
     await new LibraryWarmUp(library, { quietMs: 0 }).start(0);
-    const file = path.join(root, '.erd-studio', 'tables', 't7.dbml');
-    fs.writeFileSync(file, 'Table t7 {\n  id INT [pk]\n  parent_id INT\n  extra INT\n}\n');
+    const file = path.join(root, '.erd-studio', 'gold', 'tables', 'gold', 't7.dbml');
+    fs.writeFileSync(file, 'Table gold.t7 {\n  id INT [pk]\n  parent_id INT\n  extra INT\n}\n');
     const later = new Date(Date.now() + 5_000);
     fs.utimesSync(file, later, later);
     expect(library.unreadTableFiles().map((e) => e.name)).toEqual(['t7']);

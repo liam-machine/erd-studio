@@ -99,7 +99,7 @@ afterEach(() => {
 describe('the ready handler answers with loading first', () => {
   it('posts loading, then loading with the table count, then the diagram', async () => {
     const h = buildProvider(root);
-    const { panel } = await open(h, 'gold/sales.dbml');
+    const { panel } = await open(h, 'gold/diagrams/sales.dbml');
     await panel._simulateMessage({ type: 'ready' });
     const types = posted(panel).map((m) => m.type);
     expect(types.slice(0, 3)).toEqual(['loading', 'loading', 'domainLoaded']);
@@ -109,7 +109,7 @@ describe('the ready handler answers with loading first', () => {
 
   it('the loading message leaves the host (a turn of the event loop) before the diagram is read', async () => {
     const h = buildProvider(root);
-    const { panel } = await open(h, 'gold/sales.dbml');
+    const { panel } = await open(h, 'gold/diagrams/sales.dbml');
     const order: string[] = [];
     const postMessage = panel.webview.postMessage.bind(panel.webview);
     vi.spyOn(panel.webview, 'postMessage').mockImplementation((message: unknown) => {
@@ -130,9 +130,9 @@ describe('the ready handler answers with loading first', () => {
   });
 
   it('a broken diagram: loading (no count), then the error', async () => {
-    fs.writeFileSync(at('gold/sales.dbml'), 'Project sales {\n  erd_schema_version: \'7\'\n');
+    fs.writeFileSync(at('gold/diagrams/sales.dbml'), 'Project sales {\n  erd_schema_version: \'7\'\n');
     const h = buildProvider(root);
-    const { panel } = await open(h, 'gold/sales.dbml');
+    const { panel } = await open(h, 'gold/diagrams/sales.dbml');
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await panel._simulateMessage({ type: 'ready' });
     const types = posted(panel).map((m) => m.type);
@@ -159,12 +159,12 @@ describe('the ready handler answers with loading first', () => {
 describe('the payload does not depend on what was read before', () => {
   it('a cold open posts the same diagram as an open after the whole library was read', async () => {
     const cold = buildProvider(root);
-    const first = await open(cold, 'gold/sales.dbml');
+    const first = await open(cold, 'gold/diagrams/sales.dbml');
     await first.panel._simulateMessage({ type: 'ready' });
 
     const warm = buildProvider(root);
     warm.tableLibraryService.listTables();
-    const second = await open(warm, 'gold/sales.dbml');
+    const second = await open(warm, 'gold/diagrams/sales.dbml');
     await second.panel._simulateMessage({ type: 'ready' });
 
     const coldPayload = loadedPayload(first.panel);
@@ -178,7 +178,7 @@ describe('Add Existing Table rows on a large library', () => {
   function addTables(count: number): string[] {
     const names = Array.from({ length: count }, (_, i) => `extra_${String(i).padStart(3, '0')}`);
     for (const name of names) {
-      fs.writeFileSync(at(`tables/${name}.dbml`), `Table ${name} [schema: 'gold'] {\n  id INT [pk]\n  name VARCHAR\n}\n`);
+      fs.writeFileSync(at(`gold/tables/gold/${name}.dbml`), `Table gold.${name} {\n  id INT [pk]\n  name VARCHAR\n}\n`);
     }
     return names;
   }
@@ -186,7 +186,7 @@ describe('Add Existing Table rows on a large library', () => {
   it(`more than ${EXISTING_TABLES_READ_AT_MOST} unread files go out by name, and requestExistingTables answers in full`, async () => {
     const names = addTables(EXISTING_TABLES_READ_AT_MOST + 20);
     const h = buildProvider(root);
-    const { panel } = await open(h, 'gold/sales.dbml');
+    const { panel } = await open(h, 'gold/diagrams/sales.dbml');
     await panel._simulateMessage({ type: 'ready' });
     const rows = loadedPayload(panel).existingModels as Array<{ name: string; detailsPending?: true; columnCount: number; sourcePath: string }>;
     const pending = rows.filter((r) => r.detailsPending);
@@ -212,7 +212,7 @@ describe('Add Existing Table rows on a large library', () => {
   it(`up to ${EXISTING_TABLES_READ_AT_MOST} unread files are read for the payload, as before`, async () => {
     addTables(10);
     const h = buildProvider(root);
-    const { panel } = await open(h, 'gold/sales.dbml');
+    const { panel } = await open(h, 'gold/diagrams/sales.dbml');
     await panel._simulateMessage({ type: 'ready' });
     const rows = loadedPayload(panel).existingModels as Array<{ detailsPending?: true }>;
     expect(rows.length).toBeGreaterThan(0);
@@ -222,7 +222,7 @@ describe('Add Existing Table rows on a large library', () => {
   it('requestExistingTables is allowed on the physical stage (it only reads)', async () => {
     const h = buildProvider(root);
     h.provider.setLogicalOnly(false);
-    const { doc, panel } = await open(h, 'gold/sales.dbml');
+    const { doc, panel } = await open(h, 'gold/diagrams/sales.dbml');
     (h.provider as unknown as { openPanels: Map<string, { activeStage: string }> }).openPanels.get(doc.uri.toString())!.activeStage = 'physical';
     await panel._simulateMessage({ type: 'requestExistingTables' });
     expect(posted(panel).map((m) => m.type)).toContain('existingTables');
@@ -233,10 +233,10 @@ describe('Add Existing Table rows on a large library', () => {
 describe('a partly placed diagram', () => {
   it('DBML: the computed positions are written to erd_layout and the diagram is read once', async () => {
     // fct_order loses its position; the other five keep theirs.
-    const diagramPath = at('gold/sales.dbml');
+    const diagramPath = at('gold/diagrams/sales.dbml');
     fs.writeFileSync(diagramPath, fs.readFileSync(diagramPath, 'utf-8').replace('    fct_order 400 200\n', ''));
     const h = buildProvider(root);
-    const { doc, panel } = await open(h, 'gold/sales.dbml');
+    const { doc, panel } = await open(h, 'gold/diagrams/sales.dbml');
     const reads = vi.spyOn(h.subjectAreaService, 'getSubjectArea');
     const before = _appliedEdits.length;
     await panel._simulateMessage({ type: 'ready' });
@@ -270,7 +270,7 @@ describe('the background read of the library steps aside for a canvas', () => {
     const h = buildProvider(root);
     const noteForegroundWork = vi.fn();
     h.provider.setLibraryWarmUp({ noteForegroundWork });
-    const { panel } = await open(h, 'gold/sales.dbml');
+    const { panel } = await open(h, 'gold/diagrams/sales.dbml');
     expect(noteForegroundWork).toHaveBeenCalledTimes(1);
     await panel._simulateMessage({ type: 'ready' });
     await panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 1, y: 2 } } } });

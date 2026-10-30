@@ -152,12 +152,12 @@ describe('classifySemanticFile', () => {
     }
   });
 
-  it('a .dbml is classified by its path alone: the first line is ignored (2.0-switch: S5 removes the option)', () => {
+  it('a .dbml is classified by its path alone (an export saved as a diagram is still a diagram)', () => {
     expect(DBML_RICH_EXPORT_HEADER.startsWith(ERD_STUDIO_DBML_HEADER_PREFIX)).toBe(true);
-    expect(classifySemanticFile('gold/diagrams/sales.dbml', { ...LIBRARY, firstLine: DBML_RICH_EXPORT_HEADER })).toEqual({
+    expect(classifySemanticFile('gold/diagrams/sales.dbml', LIBRARY)).toEqual({
       kind: 'diagram', storage: 'dbml', layer: 'gold', name: 'sales',
     });
-    expect(classifySemanticFile('gold/sales.dbml', { ...LIBRARY, firstLine: 'Project sales {' })).toEqual(LEGACY_DIAGRAM);
+    expect(classifySemanticFile('gold/sales.dbml', LIBRARY)).toEqual(LEGACY_DIAGRAM);
   });
 
   it('normalises ./ and inner .. before classifying', () => {

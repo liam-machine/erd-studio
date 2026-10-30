@@ -12,6 +12,7 @@ import {
   validateColumnDefs,
   validateTableName,
   validateTableNameSafety,
+  validateNewDbmlTableName,
   validateAnnotationPositions,
   validateAnnotationUpdate,
   validatePoint,
@@ -398,5 +399,15 @@ describe('validateExtraPairs — a composite key\'s other column pairs (#133 L2)
     expect(validateMarkKey({ model: 'sat', columns: ['load_date', 'HK'] }, composite)).toBeNull();
     expect(validateMarkKey({ model: 'sat', columns: ['hk'] }, composite)).not.toBeNull();
     expect(validateRelationshipEnds({ ...composite, toModel: 'pit', extraPairs: [{ fromColumn: 'as_of', toColumn: 'AS_OF' }] })).toBe("a column can't point at itself.");
+  });
+});
+
+describe('validateNewDbmlTableName (the layer-first tree reserves no table name)', () => {
+  it('keeps the path-safety rule only: `_relationships` is an ordinary name', () => {
+    expect(validateNewDbmlTableName('_relationships')).toBeNull();
+    expect(validateNewDbmlTableName('_Relationships')).toBeNull();
+    expect(validateNewDbmlTableName('dim_customer')).toBeNull();
+    expect(validateNewDbmlTableName('../x')).toBe(validateTableNameSafety('../x'));
+    expect(validateNewDbmlTableName('')).not.toBeNull();
   });
 });

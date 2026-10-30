@@ -48,8 +48,7 @@ export function readDbmlConversionInput(workspaceRoot: string, semanticDir: stri
   const add = (rel: string, inLibrary = false): void => {
     const read = readText(path.join(semanticRoot, ...rel.split('/')));
     if (read === null) return;
-    const firstLine = rel.toLowerCase().endsWith('.dbml') ? read.text.split(/\r?\n/)[0] : undefined;
-    const cls = classifySemanticFile(rel, { tablesDirIsLayer: tablesIsLayer, ...(firstLine !== undefined ? { firstLine } : {}) });
+    const cls = classifySemanticFile(rel, { tablesDirIsLayer: tablesIsLayer });
     if (cls.kind === 'other' && inLibrary) {
       const name = misnamedTableName(rel, read.text);
       if (name !== undefined) misnamedTables.push({ path: rel, name });

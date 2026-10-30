@@ -1,21 +1,28 @@
 /**
  * The table library's name → file index: one listing of `logical-models/`
- * and `tables/` (the top level and one folder down), from which every
+ * and `tables/` (the YAML libraries: the top level and one folder down) and
+ * of the layer-first DBML tree (`<layer>/tables/<schema>/` and
+ * `<layer>/relationships/` of every DBML layer folder), from which every
  * lookup `TableLibraryService` makes is answered without touching the disk
  * again — which file holds a name (§3.4's order), every table file with its
  * folder, storage and duplicates (`listTableFiles`), the relationships
  * files, the library folders, and whether `tables/` is a layer.
  *
  * Self-validating: the index keeps the signature (inode, mtime, size) of
- * every directory it listed and of `layers.json`, taken just before each was
- * read. A file added, removed or renamed in a library directory changes that
- * directory's mtime, so a lookup re-stats that handful of paths and rebuilds
- * the index when any differs — an AI assistant writing files, a `git
- * checkout` or another window is seen without any watcher event. A
+ * every directory it listed, of each DBML layer folder (so a later
+ * `mkdir <layer>/tables` is seen) and of `layers.json`, taken just before
+ * each was read. A file added, removed or renamed in a library directory
+ * changes that directory's mtime, so a lookup re-stats that handful of paths
+ * and rebuilds the index when any differs — an AI assistant writing files, a
+ * `git checkout` or another window is seen without any watcher event. A
  * directory changed within {@link RACY_MS} of a build ({@link COARSE_RACY_MS}
  * on a whole-second file system) is "racy" (a file system's clock may give
  * two changes in one tick the same mtime), and the index is rebuilt on its
  * next use until no directory is ({@link isRacyBuild}).
+ *
+ * Listing cost: the semantic dir once; a library folder only when it exists
+ * (a `stat` says so), so a YAML project lists no DBML folder and a DBML
+ * project lists `1 + layers × (2 + schemas)` directories.
  *
  * No `vscode`: the CLI bundles it.
  */
@@ -23,7 +30,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, TABLES_DIR, classifySemanticFile, isLibraryFolderName } from '@erd-studio/core';
+import { LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RELATIONSHIPS_DIR, TABLES_DIR, classifySemanticFile, isDbmlLayerName, isLibraryFolderName } from '@erd-studio/core';
 import type { TableFileEntry } from './logicalModelService';
 import { createLogger } from './logger';
 
@@ -58,32 +65,23 @@ export function foldersOf(listing: readonly ListedName[] | null): string[] {
 }
 
 /**
- * Whether `tables/` holds DBML evidence: a `*.dbml` file at the top level or
- * a `*.dbml` entry one folder down (no content sniff). `top` is the listing
- * of `tables/`, `namesIn` lists a folder of it (null when it cannot be).
+ * `tablesDirIsLayer`'s rule over a listing of `tables/` (see that function):
+ * it holds a subject area file (`tables/*.json`) or `layers.json` lists a
+ * `tables` layer. A `.dbml` there (a 1.9 pre-release leftover) changes nothing.
  */
-export function hasDbmlEvidence(top: readonly ListedName[] | null, namesIn: (folder: string) => readonly string[] | null): boolean {
+export function isLayerFolder(top: readonly ListedName[] | null, layersListTables: boolean): boolean {
   if (top === null) return false;
-  return top.some((d) =>
-    (d.file && d.name.endsWith('.dbml')) ||
-    (d.dir && isLibraryFolderName(d.name) && (namesIn(d.name) ?? []).some((f) => f.endsWith('.dbml'))));
-}
-
-/** `tablesDirIsLayer`'s rule over a listing of `tables/` (see that function). */
-export function isLayerFolder(top: readonly ListedName[] | null, hasDbml: boolean, layersListTables: boolean): boolean {
-  if (top === null) return false;
-  const json = top.some((d) => d.file && d.name.endsWith('.json'));
-  return hasDbml ? json && layersListTables : json || layersListTables;
+  return top.some((d) => d.file && d.name.endsWith('.json')) || layersListTables;
 }
 
 /**
  * `hasTablesLibrary`'s rule: `tables/` exists, is not a layer, and holds a
- * table file (`*.yml`, `*.dbml`) at the top or one folder down. A folder that
- * cannot be listed answers false, as the reader that threw did.
+ * `*.yml` table file at the top or one folder down. A folder that cannot be
+ * listed answers false, as the reader that threw did.
  */
 export function holdsTableFiles(top: readonly ListedName[] | null, namesIn: (folder: string) => readonly string[] | null): boolean {
   if (top === null) return false;
-  const isTableFile = (name: string): boolean => name.endsWith('.yml') || name.endsWith('.dbml');
+  const isTableFile = (name: string): boolean => name.endsWith('.yml');
   for (const d of top) {
     if (d.file && isTableFile(d.name)) return true;
     if (d.dir && !d.name.startsWith('.')) {
@@ -106,13 +104,25 @@ export function layersListTables(semanticRoot: string): boolean {
   }
 }
 
+/** {@link statSignature}'s signature for a path that does not exist. */
+const ABSENT_SIGNATURE = '-';
+
 /** A directory's or file's signature (inode, mtime, size), or `-` when it cannot be stat'ed. */
-function statSignature(filePath: string): { sig: string; mtimeMs: number } {
+function statSignature(filePath: string): { sig: string; mtimeMs: number; dir: boolean } {
   try {
     const stat = fs.statSync(filePath);
-    return { sig: `${stat.ino}:${stat.mtimeMs}:${stat.size}`, mtimeMs: stat.mtimeMs };
+    return { sig: `${stat.ino}:${stat.mtimeMs}:${stat.size}`, mtimeMs: stat.mtimeMs, dir: stat.isDirectory() };
   } catch {
-    return { sig: '-', mtimeMs: 0 };
+    return { sig: ABSENT_SIGNATURE, mtimeMs: 0, dir: false };
+  }
+}
+
+/** Whether `p` is a directory (a `stat`, never a listing). */
+function isDirectory(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
   }
 }
 
@@ -164,12 +174,32 @@ interface LookupDir {
 /** One library directory as listed. */
 interface LibraryScan {
   readonly dir: string;
-  /** The path exists (`existsSync`). */
+  /** The path exists (a `stat`). */
   readonly exists: boolean;
   readonly top: ListedName[] | null;
   readonly folders: string[];
   /** Each folder's listing (null when it cannot be listed). */
   readonly folderListings: Map<string, ListedName[] | null>;
+}
+
+/** One DBML layer folder of the semantic dir, as the index listed it. */
+export interface DbmlLayerListing {
+  /** The layer folder, as listed (a layer id: `isDbmlLayerName`). */
+  readonly layer: string;
+  /** `<layer>/tables/`'s schema folders, sorted (`compareNames`); empty when it has none or does not exist. */
+  readonly schemas: readonly string[];
+  /** `<layer>/tables/` exists. */
+  readonly hasTables: boolean;
+  /** `<layer>/relationships/` exists. */
+  readonly hasRelationships: boolean;
+}
+
+/** A DBML layer's scan: its `tables/` library (one schema folder deep) and its `relationships/` listing. */
+interface LayerScan {
+  readonly layer: string;
+  readonly tables: LibraryScan | null;
+  readonly relationshipsDir: string;
+  readonly relationships: ListedName[] | null;
 }
 
 /** Everything the index answers, built from one listing. */
@@ -186,8 +216,10 @@ export interface TableLibraryIndexData {
   readonly v6IsLibrary: boolean;
   /** `listTableFiles`. */
   readonly entries: readonly TableFileEntry[];
-  /** `listRelationshipsFiles`. */
+  /** `listRelationshipsFiles`: every `<layer>/relationships/*.dbml`, by path in byte order. */
   readonly relationshipsFiles: readonly string[];
+  /** Every DBML layer folder of the semantic dir (`isDbmlLayerName`), sorted (`compareNames`). */
+  readonly dbmlLayers: readonly DbmlLayerListing[];
   /** Every listed table file's absolute path (shadowed ones included). */
   readonly tableFiles: ReadonlySet<string>;
   /** Trimmed lower-case name → the first entry's spelling (`findTableNameIgnoringCase`). */
@@ -282,9 +314,10 @@ export class TableLibraryIndex {
 
   /**
    * The file holding `name` in §3.4's order: `logical-models/` top level then
-   * folders, then `tables/` top level then folders, `.dbml` before `.yml` in
-   * each; the exact spelling first, then any case. Null when none does.
-   * The caller has checked that `name` is path-safe.
+   * folders, then `tables/` top level then folders (YAML), then each DBML
+   * layer's schema folders (`<layer>/tables/<schema>/`, layers and schemas
+   * in `compareNames` order); the exact spelling first, then any case. Null
+   * when none does. The caller has checked that `name` is path-safe.
    */
   find(name: string): string | null {
     const exactFile = (ext: string): string => `${name}${ext}`;
@@ -312,37 +345,62 @@ export class TableLibraryIndex {
     const paths: string[] = [];
     const sigs: string[] = [];
     let newest = 0;
+    const root = path.resolve(this.semanticRoot);
     // Each path is stat'ed just BEFORE it is read, so a change made while the
     // index is being built shows as a different signature on the next use.
-    const record = (p: string): void => {
-      const { sig, mtimeMs } = statSignature(p);
+    // The semantic dir is stat'ed first, so an absent direct child of it
+    // (`layers.json`, `logical-models/`, `tables/`) needs no signature of its
+    // own: creating it changes the semantic dir's. That keeps a YAML
+    // project's per-lookup check at about its pre-2.0 size.
+    const record = (p: string): boolean => {
+      const { sig, mtimeMs, dir } = statSignature(p);
+      if (sig === ABSENT_SIGNATURE && paths.length > 0 && path.resolve(path.dirname(p)) === root) return dir;
       paths.push(p);
       sigs.push(sig);
       newest = Math.max(newest, mtimeMs);
+      return dir;
     };
+    // The layer-first DBML tree's top level: a new layer folder changes it.
+    record(root);
     record(path.join(this.semanticRoot, LAYERS_CONFIG_FILE));
     const listsTables = layersListTables(this.semanticRoot);
-    const scan = (dir: string): LibraryScan => {
-      record(dir);
-      const exists = fs.existsSync(dir);
-      const top = listDir(dir);
-      const folders = foldersOf(top);
+    // A library folder: listed (and its non-dot folders) only when the stat says it is a directory.
+    const scan = (dir: string, foldersShown: (name: string) => boolean = (n) => !n.startsWith('.')): LibraryScan => {
+      const exists = record(dir);
+      const top = exists ? listDir(dir) : null;
+      const folders = foldersOf(top).filter(foldersShown);
       const folderListings = new Map<string, ListedName[] | null>();
-      // Every sub-directory a rule may look into (dot-folders included, for `hasDbmlEvidence`).
-      for (const d of top ?? []) {
-        if (!d.dir) continue;
-        const folderDir = path.join(dir, d.name);
+      for (const folder of folders) {
+        const folderDir = path.join(dir, folder);
         record(folderDir);
-        folderListings.set(d.name, listDir(folderDir));
+        folderListings.set(folder, listDir(folderDir));
       }
       return { dir, exists, top, folders, folderListings };
     };
     const v5 = scan(this.v5Dir);
     const v6 = scan(this.v6Dir);
     const namesIn = (folder: string): string[] | null => v6.folderListings.get(folder)?.map((d) => d.name) ?? null;
-    const v6HasDbml = hasDbmlEvidence(v6.top, namesIn);
-    const v6IsLayer = isLayerFolder(v6.top, v6HasDbml, listsTables);
+    const v6IsLayer = isLayerFolder(v6.top, listsTables);
     const v6IsLibrary = v6.exists && !v6IsLayer && holdsTableFiles(v6.top, namesIn);
+
+    // The layer-first DBML tree: every top-level folder with a layer's name
+    // (the semantic dir was stat'ed first, above).
+    const layerNames = (listDir(root) ?? []).filter((d) => d.dir && isDbmlLayerName(d.name)).map((d) => d.name).sort(compareNames);
+    const layers: LayerScan[] = [];
+    for (const layer of layerNames) {
+      const layerDir = path.join(root, layer);
+      // A stat of the layer: a `tables/` or `relationships/` made later changes it.
+      record(layerDir);
+      const tablesDir = path.join(layerDir, TABLES_DIR);
+      const tables = isDirectory(tablesDir) ? scan(tablesDir, isLibraryFolderName) : null;
+      const relationshipsDir = path.join(layerDir, RELATIONSHIPS_DIR);
+      let relationships: ListedName[] | null = null;
+      if (isDirectory(relationshipsDir)) {
+        record(relationshipsDir);
+        relationships = listDir(relationshipsDir);
+      }
+      layers.push({ layer, tables, relationshipsDir, relationships });
+    }
 
     const data: TableLibraryIndexData = {
       v5Exists: v5.exists,
@@ -351,9 +409,15 @@ export class TableLibraryIndex {
       v6Folders: v6.folders,
       v6IsLayer,
       v6IsLibrary,
-      ...this.entriesOf(v5, v6, v6IsLibrary),
-      relationshipsFiles: v6.exists && !v6IsLayer ? this.relationshipsFilesOf(v6) : [],
-      lookup: this.lookupOf(v5, v6, v6.exists && !v6IsLayer),
+      ...this.entriesOf(v5, v6, v6IsLibrary, layers),
+      relationshipsFiles: this.relationshipsFilesOf(layers),
+      dbmlLayers: layers.map((l) => ({
+        layer: l.layer,
+        schemas: l.tables?.folders ?? [],
+        hasTables: l.tables !== null,
+        hasRelationships: l.relationships !== null,
+      })),
+      lookup: this.lookupOf(v5, v6, v6.exists && !v6IsLayer, layers),
     };
     this.data = data;
     this.validation = { paths, sigs, racy: isRacyBuild(newest, startedAt) };
@@ -367,57 +431,55 @@ export class TableLibraryIndex {
     return folder === '' ? scan.top : scan.folderListings.get(folder) ?? null;
   }
 
-  /** What the single classifier says of a file in a library (with `tables/` read as the library). */
+  /**
+   * What the single classifier says of a file in a library: `library` is the
+   * library's path relative to the semantic dir (`logical-models`, `tables`,
+   * `<layer>/tables`), with `tables/` read as the YAML library.
+   */
   private classify(library: string, folder: string, file: string): ReturnType<typeof classifySemanticFile> {
     return classifySemanticFile(folder === '' ? `${library}/${file}` : `${library}/${folder}/${file}`, { tablesDirIsLayer: false });
   }
 
   /**
-   * `listTableFiles`: the top level first, then each folder in order,
-   * `logical-models/` before `tables/` (listed only while it is the
-   * library); a name seen before is `shadowedBy` the first file.
+   * `listTableFiles`: `logical-models/` (the top level first, then each
+   * folder in order), then `tables/` (listed only while it is the YAML
+   * library), then each DBML layer's schema folders (`<layer>/tables/<schema>/`,
+   * layers and schemas in `compareNames` order); a name seen before is
+   * `shadowedBy` the first file.
    */
-  private entriesOf(v5: LibraryScan, v6: LibraryScan, v6IsLibrary: boolean): Pick<TableLibraryIndexData, 'entries' | 'tableFiles' | 'firstNameByKey'> {
+  private entriesOf(v5: LibraryScan, v6: LibraryScan, v6IsLibrary: boolean, layers: readonly LayerScan[]): Pick<TableLibraryIndexData, 'entries' | 'tableFiles' | 'firstNameByKey'> {
     const entries: TableFileEntry[] = [];
+    // Exact name → winner (within the YAML libraries a name matches exactly),
+    // and lower-case name → the first winner: a `tables/` file of the same
+    // name in any case is shadowed by `logical-models/` (#162), and a `.dbml`
+    // table's name is compared without case (D2) against every file before it.
     const winners = new Map<string, string>();
-    // `logical-models/`'s files by lower-case name: a `tables/` file of the
-    // same name in any case is shadowed by it (#162). Within one library
-    // the match stays exact for YAML; a `.dbml` table's name is compared
-    // without case (D2), so within `tables/` any pair involving a `.dbml`
-    // file is matched by its lower-case name.
     const v5Winners = new Map<string, string>();
-    const dbmlWinners = new Map<string, { filePath: string; dbml: boolean }>();
-    let library: typeof TABLES_DIR | undefined;
-    const add = (scan: LibraryScan, libraryName: string, folder: string): void => {
+    const anyWinners = new Map<string, string>();
+    const add = (scan: LibraryScan, libraryName: string, folder: string, phase: 'v5' | 'v6' | 'dbml', layer?: string): void => {
       const listing = this.listingOf(scan, folder);
       if (listing === null) return;
       const dir = folder === '' ? scan.dir : path.join(scan.dir, folder);
       const files = listing
         .filter((d) => d.file)
         .flatMap((d): Array<{ file: string; name: string; storage: 'yaml' | 'dbml' }> => {
-          // The single classifier (D10): a `.yml` in either library, a
-          // `.dbml` only in `tables/` and never a relationships file.
+          // The single classifier (D10): a `.yml` in a YAML library, a `.dbml` in a schema folder.
           const kind = this.classify(libraryName, folder, d.name);
           return kind.kind === 'table' && kind.name !== undefined && (kind.storage === 'yaml' || kind.storage === 'dbml')
             ? [{ file: d.name, name: kind.name, storage: kind.storage }]
             : [];
         })
-        // Within one directory a `.dbml` is listed (and wins) before a `.yml` of the same name (§3.4).
-        .sort((a, b) => a.name.toLowerCase() === b.name.toLowerCase() && a.storage !== b.storage
-          ? (a.storage === 'dbml' ? -1 : 1)
-          : compareNames(a.file, b.file));
+        .sort((a, b) => compareNames(a.file, b.file));
       for (const { file, name, storage } of files) {
         const filePath = path.join(dir, file);
         const lower = name.toLowerCase();
-        const dbmlWinner = dbmlWinners.get(lower);
         const winner = winners.get(name)
-          ?? (library ? v5Winners.get(lower) : undefined)
-          ?? (dbmlWinner && (storage === 'dbml' || dbmlWinner.dbml) ? dbmlWinner.filePath : undefined);
-        const tag = library ? { library } : {};
+          ?? (phase === 'v6' ? v5Winners.get(lower) : phase === 'dbml' ? anyWinners.get(lower) : undefined);
+        const tag: Pick<TableFileEntry, 'library' | 'layer'> = phase === 'v6' ? { library: TABLES_DIR } : layer !== undefined ? { layer } : {};
         if (winner === undefined) {
           winners.set(name, filePath);
-          if (!library) v5Winners.set(lower, filePath);
-          else if (!dbmlWinners.has(lower)) dbmlWinners.set(lower, { filePath, dbml: storage === 'dbml' });
+          if (phase === 'v5') v5Winners.set(lower, filePath);
+          if (!anyWinners.has(lower)) anyWinners.set(lower, filePath);
           entries.push({ name, folder, filePath, storage, ...tag });
         } else {
           entries.push({ name, folder, filePath, shadowedBy: winner, storage, ...tag });
@@ -425,13 +487,16 @@ export class TableLibraryIndex {
       }
     };
     if (v5.exists) {
-      add(v5, LOGICAL_MODELS_DIR, '');
-      for (const folder of v5.folders) add(v5, LOGICAL_MODELS_DIR, folder);
+      add(v5, LOGICAL_MODELS_DIR, '', 'v5');
+      for (const folder of v5.folders) add(v5, LOGICAL_MODELS_DIR, folder, 'v5');
     }
     if (v6IsLibrary) {
-      library = TABLES_DIR;
-      add(v6, TABLES_DIR, '');
-      for (const folder of v6.folders) add(v6, TABLES_DIR, folder);
+      add(v6, TABLES_DIR, '', 'v6');
+      for (const folder of v6.folders) add(v6, TABLES_DIR, folder, 'v6');
+    }
+    for (const { layer, tables } of layers) {
+      if (tables === null) continue;
+      for (const schema of tables.folders) add(tables, `${layer}/${TABLES_DIR}`, schema, 'dbml', layer);
     }
     const firstNameByKey = new Map<string, string>();
     for (const entry of entries) {
@@ -441,21 +506,22 @@ export class TableLibraryIndex {
     return { entries, tableFiles: new Set(entries.map((e) => path.resolve(e.filePath))), firstNameByKey };
   }
 
-  /** `listRelationshipsFiles`: each `tables/` directory's relationships file (any case; the first sorted), top level first. */
-  private relationshipsFilesOf(v6: LibraryScan): string[] {
-    const out: string[] = [];
-    for (const folder of ['', ...v6.folders]) {
-      const file = (this.listingOf(v6, folder) ?? [])
-        .map((d) => d.name)
-        .filter((f) => this.classify(TABLES_DIR, folder, f).kind === 'relationships')
-        .sort(compareNames)[0];
-      if (file) out.push(path.join(folder === '' ? v6.dir : path.join(v6.dir, folder), file));
+  /** `listRelationshipsFiles`: every DBML layer's `relationships/*.dbml` (flat), by semantic-relative path in byte order. */
+  private relationshipsFilesOf(layers: readonly LayerScan[]): string[] {
+    const out: Array<{ rel: string; filePath: string }> = [];
+    for (const { layer, relationships, relationshipsDir } of layers) {
+      for (const d of relationships ?? []) {
+        if (!d.file && !d.link) continue;
+        const rel = `${layer}/${RELATIONSHIPS_DIR}/${d.name}`;
+        if (classifySemanticFile(rel, { tablesDirIsLayer: false }).kind !== 'relationships') continue;
+        out.push({ rel, filePath: path.join(relationshipsDir, d.name) });
+      }
     }
-    return out;
+    return out.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0)).map((r) => r.filePath);
   }
 
   /** The §3.4 lookup order, each directory's candidates indexed by exact file name and by name key. */
-  private lookupOf(v5: LibraryScan, v6: LibraryScan, readV6: boolean): LookupDir[] {
+  private lookupOf(v5: LibraryScan, v6: LibraryScan, readV6: boolean, layers: readonly LayerScan[]): LookupDir[] {
     const out: LookupDir[] = [];
     const add = (scan: LibraryScan, libraryName: string, folder: string, ext: '.yml' | '.dbml'): void => {
       const dir = path.join(path.resolve(scan.dir), folder);
@@ -476,12 +542,11 @@ export class TableLibraryIndex {
       }
       out.push({ dir, ext, exact, byKey });
     };
-    for (const folder of ['', ...v5.folders]) add(v5, LOGICAL_MODELS_DIR, folder, '.yml');
-    if (readV6) {
-      for (const folder of ['', ...v6.folders]) {
-        add(v6, TABLES_DIR, folder, '.dbml');
-        add(v6, TABLES_DIR, folder, '.yml');
-      }
+    if (v5.exists) for (const folder of ['', ...v5.folders]) add(v5, LOGICAL_MODELS_DIR, folder, '.yml');
+    if (readV6) for (const folder of ['', ...v6.folders]) add(v6, TABLES_DIR, folder, '.yml');
+    for (const { layer, tables } of layers) {
+      if (tables === null) continue;
+      for (const schema of tables.folders) add(tables, `${layer}/${TABLES_DIR}`, schema, '.dbml');
     }
     return out;
   }

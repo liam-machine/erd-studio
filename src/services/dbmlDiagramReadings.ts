@@ -7,9 +7,10 @@
  * again to save them. Core keeps a small cache of compiles, but reading a
  * large diagram's tables pushes the diagram out of it, so each of those
  * compiled the diagram afresh (twice each: as written and with its `use`
- * lines blanked). Keyed by the diagram's text and the two parts of its path
- * a reading depends on — its folder (the layer) and its stem (the name when
- * the Project has none) — so the canvas, which names the file
+ * lines blanked). Keyed by the diagram's text and the three parts of its path
+ * a reading depends on — its layer, its `diagrams/` folder (the base its
+ * `use` paths resolve against) and its stem (the name when the Project has
+ * none): `<layer>/diagrams/<name>` — so the canvas, which names the file
  * project-relative in its messages, and the domain service, which names it
  * absolute, share one reading; a changed file is always read again. A
  * failure is never remembered: it is thrown again, naming the caller's path.
@@ -34,14 +35,17 @@ const memo = new Map<string, DbmlSubjectAreaReading>();
 
 /**
  * What of `filePath` a successful reading depends on, as core's reader
- * splits it: the parent folder (the layer) and the file name without
- * `.dbml` (the fallback domain name), with either separator.
+ * splits it (`diagramPathOf`): the last three segments — the layer, the
+ * `diagrams` folder and the file name without `.dbml` (the fallback domain
+ * name) — with either separator.
  */
 export function readingPathKey(filePath: string): string {
   const segments = filePath.split(/[\\/]/).filter((s) => s !== '');
   const file = segments[segments.length - 1] ?? '';
   const stem = file.toLowerCase().endsWith('.dbml') ? file.slice(0, -'.dbml'.length) : file;
-  return `${segments.length >= 2 ? segments[segments.length - 2] : ''}/${stem}`;
+  const folders = segments.slice(Math.max(0, segments.length - 3), -1);
+  while (folders.length < 2) folders.unshift('');
+  return `${folders.join('/')}/${stem}`;
 }
 
 const keyOf = (text: string, filePath: string): string => `${readingPathKey(filePath)}\u0000${text}`;

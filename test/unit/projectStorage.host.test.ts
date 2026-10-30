@@ -10,7 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { TableLibraryService } from '../../src/services/logicalModelService';
-import { projectStorageOf, readFirstLine, subjectAreaStoragesIn } from '../../src/services/projectStorage';
+import { projectStorageOf, subjectAreaStoragesIn } from '../../src/services/projectStorage';
 
 let root: string;
 let semantic: string;
@@ -32,7 +32,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-const DBML_TABLE = 'Table dim_x {\n  id INT\n}\n';
+const DBML_TABLE = 'Table gold.dim_x {\n  id INT\n}\n';
 const JSON_DIAGRAM = JSON.stringify({ schemaVersion: 5, domain: 'sales', layer: 'gold', logical: { models: [] } });
 const DBML_DIAGRAM = "Project sales {\n  erd_schema_version: '7'\n}\n";
 
@@ -45,11 +45,18 @@ describe('projectStorageOf', () => {
   });
 
   it('DBML library files make it dbml; a relationships file alone counts', () => {
+    write('gold/relationships/gold.dbml', '// relationships\n');
+    expect(storage()).toBe('dbml');
+    write('gold/tables/gold/dim_x.dbml', DBML_TABLE);
+    write('gold/diagrams/sales.dbml', DBML_DIAGRAM);
+    expect(storage()).toBe('dbml');
+  });
+
+  it('a 1.9 pre-release tree is no DBML evidence (tables/*.dbml, tables/<f>/_relationships.dbml)', () => {
     write('tables/gold/_relationships.dbml', '// relationships\n');
-    expect(storage()).toBe('dbml');
     write('tables/dim_x.dbml', DBML_TABLE);
-    write('gold/sales.dbml', DBML_DIAGRAM);
-    expect(storage()).toBe('dbml');
+    write('logical-models/dim_y.yml', 'name: dim_y\n');
+    expect(storage()).toBe('yaml');
   });
 
   it('YAML evidence alone is yaml: a .yml table, an empty logical-models/, a JSON diagram', () => {
@@ -65,12 +72,12 @@ describe('projectStorageOf', () => {
 
   it('a .dbml diagram alone never makes a YAML project DBML', () => {
     write('logical-models/dim_x.yml', 'name: dim_x\n');
-    write('gold/sales.dbml', DBML_DIAGRAM);
+    write('gold/diagrams/sales.dbml', DBML_DIAGRAM);
     expect(storage()).toBe('yaml');
   });
 
   it('both kinds of evidence are mixed', () => {
-    write('tables/dim_x.dbml', DBML_TABLE);
+    write('gold/tables/gold/dim_x.dbml', DBML_TABLE);
     write('gold/finance.json', JSON_DIAGRAM);
     expect(storage()).toBe('mixed');
   });
@@ -78,30 +85,32 @@ describe('projectStorageOf', () => {
   it('a tables/ layer means yaml, whatever else is there', () => {
     write('tables/sales.json', JSON_DIAGRAM);
     write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'tables', label: 'T', abbreviation: 'T', color: '#888888', creatable: true, order: 1 }] }));
-    write('tables/dim_x.dbml', DBML_TABLE);
+    write('gold/tables/gold/dim_x.dbml', DBML_TABLE);
     expect(storage()).toBe('yaml');
   });
 
   it('an empty logical-models/ beside a DBML library says nothing (a migration leftover)', () => {
     fs.mkdirSync(path.join(semantic, 'logical-models'), { recursive: true });
-    write('tables/dim_x.dbml', DBML_TABLE);
+    write('gold/tables/gold/dim_x.dbml', DBML_TABLE);
     expect(storage()).toBe('dbml');
   });
 });
 
-describe('subjectAreaStoragesIn and readFirstLine', () => {
-  it('names each diagram\'s storage, skipping a rich export saved in a layer folder and the library', () => {
-    write('gold/sales.dbml', DBML_DIAGRAM);
+describe('subjectAreaStoragesIn', () => {
+  it('names each diagram\'s storage by its path: <layer>/*.json and <layer>/diagrams/*.dbml, never the library or a 1.9 diagram', () => {
+    write('gold/diagrams/sales.dbml', DBML_DIAGRAM);
     write('gold/finance.json', JSON_DIAGRAM);
     write('gold/export.dbml', '// erd-studio dbml-export v1\nTable x {\n  id INT\n}\n');
+    write('gold/tables/gold/dim_x.dbml', DBML_TABLE);
+    write('gold/relationships/gold.dbml', '// relationships\n');
     write('tables/dim_x.dbml', DBML_TABLE);
     write('templates/fact.json', '{}');
     expect(subjectAreaStoragesIn(semantic, false).sort()).toEqual(['dbml', 'json']);
   });
 
-  it('reads the first line only, without a line break, and undefined for a missing file', () => {
-    write('gold/a.dbml', 'first line\r\nsecond');
-    expect(readFirstLine(path.join(semantic, 'gold/a.dbml'))).toBe('first line');
-    expect(readFirstLine(path.join(semantic, 'gold/missing.dbml'))).toBeUndefined();
+  it('a YAML layer called diagrams holding JSON is listed as before', () => {
+    write('diagrams/sales.json', JSON_DIAGRAM);
+    write('relationships/links.json', JSON_DIAGRAM);
+    expect(subjectAreaStoragesIn(semantic, false)).toEqual(['json', 'json']);
   });
 });

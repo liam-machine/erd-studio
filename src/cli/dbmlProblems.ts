@@ -31,7 +31,7 @@ import type { DbmlFileOutline, ProjectStorage, Relationship } from '@erd-studio/
 import { erdLayoutEntrySpan, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, readErdLayoutDbml, usePathBetween } from '@erd-studio/core/dbml';
 import { listMisnamedTableFiles } from '../services/dbmlConversionFiles';
 import { compileDbmlFilesSeparately } from '../services/dbmlFileCompile';
-import { tablesDirIsLayer, tablesLayerConflict, TABLES_DIR } from '../services/logicalModelService';
+import { tablesDirIsLayer, TABLES_DIR } from '../services/logicalModelService';
 import type { CliContext } from './context';
 import { unreadableHint } from './diff';
 
@@ -74,6 +74,7 @@ const SEVERITY: Readonly<Record<string, 'error' | 'warning'>> = {
   nameCaseDrift: 'warning',
   pathWithSpace: 'warning',
   [FORMAT_CONFLICT_CODE]: 'error',
+  // 2.0-switch: S8b deletes the code: nothing reports it since S5 (the 1.9 tree is `legacyDbmlTree`'s).
   tablesLayerConflict: 'error',
   missingLayersConfig: 'warning',
   dbmlDiagramInYamlProject: 'warning',
@@ -135,8 +136,7 @@ function projectFiles(semanticRoot: string): ProjectFile[] {
     const abs = path.join(semanticRoot, ...relParts);
     const text = readText(abs);
     if (text === null) return;
-    const firstLine = text.split(/\r?\n/, 1)[0];
-    const cls = classifySemanticFile(rel, { tablesDirIsLayer: tablesIsLayer, firstLine });
+    const cls = classifySemanticFile(rel, { tablesDirIsLayer: tablesIsLayer });
     const kind = cls.kind === 'table' ? (cls.storage === 'dbml' ? 'table' : 'other')
       : cls.kind === 'relationships' || cls.kind === 'diagram' ? cls.kind : 'other';
     out.push({ rel, abs, text, kind });
@@ -212,8 +212,6 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
       });
     }
   }
-  const layerConflict = tablesLayerConflict(semanticRoot);
-  if (layerConflict) push({ file: projectRel(TABLES_DIR), code: 'tablesLayerConflict', message: layerConflict });
   if (library.length > 0 && !fs.existsSync(path.join(semanticRoot, 'layers.json'))) {
     push({
       file: ctx.semanticDir, code: 'missingLayersConfig',

@@ -44,12 +44,6 @@ export interface SemanticFileClass {
 export interface ClassifySemanticFileOptions {
   /** The project keeps a layer folder called `tables` (a pre-v6 project): it is then no table library. */
   tablesDirIsLayer: boolean;
-  /**
-   * Ignored: the layer-first tree tells a diagram from an export saved in
-   * the semantic dir by its path alone.
-   * @deprecated 2.0-switch: S5 removes it, with its callers.
-   */
-  firstLine?: string;
 }
 
 /**

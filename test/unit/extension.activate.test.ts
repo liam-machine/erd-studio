@@ -612,7 +612,7 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(listTree(ws)).toEqual(before);
     expect(fs.existsSync(path.join(ws, 'selectors.yml'))).toBe(false);
     const patterns = vscode._mockFileWatchers.map((w) => (w._pattern as vscode.RelativePattern).pattern);
-    expect(patterns).toEqual(['.erd-studio/**/*.{json,dbml}', '.erd-studio/{logical-models,tables}/**/*.{yml,dbml}']);
+    expect(patterns).toEqual(['.erd-studio/**/*.{json,dbml}', '.erd-studio/{logical-models,tables}/**/*.yml', '.erd-studio/*/tables/*/*.dbml']);
   });
 
   /** Activate in `ws` (holding the logical-only fixture) and open its diagram in the real editor provider. */
@@ -843,7 +843,7 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(listTree(ws)).toEqual(before);
 
     const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
-    const file = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    const file = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
     const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
     const panel = vscode.createMockWebviewPanel();
     await provider.resolveCustomTextEditor(
@@ -895,6 +895,7 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(featureOnce).toHaveBeenCalledWith('dbmlForeignFormatWarned');
 
     const yml = path.join(ws, '.erd-studio', 'tables', 'gold', 'dim_new.yml');
+    fs.mkdirSync(path.dirname(yml), { recursive: true });
     fs.writeFileSync(yml, 'name: dim_new\ncolumns: []\n');
     for (const w of vscode._mockFileWatchers) w._simulateCreate(vscode.Uri.file(yml));
     await vi.advanceTimersByTimeAsync(1_000);
@@ -909,7 +910,7 @@ describe('activate() in a native DBML project (S4)', () => {
     const deletedToasts = () => info.mock.calls.filter((c) => /subject area files? deleted/i.test(String(c[0])));
 
     // Undo of Convert Project to DBML: the .json comes back and the .dbml goes.
-    const salesDbml = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    const salesDbml = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
     fs.writeFileSync(path.join(ws, '.erd-studio', 'gold', 'sales.json'), '{"schemaVersion": 5, "domain": "sales", "layer": "gold", "logical": {"models": []}}\n');
     fs.rmSync(salesDbml);
     semanticWatcher()._simulateDelete(vscode.Uri.file(salesDbml));
@@ -917,7 +918,7 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(deletedToasts()).toHaveLength(0);
 
     // A diagram the user deletes: the toast, as before.
-    const staging = path.join(ws, '.erd-studio', 'silver', 'staging.dbml');
+    const staging = path.join(ws, '.erd-studio', 'silver', 'diagrams', 'staging.dbml');
     fs.rmSync(staging);
     semanticWatcher()._simulateDelete(vscode.Uri.file(staging));
     await vi.advanceTimersByTimeAsync(1_000);
@@ -932,7 +933,7 @@ describe('activate() in a native DBML project (S4)', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
     const tables = (provider as unknown as { tableLibraryService: { indexBuilds: number } }).tableLibraryService;
-    const file = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    const file = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
     const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
     const panel = vscode.createMockWebviewPanel();
     await provider.resolveCustomTextEditor(
@@ -951,13 +952,13 @@ describe('activate() in a native DBML project (S4)', () => {
     const sends = (): number => panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
     const sendsBefore = sends();
     const buildsBefore = tables.indexBuilds;
-    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{yml,dbml}'))!;
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('/tables/*/*.dbml'))!;
 
     // 300 table files appear over ~2.5 s, a few at a time, as VS Code's Undo writes them.
     const N = 300;
     for (let i = 0; i < N; i++) {
-      const tableFile = path.join(ws, '.erd-studio', 'tables', 'gold', `t_${i}.dbml`);
-      fs.writeFileSync(tableFile, `Table t_${i} {\n  id int [pk]\n}\n`);
+      const tableFile = path.join(ws, '.erd-studio', 'gold', 'tables', 'gold', `t_${i}.dbml`);
+      fs.writeFileSync(tableFile, `Table gold.t_${i} {\n  id int [pk]\n}\n`);
       tableWatcher._simulateCreate(vscode.Uri.file(tableFile));
       if (i % 10 === 9) await vi.advanceTimersByTimeAsync(80);
     }
@@ -972,15 +973,15 @@ describe('activate() in a native DBML project (S4)', () => {
   it('a burst of outside table-file deletions (Edit > Undo of Convert) whose folder changed just now builds the library index O(1) times, not once per table', async () => {
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     // 120 tables of the library, written before the window opened.
-    const gold = path.join(ws, '.erd-studio', 'tables', 'gold');
+    const gold = path.join(ws, '.erd-studio', 'gold', 'tables', 'gold');
     const N = 120;
     const tableFiles = Array.from({ length: N }, (_, i) => path.join(gold, `t_${i}.dbml`));
-    for (const [i, tableFile] of tableFiles.entries()) fs.writeFileSync(tableFile, `Table t_${i} {\n  id int [pk]\n}\n`);
+    for (const [i, tableFile] of tableFiles.entries()) fs.writeFileSync(tableFile, `Table gold.t_${i} {\n  id int [pk]\n}\n`);
     await activate(context);
     await vi.advanceTimersByTimeAsync(5_000);
     const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
     const tables = (provider as unknown as { tableLibraryService: { indexBuilds: number } }).tableLibraryService;
-    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{yml,dbml}'))!;
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('/tables/*/*.dbml'))!;
 
     // VS Code's Undo deletes them; the folder's mtime is a whole second (a
     // coarse file system clock), so every index built in the next 2 s is
@@ -1006,7 +1007,7 @@ describe('activate() in a native DBML project (S4)', () => {
     await activate(context);
     await vi.advanceTimersByTimeAsync(5_000);
     const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
-    const file = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    const file = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
     const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
     const panel = vscode.createMockWebviewPanel();
     await provider.resolveCustomTextEditor(
@@ -1018,13 +1019,13 @@ describe('activate() in a native DBML project (S4)', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     const sends = (): number => panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
     const sendsBefore = sends();
-    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{yml,dbml}'))!;
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('/tables/*/*.dbml'))!;
 
     const { ownWrites } = await import('../../src/services/ownWriteTracker');
     const ownBurst = (from: number): void => {
       for (let i = from; i < from + 40; i++) {
-        const tableFile = path.join(ws, '.erd-studio', 'tables', 'gold', `t_${i}.dbml`);
-        fs.writeFileSync(tableFile, `Table t_${i} {\n  id int [pk]\n}\n`);
+        const tableFile = path.join(ws, '.erd-studio', 'gold', 'tables', 'gold', `t_${i}.dbml`);
+        fs.writeFileSync(tableFile, `Table gold.t_${i} {\n  id int [pk]\n}\n`);
         ownWrites.recordWrite(tableFile);
         tableWatcher._simulateCreate(vscode.Uri.file(tableFile));
       }
@@ -1050,8 +1051,8 @@ describe('activate() in a native DBML project (S4)', () => {
     await activate(context);
     await vi.advanceTimersByTimeAsync(5_000);
     const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
-    const file = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
-    const otherFile = path.join(ws, '.erd-studio', 'silver', 'staging.dbml');
+    const file = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
+    const otherFile = path.join(ws, '.erd-studio', 'silver', 'diagrams', 'staging.dbml');
     const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
     const otherDoc = vscode.createMockTextDocument(otherFile, fs.readFileSync(otherFile, 'utf-8'));
     vscode.workspace.textDocuments.push(otherDoc);
@@ -1065,13 +1066,13 @@ describe('activate() in a native DBML project (S4)', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     const sends = (): number => panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
     const sendsBefore = sends();
-    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{yml,dbml}'))!;
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('/tables/*/*.dbml'))!;
     const { ownWrites } = await import('../../src/services/ownWriteTracker');
 
     // A big edit's own writes (a rename across many tables): a bulk change, which holds the canvas.
     for (let i = 0; i < 40; i++) {
-      const tableFile = path.join(ws, '.erd-studio', 'tables', 'gold', `t_${i}.dbml`);
-      fs.writeFileSync(tableFile, `Table t_${i} {\n  id int [pk]\n}\n`);
+      const tableFile = path.join(ws, '.erd-studio', 'gold', 'tables', 'gold', `t_${i}.dbml`);
+      fs.writeFileSync(tableFile, `Table gold.t_${i} {\n  id int [pk]\n}\n`);
       ownWrites.recordWrite(tableFile);
       tableWatcher._simulateCreate(vscode.Uri.file(tableFile));
     }
@@ -1093,9 +1094,9 @@ describe('activate() in a native DBML project (S4)', () => {
   });
 
   it('the foreign-format toast is not raised outside a DBML project', async () => {
-    fs.rmSync(path.join(ws, '.erd-studio', 'tables'), { recursive: true, force: true });
-    fs.rmSync(path.join(ws, '.erd-studio', 'gold', 'sales.dbml'));
-    fs.rmSync(path.join(ws, '.erd-studio', 'silver', 'staging.dbml'));
+    for (const layer of ['gold', 'silver']) {
+      for (const dir of ['tables', 'relationships', 'diagrams']) fs.rmSync(path.join(ws, '.erd-studio', layer, dir), { recursive: true, force: true });
+    }
     fs.mkdirSync(path.join(ws, '.erd-studio', 'logical-models'), { recursive: true });
     fs.writeFileSync(path.join(ws, '.erd-studio', 'logical-models', 'dim_a.yml'), 'name: dim_a\ncolumns: []\n');
     await activate(context);
@@ -1113,7 +1114,7 @@ describe('activate() in a native DBML project (S4)', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
     const refresh = vi.spyOn(provider, 'refreshSubjectAreaPanel').mockResolvedValue(undefined as never);
-    const diagram = path.join(ws, '.erd-studio', 'gold', 'sales.dbml');
+    const diagram = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
     semanticWatcher()._simulateChange(vscode.Uri.file(diagram));
     await vi.advanceTimersByTimeAsync(1_000);
     expect(refresh).not.toHaveBeenCalled();
@@ -1138,19 +1139,63 @@ describe('activate() in a native DBML project (S4)', () => {
     semanticWatcher()._simulateChange(vscode.Uri.file(path.join(ws, '.erd-studio', 'gold', 'sales.dbdiagram')));
     await vi.advanceTimersByTimeAsync(1_000);
     expect(refreshes).toBe(0);
-    semanticWatcher()._simulateChange(vscode.Uri.file(path.join(ws, '.erd-studio', 'gold', 'sales.dbml')));
+    semanticWatcher()._simulateChange(vscode.Uri.file(path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml')));
     await vi.advanceTimersByTimeAsync(1_000);
     expect(refreshes).toBeGreaterThan(0);
   });
 
-  it('warns once about tablesLayerConflict when layers.json also lists tables', async () => {
+  it('a tables layer in layers.json is no conflict any more: no toast (the DBML tree lives under the layers)', async () => {
     const layersFile = path.join(ws, '.erd-studio', 'layers.json');
     const layers = JSON.parse(fs.readFileSync(layersFile, 'utf-8'));
     layers.layers.push({ id: 'tables', label: 'Tables', abbreviation: 'TBL', color: '#888888', creatable: true, order: 3 });
     fs.writeFileSync(layersFile, JSON.stringify(layers, null, 2));
     await activate(context);
-    const conflicts = warn.mock.calls.filter((c) => String(c[0]).includes('tables/ is the DBML table library'));
-    expect(conflicts).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('tables/'))).toEqual([]);
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('1.9 pre-release'))).toEqual([]);
+  });
+});
+
+describe('activate() in a 1.9 pre-release DBML tree (§1.8)', () => {
+  let ws: string;
+  beforeEach(() => {
+    ws = path.join(root, 'old');
+    fs.cpSync(path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-1.9-tree'), ws, { recursive: true });
+    openWorkspace(ws);
+  });
+
+  const legacyToasts = () => warn.mock.calls.filter((c) => String(c[0]).includes('written by an ERD Studio 1.9 pre-release'));
+
+  it('warns once per session, with the steps, however often the context keys refresh; reads no 1.9 file as a table', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    const before = listTree(ws);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(legacyToasts()).toHaveLength(1);
+    const message = String(legacyToasts()[0][0]);
+    expect(message.startsWith("ERD Studio: This project's DBML files were written by an ERD Studio 1.9 pre-release")).toBe(true);
+    expect(message).toContain('gold/sales.dbdiagram');
+    expect(message).toContain('Then run ERD Studio: Convert Project to DBML again.');
+    // More refreshes (a layer added, a file changed) never repeat it.
+    const layersJson = vscode.Uri.file(path.join(ws, '.erd-studio', 'layers.json'));
+    for (let i = 0; i < 3; i++) {
+      for (const w of vscode._mockFileWatchers) w._simulateChange(layersJson);
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    expect(legacyToasts()).toHaveLength(1);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const library = (provider as unknown as { tableLibraryService: { listTableFiles(): unknown[]; listRelationshipsFiles(): unknown[] } }).tableLibraryService;
+    expect(library.listTableFiles()).toEqual([]);
+    expect(library.listRelationshipsFiles()).toEqual([]);
+    expect(listTree(ws)).toEqual(before);
+  });
+
+  it('a project in the layer-first tree gets no 1.9 toast', async () => {
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.cpSync(path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native'), ws, { recursive: true });
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(legacyToasts()).toHaveLength(0);
   });
 });
 

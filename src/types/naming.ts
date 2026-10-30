@@ -22,9 +22,11 @@ export const TABLE_NAME_RULE =
   'Table name must start with a letter and use only letters, numbers, and underscores.';
 
 /**
- * Why a new or renamed `.dbml` table may not be called `_relationships` (any
- * case): it is the name of each library folder's relationships file (§2.1 of
- * docs/plans/native-dbml-storage.md).
+ * Why the 1.9 pre-release refused a `.dbml` table called `_relationships`
+ * (any case): it was the name of each library folder's relationships file.
+ * The layer-first tree reserves no table name; no create path the user
+ * types into refuses it any more.
+ * @deprecated 2.0-switch: S8b deletes it with its last callers (`dbmlLibraryWrites`, `drawFromDbt`, `importDbml`).
  */
 export const RESERVED_TABLE_NAME_MESSAGE = '‘_relationships’ is the name of the relationships file; choose another table name.';
 

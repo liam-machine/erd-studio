@@ -17,8 +17,8 @@ import { Document, Pair, YAMLMap, YAMLSeq, parseDocument, isAlias, isMap, isNode
 import type { Alias, Node, Scalar, ScalarTag, Tags } from 'yaml';
 
 import {
-  DBML_RELATIONSHIPS_FILE_NAME, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, TABLES_DIR, TableDbmlError, classifySemanticFile, classifyTableLoadError,
-  dbmlName, isLibraryFolderName, tableLoadWarningOf, parseTableText, writesDbml, writesTableNaming,
+  DBML_RELATIONSHIPS_FILE_NAME, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, RELATIONSHIPS_DIR, TABLES_DIR, TableDbmlError, classifySemanticFile, classifyTableLoadError,
+  dbmlName, dbmlTablePath, isDbmlLayerName, isLibraryFolderName, tableLoadWarningOf, parseTableText, writesDbml, writesTableNaming,
 } from '@erd-studio/core';
 import { attachRelationships, dbmlTableLookup, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
 import { projectNamingOf } from './projectNaming';
@@ -38,7 +38,7 @@ import { planDbmlLibraryWrites } from './dbmlLibraryWrites';
 import type { DbmlLibraryOps, DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
 import { dropRelationshipsTo } from './libraryRelationships';
 import { memberAttachment } from './memberAttachment';
-import { TableLibraryIndex, foldersOf, hasDbmlEvidence, holdsTableFiles, isLayerFolder, layersListTables, listDir } from './tableLibraryIndex';
+import { TableLibraryIndex, foldersOf, holdsTableFiles, isLayerFolder, layersListTables, listDir } from './tableLibraryIndex';
 import { log } from './logger';
 
 /** Table file writes an editor edit bundles with its diagram change (one WorkspaceEdit). */
@@ -53,21 +53,6 @@ export interface TableFileOps {
 // @erd-studio/core; re-exported so existing imports of this module keep working.
 export { LOGICAL_MODELS_DIR, TABLES_DIR } from '@erd-studio/core';
 
-/**
- * Whether `{semanticRoot}/tables/` holds DBML evidence: a `*.dbml` file at
- * the top level or one folder down (a table or a relationships file; no
- * content sniff). Native DBML storage's library is always `tables/` (§3.3).
- */
-export function tablesDirHasDbml(semanticRoot: string): boolean {
-  const dir = path.join(semanticRoot, TABLES_DIR);
-  return hasDbmlEvidence(listDir(dir), (folder) => listNamesOrNull(path.join(dir, folder)));
-}
-
-/** The names in `dir`, or none when it cannot be listed. */
-function listNames(dir: string): string[] {
-  return listNamesOrNull(dir) ?? [];
-}
-
 /** The names in `dir`, or null when it cannot be listed. */
 function listNamesOrNull(dir: string): string[] | null {
   try {
@@ -78,60 +63,24 @@ function listNamesOrNull(dir: string): string[] | null {
 }
 
 /**
- * Whether `{semanticRoot}/tables/` is a layer folder rather than the table
+ * Whether `{semanticRoot}/tables/` is a layer folder rather than v6's table
  * library (#162). A project made before v6 may have a layer called `tables`:
  * it is one when `layers.json` lists a layer with that id, or when the folder
  * holds a subject area file (`tables/*.json`). A library folder holds only
- * table files, at the top or one folder down. A folder that is a layer keeps
- * the project on v5 (it is never read as a library) until it is renamed.
- *
- * With DBML evidence in `tables/` (§3.3 of the native DBML storage spec) it
- * is the library unless BOTH hold: a `tables` entry in `layers.json` (which
- * a 1.x first-run prompt may have written) or a stray `tables/*.json` alone
- * does not make a DBML library a layer; `doctor` reports either as
- * `tablesLayerConflict`. `TableLibraryService` answers the same from its
- * index (`tableLibraryIndex.ts`, the same rules over one listing).
+ * `*.yml`, at the top or one folder down. A folder that is a layer keeps the
+ * project on v5 (it is never read as a library) until it is renamed. A
+ * `.dbml` there is a 1.9 pre-release leftover and changes nothing: the DBML
+ * tree lives under the layer folders. `TableLibraryService` answers the same
+ * from its index (`tableLibraryIndex.ts`, the same rules over one listing).
  */
 export function tablesDirIsLayer(semanticRoot: string): boolean {
-  const top = listDir(path.join(semanticRoot, TABLES_DIR));
-  if (top === null) return false;
-  return isLayerFolder(top, tablesDirHasDbml(semanticRoot), layersListTables(semanticRoot));
+  return isLayerFolder(listDir(path.join(semanticRoot, TABLES_DIR)), layersListTables(semanticRoot));
 }
 
 /**
- * The `tablesLayerConflict` text (§3.3) when `tables/` holds DBML evidence
- * and also looks like a layer (listed in `layers.json`, or holding a
- * `*.json`), else undefined. Shown once per session by the canvas and
- * reported as an error by `doctor`. Nothing reclassifies silently.
- */
-export function tablesLayerConflict(semanticRoot: string): string | undefined {
-  if (!tablesDirHasDbml(semanticRoot)) return undefined;
-  const dir = path.join(semanticRoot, TABLES_DIR);
-  const jsonFiles = listNames(dir).filter((f) => f.endsWith('.json')).sort((a, b) => a.localeCompare(b));
-  const listed = layersListTables(semanticRoot);
-  if (jsonFiles.length > 0 && listed) {
-    const dbmlFiles = [
-      ...listNames(dir).filter((f) => f.endsWith('.dbml')),
-      ...listNames(dir).filter((f) => isLibraryFolderName(f)).flatMap((f) => listNames(path.join(dir, f)).filter((g) => g.endsWith('.dbml')).map((g) => `${f}/${g}`)),
-    ].sort((a, b) => a.localeCompare(b)).map((f) => `tables/${f}`);
-    return `layers.json lists \`tables\` and tables/ holds diagrams, so tables/ is a layer and its DBML files are not read: ${dbmlFiles.join(', ')}. ` +
-      'Move them into the table library, or rename the tables layer.';
-  }
-  if (listed) {
-    return 'layers.json lists `tables`, but tables/ is the DBML table library. Remove the `tables` layer from layers.json.';
-  }
-  if (jsonFiles.length > 0) {
-    return `tables/ is the DBML table library, but it holds ${jsonFiles.map((f) => `tables/${f}`).join(', ')}, which ERD Studio ignores there. ` +
-      'Move them into a layer folder.';
-  }
-  return undefined;
-}
-
-/**
- * Whether `{semanticRoot}/tables/` is the table library: it holds a table
- * file — a `*.yml`, or a `*.dbml` (relationships files included) — at the
- * top level or one folder down, and is not a layer folder (see
- * {@link tablesDirIsLayer}).
+ * Whether `{semanticRoot}/tables/` is the v6 table library: it holds a table
+ * file (`*.yml`, top level or one folder down) and is not a layer folder
+ * (see {@link tablesDirIsLayer}).
  */
 export function hasTablesLibrary(semanticRoot: string): boolean {
   const dir = path.join(semanticRoot, TABLES_DIR);
@@ -246,8 +195,13 @@ function duplicateKeyFileError(name: string, filePath: string, warning: { key: s
 export interface TableFileEntry {
   /** Model name: the file stem as listed (a `.dbml` file's declared name may differ in case, D2). */
   readonly name: string;
-  /** Sub-folder under its library folder (`''` for a file at the top level). */
+  /**
+   * Sub-folder under its library folder (`''` for a file at the top level);
+   * a DBML table's schema folder (`<layer>/tables/<schema>/`).
+   */
   readonly folder: string;
+  /** A DBML table's layer folder (`<layer>/tables/<schema>/<name>.dbml`); absent for YAML. */
+  readonly layer?: string;
   /** Absolute path to the yml file. */
   readonly filePath: string;
   /**
@@ -263,9 +217,8 @@ export interface TableFileEntry {
    */
   readonly library?: typeof TABLES_DIR;
   /**
-   * How the file stores the table: `yaml` (`*.yml`) or `dbml` (`*.dbml`, only
-   * in `tables/`). Within one directory a `.dbml` wins over a `.yml` of the
-   * same name, which is then `shadowedBy` it (§3.4).
+   * How the file stores the table: `yaml` (`*.yml`, in `logical-models/` or
+   * `tables/`) or `dbml` (`<layer>/tables/<schema>/*.dbml`).
    */
   readonly storage: 'yaml' | 'dbml';
 }
@@ -652,6 +605,20 @@ export class TableLibraryService {
   }
 
   /**
+   * Whether a shadowed `entry` is a copy, in another kind of library, of a
+   * name an earlier library has: a `tables/` file shadowed by
+   * `logical-models/` (#181, the naming migration's conflict), or a DBML
+   * table shadowed by a YAML file (a project part-way through Convert).
+   * Reported with "keep one of the two files", never renamed by Give
+   * Duplicate Its Own Name. False for a duplicate within one library.
+   */
+  isCrossLibraryDuplicate(entry: Pick<TableFileEntry, 'shadowedBy' | 'library' | 'layer'>): boolean {
+    if (entry.shadowedBy === undefined) return false;
+    if (entry.layer !== undefined) return !/\.dbml$/i.test(entry.shadowedBy);
+    return entry.library === TABLES_DIR && !this.isTableNamingFile(entry.shadowedBy);
+  }
+
+  /**
    * `logical-models/…` or `tables/…`: a library file's path as messages name
    * it, relative to the semantic dir with `/` separators.
    */
@@ -675,7 +642,7 @@ export class TableLibraryService {
 
   /** Whether `logical-models/` holds a table file (an empty leftover folder says nothing, #182). */
   hasV5TableFiles(): boolean {
-    return this.listTableFiles().some((e) => !e.library);
+    return this.listTableFiles().some((e) => e.storage === 'yaml' && !e.library);
   }
 
   /** Whether `logical-models/` exists, empty or not. */
@@ -841,12 +808,20 @@ export class TableLibraryService {
     this.index.invalidate();
   }
 
-  /** Whether `filePath` (absolute) is inside `logical-models/` or `tables/`. */
+  /**
+   * Whether `filePath` (absolute) is inside `logical-models/` or `tables/`,
+   * or inside a DBML layer's `tables/` or `relationships/` folder.
+   */
   private isLibraryPath(filePath: string): boolean {
-    return [this.tablesDir, this.v6TablesDir].some((dir) => {
+    const inYaml = [this.tablesDir, this.v6TablesDir].some((dir) => {
       const rel = path.relative(path.resolve(dir), filePath);
       return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
     });
+    if (inYaml) return true;
+    const rel = path.relative(path.resolve(this.semanticRoot), filePath);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    const segments = rel.split(path.sep);
+    return segments.length >= 2 && isDbmlLayerName(segments[0]) && (segments[1] === TABLES_DIR || segments[1] === RELATIONSHIPS_DIR);
   }
 
   /** Drop every relationships file's cached reading (a relationships file changed on disk). */
@@ -950,9 +925,8 @@ export class TableLibraryService {
   }
 
   /**
-   * Every relationships file of the DBML library (`tables/[<folder>/]_relationships.dbml`,
-   * any case), top level first, then each folder alphabetically. None when
-   * `tables/` is a layer.
+   * Every relationships file of the DBML library (`<layer>/relationships/*.dbml`
+   * of every DBML layer folder), by path in byte order, from the index.
    */
   listRelationshipsFiles(): string[] {
     return [...this.index.get().relationshipsFiles];
@@ -1157,12 +1131,27 @@ export class TableLibraryService {
     return `${place}\0${own}`;
   }
 
-  /** Every library directory whose listing {@link libraryAttachment} depends on: both libraries and their folders. */
+  /**
+   * Every directory whose listing {@link libraryAttachment} depends on: both
+   * YAML libraries and their folders, the semantic dir and each DBML layer
+   * folder (a new layer, `tables/` or `relationships/`), and each layer's
+   * `tables/`, schema folders and `relationships/`.
+   */
   private libraryDirs(): string[] {
     const index = this.index.get();
     return [
       this.tablesDir, ...index.v5Folders.map((f) => path.join(this.tablesDir, f)),
       this.v6TablesDir, ...index.v6Folders.map((f) => path.join(this.v6TablesDir, f)),
+      this.semanticRoot,
+      ...index.dbmlLayers.flatMap((l) => {
+        const layerDir = path.join(this.semanticRoot, l.layer);
+        const tablesDir = path.join(layerDir, TABLES_DIR);
+        return [
+          layerDir,
+          ...(l.hasTables ? [tablesDir, ...l.schemas.map((schema) => path.join(tablesDir, schema))] : []),
+          ...(l.hasRelationships ? [path.join(layerDir, RELATIONSHIPS_DIR)] : []),
+        ];
+      }),
     ];
   }
 
@@ -1252,12 +1241,16 @@ export class TableLibraryService {
       }
       const name = model?.name ?? entry.name;
       const columns = (model?.columns ?? []).map((c) => c.name);
+      // A DBML table its file does not declare (it does not read) is spelled as its writer would: `<schema>.<name>`.
+      const dbmlTree = entry.storage === 'dbml' && entry.layer !== undefined;
+      const fallbackReference = dbmlTree ? `${dbmlName(entry.folder)}.${dbmlName(name)}` : dbmlName(name);
       tables.set(name.toLowerCase(), {
         name,
-        reference: reference ?? dbmlName(name),
+        reference: reference ?? fallbackReference,
         path: this.semanticRelative(entry.filePath),
         storage: entry.storage,
         folder: entry.folder,
+        ...(dbmlTree ? { layer: entry.layer, schema: entry.folder } : {}),
         columns,
         primaryKey: (model?.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name),
         ...(alias !== undefined ? { dbmlAlias: alias } : {}),
@@ -1382,18 +1375,21 @@ export class TableLibraryService {
   }
 
   /**
-   * Whether the project has a table library folder: `logical-models/`, or
-   * v6's `tables/` (#182) when it is not a layer folder.
+   * Whether the project has a table library folder: `logical-models/`, v6's
+   * `tables/` (#182) when it is not a layer folder, or a DBML layer's
+   * `tables/` (`<layer>/tables/`).
    */
   dirExists(): boolean {
     const index = this.index.get();
-    return index.v5Exists || (index.v6Exists && !index.v6IsLayer);
+    return index.v5Exists || (index.v6Exists && !index.v6IsLayer) || index.dbmlLayers.some((l) => l.hasTables);
   }
 
   /**
    * Ensure the logical-models directory exists, creating it if necessary.
    * Pass a model file path (from {@link tablePath}) to create its layer
-   * folder as well; a path outside the library is refused.
+   * folder as well; a path outside the library is refused. A file of the
+   * DBML tree creates its `<layer>/tables/<schema>/` or
+   * `<layer>/relationships/` folder.
    */
   ensureDir(forFile?: string): void {
     const inside = (root: string, dir: string): boolean => {
@@ -1401,6 +1397,10 @@ export class TableLibraryService {
       return !rel.startsWith('..') && !path.isAbsolute(rel);
     };
     const target = forFile === undefined ? undefined : path.dirname(path.resolve(forFile));
+    if (target !== undefined && this.isDbmlTreeDir(target)) {
+      if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true });
+      return;
+    }
     // Either library (#182): a v6 project's files are created in `tables/`.
     const root = [this.tablesDir, this.v6TablesDir].map((d) => path.resolve(d)).find((d) => target !== undefined && inside(d, target))
       ?? path.resolve(this.newTablesDir());
@@ -1411,6 +1411,45 @@ export class TableLibraryService {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
+  }
+
+  /** Whether `dir` (absolute) is a folder of the DBML tree: `<layer>/tables/<schema>` or `<layer>/relationships`. */
+  private isDbmlTreeDir(dir: string): boolean {
+    const rel = path.relative(path.resolve(this.semanticRoot), dir);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    const segments = rel.split(path.sep);
+    if (!isDbmlLayerName(segments[0])) return false;
+    return (segments.length === 3 && segments[1] === TABLES_DIR && isLibraryFolderName(segments[2]))
+      || (segments.length === 2 && segments[1] === RELATIONSHIPS_DIR);
+  }
+
+  /**
+   * The layer a new DBML table goes to when no diagram gives one (§2.4): the
+   * first layer `layers.json` lists, else the first DBML layer folder on
+   * disk (sorted), else `main`.
+   */
+  defaultDbmlLayer(): string {
+    try {
+      const config = JSON.parse(fs.readFileSync(path.join(this.semanticRoot, LAYERS_CONFIG_FILE), 'utf-8')) as { layers?: unknown };
+      if (Array.isArray(config.layers)) {
+        for (const l of config.layers) {
+          const id = !!l && typeof l === 'object' ? (l as { id?: unknown }).id : undefined;
+          if (typeof id === 'string' && isDbmlLayerName(id)) return id;
+        }
+      }
+    } catch {
+      // No (readable) layers.json: the folders decide.
+    }
+    return this.index.get().dbmlLayers[0]?.layer ?? 'main';
+  }
+
+  /**
+   * `schema` as `<layer>/tables/` lists it (§1.2 One spelling): an existing
+   * schema folder that matches case-insensitively wins, else `schema` itself.
+   */
+  schemaAsListed(layer: string, schema: string): string {
+    const listed = this.index.get().dbmlLayers.find((l) => l.layer === layer)?.schemas ?? [];
+    return listed.find((s) => s === schema) ?? listed.find((s) => s.toLowerCase() === schema.toLowerCase()) ?? schema;
   }
 
   /**
@@ -2090,15 +2129,21 @@ export class TableLibraryService {
   /**
    * Where a new file for `name` goes. A `folder` that is neither layer-shaped
    * (see TABLE_FOLDER_PATTERN) nor an existing library folder is ignored and
-   * the top level used instead.
+   * the top level used instead. In a project that writes DBML (§3.2) the
+   * file is `<layer>/tables/<schema>/<name>.dbml` (`dbmlTablePath`): `folder`
+   * is the layer when it is a layer id, else {@link defaultDbmlLayer}, and
+   * the schema is the layer's name as its `tables/` lists it.
    */
   private newTablePath(name: string, folder?: string, libraryDir?: string): string {
     if (typeof name !== 'string' || !name.trim() || name.includes('/') || name.includes('\\') || name.includes('..')) {
       throw new Error(`Invalid table name "${String(name)}": must not contain path separators.`);
     }
-    // A new file in a project that writes DBML is `tables/[folder/]<name>.dbml`
-    // (§3.2, §5.1); a renamed YAML file passes its own library and stays YAML.
-    const ext = libraryDir === undefined && this.writesDbml() ? '.dbml' : '.yml';
+    // A renamed YAML file passes its own library and stays YAML.
+    if (libraryDir === undefined && this.writesDbml()) {
+      const layer = folder !== undefined && isDbmlLayerName(folder) ? folder : this.defaultDbmlLayer();
+      return this.semanticAbsolute(dbmlTablePath(layer, this.schemaAsListed(layer, layer), name));
+    }
+    const ext = '.yml';
     const modelsDir = path.resolve(libraryDir ?? this.newTablesDir());
     const resolved = path.resolve(modelsDir, `${name}${ext}`);
     if (path.dirname(resolved) !== modelsDir) {
@@ -2109,8 +2154,7 @@ export class TableLibraryService {
     // that is what keeps a renamed file in a hand-made `Staging/` folder.
     if (folder) {
       const listed = this.listFoldersOf(modelsDir);
-      // DBML: a folder already on disk is used as it is spelled there, as the planner does.
-      const existing = ext === '.dbml' ? listed.find((f) => f.toLowerCase() === folder.toLowerCase()) : listed.find((f) => f === folder);
+      const existing = listed.find((f) => f === folder);
       if (existing !== undefined) return path.join(modelsDir, existing, `${name}${ext}`);
       if (TableLibraryService.isTableFolderName(folder)) return path.join(modelsDir, folder, `${name}${ext}`);
     }
@@ -2119,9 +2163,10 @@ export class TableLibraryService {
 
   /**
    * Where a new table file for `name` goes, for callers outside this service
-   * such as sync plans and `diff`: `tables/[folder/]<name>.dbml` when the
-   * project writes DBML (§3.2), else today's rule (the library new files go
-   * to, `{folder}/` when given and allowed). Throws on an unsafe name.
+   * such as sync plans and `diff`: `<layer>/tables/<schema>/<name>.dbml` when
+   * the project writes DBML (§3.2; `folder` is the layer), else today's rule
+   * (the library new files go to, `{folder}/` when given and allowed).
+   * Throws on an unsafe name.
    */
   pathForNewTable(name: string, folder?: string): string {
     return this.newTablePath(name, folder);

@@ -296,7 +296,7 @@ describe('the self-check refuses broken output with the file-by-file compile', (
     layers: ['gold'],
     tablesDirIsLayer: false,
     files: Object.entries({ 'layers.json': LAYERS, ...files }).flatMap(([p, text]) => {
-      const cls = classifySemanticFile(p, { tablesDirIsLayer: false, firstLine: text.split('\n')[0] });
+      const cls = classifySemanticFile(p, { tablesDirIsLayer: false });
       if (cls.kind === 'other' || cls.kind === 'template') return [];
       return [{ path: p, text, hadBom: false, kind: cls.kind, ...(cls.storage ? { storage: cls.storage } : {}) }];
     }),

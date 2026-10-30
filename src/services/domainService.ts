@@ -16,10 +16,12 @@ import {
   SubjectAreaFileError,
   SubjectAreaValidationError,
   NON_SUBJECT_AREA_DIRS,
-  DBML_RELATIONSHIPS_FILE_STEM,
-  TABLES_DIR,
+  DIAGRAMS_DIR,
   buildUnifiedSubjectArea,
   classifySemanticFile,
+  dbmlNotADiagramMessage,
+  diagramPathOf,
+  isDbmlLayerName,
   compositeGroupProblem,
   detectSubjectAreaFormat,
   getRawSubjectAreaTableNames,
@@ -43,8 +45,6 @@ import type { LayerService } from './layerService';
 import type { TableLibraryService } from './logicalModelService';
 import { normaliseName } from './nameUtils';
 import { catalogNodeFor, resolveColumnType } from './columnTypes';
-import { tablesDirHasDbml, tablesDirIsLayer } from './logicalModelService';
-import { readFirstLine } from './projectStorage';
 import { log } from './logger';
 
 // The pure domain parsing lives in @erd-studio/core; these are re-exported so
@@ -66,40 +66,43 @@ interface RelationshipTest {
 const DEFAULT_SEMANTIC_DIR = '.erd-studio';
 
 /**
- * Does `fsPath` have the shape of a domain file — `{layer}/{domain}.json` or
- * `{layer}/{domain}.dbml` — where the parent segment is a layer rather than
- * one of the reserved directories or the table library, and neither segment
- * is hidden?
+ * Does `fsPath` have the shape of a domain file — `{layer}/{domain}.json`
+ * (the parent segment is a layer rather than one of the reserved
+ * directories, and neither segment is hidden) or a DBML diagram
+ * `{layer}/diagrams/{domain}.dbml` (core's `diagramPathOf`: a DBML layer
+ * name, the `diagrams` folder and `.dbml` spelled exactly)?
  *
  * Shape only: it says nothing about whether the layer is configured or the
- * file parses. It asks the single classifier (`classifySemanticFile`) about
- * the last two segments, with the semantic dir taken to be the one above
- * the layer folder; a `.dbml` under `tables/` is a table or relationships
- * file, never a diagram. Callers that know the semantic root should prefer
- * `classifySemanticPath()`, which also proves the path is *under* it; this
- * one exists for the custom editor, which is handed a document whose path
- * the selector has already placed. `firstLine`, when the caller has the
- * text, lets a `.dbml` that starts with the export header count as `other`.
+ * file parses. Callers that know the semantic root should prefer
+ * `classifySemanticPath()`, which also proves the path is *under* it; this one
+ * exists for the custom editor, which is handed a document whose path the
+ * selector has already placed.
  */
-export function isSubjectAreaFilePath(fsPath: string, firstLine?: string): boolean {
+export function isSubjectAreaFilePath(fsPath: string): boolean {
   const file = path.basename(fsPath);
   const dir = path.basename(path.dirname(fsPath));
-  if (file.startsWith('.') || dir.startsWith('.')) return false;
-  if (file.endsWith('.json')) {
-    // A `tables/*.json` beside DBML tables is no diagram unless `tables` is a layer (§3.3).
-    const semanticRoot = path.dirname(path.dirname(fsPath));
-    return !NON_SUBJECT_AREA_DIRS.has(dir) && !(dir === TABLES_DIR && tablesDirHasDbml(semanticRoot) && !tablesDirIsLayer(semanticRoot));
-  }
-  if (!file.endsWith('.dbml')) return false;
-  // `tables/<folder>/<name>.dbml` is a table or relationships file (§4.4: no
-  // `.dbml` under `tables/` is ever a diagram), whatever its folder is called.
-  if (path.basename(path.dirname(path.dirname(fsPath))) === TABLES_DIR) return false;
-  const semanticRoot = path.dirname(path.dirname(fsPath));
-  // A caller that has the text passes its first line, so a 1.x DBML export (its header line) is not a diagram.
-  return classifySemanticFile(`${dir}/${file}`, {
-    tablesDirIsLayer: tablesDirIsLayer(semanticRoot),
-    ...(firstLine !== undefined ? { firstLine } : {}),
-  }).kind === 'diagram';
+  if (file.endsWith('.dbml')) return diagramPathOf(fsPath) !== undefined;
+  return (
+    file.endsWith('.json') &&
+    !file.startsWith('.') &&
+    !dir.startsWith('.') &&
+    !NON_SUBJECT_AREA_DIRS.has(dir)
+  );
+}
+
+/**
+ * Core's `dbmlNotADiagramMessage` for `fsPath` (§1.8), shared by the editor's
+ * not-a-diagram page and `readDbmlSubjectArea`. Core finds the semantic dir by
+ * its default names, so a file inside one with another name (a custom
+ * `erdStudio.semanticDir`) is named relative to `semanticRoot`, and a 1.9
+ * pre-release shape is still told; any other path is named as given.
+ */
+export function notADiagramMessage(fsPath: string, semanticRoot: string | undefined): string {
+  if (semanticRoot === undefined) return dbmlNotADiagramMessage(fsPath);
+  const rel = path.relative(semanticRoot, fsPath);
+  const inside = rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  const defaultName = ['.erd-studio', 'erd-studio'].includes(path.basename(semanticRoot));
+  return dbmlNotADiagramMessage(inside && !defaultName ? rel.split(path.sep).join('/') : fsPath);
 }
 
 /**
@@ -167,15 +170,15 @@ export class SubjectAreaService {
   }
 
   /**
-   * Discover every diagram under .erd-studio/ — `{layer}/*.json` and
-   * `{layer}/*.dbml` — grouped by layer, through the single classifier
-   * (`classifySemanticFile`, with each `.dbml`'s first line, so a rich DBML
-   * export saved in a layer folder is not listed). Returns lightweight
-   * summaries (no full parse). A stem found in both formats in one layer is
-   * listed twice, each marked `conflict`.
+   * Discover every diagram under .erd-studio/ — `{layer}/*.json` and the
+   * layer's DBML diagrams `{layer}/diagrams/*.dbml` (through the single
+   * classifier, `classifySemanticFile`) — grouped by configured layer.
+   * Returns lightweight summaries (no full parse). A stem found in both
+   * formats in one layer is listed twice, each marked `conflict`.
    *
    * Directory structure:
-   *   .erd-studio/{layer}/*.json | *.dbml
+   *   .erd-studio/{layer}/*.json
+   *   .erd-studio/{layer}/diagrams/*.dbml
    */
   listSubjectAreas(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): SubjectAreaSummary[] {
     const basePath = path.join(projectPath, semanticDir);
@@ -186,7 +189,6 @@ export class SubjectAreaService {
 
     const summaries: SubjectAreaSummary[] = [];
     const layers = this.layerService.getAllLayers();
-    const tablesIsLayer = tablesDirIsLayer(basePath);
 
     for (const layerConfig of layers) {
       const layer = layerConfig.id;
@@ -208,31 +210,25 @@ export class SubjectAreaService {
 
       const inLayer: SubjectAreaSummary[] = [];
       for (const entry of entries) {
-        const storage = subjectAreaStorageOf(entry);
-        if (storage === undefined) {
+        if (!entry.endsWith('.json')) {
           continue;
         }
-        const filePath = path.join(layerDir, entry);
-        if (storage === 'json') {
-          // Every `.json` in a layer folder, as before, except in a DBML
-          // library `tables/` that `layers.json` also lists (§3.3).
-          if (layer === TABLES_DIR && !tablesIsLayer) continue;
-        } else {
-          const firstLine = readFirstLine(filePath);
-          const kind = classifySemanticFile(`${layer}/${entry}`, {
-            tablesDirIsLayer: tablesIsLayer,
-            ...(firstLine !== undefined ? { firstLine } : {}),
-          });
-          // The library, a relationships file and a rich export saved here are no diagrams.
-          if (kind.kind !== 'diagram') continue;
+        inLayer.push({ domain: path.basename(entry, '.json'), layer, filePath: path.join(layerDir, entry), storage: 'json' });
+      }
+      // The layer's DBML diagrams, listed only when `diagrams/` is there (the layer's own listing says so).
+      if (isDbmlLayerName(layer) && entries.includes(DIAGRAMS_DIR)) {
+        const diagramsDir = path.join(layerDir, DIAGRAMS_DIR);
+        let diagrams: string[] = [];
+        try {
+          diagrams = fs.readdirSync(diagramsDir);
+        } catch {
+          // Not a folder, or not readable: no DBML diagrams here.
         }
-
-        inLayer.push({
-          domain: entry.slice(0, -(storage === 'json' ? '.json' : '.dbml').length),
-          layer,
-          filePath,
-          storage,
-        });
+        for (const entry of diagrams) {
+          const kind = classifySemanticFile(`${layer}/${DIAGRAMS_DIR}/${entry}`, { tablesDirIsLayer: false });
+          if (kind.kind !== 'diagram' || kind.storage !== 'dbml' || kind.name === undefined) continue;
+          inLayer.push({ domain: kind.name, layer, filePath: path.join(diagramsDir, entry), storage: 'dbml' });
+        }
       }
       for (const summary of inLayer) {
         if (inLayer.some((other) => other !== summary && other.domain === summary.domain)) summary.conflict = true;
@@ -359,12 +355,11 @@ export class SubjectAreaService {
    * resolves to a `.yml` is drawn with a warning (D20).
    */
   readDbmlSubjectArea(filePath: string, text?: string): DbmlSubjectAreaReading {
-    const stem = path.basename(filePath, '.dbml');
-    if (stem.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM || path.basename(path.dirname(filePath)) === TABLES_DIR
-      || path.basename(path.dirname(path.dirname(filePath))) === TABLES_DIR) {
-      throw new SubjectAreaValidationError(
-        `${filePath} is a DBML table or relationships file, not a diagram. Open a diagram in a layer folder.`,
-      );
+    // A diagram is `<layer>/diagrams/<name>.dbml`: its semantic dir is three levels up.
+    const segments = filePath.split(/[\\/]/).filter((s) => s !== '');
+    if (classifySemanticFile(segments.slice(-3).join('/'), { tablesDirIsLayer: false }).kind !== 'diagram' || !filePath.endsWith('.dbml')) {
+      const semanticRoot = this.tableLibraryService ? path.dirname(this.tableLibraryService.getTablesDir()) : undefined;
+      throw new SubjectAreaValidationError(notADiagramMessage(filePath, semanticRoot));
     }
     const raw = text ?? fs.readFileSync(filePath, 'utf-8');
     const reading = readDbmlDiagram(raw, filePath);
@@ -409,7 +404,8 @@ export class SubjectAreaService {
     return buildUnifiedSubjectArea(obj, format, {
       filePath,
       domainNameFallback,
-      parentDirName: path.basename(path.dirname(filePath)),
+      // A DBML diagram's layer is the folder above `diagrams/`.
+      parentDirName: diagramPathOf(filePath)?.layer ?? path.basename(path.dirname(filePath)),
       layers: this.layerService,
       getModel: this.tableLibraryService
         ? (name) => this.tableLibraryService!.getTable(name)

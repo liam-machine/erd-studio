@@ -1,0 +1,24 @@
+{
+  "version": "3.0.0",
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "relationshipMode": "All",
+    "tablePositions": [
+      { "name": "fct_order", "schemaName": "public", "x": 400, "y": 200 },
+      { "name": "dim_customer", "schemaName": "public", "x": 40, "y": 40 },
+      { "name": "dim_date", "schemaName": "public", "x": 40, "y": 360 },
+      { "name": "dim_region", "schemaName": "public", "x": 760, "y": 40 },
+      { "name": "customer_profile", "schemaName": "public", "x": 40, "y": 640 },
+      { "name": "bridge_empty", "schemaName": "public", "x": 760, "y": 400 }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [
+      { "name": "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c", "x": 1120, "y": 40, "width": 220, "height": 120 },
+      { "name": "9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f", "x": 1120, "y": 200 }
+    ],
+    "referencePaths": []
+  },
+  "views": {}
+}

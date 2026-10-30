@@ -36,10 +36,10 @@
     "error: [SemanticEditorProvider] Failed to load domain: <root>/.erd-studio/silver/diagrams/dbml-future.dbml has erd_schema_version 8 but this extension only supports up to version 7. Please update the extension."
   ],
   "errors.dbml-legacy.host": [
-    "error: [SemanticEditorProvider] Failed to load domain: gold/old.dbml was written by an ERD Studio 1.9 pre-release, whose folder layout 2.0 does not read. Run erd-studio doctor in the project for the steps to convert it again."
+    "error: [SemanticEditorProvider] Failed to load domain: gold/old.dbml was written by an ERD Studio 1.9 pre-release, whose folder layout 2.0 does not read. Run erd-studio doctor in the project for the steps to convert it again. To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor."
   ],
   "errors.dbml-not-a-diagram.host": [
-    "error: [SemanticEditorProvider] Failed to load domain: <root>/.erd-studio/silver/tables/silver/dim_customer.dbml is a DBML table or relationships file, not a diagram. Open a diagram in silver/diagrams/."
+    "error: [SemanticEditorProvider] Failed to load domain: <root>/.erd-studio/silver/tables/silver/dim_customer.dbml is a DBML table or relationships file, not a diagram. Open a diagram in silver/diagrams/. To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor."
   ],
   "errors.dbml-syntax.host": [
     "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/diagrams/dbml-syntax.dbml is invalid-dbml — re-reading in 150ms (likely mid-write)",

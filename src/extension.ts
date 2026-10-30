@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { SubjectAreaService, renameSubjectAreaInRaw, subjectAreaTableNames } from './services/domainService';
-import { LayerService, LayersFileUnreadableError } from './services/layerService';
+import { LayerService, LayersFileUnreadableError, reservedLayerNameMessage } from './services/layerService';
 import { removedSubjectAreaPaths } from './services/removedSubjectAreas';
 import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, type SubjectAreaSummary, type Layer, type Stage, type UnifiedSubjectArea, type StageData } from './types/semantic';
 import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
@@ -18,7 +18,8 @@ import { FileWatcherService } from './watchers/FileWatcherService';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
-import { TABLES_DIR, TableLibraryService, tablesLayerConflict } from './services/logicalModelService';
+import { TABLES_DIR, TableLibraryService } from './services/logicalModelService';
+import { detectLegacyDbmlTree, legacyDbmlTreeMessage } from './services/legacyDbmlTree';
 import { LibraryWarmUp } from './services/libraryWarmUp';
 import { projectStorageOf } from './services/projectStorage';
 import type { ProjectStorage } from '@erd-studio/core';
@@ -48,7 +49,7 @@ import { TableLibraryTreeProvider, type TableLibraryNode } from './providers/Mod
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
-import { SubjectAreaFileError, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
+import { SubjectAreaFileError, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
 import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
@@ -1279,8 +1280,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // foreign-format warning compares against it, since the file that triggers
   // the warning itself makes the project `mixed`.
   let knownStorage: ProjectStorage = 'yaml';
-  // `tablesLayerConflict` (§3.3) is shown once per session.
-  let tablesLayerConflictShown = false;
+  // A 1.9 pre-release DBML tree (§1.8) is reported once per session.
+  let legacyDbmlTreeShown = false;
   // Its three questions about the library are answered from one look at it.
   const refreshContextKeysNow = (): void => tableLibraryService.withIndexSnapshot(() => {
     const hasSemanticDir = fs.existsSync(fullSemanticDirPath);
@@ -1289,15 +1290,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void vscode.commands.executeCommand('setContext', 'erdStudio.storage', knownStorage);
     // A project that writes the v6 naming (#182) makes `tables/` with its first
     // table, so the view shows from setup on, not only once a table exists;
-    // so does a DBML project (its library is always `tables/`).
+    // so does a DBML project (its tables live under the layer folders).
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir',
       tableLibraryService.dirExists() || (hasSemanticDir && (tableLibraryService.writesTableNaming() || knownStorage !== 'yaml')));
     refreshDiagramsStatus();
-    if (!tablesLayerConflictShown && hasSemanticDir) {
-      const conflict = tablesLayerConflict(fullSemanticDirPath);
-      if (conflict) {
-        tablesLayerConflictShown = true;
-        void vscode.window.showWarningMessage(`ERD Studio: ${conflict}`);
+    if (!legacyDbmlTreeShown && hasSemanticDir) {
+      // Path-only and memoised by the directories' signatures: an unchanged project costs a few stats.
+      const legacy = detectLegacyDbmlTree(fullSemanticDirPath);
+      if (legacy) {
+        legacyDbmlTreeShown = true;
+        void vscode.window.showWarningMessage(`ERD Studio: ${legacyDbmlTreeMessage(legacy)}`);
       }
     }
   });
@@ -2199,9 +2201,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Prompted, one WorkspaceEdit, one undo step.
     vscode.commands.registerCommand('erdStudio.resolveDuplicateModel', async (arg?: TableLibraryNode | string) => {
       const entries = tableLibraryService.listTableFiles();
-      // A duplicate within one library (#182: `tables/` too). A `tables/` copy of a
-      // name `logical-models/` also has is the migration's conflict, not fixed here (#181).
-      const duplicates = entries.filter((e) => e.shadowedBy && (!e.library || tableLibraryService.isTableNamingFile(e.shadowedBy)));
+      // A duplicate within one library (#182: `tables/` too; a DBML table shadowed
+      // by a DBML table). A copy in another kind of library (a `tables/` file
+      // `logical-models/` also has, #181; a DBML table a YAML file also has) is
+      // the migration's or Convert's conflict, not fixed here.
+      const duplicates = entries.filter((e) => e.shadowedBy && !tableLibraryService.isCrossLibraryDuplicate(e));
       const target = typeof arg === 'string' ? arg : arg?.type === 'model' ? arg.filePath : undefined;
       // Compare real paths: the tree hands over what the library listed, but a
       // warning or a caller may name the same file through a symlinked prefix.
@@ -3031,8 +3035,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!value || !value.trim()) { return 'Layer name is required'; }
             if (!/^[a-z][a-z0-9_-]*$/.test(value.trim())) { return 'Must start with lowercase letter, contain only lowercase letters, numbers, hyphens, underscores'; }
             if (layerService.hasLayer(value.trim())) { return `Layer "${value.trim()}" already exists`; }
-            // Reserved for the table library's new folder (#162); a project that already has the layer keeps it.
-            if (value.trim() === TABLES_DIR) { return `"${TABLES_DIR}" is reserved for the Table Library's folder; pick another name`; }
+            // ERD Studio's own folders (#162, §1.1: `tables`, `templates`, `logical-models`, any case); a project that already has the layer keeps it.
+            if (isReservedLayerName(value.trim())) { return reservedLayerNameMessage(value.trim()); }
             return undefined;
           },
         });

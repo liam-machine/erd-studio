@@ -504,7 +504,7 @@
             "filenamePattern": "**/erd-studio/*/*.json"
           },
           {
-            "filenamePattern": "**/.erd-studio/*/*.dbml"
+            "filenamePattern": "**/.erd-studio/*/diagrams/*.dbml"
           }
         ],
         "priority": "default"
@@ -597,7 +597,7 @@
         },
         {
           "command": "erdStudio.migrateToTableNaming",
-          "when": "view == erdStudio.modelLibrary && erdStudio.storage != dbml",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage == yaml",
           "group": "1_organise@2"
         },
         {
@@ -667,7 +667,7 @@
         },
         {
           "command": "erdStudio.migrateToTableNaming",
-          "when": "erdStudio.storage != dbml"
+          "when": "erdStudio.storage == yaml"
         },
         {
           "command": "erdStudio.convertProjectToDbml",

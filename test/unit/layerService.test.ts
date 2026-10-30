@@ -289,19 +289,36 @@ describe('LayerService', () => {
       expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual(['bronze']);
     });
 
-    it('never offers a DBML table library tables/ as a layer, flat or foldered (§3.3)', () => {
+    it('offers the layer folders of the layer-first DBML tree', () => {
+      for (const dir of ['gold/tables/gold', 'gold/relationships', 'gold/diagrams', 'silver/tables/calendar']) {
+        fs.mkdirSync(path.join(semanticDir, dir), { recursive: true });
+      }
+      fs.writeFileSync(path.join(semanticDir, 'gold', 'diagrams', 'sales.dbml'), "Project sales {\n  erd_schema_version: '7'\n}\n");
+      expect(service.detectLayersFromFilesystem().map(l => l.id).sort()).toEqual(['gold', 'silver']);
+    });
+
+    it('never offers tables/ while it holds a .dbml: restored YAML beside a leftover 1.9 tree (§1.8)', () => {
+      // `git checkout <sha> -- .erd-studio` brings the YAML back and leaves the 1.9 files.
+      fs.mkdirSync(path.join(semanticDir, 'logical-models'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'logical-models', 'fct_order.yml'), 'name: fct_order\n');
+      fs.mkdirSync(path.join(semanticDir, 'gold'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'gold', 'sales.json'), '{}');
+      fs.writeFileSync(path.join(semanticDir, 'gold', 'sales.dbml'), "Project sales {\n  erd_schema_version: '7'\n}\n");
       fs.mkdirSync(path.join(semanticDir, 'tables', 'gold'), { recursive: true });
       fs.writeFileSync(path.join(semanticDir, 'tables', 'gold', 'fct_order.dbml'), 'Table fct_order {\n  id INT\n}\n');
       fs.writeFileSync(path.join(semanticDir, 'tables', 'gold', '_relationships.dbml'), '// relationships\n');
-      fs.mkdirSync(path.join(semanticDir, 'gold'), { recursive: true });
-      fs.writeFileSync(path.join(semanticDir, 'gold', 'sales.dbml'), "Project sales {\n  erd_schema_version: '7'\n}\n");
+      expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual(['gold']);
+      // A flat leftover too.
+      fs.rmSync(path.join(semanticDir, 'tables'), { recursive: true });
+      fs.mkdirSync(path.join(semanticDir, 'tables'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'tables', '_relationships.dbml'), '// relationships\n');
       expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual(['gold']);
     });
 
-    it('a relationships file alone also makes tables/ the library, not a layer', () => {
+    it('still offers a pre-v6 tables/ layer that holds diagrams and no .dbml', () => {
       fs.mkdirSync(path.join(semanticDir, 'tables'), { recursive: true });
-      fs.writeFileSync(path.join(semanticDir, 'tables', '_relationships.dbml'), '// relationships\n');
-      expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual([]);
+      fs.writeFileSync(path.join(semanticDir, 'tables', 'report.json'), '{}');
+      expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual(['tables']);
     });
 
     it('uses known defaults for recognised layers and generated config otherwise', () => {
@@ -323,6 +340,19 @@ describe('LayerService', () => {
       await expect(service.addLayer({ id: '_relationships', label: 'R', abbreviation: 'R', color: '#123456', creatable: true }))
         .rejects.toThrow(/may not start with "_"/);
       expect(fs.existsSync(configPath)).toBe(false);
+    });
+  });
+
+  describe('addLayer refuses ERD Studio\'s own folder names, in any case (§1.1)', () => {
+    it.each(['tables', 'templates', 'logical-models', 'Tables', 'TEMPLATES', 'Logical-Models'])('%s: throws and writes nothing', async (id) => {
+      await expect(service.addLayer({ id, label: 'X', abbreviation: 'X', color: '#123456', creatable: true }))
+        .rejects.toThrow(`"${id}" is reserved for ERD Studio's own folders; pick another name.`);
+      expect(fs.existsSync(configPath)).toBe(false);
+    });
+
+    it.each(['diagrams', 'relationships'])('%s is a valid layer name (the tree is read by depth)', async (id) => {
+      await service.addLayer({ id, label: 'X', abbreviation: 'X', color: '#123456', creatable: true });
+      expect(service.getAllLayers().map((l) => l.id)).toContain(id);
     });
   });
 });

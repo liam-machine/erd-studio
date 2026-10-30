@@ -41,7 +41,7 @@ describe('.erd-studio/modelling-approach.md is ignored by the extension', () => 
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'));
     const selectors = (pkg.contributes.customEditors[0].selector as Array<{ filenamePattern: string }>).map((s) => s.filenamePattern);
     for (const pattern of selectors) {
-      expect(pattern.endsWith('/*/*.json') || pattern.endsWith('/*/*.dbml'), pattern).toBe(true);
+      expect(pattern.endsWith('/*/*.json') || pattern.endsWith('/*/diagrams/*.dbml'), pattern).toBe(true);
     }
     const watcher = fs.readFileSync(path.join(REPO_ROOT, 'src', 'watchers', 'FileWatcherService.ts'), 'utf-8');
     expect(watcher).toContain('`${this.semanticDir}/**/*.{json,dbml}`');

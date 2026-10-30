@@ -73,11 +73,15 @@ export interface InventoryModel {
 /** A table in the ERD Studio library (the design), as `logicalTables` lists it. */
 export interface InventoryLogicalTable {
   name: string;
-  /** Its file, project-relative: a `.dbml` table file, or a `.yml` in a project from before 2.0. */
+  /**
+   * Its file, project-relative: a `.dbml` table file
+   * (`.erd-studio/<layer>/tables/<schema>/<name>.dbml`), or a `.yml` in a
+   * project from before 2.0.
+   */
   file: string;
   /** The file's format (additive). */
   format: 'yaml' | 'dbml';
-  /** Folder under the library (`''` at the top level). */
+  /** Folder under the library (`''` at the top level); a DBML table's schema folder. */
   folder: string;
   description: string;
   /** "One row per …", or null when not written yet. */
@@ -101,7 +105,11 @@ export interface InventoryResult extends Envelope {
   clusters: string[][];
   /** Inventory names that already have a logical-models/*.yml. */
   alreadyModelled: string[];
-  /** Every diagram: its file, `format` (`json` or `dbml`, additive) and the tables it lists (a DBML diagram's table `use` lines). */
+  /**
+   * Every diagram (`<layer>/<name>.json`, or `<layer>/diagrams/<name>.dbml`):
+   * its file, `format` (`json` or `dbml`, additive) and the tables it lists
+   * (a DBML diagram's table `use` lines).
+   */
   domains: Array<{ file: string; layer: string; domain: string; models: string[]; format: 'json' | 'dbml' }>;
   /**
    * Every table in the ERD Studio library (restricted to `--models` when

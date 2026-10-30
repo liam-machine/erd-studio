@@ -66,9 +66,9 @@ describe('Subject Areas tree: counts from the diagram file, as getSubjectArea re
     write('silver/empty.json', JSON.stringify({ schemaVersion: 5, domain: 'empty', layer: 'silver', logical: { models: [], relationships: [] } }));
     write('gold/broken.json', '{ "schemaVersion": 5, ');
     write('gold/future.json', JSON.stringify({ schemaVersion: 99, domain: 'future', layer: 'gold', logical: { models: ['x'] } }));
-    write('tables/gold/fct_sale.dbml', dbmlTable('fct_sale'));
-    write('tables/gold/dim_date.dbml', dbmlTable('dim_date'));
-    write('gold/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n\nuse { table fct_sale } from '../tables/gold/fct_sale.dbml'\nuse { table dim_date } from '../tables/gold/dim_date.dbml'\nuse { table gone } from '../tables/gold/gone.dbml'\n");
+    write('gold/tables/gold/fct_sale.dbml', dbmlTable('fct_sale'));
+    write('gold/tables/gold/dim_date.dbml', dbmlTable('dim_date'));
+    write('gold/diagrams/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n\nuse { table fct_sale } from '../tables/gold/fct_sale.dbml'\nuse { table dim_date } from '../tables/gold/dim_date.dbml'\nuse { table gone } from '../tables/gold/gone.dbml'\n");
   });
 
   function counts(provider: SubjectAreaTreeProvider): Map<string, number> {
@@ -125,10 +125,10 @@ describe('Subject Areas tree: counts from the diagram file, as getSubjectArea re
 
 describe('Table Library tree with the real library', () => {
   beforeEach(() => {
-    for (let i = 0; i < 20; i++) write(`tables/gold/t${i}.dbml`, dbmlTable(`t${i}`));
-    write('tables/gold/broken.dbml', 'Table broken {\n  id INT [pk\n');
-    write('gold/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n\nuse { table t1 } from '../tables/gold/t1.dbml'\n");
-    write('gold/other.dbml', "Project other {\n  erd_schema_version: '7'\n}\n\nuse { table t2 } from '../tables/gold/t2.dbml'\n");
+    for (let i = 0; i < 20; i++) write(`gold/tables/gold/t${i}.dbml`, dbmlTable(`t${i}`));
+    write('gold/tables/gold/broken.dbml', 'Table broken {\n  id INT [pk\n');
+    write('gold/diagrams/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n\nuse { table t1 } from '../tables/gold/t1.dbml'\n");
+    write('gold/diagrams/other.dbml', "Project other {\n  erd_schema_version: '7'\n}\n\nuse { table t2 } from '../tables/gold/t2.dbml'\n");
   });
 
   const nodes = (provider: TableLibraryTreeProvider): TableLibraryTableNode[] =>
@@ -174,7 +174,7 @@ describe('Table Library tree with the real library', () => {
   });
 
   it('renders nothing again when every file it had not read is fine', async () => {
-    fs.rmSync(path.join(semantic, 'tables/gold/broken.dbml'));
+    fs.rmSync(path.join(semantic, 'gold/tables/gold/broken.dbml'));
     const { subjectAreaService, tableLibraryService } = services();
     const provider = new TableLibraryTreeProvider(tableLibraryService, subjectAreaService, root, '.erd-studio');
     const refreshed = vi.fn();
@@ -189,8 +189,8 @@ describe('Table Library tree with the real library', () => {
     const { subjectAreaService, tableLibraryService } = services();
     const provider = new TableLibraryTreeProvider(tableLibraryService, subjectAreaService, root, '.erd-studio');
     const cache = (provider as unknown as { membersCache: Map<string, unknown> }).membersCache;
-    const sales = path.join(semantic, 'gold/sales.dbml');
-    const other = path.join(semantic, 'gold/other.dbml');
+    const sales = path.join(semantic, 'gold/diagrams/sales.dbml');
+    const other = path.join(semantic, 'gold/diagrams/other.dbml');
     nodes(provider);
     const salesEntry = cache.get(sales);
     const otherEntry = cache.get(other);
@@ -228,13 +228,13 @@ describe('Table Library tree with the real library', () => {
   });
 
   it('clears it once a listing finds no tables, so the empty state shows, and sets it again when tables appear', () => {
-    fs.rmSync(path.join(semantic, 'tables'), { recursive: true });
+    fs.rmSync(path.join(semantic, 'gold/tables'), { recursive: true });
     const { subjectAreaService, tableLibraryService } = services();
     const loading = vi.fn();
     const provider = new TableLibraryTreeProvider(tableLibraryService, subjectAreaService, root, '.erd-studio', () => [], loading);
     expect(provider.getChildren()).toEqual([]);
     expect(loading.mock.calls).toEqual([[false]]);
-    write('tables/gold/fct_sale.dbml', dbmlTable('fct_sale'));
+    write('gold/tables/gold/fct_sale.dbml', dbmlTable('fct_sale'));
     tableLibraryService.invalidateCache();
     expect((provider.getChildren() ?? []).length).toBeGreaterThan(0);
     expect(loading.mock.calls).toEqual([[false], [true]]);
@@ -262,8 +262,8 @@ describe('both trees log how long a render took (debug, in the ERD Studio log)',
     const at = (level: string) => (message: string | Error) => { lines.push(`${level} ${String(message)}`); };
     setLogSink({ trace: at('trace'), debug: at('debug'), info: at('info'), warn: at('warn'), error: at('error') });
     try {
-      write('tables/gold/fct_sale.dbml', dbmlTable('fct_sale'));
-      write('gold/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n\nuse { table fct_sale } from '../tables/gold/fct_sale.dbml'\n");
+      write('gold/tables/gold/fct_sale.dbml', dbmlTable('fct_sale'));
+      write('gold/diagrams/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n\nuse { table fct_sale } from '../tables/gold/fct_sale.dbml'\n");
       const { layerService, subjectAreaService, tableLibraryService } = services();
       const areas = new SubjectAreaTreeProvider(subjectAreaService, layerService, root);
       for (const layer of areas.getChildren() ?? []) areas.getChildren(layer);

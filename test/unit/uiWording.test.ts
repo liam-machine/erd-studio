@@ -124,9 +124,11 @@ describe('package.json: commands for older projects and the AI helper files', ()
   const palette = pkg.contributes.menus.commandPalette as Array<{ command: string; when?: string }>;
 
   it('hides Migrate Subject Areas to the Central Table Library in a DBML project, as the other YAML-only commands', () => {
-    for (const id of ['erdStudio.migrateToV5', 'erdStudio.moveRelationshipsToLibrary', 'erdStudio.migrateToTableNaming']) {
+    for (const id of ['erdStudio.migrateToV5', 'erdStudio.moveRelationshipsToLibrary']) {
       expect(palette.find((m) => m.command === id)?.when, id).toBe('erdStudio.storage != dbml');
     }
+    // Migrate to Table Naming renames YAML files only: never offered in a DBML or mixed project.
+    expect(palette.find((m) => m.command === 'erdStudio.migrateToTableNaming')?.when).toBe('erdStudio.storage == yaml');
   });
 
   it('names the AI helper install command in plain words, never "harness", keeping its id', () => {

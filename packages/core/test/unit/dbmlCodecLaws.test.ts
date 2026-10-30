@@ -271,9 +271,9 @@ function cleanIn(files: Record<string, string>, entry: string): string[] {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-// 2.0-switch: S5 adds back test/fixtures/dbml-native, once that fixture is in the layer-first tree.
 const FIXTURE_ROOTS = [
   path.resolve(__dirname, '../fixtures/dbml'),
+  path.resolve(__dirname, '../../../../test/fixtures/dbml-native'),
 ];
 
 /** Whether a path relative to the semantic dir is a DBML diagram (`<layer>/diagrams/<name>.dbml`). */

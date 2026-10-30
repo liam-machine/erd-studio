@@ -419,6 +419,23 @@ describe('TableLibraryTreeProvider', () => {
       expect(items[0].tooltip).toContain('Keep one of the two files');
     });
 
+    it('reports a DBML copy of a YAML table (part-way through Convert) with no fix; a DBML copy of a DBML table is an ordinary duplicate', () => {
+      const GOLD = '/project/.erd-studio/gold/tables/gold';
+      const SALES = '/project/.erd-studio/gold/tables/sales';
+      const p = build([
+        entry('dim_a'),
+        { name: 'dim_a', folder: 'gold', layer: 'gold', storage: 'dbml', filePath: `${GOLD}/dim_a.dbml`, shadowedBy: `${DIR}/dim_a.yml` },
+        { name: 'dim_b', folder: 'gold', layer: 'gold', storage: 'dbml', filePath: `${GOLD}/dim_b.dbml` },
+        { name: 'dim_b', folder: 'sales', layer: 'gold', storage: 'dbml', filePath: `${SALES}/dim_b.dbml`, shadowedBy: `${GOLD}/dim_b.dbml` },
+      ]);
+      const items = folders(p.getChildren() as TableLibraryNode[]).flatMap((f) => f.children).map((c) => p.getTreeItem(c));
+      const byPath = (file: string) => items.find((i) => (i.resourceUri as { fsPath: string }).fsPath === file)!;
+      expect(byPath(`${GOLD}/dim_a.dbml`).contextValue).toBe('logicalModelReadOnly');
+      expect(byPath(`${GOLD}/dim_a.dbml`).description).toBe('(also in logical-models — ignored)');
+      expect(byPath(`${GOLD}/dim_a.dbml`).tooltip).toContain('This DBML copy is ignored. Keep one of the two files.');
+      expect(byPath(`${SALES}/dim_b.dbml`).contextValue).toBe('logicalModelDuplicate');
+    });
+
     it('treats a duplicate within tables/ as an ordinary duplicate, with the fix offered (#182)', () => {
       const V6 = '/project/.erd-studio/tables';
       const p = build([
@@ -551,23 +568,23 @@ describe('TableLibraryTreeProvider: a model file that needs fixing (#164)', () =
 });
 
 
-describe('TableLibraryTreeProvider: native DBML storage (§5.5)', () => {
-  const TABLES = '/project/.erd-studio/tables';
-  const dbmlEntry = (name: string, folder = ''): TableFileEntry => ({
-    name, folder, filePath: folder ? `${TABLES}/${folder}/${name}.dbml` : `${TABLES}/${name}.dbml`, storage: 'dbml', library: 'tables',
+describe('TableLibraryTreeProvider: native DBML storage, the layer-first tree (§5.5)', () => {
+  const SEMANTIC = '/project/.erd-studio';
+  const dbmlEntry = (name: string, layer = 'gold', schema = layer): TableFileEntry => ({
+    name, folder: schema, layer, filePath: `${SEMANTIC}/${layer}/tables/${schema}/${name}.dbml`, storage: 'dbml',
   });
-  const SALES: SubjectAreaSummary = { domain: 'sales', layer: 'gold', filePath: '/project/.erd-studio/gold/sales.dbml', storage: 'dbml' };
+  const SALES: SubjectAreaSummary = { domain: 'sales', layer: 'gold', filePath: `${SEMANTIC}/gold/diagrams/sales.dbml`, storage: 'dbml' };
 
-  function providerFor(entries: TableFileEntry[], storage: 'yaml' | 'dbml' | 'mixed') {
-    const service = createMockTableLibraryServiceFromEntries(entries, '/project/.erd-studio/logical-models');
+  function providerFor(entries: TableFileEntry[], storage: 'yaml' | 'dbml' | 'mixed', layers: () => LayerConfig[] = () => []) {
+    const service = createMockTableLibraryServiceFromEntries(entries, `${SEMANTIC}/logical-models`);
     (service as unknown as { projectStorage: () => string }).projectStorage = () => storage;
-    return new TableLibraryTreeProvider(service, createMockSubjectAreaService([SALES]), '/project', '.erd-studio');
+    return new TableLibraryTreeProvider(service, createMockSubjectAreaService([SALES]), '/project', '.erd-studio', layers);
   }
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockReadFileSync.mockImplementation((p: string) => (String(p).endsWith('.dbml')
-      ? "Project sales {\n  erd_schema_version: '7'\n}\n\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\n"
+      ? "use { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nProject sales {\n  erd_schema_version: '7'\n}\n"
       : '{}'));
   });
 
@@ -575,15 +592,15 @@ describe('TableLibraryTreeProvider: native DBML storage (§5.5)', () => {
     return (provider.getChildren() as TableLibraryNode[]).flatMap((n) => (n.type === 'folder' ? n.children : [n]));
   }
 
-  it('opens a .dbml table in the text editor (openWith … default), never the canvas', () => {
-    const provider = providerFor([dbmlEntry('fct_order', 'gold')], 'dbml');
+  it('opens a .dbml table with plain vscode.open (the canvas selector never matches a table)', () => {
+    const provider = providerFor([dbmlEntry('fct_order')], 'dbml');
     const item = provider.getTreeItem(tableNodes(provider).find((n) => n.name === 'fct_order')!);
-    expect(item.command?.command).toBe('vscode.openWith');
-    expect(item.command?.arguments?.[1]).toBe('default');
+    expect(item.command?.command).toBe('vscode.open');
+    expect(item.command?.arguments?.[0].fsPath).toBe(`${SEMANTIC}/gold/tables/gold/fct_order.dbml`);
   });
 
   it('counts a DBML diagram\'s use lines as usage', () => {
-    const provider = providerFor([dbmlEntry('fct_order', 'gold'), dbmlEntry('dim_date')], 'dbml');
+    const provider = providerFor([dbmlEntry('fct_order'), dbmlEntry('dim_date', 'silver', 'calendar')], 'dbml');
     const nodes = tableNodes(provider);
     expect(nodes.find((n) => n.name === 'fct_order')?.referencingDomains).toEqual(['sales']);
     expect(nodes.find((n) => n.name === 'dim_date')?.referencingDomains).toEqual([]);
@@ -591,39 +608,45 @@ describe('TableLibraryTreeProvider: native DBML storage (§5.5)', () => {
 
   it('names each table\'s format only while the project is mixed', () => {
     const yml: TableFileEntry = { name: 'dim_old', folder: '', filePath: `${DIR}/dim_old.yml`, storage: 'yaml' };
-    const mixed = providerFor([dbmlEntry('fct_order', 'gold'), yml], 'mixed');
+    const mixed = providerFor([dbmlEntry('fct_order'), yml], 'mixed');
     const items = tableNodes(mixed).map((n) => mixed.getTreeItem(n));
     expect(items.find((i) => i.label === 'fct_order')?.description).toBe('1 diagram · DBML');
     expect(items.find((i) => i.label === 'dim_old')?.description).toBe('(unused) · YAML');
     expect(items.find((i) => i.label === 'dim_old')?.command?.command).toBe('vscode.open');
 
-    const dbml = providerFor([dbmlEntry('fct_order', 'gold')], 'dbml');
+    const dbml = providerFor([dbmlEntry('fct_order')], 'dbml');
     expect(dbml.getTreeItem(tableNodes(dbml)[0]).description).toBe('1 diagram');
   });
 
-  it('lists a flat DBML library as the library itself, never as a "tables/" folder', () => {
-    const provider = providerFor([dbmlEntry('fct_order'), dbmlEntry('dim_date')], 'dbml');
-    const roots = provider.getChildren() as TableLibraryNode[];
-    expect(roots.map((n) => n.type)).toEqual(['model', 'model']);
-    expect(roots.map((n) => (n as TableLibraryTableNode).name)).toEqual(['dim_date', 'fct_order']);
-  });
-
-  it('shows a foldered DBML library\'s folders by layer, with the real tables/ path in the tooltip', () => {
-    const provider = new TableLibraryTreeProvider(
-      createMockTableLibraryServiceFromEntries([dbmlEntry('fct_order', 'gold'), dbmlEntry('dim_date')]),
-      createMockSubjectAreaService([SALES]),
-      '/project',
-      '.erd-studio',
+  it('groups DBML tables one level deep by layer and schema: "<schema> (<layer>)", layers in layers.json order', () => {
+    const provider = providerFor(
+      [dbmlEntry('fct_order'), dbmlEntry('dim_customer'), dbmlEntry('dim_date', 'silver', 'calendar'), dbmlEntry('afih', 'bronze', 'sap')],
+      'dbml',
       () => LAYERS,
     );
     const roots = provider.getChildren() as TableLibraryNode[];
-    expect(roots.map((n) => (n.type === 'folder' ? `folder:${n.folder}` : n.name))).toEqual(['folder:gold', 'dim_date']);
-    const gold = roots[0] as TableLibraryFolderNode;
-    expect(gold.filePath).toBe(`${TABLES}/gold`);
+    expect(roots.every((n) => n.type === 'folder')).toBe(true);
+    const folders = roots as TableLibraryFolderNode[];
+    expect(folders.map((f) => `${f.layer}/${f.folder}`)).toEqual(['bronze/sap', 'silver/calendar', 'gold/gold']);
+    const gold = folders[2];
+    expect(gold.filePath).toBe(`${SEMANTIC}/gold/tables/gold`);
+    expect(gold.children.map((c) => c.name)).toEqual(['dim_customer', 'fct_order']);
     const item = provider.getTreeItem(gold);
-    expect(item.label).toBe('Gold');
-    // The only library: no "· tables/" tag, and never "logical-models/" in the tooltip.
-    expect(item.description).toBe('1 table');
-    expect(item.tooltip).toBe('tables/gold/ — tables created in Gold diagrams');
+    expect(item.label).toBe('gold (gold)');
+    expect(item.description).toBe('2 tables');
+    expect(item.tooltip).toBe('Tables in schema gold of layer gold');
+    expect(item.id).toBe('erdStudio.modelLibrary.folder:gold/tables/gold');
+    expect(provider.getTreeItem(folders[1]).label).toBe('calendar (silver)');
+    // A layer missing from layers.json still gets its folder, after the configured ones.
+    const extra = providerFor([dbmlEntry('x', 'zeta', 'z'), dbmlEntry('fct_order')], 'dbml', () => LAYERS);
+    expect((extra.getChildren() as TableLibraryFolderNode[]).map((f) => `${f.layer}/${f.folder}`)).toEqual(['gold/gold', 'zeta/z']);
+  });
+
+  it('a mixed project shows the YAML folders first, then the DBML schema folders', () => {
+    const yml: TableFileEntry = { name: 'dim_old', folder: 'gold', filePath: `${DIR}/gold/dim_old.yml`, storage: 'yaml' };
+    const provider = providerFor([dbmlEntry('fct_order'), yml], 'mixed', () => LAYERS);
+    const roots = provider.getChildren() as TableLibraryFolderNode[];
+    expect(roots.map((f) => (f.layer ? `${f.layer}/${f.folder}` : `yaml:${f.folder}`))).toEqual(['yaml:gold', 'gold/gold']);
+    expect(provider.getTreeItem(roots[0]).label).toBe('Gold');
   });
 });

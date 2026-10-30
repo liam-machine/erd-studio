@@ -242,8 +242,8 @@ describe('a logical-only DBML project (test/fixtures/dbml-native)', () => {
     expect(r.erd.storage).toBe('dbml');
     // In layers.json order (silver, then gold).
     expect(r.erd.diagrams).toEqual([
-      { file: '.erd-studio/silver/staging.dbml', format: 'dbml' },
-      { file: '.erd-studio/gold/sales.dbml', format: 'dbml' },
+      { file: '.erd-studio/silver/diagrams/staging.dbml', format: 'dbml' },
+      { file: '.erd-studio/gold/diagrams/sales.dbml', format: 'dbml' },
     ]);
     expect(r.erd.dbmlProblems).toEqual([]);
     expect(r.erd.dbmlConversion).toBeUndefined();
@@ -254,17 +254,17 @@ describe('a logical-only DBML project (test/fixtures/dbml-native)', () => {
     const ctx = await buildCliContext({ project: NATIVE, semanticDir: '.erd-studio' });
     const r = runInventory(ctx, { summary: true });
     expect(r.domains.map((d) => [d.file, d.format, d.models])).toEqual([
-      ['.erd-studio/silver/staging.dbml', 'dbml', ['fct_order', 'dim_date']],
-      ['.erd-studio/gold/sales.dbml', 'dbml', ['fct_order', 'dim_customer', 'dim_date', 'dim_region', 'customer_profile', 'bridge_empty']],
+      ['.erd-studio/silver/diagrams/staging.dbml', 'dbml', ['fct_order', 'dim_date']],
+      ['.erd-studio/gold/diagrams/sales.dbml', 'dbml', ['fct_order', 'dim_customer', 'dim_date', 'dim_region', 'customer_profile', 'bridge_empty']],
     ]);
     expect(r.logicalTables.every((t) => t.format === 'dbml' && t.file.endsWith('.dbml'))).toBe(true);
     expect(r.logicalTables.find((t) => t.name === 'fct_order')).toMatchObject({
-      file: '.erd-studio/tables/gold/fct_order.dbml', folder: 'gold', primaryKey: ['order_line_id'],
+      file: '.erd-studio/gold/tables/gold/fct_order.dbml', folder: 'gold', primaryKey: ['order_line_id'],
     });
   });
 
   it('exports each DBML diagram, and diff still needs dbt', async () => {
-    const one = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/gold/sales.dbml', '--format', 'dbml']);
+    const one = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/gold/diagrams/sales.dbml', '--format', 'dbml']);
     expect(one.code).toBe(0);
     expect(one.out).toContain('Table gold.fct_order {');
     const all = await run(['export', '--project', NATIVE, '--all', '--format', 'mermaid', '--json']);

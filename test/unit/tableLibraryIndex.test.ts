@@ -2,18 +2,22 @@
  * The table library's name → file index (`src/services/tableLibraryIndex.ts`):
  * every answer TableLibraryService gives from it — the file a name resolves
  * to, the table listing with duplicates, the relationships files, whether
- * `tables/` is a layer — must be what the per-lookup directory reads gave
- * before the index (the reference below re-reads the disk on every call),
- * and an index must see files added, removed or renamed outside ERD Studio
- * with no invalidate call (directory signatures, and the racy-mtime rule).
+ * `tables/` is a layer — must be what per-lookup directory reads give (the
+ * reference below re-reads the disk on every call), over the YAML libraries
+ * (`logical-models/`, `tables/`) and the layer-first DBML tree
+ * (`<layer>/tables/<schema>/`, `<layer>/relationships/`); an index must see
+ * files added, removed or renamed outside ERD Studio with no invalidate call
+ * (directory signatures, and the racy-mtime rule); and its listing costs no
+ * `readdir` per YAML layer, and `1 + layers × (2 + schemas)` in a DBML project.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
+import { createRequire, syncBuiltinESMExports } from 'module';
 import * as os from 'os';
 import * as path from 'path';
 
-import { LOGICAL_MODELS_DIR, TABLES_DIR, classifySemanticFile } from '@erd-studio/core';
+import { LOGICAL_MODELS_DIR, TABLES_DIR, classifySemanticFile, isDbmlLayerName } from '@erd-studio/core';
 import { TableLibraryService, hasTablesLibrary, tablesDirIsLayer } from '../../src/services/logicalModelService';
 import { COARSE_RACY_MS, RACY_MS, TableLibraryIndex, isRacyBuild } from '../../src/services/tableLibraryIndex';
 
@@ -27,21 +31,21 @@ function write(rel: string, text = ''): string {
   return file;
 }
 
-const dbmlTable = (name: string, columns = '  id INT [pk]'): string => `Table ${name} {\n${columns}\n}\n`;
+/** A DBML table file of the schema folder it sits in (`Table <schema>.<name>`). */
+const dbmlTable = (name: string, columns = '  id INT [pk]', schema = 'gold'): string => `Table ${schema}.${name} {\n${columns}\n}\n`;
 const yamlTable = (name: string): string => `name: ${name}\ncolumns:\n  - name: id\n    dataType: INT\n`;
-const HEADER = '// ERD Studio relationships.\n';
+const HEADER = '// ERD Studio relationships: Refs only.\n';
 
-/** Set every library directory's (and layers.json's) times well in the past, so an index built now is not racy. */
+/** Set every directory under the semantic dir (and layers.json, and the dir itself) well in the past, so an index built now is not racy. */
 function ageLibrary(): void {
   const past = new Date(Date.now() - 60_000);
   const age = (p: string): void => { try { fs.utimesSync(p, past, past); } catch { /* absent */ } };
   age(path.join(semantic, 'layers.json'));
-  for (const lib of [LOGICAL_MODELS_DIR, TABLES_DIR]) {
-    const dir = path.join(semantic, lib);
-    if (!fs.existsSync(dir)) continue;
-    for (const d of fs.readdirSync(dir, { withFileTypes: true })) if (d.isDirectory()) age(path.join(dir, d.name));
+  const walk = (dir: string): void => {
+    for (const d of fs.readdirSync(dir, { withFileTypes: true })) if (d.isDirectory()) walk(path.join(dir, d.name));
     age(dir);
-  }
+  };
+  walk(semantic);
 }
 
 beforeEach(() => {
@@ -88,6 +92,15 @@ function listedFile(dir: string, name: string, ext: '.yml' | '.dbml'): string | 
   return file === undefined ? null : path.join(dir, file);
 }
 
+/** Every DBML layer folder's `tables/<schema>/` directory, layers then schemas in order. */
+function dbmlSchemaDirs(): string[] {
+  const layers = foldersOf(semantic).filter(isDbmlLayerName).sort(compare);
+  return layers.flatMap((layer) => {
+    const tables = path.resolve(semantic, layer, TABLES_DIR);
+    return foldersOf(tables).sort(compare).map((schema) => path.join(tables, schema));
+  });
+}
+
 function referenceFind(name: string): string | null {
   const v5 = path.resolve(semantic, LOGICAL_MODELS_DIR);
   for (const folder of ['', ...foldersOf(v5)]) {
@@ -95,42 +108,47 @@ function referenceFind(name: string): string | null {
     if (hit !== null) return hit;
   }
   const v6 = path.resolve(semantic, TABLES_DIR);
-  if (!fs.existsSync(v6) || tablesDirIsLayer(semantic)) return null;
-  for (const folder of ['', ...foldersOf(v6)]) {
-    const dir = path.join(v6, folder);
-    const hit = listedFile(dir, name, '.dbml') ?? listedFile(dir, name, '.yml');
+  if (fs.existsSync(v6) && !tablesDirIsLayer(semantic)) {
+    for (const folder of ['', ...foldersOf(v6)]) {
+      const hit = listedFile(path.join(v6, folder), name, '.yml');
+      if (hit !== null) return hit;
+    }
+  }
+  for (const dir of dbmlSchemaDirs()) {
+    const hit = listedFile(dir, name, '.dbml');
     if (hit !== null) return hit;
   }
   return null;
 }
 
-/** The library's table files as `rel[ (shadowed by rel)]`, the pre-index rules. */
+/**
+ * The library's table files as `rel[ (shadowed by rel)]`: YAML names match
+ * exactly within a library, `tables/` is shadowed by `logical-models/` in
+ * any case, and a DBML table by any file before it in any case.
+ */
 function referenceListing(): string[] {
   const out: string[] = [];
   const winners = new Map<string, string>();
   const v5Winners = new Map<string, string>();
-  const dbmlWinners = new Map<string, { filePath: string; dbml: boolean }>();
-  let library = false;
-  const add = (dir: string): void => {
-    let files: Array<{ file: string; name: string; storage: string }>;
+  const anyWinners = new Map<string, string>();
+  const add = (dir: string, phase: 'v5' | 'v6' | 'dbml'): void => {
+    let files: Array<{ file: string; name: string }>;
     try {
       files = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile()).map((d) => d.name).flatMap((file) => {
         const kind = classify(relOf(path.join(dir, file)));
-        return kind.kind === 'table' && kind.name !== undefined ? [{ file, name: kind.name, storage: kind.storage! }] : [];
-      }).sort((a, b) => a.name.toLowerCase() === b.name.toLowerCase() && a.storage !== b.storage ? (a.storage === 'dbml' ? -1 : 1) : compare(a.file, b.file));
+        return kind.kind === 'table' && kind.name !== undefined ? [{ file, name: kind.name }] : [];
+      }).sort((a, b) => compare(a.file, b.file));
     } catch {
       return;
     }
-    for (const { file, name, storage } of files) {
+    for (const { file, name } of files) {
       const filePath = path.join(dir, file);
       const lower = name.toLowerCase();
-      const dbmlWinner = dbmlWinners.get(lower);
-      const winner = winners.get(name) ?? (library ? v5Winners.get(lower) : undefined)
-        ?? (dbmlWinner && (storage === 'dbml' || dbmlWinner.dbml) ? dbmlWinner.filePath : undefined);
+      const winner = winners.get(name) ?? (phase === 'v6' ? v5Winners.get(lower) : phase === 'dbml' ? anyWinners.get(lower) : undefined);
       if (winner === undefined) {
         winners.set(name, filePath);
-        if (!library) v5Winners.set(lower, filePath);
-        else if (!dbmlWinners.has(lower)) dbmlWinners.set(lower, { filePath, dbml: storage === 'dbml' });
+        if (phase === 'v5') v5Winners.set(lower, filePath);
+        if (!anyWinners.has(lower)) anyWinners.set(lower, filePath);
         out.push(relOf(filePath));
       } else {
         out.push(`${relOf(filePath)} (shadowed by ${relOf(winner)})`);
@@ -139,15 +157,15 @@ function referenceListing(): string[] {
   };
   const v5 = path.join(semantic, LOGICAL_MODELS_DIR);
   if (fs.existsSync(v5)) {
-    add(v5);
-    for (const f of foldersOf(v5)) add(path.join(v5, f));
+    add(v5, 'v5');
+    for (const f of foldersOf(v5)) add(path.join(v5, f), 'v5');
   }
   if (hasTablesLibrary(semantic)) {
-    library = true;
     const v6 = path.join(semantic, TABLES_DIR);
-    add(v6);
-    for (const f of foldersOf(v6)) add(path.join(v6, f));
+    add(v6, 'v6');
+    for (const f of foldersOf(v6)) add(path.join(v6, f), 'v6');
   }
+  for (const dir of dbmlSchemaDirs()) add(dir, 'dbml');
   return out;
 }
 
@@ -191,19 +209,47 @@ describe('the index answers exactly as the per-lookup reads did', () => {
     expectSameAsReference(service(), [...NAMES, 'deep']);
   });
 
-  it('a DBML library: .dbml before .yml in one folder, relationships files never tables, a name in both libraries', () => {
-    write('tables/dim_date.dbml', dbmlTable('dim_date'));
-    write('tables/dim_date.yml', yamlTable('dim_date'));
-    write('tables/gold/fct_order.dbml', dbmlTable('fct_order'));
-    write('tables/silver/Fct_Order.dbml', dbmlTable('Fct_Order'));
-    write('tables/_relationships.dbml', HEADER);
-    write('tables/gold/_RELATIONSHIPS.dbml', HEADER);
-    write('tables/gold/stray.json', '{}');
+  it('the layer-first DBML tree: tables in schema folders, relationships files never tables, a name in a YAML library and a layer', () => {
+    write('silver/tables/calendar/dim_date.dbml', dbmlTable('dim_date', undefined, 'calendar'));
+    write('gold/tables/gold/fct_order.dbml', dbmlTable('fct_order'));
+    write('gold/tables/sales/Fct_Order.dbml', dbmlTable('Fct_Order', undefined, 'sales'));
+    write('silver/tables/silver/Fct_Order.dbml', dbmlTable('Fct_Order', undefined, 'silver'));
+    write('gold/tables/gold/_relationships.dbml', dbmlTable('_relationships'));
+    write('gold/relationships/gold.dbml', HEADER);
+    write('gold/relationships/customers.dbml', HEADER);
+    write('silver/relationships/silver.dbml', HEADER);
+    write('gold/relationships/nested/x.dbml', HEADER);
+    write('gold/tables/top.dbml', dbmlTable('top'));
+    write('gold/tables/gold/stray.json', '{}');
+    write('gold/diagrams/sales.dbml', 'Project sales {\n}\n');
     write('logical-models/dim_customer.yml', yamlTable('dim_customer'));
     write('logical-models/fct_order.yml', yamlTable('fct_order'));
     const lib = service();
-    expectSameAsReference(lib, NAMES);
-    expect(lib.listRelationshipsFiles().map(relOf)).toEqual(['tables/_relationships.dbml', 'tables/gold/_RELATIONSHIPS.dbml']);
+    expectSameAsReference(lib, [...NAMES, 'top']);
+    // `_relationships` is an ordinary table name in the layer-first tree.
+    expect(relOf(lib.findTableFile('_relationships')!)).toBe('gold/tables/gold/_relationships.dbml');
+    // A `.dbml` straight in `<layer>/tables/` is no table (a table needs a schema folder).
+    expect(lib.findTableFile('top')).toBeNull();
+    expect(lib.listRelationshipsFiles().map(relOf)).toEqual([
+      'gold/relationships/customers.dbml', 'gold/relationships/gold.dbml', 'silver/relationships/silver.dbml',
+    ]);
+    const order = lib.listTableFiles().find((e) => relOf(e.filePath) === 'gold/tables/gold/fct_order.dbml');
+    expect(order).toMatchObject({ name: 'fct_order', folder: 'gold', layer: 'gold', storage: 'dbml', shadowedBy: path.join(semantic, 'logical-models/fct_order.yml') });
+    expect(lib.listTableFiles().find((e) => e.name === 'dim_date')).toMatchObject({ folder: 'calendar', layer: 'silver', storage: 'dbml' });
+    expect(lib.listTableFiles().every((e) => e.storage === 'yaml' || e.library === undefined)).toBe(true);
+  });
+
+  it('only layer-shaped top-level folders hold DBML tables (never tables/, templates/, logical-models/ or Gold/)', () => {
+    write('Gold/tables/gold/upper.dbml', dbmlTable('upper'));
+    write('gold.old/tables/gold/dotted.dbml', dbmlTable('dotted'));
+    write('templates/tables/gold/tpl.dbml', dbmlTable('tpl'));
+    write('tables/tables/gold/twice.dbml', dbmlTable('twice'));
+    write('logical/tables/gold/stage.dbml', dbmlTable('stage'));
+    write('diagrams/tables/gold/in_diagrams.dbml', dbmlTable('in_diagrams'));
+    write('relationships/tables/gold/in_relationships.dbml', dbmlTable('in_relationships'));
+    const lib = service();
+    expectSameAsReference(lib, ['upper', 'dotted', 'tpl', 'twice', 'stage', 'in_diagrams', 'in_relationships']);
+    expect(lib.listTableNames().sort()).toEqual(['in_diagrams', 'in_relationships']);
   });
 
   it('tables/ as a layer: never read as the library', () => {
@@ -218,17 +264,42 @@ describe('the index answers exactly as the per-lookup reads did', () => {
     expect(lib.listRelationshipsFiles()).toEqual([]);
   });
 
-  it('DBML evidence keeps tables/ the library unless layers.json lists it AND it holds a .json', () => {
+  it('a 1.9 pre-release leftover in tables/ changes nothing: the YAML rule decides (a .json or layers.json listing makes it a layer)', () => {
     write('tables/dim_date.dbml', dbmlTable('dim_date'));
-    write('tables/report.json', '{}');
+    write('tables/gold/_relationships.dbml', HEADER);
     const lib = service();
     expectSameAsReference(lib, NAMES);
     expect(lib.tablesDirIsLayer()).toBe(false);
+    expect(lib.hasTablesLibrary()).toBe(false);
+    expect(lib.findTableFile('dim_date')).toBeNull();
+    expect(lib.listRelationshipsFiles()).toEqual([]);
+    write('tables/report.json', '{}');
+    expectSameAsReference(lib, NAMES);
+    expect(lib.tablesDirIsLayer()).toBe(true);
     // layers.json changing is seen by its own signature: no invalidate call.
+    fs.rmSync(path.join(semantic, 'tables/report.json'));
     write('layers.json', JSON.stringify({ layers: [{ id: 'tables', label: 'Tables' }] }));
     expectSameAsReference(lib, NAMES);
     expect(lib.tablesDirIsLayer()).toBe(true);
-    expect(lib.findTableFile('dim_date')).toBeNull();
+  });
+
+  it('isCrossLibraryDuplicate: a DBML copy of a YAML table and a tables/ copy of a logical-models/ one are; a duplicate within one library is not', () => {
+    write('logical-models/dim_a.yml', yamlTable('dim_a'));
+    write('tables/dim_c.yml', yamlTable('dim_c'));
+    write('logical-models/dim_c.yml', yamlTable('dim_c'));
+    write('gold/tables/gold/dim_a.dbml', dbmlTable('dim_a'));
+    write('gold/tables/gold/dim_b.dbml', dbmlTable('dim_b'));
+    write('gold/tables/sales/dim_b.dbml', dbmlTable('dim_b', undefined, 'sales'));
+    write('logical-models/gold/dim_d.yml', yamlTable('dim_d'));
+    write('logical-models/dim_d.yml', yamlTable('dim_d'));
+    const lib = service();
+    const cross = Object.fromEntries(lib.listTableFiles().filter((e) => e.shadowedBy).map((e) => [relOf(e.filePath), lib.isCrossLibraryDuplicate(e)]));
+    expect(cross).toEqual({
+      'logical-models/gold/dim_d.yml': false,
+      'tables/dim_c.yml': true,
+      'gold/tables/gold/dim_a.dbml': true,
+      'gold/tables/sales/dim_b.dbml': false,
+    });
   });
 
   it('a symlinked table file is found while it points at a file', () => {
@@ -252,30 +323,37 @@ describe('the index answers exactly as the per-lookup reads did', () => {
 });
 
 describe('the index sees changes made outside ERD Studio, with no invalidate call', () => {
-  it('a file added, renamed and removed in a library folder, and a new folder', () => {
-    write('tables/dim_date.dbml', dbmlTable('dim_date'));
+  it('a file added, renamed and removed in a schema folder, a new schema, a new layer and a later mkdir of <layer>/relationships', () => {
+    write('gold/tables/gold/dim_date.dbml', dbmlTable('dim_date'));
     ageLibrary();
     const lib = service();
     expect(lib.findTableFile('fct_order')).toBeNull();
     const builds = lib.indexBuilds;
 
-    write('tables/fct_order.dbml', dbmlTable('fct_order'));
-    expect(relOf(lib.findTableFile('fct_order')!)).toBe('tables/fct_order.dbml');
+    write('gold/tables/gold/fct_order.dbml', dbmlTable('fct_order'));
+    expect(relOf(lib.findTableFile('fct_order')!)).toBe('gold/tables/gold/fct_order.dbml');
     expect(lib.indexBuilds).toBe(builds + 1);
 
-    fs.renameSync(path.join(semantic, 'tables/fct_order.dbml'), path.join(semantic, 'tables/fct_sale.dbml'));
+    fs.renameSync(path.join(semantic, 'gold/tables/gold/fct_order.dbml'), path.join(semantic, 'gold/tables/gold/fct_sale.dbml'));
     expect(lib.findTableFile('fct_order')).toBeNull();
-    expect(relOf(lib.findTableFile('fct_sale')!)).toBe('tables/fct_sale.dbml');
+    expect(relOf(lib.findTableFile('fct_sale')!)).toBe('gold/tables/gold/fct_sale.dbml');
 
-    fs.rmSync(path.join(semantic, 'tables/fct_sale.dbml'));
+    fs.rmSync(path.join(semantic, 'gold/tables/gold/fct_sale.dbml'));
     expect(lib.findTableFile('fct_sale')).toBeNull();
     expect(lib.listTableNames()).toEqual(['dim_date']);
 
-    write('tables/gold/fct_order.dbml', dbmlTable('fct_order'));
-    write('tables/gold/_relationships.dbml', HEADER);
-    expect(relOf(lib.findTableFile('fct_order')!)).toBe('tables/gold/fct_order.dbml');
-    expect(lib.listRelationshipsFiles().map(relOf)).toEqual(['tables/gold/_relationships.dbml']);
-    expect(lib.tableFolder('fct_order')).toBe('gold');
+    write('gold/tables/sales/fct_order.dbml', dbmlTable('fct_order', undefined, 'sales'));
+    expect(relOf(lib.findTableFile('fct_order')!)).toBe('gold/tables/sales/fct_order.dbml');
+    expect(lib.tableFolder('fct_order')).toBe('sales');
+
+    ageLibrary();
+    lib.findTableFile('fct_order');
+    // `relationships/` made after the build: the layer's own signature changed.
+    write('gold/relationships/gold.dbml', HEADER);
+    expect(lib.listRelationshipsFiles().map(relOf)).toEqual(['gold/relationships/gold.dbml']);
+    // A new layer folder: the semantic dir's signature changed.
+    write('silver/tables/calendar/dim_day.dbml', dbmlTable('dim_day', undefined, 'calendar'));
+    expect(relOf(lib.findTableFile('dim_day')!)).toBe('silver/tables/calendar/dim_day.dbml');
   });
 
   it('a library folder created after the first lookup, and one deleted', () => {
@@ -290,8 +368,31 @@ describe('the index sees changes made outside ERD Studio, with no invalidate cal
     expect(lib.findTableFile('dim_date')).toBeNull();
   });
 
+  it('an absent layers.json, logical-models/ or tables/ is seen when created later, through the semantic dir\'s own signature', () => {
+    write('gold/finance.json', '{}');
+    ageLibrary();
+    const lib = service();
+    expect(lib.findTableFile('dim_date')).toBeNull();
+    expect(lib.hasTablesLibrary()).toBe(false);
+
+    write('tables/dim_date.yml', yamlTable('dim_date'));
+    expect(relOf(lib.findTableFile('dim_date')!)).toBe('tables/dim_date.yml');
+    expect(lib.hasTablesLibrary()).toBe(true);
+
+    ageLibrary();
+    lib.findTableFile('dim_date');
+    write('logical-models/dim_date.yml', yamlTable('dim_date'));
+    expect(relOf(lib.findTableFile('dim_date')!)).toBe('logical-models/dim_date.yml');
+
+    ageLibrary();
+    lib.findTableFile('dim_date');
+    write('layers.json', JSON.stringify({ layers: [{ id: 'tables', label: 'Tables' }] }));
+    expect(lib.tablesDirIsLayer()).toBe(true);
+    expect(lib.hasTablesLibrary()).toBe(false);
+  });
+
   it('an unchanged library is listed once, however many lookups follow', () => {
-    for (let i = 0; i < 50; i++) write(`tables/gold/t${i}.dbml`, dbmlTable(`t${i}`));
+    for (let i = 0; i < 50; i++) write(`gold/tables/gold/t${i}.dbml`, dbmlTable(`t${i}`));
     ageLibrary();
     const lib = service();
     lib.findTableFile('t0');
@@ -308,23 +409,23 @@ describe('the index sees changes made outside ERD Studio, with no invalidate cal
   });
 
   it('a directory changed within the racy window is listed again even when its signature looks unchanged', () => {
-    write('tables/dim_date.dbml', dbmlTable('dim_date'));
-    const dir = path.join(semantic, 'tables');
-    const index = new TableLibraryIndex(semantic, path.join(semantic, LOGICAL_MODELS_DIR), dir);
+    write('gold/tables/gold/dim_date.dbml', dbmlTable('dim_date'));
+    const dir = path.join(semantic, 'gold/tables/gold');
+    const index = new TableLibraryIndex(semantic, path.join(semantic, LOGICAL_MODELS_DIR), path.join(semantic, TABLES_DIR));
     // The directory changed just now: the index built from it is not trusted on its signature alone.
     fs.utimesSync(dir, new Date(), new Date());
     const before = fs.statSync(dir);
     expect(index.find('dim_date')).not.toBeNull();
     expect(index.isCold()).toBe(true);
     // A file added and the directory's times put back as they were: only the racy rule can see it.
-    write('tables/fct_order.dbml', dbmlTable('fct_order'));
+    write('gold/tables/gold/fct_order.dbml', dbmlTable('fct_order'));
     fs.utimesSync(dir, before.atime, before.mtime);
     expect(Date.now() - before.mtimeMs).toBeLessThan(RACY_MS * 50);
     expect(index.find('fct_order')).not.toBeNull();
   });
 
   it('a directory older than the racy window is trusted on its signature (the next build is the only one)', () => {
-    write('tables/dim_date.dbml', dbmlTable('dim_date'));
+    write('gold/tables/gold/dim_date.dbml', dbmlTable('dim_date'));
     ageLibrary();
     const index = new TableLibraryIndex(semantic, path.join(semantic, LOGICAL_MODELS_DIR), path.join(semantic, 'tables'));
     index.find('dim_date');
@@ -337,11 +438,11 @@ describe('the index sees changes made outside ERD Studio, with no invalidate cal
   });
 
   it('a directory dated ahead of the host clock is trusted on its signature, not rebuilt on every lookup', () => {
-    for (let i = 0; i < 20; i++) write(`tables/gold/t${i}.dbml`, dbmlTable(`t${i}`));
+    for (let i = 0; i < 20; i++) write(`gold/tables/gold/t${i}.dbml`, dbmlTable(`t${i}`));
     ageLibrary();
     // A VM or WSL2 clock behind the machine that stamped the files, or a restored archive.
     const future = new Date(Date.now() + 120_000);
-    fs.utimesSync(path.join(semantic, 'tables', 'gold'), future, future);
+    fs.utimesSync(path.join(semantic, 'gold', 'tables', 'gold'), future, future);
     const lib = service();
     lib.findTableFile('t0');
     const builds = lib.indexBuilds;
@@ -349,7 +450,7 @@ describe('the index sees changes made outside ERD Studio, with no invalidate cal
     expect(lib.indexBuilds).toBe(builds);
     expect(lib.indexIsCold()).toBe(false);
     // A later change still re-stamps the directory and is seen.
-    write('tables/gold/t_new.dbml', dbmlTable('t_new'));
+    write('gold/tables/gold/t_new.dbml', dbmlTable('t_new'));
     expect(lib.findTableFile('t_new')).not.toBeNull();
   });
 
@@ -387,17 +488,17 @@ describe('invalidatePaths: only what was written', () => {
   };
 
   beforeEach(() => {
-    write('tables/gold/fct_order.dbml', dbmlTable('fct_order', '  id INT [pk]\n  customer_key INT [note: \'first\']'));
-    write('tables/gold/dim_customer.dbml', dbmlTable('dim_customer', '  customer_key INT [pk]'));
-    write('tables/gold/_relationships.dbml', `${HEADER}Ref: fct_order.customer_key > dim_customer.customer_key\n`);
+    write('gold/tables/gold/fct_order.dbml', dbmlTable('fct_order', '  id INT [pk]\n  customer_key INT [note: \'first\']'));
+    write('gold/tables/gold/dim_customer.dbml', dbmlTable('dim_customer', '  customer_key INT [pk]'));
+    write('gold/relationships/gold.dbml', `${HEADER}Ref: gold.fct_order.customer_key > gold.dim_customer.customer_key\n`);
     write('logical-models/dim_yaml.yml', yamlTable('dim_yaml'));
   });
 
   it('an edit to one table drops that table\'s parse only', () => {
     const lib = service();
     lib.listTables();
-    const order = path.join(semantic, 'tables/gold/fct_order.dbml');
-    const customer = path.join(semantic, 'tables/gold/dim_customer.dbml');
+    const order = path.join(semantic, 'gold/tables/gold/fct_order.dbml');
+    const customer = path.join(semantic, 'gold/tables/gold/dim_customer.dbml');
     const yaml = path.join(semantic, 'logical-models/dim_yaml.yml');
     const customerReading = caches(lib).dbmlCache.get(customer);
     const yamlEntry = caches(lib).cache.get(yaml);
@@ -416,7 +517,7 @@ describe('invalidatePaths: only what was written', () => {
     const lib = service();
     const first = lib.libraryAttachment();
     expect(first?.byOwner.get('fct_order')).toHaveLength(1);
-    const order = path.join(semantic, 'tables/gold/fct_order.dbml');
+    const order = path.join(semantic, 'gold/tables/gold/fct_order.dbml');
 
     // A note changed: same name, columns and keys — the attachment is kept as is.
     fs.writeFileSync(order, dbmlTable('fct_order', '  id INT [pk]\n  customer_key INT [note: \'second, longer\']'));
@@ -434,8 +535,8 @@ describe('invalidatePaths: only what was written', () => {
 
   it('a table file that did not read before and reads now is seen by the attachment', () => {
     const yml = write('logical-models/dim_yaml.yml', 'name: dim_yaml\ncolumns: [\n');
-    const relFile = path.join(semantic, 'tables/gold/_relationships.dbml');
-    fs.appendFileSync(relFile, 'Ref: fct_order.id > dim_yaml.ID\n');
+    const relFile = path.join(semantic, 'gold/relationships/gold.dbml');
+    fs.appendFileSync(relFile, 'Ref: gold.fct_order.id > dim_yaml.ID\n');
     const lib = service();
     const first = lib.libraryAttachment();
     expect(first?.byOwner.get('fct_order')?.find((r) => r.toModel === 'dim_yaml')?.toColumn).toBe('ID');
@@ -448,7 +549,7 @@ describe('invalidatePaths: only what was written', () => {
   it('a relationships file written drops the attachment', () => {
     const lib = service();
     const first = lib.libraryAttachment();
-    const relFile = path.join(semantic, 'tables/gold/_relationships.dbml');
+    const relFile = path.join(semantic, 'gold/relationships/gold.dbml');
     fs.writeFileSync(relFile, HEADER);
     lib.invalidatePaths([relFile]);
     const second = lib.libraryAttachment();
@@ -459,7 +560,7 @@ describe('invalidatePaths: only what was written', () => {
   it('a table file created or deleted in the same clock tick is seen through invalidatePaths', () => {
     const lib = service();
     expect(lib.findTableFile('dim_region')).toBeNull();
-    const created = write('tables/gold/dim_region.dbml', dbmlTable('dim_region'));
+    const created = write('gold/tables/gold/dim_region.dbml', dbmlTable('dim_region'));
     const dir = path.dirname(created);
     // Pretend the directory's signature did not move (a coarse clock), and the index is not racy.
     const index = (lib as unknown as { index: { validation: { racy: boolean; paths: string[]; sigs: string[] } } }).index;
@@ -473,7 +574,7 @@ describe('invalidatePaths: only what was written', () => {
   it('invalidateCache(name) is invalidatePaths of that table\'s file; invalidateCache() drops everything', () => {
     const lib = service();
     lib.listTables();
-    const customer = path.join(semantic, 'tables/gold/dim_customer.dbml');
+    const customer = path.join(semantic, 'gold/tables/gold/dim_customer.dbml');
     const reading = caches(lib).dbmlCache.get(customer);
     lib.invalidateCache('fct_order');
     expect(caches(lib).dbmlCache.get(customer)).toBe(reading);
@@ -518,7 +619,7 @@ describe('ERD Studio\'s own YAML writes outside the editor tell the index (the w
 
 describe('peekTableFileError', () => {
   it('is undefined for a file not read in its current version, and the error once it is', () => {
-    write('tables/broken.dbml', 'Table broken {\n  id INT [pk\n');
+    write('gold/tables/gold/broken.dbml', 'Table gold.broken {\n  id INT [pk\n');
     write('logical-models/bad.yml', 'name: bad\ncolumns: [\n');
     write('logical-models/good.yml', yamlTable('good'));
     const lib = service();
@@ -532,5 +633,67 @@ describe('peekTableFileError', () => {
     expect(lib.peekTableFileError('broken')?.kind).toMatch(/^dbml/);
     expect(lib.peekTableFileError('bad')).not.toBeNull();
     expect(lib.peekTableFileError('good')).toBeNull();
+  });
+});
+
+describe('what one listing costs (readdir calls, counted)', () => {
+  const cjsFs = createRequire(__filename)('fs') as typeof fs;
+
+  /** The `readdir` calls `fn` makes. */
+  function readdirsOf(fn: () => void): number {
+    const real = cjsFs.readdirSync;
+    let count = 0;
+    (cjsFs as { readdirSync: unknown }).readdirSync = function (this: unknown, ...args: unknown[]) {
+      count++;
+      return (real as (...a: unknown[]) => unknown).apply(this, args);
+    };
+    // The services use the ESM namespace of `fs`, whose bindings follow the CommonJS module once synced.
+    syncBuiltinESMExports();
+    try {
+      fn();
+    } finally {
+      (cjsFs as { readdirSync: unknown }).readdirSync = real;
+      syncBuiltinESMExports();
+    }
+    return count;
+  }
+
+  it('a YAML project adds no readdir for its layer folders: the semantic dir, logical-models/ and its folders, whatever the layers', () => {
+    write('layers.json', JSON.stringify({ layers: [{ id: 'silver', label: 'Silver' }, { id: 'gold', label: 'Gold' }] }));
+    write('logical-models/silver/a.yml', yamlTable('a'));
+    write('logical-models/gold/b.yml', yamlTable('b'));
+    write('silver/sales.json', '{}');
+    write('gold/finance.json', '{}');
+    // YAML layers called `diagrams` and `relationships` stay plain YAML layers.
+    write('diagrams/overview.json', '{}');
+    write('relationships/links.json', '{}');
+    const small = readdirsOf(() => service().listTableFiles());
+    expect(small).toBe(1 + 1 + 2);
+    for (let i = 0; i < 6; i++) write(`layer_${i}/d${i}.json`, '{}');
+    expect(readdirsOf(() => service().listTableFiles())).toBe(small);
+    expect(service().listTableNames().sort()).toEqual(['a', 'b']);
+    expect(service().listRelationshipsFiles()).toEqual([]);
+  });
+
+  it('a DBML project lists 1 + layers × (2 + schemas) directories', () => {
+    const LAYERS = ['bronze', 'silver', 'gold'];
+    const SCHEMAS = 4;
+    for (const layer of LAYERS) {
+      for (let s = 0; s < SCHEMAS; s++) {
+        for (let t = 0; t < 3; t++) write(`${layer}/tables/s${s}/${layer}_s${s}_t${t}.dbml`, dbmlTable(`${layer}_s${s}_t${t}`, undefined, `s${s}`));
+      }
+      write(`${layer}/relationships/${layer}.dbml`, HEADER);
+      write(`${layer}/diagrams/${layer}.dbml`, 'Project p {\n}\n');
+    }
+    write('layers.json', JSON.stringify({ layers: LAYERS.map((id) => ({ id, label: id })) }));
+    const lib = service();
+    expect(readdirsOf(() => lib.listTableFiles())).toBe(1 + LAYERS.length * (2 + SCHEMAS));
+    expect(lib.listTableFiles()).toHaveLength(LAYERS.length * SCHEMAS * 3);
+    expect(lib.listRelationshipsFiles()).toHaveLength(LAYERS.length);
+    // Unchanged: no listing at all on the next lookups.
+    ageLibrary();
+    lib.invalidateIndex();
+    lib.listTableFiles();
+    expect(readdirsOf(() => { for (let i = 0; i < 20; i++) lib.findTableFile('gold_s1_t2'); })).toBe(0);
   });
 });

@@ -1,14 +1,15 @@
 /**
  * TableLibraryTreeProvider — VS Code TreeDataProvider for the Model Library sidebar.
  *
- * Shows the table files of the library: `.dbml` tables in .erd-studio/tables/
- * (native DBML storage), or the YAML files of a project from before 2.0 in
- * .erd-studio/logical-models/ (or v6's tables/). A library with no
- * sub-folders is a flat alphabetical list, exactly as before layer folders
- * existed. Once any table lives in a folder (`{library}/{layer}/`), the
- * folders are shown first — in layers.json order, labelled with the layer's
- * label — and the models still at the top level follow them, the same shape
- * the file explorer shows.
+ * Shows the table files of the library: `.dbml` tables in the layer folders
+ * (`.erd-studio/<layer>/tables/<schema>/`, native DBML storage), or the YAML
+ * files of a project from before 2.0 in .erd-studio/logical-models/ (or v6's
+ * tables/). A YAML library with no sub-folders is a flat alphabetical list,
+ * exactly as before layer folders existed. Once any table lives in a folder
+ * (`{library}/{layer}/`), the folders are shown first — in layers.json order,
+ * labelled with the layer's label — and the models still at the top level
+ * follow them, the same shape the file explorer shows. DBML tables are
+ * grouped one level deep by layer and schema (`<schema> (<layer>)`).
  *
  * Orphaned models (not referenced by any domain) are flagged with a warning
  * icon and "(unused)" description. Referenced models show their domain count
@@ -37,8 +38,10 @@ export interface TableLibraryTableNode {
   readonly name: string;
   readonly filePath: string;
   readonly referencingDomains: string[];
-  /** Folder under logical-models/ (`''` at the top level). */
+  /** Folder under logical-models/ (`''` at the top level); a DBML table's schema folder. */
   readonly folder?: string;
+  /** A DBML table's layer folder. */
+  readonly layer?: string;
   /** Path of the file that wins the lookup when this one is a duplicate. */
   readonly shadowedBy?: string;
   /** In v6's `tables/` library (#181): read, never changed here, so it offers no actions. */
@@ -52,21 +55,23 @@ export interface TableLibraryTableNode {
 }
 
 /**
- * The command that opens a table file from the tree. A `.dbml` table opens
- * in the text editor (`vscode.openWith … 'default'`): the canvas's selector
- * also matches `tables/*.dbml`, which the canvas would only hand back (§5.9).
+ * The command that opens a table file from the tree: `vscode.open`, for a
+ * `.dbml` table too (the canvas's selector, `<layer>/diagrams/<name>.dbml`, never
+ * matches `<layer>/tables/<schema>/`).
  */
 function openTableCommand(uri: vscode.Uri, options?: Record<string, unknown>): vscode.Command {
-  if (uri.fsPath.toLowerCase().endsWith('.dbml')) {
-    return { command: 'vscode.openWith', title: 'Open Table', arguments: [uri, 'default', ...(options ? [options] : [])] };
-  }
   return { command: 'vscode.open', title: 'Open Table', arguments: [uri, ...(options ? [options] : [])] };
 }
 
 export interface TableLibraryFolderNode {
   readonly type: 'folder';
-  /** Folder name under logical-models/ (normally a layer id); `''` for the top of v6's `tables/`. */
+  /**
+   * Folder name under logical-models/ (normally a layer id); `''` for the top
+   * of v6's `tables/`; a DBML schema folder (`<layer>/tables/<schema>/`).
+   */
   readonly folder: string;
+  /** A DBML schema folder's layer (`<layer>/tables/<schema>/`). */
+  readonly layer?: string;
   readonly filePath: string;
   readonly children: TableLibraryTableNode[];
   /** Set for a folder of v6's `tables/` library (#181), read but not written by this version. */
@@ -137,15 +142,19 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       return this.folderItem(element);
     }
 
-    // A `tables/` copy of a name `logical-models/` also has (#181): reported, with no fix to offer.
-    // A duplicate within `tables/` itself (#182) is an ordinary one, below.
-    if (element.shadowedBy && element.library && this.isInV5Library(element.shadowedBy)) {
+    // A `tables/` copy of a name `logical-models/` also has (#181), or a DBML
+    // copy of a YAML table: reported, with no fix to offer. A duplicate within
+    // one library (#182, `tables/` itself; DBML beside DBML) is an ordinary one, below.
+    // (`TableLibraryService.isCrossLibraryDuplicate`'s rule, on the node.)
+    const dbml = element.layer !== undefined;
+    if (element.shadowedBy && (dbml ? !/\.dbml$/i.test(element.shadowedBy) : element.library && this.isInV5Library(element.shadowedBy))) {
+      const winnerLibrary = this.isInV5Library(element.shadowedBy) ? 'logical-models' : 'tables';
       const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
       item.contextValue = 'logicalModelReadOnly';
       item.iconPath = new vscode.ThemeIcon('error');
-      item.description = '(also in logical-models — ignored)';
+      item.description = `(also in ${dbml ? winnerLibrary : 'logical-models'} — ignored)`;
       item.tooltip = `"${element.name}" has a file in both the old and the new table folder. Diagrams use:\n${element.shadowedBy}\n\n` +
-        'This copy in tables/ is ignored. Keep one of the two files.';
+        (dbml ? 'This DBML copy is ignored. Keep one of the two files.' : 'This copy in tables/ is ignored. Keep one of the two files.');
       item.resourceUri = vscode.Uri.file(element.filePath);
       item.command = openTableCommand(item.resourceUri);
       return item;
@@ -246,6 +255,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
         filePath: entry.filePath,
         referencingDomains: entry.shadowedBy ? [] : usageMap.get(entry.name) ?? [],
         folder: entry.folder,
+        ...(entry.layer !== undefined ? { layer: entry.layer } : {}),
         ...(entry.storage ? { storage: entry.storage } : {}),
         ...(showStorage ? { showStorage: true as const } : {}),
         ...(entry.library ? { library: entry.library } : {}),
@@ -270,11 +280,12 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     const topLevel = entries.filter(e => e.folder === '' && (!e.library || onlyTables)).map(toNode).sort(byName);
 
     // Folders of logical-models/, then of v6's tables/ (#181) — its top level
-    // included — so the two libraries never merge into one folder.
+    // included — so the two libraries never merge into one folder; then the
+    // DBML tree's schema folders, one level: `<layer>/tables/<schema>/`.
     const grouped = new Map<string, TableLibraryTableNode[]>();
     for (const entry of entries) {
       if (entry.folder === '' && (!entry.library || onlyTables)) continue;
-      const key = `${entry.library ?? ''}\0${entry.folder}`;
+      const key = entry.layer !== undefined ? `dbml\0${entry.layer}\0${entry.folder}` : `${entry.library ?? ''}\0${entry.folder}`;
       const list = grouped.get(key) ?? [];
       list.push(toNode(entry));
       grouped.set(key, list);
@@ -285,21 +296,34 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
 
     const layerOrder = new Map(this.getLayers().map((l, i) => [l.id, i]));
     const rank = (folder: string): number => (folder === '' ? -1 : layerOrder.get(folder) ?? Number.MAX_SAFE_INTEGER);
+    // YAML folders first (logical-models/, then tables/), then the DBML layers in layers.json order, each layer's schemas by name.
+    const group = (k: { library?: string; layer?: string }): number => (k.layer !== undefined ? 2 : k.library ? 1 : 0);
     const keys = [...grouped.keys()].map((key) => {
-      const [library, folder] = key.split('\0');
-      return { key, library: library === 'tables' ? 'tables' as const : undefined, folder };
+      const parts = key.split('\0');
+      if (parts[0] === 'dbml' && parts.length === 3) return { key, library: undefined, layer: parts[1], folder: parts[2] };
+      const [library, folder] = parts;
+      return { key, library: library === 'tables' ? 'tables' as const : undefined, layer: undefined, folder };
     }).sort((a, b) => {
-      if (!!a.library !== !!b.library) return a.library ? 1 : -1;
-      const ia = rank(a.folder);
-      const ib = rank(b.folder);
+      if (group(a) !== group(b)) return group(a) - group(b);
+      if (a.layer !== undefined && b.layer !== undefined && a.layer !== b.layer) {
+        const la = rank(a.layer);
+        const lb = rank(b.layer);
+        return la !== lb ? la - lb : a.layer.localeCompare(b.layer);
+      }
+      const ia = a.layer !== undefined ? 0 : rank(a.folder);
+      const ib = b.layer !== undefined ? 0 : rank(b.folder);
       return ia !== ib ? ia - ib : a.folder.localeCompare(b.folder);
     });
     const modelsDir = this.tableLibraryService.getTablesDir();
-    const folderNodes: TableLibraryFolderNode[] = keys.map(({ key, library, folder }) => ({
+    const semanticRoot = path.dirname(modelsDir);
+    const folderNodes: TableLibraryFolderNode[] = keys.map(({ key, library, layer, folder }) => ({
       type: 'folder',
       folder,
-      filePath: library ? path.join(path.dirname(modelsDir), library, folder) : path.join(modelsDir, folder),
+      filePath: layer !== undefined
+        ? path.join(semanticRoot, layer, 'tables', folder)
+        : library ? path.join(semanticRoot, library, folder) : path.join(modelsDir, folder),
       children: grouped.get(key)!.sort(byName),
+      ...(layer !== undefined ? { layer } : {}),
       ...(library && !onlyTables ? { library } : {}),
     }));
     return [...folderNodes, ...topLevel];
@@ -345,6 +369,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
   }
 
   private folderItem(element: TableLibraryFolderNode): vscode.TreeItem {
+    if (element.layer !== undefined) return this.schemaFolderItem(element, element.layer);
     const layer = this.getLayers().find(l => l.id === element.folder);
     const label = element.library && element.folder === '' ? `${element.library}/` : layer?.label ?? element.folder;
     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
@@ -360,6 +385,22 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     const where = `${path.relative(path.dirname(this.tableLibraryService.getTablesDir()), element.filePath).split(path.sep).join('/')}/`;
     if (element.library && element.folder) item.description += ` · ${element.library}/`;
     item.tooltip = layer ? `${where} — tables created in ${layer.label} diagrams` : where;
+    return item;
+  }
+
+  /** A DBML schema folder (`<layer>/tables/<schema>/`): `<schema> (<layer>)`, coloured by its layer. */
+  private schemaFolderItem(element: TableLibraryFolderNode, layerId: string): vscode.TreeItem {
+    const layer = this.getLayers().find(l => l.id === layerId);
+    const item = new vscode.TreeItem(`${element.folder} (${layerId})`, vscode.TreeItemCollapsibleState.Expanded);
+    item.id = `erdStudio.modelLibrary.folder:${layerId}/tables/${element.folder}`;
+    item.contextValue = 'logicalModelFolder';
+    const colorId = LAYER_COLOR_IDS.has(layerId) ? layerId : layer ? 'custom' : undefined;
+    item.iconPath = colorId
+      ? new vscode.ThemeIcon('folder', new vscode.ThemeColor(`erdStudio.layer.${colorId}`))
+      : new vscode.ThemeIcon('folder');
+    const count = element.children.length;
+    item.description = `${count} ${count === 1 ? 'table' : 'tables'}`;
+    item.tooltip = `Tables in schema ${element.folder} of layer ${layerId}`;
     return item;
   }
 

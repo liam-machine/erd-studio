@@ -14,7 +14,7 @@ import type { Cardinality, ColumnDef, TableRole, Stage } from '../types/semantic
 import { COLUMN_NAME_PATTERN, RESERVED_TABLE_NAME_MESSAGE, TABLE_NAME_PATTERN, TABLE_NAME_RULE, findDuplicateNames } from '../types/naming';
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
 import { ADD_EXISTING_TABLES_LIMIT } from '../types/messages';
-import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, isReservedTableName, isValidTableAlias } from '@erd-studio/core';
+import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, isValidTableAlias } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
@@ -55,20 +55,20 @@ export function validateTableNameSafety(name: unknown): string | null {
  * Do NOT use this for names discovered in the dbt project — see
  * {@link validateTableNameSafety}.
  */
-/** The refusal for a new DBML table named like the relationships file (§2.1). */
+/**
+ * The 1.9 pre-release's refusal for a table named like its relationships file.
+ * @deprecated 2.0-switch: S8b deletes it with its last callers; the layer-first tree reserves no table name.
+ */
 export { RESERVED_TABLE_NAME_MESSAGE };
 
 /**
  * Validate the name of a table about to be CREATED as a `.dbml` file in
- * `tables/` (§2.1): the path-safety rule, plus the one reserved name,
- * `_relationships` in any case. Called only by create paths (Add, Add
- * Existing, Add from dbt, Rename's new name); an existing table of that name
- * stays editable.
+ * `<layer>/tables/<schema>/`: the path-safety rule. The layer-first tree
+ * reserves no table name (`_relationships` is an ordinary name). Called only
+ * by create paths (Add, Add Existing, Add from dbt, Rename's new name).
  */
 export function validateNewDbmlTableName(name: unknown): string | null {
-  const safetyError = validateTableNameSafety(name);
-  if (safetyError) return safetyError;
-  return isReservedTableName((name as string).trim()) ? RESERVED_TABLE_NAME_MESSAGE : null;
+  return validateTableNameSafety(name);
 }
 
 export function validateTableName(name: unknown): string | null {

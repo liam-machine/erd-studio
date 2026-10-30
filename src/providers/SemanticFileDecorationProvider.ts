@@ -80,10 +80,11 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
   }
 
   /**
-   * Whether a `.dbml` path is a diagram, by path only (§3.5): `<layer>/<name>.dbml`
-   * under the semantic dir, not in the table library and not a relationships
-   * file. No `.dbml` under `tables/` is a diagram whatever `layers.json`
-   * says, so this needs no file access.
+   * Whether a `.dbml` path is a diagram, by the single classifier and the
+   * path only: `<layer>/diagrams/<name>.dbml` under the semantic dir, never
+   * a table (`<layer>/tables/<schema>/`), a relationships file
+   * (`<layer>/relationships/`) or a 1.9 pre-release file, so this needs no
+   * file access.
    */
   private isDbmlDiagram(fsPath: string): boolean {
     const normalised = fsPath.replace(/\\/g, '/');
@@ -94,8 +95,10 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
   }
 
   /**
-   * Extract the layer ID from a domain file path.
-   * Expects: .../<semanticDir>/<layerId>/<domain>.json
+   * Extract the layer ID from a domain file path: the first segment under
+   * the semantic dir, which is the layer for both shapes.
+   * Expects: .../<semanticDir>/<layerId>/<domain>.json or
+   * .../<semanticDir>/<layerId>/diagrams/<domain>.dbml
    */
   private extractLayerId(fsPath: string): string | null {
     // Normalise separators to forward slash for matching

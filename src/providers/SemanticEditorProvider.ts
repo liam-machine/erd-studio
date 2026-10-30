@@ -68,6 +68,7 @@ import {
   SubjectAreaFileError,
   SubjectAreaService,
   isSubjectAreaFilePath,
+  notADiagramMessage,
   subjectAreaTableNames,
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
@@ -86,8 +87,8 @@ import { SelectorsService } from '../services/selectorsService';
 import { computeNewTablePositions, findOpenPosition } from '../services/positionService';
 import {
   ERD_LAYOUT_NOTE_PREFIX,
-  classifySemanticFile,
   computeMissingPositions,
+  diagramPathOf,
   isErdLayoutName,
   subjectAreaStorageOf,
   SubjectAreaValidationError,
@@ -191,7 +192,7 @@ import type { DbmlConversionCandidates } from '../services/dbmlConversionFiles';
 import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
-import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused, tablesDirIsLayer } from '../services/logicalModelService';
+import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused } from '../services/logicalModelService';
 import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
 import type { FileWrite } from '../services/fileWrites';
 import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
@@ -236,13 +237,6 @@ const SUBJECT_AREA_READ_RETRY_DELAYS_MS = [150, 350, 700];
  * the canvas on the first one leaves an error over a file that is fine. A
  * genuinely unreadable file costs the same ~1.2 s of retries, then reports.
  */
-/** A document's first line (the classifier reads a DBML export's header from it). */
-function firstLineOf(document: vscode.TextDocument): string {
-  const text = document.getText();
-  const end = text.indexOf('\n');
-  return (end < 0 ? text : text.slice(0, end)).replace(/\r$/, '');
-}
-
 function isRetryableSubjectAreaRead(err: unknown): err is SubjectAreaFileError {
   return err instanceof SubjectAreaFileError && (err.transient || err.reason === 'unreadable');
 }
@@ -279,13 +273,17 @@ export const RELATIONSHIP_SURVEY_DELAY_MS = 3000;
 
 /**
  * The logical-models/ sub-folder new models created from a domain go in: the
- * domain file's layer directory (`{semanticDir}/{layer}/{domain}.json`).
+ * domain file's layer directory (`{semanticDir}/{layer}/{domain}.json`, or a
+ * DBML diagram's `{layer}/diagrams/{domain}.dbml`).
  * `TableLibraryService` ignores a name that is not layer-shaped, so a domain
  * opened from anywhere else simply creates its models at the top level.
  */
 export function tableFolderForSubjectArea(domainFilePath: string): string {
-  return path.basename(path.dirname(domainFilePath));
+  return diagramPathOf(domainFilePath)?.layer ?? path.basename(path.dirname(domainFilePath));
 }
+
+/** The last sentence of every "not a DBML diagram" page (§1.8): how to see the file as text. */
+export const REOPEN_AS_TEXT_SENTENCE = 'To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor.';
 
 /**
  * logical-models/*.yml operations to bundle into a domain WorkspaceEdit so the
@@ -390,7 +388,7 @@ function pruneViewConfigForRemovedTables(
  * dbt convention, with the alias carrying the table name.
  */
 function sameTableName(name: string, domainPath: string): string {
-  const layer = path.basename(path.dirname(domainPath)).toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  const layer = tableFolderForSubjectArea(domainPath).toLowerCase().replace(/[^a-z0-9_]/g, '_');
   return layer ? `${layer}_${name}` : `${name}_2`;
 }
 
@@ -1276,17 +1274,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     });
   }
 
-  /** A `file:` `.dbml` the classifier says is not a diagram: a table, relationships or other file (§5.9). */
-  private isRerouted(document: vscode.TextDocument): boolean {
-    if (document.uri.scheme !== 'file' || !document.uri.fsPath.toLowerCase().endsWith('.dbml')) return false;
-    // The first line too: a DBML export 1.x saved beside its diagram (`// erd-studio dbml-export …`) opens as text, as it did then (§3.5).
-    const firstLine = firstLineOf(document);
-    const semanticRoot = path.dirname(this.tableLibraryService.getTablesDir());
-    const rel = path.relative(semanticRoot, document.uri.fsPath).split(path.sep).join('/');
-    if (rel.startsWith('..') || path.isAbsolute(rel)) return !isSubjectAreaFilePath(document.uri.fsPath, firstLine);
-    return classifySemanticFile(rel, { tablesDirIsLayer: tablesDirIsLayer(semanticRoot), firstLine }).kind !== 'diagram';
-  }
-
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
     webviewPanel: vscode.WebviewPanel,
@@ -1300,19 +1287,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const foreignOwner = this.foreignProjectOf(document.uri.fsPath);
     if (foreignOwner !== null) {
       this.showForeignProject(webviewPanel, document.uri.fsPath, foreignOwner);
-      return;
-    }
-
-    // The `**/.erd-studio/*/*.dbml` selector also matches `tables/x.dbml` and
-    // `tables/_relationships.dbml`, and a glob cannot exclude them (§5.9). A
-    // `file:` one that is not a diagram is reopened as text. Other schemes
-    // (`git:` in the SCM diff, the merge editor's inputs) are never rerouted:
-    // disposing their panel would break those views; they get the
-    // not-a-diagram page with Open as Text instead.
-    if (this.isRerouted(document)) {
-      const column = webviewPanel.viewColumn;
-      webviewPanel.dispose();
-      await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default', { viewColumn: column, preview: false });
       return;
     }
 
@@ -2260,10 +2234,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * Why `name` cannot join the DBML diagram `document`, or null (D20, §2.1):
-   * an existing YAML table cannot (a `use` line cannot point at a `.yml`),
-   * and a new table may not be named like the relationships file. Null for a
-   * JSON diagram.
+   * Why `name` cannot join the DBML diagram `document`, or null (D20): an
+   * existing YAML table cannot (a `use` line cannot point at a `.yml`), and a
+   * new table's name must be safe as a file name. Null for a JSON diagram.
    */
   private dbmlMemberProblem(document: vscode.TextDocument, name: string): string | null {
     if (!this.isDbmlDocument(document)) return null;
@@ -3636,9 +3609,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.duplicateWarningsShown.has(key)) continue;
       this.duplicateWarningsShown.add(key);
       // In both libraries (#162): a project half-way between the v5 and v6
-      // naming. Reported, never resolved here — the v6 file is not written.
+      // naming, or a DBML copy of a YAML table (part-way through Convert).
+      // Reported, never resolved here — the ignored copy is not written.
       const shadowedBy = entry.shadowedBy;
-      if (entry.library && !this.tableLibraryService.isTableNamingFile(shadowedBy)) {
+      if (this.tableLibraryService.isCrossLibraryDuplicate(entry)) {
         void vscode.window.showWarningMessage(
           `"${entry.name}" has a file in both the old and the new table folder. ${domain.layer}/${domain.domain} uses ` +
           `${rel(entry.shadowedBy)}; ${rel(entry.filePath)} is ignored. Delete the copy you don't want.`,
@@ -3654,7 +3628,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           ? `, not the ${domain.layer} copy ${rel(entry.filePath)}, which is ignored.`
           : `; ${rel(entry.filePath)} is ignored.`);
       // The fix rewrites files, so it is offered only inside logical-models/.
-      const fixable = !entry.library;
+      const fixable = !entry.library && entry.layer === undefined;
       void vscode.window.showWarningMessage(
         fixable ? message : `${message} Rename or delete one copy.`,
         ...(fixable ? ['Fix…'] : []),
@@ -3801,20 +3775,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // `templates/*.json` and the other reserved directories, and a glob cannot
     // express the exclusion, so the refusal lives here. Rendering a canvas for
     // one of those can only ever end in a parse error the user cannot act on.
-    if (!isSubjectAreaFilePath(document.uri.fsPath, firstLineOf(document)) && document.uri.fsPath.toLowerCase().endsWith('.dbml')) {
-      // A table or relationships file shown through another scheme (an SCM
-      // diff), or reached directly: core's own words, with Open as Text.
+    if (!isSubjectAreaFilePath(document.uri.fsPath) && document.uri.fsPath.toLowerCase().endsWith('.dbml')) {
+      // The selector (`*/diagrams/*.dbml`) is case-insensitive in VS Code, a
+      // tab restored from 1.9 keeps its editor, and `vscode.openWith` ignores
+      // the selector: a table, relationships, 1.9 or other `.dbml` gets the
+      // not-a-diagram page (§1.8), never a reroute.
       this.postLoadError(webview, errorKey, {
-        message: `${document.uri.fsPath} is a DBML table or relationships file, not a diagram. Open a diagram in a layer folder.`,
+        message: `${notADiagramMessage(document.uri.fsPath, path.dirname(this.tableLibraryService.getTablesDir()))} ${REOPEN_AS_TEXT_SENTENCE}`,
         kind: 'not-a-domain',
       }, undefined, 'notDomain');
       return undefined;
     }
     if (!isSubjectAreaFilePath(document.uri.fsPath)) {
+      const semanticDirName = path.basename(path.dirname(path.dirname(document.uri.fsPath)));
       this.postLoadError(webview, errorKey, {
         message:
           `${path.basename(document.uri.fsPath)} is not an ERD Studio subject area file — ` +
-          `subject areas live in ${path.basename(path.dirname(path.dirname(document.uri.fsPath)))}/{layer}/{domain}.json. ` +
+          `subject areas live in ${semanticDirName}/{layer}/{domain}.json or ${semanticDirName}/{layer}/diagrams/{domain}.dbml. ` +
           `Open it as text to edit it.`,
         kind: 'not-a-domain',
       }, undefined, 'notDomain');

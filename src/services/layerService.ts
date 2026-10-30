@@ -21,7 +21,7 @@ import {
   KNOWN_LAYER_DEFAULTS,
   LAYERS_SCHEMA_VERSION,
 } from '../types/layer';
-import { LAYERS_CONFIG_FILE, validateLayersConfig } from '@erd-studio/core';
+import { LAYERS_CONFIG_FILE, isReservedLayerName, validateLayersConfig } from '@erd-studio/core';
 import { LOGICAL_MODELS_DIR, TABLES_DIR, hasTablesLibrary } from './logicalModelService';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
 import { log } from './logger';
@@ -42,6 +42,14 @@ const STAGE_DIR_NAMES = new Set(['logical', 'physical']);
  * keeps it, and the project stays on the v5 naming.
  */
 const RESERVED_DIR_NAMES = new Set(['templates', LOGICAL_MODELS_DIR, TABLES_DIR]);
+
+/**
+ * Why Add Layer (and Convert) refuse a name in core's `RESERVED_LAYER_NAMES`
+ * (`tables`, `templates`, `logical-models`, compared case-insensitively).
+ */
+export function reservedLayerNameMessage(name: string): string {
+  return `"${name}" is reserved for ERD Studio's own folders; pick another name.`;
+}
 
 /** Sentinel signature used when layers.json is absent. */
 const NO_FILE_SIGNATURE = 'missing';
@@ -236,7 +244,7 @@ export class LayerService {
       .filter(entry =>
         entry.isDirectory() &&
         !entry.name.startsWith('.') &&
-        (!RESERVED_DIR_NAMES.has(entry.name) || (entry.name === TABLES_DIR && !hasTablesLibrary(this.semanticPath))) &&
+        (!RESERVED_DIR_NAMES.has(entry.name) || (entry.name === TABLES_DIR && !hasTablesLibrary(this.semanticPath) && !this.tablesHoldsDbml())) &&
         !STAGE_DIR_NAMES.has(entry.name),
       )
       .map(entry => entry.name)
@@ -278,6 +286,30 @@ export class LayerService {
     }
 
     return layers;
+  }
+
+  /**
+   * Whether `tables/` holds a `.dbml` at its top or one folder down: a 1.9
+   * pre-release leftover (§1.8), so `tables` is never offered as a layer
+   * (restoring the YAML beside it must not turn its tables into a layer).
+   */
+  private tablesHoldsDbml(): boolean {
+    const dir = path.join(this.semanticPath, TABLES_DIR);
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    return entries.some((e) => {
+      if (e.isFile()) return e.name.endsWith('.dbml');
+      if (!e.isDirectory() || e.name.startsWith('.')) return false;
+      try {
+        return fs.readdirSync(path.join(dir, e.name)).some((f) => f.endsWith('.dbml'));
+      } catch {
+        return false;
+      }
+    });
   }
 
   /**
@@ -428,6 +460,10 @@ export class LayerService {
     // A `_` name is never a layer: `_relationships` is the DBML relationships file's (§2.1).
     if (layer.id.startsWith('_')) {
       throw new Error(`Layer ID "${layer.id}" may not start with "_"`);
+    }
+    // ERD Studio's own folders (`tables`, `templates`, `logical-models`), in any case (§1.1).
+    if (isReservedLayerName(layer.id)) {
+      throw new Error(reservedLayerNameMessage(layer.id));
     }
 
     // Check for duplicate ID

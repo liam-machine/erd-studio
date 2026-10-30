@@ -9,13 +9,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { classifySemanticFile, detectProjectStorage } from '@erd-studio/core';
+import { DIAGRAMS_DIR, classifySemanticFile, detectProjectStorage, isDbmlLayerName } from '@erd-studio/core';
 import type { ProjectStorage } from '@erd-studio/core';
 
 /** What the table library knows, as {@link projectStorageIn} needs it. */
 export interface StorageLibraryView {
+  /** Every table file: YAML (`logical-models/`, `tables/`) or DBML (`<layer>/tables/<schema>/`). */
   listTableFiles(): ReadonlyArray<{ readonly storage: 'yaml' | 'dbml' }>;
-  /** Every relationships file of the DBML library. */
+  /** Every relationships file of the DBML library (`<layer>/relationships/*.dbml`). */
   listRelationshipsFiles(): readonly string[];
   /** `logical-models/` exists, empty or not. */
   hasV5Folder(): boolean;
@@ -24,9 +25,10 @@ export interface StorageLibraryView {
 }
 
 /**
- * The storage of every subject area file (`{layer}/*.json`, `{layer}/*.dbml`)
- * under `semanticRoot`, by the single classifier (a `.dbml` saved there by
- * Export, whose first line is the export header, is not a diagram).
+ * The storage of every subject area file under `semanticRoot`: each
+ * `{layer}/*.json` and each DBML diagram `{layer}/diagrams/*.dbml`, by the
+ * single classifier (path only). `diagrams/` is listed only when the
+ * layer's own listing shows it.
  */
 export function subjectAreaStoragesIn(semanticRoot: string, tablesIsLayer: boolean): Array<'json' | 'dbml'> {
   const storages: Array<'json' | 'dbml'> = [];
@@ -36,55 +38,52 @@ export function subjectAreaStoragesIn(semanticRoot: string, tablesIsLayer: boole
   } catch {
     return storages;
   }
+  const add = (rel: string): void => {
+    const kind = classifySemanticFile(rel, { tablesDirIsLayer: tablesIsLayer });
+    if (kind.kind === 'diagram' && (kind.storage === 'json' || kind.storage === 'dbml')) storages.push(kind.storage);
+  };
   for (const dir of dirs) {
     if (!dir.isDirectory()) continue;
-    let files: string[];
+    let files: fs.Dirent[];
     try {
-      files = fs.readdirSync(path.join(semanticRoot, dir.name));
+      files = fs.readdirSync(path.join(semanticRoot, dir.name), { withFileTypes: true });
     } catch {
       continue;
     }
     for (const file of files) {
-      const rel = `${dir.name}/${file}`;
-      if (!file.endsWith('.json') && !file.endsWith('.dbml')) continue;
-      const firstLine = file.endsWith('.dbml') ? readFirstLine(path.join(semanticRoot, dir.name, file)) : undefined;
-      const kind = classifySemanticFile(rel, { tablesDirIsLayer: tablesIsLayer, ...(firstLine !== undefined ? { firstLine } : {}) });
-      if (kind.kind === 'diagram' && (kind.storage === 'json' || kind.storage === 'dbml')) storages.push(kind.storage);
+      if (file.name.endsWith('.json')) add(`${dir.name}/${file.name}`);
+    }
+    if (!files.some((f) => f.isDirectory() && f.name === DIAGRAMS_DIR) || !isDbmlLayerName(dir.name)) continue;
+    let diagrams: string[];
+    try {
+      diagrams = fs.readdirSync(path.join(semanticRoot, dir.name, DIAGRAMS_DIR));
+    } catch {
+      continue;
+    }
+    for (const file of diagrams) {
+      if (file.endsWith('.dbml')) add(`${dir.name}/${DIAGRAMS_DIR}/${file}`);
     }
   }
   return storages;
 }
 
-/** The first line of `filePath` (at most 512 bytes read), or undefined when it cannot be read. */
-export function readFirstLine(filePath: string): string | undefined {
-  let fd: number | undefined;
-  try {
-    fd = fs.openSync(filePath, 'r');
-    const buffer = Buffer.alloc(512);
-    const bytes = fs.readSync(fd, buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, bytes).toString('utf-8').split(/\r?\n/)[0];
-  } catch {
-    return undefined;
-  } finally {
-    if (fd !== undefined) {
-      try { fs.closeSync(fd); } catch { /* already closed */ }
-    }
-  }
-}
-
 /**
  * The project's storage, to **write**: `yaml` whenever `tables/` is a layer
- * folder (a DBML project never has one), else core's answer from the
- * library's files and every subject area's storage. A project with no
+ * folder (a pre-v6 YAML project), else core's answer from the library's
+ * files (DBML evidence: any DBML table or relationships file of the
+ * layer-first tree) and every subject area's storage. A project with no
  * library and no diagrams is `dbml`.
  */
 export function projectStorageIn(semanticRoot: string, library: StorageLibraryView, tablesIsLayer: boolean): ProjectStorage {
   if (tablesIsLayer) return 'yaml';
   const files = library.listTableFiles();
+  // DBML evidence: any DBML table or relationships file the library lists.
+  const hasDbmlTables = files.some((f) => f.storage === 'dbml') || library.listRelationshipsFiles().length > 0;
   return detectProjectStorage({
     hasYamlTables: files.some((f) => f.storage === 'yaml'),
-    hasV5Folder: library.hasV5Folder() && !library.hasTablesLibrary(),
-    hasDbmlTables: files.some((f) => f.storage === 'dbml') || library.listRelationshipsFiles().length > 0,
+    // An empty `logical-models/` beside a library says nothing (a migration leftover).
+    hasV5Folder: library.hasV5Folder() && !library.hasTablesLibrary() && !hasDbmlTables,
+    hasDbmlTables,
     subjectAreaStorages: subjectAreaStoragesIn(semanticRoot, tablesIsLayer),
   });
 }

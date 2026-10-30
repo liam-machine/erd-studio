@@ -110,6 +110,31 @@ describe('the DBML twins compile clean as multi-file projects, the way other DBM
   });
 });
 
+describe('the extension\'s DBML fixture (test/fixtures/dbml-native) compiles clean in every pinned parser', () => {
+  const NATIVE = path.resolve(__dirname, '../../../../test/fixtures/dbml-native/.erd-studio');
+
+  it.each(STORAGE_PARSERS)('%s: every file, the hand-split relationships files and both diagrams included', (_label, parser) => {
+    const files = twinFiles(NATIVE);
+    expect(Object.keys(files).sort()).toEqual([
+      'gold/diagrams/sales.dbml',
+      'gold/relationships/customers.dbml',
+      'gold/relationships/gold.dbml',
+      'gold/tables/gold/bridge_empty.dbml',
+      'gold/tables/gold/customer_profile.dbml',
+      'gold/tables/gold/dim_customer.dbml',
+      'gold/tables/gold/dim_region.dbml',
+      'gold/tables/gold/fct_order.dbml',
+      'silver/diagrams/staging.dbml',
+      'silver/relationships/calendar.dbml',
+      'silver/tables/calendar/dim_date.dbml',
+    ]);
+    const result = compileDbmlProject(files, Object.keys(files), parser);
+    for (const [file, diagnostics] of Object.entries(result)) {
+      expect({ file, diagnostics }).toEqual({ file, diagnostics: [] });
+    }
+  });
+});
+
 describe('a schema folder whose name holds a space', () => {
   // The fixed virtual root keeps the project's own location out of every
   // path; a folder name with a space inside the semantic dir is still part of
