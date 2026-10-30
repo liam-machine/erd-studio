@@ -1,8 +1,7 @@
 /**
  * Where things live in a semantic dir, for every storage ERD Studio reads:
  * the single file classifier ({@link classifySemanticFile}), the order a
- * table name is looked up in ({@link tableFileCandidates}), the paths that
- * belong together (a table's relationships file),
+ * table name is looked up in ({@link tableFileCandidates}),
  * the shapes and path builders of the layer-first DBML tree (2.0) and of
  * the 1.9 pre-release's tree it replaces, and the posix path helpers core
  * needs because it may not import `node:path`.
@@ -13,7 +12,7 @@
 import { NON_SUBJECT_AREA_DIRS } from './domain.js';
 import { LAYERS_CONFIG_FILE } from './layers.js';
 import { LOGICAL_MODELS_DIR, TABLES_DIR } from './logicalModel.js';
-import { DBML_RELATIONSHIPS_FILE_NAME, DBML_RELATIONSHIPS_FILE_STEM } from './dbmlRichProperties.js';
+import { DBML_RELATIONSHIPS_FILE_STEM } from './dbmlRichProperties.js';
 
 /** The folder of table templates; never a layer. */
 export const TEMPLATES_DIR = 'templates';
@@ -173,19 +172,6 @@ export function subjectAreaStorageOf(path: string): 'json' | 'dbml' | undefined 
   if (path.endsWith('.json')) return 'json';
   if (path.endsWith('.dbml')) return 'dbml';
   return undefined;
-}
-
-/** The index of the last path separator (`/`, or `\` for a Windows host path). */
-function lastSeparator(path: string): number {
-  return Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-}
-
-/**
- * The 1.9 pre-release's relationships file of a table file's folder.
- * @deprecated 2.0-switch: S4b deletes it with its last callers.
- */
-export function relationshipsFilePathOf(tableFilePath: string): string {
-  return tableFilePath.slice(0, lastSeparator(tableFilePath) + 1) + DBML_RELATIONSHIPS_FILE_NAME;
 }
 
 /**
@@ -373,9 +359,11 @@ export function legacyDbmlFileMessage(rel: string): string {
  * Why a `.dbml` path is not a diagram, for a reader asked to open one as a
  * diagram (§1.8): the 1.9 pre-release's message for its shapes, the table
  * and relationships file message for the rest of the layer-first tree, else
- * where diagrams live. `path` names the file in the message as given; the
- * 1.9 shape is read from it when it is relative to the semantic dir, or from
- * what follows its `.erd-studio` / `erd-studio` segment; a table or
+ * where diagrams live. `path` names the file in the message as given,
+ * except in the 1.9 message, which names it relative to the semantic dir
+ * (`legacyDbmlFileMessage(rel)`): the 1.9 shape is read from `path` when it
+ * is relative to the semantic dir, or from what follows its `.erd-studio` /
+ * `erd-studio` segment; a table or
  * relationships file is also recognised by its last segments, whatever
  * precedes them (an absolute path, a semantic dir with another name).
  */
@@ -385,7 +373,7 @@ export function dbmlNotADiagramMessage(path: string): string {
   const all = posix.split('/');
   const at = Math.max(all.lastIndexOf('.erd-studio'), all.lastIndexOf('erd-studio'));
   const rel: string | undefined = at >= 0 ? all.slice(at + 1).join('/') : absolute ? undefined : posix;
-  if (rel !== undefined && legacyDbmlShapeOf(rel) !== undefined) return legacyDbmlFileMessage(path);
+  if (rel !== undefined && legacyDbmlShapeOf(rel) !== undefined) return legacyDbmlFileMessage(rel);
   const segments = posix.split('/').filter((s) => s !== '');
   // By its last segments too, whatever precedes them: a semantic dir with another name (`model/…`).
   const tree = (rel !== undefined ? dbmlTreePathOf(rel) : undefined)

@@ -1,0 +1,12 @@
+Project dbml_conflict {
+  Note: 'Two branches added different tables'
+  erd_schema_version: '7'
+}
+
+use { table silver.dim_customer } from '../tables/silver/dim_customer.dbml'
+<<<<<<< HEAD
+use { table silver.fct_order } from '../tables/silver/fct_order.dbml'
+=======
+use { table silver.fct_order } from '../tables/silver/fct_order.dbml'
+use { table silver.dim_product } from '../tables/silver/dim_product.dbml'
+>>>>>>> feature/products

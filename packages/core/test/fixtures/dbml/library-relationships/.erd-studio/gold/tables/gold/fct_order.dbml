@@ -1,0 +1,16 @@
+// Kept from logical-models/gold/fct_order.yml by Convert Project to DBML:
+// # The fact. It carries its own copy of the order-date link (ERD Studio 1.6.7
+// # also left a backwards copy in dim_date.yml), and nothing for the customer or
+// # product links: those were written on the dimensions' side.
+Table gold.fct_order [
+  role: 'fact',
+  alias: 'orders'
+] {
+  Note: 'One row per order line'
+
+  order_line_id  BIGINT          [pk]
+  customer_key   INT
+  order_date_key INT             [foreign_key: 'true']
+  product_key    INT
+  amount         "DECIMAL(18,2)" [additive_type: 'additive']
+}

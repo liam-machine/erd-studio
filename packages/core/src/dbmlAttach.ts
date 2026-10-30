@@ -85,8 +85,9 @@ function at(location: DbmlRefLocation): string {
 }
 
 /**
- * Attach every Ref of `readings` (in the order given, each file in file
- * order) to its owner, when the owner is a DBML table:
+ * Attach every Ref of `readings` (in path byte order, whatever order they
+ * are given in, each file in file order) to its owner, when the owner is a
+ * DBML table:
  *
  * - ends are matched by `tables` (a table part, qualifier already removed;
  *   a DBML alias resolves through {@link dbmlTableLookup}) and respelled to
@@ -101,6 +102,7 @@ function at(location: DbmlRefLocation): string {
  * - a link read more than once (`linkKey`, in any files, either way round) is
  *   attached once, the copy {@link libraryCopyRank} ranks first, and
  *   reported in `duplicates`;
+ * - `locations` says where each attached link is stored: the copy kept;
  * - a Ref of several column pairs is one composite: its surviving members
  *   share `nextCompositeKey(entriesSoFar, toModel)`, in file order.
  *
@@ -122,13 +124,16 @@ export function attachRelationships(
   tables: (name: string) => DbmlAttachTable | undefined,
   options: { dbt?: DbtKeyIndex; partial?: boolean } = {},
 ): DbmlAttachResult {
-  const result: DbmlAttachResult = { byOwner: new Map(), misplaced: [], orphaned: [], duplicates: [], warnings: [] };
+  const result: DbmlAttachResult = { byOwner: new Map(), misplaced: [], orphaned: [], duplicates: [], warnings: [], locations: new Map() };
   interface Candidate { rel: Relationship; unit: number; at: DbmlRefLocation; rank: string; owner: string }
   const candidates: Candidate[] = [];
   let unit = 0;
   let index = 0;
 
-  for (const { path, reading } of readings) {
+  // Path byte order, so the copy a tie keeps and the order of each owner's list
+  // never depend on the order a host happened to list the files in.
+  const ordered = [...readings].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  for (const { path, reading } of ordered) {
     if (!reading || !reading.readable) continue;
     // Pending relationships (D27) belong to their owner exactly like live Refs: drawn when both ends are shown.
     for (const ref of [...reading.refs, ...(reading.pending ?? [])]) {
@@ -180,6 +185,7 @@ export function attachRelationships(
     const held = winners.get(key);
     if (!held || c.rank < held.rank) winners.set(key, c);
   }
+  for (const [key, kept] of winners) result.locations!.set(key, kept.at);
   const reported = new Set<Candidate>();
   for (const c of candidates) {
     const kept = winners.get(linkKey(c.rel))!;

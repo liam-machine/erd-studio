@@ -13,7 +13,11 @@
  *    every construct ERD Studio does not model survives, apart from those
  *    inside the cut span of a node the edit removes;
  * 5. parses: when the input compiled clean (or is a new file), the output
- *    compiles clean with its `use` targets in 9.1.1, 10.3.1 and 11.0.0.
+ *    compiles clean with its `use` targets in 9.1.1, 10.3.1 and 11.0.0 —
+ *    also after a table moves to another schema (a requalifying move).
+ *
+ * Every file is in the layer-first tree (2.0): `<layer>/tables/<schema>/`,
+ * `<layer>/relationships/` and `<layer>/diagrams/`.
  *
  * The generator is a small mulberry32 PRNG (no dependency). Set
  * `DBML_LAW_SEED` to run another seed; the seed is printed on failure.
@@ -25,12 +29,13 @@ import * as path from 'path';
 import { parseTableDbml } from '../../src/dbml/readTable';
 import { parseSubjectAreaDbml } from '../../src/dbml/readDiagram';
 import { editTableDbml, renderNewTableDbml } from '../../src/dbml/writeTable';
+import { importsOver } from '../dbmlWriterCases/diagramCases';
 import { editRelationshipsDbml } from '../../src/dbml/writeRelationships';
 import { editSubjectAreaDbml, renderNewSubjectAreaDbml } from '../../src/dbml/writeDiagram';
 import { normaliseForStorageEquivalence } from '../../src/storageEquivalence';
 import { dbmlName, dbmlNoteText } from '../../src/dbmlText';
 import { readMeta } from '../../src/meta';
-import { relationshipsFilePathOf } from '../../src/storage';
+import { classifySemanticFile } from '../../src/storage';
 import { erdLayoutOf } from '../../src/erdLayout';
 import { readRelationshipsDbml } from '../../src/dbml/readRelationships';
 import { compileOne, elementType, isUseDeclaration, plainNames, topLevel, type AstNode } from '../../src/dbml/parser';
@@ -90,8 +95,8 @@ function normTable(t: SemanticTable): unknown {
   return normaliseForStorageEquivalence({ models: [out] });
 }
 
-function readOk(text: string, stem: string): SemanticTable {
-  const r = parseTableDbml(text, stem);
+function readOk(text: string, stem: string, schemaFolder?: string): SemanticTable {
+  const r = parseTableDbml(text, stem, schemaFolder !== undefined ? { schemaFolder } : {});
   if (!r.ok) throw new Error(`does not read: ${r.error.message}\n${text}`);
   return r.table;
 }
@@ -249,7 +254,7 @@ const KEPT_CONSTRUCTS: readonly string[] = [
   'Enum order_status {\n  new\n  shipped\n}',
   "[not null, default: 'new'",
   "(customer_key, status) [unique, name: 'cust_status']",
-  "Metadata Column fct_order.status {\n  note: 'Set by a Metadata block'\n}",
+  "Metadata Column gold.fct_order.status {\n  note: 'Set by a Metadata block'\n}",
   "database_type: 'Snowflake'",
   "use * from './nothing_here_but_harmless.dbml'",
   "[delete: cascade] // shipping",
@@ -266,10 +271,13 @@ function cleanIn(files: Record<string, string>, entry: string): string[] {
 // Fixtures
 // ---------------------------------------------------------------------------
 
+// 2.0-switch: S5 adds back test/fixtures/dbml-native, once that fixture is in the layer-first tree.
 const FIXTURE_ROOTS = [
   path.resolve(__dirname, '../fixtures/dbml'),
-  path.resolve(__dirname, '../../../../test/fixtures/dbml-native'),
 ];
+
+/** Whether a path relative to the semantic dir is a DBML diagram (`<layer>/diagrams/<name>.dbml`). */
+const isDiagramFile = (file: string): boolean => classifySemanticFile(file, { tablesDirIsLayer: false }).kind === 'diagram';
 
 function walk(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
@@ -299,8 +307,8 @@ function fixtureProjects(): Array<{ name: string; files: Record<string, string> 
  * everywhere, an Enum and a Metadata block.
  */
 const HAND_WRITTEN_PROJECT: Record<string, string> = {
-  'tables/gold/fct_order.dbml': `// Order lines, by hand.
-Table fct_order [erd_role: 'transaction-fact', meta_owner: 'wins', meta_json: '{"owner":"loses","pii":false}'] {
+  'gold/tables/gold/fct_order.dbml': `// Order lines, by hand.
+Table gold.fct_order [erd_role: 'transaction-fact', meta_owner: 'wins', meta_json: '{"owner":"loses","pii":false}'] {
   // the line id
   order_line_id bigint
   customer_key int [erd_foreign_key: 'true'] // FK
@@ -318,37 +326,37 @@ Enum order_status {
   shipped
 }
 
-Metadata Column fct_order.status {
+Metadata Column gold.fct_order.status {
   note: 'Set by a Metadata block'
 }
 `,
-  'tables/gold/dim_customer.dbml': `Table gold.dim_customer as DC {
+  'gold/tables/gold/dim_customer.dbml': `Table gold.dim_customer as DC {
   customer_key int [primary key, note: 'Surrogate']
   parent_key int
 }
 `,
-  'tables/dim_date.dbml': '// Calendar.\n\nTable dim_date {\n  date_key int [pk]\n}\n',
+  'silver/tables/shared/dim_date.dbml': '// Calendar.\n\nTable shared.dim_date {\n  date_key int [pk]\n}\n',
   // 11.0-only typed values (§2.2): this file compiles in 11.0.0 alone, so Law 5 holds it to 11.0.0.
-  'tables/typed.dbml': `// Typed values, as 11.0 allows them.
+  'silver/tables/public/typed.dbml': `// Typed values, as 11.0 allows them.
 Table typed [erd_role: 'reference', meta_count: 3, headercolor: #3498db] {
   id int [pk, natural_key: true] /* the key */
   v int [scd_type: 2] // typed
   w varchar
 }
 `,
-  'tables/gold/_relationships.dbml': `// Written by hand: unsorted, with an extra use line.
-use { table fct_order } from './fct_order.dbml'
-use { table gold.dim_customer } from './dim_customer.dbml'
-use { table dim_date } from '../dim_date.dbml'
+  'gold/relationships/gold.dbml': `// Written by hand: unsorted, with an extra use line.
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
 use * from './nothing_here_but_harmless.dbml'
 
-Ref "ship date": fct_order.ship_date_key > dim_date.date_key [delete: cascade] // shipping
+Ref "ship date": gold.fct_order.ship_date_key > shared.dim_date.date_key [delete: cascade] // shipping
 // the customer
-Ref: fct_order.customer_key >? gold.dim_customer.customer_key
+Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key
 Ref parent: gold.dim_customer.parent_key > gold.dim_customer.customer_key
 `,
-  'tables/gold/nothing_here_but_harmless.dbml': '// An extra file a use line imports.\n',
-  'gold/sales.dbml': `// The sales star, by hand.
+  'gold/relationships/nothing_here_but_harmless.dbml': '// An extra file a use line imports.\n',
+  'gold/diagrams/sales.dbml': `// The sales star, by hand.
 
 Project sales {
   Note: 'Sales'
@@ -356,9 +364,10 @@ Project sales {
   database_type: 'Snowflake'
 }
 
-use { table fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 use * from '../tables/gold/dim_customer.dbml'
-use { table dim_date } from '../tables/dim_date.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
+use * from '../relationships/gold.dbml'
 
 Note "n-1" [color: #f59e0b] {
   'Remember the grain'
@@ -368,9 +377,9 @@ Note "n-1" [color: #f59e0b] {
 
 /** Use lines missing on purpose (the file does not compile for other tools; ERD Studio still reads and edits it). */
 const MISSING_USE_PROJECT: Record<string, string> = {
-  'tables/dim_date.dbml': 'Table dim_date {\n  date_key int [pk]\n}\n',
-  'tables/fct_order.dbml': 'Table fct_order {\n  id int [pk]\n  date_key int\n  other_key int\n}\n',
-  'tables/_relationships.dbml': '// No use lines.\nRef: dim_date.date_key - fct_order.date_key\nRef: fct_order.other_key > dim_date.date_key\n',
+  'gold/tables/gold/dim_date.dbml': 'Table gold.dim_date {\n  date_key int [pk]\n}\n',
+  'gold/tables/gold/fct_order.dbml': 'Table gold.fct_order {\n  id int [pk]\n  date_key int\n  other_key int\n}\n',
+  'gold/relationships/gold.dbml': '// No use lines.\nRef: gold.dim_date.date_key - gold.fct_order.date_key\nRef: gold.fct_order.other_key > gold.dim_date.date_key\n',
 };
 
 const PROJECTS = [
@@ -389,11 +398,11 @@ describe('the laws over every DBML fixture', () => {
 
     for (const [file, text] of tableFilesOf(project.files)) {
       const stem = stemOf(file);
-      const reading = parseTableDbml(text, stem);
+      const reading = parseTableDbml(text, stem, { schemaFolder: classifySemanticFile(file, { tablesDirIsLayer: false }).schema });
       if (!reading.ok || !reading.writable) continue;
       it(`${project.name}/${file}: Laws 1–5 for its table`, () => {
         // Law 1.
-        expect(editTableDbml(text, reading.table)).toBe(text);
+        expect(editTableDbml(text, reading.table, { schemaFolder: reading.table.schema })).toBe(text);
         const baseline = cleanIn({ [file]: text }, file);
         const mutations: Array<(t: SemanticTable) => void> = [
           (t) => { t.grain = 'Changed grain'; t.columns = [...(t.columns ?? []), { name: 'law_added', dataType: 'VARCHAR(10)', description: 'Added' }]; },
@@ -404,9 +413,9 @@ describe('the laws over every DBML fixture', () => {
         for (const mutate of mutations) {
           const desired = clone(reading.table);
           mutate(desired);
-          const out = editTableDbml(text, desired);
-          expect(normTable(readOk(out, desired.name))).toEqual(normTable(desired)); // Law 3
-          expect(editTableDbml(out, desired)).toBe(out); // Law 2
+          const out = editTableDbml(text, desired, { schemaFolder: reading.table.schema });
+          expect(normTable(readOk(out, desired.name, reading.table.schema))).toEqual(normTable(desired)); // Law 3
+          expect(editTableDbml(out, desired, { schemaFolder: reading.table.schema })).toBe(out); // Law 2
           expectPreserved(text, out, tableRemovedSpans(text, reading.table, desired)); // Law 4
           expect(projectDiagnostics({ [file]: out }, [file], baseline)).toEqual([]); // Law 5
         }
@@ -420,7 +429,7 @@ describe('the laws over every DBML fixture', () => {
         const owners = ownersOfFile(project.files, file, library);
         const resolve = relationshipsResolver(library);
         const mine = new Map([...owners].map(([k, list]) => [k, { name: resolve(k)?.name ?? k, relationships: list }]));
-        // Law 1: every owner of the folder listed with what it holds.
+        // Law 1: every owner with a Ref here listed with what it holds.
         expect(editRelationshipsDbml(text, { filePath: file, owners: mine, resolve })).toBe(text);
         const baseline = cleanIn(project.files, file);
         const owner = [...mine.values()].find((o) => o.relationships.length > 0);
@@ -444,14 +453,13 @@ describe('the laws over every DBML fixture', () => {
     }
 
     for (const [file, text] of Object.entries(project.files)) {
-      if (file.startsWith('tables/') || !file.endsWith('.dbml')) continue;
+      if (!isDiagramFile(file)) continue;
       it(`${project.name}/${file}: Laws 1–5 for its diagram`, () => {
         const before = parseSubjectAreaDbml(text, file).obj as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
         const resolveTable = diagramResolver(library);
         const lookups = {
           resolveTable,
-          // 2.0-switch: S4b (the folder-based imports until this generator writes the layer-first tree)
-          relationshipsImportsFor: (names: readonly string[]) => names.map((n) => resolveTable(n)).filter((t) => t?.storage === 'dbml').map((t) => relationshipsFilePathOf(t!.path)),
+          relationshipsImportsFor: (names: readonly string[], current: readonly string[]) => importsOver(project.files, names, current),
           fileExists: (p: string) => p in project.files,
         };
         expect(editSubjectAreaDbml(text, { filePath: file, before, after: before, ...lookups })).toBe(text); // Law 1
@@ -468,6 +476,42 @@ describe('the laws over every DBML fixture', () => {
       });
     }
   }
+});
+
+describe('Law 5 across a requalifying move (a table moved to another schema folder of its layer)', () => {
+  // The showcase twin's fct_order moves from silver/tables/public/ to silver/tables/sales/:
+  // its Table is re-qualified, every Ref end and use line naming it follows, and the
+  // relationships file and the diagram both still compile clean in all three parsers.
+  const files = fixtureProjects().find((p) => p.name.endsWith('dbml/showcase/.erd-studio'))!.files;
+  const FROM = 'silver/tables/public/fct_order.dbml';
+  const TO = 'silver/tables/sales/fct_order.dbml';
+  const REL = 'silver/relationships/silver.dbml';
+  const DIAGRAM = 'silver/diagrams/showcase.dbml';
+
+  it.each(ALL)('compiles clean in %s before and after', (version) => {
+    expect(projectDiagnostics(files, [REL, DIAGRAM], [version])).toEqual([]);
+    const table = readOk(files[FROM], 'fct_order', 'public');
+    const moved: Record<string, string> = { ...files, [TO]: editTableDbml(files[FROM], { ...table, schema: 'sales' }, { requalify: true, schemaFolder: 'public' }) };
+    delete moved[FROM];
+    expect(moved[TO]).toContain('Table sales.fct_order');
+    const lib = libraryOf(moved);
+    const changed = new Set(['fct_order']);
+    const owners = ownersOfFile(files, REL);
+    moved[REL] = editRelationshipsDbml(files[REL], { filePath: REL, owners: new Map(), resolve: relationshipsResolver(lib), requalified: changed, pathChanged: changed });
+    expect(moved[REL]).toMatch(/^use \{ table sales\.fct_order \} +from '\.\.\/tables\/sales\/fct_order\.dbml'$/m);
+    expect(moved[REL]).toContain('Ref: sales.fct_order.customer_key >? silver.dim_customer.customer_key');
+    expect(moved[REL]).not.toContain('public.fct_order');
+    expect(comparableRelationships(ownersOfFile(moved, REL, lib).get('fct_order'))).toEqual(comparableRelationships(owners.get('fct_order')));
+    const before = parseSubjectAreaDbml(files[DIAGRAM], DIAGRAM).obj;
+    moved[DIAGRAM] = editSubjectAreaDbml(files[DIAGRAM], {
+      filePath: DIAGRAM, before, after: before, pathChanged: changed,
+      resolveTable: diagramResolver(lib),
+      relationshipsImportsFor: (names, current) => importsOver(moved, names, current),
+      fileExists: (p) => p in moved,
+    });
+    expect(moved[DIAGRAM]).toMatch(/^use \{ table sales\.fct_order \} +from '\.\.\/tables\/sales\/fct_order\.dbml'$/m);
+    expect(projectDiagnostics(moved, [TO, REL, DIAGRAM], [version])).toEqual([]);
+  });
 });
 
 describe('renderNewTableDbml over every fixture table', () => {
@@ -489,11 +533,13 @@ describe('renderNewTableDbml over every fixture table', () => {
     expect(tables.length).toBeGreaterThanOrEqual(30);
   });
 
-  for (const [file, table] of tables) {
+  for (const [file, yamlTable] of tables) {
     it(`${file} reads back as itself and compiles in every parser`, () => {
+      // A DBML table always has a schema (its folder): the YAML one, else `public`, as Convert's last fallback.
+      const table = { ...yamlTable, schema: yamlTable.schema || 'public' };
       const out = renderNewTableDbml(table);
-      expect(normTable(readOk(out, table.name))).toEqual(normTable(table));
-      expect(projectDiagnostics({ [`tables/${table.name}.dbml`]: out })).toEqual([]);
+      expect(normTable(readOk(out, table.name, table.schema))).toEqual(normTable(table));
+      expect(projectDiagnostics({ [`gold/tables/${table.schema}/${table.name}.dbml`]: out })).toEqual([]);
     });
   }
 });
@@ -542,7 +588,7 @@ function randomTable(rng: Rng, name: string): SemanticTable {
   const pkCount = pick(rng, [0, 1, 1, 2, 3]);
   for (const c of columns.slice(0, pkCount)) c.isPrimaryKey = true;
   const t: SemanticTable = { name, columns };
-  if (chance(rng, 0.4)) t.schema = pick(rng, ['gold', 'silver', 'public']);
+  t.schema = pick(rng, ['gold', 'silver', 'public', 'SAP FI']); // a DBML table always has one: its folder
   if (chance(rng, 0.5)) t.modelRole = pick(rng, ['transaction-fact', 'conformed-dim', 'reference'] as const);
   if (chance(rng, 0.5)) t.grain = randomText(rng);
   if (chance(rng, 0.3)) t.alias = pick(rng, ['orders', 'cust']);
@@ -582,11 +628,13 @@ function decorate(rng: Rng, text: string, table: SemanticTable): string {
   }
   let result = out.join('\n');
   const columns = table.columns ?? [];
+  // A Metadata block names the table as its Table line declares it: qualified by its schema.
+  const reference = table.schema ? `${dbmlName(table.schema)}.${dbmlName(table.name)}` : dbmlName(table.name);
   if (columns.length > 0 && chance(rng, 0.3)) {
     const column = pick(rng, columns);
-    result += `\nMetadata Column ${dbmlName(table.name)}.${dbmlName(column.name)} {\n  // set by a block\n  meta_from_block: 'column'\n}\n`;
+    result += `\nMetadata Column ${reference}.${dbmlName(column.name)} {\n  // set by a block\n  meta_from_block: 'column'\n}\n`;
   }
-  if (chance(rng, 0.2)) result += `\nMetadata Table ${dbmlName(table.name)} {\n  // a block entry\n  meta_from_block: 'table'\n}\n`;
+  if (chance(rng, 0.2)) result += `\nMetadata Table ${reference} {\n  // a block entry\n  meta_from_block: 'table'\n}\n`;
   return result;
 }
 
@@ -614,17 +662,39 @@ function mutateTable(rng: Rng, t: SemanticTable): SemanticTable {
   return d;
 }
 
-/** A small library: four tables in two folders, as their files. */
+/** Where the generator's library keeps each table: three in `gold/tables/gold/`, `dim_date` in silver's `shared` schema. */
+const LIBRARY_HOMES: Record<string, { layer: string; schema: string }> = {
+  fct_order: { layer: 'gold', schema: 'gold' },
+  dim_customer: { layer: 'gold', schema: 'gold' },
+  dim_date: { layer: 'silver', schema: 'shared' },
+  bridge: { layer: 'gold', schema: 'gold' },
+};
+
+const libraryPath = (name: string, schema = LIBRARY_HOMES[name].schema): string => `${LIBRARY_HOMES[name].layer}/tables/${schema}/${name}.dbml`;
+
+/** A small library: four tables in two layers and two schemas, as their files. */
 function randomLibrary(rng: Rng): Record<string, string> {
   const files: Record<string, string> = {};
-  const names = ['fct_order', 'dim_customer', 'dim_date', 'bridge'];
-  names.forEach((name, i) => {
-    const folder = i === 2 ? '' : 'gold/';
+  for (const name of Object.keys(LIBRARY_HOMES)) {
     const columns: ColumnDef[] = ['id', 'a_key', 'b_key', 'c_key'].map((n) => ({ name: chance(rng, 0.2) ? n.toUpperCase() : n, dataType: 'int', description: '' }));
     columns[0].isPrimaryKey = true;
-    files[`tables/${folder}${name}.dbml`] = renderNewTableDbml({ name, columns });
-  });
+    files[libraryPath(name)] = renderNewTableDbml({ name, schema: LIBRARY_HOMES[name].schema, columns });
+  }
   return files;
+}
+
+/**
+ * A requalifying move (§1.2, §2.8): `name`'s file moved to the schema folder
+ * `schema` of its layer, its Table re-qualified, as the planner writes it.
+ */
+function requalify(library: Record<string, string>, name: string, schema: string): Record<string, string> {
+  const from = libraryPath(name);
+  const text = library[from];
+  const table = readOk(text, name, LIBRARY_HOMES[name].schema);
+  const moved = editTableDbml(text, { ...table, schema }, { requalify: true, schemaFolder: LIBRARY_HOMES[name].schema });
+  const out = { ...library, [libraryPath(name, schema)]: moved };
+  delete out[from];
+  return out;
 }
 
 function randomRelationships(rng: Rng, owner: string, others: readonly string[]): TableRelationship[] {
@@ -708,7 +778,7 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         trail = [];
         const t = decorate(rng, created, table);
         note('input', t);
-        const file = `tables/${name}.dbml`;
+        const file = `gold/tables/${table.schema}/${name}.dbml`;
         expect(projectDiagnostics({ [file]: t }, [file])).toEqual([]);
         const read = readOk(t, name);
         expect(editTableDbml(t, read)).toBe(t); // Law 1
@@ -737,7 +807,7 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         const library = randomLibrary(rng);
         const lib = libraryOf(library);
         const resolve = relationshipsResolver(lib);
-        const file = 'tables/gold/_relationships.dbml';
+        const file = 'gold/relationships/gold.dbml';
         const owners = ['fct_order', 'dim_customer', 'bridge'];
         const others = ['fct_order', 'dim_customer', 'dim_date', 'bridge'];
         const first = new Map(owners.map((o) => [o, { name: o, relationships: randomRelationships(rng, o, others) }]));
@@ -791,6 +861,25 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         expect(editRelationshipsDbml(out, { filePath: file, owners: next, resolve })).toBe(out); // Law 2
         expectPreserved(created, out, relationshipsRemovedSpans(created, out)); // Law 4
         expect(projectDiagnostics({ ...library, [file]: out }, [file])).toEqual([]); // Law 5
+        // Law 5 after a requalifying move: a table moves to another schema
+        // folder of its layer; every Ref end and its use line follow it.
+        if (chance(rng, 0.5)) {
+          const moved = pick(rng, others);
+          const movedLibrary = requalify(library, moved, 'sales');
+          const movedLib = libraryOf(movedLibrary);
+          note('moved', moved);
+          const requalified = editRelationshipsDbml(out, {
+            filePath: file, owners: new Map(), resolve: relationshipsResolver(movedLib),
+            requalified: new Set([moved]), pathChanged: new Set([moved]),
+          });
+          note('requalified', requalified);
+          const after = ownersOf({ ...movedLibrary, [file]: requalified }, movedLib);
+          for (const o of owners) expect(comparableRelationships(after.get(o))).toEqual(comparableRelationships(next.get(o)!.relationships)); // Law 3
+          // No Ref end or use specifier keeps the old qualifier, and no use line the old path.
+          expect(requalified).not.toContain(`${LIBRARY_HOMES[moved].schema}.${moved}`);
+          expect(requalified).not.toContain(`/${LIBRARY_HOMES[moved].schema}/${moved}.dbml'`);
+          expect(projectDiagnostics({ ...movedLibrary, [file]: requalified }, [file])).toEqual([]); // Law 5
+        }
         ran++;
       } catch (err) {
         fail('relationships', i, err);
@@ -806,20 +895,24 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
     const COLOURS: AnnotationColor[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
     for (let i = 0; i < 90; i++) {
       try {
+        const tables = randomLibrary(rng);
+        const tableLib = libraryOf(tables);
+        const resolveRel = relationshipsResolver(tableLib);
+        // One Ref in each layer's default file: gold holds fct_order → dim_customer, silver dim_date → bridge.
+        const ref = (from: string, to: string) => new Map([[from, { name: from, relationships: [{ fromColumn: 'a_key', toModel: to, toColumn: 'id', cardinality: 'many-to-one' as const }] }]]);
         const library = {
-          ...randomLibrary(rng),
-          'tables/gold/_relationships.dbml': '// relationships\n',
-          'tables/_relationships.dbml': '// relationships\n',
+          ...tables,
+          'gold/relationships/gold.dbml': editRelationshipsDbml(null, { filePath: 'gold/relationships/gold.dbml', owners: ref('fct_order', 'dim_customer'), resolve: resolveRel }),
+          'silver/relationships/silver.dbml': editRelationshipsDbml(null, { filePath: 'silver/relationships/silver.dbml', owners: ref('dim_date', 'bridge'), resolve: resolveRel }),
         };
         const lib = libraryOf(library);
         const resolveTable = diagramResolver(lib);
         const lookups = {
           resolveTable,
-          // 2.0-switch: S4b (the folder-based imports until this generator writes the layer-first tree)
-          relationshipsImportsFor: (names: readonly string[]) => names.map((n) => resolveTable(n)).filter((t) => t?.storage === 'dbml').map((t) => relationshipsFilePathOf(t!.path)),
+          relationshipsImportsFor: (names: readonly string[], current: readonly string[]) => importsOver(library, names, current),
           fileExists: (p: string) => p in library,
         };
-        const file = pick(rng, ['gold/sales.dbml', 'silver/My Diagram.dbml']);
+        const file = pick(rng, ['gold/diagrams/sales.dbml', 'silver/diagrams/My Diagram.dbml']);
         const all = ['fct_order', 'dim_customer', 'dim_date', 'bridge'];
         const members = all.filter(() => chance(rng, 0.6)).sort(() => rng() - 0.5);
         let noteCount = 0;
@@ -847,8 +940,8 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
           ...(chance(rng, 0.3) ? { showFkEdges: chance(rng, 0.5) } : {}),
           ...(chance(rng, 0.3) ? { layoutOptions: { 'elk.direction': 'RIGHT' } } : {}),
           ...(chance(rng, 0.2) ? { stubColumns: ['a_key'] } : {}),
-          members: members.map((m) => ({ name: m, path: resolveTable(m)!.path })),
-          relationshipsFiles: lookups.relationshipsImportsFor(members),
+          members: members.map((m) => ({ name: m, reference: resolveTable(m)!.reference, path: resolveTable(m)!.path })),
+          relationshipsFiles: lookups.relationshipsImportsFor(members, []),
           annotations: Array.from({ length: Math.floor(rng() * 3) }, (_, k) => makeNote(k)),
           ...(chance(rng, 0.7) ? { positions: positionsOf(members) } : {}),
         });

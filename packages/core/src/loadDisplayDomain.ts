@@ -22,6 +22,13 @@
  * after a layer are invisible here: only hosts that can list directories (the
  * extension) see them, and only they report a name found in both libraries.
  *
+ * A DBML diagram (`{semanticDir}/{layer}/diagrams/{diagram}.dbml`, read with
+ * the `dbml` option) names its tables by its `use` lines instead: each is
+ * read from the path its line resolves to, then from `{dir}/{name}.dbml` in
+ * each `{layer}/tables/{schema}` folder its lines name, then by the YAML
+ * probe above; its relationships come from the relationships files it
+ * imports (`use * from '…/relationships/{file}.dbml'`), and from no other.
+ *
  * Everything the files say is validated and repaired by the same functions
  * the extension host uses. The limits in the options exist for hosts that
  * read files they do not control; all of them are off by default.
@@ -44,9 +51,8 @@ import {
   type LayerLookup,
 } from './domain.js';
 import { LAYERS_CONFIG_FILE, parseLayersText } from './layers.js';
-import { TABLES_DIR, YamlCharLimitError, YamlNodeLimitError, isSafeTableName, parseTableTextWithUsage } from './logicalModel.js';
-import { DBML_RELATIONSHIPS_FILE_NAME, DBML_RELATIONSHIPS_FILE_STEM } from './dbmlRichProperties.js';
-import { tableFileCandidates } from './storage.js';
+import { YamlCharLimitError, YamlNodeLimitError, isSafeTableName, parseTableTextWithUsage } from './logicalModel.js';
+import { dbmlNotADiagramMessage, dbmlTreePathOf, diagramPathOf, tableFileCandidates } from './storage.js';
 import { attachRelationships, dbmlTableLookup } from './dbmlAttach.js';
 import { computeMissingPositions, toDisplaySubjectArea } from './displayDomain.js';
 import { checkLimit } from './limits.js';
@@ -108,7 +114,11 @@ export class FileTooLargeError extends Error {
  * `loadDisplaySubjectArea` reject with a TypeError before it reads anything.
  */
 export interface LoadDisplaySubjectAreaOptions {
-  /** Path of the domain file, `{semanticDir}/{layer}/{domain}.json`; `/` or `\` separated. */
+  /**
+   * Path of the domain file, `{semanticDir}/{layer}/{domain}.json`, or of a
+   * DBML diagram, `{semanticDir}/{layer}/diagrams/{diagram}.dbml`; `/` or `\`
+   * separated.
+   */
   domainPath: string;
   /**
    * Read a file's text. Resolve `null` or `undefined` when it does not exist;
@@ -165,17 +175,18 @@ export interface LoadDisplaySubjectAreaOptions {
   /**
    * The DBML readers, `dbmlStorageReader` from `@erd-studio/core/dbml`.
    * Required to read a `.dbml` diagram (without it one throws a
-   * `SubjectAreaValidationError` saying so). With it, a JSON diagram also
-   * finds tables stored as `.dbml` in `tables/` and draws their
-   * relationships; without it, JSON loading is exactly what it was.
-   * `maxYamlChars` limits a `.dbml` table file as written; `maxYamlNodes`
-   * does not apply to DBML.
+   * `SubjectAreaValidationError` saying so). A JSON diagram is loaded
+   * exactly as without it: with no directory listing, core cannot find a
+   * DBML table by name, so a JSON diagram in a project half converted to
+   * DBML draws those tables as missing (the extension, which lists the
+   * folders, draws them). `maxYamlChars` limits a `.dbml` table file as
+   * written; `maxYamlNodes` does not apply to DBML.
    */
   dbml?: DbmlStorageReader;
   /**
-   * Longest relationships file (`tables/[<folder>/]_relationships.dbml`), in
-   * characters. A longer one is not read: its relationships are not drawn,
-   * with a warning. Default unlimited.
+   * Longest relationships file a DBML diagram imports
+   * (`{layer}/relationships/{file}.dbml`), in characters. A longer one is not
+   * read: its relationships are not drawn, with a warning. Default unlimited.
    */
   maxRelationshipsChars?: number;
 }
@@ -197,6 +208,37 @@ function splitSubjectAreaPath(domainPath: string): { prefix: string; parentDirNa
   };
 }
 
+/**
+ * Split a DBML diagram's path, `{semanticDir}/{layer}/diagrams/{name}.dbml`,
+ * the same way: the prefix is three segments up, and the parent the layer
+ * folder (never `diagrams`). Segments are counted as `diagramPathOf` counts
+ * them, so a doubled separator is no segment.
+ */
+function splitDiagramPath(domainPath: string, layer: string): { prefix: string; parentDirName: string; fileName: string } {
+  const isSeparator = (i: number): boolean => domainPath[i] === '/' || domainPath[i] === '\\';
+  let end = domainPath.length;
+  for (let i = 0; i < 3; i++) {
+    while (end > 0 && isSeparator(end - 1)) end--;
+    while (end > 0 && !isSeparator(end - 1)) end--;
+  }
+  const fileSep = Math.max(domainPath.lastIndexOf('/'), domainPath.lastIndexOf('\\'));
+  return { prefix: domainPath.slice(0, end), parentDirName: layer, fileName: domainPath.slice(fileSep + 1) };
+}
+
+/**
+ * Whether a path relative to the semantic dir stays inside it: posix only (a
+ * `\` is a separator on a Windows host, so `a\..\..` would escape), no
+ * leading `..`, not absolute.
+ */
+function isInsideSemanticDir(rel: string): boolean {
+  return rel !== '' && !rel.includes('\\') && rel !== '..' && !rel.startsWith('../') && !rel.startsWith('/');
+}
+
+/** Byte order, locale-free. */
+function byteOrder(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /** The file name without `.json`, as `path.basename(file, '.json')` gives it. */
 function stripJsonExtension(fileName: string): string {
   return fileName.endsWith('.json') && fileName !== '.json' ? fileName.slice(0, -'.json'.length) : fileName;
@@ -207,26 +249,6 @@ function isDbmlPath(path: string): boolean {
   return path.toLowerCase().endsWith('.dbml');
 }
 
-/** The last segment of a prefix such as `.erd-studio/tables/` (`tables`), or `''`. */
-function lastSegment(prefix: string): string {
-  const segments = prefix.split(/[\\/]/).filter((s) => s !== '');
-  return segments[segments.length - 1] ?? '';
-}
-
-function notADiagram(domainPath: string): SubjectAreaValidationError {
-  return new SubjectAreaValidationError(
-    `${domainPath} is a DBML table or relationships file, not a diagram. Open a diagram in a layer folder.`,
-  );
-}
-
-/** One table file found for a listed name, before it is turned into the model the domain shows. */
-interface FoundTable {
-  /** The path read. */
-  path: string;
-  text: string;
-  /** The library folder of a `tables/` file (`''` at the top), else undefined. */
-  folder?: string;
-}
 
 /**
  * Read a domain, its layers and its logical models through `readFile`, and
@@ -279,7 +301,25 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     options.ignoreStrayPositions ??
     [maxModels, maxYamlNodes, maxDomainChars, maxYamlChars, maxRelationshipsChars].some((limit) => limit !== Infinity);
 
-  const { prefix, parentDirName, fileName } = splitSubjectAreaPath(domainPath);
+  // 0b. A `.dbml` that is not `{layer}/diagrams/{name}.dbml` is no diagram
+  // (a table or relationships file, a 1.9 pre-release file, anything else):
+  // refused by its path alone, before anything is read (§1.8).
+  const isDbml = isDbmlPath(domainPath);
+  const diagram = isDbml ? diagramPathOf(domainPath) : undefined;
+  if (isDbml) {
+    if (!diagram) {
+      throw new SubjectAreaValidationError(dbmlNotADiagramMessage(domainPath));
+    }
+    if (!dbml) {
+      throw new SubjectAreaValidationError(
+        `${domainPath} is a DBML diagram; pass dbml: dbmlStorageReader from '@erd-studio/core/dbml' to read it.`,
+      );
+    }
+  }
+
+  const { prefix, parentDirName, fileName } = diagram
+    ? splitDiagramPath(domainPath, diagram.layer)
+    : splitSubjectAreaPath(domainPath);
   const layersPath = `${prefix}${LAYERS_CONFIG_FILE}`;
   const readLayersText = async (): Promise<string | null | undefined> => {
     const text = await readFile(layersPath);
@@ -289,24 +329,6 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     }
     return text;
   };
-
-  // 0b. A `.dbml` table or relationships file is not a diagram (§4.4). No
-  // `.dbml` under `tables/` is ever a diagram: with DBML evidence there,
-  // `tables/` is either the library (a table file) or a YAML project's
-  // listed layer (its `.dbml` files are `other`), the two answers
-  // `classifySemanticFile` gives (§3.3, §3.5). So core needs no listing.
-  const isDbml = isDbmlPath(domainPath);
-  if (isDbml) {
-    const stem = fileName.slice(0, -'.dbml'.length);
-    if (stem.toLowerCase() === DBML_RELATIONSHIPS_FILE_STEM || lastSegment(prefix) === TABLES_DIR || parentDirName === TABLES_DIR) {
-      throw notADiagram(domainPath);
-    }
-    if (!dbml) {
-      throw new SubjectAreaValidationError(
-        `${domainPath} is a DBML diagram; pass dbml: dbmlStorageReader from '@erd-studio/core/dbml' to read it.`,
-      );
-    }
-  }
 
   // 1-3. The domain file itself.
   const domainText = await readFile(domainPath);
@@ -357,27 +379,44 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     const folders = [...new Set([domainLayer, ...layers.map((l) => l.id)])]
       .filter((f) => f !== '')
       .sort((a, b) => a.localeCompare(b));
-    // `logical-models/` then `tables/` (#162), each top level first.
-    // 2.0-switch: S4b reads a DBML diagram's members from its resolved `use` paths
-    // (`reading.uses`, then `reading.useTableDirs`); until then only the YAML probe runs.
-    const found = new Map<string, FoundTable>();
+    // A DBML diagram's member: the path its `use` line resolves to, then the
+    // same name in each table folder its lines name (a table moved within
+    // them), each relative to the semantic dir and never outside it.
+    const memberPaths = new Map<string, string>();
+    for (const use of reading?.uses ?? []) {
+      if (!memberPaths.has(use.name)) memberPaths.set(use.name, use.resolved);
+    }
+    const dbmlCandidates = (name: string): string[] => {
+      if (!reading) return [];
+      const resolved = memberPaths.get(name);
+      const paths = [
+        ...(resolved !== undefined ? [resolved] : []),
+        ...[...reading.useTableDirs].sort(byteOrder).map((dir) => `${dir}/${name}.dbml`),
+      ];
+      return [...new Set(paths)].filter(isInsideSemanticDir);
+    };
+    // A DBML member found as a `.dbml` file (its path relative to the semantic dir).
+    const dbmlFound = new Set<string>();
     await mapWithLimit(names, maxParallelReads, async (name) => {
       // One lane probes one candidate at a time, so maxParallelReads holds.
-      const candidates = tableFileCandidates(prefix, name, folders);
+      const dbmlPaths = dbmlCandidates(name);
+      // `logical-models/` then `tables/` (#162), each top level first: YAML only.
+      const candidates = [...dbmlPaths.map((rel) => `${prefix}${rel}`), ...tableFileCandidates(prefix, name, folders)];
       let text: string | null | undefined;
-      let path = '';
-      for (let i = 0; (text === null || text === undefined) && i < candidates.length; i++) {
-        path = candidates[i];
-        text = await readFile(path);
+      let index = -1;
+      while ((text === null || text === undefined) && ++index < candidates.length) {
+        text = await readFile(candidates[index]);
       }
       if (text === null || text === undefined) {
         parsed.set(name, NO_TABLE);
         return;
       }
-      if (dbml && isDbmlPath(path)) {
-        const folder = path.slice(`${prefix}${TABLES_DIR}/`.length).split('/').slice(0, -1)[0] ?? '';
-        found.set(name, { path, text, folder });
-        parsed.set(name, parseDbmlTable(name, text, dbml, maxYamlChars, warn));
+      const path = candidates[index];
+      if (dbml && index < dbmlPaths.length) {
+        dbmlFound.add(name);
+        // Its schema folder, the schema of an unqualified Table (§1.2).
+        const schemaFolder = dbmlTreePathOf(dbmlPaths[index])?.schema;
+        parsed.set(name, parseDbmlTable(name, text, dbml, maxYamlChars, warn, schemaFolder));
         return;
       }
       // The YAML table's own warnings (a parse error, say) follow the mixed-state one.
@@ -391,30 +430,34 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
       parsed.set(name, table);
     });
 
-    // 7b. DBML relationships: every relationships file in the probe set,
-    // attached to the DBML tables read (§2.4, §4.4 step 6).
-    if (dbml && (reading !== undefined || found.size > 0)) {
-      const relPaths = ['', ...folders].map((f) => `${prefix}${TABLES_DIR}/${f === '' ? '' : `${f}/`}${DBML_RELATIONSHIPS_FILE_NAME}`);
-      const readings = (await mapWithLimit(relPaths, maxParallelReads, async (path, i) => {
+    // 7b. A DBML diagram's relationships: the relationships files it imports,
+    // and no other (another DBML tool draws no more), attached to the members
+    // read (§1.4, §2.3).
+    if (dbml && reading) {
+      const relPaths = reading.relationshipsUses.filter(isInsideSemanticDir).sort(byteOrder);
+      const readings = (await mapWithLimit(relPaths, maxParallelReads, async (rel) => {
+        const path = `${prefix}${rel}`;
         const text = await readFile(path);
-        if (text === null || text === undefined) return undefined;
+        if (text === null || text === undefined) {
+          warn(`${domainPath}: imports ${rel}, which does not exist; its relationships are not drawn`);
+          return undefined;
+        }
         if (text.length > maxRelationshipsChars) {
           warn(`${path} is larger than the limit; its relationships are not drawn (${text.length} characters; at most ${maxRelationshipsChars} are read)`);
           return undefined;
         }
         const relReading: DbmlRelationshipsReading = dbml.readRelationships(text);
         for (const problem of relReading.problems) warn(`${path}: ${problem.message}`);
-        return { path, folder: i === 0 ? '' : folders[i - 1], reading: relReading };
+        return { path, reading: relReading };
       })).filter((r): r is NonNullable<typeof r> => r !== undefined);
       if (readings.length > 0) {
         const entries: DbmlAttachTable[] = [];
         for (const [name, entry] of parsed) {
           if (!entry.model) continue;
-          const dbmlFile = found.get(name);
           entries.push({
             table: entry.model,
-            folder: dbmlFile?.folder ?? '',
-            storage: dbmlFile ? 'dbml' : 'yaml',
+            folder: '', // 2.0-switch: S6a drops the attach folder.
+            storage: dbmlFound.has(name) ? 'dbml' : 'yaml',
             ...(entry.dbmlAlias !== undefined ? { dbmlAlias: entry.dbmlAlias } : {}),
           });
         }
@@ -423,7 +466,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         const attached = attachRelationships(readings, dbmlTableLookup(entries), { partial: true });
         for (const message of attached.warnings) warn(message);
         for (const [name, entry] of parsed) {
-          if (!entry.model || !found.has(name)) continue;
+          if (!entry.model || !dbmlFound.has(name)) continue;
           const relationships = attached.byOwner.get(entry.model.name.toLowerCase());
           if (relationships && relationships.length > 0) entry.model.relationships = relationships;
         }
@@ -625,19 +668,20 @@ function parseTable(
   }
 }
 
-/** Parse one `.dbml` table file's text, charging it (as written) to the character budget. */
+/** Parse one `.dbml` table file's text (`schemaFolder`: its `{layer}/tables/{schema}` folder), charging it (as written) to the character budget. */
 function parseDbmlTable(
   name: string,
   text: string,
   dbml: DbmlStorageReader,
   maxChars: number,
   warn: (message: string) => void,
+  schemaFolder: string | undefined,
 ): ParsedTable {
   if (text.length > maxChars) {
     warn(`Model "${name}" is ${text.length} characters long; at most ${maxChars} are read`);
     return NO_TABLE;
   }
-  const reading = dbml.parseTable(text, name);
+  const reading = dbml.parseTable(text, name, schemaFolder !== undefined ? { schemaFolder } : undefined);
   if (!reading.ok) {
     warn(`Failed to read model "${name}": ${reading.error.message}`);
     const { kind, line, mergeConflict, code, target } = reading.error;

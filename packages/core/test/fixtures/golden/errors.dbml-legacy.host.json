@@ -1,0 +1,7 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "gold/old.dbml was written by an ERD Studio 1.9 pre-release, whose folder layout 2.0 does not read. Run erd-studio doctor in the project for the steps to convert it again.",
+    "kind": "not-a-domain"
+  }
+}

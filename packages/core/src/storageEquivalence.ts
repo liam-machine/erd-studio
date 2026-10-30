@@ -31,7 +31,9 @@
  *   (with the foreign-key badge only they
  *   put on a column), annotation ids ignored, and relationships
  *   held in a diagram file moved to their owner in a Unified shape (the
- *   diagram's own list left empty, as a DBML diagram holds no Refs, D5).
+ *   diagram's own list left empty, as a DBML diagram holds no Refs, D5),
+ *   and, given `schemaFallback`, a table with no schema given the one
+ *   Convert gave it (every DBML table has a schema: its folder).
  *
  * It accepts the Display shape (`models`, `relationships`) and the Unified
  * shape (`logical.models`, each table's own `relationships`, and
@@ -48,6 +50,12 @@ import type { Relationship } from './types/semantic.js';
 export interface StorageEquivalenceOptions {
   /** Apply the Convert-only rows of §2.8 as well (comparing a Convert result). */
   convert?: boolean;
+  /**
+   * With `convert`: the schema Convert gave a table (its `<layer>/tables/<schema>/`
+   * folder), for a table the YAML side gives no schema (none, or `''` in the
+   * Display shape). A table it returns undefined for keeps no schema.
+   */
+  schemaFallback?: (tableName: string) => string | undefined;
 }
 
 /**
@@ -71,7 +79,8 @@ export type StorageEquivalenceRow =
   | 'convertCompositeRole'
   | 'convertDangling'
   | 'convertAnnotationIds'
-  | 'convertDiagramRelationships';
+  | 'convertDiagramRelationships'
+  | 'convertSchemaFallback';
 
 /** The rows every comparison applies. Internal. */
 export const STORAGE_EQUIVALENCE_ROWS: readonly StorageEquivalenceRow[] = [
@@ -82,6 +91,7 @@ export const STORAGE_EQUIVALENCE_ROWS: readonly StorageEquivalenceRow[] = [
 /** The Convert-only rows (`convert: true`). Internal. */
 export const STORAGE_EQUIVALENCE_CONVERT_ROWS: readonly StorageEquivalenceRow[] = [
   'convertLinkStoredTwice', 'convertCompositeRole', 'convertDangling', 'convertAnnotationIds', 'convertDiagramRelationships',
+  'convertSchemaFallback',
 ];
 
 type Rows = ReadonlySet<StorageEquivalenceRow>;
@@ -314,15 +324,19 @@ export function normaliseForStorageEquivalence<T>(area: T, options: StorageEquiv
   const rows = options.convert === true
     ? [...STORAGE_EQUIVALENCE_ROWS, ...STORAGE_EQUIVALENCE_CONVERT_ROWS]
     : STORAGE_EQUIVALENCE_ROWS;
-  return normaliseStorageRows(area, rows);
+  return normaliseStorageRows(area, rows, options);
 }
 
 /**
  * `area` with only `rows` of §2.8 applied: a deep copy. Internal (the twin
  * goldens' per-case check); {@link normaliseForStorageEquivalence} is this
- * with every row.
+ * with every row. `convertSchemaFallback` needs `options.schemaFallback`.
  */
-export function normaliseStorageRows<T>(area: T, rowList: readonly StorageEquivalenceRow[]): T {
+export function normaliseStorageRows<T>(
+  area: T,
+  rowList: readonly StorageEquivalenceRow[],
+  options: Pick<StorageEquivalenceOptions, 'schemaFallback'> = {},
+): T {
   if (!isObject(area)) return area;
   const rows: Rows = new Set(rowList);
   const copy = JSON.parse(JSON.stringify(area)) as Json;
@@ -342,6 +356,11 @@ export function normaliseStorageRows<T>(area: T, rowList: readonly StorageEquiva
   for (const model of Array.isArray(models) ? models : []) {
     if (!isObject(model)) continue;
     text(model, 'description');
+    if (rows.has('convertSchemaFallback') && options.schemaFallback && typeof model.name === 'string'
+      && (model.schema === undefined || model.schema === '')) {
+      const schema = options.schemaFallback(model.name);
+      if (schema !== undefined) model.schema = schema;
+    }
     if (rows.has('emptyRationale') && isObject(model.rationale) && Object.keys(model.rationale).length === 0) delete model.rationale;
     for (const column of Array.isArray(model.columns) ? model.columns : []) {
       if (isObject(column)) text(column, 'description');

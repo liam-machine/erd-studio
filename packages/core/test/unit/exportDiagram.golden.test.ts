@@ -112,11 +112,12 @@ describe('diagram export goldens', () => {
   // order of a relationships file, so their exports are not byte-equal to the
   // YAML goldens; they are held to the parsers instead, with the same counts.
   describe.each([
-    ['showcase', '.erd-studio/silver/showcase.dbml'],
-    ['library-relationships', '.erd-studio/gold/sales.dbml'],
-    ['composite-and-self', '.erd-studio/gold/vault.dbml'],
-    ['missing-positions', '.erd-studio/silver/showcase.dbml'],
-    ['missing-model', '.erd-studio/silver/partial.dbml'],
+    ['showcase', '.erd-studio/silver/diagrams/showcase.dbml'],
+    ['library-relationships', '.erd-studio/gold/diagrams/sales.dbml'],
+    ['composite-and-self', '.erd-studio/gold/diagrams/vault.dbml'],
+    ['missing-positions', '.erd-studio/silver/diagrams/showcase.dbml'],
+    ['missing-model', '.erd-studio/silver/diagrams/partial.dbml'],
+    ['missing-model-converted', '.erd-studio/silver/diagrams/partial.dbml'],
   ])('the DBML twin of %s', (name, domainPath) => {
     it.each(DIAGRAM_EXPORT_FORMATS)('exports %s that old and current parsers accept', async (format) => {
       const domain = await loadDisplaySubjectArea({

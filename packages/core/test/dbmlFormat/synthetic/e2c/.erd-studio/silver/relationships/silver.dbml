@@ -1,0 +1,14 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table silver.dim_customer } from '../tables/silver/dim_customer.dbml'
+use { table silver.dim_project } from '../tables/silver/dim_project.dbml'
+use { table silver.dim_task } from '../tables/silver/dim_task.dbml'
+use { table public.fct_order } from '../tables/public/fct_order.dbml'
+use { table silver.fct_task_event } from '../tables/silver/fct_task_event.dbml'
+
+Ref: silver.dim_project.parent_project_key >? silver.dim_project.project_key
+Ref: silver.dim_task.project_key >? silver.dim_project.project_key
+Ref: public.fct_order.customer_key >? silver.dim_customer.customer_key
+Ref: public.fct_order.project_key >? silver.dim_project.project_key
+Ref: silver.fct_task_event.customer_key >? silver.dim_customer.customer_key
+Ref: silver.fct_task_event.project_key >? silver.dim_project.project_key
+Ref: silver.fct_task_event.task_key >? silver.dim_task.task_key

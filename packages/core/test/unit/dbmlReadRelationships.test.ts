@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { readRelationshipsDbml } from '../../src/dbml/readRelationships';
 import { attachRelationships, dbmlTableLookup } from '../../src/dbmlAttach';
 import { DBML_RELATIONSHIPS_FILE_HEADER } from '../../src/dbmlRichProperties';
+import { linkKey } from '../../src/relationships';
 import * as relationships from '../../src/relationships';
 import type { DbmlAttachTable, DbmlRelationshipsReading } from '../../src/types/dbmlStorage';
 import type { ColumnDef } from '../../src/types/semantic';
@@ -217,6 +218,28 @@ describe('attachRelationships', () => {
       { fromColumn: 'customer_key', toModel: 'dim_gone', toColumn: 'id', cardinality: 'many-to-one' },
       { fromColumn: 'region_code', toModel: 'dim_customer', toColumn: 'gone', cardinality: 'many-to-one' },
     ]);
+  });
+
+  it('reads the files in path byte order, whatever order they are given in (a tie keeps the same copy)', () => {
+    const a = 'Ref: fct_order.customer_key > dim_customer.customer_key\n';
+    const forward = attach({ 'gold/relationships/a.dbml': a, 'gold/relationships/b.dbml': a, 'Gold/relationships/c.dbml': a });
+    const backward = attach({ 'gold/relationships/b.dbml': a, 'Gold/relationships/c.dbml': a, 'gold/relationships/a.dbml': a });
+    // `G` (0x47) sorts before `g` (0x67): byte order, not locale order.
+    expect(forward.duplicates.map((d) => d.kept.path)).toEqual(['Gold/relationships/c.dbml', 'Gold/relationships/c.dbml']);
+    expect(backward).toEqual(forward);
+  });
+
+  it('records where each attached link is stored: the copy kept, for a link read twice', () => {
+    const result = attach({
+      'gold/relationships/b.dbml': 'Ref: fct_order.customer_key > dim_customer.customer_key\nRef: fct_order.(region_code, country_code) > dim_region.(region_code, country_code)\n',
+      'gold/relationships/a.dbml': '// a copy\nRef: dim_customer.customer_key < fct_order.customer_key\n',
+    });
+    const at = (link: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }) => result.locations!.get(linkKey(link));
+    expect(at({ fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' }))
+      .toEqual({ path: 'gold/relationships/a.dbml', line: 2, owner: 'fct_order', target: 'dim_customer' });
+    expect(at({ fromModel: 'fct_order', fromColumn: 'country_code', toModel: 'dim_region', toColumn: 'country_code' }))
+      .toEqual({ path: 'gold/relationships/b.dbml', line: 2, owner: 'fct_order', target: 'dim_region' });
+    expect(result.locations!.size).toBe(3);
   });
 
   describe('a one-to-one\'s direction (§2.3)', () => {

@@ -12,59 +12,64 @@ import * as path from 'path';
 import { compileDbmlProject } from '../../src/dbml/compileProject';
 import { STORAGE_PARSERS } from '../dbmlParsers';
 
-const TABLE_A = "Table a {\n  id int [pk]\n  b_id int\n}\n";
-const TABLE_B = "Table b {\n  id int [pk]\n}\n";
-const RELATIONSHIPS = "use { table a } from './a.dbml'\nuse { table b } from './b.dbml'\n\nRef: a.b_id > b.id\n";
-const DIAGRAM = "Project d {\n  erd_schema_version: '7'\n}\n\nuse { table a } from '../tables/a.dbml'\nuse { table b } from '../tables/b.dbml'\nuse * from '../tables/_relationships.dbml'\n";
+// The layer-first tree (2.0): gold/tables/gold/, gold/relationships/, gold/diagrams/.
+const TABLE_A = "Table gold.a {\n  id int [pk]\n  b_id int\n}\n";
+const TABLE_B = "Table gold.b {\n  id int [pk]\n}\n";
+const RELATIONSHIPS = "use { table gold.a } from '../tables/gold/a.dbml'\nuse { table gold.b } from '../tables/gold/b.dbml'\n\nRef: gold.a.b_id > gold.b.id\n";
+const DIAGRAM = "Project d {\n  erd_schema_version: '7'\n}\n\nuse { table gold.a } from '../tables/gold/a.dbml'\nuse { table gold.b } from '../tables/gold/b.dbml'\nuse * from '../relationships/gold.dbml'\n";
+const A = 'gold/tables/gold/a.dbml';
+const B = 'gold/tables/gold/b.dbml';
+const REL = 'gold/relationships/gold.dbml';
+const D = 'gold/diagrams/d.dbml';
 
 describe.each(STORAGE_PARSERS)('compileDbmlProject (%s)', (_label, parser) => {
   it('a clean project gives each entry an empty list, keyed relative to the semantic dir', () => {
-    const files = { 'tables/a.dbml': TABLE_A, 'tables/b.dbml': TABLE_B, 'tables/_relationships.dbml': RELATIONSHIPS, 'gold/d.dbml': DIAGRAM };
-    expect(compileDbmlProject(files, ['gold/d.dbml', '/tables/_relationships.dbml'], parser)).toEqual({
-      'gold/d.dbml': [],
-      'tables/_relationships.dbml': [],
+    const files = { [A]: TABLE_A, [B]: TABLE_B, [REL]: RELATIONSHIPS, [D]: DIAGRAM };
+    expect(compileDbmlProject(files, [D, `/${REL}`], parser)).toEqual({
+      [D]: [],
+      [REL]: [],
     });
   });
 
   it('a dangling use is reported in the importing file, at its line', () => {
-    const files = { 'tables/a.dbml': TABLE_A, 'gold/d.dbml': DIAGRAM };
-    const result = compileDbmlProject(files, ['gold/d.dbml'], parser);
-    expect(Object.keys(result)).toEqual(['gold/d.dbml']);
-    expect(result['gold/d.dbml'].length).toBeGreaterThan(0);
-    expect(result['gold/d.dbml'].map((d) => d.line)).toContain(6);
+    const files = { [A]: TABLE_A, [D]: DIAGRAM };
+    const result = compileDbmlProject(files, [D], parser);
+    expect(Object.keys(result)).toEqual([D]);
+    expect(result[D].length).toBeGreaterThan(0);
+    expect(result[D].map((d) => d.line)).toContain(6);
   });
 
   it('an error in an imported file is keyed by that file, not the entry', () => {
-    const files = { 'tables/a.dbml': 'Table a {\n  id int [pk\n}\n', 'tables/b.dbml': TABLE_B, 'tables/_relationships.dbml': RELATIONSHIPS, 'gold/d.dbml': DIAGRAM };
-    const result = compileDbmlProject(files, ['gold/d.dbml'], parser);
-    expect(result['tables/a.dbml']?.length).toBeGreaterThan(0);
-    expect(result['tables/a.dbml'].every((d) => d.line >= 2)).toBe(true);
+    const files = { [A]: 'Table gold.a {\n  id int [pk\n}\n', [B]: TABLE_B, [REL]: RELATIONSHIPS, [D]: DIAGRAM };
+    const result = compileDbmlProject(files, [D], parser);
+    expect(result[A]?.length).toBeGreaterThan(0);
+    expect(result[A].every((d) => d.line >= 2)).toBe(true);
   });
 
   it('a file two entries reach reports each diagnostic once', () => {
     // The relationships file names a table with no file: reached from the diagram and on its own.
-    const files = { 'tables/a.dbml': TABLE_A, 'tables/_relationships.dbml': RELATIONSHIPS, 'gold/d.dbml': "use { table a } from '../tables/a.dbml'\nuse * from '../tables/_relationships.dbml'\n" };
-    const result = compileDbmlProject(files, ['gold/d.dbml', 'tables/_relationships.dbml'], parser);
-    const diagnostics = result['tables/_relationships.dbml'];
+    const files = { [A]: TABLE_A, [REL]: RELATIONSHIPS, [D]: "use { table gold.a } from '../tables/gold/a.dbml'\nuse * from '../relationships/gold.dbml'\n" };
+    const result = compileDbmlProject(files, [D, REL], parser);
+    const diagnostics = result[REL];
     expect(diagnostics.length).toBeGreaterThan(0);
     const keys = diagnostics.map((d) => `${d.code}:${d.line}:${d.column}:${d.message}`);
     expect(new Set(keys).size).toBe(keys.length);
   });
 
   it('a leading byte-order mark is dropped from every file', () => {
-    const files = { 'tables/a.dbml': `﻿${TABLE_A}`, 'tables/b.dbml': `﻿${TABLE_B}`, 'tables/_relationships.dbml': RELATIONSHIPS, 'gold/d.dbml': `﻿${DIAGRAM}` };
-    expect(compileDbmlProject(files, ['gold/d.dbml'], parser)).toEqual({ 'gold/d.dbml': [] });
+    const files = { [A]: `﻿${TABLE_A}`, [B]: `﻿${TABLE_B}`, [REL]: RELATIONSHIPS, [D]: `﻿${DIAGRAM}` };
+    expect(compileDbmlProject(files, [D], parser)).toEqual({ [D]: [] });
     // The control: without the tables, the same Ref is a binding error.
-    const missing = compileDbmlProject({ 'gold/d.dbml': files['gold/d.dbml'] }, ['gold/d.dbml'], parser);
-    expect(missing['gold/d.dbml'].length).toBeGreaterThan(0);
+    const missing = compileDbmlProject({ [D]: files[D] }, [D], parser);
+    expect(missing[D].length).toBeGreaterThan(0);
   });
 });
 
 describe('compileDbmlProject: error codes under the pin', () => {
   it('a missing use target is [4001] or [4000] in the importing file', () => {
-    const result = compileDbmlProject({ 'gold/d.dbml': "use { table a } from '../tables/a.dbml'\n" }, ['gold/d.dbml']);
-    expect(result['gold/d.dbml'].length).toBeGreaterThan(0);
-    expect(result['gold/d.dbml'].every((d) => d.code === 4000 || d.code === 4001)).toBe(true);
+    const result = compileDbmlProject({ [D]: "use { table gold.a } from '../tables/gold/a.dbml'\n" }, [D]);
+    expect(result[D].length).toBeGreaterThan(0);
+    expect(result[D].every((d) => d.code === 4000 || d.code === 4001)).toBe(true);
   });
 });
 
@@ -95,7 +100,7 @@ describe('the DBML twins compile clean as multi-file projects, the way other DBM
   describe.each(STORAGE_PARSERS)('%s', (_label, parser) => {
     it.each(CLEAN_TWINS)('%s', (name) => {
       const files = twinFiles(path.join(TWINS_DIR, name, '.erd-studio'));
-      const entries = Object.keys(files).filter((p) => !p.startsWith('tables/'));
+      const entries = Object.keys(files).filter((p) => p.split('/')[1] === 'diagrams');
       expect(entries.length).toBeGreaterThan(0);
       const result = compileDbmlProject(files, Object.keys(files), parser);
       for (const [file, diagnostics] of Object.entries(result)) {
@@ -105,20 +110,20 @@ describe('the DBML twins compile clean as multi-file projects, the way other DBM
   });
 });
 
-describe('a library folder whose name holds a space', () => {
+describe('a schema folder whose name holds a space', () => {
   // The fixed virtual root keeps the project's own location out of every
   // path; a folder name with a space inside the semantic dir is still part of
   // the virtual path. The diagram's own Ref names both imported tables, so a
   // parser that dropped them would report [4000] here.
   it.each(STORAGE_PARSERS)('keeps the imported tables and compiles clean (%s)', (_label, parser) => {
     const files = {
-      'tables/SAP FI/a.dbml': TABLE_A,
-      'tables/SAP FI/b.dbml': TABLE_B,
-      'gold/d.dbml': "use { table a } from '../tables/SAP FI/a.dbml'\nuse { table b } from '../tables/SAP FI/b.dbml'\nRef: a.b_id > b.id\n",
+      'gold/tables/SAP FI/a.dbml': 'Table "SAP FI".a {\n  id int [pk]\n  b_id int\n}\n',
+      'gold/tables/SAP FI/b.dbml': 'Table "SAP FI".b {\n  id int [pk]\n}\n',
+      [D]: 'use { table "SAP FI".a } from \'../tables/SAP FI/a.dbml\'\nuse { table "SAP FI".b } from \'../tables/SAP FI/b.dbml\'\nRef: "SAP FI".a.b_id > "SAP FI".b.id\n',
     };
-    expect(compileDbmlProject(files, ['gold/d.dbml'], parser)).toEqual({ 'gold/d.dbml': [] });
+    expect(compileDbmlProject(files, [D], parser)).toEqual({ [D]: [] });
     // The control: without the tables, the same Ref is a binding error.
-    const missing = compileDbmlProject({ 'gold/d.dbml': files['gold/d.dbml'] }, ['gold/d.dbml'], parser);
-    expect(missing['gold/d.dbml'].length).toBeGreaterThan(0);
+    const missing = compileDbmlProject({ [D]: files[D] }, [D], parser);
+    expect(missing[D].length).toBeGreaterThan(0);
   });
 });

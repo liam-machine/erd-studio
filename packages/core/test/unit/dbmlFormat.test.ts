@@ -56,6 +56,7 @@ const GOLDEN_CASES = fs.readdirSync(GOLDEN).filter((f) => f.endsWith('.dbml') &&
 describe('goldens', () => {
   it('holds the cases the layout was specified with', () => {
     expect(GOLDEN_CASES).toEqual([
+      'diagram-layout.dbml',
       'diagram.dbml',
       'enum-group.dbml',
       'refs.dbml',

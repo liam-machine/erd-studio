@@ -1,5 +1,0 @@
-Project dbml_syntax {
-  Note: 'A DBML diagram cut off mid-edit'
-  erd_schema_version: '7'
-
-use { table dim_customer } from '../tables/dim_customer.dbml'

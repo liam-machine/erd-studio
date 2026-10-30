@@ -389,6 +389,51 @@ describe('normaliseForStorageEquivalence: the Convert-only rows', () => {
   });
 });
 
+describe('normaliseForStorageEquivalence: the schema Convert gave a table (convertSchemaFallback)', () => {
+  // Every DBML table has a schema (its `<layer>/tables/<schema>/` folder); Convert
+  // gives a table the YAML side names none the library folder's name, or `public`.
+  const schemaFallback = (name: string): string | undefined => ({ fct_order: 'public', dim_customer: 'gold' } as Record<string, string>)[name];
+  const converted = (): Area => {
+    const b = display();
+    b.models[0].schema = 'public';
+    b.models[1].schema = 'gold';
+    return b;
+  };
+
+  it('a table with no schema (none, or \'\' in the Display shape) takes the fallback\'s, with convert', () => {
+    expect(norm(display(), { convert: true, schemaFallback })).toEqual(norm(converted(), { convert: true, schemaFallback }));
+    const unset = display();
+    delete unset.models[0].schema;
+    expect((norm(unset, { convert: true, schemaFallback }) as Area).models[0].schema).toBe('public');
+    // A table the fallback does not name keeps no schema.
+    expect((norm(display(), { convert: true, schemaFallback }) as Area).models[2].schema).toBe('');
+  });
+
+  it('a table with a schema keeps it, whatever the fallback says', () => {
+    const b = display();
+    b.models[0].schema = 'finance';
+    expect((norm(b, { convert: true, schemaFallback }) as Area).models[0].schema).toBe('finance');
+    differ(b, converted(), true);
+  });
+
+  it('without convert, or without a fallback, a schema difference stays a difference', () => {
+    expect(norm(display(), { schemaFallback })).not.toEqual(norm(converted(), { schemaFallback }));
+    differ(display(), converted(), true);
+  });
+
+  it('is one row: alone it removes the difference, and every other row together does not', () => {
+    const others = [...STORAGE_EQUIVALENCE_ROWS, ...STORAGE_EQUIVALENCE_CONVERT_ROWS].filter((r) => r !== 'convertSchemaFallback');
+    expect(normaliseStorageRows(display(), ['convertSchemaFallback'], { schemaFallback }))
+      .toEqual(normaliseStorageRows(converted(), ['convertSchemaFallback'], { schemaFallback }));
+    expect(normaliseStorageRows(display(), others, { schemaFallback })).not.toEqual(normaliseStorageRows(converted(), others, { schemaFallback }));
+  });
+
+  it('applies to a Unified shape\'s logical.models too', () => {
+    const unified = { schemaVersion: 5, logical: { models: [{ name: 'fct_order', columns: [] }], relationships: [] }, viewConfig: {} };
+    expect((norm(unified, { convert: true, schemaFallback }) as Area).logical.models[0].schema).toBe('public');
+  });
+});
+
 describe('normaliseForStorageEquivalence: a link stored twice across the two ends\' files', () => {
   const unified = (twice: boolean): Area => ({
     schemaVersion: 5, domain: 'd', layer: 'gold', description: '',

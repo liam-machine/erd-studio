@@ -16,7 +16,6 @@ import {
   joinPosix,
   legacyDbmlFileMessage,
   normalisePosix,
-  relationshipsFilePathOf,
   relativePosix,
   resolvePosix,
   subjectAreaStorageOf,
@@ -24,7 +23,7 @@ import {
   type SemanticFileClass,
 } from '../../src/storage';
 import { NON_SUBJECT_AREA_DIRS } from '../../src/domain';
-import { DBML_RELATIONSHIPS_FILE_NAME, ERD_STUDIO_DBML_HEADER_PREFIX } from '../../src/dbmlRichProperties';
+import { ERD_STUDIO_DBML_HEADER_PREFIX } from '../../src/dbmlRichProperties';
 import { DBML_RICH_EXPORT_HEADER } from '../../src/exportDbmlRich';
 
 const LIBRARY = { tablesDirIsLayer: false };
@@ -172,8 +171,10 @@ describe('dbmlNotADiagramMessage (§1.8)', () => {
   it('names a 1.9 shape, a table or relationships file, or where diagrams live', () => {
     expect(dbmlNotADiagramMessage('gold/sales.dbml')).toBe(legacyDbmlFileMessage('gold/sales.dbml'));
     expect(dbmlNotADiagramMessage('tables/gold/fct.dbml')).toBe(legacyDbmlFileMessage('tables/gold/fct.dbml'));
-    expect(dbmlNotADiagramMessage('/p/.erd-studio/gold/sales.dbml')).toBe(legacyDbmlFileMessage('/p/.erd-studio/gold/sales.dbml'));
-    expect(dbmlNotADiagramMessage('.erd-studio/gold/sales.dbml')).toBe(legacyDbmlFileMessage('.erd-studio/gold/sales.dbml'));
+    // The 1.9 message names the file relative to the semantic dir (§1.8: `legacyDbmlFileMessage(rel)`).
+    expect(dbmlNotADiagramMessage('/p/.erd-studio/gold/sales.dbml')).toBe(legacyDbmlFileMessage('gold/sales.dbml'));
+    expect(dbmlNotADiagramMessage('.erd-studio/gold/sales.dbml')).toBe(legacyDbmlFileMessage('gold/sales.dbml'));
+    expect(dbmlNotADiagramMessage('C:\\p\\.erd-studio\\tables\\gold\\fct.dbml')).toBe(legacyDbmlFileMessage('tables/gold/fct.dbml'));
     expect(dbmlNotADiagramMessage('gold/tables/sales/fct.dbml'))
       .toBe('gold/tables/sales/fct.dbml is a DBML table or relationships file, not a diagram. Open a diagram in gold/diagrams/.');
     expect(dbmlNotADiagramMessage('C:\\p\\x\\silver\\relationships\\silver.dbml'))
@@ -221,13 +222,6 @@ describe('tableFileCandidates', () => {
 });
 
 describe('paths that belong together', () => {
-  it('relationshipsFilePathOf is the table folder\'s _relationships.dbml', () => {
-    expect(relationshipsFilePathOf('tables/gold/fct.dbml')).toBe(`tables/gold/${DBML_RELATIONSHIPS_FILE_NAME}`);
-    expect(relationshipsFilePathOf('/p/.erd-studio/tables/dim.dbml')).toBe('/p/.erd-studio/tables/_relationships.dbml');
-    expect(relationshipsFilePathOf('C:\\p\\.erd-studio\\tables\\gold\\fct.dbml')).toBe('C:\\p\\.erd-studio\\tables\\gold\\_relationships.dbml');
-    expect(relationshipsFilePathOf('fct.dbml')).toBe('_relationships.dbml');
-  });
-
   it('subjectAreaStorageOf is by extension', () => {
     expect(subjectAreaStorageOf('gold/a.json')).toBe('json');
     expect(subjectAreaStorageOf('gold/a.dbml')).toBe('dbml');

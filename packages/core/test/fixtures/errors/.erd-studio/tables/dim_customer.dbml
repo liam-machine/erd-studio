@@ -1,4 +1,0 @@
-// A table file: passed as a diagram, it is refused (not-a-diagram).
-Table dim_customer {
-  customer_key INT [pk]
-}

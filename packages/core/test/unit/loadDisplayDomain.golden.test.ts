@@ -19,7 +19,7 @@ import * as path from 'path';
 
 import { loadDisplaySubjectArea } from '../../src/loadDisplayDomain';
 import { SubjectAreaFileError, SubjectAreaValidationError } from '../../src/domain';
-import { normaliseForStorageEquivalence, normaliseStorageRows, type StorageEquivalenceRow } from '../../src/storageEquivalence';
+import { STORAGE_EQUIVALENCE_ROWS, normaliseStorageRows, type StorageEquivalenceRow } from '../../src/storageEquivalence';
 import { dbmlStorageReader } from '../../src/dbml/index';
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
@@ -48,51 +48,66 @@ const ERROR_CASES: Record<string, string> = {
   empty: '.erd-studio/silver/empty.json',
   invalid: '.erd-studio/silver/invalid.json',
   badlayer: '.erd-studio/platinum/badlayer.json',
-  // Native DBML storage (S2): a DBML diagram that does not parse, one from a
-  // newer schema, one with git conflict markers, and a table file passed as
-  // the diagram. Read with the DBML readers.
-  'dbml-syntax': '.erd-studio/silver/dbml-syntax.dbml',
-  'dbml-future': '.erd-studio/silver/dbml-future.dbml',
-  'dbml-conflict': '.erd-studio/silver/dbml-conflict.dbml',
-  'dbml-not-a-diagram': '.erd-studio/tables/dim_customer.dbml',
+  // Native DBML storage: a DBML diagram that does not parse, one from a
+  // newer schema, one with git conflict markers, a table file passed as the
+  // diagram, and a diagram where the 1.9 pre-release kept it. Read with the
+  // DBML readers.
+  'dbml-syntax': '.erd-studio/silver/diagrams/dbml-syntax.dbml',
+  'dbml-future': '.erd-studio/silver/diagrams/dbml-future.dbml',
+  'dbml-conflict': '.erd-studio/silver/diagrams/dbml-conflict.dbml',
+  'dbml-not-a-diagram': '.erd-studio/silver/tables/silver/dim_customer.dbml',
+  'dbml-legacy': '.erd-studio/gold/old.dbml',
 };
 
 /**
  * The DBML twins (packages/core/test/fixtures/dbml/<case>): the same projects
- * stored as native DBML. Each draws what its YAML case's golden draws once
- * both go through **only the §2.8 rows it lists** (§9.2: a row a case does
- * not list must not change that case), and each listed row is needed (drop
- * it and the two differ). The full comparator (D24) agrees as well.
+ * stored as native DBML, in the layer-first tree (`<layer>/tables/<schema>/`,
+ * `<layer>/relationships/<layer>.dbml`, `<layer>/diagrams/`), as Convert
+ * writes them. Each draws what its YAML case's golden draws once both go
+ * through **only the §2.8 rows it lists** (§9.2: a row a case does not list
+ * must not change that case), and each listed row is needed (drop it and the
+ * two differ). The full comparator (D24, plus the schema row) agrees as well.
  *
  * These compare the Display shape. Rows that touch only the Unified shape
  * (composite-and-self's lone `fk_lonely` key and raw Ref spellings, the
- * library-relationships domain copy) show there, with the host, in S4.
+ * library-relationships domain copy) show there, with the host.
  */
-const DBML_TWIN_CASES: Record<string, { domainPath: string; rows: Partial<Record<StorageEquivalenceRow, string>> }> = {
+const DBML_TWIN_CASES: Record<string, {
+  domainPath: string;
+  rows: Partial<Record<StorageEquivalenceRow, string>>;
+  /** The schema Convert gave each table its YAML file names none (`convertSchemaFallback`): its schema folder. */
+  schemas?: Record<string, string>;
+}> = {
   showcase: {
-    domainPath: '.erd-studio/silver/showcase.dbml',
+    domainPath: '.erd-studio/silver/diagrams/showcase.dbml',
     rows: {
       relationshipOrder: 'the diagram file held the relationships in its own order; a relationships file keeps its Refs sorted',
       emptyAnnotations: 'the JSON file holds "annotations": []; a diagram with no Note blocks reads back with no list',
       schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+      convertSchemaFallback: 'fct_order.yml names no schema and sits at the top of the library: Convert files it in silver/tables/public/',
     },
+    schemas: { fct_order: 'public' },
   },
   'composite-and-self': {
-    domainPath: '.erd-studio/gold/vault.dbml',
+    domainPath: '.erd-studio/gold/diagrams/vault.dbml',
     rows: {
       schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+      convertSchemaFallback: 'the YAML files name no schema: Convert takes their library folder, logical-models/gold/',
     },
+    schemas: { employee: 'gold', pit_customer: 'gold', sat_customer: 'gold' },
   },
   'missing-positions': {
-    domainPath: '.erd-studio/silver/showcase.dbml',
+    domainPath: '.erd-studio/silver/diagrams/showcase.dbml',
     rows: {
       relationshipOrder: 'the diagram file held the relationships in its own order; a relationships file keeps its Refs sorted',
       emptyAnnotations: 'the JSON file holds "annotations": []; a diagram with no Note blocks reads back with no list',
       schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+      convertSchemaFallback: 'fct_order.yml names no schema and sits at the top of the library: Convert files it in silver/tables/public/',
     },
+    schemas: { fct_order: 'public' },
   },
   'missing-model': {
-    domainPath: '.erd-studio/silver/partial.dbml',
+    domainPath: '.erd-studio/silver/diagrams/partial.dbml',
     rows: { schemaVersion: 'the YAML case is 5, a DBML diagram is 7' },
   },
   // Convert's own output for missing-model (D26/D27): dim_missing, broken (left as YAML: it does not
@@ -100,11 +115,11 @@ const DBML_TWIN_CASES: Record<string, { domainPath: string; rows: Partial<Record
   // relationships from tables with no DBML file are its pending lines. No exception: it draws what the
   // JSON diagram drew, broken's YAML load error included.
   'missing-model-converted': {
-    domainPath: '.erd-studio/silver/partial.dbml',
+    domainPath: '.erd-studio/silver/diagrams/partial.dbml',
     rows: { schemaVersion: 'the YAML case is 5, a DBML diagram is 7' },
   },
   'library-relationships': {
-    domainPath: '.erd-studio/gold/sales.dbml',
+    domainPath: '.erd-studio/gold/diagrams/sales.dbml',
     rows: {
       oneToMany: 'a library one-to-many (1.6.6 / 1.6.7) is stored canonically, as fct_order many-to-one',
       schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
@@ -204,8 +219,9 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
     });
   });
 
-  describe.each(Object.entries(DBML_TWIN_CASES))('the DBML twin of %s', (name, { domainPath, rows }) => {
+  describe.each(Object.entries(DBML_TWIN_CASES))('the DBML twin of %s', (name, { domainPath, rows, schemas = {} }) => {
     const listed = Object.keys(rows) as StorageEquivalenceRow[];
+    const options = { schemaFallback: (table: string) => schemas[table] };
     const read = async (): Promise<{ twin: Record<string, unknown>; expected: Record<string, unknown> }> => {
       const domain = await loadDisplaySubjectArea({
         domainPath,
@@ -225,14 +241,15 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
 
     it(`draws what the YAML golden draws through only its listed §2.8 rows (${listed.join(', ')})`, async () => {
       const { twin, expected } = await read();
-      expect(normaliseStorageRows(twin, listed)).toEqual(normaliseStorageRows(expected, listed));
-      expect(normaliseForStorageEquivalence(twin)).toEqual(normaliseForStorageEquivalence(expected));
+      expect(normaliseStorageRows(twin, listed, options)).toEqual(normaliseStorageRows(expected, listed, options));
+      const full = [...STORAGE_EQUIVALENCE_ROWS, 'convertSchemaFallback'] as StorageEquivalenceRow[];
+      expect(normaliseStorageRows(twin, full, options)).toEqual(normaliseStorageRows(expected, full, options));
     });
 
     it.each(listed)('needs the row it lists: %s', async (row) => {
       const { twin, expected } = await read();
       const without = listed.filter((r) => r !== row);
-      expect(normaliseStorageRows(twin, without)).not.toEqual(normaliseStorageRows(expected, without));
+      expect(normaliseStorageRows(twin, without, options)).not.toEqual(normaliseStorageRows(expected, without, options));
     });
   });
 
@@ -244,7 +261,7 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
     const read = fsReadFile(root);
     const warnings: string[] = [];
     await loadDisplaySubjectArea({
-      domainPath: '.erd-studio/silver/partial.dbml',
+      domainPath: '.erd-studio/silver/diagrams/partial.dbml',
       readFile: async (p) => (namelessText !== null && p.endsWith('/nameless.yml') ? namelessText : read(p)),
       readOnly: false,
       warn: (m) => warnings.push(m),

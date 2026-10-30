@@ -101,12 +101,14 @@ const ERROR_CASES: Record<string, string> = {
   'conflict-positions': 'silver/conflict-positions.json',
   'conflict-models': 'silver/conflict-models.json',
   // Native DBML storage: a DBML diagram that does not parse, one from a newer
-  // schema, one with git conflict markers, and a table file opened as a
-  // diagram (core's loader holds the same goldens).
-  'dbml-syntax': 'silver/dbml-syntax.dbml',
-  'dbml-future': 'silver/dbml-future.dbml',
-  'dbml-conflict': 'silver/dbml-conflict.dbml',
-  'dbml-not-a-diagram': 'tables/dim_customer.dbml',
+  // schema, one with git conflict markers, a table file opened as a diagram,
+  // and a diagram where the 1.9 pre-release kept it (core's loader holds the
+  // same goldens).
+  'dbml-syntax': 'silver/diagrams/dbml-syntax.dbml',
+  'dbml-future': 'silver/diagrams/dbml-future.dbml',
+  'dbml-conflict': 'silver/diagrams/dbml-conflict.dbml',
+  'dbml-not-a-diagram': 'silver/tables/silver/dim_customer.dbml',
+  'dbml-legacy': 'gold/old.dbml',
 };
 
 const EXPECTED_FILES = [
@@ -529,13 +531,16 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
     // diagram holds none (D5): its library relationships are drawn into the
     // stage's list as well as being their owners', so the comparison moves the
     // stage's list to the owners on both sides and keeps each link once.
-    ['showcase', 'silver/showcase.dbml', ['relationshipOrder', 'emptyAnnotations', 'schemaVersion'], ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertDiagramRelationships', 'convertLinkStoredTwice']],
-    ['composite-and-self', 'gold/vault.dbml', ['schemaVersion'], ['schemaVersion', 'loneCompositeKey', 'respelling']],
-    ['missing-positions', 'silver/showcase.dbml', ['relationshipOrder', 'emptyAnnotations', 'schemaVersion'], ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertDiagramRelationships', 'convertLinkStoredTwice']],
-    ['missing-model', 'silver/partial.dbml', ['schemaVersion'], undefined],
-    ['library-relationships', 'gold/sales.dbml', ['oneToMany', 'schemaVersion'], undefined],
-  ] as const)('the DBML twin of %s (%s), read by the host', (name, relative, displayRows, unifiedRows) => {
+    // `convertSchemaFallback`: a table whose YAML file names no schema is in the
+    // schema folder Convert gave it (the library folder, else `public`).
+    ['showcase', 'silver/diagrams/showcase.dbml', ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertSchemaFallback'], ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertDiagramRelationships', 'convertLinkStoredTwice', 'convertSchemaFallback'], { fct_order: 'public' }],
+    ['composite-and-self', 'gold/diagrams/vault.dbml', ['schemaVersion', 'convertSchemaFallback'], ['schemaVersion', 'loneCompositeKey', 'respelling', 'convertSchemaFallback'], { employee: 'gold', pit_customer: 'gold', sat_customer: 'gold' }],
+    ['missing-positions', 'silver/diagrams/showcase.dbml', ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertSchemaFallback'], ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertDiagramRelationships', 'convertLinkStoredTwice', 'convertSchemaFallback'], { fct_order: 'public' }],
+    ['missing-model', 'silver/diagrams/partial.dbml', ['schemaVersion'], undefined, {}],
+    ['library-relationships', 'gold/diagrams/sales.dbml', ['oneToMany', 'schemaVersion'], undefined, {}],
+  ] as const)('the DBML twin of %s (%s), read by the host', (name, relative, displayRows, unifiedRows, schemas) => {
     const root = path.join(FIXTURES, 'dbml', name);
+    const options = { schemaFallback: (table: string) => (schemas as Record<string, string>)[table] };
 
     it(`posts what the YAML golden draws through its listed §2.8 rows (${displayRows.join(', ')})`, async () => {
       const posted = await sendSubjectAreaData(buildHost(root), subjectAreaFile(root, relative));
@@ -545,7 +550,7 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
       expect(twin.schemaVersion).toBe(7);
       const expected = { ...(readGolden(`${name}.host.json`) as { payload: Record<string, unknown> }).payload };
       DBML_TWIN_EXCEPTIONS[name]?.(expected);
-      expect(normaliseStorageRows(twin, [...displayRows])).toEqual(normaliseStorageRows(expected, [...displayRows]));
+      expect(normaliseStorageRows(twin, [...displayRows], options)).toEqual(normaliseStorageRows(expected, [...displayRows], options));
     });
 
     it('reads the Unified shape', () => {
@@ -556,7 +561,7 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
         return;
       }
       const expected = readGolden(`${name}.unified.json`);
-      expect(normaliseStorageRows(unified, [...unifiedRows])).toEqual(normaliseStorageRows(expected, [...unifiedRows]));
+      expect(normaliseStorageRows(unified, [...unifiedRows], options)).toEqual(normaliseStorageRows(expected, [...unifiedRows], options));
     });
   });
 

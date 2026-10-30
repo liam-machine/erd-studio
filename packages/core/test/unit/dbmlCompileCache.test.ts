@@ -14,8 +14,8 @@ const DIAGRAM = `Project d {
   erd_schema_version: '7'
 }
 
-use { table a } from '../tables/a.dbml'
-use { table b } from '../tables/b.dbml'
+use { table gold.a } from '../tables/gold/a.dbml'
+use { table gold.b } from '../tables/gold/b.dbml'
 `;
 
 describe('compileOne caches', () => {
@@ -36,8 +36,8 @@ describe('compileOne caches', () => {
   });
 
   it('reading a diagram after 100 table compiles reads the same as before', () => {
-    const before = parseSubjectAreaDbml(DIAGRAM, 'gold/d.dbml');
+    const before = parseSubjectAreaDbml(DIAGRAM, 'gold/diagrams/d.dbml');
     for (let i = 0; i < 100; i++) compileOne(`Table u${i} {\n  id INT [pk]\n}\n`);
-    expect(parseSubjectAreaDbml(DIAGRAM, 'gold/d.dbml')).toEqual(before);
+    expect(parseSubjectAreaDbml(DIAGRAM, 'gold/diagrams/d.dbml')).toEqual(before);
   });
 });

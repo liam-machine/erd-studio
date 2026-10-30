@@ -1,7 +1,7 @@
 {
   "type": "error",
   "payload": {
-    "message": "Subject area file <root>/.erd-studio/silver/dbml-conflict.dbml has unresolved git merge conflicts (first at line 7). Resolve them in the file — if only the layout conflicts, either side is safe to keep.",
+    "message": "Subject area file <root>/.erd-studio/silver/diagrams/dbml-conflict.dbml has unresolved git merge conflicts (first at line 7). Resolve them in the file — if only the layout conflicts, either side is safe to keep.",
     "kind": "domain-file",
     "mergeConflict": true
   }

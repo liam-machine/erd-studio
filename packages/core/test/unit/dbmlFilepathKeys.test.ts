@@ -19,8 +19,8 @@ const toKeyOf = (parser: DbmlParserModule): (() => string) => (parser.Filepath a
 describe('withKeptFilepathKeys', () => {
   it('gives the same keys while it runs and puts the parser method back', () => {
     const original = toKeyOf(PINNED_PARSER);
-    const a = PINNED_PARSER.Filepath.from('/erd-studio/tables/a b.dbml');
-    const b = PINNED_PARSER.Filepath.from('/erd-studio/gold/x.dbml');
+    const a = PINNED_PARSER.Filepath.from('/erd-studio/gold/tables/SAP FI/a b.dbml');
+    const b = PINNED_PARSER.Filepath.from('/erd-studio/gold/diagrams/x.dbml');
     const keys = withKeptFilepathKeys(PINNED_PARSER, () => [a.toKey(), a.toKey(), b.toKey()]);
     expect(keys).toEqual([original.call(a), original.call(a), original.call(b)]);
     expect(toKeyOf(PINNED_PARSER)).toBe(original);
@@ -43,10 +43,10 @@ describe('withKeptFilepathKeys', () => {
     ['11.0.0', PINNED_PARSER],
   ])('a multi-file compile reports the same with and without it (%s)', (_label, parser) => {
     const files = {
-      'tables/a.dbml': 'Table a {\n  id int [pk]\n  b_id int\n}\n',
-      'tables/b.dbml': 'Table b {\n  id int [pk]\n}\n',
-      'tables/_relationships.dbml': "use { table a } from './a.dbml'\nuse { table b } from './b.dbml'\nRef: a.b_id > b.id\nRef: a.nope > b.id\n",
-      'gold/d.dbml': "use { table a } from '../tables/a.dbml'\nuse { table missing } from '../tables/missing.dbml'\nuse * from '../tables/_relationships.dbml'\n",
+      'gold/tables/gold/a.dbml': 'Table gold.a {\n  id int [pk]\n  b_id int\n}\n',
+      'gold/tables/gold/b.dbml': 'Table gold.b {\n  id int [pk]\n}\n',
+      'gold/relationships/gold.dbml': "use { table gold.a } from '../tables/gold/a.dbml'\nuse { table gold.b } from '../tables/gold/b.dbml'\nRef: gold.a.b_id > gold.b.id\nRef: gold.a.nope > gold.b.id\n",
+      'gold/diagrams/d.dbml': "use { table gold.a } from '../tables/gold/a.dbml'\nuse { table gold.missing } from '../tables/gold/missing.dbml'\nuse * from '../relationships/gold.dbml'\n",
     };
     const entries = Object.keys(files);
     const kept = compileDbmlProject(files, entries, parser);
