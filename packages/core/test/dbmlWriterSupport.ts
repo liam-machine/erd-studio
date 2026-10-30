@@ -107,7 +107,6 @@ interface LibraryTable {
   table: SemanticTable;
   reference: string;
   path: string;
-  folder: string;
   alias?: string;
   storage: 'yaml' | 'dbml';
 }
@@ -122,14 +121,12 @@ export function libraryOf(files: Readonly<Record<string, string>>, yaml: Readonl
       table: reading.table,
       reference: reading.declaredReference,
       path,
-      // 2.0-switch: S6a drops the attach folder; no Ref has a home folder in the layer-first tree.
-      folder: kindOf(path).schema ?? '',
       ...(reading.alias !== undefined ? { alias: reading.alias } : {}),
       storage: 'dbml',
     });
   }
   for (const [name, path] of Object.entries(yaml)) {
-    out.push({ table: { name, columns: [{ name: 'id', dataType: 'int', description: '' }] }, reference: name, path, folder: '', storage: 'yaml' });
+    out.push({ table: { name, columns: [{ name: 'id', dataType: 'int', description: '' }] }, reference: name, path, storage: 'yaml' });
   }
   return out;
 }
@@ -168,10 +165,9 @@ export function relationshipsFilesOf(files: Readonly<Record<string, string>>): s
 
 /** Each owner's relationships, read from every relationships file of `files` and attached (§2.4), keyed lower-case. */
 export function ownersOf(files: Readonly<Record<string, string>>, library: readonly LibraryTable[] = libraryOf(files)): Map<string, TableRelationship[]> {
-  const readings = relationshipsFilesOf(files).map((path) => ({ path, folder: '', reading: readRelationshipsDbml(files[path]) }));
+  const readings = relationshipsFilesOf(files).map((path) => ({ path, reading: readRelationshipsDbml(files[path]) }));
   const attach: DbmlAttachTable[] = library.map((t) => ({
     table: t.table,
-    folder: t.folder,
     storage: t.storage,
     ...(t.alias !== undefined ? { dbmlAlias: t.alias } : {}),
   }));

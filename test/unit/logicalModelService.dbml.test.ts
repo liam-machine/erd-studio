@@ -4,14 +4,16 @@
  * `.dbml` tables listed after the YAML libraries, looked up from the
  * directory listing, read through one private reader with their
  * relationships attached from every relationships file, cached, and written
- * outside the editor through the DBML library planner (the write parts are
- * S6a's).
+ * outside the editor through the DBML library planner, one batch per call
+ * (one plan, one settle, one all-or-nothing write).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+import { createRequire, syncBuiltinESMExports } from 'module';
 
 import { classifySemanticFile, tableFileCandidates } from '@erd-studio/core';
 import {
@@ -20,6 +22,8 @@ import {
   hasTablesLibrary,
   tablesDirIsLayer,
 } from '../../src/services/logicalModelService';
+import { UnsavedFilesRefused } from '../../src/services/fileWrites';
+import type { SemanticTable } from '../../src/types/semantic';
 
 let root: string;
 let semantic: string;
@@ -444,8 +448,7 @@ describe('DBML TableFileErrors', () => {
   });
 });
 
-// 2.0-switch: S6a rewrites the write parts below for the layer-first tree (most still name the 1.9 `tables/` tree).
-describe('DBML table writes outside the editor (planDbmlLibraryWrites + writeFilesWithRollback)', () => {
+describe('DBML table writes outside the editor (one batch: planDbmlLibraryWrites, one settle, writeFilesWithRollback)', () => {
   // Moved from the YAML/JSON guard (tableNaming.host.test.ts, the design's one guard exception), rewritten
   // for the 2.0 tree's saveTable default (§2.4): no layers.json and no DBML layer folder → main/tables/main/.
   it('a project with no library folder at all writes its first table as DBML, to main/tables/main/ (§2.4)', () => {
@@ -457,84 +460,196 @@ describe('DBML table writes outside the editor (planDbmlLibraryWrites + writeFil
     expect(fs.existsSync(path.join(semantic, 'logical-models'))).toBe(false);
   });
 
+  it('saveTable(model, layer): <layer>/tables/<layer>/, or the configured schema; a non-layer folder takes the default layer', () => {
+    write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'silver', label: 'Silver', abbreviation: 'S', color: '#888888', creatable: true, order: 1 }] }));
+    treeTable('gold', 'gold', 'fct_order');
+    const lib = service();
+    lib.saveTable({ name: 'dim_a', columns: [] }, 'gold');
+    lib.saveTable({ name: 'dim_b', columns: [], configuredSchema: 'finance', schema: 'dbt_liam_finance' } as SemanticTable, 'gold');
+    lib.saveTable({ name: 'dim_c', columns: [] }, 'Not A Layer');
+    expect(fs.readFileSync(path.join(semantic, 'gold/tables/gold/dim_a.dbml'), 'utf-8')).toMatch(/^Table gold\.dim_a \{/);
+    expect(fs.readFileSync(path.join(semantic, 'gold/tables/finance/dim_b.dbml'), 'utf-8')).toMatch(/^Table finance\.dim_b \{/);
+    expect(fs.existsSync(path.join(semantic, 'silver/tables/silver/dim_c.dbml'))).toBe(true);
+  });
+
   it('serializeTable never renders a .dbml table as YAML; saveTable splices it in place', () => {
-    const file = write('tables/dim_date.dbml', '// keep me\n' + dbmlTable('dim_date', '  id INT [pk]\n  label VARCHAR'));
+    const file = write('gold/tables/gold/dim_date.dbml', '// keep me\n' + dbmlTable('gold.dim_date', '  id INT [pk]\n  label VARCHAR'));
     const lib = service();
     const table = lib.getTable('dim_date')!;
     expect(() => lib.serializeTable(table)).toThrow(DbmlTableWriteRefused);
     table.columns[1].description = 'Shown name';
     lib.saveTable(table);
     // Spliced, then aligned (every DBML write is in the canonical layout).
-    expect(fs.readFileSync(file, 'utf-8')).toBe("// keep me\nTable dim_date {\n  id    INT     [pk]\n  label VARCHAR [note: 'Shown name']\n}\n");
+    expect(fs.readFileSync(file, 'utf-8')).toBe("// keep me\nTable gold.dim_date {\n  id    INT     [pk]\n  label VARCHAR [note: 'Shown name']\n}\n");
     expect(fs.readdirSync(path.dirname(file))).toEqual(['dim_date.dbml']);
   });
 
-  it('renameTable renames the file, splices the name and re-spells every Ref naming it', () => {
-    write('tables/dim_date.dbml', dbmlTable('dim_date'));
-    write('tables/fct_x.dbml', dbmlTable('fct_x', '  id INT [pk]\n  date_id INT'));
-    write('tables/_relationships.dbml', `${HEADER}use { table dim_date } from './dim_date.dbml'\nuse { table fct_x } from './fct_x.dbml'\n\nRef: fct_x.date_id >? dim_date.id\n`);
+  /** gold's dim_date and fct_x, with fct_x's Ref in gold's default relationships file. */
+  function goldLibrary(): string {
+    treeTable('gold', 'gold', 'dim_date');
+    treeTable('gold', 'gold', 'fct_x', '  id INT [pk]\n  date_id INT');
+    return write('gold/relationships/gold.dbml', `${HEADER}use { table gold.dim_date } from '../tables/gold/dim_date.dbml'\nuse { table gold.fct_x } from '../tables/gold/fct_x.dbml'\n\nRef: gold.fct_x.date_id >? gold.dim_date.id\n`);
+  }
+
+  it('renameTable renames the file, splices the name and re-spells every Ref naming it, in place', () => {
+    const relFile = goldLibrary();
     const lib = service();
     lib.renameTable('dim_date', 'dim_day');
-    expect(fs.existsSync(path.join(semantic, 'tables/dim_date.dbml'))).toBe(false);
-    expect(fs.readFileSync(path.join(semantic, 'tables/dim_day.dbml'), 'utf-8')).toBe(dbmlTable('dim_day'));
-    expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8'))
-      .toBe(`${HEADER}use { table dim_day } from './dim_day.dbml'\nuse { table fct_x }   from './fct_x.dbml'\n\nRef: fct_x.date_id >? dim_day.id\n`);
+    expect(fs.existsSync(path.join(semantic, 'gold/tables/gold/dim_date.dbml'))).toBe(false);
+    expect(fs.readFileSync(path.join(semantic, 'gold/tables/gold/dim_day.dbml'), 'utf-8')).toBe(dbmlTable('gold.dim_day'));
+    expect(fs.readFileSync(relFile, 'utf-8'))
+      .toBe(`${HEADER}use { table gold.dim_day } from '../tables/gold/dim_day.dbml'\nuse { table gold.fct_x }   from '../tables/gold/fct_x.dbml'\n\nRef: gold.fct_x.date_id >? gold.dim_day.id\n`);
     expect(lib.getTable('fct_x')?.relationships?.[0]).toMatchObject({ toModel: 'dim_day', toColumn: 'id' });
   });
 
-  it('deleteTable runs the D16 cascade: the file, its Refs and other owners\' Refs to it, and their use lines', () => {
-    write('tables/dim_date.dbml', dbmlTable('dim_date'));
-    write('tables/fct_x.dbml', dbmlTable('fct_x', '  id INT [pk]\n  date_id INT'));
-    write('tables/_relationships.dbml', `${HEADER}use { table dim_date } from './dim_date.dbml'\nuse { table fct_x } from './fct_x.dbml'\n\nRef: fct_x.date_id >? dim_date.id\n`);
+  it('renameTable to `_relationships`: an ordinary table name in the layer-first tree', () => {
+    treeTable('gold', 'gold', 'dim_date');
     const lib = service();
+    lib.renameTable('dim_date', '_relationships');
+    expect(fs.readdirSync(path.join(semantic, 'gold/tables/gold'))).toEqual(['_relationships.dbml']);
+    expect(lib.listTables().map((t) => t.name)).toEqual(['_relationships']);
+  });
+
+  it('deleteTable runs the D16 cascade from the index: the file, its Refs and other owners\' Refs to it, and their use lines', () => {
+    const relFile = goldLibrary();
+    const lib = service();
+    const listing = vi.spyOn(lib, 'listTables');
+    expect(lib.dbmlDeleteCascadeOps(['dim_date']).save.map((s) => s.model.name)).toEqual(['fct_x']);
     lib.deleteTable('dim_date');
-    expect(fs.existsSync(path.join(semantic, 'tables/dim_date.dbml'))).toBe(false);
+    expect(listing).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(semantic, 'gold/tables/gold/dim_date.dbml'))).toBe(false);
     // The relationships file keeps its header and is never deleted (D15).
-    expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8')).toBe(HEADER);
+    expect(fs.readFileSync(relFile, 'utf-8')).toBe(HEADER);
     expect(lib.getTable('fct_x')?.relationships).toBeUndefined();
   });
 
   it('deleteTable in a mixed project: a YAML table\'s relationship to it stays in its yml; DBML owners lose theirs', () => {
-    write('tables/dim_date.dbml', dbmlTable('dim_date'));
-    write('tables/fct_x.dbml', dbmlTable('fct_x', '  id INT [pk]\n  date_id INT'));
-    write('tables/_relationships.dbml', `${HEADER}use { table dim_date } from './dim_date.dbml'\nuse { table fct_x } from './fct_x.dbml'\n\nRef: fct_x.date_id >? dim_date.id\n`);
-    const yml = write('tables/fct_y.yml', 'name: fct_y\ncolumns:\n  - name: date_id\n    dataType: INT\nrelationships:\n  - fromColumn: date_id\n    toModel: dim_date\n    toColumn: id\n');
+    const relFile = goldLibrary();
+    const yml = write('logical-models/fct_y.yml', 'name: fct_y\ncolumns:\n  - name: date_id\n    dataType: INT\nrelationships:\n  - fromColumn: date_id\n    toModel: dim_date\n    toColumn: id\n');
     const ymlText = fs.readFileSync(yml, 'utf-8');
     const lib = service();
     lib.deleteTable('dim_date');
-    expect(fs.existsSync(path.join(semantic, 'tables/dim_date.dbml'))).toBe(false);
+    expect(fs.existsSync(path.join(semantic, 'gold/tables/gold/dim_date.dbml'))).toBe(false);
     expect(fs.readFileSync(yml, 'utf-8')).toBe(ymlText);
-    expect(fs.readFileSync(path.join(semantic, 'tables/_relationships.dbml'), 'utf-8')).toBe(HEADER);
+    expect(fs.readFileSync(relFile, 'utf-8')).toBe(HEADER);
   });
 
-  it('renameTable refuses the reserved name `_relationships` (§2.1), and writes nothing', () => {
-    write('tables/dim_date.dbml', dbmlTable('dim_date'));
-    const lib = service();
-    expect(() => lib.renameTable('dim_date', '_relationships')).toThrow('‘_relationships’ is the name of the relationships file');
-    expect(fs.readdirSync(path.join(semantic, 'tables'))).toEqual(['dim_date.dbml']);
-    expect(lib.listTables().map((t) => t.name)).toEqual(['dim_date']);
-  });
-
-  it('a folder\'s relationships file named in another case is its file: relationshipsFileFor and new tables follow the disk', () => {
-    write('tables/Gold/fct_order.dbml', dbmlTable('fct_order'));
-    write('tables/Gold/_Relationships.dbml', `${HEADER}\n`);
-    const lib = service();
-    expect(rel(lib.relationshipsFileFor('fct_order') ?? null)).toBe('tables/Gold/_Relationships.dbml');
-    const { writes } = lib.planTableWrites({ save: [{ model: { name: 'dim_new', columns: [{ name: 'id', dataType: 'INT', description: '' }] } }] }, 'gold', { dbml: true });
-    expect(writes.map((w) => `${w.kind} ${rel(w.path)}`)).toEqual(['create tables/Gold/dim_new.dbml']);
-  });
-
-  it('tableStorage and relationshipsFileFor name a DBML table\'s format and its folder\'s relationships file', () => {
-    write('tables/gold/fct_order.dbml', dbmlTable('fct_order'));
+  it('relationshipsFileForNewRef follows decision 5; relationshipsFileHolding names where a Ref is; YAML tables have neither', () => {
+    goldLibrary();
+    treeTable('gold', 'gold', 'fct_new', '  id INT [pk]\n  date_id INT');
+    treeTable('silver', 'silver', 'stg_x', '  id INT [pk]\n  date_id INT');
+    write('gold/relationships/hand.dbml', `${HEADER}use { table gold.dim_date } from '../tables/gold/dim_date.dbml'\nuse { table gold.fct_x } from '../tables/gold/fct_x.dbml'\n\nRef "b": gold.fct_x.id >? gold.dim_date.id\n`);
     write('logical-models/dim_old.yml', yamlTable('dim_old'));
     const lib = service();
-    expect(lib.tableStorage('fct_order')).toBe('dbml');
-    expect(lib.tableStorage('dim_old')).toBe('yaml');
-    expect(lib.tableStorage('nothing')).toBeUndefined();
-    expect(rel(lib.relationshipsFileFor('fct_order') ?? null)).toBe('tables/gold/_relationships.dbml');
-    expect(lib.relationshipsFileFor('dim_old')).toBeUndefined();
+    // fct_x: one Ref in each file; the tie goes to path byte order.
+    expect(rel(lib.relationshipsFileForNewRef('fct_x') ?? null)).toBe('gold/relationships/gold.dbml');
+    // No Ref yet: its layer's default file (which may not exist).
+    expect(rel(lib.relationshipsFileForNewRef('fct_new') ?? null)).toBe('gold/relationships/gold.dbml');
+    expect(rel(lib.relationshipsFileForNewRef('STG_X') ?? null)).toBe('silver/relationships/silver.dbml');
+    expect(lib.relationshipsFileForNewRef('dim_old')).toBeUndefined();
+    expect(lib.relationshipsFileFor('stg_x')).toBe(lib.relationshipsFileForNewRef('stg_x'));
+    expect(rel(lib.relationshipsFileHolding({ fromModel: 'fct_x', fromColumn: 'id', toModel: 'dim_date', toColumn: 'id' }) ?? null)).toBe('gold/relationships/hand.dbml');
+    expect(rel(lib.relationshipsFileHolding({ fromModel: 'DIM_DATE', fromColumn: 'ID', toModel: 'fct_x', toColumn: 'date_id' }) ?? null)).toBe('gold/relationships/gold.dbml');
+    expect(lib.relationshipsFileHolding({ fromModel: 'stg_x', fromColumn: 'date_id', toModel: 'dim_date', toColumn: 'id' })).toBeUndefined();
+  });
+
+  it('planTableWrites: a diagram\'s { layer, schema } home, a layer name, the schema folder as listed', () => {
+    write('gold/tables/Gold/fct_order.dbml', dbmlTable('Gold.fct_order'));
+    const lib = service();
+    const model = { name: 'dim_new', columns: [{ name: 'id', dataType: 'INT', description: '' }] };
+    const paths = (home: Parameters<TableLibraryService['planTableWrites']>[1]): string[] =>
+      lib.planTableWrites({ save: [{ model }] }, home, { dbml: true }).writes.map((w) => `${w.kind} ${rel(w.path)}`);
+    expect(paths('gold')).toEqual(['create gold/tables/Gold/dim_new.dbml']);
+    expect(paths({ layer: 'silver', schema: 'crm' })).toEqual(['create silver/tables/crm/dim_new.dbml']);
+    // Import keeps the source's schema (spelled as listed).
+    const imported = lib.planTableWrites({ save: [{ model: { ...model, schema: 'GOLD' } }] }, { layer: 'gold', schema: 'gold' }, { dbml: true, schemaFromSource: true });
+    expect(imported.writes.map((w) => rel(w.path))).toEqual(['gold/tables/Gold/dim_new.dbml']);
+  });
+
+  it('applyDbmlBatch: one plan and one settle for many ops; a dirty diagram it would change refuses everything', () => {
+    goldLibrary();
+    treeTable('gold', 'gold', 'dim_store', '  id INT [pk]');
+    treeTable('gold', 'gold', 'fct_y', '  id INT [pk]\n  store_id INT');
+    const diagram = write('gold/diagrams/sales.dbml', "use { table gold.dim_store } from '../tables/gold/dim_store.dbml'\nuse { table gold.fct_y } from '../tables/gold/fct_y.dbml'\n\nProject sales {\n  erd_schema_version: '7'\n}\n");
+    const diagramText = fs.readFileSync(diagram, 'utf-8');
+    const lib = service();
+    const fctY = { ...lib.getTable('fct_y')!, relationships: [{ fromColumn: 'store_id', toModel: 'dim_store', toColumn: 'id', cardinality: 'many-to-one' as const }] };
+    const before = snapshotTree();
+    expect(() => lib.applyDbmlBatch({ ops: { save: [{ model: fctY }] }, dirtyFiles: (paths) => paths.filter((p) => p === diagram) }))
+      .toThrow(UnsavedFilesRefused);
+    expect(snapshotTree()).toEqual(before);
+    const listing = vi.spyOn(lib, 'listDbmlDiagrams');
+    const fctX = { ...lib.getTable('fct_x')!, description: 'X' };
+    const { writes } = lib.applyDbmlBatch({ ops: { save: [{ model: fctY }, { model: fctX }, { model: { name: 'dim_new', columns: [] } }], newTableHome: { layer: 'gold', schema: 'gold' } } });
+    expect(listing).toHaveBeenCalledTimes(1);
+    expect(writes.map((w) => `${w.kind} ${rel(w.path)}`).sort()).toEqual([
+      'create gold/tables/gold/dim_new.dbml',
+      'replace gold/diagrams/sales.dbml',
+      'replace gold/relationships/gold.dbml',
+      'replace gold/tables/gold/fct_x.dbml',
+    ]);
+    // The diagram imports the file now holding a Ref between its members (the settle).
+    expect(fs.readFileSync(diagram, 'utf-8')).not.toBe(diagramText);
+    expect(fs.readFileSync(diagram, 'utf-8')).toContain("use * from '../relationships/gold.dbml'");
+    // A column-description edit settles nothing: no diagram is even listed.
+    listing.mockClear();
+    lib.saveTable({ ...lib.getTable('dim_store')!, description: 'Stores' });
+    expect(listing).not.toHaveBeenCalled();
+  });
+
+  it('after a batch, the written relationships file\'s reading is primed: the next snapshot reads it from no disk', () => {
+    const relFile = goldLibrary();
+    treeTable('gold', 'gold', 'dim_store', '  id INT [pk]');
+    const lib = service();
+    lib.dbmlSnapshot();
+    const fctX = { ...lib.getTable('fct_x')!, columns: [...lib.getTable('fct_x')!.columns, { name: 'store_id', dataType: 'INT', description: '' }] };
+    fctX.relationships = [...(fctX.relationships ?? []), { fromColumn: 'store_id', toModel: 'dim_store', toColumn: 'id', cardinality: 'many-to-one' }];
+    lib.saveTable(fctX);
+    expect(fs.readFileSync(relFile, 'utf-8')).toContain('Ref: gold.fct_x.store_id >? gold.dim_store.id');
+    const reads = countReads(() => lib.dbmlSnapshot());
+    expect(reads.filter((p) => p.endsWith('/gold/relationships/gold.dbml'))).toEqual([]);
+    expect(lib.dbmlSnapshot().relationshipsFiles.get('gold/relationships/gold.dbml')?.refs).toHaveLength(2);
+  });
+
+  it('a configured schema is never written to a YAML table', () => {
+    write('logical-models/dim_old.yml', yamlTable('dim_old'));
+    service().saveTable({ name: 'dim_new', columns: [], configuredSchema: 'finance' } as SemanticTable);
+    expect(fs.readFileSync(path.join(semantic, 'logical-models/dim_new.yml'), 'utf-8')).not.toContain('finance');
   });
 });
+
+/** Every file under the semantic dir, relative path → text. */
+function snapshotTree(): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (dir: string): void => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) walk(abs);
+      else out[path.relative(semantic, abs).split(path.sep).join('/')] = fs.readFileSync(abs, 'utf-8');
+    }
+  };
+  walk(semantic);
+  return out;
+}
+
+/** The files `fn` reads (through the CommonJS `fs`, which the services' ESM namespace follows once synced), posix. */
+function countReads(fn: () => void): string[] {
+  const cjsFs = createRequire(__filename)('fs') as typeof fs;
+  const real = cjsFs.readFileSync;
+  const reads: string[] = [];
+  (cjsFs as { readFileSync: unknown }).readFileSync = function (this: unknown, ...args: unknown[]) {
+    reads.push(String(args[0]).split(path.sep).join('/'));
+    return (real as (...a: unknown[]) => unknown).apply(this, args);
+  };
+  syncBuiltinESMExports();
+  try {
+    fn();
+  } finally {
+    cjsFs.readFileSync = real;
+    syncBuiltinESMExports();
+  }
+  return reads;
+}
 
 describe('tables/: library or layer, the YAML rule (develop\'s: a .json or a layers.json listing)', () => {
   const LISTED = JSON.stringify({ schemaVersion: 1, layers: [{ id: 'tables', label: 'Tables', abbreviation: 'TBL', color: '#888888', creatable: true, order: 1 }] });

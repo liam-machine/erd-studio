@@ -47,6 +47,7 @@ import type { LayerService } from './layerService';
 import type { SubjectAreaService } from './domainService';
 import type { FileWrite } from './fileWrites';
 import { FileWriteExists, FileWriteRollbackFailed, writeFilesWithRollback, type FileWriteIo } from './fsFileWrites';
+import { UnsavedFilesRefused } from './fileWrites';
 import { settleDbmlDiagramWrites } from './dbmlDiagramSettle';
 import type { SemanticTable } from '../types/semantic';
 
@@ -83,7 +84,7 @@ export interface NewSubjectAreaWriteServices {
   layerService: Pick<LayerService, 'getAllLayers' | 'saveConfig'>;
   tableLibraryService: Pick<TableLibraryService, 'saveTable' | 'deleteTable' | 'tablePath' | 'writesTableNaming'>
     /** Every file a save writes (a DBML table's relationships files too), to snapshot before it; the DBML plan. */
-    & Partial<Pick<TableLibraryService, 'planTableWrites' | 'invalidateCache'>>;
+    & Partial<Pick<TableLibraryService, 'planTableWrites' | 'invalidateCache' | 'applyDbmlBatch' | 'writesTableAsDbml' | 'dbmlHomeOf'>>;
   /** The other diagrams, for the DBML settle pass (§5.7). */
   subjectAreaService?: Pick<SubjectAreaService, 'listSubjectAreas'>;
   /** The file operations of the DBML write (a test makes one fail). */
@@ -102,13 +103,8 @@ export interface NewSubjectAreaWriteServices {
   dirtyFiles?(filePaths: readonly string[]): string[];
 }
 
-/** A file the DBML write would change is open with unsaved edits; nothing was written. */
-export class UnsavedFilesRefused extends Error {
-  constructor(readonly filePaths: readonly string[]) {
-    super(`${filePaths.length} file(s) have unsaved changes.`);
-    this.name = 'UnsavedFilesRefused';
-  }
-}
+// A file the DBML write would change is open with unsaved edits (it lives with FileWrite, so the library's batch throws it too).
+export { UnsavedFilesRefused };
 
 export type NewSubjectAreaWriteResult =
   | {
@@ -141,6 +137,8 @@ export async function writeNewSubjectArea(
   const layerDir = path.dirname(domainPath);
   const written: string[] = [];
   const changed: string[] = [];
+  /** The YAML tables this write created (deleted again on failure; the DBML batch's files are put back from `before`). */
+  const writtenYaml: string[] = [];
   let domainWritten = false;
   // What each library file held before the write changed it (null: it was
   // not there), to put back on failure.
@@ -157,9 +155,28 @@ export async function writeNewSubjectArea(
     }
     fs.mkdirSync(layerDir, { recursive: true });
 
+    // The DBML tables, new and changed, are one batch (§2.6): one plan, one
+    // settle, one all-or-nothing write. Each file it wrote is put back on failure.
+    const isDbml = (t: SemanticTable): boolean => !!tableLibraryService.applyDbmlBatch && !!tableLibraryService.writesTableAsDbml?.(t.name);
+    const dbmlNew = write.newTables.filter(isDbml);
+    const dbmlChanged = write.changedTables.filter((t) => !write.newTables.includes(t) && isDbml(t));
     for (const table of write.newTables) {
+      if (dbmlNew.includes(table)) continue;
       tableLibraryService.saveTable(table, write.folder);
       written.push(table.name);
+      writtenYaml.push(table.name);
+    }
+    if (dbmlNew.length > 0 || dbmlChanged.length > 0) {
+      const batch = tableLibraryService.applyDbmlBatch!({
+        ops: {
+          save: [...dbmlNew, ...dbmlChanged].map((model) => ({ model })),
+          ...(tableLibraryService.dbmlHomeOf ? { newTableHome: tableLibraryService.dbmlHomeOf(write.folder) } : {}),
+        },
+        ...(services.dirtyFiles ? { dirtyFiles: services.dirtyFiles } : {}),
+      });
+      for (const [filePath, text] of batch.before) if (!before.has(filePath)) before.set(filePath, text);
+      written.push(...dbmlNew.map((t) => t.name));
+      changed.push(...dbmlChanged.map((t) => t.name));
     }
 
     fs.writeFileSync(domainPath, write.documentText(tableNaming), { encoding: 'utf-8', flag: 'wx' });
@@ -167,7 +184,7 @@ export async function writeNewSubjectArea(
     ownWrites.recordWrite(domainPath);
     // Existing library tables that gained a relationship, once the subject area is on disk.
     for (const table of write.changedTables) {
-      if (write.newTables.includes(table)) continue;
+      if (write.newTables.includes(table) || dbmlChanged.includes(table)) continue;
       // A DBML table's save also writes its folder's relationships file (and
       // moves misplaced Refs home): snapshot every file the save plans.
       const paths = tableLibraryService.planTableWrites
@@ -184,7 +201,7 @@ export async function writeNewSubjectArea(
     // Leave nothing behind: no orphan table files, no subject area naming
     // tables that were just removed, no library file half way through.
     let undone = true;
-    for (const name of written) {
+    for (const name of writtenYaml) {
       try { tableLibraryService.deleteTable(name); } catch { undone = false; }
     }
     if (domainWritten) {
@@ -201,6 +218,7 @@ export async function writeNewSubjectArea(
         }
       } catch { undone = false; }
     }
+    if (before.size > 0) tableLibraryService.invalidateCache?.();
     if (undone && createdRoot) {
       try { fs.rmSync(semanticRoot, { recursive: true, force: true }); } catch { undone = false; }
     } else if (undone && createdLayerDir) {

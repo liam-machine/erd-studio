@@ -262,7 +262,8 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   // Relationships a DBML diagram cannot store (their many-side table's file could not be read): named in the notice.
   let unstored: DbtDraft['relationships'] = [];
   try {
-    folder = tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
+    // A DBML table always goes to the chosen layer's folder: groupsByFolder speaks for YAML libraries only.
+    folder = dbml || tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
     // A DBML diagram holds no relationships (D5): every one goes to the library,
     // none stays behind as a diagram copy.
     routed = dbml

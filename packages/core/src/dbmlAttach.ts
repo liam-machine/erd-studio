@@ -119,8 +119,7 @@ function at(location: DbmlRefLocation): string {
  * The host, which passes the whole library, leaves it unset.
  */
 export function attachRelationships(
-  // 2.0-switch: S6a drops `folder` (ignored: no Ref has a home folder in the layer-first tree).
-  readings: ReadonlyArray<{ path: string; folder?: string; reading: DbmlRelationshipsReading }>,
+  readings: ReadonlyArray<{ path: string; reading: DbmlRelationshipsReading }>,
   tables: (name: string) => DbmlAttachTable | undefined,
   options: { dbt?: DbtKeyIndex; partial?: boolean } = {},
 ): DbmlAttachResult {

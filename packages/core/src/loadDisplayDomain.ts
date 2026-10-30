@@ -456,7 +456,6 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
           if (!entry.model) continue;
           entries.push({
             table: entry.model,
-            folder: '', // 2.0-switch: S6a drops the attach folder.
             storage: dbmlFound.has(name) ? 'dbml' : 'yaml',
             ...(entry.dbmlAlias !== undefined ? { dbmlAlias: entry.dbmlAlias } : {}),
           });

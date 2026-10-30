@@ -18,16 +18,14 @@ import type { ColumnDef } from '../../src/types/semantic';
 import { STORAGE_PARSERS } from '../dbmlParsers';
 
 const col = (name: string, isPrimaryKey = false): ColumnDef => ({ name, dataType: 'int', description: '', ...(isPrimaryKey ? { isPrimaryKey } : {}) });
-// 2.0-switch: S6a drops DbmlAttachTable.folder; no Ref has a home folder in the layer-first tree.
-// Each table carries its schema folder, as the classifier gives it, so a folder check would show.
 const table = (name: string, columns: ColumnDef[], extra: Partial<DbmlAttachTable> = {}): DbmlAttachTable =>
-  ({ table: { name, columns }, folder: 'gold', storage: 'dbml', ...extra });
+  ({ table: { name, columns }, storage: 'dbml', ...extra });
 
 const TABLES: DbmlAttachTable[] = [
   table('fct_order', [col('order_line_id', true), col('customer_key'), col('order_date_key'), col('ship_date_key'), col('region_code'), col('country_code')]),
   table('dim_customer', [col('customer_key', true), col('parent_customer_key')]),
   table('customer_profile', [col('customer_key', true)]),
-  table('dim_date', [col('date_key', true)], { folder: 'shared' }),
+  table('dim_date', [col('date_key', true)]),
   table('dim_region', [col('region_code', true), col('country_code', true)]),
 ];
 const lookup = dbmlTableLookup(TABLES);
@@ -52,6 +50,12 @@ Ref: gold.fct_order.(region_code, country_code) >? gold.dim_region.(region_code,
 `;
 
 describe('readRelationshipsDbml', () => {
+  it('lists each use line\'s path as written, in file order (absent when there is none)', () => {
+    const reading = readRelationshipsDbml(`${DBML_RELATIONSHIPS_FILE_HEADER}\nuse { table gold.b } from '../tables/gold/b.dbml'\nuse * from './other'\nuse { table gold.a } from '../tables/gold/a.dbml'\n`);
+    expect(reading.uses).toEqual(['../tables/gold/b.dbml', './other', '../tables/gold/a.dbml']);
+    expect(readRelationshipsDbml(`${DBML_RELATIONSHIPS_FILE_HEADER}\n`)).not.toHaveProperty('uses');
+  });
+
   it.each(STORAGE_PARSERS)('reads the spec example, Ref by Ref, in file order (%s)', (_label, parser) => {
     // Read on its own, every use target is missing: [4001] binding errors never hide a Ref.
     const reading = readRelationshipsDbml(GOLD, parser);
@@ -279,7 +283,7 @@ describe('attachRelationships', () => {
   });
 
   it('an orphaned Ref (a YAML owner, or no owner) is not attached', () => {
-    const tables = dbmlTableLookup([...TABLES, { table: { name: 'yaml_fact', columns: [col('customer_key')] }, folder: '', storage: 'yaml' }]);
+    const tables = dbmlTableLookup([...TABLES, { table: { name: 'yaml_fact', columns: [col('customer_key')] }, storage: 'yaml' }]);
     const result = attach({ [GOLD_PATH]: 'Ref: yaml_fact.customer_key > dim_customer.customer_key\nRef: nobody.x > dim_customer.customer_key\n' }, tables);
     expect(result.byOwner.size).toBe(0);
     expect(result.orphaned.map((o) => o.owner)).toEqual(['yaml_fact', 'nobody']);
@@ -288,7 +292,7 @@ describe('attachRelationships', () => {
 
   it('partial: a Ref whose owner the lookup does not hold is skipped without a warning; a YAML owner is still orphaned', () => {
     // Core's loader holds only a diagram's members; the owner may be a DBML table off the diagram.
-    const tables = dbmlTableLookup([...TABLES, { table: { name: 'yaml_fact', columns: [col('customer_key')] }, folder: '', storage: 'yaml' }]);
+    const tables = dbmlTableLookup([...TABLES, { table: { name: 'yaml_fact', columns: [col('customer_key')] }, storage: 'yaml' }]);
     const text = 'Ref: yaml_fact.customer_key > dim_customer.customer_key\nRef: not_on_diagram.x > dim_customer.customer_key\nRef: fct_order.customer_key >? dim_customer.customer_key\n';
     const result = attachRelationships([{ path: GOLD_PATH, reading: read(text) }], tables, { partial: true });
     expect(result.orphaned.map((o) => o.owner)).toEqual(['yaml_fact']);
@@ -376,7 +380,7 @@ Ref: fct.a >? dim.a
 
   it('attaches a pending relationship to its owner exactly like a live Ref, a target with no table kept as written', () => {
     const table = (name: string, columns: string[]): DbmlAttachTable => ({
-      table: { name, columns: columns.map((c) => ({ name: c, dataType: 'int', description: '' }) as ColumnDef) }, folder: '', storage: 'dbml',
+      table: { name, columns: columns.map((c) => ({ name: c, dataType: 'int', description: '' }) as ColumnDef) }, storage: 'dbml',
     });
     const result = attachRelationships([{ path: 'silver/relationships/silver.dbml', reading: readRelationshipsDbml(FILE) }], dbmlTableLookup([table('fct', ['a', 'b', 'k']), table('dim', ['a', 'k'])]));
     expect(result.byOwner.get('fct')).toEqual([

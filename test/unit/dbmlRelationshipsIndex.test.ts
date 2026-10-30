@@ -60,8 +60,8 @@ describe('refEntriesOf', () => {
     ].join('\n');
     const reading = readRelationshipsDbml(text);
     const tables: DbmlAttachTable[] = [
-      { table: { name: 'FCT_Order', columns: [] }, folder: '', storage: 'dbml' },
-      { table: { name: 'dim_customer', columns: [] }, folder: '', storage: 'dbml' },
+      { table: { name: 'FCT_Order', columns: [] }, storage: 'dbml' },
+      { table: { name: 'dim_customer', columns: [] }, storage: 'dbml' },
     ];
     const entries = refEntriesOf('gold/relationships/gold.dbml', reading, dbmlTableLookup(tables));
     expect(entries.map((e) => [e.owner, e.target, e.pending, e.line, e.unit.from])).toEqual([
@@ -81,8 +81,8 @@ describe('refEntriesOf', () => {
       '',
     ].join('\n');
     const tables: DbmlAttachTable[] = [
-      { table: { name: 'fct_order', columns: [{ name: 'customer_id', dataType: 'int', description: '' }] }, folder: '', storage: 'dbml' },
-      { table: { name: 'dim_customer', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] }, folder: '', storage: 'dbml' },
+      { table: { name: 'fct_order', columns: [{ name: 'customer_id', dataType: 'int', description: '' }] }, storage: 'dbml' },
+      { table: { name: 'dim_customer', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] }, storage: 'dbml' },
     ];
     const entries = refEntriesOf('gold/relationships/gold.dbml', readRelationshipsDbml(text), dbmlTableLookup(tables));
     expect(entries.map((e) => [e.owner, e.ownerQualifier])).toEqual([['afih', 'sap'], ['fct_order', 'gold'], ['fct_order', 'gold']]);

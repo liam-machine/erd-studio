@@ -101,7 +101,8 @@ export function planDbmlTableMoves(input: {
   diagrams: readonly string[];
   readText(filePath: string): string | null;
 }): FileWrite[] {
-  const { writes, plan } = input.tableLibraryService.planDbmlLibraryOps({ move: input.moves.map((m) => ({ ...m })) }, input.readText);
+  // 2.0-switch: S7 (Organise passes `{ name, toLayer }`; until then its folder is the layer)
+  const { writes, plan } = input.tableLibraryService.planDbmlLibraryOps({ move: input.moves.map((m) => ({ name: m.name, toLayer: m.toFolder })) }, input.readText);
   const semanticRoot = path.dirname(input.tableLibraryService.getTablesDir());
   return [...writes, ...settleDbmlDiagramWrites({ semanticRoot, diagrams: input.diagrams, plan, readText: input.readText })];
 }

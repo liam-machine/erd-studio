@@ -100,6 +100,13 @@ export interface DbmlRelationshipsReading {
    * reader older than 2.0's.
    */
   otherElements?: Array<{ kind: string; line: number }>;
+  /**
+   * Each `use` line's path as written, in file order: resolved against the
+   * file's folder, they name the tables the file imports, so a planner can
+   * find a line naming a table no Ref names any more. Optional: absent when
+   * there is none, and from a reader older than 2.0's.
+   */
+  uses?: string[];
 }
 
 /** A table `use` line of a diagram: the member it names and where its path points. */
@@ -228,12 +235,6 @@ export interface DbmlDiagnostic {
 export interface DbmlAttachTable {
   /** The table as read: its `name` is the real spelling, its columns give the real column spellings and the key. */
   table: Pick<SemanticTable, 'name' | 'columns'>;
-  /**
-   * Its library folder (`''` = the top of `tables/`). Not read: no Ref has a
-   * home folder in the layer-first tree.
-   * @deprecated 2.0-switch: S6a deletes it.
-   */
-  folder: string;
   storage: 'yaml' | 'dbml';
   /** A DBML alias (`Table fct_order as FO`) Ref ends may use. */
   dbmlAlias?: string;

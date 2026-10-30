@@ -6589,7 +6589,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           try { return this.tableLibraryService.libraryRelativePath(this.tableLibraryService.pathForNewTable(name)); } catch { return undefined; }
         },
         relationshipsFile: (name) => {
-          const file = this.tableLibraryService.relationshipsFileFor(name);
+          const file = this.tableLibraryService.relationshipsFileForNewRef(name);
+          return file === undefined ? undefined : this.tableLibraryService.libraryRelativePath(file);
+        },
+        relationshipStoredIn: (rel) => {
+          const file = this.tableLibraryService.relationshipsFileHolding(rel);
           return file === undefined ? undefined : this.tableLibraryService.libraryRelativePath(file);
         },
       });

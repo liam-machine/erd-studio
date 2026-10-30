@@ -1,9 +1,9 @@
 /**
- * writeNewSubjectArea's rollback with DBML library tables (§5.7 of
- * docs/plans/native-dbml-storage.md, S5 review): saving an existing `.dbml`
- * table also writes its folder's relationships file, so a later failure puts
- * back every file the save wrote (or removes one it created), not only the
- * table file.
+ * writeNewSubjectArea with DBML library tables behind a JSON diagram (2.0
+ * design §2.6): the DBML tables, new and changed, are saved as ONE batch
+ * (one plan, one settle, one all-or-nothing write), so a refusal writes
+ * nothing, and a later failure puts back every file the batch wrote (or
+ * removes one it created), not only the table files.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -40,10 +40,10 @@ function snapshot(): Record<string, string> {
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-new-sa-dbml-'));
   write('layers.json', `${JSON.stringify({ layers: [{ id: 'gold', label: 'Gold' }] }, null, 2)}\n`);
-  write('tables/dim_date.dbml', 'Table dim_date {\n  date_key INT [pk]\n}\n');
-  write('tables/fct_x.dbml', 'Table fct_x {\n  id INT [pk]\n  date_key INT\n}\n');
-  write('tables/dim_yaml.yml', 'name: dim_yaml\ncolumns:\n  - name: id\n    dataType: INT\n');
-  write('tables/fct_z.dbml', 'Table fct_z {\n  id INT [pk]\n  yaml_id INT\n}\n');
+  write('gold/tables/gold/dim_date.dbml', 'Table gold.dim_date {\n  date_key INT [pk]\n}\n');
+  write('gold/tables/gold/fct_x.dbml', 'Table gold.fct_x {\n  id INT [pk]\n  date_key INT\n}\n');
+  write('logical-models/dim_yaml.yml', 'name: dim_yaml\ncolumns:\n  - name: id\n    dataType: INT\n');
+  write('gold/tables/gold/fct_z.dbml', 'Table gold.fct_z {\n  id INT [pk]\n  yaml_id INT\n}\n');
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
@@ -52,35 +52,62 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-/** fct_x gains a relationship (its folder's relationships file is written); then fct_z's save is refused (D20). */
-async function writeThenFail(): Promise<Awaited<ReturnType<typeof writeNewSubjectArea>>> {
-  const tables = new TableLibraryService(root, '.erd-studio');
+const documentText = (): string => `${JSON.stringify({ schemaVersion: 5, domain: 'new', layer: 'gold', logical: { models: ['fct_x', 'fct_z'], relationships: [] }, viewConfig: {} }, null, 2)}\n`;
+
+/** fct_x gains a relationship; fct_z one to a YAML table (D20), unless `refused` is false. */
+async function writeNew(tables: TableLibraryService, refused = true): Promise<Awaited<ReturnType<typeof writeNewSubjectArea>>> {
   const fctX: SemanticTable = { ...tables.getTable('fct_x')!, relationships: [{ fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' }] };
-  const fctZ: SemanticTable = { ...tables.getTable('fct_z')!, relationships: [{ fromColumn: 'yaml_id', toModel: 'dim_yaml', toColumn: 'id', cardinality: 'many-to-one' }] };
+  const fctZ: SemanticTable = refused
+    ? { ...tables.getTable('fct_z')!, relationships: [{ fromColumn: 'yaml_id', toModel: 'dim_yaml', toColumn: 'id', cardinality: 'many-to-one' }] }
+    : { ...tables.getTable('fct_z')!, description: 'Z' };
   return writeNewSubjectArea({
     workspaceRoot: root,
     semanticDir: '.erd-studio',
     domainPath: at('gold/new.json'),
-    newTables: [],
+    newTables: [{ name: 'dim_new', columns: [{ name: 'id', dataType: 'INT', description: '' }] }],
     changedTables: [fctX, fctZ],
-    documentText: () => `${JSON.stringify({ schemaVersion: 5, domain: 'new', layer: 'gold', logical: { models: ['fct_x', 'fct_z'], relationships: [] }, viewConfig: {} }, null, 2)}\n`,
+    folder: 'gold',
+    documentText,
   }, { layerService: new LayerService(root, '.erd-studio'), tableLibraryService: tables });
 }
 
-describe('writeNewSubjectArea rolls back every file a DBML table save wrote', () => {
-  it('a relationships file the save created is removed again', async () => {
+describe('writeNewSubjectArea saves the DBML tables as one batch', () => {
+  it('a refusal anywhere in the batch (D20) writes nothing: no table, no relationships file, no diagram', async () => {
     const before = snapshot();
-    const result = await writeThenFail();
+    const result = await writeNew(new TableLibraryService(root, '.erd-studio'));
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.undone).toBe(true);
     expect(snapshot()).toEqual(before);
   });
 
-  it('a relationships file the save changed is put back byte for byte', async () => {
-    write('tables/_relationships.dbml', '﻿// Hand-written header\n');
+  it('one plan and one settle for every DBML table, new and changed', async () => {
+    const tables = new TableLibraryService(root, '.erd-studio');
+    const batch = vi.spyOn(tables, 'applyDbmlBatch');
+    const listing = vi.spyOn(tables, 'listDbmlDiagrams');
+    const result = await writeNew(tables, false);
+    expect(result).toMatchObject({ ok: true, written: ['dim_new'], changed: ['fct_x', 'fct_z'] });
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(listing).toHaveBeenCalledTimes(1);
+    const after = snapshot();
+    expect(after['gold/tables/gold/dim_new.dbml']).toMatch(/^Table gold\.dim_new \{/);
+    expect(after['gold/relationships/gold.dbml']).toContain('Ref: gold.fct_x.date_key >? gold.dim_date.date_key');
+    expect(after['gold/new.json']).toBe(documentText());
+  });
+
+  it('a later failure (the diagram\'s name was taken) removes a relationships file the batch created, and the new table', async () => {
+    write('gold/new.json', '{}\n');
     const before = snapshot();
-    const result = await writeThenFail();
-    expect(result.ok).toBe(false);
+    const result = await writeNew(new TableLibraryService(root, '.erd-studio'), false);
+    expect(result).toMatchObject({ ok: false, undone: true, nameTaken: true });
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('…and puts back a relationships file the batch changed, byte for byte', async () => {
+    write('gold/relationships/gold.dbml', '\uFEFF// Hand-written header\n');
+    write('gold/new.json', '{}\n');
+    const before = snapshot();
+    const result = await writeNew(new TableLibraryService(root, '.erd-studio'), false);
+    expect(result).toMatchObject({ ok: false, undone: true });
     expect(snapshot()).toEqual(before);
   });
 });

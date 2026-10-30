@@ -158,13 +158,26 @@ export function readRelationshipsDbml(rawText: string, parser: DbmlParserModule 
   const refs = refsOf(text, compiled, problems);
   const pending = readPendingRefs(text, parser, problems, topLevel(compiled.ast));
   const otherElements = otherElementsOf(text, compiled);
+  const uses = useImportsOf(compiled);
   return {
     readable: true,
     refs,
     problems,
     ...(pending.length > 0 ? { pending } : {}),
     ...(otherElements.length > 0 ? { otherElements } : {}),
+    ...(uses.length > 0 ? { uses } : {}),
   };
+}
+
+/** Each `use` line's path as written, in file order (an index resolves them against the file's folder). */
+function useImportsOf(compiled: CompiledFile): string[] {
+  const out: string[] = [];
+  for (const node of topLevel(compiled.ast)) {
+    if (!isUseDeclaration(node)) continue;
+    const importPath = node.importPath?.value;
+    if (typeof importPath === 'string') out.push(importPath);
+  }
+  return out;
 }
 
 /**

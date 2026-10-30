@@ -75,10 +75,17 @@ export interface SyncPlanContext {
    */
   newTableFilePath?: (modelName: string) => string | undefined;
   /**
-   * The relationships file holding a DBML table's Refs, relative to the
-   * semantic dir (`relationshipsFileFor`), or undefined for a YAML table.
+   * Where a new Ref of a DBML foreign-key table goes, relative to the
+   * semantic dir (`relationshipsFileForNewRef`), or undefined for a YAML
+   * table. Feeds `modelContext[…].relationshipsPath`.
    */
   relationshipsFile?: (modelName: string) => string | undefined;
+  /**
+   * The relationships file holding a relationship now, relative to the
+   * semantic dir (`relationshipsFileHolding`), or undefined when none does.
+   * Feeds each relationship's `storedIn`.
+   */
+  relationshipStoredIn?: (rel: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }) => string | undefined;
 }
 
 /** Actions that edit dbt files, after which `dbt compile` is needed. */
@@ -134,6 +141,9 @@ export function buildSyncPlan(
   const columns: ColumnResolution[] = [];
   const relationships: RelationshipResolution[] = [];
   const referencedModels = new Set<string>();
+  // Every path is project-relative with forward slashes on every platform —
+  // the CLI's JSON promises that, and the Claude sync consumer reads either.
+  const toSlash = (p: string): string => p.replace(/\\/g, '/');
 
   for (const [key, groundTruth] of Object.entries(selections)) {
     const parts = key.split(':');
@@ -196,6 +206,7 @@ export function buildSyncPlan(
       // A composite the logical model draws and dbt does not declare as one
       // (#133 L2) is not wrong in the logical model: dbt is asked to declare it.
       if (relDisc.composite && action === 'remove-relationship-from-logical') action = 'add-relationship-test-to-physical';
+      const storedIn = ctx.relationshipStoredIn?.({ fromModel, fromColumn, toModel, toColumn });
 
       relationships.push({
         fromModel,
@@ -210,6 +221,7 @@ export function buildSyncPlan(
         ...(relDisc.pairs ? { pairs: relDisc.pairs.map((p) => ({ ...p })) } : {}),
         ...(relDisc.compositeKey ? { compositeKey: relDisc.compositeKey } : {}),
         ...(relDisc.composite ? { composite: true as const } : {}),
+        ...(storedIn !== undefined ? { storedIn: toSlash(path.join(ctx.semanticDir, storedIn)) } : {}),
       });
       referencedModels.add(fromModel);
       referencedModels.add(toModel);
@@ -217,9 +229,6 @@ export function buildSyncPlan(
   }
 
   // Build model context with file paths (prefer yml source, fall back to manifest heuristic).
-  // Every path is project-relative with forward slashes on every platform —
-  // the CLI's JSON promises that, and the Claude sync consumer reads either.
-  const toSlash = (p: string): string => p.replace(/\\/g, '/');
   const modelContext: Record<string, TableContext> = {};
   for (const modelName of referencedModels) {
     const manifestModel = ctx.manifest.models.get(modelName);

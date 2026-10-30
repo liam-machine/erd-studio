@@ -505,35 +505,6 @@ Ref "ship date": gold.fct_order.ship_date_key >? shared.dim_date.date_key
       .replace('here.\n', "here.\nuse { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\n")
       .replace('customer_key\n', 'customer_key\nRef: gold.fct_order.order_date_key >? shared.dim_date.date_key\n'));
   }),
-  {
-    name: 'an incoming Ref keeps `[delete: cascade]`, its `?` marks and its trailing comment',
-    run: (): WriterOutcome => {
-      const incoming = 'Ref: gold.fct_order.ship_date_key > shared.dim_date.date_key [delete: cascade] // moved here';
-      const output = relEdit('// header\n', {
-        owners: new Map([['fct_order', { name: 'fct_order', relationships: [M21('ship_date_key', 'dim_date', 'date_key')] }]]),
-        incoming: [{ text: incoming, unit: { from: 'fct_order', to: 'dim_date', fromColumns: ['ship_date_key'], toColumns: ['date_key'], cardinality: 'many-to-one' } }],
-      });
-      return { path: REL_PATH, input: '// header\n', output, context: { ...LIBRARY } };
-    },
-    check: (o) => {
-      expect(o.output).toBe("// header\nuse { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nRef: gold.fct_order.ship_date_key > shared.dim_date.date_key [delete: cascade] // moved here\n");
-    },
-  },
-  {
-    name: 'an incoming Ref whose owner was renamed is re-spelled only at that end',
-    run: (): WriterOutcome => {
-      const incoming = 'Ref: gold.fct_order.ship_date_key >? shared.dim_date.date_key [delete: cascade] // moved';
-      const output = relEdit(null, {
-        owners: new Map([['fct_order_line', { name: 'fct_order_line', relationships: [M21('ship_date_key', 'dim_date', 'date_key')] }]]),
-        renamedOwners: new Map([['fct_order', 'fct_order_line']]),
-        incoming: [{ text: incoming, unit: { from: 'fct_order', to: 'dim_date', fromColumns: ['ship_date_key'], toColumns: ['date_key'], cardinality: 'many-to-one' } }],
-      }, RENAMED_LIBRARY);
-      return { path: REL_PATH, input: null, output, context: { ...RENAMED_LIBRARY } };
-    },
-    check: (o) => {
-      expect(o.output).toContain('Ref: gold.fct_order_line.ship_date_key >? shared.dim_date.date_key [delete: cascade] // moved\n');
-    },
-  },
   // --- Round 1 review: link identity, moves, block form, owner keys -------------------
   relCase('a composite listed with its pairs in another order is the same Ref: its bytes stay', COMPOSITE_REF, () => {
     const list = currentOwners(COMPOSITE_REF).get('fct_order')!;

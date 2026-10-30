@@ -340,17 +340,27 @@ export class MigrationService {
     // library already uses them or is empty — a flat library stays flat.
     const layerIds = new Set(this.layerService.getAllLayers().map((l) => l.id));
     const useFolders = this.tableLibraryService.groupsByFolder(layerIds);
+    // The DBML tables are one batch (§2.6): one plan, one settle, one write.
+    const dbmlSaves: Array<{ model: SemanticTable; home: { layer: string; schema: string } }> = [];
     for (const [name, { model, sources }] of allModels) {
       if (!this.tableLibraryService.tableExists(name)) {
         // The domain's layer is its parent directory name.
         const layers = new Set(sources.map((source) => path.basename(path.dirname(source))));
         const only = layers.size === 1 ? [...layers][0] : undefined;
+        const configured = only !== undefined && layerIds.has(only) ? only : undefined;
+        if (this.tableLibraryService.writesTableAsDbml(name)) {
+          // A DBML table always sits in a layer: its domain's when that is a configured layer (§2.4).
+          dbmlSaves.push({ model, home: this.tableLibraryService.dbmlHomeOf(configured) });
+          result.modelsCreated++;
+          continue;
+        }
         // Never create a folder for a directory that is not a configured layer.
-        const folder = useFolders && only !== undefined && layerIds.has(only) ? only : undefined;
+        const folder = useFolders ? configured : undefined;
         this.tableLibraryService.saveTable(model, folder);
         result.modelsCreated++;
       }
     }
+    if (dbmlSaves.length > 0) this.tableLibraryService.applyDbmlBatch({ ops: { save: dbmlSaves } });
 
     // Phase 3: Convert domain files to v5 format
     for (const filePath of v4Paths) {

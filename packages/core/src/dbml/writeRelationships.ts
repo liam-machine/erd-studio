@@ -97,8 +97,6 @@ export interface RelationshipsFileEdit {
    * changes, so its settings, comments, block form and operator keep their bytes.
    */
   renamedColumns?: ReadonlyMap<string, ReadonlyMap<string, string>>;
-  /** Ref texts moving INTO this file from another file, carried verbatim. */
-  incoming?: ReadonlyArray<{ text: string; unit: RefUnit }>;
   /**
    * Tables whose path changed in this edit (rename, move, delete), lower-case:
    * their `use` lines are re-resolved, a line no Ref needs included
@@ -122,11 +120,21 @@ export interface RelationshipsFileEdit {
   writePending?: boolean;
   /**
    * The units stored as pending lines (D27) anywhere in the library before
-   * this edit, named as before it. One this edit writes into this file (its
-   * owner moved here, say) stays a pending line while it cannot be live,
-   * instead of being refused or written as a Ref that does not compile.
+   * this edit, named as before it. One this edit writes into this file (a
+   * planner placed it here, say) stays a pending line while it cannot be
+   * live, instead of being refused or written as a Ref that does not compile.
    */
   pendingBefore?: readonly RefUnit[];
+  /**
+   * Stored Refs whose columns this edit changes (a planner's column-change
+   * match: a composite gaining or losing a column, or another column at an
+   * end), by the 1-based line the Ref starts on → the desired unit it
+   * becomes (ends named as after the edit). Each is rewritten where it is:
+   * its settings and trailing comment stay, and so does its operator while
+   * its cardinality and role do. Without an entry such a Ref is cut and the
+   * unit added at its sorted place.
+   */
+  columnChanges?: ReadonlyMap<number, RefUnit>;
   /** The DBML parser; the pinned one unless a test passes another. */
   parser?: DbmlParserModule;
 }
@@ -261,8 +269,18 @@ function endpointsKey(unit: RefUnit): string {
  * a `one-to-many` becomes many-to-one from the other end.
  */
 export function relationshipUnits(owner: string, relationships: readonly TableRelationship[]): RefUnit[] {
-  const units: RefUnit[] = [];
-  const groups = new Map<string, RefUnit>();
+  return relationshipUnitsWithMembers(owner, relationships).map((u) => u.unit);
+}
+
+/**
+ * {@link relationshipUnits}, each unit with the entries of `relationships`
+ * it is made of (a composite's entries share its `compositeKey`), in list
+ * order: what a planner needs to hand each relationships file only the
+ * units it keeps.
+ */
+export function relationshipUnitsWithMembers(owner: string, relationships: readonly TableRelationship[]): Array<{ unit: RefUnit; relationships: TableRelationship[] }> {
+  const units: Array<{ unit: RefUnit; relationships: TableRelationship[] }> = [];
+  const groups = new Map<string, { unit: RefUnit; relationships: TableRelationship[] }>();
   for (const entry of relationships) {
     const rel = canonicalRelationship({ ...entry, fromModel: owner } as Relationship);
     const role = rel.role !== undefined && rel.role !== '' ? rel.role : undefined;
@@ -270,16 +288,21 @@ export function relationshipUnits(owner: string, relationships: readonly TableRe
       const key = `${lower(rel.fromModel)}\u0000${lower(rel.toModel)}\u0000${entry.compositeKey}`;
       const held = groups.get(key);
       if (held) {
-        held.fromColumns.push(rel.fromColumn);
-        held.toColumns.push(rel.toColumn);
+        held.unit.fromColumns.push(rel.fromColumn);
+        held.unit.toColumns.push(rel.toColumn);
+        held.relationships.push(entry);
         continue;
       }
       const unit: RefUnit = { from: rel.fromModel, to: rel.toModel, fromColumns: [rel.fromColumn], toColumns: [rel.toColumn], cardinality: rel.cardinality, ...(role !== undefined ? { role } : {}) };
-      groups.set(key, unit);
-      units.push(unit);
+      const group = { unit, relationships: [entry] };
+      groups.set(key, group);
+      units.push(group);
       continue;
     }
-    units.push({ from: rel.fromModel, to: rel.toModel, fromColumns: [rel.fromColumn], toColumns: [rel.toColumn], cardinality: rel.cardinality, ...(role !== undefined ? { role } : {}) });
+    units.push({
+      unit: { from: rel.fromModel, to: rel.toModel, fromColumns: [rel.fromColumn], toColumns: [rel.toColumn], cardinality: rel.cardinality, ...(role !== undefined ? { role } : {}) },
+      relationships: [entry],
+    });
   }
   return units;
 }
@@ -467,7 +490,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const eol = oldText === null ? '\n' : eolOf(text);
   let ast: AstNode | undefined;
   /** Each Ref in the file: its unit as read and, for a bare `-` whose orientation the keys cannot settle, the other way round. */
-  const current: Array<{ ref: RefNode; unit: RefUnit; spelledNames: string[]; alt?: { unit: RefUnit; spelledNames: string[] } }> = [];
+  const current: Array<{ ref: RefNode; line: number; unit: RefUnit; spelledNames: string[]; alt?: { unit: RefUnit; spelledNames: string[] } }> = [];
   /** The file's pending relationships (D27): each one's unit, as named after the edit, and its line's span. */
   const pendingLines: Array<{ unit: RefUnit; start: number; end: number; spelledNames: string[] }> = [];
   if (oldText !== null) {
@@ -522,6 +545,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
       });
       current.push({
         ref: refNodeOf(node),
+        line: stored.line,
         unit: unitOf(rels),
         spelledNames: [rels[0].fromModel, rels[0].toModel],
         ...(undecided ? { alt: { unit: unitOf(reversed), spelledNames: [reversed[0].fromModel, reversed[0].toModel] } } : {}),
@@ -535,12 +559,6 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const desired: RefUnit[] = [];
   for (const [, entry] of edit.owners) {
     if (entry) desired.push(...relationshipUnits(entry.name, entry.relationships).map((u) => ({ ...u, from: canonical(u.from), to: canonical(u.to) })));
-  }
-  const incomingByKey = new Map<string, string>();
-  for (const { text: refLine, unit } of edit.incoming ?? []) {
-    const canon = withRenamedColumns({ ...unit, from: canonical(unit.from), to: canonical(unit.to) });
-    incomingByKey.set(identityKey(canon), refLine);
-    if (!desired.some((d) => identityKey(d) === identityKey(canon))) desired.push(canon);
   }
 
   // --- Match current Refs to desired units ---------------------------------------
@@ -559,6 +577,8 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     keyBefore: string;
     /** Its role as the file has it (a regenerated block-form Ref splices its name only when this differs). */
     readRole?: string;
+    /** A column change with the same cardinality and role: only its ends are spliced (the operator keeps its bytes). */
+    ends?: Array<{ side: AstNode; table: string; columns: string[] }>;
   };
   const kept: Kept[] = [];
   const cut: Array<{ unit: RefUnit; ref: RefNode; spelledNames: string[] }> = [];
@@ -603,6 +623,17 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
       touch(same.from, same.to);
       continue;
     }
+    const hint = edit.columnChanges?.get(entry.line);
+    const becomes = hint ? unmatched((d) => identityKey(d) === identityKey({ ...hint, from: canonical(hint.from), to: canonical(hint.to) })) : undefined;
+    if (becomes) {
+      // A column change the planner matched to this Ref: rewritten where it is, its settings and comment kept.
+      matched.add(becomes);
+      const sameOperator = becomes.cardinality === c.unit.cardinality && (becomes.role ?? '') === (c.unit.role ?? '');
+      const ends = sameOperator ? endsOf(c.ref, c.unit, becomes) : undefined;
+      keep({ unit: becomes, ref: c.ref, mode: 'regenerate', desired: becomes, spelledNames: c.spelledNames, renamed: respell, ...(c.unit.role !== undefined ? { readRole: c.unit.role } : {}), ...(ends ? { ends } : {}) });
+      touch(becomes.from, becomes.to);
+      continue;
+    }
     if (!listed.has(lower(c.unit.from))) {
       keep({ unit: c.unit, ref: c.ref, mode: respell ? 'respell' : 'keep', spelledNames: c.spelledNames, renamed: respell });
       if (respell) touch(c.unit.from, c.unit.to);
@@ -637,7 +668,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const respellPending = (line: { start: number; end: number }): void => {
     const found = pendingRefOf(line);
     if (!found) return;
-    const out = respellIncoming(found.ref);
+    const out = respellRefLine(found.ref);
     if (out !== found.ref) pendingEdits.push({ start: found.at, end: found.at + found.ref.length, text: out });
   };
   for (const pendingLine of pendingLines) {
@@ -679,7 +710,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     && !liveable(c.unit));
   for (let i = inserted.length - 1; i >= 0; i--) {
     const unit = inserted[i];
-    if (incomingByKey.has(identityKey(unit)) || liveable(unit)) continue;
+    if (liveable(unit)) continue;
     if (edit.writePending || pendingBeforeKeys.has(identityKey(unit))) {
       newPending.push(unit);
       inserted.splice(i, 1);
@@ -703,8 +734,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   for (const unit of inserted) {
     checkUnit(unit);
     // A new Ref to a table with no file would not compile, and a relationships file that does not
-    // compile is read as holding nothing (Law 5). A Ref already in the file, or carried in, stays as it is.
-    if (incomingByKey.has(identityKey(unit))) continue;
+    // compile is read as holding nothing (Law 5). A Ref already in the file stays as it is.
     const missing = [unit.from, unit.to].find((end) => edit.resolve(end) === undefined);
     if (missing !== undefined) {
       refuse(file, `The relationship ${unit.from}.(${unit.fromColumns.join(', ')}) → ${unit.to}.(${unit.toColumns.join(', ')}) names ${missing}, which has no table file, so it cannot be written to ${file}.`);
@@ -739,6 +769,10 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
    */
   const regenerated = (k: Kept): string => {
     const node = k.ref.node;
+    if (k.ends) {
+      const base = node.start as number;
+      return applyTextEdits(text.slice(node.start, node.end), k.ends.map((e) => ({ start: e.side.start - base, end: e.side.end - base, text: endText(e.table, e.columns) })));
+    }
     const callee = k.ref.application?.callee;
     if (!(k.ref.application && node.body !== k.ref.application && callee)) return refText(k.unit, restOf(k.ref));
     const base = node.start as number;
@@ -791,7 +825,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
 
   // New Refs (and moved ones) at their sorted places among the Refs that stay.
   const additions = [
-    ...inserted.map((unit) => ({ unit, text: incomingText(unit) })),
+    ...inserted.map((unit) => ({ unit, text: refText(unit) })),
     ...moving,
   ].sort((a, b) => (refUnitSortKey(a.unit) < refUnitSortKey(b.unit) ? -1 : refUnitSortKey(a.unit) > refUnitSortKey(b.unit) ? 1 : 0));
   // --- use lines (§4.5 step 5): only for the tables this edit touched -------------------
@@ -941,14 +975,31 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const out = spliced === text ? spliced : separateRefGroups(spliced, eol, parser);
   return hadBom ? `﻿${out}` : out;
 
-  function incomingText(unit: RefUnit): string {
-    const carried = incomingByKey.get(identityKey(unit));
-    if (carried === undefined) return refText(unit);
-    return respellIncoming(carried.replace(/\r?\n$/, ''));
+  /**
+   * Which side of a Ref (as written) is which end of `read`, paired with the
+   * table and columns `becomes` puts there; undefined when that is not plain
+   * (an end that does not read, or a self-reference whose two sides match
+   * the same end).
+   */
+  function endsOf(ref: RefNode, read: RefUnit, becomes: RefUnit): Array<{ side: AstNode; table: string; columns: string[] }> | undefined {
+    const sides = [ref.left, ref.right];
+    const roles = sides.map((side) => {
+      const parts = endParts(side);
+      if (!parts) return undefined;
+      const table = lower(canonical(parts.table));
+      const columns = parts.columns.map((c) => lower(columnAfter(canonical(parts.table), c))).join(',');
+      const isFrom = table === lower(read.from) && columns === read.fromColumns.map(lower).join(',');
+      const isTo = table === lower(read.to) && columns === read.toColumns.map(lower).join(',');
+      return isFrom === isTo ? undefined : isFrom ? 'from' : 'to';
+    });
+    if (roles[0] === undefined || roles[1] === undefined || roles[0] === roles[1]) return undefined;
+    return sides.map((side, i) => (roles[i] === 'from'
+      ? { side: side!, table: becomes.from, columns: becomes.fromColumns }
+      : { side: side!, table: becomes.to, columns: becomes.toColumns }));
   }
 
-  /** An incoming Ref's text with each renamed end spelled anew; everything else kept verbatim. */
-  function respellIncoming(refLine: string): string {
+  /** A Ref line (a pending line's) with each renamed end spelled anew; everything else kept verbatim. */
+  function respellRefLine(refLine: string): string {
     if (renamed.size === 0 && columnRenames.size === 0 && requalified.size === 0) return refLine;
     let compiled;
     try {

@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 
 import { DbmlEditRefused } from '../../src/dbml/errors';
 import type { TableRelationship } from '../../src/types/semantic';
-import { editRelationshipsDbml, relationshipUnits } from '../../src/dbml/writeRelationships';
+import { editRelationshipsDbml, relationshipUnits, relationshipUnitsWithMembers } from '../../src/dbml/writeRelationships';
 import {
   HAND_WRITTEN,
   LIBRARY,
@@ -32,6 +32,15 @@ describe('editRelationshipsDbml', () => {
       { from: 'a', to: 'b', fromColumns: ['x', 'y'], toColumns: ['u', 'v'], cardinality: 'many-to-one' },
       { from: 'c', to: 'a', fromColumns: ['w'], toColumns: ['z'], cardinality: 'many-to-one' },
     ]);
+  });
+
+  it('relationshipUnitsWithMembers gives each unit the entries it is made of, in list order', () => {
+    const x: TableRelationship = { fromColumn: 'x', toModel: 'b', toColumn: 'u', cardinality: 'many-to-one', compositeKey: 'k' };
+    const z: TableRelationship = { fromColumn: 'z', toModel: 'c', toColumn: 'w', cardinality: 'one-to-many' };
+    const y: TableRelationship = { fromColumn: 'y', toModel: 'b', toColumn: 'v', cardinality: 'many-to-one', compositeKey: 'k' };
+    const units = relationshipUnitsWithMembers('a', [x, z, y]);
+    expect(units.map((u) => u.relationships)).toEqual([[x, y], [z]]);
+    expect(units.map((u) => u.unit)).toEqual(relationshipUnits('a', [x, z, y]));
   });
 });
 
@@ -78,5 +87,29 @@ describe('editRelationshipsDbml refusals', () => {
   it('a file with a syntax error or conflict markers', () => {
     expect(() => relEdit('Ref: a.b > \n', owner([]))).toThrow(/^Fix the DBML in gold\/relationships\/gold\.dbml first/);
     expect(() => relEdit('<<<<<<< HEAD\nRef: a.b > c.d\n=======\n>>>>>>> x\n', owner([]))).toThrow(DbmlEditRefused);
+  });
+});
+
+describe('editRelationshipsDbml columnChanges (a column change matched to a stored Ref)', () => {
+  /** fct_order's relationships in HAND_WRITTEN with the customer Ref (line 8) pointed at dim_customer.parent_key. */
+  function retargeted(cardinality: TableRelationship['cardinality'] = 'many-to-one'): TableRelationship[] {
+    return currentOwners(HAND_WRITTEN).get('fct_order')!.map((r) => (r.toModel === 'dim_customer' ? { ...r, toColumn: 'parent_key', cardinality } : r));
+  }
+  const unit = (cardinality: TableRelationship['cardinality']) => ({ from: 'fct_order', to: 'dim_customer', fromColumns: ['Customer_Key'], toColumns: ['parent_key'], cardinality });
+
+  it('rewrites the Ref where it is: settings, trailing comment and operator keep their bytes', () => {
+    const out = relEdit(HAND_WRITTEN, { owners: new Map([['fct_order', { name: 'fct_order', relationships: retargeted() }]]), columnChanges: new Map([[8, unit('many-to-one')]]) });
+    expect(out).toBe(HAND_WRITTEN.replace('gold.dim_customer.customer_key [delete', 'gold.dim_customer.parent_key [delete'));
+  });
+
+  it('with another cardinality too, the operator is written anew and the settings and comment stay', () => {
+    const out = relEdit(HAND_WRITTEN, { owners: new Map([['fct_order', { name: 'fct_order', relationships: retargeted('one-to-one') }]]), columnChanges: new Map([[8, unit('one-to-one')]]) });
+    expect(out).toContain('// the customer of an order\nRef: gold.dim_customer.parent_key ?- gold.fct_order.Customer_Key [delete: cascade] // keep me\n');
+  });
+
+  it('without an entry the Ref is cut and the unit added at its sorted place, as before', () => {
+    const out = relEdit(HAND_WRITTEN, { owners: new Map([['fct_order', { name: 'fct_order', relationships: retargeted() }]]) });
+    expect(out).toContain('Ref: gold.fct_order.Customer_Key >? gold.dim_customer.parent_key\n');
+    expect(out).not.toContain('keep me');
   });
 });

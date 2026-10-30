@@ -50,6 +50,8 @@ export interface WriteFilesOptions {
   exclusiveCreate?: boolean;
   /** Folders a create may make, up to and not including this one (default: any missing parent). */
   io?: FileWriteIo;
+  /** The semantic dir (absolute): creates are ordered as the tree classifies them (`orderFileWrites`). */
+  semanticRoot?: string;
 }
 
 /** Refused before anything was written: a create whose file exists. */
@@ -82,14 +84,15 @@ function writeAtomic(io: FileWriteIo, p: string, data: string | Buffer): void {
 
 /**
  * Apply `writes` (absolute paths) to disk, all or nothing. Order: creates,
- * then replaces, then deletes (`orderFileWrites`). Returns the paths written.
+ * then replaces, then deletes (`orderFileWrites`, creates in the tree's order
+ * when `options.semanticRoot` is given). Returns the paths written.
  * Throws the original error after a full rollback, or
  * {@link FileWriteRollbackFailed} when the rollback itself could not restore
  * every file.
  */
 export function writeFilesWithRollback(writes: readonly FileWrite[], options: WriteFilesOptions = {}): string[] {
   const io = options.io ?? NODE_IO;
-  const ordered = orderFileWrites(mergeFileWrites(writes));
+  const ordered = orderFileWrites(mergeFileWrites(writes), options.semanticRoot);
   const exclusive = options.exclusiveCreate !== false;
 
   // Snapshots, before the first write.

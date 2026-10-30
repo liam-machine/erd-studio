@@ -320,7 +320,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   /** Every file a DBML project's save writes (empty for a YAML project). */
   let planned: string[] = [];
   try {
-    folder = tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
+    // A DBML table always goes to the chosen layer's folder: groupsByFolder speaks for YAML libraries only.
+    folder = dbml || tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
     const libraryRelationships = dbml || usesLibraryRelationships(
       tableLibraryService.listTables(),
       subjectAreaService.countSubjectAreaFileRelationships(workspaceRoot, semanticDir),

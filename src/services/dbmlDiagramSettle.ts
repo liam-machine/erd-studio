@@ -96,8 +96,13 @@ export function settleDbmlDiagramWrites(input: SettleInput): FileWrite[] {
     const beforeMembers = ((before.logical ?? {}) as { models?: unknown }).models;
     const all = [...members, ...(Array.isArray(beforeMembers) ? beforeMembers.filter((m): m is string => typeof m === 'string') : [])];
     const createdTables = new Set((plan.createdTables ?? []).map((n) => n.toLowerCase()));
-    const affected = mutated || !input.mutatedOnly && all.some((m) => plan.pathChanged.has(m.toLowerCase()) || createdTables.has(m.toLowerCase())
-      || plan.relationshipsFilesFor([m]).some((f) => created.has(f)));
+    // 2.0-switch: S6b (needsSettle): until then, a member whose path changed or that is new, a
+    // relationships file created for a member, or a table pair among the members whose holding files
+    // the plan changes (a Ref added to or cut from an existing file).
+    const lowered = new Set(all.map((m) => m.toLowerCase()));
+    const pairMoved = [...(plan.changedPairs ?? [])].some((key) => key.split('\u0000').every((end) => lowered.has(end)));
+    const affected = mutated || !input.mutatedOnly && (pairMoved || all.some((m) => plan.pathChanged.has(m.toLowerCase()) || createdTables.has(m.toLowerCase())
+      || plan.relationshipsFilesFor([m]).some((f) => created.has(f))));
     if (!affected) continue;
     try {
       const text = editSubjectAreaDbml(original, {

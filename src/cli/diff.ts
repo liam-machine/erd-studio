@@ -592,7 +592,11 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
       try { return ctx.tableLibraryService.libraryRelativePath(ctx.tableLibraryService.pathForNewTable(name)); } catch { return undefined; }
     },
     relationshipsFile: (name) => {
-      const file = ctx.tableLibraryService.relationshipsFileFor(name);
+      const file = ctx.tableLibraryService.relationshipsFileForNewRef(name);
+      return file === undefined ? undefined : ctx.tableLibraryService.libraryRelativePath(file);
+    },
+    relationshipStoredIn: (rel) => {
+      const file = ctx.tableLibraryService.relationshipsFileHolding(rel);
       return file === undefined ? undefined : ctx.tableLibraryService.libraryRelativePath(file);
     },
   });
