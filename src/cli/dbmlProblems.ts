@@ -881,8 +881,9 @@ function byteOrder(a: string, b: string): number {
  * DBML or mixed project, a `.dbml` the tree has no place for
  * (`dbmlOutsideKnownFolders`, with a hint for its shape) and any other file
  * of no kind ERD Studio knows (`unexpectedFileInDbmlFolder`); a layer folder
- * holding tables or relationships that layers.json does not list
- * (`dbmlLayerNotConfigured`) and one table name in two table files
+ * holding tables or relationships that layers.json does not list, or DBML
+ * diagrams in a layer that does not open (`dbmlLayerNotConfigured`) and one
+ * table name in two table files
  * (`duplicateTableName`). The files of a 1.9 tree (`skip`) are left to its
  * one error.
  */
@@ -910,19 +911,27 @@ function treeShapeProblems(
       });
     }
   }
-  const libraryLayers = [...new Set(shown
-    .filter((e) => e.cls.layer !== undefined && ((e.cls.kind === 'table' && e.cls.storage === 'dbml') || e.cls.kind === 'relationships'))
-    .map((e) => e.cls.layer!))].sort(byteOrder);
-  if (libraryLayers.length > 0 && ctx.layerService.configFileExists()) {
-    const configured = new Set(ctx.layerService.getValidLayerIds());
-    for (const layer of libraryLayers) {
-      if (configured.has(layer)) continue;
-      out.push({
-        file: projectRel(layer), code: 'dbmlLayerNotConfigured',
-        message: `${layer}/ is not in layers.json, but its tables and relationships are part of the project. `
-          + `Add the layer, or move the folder out of ${ctx.semanticDir} if it is a copy.`,
-      });
+  const layersOf = (keep: (cls: SemanticFileClass) => boolean): Set<string> =>
+    new Set(shown.filter((e) => e.cls.layer !== undefined && keep(e.cls)).map((e) => e.cls.layer!));
+  const libraryLayers = layersOf((cls) => (cls.kind === 'table' && cls.storage === 'dbml') || cls.kind === 'relationships');
+  // A diagram opens only in a configured layer (with no layers.json, a default one), so its folder is reported either way.
+  const diagramLayers = layersOf((cls) => cls.kind === 'diagram' && cls.storage === 'dbml');
+  const hasConfig = ctx.layerService.configFileExists();
+  const configured = new Set(ctx.layerService.getValidLayerIds());
+  for (const layer of [...new Set([...(hasConfig ? libraryLayers : []), ...diagramLayers])].sort(byteOrder)) {
+    if (configured.has(layer)) continue;
+    const away = `Add the layer, or move the folder out of ${ctx.semanticDir} if it is a copy.`;
+    let message: string;
+    if (!hasConfig) {
+      message = `${layer}/ is not a layer: with no layers.json only the default layers (${[...configured].join(', ')}) open, so its diagrams do not. ${away}`;
+    } else if (!diagramLayers.has(layer)) {
+      message = `${layer}/ is not in layers.json, but its tables and relationships are part of the project. ${away}`;
+    } else if (libraryLayers.has(layer)) {
+      message = `${layer}/ is not in layers.json: its tables and relationships are part of the project, but its diagrams do not open until the layer is added. ${away}`;
+    } else {
+      message = `${layer}/ is not in layers.json, so its diagrams do not open. ${away}`;
     }
+    out.push({ file: projectRel(layer), code: 'dbmlLayerNotConfigured', message });
   }
   const byName = new Map<string, Array<{ rel: string; name: string }>>();
   for (const { rel, cls } of shown) {

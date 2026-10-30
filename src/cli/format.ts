@@ -66,6 +66,8 @@ function fixLine(f: Fix, p: Paint): string {
       return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  not tested in dbt`;
     case 'set-cardinality':
       return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  cardinality: ${f.from} (logical) vs ${f.to} (dbt)`;
+    case 'import-relationships-file':
+      return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  not drawn: the diagram does not import ${f.storedIn}`;
     case 'declare-composite-foreign-key': {
       const pairs = f.relationship!.pairs ?? [];
       return `  ${mark} ${f.relationship!.fromModel} (${pairs.map((x) => x.fromColumn).join(', ')}) → ${f.relationship!.toModel} `
@@ -220,6 +222,7 @@ function formatLogicalInventory(r: InventoryResult, p: Paint): string {
     const where = t.domains.length > 0 ? p.dim(` — in ${t.domains.join(', ')}`) : p.dim(' — in no subject area');
     lines.push(`    ${t.name}  ${t.unreadable ? p.red('does not parse') : plural(t.columnCount, 'column')}${where}`);
   }
+  if (r.legacyDbmlTree) lines.push(`${p.red('✗')} ${r.legacyDbmlTree}`);
   return lines.join('\n') + '\n';
 }
 
@@ -247,5 +250,6 @@ export function formatInventory(r: InventoryResult, p: Paint): string {
     if (meta.models.length > 0) { lines.push(p.dim(`    models: ${meta.models.map((k) => `${k.key} (${k.count})`).join(', ')}`)); }
     if (meta.columns.length > 0) { lines.push(p.dim(`    columns: ${meta.columns.map((k) => `${k.key} (${k.count})`).join(', ')}`)); }
   }
+  if (r.legacyDbmlTree) lines.push('', `${p.red('✗')} ${r.legacyDbmlTree}`);
   return lines.join('\n') + '\n';
 }

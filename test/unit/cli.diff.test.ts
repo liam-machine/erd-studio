@@ -690,6 +690,25 @@ describe('end to end on native DBML storage: inventory → DBML logical model �
     expect(d.missingModelFiles).toEqual([]);
     expect(d.counts.matchedRelationships).toBe(inventory.relationships.length);
     expect((await run(['diff', '--all', '--json'], root)).code).toBe(0);
+
+    // The diagram stops importing the relationships file: every Ref is still there, only not drawn.
+    // The fix is the import, never a second copy of each Ref (a duplicate, error 5001).
+    const importLine = "use * from '../relationships/silver.dbml'";
+    const text = fs.readFileSync(diagram, 'utf-8');
+    expect(text).toContain(importLine);
+    fs.writeFileSync(diagram, text.replace(`${importLine}\n`, ''));
+    const unimported = JSON.parse((await run(['diff', '--domain', path.relative(root, diagram), '--json'], root)).out) as DiffResult;
+    const fixes = unimported.domains[0].fixes.filter((f) => f.severity === 'blocking');
+    expect(fixes.length).toBe(inventory.relationships.length);
+    for (const f of fixes) {
+      expect(f).toMatchObject({
+        kind: 'import-relationships-file', file: '.erd-studio/silver/diagrams/orders.dbml',
+        storedIn: '.erd-studio/silver/relationships/silver.dbml', useLine: importLine,
+      });
+    }
+    // Following the fix makes the diagram clean again.
+    fs.writeFileSync(diagram, text);
+    expect((await run(['diff', '--domain', path.relative(root, diagram), '--json'], root)).code).toBe(0);
   });
 });
 
@@ -735,6 +754,19 @@ describe('diff on native DBML storage (§7.1, S8): fix paths and kinds', () => {
     const fixes = fixesFromPlan(plan, '.erd-studio/gold/diagrams/d.dbml', '.erd-studio', [], [], library);
     expect(fixes.find((f) => f.kind === 'add-column')).toMatchObject({ file: '.erd-studio/silver/tables/silver/m.dbml' });
     expect(fixes.find((f) => f.kind === 'add-relationship')).toMatchObject({ file: '.erd-studio/gold/relationships/gold.dbml', model: 'f' });
+  });
+
+  it('a relationship to add whose Ref is already stored (storedIn) is an import of that file into the diagram, not a second Ref', () => {
+    const storedIn = '.erd-studio/silver/relationships/orders.dbml';
+    const unimported: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], storedIn }] };
+    const fixes = fixesFromPlan(unimported, '.erd-studio/gold/diagrams/d.dbml', '.erd-studio', [], [], library);
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0]).toMatchObject({
+      severity: 'blocking', kind: 'import-relationships-file', file: '.erd-studio/gold/diagrams/d.dbml', storedIn,
+      useLine: "use * from '../../silver/relationships/orders.dbml'",
+      relationship: { fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k', cardinality: 'many-to-one' },
+    });
+    expect(fixes[0].explain).toContain('Do not add the Ref again');
   });
 
   it('a stored Ref is fixed where it is held (storedIn): a cardinality change turns it round in place, with no movesFrom', () => {

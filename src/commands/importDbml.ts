@@ -126,7 +126,7 @@ export interface ImportDbmlDeps {
     TableLibraryService,
     'findTableNameIgnoringCase' | 'getTable' | 'saveTable' | 'serializeTable' | 'groupsByFolder' | 'deleteTable'
       | 'listTables' | 'hasUnreadableRelationships' | 'tablePath' | 'getTablesDir' | 'writesTableNaming'
-  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites' | 'writesDbml' | 'tableStorage' | 'invalidateCache'>>;
+  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites' | 'writesDbml' | 'tableStorage' | 'invalidateCache' | 'listsSchemaFolder'>>;
   /** `createDomain`'s rule for a new subject area name in `layer` (undefined = valid). */
   validateDomainName: (value: string, layer: string) => string | undefined;
   /**
@@ -321,8 +321,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   let dirty: string[];
   /** Every file a DBML project's save writes (empty for a YAML project). */
   let planned: string[] = [];
-  /** New tables whose schema is written as the layer's existing folder spells it. */
-  let respelled: Array<{ table: string; from: string; to: string }> = [];
+  /** New tables whose schema is written as the layer's existing folder spells it (or, `newFolder`, as an earlier table of the file does). */
+  let respelled: Array<{ table: string; from: string; to: string; newFolder?: boolean }> = [];
   try {
     // A DBML table always goes to the chosen layer's folder: groupsByFolder speaks for YAML libraries only.
     folder = dbml || tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
@@ -364,7 +364,11 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
       ? tableLibraryService.planTableWrites({ save: [...plan.newTables, ...plan.changedLibraryTables].map((model) => ({ model })) }, folder, { dbml: true, schemaFromSource: true })
       : undefined;
     planned = (planWrites?.writes ?? []).map((w) => w.path);
-    if (planWrites?.plan) respelled = respelledSchemas(plan.newTables, (name) => planWrites.plan!.resolveTable(name)?.reference);
+    if (planWrites?.plan) {
+      respelled = respelledSchemas(plan.newTables, (name) => planWrites.plan!.resolveTable(name)?.reference)
+        // A folder the layer does not list yet is made by this import, for the file's first spelling.
+        .map((r) => (tableLibraryService.listsSchemaFolder?.(chosenLayer, r.to) ?? true ? r : { ...r, newFolder: true }));
+    }
     dirty = dirtyFiles([
       ...plan.newTables.map((t) => tableLibraryService.tablePath(t.name, folder)),
       ...plan.changedLibraryTables.map((t) => tableLibraryService.tablePath(t.name)),

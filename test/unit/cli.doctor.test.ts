@@ -1135,11 +1135,26 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     const unlisted = await doctor(nativeWith({ 'layers.json': (t) => t.replace(/,\n {4}\{ "id": "gold"[^\n]*\n/, '\n') }));
     expect(problem(unlisted, 'dbmlLayerNotConfigured')).toEqual([{
       file: '.erd-studio/gold', code: 'dbmlLayerNotConfigured', severity: 'warning',
-      message: 'gold/ is not in layers.json, but its tables and relationships are part of the project. Add the layer, or move the folder out of .erd-studio if it is a copy.',
+      message: 'gold/ is not in layers.json: its tables and relationships are part of the project, but its diagrams do not open until the layer is added. Add the layer, or move the folder out of .erd-studio if it is a copy.',
     }]);
     const missing = await doctor(nativeWith({ 'layers.json': () => null }));
     expect(problem(missing, 'missingLayersConfig')).toEqual([expect.objectContaining({ severity: 'warning' })]);
     expect(problem(missing, 'dbmlLayerNotConfigured')).toEqual([]);
+  });
+
+  it('a DBML diagram in a layer folder that does not open is dbmlLayerNotConfigured, with layers.json or without it', async () => {
+    const diagram = "use { table gold.fct_order } from '../../gold/tables/gold/fct_order.dbml'\n\nProject q {\n  erd_schema_version: '7'\n}\n";
+    const root = copyFixture('dbml-native');
+    fs.mkdirSync(path.join(root, '.erd-studio', 'platinum', 'diagrams'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.erd-studio', 'platinum', 'diagrams', 'q.dbml'), diagram);
+    expect(problem(await doctor(root), 'dbmlLayerNotConfigured')).toEqual([{
+      file: '.erd-studio/platinum', code: 'dbmlLayerNotConfigured', severity: 'warning',
+      message: 'platinum/ is not in layers.json, so its diagrams do not open. Add the layer, or move the folder out of .erd-studio if it is a copy.',
+    }]);
+    fs.rmSync(path.join(root, '.erd-studio', 'layers.json'));
+    expect(problem(await doctor(root), 'dbmlLayerNotConfigured').map((p) => p.message)).toEqual([
+      'platinum/ is not a layer: with no layers.json only the default layers (silver, gold) open, so its diagrams do not. Add the layer, or move the folder out of .erd-studio if it is a copy.',
+    ]);
   });
 
   it('a backup copy of a layer folder: dbmlLayerNotConfigured, and duplicateTableName errors naming both files', async () => {

@@ -24,6 +24,7 @@ import * as path from 'path';
 import type { TableLibraryService, TableFileEntry, TableFileError } from '../services/logicalModelService';
 import type { SubjectAreaService } from '../services/domainService';
 import { subjectAreaTableNames } from '../services/domainService';
+import { suggestDuplicateName } from '../services/duplicateModelResolver';
 import type { LayerConfig } from '../types/layer';
 import type { DbmlFileIconResolver } from './dbmlFileKinds';
 import { createLogger, elapsedMs, plural } from '../services/logger';
@@ -172,7 +173,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       item.description = '(duplicate — ignored)';
       item.tooltip = `Another file already defines "${element.name}" and is the one diagrams use:\n${element.shadowedBy}\n\n` +
         'Table names are unique across all folders, as dbt model names are. Use "Give Duplicate Table Its Own Name" ' +
-        `to make this copy "${element.folder ? `${element.folder}_` : ''}${element.name}" with the warehouse name (alias) "${element.name}".`;
+        `to make this copy "${this.duplicateSuggestion(element)}" with the warehouse name (alias) "${element.name}".`;
       item.accessibilityInformation = { label: `${element.name}, duplicate, ignored` };
       item.resourceUri = vscode.Uri.file(element.filePath);
       item.command = openTableCommand(item.resourceUri);
@@ -373,6 +374,15 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     const at0 = new vscode.Position(error.line !== undefined && error.line >= 1 ? error.line - 1 : 0, 0);
     item.command = openTableCommand(item.resourceUri, { selection: new vscode.Range(at0, at0), preview: false });
     return item;
+  }
+
+  /**
+   * The name Give Duplicate Table Its Own Name offers for this copy, from
+   * the same rule the command uses: its layer (a DBML table), else its folder.
+   */
+  private duplicateSuggestion(element: TableLibraryTableNode): string {
+    const taken = new Set(this.tableLibraryService.listTableFiles().map((e) => e.name));
+    return suggestDuplicateName(element.name, element.layer ?? element.folder ?? '', taken) || element.name;
   }
 
   private folderItem(element: TableLibraryFolderNode): vscode.TreeItem {

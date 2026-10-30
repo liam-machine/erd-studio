@@ -1346,9 +1346,10 @@ export interface DescribeDbmlImportOptions {
    * YAML project, whose relationships go in the tables' own files. Either
    * way the layout goes in the diagram file (a DBML diagram's `erd_layout`).
    * `respelledSchemas`: new tables whose schema is written as the layer's
-   * existing folder spells it (§1.2 One spelling).
+   * existing folder spells it (§1.2 One spelling), or, with `newFolder`, as
+   * another table of the file spells the folder this import creates.
    */
-  dbml?: { relationshipsFiles: readonly string[]; respelledSchemas?: ReadonlyArray<{ table: string; from: string; to: string }> };
+  dbml?: { relationshipsFiles: readonly string[]; respelledSchemas?: ReadonlyArray<{ table: string; from: string; to: string; newFolder?: boolean }> };
 }
 
 /**
@@ -1385,13 +1386,14 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
     lines.push(`• ${plural(report.relationships, 'relationship')}${where}.${already}`);
   }
   // One spelling per schema folder: a file's `Table Sales.x` joins the layer's `sales/` as `Table sales.x`.
-  const respelled = new Map<string, { to: string; tables: string[] }>();
+  const respelled = new Map<string, { to: string; tables: string[]; newFolder: boolean }>();
   for (const r of options.dbml?.respelledSchemas ?? []) {
     const key = `${r.from}\u0000${r.to}`;
-    respelled.set(key, { to: r.to, tables: [...(respelled.get(key)?.tables ?? []), r.table] });
+    respelled.set(key, { to: r.to, tables: [...(respelled.get(key)?.tables ?? []), r.table], newFolder: r.newFolder === true });
   }
-  for (const [key, { to, tables }] of respelled) {
-    lines.push(`• Schema ${key.split('\u0000')[0]} is written ${to}, as the layer's existing ${to}/ folder spells it: ${someOf(tables)}.`);
+  for (const [key, { to, tables, newFolder }] of respelled) {
+    const why = newFolder ? 'as another table in this file spells it (one folder per schema)' : `as the layer's existing ${to}/ folder spells it`;
+    lines.push(`• Schema ${key.split('\u0000')[0]} is written ${to}, ${why}: ${someOf(tables)}.`);
   }
   if (report.optionalRefs > 0 && !report.erdStudioExport) {
     lines.push(`• ${plural(report.optionalRefs, 'reference is', 'references are')} optional (?). ERD Studio doesn't record that, so they are imported as plain relationships.`);

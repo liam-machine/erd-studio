@@ -91,6 +91,7 @@ import {
   classifySemanticFile,
   computeMissingPositions,
   diagramPathOf,
+  isDbmlLayerName,
   isErdLayoutName,
   subjectAreaStorageOf,
   SubjectAreaValidationError,
@@ -2176,14 +2177,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Where a table created from this diagram goes. A DBML diagram: its layer
    * `L` and the schema folder `L` as `L/tables/` lists it (case aside), else
-   * `L` (§2.4 step 2). A JSON diagram: the layer folder, or undefined for
-   * the top level — only when the diagram's directory is a configured layer
-   * AND the library has opted into layer folders (see `groupsByFolder`).
+   * `L` (§2.4 step 2). A JSON diagram in a project that writes DBML
+   * (a mixed one): its layer too, as for a DBML diagram, whatever
+   * `groupsByFolder` says of the YAML tables. A JSON diagram whose new
+   * tables are YAML: the layer folder, or undefined for the top level — only
+   * when the diagram's directory is a configured layer AND the library has
+   * opted into layer folders (see `groupsByFolder`).
    */
   private newTableFolder(domainFilePath: string): string | DbmlTableHome | undefined {
     const diagram = diagramPathOf(domainFilePath);
     if (diagram !== undefined && subjectAreaStorageOf(domainFilePath) === 'dbml') {
       return { layer: diagram.layer, schema: this.tableLibraryService.schemaAsListed(diagram.layer, diagram.layer) };
+    }
+    const layer = tableFolderForSubjectArea(domainFilePath);
+    if (this.tableLibraryService.writesDbml() && isDbmlLayerName(layer)
+      && this.layerService.getAllLayers().some((l) => l.id === layer)) {
+      return { layer, schema: this.tableLibraryService.schemaAsListed(layer, layer) };
     }
     return this.newYamlTableFolder(domainFilePath);
   }
@@ -3158,10 +3167,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return true;
   }
 
-  /** Every diagram of the project except `currentPath`. */
+  /**
+   * Every diagram of the project except `currentPath`. The DBML ones come
+   * from every DBML layer folder, listed in layers.json or not (as the batch
+   * settle reads them): a cascade that skipped a diagram in an unlisted
+   * folder, or behind an unreadable layers.json, would leave it a `use`
+   * line to a file that is gone.
+   */
   private listOtherSubjectAreas(currentPath: string): import('../types/semantic').SubjectAreaSummary[] {
     const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
-    return this.subjectAreaService.listSubjectAreas(this.workspaceRoot, semanticDir).filter((s) => !samePath(s.filePath, currentPath));
+    const listed = this.subjectAreaService.listSubjectAreas(this.workspaceRoot, semanticDir);
+    const semanticRoot = this.semanticRootDir();
+    for (const filePath of this.tableLibraryService.listDbmlDiagrams()) {
+      if (listed.some((s) => samePath(s.filePath, filePath))) continue;
+      const [layer] = path.relative(semanticRoot, filePath).split(path.sep);
+      listed.push({ domain: path.basename(filePath).replace(/\.dbml$/i, ''), layer, filePath, storage: 'dbml' });
+    }
+    return listed.filter((s) => !samePath(s.filePath, currentPath));
   }
 
   /** A file's text: an open document's (unsaved edits included), else the disk's without a byte-order mark; null when there is none. */

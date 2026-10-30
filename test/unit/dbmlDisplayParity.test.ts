@@ -309,3 +309,39 @@ describe('an unlinked member whose table has a .dbml file now', () => {
     expect(subjectAreaService.relationshipsImportDrift(diagram)).toEqual(['gold/relationships/region.dbml']);
   });
 });
+
+describe('an unlinked member whose .dbml table sits outside the folders the diagram\'s use lines name', () => {
+  /** silver's diagram draws fct (a use line) and dim_x (erd_unlinked_tables), whose file is in gold. */
+  function seed(): string {
+    const write = (rel: string, text: string): void => {
+      fs.mkdirSync(path.dirname(at(rel)), { recursive: true });
+      fs.writeFileSync(at(rel), text);
+    };
+    write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'silver', label: 'Silver' }, { id: 'gold', label: 'Gold' }] }));
+    write('silver/tables/silver/fct.dbml', 'Table silver.fct {\n  id int [pk]\n}\n');
+    write('gold/tables/gold/dim_x.dbml', 'Table gold.dim_x {\n  x_key int [pk]\n}\n');
+    write('silver/diagrams/d.dbml', "use { table silver.fct } from '../tables/silver/fct.dbml'\n\nProject d {\n  erd_schema_version: '7'\n  erd_unlinked_tables: 'dim_x'\n}\n");
+    return 'silver/diagrams/d.dbml';
+  }
+
+  it('is drawn missing by both sides (core cannot list folders), until an edit gives it a use line', async () => {
+    const diagram = seed();
+    const core = drawn(await coreOf(diagram));
+    const canvas = drawn(await canvasOf(diagram));
+    expect(canvas).toEqual(core);
+    const dimX = (canvas.models as Array<{ name: string; columns?: unknown[] }>).find((m) => m.name === 'dim_x');
+    expect(dimX?.columns ?? []).toEqual([]);
+  });
+
+  it('one in a folder a use line names is drawn with its columns by both sides', async () => {
+    const diagram = seed();
+    fs.mkdirSync(at('silver/tables/silver'), { recursive: true });
+    fs.renameSync(at('gold/tables/gold/dim_x.dbml'), at('silver/tables/silver/dim_x.dbml'));
+    fs.writeFileSync(at('silver/tables/silver/dim_x.dbml'), 'Table silver.dim_x {\n  x_key int [pk]\n}\n');
+    const core = drawn(await coreOf(diagram));
+    const canvas = drawn(await canvasOf(diagram));
+    expect(canvas).toEqual(core);
+    const dimX = (canvas.models as Array<{ name: string; columns?: unknown[] }>).find((m) => m.name === 'dim_x');
+    expect(dimX?.columns).toHaveLength(1);
+  });
+});

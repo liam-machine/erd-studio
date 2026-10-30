@@ -1659,6 +1659,11 @@ export class TableLibraryService {
     return this.index.get().dbmlLayers[0]?.layer ?? 'main';
   }
 
+  /** Whether `<layer>/tables/` already holds a schema folder spelled exactly `schema`. */
+  listsSchemaFolder(layer: string, schema: string): boolean {
+    return (this.index.get().dbmlLayers.find((l) => l.layer === layer)?.schemas ?? []).includes(schema);
+  }
+
   /**
    * `schema` as `<layer>/tables/` lists it (§1.2 One spelling): an existing
    * schema folder that matches case-insensitively wins, else `schema` itself.

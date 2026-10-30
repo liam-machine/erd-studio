@@ -223,14 +223,20 @@ function withExtension(path: string): string {
 }
 
 /**
- * Whether a schema asked for (a dbt `config.schema`, a source's `schema`, an
- * imported qualifier) can be a new schema folder: a library folder name with
- * no dbt Jinja (`{{ target.schema }}`, `{% … %}`, `{# … #}`, which a schema
- * yml read without a manifest leaves unrendered) and no character Windows
- * refuses in a file name. Otherwise the home's schema is used.
+ * Whether a schema can be a NEW schema folder, the one check every writer
+ * shares (Import, Draw from dbt and Add from dbt through this planner, and
+ * Convert): a library folder name with no dbt Jinja (`{{ target.schema }}`,
+ * `{% … %}`, `{# … #}`, which a schema yml read without a manifest leaves
+ * unrendered), no character Windows refuses in a file name, no `'` or `\`
+ * (either would end or escape the quoted path of a `use` line, which no
+ * parser reads back), no white space at either end, no trailing `.`, and
+ * not a Windows device name (`con`, `nul`, `com1`, …). Otherwise the
+ * caller falls back (the home's schema here; Convert's next step).
  */
-function isNewSchemaFolder(schema: string): boolean {
-  return isLibraryFolderName(schema) && !/[{}%#<>:"|?*\u0000-\u001f]/.test(schema) && !/[ .]$/.test(schema);
+export function isSchemaFolderName(schema: string): boolean {
+  return isLibraryFolderName(schema) && schema === schema.trim()
+    && !/[{}%#<>:"'|?*\u0000-\u001f\\]/.test(schema) && !/[ .]$/.test(schema)
+    && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(schema);
 }
 
 function refuse(file: string, message: string, line?: number): never {
@@ -434,7 +440,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       // one the developer configured, else the home's; spelled as the layer's tables/ lists it.
       const where = home ?? ops.newTableHome ?? defaultHome();
       const requested = ops.schemaFromSource ? model.schema || where.schema : configuredSchema || where.schema;
-      const schema = schemaAsListed(where.layer, isNewSchemaFolder(requested) ? requested : where.schema);
+      const schema = schemaAsListed(where.layer, isSchemaFolderName(requested) ? requested : where.schema);
       plannedSchemas.set(`${lower(where.layer)}\u0000${lower(schema)}`, schema);
       model = { ...model, schema };
       path = dbmlTablePath(where.layer, schema, model.name);

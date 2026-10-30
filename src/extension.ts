@@ -2167,7 +2167,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       let dbmlPlan: ReturnType<typeof planDbmlTableMoves> | undefined;
       if (dbmlMoves.length > 0) {
         try {
-          const diagrams = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).filter((d) => d.storage === 'dbml').map((d) => d.filePath);
+          // Every DBML diagram, in a layer folder layers.json lists or not (as the batch settle reads them).
+          const diagrams = tableLibraryService.listDbmlDiagrams();
           dbmlPlan = planDbmlTableMoves({
             tableLibraryService,
             moves: dbmlMoves.map((m) => ({ name: m.name, toLayer: m.layer })),
@@ -2313,7 +2314,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             copy: { filePath: dup.filePath, name: copyName },
             newName,
             alias,
-            diagrams: subjectAreaService.listSubjectAreas(root, semanticDir).filter((d) => d.storage === 'dbml').map((d) => d.filePath),
+            diagrams: tableLibraryService.listDbmlDiagrams(),
             readText: openOrDiskText,
           });
         } catch (err) {

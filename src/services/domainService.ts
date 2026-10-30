@@ -162,6 +162,8 @@ export function renameSubjectAreaInRaw(rawText: string, newSlug: string): string
  */
 interface DbmlDiagramView {
   memberPaths: ReadonlyMap<string, string>;
+  /** The table folders its `use` lines name, relative to the semantic dir, byte-sorted (core's `useTableDirs`). */
+  useTableDirs: readonly string[];
   imports: ReadonlySet<string>;
   /**
    * Its `erd_unlinked_tables` members (D26) the next edit keeps there, lower-case: one whose
@@ -330,6 +332,7 @@ export class SubjectAreaService {
       const { obj, format } = validateSubjectAreaDocument(reading.obj, filePath);
       const view: DbmlDiagramView = {
         memberPaths: new Map((reading.uses ?? []).map((u) => [u.name.toLowerCase(), u.resolved])),
+        useTableDirs: reading.useTableDirs ?? [],
         imports: new Set(reading.relationshipsUses),
         unlinked: new Set((reading.unlinked ?? [])
           .filter((n) => this.tableLibraryService?.tableStorage(n) !== 'dbml')
@@ -487,11 +490,27 @@ export class SubjectAreaService {
    * A DBML diagram's member as core's loader reads it (§2.3): the table in
    * the file its `use` line resolves to when that is a listed table file
    * other than the one the library picks by name (a name in two layers),
-   * else the table by name.
+   * else the table by name. A member with no `use` line (D26,
+   * `erd_unlinked_tables`) is looked for only where core looks, since core
+   * cannot list folders: `<dir>/<name>.dbml` in each table folder the
+   * diagram's `use` lines name, then a YAML table by name. A `.dbml` table
+   * anywhere else is drawn missing, as core draws it, until the next edit
+   * gives it a `use` line.
    */
   private dbmlMember(library: TableLibraryService, name: string, view: DbmlDiagramView): SemanticTable | null {
     const usePath = view.memberPaths.get(name.toLowerCase());
-    if (usePath !== undefined && !usePath.startsWith('../')) {
+    if (usePath === undefined) {
+      const listed = new Map(library.listTableFiles().map((e) => [path.resolve(e.filePath).toLowerCase(), e.filePath]));
+      for (const dir of view.useTableDirs) {
+        if (dir.startsWith('../')) continue;
+        const file = listed.get(path.resolve(library.semanticAbsolute(`${dir}/${name}.dbml`)).toLowerCase());
+        if (file === undefined) continue;
+        const byName = library.findTableFile(name);
+        return byName !== null && path.resolve(byName) === path.resolve(file) ? library.getTable(name) : library.getTableAt(file, name);
+      }
+      return library.tableStorage(name) === 'dbml' ? null : library.getTable(name);
+    }
+    if (!usePath.startsWith('../')) {
       const file = library.semanticAbsolute(usePath);
       const byName = library.findTableFile(name);
       if (byName !== null && path.resolve(byName) !== path.resolve(file)

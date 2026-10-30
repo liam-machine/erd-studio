@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 
 import { toDbmlRich } from '@erd-studio/core';
+import { projectDiagnostics } from '../../packages/core/test/dbmlWriterSupport';
 
 import { createMockTextDocument, _resetMockWorkspace } from '../__mocks__/vscode';
 import {
@@ -659,6 +660,41 @@ describe('Import DBML — the project\'s naming', () => {
     expect(ui.confirms[0].detail).toContain("• Schema Sales is written sales, as the layer's existing sales/ folder spells it: deals.");
     const diagram = fs.readFileSync(result!.domainPath, 'utf-8');
     expect(diagram).toMatch(/^use \{ table sales\.deals \} +from '\.\.\/tables\/sales\/deals\.dbml'$/m);
+  });
+
+  it('two spellings of a schema new to the layer: one folder, and the preview says another table spells it, not an existing folder', async () => {
+    fs.mkdirSync(erd('gold', 'tables', 'gold'), { recursive: true });
+    fs.writeFileSync(erd('layers.json'), LAYERS_JSON);
+    fs.writeFileSync(erd('gold', 'tables', 'gold', 'dim_rep.dbml'), 'Table gold.dim_rep {\n  rep_id int [pk]\n}\n');
+    makeProject('none');
+    const file = dbmlFile('ab.dbml', 'Table Sales.a {\n  id int [pk]\n}\nTable sales.b {\n  id int [pk]\n}\n');
+    const ui = fakeUi({ file, layer: 'gold' });
+    await importDbml(deps(ui));
+
+    expect(ui.errors).toEqual([]);
+    expect(erdFiles().filter((f) => f.startsWith('gold/tables/') && !f.startsWith('gold/tables/gold/'))).toEqual(['gold/tables/Sales/a.dbml', 'gold/tables/Sales/b.dbml']);
+    expect(ui.confirms[0].detail).toContain('• Schema sales is written Sales, as another table in this file spells it (one folder per schema): b.');
+    expect(ui.confirms[0].detail).not.toContain('existing Sales/ folder');
+  });
+
+  it('a schema that cannot be a folder (a quote, a Windows device name) goes in the layer\'s own schema, and every file compiles', async () => {
+    fs.mkdirSync(erd('gold', 'tables', 'gold'), { recursive: true });
+    fs.writeFileSync(erd('layers.json'), LAYERS_JSON);
+    fs.writeFileSync(erd('gold', 'tables', 'gold', 'dim_seed.dbml'), 'Table gold.dim_seed {\n  id int [pk]\n}\n');
+    makeProject('none');
+    const file = dbmlFile('q.dbml', 'Table "O\'Brien".x {\n  id int [pk]\n}\nTable y {\n  id int [pk]\n  x_id int [ref: > "O\'Brien".x.id]\n}\nTable con.z {\n  id int [pk]\n}\n');
+    const ui = fakeUi({ file, layer: 'gold' });
+    const result = await importDbml(deps(ui));
+
+    expect(ui.errors).toEqual([]);
+    expect(result).toBeDefined();
+    const files = erdFiles();
+    expect(files.some((f) => /O'Brien|\/con\//.test(f))).toBe(false);
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'x.dbml'), 'utf-8')).toMatch(/^Table gold\.x \{/);
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'z.dbml'), 'utf-8')).toMatch(/^Table gold\.z \{/);
+    const sources = Object.fromEntries(files.filter((f) => f.endsWith('.dbml')).map((f) => [f, fs.readFileSync(erd(f), 'utf-8')]));
+    expect(sources['gold/relationships/gold.dbml']).toContain('Ref: gold.y.x_id >? gold.x.id');
+    expect(projectDiagnostics(sources)).toEqual([]);
   });
 
   it('a mixed project (flat YAML library beside DBML layers): the import goes to the chosen layer\'s tables', async () => {

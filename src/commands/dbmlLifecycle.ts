@@ -23,6 +23,7 @@ import { useDeclarationLines } from '../services/dbmlImportParse';
 
 import type { FileWrite } from '../services/fileWrites';
 import { dbmlResolverOf, settleDbmlDiagramWrites, type SubjectAreaResolver } from '../services/dbmlDiagramSettle';
+import { buildRelationshipsIndex, refEntriesOf, relationshipsImportsFor } from '../services/dbmlRelationshipsIndex';
 import type { TableLibraryService } from '../services/logicalModelService';
 import type { SemanticTable } from '../types/semantic';
 
@@ -329,6 +330,8 @@ export function planDbmlDuplicateRename(input: {
   const relationshipsWrites: FileWrite[] = [];
   // The files whose Refs name the copy (an end re-spelled): the renamed table's Refs, after the rename.
   const copyRefFiles = new Set<string>();
+  // Their Refs as the rename leaves them, for the import rule (§2.6): the plan's index cannot tell the copy's from the winner's.
+  const respelledRefs: ReturnType<typeof refEntriesOf> = [];
   for (const filePath of input.tableLibraryService.listRelationshipsFiles()) {
     const text = input.readText(filePath);
     if (text === null) continue;
@@ -343,7 +346,11 @@ export function planDbmlDuplicateRename(input: {
       continue;
     }
     const respelled = distinct ? respellEnds(text, relReading, declared, reference) : text;
-    if (respelled !== text) copyRefFiles.add(fileRel.toLowerCase());
+    if (respelled !== text) {
+      copyRefFiles.add(fileRel.toLowerCase());
+      // Only the pair each Ref joins counts here, so no table lookup is needed.
+      respelledRefs.push(...refEntriesOf(fileRel, readRelationshipsDbml(respelled), () => undefined));
+    }
     if (respelled === text && !importsCopy) continue;
     // The copy's own use line goes; the writer adds the line each table a Ref names needs.
     const spliced = cutUseLinesTo(respelled, fileRel, copyRel);
@@ -361,31 +368,41 @@ export function planDbmlDuplicateRename(input: {
 
   // Diagrams: every one whose use line names the copy's own file (by the path it resolves to), even one that
   // does not read: the settle refuses that one rather than leave a use line to a deleted file.
-  const candidates = input.diagrams.filter((diagram) => {
+  // And every one importing a file whose Refs the copy's re-spelled ends changed: under the shared name the
+  // index counted the copy's Refs for the winner, so a diagram drawing the winner and a partner of the copy
+  // may import a file only the copy's Refs justified. It is re-rendered with no change of its own.
+  const candidates: string[] = [];
+  const importsCopyRefs = new Set<string>();
+  for (const diagram of input.diagrams) {
     const text = input.readText(diagram);
-    if (text === null) return false;
+    if (text === null) continue;
     const rel = relPosix(semanticRoot, diagram);
     const summary = diagramSummaryDbml(text, rel);
-    if (summary === null) return hasUseLineTo(text, rel, copyRel);
-    return summary.memberUses.some((u) => u.resolved.toLowerCase() === copyRel.toLowerCase());
-  });
+    if (summary === null) {
+      if (hasUseLineTo(text, rel, copyRel)) candidates.push(diagram);
+    } else if (summary.memberUses.some((u) => u.resolved.toLowerCase() === copyRel.toLowerCase())) {
+      candidates.push(diagram);
+    } else if (summary.relationshipsUses.some((f) => copyRefFiles.has(f.toLowerCase()))) {
+      candidates.push(diagram);
+      importsCopyRefs.add(diagram);
+    }
+  }
   const base = dbmlResolverOf(plan, semanticRoot);
+  const fileExists = (p: string): boolean => (p.toLowerCase() === newRel.toLowerCase() ? true : p.toLowerCase() === copyRel.toLowerCase() ? false : base.fileExists(p));
+  const afterIndex = buildRelationshipsIndex({
+    files: plan.index.files,
+    refs: [...plan.index.refs.filter((r) => !copyRefFiles.has(r.file.toLowerCase())), ...respelledRefs],
+    unreadable: plan.index.unreadable,
+  });
   const resolver: SubjectAreaResolver = {
     semanticRoot,
     resolveTable: (name) => (sameName(name, input.newName)
       ? { name: input.newName, reference, path: newRel, storage: 'dbml' }
       : base.resolveTable(name)),
     // The plan's index still knows the copy's Refs by its old name, and cannot tell them from the winner's:
-    // with the renamed table, a file is imported when the other members alone want it, or when it holds the
-    // copy's Refs and wants it under the old name.
-    relationshipsImportsFor: (names, current, unlinked) => {
-      if (!names.some((n) => sameName(n, input.newName))) return base.relationshipsImportsFor(names, current, unlinked);
-      const others = base.relationshipsImportsFor(names.filter((n) => !sameName(n, input.newName)), current, unlinked);
-      const asCopy = base.relationshipsImportsFor(names.map((n) => (sameName(n, input.newName) ? input.copy.name : n)), current, unlinked)
-        .filter((f) => copyRefFiles.has(f.toLowerCase()));
-      return [...new Set([...others, ...asCopy])].sort();
-    },
-    fileExists: (p) => (p.toLowerCase() === newRel.toLowerCase() ? true : p.toLowerCase() === copyRel.toLowerCase() ? false : base.fileExists(p)),
+    // the rule runs on an index with the re-spelled files' Refs as the rename leaves them.
+    relationshipsImportsFor: (names, current, unlinked) => relationshipsImportsFor({ members: names, unlinked }, afterIndex, { current, exists: fileExists }),
+    fileExists,
     pathChanged: lowerNames,
   };
   const settled = settleDbmlDiagramWrites({
@@ -395,9 +412,11 @@ export function planDbmlDuplicateRename(input: {
     readText: input.readText,
     resolver,
     mutatedOnly: true,
-    mutate: (_filePath, obj) => repointMember(obj, input.copy.name, input.newName),
+    // A diagram only re-importing lists the winner, never the copy: its members stay as they are.
+    mutate: (filePath, obj) => importsCopyRefs.has(filePath) || repointMember(obj, input.copy.name, input.newName),
   });
-  repointed.unshift(...settled.map((w) => w.path));
+  // Repointed: the diagrams that name the copy (one only re-importing is written, never announced as repointed).
+  repointed.unshift(...settled.filter((w) => !importsCopyRefs.has(w.path)).map((w) => w.path));
   return {
     writes: [{ kind: 'create', path: newPath, text: newText }, ...relationshipsWrites, { kind: 'delete', path: input.copy.filePath }, ...settled],
     repointed,

@@ -50,7 +50,6 @@ import {
   ERD_LAYOUT_NOTE_PREFIX,
   isDbmlLayerName,
   isErdLayoutName,
-  isLibraryFolderName,
   isReservedLayerName,
   libraryCopyRank,
   linkKey,
@@ -90,7 +89,7 @@ import {
 import { canonicalDbml, formatWrittenDbml, renderNewSubjectAreaDbml, renderNewTableDbml } from './dbmlWriters';
 
 import { DbmlFileCompileMemo, compileDbmlFilesSeparately, compileDbmlFilesSeparatelyAsync } from './dbmlFileCompile';
-import { planDbmlLibraryWrites } from './dbmlLibraryWrites';
+import { isSchemaFolderName as isNewSchemaFolderName, planDbmlLibraryWrites } from './dbmlLibraryWrites';
 import type { DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
 import { planMoveToLibrary } from './libraryRelationships';
 import { dbmlResolverOf, renderDbmlDiagram, settleSignalsOf } from './dbmlDiagramSettle';
@@ -1863,16 +1862,12 @@ function listOf(items: readonly string[]): string {
 
 /**
  * Whether a YAML table's `schema:` can be its schema folder (and so its
- * Table qualifier): a library folder name with no `.` (a database-qualified
- * `db.schema`), no dbt Jinja (`{{ … }}`), no character Windows refuses in a
- * file name, no `'` (it would end the quoted path of a `use` line), not a
- * Windows device name (`con`, `nul`, `com1`, …) and no white space at either
- * end.
+ * Table qualifier): the planner's {@link isNewSchemaFolderName} check (no
+ * Jinja, no `'`, no character Windows refuses, not a device name, …), and
+ * no `.` (a database-qualified `db.schema`).
  */
 function isSchemaFolderName(schema: unknown): schema is string {
-  return typeof schema === 'string' && isLibraryFolderName(schema) && schema === schema.trim()
-    && !schema.includes('.') && !schema.includes('{{') && !/[{}%#<>:"'|?*\u0000-\u001f\\]/.test(schema)
-    && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(schema);
+  return typeof schema === 'string' && isNewSchemaFolderName(schema) && !schema.includes('.');
 }
 
 /**
@@ -1959,7 +1954,8 @@ function tableHomes(
   const chosen = candidates.map((c) => {
     const layer = layerOf(c);
     const own = c.model.schema;
-    const schemaStep: 1 | 2 | 3 = isSchemaFolderName(own) ? 1 : c.folder !== '' ? 2 : 3;
+    // A library folder whose name cannot be a schema folder (`O'Brien`, `con`) falls through to `public`.
+    const schemaStep: 1 | 2 | 3 = isSchemaFolderName(own) ? 1 : c.folder !== '' && isNewSchemaFolderName(c.folder) ? 2 : 3;
     const asked = schemaStep === 1 ? own as string : schemaStep === 2 ? c.folder : DBML_DEFAULT_SCHEMA;
     return { c, layer, schemaStep, asked };
   });
@@ -2251,6 +2247,25 @@ function dbmlTablesAsYaml(set: Readonly<Record<string, string>>, reader: DbmlSto
   return out;
 }
 
+/**
+ * Every YAML table file of a set by lower-case name, as the extension picks
+ * one for a name: `logical-models/` before `tables/`, the top level before
+ * the folders, the folders in `localeCompare` order.
+ */
+function yamlTablesByName(set: Readonly<Record<string, string>>): Map<string, string> {
+  const entries: Array<{ path: string; name: string; rank: [number, number, string] }> = [];
+  for (const p of Object.keys(set)) {
+    const cls = classifySemanticFile(p, { tablesDirIsLayer: false });
+    if (cls.kind !== 'table' || cls.storage !== 'yaml') continue;
+    const parts = p.split('/');
+    entries.push({ path: p, name: lower(cls.name ?? stemOf(p)), rank: [parts[0] === 'logical-models' ? 0 : 1, parts.length > 2 ? 1 : 0, parts.length > 2 ? parts[1] : ''] });
+  }
+  entries.sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1] || a.rank[2].localeCompare(b.rank[2]) || byteOrder(a.path, b.path));
+  const out = new Map<string, string>();
+  for (const e of entries) if (!out.has(e.name)) out.set(e.name, e.path);
+  return out;
+}
+
 async function displayOf(
   set: Readonly<Record<string, string>>,
   domainPath: string,
@@ -2269,12 +2284,20 @@ async function displayOf(
   // A JSON diagram finds a DBML table by name in the extension (it lists the folders), never in core's
   // loader (no listing): such a table is served to it as the YAML table the extension reads it as.
   const asYaml = domainPath.toLowerCase().endsWith('.json') ? dbmlTablesAsYaml(set, reader) : new Map<string, string>();
+  // A YAML table in a library folder that is not a layer id (`logical-models/Sales/`, `a.b/`): the
+  // extension lists every folder, core's loader probes only layer folders, and a pseudo-layer with
+  // such an id is dropped by the layers.json reader. Its first probe is served the file the
+  // extension reads by that name.
+  const yamlByName = yamlTablesByName(set);
   const read = (p: string): string | null => {
     if (Object.prototype.hasOwnProperty.call(set, p)) return set[p];
     const other = listed.get(lower(p));
     if (other !== undefined) return set[other];
-    const first = /^logical-models\/([^/]+)\.yml$/.exec(p);
-    return first ? asYaml.get(lower(first[1])) ?? null : null;
+    const first = /^(?:logical-models|tables)\/([^/]+)\.yml$/.exec(p);
+    if (!first) return null;
+    const yaml = yamlByName.get(lower(first[1]));
+    if (yaml !== undefined) return set[yaml];
+    return /^logical-models\//.test(p) ? asYaml.get(lower(first[1])) ?? null : null;
   };
   try {
     const display = await loadDisplaySubjectArea({

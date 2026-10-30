@@ -42,6 +42,20 @@ describe('native DBML storage docs', () => {
     expect(text).not.toContain('erdStudio.semanticEditor');
   });
 
+  it('architecture.md says the Table Library opens a .dbml table with vscode.open, as ModelLibraryTreeProvider does', () => {
+    const text = flat(read('docs/dev/architecture.md'));
+    expect(read('src/providers/ModelLibraryTreeProvider.ts')).not.toMatch(/'vscode\.openWith'/);
+    expect(text).toContain('The Table Library opens `.dbml` tables with `vscode.open`');
+    expect(text).not.toContain("opens `.dbml` tables with `openWith 'default'`");
+  });
+
+  it('the format reference names the code doctor gives a stray .dbdiagram, which is not dbmlOutsideKnownFolders', () => {
+    const text = flat(read('docs/semantic-domain-json-reference.md'));
+    expect(text).not.toContain('any other `.dbml`, any `.dbdiagram`');
+    expect(text).toContain('anywhere else `doctor` warns (`unexpectedFileInDbmlFolder`)');
+    expect(text).toContain('(`doctor`\'s one error, `legacyDbmlTree`)');
+  });
+
   it('the 2.0.0 notes mention the new telemetry keys, with no name or path sent', () => {
     const changelog = read('CHANGELOG.md');
     const start = changelog.search(/^## (Unreleased — 2\.0\.0|2\.0\.0 — )/m);

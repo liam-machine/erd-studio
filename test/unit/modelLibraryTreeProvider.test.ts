@@ -437,6 +437,23 @@ describe('TableLibraryTreeProvider', () => {
       expect(byPath(`${SALES}/dim_b.dbml`).contextValue).toBe('logicalModelDuplicate');
     });
 
+    it('a duplicate\'s tooltip names the name Give Duplicate Table Its Own Name offers: its layer for a DBML copy, its folder for a YAML one', () => {
+      const SILVER = '/project/.erd-studio/silver/tables/crm';
+      const SALES = '/project/.erd-studio/gold/tables/sales';
+      const p = build([
+        { name: 'dim_c', folder: 'crm', layer: 'silver', storage: 'dbml', filePath: `${SILVER}/dim_c.dbml` },
+        { name: 'dim_c', folder: 'sales', layer: 'gold', storage: 'dbml', filePath: `${SALES}/dim_c.dbml`, shadowedBy: `${SILVER}/dim_c.dbml` },
+        entry('dim_y'),
+        entry('dim_y', 'silver', `${DIR}/dim_y.yml`),
+      ]);
+      const items = folders(p.getChildren() as TableLibraryNode[]).flatMap((f) => f.children).map((c) => p.getTreeItem(c));
+      const byPath = (file: string) => items.find((i) => (i.resourceUri as { fsPath: string }).fsPath === file)!;
+      const dbmlTip = String(byPath(`${SALES}/dim_c.dbml`).tooltip);
+      expect(dbmlTip).toContain('to make this copy "gold_dim_c"');
+      expect(dbmlTip).not.toContain('sales_dim_c');
+      expect(String(byPath(`${DIR}/silver/dim_y.yml`).tooltip)).toContain('to make this copy "silver_dim_y"');
+    });
+
     it('treats a duplicate within tables/ as an ordinary duplicate, with the fix offered (#182)', () => {
       const V6 = '/project/.erd-studio/tables';
       const p = build([

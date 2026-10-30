@@ -650,6 +650,43 @@ describe('the lifecycle planners (src/commands/dbmlLifecycle.ts)', () => {
     expect(after.getTable('fct_order')?.relationships?.filter((r) => r.toModel === 'dim_customer')).toHaveLength(1);
   });
 
+  it('Give Duplicate Its Own Name: a diagram drawing the winner and a partner of the copy drops the import only the copy\'s Refs justified', () => {
+    seedDuplicate();
+    // gold's dim_customer (the winner) beside silver's fct_visit, whose Ref is to the copy.
+    const x = erd('gold', 'diagrams', 'x.dbml');
+    fs.writeFileSync(x, [
+      "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'",
+      "use { table silver.fct_visit } from '../../silver/tables/silver/fct_visit.dbml'",
+      "use * from '../relationships/customers.dbml'",
+      "use * from '../../silver/relationships/silver.dbml'",
+      '',
+      'Project x {',
+      "  erd_schema_version: '7'",
+      '}',
+      '',
+    ].join('\n'));
+    const { tableLibraryService, subjectAreaService } = services();
+    // Under the shared name, the rule wants both files.
+    expect(tableLibraryService.planDbmlLibraryOps({}).plan.relationshipsImportsFor(['dim_customer', 'fct_visit'], []))
+      .toEqual(['gold/relationships/customers.dbml', 'silver/relationships/silver.dbml']);
+    const entry = tableLibraryService.listTableFiles().find((e) => e.shadowedBy && e.name.toLowerCase() === 'dim_customer')!;
+    const planned = planDbmlDuplicateRename({
+      tableLibraryService, copy: { filePath: entry.filePath, name: 'dim_customer' }, newName: 'silver_dim_customer', alias: 'dim_customer',
+      diagrams: diagramsOf(subjectAreaService), readText,
+    });
+    const xText = textOf(byPathOf(planned.writes).get('gold/diagrams/x.dbml'));
+    expect(xText).not.toContain('silver/relationships/silver.dbml');
+    expect(xText).toMatch(/^use \* from '\.\.\/relationships\/customers\.dbml'$/m);
+    // It names no copy: it is written, not announced as repointed.
+    expect(planned.repointed.map(rel)).not.toContain('gold/diagrams/x.dbml');
+    apply(planned.writes);
+    // After the edit, its imports are exactly what the rule wants.
+    const after = new TableLibraryService(tmp, '.erd-studio');
+    expect(after.planDbmlLibraryOps({}).plan.relationshipsImportsFor(['dim_customer', 'fct_visit'], ['gold/relationships/customers.dbml']))
+      .toEqual(['gold/relationships/customers.dbml']);
+    expectCompilesInEveryParser(dbmlFiles(), [...ALL_DIAGRAMS, 'silver/diagrams/third.dbml', 'gold/diagrams/x.dbml']);
+  });
+
   it('Give Duplicate Its Own Name: an unqualified copy whose name is also a schema re-spells only the ends whose table part is the copy', () => {
     copyNative();
     fs.writeFileSync(erd('gold', 'tables', 'gold', 'sales.dbml'), 'Table gold.sales {\n  sale_key INT [pk]\n}\n');

@@ -424,6 +424,36 @@ describe('export --all', () => {
   });
 });
 
+describe('a 1.9 pre-release tree: --all and inventory name it, not the --semantic-dir setting', () => {
+  const OLD = path.join(ROOT, 'test/fixtures/dbml-1.9-tree');
+
+  it('export --all is exit 3 legacy-dbml-tree with doctor\'s message', async () => {
+    const { code, out } = await run(['export', '--project', OLD, '--all', '--format', 'dbml', '--json']);
+    expect(code).toBe(3);
+    const error = (JSON.parse(out) as { error: { code: string; message: string } }).error;
+    expect(error.code).toBe('legacy-dbml-tree');
+    expect(error.message).toMatch(/^This project's DBML files were written by an ERD Studio 1\.9 pre-release/);
+    expect(error.message).not.toContain('--semantic-dir');
+  });
+
+  it('diff --all in a dbt project says the same', async () => {
+    const root = path.join(tmp, 'old');
+    fs.cpSync(OLD, root, { recursive: true });
+    fs.writeFileSync(path.join(root, 'dbt_project.yml'), "name: old\nversion: '1.0'\nprofile: old\n");
+    const { code, out } = await run(['diff', '--project', root, '--all', '--json']);
+    expect(code).toBe(3);
+    expect((JSON.parse(out) as { error: { code: string } }).error.code).toBe('legacy-dbml-tree');
+  });
+
+  it('inventory carries the message, and prints it', async () => {
+    const json = JSON.parse((await run(['inventory', '--project', OLD, '--summary', '--json'])).out) as { legacyDbmlTree?: string };
+    expect(json.legacyDbmlTree).toMatch(/1\.9 pre-release/);
+    expect((await run(['inventory', '--project', OLD, '--summary'])).out).toContain('ERD Studio 1.9 pre-release');
+    // A 2.0 project has no such note.
+    expect((JSON.parse((await run(['inventory', '--project', PROJECT, '--summary', '--json'])).out) as { legacyDbmlTree?: string }).legacyDbmlTree).toBeUndefined();
+  });
+});
+
 describe('export on native DBML storage (§7.1, S4)', () => {
   const NATIVE = path.join(ROOT, 'test/fixtures/dbml-native');
 

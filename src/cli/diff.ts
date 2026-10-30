@@ -22,7 +22,9 @@ import type { TableFileError, TableFileErrorKind } from '../services/logicalMode
 import { usesLibraryRelationships } from '../services/libraryRelationships';
 import { DBML_TABLE_QUOTE_HINT_CODES, canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship, subjectAreaStorageOf } from '@erd-studio/core';
 import type { ColumnPair } from '@erd-studio/core';
+import { usePathBetween } from '@erd-studio/core/dbml';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
+import { detectLegacyDbmlTree, legacyDbmlTreeMessage } from '../services/legacyDbmlTree';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
 
@@ -32,7 +34,13 @@ export type FixKind =
   | 'declare-composite-foreign-key'
   | 'resolve-phantom' | 'fix-model-yaml'
   /** A `.dbml` table file that does not read (native DBML storage, §7.1); `fix-model-yaml` stays for YAML. */
-  | 'fix-dbml-file';
+  | 'fix-dbml-file'
+  /**
+   * A relationship dbt tests whose Ref a relationships file already holds
+   * (`storedIn`), which the DBML diagram (`file`) does not draw because it
+   * does not import that file: add `useLine` to the diagram, never the Ref again.
+   */
+  | 'import-relationships-file';
 
 export interface Fix {
   severity: 'blocking' | 'advisory';
@@ -61,6 +69,10 @@ export interface Fix {
   };
   /** set-cardinality: the file the link is stored in now, when the fix moves it to `file` (YAML only: a DBML Ref is changed in place). */
   movesFrom?: string;
+  /** import-relationships-file: the relationships file that holds the Ref already, project-relative. */
+  storedIn?: string;
+  /** import-relationships-file: the exact line to add to the diagram (`use * from '…'`). */
+  useLine?: string;
   /** fix-model-yaml / fix-dbml-file: where the parser stopped (1-based). */
   line?: number;
   explain: string;
@@ -424,6 +436,21 @@ export function fixesFromPlan(
     }
     switch (r.action) {
       case 'add-relationship-to-logical': {
+        // The Ref is already in a relationships file the diagram does not
+        // import: the import is the fix. A second copy of the Ref would be
+        // a duplicate (error 5001) in every diagram importing that file.
+        if (r.storedIn !== undefined && domainFile.toLowerCase().endsWith('.dbml')) {
+          const useLine = `use * from '${usePathBetween(domainFile, r.storedIn)}'`;
+          const what = pairs ? `the composite foreign key ${describeComposite(r.fromModel, r.toModel, pairs)}` : `the link ${link}`;
+          fixes.push({
+            severity: 'blocking', kind: 'import-relationships-file', model: r.fromModel, column: r.fromColumn, file: domainFile,
+            relationship: { ...rel, ...(r.targetCardinality ? { cardinality: r.targetCardinality } : {}), ...(pairs ? { pairs: [...pairs] } : {}) },
+            storedIn: r.storedIn, useLine,
+            explain: `dbt tests ${what}, and ${r.storedIn} already holds it, but this diagram does not import that file — `
+              + `add the line \`${useLine}\` to ${domainFile}. Do not add the Ref again.`,
+          });
+          break;
+        }
         if (pairs) {
           const c = canonicalPairs(r.targetCardinality);
           const cardinality = r.targetCardinality === 'one-to-many' ? 'many-to-one' : (r.targetCardinality ?? 'many-to-one');
@@ -660,7 +687,8 @@ function unreadableTables(ctx: CliContext, unified: UnifiedSubjectArea): Unreada
  * `--all` over nothing must never read as a result: a wrong or omitted
  * `--semantic-dir` (the CLI cannot see VS Code settings) would otherwise
  * hand the skill a verified match — or an empty export — over zero domains.
- * So no folder is `no-semantic-dir` and no domain is `no-domains` (exit 3).
+ * So no folder is `no-semantic-dir` and no domain is `no-domains` (exit 3),
+ * or `legacy-dbml-tree` when the folder is an ERD Studio 1.9 pre-release tree.
  */
 export function listAllSubjectAreas(ctx: CliContext): SubjectAreaSummary[] {
   const semanticRoot = path.join(ctx.root, ctx.semanticDir);
@@ -672,6 +700,9 @@ export function listAllSubjectAreas(ctx: CliContext): SubjectAreaSummary[] {
   }
   const summaries = ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir);
   if (summaries.length === 0) {
+    // A 1.9 pre-release tree has no diagram 2.0 reads: say so, not "check --semantic-dir".
+    const legacy = detectLegacyDbmlTree(semanticRoot);
+    if (legacy) throw new CliEnvError('legacy-dbml-tree', legacyDbmlTreeMessage(legacy));
     throw new CliEnvError(
       'no-domains',
       `No subject area files under ${ctx.semanticDir}/ — check --semantic-dir (it must match the erdStudio.semanticDir setting).`,

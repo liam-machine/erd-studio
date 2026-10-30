@@ -1900,3 +1900,31 @@ describe('planDbmlConversion: the layer-first tree (ERD Studio 2.0)', () => {
     expect(second.creates).toEqual([]);
   });
 });
+
+describe('planDbmlConversion: a library folder whose name is not a layer id', () => {
+  it.each(['Sales', 'sales area', 'a.b'])('logical-models/%s/: its table converts, drawn the same before and after (no false self-check refusal)', async (folder) => {
+    const input = inputOf({
+      'logical-models/x.yml': yml('x', [['x_key', 'INT', true]]),
+      [`logical-models/${folder}/y.yml`]: yml('y', [['yid', 'INT', true]]),
+      'gold/d.json': diagram('d', 'gold', ['x', 'y']),
+    });
+    const plan = await planDbmlConversion(input);
+    expect(plan.refusals).toEqual([]);
+    expect(plan.creates.some((c) => /^gold\/tables\/[^/]+\/y\.dbml$/.test(c.path))).toBe(true);
+    expectCompilesEverywhere(input, plan);
+  });
+
+  it("a folder that cannot be a schema folder (a quote, a device name) gives its tables the public schema, and every file compiles", async () => {
+    const input = inputOf({
+      "logical-models/O'Brien/y.yml": yml('y', [['yid', 'INT', true]]),
+      'logical-models/con/z.yml': yml('z', [['zid', 'INT', true], 'yid'], [{ fromColumn: 'yid', toModel: 'y', toColumn: 'yid', cardinality: 'many-to-one' }]),
+      'gold/d.json': diagram('d', 'gold', ['y', 'z']),
+    });
+    const plan = await planDbmlConversion(input);
+    expect(plan.refusals).toEqual([]);
+    expect(created(plan, 'gold/tables/public/y.dbml')).toMatch(/^Table public\.y \{/);
+    expect(created(plan, 'gold/tables/public/z.dbml')).toMatch(/^Table public\.z \{/);
+    expect(plan.creates.some((c) => /O'Brien|\/con\//.test(c.path))).toBe(false);
+    expectCompilesEverywhere(input, plan);
+  });
+});

@@ -25,6 +25,7 @@ import { mergeCompositeGroups, mergeUniqueMaps, subjectAreaTableNames } from '..
 import { normaliseName } from '../services/nameUtils';
 import { catalogNodeFor } from '../services/columnTypes';
 import { inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
+import { detectLegacyDbmlTree, legacyDbmlTreeMessage } from '../services/legacyDbmlTree';
 import {
   detectConventions,
   findSnapshotNames,
@@ -123,6 +124,12 @@ export interface InventoryResult extends Envelope {
    * under `--models`. See `src/cli/conventions.ts`.
    */
   conventions: ProjectConventions;
+  /**
+   * Set when the semantic dir holds an ERD Studio 1.9 pre-release tree,
+   * which 2.0 does not read (its diagrams and tables are not listed): the
+   * message `doctor` gives for it (additive).
+   */
+  legacyDbmlTree?: string;
 }
 
 export interface InventoryOptions {
@@ -434,7 +441,14 @@ function logicalOnlyInventory(ctx: CliContext, opts: InventoryOptions): Inventor
     logicalTables: listLogicalTables(ctx, domains, opts),
     skipped: [],
     conventions: detectConventions({ models: [], packages: [], snapshots: [], relationships: [] }),
+    ...legacyTreeNote(ctx),
   };
+}
+
+/** `legacyDbmlTree`, when the semantic dir is a 1.9 pre-release tree. */
+function legacyTreeNote(ctx: CliContext): { legacyDbmlTree?: string } {
+  const tree = detectLegacyDbmlTree(path.join(ctx.root, ctx.semanticDir));
+  return tree ? { legacyDbmlTree: legacyDbmlTreeMessage(tree) } : {};
 }
 
 export function runInventory(ctx: CliContext, opts: InventoryOptions = {}): InventoryResult {
@@ -466,5 +480,6 @@ export function runInventory(ctx: CliContext, opts: InventoryOptions = {}): Inve
     logicalTables: listLogicalTables(ctx, domains, opts),
     skipped,
     conventions,
+    ...legacyTreeNote(ctx),
   };
 }

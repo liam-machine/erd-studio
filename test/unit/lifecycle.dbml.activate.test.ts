@@ -513,6 +513,19 @@ describe('in a native DBML project', () => {
     compilesClean();
   });
 
+  it('Organise moves the use line of a diagram in a folder layers.json does not list, too', async () => {
+    seedRate();
+    fs.mkdirSync(erd('archive', 'diagrams'), { recursive: true });
+    fs.writeFileSync(erd('archive', 'diagrams', 'old.dbml'), "use { table gold.dim_rate } from '../../gold/tables/gold/dim_rate.dbml'\n\nProject old {\n  erd_schema_version: '7'\n}\n");
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+      (args.includes('Move Files') ? 'Move Files' : undefined)) as never);
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+    expect(errors).not.toHaveBeenCalled();
+    expect(fs.existsSync(erd('silver', 'tables', 'gold', 'dim_rate.dbml'))).toBe(true);
+    expect(fs.readFileSync(erd('archive', 'diagrams', 'old.dbml'), 'utf-8')).toMatch(/^use \{ table gold\.dim_rate \} +from '\.\.\/\.\.\/silver\/tables\/gold\/dim_rate\.dbml'$/m);
+  });
+
   it('Organise lists a table it re-qualifies (its schema spelled as the new layer\'s folder spells it)', async () => {
     fs.mkdirSync(erd('gold', 'tables', 'Calendar'), { recursive: true });
     fs.writeFileSync(erd('gold', 'tables', 'Calendar', 'dim_holiday.dbml'), 'Table Calendar.dim_holiday {\n  holiday_key INT [pk]\n}\n');

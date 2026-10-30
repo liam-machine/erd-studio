@@ -557,6 +557,91 @@ describe('cascades across diagrams (§2.6, §2.8)', () => {
   });
 });
 
+describe('cascades reach a diagram whose layer folder layers.json does not list', () => {
+  /** A diagram in `layer` drawing gold's dim_region and fct_order, with the relationships file that joins them. */
+  function strayDiagram(layer: string): string {
+    const rel = `${layer}/diagrams/old.dbml`;
+    fs.mkdirSync(path.dirname(at(rel)), { recursive: true });
+    fs.writeFileSync(at(rel), [
+      "use { table gold.dim_region } from '../../gold/tables/gold/dim_region.dbml'",
+      "use { table gold.fct_order } from '../../gold/tables/gold/fct_order.dbml'",
+      "use * from '../../gold/relationships/gold.dbml'",
+      '',
+      'Project old {',
+      "  erd_schema_version: '7'",
+      '}',
+      '',
+    ].join('\n'));
+    return rel;
+  }
+  /** layers.json with a merge conflict: LayerService falls back to the default layers (silver, gold). */
+  function conflictLayers(): void {
+    const text = fs.readFileSync(at('layers.json'), 'utf-8');
+    fs.writeFileSync(at('layers.json'), text.replace('"layers": [', '"layers": [\n<<<<<<< HEAD\n    { "id": "bronze", "label": "Bronze", "abbreviation": "BRZ", "color": "#cd7f32", "creatable": true, "order": 0 },\n=======\n>>>>>>> other'));
+  }
+
+  it('a canvas rename rewrites a diagram in a folder layers.json does not list', async () => {
+    const stray = strayDiagram('archive');
+    const r = await run({ type: 'renameModel', payload: { oldName: 'dim_region', newName: 'dim_area' } });
+    expectWrote(r, [stray, 'gold/diagrams/sales.dbml', 'gold/relationships/customers.dbml', 'gold/relationships/gold.dbml', 'gold/tables/gold/dim_area.dbml', 'gold/tables/gold/dim_region.dbml']);
+    expect(r.after[stray]).toMatch(useLine('gold.dim_area', '../../gold/tables/gold/dim_area.dbml'));
+    expect(r.after[stray]).not.toContain('dim_region');
+  });
+
+  it('a canvas rename rewrites a diagram in a layer that only a conflicted layers.json listed', async () => {
+    const stray = strayDiagram('bronze');
+    conflictLayers();
+    const r = await run({ type: 'renameModel', payload: { oldName: 'dim_region', newName: 'dim_area' } });
+    expectWrote(r, [stray, 'gold/diagrams/sales.dbml', 'gold/relationships/customers.dbml', 'gold/relationships/gold.dbml', 'gold/tables/gold/dim_area.dbml', 'gold/tables/gold/dim_region.dbml']);
+    expect(r.after[stray]).toMatch(useLine('gold.dim_area', '../../gold/tables/gold/dim_area.dbml'));
+  });
+
+  it('Delete Table (File) drops the use line from such diagrams too, and counts them', async () => {
+    const archive = strayDiagram('archive');
+    const bronze = strayDiagram('bronze');
+    conflictLayers();
+    const { provider } = buildProvider(new OwnWriteTracker());
+    expect(provider.describeDbmlDeleteCascade(['dim_region'], false)).toMatch(/its place in 3 diagrams\.$/);
+    const before = snapshot();
+    expect(await provider.deleteTablesWithCascade(['dim_region'])).toEqual({ ok: true, unrestored: [] });
+    const after = snapshot();
+    for (const diagram of [archive, bronze]) expect(after[diagram]).not.toContain('dim_region');
+    const diagnostics = new Set(diagnosticsOf(before));
+    expect(diagnosticsOf(after).filter((d) => !diagnostics.has(d))).toEqual([]);
+  });
+});
+
+describe('a JSON diagram in a mixed project (flat YAML library plus DBML tables)', () => {
+  beforeEach(() => {
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    const write = (rel: string, text: string): void => {
+      fs.mkdirSync(path.dirname(at(rel)), { recursive: true });
+      fs.writeFileSync(at(rel), text);
+    };
+    write('layers.json', `${JSON.stringify({ schemaVersion: 1, layers: [
+      { id: 'bronze', label: 'Bronze', abbreviation: 'BRZ', color: '#cd7f32', creatable: true, order: 0 },
+      { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', creatable: true, order: 1 },
+      { id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', creatable: true, order: 2 },
+    ] }, null, 2)}\n`);
+    write('logical-models/dim_a.yml', 'name: dim_a\ncolumns:\n  - name: a_key\n    dataType: INT\n    isPrimaryKey: true\n');
+    write('gold/tables/gold/fct_x.dbml', 'Table gold.fct_x {\n  x_key INT [pk]\n}\n');
+    write('gold/s.json', `${JSON.stringify({
+      schemaVersion: 5, domain: 's', layer: 'gold', description: 's',
+      logical: { models: ['dim_a', 'fct_x'], relationships: [] },
+      viewConfig: { positions: { dim_a: { x: 0, y: 0 }, fct_x: { x: 300, y: 0 } } },
+    }, null, 2)}\n`);
+  });
+
+  it('Add Table puts the new DBML table in the diagram\'s layer, not the first configured one', async () => {
+    expect(library().projectStorage()).toBe('mixed');
+    const r = await run({ type: 'addModel', payload: { name: 'dim_new', description: '', columns: [{ name: 'new_key', dataType: 'INT', description: '', isPrimaryKey: true }] } }, 'gold/s.json');
+    expect(r.errors).toEqual([]);
+    expect(r.written).toEqual(['gold/s.json', 'gold/tables/gold/dim_new.dbml']);
+    expect(r.after['gold/tables/gold/dim_new.dbml']).toMatch(/^Table gold\.dim_new /m);
+    expect(r.after['logical-models/dim_a.yml']).toBe(r.before['logical-models/dim_a.yml']);
+  });
+});
+
 describe('positions and sticky notes', () => {
   it('updatePositions: erd_layout only', async () => {
     const r = await run({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
