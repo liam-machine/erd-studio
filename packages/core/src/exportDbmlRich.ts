@@ -7,9 +7,9 @@
  * DBML import reads it back field for field, and dbdiagram / dbdocs show the
  * properties as real fields and filters. Custom properties need a DBML 9.1
  * or later parser (`@dbml/parse` 9.1+, what dbdiagram.io runs); older
- * parsers reject the whole file. The canvas positions travel beside the
- * `.dbml` in dbdiagram's own `<name>.dbdiagram` file (`dbdiagramLayout.ts`),
- * which `dbdiagram push` reads.
+ * parsers reject the whole file. The canvas positions travel in the file
+ * itself, in the Project's `erd_layout` (the format a stored diagram uses,
+ * `erdLayout.ts`), which other DBML tools keep as a plain setting.
  *
  * The output is a contract: the same `DisplaySubjectArea` always gives the
  * same text, it opens with {@link DBML_RICH_EXPORT_HEADER}, and every mapping
@@ -20,8 +20,8 @@
  *
  * | ERD Studio                          | DBML                                                                    |
  * |-------------------------------------|-------------------------------------------------------------------------|
- * | (header)                            | `// erd-studio dbml-export v2 (DBML 9.1+)`, then `//` lines naming the layout file, what `?` on a Ref means and what is left out |
- * | subject area name, description      | `Project <name> { Note: '<description>' }` (`Project {` when it has no name; no Project when it has neither) |
+ * | (header)                            | `// erd-studio dbml-export v2 (DBML 9.1+)`, then `//` lines saying what `?` on a Ref means and what is left out |
+ * | subject area name, description      | `Project <name> { Note: '<description>' }` (`Project {` when it has no name; no Project when it has neither and nothing is placed) |
  * | layer (+ layer colour, label)       | `TableGroup <layer> [color: <hex>, note: 'Layer: <label>'] { every exported table }` — the colour only when `layerConfig.color` is `#rgb` / `#rrggbb` |
  * | table (+ schema)                    | `Table [schema.]name` — the model name, never DBML's `as` (DBML aliases are unique; ours are not) |
  * | description                         | the table's `Note: '…'`                                                 |
@@ -44,8 +44,8 @@
  * | relationship role                   | the Ref's name: `Ref "ship date": …`                                    |
  * | relationship drawn backwards (`keysContradict`) | a `// This starts at …'s key (…), so it was probably drawn backwards.` line above the Ref, which stays as stored |
  * | sticky note                         | `Note sticky_<n> [color: <swatch hex>, linked_table: '<model>'] { '<text>' }` |
+ * | canvas positions, sticky-note boxes | the Project's last key, `erd_layout: '''…'''`: a line per placed table (`<name> <x> <y>`) and per placed note (`note/sticky_<n> <x> <y>[ <w> <h>]`) |
  * | table without columns               | one placeholder column `_erd_no_columns unknown [erd_placeholder: 'true', note: …]` (DBML needs one), which import drops |
- * | canvas positions                    | the `.dbdiagram` file beside this one                                   |
  *
  * Strings: custom-property values are always quoted strings (`scd_type:
  * '2'`): unquoted typed values exist only from DBML 11.0. A one-line value is
@@ -58,8 +58,7 @@
  * reads every name back exactly, so nothing is renamed. Comments say why
  * anything is left out: a relationship whose ends are not in the diagram, a
  * column pointing at itself, a second copy of a link (DBML refuses two Refs
- * between the same columns), meta that cannot be written as JSON, sticky-note
- * positions and sizes (the `.dbdiagram` shape for them is unknown), and the
+ * between the same columns), meta that cannot be written as JSON, and the
  * canvas's layout options.
  */
 
@@ -68,6 +67,7 @@ import { backwardsNoteOf, describeEnds, oneLine, prepareSubjectArea, text } from
 import type { ExportColumn, ExportLink, ExportMeta, ExportTable } from './exportShared.js';
 import {
   DBML_DEFAULT_SCHEMA,
+  DBML_DIAGRAM_PROPERTIES,
   DBML_RICH_COLUMN_PROPERTIES,
   DBML_RICH_META_JSON_PROPERTY,
   DBML_RICH_META_PREFIX,
@@ -80,21 +80,15 @@ import {
   DBML_STORAGE_PLACEHOLDER_NOTE,
   rationaleProperty,
 } from './dbmlRichProperties.js';
-import { dbdiagramLayoutFileName } from './dbdiagramLayout.js';
+import { erdLayoutOf, renderErdLayoutValue } from './erdLayout.js';
+import type { Annotation, NodePosition } from './types/semantic.js';
 import { dbmlColumnType as columnType, dbmlName as ident, dbmlNoteText as noteText, dbmlString as str } from './dbmlText.js';
 
 /** The first line of every rich DBML export. */
 export const DBML_RICH_EXPORT_HEADER = '// erd-studio dbml-export v2 (DBML 9.1+)';
 
-/** Options for {@link toDbmlRich}. */
-export interface DbmlRichOptions {
-  /**
-   * The layout file the header names (it sits beside the `.dbml`). Defaults
-   * to {@link dbdiagramLayoutFileName}`(area)`; pass the name actually
-   * written when the user saved under another name, or `''` to name none.
-   */
-  layoutFileName?: string;
-}
+/** Options for {@link toDbmlRich}: none yet (the positions travel in the file, so there is no layout file to name). */
+export type DbmlRichOptions = Record<string, never>;
 
 /** A meta key DBML can carry as `meta_<key>`: DBML lower-cases property names, so only lower-case ones read back exactly. */
 const META_KEY = /^[a-z_][a-z0-9_]*$/;
@@ -294,6 +288,40 @@ function commentLines(label: string, value: string): string[] {
   return [`// ${label}${lines[0]}`, ...lines.slice(1).map((l) => `//     ${l}`)];
 }
 
+/** The canvas position of `name`: its own entry, else one spelled in another case. */
+function positionOf(positions: Record<string, unknown>, name: string): NodePosition | undefined {
+  const own = Object.prototype.hasOwnProperty.call(positions, name) ? positions[name] : undefined;
+  const entry = own ?? Object.entries(positions).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+  if (!entry || typeof entry !== 'object') return undefined;
+  const { x, y } = entry as Record<string, unknown>;
+  return typeof x === 'number' && typeof y === 'number' ? { x, y } : undefined;
+}
+
+/**
+ * The `erd_layout` value of the export (decoded, before DBML escaping), or
+ * undefined when nothing is placed: the exported tables' positions under
+ * their model names, and each sticky note's box under the name the export
+ * gives its Note (`note/sticky_<n>`). Non-finite numbers are left out.
+ */
+function layoutValue(area: Record<string, unknown>, prepared: ReturnType<typeof prepareSubjectArea>): string | undefined {
+  const viewConfig = area.viewConfig && typeof area.viewConfig === 'object' ? (area.viewConfig as Record<string, unknown>) : {};
+  const stored = viewConfig.positions && typeof viewConfig.positions === 'object' && !Array.isArray(viewConfig.positions)
+    ? (viewConfig.positions as Record<string, unknown>)
+    : {};
+  const positions: Record<string, NodePosition> = {};
+  for (const item of prepared.models) {
+    if (item.kind !== 'model') continue;
+    const position = positionOf(stored, item.model.name);
+    // An own property, so a table called `__proto__` is placed like any other.
+    if (position) Object.defineProperty(positions, item.model.name, { value: position, enumerable: true, writable: true, configurable: true });
+  }
+  const notes: Annotation[] = [];
+  prepared.stickies.forEach((sticky, i) => {
+    if (sticky.box) notes.push({ id: `${DBML_RICH_STICKY_PREFIX}${i + 1}`, text: '', ...sticky.box });
+  });
+  return renderErdLayoutValue(erdLayoutOf(positions, notes), { eol: '\n', indent: '  ' });
+}
+
 /** The layer's TableGroup colour: `layerConfig.color` when it is a hex DBML accepts. */
 function layerColour(area: Record<string, unknown>): string | undefined {
   const config = area.layerConfig && typeof area.layerConfig === 'object' ? (area.layerConfig as Record<string, unknown>) : {};
@@ -311,24 +339,24 @@ function layerLabel(area: Record<string, unknown>, layer: string): string {
  * never throws on a valid `DisplaySubjectArea`, however minimal, nor on one
  * from an older core.
  */
-export function toDbmlRich(area: DisplaySubjectArea, options: DbmlRichOptions = {}): string {
+export function toDbmlRich(area: DisplaySubjectArea, _options: DbmlRichOptions = {}): string {
   const prepared = prepareSubjectArea(area);
   const input = (area && typeof area === 'object' ? area : {}) as unknown as Record<string, unknown>;
-  const layoutFile = oneLine(typeof options?.layoutFileName === 'string' ? options.layoutFileName : dbdiagramLayoutFileName(area ?? ({} as DisplaySubjectArea)));
 
-  const out: string[] = [DBML_RICH_EXPORT_HEADER];
-  if (layoutFile) out.push(`// Table positions: ${layoutFile}, next to this file (\`dbdiagram push\` reads it).`);
-  out.push(
+  const out: string[] = [
+    DBML_RICH_EXPORT_HEADER,
     '// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.',
-    '// Not exported: sticky-note positions and sizes, the canvas layout options.',
-  );
+    '// Not exported: the canvas layout options.',
+  ];
 
-  // Project.
+  // Project, with the positions last (`erd_layout`).
   const name = prepared.name.trim() ? prepared.name : '';
   const description = noteText(prepared.description);
-  if (name || description) {
+  const layout = layoutValue(input, prepared);
+  if (name || description || layout !== undefined) {
     out.push('', name ? `Project ${ident(name)} {` : 'Project {');
     if (description) out.push(`  Note: ${str(description)}`);
+    if (layout !== undefined) out.push(`  ${DBML_DIAGRAM_PROPERTIES.layout}: ${str(layout)}`);
     out.push('}');
   }
 

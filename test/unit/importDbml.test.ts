@@ -4,8 +4,9 @@
  * a real temp project (real LayerService, SubjectAreaService and
  * TableLibraryService): the file → layer → name → dry run → write → open
  * steps, ERD Studio's own rich export (generated with `toDbmlRich` from the
- * fixture project) and DBML from other tools, the dbdiagram layout file
- * present, absent, partial and unreadable, every cancel, a file that is not
+ * fixture project) and DBML from other tools, the file's own `erd_layout`
+ * present, absent, partial and with bad lines (a `.dbdiagram` beside the file
+ * is ignored), every cancel, a file that is not
  * DBML, a name taken, the unsaved-file and refusal stops, write failures with
  * full rollback, v5 vs v6 naming projects and library vs subject-area
  * relationship storage, and its telemetry.
@@ -17,7 +18,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 
-import { serializeDbdiagramLayout, toDbmlRich } from '@erd-studio/core';
+import { toDbmlRich } from '@erd-studio/core';
 
 import { createMockTextDocument, _resetMockWorkspace } from '../__mocks__/vscode';
 import {
@@ -30,7 +31,6 @@ import {
   OPEN_IT_BUTTON,
   SHOW_FILE_BUTTON,
   TRY_AGAIN_BUTTON,
-  dbdiagramLayoutPathFor,
   describeInvalidDbml,
   importDbml,
   type ImportDbmlDeps,
@@ -63,24 +63,12 @@ const SHOP_DBML = [
   '',
 ].join('\n');
 
-/** dbdiagram's layout for SHOP_DBML: both tables placed. */
-const SHOP_LAYOUT = JSON.stringify({
-  version: '3.0.0',
-  gridEnabling: false,
-  currentViewName: null,
-  defaultView: {
-    detailLevel: 'All',
-    relationshipMode: 'All',
-    tablePositions: [
-      { name: 'customers', schemaName: 'public', x: 10, y: 20 },
-      { name: 'orders', schemaName: 'public', x: 300.5, y: 40 },
-    ],
-    tableGroupCollapseStates: [],
-    stickyNoteLayouts: [],
-    referencePaths: [],
-  },
-  views: {},
-});
+/** SHOP_DBML with a Project whose `erd_layout` holds these lines (the rich export's shape). */
+const shopWithLayout = (...lines: string[]): string =>
+  `${SHOP_DBML}\nProject shop {\n  erd_layout: '''\n${lines.map((l) => `    ${l}\n`).join('')}  '''\n}\n`;
+
+/** SHOP_DBML with both tables placed. */
+const SHOP_PLACED = shopWithLayout('customers 10 20', 'orders 300.5 40');
 
 type Pickable = vscode.QuickPickItem & { id?: string };
 
@@ -127,7 +115,6 @@ function fakeUi(answers: Answers): FakeUi {
       if (answers.unreadable?.includes(filePath) && (answers.failReads === undefined || answers.failReads-- > 0)) throw Object.assign(new Error(`EACCES: open '${filePath}'`), { code: 'EACCES' });
       return fs.readFileSync(filePath, 'utf-8');
     },
-    exists: async (filePath) => fs.existsSync(filePath),
     showQuickPick: async <T extends vscode.QuickPickItem>(items: readonly T[], options: vscode.QuickPickOptions) => {
       ui.picks.push({ items: [...items] as Pickable[], options });
       return (items as readonly Pickable[]).find((i) => i.id === answers.layer) as T | undefined;
@@ -204,11 +191,10 @@ function deps(ui: ImportDbmlUi, overrides: Partial<ImportDbmlDeps> = {}): Import
   };
 }
 
-/** Put a DBML file (and optionally its layout) in the inbox folder; returns its path. */
-function dbmlFile(name: string, text: string, layout?: string): string {
+/** Put a DBML file in the inbox folder; returns its path. */
+function dbmlFile(name: string, text: string): string {
   const file = path.join(inbox, name);
   fs.writeFileSync(file, text);
-  if (layout !== undefined) fs.writeFileSync(dbdiagramLayoutPathFor(file), layout);
   return file;
 }
 
@@ -270,7 +256,7 @@ describe('Import DBML — a file from another tool', () => {
     expect(ui.confirms[0].message).toBe('Import 2 tables into a new diagram "shop" in the Gold layer.');
     expect(ui.confirms[0].button).toBe(IMPORT_BUTTON);
     expect(ui.confirms[0].detail).toContain('• New: customers, orders.');
-    expect(ui.confirms[0].detail).toContain('No layout file');
+    expect(ui.confirms[0].detail).toContain('No erd_layout in the file');
 
     expect(lms.getTable('customers')?.columns?.map((c) => c.name)).toEqual(['id', 'name']);
     expect(lms.getTable('customers')?.columns?.[0].isPrimaryKey).toBe(true);
@@ -360,15 +346,15 @@ describe('Import DBML — ERD Studio\'s own rich export', () => {
   it('round-trips the showcase subject area: every table, its relationships and its layout', async () => {
     makeProject('v5');
     const display = showcaseDisplay();
-    const file = dbmlFile('showcase.dbml', toDbmlRich(display), serializeDbdiagramLayout(display));
+    const file = dbmlFile('showcase.dbml', toDbmlRich(display));
     const ui = fakeUi({ file, layer: 'silver', names: ['showcase-copy'] });
 
     const result = await importDbml(deps(ui));
 
     expect(result).toBeDefined();
-    // The layout next to it was read and used.
-    expect(ui.reads).toEqual([file, path.join(inbox, 'showcase.dbdiagram')]);
-    expect(result!.layoutPath).toBe(path.join(inbox, 'showcase.dbdiagram'));
+    // One file: the positions are in its own Project.
+    expect(ui.reads).toEqual([file]);
+    expect(result).not.toHaveProperty('layoutPath');
     // The file's TableGroup names the layer: offered first.
     expect(ui.picks[0].items[0]).toMatchObject({ id: 'silver', description: 'suggested by the file' });
     const names = display.models.map((m) => m.name);
@@ -378,7 +364,9 @@ describe('Import DBML — ERD Studio\'s own rich export', () => {
     // Every position the showcase has comes back, at the same place.
     const positions = readJson(path.join(FIXTURE_ROOT, '.erd-studio', 'silver', 'showcase.json')).viewConfig.positions;
     expect(doc.viewConfig.positions).toEqual(positions);
-    expect(ui.confirms[0].detail).toContain('Layout: every table placed from showcase.dbdiagram.');
+    expect(ui.confirms[0].detail).toContain("Layout: every table placed from the file's erd_layout.");
+    // erd_layout is read, not left out as a project setting.
+    expect(ui.confirms[0].detail).not.toContain('erd_layout (');
     // A new library keeps relationships in the tables' files.
     const libraryLinks = names.flatMap((n) => lms.getTable(n)?.relationships ?? []);
     expect(libraryLinks.length).toBe(result!.plan.report.relationships);
@@ -390,7 +378,6 @@ describe('Import DBML — ERD Studio\'s own rich export', () => {
     makeProject('v5');
     const file = path.join(inbox, 'sales.dbml');
     fs.copyFileSync(path.join(DBML_FIXTURES, 'erd-studio', 'sales.dbml'), file);
-    fs.copyFileSync(path.join(DBML_FIXTURES, 'erd-studio', 'sales.dbdiagram'), path.join(inbox, 'sales.dbdiagram'));
     const ui = fakeUi({ file, layer: 'gold' });
 
     const result = await importDbml(deps(ui));
@@ -398,27 +385,25 @@ describe('Import DBML — ERD Studio\'s own rich export', () => {
     expect(result).toBeDefined();
     expect(ui.inputs[0].value).toBe('sales');
     expect(lms.getTable('fct_order')).toMatchObject({ grain: 'One row per order line', alias: 'orders' });
-    expect(Object.keys(readJson(result!.domainPath).viewConfig.positions ?? {}).length).toBeGreaterThan(0);
+    expect(readJson(result!.domainPath).viewConfig.positions).toMatchObject({ fct_order: { x: 400, y: 120 }, dim_passport: { x: -320, y: 40.5 } });
     expect(features()).toContain('importDbmlLayout');
   });
 
   it('a layout that places only some tables: places those, and says the rest are placed when it opens', async () => {
     makeProject('v5');
-    const layout = JSON.parse(SHOP_LAYOUT);
-    layout.defaultView.tablePositions = layout.defaultView.tablePositions.slice(0, 1);
-    const file = dbmlFile('shop.dbml', SHOP_DBML, JSON.stringify(layout));
+    const file = dbmlFile('shop.dbml', shopWithLayout('customers 10 20'));
     const ui = fakeUi({ file, layer: 'silver' });
 
     const result = await importDbml(deps(ui));
 
     expect(readJson(result!.domainPath).viewConfig.positions).toEqual({ customers: { x: 10, y: 20 } });
-    expect(ui.confirms[0].detail).toContain('Layout: 1 of 2 tables placed from shop.dbdiagram; the rest are placed when it opens.');
+    expect(ui.confirms[0].detail).toContain("Layout: 1 of 2 tables placed from the file's erd_layout; the rest are placed when it opens.");
     expect(features()).toEqual(['importDbml', 'importDbmlLayout']);
   });
 
   it('a full layout: places every table', async () => {
     makeProject('v5');
-    const file = dbmlFile('shop.dbml', SHOP_DBML, SHOP_LAYOUT);
+    const file = dbmlFile('shop.dbml', SHOP_PLACED);
     const ui = fakeUi({ file, layer: 'silver' });
 
     const result = await importDbml(deps(ui));
@@ -426,31 +411,36 @@ describe('Import DBML — ERD Studio\'s own rich export', () => {
     expect(readJson(result!.domainPath).viewConfig.positions).toEqual({ customers: { x: 10, y: 20 }, orders: { x: 300.5, y: 40 } });
   });
 
-  it('a layout file that cannot be read does not stop the import: the canvas lays it out', async () => {
+  it('erd_layout lines it cannot read do not stop the import: says so in the dry run, and places the rest', async () => {
     makeProject('v5');
-    const file = dbmlFile('shop.dbml', SHOP_DBML, SHOP_LAYOUT);
-    const ui = fakeUi({ file, layer: 'silver', unreadable: [path.join(inbox, 'shop.dbdiagram')] });
-
-    const result = await importDbml(deps(ui));
-
-    expect(result).toBeDefined();
-    expect(result!.layoutPath).toBeUndefined();
-    expect(readJson(result!.domainPath).viewConfig).toEqual({});
-    expect(ui.confirms[0].detail).toContain('shop.dbdiagram: The layout file could not be read.');
-    expect(features()).toEqual(['importDbml']);
-  });
-
-  it('a layout file that is not JSON: says so in the dry run and imports without positions', async () => {
-    makeProject('v5');
-    const file = dbmlFile('shop.dbml', SHOP_DBML, 'not json');
+    const file = dbmlFile('shop.dbml', shopWithLayout('customers 10 20', 'orders here'));
     const ui = fakeUi({ file, layer: 'silver' });
 
     const result = await importDbml(deps(ui));
 
-    expect(readJson(result!.domainPath).viewConfig).toEqual({});
-    expect(ui.confirms[0].detail).toContain('shop.dbdiagram: The layout file is not JSON.');
-    // Nothing came from it, so the import did not use a layout.
-    expect(result!.layoutPath).toBeUndefined();
+    expect(readJson(result!.domainPath).viewConfig.positions).toEqual({ customers: { x: 10, y: 20 } });
+    expect(ui.confirms[0].detail).toMatch(/\n• Line \d+ of the file is not <name> <x> <y> in erd_layout; that table is placed when the diagram opens\.\n/);
+    // The file had an erd_layout, so the import counts it.
+    expect(features()).toEqual(['importDbml', 'importDbmlLayout']);
+  });
+
+  it('a sibling .dbdiagram is ignored: only the file itself is read', async () => {
+    makeProject('v5');
+    // A temp copy of the pulled file, with a layout file beside it as `dbdiagram pull` writes one.
+    const file = path.join(inbox, 'silver.dbml');
+    fs.copyFileSync(path.join(DBML_FIXTURES, 'dbdiagram-pull', 'silver.dbml'), file);
+    fs.writeFileSync(path.join(inbox, 'silver.dbdiagram'), JSON.stringify({
+      version: '3.0.0',
+      defaultView: { tablePositions: [{ name: 'dim_task', schemaName: 'silver', x: 1, y: 2 }], stickyNoteLayouts: [] },
+    }));
+    const ui = fakeUi({ file, layer: 'silver' });
+
+    const result = await importDbml(deps(ui));
+
+    expect(result).toBeDefined();
+    expect(ui.reads).toEqual([file]);
+    expect(readJson(result!.domainPath).viewConfig.positions).toBeUndefined();
+    expect(ui.confirms[0].detail).toContain('No erd_layout in the file');
     expect(features()).toEqual(['importDbml']);
   });
 });
@@ -930,12 +920,6 @@ describe('Import DBML — no layers', () => {
 });
 
 describe('Import DBML — helpers', () => {
-  it('the layout file is <name>.dbdiagram next to the DBML', () => {
-    expect(dbdiagramLayoutPathFor(path.join('/x', 'silver.dbml'))).toBe(path.join('/x', 'silver.dbdiagram'));
-    expect(dbdiagramLayoutPathFor(path.join('/x', 'Silver.DBML'))).toBe(path.join('/x', 'Silver.dbdiagram'));
-    expect(dbdiagramLayoutPathFor(path.join('/x', 'model.txt'))).toBe(path.join('/x', 'model.txt.dbdiagram'));
-  });
-
   it('names three problems by line and counts the rest', () => {
     const d = (line: number, message: string) => ({ line, column: 1, message });
     expect(describeInvalidDbml('a.dbml', [d(2, 'Expected }'), d(4, 'Unknown column.'), d(9, 'x'), d(10, 'y'), d(11, 'z')])).toBe(

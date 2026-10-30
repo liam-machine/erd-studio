@@ -2,7 +2,7 @@
  * The Import DBML planner (src/services/dbmlImport.ts): the mapping row by
  * row, foreign DBML (dbdiagram's syntax: inline and composite refs,
  * partials, enums, optional refs, odd and schema-qualified names, notes,
- * groups, indexes, Records), a real `dbdiagram pull`, collisions with an
+ * groups, indexes, Records), the file's own `erd_layout`, collisions with an
  * existing Table Library, library vs subject-area relationship storage, v5
  * vs v6 naming and folder-grouped libraries.
  */
@@ -13,7 +13,7 @@ import * as path from 'path';
 import * as v10 from 'dbml-parse-v10';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { DBML_RICH_EXPORT_HEADER, detectSubjectAreaFormat, readDbdiagramLayout, validateSubjectAreaDocument } from '@erd-studio/core';
+import { DBML_RICH_EXPORT_HEADER, detectSubjectAreaFormat, validateSubjectAreaDocument } from '@erd-studio/core';
 import {
   DBML_META_KEY,
   analyseDbml,
@@ -24,11 +24,12 @@ import {
   serializeDbmlImportDocument,
   suggestDbmlLayer,
   suggestDbmlSubjectAreaName,
+  type DbmlImportLayout,
   type DbmlImportLibrary,
   type DbmlImportPlan,
   type PlanDbmlImportInput,
 } from '../../src/services/dbmlImport';
-import { readDbml, type DbmlModel, type DbmlParserModule } from '../../src/services/dbmlImportParse';
+import { readDbml, readDbmlImportLayout, type DbmlModel, type DbmlParserModule } from '../../src/services/dbmlImportParse';
 import { TableLibraryService } from '../../src/services/logicalModelService';
 import type { ColumnDef, Relationship, SemanticTable } from '../../src/types/semantic';
 
@@ -64,7 +65,7 @@ function plan(text: string, extra: Partial<PlanDbmlImportInput> = {}): DbmlImpor
   });
 }
 
-const salesLayout = () => readDbdiagramLayout(fixture('erd-studio/sales.dbdiagram'));
+const salesLayout = (): DbmlImportLayout => readDbmlImportLayout(fixture('erd-studio/sales.dbml'))!;
 const salesPlan = (extra: Partial<PlanDbmlImportInput> = {}): DbmlImportPlan =>
   plan(fixture('erd-studio/sales.dbml'), { layout: salesLayout(), fileName: 'sales.dbml', ...extra });
 
@@ -312,7 +313,7 @@ describe('an ERD Studio rich export, row by row', () => {
 
   it('a table written public.name matches refs and layout entries without a schema', () => {
     const text = 'Table public.users {\n  id int [pk]\n}\nTable posts {\n  user_id int\n}\nRef: posts.user_id > users.id\n';
-    const layout = { tables: [{ name: 'users', schemaName: 'public', x: 1, y: 2 }, { name: 'posts', schemaName: 'public', x: 3, y: 4 }], stickies: [], problems: [] };
+    const layout = { positions: { users: { x: 1, y: 2 }, posts: { x: 3, y: 4 } }, stickies: [], problems: [] };
     const p = plan(text, { layout });
     expect(p.relationships.map(ends)).toEqual(['posts.user_id -> users.id many-to-one']);
     // The parser reads `public` as DBML's default schema, which is no schema.
@@ -320,7 +321,7 @@ describe('an ERD Studio rich export, row by row', () => {
     expect(p.document.viewConfig.positions).toEqual({ users: { x: 1, y: 2 }, posts: { x: 3, y: 4 } });
   });
 
-  it('positions come from the .dbdiagram, keyed by the imported name; a table it misses gets none', () => {
+  it('positions come from the file\'s erd_layout, keyed by the imported name; a table it misses gets none', () => {
     const p = salesPlan();
     expect(p.document.viewConfig.positions).toEqual({
       fct_order: { x: 400, y: 120 },
@@ -331,18 +332,28 @@ describe('an ERD Studio rich export, row by row', () => {
       empty_stub: { x: 900, y: 500 },
     });
     expect(p.report).toMatchObject({ positioned: 6, unpositioned: 1, layoutRead: true, layoutProblems: [] });
+    // erd_layout is read, not left out as a project setting.
+    expect(p.report.dropped).toEqual([]);
+  });
+
+  it('matches a layout entry by the DBML name, then the imported name, then ignoring case', () => {
+    // `Order Items` is imported as `Order_Items`; `CUSTOMERS` is matched ignoring case.
+    const text = 'Table "Order Items" {\n  id int\n}\nTable renamed_in_file {\n  id int\n}\nTable customers {\n  id int\n}\n';
+    const layout = { positions: { 'Order Items': { x: 1, y: 2 }, Order_Items: { x: 9, y: 9 }, CUSTOMERS: { x: 5, y: 6 } }, stickies: [] };
+    const p = plan(text, { layout });
+    expect(p.document.viewConfig.positions).toEqual({ Order_Items: { x: 1, y: 2 }, customers: { x: 5, y: 6 } });
+    expect(p.report).toMatchObject({ positioned: 2, unpositioned: 1 });
+    const byImportedName = plan(text, { layout: { positions: { Order_Items: { x: 9, y: 9 } }, stickies: [] } });
+    expect(byImportedName.document.viewConfig.positions).toEqual({ Order_Items: { x: 9, y: 9 } });
   });
 
   it('a table named after an object member (constructor, toString) still gets its position', () => {
     const text = 'Table constructor {\n  id int [pk]\n}\nTable toString {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n}\n';
-    const layout = {
-      tables: [
-        { name: 'constructor', schemaName: 'public', x: 1, y: 2 },
-        { name: 'toString', schemaName: 'public', x: 3, y: 4 },
-        { name: 'orders', schemaName: 'public', x: 5, y: 6 },
-      ],
-      stickies: [],
-    };
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const [name, x, y] of [['constructor', 1, 2], ['toString', 3, 4], ['orders', 5, 6]] as const) {
+      Object.defineProperty(positions, name, { value: { x, y }, enumerable: true });
+    }
+    const layout = { positions, stickies: [] };
     const p = plan(text, { layout });
     expect(p.document.viewConfig.positions).toEqual({ constructor: { x: 1, y: 2 }, toString: { x: 3, y: 4 }, orders: { x: 5, y: 6 } });
     expect(p.report).toMatchObject({ positioned: 3, unpositioned: 0 });
@@ -357,7 +368,7 @@ describe('an ERD Studio rich export, row by row', () => {
   });
 
   it('a sticky note the layout places keeps its place and size', () => {
-    const layout = { ...salesLayout(), stickies: [{ name: 'sticky_2', x: 10, y: 20, width: 300, height: 120 }] };
+    const layout = { ...salesLayout(), stickies: [{ id: 'sticky_2', x: 10, y: 20, width: 300, height: 120 }] };
     const notes = salesPlan({ layout }).document.viewConfig.annotations!;
     expect(notes[1]).toEqual({ id: 'dbml-sticky_2', text: 'Two\nlines', x: 10, y: 20, width: 300, height: 120, color: 'yellow' });
     expect(notes[0]).toMatchObject({ x: -320, y: -260 });
@@ -817,51 +828,6 @@ describe('foreign DBML (dbdiagram syntax)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// A real dbdiagram pull
-// ---------------------------------------------------------------------------
-
-describe('the dbdiagram pull fixture', () => {
-  const pulled = (): DbmlImportPlan => plan(fixture('dbdiagram-pull/silver.dbml'), {
-    layer: 'silver',
-    layout: readDbdiagramLayout(fixture('dbdiagram-pull/silver.dbdiagram')),
-  });
-
-  it('places every table, a table without a schema matching schemaName "public"', () => {
-    const p = pulled();
-    expect(p.document.viewConfig.positions).toEqual({
-      fct_task_event: { x: 1015.04296875, y: 278 },
-      dim_task: { x: -202.669921875, y: 159 },
-      dim_project: { x: -657, y: 340 },
-      dim_customer: { x: -381, y: 659 },
-      dim_date: { x: -310, y: -101 },
-      fct_order: { x: 540.330078125, y: 557 },
-    });
-    expect(p.report).toMatchObject({ positioned: 6, unpositioned: 0, layoutProblems: [] });
-  });
-
-  it('reads its tables, fields and refs', () => {
-    const p = pulled();
-    expect(tableOf(p, 'dim_task')).toMatchObject({ schema: 'silver', modelRole: 'domain-dim', grain: 'One row per task version' });
-    expect(tableOf(p, 'fct_order').schema).toBeUndefined();
-    expect(columnOf(tableOf(p, 'dim_customer'), 'customer_name').scdType).toBe(2);
-    expect(p.relationships).toHaveLength(7);
-    expect(p.relationships.find((r) => r.fromColumn === 'parent_project_key')).toMatchObject({
-      fromModel: 'dim_project', toModel: 'dim_project', toColumn: 'project_key', cardinality: 'many-to-one',
-    });
-    expect(p.report.dropped).toEqual([]);
-    expect(analyseDbml(model(fixture('dbdiagram-pull/silver.dbml')), { layerIds: LAYERS })).toMatchObject({ suggestedName: 'showcase', suggestedLayer: 'silver' });
-  });
-
-  it('reports a layout\'s problems', () => {
-    const layout = readDbdiagramLayout('{"version":"4.0.0","defaultView":{"tablePositions":[{"name":"dim_task","schemaName":"silver","x":1,"y":2},{"x":1}]}}');
-    const p = plan(fixture('dbdiagram-pull/silver.dbml'), { layer: 'silver', layout });
-    expect(p.report.positioned).toBe(1);
-    expect(p.report.layoutProblems).toEqual(layout.problems);
-    expect(p.report.layoutProblems.length).toBeGreaterThan(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // The Table Library
 // ---------------------------------------------------------------------------
 
@@ -1103,11 +1069,11 @@ describe('saving the planned tables with TableLibraryService', () => {
 
 describe('describeDbmlImportPlan', () => {
   it('summarises an ERD Studio export', () => {
-    expect(describeDbmlImportPlan(salesPlan(), { layerLabel: 'Gold', layoutFileName: 'sales.dbdiagram' })).toBe([
+    expect(describeDbmlImportPlan(salesPlan(), { layerLabel: 'Gold' })).toBe([
       'Import 7 tables into a new diagram "imported" in the Gold layer.',
       '• New: fct_order, dim_customer, dim_passport, dim_date and 3 more.',
       '• 7 relationships.',
-      '• Layout: 6 of 7 tables placed from sales.dbdiagram; the rest are placed when it opens.',
+      '• Layout: 6 of 7 tables placed from the file\'s erd_layout; the rest are placed when it opens.',
       '• 2 sticky notes.',
     ].join('\n'));
   });
@@ -1133,15 +1099,15 @@ describe('describeDbmlImportPlan', () => {
     // No layout: where the first open's layout is saved.
     const foreign = plan(fixture('foreign/ecommerce.dbml'), { layer: 'silver' });
     expect(describeDbmlImportPlan(foreign, { dbml: { relationshipsFiles: [], layoutFileName: 'ecommerce.dbdiagram' } }))
-      .toContain('• No layout file: the diagram is laid out automatically when it opens, and that layout is saved in ecommerce.dbdiagram.');
-    expect(describeDbmlImportPlan(salesPlan({ layout: readDbdiagramLayout('not json') }), { layoutFileName: 'sales.dbdiagram', dbml: { relationshipsFiles: [], layoutFileName: 'imported.dbdiagram' } }))
-      .toContain('• sales.dbdiagram has no positions for these tables: the diagram is laid out automatically when it opens, and that layout is saved in imported.dbdiagram.');
+      .toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens, and that layout is saved in ecommerce.dbdiagram.');
+    expect(describeDbmlImportPlan(salesPlan({ layout: { positions: {}, stickies: [] } }), { dbml: { relationshipsFiles: [], layoutFileName: 'imported.dbdiagram' } }))
+      .toContain('• The file\'s erd_layout has no positions for these tables: the diagram is laid out automatically when it opens, and that layout is saved in imported.dbdiagram.');
   });
 
   it('summarises a foreign file: optional refs, meta, renames and what is left out', () => {
     const text = describeDbmlImportPlan(plan(fixture('foreign/ecommerce.dbml'), { layer: 'silver' }));
     expect(text).toContain('• 1 reference is optional (?). ERD Studio doesn\'t record that, so they are imported as plain relationships.');
-    expect(text).toContain('• No layout file: the diagram is laid out automatically when it opens.');
+    expect(text).toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens.');
     expect(text).toMatch(/• DBML settings ERD Studio has no field for \(not null, defaults, indexes, …\) are kept in the meta of \d+ tables and columns, under "dbml"\./);
     expect(text).toContain([
       'Left out:',
@@ -1154,10 +1120,37 @@ describe('describeDbmlImportPlan', () => {
   });
 
   it('says when a layout places nothing, and its problems', () => {
-    const layout = readDbdiagramLayout('not json');
-    const text = describeDbmlImportPlan(salesPlan({ layout }), { layoutFileName: 'sales.dbdiagram' });
-    expect(text).toContain('• sales.dbdiagram has no positions for these tables: the diagram is laid out automatically when it opens.');
-    expect(text).toContain(`• sales.dbdiagram: ${layout.problems[0]}`);
+    const layout = readDbmlImportLayout("Project p {\n  erd_layout: '''\n    nobody here\n    nobody 1 2\n    nobody 3 4\n  '''\n}\nTable a {\n  id int\n}\n")!;
+    expect(layout.problems).toEqual([
+      'Line 3 of the file is not <name> <x> <y> in erd_layout; that table is placed when the diagram opens',
+      'nobody is listed twice in erd_layout; the first is read',
+    ]);
+    const text = describeDbmlImportPlan(plan("Table a {\n  id int\n}\n", { layout }));
+    expect(text).toContain('• The file\'s erd_layout has no positions for these tables: the diagram is laid out automatically when it opens.');
+    expect(text).toContain('\n• Line 3 of the file is not <name> <x> <y> in erd_layout; that table is placed when the diagram opens.\n');
+    expect(text).toMatch(/\n• nobody is listed twice in erd_layout; the first is read\.$/);
+    expect(text).not.toContain('erd_layout: ');
+  });
+
+  it('reads erd_layout only from the file itself: none, a bad line, a repeated key', () => {
+    expect(readDbmlImportLayout('Table a {\n  id int\n}\n')).toBeUndefined();
+    expect(readDbmlImportLayout('not dbml {')).toBeUndefined();
+    const bad = readDbmlImportLayout("Project p {\n  erd_layout: 'a 1'\n}\nTable a {\n  id int\n}\n")!;
+    expect(bad.positions).toEqual({});
+    expect(bad.problems).toEqual(['Line 2 of the file is not <name> <x> <y> in erd_layout; that table is placed when the diagram opens']);
+    const notText = readDbmlImportLayout("Project p {\n  erd_layout: '''\n    a 1 2\n  '''\n  ERD_LAYOUT: '''\n    a 3 4\n  '''\n}\nTable a {\n  id int\n}\n")!;
+    // The first entry is read (the parser's own database keeps the last), and the repeat is named.
+    expect(notText.positions).toEqual({ a: { x: 1, y: 2 } });
+    // Import never rewrites the source, so the message says only what is read.
+    expect(notText.problems).toEqual(['erd_layout appears 2 times; only the first is read']);
+    const notString = readDbmlImportLayout('Project p {\n  erd_layout: 12\n}\nTable a {\n  id int\n}\n');
+    expect(notString?.problems).toEqual(['erd_layout is not a string, so its positions are not read']);
+    const conflicted = readDbmlImportLayout("Project p {\n  erd_layout: '''\n<<<<<<< ours\n    a 1 2\n=======\n    a 3 4\n>>>>>>> theirs\n  '''\n}\nTable a {\n  id int\n}\n")!;
+    expect(conflicted.positions).toEqual({ a: { x: 1, y: 2 } });
+    expect(conflicted.problems).toEqual([
+      'a is listed twice in erd_layout; the first is read',
+      'erd_layout has an unresolved git merge conflict (line 3); both sides are read, and a table listed twice takes its first position',
+    ]);
   });
 
   it('caps long lists', () => {

@@ -1,10 +1,10 @@
 /**
  * **Import DBML…** (`erdStudio.importDbml`) — a DBML file in as a NEW logical
- * subject area: ERD Studio's own rich export (`toDbmlRich`, "DBML (rich, with
- * layout)") or a file from dbdiagram.io or any other DBML tool. No dbt needed:
- * it reads only the chosen file and, when there is one next to it, the
- * dbdiagram layout file `<name>.dbdiagram` (`dbdiagram pull` writes it, and
- * so does ERD Studio's rich export), which places the tables and sticky notes.
+ * subject area: ERD Studio's own rich export (`toDbmlRich`, "Rich DBML") or
+ * a file from dbdiagram.io or any other DBML tool. No dbt needed: it reads
+ * only the chosen file. Its Project's `erd_layout`, when it has one (the rich
+ * export writes it), places the tables and sticky notes; a `.dbdiagram` file
+ * beside it is not read.
  *
  * Steps: file → read it (`workspace.fs`) → `readDbml` (a file that is not
  * valid DBML is reported with its line numbers and an Open File button) →
@@ -30,7 +30,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { DBML_RELATIONSHIPS_FILE_NAME, isReservedTableName, layoutFilePathOf, readDbdiagramLayout } from '@erd-studio/core';
+import { DBML_RELATIONSHIPS_FILE_NAME, isReservedTableName, layoutFilePathOf } from '@erd-studio/core';
 import { DBML_CONVERT_FIRST_MESSAGE } from '@erd-studio/core/dbml';
 import { RESERVED_TABLE_NAME_MESSAGE } from '../types/naming';
 
@@ -40,7 +40,6 @@ import {
   planDbmlImport,
   serializeDbmlImportDocument,
   suggestDbmlSubjectAreaName,
-  type DbmlImportLayout,
   type DbmlImportPlan,
 } from '../services/dbmlImport';
 import type { DbmlDiagnostic } from '../services/dbmlImportParse';
@@ -99,8 +98,6 @@ export interface ImportDbmlUi {
   pickFile(defaultFolder: string | undefined): Promise<string | undefined>;
   /** A file's text (`workspace.fs`). Throws when it cannot be read. */
   readFile(filePath: string): Promise<string>;
-  /** Whether a file exists (the layout next to the DBML). */
-  exists(filePath: string): Promise<boolean>;
   showQuickPick<T extends vscode.QuickPickItem>(items: readonly T[], options: vscode.QuickPickOptions): Promise<T | undefined>;
   showInputBox(options: vscode.InputBoxOptions): Promise<string | undefined>;
   /** A modal: `message`, the `detail` under it, `button` and Cancel. True when `button` was picked. */
@@ -163,8 +160,6 @@ export interface ImportDbmlResume {
 export interface ImportDbmlResult {
   domainPath: string;
   plan: DbmlImportPlan;
-  /** The layout file used, when there was one. */
-  layoutPath?: string;
 }
 
 /**
@@ -180,12 +175,6 @@ export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume
     telemetry.error('importDbmlFailed');
     throw err;
   }
-}
-
-/** The layout file dbdiagram keeps next to `<name>.dbml`: `<name>.dbdiagram`. */
-export function dbdiagramLayoutPathFor(dbmlPath: string): string {
-  const parsed = path.parse(dbmlPath);
-  return path.join(parsed.dir, `${/\.dbml$/i.test(parsed.base) ? parsed.name : parsed.base}.dbdiagram`);
 }
 
 /**
@@ -244,7 +233,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   }
 
   // Loaded on first use: the parser is a third of the bundle, and only this command needs it.
-  const { readDbml } = await import('../services/dbmlImportParse');
+  const { readDbml, readDbmlImportLayout } = await import('../services/dbmlImportParse');
   const read = readDbml(text);
   if (!read.ok) {
     if (!fromExample) telemetry.feature('importDbmlInvalid');
@@ -260,23 +249,10 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     return undefined;
   }
 
-  // The layout next to it, when there is one. A layout that cannot be read
-  // is not a reason to stop: the canvas lays the diagram out instead.
-  const layoutPath = dbdiagramLayoutPathFor(filePath);
-  let layout: DbmlImportLayout | undefined;
-  let layoutUsed = false;
-  if (await ui.exists(layoutPath).catch(() => false)) {
-    try {
-      layout = readDbdiagramLayout(await ui.readFile(layoutPath));
-      // readDbdiagramLayout never throws: a file it could not make sense of
-      // comes back empty with a problem, which the dry run names; only a
-      // layout that yielded something counts as used.
-      layoutUsed = layout.tables.length > 0 || layout.stickies.length > 0;
-    } catch (err) {
-      log.error(`[ERD Studio] ${TITLE}: could not read the layout file:`, err);
-      layout = { tables: [], stickies: [], problems: ['The layout file could not be read.'] };
-    }
-  }
+  // The positions in the file's own Project (`erd_layout`), when it has
+  // them. Lines that cannot be read are not a reason to stop: the dry run
+  // names them and the canvas places those tables instead.
+  const layout = readDbmlImportLayout(text);
 
   // 2. The layer: the one the file's TableGroup or schema names, offered first.
   const creatable = layerService.getCreatableLayers();
@@ -419,7 +395,6 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   const semanticRoot = path.join(workspaceRoot, semanticDir);
   const [headline, ...details] = describeDbmlImportPlan(plan, {
     layerLabel,
-    layoutFileName: layout ? path.basename(layoutPath) : undefined,
     ...(dbml ? {
       dbml: {
         // Where the relationships go: the library's `_relationships.dbml` files this save writes.
@@ -441,7 +416,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     folder,
     changedTables: plan.changedLibraryTables,
     documentText: (tableNaming) => serializeDbmlImportDocument(plan.document, tableNaming),
-    // The source layout's positions and sticky-note boxes go into the new `.dbdiagram`.
+    // The source's positions and sticky-note boxes go where the project keeps a new diagram's layout.
     document: () => ({ ...plan.document, logical: { ...plan.document.logical, relationships: [] } }) as unknown as Record<string, unknown>,
   }, { layerService, tableLibraryService, subjectAreaService, readText: openOrDiskText, dirtyFiles });
   if (!outcome.ok) {
@@ -481,11 +456,11 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     telemetry.feature('exampleDiagram');
   } else {
     telemetry.feature('importDbml');
-    if (layoutUsed) telemetry.feature('importDbmlLayout');
+    if (layout) telemetry.feature('importDbmlLayout');
   }
 
   await ui.openDiagram(domainPath);
-  return { domainPath, plan, ...(layoutUsed ? { layoutPath } : {}) };
+  return { domainPath, plan };
 
   /** The refusal's own sentence, with Open File when it knows the file. */
   function showRefusal(err: RefusedWrite, outcomeSentence: string): void {
@@ -531,14 +506,6 @@ export function vscodeImportDbmlUi(): ImportDbmlUi {
       return picked?.[0]?.fsPath;
     },
     readFile: async (filePath) => new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
-    exists: async (filePath) => {
-      try {
-        await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
-        return true;
-      } catch {
-        return false;
-      }
-    },
     showQuickPick: async (items, options) => vscode.window.showQuickPick([...items], options),
     showInputBox: async (options) => vscode.window.showInputBox(options),
     confirm: async (message, detail, button) =>

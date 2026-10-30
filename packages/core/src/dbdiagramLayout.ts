@@ -1,12 +1,12 @@
 /**
- * The canvas layout of a rich DBML export (`toDbmlRich`), as dbdiagram's own
- * `<name>.dbdiagram` file: `dbdiagram push silver.dbml` reads `silver.dbdiagram`
- * from beside it, so the diagram opens in dbdiagram where it was on the
- * canvas, and `dbdiagram pull` writes one that ERD Studio's DBML import reads
- * back ({@link readDbdiagramLayout}).
+ * A DBML diagram's layout file, `<name>.dbdiagram` beside `<name>.dbml`
+ * (native DBML storage, the 1.9 pre-release tree): dbdiagram's own JSON
+ * shape, which holds the canvas positions and sticky-note boxes. The rich
+ * DBML export no longer writes one (its positions are in the Project's
+ * `erd_layout`, `erdLayout.ts`); this module stays only for the storage
+ * sidecar, until positions move into `erd_layout` there too.
  *
- * Built only from a file `dbdiagram pull` wrote from our own diagram and
- * dbdiagram's public documentation. The shape (version `"3.0.0"`):
+ * The shape (version `"3.0.0"`):
  *
  * ```json
  * {
@@ -25,23 +25,10 @@
  * }
  * ```
  *
- * - `tablePositions` names each table exactly as `toDbmlRich` writes it; a
- *   table with no schema is in `"public"`, as dbdiagram writes it. Only tables
- *   the export writes and the canvas has placed are listed, in the export's
- *   table order. Coordinates are canvas pixels (both tools place a table by
- *   its top-left corner), rounded to two decimals.
- * - Sticky notes keep no layout: the shape of a `stickyNoteLayouts` entry is
- *   not documented, so the list is written empty (the reader accepts the
- *   obvious one). Relationship paths, collapsed groups and dark mode are
- *   dbdiagram's own and are left to it.
- *
- * Pure and deterministic; never throws.
+ * Pure and deterministic; the reader never throws.
  */
 
-import type { DisplaySubjectArea } from './types/display.js';
 import type { Annotation, NodePosition } from './types/semantic.js';
-import { prepareSubjectArea } from './exportShared.js';
-import { exportFileBase } from './exportFileName.js';
 
 /** The `.dbdiagram` format version written. */
 export const DBDIAGRAM_LAYOUT_VERSION = '3.0.0';
@@ -92,11 +79,6 @@ export interface DbdiagramLayoutReading {
   problems: string[];
 }
 
-/** The `.dbdiagram` file beside the rich export of `area`: `showcase.dbdiagram` beside `showcase.dbml`. */
-export function dbdiagramLayoutFileName(area: Pick<DisplaySubjectArea, 'domain'>): string {
-  return `${exportFileBase(area)}.dbdiagram`;
-}
-
 /** `value` rounded to two decimals, with no `-0`. */
 function round(value: number): number {
   const rounded = Math.round(value * 100) / 100;
@@ -107,62 +89,12 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-/** The canvas position of `name`: its own entry, else one spelled in another case. */
-function positionOf(positions: Record<string, unknown>, name: string): NodePosition | undefined {
-  const own = Object.prototype.hasOwnProperty.call(positions, name) ? positions[name] : undefined;
-  const entry = own ?? Object.entries(positions).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
-  if (!entry || typeof entry !== 'object') return undefined;
-  const { x, y } = entry as Record<string, unknown>;
-  return isFiniteNumber(x) && isFiniteNumber(y) ? { x, y } : undefined;
-}
-
-/** The layout of `area`'s rich DBML export, as dbdiagram's `.dbdiagram` JSON. */
-export function toDbdiagramLayout(area: DisplaySubjectArea): DbdiagramLayout {
-  const input = (area && typeof area === 'object' ? area : {}) as unknown as Record<string, unknown>;
-  const viewConfig = input.viewConfig && typeof input.viewConfig === 'object' ? (input.viewConfig as Record<string, unknown>) : {};
-  const positions =
-    viewConfig.positions && typeof viewConfig.positions === 'object' && !Array.isArray(viewConfig.positions)
-      ? (viewConfig.positions as Record<string, unknown>)
-      : {};
-  const tablePositions: DbdiagramTablePosition[] = [];
-  for (const item of prepareSubjectArea(area).models) {
-    if (item.kind !== 'model') continue;
-    const position = positionOf(positions, item.model.name);
-    if (!position) continue;
-    tablePositions.push({
-      name: item.model.name,
-      schemaName: item.model.schema || DBDIAGRAM_DEFAULT_SCHEMA,
-      x: round(position.x),
-      y: round(position.y),
-    });
-  }
-  return {
-    version: DBDIAGRAM_LAYOUT_VERSION,
-    gridEnabling: false,
-    currentViewName: null,
-    defaultView: {
-      detailLevel: 'All',
-      relationshipMode: 'All',
-      tablePositions,
-      tableGroupCollapseStates: [],
-      stickyNoteLayouts: [],
-      referencePaths: [],
-    },
-    views: {},
-  };
-}
-
-/** {@link toDbdiagramLayout} as the file's text: two-space JSON and a final line break. */
-export function serializeDbdiagramLayout(area: DisplaySubjectArea): string {
-  return JSON.stringify(toDbdiagramLayout(area), null, 2) + '\n';
-}
-
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
 /**
- * Read a `.dbdiagram` file for import. Tolerant: reads every table position
+ * Read a diagram's layout file. Tolerant: reads every table position
  * and sticky-note layout it can from `defaultView` and reports, in
  * `problems`, what it could not — the file is not JSON, a version other than
  * 3.x (read anyway), an entry without a name or numeric x / y. Never throws.

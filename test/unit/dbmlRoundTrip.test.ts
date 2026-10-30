@@ -1,7 +1,7 @@
 /**
- * The DBML round trip, end to end: a subject area exported as rich DBML and
- * its `.dbdiagram` layout (`toDbmlRich`, `serializeDbdiagramLayout` in
- * `@erd-studio/core`), read back (`readDbml`, `readDbdiagramLayout`),
+ * The DBML round trip, end to end: a subject area exported as rich DBML, its
+ * positions in the Project's `erd_layout` (`toDbmlRich` in
+ * `@erd-studio/core`), read back (`readDbml`, `readDbmlImportLayout`),
  * planned as a new subject area in an empty project (`planDbmlImport`),
  * written the way Import DBML… writes it (`TableLibraryService.saveTable`,
  * `serializeDbmlImportDocument`), and loaded again through core's pipeline
@@ -14,7 +14,7 @@
  * export of what comes back is the first export again, and from then on a
  * fixed point. Also: each core fixture imported back into its own project
  * (every table reused), and every DBML file under test/fixtures/dbml (other
- * tools' and a real `dbdiagram pull`) imported, exported as rich DBML that
+ * tools' and a `dbdiagram pull` of our own) imported, exported as rich DBML that
  * the three parsers read with no diagnostic of ERD Studio's making, and
  * round-tripped again.
  *
@@ -23,7 +23,7 @@
  * each column's name, type, description, PK, NK, SCD type, additivity, FK
  * flag (the file's own and the badge) and meta (exactly); the relationships
  * as links (ends, cardinality, role, composite grouping); the canvas
- * positions; the sticky notes' text, colour and linked table.
+ * positions; the sticky notes' text, colour, linked table and box.
  *
  * What does not come back, and why — the only differences allowed:
  *
@@ -31,9 +31,8 @@
  *   written fresh); `schemaVersion` (the new project's naming decides it);
  *   the subject area's `modelFolder` and `stubColumns` (dbt-side settings of
  *   the physical stage), `viewConfig.showFkEdges` and `layoutOptions` (canvas
- *   settings), and sticky-note positions, sizes and ids (the `.dbdiagram`
- *   shape for sticky notes is not documented, so the export writes none and
- *   the import places notes in a row above the tables).
+ *   settings), and sticky-note ids (the export names each note
+ *   `sticky_<n>`; its box travels in `erd_layout` under that name).
  * - **The compositeKey label**: a composite foreign key keeps its column
  *   pairs, but its label is made again (`fk_<to table>`), as a new link's is,
  *   and its role is written on each pair (core reads it from the first). A
@@ -56,7 +55,7 @@
  * - **Meta key order**: every entry comes back, exactly, but the text values
  *   under lower-case keys (`meta_<key>` properties, readable in dbdiagram)
  *   come before the rest (`meta_json`'s).
- * - **Positions** are written to two decimals.
+ * - **Positions** and sticky-note boxes are written to two decimals.
  * - A **zero-column table** travels with a placeholder column, which the
  *   import drops: it comes back with no columns, as it was (its own test).
  */
@@ -72,13 +71,11 @@ import {
   DBML_RICH_PLACEHOLDER_COLUMN,
   canonicalRelationship,
   loadDisplaySubjectArea,
-  readDbdiagramLayout,
-  serializeDbdiagramLayout,
   toDbmlRich,
 } from '@erd-studio/core';
 import type { DisplayRelationship, DisplaySubjectArea, DisplayTable } from '@erd-studio/core';
 import { planDbmlImport, serializeDbmlImportDocument, type DbmlImportPlan } from '../../src/services/dbmlImport';
-import { readDbml, type DbmlParserModule } from '../../src/services/dbmlImportParse';
+import { readDbml, readDbmlImportLayout, type DbmlParserModule } from '../../src/services/dbmlImportParse';
 import { TableLibraryService } from '../../src/services/logicalModelService';
 import { MODEL_LINT_INFOS, parseDbmlRich, readDbmlRich } from '../../packages/core/test/exportParsers';
 
@@ -179,7 +176,6 @@ function seedV6YamlProject(semanticRoot: string): void {
 
 interface RoundTrip {
   dbml: string;
-  layout: string;
   plan: DbmlImportPlan;
   back: DisplaySubjectArea;
   workspace: string;
@@ -195,7 +191,6 @@ async function roundTrip(
   options: { layers: string | null; naming: Naming; libraryRelationships: boolean; parser?: DbmlParserModule },
 ): Promise<RoundTrip> {
   const dbml = toDbmlRich(area);
-  const layout = serializeDbdiagramLayout(area);
   const read = readDbml(dbml, options.parser);
   if (!read.ok) throw new Error(`the export does not read back: ${JSON.stringify(read.diagnostics)}`);
 
@@ -209,7 +204,7 @@ async function roundTrip(
 
   const plan = planDbmlImport({
     model: read.model,
-    layout: readDbdiagramLayout(layout),
+    layout: readDbmlImportLayout(dbml),
     layer: area.layer,
     subjectAreaName: area.domain,
     fileName: `${area.domain}.dbml`,
@@ -225,7 +220,7 @@ async function roundTrip(
   for (const table of plan.changedLibraryTables) library.saveTable(table);
 
   const back = await loadArea(workspace, domainPath);
-  return { dbml, layout, plan, back, workspace };
+  return { dbml, plan, back, workspace };
 }
 
 // ---------------------------------------------------------------------------
@@ -332,9 +327,17 @@ function canonicalPositions(area: DisplaySubjectArea): Record<string, { x: numbe
 }
 
 function canonicalStickies(area: DisplaySubjectArea): Array<Record<string, unknown>> {
+  const round = (n: number): number => Math.round(n * 100) / 100 || 0;
+  const size = (n: number | undefined): number | null => (typeof n === 'number' && Number.isFinite(n) && round(n) > 0 ? round(n) : null);
   return (area.viewConfig?.annotations ?? [])
     .filter((a) => typeof a.text === 'string' && a.text.trim() !== '')
-    .map((a) => ({ text: a.text, color: a.color ?? null, linkedModel: a.linkedModel ?? null }));
+    .map((a) => ({
+      text: a.text,
+      color: a.color ?? null,
+      linkedModel: a.linkedModel ?? null,
+      // The box travels in erd_layout, as `note/sticky_<n>`.
+      box: [round(a.x), round(a.y), size(a.width), size(a.height)],
+    }));
 }
 
 /** Everything the export carries, in a shape two loads of the same diagram agree on. */
@@ -360,8 +363,8 @@ function canonical(area: DisplaySubjectArea): Record<string, unknown> {
 function withoutLeftOut(dbml: string): string {
   return dbml
     .split('\n')
-    // (The header's own "Not exported: sticky-note positions …" line stays.)
-    .filter((line) => !/^\/\/ (Not exported: (?!sticky-note positions)|.*: column \d+ has no name; not exported$|.*: its table file could not be read )/.test(line))
+    // (The header's own "Not exported: the canvas layout options." line stays.)
+    .filter((line) => !/^\/\/ (Not exported: (?!the canvas layout options)|.*: column \d+ has no name; not exported$|.*: its table file could not be read )/.test(line))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/\n+$/, '\n');
@@ -749,7 +752,6 @@ async function checkRoundTrip(root: string, domainPath: string): Promise<void> {
     } else {
       expect(again, label).toBe(withoutLeftOut(trip.dbml));
     }
-    expect(serializeDbdiagramLayout(trip.back), label).toBe(trip.layout);
 
     // From the second round on, the export is a fixed point, byte for byte.
     const third = await roundTrip(trip.back, { layers, ...mode });
@@ -921,7 +923,7 @@ describe('DBML round trip: what DBML trims (documented exceptions)', () => {
 });
 
 describe('foreign DBML → ERD Studio → rich DBML', () => {
-  /** Every DBML file under test/fixtures/dbml, with the `.dbdiagram` beside it when there is one. */
+  /** Every DBML file under test/fixtures/dbml, its own erd_layout read when it has one. */
   const files = (fs.readdirSync(path.resolve(FOREIGN, '..'), { recursive: true }) as string[])
     .filter((f) => f.endsWith('.dbml'))
     .sort();
@@ -932,8 +934,9 @@ describe('foreign DBML → ERD Studio → rich DBML', () => {
 
   it.each(files)('%s: imports, exports as rich DBML every parser reads with no diagnostic, and imports the same again', async (file) => {
     const full = path.resolve(FOREIGN, '..', file);
-    const layoutFile = full.replace(/\.dbml$/, '.dbdiagram');
-    const read = readDbml(fs.readFileSync(full, 'utf-8'));
+    const text = fs.readFileSync(full, 'utf-8');
+    const layout = readDbmlImportLayout(text);
+    const read = readDbml(text);
     if (!read.ok) throw new Error(JSON.stringify(read.diagnostics));
 
     const workspace = tempWorkspace();
@@ -943,7 +946,7 @@ describe('foreign DBML → ERD Studio → rich DBML', () => {
     const lib = { findTableName: (n: string) => library.findTableNameIgnoringCase(n), getTable: (n: string) => library.getTable(n) };
     const plan = planDbmlImport({
       model: read.model,
-      ...(fs.existsSync(layoutFile) ? { layout: readDbdiagramLayout(fs.readFileSync(layoutFile, 'utf-8')) } : {}),
+      ...(layout ? { layout } : {}),
       layer: 'silver',
       subjectAreaName: 'imported',
       fileName: path.basename(file),
@@ -990,7 +993,7 @@ describe('DBML round trip: back into its own project', () => {
       const absent = area.models.map((m) => m.name).filter((n) => library.findTableNameIgnoringCase(n) === null);
       const plan = planDbmlImport({
         model: read.model,
-        layout: readDbdiagramLayout(serializeDbdiagramLayout(area)),
+        layout: readDbmlImportLayout(toDbmlRich(area)),
         layer: area.layer,
         subjectAreaName: 'copy',
         library: { findTableName: (n) => library.findTableNameIgnoringCase(n), getTable: (n) => library.getTable(n) },

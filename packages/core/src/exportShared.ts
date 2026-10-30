@@ -100,6 +100,8 @@ export interface ExportSticky {
   linkedModel?: string;
   /** The note's colour as stored (`AnnotationColor`), when it has one. */
   color?: string;
+  /** The note's box on the canvas, as stored (rich DBML writes it in `erd_layout`); absent when not a finite x and y. */
+  box?: { x: number; y: number; width?: number; height?: number };
 }
 
 export interface PreparedSubjectArea {
@@ -405,7 +407,11 @@ export function prepareSubjectArea(domain: DisplaySubjectArea): PreparedSubjectA
     if (!body.trim()) continue;
     const linked = text(raw.linkedModel).trim();
     const color = text(raw.color).trim();
-    stickies.push({ text: body, ...(linked ? { linkedModel: linked } : {}), ...(color ? { color } : {}) });
+    const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+    const box = finite(raw.x) && finite(raw.y)
+      ? { x: raw.x, y: raw.y, ...(finite(raw.width) ? { width: raw.width } : {}), ...(finite(raw.height) ? { height: raw.height } : {}) }
+      : undefined;
+    stickies.push({ text: body, ...(linked ? { linkedModel: linked } : {}), ...(color ? { color } : {}), ...(box ? { box } : {}) });
   }
 
   return {

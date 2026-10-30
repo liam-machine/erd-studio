@@ -1,10 +1,13 @@
 // erd-studio dbml-export v2 (DBML 9.1+)
-// Table positions: sales.dbdiagram, next to this file (`dbdiagram push` reads it).
 // A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
-// Not exported: sticky-note positions and sizes, the canvas layout options.
+// Not exported: the canvas layout options.
 
 Project sales {
   Note: 'ERD Studio 1.6.6 / 1.6.7 saved a line drawn from the dimension as one-to-many in the domain file (#163)'
+  erd_layout: '''
+    dim_store 400 0
+    fct_sale 0 0
+  '''
 }
 
 Table gold.fct_sale {

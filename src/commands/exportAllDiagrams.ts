@@ -1,9 +1,8 @@
 /**
  * **Export All Diagrams…** (`erdStudio.exportAllDiagrams`) — every subject
  * area's logical (design) stage, one file each, into a folder the user picks:
- * format → folder → write. With DBML for dbdiagram.io (`dbml-rich`) each
- * `.dbml` gets its `.dbdiagram` layout file beside it, so the folder is
- * ready for `dbdiagram push`.
+ * format → folder → write. With rich DBML (`dbml-rich`) each `.dbml`
+ * carries its table positions in its Project's `erd_layout`.
  *
  * The files come from `exportSubjectAreaFiles` (`src/services/diagramExport.ts`),
  * the same read and the same names `erd-studio export --all` prints: one
@@ -322,9 +321,7 @@ function reportDone(
   skipped: readonly SkippedInWords[],
   shownFolder: string,
 ): void {
-  const diagrams = files.filter((f) => f.kind === 'diagram').length;
-  const withLayout = files.some((f) => f.kind === 'layout') ? ', each with its table positions in a .dbdiagram file' : '';
-  const done = `Exported ${count(diagrams, 'diagram')} as ${FORMAT_LABELS[format]} to ${shownFolder}${withLayout}.`;
+  const done = `Exported ${count(files.length, 'diagram')} as ${FORMAT_LABELS[format]} to ${shownFolder}.`;
   if (skipped.length === 0) {
     void ui.showInformationMessage(done);
     return;

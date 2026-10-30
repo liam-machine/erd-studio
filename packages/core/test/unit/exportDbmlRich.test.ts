@@ -11,7 +11,7 @@ import * as path from 'path';
 
 import { DBML_RICH_EXPORT_HEADER, toDbmlRich } from '../../src/exportDbmlRich';
 import { toDbml } from '../../src/exportDbml';
-import { serializeDbdiagramLayout } from '../../src/dbdiagramLayout';
+import { readErdLayoutDbml } from '../../src/dbml/erdLayoutDbml';
 import {
   DBML_RICH_COLUMN_PROPERTIES,
   DBML_RICH_META_JSON_PROPERTY,
@@ -59,21 +59,16 @@ function pair(cardinality: DisplayRelationship['cardinality']) {
 }
 
 describe('toDbmlRich: header and Project', () => {
-  it('opens with the versioned header and names the layout file beside it', () => {
+  it('opens with the versioned header, names no layout file and leaves out only the layout options', () => {
     const text = toDbmlRich(subjectArea([tableDef('a', [col('id')])], [], { domain: 'customer 360' }));
     const lines = text.split('\n');
     expect(lines[0]).toBe(DBML_RICH_EXPORT_HEADER);
     expect(DBML_RICH_EXPORT_HEADER).toBe('// erd-studio dbml-export v2 (DBML 9.1+)');
-    expect(lines[1]).toBe('// Table positions: customer 360.dbdiagram, next to this file (`dbdiagram push` reads it).');
-    expect(text).toMatch(/^\/\/ A \? beside a Ref operator .*ERD Studio does not record nullability/m);
+    expect(lines[1]).toMatch(/^\/\/ A \? beside a Ref operator .*ERD Studio does not record nullability/);
+    expect(lines[2]).toBe('// Not exported: the canvas layout options.');
+    expect(text).not.toContain('dbdiagram');
+    expect(text).not.toContain('Table positions');
     expect(text.endsWith('}\n')).toBe(true);
-  });
-
-  it('names the layout file it is given, and none when given an empty name', () => {
-    const area = subjectArea([tableDef('a', [col('id')])]);
-    expect(toDbmlRich(area, { layoutFileName: 'renamed.dbdiagram' })).toContain('// Table positions: renamed.dbdiagram, next to this file');
-    expect(toDbmlRich(area, { layoutFileName: 'two\nlines' })).toContain('// Table positions: two lines, next to this file');
-    expect(toDbmlRich(area, { layoutFileName: '' })).not.toContain('Table positions');
   });
 
   it('writes the subject area name and description as the Project', () => {
@@ -84,6 +79,7 @@ describe('toDbmlRich: header and Project', () => {
   it('writes an unnamed Project for a description alone, and none for neither', () => {
     expect(read(subjectArea([tableDef('a', [col('id')])], [], { domain: '', description: 'About' })).project).toEqual({ name: null, note: 'About' });
     expect(read(subjectArea([tableDef('a', [col('id')])], [], { domain: '  ', description: '' })).project).toBeNull();
+    expect(toDbmlRich(subjectArea([tableDef('a', [col('id')])], [], { domain: '  ', description: '' }))).not.toContain('Project');
   });
 });
 
@@ -613,12 +609,72 @@ describe('toDbmlRich: sticky notes', () => {
     ]);
   });
 
-  it('leaves positions out of the DBML (they go in the .dbdiagram file)', () => {
-    const area = subjectArea([tableDef('a', [col('id')])], [], {
-      viewConfig: { positions: { a: { x: 123456, y: 654321 } }, annotations: [{ id: 'n', text: 'x', x: 777777, y: 888888, width: 999999 }] },
+});
+
+describe('toDbmlRich: positions in erd_layout', () => {
+  it('writes the placed tables and sticky notes as the Project\'s last key, sorted, as a stored diagram writes them', () => {
+    const area = subjectArea([tableDef('b', [col('id')]), tableDef('a', [col('id')])], [], {
+      domain: 'sales',
+      description: 'About',
+      viewConfig: {
+        positions: { b: { x: 400, y: 200.456 }, a: { x: -20.5, y: 0 } },
+        annotations: [
+          { id: 'n1', text: 'First', x: 10, y: 10 },
+          { id: 'n2', text: '   ', x: 99, y: 99 },
+          { id: 'n3', text: 'Sized', x: 300, y: 10, width: 220, height: 90 },
+        ],
+      },
     });
     const text = toDbmlRich(area);
-    for (const n of ['123456', '654321', '777777', '888888', '999999']) expect(text).not.toContain(n);
+    // Note 2 is empty, so not exported: the third annotation is sticky_2.
+    expect(text).toContain([
+      'Project sales {',
+      "  Note: 'About'",
+      "  erd_layout: '''",
+      '    a -20.5 0',
+      '    b 400 200.46',
+      '    note/sticky_1 10 10',
+      '    note/sticky_2 300 10 220 90',
+      "  '''",
+      '}',
+    ].join('\n'));
+    const layout = readErdLayoutDbml(text)!;
+    expect(layout.problemsAt).toEqual([]);
+    expect(layout.positions).toEqual({ a: { x: -20.5, y: 0 }, b: { x: 400, y: 200.46 } });
+    expect(layout.stickies).toEqual([{ id: 'sticky_1', x: 10, y: 10 }, { id: 'sticky_2', x: 300, y: 10, width: 220, height: 90 }]);
+    for (const parse of parseDbmlRich(text)) expect(parse.diagnostics, parse.parser).toEqual([]);
+  });
+
+  it('writes a Project for positions alone, and none when nothing is placed', () => {
+    const placed = toDbmlRich(subjectArea([tableDef('a', [col('id')])], [], { domain: '', viewConfig: { positions: { a: { x: 1, y: 2 } } } }));
+    expect(placed).toContain("Project {\n  erd_layout: '''\n    a 1 2\n  '''\n}");
+    expect(readDbmlRich(placed).project).toBeNull();
+    const unplaced = toDbmlRich(subjectArea([tableDef('a', [col('id')])], [], { domain: '', viewConfig: { positions: { other: { x: 1, y: 2 } } } }));
+    expect(unplaced).not.toContain('Project');
+    expect(unplaced).not.toContain('erd_layout');
+  });
+
+  it('places a table by a position spelled in another case, under the exported name, and skips what it cannot write', () => {
+    const area = subjectArea([tableDef('dim_date', [col('id')]), tableDef('x', [col('id')]), tableDef('y', [col('id')])], [], {
+      domain: 'd',
+      viewConfig: {
+        positions: { DIM_DATE: { x: 1, y: 2 }, x: { x: Number.NaN, y: 0 }, y: { x: Infinity, y: 0 }, gone: { x: 5, y: 5 } },
+        annotations: [{ id: 'n', text: 'note', x: Number.NaN, y: 0 }],
+      },
+    });
+    const layout = readErdLayoutDbml(toDbmlRich(area))!;
+    expect(layout.positions).toEqual({ dim_date: { x: 1, y: 2 } });
+    expect(layout.stickies).toEqual([]);
+  });
+
+  it('escapes a name with a quote or a backslash, and reads it back exactly', () => {
+    const area = subjectArea([tableDef("it's", [col('id')]), tableDef('a\\b', [col('id')])], [], {
+      domain: 'd',
+      viewConfig: { positions: { "it's": { x: 1, y: 2 }, 'a\\b': { x: 3, y: 4 } } },
+    });
+    const text = toDbmlRich(area);
+    expect(readErdLayoutDbml(text)!.positions).toEqual({ "it's": { x: 1, y: 2 }, 'a\\b': { x: 3, y: 4 } });
+    for (const parse of parseDbmlRich(text)) expect(parse.diagnostics, parse.parser).toEqual([]);
   });
 });
 
@@ -660,7 +716,7 @@ describe('toDbmlRich: robustness', () => {
 
 /**
  * Everything the mapping table covers in one subject area, held to a golden
- * of its own (`rich-features.rich.dbml` and `.dbdiagram`), with no lint info
+ * of its own (`rich-features.rich.dbml`, positions in its `erd_layout`), with no lint info
  * at all: every Ref here joins key columns as its cardinality says.
  */
 function richFeatures(): DisplaySubjectArea {
@@ -727,12 +783,9 @@ describe('toDbmlRich: every feature together', () => {
   it('matches the rich-features golden, with no diagnostic in any 9.1+ parser', () => {
     const area = richFeatures();
     const text = toDbmlRich(area);
-    const layout = serializeDbdiagramLayout(area);
-    for (const [file, content] of [['rich-features.rich.dbml', text], ['rich-features.dbdiagram', layout]] as const) {
-      const golden = path.join(GOLDEN_DIR, file);
-      if (UPDATE) fs.writeFileSync(golden, content);
-      expect(content).toBe(fs.readFileSync(golden, 'utf-8'));
-    }
+    const golden = path.join(GOLDEN_DIR, 'rich-features.rich.dbml');
+    if (UPDATE) fs.writeFileSync(golden, text);
+    expect(text).toBe(fs.readFileSync(golden, 'utf-8'));
     for (const parse of parseDbmlRich(text)) expect(parse.diagnostics, parse.parser).toEqual([]);
 
     const r = readDbmlRich(text, { infos: 'none' });

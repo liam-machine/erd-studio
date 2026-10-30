@@ -192,9 +192,9 @@ export const FEATURES = [
   'exportCancelled',
   // A project state, not a cancel: run with no canvas focused and no diagram to pick.
   'exportNoDiagrams',
-  // DBML round trip: the rich export (with its .dbdiagram layout), Export All
-  // Diagrams…, and Import DBML… — a completed import, one that also read a
-  // layout file, a cancel at any step, and a file DBML could not read (the
+  // DBML round trip: the rich export (positions in its erd_layout), Export All
+  // Diagrams…, and Import DBML… — a completed import, one whose file had an
+  // erd_layout, a cancel at any step, and a file DBML could not read (the
   // user's file, not a failure of ours). A failure is `importDbmlFailed`.
   'exportDbmlRich',
   'exportAll',

@@ -26,6 +26,8 @@
 
 import { Compiler, DEFAULT_ENTRY, MemoryProjectLayout } from '@dbml/parse';
 import { ERD_STUDIO_DBML_HEADER_PREFIX } from '@erd-studio/core';
+import { readErdLayoutDbml } from '@erd-studio/core/dbml';
+import type { DbmlImportLayout } from './dbmlImport';
 
 // ---------------------------------------------------------------------------
 // The normalised model
@@ -296,6 +298,38 @@ export function readDbml(text: string, parser: DbmlParserModule = PINNED_PARSER)
     ok: true,
     model: normaliseRawDbml(raw, { erdStudioExport: isErdStudioExport(text), erdStudioPlainExport: isErdStudioPlainExport(text) }),
   };
+}
+
+/**
+ * The positions a DBML file being imported carries: its first Project's
+ * `erd_layout` (core's `readErdLayoutDbml`, the reader stored diagrams use),
+ * with what could not be read as sentences for the dry run. Undefined when
+ * the file has no `erd_layout`, or does not parse (`readDbml` reports that).
+ */
+export function readDbmlImportLayout(text: string): DbmlImportLayout | undefined {
+  const reading = readErdLayoutDbml(text);
+  if (!reading || reading.keyCount === 0) return undefined;
+  // The reader's own messages describe the editor, which rewrites the diagram;
+  // Import only reads the source. `layoutBadLine` problems are the codec's
+  // `problems`, in order.
+  let lineProblem = 0;
+  const problems = reading.problemsAt.map((p) => {
+    switch (p.code) {
+      case 'layoutDuplicateKey':
+        return `erd_layout appears ${reading.keyCount} times; only the first is read`;
+      case 'layoutBadValue':
+        return 'erd_layout is not a string, so its positions are not read';
+      case 'layoutMergeConflict':
+        return `erd_layout has an unresolved git merge conflict (line ${p.line}); both sides are read, and a table listed twice takes its first position`;
+      case 'layoutBadLine': {
+        const problem = reading.problems[lineProblem++];
+        return problem?.kind === 'duplicate'
+          ? problem.message
+          : `Line ${p.line} of the file is not <name> <x> <y> in erd_layout; that table is placed when the diagram opens`;
+      }
+    }
+  });
+  return { positions: reading.positions, stickies: reading.stickies, problems };
 }
 
 /** The first non-blank line of `text`, trimmed. */

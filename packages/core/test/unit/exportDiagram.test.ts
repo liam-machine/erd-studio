@@ -18,7 +18,6 @@ import {
   toMermaid,
   type DiagramExportFormat,
 } from '../../src/exportDiagram';
-import { dbdiagramLayoutFileName, readDbdiagramLayout, serializeDbdiagramLayout, toDbdiagramLayout } from '../../src/dbdiagramLayout';
 import { RATIONALE_KEYS } from '../../src/logicalModel';
 import { RATIONALE_LABELS } from '../../src/exportShared';
 import type { DisplaySubjectArea } from '../../src/types/display';
@@ -31,10 +30,10 @@ describe('diagram export API', () => {
     expect(core.toDbmlRich).toBe(toDbmlRich);
     expect(core.exportDiagram).toBe(exportDiagram);
     expect(core.diagramExportFileName).toBe(diagramExportFileName);
-    expect(core.toDbdiagramLayout).toBe(toDbdiagramLayout);
-    expect(core.serializeDbdiagramLayout).toBe(serializeDbdiagramLayout);
-    expect(core.dbdiagramLayoutFileName).toBe(dbdiagramLayoutFileName);
-    expect(core.readDbdiagramLayout).toBe(readDbdiagramLayout);
+    // The dbdiagram.io export sidecar is gone: the rich export carries its positions in erd_layout.
+    for (const gone of ['toDbdiagramLayout', 'serializeDbdiagramLayout', 'dbdiagramLayoutFileName']) {
+      expect(core, gone).not.toHaveProperty(gone);
+    }
     expect(core.DBML_RICH_EXPORT_HEADER).toMatch(/^\/\/ erd-studio dbml-export v2/);
     expect(core.DIAGRAM_EXPORT_FORMATS).toEqual(['mermaid', 'dbml', 'dbml-rich']);
     expect(core.DIAGRAM_EXPORT_FILE_EXTENSIONS).toEqual({ mermaid: 'mmd', dbml: 'dbml', 'dbml-rich': 'dbml' });
@@ -50,7 +49,6 @@ describe('diagram export API', () => {
     expect(exportDiagram(d, 'dbml')).toBe(toDbml(d));
     expect(exportDiagram(d, 'mermaid')).toBe(toMermaid(d));
     expect(exportDiagram(d, 'dbml-rich')).toBe(toDbmlRich(d));
-    expect(exportDiagram(d, 'dbml-rich')).toBe(toDbmlRich(d, { layoutFileName: dbdiagramLayoutFileName(d) }));
     expect(() => exportDiagram(d, 'svg' as DiagramExportFormat)).toThrow('Unknown diagram export format: svg');
   });
 
@@ -72,12 +70,16 @@ describe('diagram export API', () => {
     }
   });
 
-  it('leaves positions out of every format', () => {
+  it('leaves positions out of every format but rich DBML, which carries them in erd_layout', () => {
     const d = subjectArea([tableDef('a', [col('id')])], [], { viewConfig: { positions: { a: { x: 123456, y: 654321 } } } });
     for (const format of DIAGRAM_EXPORT_FORMATS) {
       const text = exportDiagram(d, format);
-      expect(text).not.toContain('123456');
-      expect(text).not.toContain('654321');
+      if (format === 'dbml-rich') {
+        expect(text).toContain("  erd_layout: '''\n    a 123456 654321\n  '''\n");
+      } else {
+        expect(text).not.toContain('123456');
+        expect(text).not.toContain('654321');
+      }
     }
   });
 
@@ -101,15 +103,6 @@ describe('diagram export API', () => {
   ] as const)('names the export of %j as %s → %s', (name, format, expected) => {
     expect(diagramExportFileName({ domain: name }, format)).toBe(expected);
   });
-
-  it.each(['showcase', 'customer 360', 'a/b\\c:d', '..hidden..', '', 'CON', 'con.txt', 'x'.repeat(300), '日本'])(
-    'names the layout file of %j with the base of its rich DBML export',
-    (name) => {
-      const dbml = diagramExportFileName({ domain: name }, 'dbml-rich');
-      expect(dbml.endsWith('.dbml')).toBe(true);
-      expect(dbdiagramLayoutFileName({ domain: name })).toBe(`${dbml.slice(0, -'.dbml'.length)}.dbdiagram`);
-    },
-  );
 
   it('caps the file name length and tolerates a missing name', () => {
     expect(diagramExportFileName({ domain: 'x'.repeat(300) }, 'dbml')).toBe(`${'x'.repeat(100)}.dbml`);
@@ -177,7 +170,7 @@ describe('diagram export API', () => {
 
   it('imports nothing outside core in the export sources', () => {
     const src = path.resolve(__dirname, '../../src');
-    for (const file of ['exportDiagram.ts', 'exportDbml.ts', 'exportDbmlRich.ts', 'exportMermaid.ts', 'exportShared.ts', 'exportFileName.ts', 'dbdiagramLayout.ts', 'dbmlRichProperties.ts']) {
+    for (const file of ['exportDiagram.ts', 'exportDbml.ts', 'exportDbmlRich.ts', 'exportMermaid.ts', 'exportShared.ts', 'exportFileName.ts', 'erdLayout.ts', 'dbmlRichProperties.ts']) {
       const text = fs.readFileSync(path.join(src, file), 'utf-8');
       const specs = [...text.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
       expect(specs.filter((s) => !s.startsWith('./')), file).toEqual([]);

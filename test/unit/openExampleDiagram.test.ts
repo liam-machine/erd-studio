@@ -66,7 +66,6 @@ function recorder(answers: { confirm?: boolean; layer?: string } = {}): Recorder
     dialogs: 0, reads: [], picks: [], inputs: [], confirms: [], opened: [], errors: [],
     pickFile: async () => { ui.dialogs++; return undefined; },
     readFile: async (filePath) => { ui.reads.push(filePath); throw new Error('read from disk'); },
-    exists: async () => true,
     showQuickPick: async <T extends vscode.QuickPickItem>(items: readonly T[]) => {
       const ids = (items as unknown as Array<{ id: string }>).map((i) => i.id);
       ui.picks.push(ids);
@@ -279,13 +278,14 @@ describe('Open Example Diagram', () => {
     expect(result?.domainPath).toBe(erd('marts', 'coffee-shop.dbml'));
   });
 
-  it('exampleDbmlUi reads only the example and finds no layout next to it', async () => {
+  it('exampleDbmlUi reads only the example, which has no erd_layout', async () => {
     const base = recorder();
     const examplePath = path.join(tmp, EXAMPLE_DBML_FILE_NAME);
     const ui = exampleDbmlUi(base, examplePath);
     expect(await ui.pickFile(tmp)).toBe(examplePath);
     expect(await ui.readFile(examplePath)).toBe(EXAMPLE_DBML);
-    expect(await ui.exists(path.join(tmp, 'coffee-shop.dbdiagram'))).toBe(false);
+    expect(ui).not.toHaveProperty('exists');
+    expect(EXAMPLE_DBML).not.toContain('erd_layout');
     await expect(ui.readFile(path.join(tmp, 'other.dbml'))).rejects.toThrow('read from disk');
   });
 });

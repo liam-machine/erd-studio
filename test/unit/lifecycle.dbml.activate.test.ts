@@ -145,13 +145,11 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
       (typeof args[1] === 'object' && (args[1] as { modal?: boolean }).modal ? 'Import' : undefined)) as never);
   }
 
-  it('Import DBML writes the source .dbdiagram positions into the new diagram\'s layout file', async () => {
+  it('Import DBML writes the source erd_layout positions into the new diagram\'s layout file', async () => {
     const inbox = path.join(root, 'inbox');
     fs.mkdirSync(inbox);
-    fs.writeFileSync(path.join(inbox, 'shop.dbml'), 'Table customers {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n  customer_id int [ref: > customers.id]\n}\n');
-    fs.writeFileSync(path.join(inbox, 'shop.dbdiagram'), JSON.stringify({
-      version: 1, defaultView: { tablePositions: [{ name: 'customers', schemaName: 'public', x: 40, y: 60 }, { name: 'orders', schemaName: 'public', x: 400, y: 60 }] },
-    }));
+    fs.writeFileSync(path.join(inbox, 'shop.dbml'), 'Table customers {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n  customer_id int [ref: > customers.id]\n}\n'
+      + "Project shop {\n  erd_layout: '''\n    customers 40 60\n    orders 400 60\n  '''\n}\n");
     await activate(context);
     importFrom(path.join(inbox, 'shop.dbml'));
     await vscode.commands.executeCommand('erdStudio.importDbml');
@@ -176,7 +174,7 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     const detail = (modal[1] as { detail: string }).detail;
     expect(detail).toContain('• 1 relationship saved in tables/gold/_relationships.dbml.');
     expect(detail).not.toContain('the tables\' files');
-    expect(detail).toContain('• No layout file: the diagram is laid out automatically when it opens, and that layout is saved in shop.dbdiagram.');
+    expect(detail).toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens, and that layout is saved in shop.dbdiagram.');
     // The import itself writes no layout file: the first open's auto layout does, as a JSON diagram's first open writes its positions.
     expect(files()).toEqual([
       'gold/shop.dbml', 'layers.json',

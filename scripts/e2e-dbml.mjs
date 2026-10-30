@@ -12,9 +12,10 @@
  *    copy, and build every diagram's display in-process (core's
  *    loadDisplaySubjectArea), and compare: doctor says storage dbml with no
  *    DBML error; diff and the displays agree after the normalisations the spec
- *    names; exports are byte-equal for diagrams the plan's notes do not touch;
- *    layouts are equal after rounding. A diagram the plan lists under
- *    movedRelationships differs by exactly those relationships.
+ *    names (positions included, compared whatever their key order); exports
+ *    are byte-equal for diagrams the plan's notes do not touch (a rich DBML
+ *    export carries its positions in erd_layout). A diagram the plan lists
+ *    under movedRelationships differs by exactly those relationships.
  * 5. Compile every written .dbml as a multi-file project under @dbml/parse
  *    9.1.1, 10.3.1 and 11.0.0 with zero errors.
  * 6. Exit non-zero on any failure, with a readable diff.
@@ -201,6 +202,10 @@ pass(`diff --all compared on ${Object.keys(diffBefore).length} diagrams`);
 const comparator = path.join(tmp, 'storage-equivalence.cjs');
 esbuild.buildSync({ entryPoints: [path.join(ROOT, 'packages', 'core', 'src', 'storageEquivalence.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: comparator, logLevel: 'warning' });
 const compare = require(comparator).normaliseForStorageEquivalence;
+/** JSON with every object's keys sorted: two displays are equal whatever order their positions (or anything else) were written in. */
+const stableJson = (value) => JSON.stringify(value, (_k, v) => (v && typeof v === 'object' && !Array.isArray(v)
+  ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]]))
+  : v));
 const linkKeyOf = (r) => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`.toLowerCase();
 for (const diagram of Object.keys(before).sort()) {
   const was = before[diagram];
@@ -225,17 +230,17 @@ for (const diagram of Object.keys(before).sort()) {
       if (nowCol && wasCol) nowCol.isForeignKey = wasCol.isForeignKey;
     }
   }
-  const a = JSON.stringify(compare(was, { convert: true }));
-  const b = JSON.stringify(compare(now, { convert: true }));
+  const a = stableJson(compare(was, { convert: true }));
+  const b = stableJson(compare(now, { convert: true }));
   if (a !== b) {
     let i = 0;
     while (i < a.length && a[i] === b[i]) i++;
     fail(`display: ${diagram} draws differently after Convert`, `…${a.slice(Math.max(0, i - 120), i + 200)}\n   vs\n…${b.slice(Math.max(0, i - 120), i + 200)}`);
   }
 }
-pass(`displays compared on ${Object.keys(before).length} diagrams through normaliseForStorageEquivalence`);
+pass(`displays compared on ${Object.keys(before).length} diagrams through normaliseForStorageEquivalence, positions included`);
 
-// export --all: byte-equal for diagrams the notes do not touch; layouts equal after rounding
+// export --all: byte-equal for diagrams the notes do not touch
 const exportsOf = (project, format) => {
   const r = cli(project, ['export', '--all', '--format', format, '--json']);
   if (r.code !== 0) fail(`export --all --format ${format} exited ${r.code}`, r.err || r.out);
@@ -270,18 +275,7 @@ for (const format of FORMATS) {
 }
 if (byteCompared === 0) fail('export: no export was compared byte for byte (every diagram counted as touched by the plan)');
 if (skippedMoved.size > 0) log(`note exports not compared for ${[...skippedMoved].sort().join(', ')}: each gains moved relationships (its display is checked)`);
-const round = (layout) => JSON.stringify(JSON.parse(layout), (k, v) => (typeof v === 'number' && (k === 'x' || k === 'y' || k === 'width' || k === 'height') ? Math.round(v * 100) / 100 : v));
-const layoutsA = exportsOf(original, 'dbml-layout');
-const layoutsB = exportsOf(converted, 'dbml-layout');
-for (const [k, text] of layoutsA) {
-  if (!k.endsWith('.dbdiagram')) continue;
-  const [diagram] = k.split('\u0000');
-  if (diffBefore[diagram]?.needsMigration || before[diagram]?.loadError) continue;
-  const other = layoutsB.get(k);
-  if (other === undefined) { fail(`layout: ${diagram} is missing after Convert`); continue; }
-  if (round(text) !== round(other)) fail(`layout: ${diagram} differs after Convert`, firstLineDiff(text, other));
-}
-pass(`exports compared: ${byteCompared} byte for byte (the plan touches nothing there), ${lineCompared} line for line; layouts after rounding`);
+pass(`exports compared: ${byteCompared} byte for byte (the plan touches nothing there), ${lineCompared} line for line`);
 
 // ── 5. Every written .dbml compiles in 9.1.1, 10.3.1 and 11.0.0 ─────────────
 const compiled = runHelper('compile', converted);

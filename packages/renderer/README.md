@@ -51,7 +51,7 @@ Each `ErdCanvas` has its own store, so several can share a page.
 
 ## Exporting a diagram
 
-The `.` entry re-exports `@erd-studio/core`'s exporters, so a page that shows a diagram with `ErdCanvas` can offer it as text without depending on core itself: `toMermaid`, `toDbml`, `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `exportDiagram`, `diagramExportFileName`, `DIAGRAM_EXPORT_FORMATS`, `DIAGRAM_EXPORT_FILE_EXTENSIONS`, the rich export's layout file (`toDbdiagramLayout`, `serializeDbdiagramLayout`, `dbdiagramLayoutFileName`) and the `DiagramExportFormat`, `DbmlRichOptions`, `DbdiagramLayout` and `DbdiagramTablePosition` types. They are pure functions with no React or DOM use; the same `DisplaySubjectArea` gives the same text everywhere ERD Studio exports it.
+The `.` entry re-exports `@erd-studio/core`'s exporters, so a page that shows a diagram with `ErdCanvas` can offer it as text without depending on core itself: `toMermaid`, `toDbml`, `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `exportDiagram`, `diagramExportFileName`, `DIAGRAM_EXPORT_FORMATS`, `DIAGRAM_EXPORT_FILE_EXTENSIONS` and the `DiagramExportFormat` and `DbmlRichOptions` types. Rich DBML is one file per diagram: its Project carries the table positions in `erd_layout`. The exporters are pure functions with no React or DOM use; the same `DisplaySubjectArea` gives the same text everywhere ERD Studio exports it.
 
 ```ts
 import { exportDiagram, diagramExportFileName, type DisplaySubjectArea } from '@erd-studio/renderer';

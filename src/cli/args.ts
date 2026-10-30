@@ -15,15 +15,19 @@ export type CliCommand = 'doctor' | 'inventory' | 'diff' | 'export' | 'version' 
 export const CLI_COMMANDS: readonly CliCommand[] = ['doctor', 'inventory', 'diff', 'export', 'version', 'help'];
 
 /**
- * What `export --format` takes: every diagram format, plus `dbml-layout` —
- * the `.dbdiagram` layout file of a `dbml-rich` export (its table
- * positions, as dbdiagram's own CLI reads them), printed on its own.
+ * What `export --format` takes: every diagram format. (`dbml-layout`, the
+ * `.dbdiagram` file of a `dbml-rich` export, was removed: the positions are
+ * in the rich export's own Project, `erd_layout`.)
  */
-export type CliExportFormat = DiagramExportFormat | 'dbml-layout';
+export type CliExportFormat = DiagramExportFormat;
 
-export const CLI_EXPORT_FORMATS: readonly CliExportFormat[] = [...DIAGRAM_EXPORT_FORMATS, 'dbml-layout'];
+export const CLI_EXPORT_FORMATS: readonly CliExportFormat[] = [...DIAGRAM_EXPORT_FORMATS];
 
-/** `mermaid|dbml|dbml-rich|dbml-layout` — the export formats as the usage text and its errors spell them. */
+/** The message for the removed `--format dbml-layout`. */
+export const DBML_LAYOUT_REMOVED_MESSAGE =
+  "--format dbml-layout was removed: positions are in the diagram's Project (erd_layout); use --format dbml-rich.";
+
+/** `mermaid|dbml|dbml-rich` — the export formats as the usage text and its errors spell them. */
 const FORMAT_CHOICES = CLI_EXPORT_FORMATS.join('|');
 
 export interface CliOptions {
@@ -177,6 +181,9 @@ export function parseArgs(argv: readonly string[]): CliOptions {
       case '--strict': opts.strict = true; break;
       case '--format': {
         const format = value!.trim().toLowerCase();
+        if (format === 'dbml-layout') {
+          throw new CliUsageError(DBML_LAYOUT_REMOVED_MESSAGE);
+        }
         if (!(CLI_EXPORT_FORMATS as readonly string[]).includes(format)) {
           throw new CliUsageError(`Unknown --format "${value}". Expected one of: ${FORMAT_CHOICES}.`);
         }
@@ -242,11 +249,9 @@ Shared options:
 export prints a subject area's logical (design) diagram on stdout and writes no file:
   erd-studio export --domain .erd-studio/gold/sales.dbml --format dbml > sales.dbml
   dbml         DBML any tool reads; ERD Studio's fields go in notes
-  dbml-rich    DBML for dbdiagram.io: ERD Studio's fields as properties (DBML 9.1+)
-  dbml-layout  the table positions for dbml-rich, as dbdiagram's .dbdiagram file:
-               erd-studio export --domain <path> --format dbml-layout > sales.dbdiagram
+  dbml-rich    rich DBML: every ERD Studio field as a property, the table positions
+               in the Project's erd_layout (DBML 9.1+, as dbdiagram.io reads)
   --all        every subject area, as a JSON list of { fileName, content }
-               (dbml-rich lists each .dbml followed by its .dbdiagram)
 
 Without a dbt project (a folder holding only .erd-studio), doctor checks your ERD Studio
 files and skips the dbt checks; inventory and export read your ERD Studio files; diff

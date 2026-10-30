@@ -1,10 +1,15 @@
 // erd-studio dbml-export v2 (DBML 9.1+)
-// Table positions: partial.dbdiagram, next to this file (`dbdiagram push` reads it).
 // A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
-// Not exported: sticky-note positions and sizes, the canvas layout options.
+// Not exported: the canvas layout options.
 
 Project partial {
   Note: 'A domain whose model references do not all resolve'
+  erd_layout: '''
+    broken 0 300
+    dim_customer 0 0
+    dim_missing 400 0
+    nameless 400 300
+  '''
 }
 
 Table silver.dim_customer {

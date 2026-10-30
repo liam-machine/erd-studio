@@ -17,16 +17,12 @@ import {
   OPEN_FILE_BUTTON,
   DBML_COPIED_MESSAGE,
   DBML_RICH_COPIED_MESSAGE,
-  DBML_RICH_OPENED_MESSAGE,
   EXPORT_TITLE,
   FORMAT_FEATURES,
   FORMAT_ITEMS,
   FORMAT_LABELS,
-  KEEP_LAYOUT_BUTTON,
   MERMAID_COPIED_MESSAGE,
   NO_DIAGRAMS_MESSAGE,
-  REPLACE_LAYOUT_BUTTON,
-  layoutUriFor,
   subjectAreaPathFromArg,
   exportDiagramCommand,
   type ExportAction,
@@ -60,10 +56,6 @@ interface FakeUi extends ExportDiagramUi {
   errorButtons: string[][];
   openedAt: Array<{ filePath: string; line?: number; column?: number }>;
   feedback: FeedbackPrefill[];
-  /** Every modal warning: its message, detail and buttons. */
-  modals: Array<{ message: string; detail: string; items: string[] }>;
-  /** Every path `fileExists` was asked about. */
-  existsAsked: string[];
 }
 
 /**
@@ -79,15 +71,11 @@ function fakeUi(answers: {
   infoChoice?: string;
   /** The button picked on each error message, in turn (undefined = dismissed). */
   errorChoices?: Array<string | undefined>;
-  /** Paths that already exist on disk. */
-  existing?: string[];
-  /** The button picked on the modal warning (undefined = Cancel). */
-  modalChoice?: string;
 }): FakeUi {
   const errorChoices = [...(answers.errorChoices ?? [])];
   const ui: FakeUi = {
     picks: [], clipboard: [], untitled: [], saveDialogs: [], written: [], opened: [], infos: [], errors: [],
-    errorButtons: [], openedAt: [], feedback: [], modals: [], existsAsked: [],
+    errorButtons: [], openedAt: [], feedback: [],
     showQuickPick: async <T extends vscode.QuickPickItem>(items: readonly T[], options: vscode.QuickPickOptions) => {
       ui.picks.push({ items: [...items] as Pickable[], options });
       const list = items as readonly Pickable[];
@@ -105,14 +93,6 @@ function fakeUi(answers: {
       ui.saveDialogs.push(options);
       return answers.saveTo ? vscode.Uri.file(answers.saveTo) as unknown as vscode.Uri : undefined;
     },
-    fileExists: async (uri) => {
-      ui.existsAsked.push(uri.fsPath);
-      return (answers.existing ?? []).includes(uri.fsPath);
-    },
-    showModalWarning: async (message, detail, ...items) => {
-      ui.modals.push({ message, detail, items });
-      return answers.modalChoice;
-    },
     writeFile: async (uri, content) => { ui.written.push({ fsPath: uri.fsPath, content }); },
     openFile: async (uri) => { ui.opened.push(uri.fsPath); },
     showInformationMessage: async (message) => { ui.infos.push(message); return answers.infoChoice; },
@@ -127,20 +107,12 @@ function fakeUi(answers: {
   return ui;
 }
 
-/** The rich DBML text, its header naming `layoutFileName` (none for ''). */
-const RICH = (layoutFileName: string) =>
-  `// erd-studio dbml-export v2 (DBML 9.1+)\n${layoutFileName ? `// Table positions: ${layoutFileName}\n` : ''}`;
-const LAYOUT_JSON = '{ "version": "3.0.0" }\n';
+/** The rich DBML text: one file, its positions in the Project's erd_layout. */
+const RICH = "// erd-studio dbml-export v2 (DBML 9.1+)\n\nProject showcase {\n  erd_layout: '''\n    a 1 2\n  '''\n}\n";
 
 const EXPORTED = (format: DiagramExportFormat): SubjectAreaExport => {
   if (format === 'dbml-rich') {
-    return {
-      content: RICH('showcase.dbdiagram'),
-      fileName: 'showcase.dbml',
-      domainName: 'showcase',
-      layer: 'silver',
-      layout: { fileName: 'showcase.dbdiagram', content: LAYOUT_JSON, dbmlWithLayoutFileName: RICH },
-    };
+    return { content: RICH, fileName: 'showcase.dbml', domainName: 'showcase', layer: 'silver' };
   }
   return {
     content: format === 'mermaid' ? 'erDiagram\n%% erd-studio mermaid-export v1\n' : '// erd-studio dbml-export v1\n',
@@ -247,16 +219,17 @@ describe('which domain is exported', () => {
 });
 
 describe('the QuickPicks', () => {
-  it('offers Mermaid, DBML and DBML for dbdiagram.io, each with what it is for, under a title that names the logical design', async () => {
+  it('offers Mermaid, DBML and rich DBML, each with what it is for, under a title that names the logical design', async () => {
     const ui = fakeUi({});
     await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
     expect(ui.picks).toHaveLength(1);
     const [{ items, options }] = ui.picks;
-    expect(items.map((i) => i.label)).toEqual(['Mermaid', 'DBML', 'DBML for dbdiagram.io']);
+    expect(items.map((i) => i.label)).toEqual(['Mermaid', 'DBML', 'Rich DBML']);
     expect(items[0].detail).toBe('Renders in GitHub, GitLab and Markdown docs');
     expect(items[1].detail).toBe("Opens in any DBML tool. ERD Studio's fields go in notes; no table positions");
-    expect(items[2].detail).toBe("Keeps ERD Studio's fields and the table positions. Needs DBML 9.1 or later, as dbdiagram.io and dbdocs read");
-    expect(items.map((i) => i.description)).toEqual(['.mmd', '.dbml', '.dbml + .dbdiagram']);
+    expect(items[2].detail).toBe('Every ERD Studio field, positions in erd_layout. Needs DBML 9.1 or later, as dbdiagram.io and dbdocs read');
+    // One file each: no layout file beside the rich export.
+    expect(items.map((i) => i.description)).toEqual(['.mmd', '.dbml', '.dbml']);
     expect(options.title).toBe(EXPORT_TITLE);
     expect(options.title).toMatch(/logical design/);
     expect(options.placeHolder).toContain('"showcase"');
@@ -448,25 +421,25 @@ describe('Save As…', () => {
   });
 });
 
-describe('DBML for dbdiagram.io', () => {
-  it('Copy gives the DBML alone, its header naming no layout file, and says the clipboard has no positions', async () => {
+describe('rich DBML', () => {
+  it('Copy gives the whole file, positions included', async () => {
     const ui = fakeUi({ format: 'dbml-rich', action: 'copy' });
     const result = await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
-    expect(ui.clipboard).toEqual([RICH('')]);
+    expect(ui.clipboard).toEqual([RICH]);
     expect(ui.infos).toEqual([DBML_RICH_COPIED_MESSAGE]);
-    expect(DBML_RICH_COPIED_MESSAGE).toMatch(/no table positions/);
-    expect(DBML_RICH_COPIED_MESSAGE).toMatch(/Save As…/);
+    // Nothing is missing from the clipboard any more.
+    expect(DBML_RICH_COPIED_MESSAGE).not.toMatch(/position/i);
+    expect(DBML_RICH_COPIED_MESSAGE).not.toMatch(/dbdiagram file/);
     expect(ui.written).toEqual([]);
     expect(result).toEqual({ format: 'dbml-rich', action: 'copy', fileName: 'showcase.dbml' });
     expect(features()).toEqual(['exportDbmlRich']);
   });
 
-  it('Open gives the DBML alone, as dbml, and says where the positions would go', async () => {
+  it('Open gives the whole file, as dbml, and says nothing about missing positions', async () => {
     const ui = fakeUi({ format: 'dbml-rich', action: 'open', languages: ['dbml'] });
     await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
-    expect(ui.untitled).toEqual([{ content: RICH(''), language: 'dbml' }]);
-    expect(ui.infos).toEqual([DBML_RICH_OPENED_MESSAGE]);
-    expect(DBML_RICH_OPENED_MESSAGE).toMatch(/\.dbdiagram/);
+    expect(ui.untitled).toEqual([{ content: RICH, language: 'dbml' }]);
+    expect(ui.infos).toEqual([]);
     expect(ui.written).toEqual([]);
     expect(features()).toEqual(['exportDbmlRich']);
   });
@@ -474,83 +447,18 @@ describe('DBML for dbdiagram.io', () => {
   it('the action step names the format plainly', async () => {
     const ui = fakeUi({ format: 'dbml-rich' });
     await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
-    expect(ui.picks[1].options.title).toBe(`${EXPORT_TITLE}: DBML for dbdiagram.io`);
+    expect(ui.picks[1].options.title).toBe(`${EXPORT_TITLE}: Rich DBML`);
   });
 
-  it('Save As writes the .dbml and its .dbdiagram side by side, the header naming the layout by the name chosen', async () => {
+  it('Save As writes the one .dbml under the name chosen, its text unchanged', async () => {
     const ui = fakeUi({ format: 'dbml-rich', action: 'save', saveTo: '/elsewhere/model.dbml' });
     const result = await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
     expect(ui.saveDialogs[0].defaultUri?.fsPath).toBe(path.join('/project', 'showcase.dbml'));
-    expect(ui.saveDialogs[0].filters).toEqual({ 'DBML for dbdiagram.io': ['dbml'] });
-    expect(ui.existsAsked).toEqual(['/elsewhere/model.dbdiagram']);
-    expect(ui.modals).toEqual([]);
-    expect(ui.written).toEqual([
-      { fsPath: '/elsewhere/model.dbml', content: RICH('model.dbdiagram') },
-      { fsPath: '/elsewhere/model.dbdiagram', content: LAYOUT_JSON },
-    ]);
-    expect(ui.infos).toEqual(['Exported model.dbml and its table positions, model.dbdiagram.']);
-    expect(result).toEqual({
-      format: 'dbml-rich', action: 'save', fileName: 'showcase.dbml',
-      savedTo: '/elsewhere/model.dbml', layoutSavedTo: '/elsewhere/model.dbdiagram',
-    });
+    expect(ui.saveDialogs[0].filters).toEqual({ 'Rich DBML': ['dbml'] });
+    expect(ui.written).toEqual([{ fsPath: '/elsewhere/model.dbml', content: RICH }]);
+    expect(ui.infos).toEqual(['Exported model.dbml.']);
+    expect(result).toEqual({ format: 'dbml-rich', action: 'save', fileName: 'showcase.dbml', savedTo: '/elsewhere/model.dbml' });
     expect(features()).toEqual(['exportDbmlRich']);
-  });
-
-  it('keeps the suggested name\'s header when the user keeps the suggested name', async () => {
-    const ui = fakeUi({ format: 'dbml-rich', action: 'save', saveTo: '/project/showcase.dbml' });
-    await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
-    expect(ui.written.map((w) => w.fsPath)).toEqual(['/project/showcase.dbml', '/project/showcase.dbdiagram']);
-    expect(ui.written[0].content).toBe(EXPORTED('dbml-rich').content);
-  });
-
-  it('asks before replacing a .dbdiagram that is already there, and Replace writes both', async () => {
-    const ui = fakeUi({
-      format: 'dbml-rich', action: 'save', saveTo: '/x/model.dbml', existing: ['/x/model.dbdiagram'], modalChoice: REPLACE_LAYOUT_BUTTON,
-    });
-    const result = await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
-    expect(ui.modals).toEqual([{
-      message: 'model.dbdiagram already exists. Replace it?',
-      detail: "It holds the table positions dbdiagram.io uses for model.dbml. Replacing it gives it this diagram's positions.",
-      items: [REPLACE_LAYOUT_BUTTON, KEEP_LAYOUT_BUTTON],
-    }]);
-    expect(ui.written.map((w) => w.fsPath)).toEqual(['/x/model.dbml', '/x/model.dbdiagram']);
-    expect(result?.layoutSavedTo).toBe('/x/model.dbdiagram');
-  });
-
-  it('Save .dbml Only leaves the existing .dbdiagram untouched and says so', async () => {
-    const ui = fakeUi({
-      format: 'dbml-rich', action: 'save', saveTo: '/x/model.dbml', existing: ['/x/model.dbdiagram'], modalChoice: KEEP_LAYOUT_BUTTON,
-    });
-    const result = await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
-    expect(ui.written).toEqual([{ fsPath: '/x/model.dbml', content: RICH('model.dbdiagram') }]);
-    expect(ui.infos).toEqual(['Exported model.dbml. model.dbdiagram was left as it was.']);
-    expect(result).toEqual({ format: 'dbml-rich', action: 'save', fileName: 'showcase.dbml', savedTo: '/x/model.dbml' });
-    expect(features()).toEqual(['exportDbmlRich']);
-  });
-
-  it('cancelling that question writes nothing at all', async () => {
-    const ui = fakeUi({ format: 'dbml-rich', action: 'save', saveTo: '/x/model.dbml', existing: ['/x/model.dbdiagram'] });
-    expect(await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA)).toBeUndefined();
-    expect(ui.modals).toHaveLength(1);
-    expect(ui.written).toEqual([]);
-    expect(ui.infos).toEqual([]);
-    expect(features()).toEqual(['exportCancelled']);
-  });
-
-  it('a .dbdiagram it cannot check for is treated as absent', async () => {
-    const ui = fakeUi({ format: 'dbml-rich', action: 'save', saveTo: '/x/model.dbml' });
-    ui.fileExists = async () => { throw new Error('stat failed'); };
-    await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
-    expect(ui.written.map((w) => w.fsPath)).toEqual(['/x/model.dbml', '/x/model.dbdiagram']);
-  });
-
-  it('Mermaid and plain DBML never look for a layout file', async () => {
-    for (const format of ['mermaid', 'dbml'] as const) {
-      const ui = fakeUi({ format, action: 'save', saveTo: `/x/d.${format === 'mermaid' ? 'mmd' : 'dbml'}` });
-      await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
-      expect(ui.existsAsked).toEqual([]);
-      expect(ui.written).toHaveLength(1);
-    }
   });
 
   it('a .dbml it may not write saves nothing, and offers another location', async () => {
@@ -560,38 +468,6 @@ describe('DBML for dbdiagram.io', () => {
     expect(ui.errors).toEqual(["Couldn't save model.dbml: ERD Studio isn't allowed to write to that folder."]);
     expect(ui.errorButtons).toEqual([[CHOOSE_ANOTHER_LOCATION_BUTTON]]);
     expect(errors()).toEqual(['exportFailed']);
-  });
-
-  it('a .dbdiagram it may not write says the .dbml was saved without it, and offers another location', async () => {
-    const ui = fakeUi({ format: 'dbml-rich', action: 'save', saveTo: '/x/model.dbml' });
-    ui.writeFile = async (uri, content) => {
-      if (uri.fsPath.endsWith('.dbdiagram')) throw Object.assign(new Error('denied'), { code: 'NoPermissions' });
-      ui.written.push({ fsPath: uri.fsPath, content });
-    };
-    expect(await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA)).toBeUndefined();
-    expect(ui.written.map((w) => w.fsPath)).toEqual(['/x/model.dbml']);
-    expect(ui.errors).toEqual(["Saved model.dbml, but couldn't save its table positions, model.dbdiagram: ERD Studio isn't allowed to write it."]);
-    expect(ui.errorButtons).toEqual([[CHOOSE_ANOTHER_LOCATION_BUTTON]]);
-    expect(errors()).toEqual(['exportFailed']);
-    expect(features()).toEqual([]);
-  });
-
-  it('any other failure writing the .dbdiagram is ERD Studio\'s, and says the .dbml was saved', async () => {
-    const ui = fakeUi({ format: 'dbml-rich', action: 'save', saveTo: '/x/model.dbml' });
-    ui.writeFile = async (uri) => { if (uri.fsPath.endsWith('.dbdiagram')) throw new Error('boom'); };
-    await exportDiagramCommand(deps(ui).deps, SUBJECT_AREA);
-    expect(ui.errors).toEqual([
-      "Export Diagram hit a problem in ERD Studio while saving the table positions, so model.dbml was saved without model.dbdiagram. This isn't something you did. Please send us a report.",
-    ]);
-    expect(ui.errorButtons).toEqual([['Send Feedback']]);
-  });
-
-  it('layoutUriFor puts the layout beside the file under the same name, never on the file itself', () => {
-    expect(layoutUriFor(vscode.Uri.file('/x/model.dbml')).fsPath).toBe('/x/model.dbdiagram');
-    expect(layoutUriFor(vscode.Uri.file('/x/model')).fsPath).toBe('/x/model.dbdiagram');
-    expect(layoutUriFor(vscode.Uri.file('/x/a.b.dbml')).fsPath).toBe('/x/a.b.dbdiagram');
-    expect(layoutUriFor(vscode.Uri.file('/x/model.dbdiagram')).fsPath).toBe('/x/model.dbdiagram.dbdiagram');
-    expect(layoutUriFor(vscode.Uri.file('/x/Model.DBDIAGRAM')).fsPath).toBe('/x/Model.DBDIAGRAM.dbdiagram');
   });
 });
 
@@ -683,7 +559,7 @@ describe('with the real exporter', () => {
       expect(ui.errors).toEqual([]);
     }
   });
-  it('saves the fixture showcase domain as rich DBML plus its .dbdiagram, the bytes the shared export gives', async () => {
+  it('saves the fixture showcase domain as one rich DBML file, the bytes the shared export gives', async () => {
     const layerService = new LayerService(FIXTURE_ROOT, '.erd-studio');
     const subjectAreaService = new SubjectAreaService(layerService);
     subjectAreaService.setTableLibraryService(new TableLibraryService(FIXTURE_ROOT, '.erd-studio'));
@@ -694,17 +570,13 @@ describe('with the real exporter', () => {
     // This project's showcase is not core's fixture, so the bytes are the
     // shared export's (cli.export.test checks those against core's goldens).
     const direct = await exportDomain(SHOWCASE, 'dbml-rich');
-    expect(direct.content.startsWith('// erd-studio dbml-export v2 (DBML 9.1+)\n// Table positions: showcase.dbdiagram')).toBe(true);
-    expect(ui.written).toEqual([
-      { fsPath: '/out/showcase.dbml', content: direct.content },
-      { fsPath: '/out/showcase.dbdiagram', content: direct.layout!.content },
-    ]);
-    expect(JSON.parse(ui.written[1].content)).toMatchObject({ version: '3.0.0', defaultView: { tablePositions: expect.any(Array) } });
+    expect(direct.content.startsWith('// erd-studio dbml-export v2 (DBML 9.1+)\n')).toBe(true);
+    expect(direct.content).toContain("  erd_layout: '''\n");
+    expect(ui.written).toEqual([{ fsPath: '/out/showcase.dbml', content: direct.content }]);
 
-    // Copied, the header names no layout file; otherwise the text is the same.
+    // Copied, the text is the same: the positions travel with it.
     const copy = fakeUi({ format: 'dbml-rich', action: 'copy' });
     await exportDiagramCommand({ exportDomain, activeDomainPath: () => undefined, hasDiagrams: () => true, pickDomain: async () => undefined, ui: copy }, SHOWCASE);
-    const withoutLayoutLine = direct.content.split('\n').filter((l) => !l.startsWith('// Table positions:')).join('\n');
-    expect(copy.clipboard).toEqual([withoutLayoutLine]);
+    expect(copy.clipboard).toEqual([direct.content]);
   });
 });

@@ -121,7 +121,7 @@ describe('erdStudio.importDbml in activate()', () => {
     expect(fs.existsSync(path.join(plain, '.erd-studio', 'tables', 'gold', 'shop_customer.dbml'))).toBe(true);
   });
 
-  it('with a project: picks the file, reads it and its layout through workspace.fs, writes the diagram and opens it', async () => {
+  it('with a project: picks the file, reads it (positions in its erd_layout) through workspace.fs, writes the diagram and opens it', async () => {
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
     vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(root), name: path.basename(root), index: 0 }];
     await activate(context);
@@ -129,11 +129,8 @@ describe('erdStudio.importDbml in activate()', () => {
     expect(count('dbtSemantic.importDbml')).toBe(0);
 
     const dbml = path.join(inbox, 'shop.dbml');
-    fs.writeFileSync(dbml, 'Table shop_customer {\n  id int [pk]\n}\n\nTable shop_order {\n  id int [pk]\n  customer_id int [ref: > shop_customer.id]\n}\n');
-    fs.writeFileSync(path.join(inbox, 'shop.dbdiagram'), JSON.stringify({
-      version: '3.0.0',
-      defaultView: { tablePositions: [{ name: 'shop_customer', schemaName: 'public', x: 1, y: 2 }] },
-    }));
+    fs.writeFileSync(dbml, 'Table shop_customer {\n  id int [pk]\n}\n\nTable shop_order {\n  id int [pk]\n  customer_id int [ref: > shop_customer.id]\n}\n\n'
+      + "Project shop {\n  erd_layout: '''\n    shop_customer 1 2\n  '''\n}\n");
     const dialog = vi.spyOn(vscode.window, 'showOpenDialog').mockResolvedValue([vscode.Uri.file(dbml)] as never);
     vi.spyOn(vscode.workspace.fs, 'readFile').mockImplementation((async (uri: vscode.Uri) => fs.readFileSync(uri.fsPath)) as never);
     vi.spyOn(vscode.workspace.fs, 'stat').mockImplementation((async (uri: vscode.Uri) => {
@@ -161,7 +158,7 @@ describe('erdStudio.importDbml in activate()', () => {
     // The dry run was a modal whose detail lists the layout.
     const modal = info.mock.calls.find((c) => typeof c[1] === 'object')!;
     expect(String(modal[0])).toBe('Import 2 tables into a new diagram "shop" in the Gold layer.');
-    expect((modal[1] as { detail: string }).detail).toContain('shop.dbdiagram');
+    expect((modal[1] as { detail: string }).detail).toContain("1 of 2 tables placed from the file's erd_layout");
     expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: domainPath }), SUBJECT_AREA_EDITOR_VIEW_TYPE);
   });
 });

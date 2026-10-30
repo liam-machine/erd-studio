@@ -2483,7 +2483,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         semanticRoot: fullSemanticDirPath,
       }, arg)),
     // Export every domain's logical design into a folder the user picks, one
-    // file each (plus its .dbdiagram for DBML for dbdiagram.io).
+    // file each (rich DBML carries its positions in erd_layout).
     vscode.commands.registerCommand(EXPORT_ALL_DIAGRAMS_COMMAND, () =>
       exportAllDiagramsCommand({
         listSubjectAreas: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir),

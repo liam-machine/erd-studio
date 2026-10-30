@@ -13,8 +13,7 @@
  * including one built by an older core, and never throw on it.
  *
  * The mapping of each format is documented at the top of `exportMermaid.ts`,
- * `exportDbml.ts` and `exportDbmlRich.ts` (its layout file in
- * `dbdiagramLayout.ts`).
+ * `exportDbml.ts` and `exportDbmlRich.ts`.
  */
 
 import type { DisplaySubjectArea } from './types/display.js';
@@ -30,7 +29,7 @@ export { toMermaid } from './exportMermaid.js';
 /**
  * A text format a diagram can be exported to: `mermaid`, `dbml` (portable,
  * notes only) or `dbml-rich` (ERD Studio's fields as DBML custom properties,
- * DBML 9.1+, with a `.dbdiagram` layout file beside it).
+ * DBML 9.1+, its canvas positions in the Project's `erd_layout`).
  */
 export type DiagramExportFormat = 'mermaid' | 'dbml' | 'dbml-rich';
 
@@ -69,8 +68,7 @@ export function exportDiagram(domain: DisplaySubjectArea, format: DiagramExportF
  * spaces removed, at most 100 characters, and `diagram` when nothing is left.
  * A name Windows reserves (`con`, `nul.txt`, …) gets `-diagram` after the
  * reserved word, and a format outside {@link DIAGRAM_EXPORT_FORMATS} the
- * extension `txt`. A rich DBML export's layout file has the same base
- * (`dbdiagramLayoutFileName`).
+ * extension `txt`.
  */
 export function diagramExportFileName(domain: Pick<DisplaySubjectArea, 'domain'>, format: DiagramExportFormat): string {
   // Only the formats themselves: a plain lookup would also find `toString` and every other inherited property.

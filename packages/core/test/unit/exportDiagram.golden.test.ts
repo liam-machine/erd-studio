@@ -2,7 +2,7 @@
 /**
  * The exports are a contract: every core fixture that loads is exported to
  * every format and compared with a golden (test/fixtures/golden/<fixture>.mmd,
- * .dbml and .rich.dbml, plus the rich export's layout file <fixture>.dbdiagram),
+ * .dbml and .rich.dbml, whose Project carries the positions in erd_layout),
  * and each golden is parsed by the real parsers, old and current (see
  * ../exportParsers.ts): every DBML golden must read the same in @dbml/parse
  * 10.3.1 and @dbml/core 3.13.4, 2.6.1 and 2.4.2; every rich DBML golden must
@@ -22,8 +22,7 @@ import * as path from 'path';
 
 import { loadDisplaySubjectArea } from '../../src/loadDisplayDomain';
 import { DIAGRAM_EXPORT_FORMATS, exportDiagram } from '../../src/exportDiagram';
-import { serializeDbdiagramLayout } from '../../src/dbdiagramLayout';
-import { dbmlStorageReader } from '../../src/dbml/index';
+import { dbmlStorageReader, readErdLayoutDbml } from '../../src/dbml/index';
 import { MERMAID_LOAD_TIMEOUT_MS, goldenFileName, loadMermaidParsers, parseMermaid, readDbmlEverywhere, readDbmlRich } from '../exportParsers';
 
 // Load both Mermaid releases here, outside any test's timeout (#152).
@@ -96,24 +95,15 @@ describe('diagram export goldens', () => {
         // Every table is written, a table without columns with a placeholder column.
         const read = readDbmlRich(text);
         expect(read.tables.length).toBe(new Set(domain.models.map((m) => m.name.toLowerCase())).size);
+        // erd_layout places only tables the export writes, each under its own name, and reads back with no problem.
+        const layout = readErdLayoutDbml(text)!;
+        expect(layout.problemsAt).toEqual([]);
+        const tables = new Set(read.tables.map((t) => t.name));
+        for (const placed of Object.keys(layout.positions)) expect(tables.has(placed), placed).toBe(true);
       } else {
         const parsed = await parseMermaid(text);
         expect(parsed.entities.length).toBe(new Set(domain.models.map((m) => m.name.toLowerCase())).size);
       }
-    });
-
-    it('matches the .dbdiagram layout golden, which names the tables the rich export writes', async () => {
-      const domain = await load();
-      const text = serializeDbdiagramLayout(domain);
-      expect(serializeDbdiagramLayout(JSON.parse(JSON.stringify(domain)))).toBe(text);
-
-      const golden = path.join(GOLDEN_DIR, `${name}.dbdiagram`);
-      if (UPDATE) fs.writeFileSync(golden, text);
-      expect(text).toBe(fs.readFileSync(golden, 'utf-8'));
-
-      const layout = JSON.parse(text);
-      const tables = new Set(readDbmlRich(exportDiagram(domain, 'dbml-rich')).tables.map((t) => `${t.schema}.${t.name}`));
-      for (const p of layout.defaultView.tablePositions) expect(tables.has(`${p.schemaName}.${p.name}`), p.name).toBe(true);
     });
   });
 
