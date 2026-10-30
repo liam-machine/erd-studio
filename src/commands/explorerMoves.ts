@@ -200,7 +200,7 @@ export function describeExplorerRefusal(
     const file = path.basename(plan.move.to);
     if (plan.what === 'extension') {
       return {
-        message: `ERD Studio reads only files whose names end in .dbml, in lower case, so it no longer reads ${file}. The files that point at it were left as they are; ${back} to ${file.replace(/\.dbml$/i, '.dbml')}, and they follow.`,
+        message: `ERD Studio reads only files whose names end in .dbml, in lower case, so it no longer reads ${file}. The files that point at it were left as they are; ${/\.dbml$/i.test(file) ? `${back} to ${file.replace(/\.dbml$/i, '.dbml')}` : `${back}, or add .dbml to its name`}, and they follow.`,
         button,
       };
     }

@@ -596,14 +596,15 @@ function dbmlKindOfText(text: string | null, pathKind: DbmlFileKind | undefined)
  * The one name that keeps ERD Studio from reading a `.dbml` file at `rel`
  * (posix, semantic-relative) shaped as a tree path: a layer folder that is
  * not a layer name, a schema folder Move Table refuses, or an extension not
- * spelled `.dbml`. Undefined when there is none, or `rel` has no tree shape.
+ * spelled `.dbml` (or none: `fct_order.dbml` renamed to `fct_order`).
+ * Undefined when there is none, or `rel` has no tree shape.
  */
 function badNameAt(rel: string): { what: 'layer' | 'schema' | 'extension'; name: string; folder: string } | undefined {
   const segments = rel.split('/');
   const file = segments[segments.length - 1];
   const shaped = (segments.length === 3 && (segments[1] === DIAGRAMS_DIR || segments[1] === RELATIONSHIPS_DIR))
     || (segments.length === 4 && segments[1] === TABLES_DIR);
-  if (!shaped || !/\.dbml$/i.test(file)) return undefined;
+  if (!shaped) return undefined;
   if (!isDbmlLayerName(segments[0])) return { what: 'layer', name: segments[0], folder: segments[0] };
   if (segments.length === 4 && !isSchemaFolderName(segments[2])) return { what: 'schema', name: segments[2], folder: segments.slice(0, 3).join('/') };
   if (!file.endsWith('.dbml')) return { what: 'extension', name: file, folder: segments.slice(0, -1).join('/') };
@@ -712,7 +713,10 @@ export function planDbmlExplorerMoves(input: {
 
   // Only a DBML file of the tree can have files pointing at it.
   const considered = input.moves.flatMap((m): ConsideredMove[] => {
-    if (!inside(m.from) || !/\.dbml$/i.test(m.from)) return [];
+    // A file renamed without its .dbml, then given it back, is followed too: from where the files
+    // that point at it say it was, and only then (any other file given the extension is new).
+    const fromDbml = /\.dbml$/i.test(m.from);
+    if (!inside(m.from) || (!fromDbml && !/\.dbml$/i.test(m.to))) return [];
     const fromRel = rel(m.from);
     const toRel = inside(m.to) ? rel(m.to) : undefined;
     const fromTree = dbmlTreePathOf(fromRel);
@@ -722,14 +726,16 @@ export function planDbmlExplorerMoves(input: {
     if (!kind) return [];
     // Where the files that point at it say it is: where it was, unless that was not its place.
     let originRel = fromRel;
+    let pointedAt = fromDbml;
     if (kind === 'table' && table !== undefined && !(fromTree?.kind === 'table' && sameName(fromTree.name, table))) {
       const found = stale('table', table, toRel);
-      if (found.length === 1) originRel = found[0];
+      if (found.length === 1) [originRel, pointedAt] = [found[0], true];
       else if (found.length === 0 && now?.kind === 'table') originRel = `${path.posix.dirname(toRel!)}/${table}.dbml`;
     } else if (kind === 'relationships' && fromTree?.kind !== 'relationships') {
       const found = stale('relationships', path.posix.basename(fromRel).replace(/\.dbml$/i, ''), toRel);
-      if (found.length === 1) originRel = found[0];
+      if (found.length === 1) [originRel, pointedAt] = [found[0], true];
     }
+    if (!pointedAt) return [];
     const origin = dbmlTreePathOf(originRel);
     // Not a file ERD Studio read where it was: nothing points at it. (A diagram or relationships
     // file read from the other's folder resolves its use lines alike: same depth.)

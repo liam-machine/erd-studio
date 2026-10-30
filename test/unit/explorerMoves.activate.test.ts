@@ -685,6 +685,33 @@ describe('names ERD Studio cannot read', () => {
       'Rename File Back',
     );
   });
+
+  it('a table file renamed without its .dbml (the rename box selects the whole name): says so, not that the folder is wrong; adding .dbml then renames the table', async () => {
+    await activate(context);
+    await explorerMove(['gold/tables/gold/fct_order.dbml', 'gold/tables/gold/fct_orders']);
+    expect(questions()).toEqual([]);
+    expect(warnings).toHaveBeenCalledWith(
+      'ERD Studio reads only files whose names end in .dbml, in lower case, so it no longer reads fct_orders. The files that point at it were left as they are; rename the file back, or add .dbml to its name, and they follow.',
+      'Rename File Back',
+    );
+    answer('Update');
+    await explorerMove(['gold/tables/gold/fct_orders', 'gold/tables/gold/fct_orders.dbml']);
+    expect(warnings).toHaveBeenCalledTimes(1);
+    expect(questions()).toEqual(['Rename table fct_order to fct_orders everywhere (4 files)? Its file\'s name is the table\'s name.']);
+    expect(read('gold/tables/gold/fct_orders.dbml')).toMatch(/^Table gold\.fct_orders \[/m);
+    compilesClean();
+  });
+
+  it('another file given the .dbml extension is not taken for a table renamed: nothing asked, nothing written', async () => {
+    fs.writeFileSync(erd('gold', 'tables', 'gold', 'scratch.txt'), read('gold/tables/gold/fct_order.dbml'));
+    await activate(context);
+    answer('Update');
+    const before = bytes();
+    await explorerMove(['gold/tables/gold/scratch.txt', 'gold/tables/gold/scratch.dbml']);
+    expect(questions()).toEqual([]);
+    expect(warnings).not.toHaveBeenCalled();
+    expect([...bytes()].filter(([f]) => f !== 'gold/tables/gold/scratch.dbml')).toEqual([...before].filter(([f]) => f !== 'gold/tables/gold/scratch.txt'));
+  });
 });
 
 describe('in a YAML/JSON project', () => {
