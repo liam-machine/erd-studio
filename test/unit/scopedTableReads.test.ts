@@ -226,11 +226,14 @@ describe('readingTables: a diagram\'s tables get exactly the relationships the w
     expect(library.readingTables(['a'], () => library.getTable('a'))?.relationships).toHaveLength(2);
   });
 
-  it('getSubjectArea reads a DBML diagram\'s members with the same relationships as before', () => {
+  it('getSubjectArea reads a DBML diagram\'s members with the same relationships as before (it imports every relationships file)', () => {
     const { names, folderOf } = buildLibrary(9);
     const members = names.slice(0, 10);
     const useLine = (m: string): string => `use { table ${m} } from '${path.posix.relative('gold/diagrams', tablePath(folderOf.get(m)!, m))}'`;
-    write('gold/diagrams/d.dbml', `Project d {\n  erd_schema_version: '7'\n}\n\n${members.map(useLine).join('\n')}\n`);
+    // The canvas draws only the Refs of the files a diagram imports, as core does (dbmlDisplayParity.test.ts).
+    const imports = service().listRelationshipsFiles()
+      .map((f) => `use * from '${path.posix.relative('gold/diagrams', path.relative(semantic, f).split(path.sep).join('/'))}'`);
+    write('gold/diagrams/d.dbml', `Project d {\n  erd_schema_version: '7'\n}\n\n${[...members.map(useLine), ...imports].join('\n')}\n`);
     const layers = new LayerService(root, '.erd-studio');
     const domains = new SubjectAreaService(layers);
     const library = service();

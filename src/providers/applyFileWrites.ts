@@ -75,6 +75,13 @@ export interface ApplyFileWritesOptions {
   /** Called before each create (and each rename's target), to make its folder where only a plain mkdir is wrong (library paths). */
   ensureDir?(filePath: string): void;
   /**
+   * The semantic dir (absolute): creates are then ordered by what the tree
+   * says each file is (tables, relationships files, diagrams, README, the
+   * rest; `orderFileWrites`), so a file is created after every file its
+   * `use` lines name. Without it, `.yml` and `.dbml` creates go first.
+   */
+  semanticRoot?: string;
+  /**
    * Files moved as they are, in the same edit (after the creates and
    * replaces, before the deletes): a file rename keeps every byte, whatever
    * the file's encoding. The reconcile moves back any that landed.
@@ -143,7 +150,7 @@ export function undoAnchor(doc: vscode.TextDocument): { range: vscode.Range; tex
 /** Apply `writes` (absolute paths) as one WorkspaceEdit, reconciling a partial failure. */
 export async function applyFileWrites(writes: readonly FileWrite[], options: ApplyFileWritesOptions = {}): Promise<AppliedFileWrites> {
   const primaryPath = options.primary?.document.uri.fsPath;
-  const allWrites = orderFileWrites(mergeFileWrites(writes.filter((w) => !(primaryPath !== undefined && w.kind === 'replace' && samePath(w.path, primaryPath)))));
+  const allWrites = orderFileWrites(mergeFileWrites(writes.filter((w) => !(primaryPath !== undefined && w.kind === 'replace' && samePath(w.path, primaryPath)))), options.semanticRoot);
 
   // What each planned file held before (null: absent), to put back after a
   // failure. Creates too: a create that failed because its file was already

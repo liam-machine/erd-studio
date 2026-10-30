@@ -19,7 +19,7 @@ import { editRelationshipsDbml, editSubjectAreaDbml, editTableDbml, renderNewSub
 
 import type { FileWrite } from '../services/fileWrites';
 import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
-import { dbmlResolverOf, settleDbmlDiagramWrites, type DbmlDiagramResolver } from '../services/dbmlDiagramSettle';
+import { dbmlResolverOf, settleDbmlDiagramWrites, type SubjectAreaResolver } from '../services/dbmlDiagramSettle';
 import type { TableLibraryService } from '../services/logicalModelService';
 import type { SemanticTable } from '../types/semantic';
 
@@ -59,7 +59,7 @@ export function planDbmlSubjectAreaRename(input: {
   newPath: string;
   newSlug: string;
   text: string;
-  resolver: DbmlDiagramResolver;
+  resolver: Pick<SubjectAreaResolver, 'resolveTable' | 'relationshipsImportsFor' | 'fileExists'>;
 }): FileWrite[] {
   const rel = relPosix(input.semanticRoot, input.oldPath);
   const before = parseSubjectAreaDbml(input.text, rel).obj;
@@ -69,8 +69,7 @@ export function planDbmlSubjectAreaRename(input: {
     before,
     after,
     resolveTable: (name) => input.resolver.resolveTable(name),
-    // 2.0-switch: S7 (the folder-based resolver gives the imports until the planner's index does)
-    relationshipsImportsFor: (names) => input.resolver.relationshipsFilesFor(names),
+    relationshipsImportsFor: (names, current) => input.resolver.relationshipsImportsFor(names, current),
     fileExists: (p) => input.resolver.fileExists(p),
   });
   return [
@@ -81,11 +80,11 @@ export function planDbmlSubjectAreaRename(input: {
 
 /** The library as it is now, for rendering a diagram against it. */
 export function currentDbmlResolver(
-  tableLibraryService: Pick<TableLibraryService, 'planDbmlLibraryOps'>,
+  tableLibraryService: Pick<TableLibraryService, 'planDbmlLibraryOps' | 'getTablesDir'>,
   readText?: (filePath: string) => string | null,
-): { plan: DbmlLibraryWritePlan; resolver: DbmlDiagramResolver } {
+): { plan: DbmlLibraryWritePlan; resolver: SubjectAreaResolver } {
   const { plan } = tableLibraryService.planDbmlLibraryOps({}, readText);
-  return { plan, resolver: dbmlResolverOf(plan) };
+  return { plan, resolver: dbmlResolverOf(plan, path.dirname(tableLibraryService.getTablesDir())) };
 }
 
 /**
@@ -156,12 +155,17 @@ export function planDbmlDuplicateRename(input: {
   const reference = dot > 0 && !declared.endsWith('"') ? `${declared.slice(0, dot)}.${dbmlName(input.newName)}` : dbmlName(input.newName);
   // The copy's folder's relationships file, when it has one (the copy owns no Refs: readers ignore it).
   const copyFolderRels = [`${path.posix.dirname(newRel)}/_relationships.dbml`].filter((p) => plan.fileExists(p));
-  const base = dbmlResolverOf(plan);
-  const resolver: DbmlDiagramResolver = {
+  const base = dbmlResolverOf(plan, semanticRoot);
+  const resolver: SubjectAreaResolver = {
+    semanticRoot,
     resolveTable: (name) => (sameName(name, input.newName)
       ? { name: input.newName, reference, path: newRel, storage: 'dbml' }
       : base.resolveTable(name)),
-    relationshipsFilesFor: (names) => [...new Set(names.flatMap((n) => (sameName(n, input.newName) ? copyFolderRels : base.relationshipsFilesFor([n]))))],
+    // 2.0-switch: S7 (Give Duplicate's qualified re-spelling, §2.8, replaces the copy's folder file)
+    relationshipsImportsFor: (names, current) => [...new Set([
+      ...base.relationshipsImportsFor(names.filter((n) => !sameName(n, input.newName)), current),
+      ...(names.some((n) => sameName(n, input.newName)) ? copyFolderRels : []),
+    ])].sort(),
     fileExists: (p) => (p.toLowerCase() === newRel.toLowerCase() ? true : p.toLowerCase() === copyRel.toLowerCase() ? false : base.fileExists(p)),
     pathChanged: new Set([input.copy.name.toLowerCase(), input.newName.toLowerCase()]),
   };

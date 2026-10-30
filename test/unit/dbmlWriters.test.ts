@@ -89,7 +89,7 @@ describe('the writers', () => {
     };
     const text = renderNewTableDbml(table);
     expect(text).toBe(
-      "Table fct_order [schema: 'gold'] {\n" +
+      'Table gold.fct_order {\n' +
       "  Note: 'Order lines'\n" +
       '\n' +
       "  order_line_id BIGINT          [pk, natural_key: 'true', note: 'Line id']\n" +
@@ -101,15 +101,16 @@ describe('the writers', () => {
 
   it('a column whose settings pass 100 characters gets them one per line', () => {
     const long = 'x'.repeat(90);
-    const text = renderNewTableDbml({ name: 't', columns: [{ name: 'id', dataType: 'int', description: long, isPrimaryKey: true }] });
-    expect(text).toBe(`Table t {\n  id int [\n    pk,\n    note: '${long}'\n  ]\n}\n`);
+    const text = renderNewTableDbml({ name: 't', schema: 'main', columns: [{ name: 'id', dataType: 'int', description: long, isPrimaryKey: true }] });
+    expect(text).toBe(`Table main.t {\n  id int [\n    pk,\n    note: '${long}'\n  ]\n}\n`);
   });
 
-  it('a 1.9.3 table file still reads, the same table as the new layout', () => {
-    const old = parseTableDbml(V193_TABLE, 'fct_order');
+  it('a 1.9.3 table file still reads (its [schema:] setting is not the schema), the same table as the new layout writes in its folder', () => {
+    const old = parseTableDbml(V193_TABLE, 'fct_order', { schemaFolder: 'gold' });
     expect(old.ok).toBe(true);
     if (!old.ok) return;
-    const fresh = parseTableDbml(renderNewTableDbml(old.table), 'fct_order');
+    expect(old.table.schema).toBe('gold');
+    const fresh = parseTableDbml(renderNewTableDbml(old.table), 'fct_order', { schemaFolder: 'gold' });
     expect(fresh.ok && fresh.table).toEqual(old.table);
   });
 
@@ -144,37 +145,37 @@ describe('the writers', () => {
 
   it('a new diagram aligns its table use lines', () => {
     const text = renderNewSubjectAreaDbml({
-      filePath: 'gold/sales.dbml',
+      filePath: 'gold/diagrams/sales.dbml',
       domain: 'sales',
       members: [
-        { name: 'fct_order', reference: 'fct_order', path: 'tables/gold/fct_order.dbml' },
-        { name: 'dim_date', reference: 'dim_date', path: 'tables/dim_date.dbml' },
+        { name: 'fct_order', reference: 'gold.fct_order', path: 'gold/tables/gold/fct_order.dbml' },
+        { name: 'dim_date', reference: 'gold.dim_date', path: 'gold/tables/gold/dim_date.dbml' },
       ],
       relationshipsFiles: [],
       annotations: [],
     });
-    expect(text).toContain("use { table fct_order } from '../tables/gold/fct_order.dbml'\nuse { table dim_date }  from '../tables/dim_date.dbml'\n");
+    expect(text).toContain("use { table gold.fct_order } from '../tables/gold/fct_order.dbml'\nuse { table gold.dim_date }  from '../tables/gold/dim_date.dbml'\n");
     expect(formatDbml(text).changed).toBe(false);
   });
 
   it('a diagram edit that changes nothing leaves an unformatted file byte for byte', () => {
-    const text = "Project sales {\n    erd_schema_version: '7'\n}\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\nuse { table dim_date } from '../tables/dim_date.dbml'\n";
+    const text = "Project sales {\n    erd_schema_version: '7'\n}\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\nuse { table gold.dim_date } from '../tables/gold/dim_date.dbml'\n";
     const obj = { schemaVersion: 5, domain: 'sales', layer: 'gold', logical: { models: ['fct_order', 'dim_date'], relationships: [] } };
     const out = editSubjectAreaDbml(text, {
-      filePath: 'gold/sales.dbml',
+      filePath: 'gold/diagrams/sales.dbml',
       before: obj,
       after: structuredClone(obj),
-      resolveTable: (name) => ({ name, reference: name, path: name === 'dim_date' ? 'tables/dim_date.dbml' : `tables/gold/${name}.dbml`, storage: 'dbml' }),
-      relationshipsFilesFor: () => [],
+      resolveTable: (name) => ({ name, reference: `gold.${name}`, path: `gold/tables/gold/${name}.dbml`, storage: 'dbml' }),
+      relationshipsImportsFor: () => [],
       fileExists: () => true,
     });
     expect(out).toBe(text);
   });
 
   it('a layout-only edit (a drag) is NOT formatted: only erd_layout changes, the rest keeps its hand layout', () => {
-    const text = "Project sales {\n    erd_schema_version: '7'\n    erd_layout: '''\n      fct_order 1 2\n    '''\n}\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\nuse { table dim_date } from '../tables/dim_date.dbml'\n";
+    const text = "Project sales {\n    erd_schema_version: '7'\n    erd_layout: '''\n      fct_order 1 2\n    '''\n}\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\nuse { table gold.dim_date } from '../tables/gold/dim_date.dbml'\n";
     expect(formatDbml(text).changed).toBe(true);
-    const out = editDiagramLayoutDbml(text, { filePath: 'gold/sales.dbml', positions: { fct_order: { x: 3, y: 4 } }, annotations: [] });
+    const out = editDiagramLayoutDbml(text, { filePath: 'gold/diagrams/sales.dbml', positions: { fct_order: { x: 3, y: 4 } }, annotations: [] });
     expect(out).toBe(text.replace('      fct_order 1 2\n', '      fct_order 3 4\n'));
   });
 });

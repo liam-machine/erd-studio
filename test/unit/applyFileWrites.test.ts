@@ -1,8 +1,8 @@
 /**
  * applyFileWrites (D23, §5.3 steps 6–7 of docs/plans/native-dbml-storage.md,
  * §9.5): one WorkspaceEdit in a fixed order — the primary replace, then
- * creates (relationships files before table files before anything else),
- * then replaces, then deletes — and, when VS Code applies only part of it
+ * creates (with the semantic dir: table files, relationships files,
+ * diagrams, README, anything else, §2.8), then replaces, then deletes — and, when VS Code applies only part of it
  * (the mock applies a prefix), a reconcile back to the exact prior state; a
  * reconcile that fails too names the files in a modal. The primary is a
  * full-range replace, except with `minimalPrimary` (a DBML drag only).
@@ -41,29 +41,33 @@ function disk(): Record<string, string> {
 
 /** The primary diagram as an open, saved document. */
 function primary() {
-  const doc = createMockTextDocument(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8'), { persist: true });
+  const doc = createMockTextDocument(at('gold/diagrams/sales.dbml'), fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8'), { persist: true });
   (vscode.workspace.textDocuments as unknown[]).push(doc);
   return doc;
 }
 
 function plannedWrites(): FileWrite[] {
   return [
-    { kind: 'delete', path: at('tables/gold/old.dbml') },
-    { kind: 'replace', path: at('tables/gold/fct.dbml'), text: 'Table fct {\n  id INT [pk]\n  x INT\n}\n' },
+    { kind: 'delete', path: at('gold/tables/gold/old.dbml') },
+    { kind: 'replace', path: at('gold/tables/gold/fct.dbml'), text: 'Table fct {\n  id INT [pk]\n  x INT\n}\n' },
     { kind: 'create', path: at('gold/notes.md'), text: 'notes\n' },
-    { kind: 'create', path: at('tables/gold/new.dbml'), text: 'Table new {\n  id INT\n}\n' },
-    { kind: 'delete', path: at('tables/gold/older.dbml') },
-    { kind: 'create', path: at('tables/gold/_relationships.dbml'), text: '// rels\n' },
+    { kind: 'create', path: at('gold/tables/gold/new.dbml'), text: 'Table new {\n  id INT\n}\n' },
+    { kind: 'delete', path: at('gold/tables/gold/older.dbml') },
+    { kind: 'create', path: at('gold/relationships/gold.dbml'), text: '// rels\n' },
   ];
 }
+
+/** A semantic-relative path's op line. */
+const opsOf = (edit: unknown): string[] => (edit as { _ops: Array<{ kind: string; uri: { fsPath: string } }> })._ops
+  .map((op) => `${op.kind} ${path.relative(root, op.uri.fsPath).split(path.sep).join('/')}`);
 
 beforeEach(() => {
   _resetMockWorkspace();
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-apply-writes-'));
-  write('gold/sales.dbml', 'Project sales {\n}\n');
-  write('tables/gold/fct.dbml', 'Table fct {\n  id INT [pk]\n}\n');
-  write('tables/gold/old.dbml', 'Table old {\n  id INT\n}\n');
-  write('tables/gold/older.dbml', 'Table older {\n  id INT\n}\n');
+  write('gold/diagrams/sales.dbml', 'Project sales {\n}\n');
+  write('gold/tables/gold/fct.dbml', 'Table fct {\n  id INT [pk]\n}\n');
+  write('gold/tables/gold/old.dbml', 'Table old {\n  id INT\n}\n');
+  write('gold/tables/gold/older.dbml', 'Table older {\n  id INT\n}\n');
 });
 
 afterEach(() => {
@@ -72,25 +76,39 @@ afterEach(() => {
 });
 
 describe('the order of one WorkspaceEdit', () => {
-  it('primary replace, creates (relationships, tables, anything else), replaces, deletes', async () => {
+  it('primary replace, creates (tables, relationships files, anything else), replaces, deletes', async () => {
     const doc = primary();
-    const result = await applyFileWrites(plannedWrites(), { primary: { document: doc as unknown as vscode.TextDocument, text: 'Project sales {\n  Note: \'x\'\n}\n' } });
+    const result = await applyFileWrites(plannedWrites(), { primary: { document: doc as unknown as vscode.TextDocument, text: 'Project sales {\n  Note: \'x\'\n}\n' }, semanticRoot: root });
     expect(result.ok).toBe(true);
     expect(_appliedEdits).toHaveLength(1);
-    const ops = (_appliedEdits[0] as unknown as { _ops: Array<{ kind: string; uri: { fsPath: string } }> })._ops
-      .map((op) => `${op.kind} ${path.relative(root, op.uri.fsPath).split(path.sep).join('/')}`);
-    expect(ops).toEqual([
-      'replace gold/sales.dbml',
-      'createFile tables/gold/_relationships.dbml',
-      'createFile tables/gold/new.dbml',
+    expect(opsOf(_appliedEdits[0])).toEqual([
+      'replace gold/diagrams/sales.dbml',
+      'createFile gold/tables/gold/new.dbml',
+      'createFile gold/relationships/gold.dbml',
       'createFile gold/notes.md',
-      'replace tables/gold/fct.dbml',
-      'deleteFile tables/gold/old.dbml',
-      'deleteFile tables/gold/older.dbml',
+      'replace gold/tables/gold/fct.dbml',
+      'deleteFile gold/tables/gold/old.dbml',
+      'deleteFile gold/tables/gold/older.dbml',
     ]);
-    expect(result.created.map((p) => path.basename(p))).toEqual(['_relationships.dbml', 'new.dbml', 'notes.md']);
+    expect(result.created.map((p) => path.basename(p))).toEqual(['new.dbml', 'gold.dbml', 'notes.md']);
     expect(result.deleted.map((p) => path.basename(p))).toEqual(['old.dbml', 'older.dbml']);
     expect(result.replaced.map((u) => path.basename(u.fsPath))).toEqual(['fct.dbml']);
+  });
+
+  it('a create is ranked by what the tree says the file is: a schema folder named relationships still holds tables; diagrams, then README, come after', async () => {
+    const result = await applyFileWrites([
+      { kind: 'create', path: at('README.md'), text: '# .erd-studio\n' },
+      { kind: 'create', path: at('gold/diagrams/new.dbml'), text: 'Project new {\n}\n' },
+      { kind: 'create', path: at('gold/relationships/gold.dbml'), text: '// rels\n' },
+      { kind: 'create', path: at('gold/tables/relationships/x.dbml'), text: 'Table relationships.x {\n  id INT\n}\n' },
+    ], { semanticRoot: root });
+    expect(result.ok).toBe(true);
+    expect(opsOf(_appliedEdits[0])).toEqual([
+      'createFile gold/tables/relationships/x.dbml',
+      'createFile gold/relationships/gold.dbml',
+      'createFile gold/diagrams/new.dbml',
+      'createFile README.md',
+    ]);
   });
 });
 
@@ -134,8 +152,8 @@ describe('a partial apply (D23)', () => {
     expect(result.unrestored).toEqual([]);
     expect(doc.getText()).toBe(beforePrimary);
     // Replaced documents hold their old text again (and were saved, as they were saved before).
-    const fct = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('tables/gold/fct.dbml'));
-    if (fct) expect(fct.getText()).toBe(beforeDisk['tables/gold/fct.dbml']);
+    const fct = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at('gold/tables/gold/fct.dbml'));
+    if (fct) expect(fct.getText()).toBe(beforeDisk['gold/tables/gold/fct.dbml']);
     expect(disk()).toEqual(beforeDisk);
   });
 
@@ -146,25 +164,25 @@ describe('a partial apply (D23)', () => {
     const result = await applyFileWrites(plannedWrites(), { primary: { document: doc as unknown as vscode.TextDocument, text: 'Project sales {}\n' } });
     expect(result.ok).toBe(false);
     expect(result.unrestored.map((p) => path.relative(root, p).split(path.sep).join('/')).sort()).toEqual([
-      'gold/notes.md', 'gold/sales.dbml', 'tables/gold/_relationships.dbml', 'tables/gold/new.dbml',
+      'gold/diagrams/sales.dbml', 'gold/notes.md', 'gold/relationships/gold.dbml', 'gold/tables/gold/new.dbml',
     ]);
     expect(error).toHaveBeenCalledTimes(1);
     const [message, options] = error.mock.calls[0] as unknown as [string, { modal?: boolean }];
     expect(message).toContain('Restore these from source control');
-    expect(message).toContain('_relationships.dbml');
+    expect(message).toContain('gold/relationships/gold.dbml');
     expect(options).toEqual({ modal: true });
   });
 
   it('a create that failed because its file was already there leaves that file alone (only what the edit made is undone)', async () => {
     const doc = primary();
-    // The planned bytes, already on disk: createFile (overwrite: false) fails on it, after the relationships file landed.
-    write('tables/gold/new.dbml', 'Table new {\n  id INT\n}\n');
+    // The planned bytes, already on disk: createFile (overwrite: false) fails on it.
+    write('gold/tables/gold/new.dbml', 'Table new {\n  id INT\n}\n');
     const beforeDisk = disk();
     const result = await applyFileWrites(plannedWrites(), { primary: { document: doc as unknown as vscode.TextDocument, text: 'Project sales {}\n' } });
     expect(result.ok).toBe(false);
     expect(result.unrestored).toEqual([]);
     expect(disk()).toEqual(beforeDisk);
-    expect(disk()['tables/gold/new.dbml']).toBe('Table new {\n  id INT\n}\n');
+    expect(disk()['gold/tables/gold/new.dbml']).toBe('Table new {\n  id INT\n}\n');
   });
 
   it('nothing applied (the whole edit refused) needs no reconcile', async () => {

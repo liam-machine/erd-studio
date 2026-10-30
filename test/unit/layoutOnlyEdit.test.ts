@@ -67,7 +67,7 @@ interface Harness {
   errors(): string[];
 }
 
-async function open(diagram = 'gold/sales.dbml', tracker = new OwnWriteTracker()): Promise<Harness> {
+async function open(diagram = 'gold/diagrams/sales.dbml', tracker = new OwnWriteTracker()): Promise<Harness> {
   const layerService = new LayerService(root, '.erd-studio');
   const subjectAreaService = new SubjectAreaService(layerService);
   const tables = new TableLibraryService(root, '.erd-studio');
@@ -183,16 +183,16 @@ describe('a drag on a DBML diagram rewrites its erd_layout alone', () => {
     const invalidatePaths = vi.spyOn(h.tables, 'invalidatePaths');
     const invalidateCache = vi.spyOn(h.tables, 'invalidateCache');
     const listTables = vi.spyOn(h.tables, 'listTables');
-    const dbmlBefore = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    const dbmlBefore = fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8');
     // The fixture is not in the canonical layout, so a formatted write would show: a move never formats.
-    expect(formatWrittenDbml(dbmlBefore, 'gold/sales.dbml')).not.toBe(dbmlBefore);
-    const othersBefore = new Map(['tables/gold/fct_order.dbml', 'tables/gold/_relationships.dbml', 'silver/staging.dbml'].map((p) => [p, fs.readFileSync(at(p), 'utf-8')]));
+    expect(formatWrittenDbml(dbmlBefore, 'gold/diagrams/sales.dbml')).not.toBe(dbmlBefore);
+    const othersBefore = new Map(['gold/tables/gold/fct_order.dbml', 'gold/relationships/gold.dbml', 'silver/diagrams/staging.dbml'].map((p) => [p, fs.readFileSync(at(p), 'utf-8')]));
 
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
 
     expect(h.errors()).toEqual([]);
     expect(_appliedEdits).toHaveLength(1);
-    expect(pathsOf(_appliedEdits[0])).toEqual(['gold/sales.dbml']);
+    expect(pathsOf(_appliedEdits[0])).toEqual(['gold/diagrams/sales.dbml']);
     const ops = opsOf(_appliedEdits[0]) as Array<{ kind: string; range: { start: unknown; end: unknown }; newText: string }>;
     expect(ops).toHaveLength(1);
     // The replaced range lies inside the erd_layout entry, and is far smaller than the file.
@@ -200,7 +200,7 @@ describe('a drag on a DBML diagram rewrites its erd_layout alone', () => {
     const start = h.document.offsetAt(ops[0].range.start as never);
     expect(start).toBeGreaterThanOrEqual(span.start);
     expect(ops[0].newText.length).toBeLessThan(40);
-    const after = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    const after = fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8');
     expect(outsideLayout(after)).toBe(outsideLayout(dbmlBefore));
     expect(layoutEntry(after)).toContain('    fct_order 420 220\n');
     // A Project-first diagram keeps its order (§1.4).
@@ -221,13 +221,13 @@ describe('a drag on a DBML diagram rewrites its erd_layout alone', () => {
     _mockFormatOnSave.enabled = true;
     try {
       const h = await open();
-      const dbmlBefore = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
-      expect(formatWrittenDbml(dbmlBefore, 'gold/sales.dbml')).not.toBe(dbmlBefore);
+      const dbmlBefore = fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8');
+      expect(formatWrittenDbml(dbmlBefore, 'gold/diagrams/sales.dbml')).not.toBe(dbmlBefore);
 
       await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
 
       expect(h.errors()).toEqual([]);
-      const after = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+      const after = fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8');
       expect(outsideLayout(after)).toBe(outsideLayout(dbmlBefore));
       expect(h.document.getText()).toBe(after);
       expect(vscode.workspace.textDocuments.filter((d) => d.isDirty)).toEqual([]);
@@ -235,7 +235,7 @@ describe('a drag on a DBML diagram rewrites its erd_layout alone', () => {
       // The format-on-save participant is live: a save that is not ERD Studio's formats.
       h.document._setText(after);
       await h.document.save();
-      expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(formatWrittenDbml(after, 'gold/sales.dbml'));
+      expect(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')).toBe(formatWrittenDbml(after, 'gold/diagrams/sales.dbml'));
     } finally {
       for (const d of subscriptions) d.dispose();
     }
@@ -247,8 +247,8 @@ describe('a drag on a DBML diagram rewrites its erd_layout alone', () => {
     await h.panel._simulateMessage({ type: 'updateAnnotation', payload: { id: '3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c', width: 300, height: 160 } });
     expect(h.errors()).toEqual([]);
     expect(h.events.map((e) => e.layoutOnly)).toEqual([true, true]);
-    expect(_appliedEdits.every((e) => pathsOf(e).join() === 'gold/sales.dbml')).toBe(true);
-    const layout = layoutEntry(fs.readFileSync(at('gold/sales.dbml'), 'utf-8'));
+    expect(_appliedEdits.every((e) => pathsOf(e).join() === 'gold/diagrams/sales.dbml')).toBe(true);
+    const layout = layoutEntry(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8'));
     expect(layout).toContain('    dim_date 60 380\n');
     expect(layout).toContain('    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 1200 80 300 160\n');
   });
@@ -259,7 +259,7 @@ describe('a drag on a DBML diagram rewrites its erd_layout alone', () => {
     expect(h.errors()).toEqual([]);
     expect(h.events).toHaveLength(1);
     expect(h.events[0].layoutOnly).toBeUndefined();
-    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toContain("'Grain agreed'");
+    expect(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')).toContain("'Grain agreed'");
   });
 
   it('a drop where the table already was writes nothing: no edit, no save, no undo step', async () => {
@@ -273,14 +273,14 @@ describe('a drag on a DBML diagram rewrites its erd_layout alone', () => {
   });
 
   it('a git conflict in erd_layout refuses the drag with the §1.6 text, and writes nothing', async () => {
-    const conflicted = fs.readFileSync(at('gold/sales.dbml'), 'utf-8')
+    const conflicted = fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')
       .replace('    fct_order 400 200\n', '<<<<<<< HEAD\n    fct_order 400 200\n=======\n    fct_order 500 200\n>>>>>>> theirs\n');
-    fs.writeFileSync(at('gold/sales.dbml'), conflicted);
+    fs.writeFileSync(at('gold/diagrams/sales.dbml'), conflicted);
     const h = await open();
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 1, y: 2 } } } });
-    expect(h.errors().join(' ')).toContain('gold/sales.dbml has a merge conflict in erd_layout (line 12). Only positions differ: keep either side, then try again. Positions are not saved until then.');
+    expect(h.errors().join(' ')).toContain('gold/diagrams/sales.dbml has a merge conflict in erd_layout (line 12). Only positions differ: keep either side, then try again. Positions are not saved until then.');
     expect(_appliedEdits).toHaveLength(0);
-    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(conflicted);
+    expect(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')).toBe(conflicted);
   });
 
   it('the next drag, and the next open, read the diagram without compiling it (the drag\'s reading is remembered)', async () => {
@@ -302,9 +302,9 @@ describe('a drag on a DBML diagram rewrites its erd_layout alone', () => {
 describe('undo and redo of a drag', () => {
   async function dragged() {
     const h = await open();
-    const original = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    const original = fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8');
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
-    const moved = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    const moved = fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8');
     expect(moved).not.toBe(original);
     h.events.length = 0;
     h.panel._postedMessages.length = 0;
@@ -320,7 +320,7 @@ describe('undo and redo of a drag', () => {
     await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
     await vi.waitFor(() => expect(h.events).toHaveLength(1), { timeout: 2000, interval: 10 });
     expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: false, layoutOnly: true }]);
-    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(original);
+    expect(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')).toBe(original);
     expect(h.document.isDirty).toBe(false);
     expect(invalidateIndex).not.toHaveBeenCalled();
     expect(invalidatePaths).not.toHaveBeenCalled();
@@ -344,7 +344,7 @@ describe('undo and redo of a drag', () => {
       undo.dispose();
     }
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(original);
+    expect(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')).toBe(original);
     expect(h.events).toEqual([{ uri: h.document.uri, modelLibraryChanged: false, layoutOnly: true }]);
     expect(invalidateIndex).not.toHaveBeenCalled();
     expect(sends(h)).toBe(1);
@@ -362,7 +362,7 @@ describe('undo and redo of a drag', () => {
   it('an anchor-only undo that took away a file this canvas created still refreshes the library', async () => {
     const h = await open();
     // A table this canvas created, which the undo of its create deleted (no text event).
-    const created = at('tables/gold/dim_new.dbml');
+    const created = at('gold/tables/gold/dim_new.dbml');
     (h.provider as unknown as { editedTablePaths: Map<string, Set<string>> }).editedTablePaths
       .set(h.document.uri.toString(), new Set([created]));
     const invalidateIndex = vi.spyOn(h.tables, 'invalidateIndex');
@@ -378,7 +378,7 @@ describe('undo and redo of a drag', () => {
     h.document._setText(h.document.getText());
     await _fireDidChangeTextDocument(h.document, TextDocumentChangeReason.Undo);
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(moved);
+    expect(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')).toBe(moved);
     expect(h.document.isDirty).toBe(false);
     expect(invalidateIndex).not.toHaveBeenCalled();
     expect(h.events).toEqual([]);
@@ -395,9 +395,9 @@ describe('a Cmd+Z that arrives while the canvas is still flushing the last one',
    */
   it('is flushed after it, so the diagram is not left dirty and holds the second rewind', async () => {
     const h = await open();
-    const original = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    const original = fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8');
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
-    const first = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
+    const first = fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8');
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 520, y: 320 } } } });
     expect(first).not.toBe(original);
     const nativeUndo = async (text: string): Promise<void> => {
@@ -419,7 +419,7 @@ describe('a Cmd+Z that arrives while the canvas is still flushing the last one',
     await vi.waitFor(() => expect(secondFired).toBe(true), { timeout: 2000, interval: 10 });
     await vi.waitFor(() => {
       expect(h.document.isDirty).toBe(false);
-      expect(fs.readFileSync(at('gold/sales.dbml'), 'utf-8')).toBe(original);
+      expect(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')).toBe(original);
     }, { timeout: 2000, interval: 10 });
     expect(spy.mock.calls.length).toBe(2);
     expect(h.errors()).toEqual([]);
@@ -450,16 +450,16 @@ describe('a drag on a JSON diagram', () => {
 
 describe('applyFileWrites', () => {
   it('leaves out a replace whose text the file already holds (no edit, no save)', async () => {
-    const primary = createMockTextDocument(at('gold/sales.dbml'), fs.readFileSync(at('gold/sales.dbml'), 'utf-8'), { persist: true });
-    const same = fs.readFileSync(at('tables/dim_date.dbml'), 'utf-8');
-    const staging = fs.readFileSync(at('silver/staging.dbml'), 'utf-8');
+    const primary = createMockTextDocument(at('gold/diagrams/sales.dbml'), fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8'), { persist: true });
+    const same = fs.readFileSync(at('silver/tables/calendar/dim_date.dbml'), 'utf-8');
+    const staging = fs.readFileSync(at('silver/diagrams/staging.dbml'), 'utf-8');
     const applied = await applyFileWrites(
-      [{ kind: 'replace', path: at('tables/dim_date.dbml'), text: same }, { kind: 'replace', path: at('silver/staging.dbml'), text: `${staging}// y\n` }],
+      [{ kind: 'replace', path: at('silver/tables/calendar/dim_date.dbml'), text: same }, { kind: 'replace', path: at('silver/diagrams/staging.dbml'), text: `${staging}// y\n` }],
       { primary: { document: primary as unknown as vscode.TextDocument, text: `${primary.getText()}// x\n` } },
     );
     expect(applied.ok).toBe(true);
-    expect(applied.replaced.map((u) => relOf(u.fsPath))).toEqual(['silver/staging.dbml']);
-    expect(pathsOf(_appliedEdits[0])).toEqual(['gold/sales.dbml', 'silver/staging.dbml']);
+    expect(applied.replaced.map((u) => relOf(u.fsPath))).toEqual(['silver/diagrams/staging.dbml']);
+    expect(pathsOf(_appliedEdits[0])).toEqual(['gold/diagrams/sales.dbml', 'silver/diagrams/staging.dbml']);
     // A changed primary is still replaced whole.
     const full = opsOf(_appliedEdits[0])[0] as { newText: string; range: { start: unknown } };
     expect(full.newText.endsWith('// x\n')).toBe(true);
@@ -467,8 +467,8 @@ describe('applyFileWrites', () => {
   });
 
   it('minimalPrimary replaces only the primary\'s changed range; the document ends up with the new text', async () => {
-    const text = fs.readFileSync(at('gold/sales.dbml'), 'utf-8');
-    const primary = createMockTextDocument(at('gold/sales.dbml'), text, { persist: true });
+    const text = fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8');
+    const primary = createMockTextDocument(at('gold/diagrams/sales.dbml'), text, { persist: true });
     const next = text.replace('    fct_order 400 200\n', '    fct_order 401 200\n');
     const applied = await applyFileWrites([], { primary: { document: primary as unknown as vscode.TextDocument, text: next }, minimalPrimary: true });
     expect(applied.ok).toBe(true);
@@ -525,7 +525,7 @@ describe('drags that queue up while the host is busy', () => {
     expect(h.errors()).toEqual([]);
     // The first drag, then ONE edit for the two that waited.
     expect(spy).toHaveBeenCalledTimes(2);
-    const layout = layoutEntry(fs.readFileSync(at('gold/sales.dbml'), 'utf-8'));
+    const layout = layoutEntry(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8'));
     expect(layout).toContain('    fct_order 401 201\n');
     expect(layout).toContain('    dim_date 55 375\n');
     expect(layout).toContain('    dim_region 700 50\n');
@@ -550,17 +550,17 @@ describe('drags that queue up while the host is busy', () => {
     await Promise.all([a, b, c, d]);
     expect(h.errors()).toEqual([]);
     expect(spy).toHaveBeenCalledTimes(4);
-    expect(layoutEntry(fs.readFileSync(at('gold/sales.dbml'), 'utf-8'))).toContain('    dim_date 55 375\n');
+    expect(layoutEntry(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8'))).toContain('    dim_date 55 375\n');
   });
 });
 
 describe('own-write echo after a busy host (watchers)', () => {
   const semanticWatcher = () => _mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{json,dbml}'))!;
-  const tableWatcher = () => _mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{yml,dbml}'))!;
+  const tableWatcher = () => _mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('/tables/*/*.dbml'))!;
 
   it('a drag\'s .dbml save (its only write) is ours even when the watcher callback runs 12 s later', async () => {
     const tracker = new OwnWriteTracker();
-    const h = await open('gold/sales.dbml', tracker);
+    const h = await open('gold/diagrams/sales.dbml', tracker);
     await h.panel._simulateMessage({ type: 'updatePositions', payload: { positions: { fct_order: { x: 420, y: 220 } } } });
     expect(h.errors()).toEqual([]);
 
@@ -569,7 +569,7 @@ describe('own-write echo after a busy host (watchers)', () => {
     const changed = vi.fn();
     watcher.onSemanticFileChanged(changed);
     try {
-      semanticWatcher()._simulateChange(vscode.Uri.file(at('gold/sales.dbml')));
+      semanticWatcher()._simulateChange(vscode.Uri.file(at('gold/diagrams/sales.dbml')));
       // The host was blocked: the debounced callbacks run long after the 5 s the old tracker allowed.
       vi.setSystemTime(Date.now() + 12_000);
       vi.advanceTimersByTime(300);
@@ -577,8 +577,8 @@ describe('own-write echo after a busy host (watchers)', () => {
 
       // A real change made afterwards is still reported.
       vi.advanceTimersByTime(5_000);
-      fs.appendFileSync(at('gold/sales.dbml'), '\n');
-      semanticWatcher()._simulateChange(vscode.Uri.file(at('gold/sales.dbml')));
+      fs.appendFileSync(at('gold/diagrams/sales.dbml'), '\n');
+      semanticWatcher()._simulateChange(vscode.Uri.file(at('gold/diagrams/sales.dbml')));
       vi.advanceTimersByTime(300);
       expect(changed).toHaveBeenCalledTimes(1);
       expect(Object.keys(changed.mock.calls[0][0])).toEqual(['uri']);
@@ -594,7 +594,7 @@ describe('own-write echo after a busy host (watchers)', () => {
     const changed = vi.fn();
     watcher.onTableChanged(changed);
     try {
-      const file = at('tables/gold/fct_order.dbml');
+      const file = at('gold/tables/gold/fct_order.dbml');
       tracker.expectWrite([file]);
       fs.appendFileSync(file, '\n');
       tableWatcher()._simulateChange(vscode.Uri.file(file));
@@ -616,7 +616,7 @@ describe('own-write echo after a busy host (watchers)', () => {
     const changed = vi.fn();
     watcher.onSemanticFileChanged(changed);
     try {
-      const file = at('gold/sales.dbml');
+      const file = at('gold/diagrams/sales.dbml');
       tracker.expectWrite([file]);
       fs.appendFileSync(file, '\n');
       semanticWatcher()._simulateChange(vscode.Uri.file(file));

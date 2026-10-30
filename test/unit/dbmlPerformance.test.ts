@@ -1,14 +1,18 @@
 /**
- * Performance budgets for reading a large native DBML library (§7.6 of
- * docs/plans/native-dbml-storage.md): a flat library of 10,000 tables and
- * 30,000 Refs in one `tables/_relationships.dbml`. A time over its budget
- * is printed; the test fails above three times the budget (eight on CI),
- * which the quadratic reads this guards against exceed many times over. `DBML_PERF_LOG=1` prints every time.
+ * Performance budgets for reading and editing a large native DBML library in
+ * the layer-first tree (ERD Studio 2.0): 10,000 tables in three layers
+ * (`<L>/tables/<L>/`), 30,000 Refs, each in its owner's layer default file
+ * `<L>/relationships/<L>.dbml` (about 10,000 Refs each), plus one file split
+ * out by hand (`gold/relationships/hand.dbml`). A time over its budget is
+ * printed; the test fails above three times the budget (eight on CI), which
+ * the quadratic reads this guards against exceed many times over.
+ * `DBML_PERF_LOG=1` prints every time.
  *
  * The read budgets hold from S4 (the attachment is computed once per pass
- * and memoised, never rebuilt per table). The relationship-edit budget
- * (plan + `editRelationshipsDbml`, ≤ 3 s) joined with the editor pipeline's
- * DBML writes in S5.
+ * and memoised, never rebuilt per table). The placement (decision 5, over
+ * the index of every relationships file) and the one-relationship-add
+ * budgets are S6b's: an add plans against the whole library and rewrites
+ * the one file that holds the owner's Refs.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -17,10 +21,14 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { TableLibraryService } from '../../src/services/logicalModelService';
+import { placeNewRef } from '../../src/services/dbmlRelationshipsIndex';
 import { classifyWatchedSemanticPath } from '../../src/watchers/FileWatcherService';
 
 const TABLES = 10_000;
 const REFS_PER_TABLE = 3;
+const LAYERS = ['bronze', 'silver', 'gold'] as const;
+/** Tables whose Refs were split out of gold's default file by hand. */
+const HAND_SPLIT = 30;
 
 let root: string;
 
@@ -44,26 +52,47 @@ function withinBudget<T>(label: string, budgetMs: number, fn: () => T): T {
   return result;
 }
 
+const layerOf = (i: number): string => LAYERS[i % LAYERS.length];
+const tablePath = (i: number): string => `${layerOf(i)}/tables/${layerOf(i)}/t${i}.dbml`;
+/** Every Ref of table `i` is in its layer's default file, but the first HAND_SPLIT gold tables', which are in hand.dbml. */
+const refsFileOf = (i: number): string => (layerOf(i) === 'gold' && i < HAND_SPLIT * LAYERS.length ? 'gold/relationships/hand.dbml' : `${layerOf(i)}/relationships/${layerOf(i)}.dbml`);
+
 beforeAll(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-dbml-perf-'));
-  const dir = path.join(root, '.erd-studio', 'tables');
-  fs.mkdirSync(dir, { recursive: true });
-  const refs: string[] = ['// ERD Studio relationships.', ''];
+  const sem = path.join(root, '.erd-studio');
+  for (const l of LAYERS) {
+    fs.mkdirSync(path.join(sem, l, 'tables', l), { recursive: true });
+    fs.mkdirSync(path.join(sem, l, 'relationships'), { recursive: true });
+  }
+  fs.writeFileSync(path.join(sem, 'layers.json'), JSON.stringify({
+    schemaVersion: 1,
+    layers: LAYERS.map((id, order) => ({ id, label: id, abbreviation: id.slice(0, 3).toUpperCase(), color: '#a0a0a0', creatable: true, order })),
+  }));
+  const files = new Map<string, { uses: Set<number>; refs: string[] }>();
   for (let i = 0; i < TABLES; i++) {
     const fks = Array.from({ length: REFS_PER_TABLE }, (_, k) => `  fk${k} INT`).join('\n');
-    fs.writeFileSync(path.join(dir, `t${i}.dbml`), `Table t${i} {\n  id INT [pk]\n${fks}\n}\n`);
+    fs.writeFileSync(path.join(sem, tablePath(i)), `Table ${layerOf(i)}.t${i} {\n  id INT [pk]\n${fks}\n}\n`);
+    const file = refsFileOf(i);
+    const entry = files.get(file) ?? { uses: new Set<number>(), refs: [] };
+    files.set(file, entry);
     for (let k = 0; k < REFS_PER_TABLE; k++) {
-      refs.push(`Ref: t${i}.fk${k} >? t${(i + k + 1) % TABLES}.id`);
+      const to = (i + k + 1) % TABLES;
+      entry.uses.add(i).add(to);
+      entry.refs.push(`Ref: ${layerOf(i)}.t${i}.fk${k} >? ${layerOf(to)}.t${to}.id`);
     }
   }
-  fs.writeFileSync(path.join(dir, '_relationships.dbml'), `${refs.join('\n')}\n`);
+  for (const [file, { uses, refs }] of files) {
+    const lines = [...uses].sort((a, b) => a - b)
+      .map((i) => `use { table ${layerOf(i)}.t${i} } from '${path.posix.relative(path.posix.dirname(file), tablePath(i))}'`);
+    fs.writeFileSync(path.join(sem, file), `// ERD Studio relationships: Refs only.\n${lines.join('\n')}\n\n${refs.join('\n')}\n`);
+  }
 }, 120_000);
 
 afterAll(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe(`a flat DBML library of ${TABLES} tables and ${TABLES * REFS_PER_TABLE} Refs (§7.6)`, () => {
+describe(`a layer-first DBML library of ${TABLES} tables and ${TABLES * REFS_PER_TABLE} Refs (three default files and one split by hand)`, () => {
   it('reads every table, every relationships file and attaches within budget, then serves a 50-table canvas load', () => {
     const lib = new TableLibraryService(root, '.erd-studio');
     const tables = withinBudget('read and attach (cold)', 5_000, () => lib.listTables());
@@ -79,26 +108,48 @@ describe(`a flat DBML library of ${TABLES} tables and ${TABLES * REFS_PER_TABLE}
 
     // A second listTables is linear, not one library pass per table.
     withinBudget('listTables (warm)', 2_000, () => lib.listTables());
+  }, 120_000);
 
-    // One relationship edit: the library planned (snapshot, attach, one
-    // editRelationshipsDbml over the 30,000-Ref file), the file written once.
-    const owner = lib.getTable('t42')!;
-    owner.relationships = owner.relationships!.slice(1);
-    const { writes } = withinBudget('one relationship edit (plan + editRelationshipsDbml)', 3_000, () =>
-      lib.planTableWrites({ save: [{ model: owner }] }));
-    expect(writes.map((w) => `${w.kind} ${path.basename(w.path)}`)).toEqual(['replace _relationships.dbml']);
-    const text = (writes[0] as { text: string }).text;
-    expect(text.split('\n').filter((l) => l.startsWith('Ref')).length).toBe(TABLES * REFS_PER_TABLE - 1);
+  it('places a new Ref by decision 5 over the index of every relationships file within budget', () => {
+    const lib = new TableLibraryService(root, '.erd-studio');
+    // Cold, the index is built from the planner's snapshot, which reads every table file as well (S6a).
+    const index = withinBudget('the relationships index (cold: every table and relationships file read)', 6_000, () => lib.relationshipsIndex());
+    expect(index.files).toEqual(['bronze/relationships/bronze.dbml', 'gold/relationships/gold.dbml', 'gold/relationships/hand.dbml', 'silver/relationships/silver.dbml']);
+    expect(index.refs).toHaveLength(TABLES * REFS_PER_TABLE);
+    const placements = withinBudget('1,000 placements', 500, () =>
+      Array.from({ length: 1_000 }, (_, k) => placeNewRef({ table: `t${k}`, layer: layerOf(k) }, index)));
+    // Rule 1 everywhere: the file holding the owner's Refs, hand.dbml for the split ones.
+    expect(placements.every((p, k) => p.rule === 1 && p.file === refsFileOf(k))).toBe(true);
+    expect(placements[2].file).toBe('gold/relationships/hand.dbml');
+    expect(placements[92].file).toBe('gold/relationships/gold.dbml');
+  }, 120_000);
+
+  it('one relationship add plans against the whole library and rewrites only the file holding the owner\'s Refs, within budget', () => {
+    const lib = new TableLibraryService(root, '.erd-studio');
+    lib.listTables();
+    // t43 is a silver table (its layer's default file), t2 one of gold's split out by hand.
+    for (const [table, file] of [['t43', 'silver/relationships/silver.dbml'], ['t2', 'gold/relationships/hand.dbml']] as const) {
+      expect(refsFileOf(Number(table.slice(1)))).toBe(file);
+      const owner = lib.getTable(table)!;
+      owner.columns = [...owner.columns, { name: 'extra', dataType: 'INT', description: '' }];
+      owner.relationships = [...owner.relationships!, { fromColumn: 'extra', toModel: 't9999', toColumn: 'id', cardinality: 'many-to-one' }];
+      const { writes } = withinBudget(`one relationship add to ${file} (plan + editRelationshipsDbml)`, 3_000, () =>
+        lib.planTableWrites({ save: [{ model: owner }] }));
+      const rel = (p: string): string => path.relative(path.join(root, '.erd-studio'), p).split(path.sep).join('/');
+      expect(writes.map((w) => `${w.kind} ${rel(w.path)}`).sort()).toEqual([`replace ${file}`, `replace ${tablePath(Number(table.slice(1)))}`].sort());
+      const text = (writes.find((w) => rel(w.path) === file) as { text: string }).text;
+      expect(text).toContain(`Ref: ${layerOf(Number(table.slice(1)))}.${table}.extra >? ${layerOf(9999)}.t9999.id`);
+    }
   }, 120_000);
 
   it('the semantic watcher classifies a burst of one event per table file without listing the library each time', () => {
     const semantic = path.join(root, '.erd-studio');
-    const tables = path.join(semantic, 'tables');
     const kinds = withinBudget(`classify ${TABLES} table-file events`, 500, () =>
-      Array.from({ length: TABLES }, (_, i) => classifyWatchedSemanticPath(semantic, path.join(tables, `t${i}.dbml`))));
+      Array.from({ length: TABLES }, (_, i) => classifyWatchedSemanticPath(semantic, path.join(semantic, ...tablePath(i).split('/')))));
     expect(kinds.every((k) => k === 'table')).toBe(true);
-    // The relationships file and a diagram are still told apart.
-    expect(classifyWatchedSemanticPath(semantic, path.join(tables, '_relationships.dbml'))).toBe('relationships');
-    expect(classifyWatchedSemanticPath(semantic, path.join(semantic, 'gold', 'sales.dbml'))).toBe('domain');
+    // The relationships files and a diagram are still told apart.
+    expect(classifyWatchedSemanticPath(semantic, path.join(semantic, 'gold', 'relationships', 'gold.dbml'))).toBe('relationships');
+    expect(classifyWatchedSemanticPath(semantic, path.join(semantic, 'gold', 'relationships', 'hand.dbml'))).toBe('relationships');
+    expect(classifyWatchedSemanticPath(semantic, path.join(semantic, 'gold', 'diagrams', 'sales.dbml'))).toBe('domain');
   });
 });

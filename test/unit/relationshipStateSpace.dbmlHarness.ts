@@ -1,15 +1,18 @@
 /**
- * Real files for relationshipStateSpace on native DBML storage (§9.5 of
- * docs/plans/native-dbml-storage.md): a model World projected through the
+ * Real files for relationshipStateSpace on native DBML storage, in the
+ * layer-first tree (ERD Studio 2.0): a model World projected through the
  * DBML codec — diagram copies dropped (a DBML diagram holds no
  * relationships, D5), library entries canonicalised to their foreign-key
- * table (§2.8), ends respelled — then written as `tables/dim.dbml`,
- * `tables/gold/fct.dbml`, their folders' `_relationships.dbml` and DBML
- * diagrams `silver/D1..D3.dbml`, and read back through TableLibraryService.
+ * table (§2.8), ends respelled — then written as
+ * `silver/tables/silver/dim.dbml`, `gold/tables/gold/fct.dbml`, the
+ * relationships files the planner places their Refs in (decision 5) and
+ * DBML diagrams `silver/diagrams/D1..D3.dbml` importing exactly the files
+ * that hold a Ref between two of their tables, and read back through
+ * TableLibraryService.
  *
- * `dim` sits at the top of `tables/` and `fct` in `tables/gold/`, so a link
- * lands in a different relationships file depending on its owner: every
- * write must land in its owner's folder file.
+ * `dim` sits in silver and `fct` in gold, so a new Ref lands in a different
+ * layer's default file depending on its owner, and an existing one stays
+ * where it is (decision 5, a Ref is never moved).
  */
 
 import { vi } from 'vitest';
@@ -20,6 +23,9 @@ import * as vscode from 'vscode';
 
 import { canonicalRelationship } from '@erd-studio/core';
 import { readRelationshipsDbml, renderNewSubjectAreaDbml, renderNewTableDbml } from '@erd-studio/core/dbml';
+import { relationshipsImportsFor } from '../../src/services/dbmlRelationshipsIndex';
+import { diagramSummaryOf } from '../../src/services/dbmlDiagramSummaries';
+import type { RelationshipsIndex } from '../../src/services/dbmlRelationshipsIndex';
 import { createMockTextDocument, createMockWebviewPanel } from '../__mocks__/vscode';
 import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { SubjectAreaService } from '../../src/services/domainService';
@@ -38,8 +44,9 @@ import type { DbtSpec, SubjectAreaName, TableName, World } from './relationshipS
 import { SEMANTIC_DIR } from './relationshipStateSpace.harness';
 import type { GWorld } from './relationshipStateSpace.universes';
 
-export const TABLE_PATHS: Record<TableName, string> = { dim: 'tables/dim.dbml', fct: 'tables/gold/fct.dbml' };
-export const RELATIONSHIPS_FILES: Record<TableName, string> = { dim: 'tables/_relationships.dbml', fct: 'tables/gold/_relationships.dbml' };
+export const TABLE_PATHS: Record<TableName, string> = { dim: 'silver/tables/silver/dim.dbml', fct: 'gold/tables/gold/fct.dbml' };
+/** Each table's layer (and schema): its Ref goes to `<layer>/relationships/<layer>.dbml` when it has none yet (rule 2). */
+export const TABLE_LAYERS: Record<string, string> = { dim: 'silver', fct: 'gold', emp: 'gold' };
 
 export interface DbmlProject { root: string; tableLibraryService: TableLibraryService; subjectAreaService: SubjectAreaService; diagramPath: (d: SubjectAreaName) => string }
 
@@ -81,7 +88,7 @@ export function materialiseDbml(w: World): DbmlProject {
   for (const name of ['dim', 'fct'] as const) {
     const file = path.join(semantic, TABLE_PATHS[name]);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, renderNewTableDbml({ name, columns: columnsOf(w.profile, name) }));
+    fs.writeFileSync(file, renderNewTableDbml({ name, schema: TABLE_LAYERS[name], columns: columnsOf(w.profile, name) }));
   }
   fs.writeFileSync(path.join(semantic, 'layers.json'), `${JSON.stringify({ schemaVersion: 1, layers: [
     { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', creatable: true, order: 1 },
@@ -97,21 +104,54 @@ export function materialiseDbml(w: World): DbmlProject {
     writeFilesWithRollback(plan.writes.map((wr) => ({ ...wr, path: path.join(semantic, wr.path) })));
   }
   tableLibraryService.invalidateCache();
-  const diagramPath = (d: SubjectAreaName): string => path.join(semantic, 'silver', `${d}.dbml`);
-  fs.mkdirSync(path.join(semantic, 'silver'), { recursive: true });
-  for (const d of ['D1', 'D2', 'D3'] as const) {
-    const members = w.domModels[d];
-    const relationshipsFiles = [...new Set(members.map((m) => RELATIONSHIPS_FILES[m]))].filter((f) => fs.existsSync(path.join(semantic, f)));
-    fs.writeFileSync(diagramPath(d), renderNewSubjectAreaDbml({
-      filePath: `silver/${d}.dbml`, domain: d,
-      members: members.map((name) => ({ name, path: TABLE_PATHS[name] })),
-      relationshipsFiles,
-      positions: Object.fromEntries(members.map((m, i) => [m, { x: i * 300, y: 0 }])),
-    }));
-  }
+  const diagramPath = writeDiagrams(semantic, tableLibraryService.relationshipsIndex(), w.domModels, TABLE_PATHS);
   const subjectAreaService = new SubjectAreaService(new LayerService(root, SEMANTIC_DIR));
   subjectAreaService.setTableLibraryService(tableLibraryService);
   return { root, tableLibraryService, subjectAreaService, diagramPath };
+}
+
+/** The diagrams D1..D3 (`silver/diagrams/`), each importing exactly the files holding a Ref between two of its tables. */
+function writeDiagrams(
+  semantic: string,
+  index: RelationshipsIndex,
+  domModels: Record<SubjectAreaName, readonly string[]>,
+  tablePaths: Record<string, string>,
+): (d: SubjectAreaName) => string {
+  const diagramPath = (d: SubjectAreaName): string => path.join(semantic, 'silver', 'diagrams', `${d}.dbml`);
+  fs.mkdirSync(path.join(semantic, 'silver', 'diagrams'), { recursive: true });
+  for (const d of ['D1', 'D2', 'D3'] as const) {
+    const members = domModels[d];
+    fs.writeFileSync(diagramPath(d), renderNewSubjectAreaDbml({
+      filePath: `silver/diagrams/${d}.dbml`, domain: d,
+      members: members.map((name) => ({ name, reference: `${TABLE_LAYERS[name]}.${name}`, path: tablePaths[name] })),
+      relationshipsFiles: relationshipsImportsFor(members, index),
+      positions: Object.fromEntries(members.map((m, i) => [m, { x: i * 300, y: 0 }])),
+    }));
+  }
+  return diagramPath;
+}
+
+/**
+ * The violations of the import invariant: each diagram's `use *` set of
+ * relationships files equals `relationshipsImportsFor(members)` over the
+ * project's relationships files as they are.
+ */
+export function importViolations(p: DbmlProject): string[] {
+  const out: string[] = [];
+  const index = new TableLibraryService(p.root, SEMANTIC_DIR).relationshipsIndex();
+  const semantic = path.join(p.root, SEMANTIC_DIR);
+  for (const d of ['D1', 'D2', 'D3'] as const) {
+    const rel = path.relative(semantic, p.diagramPath(d)).split(path.sep).join('/');
+    const summary = diagramSummaryOf(rel, fs.readFileSync(p.diagramPath(d), 'utf-8'));
+    if (!summary) {
+      out.push(`imports: ${rel} does not parse`);
+      continue;
+    }
+    const wanted = relationshipsImportsFor(summary.members, index, { current: summary.relationshipsUses });
+    const have = [...summary.relationshipsUses].sort();
+    if (JSON.stringify(wanted) !== JSON.stringify(have)) out.push(`imports: ${rel} imports [${have.join(', ')}], not [${wanted.join(', ')}]`);
+  }
+  return out;
 }
 
 /** A profile's dbt tests as a schema yml the real YmlParserService reads (#133 L1), as the JSON harness writes them. */
@@ -164,13 +204,15 @@ export function dbmlFiles(p: DbmlProject): Record<string, string> {
   return out;
 }
 
-/** Each Ref in each relationships file: the file, and the canonical owner and link keys of its pairs. */
-export function storedRefs(p: DbmlProject): Array<{ file: string; owner: string; links: string[] }> {
-  const out: Array<{ file: string; owner: string; links: string[] }> = [];
+/** Each Ref in each relationships file (`<layer>/relationships/*.dbml`): the file, the table pair (lower, sorted), the owner as written and the link keys of its pairs. */
+export function storedRefs(p: DbmlProject): Array<{ file: string; owner: string; pair: string; links: string[] }> {
+  const out: Array<{ file: string; owner: string; pair: string; links: string[] }> = [];
   for (const [file, text] of Object.entries(dbmlFiles(p))) {
-    if (!file.endsWith('_relationships.dbml')) continue;
+    if (!/^[^/]+\/relationships\/[^/]+\.dbml$/.test(file)) continue;
     for (const ref of readRelationshipsDbml(text).refs) {
-      out.push({ file, owner: ref.relationships[0]?.fromModel.toLowerCase() ?? '', links: ref.relationships.map(linkKey) });
+      const first = ref.relationships[0];
+      const pair = first ? [first.fromModel.toLowerCase(), first.toModel.toLowerCase()].sort().join('~') : '';
+      out.push({ file, owner: first?.fromModel.toLowerCase() ?? '', pair, links: ref.relationships.map(linkKey) });
     }
   }
   return out;
@@ -230,19 +272,19 @@ export function normaliseLibrary(w: World): string {
 // The GROUP and SELF universes (relationshipStateSpace.universes.ts, #133 L2, L3)
 // ---------------------------------------------------------------------------
 
-/** Where each table of a universe lives, and its folder's relationships file. */
+/** Where each table of a universe lives, and its layer's default relationships file (where its first Ref goes). */
 export interface GLayout { tablePaths: Record<string, string>; relationshipsFiles: Record<string, string> }
 
-/** GROUP: `dim` (keyed by the composite (k, k_x)) at the top of `tables/`, `fct` in `tables/gold/`. */
+/** GROUP: `dim` (keyed by the composite (k, k_x)) in silver, `fct` in gold. */
 export const GROUP_LAYOUT: GLayout = {
-  tablePaths: { dim: 'tables/dim.dbml', fct: 'tables/gold/fct.dbml' },
-  relationshipsFiles: { dim: 'tables/_relationships.dbml', fct: 'tables/gold/_relationships.dbml' },
+  tablePaths: { dim: TABLE_PATHS.dim, fct: TABLE_PATHS.fct },
+  relationshipsFiles: { dim: 'silver/relationships/silver.dbml', fct: 'gold/relationships/gold.dbml' },
 };
 
-/** SELF: `emp` in `tables/gold/`; its self-reference is a bare `emp.mgr > emp.id`-style Ref. */
+/** SELF: `emp` in gold; its self-reference is a bare `emp.mgr > emp.id`-style Ref. */
 export const SELF_LAYOUT: GLayout = {
-  tablePaths: { emp: 'tables/gold/emp.dbml' },
-  relationshipsFiles: { emp: 'tables/gold/_relationships.dbml' },
+  tablePaths: { emp: 'gold/tables/gold/emp.dbml' },
+  relationshipsFiles: { emp: 'gold/relationships/gold.dbml' },
 };
 
 /**
@@ -279,10 +321,11 @@ export function materialiseDbmlG(w: GWorld, layout: GLayout): DbmlProject {
     for (const name of Object.keys(w.columns)) {
       const file = path.join(semantic, layout.tablePaths[name]);
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, renderNewTableDbml({ name, columns: w.columns[name] }));
+      fs.writeFileSync(file, renderNewTableDbml({ name, schema: TABLE_LAYERS[name], columns: w.columns[name] }));
     }
     fs.writeFileSync(path.join(semantic, 'layers.json'), `${JSON.stringify({ schemaVersion: 1, layers: [
       { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', creatable: true, order: 1 },
+      { id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', creatable: true, order: 2 },
     ] }, null, 2)}\n`);
     const tableLibraryService = new TableLibraryService(root, SEMANTIC_DIR);
     const saves = Object.keys(w.columns).filter((n) => w.lib[n].length > 0).map((name) => ({
@@ -293,18 +336,7 @@ export function materialiseDbmlG(w: GWorld, layout: GLayout): DbmlProject {
       writeFilesWithRollback(plan.writes.map((wr) => ({ ...wr, path: path.join(semantic, wr.path) })));
     }
     tableLibraryService.invalidateCache();
-    const diagramPath = (d: SubjectAreaName): string => path.join(semantic, 'silver', `${d}.dbml`);
-    fs.mkdirSync(path.join(semantic, 'silver'), { recursive: true });
-    for (const d of ['D1', 'D2', 'D3'] as const) {
-      const members = w.domModels[d];
-      const relationshipsFiles = [...new Set(members.map((m) => layout.relationshipsFiles[m]))].filter((f) => fs.existsSync(path.join(semantic, f)));
-      fs.writeFileSync(diagramPath(d), renderNewSubjectAreaDbml({
-        filePath: `silver/${d}.dbml`, domain: d,
-        members: members.map((name) => ({ name, path: layout.tablePaths[name] })),
-        relationshipsFiles,
-        positions: Object.fromEntries(members.map((m, i) => [m, { x: i * 300, y: 0 }])),
-      }));
-    }
+    const diagramPath = writeDiagrams(semantic, tableLibraryService.relationshipsIndex(), w.domModels, layout.tablePaths);
     const subjectAreaService = new SubjectAreaService(new LayerService(root, SEMANTIC_DIR));
     subjectAreaService.setTableLibraryService(tableLibraryService);
     return { root, tableLibraryService, subjectAreaService, diagramPath };

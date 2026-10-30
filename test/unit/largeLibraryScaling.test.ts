@@ -8,8 +8,9 @@
  *
  * So these tests count work, not time: directory listings, file reads and
  * DBML compiles, through the real services and editor provider on a
- * 1,100-table library generated here (three layer folders, a relationships
- * file per folder, a 500-table diagram). Counts do not drift on a slow CI
+ * 1,100-table library generated here in the layer-first tree (three layers,
+ * `<L>/tables/<L>/`, one default relationships file per layer
+ * `<L>/relationships/<L>.dbml`, a 500-table diagram in `gold/diagrams/`). Counts do not drift on a slow CI
  * runner; the bounds sit far below what the quadratic versions did (tens of
  * thousands of listings) and far above what the current code does. Each
  * operation also gets a wall-clock budget with the same 3× (8× on CI) margin
@@ -41,6 +42,18 @@ const TABLES = 1_100;
 const MEMBERS = 500;
 const SMALL_DIAGRAMS_PER_LAYER = 3;
 const LAYERS = ['bronze', 'silver', 'gold'] as const;
+/**
+ * What listing a DBML library costs (S5): the semantic dir once, then for
+ * each layer its `tables/` and `relationships/` folders and each schema
+ * folder (one schema per layer here). Never a hand-raised constant.
+ */
+const DBML_LISTINGS = 1 + LAYERS.length * (2 + 1);
+/**
+ * The paths the library index stats to check itself, for a DBML library
+ * (S5): the semantic dir and `layers.json`, then each layer folder, its
+ * `tables/`, its schema folder and its `relationships/`.
+ */
+const DBML_CHECKED_PATHS = 2 + LAYERS.length * 4;
 const MARGIN = process.env.CI ? 8 : 3;
 const LOG = Boolean(process.env.DBML_PERF_LOG);
 
@@ -73,41 +86,59 @@ function layoutEntry(members: readonly number[]): string {
   return `  erd_layout: '''\n${lines.map((l) => `    ${l}\n`).join('')}  '''\n`;
 }
 
-function diagramText(name: string, members: readonly number[]): string {
-  const uses = members.map((i) => `use { table ${tableName(i)} } from '../tables/${folderOf(i)}/${tableName(i)}.dbml'`);
-  const rels = LAYERS.map((f) => `use * from '../tables/${f}/_relationships.dbml'`);
-  return `Project ${name} {\n  erd_schema_version: '7'\n  erd_show_fk_edges: 'true'\n${layoutEntry(members)}}\n\n${uses.join('\n')}\n${rels.join('\n')}\n`;
+/** A table's file, semantic-relative: `<L>/tables/<L>/<name>.dbml`. */
+const tablePath = (i: number): string => `${folderOf(i)}/tables/${folderOf(i)}/${tableName(i)}.dbml`;
+/** A layer's default relationships file. */
+const relationshipsPath = (layer: string): string => `${layer}/relationships/${layer}.dbml`;
+/** The shortest relative path from the file `from` to `to` (both semantic-relative), `./` added when it does not climb. */
+const usePath = (from: string, to: string): string => {
+  const rel = path.posix.relative(path.posix.dirname(from), to);
+  return rel.startsWith('../') ? rel : `./${rel}`;
+};
+
+/** The relationships files holding a Ref with both ends among `members` (each Ref is in its owner's layer file): what a diagram imports. */
+function importsOf(members: readonly number[]): string[] {
+  const set = new Set(members);
+  const files = new Set<string>();
+  for (const i of members) for (const r of refsOf(i)) if (set.has(r.to)) files.add(relationshipsPath(folderOf(i)));
+  return [...files].sort();
 }
 
-/** Writes the library and its diagrams under `root/.erd-studio`. */
+function diagramText(name: string, layer: string, members: readonly number[]): string {
+  const file = `${layer}/diagrams/${name}.dbml`;
+  const uses = members.map((i) => `use { table ${folderOf(i)}.${tableName(i)} } from '${usePath(file, tablePath(i))}'`);
+  const rels = importsOf(members).map((f) => `use * from '${usePath(file, f)}'`);
+  return `Project ${name} {\n  erd_schema_version: '7'\n  erd_show_fk_edges: 'true'\n${layoutEntry(members)}}\n\n${[...uses, ...rels].join('\n')}\n`;
+}
+
+/** Writes the library and its diagrams under `root/.erd-studio`, in the layer-first tree. */
 function writeDbmlProject(root: string): void {
   const sem = path.join(root, '.erd-studio');
-  for (const f of LAYERS) fs.mkdirSync(path.join(sem, 'tables', f), { recursive: true });
-  for (const f of LAYERS) fs.mkdirSync(path.join(sem, f), { recursive: true });
+  for (const f of LAYERS) {
+    for (const dir of [`tables/${f}`, 'relationships', 'diagrams']) fs.mkdirSync(path.join(sem, f, dir), { recursive: true });
+  }
   fs.writeFileSync(path.join(sem, 'layers.json'), LAYERS_JSON);
   const refLines = new Map<string, string[]>(LAYERS.map((f) => [f, []]));
   const named = new Map<string, Set<number>>(LAYERS.map((f) => [f, new Set()]));
   for (let i = 0; i < TABLES; i++) {
     const refs = refsOf(i);
     const columns = ['  id BIGINT [pk]', ...refs.map((r) => `  ${r.column} BIGINT`), "  label VARCHAR [note: 'a label']"];
-    fs.writeFileSync(path.join(sem, 'tables', folderOf(i), `${tableName(i)}.dbml`), `Table ${tableName(i)} {\n${columns.join('\n')}\n  Note: 'Table ${i}'\n}\n`);
+    fs.writeFileSync(path.join(sem, tablePath(i)), `Table ${folderOf(i)}.${tableName(i)} {\n${columns.join('\n')}\n  Note: 'Table ${i}'\n}\n`);
     for (const r of refs) {
-      refLines.get(folderOf(i))!.push(`Ref: ${tableName(i)}.${r.column} >? ${tableName(r.to)}.id`);
+      refLines.get(folderOf(i))!.push(`Ref: ${folderOf(i)}.${tableName(i)}.${r.column} >? ${folderOf(r.to)}.${tableName(r.to)}.id`);
       named.get(folderOf(i))!.add(i).add(r.to);
     }
   }
   for (const f of LAYERS) {
-    const uses = [...named.get(f)!].sort((a, b) => a - b).map((i) => {
-      const from = folderOf(i) === f ? `./${tableName(i)}.dbml` : `../${folderOf(i)}/${tableName(i)}.dbml`;
-      return `use { table ${tableName(i)} } from '${from}'`;
-    });
-    fs.writeFileSync(path.join(sem, 'tables', f, '_relationships.dbml'), `// ERD Studio relationships.\n${uses.join('\n')}\n\n${refLines.get(f)!.join('\n')}\n`);
+    const file = relationshipsPath(f);
+    const uses = [...named.get(f)!].sort((a, b) => a - b).map((i) => `use { table ${folderOf(i)}.${tableName(i)} } from '${usePath(file, tablePath(i))}'`);
+    fs.writeFileSync(path.join(sem, file), `// ERD Studio relationships: Refs only.\n${uses.join('\n')}\n\n${refLines.get(f)!.join('\n')}\n`);
   }
-  fs.writeFileSync(path.join(sem, 'gold', 'big.dbml'), diagramText('big', bigMembers));
+  fs.writeFileSync(path.join(sem, 'gold', 'diagrams', 'big.dbml'), diagramText('big', 'gold', bigMembers));
   LAYERS.forEach((f, li) => {
     for (let d = 0; d < SMALL_DIAGRAMS_PER_LAYER; d++) {
       const members = Array.from({ length: 30 }, (_, k) => (li * 300 + d * 40 + k * 3) % TABLES);
-      fs.writeFileSync(path.join(sem, f, `${f}_area_${d}.dbml`), diagramText(`${f}_area_${d}`, members));
+      fs.writeFileSync(path.join(sem, f, 'diagrams', `${f}_area_${d}.dbml`), diagramText(`${f}_area_${d}`, f, members));
     }
   });
 }
@@ -155,15 +186,22 @@ function writeYamlProject(root: string): void {
 interface Counts {
   readdir: number;
   stat: number;
-  /** Reads of library table files (`tables/**.dbml` or `logical-models/**.yml`, not `_relationships.dbml`). */
+  /** Reads of library table files (`<L>/tables/**.dbml` or `logical-models/**.yml`). */
   tableReads: number;
   /** The most times any one file was read. */
   maxReadsOfOneFile: number;
   diagramReads: number;
+  /** The diagram files read, by file name. */
+  diagramsRead: string[];
   relationshipsReads: number;
   /** DBML texts handed to @dbml/parse (each a compile that missed core's cache), by kind. */
   tableCompiles: number;
+  /** Every diagram text handed to the parser: full compiles and syntax-only parses (summaries, member counts). */
   diagramCompiles: number;
+  /** The Project names of the diagrams fully compiled (not a syntax-only parse), in order. */
+  diagramsCompiled: string[];
+  /** Relationships files fully compiled (a syntax-only parse, as the formatter's, is not counted). */
+  relationshipsCompiles: number;
 }
 
 const cjsFs = createRequire(__filename)('fs') as typeof fs;
@@ -175,7 +213,7 @@ const realSetSource = parseLayout.setSource;
 let current: { counts: Counts; perFile: Map<string, number> } | undefined;
 
 function startCounting(): void {
-  const counts: Counts = { readdir: 0, stat: 0, tableReads: 0, maxReadsOfOneFile: 0, diagramReads: 0, relationshipsReads: 0, tableCompiles: 0, diagramCompiles: 0 };
+  const counts: Counts = { readdir: 0, stat: 0, tableReads: 0, maxReadsOfOneFile: 0, diagramReads: 0, diagramsRead: [], relationshipsReads: 0, tableCompiles: 0, diagramCompiles: 0, diagramsCompiled: [], relationshipsCompiles: 0 };
   const perFile = new Map<string, number>();
   current = { counts, perFile };
   (cjsFs as { readdirSync: unknown }).readdirSync = function (this: unknown, ...args: unknown[]) {
@@ -190,16 +228,24 @@ function startCounting(): void {
     const p = String(args[0]).split(path.sep).join('/');
     if (/\/\.erd-studio\//.test(p)) {
       perFile.set(p, (perFile.get(p) ?? 0) + 1);
-      if (/_relationships\.dbml$/i.test(p)) counts.relationshipsReads++;
-      else if (/\/\.erd-studio\/(tables|logical-models)\//.test(p)) counts.tableReads++;
-      else if (/\.(dbml|json)$/i.test(p) && !p.endsWith('/layers.json')) counts.diagramReads++;
+      if (/\/\.erd-studio\/[^/]+\/relationships\/[^/]+\.dbml$/.test(p)) counts.relationshipsReads++;
+      else if (/\/\.erd-studio\/([^/]+\/tables|logical-models)\//.test(p)) counts.tableReads++;
+      else if (/\.(dbml|json)$/i.test(p) && !p.endsWith('/layers.json')) {
+        counts.diagramReads++;
+        if (!counts.diagramsRead.includes(path.posix.basename(p))) counts.diagramsRead.push(path.posix.basename(p));
+      }
     }
     return (real.readFileSync as (...a: unknown[]) => unknown).apply(this, args);
   };
   syncBuiltinESMExports();
   parseLayout.setSource = function (fp: unknown, text: string) {
+    // A syntax-only parse (core's parseSyntax) binds nothing: far cheaper than a compile.
+    const syntaxOnly = (): boolean => new Error().stack?.includes('parseSyntax') === true;
     if (/^\s*Table\s/.test(text)) counts.tableCompiles++;
-    else if (/^\s*Project\s/m.test(text)) counts.diagramCompiles++;
+    else if (/^\s*Project\s/m.test(text)) {
+      counts.diagramCompiles++;
+      if (!syntaxOnly()) counts.diagramsCompiled.push(/^\s*Project\s+(\S+)/m.exec(text)?.[1] ?? '?');
+    } else if (/^\/\/ ERD Studio relationships/.test(text) && !syntaxOnly()) counts.relationshipsCompiles++;
     return realSetSource.call(this, fp, text);
   };
 }
@@ -369,21 +415,21 @@ describe(`table lookups in a ${TABLES}-table library`, () => {
     const { counts, result } = await measure(`${_kind}: ${TABLES} × findTableFile, resolveTablePath, tableStorage, findTableNameIgnoringCase`, 300, () =>
       names.map((n) => [lib.findTableFile(n), lib.resolveTablePath(n), lib.tableStorage(n), lib.findTableNameIgnoringCase(n.toUpperCase())]));
     expect(result.every(([file, resolved, storage, found], i) => file !== null && resolved === file && storage !== undefined && found === names[i])).toBe(true);
-    // One listing of the library (root, the three folders and the other library
-    // root at most); the quadratic lookup listed folders on every call (~18,000
-    // listings for one diagram open).
-    expect(counts.readdir).toBeLessThanOrEqual(12);
-    // The index checks itself with a stat per directory it listed, once per
+    // One listing of the library (DBML: the formula; YAML: the root, the three
+    // folders and the other library root at most); the quadratic lookup listed
+    // folders on every call (~18,000 listings for one diagram open).
+    expect(counts.readdir).toBeLessThanOrEqual(_kind === 'DBML' ? DBML_LISTINGS : 12);
+    // The index checks itself with a stat per path it watches, once per
     // lookup at most: linear, a handful per name.
-    expect(counts.stat).toBeLessThanOrEqual(names.length * 4 * 10);
+    expect(counts.stat).toBeLessThanOrEqual(names.length * 4 * (_kind === 'DBML' ? DBML_CHECKED_PATHS + 1 : 10));
     expect(counts.tableReads).toBe(0);
   });
 
   it('a file added outside ERD Studio is found without any invalidate call (the index checks itself)', () => {
     const lib = new TableLibraryService(dbmlRoot, '.erd-studio');
     expect(lib.findTableFile('t_added_later')).toBeNull();
-    const file = path.join(dbmlRoot, '.erd-studio', 'tables', 'silver', 't_added_later.dbml');
-    fs.writeFileSync(file, 'Table t_added_later {\n  id INT [pk]\n}\n');
+    const file = path.join(dbmlRoot, '.erd-studio', 'silver', 'tables', 'silver', 't_added_later.dbml');
+    fs.writeFileSync(file, 'Table silver.t_added_later {\n  id INT [pk]\n}\n');
     // Make the folder's change visible even on a file system with a coarse
     // clock, with a time in the past so no later test sees a "racy" folder.
     const age = (seconds: number): void => {
@@ -450,7 +496,7 @@ describe('rendering both sidebar trees', () => {
 describe(`opening a ${MEMBERS}-table DBML diagram in a ${TABLES}-table library, then moving a table`, () => {
   it('cold: reads only the diagram\'s tables (and the other ends of their Refs), each once; compiles the diagram once', async () => {
     const h = buildProvider(dbmlRoot);
-    const panel = await openCanvas(h.provider, path.join(dbmlRoot, '.erd-studio', 'gold', 'big.dbml'));
+    const panel = await openCanvas(h.provider, path.join(dbmlRoot, '.erd-studio', 'gold', 'diagrams', 'big.dbml'));
 
     const cold = await measure('DBML: ready → domainLoaded (cold)', 2_000, () => panel._simulateMessage({ type: 'ready' }));
     const loaded = posted(panel).find((m) => m.type === 'domainLoaded')?.payload;
@@ -464,9 +510,10 @@ describe(`opening a ${MEMBERS}-table DBML diagram in a ${TABLES}-table library, 
     // No file read over and over (a lookup per member re-reading the folder or the diagram).
     expect(cold.counts.maxReadsOfOneFile).toBeLessThanOrEqual(4);
     expect(cold.counts.relationshipsReads).toBeLessThanOrEqual(LAYERS.length);
-    // The diagram is compiled for the read and reused by everything after it
-    // in the same open. (One more compile is the member count for `loading`.)
-    expect(cold.counts.diagramCompiles).toBeLessThanOrEqual(2);
+    // The diagram is read once and reused by everything after it in the same
+    // open: core's reader compiles it as written and again with its use lines
+    // blanked (two), and the member count for `loading` is one syntax parse.
+    expect(cold.counts.diagramCompiles).toBeLessThanOrEqual(3);
     // The library is listed once, not per member (~18,000 listings before).
     expect(cold.counts.readdir).toBeLessThanOrEqual(30);
 
@@ -501,7 +548,7 @@ describe(`opening a ${MEMBERS}-table DBML diagram in a ${TABLES}-table library, 
     expect([...touched].sort()).toEqual(['big.dbml']);
     expect(h.writes).toHaveLength(1);
     expect(h.writes[0].layoutOnly).toBe(true);
-    expect(fs.readFileSync(path.join(dbmlRoot, '.erd-studio', 'gold', 'big.dbml'), 'utf-8')).toContain(`\n    ${victim} 4321 1234\n`);
+    expect(fs.readFileSync(path.join(dbmlRoot, '.erd-studio', 'gold', 'diagrams', 'big.dbml'), 'utf-8')).toContain(`\n    ${victim} 4321 1234\n`);
 
     // The move dropped no cached reading, and remembered the one it wrote: the next open reads and compiles nothing.
     panel._postedMessages.length = 0;
@@ -511,6 +558,63 @@ describe(`opening a ${MEMBERS}-table DBML diagram in a ${TABLES}-table library, 
     expect(after.counts.diagramCompiles).toBe(0);
     const moved = posted(panel).find((m) => m.type === 'domainLoaded')?.payload?.viewConfig?.positions?.[victim];
     expect(moved).toMatchObject({ x: 4321, y: 1234 });
+  }, 60_000);
+
+  it('a column-description edit reads no other diagram and lists nothing; one relationship add fully compiles only the diagrams it settles, and its relationships file at most twice, and the next snapshot reads none', async () => {
+    // A copy: these edits write.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-scale-edit-'));
+    try {
+      fs.cpSync(dbmlRoot, root, { recursive: true });
+      ageDirectories(root);
+      const h = buildProvider(root);
+      const big = path.join(root, '.erd-studio', 'gold', 'diagrams', 'big.dbml');
+      const panel = await openCanvas(h.provider, big);
+      await panel._simulateMessage({ type: 'ready' });
+      const member = tableName(bigMembers[3]);
+
+      // §2.6 step 0: no path, no new table, no Ref pair changed: no other diagram listed or read.
+      _appliedEdits.length = 0;
+      panel._postedMessages.length = 0;
+      const describe = await measure('DBML: a column description edited', 1_000, () => panel._simulateMessage({
+        type: 'updateColumn',
+        payload: { modelName: member, oldColumnName: 'label', column: { name: 'label', dataType: 'VARCHAR', description: 'Changed' } },
+      }));
+      expect(posted(panel).filter((m) => m.type === 'error')).toEqual([]);
+      expect(_appliedEdits).toHaveLength(1);
+      expect(describe.counts.readdir).toBe(0);
+      // The edited diagram itself is read again for the redraw; no other diagram is read or compiled.
+      expect(describe.counts.diagramsRead).toEqual(['big.dbml']);
+      expect(describe.counts.diagramsCompiled.every((name) => name === 'big')).toBe(true);
+      expect(describe.counts.relationshipsCompiles).toBe(0);
+
+      // A new Ref between two of big's tables (no small diagram shows both): it goes into the owner's
+      // layer file, every other diagram is read as a summary only, and none is compiled or written.
+      const owner = bigMembers[10];
+      const target = bigMembers[12];
+      _appliedEdits.length = 0;
+      panel._postedMessages.length = 0;
+      const add = await measure('DBML: one relationship added', 3_000, () => panel._simulateMessage({
+        type: 'addRelationship',
+        payload: { fromModel: tableName(owner), fromColumn: 'label', toModel: tableName(target), toColumn: 'id', cardinality: 'many-to-one' },
+      }));
+      expect(posted(panel).filter((m) => m.type === 'error')).toEqual([]);
+      expect(_appliedEdits).toHaveLength(1);
+      const written = [...new Set((_appliedEdits[0] as unknown as { _ops: Array<{ uri: { fsPath: string } }> })._ops
+        .map((op) => path.relative(path.join(root, '.erd-studio'), op.uri.fsPath).split(path.sep).join('/')))].sort();
+      expect(written).toEqual(['gold/diagrams/big.dbml', `${folderOf(owner)}/relationships/${folderOf(owner)}.dbml`]);
+      expect(add.counts.diagramsCompiled.every((name) => name === 'big')).toBe(true);
+      // The writer's compile of the file as it was, and the read that primes the cache with what was written.
+      expect(add.counts.relationshipsCompiles).toBeLessThanOrEqual(2 * (written.length - 1));
+      expect(fs.readFileSync(path.join(root, '.erd-studio', written[1]), 'utf-8'))
+        .toContain(`Ref: ${folderOf(owner)}.${tableName(owner)}.label >? ${folderOf(target)}.${tableName(target)}.id`);
+
+      // The next edit's snapshot reads and compiles no relationships file.
+      const next = await measure('DBML: the next snapshot', 1_000, () => h.tableLibraryService.dbmlSnapshot());
+      expect(next.counts.relationshipsReads).toBe(0);
+      expect(next.counts.relationshipsCompiles).toBe(0);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }, 60_000);
 
   it('an edit to one table re-reads that table only, not the library', async () => {
@@ -524,7 +628,7 @@ describe(`opening a ${MEMBERS}-table DBML diagram in a ${TABLES}-table library, 
       h.tableLibraryService.invalidatePaths([file]);
       const { counts } = await measure('DBML: listTables after one table changed', 500, () => h.tableLibraryService.listTables());
       expect(counts.tableReads).toBe(1);
-      expect(counts.readdir).toBeLessThanOrEqual(12);
+      expect(counts.readdir).toBeLessThanOrEqual(DBML_LISTINGS);
       expect(h.tableLibraryService.getTable(victim)?.description).toBe('Changed');
     } finally {
       fs.writeFileSync(file, before);

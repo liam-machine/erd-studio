@@ -1,6 +1,7 @@
 /**
- * relationshipStateSpace on native DBML storage (§9.5 of
- * docs/plans/native-dbml-storage.md, stage S5).
+ * relationshipStateSpace on native DBML storage in the layer-first tree
+ * (ERD Studio 2.0; first written for §9.5 of
+ * docs/plans/native-dbml-storage.md).
  *
  * The universes store a link either way round, as one-to-many records and
  * in diagram files, which DBML cannot hold, so each state is first
@@ -15,8 +16,14 @@
  * the files it leaves:
  *
  * - **one link per linkKey**, across every relationships file;
- * - **ownership by the FK side**, and **every Ref in its owner's folder
- *   file** (`dim` at the top of `tables/`, `fct` in `tables/gold/`);
+ * - **no existing Ref changes file**: a link held before and after is in
+ *   the same file, and a Ref whose links are all new is either in a file
+ *   that held a Ref of the same table pair before (a column change, match
+ *   2b, regenerated in place) or in `placeNewRef`'s file for the index
+ *   before the edit (decision 5; `dim` lives in silver, `fct` in gold);
+ * - **exact imports**: every diagram's `use *` set of relationships files
+ *   equals `relationshipsImportsFor(members)` after the edit (D1 is the
+ *   diagram edited, D2 and D3 are settled in the same WorkspaceEdit);
  * - **representable**: when the edit succeeds, the library read back equals
  *   the state `planRelationshipWrite` decides for the projected world
  *   (the model's `op.run`, which calls it), modulo §2.8; when the planner
@@ -48,7 +55,7 @@ import { _resetMockWorkspace } from '../__mocks__/vscode';
 import { CARDS, SWAP, describeState, messageOf, opsFor, states, worldOf } from './relationshipStateSpace.model';
 import type { State } from './relationshipStateSpace.model';
 import {
-  GROUP_LAYOUT, SELF_LAYOUT, TABLE_PATHS, dbmlFiles, materialiseDbml, materialiseDbmlG, normaliseLibrary, normaliseLibraryG,
+  GROUP_LAYOUT, SELF_LAYOUT, TABLE_LAYERS, TABLE_PATHS, dbmlFiles, importViolations, materialiseDbml, materialiseDbmlG, normaliseLibrary, normaliseLibraryG,
   projectGWorld, projectWorld, readBackDbml, readBackDbmlG, sendToDbmlProvider, storedRefs,
 } from './relationshipStateSpace.dbmlHarness';
 import type { DbmlProject, GLayout } from './relationshipStateSpace.dbmlHarness';
@@ -58,8 +65,17 @@ import type { RelationshipWriteOp } from '../../src/services/libraryRelationship
 import type { Relationship } from '../../src/types/semantic';
 import { linkKey } from '@erd-studio/core';
 import { projectDiagnostics } from '../../packages/core/test/dbmlWriterSupport';
+import { placeNewRef } from '../../src/services/dbmlRelationshipsIndex';
+import type { RelationshipsIndex } from '../../src/services/dbmlRelationshipsIndex';
+import { TableLibraryService } from '../../src/services/logicalModelService';
+import { SEMANTIC_DIR } from './relationshipStateSpace.harness';
 
-const FOLDER_FILE: Record<string, string> = { dim: 'tables/_relationships.dbml', fct: 'tables/gold/_relationships.dbml' };
+/** What the storage invariants compare with: the Refs and the relationships index before the edit. */
+interface Before { refs: ReturnType<typeof storedRefs>; index: RelationshipsIndex }
+
+function beforeOf(p: DbmlProject): Before {
+  return { refs: storedRefs(p), index: new TableLibraryService(p.root, SEMANTIC_DIR).relationshipsIndex() };
+}
 
 function sample(every: number): State[] {
   const out: State[] = [];
@@ -68,19 +84,32 @@ function sample(every: number): State[] {
   return out;
 }
 
-/** The violations of the storage invariants on `p`'s files (`homes`: each owner's folder file). */
-function storageViolations(p: DbmlProject, homes: Record<string, string> = FOLDER_FILE): string[] {
+/** The violations of the storage invariants on `p`'s files, against the state `before` the edit. */
+function storageViolations(p: DbmlProject, before: Before): string[] {
   const out: string[] = [];
   const refs = storedRefs(p);
   const seen = new Map<string, string>();
+  const heldBefore = new Map(before.refs.flatMap((r) => r.links.map((l) => [l, r.file] as const)));
+  const pairFilesBefore = new Map<string, Set<string>>();
+  for (const r of before.refs) pairFilesBefore.set(r.pair, (pairFilesBefore.get(r.pair) ?? new Set()).add(r.file));
   for (const ref of refs) {
     for (const link of ref.links) {
       const held = seen.get(link);
       if (held) out.push(`one-link: ${link.replace('\u0000', '~')} in ${held} and ${ref.file}`);
       seen.set(link, ref.file);
     }
-    if (homes[ref.owner] !== ref.file) out.push(`home: a Ref owned by ${ref.owner} is in ${ref.file}`);
+    const kept = ref.links.filter((l) => heldBefore.has(l));
+    for (const link of kept) {
+      if (heldBefore.get(link) !== ref.file) out.push(`moved: ${link.replace('\u0000', '~')} went from ${heldBefore.get(link)} to ${ref.file}`);
+    }
+    if (kept.length === 0) {
+      const placed = placeNewRef({ table: ref.owner, layer: TABLE_LAYERS[ref.owner] }, before.index).file;
+      if (ref.file !== placed && !pairFilesBefore.get(ref.pair)?.has(ref.file)) {
+        out.push(`placement: a new Ref owned by ${ref.owner} is in ${ref.file}, not ${placed}`);
+      }
+    }
   }
+  out.push(...importViolations(p));
   const diagnostics = projectDiagnostics(dbmlFiles(p));
   for (const d of diagnostics.slice(0, 3)) out.push(`law5: ${d.parser} ${d.file} ${d.type} ${d.text}`);
   return out;
@@ -100,7 +129,7 @@ async function resendViolations(p: DbmlProject, message: unknown): Promise<strin
 }
 
 describe('relationshipStateSpace on native DBML storage (projected universes)', () => {
-  it('every relationship edit from a DBML diagram keeps one link per key, in its owner\'s folder file, representable and compiling', async () => {
+  it('every relationship edit from a DBML diagram keeps one link per key, moves no Ref, places a new one by decision 5, imports exactly, representable and compiling', async () => {
     const every = Number(process.env.STATESPACE_DBML_EVERY ?? 151);
     let runs = 0;
     let skippedProjection = 0;
@@ -124,12 +153,13 @@ describe('relationshipStateSpace on native DBML storage (projected universes)', 
           const before = readBackDbml(p, projected);
           if (normaliseLibrary(before) !== normaliseLibrary(projected)) { skippedUnstorable++; continue; }
           const tablesBefore = Object.values(TABLE_PATHS).map((t) => dbmlFiles(p)[t]);
+          const stored = beforeOf(p);
           const predicted = op.run(projected);
           const { errors } = await sendToDbmlProvider(p, messageOf(op.call));
           const actual = readBackDbml(p, projected);
           runs++;
           const label = `${describeState(s)} / ${op.name}`;
-          for (const v of storageViolations(p)) violations.push(`${v} :: ${label}`);
+          for (const v of storageViolations(p, stored)) violations.push(`${v} :: ${label}`);
           // Column-free relationship edits never touch a table file (Law 4).
           const tablesAfter = Object.values(TABLE_PATHS).map((t) => dbmlFiles(p)[t]);
           if (JSON.stringify(tablesAfter) !== JSON.stringify(tablesBefore) && !errors.length) {
@@ -262,12 +292,13 @@ async function runUniverse(
         // A state the writer stores differently from the projection (beyond §2.8) is not a starting point.
         if (normaliseLibraryG(before) !== normaliseLibraryG(projected)) { result.skippedUnstorable++; continue; }
         const tablesBefore = tablePaths.map((t) => dbmlFiles(p)[t]);
+        const stored = beforeOf(p);
         const predicted = gWrite(projected, g.op);
         const { errors } = await sendToDbmlProvider(p, g.message);
         const actual = readBackDbmlG(p, projected);
         result.runs++;
         const label = `${stateLabel} / ${g.name}`;
-        for (const v of storageViolations(p, layout.relationshipsFiles)) result.violations.push(`${v} :: ${label}`);
+        for (const v of storageViolations(p, stored)) result.violations.push(`${v} :: ${label}`);
         if (!g.marks && JSON.stringify(tablePaths.map((t) => dbmlFiles(p)[t])) !== JSON.stringify(tablesBefore)) {
           result.violations.push(`law4: a table file changed :: ${label}`);
         }
@@ -314,4 +345,36 @@ describe('relationshipStateSpace on native DBML storage: the GROUP and SELF univ
     expect(r.violations.slice(0, 20)).toEqual([]);
     expect(r.mismatches.slice(0, 20)).toEqual([]);
   }, 600_000);
+});
+
+describe('the DBML storage invariants are not vacuous', () => {
+  it('a diagram missing an import, a Ref moved to another file and a new Ref out of place are each reported', () => {
+    let world = null as ReturnType<typeof projectWorld>;
+    for (const s of states('small')) {
+      const w = projectWorld(worldOf(s.profile, s.copies, s.bystander));
+      if (w && w.lib.fct.length > 0 && w.domModels.D1.includes('dim') && w.domModels.D1.includes('fct')) { world = w; break; }
+    }
+    expect(world).not.toBeNull();
+    const p = materialiseDbml(world!);
+    try {
+      const stored = beforeOf(p);
+      expect(storageViolations(p, stored)).toEqual([]);
+      const semantic = `${p.root}/${SEMANTIC_DIR}`;
+      const held = stored.refs[0].file;
+      expect(held).toMatch(/^(silver|gold)\/relationships\/(silver|gold)\.dbml$/);
+      // Drop D1's import of the file holding the Ref.
+      const d1 = p.diagramPath('D1');
+      const d1Text = fs.readFileSync(d1, 'utf-8');
+      fs.writeFileSync(d1, d1Text.replace(new RegExp(`^use \\* from '[^']*${held.split('/').pop()!.replace('.', '\\.')}'\n`, 'm'), ''));
+      expect(storageViolations(p, stored).some((v) => v.startsWith('imports: silver/diagrams/D1.dbml'))).toBe(true);
+      fs.writeFileSync(d1, d1Text);
+      // Move the file (its Ref with it) to another name in the same folder: the Ref moved.
+      fs.renameSync(`${semantic}/${held}`, `${semantic}/${held.replace(/[^/]+\.dbml$/, 'moved.dbml')}`);
+      expect(storageViolations(p, stored).some((v) => v.startsWith('moved: '))).toBe(true);
+      // A Ref none held before, in a file placeNewRef would not choose and no Ref of its pair was in.
+      expect(storageViolations(p, { refs: [], index: stored.index }).some((v) => v.startsWith('placement: '))).toBe(true);
+    } finally {
+      fs.rmSync(p.root, { recursive: true, force: true });
+    }
+  });
 });

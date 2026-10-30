@@ -29,8 +29,9 @@ import {
 } from '@erd-studio/core';
 import { readDbmlDiagram } from '../services/dbmlDiagramReadings';
 import { erdLayoutEntrySpan } from '@erd-studio/core/dbml';
-import type { DbmlDiagramTable } from '@erd-studio/core/dbml';
-import { editDiagramLayoutDbml, editSubjectAreaDbml } from '../services/dbmlWriters';
+import { editDiagramLayoutDbml } from '../services/dbmlWriters';
+import { renderDbmlDiagram } from '../services/dbmlDiagramSettle';
+import type { SubjectAreaResolver } from '../services/dbmlDiagramSettle';
 import type { Annotation, NodePosition } from '@erd-studio/core';
 
 import { subjectAreaTableNames } from '../services/domainService';
@@ -53,24 +54,11 @@ export interface ParsedSubjectArea {
 }
 
 /**
- * The library as an edit leaves it, for rendering a DBML diagram (§5.2):
- * tables resolved after the edit's table writes, the relationships files of
- * their folders, and which files exist. Paths are posix, relative to
- * `semanticRoot`.
+ * The library as an edit leaves it, for rendering a DBML diagram: defined
+ * beside the one settle rule (`dbmlDiagramSettle.ts`, no `vscode`), which
+ * every write path shares.
  */
-export interface SubjectAreaResolver {
-  /** The semantic dir, absolute. */
-  semanticRoot: string;
-  resolveTable(name: string): DbmlDiagramTable | undefined;
-  relationshipsFilesFor(names: readonly string[]): string[];
-  fileExists(relPath: string): boolean;
-  /** Tables whose file moved, was renamed or was deleted in this edit (lower-case). */
-  pathChanged?: ReadonlySet<string>;
-  /** Recompute the relationships `use` lines even when membership did not change (the settle pass). */
-  refreshRelationshipsUses?: boolean;
-  /** Leave a conflicted `erd_layout` as it is (§1.6): set when rendering a diagram that is not the one being edited. */
-  keepLayoutIfConflicted?: boolean;
-}
+export type { SubjectAreaResolver } from '../services/dbmlDiagramSettle';
 
 /** Turns one kind of diagram file into a {@link ParsedSubjectArea} and back. */
 export interface SubjectAreaCodec {
@@ -158,18 +146,7 @@ const dbmlCodec: SubjectAreaCodec = {
   render(p, text, filePath, resolver) {
     if (!resolver) throw new Error('A DBML diagram is rendered against the library: pass a resolver.');
     const rel = path.relative(resolver.semanticRoot, filePath).split(path.sep).join('/');
-    const primary = editSubjectAreaDbml(text, {
-      filePath: rel,
-      before: p.snapshot,
-      after: p.parsed,
-      resolveTable: (name) => resolver.resolveTable(name),
-      // 2.0-switch: S6b (the folder-based resolver gives the imports until the planner's index does)
-      relationshipsImportsFor: (names) => resolver.relationshipsFilesFor(names),
-      fileExists: (relPath) => resolver.fileExists(relPath),
-      ...(resolver.pathChanged ? { pathChanged: resolver.pathChanged } : {}),
-      ...(resolver.refreshRelationshipsUses ? { refreshRelationshipsUses: true } : {}),
-      ...(resolver.keepLayoutIfConflicted ? { keepLayoutIfConflicted: true } : {}),
-    });
+    const primary = renderDbmlDiagram(text, rel, p.snapshot, p.parsed, resolver);
     return [{ kind: 'replace', path: filePath, text: primary }];
   },
   tableNames: subjectAreaTableNames,

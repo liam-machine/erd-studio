@@ -1208,6 +1208,42 @@ export class TableLibraryService {
   }
 
   /**
+   * Every relationships file (relative to the semantic dir) holding a copy
+   * of `owner`'s relationship `rel`, as the attachment `owner`'s list came
+   * from read it (the members' own while {@link readingTables} runs, else
+   * the whole library's): the copy it kept first, then each duplicate it
+   * dropped. `pending` marks a copy that is a `// erd-studio pending:` line
+   * (D27). Empty when no relationships file holds it (a YAML table's own
+   * relationship).
+   */
+  relationshipHolders(owner: string, rel: { fromColumn: string; toModel: string; toColumn: string }): Array<{ path: string; pending: boolean }> {
+    const attachment = this.attachmentFor(owner);
+    const kept = attachment?.locations?.get(linkKey({ fromModel: owner, ...rel }));
+    if (!attachment || kept === undefined) return [];
+    const copies = [kept, ...attachment.duplicates
+      .filter((d) => d.kept.path === kept.path && d.kept.line === kept.line)
+      .map((d) => d.dropped)];
+    return copies.map((at) => {
+      const reading = this.readRelationshipsFile(this.semanticAbsolute(at.path));
+      return { path: at.path, pending: reading?.pending?.some((p) => p.line === at.line) === true };
+    });
+  }
+
+  /**
+   * The table in the file `filePath` (absolute; a listed table file), with
+   * its relationships, whatever table the library would pick for `name`: a
+   * diagram's member read by its `use` path (two layers may each hold a
+   * table of that name). Null when the file does not read.
+   */
+  getTableAt(filePath: string, name: string): SemanticTable | null {
+    try {
+      return this.readTableEntry(filePath, name);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * {@link relationshipsFileForNewRef}.
    * @deprecated 2.0-switch: S8b moves doctor's last call to `relationshipsFileHolding`.
    */
@@ -1501,6 +1537,28 @@ export class TableLibraryService {
     }
     this.primeRelationships(writes);
     return { plan, writes, before };
+  }
+
+  /**
+   * Cache the reading of each relationships file among `filePaths`
+   * (absolute; anything else is skipped), read from disk now and keyed by
+   * its signature (§2.4 step 9): the editor calls it once an edit's files
+   * are saved, so the next snapshot reads none of them again. A file that
+   * is gone or does not read is left uncached.
+   */
+  primeRelationshipsFiles(filePaths: Iterable<string>): void {
+    for (const filePath of filePaths) {
+      if (this.classifyLibraryFile(path.resolve(filePath)).kind !== 'relationships') continue;
+      const signature = fileSignature(filePath);
+      if (signature === null) continue;
+      let text: string;
+      try {
+        text = fs.readFileSync(filePath, 'utf-8');
+      } catch {
+        continue;
+      }
+      this.relationshipsCache.set(filePath, { signature, reading: readRelationshipsDbml(text) });
+    }
   }
 
   /**

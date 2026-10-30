@@ -35,7 +35,7 @@ import {
 import { subjectAreaMembersDbml } from '@erd-studio/core/dbml';
 import { readDbmlDiagram, rememberedDbmlMembers } from './dbmlDiagramReadings';
 import type { DbmlSubjectAreaReading, DbtKeyIndex, SubjectAreaFormat } from '@erd-studio/core';
-import type { SubjectAreaSummary, SemanticSubjectArea, UnifiedSubjectArea } from '../types/semantic';
+import type { SubjectAreaSummary, SemanticSubjectArea, SemanticTable, UnifiedSubjectArea } from '../types/semantic';
 import type { DisplaySubjectArea, DisplayTable, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
 import type { CompositeForeignKey, ManifestData } from '../types/manifest';
 import type { CatalogData, CatalogColumn } from '../types/catalog';
@@ -155,8 +155,28 @@ export function renameSubjectAreaInRaw(rawText: string, newSlug: string): string
   return JSON.stringify(doc, null, 2) + '\n';
 }
 
+/**
+ * What a DBML diagram itself says about its tables (§2.3 display parity):
+ * each member's `use` path (semantic-relative, by lower-case name) and the
+ * relationships files it imports. The canvas draws only these, as core does.
+ */
+interface DbmlDiagramView {
+  memberPaths: ReadonlyMap<string, string>;
+  imports: ReadonlySet<string>;
+  /** Filled while reading: the files holding a relationship between two members that the diagram does not import. */
+  drift: Set<string>;
+}
+
+/** The canvas warning for a relationships file a diagram does not import but holds a Ref between its tables. */
+export function unimportedRelationshipsMessage(file: string): string {
+  return `${file} holds a relationship between tables of this diagram, but the diagram does not import it; `
+    + 'other DBML tools do not draw it. Any edit to this diagram adds the import.';
+}
+
 export class SubjectAreaService {
   private tableLibraryService: TableLibraryService | null = null;
+  /** The last read of each DBML diagram: the relationships files it should import but does not (path → files). */
+  private readonly importDrift = new Map<string, string[]>();
 
   constructor(private readonly layerService: LayerService) {}
 
@@ -303,7 +323,15 @@ export class SubjectAreaService {
     if (subjectAreaStorageOf(filePath) === 'dbml') {
       const reading = this.readDbmlSubjectArea(filePath, raw);
       const { obj, format } = validateSubjectAreaDocument(reading.obj, filePath);
-      const unified = this.buildUnified(obj, format, filePath, path.basename(filePath, '.dbml'), options);
+      const view: DbmlDiagramView = {
+        memberPaths: new Map((reading.uses ?? []).map((u) => [u.name.toLowerCase(), u.resolved])),
+        imports: new Set(reading.relationshipsUses),
+        drift: new Set(),
+      };
+      const unified = this.buildUnified(obj, format, filePath, path.basename(filePath, '.dbml'), { ...options, dbml: view });
+      const drift = [...view.drift].sort();
+      this.importDrift.set(path.resolve(filePath), drift);
+      for (const file of drift) log.warn(`[DomainService] ${filePath}: ${unimportedRelationshipsMessage(file)}`);
       // D8: the diagram's own version, on the Unified shape only.
       unified.schemaVersion = reading.schemaVersion;
       return unified;
@@ -378,13 +406,23 @@ export class SubjectAreaService {
     return reading;
   }
 
+  /**
+   * The relationships files the last read of the DBML diagram `filePath`
+   * found holding a relationship between two of its tables that it does
+   * not import (so neither the canvas nor other DBML tools draw it), sorted;
+   * empty when there are none or it was never read.
+   */
+  relationshipsImportDrift(filePath: string): string[] {
+    return [...(this.importDrift.get(path.resolve(filePath)) ?? [])];
+  }
+
   /** `buildUnifiedSubjectArea` with this host's library and layers. */
   private buildUnified(
     obj: Record<string, unknown>,
     format: SubjectAreaFormat,
     filePath: string,
     domainNameFallback: string,
-    options: { dbtKeyIndex?: DbtKeyIndex },
+    options: { dbtKeyIndex?: DbtKeyIndex; dbml?: DbmlDiagramView },
   ): UnifiedSubjectArea {
     // The diagram's own tables are read with only the relationships they own
     // worked out (`readingTables`), not an attach over the whole library.
@@ -399,16 +437,23 @@ export class SubjectAreaService {
     format: SubjectAreaFormat,
     filePath: string,
     domainNameFallback: string,
-    options: { dbtKeyIndex?: DbtKeyIndex },
+    options: { dbtKeyIndex?: DbtKeyIndex; dbml?: DbmlDiagramView },
   ): UnifiedSubjectArea {
+    const view = options.dbml;
+    const library = this.tableLibraryService;
+    const members = new Set(tableNamesOf(obj).map((n) => n.toLowerCase()));
     return buildUnifiedSubjectArea(obj, format, {
       filePath,
       domainNameFallback,
       // A DBML diagram's layer is the folder above `diagrams/`.
       parentDirName: diagramPathOf(filePath)?.layer ?? path.basename(path.dirname(filePath)),
       layers: this.layerService,
-      getModel: this.tableLibraryService
-        ? (name) => this.tableLibraryService!.getTable(name)
+      getModel: library
+        ? (name) => {
+          if (!view) return library.getTable(name);
+          const model = this.dbmlMember(library, name, view);
+          return model ? this.importedRelationshipsOnly(library, model, view, members) : null;
+        }
         : undefined,
       getModelError: this.tableLibraryService
         ? (name) => {
@@ -428,6 +473,56 @@ export class SubjectAreaService {
       warn: (message) => log.warn(`[DomainService] ${message}`),
       ...(options.dbtKeyIndex ? { dbtKeyIndex: options.dbtKeyIndex } : {}),
     });
+  }
+
+  /**
+   * A DBML diagram's member as core's loader reads it (§2.3): the table in
+   * the file its `use` line resolves to when that is a listed table file
+   * other than the one the library picks by name (a name in two layers),
+   * else the table by name.
+   */
+  private dbmlMember(library: TableLibraryService, name: string, view: DbmlDiagramView): SemanticTable | null {
+    const usePath = view.memberPaths.get(name.toLowerCase());
+    if (usePath !== undefined && !usePath.startsWith('../')) {
+      const file = library.semanticAbsolute(usePath);
+      const byName = library.findTableFile(name);
+      if (byName !== null && path.resolve(byName) !== path.resolve(file)
+        && library.listTableFiles().some((e) => path.resolve(e.filePath) === path.resolve(file))) {
+        return library.getTableAt(file, name);
+      }
+    }
+    return library.getTable(name);
+  }
+
+  /**
+   * `model` with only the relationships held in a file the DBML diagram
+   * imports, as core draws it (§2.3): a relationship no imported file holds
+   * a copy of is left out of the display (never out of the library, which
+   * edits read). When it is between two members, each file holding it as a
+   * live Ref is recorded as drift for the canvas warning: the next edit
+   * imports those. A pending line (D27) never brings an import, so it is
+   * hidden without a warning. A YAML table's own relationships (held in no
+   * relationships file) are kept.
+   */
+  private importedRelationshipsOnly(
+    library: TableLibraryService,
+    model: SemanticTable,
+    view: DbmlDiagramView,
+    members: ReadonlySet<string>,
+  ): SemanticTable {
+    const relationships = model.relationships ?? [];
+    if (relationships.length === 0) return model;
+    const kept = relationships.filter((rel) => {
+      const holders = library.relationshipHolders(model.name, rel);
+      if (holders.length === 0 || holders.some((h) => view.imports.has(h.path))) return true;
+      if (members.has(rel.toModel.toLowerCase())) {
+        for (const h of holders) if (!h.pending) view.drift.add(h.path);
+      }
+      return false;
+    });
+    if (kept.length === relationships.length) return model;
+    const { relationships: _all, ...rest } = model;
+    return kept.length > 0 ? { ...rest, relationships: kept } : rest;
   }
 
   /**
