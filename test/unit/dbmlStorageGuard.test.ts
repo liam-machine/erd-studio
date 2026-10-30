@@ -11,9 +11,12 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { CURRENT_SCHEMA_VERSION } from '@erd-studio/core';
-import { DBML_READING_SCHEMA_VERSION, DBML_STORAGE_MESSAGE, detectDbmlStorage } from '../../src/services/dbmlStorageGuard';
 import {
-  DIAGRAM_DBML, EXPORT_DBML, FIXTURE_ROOT, RELATIONSHIPS_DBML, TABLE_DBML, makeDbmlProject,
+  DBML_READING_SCHEMA_VERSION, DBML_STORAGE_MESSAGE, detectDbmlStorage, semanticRootsOfDiagram,
+} from '../../src/services/dbmlStorageGuard';
+import {
+  DIAGRAM_DBML, EXPORT_DBML, FIXTURE_ROOT, LAYER_DIAGRAM_DBML, LAYER_RELATIONSHIPS_DBML, LAYER_TABLE_DBML,
+  RELATIONSHIPS_DBML, TABLE_DBML, makeDbmlProject, makeLayerFirstDbmlProject,
 } from './dbmlStorageGuard.fixture';
 
 let root: string;
@@ -85,6 +88,93 @@ describe('detectDbmlStorage: projects a newer ERD Studio stored as DBML', () => 
   });
 });
 
+describe("detectDbmlStorage: the layer-first tree 1.9.4 and 2.0 write", () => {
+  it('finds a converted project', () => {
+    const converted = makeLayerFirstDbmlProject(path.join(root, 'p'));
+    expect(detectDbmlStorage(converted)?.file).toMatch(/^gold\/(diagrams|relationships|tables\/gold)\/[a-z_]+\.dbml$/);
+  });
+
+  it('finds a diagram in <layer>/diagrams/', () => {
+    write('layers.json', '{"layers":[{"id":"gold","label":"Gold"}]}');
+    write('gold/diagrams/sales.dbml', LAYER_DIAGRAM_DBML);
+    expect(detectDbmlStorage(semantic)).toEqual({ kind: 'diagram', file: 'gold/diagrams/sales.dbml' });
+  });
+
+  it('finds a relationships file in <layer>/relationships/', () => {
+    write('gold/relationships/sales.dbml', LAYER_RELATIONSHIPS_DBML);
+    expect(detectDbmlStorage(semantic)).toEqual({ kind: 'relationships', file: 'gold/relationships/sales.dbml' });
+  });
+
+  it('finds a table file in <layer>/tables/<schema>/', () => {
+    write('gold/tables/gold/fct_order.dbml', LAYER_TABLE_DBML);
+    expect(detectDbmlStorage(semantic)).toEqual({ kind: 'table', file: 'gold/tables/gold/fct_order.dbml' });
+  });
+
+  it('finds it in a tables/ layer folder too (a pre-v6 project)', () => {
+    write('tables/orders.json', '{"schemaVersion":5}');
+    write('tables/tables/gold/fct_order.dbml', LAYER_TABLE_DBML);
+    expect(detectDbmlStorage(semantic)).toEqual({ kind: 'table', file: 'tables/tables/gold/fct_order.dbml' });
+  });
+
+  it('does not count a saved export in any of those places', () => {
+    write('gold/diagrams/sales.dbml', EXPORT_DBML);
+    write('gold/relationships/sales.dbml', EXPORT_DBML);
+    write('gold/tables/gold/fct_order.dbml', EXPORT_DBML);
+    write('gold/sales.json', '{"schemaVersion":6}');
+    expect(detectDbmlStorage(semantic)).toBeNull();
+  });
+
+  it('does not count a diagrams/ file that does not declare erd_schema_version', () => {
+    write('gold/diagrams/sketch.dbml', 'Table a {\n  id int [pk]\n}\n');
+    expect(detectDbmlStorage(semantic)).toBeNull();
+  });
+
+  it('does not count a table directly in <layer>/tables/ or deeper than one schema folder', () => {
+    write('gold/tables/fct_order.dbml', LAYER_TABLE_DBML);
+    write('gold/tables/gold/archive/fct_order.dbml', LAYER_TABLE_DBML);
+    expect(detectDbmlStorage(semantic)).toBeNull();
+  });
+
+  it('does not look inside folders that are never layers (logical-models/, templates/, hidden, the tables/ library)', () => {
+    write('logical-models/relationships/x.dbml', LAYER_RELATIONSHIPS_DBML);
+    write('templates/diagrams/x.dbml', LAYER_DIAGRAM_DBML);
+    write('.cache/tables/gold/x.dbml', LAYER_TABLE_DBML);
+    write('tables/dim_date.yml', 'name: dim_date\n');
+    write('tables/gold/fct_order.yml', 'name: fct_order\n');
+    write('tables/gold/relationships/x.dbml', LAYER_RELATIONSHIPS_DBML);
+    expect(detectDbmlStorage(semantic)).toBeNull();
+  });
+});
+
+describe('semanticRootsOfDiagram: the ERD Studio folder of a restored diagram tab', () => {
+  /** The first root the no-project stub editor would guard, as extension.ts tries them. */
+  const guardedRoot = (documentPath: string): string | undefined =>
+    semanticRootsOfDiagram(documentPath).find((r) => detectDbmlStorage(r) !== null);
+
+  it('a layer-first diagram resolves to the ERD Studio folder, not its layer', () => {
+    write('layers.json', '{"layers":[{"id":"gold","label":"Gold"}]}');
+    write('gold/diagrams/sales.dbml', LAYER_DIAGRAM_DBML);
+    const tab = path.join(semantic, 'gold', 'diagrams', 'sales.dbml');
+    expect(semanticRootsOfDiagram(tab)[0]).toBe(semantic);
+    expect(guardedRoot(tab)).toBe(semantic);
+    expect(detectDbmlStorage(semantic)?.file).toBe('gold/diagrams/sales.dbml');
+  });
+
+  it('a diagram directly in a layer folder resolves two levels up', () => {
+    write('silver/sales.dbml', DIAGRAM_DBML);
+    const tab = path.join(semantic, 'silver', 'sales.dbml');
+    expect(semanticRootsOfDiagram(tab)).toEqual([semantic]);
+    expect(guardedRoot(tab)).toBe(semantic);
+  });
+
+  it('a 1.9 layer that is itself named diagrams still resolves to the ERD Studio folder', () => {
+    write('diagrams/sales.dbml', DIAGRAM_DBML);
+    const tab = path.join(semantic, 'diagrams', 'sales.dbml');
+    expect(semanticRootsOfDiagram(tab)).toEqual([root, semantic]);
+    expect(guardedRoot(tab)).toBe(semantic);
+  });
+});
+
 describe('the guard stands down where core reads DBML (a merge into 2.0)', () => {
   it('this core cannot read DBML yet; when this fails, delete the stable DBML guard', () => {
     expect(
@@ -137,6 +227,23 @@ describe('detectDbmlStorage: YAML / JSON projects are never flagged', () => {
     write('tables/a/b/x.dbml', TABLE_DBML);
     write('tables/.hidden.dbml', TABLE_DBML);
     write('tables/dim_date.yml', 'name: dim_date\n');
+    expect(detectDbmlStorage(semantic)).toBeNull();
+  });
+
+  it('a YAML / JSON project with ordinary layer folders', () => {
+    write('layers.json', '{"layers":[{"id":"silver","label":"Silver"},{"id":"gold","label":"Gold"}]}');
+    write('logical-models/dim_customer.yml', 'name: dim_customer\n');
+    write('silver/customer-360.json', '{"schemaVersion":5}');
+    write('gold/reporting.json', '{"schemaVersion":5}');
+    expect(detectDbmlStorage(semantic)).toBeNull();
+  });
+
+  it('a layer folder that happens to hold a tables/ subfolder with no .dbml files', () => {
+    write('gold/reporting.json', '{"schemaVersion":6}');
+    write('gold/tables/gold/fct_order.yml', 'name: fct_order\n');
+    write('gold/tables/gold/notes.md', '# notes\n');
+    write('gold/relationships/readme.txt', 'x\n');
+    write('gold/diagrams/sales.json', '{"schemaVersion":6}');
     expect(detectDbmlStorage(semantic)).toBeNull();
   });
 

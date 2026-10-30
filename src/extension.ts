@@ -81,7 +81,7 @@ import {
   DBML_STORAGE_MESSAGE, DbmlStorageGuard, OPEN_EXTENSION_PAGE_COMMAND, STORAGE_CHECKED_CONTEXT_KEY, openExtensionPage,
   showDbmlStoragePage,
 } from './providers/dbmlStorageGuardUi';
-import { detectDbmlStorage } from './services/dbmlStorageGuard';
+import { detectDbmlStorage, semanticRootsOfDiagram } from './services/dbmlStorageGuard';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -891,8 +891,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const guardIfDbml = guardDbmlStorageWithoutProject(context);
     // Register stub commands / editor so palette entries and the sidebar
     // welcome buttons explain the problem instead of "command not found".
-    // A diagram sits at <ERD Studio folder>/<layer>/<file>.
-    registerFallbackCommands(context, (documentPath) => guardIfDbml(path.dirname(path.dirname(documentPath))));
+    // A diagram sits at <ERD Studio folder>/<layer>/<file> or, in the
+    // layer-first tree, <ERD Studio folder>/<layer>/diagrams/<file>.
+    registerFallbackCommands(context, (documentPath) => semanticRootsOfDiagram(documentPath).some(guardIfDbml));
     publishProjectContextKeys(false);
     // A fresh install first activated without a dbt project (usually by
     // clicking the ERD Studio icon) still starts on the Get Started
