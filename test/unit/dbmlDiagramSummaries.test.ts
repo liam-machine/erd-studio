@@ -197,8 +197,16 @@ describe('needsSettle', () => {
       changedPairs: new Set([pairKey('fct_order', 'dim_store')]),
       importsFor: () => [],
     }, false],
-    ['a pair with an unlinked table changes', {
+    // A pending line to an unlinked table brings an import too (§2.4), so its pair counts.
+    ['a pair with an unlinked table changes and the imports differ', {
       changedPairs: new Set([pairKey('fct_order', 'gld_child')]),
+      importsFor: () => [],
+    }, true],
+    ['a pair with an unlinked table changes but the imports are the same set', {
+      changedPairs: new Set([pairKey('fct_order', 'gld_child')]),
+    }, false],
+    ['a pair with a table the diagram does not draw changes', {
+      changedPairs: new Set([pairKey('gld_child', 'dim_store')]),
       importsFor: () => [],
     }, false],
   ];
@@ -208,15 +216,15 @@ describe('needsSettle', () => {
     });
   }
 
-  it('asks importsFor with the members and the current imports', () => {
-    const calls: Array<[readonly string[], readonly string[]]> = [];
+  it('asks importsFor with the members, the current imports and the unlinked tables', () => {
+    const calls: Array<[readonly string[], readonly string[], readonly string[] | undefined]> = [];
     needsSettle(summary, signals({
       changedPairs: new Set([pairKey('fct_order', 'dim_customer')]),
-      importsFor: (members, current) => {
-        calls.push([members, current]);
+      importsFor: (members, current, unlinked) => {
+        calls.push([members, current, unlinked]);
         return [...current];
       },
     }));
-    expect(calls).toEqual([[summary.members, summary.relationshipsUses]]);
+    expect(calls).toEqual([[summary.members, summary.relationshipsUses, summary.unlinked]]);
   });
 });

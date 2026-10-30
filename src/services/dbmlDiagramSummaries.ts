@@ -121,35 +121,36 @@ export interface SettleSignals {
   createdTables: ReadonlySet<string>;
   /** Tables whose schema changes. */
   requalified: ReadonlySet<string>;
-  /** Table pairs (`pairKey`) whose holding relationships files change. */
+  /** Table pairs (`pairKey`) whose holding relationships files (Refs or pending lines) change. */
   changedPairs: ReadonlySet<string>;
-  /** The relationships files a diagram showing `members` imports after the edit, given its imports now. */
-  importsFor(members: readonly string[], current: readonly string[]): string[];
+  /** The relationships files a diagram showing `members` and `unlinked` imports after the edit, given its imports now. */
+  importsFor(members: readonly string[], current: readonly string[], unlinked?: readonly string[]): string[];
 }
 
 /**
  * Whether an edit must rewrite a diagram it is not editing (§2.6 step 2):
  * (a) a member or unlinked table is renamed, moved, deleted, created or
  * re-qualified; or (b) a table pair whose holding files change has both
- * ends among its `use` members, and the relationships files it should
- * import differ, as a set, from the ones it imports.
+ * ends among the tables it draws (`use` members and unlinked ones: a
+ * pending line between them brings an import too), and the relationships
+ * files it should import differ, as a set, from the ones it imports.
  */
 export function needsSettle(summary: DiagramSummary, signals: SettleSignals): boolean {
   const names = [...summary.members, ...summary.unlinked].map((n) => n.toLowerCase());
   const touched = (n: string): boolean => signals.pathChanged.has(n) || signals.createdTables.has(n) || signals.requalified.has(n);
   if (names.some(touched)) return true;
-  if (signals.changedPairs.size === 0 || summary.members.length === 0) return false;
-  const members = new Set(summary.members.map((n) => n.toLowerCase()));
-  let pairAmongMembers = false;
+  if (signals.changedPairs.size === 0 || names.length === 0) return false;
+  const drawn = new Set(names);
+  let pairDrawn = false;
   for (const key of signals.changedPairs) {
     const [a, b] = key.split('\u0000');
-    if (members.has(a) && members.has(b ?? a)) {
-      pairAmongMembers = true;
+    if (drawn.has(a) && drawn.has(b ?? a)) {
+      pairDrawn = true;
       break;
     }
   }
-  if (!pairAmongMembers) return false;
-  const wanted = new Set(signals.importsFor(summary.members, summary.relationshipsUses));
+  if (!pairDrawn) return false;
+  const wanted = new Set(signals.importsFor(summary.members, summary.relationshipsUses, summary.unlinked));
   const current = new Set(summary.relationshipsUses);
   return wanted.size !== current.size || [...wanted].some((f) => !current.has(f));
 }

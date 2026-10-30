@@ -774,10 +774,13 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
       });
     }
     for (const pending of reading.pending ?? []) pushPending(f.rel, pending);
-    // Its relationships imports, pair-based (§2.4): a file holding a live Ref between two of its tables, and no other.
+    // Its relationships imports, pair-based (§2.4): a file holding a live Ref between two of its `use` members,
+    // or a pending line (D27) between two of the tables it draws (unlinked ones too), and no other. An unlinked
+    // member whose table has a .dbml file now counts as a `use` member: the next edit gives it a line (D26).
     if (index) {
-      const members = new Set(reading.members.map((m) => m.toLowerCase()));
-      const want = relationshipsImportsFor(members, index, { current: reading.relationshipsUses });
+      const unlinked = (reading.unlinked ?? []).filter((n) => tableOf(n)?.storage !== 'dbml');
+      const linked = reading.members.filter((m) => !unlinked.some((u) => u.toLowerCase() === m.toLowerCase()));
+      const want = relationshipsImportsFor({ members: linked, unlinked }, index, { current: reading.relationshipsUses });
       const imported = new Set(reading.relationshipsUses);
       for (const file of want) {
         if (imported.has(file)) continue;
@@ -787,10 +790,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
         });
       }
       const wanted = new Set(want);
-      // A pending line (D27) between two of its tables keeps its file imported: Convert imports it so the line is drawn.
-      const holdsPendingHere = (file: string): boolean => index!.refs.some((r) => r.file === file && r.pending && members.has(r.owner) && members.has(r.target));
       for (const file of reading.relationshipsUses) {
-        if (wanted.has(file) || !index.files.includes(file) || index.unreadable.has(file) || holdsPendingHere(file)) continue;
+        if (wanted.has(file) || !index.files.includes(file) || index.unreadable.has(file)) continue;
         const line = outline(f).uses.find((u) => u.wildcard && u.resolved === file)?.line;
         push({
           file: projectRel(f.rel), ...(line !== undefined ? { line } : {}), code: 'extraRelationshipsUse',

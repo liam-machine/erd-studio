@@ -1284,6 +1284,61 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(ids(r)).toEqual(['ready']);
   });
 
+  it('a pending line (D27) between two tables a diagram draws, unlinked ones included, wants its file imported: kept quietly, missing reported (§2.4)', async () => {
+    const PENDING_FILE = 'gold/relationships/pending.dbml';
+    const pendingFile = (): string => [
+      "use { table gold.fct_order } from '../tables/gold/fct_order.dbml'",
+      '',
+      '// erd-studio pending: Ref: gold.fct_order.customer_key >? dim_missing.customer_key',
+      '',
+    ].join('\n');
+    const unlinked = replace("  erd_layout_options", "  erd_unlinked_tables: 'dim_missing'\n  erd_layout_options");
+    const imported = await doctor(nativeWith({
+      [PENDING_FILE]: pendingFile,
+      [SALES]: (t) => unlinked(t).replace("use * from '../relationships/gold.dbml'\n", "use * from '../relationships/gold.dbml'\nuse * from '../relationships/pending.dbml'\n"),
+    }));
+    expect(problem(imported, 'extraRelationshipsUse')).toEqual([]);
+    expect(problem(imported, 'missingRelationshipsUse')).toEqual([]);
+    const notImported = await doctor(nativeWith({ [PENDING_FILE]: pendingFile, [SALES]: unlinked }));
+    expect(problem(notImported, 'missingRelationshipsUse')).toEqual([{
+      file: `.erd-studio/${SALES}`, code: 'missingRelationshipsUse', severity: 'warning',
+      message: `${unimportedRelationshipsMessage(PENDING_FILE)} Add the line: use * from '../relationships/pending.dbml'`,
+    }]);
+    // A pending line to a table the diagram does not draw brings no import: one kept for it is extra.
+    const elsewhere = await doctor(nativeWith({
+      [PENDING_FILE]: pendingFile,
+      [SALES]: replace("use * from '../relationships/gold.dbml'\n", "use * from '../relationships/gold.dbml'\nuse * from '../relationships/pending.dbml'\n"),
+    }));
+    expect(problem(elsewhere, 'extraRelationshipsUse').map((p) => p.message)).toEqual([
+      expect.stringContaining('This diagram imports gold/relationships/pending.dbml, which holds no relationship between its tables'),
+    ]);
+  });
+
+  it('an unlinked member whose table has a .dbml file counts as a use member for its live Refs, as the next edit makes it one (D26, §2.4)', async () => {
+    const REGION_REL = 'gold/relationships/region.dbml';
+    const regionRef = 'Ref region: gold.fct_order.(region_code, country_code) >? gold.dim_region.(region_code, country_code)\n';
+    const regionFile = (): string => [
+      "use { table gold.dim_region } from '../tables/gold/dim_region.dbml'",
+      "use { table gold.fct_order } from '../tables/gold/fct_order.dbml'",
+      '',
+      regionRef,
+    ].join('\n');
+    const unlinkedRegion = (t: string): string => replace("use { table gold.dim_region } from '../tables/gold/dim_region.dbml'\n", '')(
+      replace("  erd_layout_options", "  erd_unlinked_tables: 'dim_region'\n  erd_layout_options")(t));
+    const imported = await doctor(nativeWith({
+      [GOLD_REL]: replace(regionRef, ''),
+      [REGION_REL]: regionFile,
+      [SALES]: (t) => unlinkedRegion(t).replace("use * from '../relationships/gold.dbml'\n", "use * from '../relationships/gold.dbml'\nuse * from '../relationships/region.dbml'\n"),
+    }));
+    expect(problem(imported, 'unlinkedTable').map((p) => p.message)).toEqual([expect.stringContaining('dim_region has a table file now')]);
+    expect(problem(imported, 'extraRelationshipsUse')).toEqual([]);
+    expect(problem(imported, 'missingRelationshipsUse')).toEqual([]);
+    const notImported = await doctor(nativeWith({ [GOLD_REL]: replace(regionRef, ''), [REGION_REL]: regionFile, [SALES]: unlinkedRegion }));
+    expect(problem(notImported, 'missingRelationshipsUse').map((p) => p.message)).toEqual([
+      `${unimportedRelationshipsMessage(REGION_REL)} Add the line: use * from '../relationships/region.dbml'`,
+    ]);
+  });
+
   it('a YAML project with a layer named diagrams gives no warning', async () => {
     const root = copyFixture('logical-only');
     const layers = path.join(root, '.erd-studio', 'layers.json');

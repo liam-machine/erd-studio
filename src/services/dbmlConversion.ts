@@ -1462,18 +1462,6 @@ async function planOnce(
     if (newPath !== null) pathChanged.add(lower(stemOf(newPath)));
   }
   const fileExistsAfter = (p: string): boolean => libraryPlan.fileExists(p) || creates.has(p) || plannedTableText.has(p);
-  /**
-   * The relationships files a diagram imports after the plan: those holding a live Ref between two of its
-   * `members` (the planner's rule, §2.4), and those holding a pending line (D27) between two of the tables
-   * it `draws` (members and missing ones alike), so it draws that relationship as it did before.
-   */
-  const importsFor = (members: readonly string[], draws: readonly string[], current: readonly string[] = []): string[] => {
-    const drawn = new Set(draws.map(lower));
-    const pending = libraryPlan.afterIndex.refs
-      .filter((r) => r.pending && drawn.has(r.owner) && drawn.has(r.target) && fileExistsAfter(r.file))
-      .map((r) => r.file);
-    return [...new Set([...libraryPlan.relationshipsImportsFor(members, current), ...pending])].sort(byteOrder);
-  };
   /** How a Ref end or a `use` specifier spells a table with a `.dbml` file after the plan (pending lines too). */
   const referenceOf = (name: string): string | undefined => {
     const t = libraryPlan.resolveTable(name);
@@ -1604,7 +1592,7 @@ async function planOnce(
       members,
       ...(unlinked.length > 0 ? { unlinked } : {}),
       ...(pendingLines.length > 0 ? { pendingRefs: pendingLines } : {}),
-      relationshipsFiles: importsFor(members.map((m) => m.name), [...members.map((m) => m.name), ...unlinked]),
+      relationshipsFiles: libraryPlan.relationshipsImportsFor(members.map((m) => m.name), [], unlinked),
       annotations,
       positions,
     }));
@@ -1670,11 +1658,7 @@ async function planOnce(
       const before = d.reading.obj;
       const after = structuredClone(before);
       if (isObject(after.logical)) (after.logical as Record<string, unknown>).relationships = ownAfter;
-      const draws = isObject(after.logical) && Array.isArray(after.logical.models) ? (after.logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
-      const text = renderDbmlDiagram(f.text, f.path, before, after, {
-        ...settleResolver,
-        relationshipsImportsFor: (names, current) => importsFor(names, [...names, ...draws], current),
-      });
+      const text = renderDbmlDiagram(f.text, f.path, before, after, settleResolver);
       if (text !== f.text) replaces.set(f.path, text);
     } catch (err) {
       if (ownAfter.length !== ownBefore.length) {

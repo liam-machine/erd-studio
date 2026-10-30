@@ -378,10 +378,10 @@ export function planDbmlDuplicateRename(input: {
     // The plan's index still knows the copy's Refs by its old name, and cannot tell them from the winner's:
     // with the renamed table, a file is imported when the other members alone want it, or when it holds the
     // copy's Refs and wants it under the old name.
-    relationshipsImportsFor: (names, current) => {
-      if (!names.some((n) => sameName(n, input.newName))) return base.relationshipsImportsFor(names, current);
-      const others = base.relationshipsImportsFor(names.filter((n) => !sameName(n, input.newName)), current);
-      const asCopy = base.relationshipsImportsFor(names.map((n) => (sameName(n, input.newName) ? input.copy.name : n)), current)
+    relationshipsImportsFor: (names, current, unlinked) => {
+      if (!names.some((n) => sameName(n, input.newName))) return base.relationshipsImportsFor(names, current, unlinked);
+      const others = base.relationshipsImportsFor(names.filter((n) => !sameName(n, input.newName)), current, unlinked);
+      const asCopy = base.relationshipsImportsFor(names.map((n) => (sameName(n, input.newName) ? input.copy.name : n)), current, unlinked)
         .filter((f) => copyRefFiles.has(f.toLowerCase()));
       return [...new Set([...others, ...asCopy])].sort();
     },

@@ -89,17 +89,34 @@ describe('editSubjectAreaDbml in the layer-first tree (§1.4)', () => {
     expect(diagramEdit(OTHER_USES, () => undefined, { extra: { refreshRelationshipsUses: true } })).toBe(OTHER_USES);
   });
 
-  it('relationshipsImportsFor gets the members after the edit and the relationships files the diagram imports now', () => {
-    const calls: Array<[string[], string[]]> = [];
+  it('relationshipsImportsFor gets the members after the edit, the relationships files the diagram imports now and its unlinked members', () => {
+    const calls: Array<[string[], string[], string[]]> = [];
     const before = readDiagram(OTHER_USES);
     const after = clone(before);
     after.logical.models.push('dim_date');
     const base = lookups(DIAGRAM_LIBRARY);
     editSubjectAreaDbml(OTHER_USES, {
       filePath: DIAGRAM_PATH, before, after, ...base,
-      relationshipsImportsFor: (names, current) => { calls.push([[...names], [...current]]); return base.relationshipsImportsFor(names, current); },
+      relationshipsImportsFor: (names, current, unlinked) => {
+        calls.push([[...names], [...current], [...unlinked]]);
+        return base.relationshipsImportsFor(names, current, unlinked);
+      },
     });
-    expect(calls).toEqual([[['fct_order', 'dim_customer', 'dim_date'], ['gold/relationships/gold.dbml']]]);
+    expect(calls).toEqual([[['fct_order', 'dim_customer', 'dim_date'], ['gold/relationships/gold.dbml'], []]]);
+    // A member with no table file (in erd_unlinked_tables) is passed as unlinked, never as a member.
+    const withMissing = OTHER_USES.replace("  database_type: 'Snowflake'\n", "  database_type: 'Snowflake'\n  erd_unlinked_tables: 'dim_missing'\n");
+    const missingBefore = readDiagram(withMissing);
+    const missingAfter = clone(missingBefore);
+    missingAfter.logical.models.push('dim_date');
+    calls.length = 0;
+    editSubjectAreaDbml(withMissing, {
+      filePath: DIAGRAM_PATH, before: missingBefore, after: missingAfter, ...base,
+      relationshipsImportsFor: (names, current, unlinked) => {
+        calls.push([[...names], [...current], [...unlinked]]);
+        return base.relationshipsImportsFor(names, current, unlinked);
+      },
+    });
+    expect(calls).toEqual([[['fct_order', 'dim_customer', 'dim_date'], ['gold/relationships/gold.dbml'], ['dim_missing']]]);
   });
 
   it('an import the resolver keeps (a relationships file that does not read) stays; one it drops goes', () => {
@@ -110,6 +127,26 @@ describe('editSubjectAreaDbml in the layer-first tree (§1.4)', () => {
     const dropped = diagramEdit(text, (a) => { a.logical.models = ['dim_customer']; }, { library });
     expect(dropped).toContain("use * from '../relationships/broken.dbml'\n");
     expect(dropped).not.toContain('relationships/gold.dbml');
+  });
+
+  it('imports a relationships file for a pending line to an unlinked member, and keeps it on the next edit', () => {
+    const library = {
+      ...DIAGRAM_LIBRARY,
+      'gold/relationships/pending.dbml': '// erd-studio pending: Ref: gold.fct_order.missing_key >? dim_missing.missing_key\n',
+    };
+    const text = SALES.replace("  database_type: 'Snowflake'\n", "  database_type: 'Snowflake'\n  erd_unlinked_tables: 'dim_missing'\n");
+    expect(readDiagram(text).logical.models).toEqual(['fct_order', 'dim_customer', 'dim_missing']);
+    // An unrelated edit with the settle pass's refresh adds the import, and the next one keeps it.
+    const settled = diagramEdit(text, (a) => { a.description = 'changed'; }, { library, extra: { refreshRelationshipsUses: true } });
+    expect(settled).toContain("use * from '../relationships/gold.dbml'\nuse * from '../relationships/pending.dbml'\n");
+    const again = diagramEdit(settled, (a) => { a.logical.models.push('dim_date'); }, { library });
+    expect(again).toContain("use * from '../relationships/pending.dbml'\n");
+    // Without the unlinked member it goes.
+    const removed = diagramEdit(settled, (a) => { a.logical.models = a.logical.models.filter((m: string) => m !== 'dim_missing'); }, { library });
+    expect(removed).not.toContain('pending.dbml');
+    // A pending line with an end the diagram does not draw brings no import.
+    const elsewhere = { ...library, 'gold/relationships/pending.dbml': '// erd-studio pending: Ref: gold.fct_order.missing_key >? dim_other.missing_key\n' };
+    expect(diagramEdit(text, (a) => { a.description = 'changed'; }, { library: elsewhere, extra: { refreshRelationshipsUses: true } })).not.toContain('pending.dbml');
   });
 
   it('a relationships file named like a table is an import, never a member', () => {

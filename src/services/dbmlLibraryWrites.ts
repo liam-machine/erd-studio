@@ -169,13 +169,16 @@ export interface DbmlLibraryWritePlan {
   /** A table after the plan: real name, declared reference, real column spellings, path, storage. */
   resolveTable(name: string): DbmlPlannedTable | undefined;
   /**
-   * The relationships files a diagram showing `members` imports after the
-   * plan (`relationshipsImportsFor` over the after-index): every file holding
-   * a live Ref with both ends among them, plus every file of `current` (its
-   * imports now) that does not read. Byte-sorted; only files that exist after.
+   * The relationships files a diagram showing `members` (its `use` members)
+   * and `unlinked` (its `erd_unlinked_tables`) imports after the plan
+   * (`relationshipsImportsFor` over the after-index): every file holding a
+   * live Ref with both ends among the members, every file holding a pending
+   * line with both ends among the members or unlinked, plus every file of
+   * `current` (its imports now) that does not read. Byte-sorted; only files
+   * that exist after.
    */
-  relationshipsImportsFor(members: Iterable<string>, current?: readonly string[]): string[];
-  /** The table pairs (`pairKey`) whose set of files holding a live Ref the plan changes. */
+  relationshipsImportsFor(members: Iterable<string>, current?: readonly string[], unlinked?: Iterable<string>): string[];
+  /** The table pairs (`pairKey`) whose set of files holding a Ref or a pending line the plan changes. */
   changedPairs: Set<string>;
   /** Tables whose qualifier the plan changes (a move to another schema), lower-case, named as after the plan. */
   requalified: Set<string>;
@@ -864,7 +867,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   return {
     writes: merged,
     resolveTable,
-    relationshipsImportsFor: (members, current = []) => importsFor(members, afterIndex, { current, exists: fileExists }),
+    relationshipsImportsFor: (members, current = [], unlinked = []) => importsFor({ members, unlinked }, afterIndex, { current, exists: fileExists }),
     changedPairs: afterIndex === index ? new Set() : changedPairsOf(index, afterIndex),
     requalified: new Set(requalified),
     fileExists,

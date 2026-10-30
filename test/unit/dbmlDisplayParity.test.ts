@@ -248,7 +248,7 @@ describe('a relationship stored twice, once in a file the diagram imports and on
 });
 
 describe('a pending line between two of the diagram\'s tables in a file it does not import', () => {
-  it('is drawn by neither side, and raises no drift warning (an edit never imports a file for a pending line)', async () => {
+  it('is drawn by neither side, and raises the drift warning: the next edit imports its file (§2.4, pending lines count)', async () => {
     fs.cpSync(NATIVE, root, { recursive: true });
     fs.writeFileSync(at('gold/relationships/extra.dbml'), [
       '// erd-studio pending: Ref: gold.fct_order.region_code >? gold.dim_customer.customer_key',
@@ -257,9 +257,55 @@ describe('a pending line between two of the diagram\'s tables in a file it does 
     const core = drawn(await coreOf('gold/diagrams/sales.dbml'));
     const canvas = drawn(await canvasOf('gold/diagrams/sales.dbml'));
     expect(canvas).toEqual(core);
-    expect(warnings.filter((w) => w.includes('extra.dbml'))).toEqual([]);
+    const edges = (canvas.relationships as Array<{ fromModel: string; fromColumn: string; toModel: string }>).map((r) => `${r.fromModel}.${r.fromColumn}>${r.toModel}`);
+    expect(edges).not.toContain('fct_order.region_code>dim_customer');
     const { subjectAreaService } = buildProvider();
     subjectAreaService.getSubjectArea(at('gold/diagrams/sales.dbml'));
-    expect(subjectAreaService.relationshipsImportDrift(at('gold/diagrams/sales.dbml'))).toEqual([]);
+    expect(subjectAreaService.relationshipsImportDrift(at('gold/diagrams/sales.dbml'))).toEqual(['gold/relationships/extra.dbml']);
+  });
+
+  it('once the diagram imports the file, both sides draw it and nothing drifts', async () => {
+    fs.cpSync(NATIVE, root, { recursive: true });
+    fs.writeFileSync(at('gold/relationships/extra.dbml'), [
+      '// erd-studio pending: Ref: gold.fct_order.region_code >? gold.dim_customer.customer_key',
+      '',
+    ].join('\n'));
+    const diagram = at('gold/diagrams/sales.dbml');
+    const text = fs.readFileSync(diagram, 'utf-8');
+    const anchor = "use * from '../relationships/";
+    expect(text).toContain(anchor);
+    fs.writeFileSync(diagram, text.replace(anchor, `use * from '../relationships/extra.dbml'\n${anchor}`));
+    const core = drawn(await coreOf('gold/diagrams/sales.dbml'));
+    const canvas = drawn(await canvasOf('gold/diagrams/sales.dbml'));
+    expect(canvas).toEqual(core);
+    const edges = (canvas.relationships as Array<{ fromModel: string; fromColumn: string; toModel: string }>).map((r) => `${r.fromModel}.${r.fromColumn}>${r.toModel}`);
+    expect(edges).toContain('fct_order.region_code>dim_customer');
+    const { subjectAreaService } = buildProvider();
+    subjectAreaService.getSubjectArea(diagram);
+    expect(subjectAreaService.relationshipsImportDrift(diagram)).toEqual([]);
+  });
+});
+
+describe('an unlinked member whose table has a .dbml file now', () => {
+  it('counts as a member for its live Refs: a file holding one it does not import drifts, as the next edit imports it (D26, §2.4)', () => {
+    fs.cpSync(NATIVE, root, { recursive: true });
+    const regionRef = 'Ref region: gold.fct_order.(region_code, country_code) >? gold.dim_region.(region_code, country_code)\n';
+    const gold = fs.readFileSync(at('gold/relationships/gold.dbml'), 'utf-8');
+    expect(gold).toContain(regionRef);
+    fs.writeFileSync(at('gold/relationships/gold.dbml'), gold.replace(regionRef, ''));
+    fs.writeFileSync(at('gold/relationships/region.dbml'), [
+      "use { table gold.dim_region } from '../tables/gold/dim_region.dbml'",
+      "use { table gold.fct_order } from '../tables/gold/fct_order.dbml'",
+      '',
+      regionRef,
+    ].join('\n'));
+    const diagram = at('gold/diagrams/sales.dbml');
+    const regionUse = "use { table gold.dim_region } from '../tables/gold/dim_region.dbml'\n";
+    const text = fs.readFileSync(diagram, 'utf-8');
+    expect(text).toContain(regionUse);
+    fs.writeFileSync(diagram, text.replace(regionUse, '').replace('  erd_layout_options', "  erd_unlinked_tables: 'dim_region'\n  erd_layout_options"));
+    const { subjectAreaService } = buildProvider();
+    subjectAreaService.getSubjectArea(diagram);
+    expect(subjectAreaService.relationshipsImportDrift(diagram)).toEqual(['gold/relationships/region.dbml']);
   });
 });

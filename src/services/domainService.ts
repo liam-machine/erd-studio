@@ -163,6 +163,11 @@ export function renameSubjectAreaInRaw(rawText: string, newSlug: string): string
 interface DbmlDiagramView {
   memberPaths: ReadonlyMap<string, string>;
   imports: ReadonlySet<string>;
+  /**
+   * Its `erd_unlinked_tables` members (D26) the next edit keeps there, lower-case: one whose
+   * table has a .dbml file now gains a `use` line on that edit, so it counts as a member.
+   */
+  unlinked: ReadonlySet<string>;
   /** Filled while reading: the files holding a relationship between two members that the diagram does not import. */
   drift: Set<string>;
 }
@@ -326,6 +331,9 @@ export class SubjectAreaService {
       const view: DbmlDiagramView = {
         memberPaths: new Map((reading.uses ?? []).map((u) => [u.name.toLowerCase(), u.resolved])),
         imports: new Set(reading.relationshipsUses),
+        unlinked: new Set((reading.unlinked ?? [])
+          .filter((n) => this.tableLibraryService?.tableStorage(n) !== 'dbml')
+          .map((n) => n.toLowerCase())),
         drift: new Set(),
       };
       const unified = this.buildUnified(obj, format, filePath, path.basename(filePath, '.dbml'), { ...options, dbml: view });
@@ -498,11 +506,13 @@ export class SubjectAreaService {
    * `model` with only the relationships held in a file the DBML diagram
    * imports, as core draws it (§2.3): a relationship no imported file holds
    * a copy of is left out of the display (never out of the library, which
-   * edits read). When it is between two members, each file holding it as a
-   * live Ref is recorded as drift for the canvas warning: the next edit
-   * imports those. A pending line (D27) never brings an import, so it is
-   * hidden without a warning. A YAML table's own relationships (held in no
-   * relationships file) are kept.
+   * edits read). Each file the shared import rule (`relationshipsImportsFor`)
+   * wants for it is recorded as drift for the canvas warning, since the next
+   * edit imports those: a live Ref between two `use` members (an unlinked
+   * one whose table has a .dbml file counts: that edit gives it a line), or
+   * a pending line (D27) between two tables the diagram draws (unlinked ones
+   * too). A
+   * YAML table's own relationships (held in no relationships file) are kept.
    */
   private importedRelationshipsOnly(
     library: TableLibraryService,
@@ -515,8 +525,11 @@ export class SubjectAreaService {
     const kept = relationships.filter((rel) => {
       const holders = library.relationshipHolders(model.name, rel);
       if (holders.length === 0 || holders.some((h) => view.imports.has(h.path))) return true;
-      if (members.has(rel.toModel.toLowerCase())) {
-        for (const h of holders) if (!h.pending) view.drift.add(h.path);
+      const owner = model.name.toLowerCase();
+      const target = rel.toModel.toLowerCase();
+      if (members.has(owner) && members.has(target)) {
+        const linked = !view.unlinked.has(owner) && !view.unlinked.has(target);
+        for (const h of holders) if (h.pending || linked) view.drift.add(h.path);
       }
       return false;
     });

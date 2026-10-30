@@ -229,9 +229,25 @@ describe('relationshipsImportsFor', () => {
     expect(relationshipsImportsFor(['fct'], idx)).toEqual([]);
   });
 
-  it('never imports for a pending line', () => {
-    const idx = index(files, [ref(files[0], 'fct', 'dim', 1, { pending: true })]);
-    expect(relationshipsImportsFor(['fct', 'dim'], idx)).toEqual([]);
+  it('imports for a pending line between two tables the diagram draws, unlinked ones included', () => {
+    const idx = index(files, [ref(files[0], 'fct', 'dim', 1, { pending: true }), ref(files[2], 'fct', 'gone', 1, { pending: true })]);
+    expect(relationshipsImportsFor(['fct', 'dim'], idx)).toEqual(['gold/relationships/a.dbml']);
+    expect(relationshipsImportsFor({ members: ['FCT'], unlinked: ['Dim'] }, idx)).toEqual(['gold/relationships/a.dbml']);
+    expect(relationshipsImportsFor({ members: ['fct'], unlinked: ['dim', 'gone'] }, idx)).toEqual(['gold/relationships/a.dbml', 'gold/relationships/c.dbml']);
+    // An end outside the diagram brings no import.
+    expect(relationshipsImportsFor({ members: ['fct'], unlinked: ['other'] }, idx)).toEqual([]);
+    expect(relationshipsImportsFor({ members: ['fct'] }, idx)).toEqual([]);
+  });
+
+  it('a live Ref needs both ends among the use members: an unlinked end brings no import', () => {
+    const idx = index(files, [ref(files[1], 'fct', 'dim', 1)]);
+    expect(relationshipsImportsFor({ members: ['fct'], unlinked: ['dim'] }, idx)).toEqual([]);
+    expect(relationshipsImportsFor({ members: ['fct', 'dim'], unlinked: [] }, idx)).toEqual(['gold/relationships/b.dbml']);
+  });
+
+  it('never imports an unreadable file for a pending line', () => {
+    const idx = index(files, [ref(files[3], 'fct', 'dim', 1, { pending: true })], { unreadable: [files[3]] });
+    expect(relationshipsImportsFor({ members: ['fct'], unlinked: ['dim'] }, idx)).toEqual([]);
   });
 
   it('keeps an unreadable file the diagram imports, and never adds one', () => {
@@ -275,10 +291,14 @@ describe('changedPairs', () => {
     expect(changedPairs(before, after)).toEqual(new Set([pairKey('fct_order', 'dim'), pairKey('fct_sale', 'dim')]));
   });
 
-  it('ignores pending lines', () => {
+  it('sees a pending line added, removed or become a Ref (it brings an import too)', () => {
     const before = index([A], []);
-    const after = index([A], [ref(A, 'fct', 'dim', 1, { pending: true })]);
-    expect(changedPairs(before, after)).toEqual(new Set());
+    const pending = index([A], [ref(A, 'fct', 'dim', 1, { pending: true })]);
+    const live = index([A], [ref(A, 'fct', 'dim', 1)]);
+    expect(changedPairs(before, pending)).toEqual(new Set([pairKey('fct', 'dim')]));
+    expect(changedPairs(pending, before)).toEqual(new Set([pairKey('fct', 'dim')]));
+    expect(changedPairs(pending, live)).toEqual(new Set([pairKey('fct', 'dim')]));
+    expect(changedPairs(pending, index([A], [ref(A, 'fct', 'dim', 7, { pending: true })]))).toEqual(new Set());
   });
 
   it('pairKey is order-free and case-free', () => {

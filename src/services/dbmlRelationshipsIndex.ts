@@ -248,22 +248,39 @@ export function placeNewRef(
 }
 
 /**
- * The relationships files a diagram showing `members` imports: every file
- * holding a live Ref with both ends among the members (a self-Ref counts;
- * pending lines never do), plus every file of `current` (its imports now)
- * that does not read, which is kept because it may hold one. An unreadable
- * file is never added. `exists` filters the result when given. Byte-sorted.
+ * The tables a diagram draws, as {@link relationshipsImportsFor} reads them:
+ * its `use` members, and the members it names in `erd_unlinked_tables`
+ * (D26: no `.dbml` table file to use; a missing table among them).
+ */
+export interface DiagramTables {
+  members: Iterable<string>;
+  unlinked?: Iterable<string>;
+}
+
+/**
+ * The relationships files a diagram imports, the one rule every reader and
+ * writer asks (the editor and its settle, Convert, the canvas display
+ * filter, `doctor`): every file holding a live Ref with both ends among its
+ * `use` members (a self-Ref counts), every file holding a pending line (D27)
+ * with both ends among the tables it draws (`members` and `unlinked`: a
+ * relationship to a missing table is drawn, as in 1.9.0), plus every file of
+ * `current` (its imports now) that does not read, which is kept because it
+ * may hold one. An unreadable file is never added. `exists` filters the
+ * result when given. Byte-sorted. A bare list is the `use` members alone.
  */
 export function relationshipsImportsFor(
-  members: Iterable<string>,
+  tables: Iterable<string> | DiagramTables,
   index: RelationshipsIndex,
   options: { current?: readonly string[]; exists?: (file: string) => boolean } = {},
 ): string[] {
+  const { members, unlinked = [] } = isDiagramTables(tables) ? tables : { members: tables };
   const names = new Set([...members].map(lower));
+  const drawn = new Set([...names, ...[...unlinked].map(lower)]);
   const out = new Set<string>();
   for (const ref of index.refs) {
-    if (ref.pending || index.unreadable.has(ref.file)) continue;
-    if (names.has(ref.owner) && names.has(ref.target)) out.add(ref.file);
+    if (index.unreadable.has(ref.file)) continue;
+    const among = ref.pending ? drawn : names;
+    if (among.has(ref.owner) && among.has(ref.target)) out.add(ref.file);
   }
   if (options.current && options.current.length > 0 && index.unreadable.size > 0) {
     const unreadable = new Set([...index.unreadable].map(lower));
@@ -273,23 +290,28 @@ export function relationshipsImportsFor(
   return result.sort(byteOrder);
 }
 
-/** Every table pair held by a live Ref, with its holding files. */
+function isDiagramTables(tables: Iterable<string> | DiagramTables): tables is DiagramTables {
+  return typeof (tables as Iterable<string>)[Symbol.iterator] !== 'function';
+}
+
+/** Every table pair held by a Ref or a pending line, with its holding files (a pending holder marked). */
 function pairHolders(index: RelationshipsIndex): Map<string, string> {
   const out = new Map<string, Set<string>>();
   for (const ref of index.refs) {
-    if (ref.pending) continue;
     const key = pairKey(ref.owner, ref.target);
     const files = out.get(key) ?? new Set<string>();
     out.set(key, files);
-    files.add(ref.file);
+    files.add(ref.pending ? `${ref.file}\u0000pending` : ref.file);
   }
   return new Map([...out].map(([key, files]) => [key, [...files].sort(byteOrder).join('\u0000')]));
 }
 
 /**
- * The table pairs ({@link pairKey}) whose set of files holding a live Ref
- * differs between `before` and `after`: a Ref added or removed, moved to
- * another file, or renamed (the old pair and the new one both change).
+ * The table pairs ({@link pairKey}) whose set of files holding a Ref or a
+ * pending line differs between `before` and `after`: one added or removed,
+ * moved to another file, renamed (the old pair and the new one both
+ * change), or a pending line become a Ref. Pending lines count because
+ * they bring an import too ({@link relationshipsImportsFor}).
  */
 export function changedPairs(before: RelationshipsIndex, after: RelationshipsIndex): Set<string> {
   const a = pairHolders(before);

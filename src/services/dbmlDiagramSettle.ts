@@ -47,8 +47,12 @@ export interface SubjectAreaResolver {
   /** The semantic dir, absolute. */
   semanticRoot: string;
   resolveTable(name: string): DbmlDiagramTable | undefined;
-  /** The relationships files a diagram showing `names` imports after the edit; `current` is what it imports now. */
-  relationshipsImportsFor(names: readonly string[], current: readonly string[]): string[];
+  /**
+   * The relationships files a diagram showing `names` (its `use` members) and
+   * `unlinked` (its `erd_unlinked_tables`) imports after the edit; `current`
+   * is what it imports now.
+   */
+  relationshipsImportsFor(names: readonly string[], current: readonly string[], unlinked?: readonly string[]): string[];
   fileExists(relPath: string): boolean;
   /** Tables whose file moved, was renamed or was deleted in this edit, and tables it created (lower-case). */
   pathChanged?: ReadonlySet<string>;
@@ -82,7 +86,7 @@ export function dbmlResolverOf(plan: DbmlLibraryWritePlan, semanticRoot: string)
   return {
     semanticRoot,
     resolveTable: (name) => plan.resolveTable(name),
-    relationshipsImportsFor: (names, current) => plan.relationshipsImportsFor(names, current),
+    relationshipsImportsFor: (names, current, unlinked) => plan.relationshipsImportsFor(names, current, unlinked),
     fileExists: (relPath) => plan.fileExists(relPath),
     ...(pathChanged.size > 0 ? { pathChanged } : {}),
   };
@@ -95,7 +99,7 @@ export function settleSignalsOf(plan: DbmlLibraryWritePlan): SettleSignals {
     createdTables: new Set(plan.createdTables.map((n) => n.toLowerCase())),
     requalified: plan.requalified,
     changedPairs: plan.changedPairs,
-    importsFor: (members, current) => plan.relationshipsImportsFor(members, current),
+    importsFor: (members, current, unlinked) => plan.relationshipsImportsFor(members, current, unlinked),
   };
 }
 
@@ -121,7 +125,7 @@ export function renderDbmlDiagram(
     before,
     after,
     resolveTable: (name) => resolver.resolveTable(name),
-    relationshipsImportsFor: (names, current) => resolver.relationshipsImportsFor(names, current),
+    relationshipsImportsFor: (names, current, unlinked) => resolver.relationshipsImportsFor(names, current, unlinked),
     fileExists: (relPath) => resolver.fileExists(relPath),
     ...(resolver.pathChanged ? { pathChanged: resolver.pathChanged } : {}),
     ...(resolver.refreshRelationshipsUses ? { refreshRelationshipsUses: true } : {}),

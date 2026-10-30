@@ -133,8 +133,8 @@ function writeDiagrams(
 
 /**
  * The violations of the import invariant: each diagram's `use *` set of
- * relationships files equals `relationshipsImportsFor(members)` over the
- * project's relationships files as they are.
+ * relationships files equals `relationshipsImportsFor({ members, unlinked })`
+ * over the project's relationships files as they are.
  */
 export function importViolations(p: DbmlProject): string[] {
   const out: string[] = [];
@@ -147,7 +147,7 @@ export function importViolations(p: DbmlProject): string[] {
       out.push(`imports: ${rel} does not parse`);
       continue;
     }
-    const wanted = relationshipsImportsFor(summary.members, index, { current: summary.relationshipsUses });
+    const wanted = relationshipsImportsFor({ members: summary.members, unlinked: summary.unlinked }, index, { current: summary.relationshipsUses });
     const have = [...summary.relationshipsUses].sort();
     if (JSON.stringify(wanted) !== JSON.stringify(have)) out.push(`imports: ${rel} imports [${have.join(', ')}], not [${wanted.join(', ')}]`);
   }

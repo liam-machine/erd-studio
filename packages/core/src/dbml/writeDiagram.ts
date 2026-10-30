@@ -88,9 +88,11 @@ export interface SubjectAreaDbmlEdit {
    * The relationships files (paths after this edit, relative to the semantic
    * dir) the diagram should import for these members; `current` is what it
    * imports now (its `use *` lines of relationships files, resolved), so an
-   * implementation can keep one it cannot read.
+   * implementation can keep one it cannot read. `unlinked` is the members it
+   * names in `erd_unlinked_tables` after this edit (D26), so a file holding a
+   * pending line (D27) to one of them can be imported too.
    */
-  relationshipsImportsFor(memberNames: readonly string[], current: readonly string[]): string[];
+  relationshipsImportsFor(memberNames: readonly string[], current: readonly string[], unlinked: readonly string[]): string[];
   /** Recompute the relationships `use` lines even when membership did not change (the settle pass). */
   refreshRelationshipsUses?: boolean;
   /**
@@ -631,9 +633,11 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   }
 
   // --- Relationships use lines (only on a membership change or the settle pass) -------
-  if (membershipChanged || edit.refreshRelationshipsUses) {
+  // The unlinked members count: a pending line to one of them brings its file's import (§2.4).
+  const unlinkedChanged = [...new Set(oldUnlinked.map(lower))].sort().join('\u0000') !== [...new Set(newUnlinked.map(lower))].sort().join('\u0000');
+  if (membershipChanged || unlinkedChanged || edit.refreshRelationshipsUses) {
     const current = [...new Set(relUses.map((u) => u.resolved))];
-    const wanted = [...new Set(edit.relationshipsImportsFor(newMembers, current).map(normalisePosix))].filter((p) => edit.fileExists(p));
+    const wanted = [...new Set(edit.relationshipsImportsFor(newMembers, current, newUnlinked).map(normalisePosix))].filter((p) => edit.fileExists(p));
     const keptRel = relUses.filter((u) => wanted.includes(u.resolved));
     for (const u of relUses) if (!wanted.includes(u.resolved)) edits.push(cutEdit(text, u.node));
     const have = new Set(keptRel.map((u) => u.resolved));

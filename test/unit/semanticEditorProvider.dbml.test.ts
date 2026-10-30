@@ -14,7 +14,8 @@
  * - every written path is in `editedTablePaths` and recorded as an own write;
  * - D20 (a YAML table, or a DBML relationship to one) is refused;
  * - every diagram imports exactly the relationships files holding a Ref
- *   between two of its tables, settled in the same edit (§2.6).
+ *   between two of its tables (or a pending line between two tables it
+ *   draws), settled in the same edit (§2.6).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -43,6 +44,7 @@ import type { TemplateService } from '../../src/services/templateService';
 import type { SemanticTable } from '../../src/types/semantic';
 import { projectDiagnostics } from '../../packages/core/test/dbmlWriterSupport';
 import { TABLE_NAME_RULE } from '../../src/types/naming';
+import { convertOnDisk } from '../../scripts/convert-on-disk';
 
 /** A `use { table … } from '…'` line, however far the formatter pads its `from` (consecutive use lines align). */
 function useLine(table: string, from: string): RegExp {
@@ -922,5 +924,83 @@ describe('a diagram with a member with no table file and pending relationships (
     expect(r.after['gold/diagrams/sales.dbml']).toContain('// erd-studio pending: Ref: gld_fct_risk_child.customer_key >? dim_customer.customer_key');
     const before = new Set(diagnosticsOf(r.before));
     expect(diagnosticsOf(r.after).filter((d) => !before.has(d))).toEqual([]);
+  });
+});
+
+describe('a converted diagram\'s pending relationship (D27) in a relationships file: the import that draws it survives unrelated edits (§2.4)', () => {
+  const DIAGRAM = 'gold/diagrams/s.dbml';
+  const IMPORT = "use * from '../relationships/gold.dbml'";
+  const PENDING = '// erd-studio pending: Ref: public.fct.x_key >? dim_x.x_key';
+
+  /** A YAML project whose fct has a relationship to dim_x, which has no table file, on one diagram; then Convert. */
+  const converted = async (): Promise<void> => {
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    const write = (rel: string, text: string): void => {
+      fs.mkdirSync(path.dirname(at(rel)), { recursive: true });
+      fs.writeFileSync(at(rel), text);
+    };
+    write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', creatable: true, order: 1 }] }, null, 2));
+    write('logical-models/fct.yml', [
+      'name: fct', 'columns:', '  - name: fct_key', '    dataType: INT', '    isPrimaryKey: true', '  - name: x_key', '    dataType: INT',
+      'relationships:', '  - fromColumn: x_key', '    toModel: dim_x', '    toColumn: x_key', '    cardinality: many-to-one', '',
+    ].join('\n'));
+    write('gold/s.json', JSON.stringify({
+      schemaVersion: 5, domain: 's', layer: 'gold', description: 's diagram',
+      logical: { models: ['fct', 'dim_x'], relationships: [] },
+      viewConfig: { positions: { fct: { x: 40, y: 40 }, dim_x: { x: 340, y: 40 } } },
+    }, null, 2));
+    const plan = await convertOnDisk(root);
+    expect(plan.refusals).toEqual([]);
+    const text = fs.readFileSync(at(DIAGRAM), 'utf-8');
+    expect(text).toContain(`${IMPORT}\n`);
+    expect(text).toContain("erd_unlinked_tables: 'dim_x'");
+    expect(fs.readFileSync(at('gold/relationships/gold.dbml'), 'utf-8')).toContain(`${PENDING}\n`);
+  };
+
+  /** The relationships the canvas draws on `diagram`, opened fresh. */
+  const drawnOn = async (diagram: string): Promise<string[]> => {
+    const { provider } = buildProvider(new OwnWriteTracker());
+    const document = createMockTextDocument(at(diagram), fs.readFileSync(at(diagram), 'utf-8'), { persist: true });
+    const panel = createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(document as unknown as vscode.TextDocument, panel as unknown as vscode.WebviewPanel, {} as vscode.CancellationToken);
+    await panel._simulateMessage({ type: 'ready' });
+    const loaded = panel._postedMessages.find((m) => (m as { type: string }).type === 'domainLoaded') as { payload: { relationships: Array<Record<string, string>> } };
+    return loaded.payload.relationships.map((r) => `${r.fromModel}.${r.fromColumn} > ${r.toModel}.${r.toColumn}`);
+  };
+
+  it('Convert imports the file, and the canvas draws the relationship to the missing table', async () => {
+    await converted();
+    expect(await drawnOn(DIAGRAM)).toEqual(['fct.x_key > dim_x.x_key']);
+  });
+
+  it('adding a table keeps the import (the edited diagram\'s refresh asks the same rule), and the relationship is still drawn', async () => {
+    await converted();
+    const r = await run({ type: 'addModel', payload: { name: 'dim_store', description: '', columns: [{ name: 'store_key', dataType: 'INT', description: '', isPrimaryKey: true }] } }, DIAGRAM);
+    expect(r.errors).toEqual([]);
+    const after = r.after[DIAGRAM];
+    expect(after).toMatch(useLine('gold.dim_store', '../tables/gold/dim_store.dbml'));
+    expect(after).toContain(`${IMPORT}\n`);
+    expect(after).toContain("erd_unlinked_tables: 'dim_x'");
+    expect(r.after['gold/relationships/gold.dbml']).toBe(r.before['gold/relationships/gold.dbml']);
+    expect(await drawnOn(DIAGRAM)).toEqual(['fct.x_key > dim_x.x_key']);
+  });
+
+  it('a drag changes erd_layout only: the import stays, and the relationship is still drawn', async () => {
+    await converted();
+    const r = await run({ type: 'updatePositions', payload: { positions: { fct: { x: 60, y: 80 } } } }, DIAGRAM);
+    expect(r.errors).toEqual([]);
+    expect(r.written).toEqual([DIAGRAM]);
+    expect(r.after[DIAGRAM]).toBe(r.before[DIAGRAM].replace('    fct 40 40\n', '    fct 60 80\n'));
+    expect(await drawnOn(DIAGRAM)).toEqual(['fct.x_key > dim_x.x_key']);
+  });
+
+  it('removing the missing table drops the import with it: no pending line is left between the tables it draws', async () => {
+    await converted();
+    const r = await run({ type: 'removeModels', payload: { modelNames: ['dim_x'] } }, DIAGRAM);
+    expect(r.errors).toEqual([]);
+    expect(r.after[DIAGRAM]).not.toContain('erd_unlinked_tables');
+    expect(r.after[DIAGRAM]).not.toContain('relationships/gold.dbml');
+    // The pending line stays in the library: removing a table from a diagram never deletes its relationships.
+    expect(r.after['gold/relationships/gold.dbml']).toContain(`${PENDING}\n`);
   });
 });

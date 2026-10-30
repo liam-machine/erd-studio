@@ -111,15 +111,23 @@ export function readDiagram(text: string, path = DIAGRAM_PATH): Obj {
 /**
  * The relationships files of `library` a diagram of `members` imports (§2.4
  * `relationshipsImportsFor`): each one holding a live Ref with both ends
- * among the members (a self-reference included); one that does not read is
+ * among the members (a self-reference included), or a pending line with
+ * both ends among the members and `unlinked`; one that does not read is
  * kept when the diagram imports it now (`current`), never added.
  */
-export function importsOver(library: Readonly<Record<string, string>>, members: readonly string[], current: readonly string[]): string[] {
+export function importsOver(
+  library: Readonly<Record<string, string>>,
+  members: readonly string[],
+  current: readonly string[],
+  unlinked: readonly string[] = [],
+): string[] {
   const names = new Set(members.map((m) => m.toLowerCase()));
+  const drawn = new Set([...names, ...unlinked.map((m) => m.toLowerCase())]);
   return relationshipsFilesOf(library).filter((file) => {
     const reading = readRelationshipsDbml(library[file]);
     if (!reading.readable) return current.includes(file);
-    return reading.refs.some((r) => names.has(r.owner.toLowerCase()) && names.has(r.target.toLowerCase()));
+    return reading.refs.some((r) => names.has(r.owner.toLowerCase()) && names.has(r.target.toLowerCase()))
+      || (reading.pending ?? []).some((r) => drawn.has(r.owner.toLowerCase()) && drawn.has(r.target.toLowerCase()));
   });
 }
 
@@ -128,7 +136,7 @@ export function lookups(library: Readonly<Record<string, string>>, yaml: Record<
   const resolveTable = diagramResolver(libraryOf(library, yaml));
   return {
     resolveTable,
-    relationshipsImportsFor: (names, current) => importsOver(library, names, current),
+    relationshipsImportsFor: (names, current, unlinked) => importsOver(library, names, current, unlinked),
     fileExists: (p) => Object.prototype.hasOwnProperty.call(library, p),
   };
 }

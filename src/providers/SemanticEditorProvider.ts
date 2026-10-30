@@ -3656,8 +3656,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * A warning, once per file and diagram in a session, for each
-   * relationships file holding a Ref between two of this DBML diagram's
-   * tables that it does not import (§2.3): the canvas leaves those Refs
+   * relationships file holding a Ref (or a pending line) between two of this
+   * DBML diagram's tables that it does not import (§2.3): the canvas leaves those Refs
    * out, as core and other DBML tools do, and the next edit of the diagram
    * adds the import.
    */
