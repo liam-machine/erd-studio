@@ -221,16 +221,19 @@ export interface RefPlacement {
  *    (`listedLayer`, given the lower-case layer; else `fk.layer`). A listed
  *    file equal to that path in another case is reused (`create: false`), so
  *    a create never collides with a case twin.
+ *
+ * `layerDefaultOnly` (Convert) skips rule 1.
  */
 export function placeNewRef(
   fk: { table: string; layer: string },
   index: RelationshipsIndex,
   listedLayer?: (layerLower: string) => string | undefined,
+  options: { layerDefaultOnly?: boolean } = {},
 ): RefPlacement {
   let best: string | undefined;
   let most = 0;
   // ownerCounts is in file byte order, so the first file with the most wins a tie.
-  for (const [file, count] of index.ownerCounts(fk.table)) {
+  for (const [file, count] of options.layerDefaultOnly ? [] : index.ownerCounts(fk.table)) {
     if (index.unreadable.has(file)) continue;
     if (count > most) {
       best = file;

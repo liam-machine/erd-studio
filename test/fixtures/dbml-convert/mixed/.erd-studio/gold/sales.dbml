@@ -1,9 +1,0 @@
-Project sales {
-  Note: 'Orders, their customers and regions'
-  erd_schema_version: '7'
-}
-
-use { table fct_order } from '../tables/gold/fct_order.dbml'
-use { table dim_customer } from '../tables/gold/dim_customer.dbml'
-use { table dim_region } from '../tables/dim_region.dbml'
-use * from '../tables/gold/_relationships.dbml'

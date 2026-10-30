@@ -14,7 +14,7 @@ import * as path from 'path';
 import * as v9 from 'dbml-parse-v9';
 import * as v10 from 'dbml-parse-v10';
 
-import { normaliseForStorageEquivalence } from '@erd-studio/core';
+import { dbmlTreePathOf, normaliseForStorageEquivalence } from '@erd-studio/core';
 import { compileDbmlProject } from '@erd-studio/core/dbml';
 import type { DbmlParserModule } from '@erd-studio/core/dbml';
 
@@ -96,6 +96,9 @@ describe('Convert Project to DBML on the dbt-project fixture', () => {
     };
     walk(erd);
     expect(left.filter((p) => p.endsWith('.yml'))).toEqual([]);
+    // Every DBML file is in the layer-first tree, and the folder has its README.
+    expect(left.filter((p) => p.endsWith('.dbml')).every((p) => /^[a-z]+\/(tables\/[^/]+|relationships|diagrams)\/[^/]+\.dbml$/.test(p))).toBe(true);
+    expect(left).toContain('README.md');
     expect(left.filter((p) => p.endsWith('.json')).sort()).toEqual([
       '.sync-plan.json', 'layers.json', 'templates/blank.json', 'templates/bridge.json', 'templates/dimension.json', 'templates/fact.json', 'templates/scd2.json',
     ]);
@@ -103,10 +106,16 @@ describe('Convert Project to DBML on the dbt-project fixture', () => {
   });
 
   it('draws every diagram as before, through the storage-equivalence comparator', () => {
-    expect([...after.keys()].sort()).toEqual([...before.keys()].sort());
+    // Each diagram is now <layer>/diagrams/<name>.dbml (plan.targets), and each table has the schema of its folder.
+    const stem = (p: string): string => p.replace(/\.(json|dbml|yml)$/, '');
+    const moved = new Map(plan.targets.filter((t) => t.source.endsWith('.json')).map((t) => [stem(t.source), stem(t.target)]));
+    expect([...after.keys()].sort()).toEqual([...before.keys()].map((k) => moved.get(k) ?? k).sort());
+    expect([...after.keys()].every((k) => /^[a-z]+\/diagrams\//.test(k))).toBe(true);
+    const schemaOf = new Map(plan.targets.filter((t) => t.source.endsWith('.yml')).map((t) => [path.posix.basename(stem(t.target)).toLowerCase(), dbmlTreePathOf(t.target)!.schema]));
+    const schemaFallback = (name: string): string | undefined => schemaOf.get(name.toLowerCase());
     for (const [key, was] of before) {
-      const now = after.get(key);
-      expect(normaliseForStorageEquivalence(now, { convert: true }), key).toEqual(normaliseForStorageEquivalence(was, { convert: true }));
+      const now = after.get(moved.get(key) ?? key);
+      expect(normaliseForStorageEquivalence(now, { convert: true, schemaFallback }), key).toEqual(normaliseForStorageEquivalence(was, { convert: true, schemaFallback }));
     }
   });
 

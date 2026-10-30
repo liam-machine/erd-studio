@@ -23,7 +23,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { LOGICAL_MODELS_DIR } from '@erd-studio/core';
 
 import { applyFileWrites } from '../providers/applyFileWrites';
 import { ConvertToDbmlPanel, type ConvertPanelChoice } from '../providers/ConvertToDbmlPanel';
@@ -42,6 +41,7 @@ import {
 } from '../services/commandErrors';
 import { dbmlConversionIsEmpty, describeDbmlConversion, isDbmlSelfCheckRefusal, planDbmlConversion } from '../services/dbmlConversion';
 import type { DbmlConversionPhase, DbmlConversionPlan } from '../services/dbmlConversion';
+import { removeEmptiedLibraryFolders } from '../services/dbmlConversionCleanup';
 import { buildConvertReview, thousands } from '../services/dbmlConversionReview';
 import { dbmlConversionFingerprint, dbmlConversionOfferFingerprint, readDbmlConversionInput } from '../services/dbmlConversionFiles';
 import type { FileWrite } from '../services/fileWrites';
@@ -61,11 +61,11 @@ export const CONVERT_OPTIONAL_LINE = 'Converting is optional: if you cancel, you
 export const CONVERT_WHAT_LINE =
   'Convert writes the tables, relationships and diagrams below as DBML files and removes the YAML and JSON files they came from, in one edit.';
 export const CONVERT_TEAMMATES_LINE =
-  'Afterwards, everyone who opens this project needs ERD Studio 1.9 pre-release or 2.0 and later: older versions (1.7.x and earlier) show no diagrams. ' +
+  'Afterwards, everyone who opens this project needs ERD Studio 2.0 or later: older versions (the 1.9 pre-releases, 1.7.x and earlier) show no diagrams. ' +
   'AI helper files from before 2.0 write YAML: update them afterwards (ERD Studio: Set Up My AI Helper).';
 /** The last sentence of the toast after a conversion. */
 export const CONVERTED_TEAMMATES_SENTENCE =
-  "Teammates and other VS Code windows on an older ERD Studio (1.7.x) can't open the converted project until they switch to the ERD Studio pre-release or update to 2.0.";
+  "Teammates and other VS Code windows on an older ERD Studio (1.9 pre-release, 1.7.x) can't open the converted project until they update to 2.0 or later.";
 /** Said when the user cancels while Convert is still reading or planning. */
 export const CONVERT_CANCELLED_MESSAGE = `${CONVERT_TO_DBML_TITLE} was cancelled. Nothing was changed.`;
 export const CONVERT_GIT_LINE =
@@ -590,12 +590,9 @@ async function applyConversion(
     for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
     saveReplacedOnUndo(applied.replaced.map((u) => u.fsPath));
 
-    // 10. The emptied logical-models/ (and its folders) go; tables/ stays.
-    const v5Root = path.join(semanticRoot, LOGICAL_MODELS_DIR);
-    const emptied = new Set(plan.deletes.map((d) => path.dirname(abs(d))).filter((d) => d.startsWith(v5Root)));
-    for (const folder of [...emptied, v5Root].sort((a, b) => b.length - a.length)) {
-      try { if (fs.readdirSync(folder).length === 0) fs.rmdirSync(folder); } catch { /* already gone, or not empty */ }
-    }
+    // 10. The YAML library's folders the deletes emptied go: logical-models/ and its folders, and the v6
+    // tables/ library's folders and tables/ itself (a DBML project keeps its tables in <layer>/tables/).
+    removeEmptiedLibraryFolders(semanticRoot, plan.deletes);
 
     // 11. Canvases of converted diagrams: closed, and their .dbml reopened in the
     // canvas; with none open, a converted diagram that opens without writing
@@ -643,14 +640,15 @@ async function applyConversion(
 }
 
 /**
- * The tabs showing a converted `.json` diagram, and the `.dbml` each becomes.
- * Read before the edit applies: VS Code may close a deleted file's tab itself.
+ * The tabs showing a converted `.json` diagram, and the `.dbml` each becomes
+ * (`plan.targets`). Read before the edit applies: VS Code may close a deleted
+ * file's tab itself.
  */
 function convertedCanvasTabs(plan: DbmlConversionPlan, abs: (rel: string) => string): Array<{ tab: vscode.Tab; target: string }> {
   const converted = new Map<string, string>();
-  for (const d of plan.deletes) {
-    if (!d.endsWith('.json')) continue;
-    converted.set(path.resolve(abs(d)), abs(`${d.slice(0, -'.json'.length)}.dbml`));
+  for (const { source, target } of plan.targets) {
+    if (!source.endsWith('.json')) continue;
+    converted.set(path.resolve(abs(source)), abs(target));
   }
   const out: Array<{ tab: vscode.Tab; target: string }> = [];
   if (converted.size === 0) return out;
@@ -699,9 +697,9 @@ export function convertedUndoSentence(undoFrom: UndoFrom): string {
  */
 async function openUndoTarget(plan: DbmlConversionPlan, abs: (rel: string) => string): Promise<UndoFrom> {
   const created = new Set(plan.creates.map((c) => c.path));
-  const diagrams = plan.deletes
-    .filter((d) => d.endsWith('.json'))
-    .map((d) => `${d.slice(0, -'.json'.length)}.dbml`)
+  const diagrams = plan.targets
+    .filter((t) => t.source.endsWith('.json'))
+    .map((t) => t.target)
     .filter((d) => created.has(d));
   const placed = new Set(plan.placedDiagrams);
   try {

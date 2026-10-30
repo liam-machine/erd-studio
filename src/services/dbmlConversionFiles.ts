@@ -10,10 +10,12 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, TABLES_DIR, classifySemanticFile, parseLayersText, parseTableText } from '@erd-studio/core';
+import { LOGICAL_MODELS_DIR, SEMANTIC_README_NAME, TABLES_DIR, classifySemanticFile, parseLayersText, parseTableText } from '@erd-studio/core';
 
 import type { DbmlConversionFile, DbmlConversionInput } from './dbmlConversion';
+import { detectLegacyDbmlTree } from './legacyDbmlTree';
 import { tablesDirIsLayer } from './logicalModelService';
+import { listSemanticFiles } from './semanticFiles';
 
 /** A file's text with its byte-order mark stripped, and whether it had one; null when it cannot be read. */
 function readText(filePath: string): { text: string; hadBom: boolean } | null {
@@ -36,16 +38,21 @@ function listDir(dir: string): fs.Dirent[] {
 
 /**
  * The planner's input for the semantic dir at `semanticRoot`: `layers.json`,
- * every table (`logical-models/` and `tables/`, top level and one folder
- * down), every relationships file, and every diagram in a layer folder.
- * An unreadable file is left out.
+ * the README, every YAML table (`logical-models/` and `tables/`, top level
+ * and one folder down), every JSON diagram, and every DBML table,
+ * relationships file and diagram of the layer-first tree, as
+ * `listSemanticFiles` lists and classifies them (by path; no file is read to
+ * classify it). The 1.9 pre-release's files are named, for the planner's
+ * refusal. An unreadable file is left out.
  */
 export function readDbmlConversionInput(workspaceRoot: string, semanticDir: string): DbmlConversionInput {
   const semanticRoot = path.join(workspaceRoot, semanticDir);
   const tablesIsLayer = fs.existsSync(path.join(semanticRoot, TABLES_DIR)) && tablesDirIsLayer(semanticRoot);
   const files: DbmlConversionFile[] = [];
   const misnamedTables: Array<{ path: string; name: string }> = [];
+  let readmeInOtherCase = false;
   const add = (rel: string, inLibrary = false): void => {
+    if (rel !== SEMANTIC_README_NAME && rel.toLowerCase() === SEMANTIC_README_NAME.toLowerCase()) readmeInOtherCase = true;
     const read = readText(path.join(semanticRoot, ...rel.split('/')));
     if (read === null) return;
     const cls = classifySemanticFile(rel, { tablesDirIsLayer: tablesIsLayer });
@@ -59,32 +66,26 @@ export function readDbmlConversionInput(workspaceRoot: string, semanticDir: stri
   walkConversionFiles(semanticRoot, tablesIsLayer, add);
   const layersText = files.find((f) => f.kind === 'layers')?.text ?? null;
   const layers = parseLayersText(layersText, () => { /* doctor reports layers.json itself */ }).map((l) => l.id);
-  return { semanticDir, layers, tablesDirIsLayer: tablesIsLayer, files, ...(misnamedTables.length > 0 ? { misnamedTables } : {}) };
+  const legacy = detectLegacyDbmlTree(semanticRoot);
+  return {
+    semanticDir, layers, tablesDirIsLayer: tablesIsLayer, files,
+    ...(misnamedTables.length > 0 ? { misnamedTables } : {}),
+    ...(legacy && legacy.files.length > 0 ? { legacyDbmlFiles: legacy.files } : {}),
+    ...(readmeInOtherCase ? { readmeInOtherCase } : {}),
+  };
 }
 
 /**
- * Every file Convert reads, in the order it reads them (relative, posix):
- * `layers.json`, and every file in a top-level folder of the semantic dir and,
- * in the library (`logical-models/`, and `tables/` unless it is a layer), one
- * folder down. `inLibrary` says which.
+ * Every file Convert reads, in byte order (relative, posix): what
+ * `listSemanticFiles` lists, with no first-line reads. `inLibrary` says
+ * whether it is in the YAML library (`logical-models/`, and `tables/` unless
+ * it is a layer), at its top or one folder down.
  */
 function walkConversionFiles(semanticRoot: string, tablesIsLayer: boolean, visit: (rel: string, inLibrary: boolean) => void): void {
-  for (const entry of listDir(semanticRoot).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isFile()) {
-      if (entry.name === LAYERS_CONFIG_FILE) visit(entry.name, false);
-      continue;
-    }
-    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-    const library = entry.name === LOGICAL_MODELS_DIR || (entry.name === TABLES_DIR && !tablesIsLayer);
-    for (const child of listDir(path.join(semanticRoot, entry.name)).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (child.isFile()) {
-        visit(`${entry.name}/${child.name}`, library);
-      } else if (library && child.isDirectory() && !child.name.startsWith('.')) {
-        for (const leaf of listDir(path.join(semanticRoot, entry.name, child.name)).sort((a, b) => a.name.localeCompare(b.name))) {
-          if (leaf.isFile()) visit(`${entry.name}/${child.name}/${leaf.name}`, true);
-        }
-      }
-    }
+  for (const { rel } of listSemanticFiles(semanticRoot, { tablesDirIsLayer: tablesIsLayer })) {
+    const segments = rel.split('/');
+    const library = segments.length <= 3 && (segments[0] === LOGICAL_MODELS_DIR || (segments[0] === TABLES_DIR && !tablesIsLayer)) && segments.length >= 2;
+    visit(rel, library);
   }
 }
 

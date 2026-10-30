@@ -387,19 +387,13 @@ async function dbmlConversionPreview(ctx: CliContext, storage: ProjectStorage): 
   // is one finishing settles. Convert refuses a target with other contents, and any refusal empties
   // `resumed`: such a pair is a format conflict for the user to settle, and nothing is unfinished until
   // the plan can run.
+  // Where each source goes is the plan's (`targets`): the layer-first tree has no path rule to guess it by.
   const paths = new Map(input.files.map((f) => [f.path.toLowerCase(), f.path]));
   const resumed = new Set(plan.resumed.map((p) => p.toLowerCase()));
   const settled: string[] = [];
-  for (const f of input.files) {
-    let target: string | undefined;
-    if (f.kind === 'table' && f.storage === 'yaml') {
-      const at = f.path.indexOf('/');
-      target = `tables/${f.path.slice(at + 1).replace(/\.yml$/i, '.dbml')}`;
-    } else if (f.kind === 'diagram' && f.storage === 'json') {
-      target = f.path.replace(/\.json$/i, '.dbml');
-    }
-    const existing = target === undefined ? undefined : paths.get(target.toLowerCase());
-    if (existing !== undefined && resumed.has(existing.toLowerCase())) settled.push(f.path.toLowerCase(), existing.toLowerCase());
+  for (const { source, target } of plan.targets) {
+    const existing = paths.get(target.toLowerCase());
+    if (existing !== undefined && resumed.has(existing.toLowerCase())) settled.push(source.toLowerCase(), existing.toLowerCase());
   }
   return {
     settled,

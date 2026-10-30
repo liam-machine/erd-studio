@@ -583,7 +583,7 @@ export function dbmlConversionOfferDetail(storage: 'yaml' | 'mixed', files: numb
       'YAML or JSON (probably written by an AI helper set up with an older ERD Studio, or by a teammate on one). Convert them to DBML? (You\'ll see the full list first.)';
   }
   return 'Your project keeps working as YAML and JSON — converting is optional. ERD Studio can store it as DBML instead, an open format. ' +
-    'Afterwards, everyone who opens it needs ERD Studio 1.9 pre-release or 2.0 and later. ' +
+    'Afterwards, everyone who opens it needs ERD Studio 2.0 or later. ' +
     "Convert now? (You'll see the full list of changes first.)";
 }
 

@@ -5,7 +5,8 @@
  *
  *   convert <projectRoot>   Plan Convert Project to DBML (readDbmlConversionInput +
  *                           planDbmlConversion) and write it to disk as the command's
- *                           one edit would. Exits 1 on any refusal.
+ *                           one edit would, emptied YAML library folders removed
+ *                           (`convertOnDisk`). Exits 1 on any refusal.
  *   displays <projectRoot>  Every diagram's display, built with core's
  *                           loadDisplaySubjectArea (the CLI has no display format).
  *   compile <projectRoot>   Every `.dbml` compiled as a multi-file project under
@@ -23,8 +24,7 @@ import { LAYERS_CONFIG_FILE, classifySemanticFile, loadDisplaySubjectArea, parse
 import { compileDbmlProject, dbmlStorageReader } from '@erd-studio/core/dbml';
 import type { DbmlParserModule } from '@erd-studio/core/dbml';
 
-import { planDbmlConversion } from '../src/services/dbmlConversion';
-import { readDbmlConversionInput } from '../src/services/dbmlConversionFiles';
+import { convertOnDisk } from './convert-on-disk';
 
 const SEMANTIC_DIR = '.erd-studio';
 
@@ -39,28 +39,16 @@ function listFiles(root: string, dir = ''): string[] {
 }
 
 async function convert(projectRoot: string): Promise<void> {
-  const semanticRoot = path.join(projectRoot, SEMANTIC_DIR);
-  const plan = await planDbmlConversion(readDbmlConversionInput(projectRoot, SEMANTIC_DIR));
+  const plan = await convertOnDisk(projectRoot);
   if (plan.refusals.length > 0) {
     process.stdout.write(JSON.stringify({ refusals: plan.refusals }, null, 2));
     process.exit(1);
-  }
-  for (const c of plan.creates) {
-    const file = path.join(semanticRoot, c.path);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, c.text);
-  }
-  for (const r of plan.replaces) fs.writeFileSync(path.join(semanticRoot, r.path), r.text);
-  for (const d of plan.deletes) fs.rmSync(path.join(semanticRoot, d));
-  // The command removes library folders the deletes left empty.
-  for (const dir of ['logical-models']) {
-    const abs = path.join(semanticRoot, dir);
-    if (fs.existsSync(abs) && listFiles(abs).length === 0) fs.rmSync(abs, { recursive: true, force: true });
   }
   process.stdout.write(JSON.stringify({
     created: plan.creates.map((c) => c.path),
     replaced: plan.replaces.map((r) => r.path),
     deleted: plan.deletes,
+    targets: plan.targets,
     notes: plan.notes,
     movedRelationships: plan.movedRelationships,
     summary: plan.summary,
@@ -69,9 +57,11 @@ async function convert(projectRoot: string): Promise<void> {
 
 /**
  * Each diagram's display, keyed by its path relative to the semantic dir
- * without the extension. Every library folder is listed as a layer, so the
- * loader's probe finds every table wherever it is (the host's semantics,
- * §3.4), as Convert's own self-check does.
+ * without the extension. The layers are layers.json's; each YAML library
+ * folder (`logical-models/<f>/`, `tables/<f>/` of `.yml` tables) is listed as
+ * a layer too, so the loader's probe finds a YAML table wherever it is (the
+ * host's semantics), as Convert's own self-check does. A DBML diagram finds
+ * its tables by its `use` lines, never by a probe.
  */
 async function displays(projectRoot: string): Promise<void> {
   const semanticRoot = path.join(projectRoot, SEMANTIC_DIR);
@@ -88,7 +78,7 @@ async function displays(projectRoot: string): Promise<void> {
   const libraryFolders = new Set<string>();
   for (const f of files) {
     const parts = f.split('/');
-    if ((parts[0] === 'tables' || parts[0] === 'logical-models') && parts.length === 3) libraryFolders.add(parts[1]);
+    if ((parts[0] === 'tables' || parts[0] === 'logical-models') && parts.length === 3 && /\.yml$/i.test(f)) libraryFolders.add(parts[1]);
   }
   const extra = [...libraryFolders].filter((f) => !known.has(f)).map((id, i) => ({
     id, label: id, abbreviation: id.slice(0, 3).toUpperCase(), color: '#888888', creatable: false, order: 1000 + i,

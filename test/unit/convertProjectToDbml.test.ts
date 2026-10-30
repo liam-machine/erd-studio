@@ -162,8 +162,8 @@ describe('convertProjectToDbml', () => {
     expect(view.heading).toBe('Convert this project to DBML?');
     expect(view.intro).toEqual([CONVERT_OPTIONAL_LINE, CONVERT_WHAT_LINE, CONVERT_TEAMMATES_LINE, CONVERT_GIT_LINE, CONVERT_UNDO_LINE]);
     expect(html).toContain('Converting is optional: if you cancel, your project keeps working exactly as it is.');
-    expect(html).toContain('everyone who opens this project needs ERD Studio 1.9 pre-release or 2.0 and later');
-    expect(html).not.toContain('2.0 or later');
+    expect(html).toContain('everyone who opens this project needs ERD Studio 2.0 or later');
+    expect(html).not.toContain('1.9 pre-release or 2.0');
     expect(html).not.toContain('An earlier conversion stopped part way');
     // Every path of the plan is listed, project-relative.
     for (const p of [...plan.creates.map((c) => c.path), ...plan.replaces.map((r) => r.path), ...plan.deletes]) {
@@ -179,12 +179,13 @@ describe('convertProjectToDbml', () => {
     expect(feature).toHaveBeenCalledWith('convertToDbml');
     expect(info.mock.calls.at(-1)![0]).toBe(
       'Converted to DBML: 3 tables, 1 diagram. Edit > Undo, straight away, with this diagram in front, puts every file back. ' +
-        "Teammates and other VS Code windows on an older ERD Studio (1.7.x) can't open the converted project until they switch to the ERD Studio pre-release or update to 2.0.",
+        "Teammates and other VS Code windows on an older ERD Studio (1.9 pre-release, 1.7.x) can't open the converted project until they update to 2.0 or later.",
     );
     expect(CONVERTED_TEAMMATES_SENTENCE).toContain('1.7.x');
+    expect(CONVERTED_TEAMMATES_SENTENCE).toContain('2.0 or later');
     // Counts as the panel writes them, and the next step a stable teammate really has.
     expect(convertedMessage({ tables: 1100, diagrams: 21 }, 1200, 'diagram')).toMatch(
-      /^Converted to DBML: 1,100 tables, 21 diagrams\. 1,200 files stay as they are until fixed; .* until they switch to the ERD Studio pre-release or update to 2\.0\.$/,
+      /^Converted to DBML: 1,100 tables, 21 diagrams\. 1,200 files stay as they are until fixed; .* until they update to 2\.0 or later\.$/,
     );
 
     info.mockClear();
@@ -266,7 +267,8 @@ describe('convertProjectToDbml', () => {
 
     // Declining the v4 step stops, as a cancel.
     fs.writeFileSync(path.join(erd, 'gold', 'old2.json'), JSON.stringify({ schemaVersion: 4, domain: 'old2', layer: 'gold', logical: { models: [{ name: 'inline', columns: [] }], relationships: [] } }));
-    fs.writeFileSync(path.join(erd, 'tables', 'gold', 'extra.yml'), 'name: extra\ncolumns:\n  - name: id\n    dataType: INT\n');
+    fs.mkdirSync(path.join(erd, 'logical-models', 'gold'), { recursive: true });
+    fs.writeFileSync(path.join(erd, 'logical-models', 'gold', 'extra.yml'), 'name: extra\ncolumns:\n  - name: id\n    dataType: INT\n');
     const before = snapshot();
     expect(await convertProjectToDbml(deps({ migrateToV5: vi.fn(async () => false) }))).toBe('cancelled');
     expect(feature).toHaveBeenCalledWith('convertToDbmlCancelled');
@@ -455,10 +457,12 @@ describe('convertProjectToDbml', () => {
     fs.cpSync(path.resolve(__dirname, '../fixtures/dbml-convert/mixed/.erd-studio'), erd, { recursive: true });
     const plan = await planProjectDbmlConversion(deps());
     answerConvert();
-    const relationships = path.join(erd, 'tables', 'gold', '_relationships.dbml');
+    const relationships = path.join(erd, 'gold', 'relationships', 'gold.dbml');
     const original = fs.readFileSync(relationships, 'utf-8');
     expect(await convertProjectToDbml(deps())).toBe('converted');
-    expect(fs.readFileSync(relationships, 'utf-8')).toBe(plan.replaces.find((r) => r.path === 'tables/gold/_relationships.dbml')!.text);
+    expect(fs.readFileSync(relationships, 'utf-8')).toBe(plan.replaces.find((r) => r.path === 'gold/relationships/gold.dbml')!.text);
+    // The emptied v6 tables/ library and its folders go (step 10).
+    expect(fs.existsSync(path.join(erd, 'tables'))).toBe(false);
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(relationships)) as unknown as ReturnType<typeof vscode.createMockTextDocument>;
     doc._persist = true;
     doc._setText(original);
@@ -479,7 +483,7 @@ describe('convertProjectToDbml', () => {
     expect(await convertProjectToDbml(deps())).toBe('converted');
     expect(close).toHaveBeenCalledWith(tab);
     const openWith = exec.mock.calls.find((c) => c[0] === 'vscode.openWith')!;
-    expect((openWith[1] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'vault.dbml'));
+    expect((openWith[1] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'diagrams', 'vault.dbml'));
     expect(openWith[2]).toBe('erdStudio.domainEditor');
   });
 
@@ -490,7 +494,7 @@ describe('convertProjectToDbml', () => {
     expect(await convertProjectToDbml(deps())).toBe('converted');
     const opens = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
     expect(opens).toHaveLength(1);
-    expect((opens[0][1] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'vault.dbml'));
+    expect((opens[0][1] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'diagrams', 'vault.dbml'));
     expect(opens[0][2]).toBe('erdStudio.domainEditor');
     expect(info.mock.calls.at(-1)![0]).toContain('Edit > Undo, straight away, with this diagram in front, puts every file back.');
   });
@@ -532,13 +536,13 @@ describe('convertProjectToDbml', () => {
     expect(await convertProjectToDbml(deps())).toBe('converted');
     expect(exec.mock.calls.filter((c) => c[0] === 'vscode.openWith')).toEqual([]);
     expect(show).toHaveBeenCalledTimes(1);
-    expect((show.mock.calls[0][0] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'vault.dbml'));
+    expect((show.mock.calls[0][0] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'diagrams', 'vault.dbml'));
     expect(info.mock.calls.at(-1)![0]).toContain('Edit > Undo, straight away, with this file in front, puts every file back.');
   });
 
   it('a fully placed converted diagram is in placedDiagrams (the one Convert may open in the canvas)', async () => {
     useFixture('composite-and-self');
-    expect((await planProjectDbmlConversion(deps())).placedDiagrams).toEqual(['gold/vault.dbml']);
+    expect((await planProjectDbmlConversion(deps())).placedDiagrams).toEqual(['gold/diagrams/vault.dbml']);
   });
 
   it('reopening a canvas whose diagram is not fully placed: the toast does not promise a one-step undo', async () => {
@@ -577,7 +581,7 @@ describe('convertProjectToDbml', () => {
     answerConvert();
     expect(await convertProjectToDbml(deps())).toBe('converted');
     expect(close).not.toHaveBeenCalled();
-    expect((exec.mock.calls.find((c) => c[0] === 'vscode.openWith')![1] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'vault.dbml'));
+    expect((exec.mock.calls.find((c) => c[0] === 'vscode.openWith')![1] as vscode.Uri).fsPath).toBe(path.join(erd, 'gold', 'diagrams', 'vault.dbml'));
   });
 
   it('a half-applied earlier run: the panel says this finishes it, and the result is the twin', async () => {
@@ -586,10 +590,10 @@ describe('convertProjectToDbml', () => {
     expect(await convertProjectToDbml(deps())).toBe('converted');
     expect(shown[0].view.intro).toContain(CONVERT_RESUME_LINE);
     expect(shown[0].view.sections.map((x) => x.id)).toContain('resumed');
-    // The rest is the twin. The files the earlier (1.9.x) run wrote are left as it wrote them: they hold
-    // the same table and Refs in the older layout, and finishing never rewrites a file it does not change.
+    // The rest is the twin. The files the earlier run wrote are left as it wrote them: they hold the same
+    // table and Refs (employee.dbml in an older layout), and finishing never rewrites a file it does not change.
     const earlier = snapshot(path.resolve(__dirname, '../fixtures/dbml-convert/half-converted/.erd-studio'));
-    const resumed = ['tables/gold/employee.dbml', 'tables/gold/_relationships.dbml'];
+    const resumed = ['gold/tables/gold/employee.dbml', 'gold/relationships/gold.dbml'];
     const expected = snapshot(TWIN);
     for (const p of resumed) expected.set(p, earlier.get(p)!);
     expect(snapshot()).toEqual(expected);
@@ -684,8 +688,8 @@ describe('the canvas offer (§6.4)', () => {
     const options = info.mock.calls[0][1] as { modal: boolean; detail: string };
     expect(options.modal).toBe(true);
     expect(options.detail.startsWith(YAML_OFFER)).toBe(true);
-    expect(options.detail).toContain('Afterwards, everyone who opens it needs ERD Studio 1.9 pre-release or 2.0 and later.');
-    expect(options.detail).not.toContain('2.0 or later');
+    expect(options.detail).toContain('Afterwards, everyone who opens it needs ERD Studio 2.0 or later.');
+    expect(options.detail).not.toContain('1.9 pre-release or 2.0');
     expect(info.mock.calls[0].slice(2)).toEqual(['Convert…', "Don't Ask Again"]);
     expect([DBML_CONVERSION_OFFER_CONVERT, DBML_CONVERSION_OFFER_DECLINE]).toEqual(['Convert…', "Don't Ask Again"]);
     expect(feature).toHaveBeenCalledWith('convertToDbmlOffered');
@@ -721,7 +725,7 @@ describe('the canvas offer (§6.4)', () => {
   it('uses the mixed wording in a mixed project', async () => {
     fs.cpSync(path.resolve(__dirname, '../fixtures/dbml-convert/mixed/.erd-studio'), erd, { recursive: true });
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
-    await openWith(new Map()).open('gold/sales.dbml');
+    await openWith(new Map()).open('gold/diagrams/sales.dbml');
     expect(offers(info).map((c) => (c[1] as { modal: boolean; detail: string }))).toContainEqual(expect.objectContaining({ modal: true, detail:
       'Your project keeps working as it is — converting is optional. It is stored as DBML, but 3 files are YAML or JSON ' +
         "(probably written by an AI helper set up with an older ERD Studio, or by a teammate on one). Convert them to DBML? (You'll see the full list first.)" }));
@@ -741,14 +745,14 @@ describe('the canvas offer (§6.4)', () => {
     // Still mixed: the listing alone would offer it, but it would only lead back to the file to fix.
     expect(countDbmlConversionCandidates(root, '.erd-studio').files).toBeGreaterThan(0);
     expect(dbmlConversionGoesNowhere(workspaceState, root, '.erd-studio')).toBe(true);
-    const diagram = fs.readdirSync(path.join(erd, 'gold')).find((f) => f.endsWith('.dbml'))!;
+    const diagram = fs.readdirSync(path.join(erd, 'gold', 'diagrams')).find((f) => f.endsWith('.dbml'))!;
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
-    await openWith(state).open(`gold/${diagram}`);
+    await openWith(state).open(`gold/diagrams/${diagram}`);
     expect(offers(info)).toEqual([]);
     // Fixed: offered again.
     fs.writeFileSync(broken, good);
     info.mockClear();
-    await openWith(state).open(`gold/${diagram}`);
+    await openWith(state).open(`gold/diagrams/${diagram}`);
     expect(offers(info)).toHaveLength(1);
   });
 
@@ -1086,7 +1090,7 @@ describe('the cheap offer check and the fingerprint', () => {
     fs.cpSync(path.resolve(__dirname, '../fixtures/dbml-convert/mixed/.erd-studio'), erd, { recursive: true });
     const fp = (): string => dbmlConversionOfferFingerprint(root, '.erd-studio');
     const first = fp();
-    const sales = path.join(erd, 'gold', 'sales.dbml');
+    const sales = path.join(erd, 'gold', 'diagrams', 'sales.dbml');
     fs.writeFileSync(sales, `${fs.readFileSync(sales, 'utf-8')}\n// moved\n`);
     fs.utimesSync(sales, new Date(), new Date(Date.now() + 5000));
     expect(fp()).toBe(first);

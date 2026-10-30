@@ -27,7 +27,7 @@ import {
 
 function plan(overrides: Partial<DbmlConversionPlan> = {}): DbmlConversionPlan {
   return {
-    creates: [], replaces: [], deletes: [], resumed: [], refusals: [], handled: [], leftAsIs: [], keptMissing: [], notes: [], v4SubjectAreas: [],
+    creates: [], replaces: [], deletes: [], targets: [], resumed: [], refusals: [], handled: [], leftAsIs: [], keptMissing: [], notes: [], v4SubjectAreas: [],
     movedRelationships: [], placedDiagrams: [],
     summary: { tables: 0, diagrams: 0, relationshipsFiles: 0, relationships: 0 },
     ...overrides,
@@ -59,15 +59,22 @@ describe('locateDbmlRefusal', () => {
 describe('buildConvertReview', () => {
   const review = plan({
     creates: [
-      { path: 'tables/gold/_relationships.dbml', text: '' },
-      { path: 'tables/gold/dim_b.dbml', text: '' },
-      { path: 'tables/gold/dim_a.dbml', text: '' },
-      { path: 'gold/sales.dbml', text: '' },
-      { path: 'gold/aaa.dbml', text: '' },
+      { path: 'gold/tables/gold/dim_b.dbml', text: '' },
+      { path: 'gold/tables/gold/dim_a.dbml', text: '' },
+      { path: 'gold/relationships/gold.dbml', text: '' },
+      { path: 'gold/diagrams/sales.dbml', text: '' },
+      { path: 'gold/diagrams/aaa.dbml', text: '' },
+      { path: 'README.md', text: '' },
     ],
-    replaces: [{ path: 'tables/silver/_relationships.dbml', text: '' }],
+    replaces: [{ path: 'silver/relationships/silver.dbml', text: '' }],
     deletes: ['logical-models/gold/dim_a.yml', 'logical-models/gold/dim_b.yml', 'gold/sales.json', 'gold/aaa.json'],
-    notes: ['logical-models/gold/dim_a.yml: keys ERD Studio does not read (columns[].isSourceCode) are kept as // lines above the Table in tables/gold/dim_a.dbml.'],
+    targets: [
+      { source: 'logical-models/gold/dim_a.yml', target: 'gold/tables/gold/dim_a.dbml' },
+      { source: 'logical-models/gold/dim_b.yml', target: 'gold/tables/gold/dim_b.dbml' },
+      { source: 'gold/sales.json', target: 'gold/diagrams/sales.dbml' },
+      { source: 'gold/aaa.json', target: 'gold/diagrams/aaa.dbml' },
+    ],
+    notes: ['logical-models/gold/dim_a.yml: keys ERD Studio does not read (columns[].isSourceCode) are kept as // lines above the Table in gold/tables/gold/dim_a.dbml.'],
     movedRelationships: [{ from: 'fct.a_id', to: 'dim_a.id', diagrams: ['gold/aaa.json'] }, { from: 'x.y', to: 'z.w', diagrams: [] }],
     summary: { tables: 2, diagrams: 2, relationshipsFiles: 2, relationships: 3 },
   });
@@ -77,30 +84,32 @@ describe('buildConvertReview', () => {
     expect(view.mode).toBe('review');
     expect(locations).toEqual([]);
     const section = (id: string) => view.sections.find((x) => x.id === id)!;
-    expect(view.sections.map((x) => x.id)).toEqual(['tables', 'relationships', 'diagrams', 'removed', 'moved', 'notes']);
+    expect(view.sections.map((x) => x.id)).toEqual(['tables', 'relationships', 'diagrams', 'other', 'removed', 'moved', 'notes']);
     expect(section('tables').items).toEqual([
-      { path: '.erd-studio/tables/gold/dim_a.dbml', tag: 'new' },
-      { path: '.erd-studio/tables/gold/dim_b.dbml', tag: 'new' },
+      { path: '.erd-studio/gold/tables/gold/dim_a.dbml', tag: 'new' },
+      { path: '.erd-studio/gold/tables/gold/dim_b.dbml', tag: 'new' },
     ]);
     expect(section('relationships').items).toEqual([
-      { path: '.erd-studio/tables/gold/_relationships.dbml', tag: 'new' },
-      { path: '.erd-studio/tables/silver/_relationships.dbml', tag: 'updated' },
+      { path: '.erd-studio/gold/relationships/gold.dbml', tag: 'new' },
+      { path: '.erd-studio/silver/relationships/silver.dbml', tag: 'updated' },
     ]);
     expect(section('diagrams').items).toEqual([
-      { path: '.erd-studio/gold/aaa.dbml', tag: 'new' },
-      { path: '.erd-studio/gold/sales.dbml', tag: 'new' },
+      { path: '.erd-studio/gold/diagrams/aaa.dbml', tag: 'new' },
+      { path: '.erd-studio/gold/diagrams/sales.dbml', tag: 'new' },
     ]);
+    // The folder's README is listed as it is created.
+    expect(section('other').items).toEqual([{ path: '.erd-studio/README.md', tag: 'new' }]);
     expect(section('removed').items).toHaveLength(4);
-    // Each diagram as the .dbml it becomes, project-relative, in the path style.
+    // Each diagram as the .dbml it becomes (plan.targets), project-relative, in the path style.
     expect(section('moved').items).toEqual([
-      { text: 'fct.a_id → dim_a.id also shows in', paths: ['.erd-studio/gold/aaa.dbml'] },
+      { text: 'fct.a_id → dim_a.id also shows in', paths: ['.erd-studio/gold/diagrams/aaa.dbml'] },
       { text: '1 other relationship shows in the same diagrams as before.' },
     ]);
-    expect(buildConvertPanelHtml(view, 'n')).toContain('<span class="cdb-item__paths"><code class="cdb-item__path">.erd-studio/gold/aaa.dbml</code></span>');
+    expect(buildConvertPanelHtml(view, 'n')).toContain('<span class="cdb-item__paths"><code class="cdb-item__path">.erd-studio/gold/diagrams/aaa.dbml</code></span>');
     expect(section('notes').items[0].text).toContain('are kept as // lines');
     expect(view.counts).toEqual([
       { label: 'tables', value: 2 }, { label: 'diagrams', value: 2 }, { label: 'relationships', value: 3 },
-      { label: 'files created', value: 5 }, { label: 'file updated', value: 1 }, { label: 'files removed', value: 4 },
+      { label: 'files created', value: 6 }, { label: 'file updated', value: 1 }, { label: 'files removed', value: 4 },
     ]);
   });
 
@@ -182,7 +191,7 @@ describe('isConvertPanelToHost', () => {
 describe('buildConvertPanelHtml', () => {
   it('has a nonce-only CSP, no remote resources, theme colours only, and escapes every path', () => {
     const { view } = buildConvertReview(plan({
-      creates: [{ path: 'tables/<b>&.dbml', text: '' }],
+      creates: [{ path: 'gold/tables/gold/<b>&.dbml', text: '' }],
       summary: { tables: 1, diagrams: 0, relationshipsFiles: 0, relationships: 0 },
     }), { display, introLines: ['Commit your work first.'] });
     const html = buildConvertPanelHtml(view, 'abc123');
@@ -193,7 +202,7 @@ describe('buildConvertPanelHtml', () => {
     expect(html.match(/<script/g)).toHaveLength(1);
     expect(html).not.toMatch(/https?:\/\//);
     expect(html).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
-    expect(html).toContain('.erd-studio/tables/&lt;b&gt;&amp;.dbml');
+    expect(html).toContain('.erd-studio/gold/tables/gold/&lt;b&gt;&amp;.dbml');
     expect(html).not.toContain('<b>&');
     // A scrollable list of collapsible sections, with the buttons outside it.
     expect(html).toMatch(/\.cdb__list \{[^}]*overflow-y: auto/);
@@ -305,11 +314,15 @@ describe('ConvertToDbmlPanel', () => {
 
 describe('buildConvertReview: what Convert handles, leaves and keeps missing (D26/D27)', () => {
   const partial = plan({
-    creates: [{ path: 'tables/dim.dbml', text: '' }, { path: 'gold/commercial.dbml', text: '' }],
+    creates: [{ path: 'gold/tables/public/dim.dbml', text: '' }, { path: 'gold/diagrams/commercial.dbml', text: '' }],
     deletes: ['logical-models/dim.yml', 'gold/commercial.json'],
+    targets: [
+      { source: 'logical-models/dim.yml', target: 'gold/tables/public/dim.dbml' },
+      { source: 'gold/commercial.json', target: 'gold/diagrams/commercial.dbml' },
+    ],
     handled: [{ path: 'gold/commercial.json', text: 'It lists Dim, which is the table dim; the DBML diagram names it dim.' }],
     leftAsIs: [{ path: 'logical-models/gold/gld_fct_x.yml', line: 293, problem: 'The key name is written twice with different values (line 293). Keep the one you mean.' }],
-    keptMissing: [{ diagram: 'gold/commercial.dbml', tables: ['gld_fct_risk_child', 'gld_fct_risk_parent'] }],
+    keptMissing: [{ diagram: 'gold/diagrams/commercial.dbml', tables: ['gld_fct_risk_child', 'gld_fct_risk_parent'] }],
     notes: ['a note'],
     summary: { tables: 1, diagrams: 1, relationshipsFiles: 0, relationships: 0 },
   });
@@ -336,7 +349,7 @@ describe('buildConvertReview: what Convert handles, leaves and keeps missing (D2
     expect(section('left').hint).toBe('This file stays exactly as it is, and the diagrams draw it as before. Fix it and run Convert again to finish the job.');
     expect(locations).toEqual([{ path: 'logical-models/gold/gld_fct_x.yml', line: 293 }]);
     expect(section('missing').items).toEqual([
-      { path: '.erd-studio/gold/commercial.dbml', text: 'gld_fct_risk_child, gld_fct_risk_parent' },
+      { path: '.erd-studio/gold/diagrams/commercial.dbml', text: 'gld_fct_risk_child, gld_fct_risk_parent' },
     ]);
     expect(section('missing').count).toBe(2);
     expect(section('missing').hint).toBe('These tables have no table file. They stay on their diagram, drawn as missing exactly as before. Create them later with Add from dbt.');

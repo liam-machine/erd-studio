@@ -24,6 +24,8 @@ import { readDbmlConversionInput } from '../../src/services/dbmlConversionFiles'
 import { runDoctor } from '../../src/cli/doctor';
 import { formatDoctor, makePaint } from '../../src/cli/format';
 import { clearLogBuffer, recentLogLines } from '../../src/services/logger';
+import { LayerService, reservedLayerNameMessage } from '../../src/services/layerService';
+import { semanticReadmeText } from '../../src/services/semanticReadme';
 
 const CORE_FIXTURES = path.resolve(__dirname, '../../packages/core/test/fixtures');
 const FIXTURES = path.resolve(__dirname, '../fixtures/dbml-convert');
@@ -42,9 +44,12 @@ const LAYERS = JSON.stringify({
   ],
 }, null, 2);
 
+/** The folder's README, there already (`readme: false`: the project has none, and Convert creates it). */
+const README = '# .erd-studio\n';
+
 /** The planner's input for in-memory files (paths relative to the semantic dir). */
-function inputOf(files: Record<string, string>, options: { tablesDirIsLayer?: boolean } = {}): DbmlConversionInput {
-  const all = { 'layers.json': LAYERS, ...files };
+function inputOf(files: Record<string, string>, options: { tablesDirIsLayer?: boolean; readme?: boolean } = {}): DbmlConversionInput {
+  const all = { 'layers.json': LAYERS, ...(options.readme === false ? {} : { 'README.md': README }), ...files };
   return {
     semanticDir: '.erd-studio',
     layers: ['silver', 'gold'],
@@ -100,6 +105,12 @@ function expectCompilesEverywhere(input: DbmlConversionInput, plan: DbmlConversi
   }
 }
 
+/** Whether a note is one of where Convert put a table (its layer and schema, §S8a), not the case under test. */
+const isHomeNote = (note: string): boolean =>
+  / (goes|go) in the \S+ layer \(\S+\/tables\/\), /.test(note) || / (has|have) no schema (in the yml|\(in the yml)/.test(note) || /: its schema .* (can't be a folder name|is written )/.test(note);
+/** The plan's notes, without where each table went. */
+const notesOf = (plan: DbmlConversionPlan): string[] => plan.notes.filter((n) => !isHomeNote(n));
+
 /** A file left as it is, with its problem (and line). */
 const leftOf = (plan: DbmlConversionPlan, p: string): DbmlConversionPlan['leftAsIs'][number] | undefined => plan.leftAsIs.find((l) => l.path === p);
 
@@ -112,9 +123,9 @@ describe('planDbmlConversion: the two refusals left (D26/D27)', () => {
 
   it('a self-check failure is a named refusal, and nothing is planned', async () => {
     const plan = await planDbmlConversion(inputOf({ 'logical-models/dim.yml': DIM }), {
-      compile: (_files, entries) => Object.fromEntries(entries.map((e) => [e, e === 'tables/dim.dbml' ? [{ code: 4000, message: 'Forced', line: 2, column: 1 }] : []])),
+      compile: (_files, entries) => Object.fromEntries(entries.map((e) => [e, e === 'silver/tables/public/dim.dbml' ? [{ code: 4000, message: 'Forced', line: 2, column: 1 }] : []])),
     });
-    expect(plan.refusals).toEqual(['Convert would write DBML that does not compile: tables/dim.dbml:2 Forced [4000]. Nothing was changed; please report this with the file.']);
+    expect(plan.refusals).toEqual(['Convert would write DBML that does not compile: silver/tables/public/dim.dbml:2 Forced [4000]. Nothing was changed; please report this with the file.']);
     expect(plan.creates).toEqual([]);
     expect(plan.deletes).toEqual([]);
     expect(describeDbmlConversion(plan)).toMatch(/^Can't convert yet:/);
@@ -126,7 +137,7 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
     const plan = await planDbmlConversion(inputOf({ 'logical-models/_relationships.yml': yml('_relationships', ['id']), 'logical-models/dim.yml': DIM }));
     expect(plan.refusals).toEqual([]);
     expect(leftOf(plan, 'logical-models/_relationships.yml')?.problem).toMatch(/‘_relationships’ is the name of the relationships file/);
-    expect(plan.creates.map((c) => c.path)).toEqual(['tables/dim.dbml']);
+    expect(plan.creates.map((c) => c.path)).toEqual(['silver/tables/public/dim.dbml']);
   });
 
   it.each([
@@ -138,7 +149,7 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
     expect(plan.refusals).toEqual([]);
     // The fix names the command as the palette lists it.
     for (const p of Object.keys(files)) expect(leftOf(plan, p)?.problem).toMatch(/^One table has 2 files: .*\(ERD Studio: Give Duplicate Table Its Own Name, or delete the others\)\.$/);
-    expect(plan.creates.map((c) => c.path)).toEqual(['tables/other.dbml']);
+    expect(plan.creates.map((c) => c.path)).toEqual(['silver/tables/public/other.dbml']);
   });
 
   it('a relationship to a name left in two files stays pending, and its note names both files (not only the last one read)', async () => {
@@ -149,7 +160,7 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
     }));
     expect(plan.refusals).toEqual([]);
     expect(plan.notes).toContain(
-      'logical-models/gold/fct.yml: the relationship fct.dim_key → dim.dim_key is kept as a pending line in tables/gold/_relationships.dbml '
+      'logical-models/gold/fct.yml: the relationship fct.dim_key → dim.dim_key is kept as a pending line in gold/relationships/gold.dbml '
         + '(dim stays a YAML table until its files (logical-models/gold/dim.yml, logical-models/silver/dim.yml) are made one). '
         + 'It draws as before, and becomes a live Ref when both ends have table files with those columns.',
     );
@@ -205,34 +216,34 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
   });
 
   it('a target table file that exists with other bytes: the .yml stays', async () => {
-    const plan = await planDbmlConversion(inputOf({ 'logical-models/dim.yml': DIM, 'tables/dim.dbml': 'Table dim {\n  dim_key INT [pk]\n}\n' }));
+    const plan = await planDbmlConversion(inputOf({ 'logical-models/dim.yml': DIM, 'silver/tables/public/dim.dbml': 'Table public.dim {\n  dim_key INT [pk]\n}\n' }));
     expect(plan.refusals).toEqual([]);
-    expect(leftOf(plan, 'logical-models/dim.yml')?.problem).toMatch(/^tables\/dim\.dbml already exists, with other contents than this file converts to/);
+    expect(leftOf(plan, 'logical-models/dim.yml')?.problem).toMatch(/^silver\/tables\/public\/dim\.dbml already exists, with other contents than this file converts to/);
     expect(plan.deletes).toEqual([]);
   });
 
   it('an x.dbml with a syntax error beside x.json: x.json stays, and the log says nothing was written to x.dbml', async () => {
     clearLogBuffer();
-    const files = { 'logical-models/dim.yml': DIM, 'gold/sales.json': diagram('sales', 'gold', ['dim']), 'gold/sales.dbml': 'Table broken {\n  id int [pk\n}\n' };
+    const files = { 'logical-models/dim.yml': DIM, 'gold/sales.json': diagram('sales', 'gold', ['dim']), 'gold/diagrams/sales.dbml': 'Table broken {\n  id int [pk\n}\n' };
     for (let run = 0; run < 2; run++) {
       const plan = await planDbmlConversion(inputOf(files));
-      expect(leftOf(plan, 'gold/sales.json')?.problem).toMatch(/^gold\/sales\.dbml is also in gold\//);
-      expect(written(plan, 'gold/sales.dbml')).toBeUndefined();
+      expect(leftOf(plan, 'gold/sales.json')?.problem).toMatch(/^gold\/diagrams\/sales\.dbml already exists, and holds something other than this file converts to/);
+      expect(written(plan, 'gold/diagrams/sales.dbml')).toBeUndefined();
     }
-    expect(recentLogLines().filter((l) => l.includes('gold/sales.dbml') && l.includes('was written'))).toEqual([]);
+    expect(recentLogLines().filter((l) => l.includes('gold/diagrams/sales.dbml') && l.includes('was written'))).toEqual([]);
   });
 
   it('x.json and x.dbml in one layer: x.json stays, unless x.dbml is what x.json converts to', async () => {
     const files = { 'logical-models/dim.yml': DIM, 'gold/sales.json': diagram('sales', 'gold', ['dim']) };
     const clean = await planDbmlConversion(inputOf(files));
-    const plan = await planDbmlConversion(inputOf({ ...files, 'gold/sales.dbml': 'Project other {\n}\n' }));
+    const plan = await planDbmlConversion(inputOf({ ...files, 'gold/diagrams/sales.dbml': 'Project other {\n}\n' }));
     expect(plan.refusals).toEqual([]);
-    expect(leftOf(plan, 'gold/sales.json')?.problem).toMatch(/^gold\/sales\.dbml is also in gold\//);
+    expect(leftOf(plan, 'gold/sales.json')?.problem).toMatch(/^gold\/diagrams\/sales\.dbml already exists, and holds something other/);
     expect(plan.deletes).toEqual(['logical-models/dim.yml']);
-    const resumed = await planDbmlConversion(inputOf({ ...files, 'gold/sales.dbml': created(clean, 'gold/sales.dbml')! }));
+    const resumed = await planDbmlConversion(inputOf({ ...files, 'gold/diagrams/sales.dbml': created(clean, 'gold/diagrams/sales.dbml')! }));
     expect(resumed.refusals).toEqual([]);
-    expect(resumed.resumed).toContain('gold/sales.dbml');
-    expect(created(resumed, 'gold/sales.dbml')).toBeUndefined();
+    expect(resumed.resumed).toContain('gold/diagrams/sales.dbml');
+    expect(created(resumed, 'gold/diagrams/sales.dbml')).toBeUndefined();
     expect(resumed.deletes).toContain('gold/sales.json');
   });
 
@@ -283,18 +294,18 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
     const broken = 'Table broken {\n  id INT [pk\n}\n';
     const input = inputOf({
       'logical-models/fct.yml': yml('fct', [['fct_key', 'INT', true], 'id'], [{ fromColumn: 'id', toModel: 'broken', toColumn: 'id', cardinality: 'many-to-one' }]),
-      'tables/broken.dbml': broken,
+      'gold/tables/gold/broken.dbml': broken,
       'gold/s.json': diagram('s', 'gold', ['fct', 'broken']),
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(created(plan, 'tables/_relationships.dbml')).toContain('// erd-studio pending: Ref: fct.id >? broken.id\n');
-    expect(created(plan, 'gold/s.dbml')).toContain("erd_unlinked_tables: 'broken'");
-    expect(leftOf(plan, 'tables/broken.dbml')?.problem).toMatch(/^It is not readable DBML/);
+    expect(created(plan, 'gold/relationships/gold.dbml')).toContain('// erd-studio pending: Ref: public.fct.id >? broken.id\n');
+    expect(created(plan, 'gold/diagrams/s.dbml')).toContain("erd_unlinked_tables: 'broken'");
+    expect(leftOf(plan, 'gold/tables/gold/broken.dbml')?.problem).toMatch(/^It is not readable DBML/);
     expect(plan.keptMissing).toEqual([]);
-    const untouched = await planDbmlConversion(inputOf({ 'logical-models/dim.yml': DIM, 'tables/broken.dbml': broken }));
+    const untouched = await planDbmlConversion(inputOf({ 'logical-models/dim.yml': DIM, 'gold/tables/gold/broken.dbml': broken }));
     expect(untouched.leftAsIs).toEqual([]);
-    expect([...untouched.creates, ...untouched.replaces].map((w) => w.path)).toEqual(['tables/dim.dbml']);
+    expect([...untouched.creates, ...untouched.replaces].map((w) => w.path)).toEqual(['silver/tables/public/dim.dbml']);
   });
 
   it('an existing relationships file that does not read: the tables whose relationships go there stay YAML', async () => {
@@ -302,24 +313,29 @@ describe('planDbmlConversion: a file it cannot convert stays as it is, and the r
       'logical-models/dim.yml': DIM,
       'logical-models/fct.yml': yml('fct', [['fct_key', 'INT', true], 'dim_key'], [FCT_REL]),
     };
-    const needed = await planDbmlConversion(inputOf({ ...files, 'tables/_relationships.dbml': 'Ref: a.b >\n' }));
+    const needed = await planDbmlConversion(inputOf({ ...files, 'silver/relationships/silver.dbml': 'Ref: a.b >\n' }));
     expect(needed.refusals).toEqual([]);
-    expect(leftOf(needed, 'logical-models/fct.yml')?.problem).toMatch(/^Its relationships go in tables\/_relationships\.dbml, which does not read/);
-    expect(needed.creates.map((c) => c.path)).toEqual(['tables/dim.dbml']);
+    expect(leftOf(needed, 'logical-models/fct.yml')?.problem).toMatch(/^Its relationships go in silver\/relationships\/silver\.dbml, which does not read/);
+    expect(needed.creates.map((c) => c.path)).toEqual(['silver/tables/public/dim.dbml']);
     expect(needed.replaces).toEqual([]);
-    const elsewhere = await planDbmlConversion(inputOf({ ...files, 'tables/other/_relationships.dbml': 'Ref: a.b >\n' }));
-    expect(elsewhere.leftAsIs).toEqual([]);
+    // Any relationships file that does not read may hold the relationship already (§2.4 step 5): nothing new is written.
+    const elsewhere = await planDbmlConversion(inputOf({ ...files, 'gold/relationships/other.dbml': 'Ref: a.b >\n' }));
+    expect(elsewhere.leftAsIs.map((l) => l.path)).toEqual(['logical-models/fct.yml']);
+    expect(leftOf(elsewhere, 'logical-models/fct.yml')?.problem).toMatch(/^Its relationships can't be written while gold\/relationships\/other\.dbml does not read/);
     expect(elsewhere.replaces).toEqual([]);
+    // A table with no relationships converts all the same.
+    expect(elsewhere.creates.map((c) => c.path)).toEqual(['silver/tables/public/dim.dbml']);
   });
 
   it('an existing DBML diagram that is not writable is left as it is, and draws the same', async () => {
     const plan = await planDbmlConversion(inputOf({
       'logical-models/dim.yml': DIM,
-      'gold/sales.dbml': "Project sales {\n  erd_schema_version: '7'\n}\n\nProject again {\n}\n\nuse { table dim } from '../tables/dim.dbml'\n",
+      'gold/diagrams/sales.dbml': "Project sales {\n  erd_schema_version: '7'\n}\n\nProject again {\n}\n\nuse { table public.dim } from '../tables/public/dim.dbml'\n",
     }));
     expect(plan.refusals).toEqual([]);
-    expect(leftOf(plan, 'gold/sales.dbml')?.problem).toMatch(/^It should gain use lines for the converted tables, and ERD Studio can't edit it/);
-    expect(plan.creates.map((c) => c.path)).toEqual(['tables/dim.dbml']);
+    expect(leftOf(plan, 'gold/diagrams/sales.dbml')?.problem).toMatch(/^It should gain use lines for the converted tables, and ERD Studio can't edit it/);
+    // Its table goes in the layer of the diagram that shows it.
+    expect(plan.creates.map((c) => c.path)).toEqual(['gold/tables/public/dim.dbml']);
   });
 });
 
@@ -328,16 +344,16 @@ describe('planDbmlConversion: what ERD Studio does not read is kept as a // bloc
     const plan = await planDbmlConversion(inputOf({
       'logical-models/dim.yml': '# The date dimension.\nname: dim # one row per day\ncolumns:\n  - name: dim_key\n    dataType: INT\n    isPrimaryKey: true\n',
     }));
-    expect(created(plan, 'tables/dim.dbml')).toBe([
+    expect(created(plan, 'silver/tables/public/dim.dbml')).toBe([
       keptFromLine('logical-models/dim.yml'),
       '// # The date dimension.',
       '// name: dim # one row per day',
-      'Table dim {',
+      'Table public.dim {',
       '  dim_key INT [pk]',
       '}',
       '',
     ].join('\n'));
-    expect(plan.notes).toContain('logical-models/dim.yml: its comments are kept as // lines above the Table in tables/dim.dbml; ERD Studio does not read them.');
+    expect(plan.notes).toContain('logical-models/dim.yml: its comments are kept as // lines above the Table in silver/tables/public/dim.dbml; ERD Studio does not read them.');
   });
 
   it('unknown keys, at the top, on a column and on a relationship', async () => {
@@ -360,28 +376,28 @@ describe('planDbmlConversion: what ERD Studio does not read is kept as a // bloc
         '',
       ].join('\n'),
     }));
-    expect(created(plan, 'tables/fct.dbml')).toMatch(new RegExp(`^${keptFromLine('logical-models/fct.yml')}\\n// owner: data-team\\n//   - name: dim_key\\n//     tests:\\n//       - not_null\\n//   - fromColumn: dim_key\\n//     reviewed: yes\\nTable fct`));
-    expect(plan.notes).toContain('logical-models/fct.yml: keys ERD Studio does not read (owner, columns[].tests, relationships[].reviewed) are kept as // lines above the Table in tables/fct.dbml.');
+    expect(created(plan, 'silver/tables/public/fct.dbml')).toMatch(new RegExp(`^${keptFromLine('logical-models/fct.yml')}\\n// owner: data-team\\n//   - name: dim_key\\n//     tests:\\n//       - not_null\\n//   - fromColumn: dim_key\\n//     reviewed: yes\\nTable public\\.fct`));
+    expect(plan.notes).toContain('logical-models/fct.yml: keys ERD Studio does not read (owner, columns[].tests, relationships[].reviewed) are kept as // lines above the Table in silver/tables/public/fct.dbml.');
   });
 
   it('YAML anchors and aliases: written out in full, the lines that held them kept', async () => {
     const plan = await planDbmlConversion(inputOf({
       'logical-models/dim.yml': 'name: dim\ncolumns:\n  - name: dim_key\n    dataType: &key INT\n    isPrimaryKey: true\n  - name: other_key\n    dataType: *key\n',
     }));
-    const text = created(plan, 'tables/dim.dbml')!;
+    const text = created(plan, 'silver/tables/public/dim.dbml')!;
     // Each kept line comes with its column's first line, so the comment says which column held it.
     expect(text.split('\n').slice(0, 5)).toEqual([
       keptFromLine('logical-models/dim.yml'), '//   - name: dim_key', '//     dataType: &key INT', '//   - name: other_key', '//     dataType: *key',
     ]);
     expect(text).toContain('  other_key INT\n');
-    expect(plan.notes).toContain('logical-models/dim.yml: its YAML anchors and aliases are written out in full; the lines that held them are kept as // lines above the Table in tables/dim.dbml.');
+    expect(plan.notes).toContain('logical-models/dim.yml: its YAML anchors and aliases are written out in full; the lines that held them are kept as // lines above the Table in silver/tables/public/dim.dbml.');
   });
 
   it('a kept column line keeps the line that names its column when name: is not the first key', async () => {
     const plan = await planDbmlConversion(inputOf({
       'logical-models/fct_k.yml': 'name: fct_k\ncolumns:\n  - dataType: int\n    name: id\n    isSourceCode: true\n',
     }));
-    expect(created(plan, 'tables/fct_k.dbml')!.split('\n').slice(0, 4)).toEqual([
+    expect(created(plan, 'silver/tables/public/fct_k.dbml')!.split('\n').slice(0, 4)).toEqual([
       keptFromLine('logical-models/fct_k.yml'), '//   - dataType: int', '//     name: id', '//     isSourceCode: true',
     ]);
   });
@@ -391,14 +407,14 @@ describe('planDbmlConversion: what ERD Studio does not read is kept as a // bloc
       'logical-models/dim.yml': DIM,
       'gold/sales.json': diagram('sales', 'gold', ['dim'], [], { $schema: 'https://example.com/s.json', owner: { team: 'bi' } }),
     }));
-    expect(created(plan, 'gold/sales.dbml')!.split('\n').slice(0, 4)).toEqual([
+    expect(created(plan, 'gold/diagrams/sales.dbml')!.split('\n').slice(0, 4)).toEqual([
       keptFromLine('gold/sales.json'),
       '// "$schema": "https://example.com/s.json"',
       '// "owner": {"team":"bi"}',
-      "use { table dim } from '../tables/dim.dbml'",
+      "use { table public.dim } from '../tables/public/dim.dbml'",
     ]);
-    expect(created(plan, 'gold/sales.dbml')!).toMatch(/\nProject sales \{[^]*\}\n$/);
-    expect(plan.notes).toContain('gold/sales.json: keys a DBML diagram does not store ($schema, owner) are kept as // lines above the Project in gold/sales.dbml.');
+    expect(created(plan, 'gold/diagrams/sales.dbml')!).toMatch(/\nProject sales \{[^]*\}\n$/);
+    expect(plan.notes).toContain('gold/sales.json: keys a DBML diagram does not store ($schema, owner) are kept as // lines above the Project in gold/diagrams/sales.dbml.');
   });
 });
 
@@ -413,9 +429,13 @@ describe('planDbmlConversion: diagram-held relationships and v4 files', () => {
     }));
     expect(plan.refusals).toEqual([]);
     expect(plan.movedRelationships).toEqual([{ from: 'fct.dim_key', to: 'dim.dim_key', diagrams: ['gold/b.json'] }]);
-    expect(refLines(created(plan, 'tables/_relationships.dbml'))).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
+    // fct is on gold diagrams only; dim is on a silver one too, so it goes in the first layer listed.
+    expect(created(plan, 'gold/tables/public/fct.dbml')).toBeDefined();
+    expect(created(plan, 'silver/tables/public/dim.dbml')).toBeDefined();
+    // The Ref goes in its foreign-key table's layer default file.
+    expect(refLines(created(plan, 'gold/relationships/gold.dbml'))).toEqual(['Ref: public.fct.dim_key >? public.dim.dim_key']);
     // Neither diagram holds a Ref (D5).
-    expect(created(plan, 'gold/a.dbml')).not.toMatch(/^Ref/m);
+    expect(created(plan, 'gold/diagrams/a.dbml')).not.toMatch(/^Ref/m);
     expect(describeDbmlConversion(plan)).toContain('Relationships kept in diagram files move to the table library and will also show in these diagrams:\n• fct.dim_key → dim.dim_key: gold/b.json');
   });
 
@@ -435,7 +455,7 @@ describe('planDbmlConversion: the normalisations of §6.1 step 3, each with its 
   it('respells ends to the real table and column spelling (composite-and-self employee.yml)', async () => {
     const plan = await planDbmlConversion(readDbmlConversionInput(path.join(CORE_FIXTURES, 'composite-and-self'), '.erd-studio'));
     expect(plan.refusals).toEqual([]);
-    expect(refLines(created(plan, 'tables/gold/_relationships.dbml'))).toContain('Ref: employee.mentor_id >? employee.employee_id');
+    expect(refLines(created(plan, 'gold/relationships/gold.dbml'))).toContain('Ref: gold.employee.mentor_id >? gold.employee.employee_id');
     expect(plan.notes).toContain('logical-models/gold/employee.yml: employee.Mentor_ID → Employee.EMPLOYEE_ID is written as employee.mentor_id → employee.employee_id, the tables\' and columns\' own spelling (DBML compares names exactly).');
   });
 
@@ -444,13 +464,13 @@ describe('planDbmlConversion: the normalisations of §6.1 step 3, each with its 
       'logical-models/fct.yml': yml('fct', [['fct_key', 'INT', true], 'x_key'], [{ fromColumn: 'x_key', toModel: 'dim_x', toColumn: 'x_key', cardinality: 'many-to-one' }]),
     }));
     expect(plan.refusals).toEqual([]);
-    const text = created(plan, 'tables/_relationships.dbml')!;
-    expect(text).toContain('// erd-studio pending: Ref: fct.x_key >? dim_x.x_key\n');
+    const text = created(plan, 'silver/relationships/silver.dbml')!;
+    expect(text).toContain('// erd-studio pending: Ref: public.fct.x_key >? dim_x.x_key\n');
     expect(refLines(text)).toEqual([]);
     const reading = readRelationshipsDbml(text);
     expect(reading.refs).toEqual([]);
     expect(reading.pending?.map((r) => r.relationships)).toEqual([[{ fromModel: 'fct', fromColumn: 'x_key', toModel: 'dim_x', toColumn: 'x_key', cardinality: 'many-to-one' }]]);
-    expect(plan.notes).toEqual([expect.stringMatching(/^logical-models\/fct\.yml: the relationship fct\.x_key → dim_x\.x_key is kept as a pending line in tables\/_relationships\.dbml \(dim_x has no table file\)\. It draws as before/)]);
+    expect(notesOf(plan)).toEqual([expect.stringMatching(/^logical-models\/fct\.yml: the relationship fct\.x_key → dim_x\.x_key is kept as a pending line in silver\/relationships\/silver\.dbml \(dim_x has no table file\)\. It draws as before/)]);
     expect(plan.summary.pending).toBe(1);
   });
 
@@ -463,16 +483,16 @@ describe('planDbmlConversion: the normalisations of §6.1 step 3, each with its 
       ]),
     });
     const plan = await planDbmlConversion(input);
-    const text = created(plan, 'tables/_relationships.dbml')!;
-    expect(refLines(text)).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
-    expect(text).toMatch(/\n\n\/\/ erd-studio pending: Ref: fct\.gone_key >\? dim\.gone\n$/);
+    const text = created(plan, 'silver/relationships/silver.dbml')!;
+    expect(refLines(text)).toEqual(['Ref: public.fct.dim_key >? public.dim.dim_key']);
+    expect(text).toMatch(/\n\n\/\/ erd-studio pending: Ref: public\.fct\.gone_key >\? public\.dim\.gone\n$/);
     expectCompilesEverywhere(input, plan);
   });
 
   it.each([
-    ['many-to-one, and its backwards copy on the other end', FCT_REL, { fromColumn: 'dim_key', toModel: 'fct', toColumn: 'dim_key', cardinality: 'many-to-one' }, 'Ref: fct.dim_key >? dim.dim_key'],
-    ['one-to-one, stored reversed (-)', { ...FCT_REL, cardinality: 'one-to-one' }, { fromColumn: 'dim_key', toModel: 'fct', toColumn: 'dim_key', cardinality: 'one-to-one' }, 'Ref: dim.dim_key ?- fct.dim_key'],
-    ['many-to-many, stored reversed (<>)', { ...FCT_REL, cardinality: 'many-to-many' }, { fromColumn: 'dim_key', toModel: 'fct', toColumn: 'dim_key', cardinality: 'many-to-many' }, 'Ref: fct.dim_key <>? dim.dim_key'],
+    ['many-to-one, and its backwards copy on the other end', FCT_REL, { fromColumn: 'dim_key', toModel: 'fct', toColumn: 'dim_key', cardinality: 'many-to-one' }, 'Ref: public.fct.dim_key >? public.dim.dim_key'],
+    ['one-to-one, stored reversed (-)', { ...FCT_REL, cardinality: 'one-to-one' }, { fromColumn: 'dim_key', toModel: 'fct', toColumn: 'dim_key', cardinality: 'one-to-one' }, 'Ref: public.dim.dim_key ?- public.fct.dim_key'],
+    ['many-to-many, stored reversed (<>)', { ...FCT_REL, cardinality: 'many-to-many' }, { fromColumn: 'dim_key', toModel: 'fct', toColumn: 'dim_key', cardinality: 'many-to-many' }, 'Ref: public.fct.dim_key <>? public.dim.dim_key'],
   ])('a link stored in both ends\' files: %s', async (_label, inFct, inDim, ref) => {
     const input = inputOf({
       'logical-models/dim.yml': yml('dim', [['dim_key', 'INT', true], 'label'], [inDim]),
@@ -480,8 +500,8 @@ describe('planDbmlConversion: the normalisations of §6.1 step 3, each with its 
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(refLines(created(plan, 'tables/_relationships.dbml'))).toEqual([ref]);
-    expect(plan.notes).toEqual([expect.stringMatching(/is stored twice \(also in logical-models\/fct\.yml\); it is written once/)]);
+    expect(refLines(created(plan, 'silver/relationships/silver.dbml'))).toEqual([ref]);
+    expect(notesOf(plan)).toEqual([expect.stringMatching(/is stored twice \(also in logical-models\/fct\.yml\); it is written once/)]);
     expectCompilesEverywhere(input, plan);
   });
 
@@ -490,8 +510,8 @@ describe('planDbmlConversion: the normalisations of §6.1 step 3, each with its 
       'logical-models/dim.yml': DIM,
       'logical-models/fct.yml': yml('fct', [['fct_key', 'INT', true], 'dim_key'], [FCT_REL, FCT_REL]),
     }));
-    expect(refLines(created(plan, 'tables/_relationships.dbml'))).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
-    expect(plan.notes).toEqual([expect.stringMatching(/stored twice/)]);
+    expect(refLines(created(plan, 'silver/relationships/silver.dbml'))).toEqual(['Ref: public.fct.dim_key >? public.dim.dim_key']);
+    expect(notesOf(plan)).toEqual([expect.stringMatching(/stored twice/)]);
   });
 
   it('a library one-to-many is stored canonically, in the many side\'s folder', async () => {
@@ -499,9 +519,9 @@ describe('planDbmlConversion: the normalisations of §6.1 step 3, each with its 
       'logical-models/dim.yml': yml('dim', [['dim_key', 'INT', true]], [{ fromColumn: 'dim_key', toModel: 'fct', toColumn: 'dim_key', cardinality: 'one-to-many' }]),
       'logical-models/gold/fct.yml': yml('fct', [['fct_key', 'INT', true], 'dim_key']),
     }));
-    expect(created(plan, 'tables/_relationships.dbml')).toBeUndefined();
-    expect(refLines(created(plan, 'tables/gold/_relationships.dbml'))).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
-    expect(plan.notes).toEqual([expect.stringMatching(/^logical-models\/dim\.yml: the one-to-many dim\.dim_key → fct\.dim_key is stored as the many-to-one fct\.dim_key → dim\.dim_key/)]);
+    expect(created(plan, 'silver/relationships/silver.dbml')).toBeUndefined();
+    expect(refLines(created(plan, 'gold/relationships/gold.dbml'))).toEqual(['Ref: gold.fct.dim_key >? public.dim.dim_key']);
+    expect(notesOf(plan)).toEqual([expect.stringMatching(/^logical-models\/dim\.yml: the one-to-many dim\.dim_key → fct\.dim_key is stored as the many-to-one fct\.dim_key → dim\.dim_key/)]);
   });
 
   it('a composite group whose roles disagree takes its first member\'s role', async () => {
@@ -512,8 +532,8 @@ describe('planDbmlConversion: the normalisations of §6.1 step 3, each with its 
         { fromColumn: 'day', toModel: 'dim', toColumn: 'day', cardinality: 'many-to-one', compositeKey: 'fk_dim', role: 'other' },
       ]),
     }));
-    expect(refLines(created(plan, 'tables/_relationships.dbml'))).toEqual(['Ref "as of": fct.(dim_key, day) >? dim.(dim_key, day)']);
-    expect(plan.notes).toEqual([expect.stringMatching(/the columns of the composite relationship "fk_dim" from fct have different roles; it takes its first column's role \("as of"\)/)]);
+    expect(refLines(created(plan, 'silver/relationships/silver.dbml'))).toEqual(['Ref "as of": public.fct.(dim_key, day) >? public.dim.(dim_key, day)']);
+    expect(notesOf(plan)).toEqual([expect.stringMatching(/the columns of the composite relationship "fk_dim" from fct have different roles; it takes its first column's role \("as of"\)/)]);
   });
 
   it('a second sticky note with a used id gets a new one, the same on every plan', async () => {
@@ -527,12 +547,12 @@ describe('planDbmlConversion: the normalisations of §6.1 step 3, each with its 
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    const names = [...created(plan, 'gold/sales.dbml')!.matchAll(/^Note (\S+)/gm)].map((m) => m[1]);
+    const names = [...created(plan, 'gold/diagrams/sales.dbml')!.matchAll(/^Note (\S+)/gm)].map((m) => m[1]);
     expect(names).toHaveLength(2);
     expect(names[0]).toBe('n1');
     expect(names[1]).not.toBe('n1');
     expect(plan.notes).toContain('gold/sales.json: a second sticky note with the id n1 gets a new id (DBML names each Note once).');
-    expect(created(await planDbmlConversion(input), 'gold/sales.dbml')).toBe(created(plan, 'gold/sales.dbml'));
+    expect(created(await planDbmlConversion(input), 'gold/diagrams/sales.dbml')).toBe(created(plan, 'gold/diagrams/sales.dbml'));
     expectCompilesEverywhere(input, plan);
   });
 });
@@ -542,35 +562,53 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
     const input = readDbmlConversionInput(path.join(FIXTURES, 'mixed'), '.erd-studio');
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(plan.replaces.map((r) => r.path).sort()).toEqual(['gold/sales.dbml', 'tables/gold/_relationships.dbml']);
-    expect(refLines(written(plan, 'tables/gold/_relationships.dbml'))).toEqual([
-      'Ref: fct_order.customer_key >? dim_customer.customer_key',
-      'Ref: fct_refund.order_line_id >? fct_order.order_line_id',
+    expect(plan.replaces.map((r) => r.path).sort()).toEqual(['gold/diagrams/sales.dbml', 'gold/relationships/gold.dbml']);
+    // A new Ref goes in its foreign-key table's layer default file; the Ref already there stays.
+    expect(refLines(written(plan, 'gold/relationships/gold.dbml'))).toEqual([
+      'Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key',
+      'Ref: gold.fct_refund.order_line_id >? gold.fct_order.order_line_id',
     ]);
-    // The diagram gains the use line of the relationships file this run creates (its member dim_region lives there).
-    expect(written(plan, 'gold/sales.dbml')).toContain("use * from '../tables/_relationships.dbml'\n");
+    expect(refLines(written(plan, 'silver/relationships/silver.dbml'))).toEqual([
+      'Ref: public.fct_visit.customer_key >? gold.dim_customer.customer_key',
+      'Ref: public.fct_visit.region_key >? silver.dim_region.region_key',
+    ]);
+    // The diagram's unlinked member gains its table file, and so its use line (D26); its Project stays first.
+    const sales = written(plan, 'gold/diagrams/sales.dbml')!;
+    expect(sales).toContain("use { table gold.fct_refund }   from '../tables/gold/fct_refund.dbml'\n");
+    expect(sales).not.toContain('erd_unlinked_tables');
+    expect(sales).toMatch(/^Project sales \{/);
+    // Tables (the v6 tables/ library's: one by its folder, one by the diagram that shows it), relationships files, diagrams, the README.
     expect(plan.creates.map((c) => c.path)).toEqual([
-      'tables/_relationships.dbml', 'tables/fct_visit.dbml', 'tables/gold/fct_refund.dbml', 'silver/visits.dbml',
+      'silver/tables/public/fct_visit.dbml', 'gold/tables/gold/fct_refund.dbml', 'silver/relationships/silver.dbml', 'silver/diagrams/visits.dbml', 'README.md',
     ]);
-    expect(written(plan, 'silver/visits.dbml')).toContain("  erd_layout: '''\n");
+    const visits = written(plan, 'silver/diagrams/visits.dbml')!;
+    expect(visits).toContain("  erd_layout: '''\n");
+    // Across layers, a use path climbs out of its own layer.
+    expect(visits).toContain("use { table gold.fct_order }    from '../../gold/tables/gold/fct_order.dbml'\n");
+    expect(visits).toContain("use * from '../../gold/relationships/gold.dbml'\nuse * from '../relationships/silver.dbml'\n");
     expect(plan.deletes.sort()).toEqual(['silver/visits.json', 'tables/fct_visit.yml', 'tables/gold/fct_refund.yml']);
+    expect(plan.targets).toEqual([
+      { source: 'tables/fct_visit.yml', target: 'silver/tables/public/fct_visit.dbml' },
+      { source: 'tables/gold/fct_refund.yml', target: 'gold/tables/gold/fct_refund.dbml' },
+      { source: 'silver/visits.json', target: 'silver/diagrams/visits.dbml' },
+    ]);
     expectCompilesEverywhere(input, plan);
   });
 
   it('a Ref already written against a YAML table gets its use line when that table is converted', async () => {
     // The header Convert and the canvas write (a comment right above a use line belongs to that line).
-    const header = '// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.\n';
+    const header = '// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.\n';
     const input = inputOf({
-      'tables/gold/fct_order.dbml': 'Table fct_order {\n  id INT [pk]\n  new_key INT\n}\n',
+      'gold/tables/gold/fct_order.dbml': 'Table gold.fct_order {\n  id INT [pk]\n  new_key INT\n}\n',
       'tables/gold/dim_new.yml': yml('dim_new', [['new_key', 'INT', true]]),
-      'tables/gold/_relationships.dbml': `${header}use { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.new_key > dim_new.new_key // written before converting\n`,
-      'gold/sales.dbml': "Project sales {\n  erd_schema_version: '7'\n}\nuse { table fct_order } from '../tables/gold/fct_order.dbml'\nuse * from '../tables/gold/_relationships.dbml'\n",
+      'gold/relationships/gold.dbml': `${header}use { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nRef: gold.fct_order.new_key > dim_new.new_key // written before converting\n`,
+      'gold/diagrams/sales.dbml': "Project sales {\n  erd_schema_version: '7'\n}\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\nuse * from '../relationships/gold.dbml'\n",
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(created(plan, 'tables/gold/dim_new.dbml')).toBeDefined();
-    expect(written(plan, 'tables/gold/_relationships.dbml')).toBe(
-      `${header}use { table dim_new }   from './dim_new.dbml'\nuse { table fct_order } from './fct_order.dbml'\n\nRef: fct_order.new_key > dim_new.new_key // written before converting\n`,
+    expect(created(plan, 'gold/tables/gold/dim_new.dbml')).toBeDefined();
+    expect(written(plan, 'gold/relationships/gold.dbml')).toBe(
+      `${header}use { table gold.dim_new }   from '../tables/gold/dim_new.dbml'\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nRef: gold.fct_order.new_key > gold.dim_new.new_key // written before converting\n`,
     );
     expectCompilesEverywhere(input, plan);
   });
@@ -580,20 +618,20 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
     // The relationships file the earlier run wrote first (D23) holds what this run would write there.
-    expect(plan.resumed).toEqual(['tables/gold/employee.dbml', 'tables/gold/_relationships.dbml']);
-    expect(plan.creates.map((c) => c.path)).toEqual(['tables/gold/pit_customer.dbml', 'tables/gold/sat_customer.dbml', 'gold/vault.dbml']);
+    expect(plan.resumed).toEqual(['gold/tables/gold/employee.dbml', 'gold/relationships/gold.dbml']);
+    expect(plan.creates.map((c) => c.path)).toEqual(['gold/tables/gold/pit_customer.dbml', 'gold/tables/gold/sat_customer.dbml', 'gold/diagrams/vault.dbml', 'README.md']);
     expect(plan.replaces).toEqual([]);
     expect(plan.deletes).toContain('logical-models/gold/employee.yml');
     // The rest is exactly what a fresh run writes (the twin).
     const twin = path.join(CORE_FIXTURES, 'dbml', 'composite-and-self', '.erd-studio');
     for (const c of plan.creates) expect(c.text).toBe(fs.readFileSync(path.join(twin, c.path), 'utf-8'));
-    expect(describeDbmlConversion(plan)).toContain('Already converted by an earlier run: tables/gold/employee.dbml, tables/gold/_relationships.dbml.');
+    expect(describeDbmlConversion(plan)).toContain('Already converted by an earlier run: gold/tables/gold/employee.dbml, gold/relationships/gold.dbml.');
 
     const doctor = await runDoctor({ project: path.join(FIXTURES, 'half-converted'), semanticDir: '.erd-studio', noDbt: true });
-    expect(doctor.erd.dbmlConversion?.resumed).toEqual(['tables/gold/employee.dbml', 'tables/gold/_relationships.dbml']);
+    expect(doctor.erd.dbmlConversion?.resumed).toEqual(['gold/tables/gold/employee.dbml', 'gold/relationships/gold.dbml']);
     expect(doctor.nextSteps.map((s) => s.id)).toContain('finish-dbml-conversion');
-    // The yml beside the DBML file the earlier run wrote is no conflict to settle by hand.
-    expect(doctor.erd.namingConflicts.map((c) => c.name)).toEqual(['employee']);
+    // The yml beside the DBML file the earlier run wrote is no naming conflict (DBML is not in tables/).
+    expect(doctor.erd.namingConflicts.map((c) => c.name)).toEqual([]);
     expect(doctor.nextSteps.map((s) => s.id)).not.toContain('resolve-naming-conflicts');
     // Nor a format conflict: the DBML file holds exactly what Convert writes, so finishing settles the pair.
     expect(doctor.erd.dbmlProblems.filter((p) => p.code === 'formatConflict').length).toBeGreaterThan(0);
@@ -636,22 +674,22 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
         fs.writeFileSync(path.join(dir, rel), text);
       };
       write('layers.json', LAYERS);
-      write('tables/dim.dbml', 'Table dim {\n  dim_key INT [pk]\n}\n');
-      write('tables/fct.dbml', 'Table fct {\n  fct_key INT [pk]\n  dim_key INT\n}\n');
+      write('silver/tables/public/dim.dbml', 'Table public.dim {\n  dim_key INT [pk]\n}\n');
+      write('silver/tables/public/fct.dbml', 'Table public.fct {\n  fct_key INT [pk]\n  dim_key INT\n}\n');
       // Add from dbt made fct after Convert: its pending lines can be live now.
-      write('tables/_relationships.dbml', "// ERD Studio relationships.\nuse { table dim } from './dim.dbml'\n\n// erd-studio pending: Ref: fct.dim_key >? dim.dim_key\n");
-      write('gold/c.dbml', "Project c {\n  erd_schema_version: '7'\n  erd_unlinked_tables: 'fct'\n}\n\nuse { table dim } from '../tables/dim.dbml'\nuse * from '../tables/_relationships.dbml'\n");
+      write('silver/relationships/silver.dbml', "// ERD Studio relationships.\nuse { table public.dim } from '../tables/public/dim.dbml'\n\n// erd-studio pending: Ref: fct.dim_key >? public.dim.dim_key\n");
+      write('gold/diagrams/c.dbml', "Project c {\n  erd_schema_version: '7'\n  erd_unlinked_tables: 'fct'\n}\n\nuse { table public.dim } from '../../silver/tables/public/dim.dbml'\nuse * from '../../silver/relationships/silver.dbml'\n");
       const doctor = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true });
       expect(doctor.erd.storage).toBe('dbml');
       expect(doctor.erd.dbmlConversion?.refusals).toEqual([]);
       expect(doctor.nextSteps.find((x) => x.id === 'finish-dbml-conversion')?.why).toMatch(/^Some pending relationships or diagram members are ready to settle.*Run ERD Studio: Convert Project to DBML/);
       const plan = await planDbmlConversion(readDbmlConversionInput(root, '.erd-studio'));
       expect(plan.refusals).toEqual([]);
-      const rel = plan.replaces.find((r) => r.path === 'tables/_relationships.dbml')!.text;
-      expect(rel).toContain('Ref: fct.dim_key >? dim.dim_key\n');
+      const rel = plan.replaces.find((r) => r.path === 'silver/relationships/silver.dbml')!.text;
+      expect(rel).toContain('Ref: public.fct.dim_key >? public.dim.dim_key\n');
       expect(rel).not.toContain('erd-studio pending');
-      const diagramText = plan.replaces.find((r) => r.path === 'gold/c.dbml')!.text;
-      expect(diagramText).toContain("use { table fct } from '../tables/fct.dbml'");
+      const diagramText = plan.replaces.find((r) => r.path === 'gold/diagrams/c.dbml')!.text;
+      expect(diagramText).toContain("use { table public.fct } from '../../silver/tables/public/fct.dbml'");
       expect(diagramText).not.toContain('erd_unlinked_tables');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -660,11 +698,11 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
 
   it('a half-applied run whose target has other bytes: that .yml stays, the rest finishes', async () => {
     const input = readDbmlConversionInput(path.join(FIXTURES, 'half-converted'), '.erd-studio');
-    const changed = { ...input, files: input.files.map((f) => (f.path === 'tables/gold/employee.dbml' ? { ...f, text: `${f.text}// edited\n` } : f)) };
+    const changed = { ...input, files: input.files.map((f) => (f.path === 'gold/tables/gold/employee.dbml' ? { ...f, text: `${f.text}// edited\n` } : f)) };
     const plan = await planDbmlConversion(changed);
     expect(plan.refusals).toEqual([]);
     expect(plan.leftAsIs.map((l) => [l.path, l.problem])).toEqual([[
-      'logical-models/gold/employee.yml', expect.stringMatching(/^tables\/gold\/employee\.dbml already exists, with other contents than this file converts to/),
+      'logical-models/gold/employee.yml', expect.stringMatching(/^gold\/tables\/gold\/employee\.dbml already exists, with other contents than this file converts to/),
     ]]);
     expect(plan.deletes).not.toContain('logical-models/gold/employee.yml');
   });
@@ -677,8 +715,10 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(refLines(created(plan, 'tables/finance/_relationships.dbml'))).toEqual(['Ref: fct_ledger.account_key >? dim_account.account_key']);
-    expect(created(plan, 'gold/ledger.dbml')).toContain("use * from '../tables/finance/_relationships.dbml'");
+    // finance/ is not a layer: the tables go in the layer of their diagram, the folder is their schema.
+    expect(created(plan, 'gold/tables/finance/dim_account.dbml')).toMatch(/^Table finance\.dim_account \{/);
+    expect(refLines(created(plan, 'gold/relationships/gold.dbml'))).toEqual(['Ref: finance.fct_ledger.account_key >? finance.dim_account.account_key']);
+    expect(created(plan, 'gold/diagrams/ledger.dbml')).toContain("use * from '../relationships/gold.dbml'");
     expectCompilesEverywhere(input, plan);
   });
 
@@ -697,7 +737,8 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
       const input = readDbmlConversionInput(root, '.erd-studio');
       expect(input.files.find((f) => f.path === 'logical-models/dim.yml')).toMatchObject({ hadBom: true, text: DIM });
       const plan = await planDbmlConversion(input);
-      expect(created(plan, 'tables/dim.dbml')).toBe('Table dim {\n  dim_key INT [pk]\n  label   INT\n}\n');
+      // No layers.json and no layer folder: a new main layer.
+      expect(created(plan, 'main/tables/public/dim.dbml')).toBe('Table public.dim {\n  dim_key INT [pk]\n  label   INT\n}\n');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -723,8 +764,8 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(created(plan, 'tables/_relationships.dbml')).toContain('// erd-studio pending: Ref: fct.dim_key >? dim.nope\n');
-    expect(plan.notes).toEqual(['logical-models/fct.yml: the relationship fct.dim_key → dim.nope is kept as a pending line in tables/_relationships.dbml (dim has no column nope). '
+    expect(created(plan, 'gold/relationships/gold.dbml')).toContain('// erd-studio pending: Ref: public.fct.dim_key >? public.dim.nope\n');
+    expect(notesOf(plan)).toEqual(['logical-models/fct.yml: the relationship fct.dim_key → dim.nope is kept as a pending line in gold/relationships/gold.dbml (dim has no column nope). '
       + 'It draws as before, and becomes a live Ref when both ends have table files with those columns.']);
     expectCompilesEverywhere(input, plan);
   });
@@ -733,8 +774,8 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     const fct = 'name: fct\ncolumns:\n  - name: dim_key\n    dataType: INT\n    isForeignKey: true\nrelationships:\n  - fromColumn: dim_key\n    toModel: dim\n    toColumn: nope\n';
     const plan = await planDbmlConversion(inputOf({ 'logical-models/dim.yml': DIM, 'logical-models/fct.yml': fct, 'gold/d.json': diagram('d', 'gold', ['fct', 'dim']) }));
     expect(plan.refusals).toEqual([]);
-    expect(created(plan, 'tables/fct.dbml')).toContain("foreign_key: 'true'");
-    expect(plan.notes).toEqual([expect.stringMatching(/kept as a pending line .* It draws as before/)]);
+    expect(created(plan, 'gold/tables/public/fct.dbml')).toContain("foreign_key: 'true'");
+    expect(notesOf(plan)).toEqual([expect.stringMatching(/kept as a pending line .* It draws as before/)]);
   });
 
   it('a dangling from column (renamed in the yml, not in its relationship) whose tables a diagram draws: no false self-check refusal (S7 review, round 2)', async () => {
@@ -745,9 +786,9 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(created(plan, 'tables/_relationships.dbml')).toContain('// erd-studio pending: Ref: fct.gone >? dim.dim_key\n');
-    expect(plan.notes).toEqual([
-      'logical-models/fct.yml: the relationship fct.gone → dim.dim_key is kept as a pending line in tables/_relationships.dbml (fct has no column gone). '
+    expect(created(plan, 'gold/relationships/gold.dbml')).toContain('// erd-studio pending: Ref: public.fct.gone >? public.dim.dim_key\n');
+    expect(notesOf(plan)).toEqual([
+      'logical-models/fct.yml: the relationship fct.gone → dim.dim_key is kept as a pending line in gold/relationships/gold.dbml (fct has no column gone). '
         + 'It draws as before, and becomes a live Ref when both ends have table files with those columns.',
     ]);
     expectCompilesEverywhere(input, plan);
@@ -761,9 +802,9 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    const text = created(plan, 'tables/_relationships.dbml')!;
-    expect(refLines(text)).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
-    expect(text).toContain('// erd-studio pending: Ref: fct.old_key >? dim.dim_key\n');
+    const text = created(plan, 'gold/relationships/gold.dbml')!;
+    expect(refLines(text)).toEqual(['Ref: public.fct.dim_key >? public.dim.dim_key']);
+    expect(text).toContain('// erd-studio pending: Ref: public.fct.old_key >? public.dim.dim_key\n');
     expectCompilesEverywhere(input, plan);
   });
 
@@ -788,8 +829,8 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(created(plan, 'tables/_relationships.dbml')).toContain('// erd-studio pending: Ref: fct.dim_key >? dim.nope\n');
-    expect(plan.notes).toEqual([expect.stringMatching(/^gold\/d\.json: the relationship fct\.dim_key → dim\.nope is kept as a pending line/)]);
+    expect(created(plan, 'gold/relationships/gold.dbml')).toContain('// erd-studio pending: Ref: public.fct.dim_key >? public.dim.nope\n');
+    expect(notesOf(plan)).toEqual([expect.stringMatching(/^gold\/d\.json: the relationship fct\.dim_key → dim\.nope is kept as a pending line/)]);
     expectCompilesEverywhere(input, plan);
   });
 
@@ -800,12 +841,12 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(created(plan, 'tables/gold/_relationships.dbml')).toBeUndefined();
-    const text = created(plan, 'gold/d.dbml')!;
+    expect(created(plan, 'gold/relationships/gold.dbml')).toBeUndefined();
+    const text = created(plan, 'gold/diagrams/d.dbml')!;
     expect(text).toContain("erd_unlinked_tables: 'gone'");
-    expect(text).toMatch(/\n\n\/\/ erd-studio pending: Ref: gone\.dim_key >\? dim\.dim_key\n\nProject d \{/);
-    expect(plan.keptMissing).toEqual([{ diagram: 'gold/d.dbml', tables: ['gone'] }]);
-    expect(plan.notes).toEqual(['gold/d.json: 1 relationship whose foreign-key table has no table file is kept in gold/d.dbml as pending lines; it draws as before.']);
+    expect(text).toMatch(/\n\n\/\/ erd-studio pending: Ref: gone\.dim_key >\? gold\.dim\.dim_key\n\nProject d \{/);
+    expect(plan.keptMissing).toEqual([{ diagram: 'gold/diagrams/d.dbml', tables: ['gone'] }]);
+    expect(notesOf(plan)).toEqual(['gold/d.json: 1 relationship whose foreign-key table has no table file is kept in gold/diagrams/d.dbml as pending lines; it draws as before.']);
     expectCompilesEverywhere(input, plan);
   });
 
@@ -820,7 +861,7 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     });
     const first = await planDbmlConversion(input);
     expect(first.refusals).toEqual([]);
-    const relationships = created(first, 'tables/_relationships.dbml')!;
+    const relationships = created(first, 'gold/relationships/gold.dbml')!;
     expect(relationships.match(/\/\/ erd-studio pending:/g)).toHaveLength(1);
 
     // Every create landed, no delete: the re-plan is the rest of the first plan, byte for byte.
@@ -832,11 +873,11 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     expect(all.deletes.sort()).toEqual(first.deletes.sort());
 
     // Only the relationships file landed (D23 writes it first).
-    const some = await planDbmlConversion(applied(input, first, { only: ['tables/_relationships.dbml'] }));
+    const some = await planDbmlConversion(applied(input, first, { only: ['gold/relationships/gold.dbml'] }));
     expect(some.refusals).toEqual([]);
     expect(some.replaces).toEqual([]);
-    expect(some.resumed).toEqual(['tables/_relationships.dbml']);
-    expect(some.creates.map((c) => c.path).sort()).toEqual(first.creates.map((c) => c.path).filter((p) => p !== 'tables/_relationships.dbml').sort());
+    expect(some.resumed).toEqual(['gold/relationships/gold.dbml']);
+    expect(some.creates.map((c) => c.path).sort()).toEqual(first.creates.map((c) => c.path).filter((p) => p !== 'gold/relationships/gold.dbml').sort());
   });
 
   it('doctor raises finish-dbml-conversion when only the relationships file of an earlier run landed', async () => {
@@ -854,9 +895,9 @@ describe('planDbmlConversion: S7 review, round 1', () => {
       };
       write('layers.json', LAYERS);
       for (const [p, text] of Object.entries(files)) write(p, text);
-      write('tables/_relationships.dbml', created(first, 'tables/_relationships.dbml')!);
+      write('gold/relationships/gold.dbml', created(first, 'gold/relationships/gold.dbml')!);
       const doctor = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true });
-      expect(doctor.erd.dbmlConversion?.resumed).toEqual(['tables/_relationships.dbml']);
+      expect(doctor.erd.dbmlConversion?.resumed).toEqual(['gold/relationships/gold.dbml']);
       expect(doctor.nextSteps.map((s) => s.id)).toContain('finish-dbml-conversion');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -875,7 +916,7 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     };
     const first = await planDbmlConversion(inputOf(files));
     expect(first.refusals).toEqual([]);
-    const half = applied(inputOf(files), first, { only: ['tables/_relationships.dbml'] });
+    const half = applied(inputOf(files), first, { only: ['gold/relationships/gold.dbml'] });
     const edit = (from: string, to: string): DbmlConversionInput => ({
       ...half,
       files: half.files.map((f) => (f.path === 'logical-models/fct.yml' ? { ...f, text: f.text.replace(from, to) } : f)),
@@ -884,14 +925,14 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     // The user removes a relationship from the yml the canvas still reads.
     const removed = await planDbmlConversion(edit('  - fromColumn: other_key\n    toModel: other\n    toColumn: other_key\n    cardinality: many-to-one\n', ''));
     expect(removed.refusals).toEqual([]);
-    expect(refLines(written(removed, 'tables/_relationships.dbml'))).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
-    expect(removed.notes).toContain('tables/_relationships.dbml: the Ref fct.other_key → other.other_key belongs to fct, which is still a YAML table (logical-models/fct.yml), so ERD Studio never drew it; logical-models/fct.yml\'s relationships replace it.');
-    expect(removed.resumed).not.toContain('tables/_relationships.dbml');
+    expect(refLines(written(removed, 'gold/relationships/gold.dbml'))).toEqual(['Ref: public.fct.dim_key >? public.dim.dim_key']);
+    expect(removed.notes).toContain('gold/relationships/gold.dbml: the Ref fct.other_key → other.other_key belongs to fct, which is still a YAML table (logical-models/fct.yml), so ERD Studio never drew it; logical-models/fct.yml\'s relationships replace it.');
+    expect(removed.resumed).not.toContain('gold/relationships/gold.dbml');
 
     // Or changes a cardinality: written as the yml has it, never "stored twice".
     const changed = await planDbmlConversion(edit('toColumn: dim_key\n    cardinality: many-to-one', 'toColumn: dim_key\n    cardinality: one-to-one'));
     expect(changed.refusals).toEqual([]);
-    expect(refLines(written(changed, 'tables/_relationships.dbml'))).toEqual(['Ref: dim.dim_key ?- fct.dim_key', 'Ref: fct.other_key >? other.other_key']);
+    expect(refLines(written(changed, 'gold/relationships/gold.dbml'))).toEqual(['Ref: public.dim.dim_key ?- public.fct.dim_key', 'Ref: public.fct.other_key >? public.other.other_key']);
     expect(changed.notes.filter((n) => /stored twice/.test(n))).toEqual([]);
   });
 
@@ -903,7 +944,7 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     }));
     expect(plan.refusals).toEqual([]);
     expect(plan.leftAsIs).toEqual([]);
-    expect(created(plan, 'gold/d.dbml')).not.toContain('erd_layout');
+    expect(created(plan, 'gold/diagrams/d.dbml')).not.toContain('erd_layout');
     expect(plan.deletes.sort()).toEqual(['gold/d.json', 'logical-models/dim.yml']);
   });
 
@@ -916,7 +957,7 @@ describe('planDbmlConversion: S7 review, round 1', () => {
       }),
     }));
     expect(plan.refusals).toEqual([]);
-    const text = created(plan, 'gold/d.dbml')!;
+    const text = created(plan, 'gold/diagrams/d.dbml')!;
     expect(text).toContain('// "viewConfig.positions.note/x": {"x":1,"y":1}\n');
     expect(text).toContain('// "viewConfig.positions. padded": {"x":2,"y":2}\n');
     // DIM stays a stray (dim is written where the canvas places it today, counting every stored position).
@@ -949,21 +990,21 @@ describe('planDbmlConversion: S7 review, round 1', () => {
       ].join('\n'),
     }));
     expect(plan.refusals).toEqual([]);
-    expect(created(plan, 'tables/fct.dbml')).toBe([
+    expect(created(plan, 'silver/tables/public/fct.dbml')).toBe([
       keptFromLine('logical-models/fct.yml'),
       '//   - fromColumn: dim_key',
       '//     toModel: dim',
-      'Table fct {',
+      'Table public.fct {',
       '  dim_key INT',
       '}',
       '',
     ].join('\n'));
-    expect(plan.notes).toContain('logical-models/fct.yml: values ERD Studio does not read (relationships[0]) are kept as // lines above the Table in tables/fct.dbml; they were not drawn before and are not drawn now.');
-    const t = created(plan, 'tables/t.dbml')!;
+    expect(plan.notes).toContain('logical-models/fct.yml: values ERD Studio does not read (relationships[0]) are kept as // lines above the Table in silver/tables/public/fct.dbml; they were not drawn before and are not drawn now.');
+    const t = created(plan, 'silver/tables/public/t.dbml')!;
     for (const line of ['rationale: Chosen because finance asked for daily grain', 'meta: owner-team-x', '    scdType: two', '  - b_column_as_string', '  - fromModel: other_table', '    cardinality: lots-to-one']) {
       expect(t).toContain(`// ${line}\n`);
     }
-    expect(plan.notes).toContain('logical-models/t.yml: values ERD Studio does not read (rationale, meta, columns[0].scdType, columns[1], relationships[0].fromModel, relationships[0].cardinality) are kept as // lines above the Table in tables/t.dbml; they were not drawn before and are not drawn now.');
+    expect(plan.notes).toContain('logical-models/t.yml: values ERD Studio does not read (rationale, meta, columns[0].scdType, columns[1], relationships[0].fromModel, relationships[0].cardinality) are kept as // lines above the Table in silver/tables/public/t.dbml; they were not drawn before and are not drawn now.');
   });
 
   it.each([
@@ -976,7 +1017,7 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     const input = inputFn();
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    const diagramText = plan.creates.find((c) => c.path.endsWith('.dbml') && !c.path.startsWith('tables/'))!.text;
+    const diagramText = plan.creates.find((c) => classifySemanticFile(c.path, { tablesDirIsLayer: false }).kind === 'diagram')!.text;
     expect(diagramText).toMatch(/^ {4}\w+ 520 40$/m);
     expect(diagramText).toMatch(/^Note a1/m);
     expect(plan.notes.join('\n')).not.toMatch(/logical\.viewConfig/);
@@ -1000,8 +1041,8 @@ describe('planDbmlConversion: S7 review, round 1', () => {
       { path: 'gold/sales.json', text: 'It lists Dim, which is the table dim; the DBML diagram names it dim.' },
       { path: 'gold/sales.json', text: 'It lists FCT, which is the table fct; the DBML diagram names it fct.' },
     ]);
-    const text = created(plan, 'gold/sales.dbml')!;
-    expect(text).toContain("use { table dim } from '../tables/dim.dbml'\nuse { table fct } from '../tables/fct.dbml'\n");
+    const text = created(plan, 'gold/diagrams/sales.dbml')!;
+    expect(text).toContain("use { table public.dim } from '../tables/public/dim.dbml'\nuse { table public.fct } from '../tables/public/fct.dbml'\n");
     // Positions keep their keys. Alone, FCT's would be read as fct's (§1.6) and move fct from where the canvas
     // places it today: fct is written where the canvas places it, so FCT's stays a stray, like Dim's.
     expect(text).toMatch(/ {2}erd_layout: '''\n {4}Dim 500 500\n {4}FCT 900 900\n {4}dim 10 20\n {4}fct -?\d+(?:\.\d+)? -?\d+(?:\.\d+)?\n {2}'''\n/);
@@ -1022,16 +1063,16 @@ describe('planDbmlConversion: S7 review, round 1', () => {
 
   it('an existing DBML table the plan must change that is not writable (an inline ref:) is refused, by name', async () => {
     const plan = await planDbmlConversion(inputOf({
-      'tables/dim.dbml': 'Table dim {\n  dim_key INT [pk]\n  other_key INT [ref: > other.other_key]\n}\n',
+      'gold/tables/gold/dim.dbml': 'Table gold.dim {\n  dim_key INT [pk]\n  other_key INT [ref: > other.other_key]\n}\n',
       'logical-models/other.yml': yml('other', [['other_key', 'INT', true]]),
       'logical-models/fct.yml': yml('fct', ['dim_key']),
       'gold/d.json': diagram('d', 'gold', ['fct', 'dim'], [{ fromModel: 'dim', fromColumn: 'dim_key', toModel: 'fct', toColumn: 'dim_key', cardinality: 'one-to-one' }]),
     }));
-    expect(plan.refusals).toEqual([expect.stringMatching(/^Convert can't write the table library: tables\/dim\.dbml: Move `ref: > other\.other_key`/)]);
+    expect(plan.refusals).toEqual([expect.stringMatching(/^Convert can't write the table library: gold\/tables\/gold\/dim\.dbml: Move `ref: > other\.other_key`/)]);
     expect(plan.creates).toEqual([]);
     // Untouched by the plan, it is no refusal.
     const untouched = await planDbmlConversion(inputOf({
-      'tables/dim.dbml': 'Table dim {\n  dim_key INT [pk]\n  other_key INT [ref: > other.other_key]\n}\n',
+      'gold/tables/gold/dim.dbml': 'Table gold.dim {\n  dim_key INT [pk]\n  other_key INT [ref: > other.other_key]\n}\n',
       'logical-models/other.yml': yml('other', [['other_key', 'INT', true]]),
     }));
     expect(untouched.refusals).toEqual([]);
@@ -1071,12 +1112,12 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     };
     const plan = await planDbmlConversion(inputOf(files));
     expect(plan.refusals).toEqual([]);
-    const text = created(plan, 'gold/sales.dbml')!;
+    const text = created(plan, 'gold/diagrams/sales.dbml')!;
     expect(text).toContain('// "viewConfig.annotations[0]": {"text":"no id","x":5,"y":5}\n');
     expect(text).toContain('// "viewConfig.annotations[1]": {"id":"n1","text":"no xy"}\n');
     expect(text).toContain('// "viewConfig.positions.bad": {"x":"a","y":2}\n');
     expect([...text.matchAll(/^Note (\S+)/gm)].map((m) => m[1])).toEqual(['n2']);
-    expect(plan.notes).toContain('gold/sales.json: positions and sticky notes ERD Studio does not draw (viewConfig.positions.bad, viewConfig.annotations[0], viewConfig.annotations[1]: no id, or no numeric x and y) are kept as // lines above the Project in gold/sales.dbml.');
+    expect(plan.notes).toContain('gold/sales.json: positions and sticky notes ERD Studio does not draw (viewConfig.positions.bad, viewConfig.annotations[0], viewConfig.annotations[1]: no id, or no numeric x and y) are kept as // lines above the Project in gold/diagrams/sales.dbml.');
 
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-convert-notes-'));
     try {
@@ -1111,6 +1152,8 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
       readFile: async (p) => all[p] ?? all[lower.get(p.toLowerCase()) ?? ''] ?? null,
     });
   };
+  /** Models without their schema: a converted table gains its folder's (§1.2). */
+  const withoutSchema = (models: DisplaySubjectArea['models']): unknown[] => models.map(({ schema: _schema, ...rest }) => rest);
   const DUPLICATE_SAME = 'name: fct\ncolumns:\n  - name: fct_key\n    dataType: INT\n    isPrimaryKey: true\n    isPrimaryKey: true\n  - name: dim_key\n    dataType: INT\nrelationships:\n  - fromColumn: dim_key\n    toModel: dim\n    toColumn: dim_key\n    cardinality: many-to-one\n';
   const DUPLICATE_DIFFERENT = 'name: other\ndescription: one\ndescription: two\ncolumns:\n  - name: other_key\n    dataType: INT\n  - name: dim_key\n    dataType: INT\nrelationships:\n  - fromColumn: dim_key\n    toModel: dim\n    toColumn: dim_key\n    cardinality: many-to-one\n';
 
@@ -1120,7 +1163,7 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     expect(plan.refusals).toEqual([]);
     expect(plan.leftAsIs).toEqual([]);
     expect(plan.handled).toEqual([{ path: 'logical-models/fct.yml', text: 'The key isPrimaryKey is written twice with the same value (line 6); converted as if written once.' }]);
-    expect(created(plan, 'tables/fct.dbml')).toBe('Table fct {\n  fct_key INT [pk]\n  dim_key INT\n}\n');
+    expect(created(plan, 'gold/tables/public/fct.dbml')).toBe('Table public.fct {\n  fct_key INT [pk]\n  dim_key INT\n}\n');
     expect(plan.deletes).toContain('logical-models/fct.yml');
     expectCompilesEverywhere(input, plan);
   });
@@ -1137,17 +1180,17 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     expect(plan.leftAsIs).toEqual([{ path: 'logical-models/other.yml', line: 3, problem: 'The key description is written twice with different values (line 3). Keep the one you mean.' }]);
     expect(plan.deletes).not.toContain('logical-models/other.yml');
     expect(plan.keptMissing).toEqual([]);
-    const diagramText = created(plan, 'gold/s.dbml')!;
+    const diagramText = created(plan, 'gold/diagrams/s.dbml')!;
     expect(diagramText).toContain("erd_unlinked_tables: 'other'");
     expect(diagramText).not.toContain("tables/other.dbml");
     // The Ref to the YAML table is pending (a live one would break the file); the YAML table's own one stays in its file.
-    const relationships = created(plan, 'tables/_relationships.dbml')!;
-    expect(refLines(relationships)).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
-    expect(relationships).toContain('// erd-studio pending: Ref: fct.other_key >? other.other_key\n');
+    const relationships = created(plan, 'gold/relationships/gold.dbml')!;
+    expect(refLines(relationships)).toEqual(['Ref: public.fct.dim_key >? public.dim.dim_key']);
+    expect(relationships).toContain('// erd-studio pending: Ref: public.fct.other_key >? other.other_key\n');
     expectCompilesEverywhere(input, plan);
     // What the diagram draws: the same three tables and three lines, other.yml's own included.
     const before = await displayOf(after(input, { ...plan, creates: [], replaces: [], deletes: [] }), 'gold/s.json');
-    const now = await displayOf(after(input, plan), 'gold/s.dbml');
+    const now = await displayOf(after(input, plan), 'gold/diagrams/s.dbml');
     const lines = (d: DisplaySubjectArea): string[] => d.relationships.map((r) => `${r.fromModel}.${r.fromColumn}>${r.toModel}.${r.toColumn}`).sort();
     expect(lines(now)).toEqual(lines(before));
     expect(lines(now)).toHaveLength(3);
@@ -1162,12 +1205,14 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(plan.keptMissing).toEqual([{ diagram: 'gold/s.dbml', tables: ['dim_x'] }]);
+    expect(plan.keptMissing).toEqual([{ diagram: 'gold/diagrams/s.dbml', tables: ['dim_x'] }]);
     const before = await displayOf(after(input, { ...plan, creates: [], replaces: [], deletes: [] }), 'gold/s.json');
-    const now = await displayOf(after(input, plan), 'gold/s.dbml');
+    const now = await displayOf(after(input, plan), 'gold/diagrams/s.dbml');
     expect(before.relationships).toHaveLength(1);
     expect(now.relationships).toEqual(before.relationships);
-    expect(now.models).toEqual(before.models);
+    // The same models; the converted one has the schema of its folder now (public: its yml gave it none).
+    expect(withoutSchema(now.models)).toEqual(withoutSchema(before.models));
+    expect(now.models.map((m) => m.schema)).toEqual(['public', '']);
     expect(now.viewConfig.positions).toEqual(before.viewConfig.positions);
   });
 
@@ -1179,12 +1224,12 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(plan.keptMissing).toEqual([{ diagram: 'gold/commercial.dbml', tables: missing }]);
-    expect(created(plan, 'gold/commercial.dbml')).toBe([
-      "use { table gld_dim_project } from '../tables/gold/gld_dim_project.dbml'",
+    expect(plan.keptMissing).toEqual([{ diagram: 'gold/diagrams/commercial.dbml', tables: missing }]);
+    expect(created(plan, 'gold/diagrams/commercial.dbml')).toBe([
+      "use { table gold.gld_dim_project } from '../tables/gold/gld_dim_project.dbml'",
       '',
-      '// erd-studio pending: Ref: gld_fct_risk_child.project_id >? gld_dim_project.project_id',
-      '// erd-studio pending: Ref: gld_fct_risk_parent.project_id >? gld_dim_project.project_id',
+      '// erd-studio pending: Ref: gld_fct_risk_child.project_id >? gold.gld_dim_project.project_id',
+      '// erd-studio pending: Ref: gld_fct_risk_parent.project_id >? gold.gld_dim_project.project_id',
       '',
       'Project commercial {',
       "  Note: 'commercial diagram'",
@@ -1198,12 +1243,13 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
       '}',
       '',
     ].join('\n'));
-    expect(plan.placedDiagrams).toEqual(['gold/commercial.dbml']);
+    expect(plan.placedDiagrams).toEqual(['gold/diagrams/commercial.dbml']);
     expectCompilesEverywhere(input, plan);
     const before = await displayOf(after(input, { ...plan, creates: [], replaces: [], deletes: [] }), 'gold/commercial.json');
-    const now = await displayOf(after(input, plan), 'gold/commercial.dbml');
+    const now = await displayOf(after(input, plan), 'gold/diagrams/commercial.dbml');
     expect(now.relationships).toEqual(before.relationships);
-    expect(now.models).toEqual(before.models);
+    expect(withoutSchema(now.models)).toEqual(withoutSchema(before.models));
+    expect(now.models.find((m) => m.name === 'gld_dim_project')?.schema).toBe('gold');
   });
 
   it('the same project gives the same plan, byte for byte', async () => {
@@ -1235,7 +1281,7 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     expect(first.leftAsIs.map((l) => l.path)).toEqual(['logical-models/other.yml']);
     const mixed = after(input, first);
     // The diagram's own relationship from the YAML table is pending in the diagram.
-    expect(mixed['gold/s.dbml']).toContain('// erd-studio pending: Ref: other.other_key >? fct.fct_key\n');
+    expect(mixed['gold/diagrams/s.dbml']).toContain('// erd-studio pending: Ref: other.other_key >? public.fct.fct_key\n');
     expect(classifyStorage(mixed)).toBe('mixed');
     // Nothing more to convert until it is fixed: the plan lists the file and writes nothing.
     const waiting = await planDbmlConversion(inputOf(mixed));
@@ -1248,22 +1294,23 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     const finish = await planDbmlConversion(inputOf(fixed));
     expect(finish.refusals).toEqual([]);
     expect(finish.leftAsIs).toEqual([]);
-    expect(finish.creates.map((c) => c.path)).toEqual(['tables/other.dbml']);
+    // It goes in the layer of the diagram that shows it.
+    expect(finish.creates.map((c) => c.path)).toEqual(['gold/tables/public/other.dbml']);
     expect(finish.deletes).toEqual(['logical-models/other.yml']);
     const done = after(inputOf(fixed), finish);
-    expect(done['gold/s.dbml']).not.toContain('erd_unlinked_tables');
-    expect(done['gold/s.dbml']).not.toContain('erd-studio pending');
-    expect(done['gold/s.dbml']).toContain("use { table other } from '../tables/other.dbml'\n");
-    const relationships = done['tables/_relationships.dbml'];
+    expect(done['gold/diagrams/s.dbml']).not.toContain('erd_unlinked_tables');
+    expect(done['gold/diagrams/s.dbml']).not.toContain('erd-studio pending');
+    expect(done['gold/diagrams/s.dbml']).toMatch(/^use \{ table public\.other \} +from '\.\.\/tables\/public\/other\.dbml'$/m);
+    const relationships = done['gold/relationships/gold.dbml'];
     expect(relationships).not.toContain('erd-studio pending');
     expect(refLines(relationships)).toEqual([
-      'Ref: fct.dim_key >? dim.dim_key',
-      'Ref: fct.other_key >? other.other_key',
-      'Ref: other.dim_key >? dim.dim_key',
-      'Ref: other.other_key >? fct.fct_key',
+      'Ref: public.fct.dim_key >? public.dim.dim_key',
+      'Ref: public.fct.other_key >? public.other.other_key',
+      'Ref: public.other.dim_key >? public.dim.dim_key',
+      'Ref: public.other.other_key >? public.fct.fct_key',
     ]);
     expect(finish.movedRelationships).toEqual([{ from: 'other.other_key', to: 'fct.fct_key', diagrams: [] }]);
-    expect(relationships).toContain("use { table other } from './other.dbml'\n");
+    expect(relationships).toMatch(/^use \{ table public\.other \} +from '\.\.\/tables\/public\/other\.dbml'$/m);
     expect(classifyStorage(done)).toBe('dbml');
     expectCompilesEverywhere(inputOf(fixed), finish);
   });
@@ -1279,9 +1326,9 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
       const plan = await planDbmlConversion(input);
       expect(plan.refusals, left).toEqual([]);
       expect(plan.leftAsIs.map((l) => l.path), left).toEqual(['logical-models/foo.yml']);
-      expect(created(plan, 'gold/c.dbml'), left).toContain("erd_unlinked_tables: 'foo'");
+      expect(created(plan, 'gold/diagrams/c.dbml'), left).toContain("erd_unlinked_tables: 'foo'");
       const before = await displayOf(after(input, { ...plan, creates: [], replaces: [], deletes: [] }), 'gold/c.json');
-      const now = await displayOf(after(input, plan), 'gold/c.dbml');
+      const now = await displayOf(after(input, plan), 'gold/diagrams/c.dbml');
       const byName = (d: DisplaySubjectArea) => d.models.map((m) => m.name).sort();
       expect(byName(now), left).toEqual(byName(before));
     }
@@ -1294,7 +1341,8 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     }));
     expect(plan.refusals).toEqual([]);
     expect(plan.leftAsIs).toEqual([{ path: 'gold/c.json', problem: 'It lists miss and MISS, which differ only in case and have no table file, so it draws two tables where a DBML diagram can name one. Remove one of them.' }]);
-    expect(plan.creates.map((c) => c.path)).toEqual(['tables/dim.dbml']);
+    // The diagram left as JSON still says where dim belongs.
+    expect(plan.creates.map((c) => c.path)).toEqual(['gold/tables/public/dim.dbml']);
   });
 
   it('finishing a diagram that keeps other missing members: the fixed table gains its use line ahead of them, with no false self-check refusal', async () => {
@@ -1309,21 +1357,21 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     const first = await planDbmlConversion(inputOf(files));
     expect(first.refusals).toEqual([]);
     const mixed = after(inputOf(files), first);
-    expect(mixed['gold/c.dbml']).toContain("erd_unlinked_tables: 'gone_a, risk, gone_b, other, gone_c'");
+    expect(mixed['gold/diagrams/c.dbml']).toContain("erd_unlinked_tables: 'gone_a, risk, gone_b, other, gone_c'");
     // One fixed, then the other: each run finishes what it can.
     const oneFixed = { ...mixed, 'logical-models/other.yml': DUPLICATE_DIFFERENT.replace('description: one\n', '') };
     const second = await planDbmlConversion(inputOf(oneFixed));
     expect(second.refusals).toEqual([]);
     expect(second.leftAsIs.map((l) => l.path)).toEqual(['logical-models/risk.yml']);
     const done1 = after(inputOf(oneFixed), second);
-    expect(done1['gold/c.dbml']).toContain("erd_unlinked_tables: 'gone_a, risk, gone_b, gone_c'");
-    expect(done1['gold/c.dbml']).toContain("use { table other } from '../tables/other.dbml'");
+    expect(done1['gold/diagrams/c.dbml']).toContain("erd_unlinked_tables: 'gone_a, risk, gone_b, gone_c'");
+    expect(done1['gold/diagrams/c.dbml']).toMatch(/^use \{ table public\.other \} +from '\.\.\/tables\/public\/other\.dbml'$/m);
     const bothFixed = { ...done1, 'logical-models/risk.yml': 'name: risk\ncolumns: []\n' };
     const third = await planDbmlConversion(inputOf(bothFixed));
     expect(third.refusals).toEqual([]);
     expect(third.leftAsIs).toEqual([]);
     const done2 = after(inputOf(bothFixed), third);
-    expect(done2['gold/c.dbml']).toContain("erd_unlinked_tables: 'gone_a, gone_b, gone_c'");
+    expect(done2['gold/diagrams/c.dbml']).toContain("erd_unlinked_tables: 'gone_a, gone_b, gone_c'");
     expect(classifyStorage(done2)).toBe('dbml');
   });
 });
@@ -1344,7 +1392,7 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
     const table = 'name: dim\nmeta:\n  owner: people\n  contains_pii: true\n  exposure: crm\ncolumns:\n  - name: dim_key\n    dataType: INT\n    isPrimaryKey: true\n';
     const plan = await planDbmlConversion(inputOf({ 'logical-models/dim.yml': table, 'gold/d.json': diagram('d', 'gold', ['dim']) }));
     expect(plan.refusals).toEqual([]);
-    const text = created(plan, 'tables/dim.dbml')!;
+    const text = created(plan, 'gold/tables/public/dim.dbml')!;
     const reading = parseTableDbml(text, 'dim');
     expect(reading.ok).toBe(true);
     if (reading.ok) expect(Object.keys(reading.table.meta ?? {})).toEqual(['owner', 'contains_pii', 'exposure']);
@@ -1361,7 +1409,7 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
     expect(leftOf(plan, 'logical-models/silver/dim_sales_rep.yml')?.problem).toMatch(/^It is empty, so ERD Studio does not read it as a table/);
     expect(leftOf(plan, 'logical-models/silver/schema.yml')?.problem).toMatch(/^It is a dbt schema file \(version: and models: or sources:\), not an ERD Studio table\. Move it out of the table library/);
     expect(leftOf(plan, 'logical-models/silver/nameless.yml')?.problem).toMatch(/^It has no name: key/);
-    expect(created(plan, 'tables/dim.dbml')).toBeDefined();
+    expect(created(plan, 'silver/tables/public/dim.dbml')).toBeDefined();
   });
 
   it('a diagram in a folder layers.json does not list stays JSON (it does not open, so Convert cannot check it)', async () => {
@@ -1375,7 +1423,7 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
       'It is in the platinum/ folder, which is not a layer in layers.json, so ERD Studio does not open it. Add the layer platinum to layers.json (or move the file into a layer\'s folder), then convert again.',
     );
     expect(plan.deletes).not.toContain('platinum/exec.json');
-    expect(plan.creates.map((c) => c.path)).not.toContain('platinum/exec.dbml');
+    expect(plan.creates.map((c) => c.path)).not.toContain('platinum/diagrams/exec.dbml');
     expect(plan.deletes).toContain('gold/d.json');
   });
 
@@ -1443,7 +1491,7 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
       expect(leftOf(plan, 'logical-models/gold/dim_c.yml')?.problem).toMatch(/indented with a tab/);
       // Not "create them later with Add from dbt": each has a file, under the wrong name.
       expect(plan.keptMissing).toEqual([]);
-      expect(created(plan, 'gold/d.dbml')).toContain("erd_unlinked_tables: 'dim_a, dim_b'");
+      expect(created(plan, 'gold/diagrams/d.dbml')).toContain("erd_unlinked_tables: 'dim_a, dim_b'");
       expect(plan.deletes).not.toContain('logical-models/gold/dim_a.yaml');
       // The same plan twice.
       expect(JSON.stringify(await planDbmlConversion(readDbmlConversionInput(root, '.erd-studio')))).toBe(JSON.stringify(plan));
@@ -1483,7 +1531,7 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
     const input = inputOf({ 'logical-models/dim.yml': DIM, 'logical-models/fct.yml': fct, 'gold/d.json': diagram('d', 'gold', ['dim', 'fct']) });
     const plan = await planDbmlConversion(input);
     expect(plan.refusals).toEqual([]);
-    expect(refLines(written(plan, 'tables/_relationships.dbml'))).toEqual(['Ref: fct.dim_key >? dim.dim_key']);
+    expect(refLines(written(plan, 'gold/relationships/gold.dbml'))).toEqual(['Ref: public.fct.dim_key >? public.dim.dim_key']);
     expect(plan.notes).toContain(
       'logical-models/fct.yml: the composite relationship "fk_dim" from fct has only one column pair (fct.dim_key → dim.dim_key), so it is written as a single-column Ref ' +
         'without its compositeKey, as ERD Studio already drew it. Add the other columns on the canvas if it is meant to be composite.',
@@ -1502,7 +1550,7 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
         'without its compositeKey, as ERD Studio already drew it. Add the other columns on the canvas if it is meant to be composite.',
     );
     expect(notes.some((n) => n.includes('Ref without'))).toBe(false);
-    expect(written(plan, 'tables/_relationships.dbml')).toContain('// erd-studio pending: Ref: fct.z_id >? dim_zz.id');
+    expect(written(plan, 'gold/relationships/gold.dbml')).toContain('// erd-studio pending: Ref: public.fct.z_id >? dim_zz.id');
   });
 
   it('doctor says Convert fixes a key written twice with the same value, so the two never disagree', async () => {
@@ -1529,5 +1577,323 @@ describe('planDbmlConversion: stress round 1 (a 100-table demo project with 38 p
     expect(formatDoctor(left, makePaint(false))).toContain(
       '! .erd-studio/gold/sales.json: Convert leaves it as it is until fixed — It defines the relationship fct_order.customer_key → dim_customer.customer_key as one-to-one',
     );
+  });
+});
+
+describe('planDbmlConversion: the layer-first tree (ERD Studio 2.0)', () => {
+  /** A YAML table with a `schema:`. */
+  const withSchema = (name: string, schema: string): string => `name: ${name}\nschema: ${JSON.stringify(schema)}\ncolumns:\n  - name: ${name}_key\n    dataType: INT\n    isPrimaryKey: true\n`;
+  /** The input without layers.json (the default layers apply), and the folders it lists. */
+  const noLayersJson = (files: Record<string, string>): DbmlConversionInput => {
+    const input = inputOf(files);
+    return { ...input, files: input.files.filter((f) => f.kind !== 'layers') };
+  };
+  const createdPaths = (plan: DbmlConversionPlan): string[] => plan.creates.map((c) => c.path);
+
+  describe('the layer of a converted table, in order', () => {
+    it('1. its library folder, when that folder is a layer in layers.json: no note', async () => {
+      const plan = await planDbmlConversion(inputOf({ 'logical-models/gold/a.yml': yml('a', [['id', 'INT', true]]), 'silver/d.json': diagram('d', 'silver', ['a']) }));
+      expect(plan.refusals).toEqual([]);
+      expect(created(plan, 'gold/tables/gold/a.dbml')).toMatch(/^Table gold\.a \{/);
+      expect(plan.notes.filter((n) => / layer \(/.test(n))).toEqual([]);
+    });
+
+    it('1. with no layers.json, its library folder when that folder exists at the top', async () => {
+      const plan = await planDbmlConversion(noLayersJson({
+        'logical-models/bronze/a.yml': yml('a', [['id', 'INT', true]]),
+        'bronze/raw.json': diagram('raw', 'bronze', []),
+      }));
+      expect(createdPaths(plan)).toContain('bronze/tables/bronze/a.dbml');
+      expect(plan.notes.filter((n) => / layer \(/.test(n))).toEqual([]);
+    });
+
+    it('2. the layer of the diagrams that list it, when they agree (JSON diagrams and DBML diagrams already there)', async () => {
+      const plan = await planDbmlConversion(inputOf({
+        'logical-models/a.yml': yml('a', [['id', 'INT', true]]),
+        'logical-models/b.yml': yml('b', [['id', 'INT', true]]),
+        'logical-models/finance/c.yml': yml('c', [['id', 'INT', true]]),
+        'gold/one.json': diagram('one', 'gold', ['a', 'c']),
+        'gold/two.json': diagram('two', 'gold', ['a']),
+        // A converted diagram lists a table with no file yet as unlinked (D26).
+        'gold/diagrams/three.dbml': "Project three {\n  erd_schema_version: '7'\n  erd_unlinked_tables: 'b'\n}\n",
+      }));
+      expect(plan.refusals).toEqual([]);
+      expect(createdPaths(plan)).toEqual(expect.arrayContaining(['gold/tables/public/a.dbml', 'gold/tables/public/b.dbml', 'gold/tables/finance/c.dbml']));
+      expect(plan.notes).toContain('a, b and c go in the gold layer (gold/tables/), the layer of the diagrams that show them.');
+    });
+
+    it('3. the first layer in layers.json, when no diagram lists it or the diagrams disagree', async () => {
+      const plan = await planDbmlConversion(inputOf({
+        'logical-models/a.yml': yml('a', [['id', 'INT', true]]),
+        'logical-models/finance/lonely.yml': yml('lonely', [['id', 'INT', true]]),
+        'gold/one.json': diagram('one', 'gold', ['a']),
+        'silver/two.json': diagram('two', 'silver', ['a']),
+      }));
+      expect(plan.refusals).toEqual([]);
+      expect(createdPaths(plan)).toEqual(expect.arrayContaining(['silver/tables/public/a.dbml', 'silver/tables/finance/lonely.dbml']));
+      expect(plan.notes).toContain('a and lonely go in the silver layer (silver/tables/), the first layer in layers.json: no diagram shows them, or the diagrams that do are in different layers.');
+    });
+
+    it('4. with no layers.json, the first top-level folder that can be a layer, sorted', async () => {
+      const plan = await planDbmlConversion(noLayersJson({
+        'logical-models/a.yml': yml('a', [['id', 'INT', true]]),
+        'zeta/x.json': diagram('x', 'zeta', []),
+        'Upper/y.json': diagram('y', 'Upper', []),
+        'gold/z.json': diagram('z', 'gold', []),
+      }));
+      expect(createdPaths(plan)).toContain('gold/tables/public/a.dbml');
+      expect(plan.notes).toContain('a goes in the gold layer (gold/tables/), the first layer folder: the project has no layers.json, and no diagram decides it.');
+    });
+
+    it('5. main, with no layers.json and no layer folder', async () => {
+      const plan = await planDbmlConversion(noLayersJson({ 'logical-models/a.yml': yml('a', [['id', 'INT', true]]) }));
+      expect(createdPaths(plan)).toEqual(['main/tables/public/a.dbml']);
+      expect(plan.notes).toContain('a goes in the main layer (main/tables/), a new layer folder: the project has no layers.json and no layer folder. Add main to layers.json to open diagrams there.');
+    });
+  });
+
+  describe('the schema of a converted table, in order', () => {
+    it('1. the yml schema; 2. the library folder; 3. public, each not from the yml in a note', async () => {
+      const plan = await planDbmlConversion(inputOf({
+        'logical-models/gold/a.yml': withSchema('a', 'sales'),
+        'logical-models/gold/b.yml': yml('b', [['id', 'INT', true]]),
+        'logical-models/c.yml': yml('c', [['id', 'INT', true]]),
+        'gold/d.json': diagram('d', 'gold', ['a', 'b', 'c']),
+      }));
+      expect(plan.refusals).toEqual([]);
+      expect(created(plan, 'gold/tables/sales/a.dbml')).toMatch(/^Table sales\.a \{/);
+      expect(created(plan, 'gold/tables/gold/b.dbml')).toMatch(/^Table gold\.b \{/);
+      expect(created(plan, 'gold/tables/public/c.dbml')).toMatch(/^Table public\.c \{/);
+      expect(plan.notes).toContain('b has no schema in the yml, so its schema is its library folder\'s name: written as Table gold.<name> in gold/tables/gold/.');
+      expect(plan.notes).toContain('c has no schema (in the yml or a library folder), so it is written as Table public.<name> in gold/tables/public/.');
+      expect(plan.notes.some((n) => n.startsWith('a '))).toBe(false);
+      // The diagram uses each by its qualified name.
+      expect(created(plan, 'gold/diagrams/d.dbml')).toContain("use { table sales.a }  from '../tables/sales/a.dbml'\n");
+    });
+
+    it('a yml schema that can\'t be a folder name (a database prefix, dbt Jinja) falls back, with a note, and draws the same', async () => {
+      const plan = await planDbmlConversion(inputOf({
+        'logical-models/gold/a.yml': withSchema('a', 'analytics.finance'),
+        'logical-models/b.yml': withSchema('b', '{{ target.schema }}'),
+        'gold/d.json': diagram('d', 'gold', ['a', 'b']),
+      }));
+      expect(plan.refusals).toEqual([]);
+      expect(createdPaths(plan)).toEqual(expect.arrayContaining(['gold/tables/gold/a.dbml', 'gold/tables/public/b.dbml']));
+      expect(plan.notes).toContain('logical-models/gold/a.yml: its schema "analytics.finance" can\'t be a folder name, so it is written as Table gold.a in gold/tables/gold/ (ERD Studio reads a DBML table\'s schema from its folder).');
+      expect(plan.notes).toContain('logical-models/b.yml: its schema "{{ target.schema }}" can\'t be a folder name, so it is written as Table public.b in gold/tables/public/ (ERD Studio reads a DBML table\'s schema from its folder).');
+    });
+
+    it('a yml schema with a single quote (it would break a quoted use path) or a Windows device name falls back, with a note', async () => {
+      const input = inputOf({
+        'logical-models/c.yml': withSchema('c', "O'Brien"),
+        'logical-models/e.yml': withSchema('e', 'con'),
+        'logical-models/g.yml': withSchema('g', 'COM1'),
+        'logical-models/fct.yml': yml('fct', [['fct_key', 'INT', true], 'c_key'], [{ fromColumn: 'c_key', toModel: 'c', toColumn: 'c_key', cardinality: 'many-to-one' }]),
+        'gold/d.json': diagram('d', 'gold', ['c', 'e', 'g', 'fct']),
+      });
+      const plan = await planDbmlConversion(input);
+      expect(plan.refusals).toEqual([]);
+      expect(createdPaths(plan)).toEqual(expect.arrayContaining(['gold/tables/public/c.dbml', 'gold/tables/public/e.dbml', 'gold/tables/public/g.dbml']));
+      expect(plan.notes).toContain('logical-models/c.yml: its schema "O\'Brien" can\'t be a folder name, so it is written as Table public.c in gold/tables/public/ (ERD Studio reads a DBML table\'s schema from its folder).');
+      expect(plan.notes).toContain('logical-models/e.yml: its schema "con" can\'t be a folder name, so it is written as Table public.e in gold/tables/public/ (ERD Studio reads a DBML table\'s schema from its folder).');
+      expect(plan.notes).toContain('logical-models/g.yml: its schema "COM1" can\'t be a folder name, so it is written as Table public.g in gold/tables/public/ (ERD Studio reads a DBML table\'s schema from its folder).');
+      expectCompilesEverywhere(input, plan);
+    });
+
+    it('schemas that differ only in case in one layer get one folder: an existing one\'s spelling, else the first in byte order, with a note', async () => {
+      const plan = await planDbmlConversion(inputOf({
+        'logical-models/gold/a.yml': withSchema('a', 'sales'),
+        'logical-models/gold/b.yml': withSchema('b', 'Sales'),
+        'logical-models/gold/c.yml': withSchema('c', 'FINANCE'),
+        // Another layer may spell it its own way.
+        'logical-models/silver/d.yml': withSchema('d', 'sales'),
+        'gold/tables/finance/e.dbml': 'Table finance.e {\n  e_key INT [pk]\n}\n',
+        'gold/x.json': diagram('x', 'gold', ['a', 'b', 'c', 'e']),
+      }));
+      expect(plan.refusals).toEqual([]);
+      expect(createdPaths(plan)).toEqual(expect.arrayContaining(['gold/tables/Sales/a.dbml', 'gold/tables/Sales/b.dbml', 'gold/tables/finance/c.dbml', 'silver/tables/sales/d.dbml']));
+      expect(created(plan, 'gold/tables/Sales/a.dbml')).toMatch(/^Table Sales\.a \{/);
+      expect(plan.notes).toContain('logical-models/gold/a.yml: its schema sales is written Sales, as another table of the gold layer spells it (one folder per schema).');
+      expect(plan.notes).toContain('logical-models/gold/c.yml: its schema FINANCE is written finance, as the existing gold/tables/finance/ folder spells it (one folder per schema).');
+    });
+  });
+
+  it('one layer\'s tables in two schemas give ONE default relationships file, every Ref in its foreign-key table\'s layer', async () => {
+    const plan = await planDbmlConversion(inputOf({
+      'logical-models/gold/dim.yml': withSchema('dim', 'crm').replace('dim_key', 'dim_key'),
+      'logical-models/gold/fct.yml': `name: fct\nschema: finance\ncolumns:\n  - name: fct_key\n    dataType: INT\n    isPrimaryKey: true\n  - name: dim_key\n    dataType: INT\nrelationships:\n  - fromColumn: dim_key\n    toModel: dim\n    toColumn: dim_key\n    cardinality: many-to-one\n`,
+      'logical-models/silver/visit.yml': `name: visit\ncolumns:\n  - name: dim_key\n    dataType: INT\nrelationships:\n  - fromColumn: dim_key\n    toModel: dim\n    toColumn: dim_key\n    cardinality: many-to-one\n`,
+      'gold/d.json': diagram('d', 'gold', ['fct', 'dim', 'visit']),
+    }));
+    expect(plan.refusals).toEqual([]);
+    const relationshipsFiles = createdPaths(plan).filter((p) => classifySemanticFile(p, { tablesDirIsLayer: false }).kind === 'relationships');
+    expect(relationshipsFiles).toEqual(['gold/relationships/gold.dbml', 'silver/relationships/silver.dbml']);
+    expect(refLines(created(plan, 'gold/relationships/gold.dbml'))).toEqual(['Ref: finance.fct.dim_key >? crm.dim.dim_key']);
+    expect(refLines(created(plan, 'silver/relationships/silver.dbml'))).toEqual(['Ref: silver.visit.dim_key >? crm.dim.dim_key']);
+    // The diagram imports both, one across layers.
+    expect(created(plan, 'gold/diagrams/d.dbml')).toContain("use * from '../../silver/relationships/silver.dbml'\nuse * from '../relationships/gold.dbml'\n");
+    expectCompilesEverywhere(inputOf({}), { ...plan, deletes: [] });
+  });
+
+  it('a new Ref goes to its foreign-key table\'s layer default file, never to the file holding most of its Refs (rule 1)', async () => {
+    const header = '// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.\n';
+    const input = inputOf({
+      'gold/tables/gold/fct.dbml': 'Table gold.fct {\n  fct_key INT [pk]\n  dim_key INT\n  other_key INT\n}\n',
+      'gold/tables/gold/dim.dbml': 'Table gold.dim {\n  dim_key INT [pk]\n}\n',
+      'gold/tables/gold/other.dbml': 'Table gold.other {\n  other_key INT [pk]\n}\n',
+      'gold/relationships/custom.dbml': `${header}use { table gold.dim } from '../tables/gold/dim.dbml'\nuse { table gold.fct } from '../tables/gold/fct.dbml'\n\nRef: gold.fct.dim_key >? gold.dim.dim_key\n`,
+      // A diagram-held relationship of fct moves to the library: it is new there.
+      'gold/d.json': diagram('d', 'gold', ['fct', 'dim', 'other'], [{ fromModel: 'fct', fromColumn: 'other_key', toModel: 'other', toColumn: 'other_key', cardinality: 'many-to-one' }]),
+    });
+    const plan = await planDbmlConversion(input);
+    expect(plan.refusals).toEqual([]);
+    expect(written(plan, 'gold/relationships/custom.dbml')).toBeUndefined();
+    expect(refLines(created(plan, 'gold/relationships/gold.dbml'))).toEqual(['Ref: gold.fct.other_key >? gold.other.other_key']);
+    expect(created(plan, 'gold/diagrams/d.dbml')).toContain("use * from '../relationships/custom.dbml'\nuse * from '../relationships/gold.dbml'\n");
+    expectCompilesEverywhere(input, plan);
+  });
+
+  it('README.md is created when the folder has none, last of the creates; never replaced, never when nothing is written', async () => {
+    const files = { 'logical-models/dim.yml': DIM, 'gold/d.json': diagram('d', 'gold', ['dim']) };
+    const fresh = await planDbmlConversion(inputOf(files, { readme: false }));
+    expect(fresh.refusals).toEqual([]);
+    expect(createdPaths(fresh)).toEqual(['gold/tables/public/dim.dbml', 'gold/diagrams/d.dbml', 'README.md']);
+    expect(created(fresh, 'README.md')).toBe(semanticReadmeText());
+    const kept = await planDbmlConversion(inputOf(files));
+    expect(createdPaths(kept)).not.toContain('README.md');
+    expect(written(kept, 'README.md')).toBeUndefined();
+    const nothing = await planDbmlConversion(inputOf({ 'gold/tables/public/dim.dbml': 'Table public.dim {\n  dim_key INT [pk]\n}\n' }, { readme: false }));
+    expect([...nothing.creates, ...nothing.replaces, ...nothing.deletes]).toEqual([]);
+  });
+
+  it('a readme.md in another case is the folder\'s README: Convert creates no README.md beside it (one file on macOS and Windows)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-convert-readme-'));
+    try {
+      const sem = path.join(root, '.erd-studio');
+      fs.mkdirSync(path.join(sem, 'logical-models'), { recursive: true });
+      fs.writeFileSync(path.join(sem, 'layers.json'), LAYERS);
+      fs.writeFileSync(path.join(sem, 'logical-models', 'dim.yml'), DIM);
+      fs.writeFileSync(path.join(sem, 'readme.md'), 'my own notes\n');
+      const input = readDbmlConversionInput(root, '.erd-studio');
+      expect(input.readmeInOtherCase).toBe(true);
+      const plan = await planDbmlConversion(input);
+      expect(plan.refusals).toEqual([]);
+      expect(createdPaths(plan)).toEqual(['silver/tables/public/dim.dbml']);
+      expect(createdPaths(await planDbmlConversion({ ...input, readmeInOtherCase: undefined }))).toContain('README.md');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a layer whose name is reserved for ERD Studio\'s own folders (tables, templates, logical-models)', async () => {
+    for (const name of ['tables', 'templates', 'logical-models']) {
+      const input = { ...inputOf({ 'logical-models/dim.yml': DIM }), layers: ['silver', name] };
+      const plan = await planDbmlConversion(input);
+      expect(plan.refusals).toEqual([`This project has a layer called "${name}". ${reservedLayerNameMessage(name)} Rename that layer (its folder and its id in layers.json), then convert.`]);
+      expect([...plan.creates, ...plan.deletes]).toEqual([]);
+    }
+    // relationships and diagrams are not reserved.
+    const plan = await planDbmlConversion({ ...inputOf({ 'logical-models/dim.yml': DIM }), layers: ['diagrams', 'relationships'] });
+    expect(plan.refusals).toEqual([]);
+  });
+
+  it('refuses while an ERD Studio 1.9 pre-release tree is there, listing at most 10 of its files', async () => {
+    const legacyDbmlFiles = Array.from({ length: 12 }, (_, i) => `tables/gold/t${String(i).padStart(2, '0')}.dbml`);
+    const plan = await planDbmlConversion({ ...inputOf({ 'logical-models/dim.yml': DIM }), legacyDbmlFiles });
+    expect(plan.refusals).toEqual([
+      'Delete these ERD Studio 1.9 pre-release files first (they are not converted and would be left beside the new tree): '
+        + `${legacyDbmlFiles.slice(0, 10).join(', ')} and 2 more.`,
+    ]);
+    expect([...plan.creates, ...plan.deletes]).toEqual([]);
+  });
+
+  it('restored YAML beside a leftover 1.9 tree: refused with the list and no tables layer offered; once the files are deleted, Convert runs', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-convert-legacy-'));
+    try {
+      const sem = path.join(root, '.erd-studio');
+      const put = (rel: string, text: string): void => {
+        fs.mkdirSync(path.dirname(path.join(sem, rel)), { recursive: true });
+        fs.writeFileSync(path.join(sem, rel), text);
+      };
+      put('layers.json', LAYERS);
+      put('logical-models/gold/dim.yml', DIM);
+      put('gold/sales.json', diagram('sales', 'gold', ['dim']));
+      // What `git checkout <sha> -- .erd-studio` leaves of a 1.9 conversion.
+      const leftovers = ['gold/sales.dbdiagram', 'gold/sales.dbml', 'tables/gold/_relationships.dbml', 'tables/gold/dim.dbml'];
+      for (const rel of leftovers) put(rel, rel.endsWith('.dbdiagram') ? '{}' : 'Table dim {\n  dim_key INT [pk]\n}\n');
+      const refused = await planDbmlConversion(readDbmlConversionInput(root, '.erd-studio'));
+      expect(refused.refusals).toEqual([
+        `Delete these ERD Studio 1.9 pre-release files first (they are not converted and would be left beside the new tree): ${leftovers.join(', ')}.`,
+      ]);
+      expect(new LayerService(root, '.erd-studio').detectLayersFromFilesystem().map((l) => l.id)).not.toContain('tables');
+      // 2.0-switch: S8b adds doctor's legacyDbmlTree code; assert here (§1.8) runDoctor gives exactly one
+      // legacyDbmlTree error and no per-file DBML problem for the leftovers.
+
+      for (const rel of leftovers) fs.rmSync(path.join(sem, rel));
+      fs.rmSync(path.join(sem, 'tables'), { recursive: true });
+      const plan = await planDbmlConversion(readDbmlConversionInput(root, '.erd-studio'));
+      expect(plan.refusals).toEqual([]);
+      expect(createdPaths(plan)).toEqual(['gold/tables/gold/dim.dbml', 'gold/diagrams/sales.dbml', 'README.md']);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('plan.targets names where each converted source goes, resumed ones included', async () => {
+    const files = { 'logical-models/dim.yml': DIM, 'logical-models/gold/fct.yml': yml('fct', ['dim_key'], [FCT_REL]), 'gold/d.json': diagram('d', 'gold', ['fct', 'dim']) };
+    const plan = await planDbmlConversion(inputOf(files));
+    expect(plan.targets).toEqual([
+      { source: 'logical-models/dim.yml', target: 'gold/tables/public/dim.dbml' },
+      { source: 'logical-models/gold/fct.yml', target: 'gold/tables/gold/fct.dbml' },
+      { source: 'gold/d.json', target: 'gold/diagrams/d.dbml' },
+    ]);
+    expect(plan.targets.map((t) => t.source).sort()).toEqual([...plan.deletes].sort());
+    // A resumed run still says where each source went.
+    const again = await planDbmlConversion(inputOf({ ...files, ...Object.fromEntries(plan.creates.map((c) => [c.path, c.text])) }));
+    expect(again.targets).toEqual(plan.targets);
+    expect(again.creates).toEqual([]);
+  });
+
+  it('resume: interrupted after the diagrams are written, a second run chooses the same targets and notes, byte for byte', async () => {
+    const files = {
+      'logical-models/dim.yml': withSchema('dim', 'crm'),
+      'logical-models/fct.yml': `name: fct\ncolumns:\n  - name: fct_key\n    dataType: INT\n    isPrimaryKey: true\n  - name: dim_key\n    dataType: INT\nrelationships:\n  - fromColumn: dim_key\n    toModel: dim\n    toColumn: dim_key\n    cardinality: many-to-one\n`,
+      'logical-models/finance/ledger.yml': yml('ledger', [['ledger_key', 'INT', true]]),
+      'logical-models/lonely.yml': yml('lonely', [['id', 'INT', true]]),
+      'logical-models/gold/Sales_a.yml': withSchema('Sales_a', 'Sales'),
+      'logical-models/gold/sales_b.yml': withSchema('sales_b', 'sales'),
+      'gold/d.json': diagram('d', 'gold', ['fct', 'dim', 'ledger']),
+      'silver/e.json': diagram('e', 'silver', ['dim', 'lonely']),
+    };
+    const first = await planDbmlConversion(inputOf(files, { readme: false }));
+    expect(first.refusals).toEqual([]);
+    // Every create up to the diagrams landed (tables, relationships files, diagrams); not the README, and no delete.
+    const landed = first.creates.filter((c) => c.path !== 'README.md');
+    expect(landed.length).toBe(first.creates.length - 1);
+    const second = await planDbmlConversion(inputOf({ ...files, ...Object.fromEntries(landed.map((c) => [c.path, c.text])) }, { readme: false }));
+    expect(second.refusals).toEqual([]);
+    expect(second.targets).toEqual(first.targets);
+    expect(second.notes).toEqual(first.notes);
+    expect(second.creates.map((c) => c.path)).toEqual(['README.md']);
+    expect(second.resumed.sort()).toEqual(landed.map((c) => c.path).sort());
+    expect(second.deletes).toEqual(first.deletes);
+  });
+
+  it('resume with no layers.json: the main/ folder the first run made does not turn a later run\'s layer step into another one', async () => {
+    const files = {
+      'logical-models/a.yml': yml('a', [['a_key', 'INT', true], 'c_key'], [{ fromColumn: 'c_key', toModel: 'c', toColumn: 'c_key', cardinality: 'many-to-one' }]),
+      'logical-models/b.yml': yml('b', [['b_key', 'INT', true]]),
+      'logical-models/main/c.yml': yml('c', [['c_key', 'INT', true]]),
+    };
+    const first = await planDbmlConversion(noLayersJson(files));
+    expect(first.refusals).toEqual([]);
+    expect(first.targets.map((t) => t.target)).toEqual(['main/tables/public/a.dbml', 'main/tables/public/b.dbml', 'main/tables/main/c.dbml']);
+    expect(first.notes.some((n) => n.startsWith('a, b and c go in the main layer (main/tables/), a new layer folder'))).toBe(true);
+    expect(createdPaths(first)).toContain('main/relationships/main.dbml');
+    const second = await planDbmlConversion(noLayersJson({ ...files, ...Object.fromEntries(first.creates.map((c) => [c.path, c.text])) }));
+    expect(second.refusals).toEqual([]);
+    expect(second.targets).toEqual(first.targets);
+    expect(second.notes).toEqual(first.notes);
+    expect(second.creates).toEqual([]);
   });
 });

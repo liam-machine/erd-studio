@@ -18,6 +18,7 @@ import * as path from 'path';
 
 import { planDbmlConversion } from '../../src/services/dbmlConversion';
 import { readDbmlConversionInput } from '../../src/services/dbmlConversionFiles';
+import { classifySemanticFile } from '@erd-studio/core';
 import { formatDbml } from '@erd-studio/core/dbml';
 
 const CORE_FIXTURES = path.resolve(__dirname, '../../packages/core/test/fixtures');
@@ -96,7 +97,7 @@ describe('fixtures Convert leaves partly as they are', () => {
       { path: 'logical-models/broken.yml', line: 5, problem: expect.stringMatching(/^It does not parse as YAML \(line 5\): /) },
       { path: 'logical-models/nameless.yml', problem: 'It has no name: key, so ERD Studio does not read it as a table. Add one, or delete the file.' },
     ]);
-    expect(plan.keptMissing).toEqual([{ diagram: 'silver/partial.dbml', tables: ['dim_missing'] }]);
+    expect(plan.keptMissing).toEqual([{ diagram: 'silver/diagrams/partial.dbml', tables: ['dim_missing'] }]);
   });
 });
 
@@ -109,7 +110,7 @@ describe('Convert writes the canonical layout', () => {
       expect(formatDbml(c.text), c.path).toMatchObject({ changed: false });
       expect(formatDbml(c.text).skipped, c.path).toBeUndefined();
       // A table's Note is the first line of its body, followed by a blank line.
-      if (c.path.startsWith('tables/') && !c.path.endsWith('_relationships.dbml') && /\n {2}Note: /.test(c.text)) {
+      if (classifySemanticFile(c.path, { tablesDirIsLayer: false }).kind === 'table' && /\n {2}Note: /.test(c.text)) {
         const open = /^(?:Table [^\n]*\{|\] \{)\n/m.exec(c.text)!;
         expect(c.text.slice(open.index + open[0].length), c.path).toMatch(/^ {2}Note: '[^\n]*'\n\n/);
       }

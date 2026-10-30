@@ -151,6 +151,13 @@ export interface DbmlLibraryOps {
    * pending line (D27) instead of being refused.
    */
   writePending?: boolean;
+  /**
+   * Convert only: every NEW Ref goes to its foreign-key table's layer default
+   * file (`placeNewRef`'s rule 2), never to the file already holding the most
+   * of its Refs (rule 1), so where Convert writes a Ref never depends on what
+   * an earlier run or a hand edit left. A Ref already stored stays where it is.
+   */
+  newRefsToLayerDefault?: boolean;
 }
 
 /** A table as the plan leaves it. */
@@ -168,11 +175,6 @@ export interface DbmlLibraryWritePlan {
    * imports now) that does not read. Byte-sorted; only files that exist after.
    */
   relationshipsImportsFor(members: Iterable<string>, current?: readonly string[]): string[];
-  /**
-   * {@link relationshipsImportsFor} with no current imports.
-   * @deprecated 2.0-switch: S8a (Convert moves its last caller to `relationshipsImportsFor`).
-   */
-  relationshipsFilesFor(names: readonly string[]): string[];
   /** The table pairs (`pairKey`) whose set of files holding a live Ref the plan changes. */
   changedPairs: Set<string>;
   /** Tables whose qualifier the plan changes (a move to another schema), lower-case, named as after the plan. */
@@ -673,6 +675,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       { table: plan.oldKey, layer: owner ? layerOf(owner.path) : defaultHome().layer },
       index,
       (l) => listedLayers.get(l),
+      ops.newRefsToLayerDefault ? { layerDefaultOnly: true } : {},
     );
     placed.set(member, placement.file);
   }
@@ -825,6 +828,9 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   const created = new Set(writes.filter((w) => w.kind === 'create').map((w) => w.path));
   const deleted = new Set(writes.filter((w) => w.kind === 'delete').map((w) => w.path));
   const createdRelationshipsFiles: string[] = [];
+  // Ref ends written anew: a table moved to another schema, and one that gains its file (Convert), whose
+  // ends a file may spell as it was while it was YAML (`dim`, not `gold.dim`).
+  const endsRespelled = new Set<string>([...requalified, ...(ops.gainFile ?? []).map(lower)]);
   for (const file of [...edits.keys()].sort(byteOrder)) {
     const e = edits.get(file)!;
     const exists = snapshot.relationshipsFiles.has(file) || fileListed(file);
@@ -837,7 +843,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       ...(renames.size > 0 ? { renamedOwners: renames } : {}),
       ...(columnRenames.size > 0 ? { renamedColumns: columnRenames } : {}),
       ...(pathChangedAfter.size > 0 ? { pathChanged: pathChangedAfter } : {}),
-      ...(requalified.size > 0 ? { requalified } : {}),
+      ...(endsRespelled.size > 0 ? { requalified: endsRespelled } : {}),
       ...(ops.writePending ? { writePending: true } : {}),
       ...(pendingBefore.length > 0 ? { pendingBefore } : {}),
       ...(columnChanges.has(file) ? { columnChanges: columnChanges.get(file)! } : {}),
@@ -859,7 +865,6 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     writes: merged,
     resolveTable,
     relationshipsImportsFor: (members, current = []) => importsFor(members, afterIndex, { current, exists: fileExists }),
-    relationshipsFilesFor: (names) => importsFor(names, afterIndex, { exists: fileExists }),
     changedPairs: afterIndex === index ? new Set() : changedPairsOf(index, afterIndex),
     requalified: new Set(requalified),
     fileExists,

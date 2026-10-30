@@ -23,7 +23,6 @@ import {
   DBML_DIAGRAM_QUOTE_HINT_CODES,
   DBML_QUOTE_HINT,
   DBML_TABLE_QUOTE_HINT_CODES,
-  classifySemanticFile,
   findConflictMarkers,
   parseTableText,
 } from '@erd-studio/core';
@@ -32,6 +31,7 @@ import { erdLayoutEntrySpan, outlineDbmlFile, parseSubjectAreaDbml, parseTableDb
 import { listMisnamedTableFiles } from '../services/dbmlConversionFiles';
 import { compileDbmlFilesSeparately } from '../services/dbmlFileCompile';
 import { tablesDirIsLayer, TABLES_DIR } from '../services/logicalModelService';
+import { listSemanticFiles } from '../services/semanticFiles';
 import type { CliContext } from './context';
 import { unreadableHint } from './diff';
 
@@ -118,39 +118,18 @@ function readText(file: string): string | null {
   }
 }
 
-function listDir(dir: string): fs.Dirent[] {
-  try {
-    return fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  } catch {
-    return [];
-  }
-}
-
-/** Every `.dbml` file a project can hold: one level into each folder, two into `tables/`. */
+/** Every `.dbml` file under the semantic dir, as `listSemanticFiles` lists and classifies them (the one walk Convert uses too). */
 function projectFiles(semanticRoot: string): ProjectFile[] {
   const tablesIsLayer = tablesDirIsLayer(semanticRoot);
   const out: ProjectFile[] = [];
-  const add = (relParts: string[]): void => {
-    const rel = relParts.join('/');
-    if (!/\.dbml$/i.test(rel)) return;
-    const abs = path.join(semanticRoot, ...relParts);
+  for (const { rel, cls } of listSemanticFiles(semanticRoot, { tablesDirIsLayer: tablesIsLayer })) {
+    if (!/\.dbml$/i.test(rel)) continue;
+    const abs = path.join(semanticRoot, ...rel.split('/'));
     const text = readText(abs);
-    if (text === null) return;
-    const cls = classifySemanticFile(rel, { tablesDirIsLayer: tablesIsLayer });
+    if (text === null) continue;
     const kind = cls.kind === 'table' ? (cls.storage === 'dbml' ? 'table' : 'other')
       : cls.kind === 'relationships' || cls.kind === 'diagram' ? cls.kind : 'other';
     out.push({ rel, abs, text, kind });
-  };
-  for (const top of listDir(semanticRoot)) {
-    if (!top.isDirectory() || top.name.startsWith('.') || top.name === 'node_modules') continue;
-    for (const entry of listDir(path.join(semanticRoot, top.name))) {
-      if (entry.isFile()) add([top.name, entry.name]);
-      else if (entry.isDirectory() && top.name === TABLES_DIR && !entry.name.startsWith('.')) {
-        for (const inner of listDir(path.join(semanticRoot, top.name, entry.name))) {
-          if (inner.isFile()) add([top.name, entry.name, inner.name]);
-        }
-      }
-    }
   }
   return out;
 }

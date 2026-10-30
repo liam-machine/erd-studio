@@ -639,8 +639,6 @@ describe('the plan\'s answers: relationshipsImportsFor and changedPairs (§2.4 s
     expect(plan.relationshipsImportsFor(['fct_order', 'dim_customer', 'DIM_DATE'])).toEqual(['gold/relationships/dates.dbml', GOLD]);
     expect(plan.relationshipsImportsFor(['fct_visit', 'dim_date'])).toEqual(['silver/relationships/silver.dbml']);
     expect(plan.relationshipsImportsFor(['fct_visit'])).toEqual([]);
-    // The deprecated bridge answers the same.
-    expect(plan.relationshipsFilesFor(['fct_visit', 'dim_date'])).toEqual(['silver/relationships/silver.dbml']);
     expect(plan.changedPairs).toEqual(new Set([pairKey('fct_visit', 'dim_date')]));
     expect(plan.changedPairs).toEqual(changedPairs(plan.index, plan.afterIndex));
     // An unreadable file the diagram imports now is kept; one it does not import is never added.

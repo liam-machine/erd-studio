@@ -1,0 +1,10 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table gold.employee }     from '../tables/gold/employee.dbml'
+use { table gold.pit_customer } from '../tables/gold/pit_customer.dbml'
+use { table gold.sat_customer } from '../tables/gold/sat_customer.dbml'
+
+Ref manager: gold.employee.manager_id >? gold.employee.employee_id
+Ref: gold.employee.mentor_id >? gold.employee.employee_id
+
+Ref "as of": gold.pit_customer.(customer_hk, as_of_date) >? gold.sat_customer.(customer_hk, load_date)
+Ref: gold.pit_customer.snapshot_hk >? gold.sat_customer.customer_hk

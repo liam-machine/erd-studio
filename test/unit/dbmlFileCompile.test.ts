@@ -317,11 +317,11 @@ describe('the self-check refuses broken output with the file-by-file compile', (
     const plan = await planDbmlConversion(inputOf(yamlProject), {
       compile: (files, entries) => {
         const broken = { ...files };
-        for (const p of Object.keys(broken)) if (p.endsWith('_relationships.dbml')) broken[p] = broken[p].replace(/fct\.dim_key/, 'fct.nope');
+        for (const p of Object.keys(broken)) if (p.startsWith('gold/relationships/')) broken[p] = broken[p].replace(/fct\.dim_key/, 'fct.nope');
         return compileDbmlFilesSeparately(broken, entries);
       },
     });
-    expect(plan.refusals).toEqual([expect.stringMatching(/^Convert would write DBML that does not compile: tables\/_relationships\.dbml:\d+ Column 'nope' does not exist/)]);
+    expect(plan.refusals).toEqual([expect.stringMatching(/^Convert would write DBML that does not compile: gold\/relationships\/gold\.dbml:\d+ Column 'nope' does not exist/)]);
     expect(plan.creates).toEqual([]);
   });
 
@@ -329,9 +329,9 @@ describe('the self-check refuses broken output with the file-by-file compile', (
     const plan = await planDbmlConversion(inputOf(yamlProject), {
       compile: (files, entries) => {
         const broken = { ...files };
-        const rel = Object.keys(broken).find((p) => p.endsWith('_relationships.dbml'))!;
+        const rel = Object.keys(broken).find((p) => p.startsWith('gold/relationships/'))!;
         const ref = broken[rel].split('\n').find((l) => l.startsWith('Ref'))!;
-        const diagram = Object.keys(broken).find((p) => p.startsWith('gold/') && p.endsWith('.dbml'))!;
+        const diagram = Object.keys(broken).find((p) => p.startsWith('gold/diagrams/'))!;
         broken[diagram] += `\n${ref}\n`;
         return compileDbmlFilesSeparately(broken, entries);
       },

@@ -108,10 +108,6 @@ export const MIGRATE_TO_V5_COMMAND_TITLE = 'ERD Studio: Migrate Subject Areas to
 /** The tag on a problem whose file has unsaved edits: Check Again reads what is saved. */
 export const UNSAVED_TAG = 'unsaved edits: save, then Check Again';
 
-/** A converted diagram's path: its `.json` becomes the `.dbml` beside it (an existing `.dbml` stays). */
-function diagramTarget(relPath: string): string {
-  return relPath.endsWith('.json') ? `${relPath.slice(0, -'.json'.length)}.dbml` : relPath;
-}
 
 /** A count as people write it (1,100), as the progress notification and the completion toast show it. */
 export const thousands = (n: number): string => n.toLocaleString('en-US');
@@ -251,8 +247,10 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
   const strip = (items: Array<ConvertReviewItem & { rel: string }>): ConvertReviewItem[] => items.map(({ rel: _rel, ...item }) => item);
 
   const moved: ConvertReviewItem[] = [];
+  // A converted diagram is named by the `.dbml` it becomes (`<layer>/diagrams/<name>.dbml`); an existing one by its own path.
+  const targetOf = new Map(plan.targets.map((t) => [t.source, t.target]));
   const also = plan.movedRelationships.filter((m) => m.diagrams.length > 0);
-  for (const m of also) moved.push({ text: `${m.from} → ${m.to} also shows in`, paths: m.diagrams.map((d) => display(diagramTarget(d))) });
+  for (const m of also) moved.push({ text: `${m.from} → ${m.to} also shows in`, paths: m.diagrams.map((d) => display(targetOf.get(d) ?? d)) });
   const only = plan.movedRelationships.length - also.length;
   if (only > 0) moved.push({ text: `${plural(only, also.length > 0 ? 'other relationship' : 'relationship')} ${only === 1 ? 'shows' : 'show'} in the same diagrams as before.` });
 

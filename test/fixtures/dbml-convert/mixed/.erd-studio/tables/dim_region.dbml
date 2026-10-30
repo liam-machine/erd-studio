@@ -1,4 +1,0 @@
-Table dim_region {
-  region_key INT [pk]
-  region_name VARCHAR
-}

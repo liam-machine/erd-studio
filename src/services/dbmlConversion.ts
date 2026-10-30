@@ -12,34 +12,46 @@
  * fixes are applied and listed (`handled`), a diagram member with no table
  * file stays on the diagram (`keptMissing`, D26) and a relationship that
  * cannot be a live Ref yet is a pending line (D27). It refuses only when
- * nothing can convert (a layer called `tables`) or its self-check fails
- * (step 8: every DBML file after the plan compiles, and every diagram draws
- * what it drew before, through the one storage-equivalence comparator). The
- * same input always gives the same plan.
+ * nothing can convert (a layer whose name is reserved, or files of the 1.9
+ * pre-release's tree still there) or its self-check fails (step 8: every
+ * DBML file after the plan compiles, and every diagram draws what it drew
+ * before, through the one storage-equivalence comparator). The same input
+ * always gives the same plan.
  *
- * Tables are written by core's `renderNewTableDbml`, relationships only
- * through `planDbmlLibraryWrites` (§4.6), and diagrams, their positions in
- * the Project's `erd_layout`, by `renderNewSubjectAreaDbml`. No
- * `vscode`, no `fs`: the CLI bundles it.
+ * It writes the layer-first tree (ERD Studio 2.0): each table to
+ * `<layer>/tables/<schema>/<name>.dbml` (its home chosen in one pass first,
+ * {@link tableHomes}), by core's `renderNewTableDbml`; relationships only
+ * through `planDbmlLibraryWrites` (§2.4), every new Ref in its foreign-key
+ * table's layer default file; each diagram to `<layer>/diagrams/<name>.dbml`
+ * by `renderNewSubjectAreaDbml`, its positions in the Project's
+ * `erd_layout`, the Project last; and the folder's README when it has none.
+ * No `vscode`: the CLI bundles it.
  */
 
 import { createHash } from 'crypto';
 
-import { Parser, isAlias, isMap, isNode, isScalar, isSeq, parseDocument, visit } from 'yaml';
+import { Parser, isAlias, isMap, isNode, isScalar, isSeq, parseDocument, stringify as stringifyYaml, visit } from 'yaml';
 import type { Node as YamlNode, Pair } from 'yaml';
 
 import {
-  DBML_RELATIONSHIPS_FILE_NAME,
+  DBML_DEFAULT_SCHEMA,
   RATIONALE_KEYS,
+  SEMANTIC_README_NAME,
   SubjectAreaFileError,
   TABLES_DIR,
   canonicalRelationship,
   classifySemanticFile,
   dbmlName,
+  dbmlTablePath,
+  dbmlTreePathOf,
   describeUnsupportedSubjectAreaFormat,
+  diagramFilePath,
   detectSubjectAreaFormat,
   ERD_LAYOUT_NOTE_PREFIX,
+  isDbmlLayerName,
   isErdLayoutName,
+  isLibraryFolderName,
+  isReservedLayerName,
   isReservedTableName,
   libraryCopyRank,
   linkKey,
@@ -48,6 +60,7 @@ import {
   parseLayersText,
   parseSubjectAreaJson,
   parseTableText,
+  relationshipsFilePath,
   subjectAreaViewConfig,
   validateSubjectAreaDocument,
 } from '@erd-studio/core';
@@ -75,13 +88,20 @@ import {
   readRelationshipsDbml,
   subjectAreaMembersDbml,
 } from '@erd-studio/core/dbml';
-import { canonicalDbml, editSubjectAreaDbml, formatWrittenDbml, renderNewSubjectAreaDbml, renderNewTableDbml } from './dbmlWriters';
+import { canonicalDbml, formatWrittenDbml, renderNewSubjectAreaDbml, renderNewTableDbml } from './dbmlWriters';
 
 import { DbmlFileCompileMemo, compileDbmlFilesSeparately, compileDbmlFilesSeparatelyAsync } from './dbmlFileCompile';
 import { planDbmlLibraryWrites } from './dbmlLibraryWrites';
 import type { DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
 import { planMoveToLibrary } from './libraryRelationships';
+import { dbmlResolverOf, renderDbmlDiagram, settleSignalsOf } from './dbmlDiagramSettle';
+import type { SubjectAreaResolver } from './dbmlDiagramSettle';
+import { diagramSummaryOf, needsSettle } from './dbmlDiagramSummaries';
+import type { SettleSignals } from './dbmlDiagramSummaries';
 import { jsonMistakeAt } from './commandErrors';
+import { orderFileWrites } from './fileWrites';
+import type { FileWrite } from './fileWrites';
+import { semanticReadmeText } from './semanticReadme';
 
 /**
  * Whether an existing DBML table file already holds what Convert writes
@@ -136,6 +156,19 @@ export interface DbmlConversionInput {
    * Optional (absent: none).
    */
   misnamedTables?: Array<{ path: string; name: string }>;
+  /**
+   * Files of an ERD Studio 1.9 pre-release's DBML tree (`detectLegacyDbmlTree`,
+   * §1.8): Convert refuses while there are any, since they are not converted
+   * and would be left beside the new tree. Optional (absent: none).
+   */
+  legacyDbmlFiles?: string[];
+  /**
+   * A file at the semantic dir's top whose name is README.md in another case
+   * (`readme.md`): the classifier names only `README.md`, so `files` does not
+   * hold it, and Convert creates no README.md beside it (on macOS and Windows
+   * it is the same file). Optional (absent: none).
+   */
+  readmeInOtherCase?: boolean;
 }
 
 export interface DbmlConversionPlan {
@@ -145,6 +178,13 @@ export interface DbmlConversionPlan {
   replaces: Array<{ path: string; text: string }>;
   /** Every converted `.yml` and `.json`. */
   deletes: string[];
+  /**
+   * Each converted `.yml` table and `.json` diagram with the `.dbml` it
+   * becomes (paths relative to the semantic dir), resumed ones included, in
+   * the order they were read: the panel, the command's reopen and undo
+   * targets and doctor's preview read where a source went from here.
+   */
+  targets: Array<{ source: string; target: string }>;
   /** Targets already on disk with exactly the planned bytes (a half-applied earlier run): neither created nor refused. */
   resumed: string[];
   /**
@@ -603,9 +643,11 @@ function keptJsonLines(
 /** A library table as it will be once converted. */
 interface LibraryTable {
   name: string;
-  /** Its `.dbml` path after the plan. */
+  /** Its `.dbml` path after the plan: `<layer>/tables/<schema>/<name>.dbml`. */
   path: string;
-  folder: string;
+  /** Its layer folder and schema folder, as `path` spells them. */
+  layer: string;
+  schema: string;
   model: SemanticTable;
   /** A YAML table being converted. */
   converted?: { source: string; text: string; resumed: boolean };
@@ -632,7 +674,7 @@ interface LeftFile {
 
 function emptyPlan(): DbmlConversionPlan {
   return {
-    creates: [], replaces: [], deletes: [], resumed: [], refusals: [], handled: [], leftAsIs: [], keptMissing: [], notes: [],
+    creates: [], replaces: [], deletes: [], targets: [], resumed: [], refusals: [], handled: [], leftAsIs: [], keptMissing: [], notes: [],
     v4SubjectAreas: [], movedRelationships: [], placedDiagrams: [],
     summary: { tables: 0, diagrams: 0, relationshipsFiles: 0, relationships: 0 },
   };
@@ -640,6 +682,24 @@ function emptyPlan(): DbmlConversionPlan {
 
 /** The most rounds the planner takes to settle which files it leaves as they are (each round leaves at least one more). */
 const MAX_ROUNDS = 64;
+
+/** How many 1.9 pre-release files the refusal names before "and N more". */
+const LEGACY_FILES_LISTED = 10;
+
+/**
+ * Why a layer name cannot be a DBML layer: the sentence Add Layer refuses it
+ * with (`reservedLayerNameMessage` in layerService.ts, which this module
+ * does not import: it is CLI-bundled and file-system free).
+ */
+export function reservedLayerRefusal(name: string): string {
+  return `"${name}" is reserved for ERD Studio's own folders; pick another name.`;
+}
+
+/** Code-unit order (`<`): the same on every machine and locale. */
+function byteOrder(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 
 /**
  * Plan the conversion of a project to DBML (§6.1). Never writes; refusals
@@ -652,11 +712,24 @@ const MAX_ROUNDS = 64;
  * project always gives the same plan, byte for byte.
  */
 export async function planDbmlConversion(input: DbmlConversionInput, options: DbmlConversionOptions = {}): Promise<DbmlConversionPlan> {
-  if (input.tablesDirIsLayer) {
+  // A layer whose name the DBML tree keeps for ERD Studio's own folders (§1.1): nothing can convert.
+  const reserved = [...new Set([...(input.tablesDirIsLayer ? [TABLES_DIR] : []), ...input.layers.filter(isReservedLayerName)])];
+  if (reserved.length > 0) {
     const plan = emptyPlan();
+    for (const name of reserved) {
+      plan.refusals.push(`This project has a layer called "${name}". ${reservedLayerRefusal(name)} Rename that layer (its folder and its id in layers.json), then convert.`);
+    }
+    return plan;
+  }
+  // The 1.9 pre-release's files are not converted, and would be left beside the new tree (§1.8).
+  const legacy = [...(input.legacyDbmlFiles ?? [])].sort(byteOrder);
+  if (legacy.length > 0) {
+    const plan = emptyPlan();
+    const shown = legacy.slice(0, LEGACY_FILES_LISTED);
+    const more = legacy.length - shown.length;
     plan.refusals.push(
-      `This project has a layer called "${TABLES_DIR}", and a DBML project keeps its table library in ${input.semanticDir}/${TABLES_DIR}/. ` +
-        'Rename that layer (its folder and its id in layers.json), then convert.',
+      'Delete these ERD Studio 1.9 pre-release files first (they are not converted and would be left beside the new tree): ' +
+        `${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}.`,
     );
     return plan;
   }
@@ -715,6 +788,8 @@ async function planOnce(
   const converted: LibraryTable[] = [];
   /** Converted tables whose identical duplicate keys were read once: the before-display's warning is not a difference. */
   const dedupedKeys = new Set<string>();
+  /** The YAML tables that read, before their home (layer and schema) is chosen. */
+  const candidates: Array<{ f: DbmlConversionFile; model: SemanticTable; folder: string }> = [];
   for (const f of yamlTables) {
     await breathe();
     const cls = classifySemanticFile(f.path, { tablesDirIsLayer: false });
@@ -785,20 +860,7 @@ async function planOnce(
       leave(f.path, `It lists the column${twice.length === 1 ? '' : 's'} ${twice.join(', ')} more than once, and a DBML table names each column once. Remove or rename the copy.`, secondColumnLine(f.text, twice[0]));
       continue;
     }
-    const folder = cls.folder ?? '';
-    const target = `${TABLES_DIR}/${folder ? `${folder}/` : ''}${model.name}.dbml`;
-    const kept = keptYamlLines(f.path, f.text, model.name);
-    const { relationships: _r, ...bare } = model;
-    // The kept YAML lines go above the Table as `//` lines; the whole file is then formatted once more.
-    const rendered = renderNewTableDbml(bare as SemanticTable);
-    const text = kept.block.length > 0 ? formatWrittenDbml([...kept.block, rendered].join('\n'), target) : rendered;
-    if (kept.comments) notes.push(`${f.path}: its comments are kept as // lines above the Table in ${target}; ERD Studio does not read them.`);
-    if (kept.unknownKeys.length > 0) notes.push(`${f.path}: keys ERD Studio does not read (${kept.unknownKeys.join(', ')}) are kept as // lines above the Table in ${target}.`);
-    if (kept.ignoredValues.length > 0) notes.push(`${f.path}: values ERD Studio does not read (${kept.ignoredValues.join(', ')}) are kept as // lines above the Table in ${target}; they were not drawn before and are not drawn now.`);
-    if (kept.anchors) notes.push(`${f.path}: its YAML anchors and aliases are written out in full; the lines that held them are kept as // lines above the Table in ${target}.`);
-    const table: LibraryTable = { name: model.name, path: target, folder, model, converted: { source: f.path, text, resumed: false } };
-    converted.push(table);
-    addName(model.name, { path: f.path, target, text, storage: 'yaml' });
+    candidates.push({ f, model, folder: cls.folder ?? '' });
   }
   const existingDbml: LibraryTable[] = [];
   /** DBML table files that do not read (lower-case stem → path and why): diagrams keep them unlinked, Refs to them stay pending. */
@@ -808,7 +870,7 @@ async function planOnce(
   for (const f of dbmlTables) {
     const cls = classifySemanticFile(f.path, { tablesDirIsLayer: false });
     const stem = cls.name ?? stemOf(f.path);
-    const reading = parseTableDbml(f.text, stem);
+    const reading = parseTableDbml(f.text, stem, { ...(cls.schema !== undefined ? { schemaFolder: cls.schema } : {}) });
     if (!reading.ok) {
       unreadableTables.set(lower(stem), {
         path: f.path,
@@ -818,13 +880,35 @@ async function planOnce(
       addName(stem, { path: f.path, text: f.text, storage: 'dbml' });
       continue;
     }
+    const tree = dbmlTreePathOf(f.path);
     const table: LibraryTable = {
-      name: reading.table.name, path: f.path, folder: cls.folder ?? '', model: reading.table,
+      name: reading.table.name, path: f.path, layer: tree?.layer ?? dirOf(f.path), schema: tree?.schema ?? cls.folder ?? '', model: reading.table,
       dbml: { reference: reading.declaredReference, ...(reading.alias !== undefined ? { alias: reading.alias } : {}), text: f.text },
     };
     if (!reading.writable) nonWritableTables.add(f.path);
     existingDbml.push(table);
     addName(reading.table.name, { path: f.path, text: f.text, storage: 'dbml' });
+  }
+  // ---- 1b. Where each converted table goes: its layer, then its schema (one pass, before any rendering) ----
+  const homes = tableHomes(input, candidates, dbmlTables.map((f) => f.path));
+  notes.push(...homes.notes);
+  for (const c of candidates) {
+    const { f, model: read } = c;
+    const { layer, schema } = homes.of.get(c)!;
+    const model: SemanticTable = { ...read, schema };
+    const target = dbmlTablePath(layer, schema, model.name);
+    const kept = keptYamlLines(f.path, f.text, model.name);
+    const { relationships: _r, ...bare } = model;
+    // The kept YAML lines go above the Table as `//` lines; the whole file is then formatted once more.
+    const rendered = renderNewTableDbml(bare as SemanticTable);
+    const text = kept.block.length > 0 ? formatWrittenDbml([...kept.block, rendered].join('\n'), target) : rendered;
+    if (kept.comments) notes.push(`${f.path}: its comments are kept as // lines above the Table in ${target}; ERD Studio does not read them.`);
+    if (kept.unknownKeys.length > 0) notes.push(`${f.path}: keys ERD Studio does not read (${kept.unknownKeys.join(', ')}) are kept as // lines above the Table in ${target}.`);
+    if (kept.ignoredValues.length > 0) notes.push(`${f.path}: values ERD Studio does not read (${kept.ignoredValues.join(', ')}) are kept as // lines above the Table in ${target}; they were not drawn before and are not drawn now.`);
+    if (kept.anchors) notes.push(`${f.path}: its YAML anchors and aliases are written out in full; the lines that held them are kept as // lines above the Table in ${target}.`);
+    const table: LibraryTable = { name: model.name, path: target, layer, schema, model, converted: { source: f.path, text, resumed: false } };
+    converted.push(table);
+    addName(model.name, { path: f.path, target, text, storage: 'yaml' });
   }
   // A table file named .yaml (or .YML): never listed by the library, so never converted. Diagrams keep its
   // members as they drew them, and it is left with the name to give it (unless a table of that name has a file).
@@ -895,7 +979,6 @@ async function planOnce(
   }
   const attachTables: DbmlAttachTable[] = [...library.values()].map((t) => ({
     table: { name: t.name, columns: t.model.columns ?? [] },
-    folder: t.folder,
     storage: 'dbml',
     ...(t.dbml?.alias !== undefined ? { dbmlAlias: t.dbml.alias } : {}),
   }));
@@ -909,11 +992,18 @@ async function planOnce(
     const cols = (t.model.columns ?? []).map((c) => c.name);
     return cols.find((c) => c === column) ?? cols.find((c) => lower(c) === lower(column));
   };
-  const relationshipsFileOfFolder = (folder: string): string => {
-    const dir = folder ? `${TABLES_DIR}/${folder}` : TABLES_DIR;
-    const listed = [...relationshipsReadings.keys(), ...unreadableRelationships.keys()].find((p) => lower(dirOf(p)) === lower(dir));
-    return listed ?? `${dir}/${DBML_RELATIONSHIPS_FILE_NAME}`;
+  /** Every relationships file there is, readable or not. */
+  const listedRelationships = [...relationshipsReadings.keys(), ...unreadableRelationships.keys()].sort(byteOrder);
+  /**
+   * Where a NEW Ref of a table goes (plan decision 5, rule 2): its layer's default file,
+   * `<layer>/relationships/<layer>.dbml`, or a listed file of that path in another case.
+   */
+  const homeFileOf = (t: LibraryTable): string => {
+    const wanted = relationshipsFilePath(t.layer, t.layer);
+    return listedRelationships.find((p) => p === wanted) ?? listedRelationships.find((p) => lower(p) === lower(wanted)) ?? wanted;
   };
+  /** The file holding a stored Ref of `owner` (attach `locations`), else the owner's default file. */
+  const holderOf = (owner: LibraryTable, rel: Relationship): string => attachment.locations?.get(linkKey(rel))?.path ?? homeFileOf(owner);
   /** Relationships files an earlier, half-applied run wrote: they hold what this run would write there (§6.1 step 7). */
   const resumedRelationships = new Set<string>();
   const pool: PoolEntry[] = [];
@@ -929,12 +1019,16 @@ async function planOnce(
       // it). Such Refs are an earlier, half-applied run's output (or written by hand against D20), so
       // the YAML list replaces them; one the YAML file no longer has is named, not silently dropped.
       const stale = attachment.byOwner.get(lower(t.name)) ?? [];
-      if (stale.length > 0) resumedRelationships.add(relationshipsFileOfFolder(t.folder));
-      for (const entry of stale) replacedRefs.push({ rel: { ...entry, fromModel: t.name } as Relationship, table: t });
+      for (const entry of stale) {
+        const rel = { ...entry, fromModel: t.name } as Relationship;
+        resumedRelationships.add(holderOf(t, rel));
+        replacedRefs.push({ rel, table: t });
+      }
       continue;
     }
     (attachment.byOwner.get(lower(t.name)) ?? []).forEach((entry, index) => {
-      pool.push({ rel: { ...entry, fromModel: t.name } as Relationship, file: relationshipsFileOfFolder(t.folder), index: 1000 + index, source: 'dbml' });
+      const rel = { ...entry, fromModel: t.name } as Relationship;
+      pool.push({ rel, file: holderOf(t, rel), index: 1000 + index, source: 'dbml' });
     });
   }
   {
@@ -942,7 +1036,7 @@ async function planOnce(
     for (const { rel, table } of replacedRefs) {
       if (yamlLinks.has(linkKey(rel))) continue;
       notes.push(
-        `${relationshipsFileOfFolder(table.folder)}: the Ref ${describeEnds(rel.fromModel, [rel.fromColumn], rel.toModel, [rel.toColumn])} belongs to ${table.name}, ` +
+        `${holderOf(table, rel)}: the Ref ${describeEnds(rel.fromModel, [rel.fromColumn], rel.toModel, [rel.toColumn])} belongs to ${table.name}, ` +
           `which is still a YAML table (${table.converted!.source}), so ERD Studio never drew it; ${table.converted!.source}'s relationships replace it.`,
       );
     }
@@ -1011,7 +1105,7 @@ async function planOnce(
   entries = entries.map((e) => {
     if (e.rel.cardinality !== 'one-to-many') return e;
     const turned = canonicalRelationship(e.rel);
-    notes.push(`${e.file}: the one-to-many ${describeEnds(e.rel.fromModel, [e.rel.fromColumn], e.rel.toModel, [e.rel.toColumn])} is stored as the many-to-one ${describeEnds(turned.fromModel, [turned.fromColumn], turned.toModel, [turned.toColumn])}, in ${turned.fromModel}'s folder; it draws the same.`);
+    notes.push(`${e.file}: the one-to-many ${describeEnds(e.rel.fromModel, [e.rel.fromColumn], e.rel.toModel, [e.rel.toColumn])} is stored as the many-to-one ${describeEnds(turned.fromModel, [turned.fromColumn], turned.toModel, [turned.toColumn])}, with ${turned.fromModel}'s relationships; it draws the same.`);
     // The other end owns it now; it has a table file only when it is in the library.
     if (!tableOf(turned.fromModel)) return { ...e, rel: turned, pending: e.pending ?? noFileReason(turned.fromModel) };
     return checkEntry({ ...e, rel: turned });
@@ -1083,7 +1177,7 @@ async function planOnce(
       continue;
     }
     const name = cls.name ?? stemOf(f.path);
-    jsonDiagrams.push({ file: f, raw: raw as Record<string, unknown>, obj, layer, name, target: `${layer}/${name}.dbml` });
+    jsonDiagrams.push({ file: f, raw: raw as Record<string, unknown>, obj, layer, name, target: diagramFilePath(layer, name) });
   }
   // Existing DBML diagrams: their pending relationships (D27) move to the library once their table has a file.
   interface DbmlDiagram { file: DbmlConversionFile; reading: ReturnType<typeof parseSubjectAreaDbml> | null; error?: string }
@@ -1214,19 +1308,27 @@ async function planOnce(
   if (refusals.length > 0) return { plan: withoutWrites(plan), leaveMore };
   if (leaveMore.size > 0) return again();
 
-  // A relationship bound for a relationships file that does not read: its YAML table (or the diagram
-  // that held it) stays as it is, since that file is never edited.
-  for (const [, list] of lists) {
-    const owner = tableOf(list[0].rel.fromModel);
-    if (!owner) continue;
-    const home = relationshipsFileOfFolder(owner.folder);
-    const broken = unreadableRelationships.get(home);
-    if (!broken) continue;
-    const current = attachment.byOwner.get(lower(owner.name)) ?? [];
-    const changes = owner.converted !== undefined || list.length !== current.length;
-    if (!changes) continue;
-    for (const e of list) {
-      leaveSource(e, holdersOfEntry(e), `Its relationships go in ${home}, which does not read: ${broken.why}${broken.line !== undefined ? ` (line ${broken.line})` : ''}. Fix that file.`);
+  // A relationship no file holds yet, while a relationships file does not read: the library planner
+  // writes no new Ref then, since that file may already hold it (§2.4 step 5). Its YAML table (or the
+  // diagram that held it) stays as it is until the file is fixed.
+  if (unreadableRelationships.size > 0) {
+    const firstBroken = listedRelationships.find((p) => unreadableRelationships.has(p))!;
+    const said = (file: string): string => {
+      const broken = unreadableRelationships.get(file)!;
+      return `${broken.why}${broken.line !== undefined ? ` (line ${broken.line})` : ''}`;
+    };
+    for (const [, list] of lists) {
+      const owner = tableOf(list[0].rel.fromModel);
+      if (!owner) continue;
+      const current = attachment.byOwner.get(lower(owner.name)) ?? [];
+      if (owner.converted === undefined && list.length === current.length) continue;
+      const fresh = list.filter((e) => !attachment.locations?.has(linkKey(e.rel)));
+      if (fresh.length === 0) continue;
+      const home = homeFileOf(owner);
+      const why = unreadableRelationships.has(home)
+        ? `Its relationships go in ${home}, which does not read: ${said(home)}. Fix that file.`
+        : `Its relationships can't be written while ${firstBroken} does not read: ${said(firstBroken)}. Fix that file first: it may already hold them.`;
+      for (const e of fresh) leaveSource(e, holdersOfEntry(e), why);
     }
   }
   if (refusals.length > 0) return { plan: withoutWrites(plan), leaveMore };
@@ -1238,7 +1340,7 @@ async function planOnce(
     const owner = tableOf(e.rel.fromModel)!;
     notes.push(
       `${e.file}: the relationship ${describeEnds(e.rel.fromModel, [e.rel.fromColumn], e.rel.toModel, [e.rel.toColumn])} is kept as a pending line in ` +
-        `${relationshipsFileOfFolder(owner.folder)} (${e.pending}). It draws as before, and becomes a live Ref when both ends have table files with those columns.`,
+        `${e.source === 'dbml' ? e.file : homeFileOf(owner)} (${e.pending}). It draws as before, and becomes a live Ref when both ends have table files with those columns.`,
     );
   }
 
@@ -1251,10 +1353,12 @@ async function planOnce(
   for (const t of library.values()) {
     snapshotTables.set(lower(t.name), {
       name: t.name,
-      reference: t.dbml?.reference ?? dbmlName(t.name),
+      reference: t.dbml?.reference ?? `${dbmlName(t.schema)}.${dbmlName(t.name)}`,
       path: t.path,
       storage: 'dbml',
-      folder: t.folder,
+      folder: t.schema,
+      layer: t.layer,
+      schema: t.schema,
       columns: (t.model.columns ?? []).map((c) => c.name),
       primaryKey: (t.model.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name),
       ...(t.dbml?.alias !== undefined ? { dbmlAlias: t.dbml.alias } : {}),
@@ -1294,7 +1398,11 @@ async function planOnce(
     // names one (written against it while it was YAML) gets its use line, or the file would not compile;
     // a pending line naming one becomes a live Ref.
     const gainFile = [...library.values()].filter((t) => t.converted).map((t) => t.name);
-    libraryPlan = planDbmlLibraryWrites(snapshot, { save: saves, writePending: true, ...(gainFile.length > 0 ? { gainFile } : {}) });
+    // Every NEW Ref goes to its foreign-key table's layer default file (plan decision 5, rule 2);
+    // a Ref already in a relationships file stays where it is.
+    libraryPlan = planDbmlLibraryWrites(snapshot, {
+      save: saves, writePending: true, newRefsToLayerDefault: true, ...(gainFile.length > 0 ? { gainFile } : {}),
+    });
   } catch (err) {
     if (err instanceof DbmlEditRefused) {
       // A table Convert itself writes is left as YAML, named by the file it comes from.
@@ -1315,7 +1423,7 @@ async function planOnce(
     const owner = [...library.values()].find((t) => t.path === w.path);
     const fromDiagrams = owner ? (finalLists.get(lower(owner.name)) ?? []).filter((e) => e.source === 'diagram') : [];
     if (fromDiagrams.length === 0) {
-      refusals.push(`${w.path} must change for the conversion, and ERD Studio can't edit it (it holds a use line, a Ref or an inline ref: setting, which belong in its folder's _relationships.dbml). Fix it, then convert.`);
+      refusals.push(`${w.path} must change for the conversion, and ERD Studio can't edit it (it holds a use line, a Ref or an inline ref: setting, which belong in a relationships file, ${owner?.layer ?? '<layer>'}/relationships/). Fix it, then convert.`);
       continue;
     }
     for (const e of fromDiagrams) for (const h of holdersOfEntry(e)) leave(h, `Its relationships would go to ${w.path}, which ERD Studio can't edit (it holds a use line, a Ref or an inline ref: setting). Fix that file.`);
@@ -1350,6 +1458,7 @@ async function planOnce(
       continue;
     } else creates.set(t.path, text);
     plan.deletes.push(t.converted.source);
+    plan.targets.push({ source: t.converted.source, target: t.path });
   }
   if (leaveMore.size > 0) return again();
 
@@ -1361,23 +1470,40 @@ async function planOnce(
     pathChanged.add(lower(oldName));
     if (newPath !== null) pathChanged.add(lower(stemOf(newPath)));
   }
-  const createdRelationships = new Set(libraryPlan.createdRelationshipsFiles);
-  const relationshipsFilesFor = (names: readonly string[]): string[] => libraryPlan.relationshipsFilesFor(names);
   const fileExistsAfter = (p: string): boolean => libraryPlan.fileExists(p) || creates.has(p) || plannedTableText.has(p);
+  /**
+   * The relationships files a diagram imports after the plan: those holding a live Ref between two of its
+   * `members` (the planner's rule, §2.4), and those holding a pending line (D27) between two of the tables
+   * it `draws` (members and missing ones alike), so it draws that relationship as it did before.
+   */
+  const importsFor = (members: readonly string[], draws: readonly string[], current: readonly string[] = []): string[] => {
+    const drawn = new Set(draws.map(lower));
+    const pending = libraryPlan.afterIndex.refs
+      .filter((r) => r.pending && drawn.has(r.owner) && drawn.has(r.target) && fileExistsAfter(r.file))
+      .map((r) => r.file);
+    return [...new Set([...libraryPlan.relationshipsImportsFor(members, current), ...pending])].sort(byteOrder);
+  };
+  /** How a Ref end or a `use` specifier spells a table with a `.dbml` file after the plan (pending lines too). */
+  const referenceOf = (name: string): string | undefined => {
+    const t = libraryPlan.resolveTable(name);
+    return t && t.storage === 'dbml' ? t.reference : undefined;
+  };
   const diagramTargets = new Map<string, string>(); // lower target path → source json
   /** Members with no DBML table file to use, per diagram source: kept unlinked (D26). */
   const unlinkedOf = new Map<string, string[]>();
   /** Position keys the canvas never drew that a converted diagram keeps as // lines, not in erd_layout, per target. */
   const keptPositionKeys = new Map<string, Set<string>>();
+  /**
+   * The YAML library's folders (`logical-models/<f>/`, `tables/<f>/`): listed as layers for the
+   * loader, so a YAML table is found wherever it is, before and after alike.
+   */
+  const yamlLibraryFolders = [...new Set(files.filter((f) => f.kind === 'table' && f.storage === 'yaml')
+    .map((f) => classifySemanticFile(f.path, { tablesDirIsLayer: false }).folder ?? '').filter((f) => f !== ''))].sort();
   /** What a diagram draws before this run (only asked for when its positions must be pinned). */
   let beforeSet: Record<string, string> | undefined;
   const displayBeforeOf = (from: string): Promise<Record<string, unknown> | null> => {
     beforeSet ??= Object.fromEntries(files.map((f) => [f.path, f.text]));
-    const folders = [...new Set([
-      ...[...library.values()].map((t) => t.folder),
-      ...files.filter((f) => f.kind === 'table').map((f) => classifySemanticFile(f.path, { tablesDirIsLayer: false }).folder ?? ''),
-    ].filter((f) => f !== ''))].sort();
-    return displayOf(beforeSet, from, folders, input.layers);
+    return displayOf(beforeSet, from, yamlLibraryFolders, input.layers);
   };
   /** Members the self-check treats as missing or unreadable (names, lower-case), per diagram source. */
   for (const d of jsonDiagrams) {
@@ -1471,7 +1597,7 @@ async function planOnce(
       for (const name of unplaced) if (Object.prototype.hasOwnProperty.call(placedNow, name)) positions[name] = placedNow[name];
     }
     // The diagram's own relationships that stay its own: pending lines, their table has no file (D27).
-    const pendingLines = pendingRefLines(ownPending(d.file.path, diagramRelationships(d)));
+    const pendingLines = pendingRefLines(ownPending(d.file.path, diagramRelationships(d)), referenceOf);
     if (pendingLines.length > 0) {
       notes.push(`${d.file.path}: ${plural(pendingLines.length, 'relationship')} whose foreign-key table has no table file ${pendingLines.length === 1 ? 'is' : 'are'} kept in ${d.target} as pending lines; ${pendingLines.length === 1 ? 'it draws' : 'they draw'} as before.`);
     }
@@ -1487,7 +1613,7 @@ async function planOnce(
       members,
       ...(unlinked.length > 0 ? { unlinked } : {}),
       ...(pendingLines.length > 0 ? { pendingRefs: pendingLines } : {}),
-      relationshipsFiles: relationshipsFilesFor(members.map((m) => m.name)),
+      relationshipsFiles: importsFor(members.map((m) => m.name), [...members.map((m) => m.name), ...unlinked]),
       annotations,
       positions,
     }));
@@ -1497,7 +1623,7 @@ async function planOnce(
     // An earlier run's diagram in an older layout holds the same tokens: formatted, it is this run's text.
     // Read only, never written here: compared without formatWrittenDbml's "was written" log line.
     if (existing && !(existing.path === d.target && (existing.text === diagramText || canonicalDbml(existing.text) === diagramText))) {
-      leave(d.file.path, `${existing.path} is also in ${d.layer}/, and holds something other than this file converts to. Keep one of them.`);
+      leave(d.file.path, `${existing.path} already exists, and holds something other than this file converts to. Keep one of them.`);
       continue;
     }
     if (unknown.length > 0) notes.push(`${d.file.path}: keys a DBML diagram does not store (${unknown.join(', ')}) are kept as // lines above the Project in ${d.target}.`);
@@ -1517,21 +1643,32 @@ async function planOnce(
     if ([...members.map((m) => m.name), ...unlinked].every(placed)) plan.placedDiagrams.push(d.target);
     diagramTargets.set(lower(d.target), d.file.path);
     plan.deletes.push(d.file.path);
+    plan.targets.push({ source: d.file.path, target: d.target });
   }
   if (leaveMore.size > 0) return again();
 
-  // Existing DBML diagrams: a settle re-render, for the use lines of the files this run creates, the
-  // unlinked members that gain a table file (D26) and the pending relationships that move to the library (D27).
+  // Existing DBML diagrams settle by §2.6 (the editor's rule): a diagram whose member gains its file or
+  // whose imports change is re-rendered, as are those whose unlinked members gain a table file (D26) and
+  // those whose pending relationships move to the library (D27). Convert leaves one it can't edit as it
+  // is, named, where the editor would refuse the edit.
+  const settleResolver: SubjectAreaResolver = {
+    ...dbmlResolverOf(libraryPlan, sd),
+    pathChanged,
+    fileExists: fileExistsAfter,
+    refreshRelationshipsUses: true,
+    keepLayoutIfConflicted: true,
+  };
+  const signals: SettleSignals = { ...settleSignalsOf(libraryPlan), pathChanged };
   for (const d of dbmlDiagrams) {
     const f = d.file;
-    const members = subjectAreaMembersDbml(f.text, f.path);
+    const summary = diagramSummaryOf(f.path, f.text);
     const ownBefore = dbmlDiagramRelationships(d);
     const ownAfter = ownPending(f.path, ownBefore);
-    const affected = members === null
-      || members.some((m) => pathChanged.has(lower(m)) || relationshipsFilesFor([m]).some((r) => createdRelationships.has(r)))
+    const affected = summary === null
+      || needsSettle(summary, signals)
       || ownAfter.length !== ownBefore.length
       // An unlinked member whose table has a .dbml file now (Add from dbt made it): it gains its use line.
-      || (d.reading?.unlinked ?? []).some((m) => libraryPlan.resolveTable(m)?.storage === 'dbml');
+      || summary.unlinked.some((m) => libraryPlan.resolveTable(m)?.storage === 'dbml');
     if (!affected) continue;
     if (!d.reading) {
       leave(f.path, `It must gain use lines for the converted tables, and it does not read: ${d.error}. It still draws the same in ERD Studio; fix it so other DBML tools read it too.`);
@@ -1542,17 +1679,10 @@ async function planOnce(
       const before = d.reading.obj;
       const after = structuredClone(before);
       if (isObject(after.logical)) (after.logical as Record<string, unknown>).relationships = ownAfter;
-      const text = editSubjectAreaDbml(f.text, {
-        filePath: f.path,
-        before,
-        after,
-        resolveTable: (name) => libraryPlan.resolveTable(name),
-        // 2.0-switch: S8a (the folder-based plan gives the imports until the planner's index does)
-        relationshipsImportsFor: (names) => relationshipsFilesFor(names),
-        fileExists: fileExistsAfter,
-        pathChanged,
-        refreshRelationshipsUses: true,
-        keepLayoutIfConflicted: true,
+      const draws = isObject(after.logical) && Array.isArray(after.logical.models) ? (after.logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
+      const text = renderDbmlDiagram(f.text, f.path, before, after, {
+        ...settleResolver,
+        relationshipsImportsFor: (names, current) => importsFor(names, [...names, ...draws], current),
       });
       if (text !== f.text) replaces.set(f.path, text);
     } catch (err) {
@@ -1568,6 +1698,11 @@ async function planOnce(
   if (leaveMore.size > 0) return again();
 
   for (const p of resumedRelationships) if (fileAt.has(p) && !creates.has(p) && !replaces.has(p) && !plan.resumed.includes(p)) plan.resumed.push(p);
+  // The folder's README (§1.7), for anyone who opens it without ERD Studio: created when absent, never replaced.
+  const writesSomething = creates.size > 0 || replaces.size > 0 || plan.deletes.length > 0;
+  if (writesSomething && !input.readmeInOtherCase && !files.some((f) => f.kind === 'readme') && !fileAtLower.has(lower(SEMANTIC_README_NAME))) {
+    creates.set(SEMANTIC_README_NAME, semanticReadmeText());
+  }
   plan.creates = orderCreates([...creates].map(([path, text]) => ({ path, text })));
   plan.replaces = [...replaces].map(([path, text]) => ({ path, text }));
   plan.deletes = [...new Set(plan.deletes)];
@@ -1594,7 +1729,7 @@ async function planOnce(
   }, 0);
   const pendingCount = [...finalLists.values()].reduce((n, list) => n + list.filter((e) => e.pending !== undefined).length, 0)
     + jsonDiagrams.reduce((n, d) => n + ownPending(d.file.path, diagramRelationships(d)).length, 0);
-  const relationshipsFilesWritten = new Set([...creates.keys(), ...replaces.keys()].filter((p) => lower(p.slice(p.lastIndexOf('/') + 1)) === DBML_RELATIONSHIPS_FILE_NAME));
+  const relationshipsFilesWritten = new Set([...creates.keys(), ...replaces.keys()].filter((p) => classifySemanticFile(p, { tablesDirIsLayer: false }).kind === 'relationships'));
   plan.summary = {
     tables: converted.filter((t) => library.get(lower(t.name)) === t).length,
     diagrams: jsonDiagrams.length,
@@ -1673,17 +1808,13 @@ async function planOnce(
     // A JSON diagram left as it is must draw what it drew too: the library changed under it.
     ...files.filter((f) => f.kind === 'diagram' && f.storage === 'json' && left.has(f.path)).map((f) => ({ from: f.path, to: f.path })),
   ];
-  const libraryFolders = [...new Set([
-    ...[...library.values()].map((t) => t.folder),
-    ...files.filter((f) => f.kind === 'table').map((f) => classifySemanticFile(f.path, { tablesDirIsLayer: false }).folder ?? ''),
-  ].filter((f) => f !== ''))].sort();
   // Every diagram reads the same tables and relationships files: each text is parsed once.
   const reader = memoisedDbmlReader();
   for (const { from, to } of comparisons) {
     await breathe();
-    const was = await displayOf(before, from, libraryFolders, input.layers, reader);
+    const was = await displayOf(before, from, yamlLibraryFolders, input.layers, reader);
     if (was === null) continue;
-    const now = await displayOf(after, to, libraryFolders, input.layers, reader);
+    const now = await displayOf(after, to, yamlLibraryFolders, input.layers, reader);
     if (now === null) {
       refusals.push(`Convert would write ${to} so that it no longer loads. ${DBML_SELF_CHECK_REFUSAL_END}`);
       return { plan: withoutWrites(plan), leaveMore: new Map() };
@@ -1722,8 +1853,19 @@ async function planOnce(
     const wasPositions = isObject(was.viewConfig) && isObject((was.viewConfig as Record<string, unknown>).positions)
       ? (was.viewConfig as Record<string, Record<string, unknown>>).positions : undefined;
     if (keptKeys && wasPositions) for (const key of keptKeys) delete wasPositions[key];
-    const a = normaliseForStorageEquivalence(was, { convert: true });
-    const b = normaliseForStorageEquivalence(now, { convert: true });
+    // A converted table's schema is its folder: one the yml gave no schema takes it (the comparator's
+    // Convert row), and so does one whose yml schema can't be a folder name or is spelled another way
+    // in its layer (each named in a note).
+    for (const model of Array.isArray(was.models) ? (was.models as Array<Record<string, unknown>>) : []) {
+      if (typeof model.name === 'string' && homes.schemaReplaced.has(lower(model.name))) delete model.schema;
+    }
+    // A table drawn from a DBML file after the plan has that file's schema (every DBML table has one).
+    const schemaFallback = (name: string): string | undefined => {
+      const t = tableOf(name);
+      return t ? t.model.schema ?? t.schema : undefined;
+    };
+    const a = normaliseForStorageEquivalence(was, { convert: true, schemaFallback });
+    const b = normaliseForStorageEquivalence(now, { convert: true, schemaFallback });
     const difference = firstDifference(a, b) ?? danglingDifference(was, now);
     if (difference !== null) {
       refusals.push(`Convert would change what ${from} draws (${difference}). ${DBML_SELF_CHECK_REFUSAL_END}`);
@@ -1731,6 +1873,178 @@ async function planOnce(
     }
   }
   return { plan, leaveMore: new Map() };
+}
+
+/** Where a converted table goes: `<layer>/tables/<schema>/`. */
+interface TableHome {
+  layer: string;
+  schema: string;
+}
+
+/** `a`, `a and b`, `a, b and c`. */
+function listOf(items: readonly string[]): string {
+  return items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/**
+ * Whether a YAML table's `schema:` can be its schema folder (and so its
+ * Table qualifier): a library folder name with no `.` (a database-qualified
+ * `db.schema`), no dbt Jinja (`{{ … }}`), no character Windows refuses in a
+ * file name, no `'` (it would end the quoted path of a `use` line), not a
+ * Windows device name (`con`, `nul`, `com1`, …) and no white space at either
+ * end.
+ */
+function isSchemaFolderName(schema: unknown): schema is string {
+  return typeof schema === 'string' && isLibraryFolderName(schema) && schema === schema.trim()
+    && !schema.includes('.') && !schema.includes('{{') && !/[{}%#<>:"'|?*\u0000-\u001f\\]/.test(schema)
+    && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(schema);
+}
+
+/**
+ * Every converted table's home (§S8a), chosen before anything is rendered,
+ * so a resumed run chooses what the first run chose.
+ *
+ * Layer, in order: (1) its library folder (`logical-models/<f>/`, v6
+ * `tables/<f>/`) when that folder is a layer in layers.json (with no
+ * layers.json, an existing top-level folder); (2) the layer of the diagrams
+ * that list it (JSON diagrams and the DBML diagrams already there), when they
+ * all agree; (3) the first layer in layers.json; (4) the first top-level
+ * folder that can be a DBML layer, sorted; (5) `main`.
+ *
+ * Schema, in order: (1) the yml's `schema` when it can be a folder name;
+ * (2) the library folder; (3) `public`. Within one layer a schema is spelled
+ * one way: as an existing `<layer>/tables/<schema>/` folder spells it, else
+ * the first spelling in byte order.
+ *
+ * Every choice not from step 1, and every schema not from the yml, is a note.
+ */
+function tableHomes(
+  input: DbmlConversionInput,
+  candidates: ReadonlyArray<{ f: DbmlConversionFile; model: SemanticTable; folder: string }>,
+  dbmlTablePaths: readonly string[],
+): { of: Map<(typeof candidates)[number], TableHome>; notes: string[]; schemaReplaced: Set<string> } {
+  const files = input.files;
+  const hasLayersJson = files.some((f) => f.kind === 'layers');
+  const listedLayers = hasLayersJson ? input.layers.filter(isDbmlLayerName) : [];
+  const converting = new Set(candidates.map((c) => lower(c.model.name)));
+  // The top-level folders that are there whether or not this run has been applied before: a folder
+  // holding only DBML files of tables this run converts and relationships files is one an earlier,
+  // half-applied run may have made (`main/`), so it does not count, and a resumed run takes the same
+  // layer step, and says the same, as the first run.
+  const madeByConvert = (f: DbmlConversionFile): boolean => f.kind === 'relationships'
+    || (f.kind === 'table' && f.storage === 'dbml' && converting.has(lower(stemOf(f.path))));
+  const topFolders = [...new Set(files.filter((f) => !madeByConvert(f)).map((f) => f.path.split('/'))
+    .filter((s) => s.length > 1).map((s) => s[0]))].sort(byteOrder);
+  const opens = new Set(input.layers);
+  // (2) The layers of the diagrams that list each table (lower-case name → layers).
+  const shownIn = new Map<string, Set<string>>();
+  for (const f of files) {
+    if (f.kind !== 'diagram') continue;
+    const layer = classifySemanticFile(f.path, { tablesDirIsLayer: false }).layer ?? dirOf(f.path);
+    if (!opens.has(layer) || !isDbmlLayerName(layer)) continue;
+    let names: string[] = [];
+    if (f.storage === 'json') {
+      try {
+        // Read as the editor reads it (a v6 file's `logical.tables` is its `logical.models`).
+        const obj = validateSubjectAreaDocument(parseSubjectAreaJson(f.text, f.path), f.path).obj;
+        const models = isObject(obj.logical) && Array.isArray(obj.logical.models) ? obj.logical.models : [];
+        names = models.filter((m): m is string => typeof m === 'string');
+      } catch { /* a diagram that does not load lists nothing */ }
+    } else {
+      names = subjectAreaMembersDbml(f.text, f.path) ?? [];
+    }
+    for (const name of names) {
+      const layers = shownIn.get(lower(name)) ?? new Set<string>();
+      layers.add(layer);
+      shownIn.set(lower(name), layers);
+    }
+  }
+  type Chosen = { layer: string; step: 1 | 2 | 3 | 4 | 5 };
+  const layerOf = (c: (typeof candidates)[number]): Chosen => {
+    const folder = c.folder;
+    if (folder !== '' && (hasLayersJson ? listedLayers.includes(folder) : topFolders.includes(folder) && isDbmlLayerName(folder))) return { layer: folder, step: 1 };
+    const shown = shownIn.get(lower(c.model.name));
+    if (shown && shown.size === 1) return { layer: [...shown][0], step: 2 };
+    if (listedLayers.length > 0) return { layer: listedLayers[0], step: 3 };
+    const existing = topFolders.find(isDbmlLayerName);
+    if (existing !== undefined) return { layer: existing, step: 4 };
+    return { layer: 'main', step: 5 };
+  };
+  // Schema folders the layers already have (lower-case layer → lower-case schema → spelling), from the
+  // other tables' files: a file of a table this run converts (an earlier, half-applied run's) does not
+  // count, so a resumed run spells each schema, and says why, as the first run did.
+  const listedSchemas = new Map<string, Map<string, string>>();
+  for (const p of dbmlTablePaths) {
+    const tree = dbmlTreePathOf(p);
+    if (tree?.kind !== 'table' || tree.schema === undefined || converting.has(lower(tree.name))) continue;
+    const schemas = listedSchemas.get(lower(tree.layer)) ?? new Map<string, string>();
+    if (!schemas.has(lower(tree.schema))) schemas.set(lower(tree.schema), tree.schema);
+    listedSchemas.set(lower(tree.layer), schemas);
+  }
+  const chosen = candidates.map((c) => {
+    const layer = layerOf(c);
+    const own = c.model.schema;
+    const schemaStep: 1 | 2 | 3 = isSchemaFolderName(own) ? 1 : c.folder !== '' ? 2 : 3;
+    const asked = schemaStep === 1 ? own as string : schemaStep === 2 ? c.folder : DBML_DEFAULT_SCHEMA;
+    return { c, layer, schemaStep, asked };
+  });
+  // One spelling per schema folder of a layer: the folder's when it exists, else the first in byte order.
+  const spellings = new Map<string, string>();
+  for (const { layer, asked } of chosen) {
+    const key = `${lower(layer.layer)}\u0000${lower(asked)}`;
+    const listed = listedSchemas.get(lower(layer.layer))?.get(lower(asked));
+    const held = spellings.get(key);
+    spellings.set(key, listed ?? (held === undefined || byteOrder(asked, held) < 0 ? asked : held));
+  }
+  const of = new Map<(typeof candidates)[number], TableHome>();
+  const notes: string[] = [];
+  const schemaReplaced = new Set<string>();
+  const byLayerStep = new Map<string, { layer: string; step: number; names: string[] }>();
+  const bySchema = new Map<string, { layer: string; schema: string; step: number; names: string[] }>();
+  const perTable: string[] = [];
+  for (const { c, layer, schemaStep, asked } of chosen) {
+    const schema = spellings.get(`${lower(layer.layer)}\u0000${lower(asked)}`)!;
+    of.set(c, { layer: layer.layer, schema });
+    const name = c.model.name;
+    if (layer.step !== 1) {
+      const key = `${layer.step}\u0000${layer.layer}`;
+      const group = byLayerStep.get(key) ?? { layer: layer.layer, step: layer.step, names: [] };
+      group.names.push(name);
+      byLayerStep.set(key, group);
+    }
+    const own = c.model.schema;
+    if (typeof own === 'string' && own !== '' && schemaStep !== 1) {
+      schemaReplaced.add(lower(name));
+      perTable.push(`${c.f.path}: its schema ${JSON.stringify(own)} can't be a folder name, so it is written as Table ${schema}.${name} in ${layer.layer}/tables/${schema}/ (ERD Studio reads a DBML table's schema from its folder).`);
+    } else if (schemaStep !== 1) {
+      const key = `${schemaStep}\u0000${layer.layer}\u0000${schema}`;
+      const group = bySchema.get(key) ?? { layer: layer.layer, schema, step: schemaStep, names: [] };
+      group.names.push(name);
+      bySchema.set(key, group);
+    }
+    if (schema !== asked) {
+      if (schemaStep === 1) schemaReplaced.add(lower(name));
+      const listed = listedSchemas.get(lower(layer.layer))?.get(lower(asked)) !== undefined;
+      perTable.push(`${c.f.path}: its schema ${asked} is written ${schema}, as ${listed ? `the existing ${layer.layer}/tables/${schema}/ folder` : `another table of the ${layer.layer} layer`} spells it (one folder per schema).`);
+    }
+  }
+  const sortedNames = (names: string[]): string => listOf([...names].sort(byteOrder));
+  const verb = (names: string[], one: string, many: string): string => (names.length === 1 ? one : many);
+  for (const g of [...byLayerStep.values()].sort((a, b) => a.step - b.step || byteOrder(a.layer, b.layer))) {
+    const it = verb(g.names, 'it', 'them');
+    const why = g.step === 2 ? `the layer of the diagrams that show ${it}`
+      : g.step === 3 ? `the first layer in layers.json: no diagram shows ${it}, or the diagrams that do are in different layers`
+        : g.step === 4 ? 'the first layer folder: the project has no layers.json, and no diagram decides it'
+          : 'a new layer folder: the project has no layers.json and no layer folder. Add main to layers.json to open diagrams there';
+    notes.push(`${sortedNames(g.names)} ${verb(g.names, 'goes', 'go')} in the ${g.layer} layer (${g.layer}/tables/), ${why}.`);
+  }
+  for (const g of [...bySchema.values()].sort((a, b) => a.step - b.step || byteOrder(a.layer, b.layer) || byteOrder(a.schema, b.schema))) {
+    notes.push(g.step === 2
+      ? `${sortedNames(g.names)} ${verb(g.names, 'has', 'have')} no schema in the yml, so ${verb(g.names, 'its', 'their')} schema is ${verb(g.names, 'its', 'their')} library folder's name: written as Table ${g.schema}.<name> in ${g.layer}/tables/${g.schema}/.`
+      : `${sortedNames(g.names)} ${verb(g.names, 'has', 'have')} no schema (in the yml or a library folder), so ${verb(g.names, 'it is', 'they are')} written as Table ${g.schema}.<name> in ${g.layer}/tables/${g.schema}/.`);
+  }
+  notes.push(...perTable);
+  return { of, notes, schemaReplaced };
 }
 
 /**
@@ -1800,14 +2114,14 @@ function danglingDifference(was: Record<string, unknown>, now: Record<string, un
  * group (`compositeKey`, per owner) one line, stored canonically, in the
  * order the diagram held them (so it reads back in the same order).
  */
-function pendingRefLines(own: readonly Relationship[]): string[] {
+function pendingRefLines(own: readonly Relationship[], referenceOf: (table: string) => string | undefined): string[] {
   const units = new Map<string, Relationship[]>();
   for (const raw of own) {
     const rel = canonicalRelationship(raw);
     const key = rel.compositeKey ? `c\u0000${lower(rel.fromModel)}\u0000${lower(rel.toModel)}\u0000${lower(rel.compositeKey)}` : `l\u0000${linkKey(rel)}`;
     units.set(key, [...(units.get(key) ?? []), rel]);
   }
-  return [...units.values()].map((members) => pendingRelationshipRef(members));
+  return [...units.values()].map((members) => pendingRelationshipRef(members, referenceOf));
 }
 
 /**
@@ -1881,19 +2195,20 @@ function canonicalJson(value: unknown): unknown {
 
 /** The plan with its writes dropped (it refuses). */
 function withoutWrites(plan: DbmlConversionPlan): DbmlConversionPlan {
-  return { ...plan, creates: [], replaces: [], deletes: [], resumed: [] };
+  return { ...plan, creates: [], replaces: [], deletes: [], targets: [], resumed: [] };
 }
 
-/** Creates in the order they are applied (D23): relationships files, tables, diagrams, anything else. */
+/**
+ * Creates in the order they are applied (§2.8): tables, relationships files
+ * (which `use` tables), diagrams (which `use` both), the README, anything
+ * else; `orderFileWrites`' ranking, so a half-applied run never leaves a
+ * `use` line to a file not yet written.
+ */
 function orderCreates(creates: Array<{ path: string; text: string }>): Array<{ path: string; text: string }> {
-  const rank = (p: string): number => {
-    const name = lower(p.slice(p.lastIndexOf('/') + 1));
-    if (name === DBML_RELATIONSHIPS_FILE_NAME) return 0;
-    if (p.startsWith(`${TABLES_DIR}/`)) return 1;
-    if (name.endsWith('.dbml')) return 2;
-    return 3;
-  };
-  return creates.map((c, i) => ({ c, i })).sort((a, b) => rank(a.c.path) - rank(b.c.path) || a.i - b.i).map(({ c }) => c);
+  const root = '/semantic-dir';
+  const byPath = new Map(creates.map((c) => [`${root}/${c.path}`, c]));
+  return orderFileWrites(creates.map((c): FileWrite => ({ kind: 'create', path: `${root}/${c.path}`, text: c.text })), root)
+    .map((w) => byPath.get(w.path)!);
 }
 
 /**
@@ -1913,10 +2228,10 @@ export function memoisedDbmlReader(base: DbmlStorageReader = dbmlStorageReader):
   const tables = new Map<string, ReturnType<DbmlStorageReader['parseTable']>>();
   const relationships = new Map<string, ReturnType<DbmlStorageReader['readRelationships']>>();
   return {
-    parseTable: (text, fileStem) => {
-      const key = `${fileStem}\u0000${text}`;
+    parseTable: (text, fileStem, options) => {
+      const key = `${fileStem}\u0000${options?.schemaFolder ?? ''}\u0000${text}`;
       let reading = tables.get(key);
-      if (!reading) { reading = base.parseTable(text, fileStem); tables.set(key, reading); }
+      if (!reading) { reading = base.parseTable(text, fileStem, options); tables.set(key, reading); }
       return structuredClone(reading);
     },
     readRelationships: (text) => {
@@ -1927,6 +2242,38 @@ export function memoisedDbmlReader(base: DbmlStorageReader = dbmlStorageReader):
     parseSubjectArea: (text, filePath) => base.parseSubjectArea(text, filePath),
     subjectAreaMembers: (text, filePath) => base.subjectAreaMembers(text, filePath),
   };
+}
+
+/**
+ * The DBML tables of a file set no YAML table file shadows (lower-case name
+ * → a YAML text of the table as the extension reads it: the DBML table, with
+ * the relationships every relationships file of the set attaches to it), for
+ * the self-check's JSON diagrams in a mixed project.
+ */
+function dbmlTablesAsYaml(set: Readonly<Record<string, string>>, reader: DbmlStorageReader): Map<string, string> {
+  const yamlNames = new Set<string>();
+  const tables: Array<{ table: SemanticTable; alias?: string }> = [];
+  const readings: Array<{ path: string; reading: DbmlRelationshipsReading }> = [];
+  for (const p of Object.keys(set).sort(byteOrder)) {
+    const cls = classifySemanticFile(p, { tablesDirIsLayer: false });
+    if (cls.kind === 'table' && cls.storage === 'yaml') yamlNames.add(lower(cls.name ?? stemOf(p)));
+    else if (cls.kind === 'table' && cls.storage === 'dbml') {
+      const reading = reader.parseTable(set[p], cls.name ?? stemOf(p), cls.schema !== undefined ? { schemaFolder: cls.schema } : {});
+      if (reading.ok) tables.push({ table: reading.table, ...(reading.alias !== undefined ? { alias: reading.alias } : {}) });
+    } else if (cls.kind === 'relationships') {
+      readings.push({ path: p, reading: reader.readRelationships(set[p]) });
+    }
+  }
+  const out = new Map<string, string>();
+  if (tables.length === 0) return out;
+  const lookup = dbmlTableLookup(tables.map((t) => ({ table: { name: t.table.name, columns: t.table.columns ?? [] }, storage: 'dbml' as const, ...(t.alias !== undefined ? { dbmlAlias: t.alias } : {}) })));
+  const attached = attachRelationships(readings.filter((r) => r.reading.readable), lookup);
+  for (const { table } of tables) {
+    if (yamlNames.has(lower(table.name)) || out.has(lower(table.name))) continue;
+    const relationships = attached.byOwner.get(lower(table.name)) ?? [];
+    out.set(lower(table.name), stringifyYaml({ ...table, relationships }));
+  }
+  return out;
 }
 
 async function displayOf(
@@ -1944,10 +2291,15 @@ async function displayOf(
   const layersText = JSON.stringify({ schemaVersion: 1, layers: [...layers, ...extra] });
   const listed = new Map<string, string>();
   for (const p of Object.keys(set).sort()) if (!listed.has(lower(p))) listed.set(lower(p), p);
+  // A JSON diagram finds a DBML table by name in the extension (it lists the folders), never in core's
+  // loader (no listing): such a table is served to it as the YAML table the extension reads it as.
+  const asYaml = domainPath.toLowerCase().endsWith('.json') ? dbmlTablesAsYaml(set, reader) : new Map<string, string>();
   const read = (p: string): string | null => {
     if (Object.prototype.hasOwnProperty.call(set, p)) return set[p];
     const other = listed.get(lower(p));
-    return other === undefined ? null : set[other];
+    if (other !== undefined) return set[other];
+    const first = /^logical-models\/([^/]+)\.yml$/.exec(p);
+    return first ? asYaml.get(lower(first[1])) ?? null : null;
   };
   try {
     const display = await loadDisplaySubjectArea({
