@@ -1,9 +1,11 @@
 /**
- * A project as ERD Studio 2.0's Convert Project to DBML leaves it, built from
- * the main dbt fixture: the YAML library and JSON diagrams are gone, tables
- * and relationships are `.dbml` files under `tables/`, and diagrams are
- * `<layer>/<name>.dbml` with a `.dbdiagram` layout. File contents are what
- * 2.0 writes (shortened). Shared by the stable DBML guard's tests.
+ * A project as the early 1.9 pre-releases' Convert Project to DBML leaves it,
+ * built from the main dbt fixture: the YAML library and JSON diagrams are
+ * gone, tables and relationships are `.dbml` files under `tables/`, and
+ * diagrams are `<layer>/<name>.dbml` with a `.dbdiagram` layout. File
+ * contents are what they write (shortened). `makeLayerFirstDbmlProject`
+ * builds the layer-first tree 1.9.4 and 2.0 write instead. Shared by the
+ * stable DBML guard's tests.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,6 +40,37 @@ use { table dim_customer } from '../tables/gold/dim_customer.dbml'
 use * from '../tables/gold/_relationships.dbml'
 `;
 
+/** A table file in 2.0's layer-first tree: one `Table <schema>.<name>`. */
+export const LAYER_TABLE_DBML = `Table gold.fct_order [
+  role: 'fact',
+  grain: 'One row per order'
+] {
+  id int [pk]
+  customer_key int
+}
+`;
+
+/** A relationships file in 2.0's layer-first tree. */
+export const LAYER_RELATIONSHIPS_DBML = `use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+
+Ref: gold.fct_order.customer_key > gold.dim_customer.customer_key
+`;
+
+/** A diagram in 2.0's layer-first tree. */
+export const LAYER_DIAGRAM_DBML = `use * from '../relationships/sales.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+
+Note sales_note {
+  'Orders by customer'
+}
+
+Project sales {
+  erd_schema_version: '7'
+  erd_layout: '{"gold.fct_order":{"x":0,"y":0}}'
+}
+`;
+
 export const EXPORT_DBML = `// erd-studio dbml-export v1
 // Left out: positions
 
@@ -62,6 +95,32 @@ export function makeDbmlProject(root: string): string {
   fs.writeFileSync(path.join(semantic, 'tables', 'gold', '_relationships.dbml'), RELATIONSHIPS_DBML);
   fs.writeFileSync(path.join(semantic, 'silver', 'showcase.dbml'), DIAGRAM_DBML);
   fs.writeFileSync(path.join(semantic, 'silver', 'showcase.dbdiagram'), '{"tables":{}}\n');
+  return semantic;
+}
+
+/**
+ * Copy the dbt fixture to `root` and convert it as ERD Studio 1.9.4 and 2.0
+ * do, into the layer-first tree: `<layer>/tables/<schema>/<name>.dbml`,
+ * `<layer>/relationships/<name>.dbml` and `<layer>/diagrams/<name>.dbml`.
+ * Returns the ERD Studio folder.
+ */
+export function makeLayerFirstDbmlProject(root: string): string {
+  fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+  const semantic = path.join(root, '.erd-studio');
+  fs.rmSync(path.join(semantic, 'logical-models'), { recursive: true, force: true });
+  for (const layer of ['silver', 'gold']) {
+    for (const f of fs.readdirSync(path.join(semantic, layer))) {
+      if (f.endsWith('.json')) fs.rmSync(path.join(semantic, layer, f));
+    }
+  }
+  const gold = path.join(semantic, 'gold');
+  fs.mkdirSync(path.join(gold, 'tables', 'gold'), { recursive: true });
+  fs.mkdirSync(path.join(gold, 'relationships'), { recursive: true });
+  fs.mkdirSync(path.join(gold, 'diagrams'), { recursive: true });
+  fs.writeFileSync(path.join(gold, 'tables', 'gold', 'fct_order.dbml'), LAYER_TABLE_DBML);
+  fs.writeFileSync(path.join(gold, 'tables', 'gold', 'dim_customer.dbml'), LAYER_TABLE_DBML.replace(/fct_order/g, 'dim_customer'));
+  fs.writeFileSync(path.join(gold, 'relationships', 'sales.dbml'), LAYER_RELATIONSHIPS_DBML);
+  fs.writeFileSync(path.join(gold, 'diagrams', 'sales.dbml'), LAYER_DIAGRAM_DBML);
   return semantic;
 }
 

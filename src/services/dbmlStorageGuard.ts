@@ -2,16 +2,20 @@
  * Stable guard for projects stored as DBML by a newer ERD Studio.
  *
  * ERD Studio 2.0 (first shipped as the 1.9 pre-release) can keep a project's
- * tables, relationships and diagrams as `.dbml` files: tables at
+ * tables, relationships and diagrams as `.dbml` files. The early 1.9
+ * pre-releases wrote a library-first tree: tables at
  * `tables/[<folder>/]<name>.dbml`, relationships in
  * `tables/[<folder>/]_relationships.dbml`, diagrams at `<layer>/<name>.dbml`
- * with a `<name>.dbdiagram` layout beside them. This version reads none of
- * that. Opened on such a project it would show an empty Table Library and no
- * diagrams, and its create paths could write YAML and JSON files beside the
- * DBML ones (a `tables/x.yml` next to `tables/x.dbml`, a `silver/x.json` next
- * to `silver/x.dbml`), which the newer version would then report as
- * conflicts. So when this detector finds DBML storage, the extension says so
- * and refuses every action that writes into the ERD Studio folder.
+ * with a `<name>.dbdiagram` layout beside them. 1.9.4 and 2.0 write a
+ * layer-first tree: tables at `<layer>/tables/<schema>/<name>.dbml`,
+ * relationships in `<layer>/relationships/<name>.dbml` and diagrams at
+ * `<layer>/diagrams/<name>.dbml`. This version reads none of that. Opened on
+ * such a project it would show an empty Table Library and no diagrams, and
+ * its create paths could write YAML and JSON files beside the DBML ones (a
+ * `tables/x.yml` next to `tables/x.dbml`, a `silver/x.json` next to
+ * `silver/x.dbml`), which the newer version would then report as conflicts.
+ * So when this detector finds DBML storage, the extension says so and
+ * refuses every action that writes into the ERD Studio folder.
  *
  * This file is the detector and the shared wording only. It imports no
  * `vscode` (the `erd-studio` CLI's `doctor` uses it too); the editor side is
@@ -52,6 +56,11 @@ export const ERD_STUDIO_EXTENSION_ID = 'liamwynne.erd-studio';
 
 /** The file name of a library folder's relationships file in DBML storage. */
 const RELATIONSHIPS_FILE_STEM = '_relationships';
+
+/** A layer folder's subfolders in 2.0's layer-first tree. */
+const LAYER_TABLES_DIR = 'tables';
+const LAYER_RELATIONSHIPS_DIR = 'relationships';
+const LAYER_DIAGRAMS_DIR = 'diagrams';
 
 /**
  * The first line of the single-file DBML export (`toDbml`), in every version.
@@ -136,12 +145,54 @@ function libraryEvidenceIn(dir: string, relDir: string): DbmlStorageEvidence | n
  * declares `erd_schema_version` (which only a newer ERD Studio's diagrams
  * carry) and is not a saved export.
  */
-function diagramEvidenceIn(dir: string, relDir: string): DbmlStorageEvidence | null {
-  for (const entry of dirEntries(dir)) {
+function diagramEvidenceIn(dir: string, relDir: string, entries: fs.Dirent[] = dirEntries(dir)): DbmlStorageEvidence | null {
+  for (const entry of entries) {
     if (!isDbmlFile(entry) || stemOf(entry.name).toLowerCase() === RELATIONSHIPS_FILE_STEM) { continue; }
     const head = readHead(path.join(dir, entry.name));
     if (head !== null && !isExport(head) && DIAGRAM_VERSION_KEY.test(head)) {
       return { kind: 'diagram', file: `${relDir}/${entry.name}` };
+    }
+  }
+  return null;
+}
+
+/**
+ * A DBML relationships file directly in a layer's `relationships/` folder,
+ * or null: any `.dbml` file there that is not a saved export.
+ */
+function relationshipsEvidenceIn(dir: string, relDir: string): DbmlStorageEvidence | null {
+  for (const entry of dirEntries(dir)) {
+    if (!isDbmlFile(entry)) { continue; }
+    const head = readHead(path.join(dir, entry.name));
+    if (head !== null && !isExport(head)) {
+      return { kind: 'relationships', file: `${relDir}/${entry.name}` };
+    }
+  }
+  return null;
+}
+
+/**
+ * Evidence of 2.0's layer-first tree inside one layer folder, or null: a
+ * diagram in `diagrams/`, a relationships file in `relationships/`, or a
+ * table file in `tables/<schema>/` (one folder down, never deeper). Lists
+ * only those subfolders; a layer without them costs one listing.
+ */
+function layerFirstEvidenceIn(layerDir: string, relLayer: string, entries: fs.Dirent[]): DbmlStorageEvidence | null {
+  const sub = (name: string): boolean => entries.some((d) => d.isDirectory() && d.name === name);
+  if (sub(LAYER_DIAGRAMS_DIR)) {
+    const found = diagramEvidenceIn(path.join(layerDir, LAYER_DIAGRAMS_DIR), `${relLayer}/${LAYER_DIAGRAMS_DIR}`);
+    if (found) { return found; }
+  }
+  if (sub(LAYER_RELATIONSHIPS_DIR)) {
+    const found = relationshipsEvidenceIn(path.join(layerDir, LAYER_RELATIONSHIPS_DIR), `${relLayer}/${LAYER_RELATIONSHIPS_DIR}`);
+    if (found) { return found; }
+  }
+  if (sub(LAYER_TABLES_DIR)) {
+    const tablesDir = path.join(layerDir, LAYER_TABLES_DIR);
+    for (const schema of dirEntries(tablesDir)) {
+      if (!schema.isDirectory() || schema.name.startsWith('.')) { continue; }
+      const found = libraryEvidenceIn(path.join(tablesDir, schema.name), `${relLayer}/${LAYER_TABLES_DIR}/${schema.name}`);
+      if (found) { return found; }
     }
   }
   return null;
@@ -154,7 +205,15 @@ function diagramEvidenceIn(dir: string, relDir: string): DbmlStorageEvidence | n
  * - a `.dbml` file in the table library `tables/` (top level or one folder
  *   down), unless `tables/` is a layer folder or the file is a saved export;
  * - a `_relationships.dbml` there;
- * - a `.dbml` diagram in a layer folder that declares `erd_schema_version`.
+ * - a `.dbml` diagram in a layer folder that declares `erd_schema_version`;
+ * - in 2.0's layer-first tree, inside a layer folder: a `.dbml` diagram in
+ *   `diagrams/` that declares `erd_schema_version`, a `.dbml` file in
+ *   `relationships/`, or a `.dbml` table in `tables/<schema>/` (never a saved
+ *   export in any of them).
+ *
+ * A layer folder is any top-level folder except hidden ones, the reserved
+ * folders (`templates/`, …), `logical-models/` and `tables/` while it is the
+ * table library.
  *
  * Reads folder listings and at most the first 64 KB of a few `.dbml` files,
  * fresh on every call, so it stays right after a git checkout or an
@@ -184,8 +243,25 @@ export function detectDbmlStorage(semanticRoot: string): DbmlStorageEvidence | n
   for (const dir of top) {
     if (!dir.isDirectory() || dir.name.startsWith('.') || NON_SUBJECT_AREA_DIRS.has(dir.name) || dir.name === LOGICAL_MODELS_DIR) { continue; }
     if (dir.name === TABLES_DIR && !tablesIsLayer) { continue; }
-    const diagram = diagramEvidenceIn(path.join(semanticRoot, dir.name), dir.name);
+    const layerDir = path.join(semanticRoot, dir.name);
+    const entries = dirEntries(layerDir);
+    const diagram = diagramEvidenceIn(layerDir, dir.name, entries);
     if (diagram) { return diagram; }
+    const layerFirst = layerFirstEvidenceIn(layerDir, dir.name, entries);
+    if (layerFirst) { return layerFirst; }
   }
   return null;
+}
+
+/**
+ * The ERD Studio folders a diagram the editor opens may belong to, the likelier
+ * first. A diagram sits at `<folder>/<layer>/<name>.dbml` (the early 1.9
+ * pre-releases) or `<folder>/<layer>/diagrams/<name>.dbml` (1.9.4 and 2.0),
+ * so a file in a `diagrams/` folder names both: the layer-first root, then the
+ * older one in case `diagrams` is itself a layer.
+ */
+export function semanticRootsOfDiagram(documentPath: string): string[] {
+  const parent = path.dirname(documentPath);
+  const layerRoot = path.dirname(parent);
+  return path.basename(parent) === LAYER_DIAGRAMS_DIR ? [path.dirname(layerRoot), layerRoot] : [layerRoot];
 }

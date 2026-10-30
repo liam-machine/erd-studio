@@ -1,6 +1,6 @@
 /**
  * The stable DBML guard on the surfaces outside activation: `erd-studio
- * doctor` reports a DBML project as an error with the update advice,
+ * doctor` reports a DBML project (either tree) as an error with the update advice,
  * selectors.yml is never regenerated (this version lists no DBML diagram, so
  * it would drop their selectors), a canvas that was open when the project
  * became DBML refuses edits, and package.json shows the message in both views.
@@ -23,7 +23,7 @@ import { TableLibraryService } from '../../src/services/logicalModelService';
 import { ManifestService } from '../../src/services/manifestService';
 import { YmlParserService } from '../../src/services/ymlParserService';
 import { TemplateService } from '../../src/services/templateService';
-import { FIXTURE_ROOT, makeDbmlProject, snapshot } from './dbmlStorageGuard.fixture';
+import { FIXTURE_ROOT, makeDbmlProject, makeLayerFirstDbmlProject, snapshot } from './dbmlStorageGuard.fixture';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const cleanEnv: NodeJS.ProcessEnv = { PATH: '' };
@@ -135,6 +135,21 @@ describe('erd-studio doctor', () => {
     expect(out).toContain('No dbt project found');
     expect(out).toContain(`✗ ${DBML_STORAGE_MESSAGE} (found ${r.erd.dbmlStorage!.file})`);
     expect(out).toMatch(/Next steps:\n {2}1\. Open this project with a newer ERD Studio/);
+  });
+
+  it('reports the layer-first tree 1.9.4 and 2.0 write the same way', async () => {
+    const root = path.join(tmp, 'p');
+    makeLayerFirstDbmlProject(root);
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: tmp });
+    expect(r.erd.dbmlStorage?.file).toMatch(/^\.erd-studio\/gold\/(diagrams|relationships|tables\/gold)\/[a-z_]+\.dbml$/);
+    expect(r.nextSteps.map((s) => s.id)[0]).toBe('update-erd-studio');
+
+    let out = '';
+    const code = await main(['doctor', '--project', root, '--no-dbt'], {
+      stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: root, env: cleanEnv,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain(`✗ ${DBML_STORAGE_MESSAGE} (found ${r.erd.dbmlStorage!.file})`);
   });
 
   it('a folder with no dbt project and no DBML storage is reported as before', async () => {

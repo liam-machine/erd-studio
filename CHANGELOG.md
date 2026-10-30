@@ -8,6 +8,11 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+- **A project converted to DBML by the 1.9.4 pre-release (or 2.0) now shows the *"stored as DBML by a newer ERD Studio"* message instead of an empty project, and ERD Studio no longer writes YAML or JSON files into it.** Those versions keep each layer's tables, relationships and diagrams in its own `tables/`, `relationships/` and `diagrams/` folders, which 1.7.3 did not recognise. `erd-studio doctor` reports it the same way.
+
 ## 1.7.3 — 2026-10-29
 
 ### Fixed
