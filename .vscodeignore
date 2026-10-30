@@ -51,8 +51,10 @@ data engineer plugin/**
 # syntaxes/ ships (never list it here): the DBML TextMate grammar and language
 # configuration that package.json's `languages` and `grammars` point at.
 #
-# media/ otherwise ships: the icons, media/onboarding/ (Welcome video + poster)
-# and media/walkthrough/*.svg (the Get Started walkthrough's step images).
+# media/ otherwise ships: the icons, media/file-icons/ (the DBML Diagram, Table
+# and Relationships language icons package.json's `languages` point at, also
+# drawn in ERD Studio's trees), media/onboarding/ (Welcome video + poster) and
+# media/walkthrough/*.svg (the Get Started walkthrough's step images).
 #
 # Media referenced only by README.md and docs/*.md (the README's relative links
 # are rewritten to absolute github.com URLs by vsce; docs/dbt.md uses an absolute

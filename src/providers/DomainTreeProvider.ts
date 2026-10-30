@@ -20,6 +20,7 @@ import type { LayerService } from '../services/layerService';
 import { createLogger, elapsedMs, log, plural } from '../services/logger';
 import { layersFailure } from '../services/diagramCommandErrors';
 import { showCommandFailure } from '../commands/commandFailure';
+import type { DbmlFileIconResolver } from './dbmlFileKinds';
 
 const treeLog = createLogger('Subject Areas');
 
@@ -118,6 +119,8 @@ export class SubjectAreaTreeProvider
     semanticDir?: string,
     /** Told whether the empty-state text may show: false once a root listing finds no rows, true again once one finds rows (the extension sets `erdStudio.diagramsLoading`). Optional. */
     private readonly onLoadingChange?: (loading: boolean) => void,
+    /** The DBML Diagram icon for `.dbml` rows (`dbmlFileIcon`). Optional: without it every diagram row keeps the `json` codicon. */
+    private readonly dbmlIcon?: DbmlFileIconResolver,
   ) {
     this.semanticDir = semanticDir ?? DEFAULT_SEMANTIC_DIR;
   }
@@ -395,7 +398,9 @@ export class SubjectAreaTreeProvider
     }
 
     item.contextValue = 'domain';
-    item.iconPath = new vscode.ThemeIcon('json');
+    item.iconPath = element.summary.storage === 'dbml' && this.dbmlIcon
+      ? this.dbmlIcon('diagram')
+      : new vscode.ThemeIcon('json');
     item.tooltip = `${this.layerService.getLabel(element.summary.layer)} / ${element.summary.domain}`;
     item.command = {
       command: 'erdStudio.openDomain',

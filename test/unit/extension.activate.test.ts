@@ -156,11 +156,13 @@ describe('activate() with no folder open (empty window)', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('registers Format Document for .dbml files once, before the no-project early return', async () => {
+  it('registers Format Document for .dbml files once (all four DBML language ids), before the no-project early return', async () => {
     const before = vscode._formattingProviders.length;
     await activate(context);
     const added = vscode._formattingProviders.slice(before);
-    expect(added.map((p) => p.selector)).toEqual([{ language: 'dbml' }]);
+    expect(added.map((p) => p.selector)).toEqual([
+      [{ language: 'dbml' }, { language: 'dbml-table' }, { language: 'dbml-relationships' }, { language: 'dbml-diagram' }],
+    ]);
   });
 
   it('still reports an erdStudio.projectPath that points at no dbt project', async () => {
@@ -1977,8 +1979,9 @@ describe('Welcome panel: first run', () => {
     expect(step('newDiagram').description).not.toMatch(/YAML|JSON/);
     expect((step('newDiagram').media as { altText?: string }).altText).toContain('the DBML files a new project keeps it in');
     const svg = fs.readFileSync(path.join(REPO_ROOT, step('newDiagram').media.svg), 'utf-8');
-    for (const file of ['sales.dbml', 'sales.dbdiagram', 'customer.dbml', '_relationships.dbml']) expect(svg).toContain(`>${file}</text>`);
-    expect(svg).not.toMatch(/\.yml<|sales\.json</);
+    // The layer-first tree: <layer>/diagrams/, <layer>/tables/<schema>/, <layer>/relationships/.
+    for (const file of ['gold/', 'diagrams/', 'sales.dbml', 'tables/', 'customer.dbml', 'relationships/', 'gold.dbml']) expect(svg).toContain(`>${file}</text>`);
+    expect(svg).not.toMatch(/\.yml<|sales\.json<|\.dbdiagram<|_relationships\.dbml</);
     expect(step('importDbml').description).toContain('(command:erdStudio.importDbml)');
     expect(step('draw').description).toContain('(command:erdStudio.drawFromDbt)');
     expect(step('sample').description).toContain('(command:erdStudio.trySampleProject)');

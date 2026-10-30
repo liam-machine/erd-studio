@@ -25,6 +25,7 @@ import type { TableLibraryService, TableFileEntry, TableFileError } from '../ser
 import type { SubjectAreaService } from '../services/domainService';
 import { subjectAreaTableNames } from '../services/domainService';
 import type { LayerConfig } from '../types/layer';
+import type { DbmlFileIconResolver } from './dbmlFileKinds';
 import { createLogger, elapsedMs, plural } from '../services/logger';
 
 const treeLog = createLogger('Table Library');
@@ -120,6 +121,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     private readonly getLayers: () => LayerConfig[] = () => [],
     /** Told when the tree starts or stops loading (the extension sets `erdStudio.tablesLoading`). Optional. */
     private readonly onLoadingChange?: (loading: boolean) => void,
+    /** The DBML Table icon for healthy `.dbml` rows (`dbmlFileIcon`). Optional: without it they keep the `symbol-class` codicon. */
+    private readonly dbmlIcon?: DbmlFileIconResolver,
   ) {}
 
   refresh(): void {
@@ -180,7 +183,11 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
 
     item.contextValue = 'logicalModel';
-    item.iconPath = new vscode.ThemeIcon(isOrphan ? 'warning' : 'symbol-class');
+    // A DBML table in use gets the DBML Table icon; an unused one keeps its
+    // warning (as a file error, below, and a duplicate, above, keep theirs).
+    item.iconPath = isOrphan
+      ? new vscode.ThemeIcon('warning')
+      : dbml && this.dbmlIcon ? this.dbmlIcon('table') : new vscode.ThemeIcon('symbol-class');
 
     if (element.fileError) {
       return this.fileErrorItem(item, element, element.fileError);

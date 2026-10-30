@@ -30,12 +30,13 @@ describe('package.json for native DBML storage', () => {
     for (const m of menus) expect(m.when).toContain('erdStudio.storage == yaml');
   });
 
-  it('.dbdiagram has no language (positions are the diagram\'s erd_layout); only .dbml is dbml', () => {
+  it('.dbdiagram has no language (positions are the diagram\'s erd_layout); only dbml claims .dbml, the three kinds go by path', () => {
     const languages = pkg.contributes.languages as Array<{ id: string; extensions?: string[] }>;
     expect(languages.filter((l) => l.extensions?.includes('.dbdiagram'))).toEqual([]);
-    expect(languages.map((l) => l.id)).toEqual(['dbml']);
+    expect(languages.map((l) => l.id)).toEqual(['dbml', 'dbml-diagram', 'dbml-table', 'dbml-relationships']);
+    expect(languages.filter((l) => l.extensions).map((l) => l.id)).toEqual(['dbml']);
     expect(languages.find((l) => l.id === 'dbml')?.extensions).toEqual(['.dbml']);
-    expect(pkg.contributes.grammars.map((g: { language: string }) => g.language)).toEqual(['dbml']);
+    expect(pkg.contributes.grammars.map((g: { language: string }) => g.language)).toEqual(['dbml', 'dbml-diagram', 'dbml-table', 'dbml-relationships']);
   });
 
   it('no JSON or YAML schema is contributed for .dbml or .dbdiagram files', () => {

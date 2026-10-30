@@ -8,6 +8,11 @@
  * relationships file and a diagram file, laid out as the formatter lays them
  * out) and each one is checked to parse in the pinned parser first, so the
  * grammar is tested against syntax DBML really accepts.
+ *
+ * The package.json block also pins the three path-chosen language modes
+ * (DBML Diagram, Table, Relationships): their icons, the one formatter and
+ * grammar they share, and a mini VS Code glob checked against
+ * `classifySemanticFile`.
  */
 
 import * as fs from 'fs';
@@ -16,6 +21,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import * as oniguruma from 'vscode-oniguruma';
 import * as vsctm from 'vscode-textmate';
 import { compileOne } from '../../packages/core/src/dbml/parser';
+import { classifySemanticFile } from '../../packages/core/src/storage';
+import { DBML_KIND_LANGUAGE_IDS, DBML_LANGUAGE_IDS, dbmlFileIconPath, type DbmlFileKind } from '../../src/providers/dbmlFileKinds';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'));
@@ -366,9 +373,110 @@ describe('dbml.tmLanguage.json: structure', () => {
   });
 });
 
-describe('package.json: the dbml language', () => {
-  it('contributes the dbml language for .dbml with its configuration, and none for .dbdiagram (positions are erd_layout)', () => {
-    const languages = pkg.contributes.languages as Array<Record<string, unknown>>;
+/** The language ids ERD Studio contributes, in package.json's order. */
+const LANGUAGE_IDS = ['dbml', 'dbml-diagram', 'dbml-table', 'dbml-relationships'];
+
+/** The custom editor's DBML selector: the canvas opens what it matches. */
+function canvasDbmlPattern(): string {
+  const selector = pkg.contributes.customEditors[0].selector as Array<{ filenamePattern: string }>;
+  const dbml = selector.filter((s) => s.filenamePattern.endsWith('.dbml'));
+  expect(dbml).toHaveLength(1);
+  return dbml[0].filenamePattern;
+}
+
+/**
+ * A mini VS Code glob: `**\/` is any prefix (or none), `*` is any run within
+ * one segment. Case-insensitive, as VS Code matches both language
+ * `filenamePatterns` and custom-editor `filenamePattern`s (it lower-cases the
+ * path and the pattern).
+ */
+function vscodeGlob(glob: string): RegExp {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    if (glob.startsWith('**/', i)) {
+      re += '(?:.*/)?';
+      i += 2;
+    } else if (glob[i] === '*') {
+      re += '[^/\\\\]*';
+    } else {
+      re += glob[i].replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp(`^${re}$`, 'i');
+}
+
+/** The language VS Code gives `filePath`: a matching `filenamePatterns` entry beats an extension. */
+function vscodeLanguageOf(filePath: string): string | undefined {
+  const languages = pkg.contributes.languages as Array<{ id: string; filenamePatterns?: string[]; extensions?: string[] }>;
+  const byPattern = languages.find((l) => (l.filenamePatterns ?? []).some((p) => vscodeGlob(p).test(filePath)));
+  if (byPattern) return byPattern.id;
+  return languages.find((l) => (l.extensions ?? []).some((e) => filePath.toLowerCase().endsWith(e.toLowerCase())))?.id;
+}
+
+/**
+ * The language the classifier would give `filePath`: its kind's language
+ * inside a `.erd-studio` folder (found in any case, as a case-insensitive
+ * disk finds it), plain `dbml` otherwise.
+ */
+function classifierLanguageOf(filePath: string): string {
+  const at = filePath.search(/\/\.erd-studio\//i);
+  if (at < 0) return 'dbml';
+  const rel = filePath.slice(at + '/.erd-studio/'.length);
+  const cls = classifySemanticFile(rel, { tablesDirIsLayer: false });
+  return cls.kind === 'diagram' || cls.kind === 'table' || cls.kind === 'relationships'
+    ? DBML_KIND_LANGUAGE_IDS[cls.kind]
+    : 'dbml';
+}
+
+const VSCODEIGNORE_LINES = fs.readFileSync(path.join(REPO_ROOT, '.vscodeignore'), 'utf-8').split('\n')
+  .map((l) => l.trim())
+  .filter((l) => l !== '' && !l.startsWith('#'));
+
+/** A `.vscodeignore` glob as vsce's minimatch reads it: anchored at the root; `**` crosses folders, `*` does not. */
+function ignoreGlob(glob: string): RegExp {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    if (glob.startsWith('**/', i)) {
+      re += '(?:.*/)?';
+      i += 2;
+    } else if (glob.startsWith('**', i)) {
+      re += '.*';
+      i += 1;
+    } else if (glob[i] === '*') {
+      re += '[^/]*';
+    } else {
+      re += glob[i].replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/**
+ * Whether vsce leaves `rel` out of the VSIX, read the way its `collectFiles`
+ * reads `.vscodeignore`: a line whose last segment has no `*` also stands for
+ * the folder of that name (`<line>/**`, or `<line>**` after a `/`), and a file
+ * any line ignores ships only if any `!` line (wherever it sits) puts it back.
+ */
+function vscodeIgnores(rel: string, lines: string[] = VSCODEIGNORE_LINES): boolean {
+  const all = [
+    ...lines,
+    ...lines.filter((l) => !/(^|\/)[^/]*\*[^/]*$/.test(l)).map((l) => (l.endsWith('/') ? `${l}**` : `${l}/**`)),
+  ];
+  const ignores = all.filter((l) => !l.startsWith('!'));
+  const negations = all.filter((l) => l.startsWith('!')).map((l) => l.slice(1));
+  return ignores.some((g) => ignoreGlob(g).test(rel)) && !negations.some((g) => ignoreGlob(g).test(rel));
+}
+
+const ICON_COLOURS: Record<DbmlFileKind, { dark: string; light: string }> = {
+  table: { dark: '#3B82F6', light: '#2563EB' },
+  relationships: { dark: '#8B5CF6', light: '#7C3AED' },
+  diagram: { dark: '#0D9488', light: '#0F766E' },
+};
+
+describe('package.json: the dbml languages', () => {
+  const languages = pkg.contributes.languages as Array<Record<string, unknown>>;
+
+  it('contributes the dbml language for .dbml with its configuration and no icon, and none for .dbdiagram (positions are erd_layout)', () => {
     expect(languages.some((l) => (l.extensions as string[] | undefined)?.includes('.dbdiagram'))).toBe(false);
     const dbml = languages.find((l) => l.id === 'dbml');
     expect(dbml).toEqual({
@@ -379,34 +487,141 @@ describe('package.json: the dbml language', () => {
     });
   });
 
-  it('contributes the grammar for dbml and makes ERD Studio the default dbml formatter, without format on save', () => {
-    expect(pkg.contributes.grammars).toEqual([
-      { language: 'dbml', scopeName: 'source.dbml', path: './syntaxes/dbml.tmLanguage.json' },
-    ]);
-    expect(pkg.contributes.configurationDefaults).toEqual({
-      '[dbml]': {
-        'editor.defaultFormatter': `${pkg.publisher}.${pkg.name}`,
-        // The formatter's indent, so a line typed in a file with no indented lines yet gets 2 spaces.
-        'editor.tabSize': 2,
-        'editor.insertSpaces': true,
-      },
-    });
+  it('contributes a language for each kind of project file, chosen by path alone (no extensions), each with its own icon', () => {
+    expect(languages.map((l) => l.id)).toEqual(LANGUAGE_IDS);
+    expect([...DBML_LANGUAGE_IDS].sort()).toEqual([...LANGUAGE_IDS].sort());
+    const kinds: Array<[DbmlFileKind, string, string]> = [
+      ['diagram', 'DBML Diagram', '**/.erd-studio/*/diagrams/*.dbml'],
+      ['table', 'DBML Table', '**/.erd-studio/*/tables/*/*.dbml'],
+      ['relationships', 'DBML Relationships', '**/.erd-studio/*/relationships/*.dbml'],
+    ];
+    for (const [kind, alias, pattern] of kinds) {
+      const language = languages.find((l) => l.id === DBML_KIND_LANGUAGE_IDS[kind]);
+      expect(language, kind).toEqual({
+        id: DBML_KIND_LANGUAGE_IDS[kind],
+        aliases: [alias],
+        filenamePatterns: [pattern],
+        configuration: './syntaxes/dbml.language-configuration.json',
+        icon: dbmlFileIconPath(kind),
+      });
+      expect(language).not.toHaveProperty('extensions');
+    }
+  });
+
+  it('the dbml-diagram pattern is exactly the canvas selector, so every file shown as a DBML Diagram opens in the canvas', () => {
+    const diagram = languages.find((l) => l.id === 'dbml-diagram') as { filenamePatterns: string[] };
+    expect(diagram.filenamePatterns[0]).toBe(canvasDbmlPattern());
+  });
+
+  it('every id shares the one configuration, grammar and scopeName, and ERD Studio is each one\'s default formatter, without format on save', () => {
+    for (const l of languages) expect(l.configuration, String(l.id)).toBe('./syntaxes/dbml.language-configuration.json');
+    expect(pkg.contributes.grammars).toEqual(LANGUAGE_IDS.map((language) => (
+      { language, scopeName: 'source.dbml', path: './syntaxes/dbml.tmLanguage.json' }
+    )));
+    const defaults = {
+      'editor.defaultFormatter': `${pkg.publisher}.${pkg.name}`,
+      // The formatter's indent, so a line typed in a file with no indented lines yet gets 2 spaces.
+      'editor.tabSize': 2,
+      'editor.insertSpaces': true,
+    };
+    expect(pkg.contributes.configurationDefaults).toEqual(
+      Object.fromEntries(LANGUAGE_IDS.map((id) => [`[${id}]`, defaults])),
+    );
     expect(JSON.stringify(pkg.contributes.configurationDefaults)).not.toMatch(/formatOnSave/);
   });
 
   it('every contributed path exists, and none is excluded from the VSIX', () => {
+    // The matcher is not vacuous: it sees what .vscodeignore leaves out and puts back.
+    expect(vscodeIgnores('media/demo.gif')).toBe(true);
+    expect(vscodeIgnores('docs/dbml.md')).toBe(true);
+    expect(vscodeIgnores('src/extension.ts')).toBe(true);
+    expect(vscodeIgnores('README.md')).toBe(false);
+    expect(vscodeIgnores('dist/extension.js')).toBe(false);
+    expect(vscodeIgnores('media/icon.png')).toBe(false);
+    // A line naming a folder leaves the whole folder out, and a `!` line puts a file back wherever it sits.
+    const icon = 'media/file-icons/dbml-table-dark.svg';
+    expect(vscodeIgnores(icon, ['media/file-icons'])).toBe(true);
+    expect(vscodeIgnores(icon, ['media/'])).toBe(true);
+    expect(vscodeIgnores(icon, ['!media/file-icons/*.svg', 'media/**'])).toBe(false);
+    expect(vscodeIgnores(icon, ['media/*.svg'])).toBe(false);
+
     const paths = [
-      ...pkg.contributes.languages.map((l: { configuration?: string }) => l.configuration).filter(Boolean),
+      ...languages.map((l) => l.configuration as string | undefined).filter(Boolean),
+      ...languages.flatMap((l) => {
+        const icon = l.icon as { light: string; dark: string } | undefined;
+        return icon ? [icon.light, icon.dark] : [];
+      }),
       ...pkg.contributes.grammars.map((g: { path: string }) => g.path),
     ] as string[];
-    const ignore = fs.readFileSync(path.join(REPO_ROOT, '.vscodeignore'), 'utf-8').split('\n').map((l) => l.trim());
+    expect(paths.filter((p) => p.includes('file-icons'))).toHaveLength(6);
     for (const p of paths) {
-      expect(fs.existsSync(path.join(REPO_ROOT, p)), p).toBe(true);
-      const top = p.replace(/^\.\//, '').split('/')[0];
-      expect(ignore.filter((l) => l.startsWith(top)), p).toEqual([]);
+      const rel = p.replace(/^\.\//, '');
+      expect(fs.existsSync(path.join(REPO_ROOT, rel)), p).toBe(true);
+      expect(vscodeIgnores(rel), p).toBe(false);
     }
   });
 
+  it('each icon is a 16×16 flat SVG with fixed colours; a light/dark pair differs only in colour; the three kinds differ', () => {
+    const shapes = new Set<string>();
+    for (const kind of Object.keys(ICON_COLOURS) as DbmlFileKind[]) {
+      const { light, dark } = dbmlFileIconPath(kind);
+      const lightText = fs.readFileSync(path.join(REPO_ROOT, light), 'utf-8');
+      const darkText = fs.readFileSync(path.join(REPO_ROOT, dark), 'utf-8');
+      for (const [text, colour] of [[lightText, ICON_COLOURS[kind].light], [darkText, ICON_COLOURS[kind].dark]]) {
+        expect(text, kind).toContain('viewBox="0 0 16 16"');
+        expect(text, kind).toContain('width="16" height="16"');
+        expect(text, kind).not.toMatch(/currentColor/i);
+        expect(text, kind).not.toMatch(/<(?:image|linearGradient|radialGradient|filter|style|script)\b/);
+        expect(new Set(text.match(/#[0-9A-Fa-f]{6}\b/g)), kind).toEqual(new Set([colour]));
+      }
+      const shape = (text: string) => text.replace(/#[0-9A-Fa-f]{6}\b/g, '#COLOUR');
+      expect(shape(lightText), kind).toBe(shape(darkText));
+      shapes.add(shape(darkText));
+    }
+    expect(shapes.size).toBe(3);
+  });
+
+  it('the glob VS Code applies agrees with classifySemanticFile, apart from the pinned case differences', () => {
+    // [path, the language both give, opens in the canvas]
+    const agree: Array<[string, string, boolean]> = [
+      ['/p/.erd-studio/gold/tables/gold/a.dbml', 'dbml-table', false],
+      ['/p/.erd-studio/gold/relationships/gold.dbml', 'dbml-relationships', false],
+      ['/p/.erd-studio/gold/diagrams/x.dbml', 'dbml-diagram', true],
+      // A layer may be called diagrams or relationships: the grammar is by depth.
+      ['/p/.erd-studio/diagrams/diagrams/x.dbml', 'dbml-diagram', true],
+      ['/p/.erd-studio/relationships/relationships/relationships.dbml', 'dbml-relationships', false],
+      // diagrams/ is flat: a subfolder is no diagram (nor a canvas).
+      ['/p/.erd-studio/gold/diagrams/a/b.dbml', 'dbml', false],
+      // An export outside .erd-studio.
+      ['/p/exports/sales.dbml', 'dbml', false],
+      // The semantic folder in another case is the same folder on a case-insensitive disk.
+      ['/p/.ERD-Studio/gold/diagrams/x.dbml', 'dbml-diagram', true],
+    ];
+    const canvas = vscodeGlob(canvasDbmlPattern());
+    for (const [filePath, language, opens] of agree) {
+      expect(vscodeLanguageOf(filePath), filePath).toBe(language);
+      expect(classifierLanguageOf(filePath), filePath).toBe(language);
+      expect(canvas.test(filePath), filePath).toBe(opens);
+    }
+
+    // [path, VS Code's language, the classifier's language, opens in the canvas]
+    const disagree: Array<[string, string, string, boolean]> = [
+      // accepted, §1.1: do not make the classifier case-insensitive. VS Code
+      // shows the DBML Diagram icon and opens the canvas, which shows the
+      // "not a DBML diagram" page saying how to reopen it as text.
+      ['/p/.erd-studio/gold/Diagrams/x.dbml', 'dbml-diagram', 'dbml', true],
+      // accepted, §1.1: do not make the classifier case-insensitive.
+      ['/p/.erd-studio/gold/Tables/s/x.dbml', 'dbml-table', 'dbml', false],
+      // accepted, §1.1: a layer folder is a lower-case id (doctor's hint says
+      // to rename Gold/ to gold/); a glob cannot say which folders are layers.
+      ['/p/.ERD-Studio/Gold/diagrams/x.dbml', 'dbml-diagram', 'dbml', true],
+    ];
+    for (const [filePath, vscodeLanguage, classifierLanguage, opens] of disagree) {
+      expect(vscodeLanguageOf(filePath), filePath).toBe(vscodeLanguage);
+      expect(classifierLanguageOf(filePath), filePath).toBe(classifierLanguage);
+      expect(canvas.test(filePath), filePath).toBe(opens);
+    }
+  });
   it('the language configuration is valid: its regexes compile and brackets indent', () => {
     const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
     expect(config.comments).toEqual({ lineComment: '//', blockComment: ['/*', '*/'] });

@@ -124,6 +124,7 @@ import { saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles, openOrDiskText } from './providers/dirtyDocuments';
 import { log, elapsedMs, setLogSink } from './services/logger';
 import { registerDbmlFormatting } from './providers/dbmlFormattingProvider';
+import { dbmlFileIcon } from './providers/dbmlFileKinds';
 import { LOG_CHANNEL_NAME, SHOW_LOGS_COMMAND } from './services/showLogs';
 
 /**
@@ -1228,6 +1229,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceRoot,
     semanticDir,
     (loading) => { void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', loading); },
+    (kind) => dbmlFileIcon(context.extensionUri, kind),
   );
   // `erdStudio.tablesLoading` (set above, before the views) holds until a
   // Table Library listing finds no rows, and while a full rebuild of the
@@ -1240,6 +1242,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     semanticDir,
     () => layerService.getAllLayers(),
     (loading) => { void vscode.commands.executeCommand('setContext', 'erdStudio.tablesLoading', loading); },
+    (kind) => dbmlFileIcon(context.extensionUri, kind),
   );
   // Held while Convert Project to DBML writes: one refresh of each view after, not one per file.
   const viewRefreshes = new RefreshGate();

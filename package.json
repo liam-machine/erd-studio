@@ -520,6 +520,48 @@
           ".dbml"
         ],
         "configuration": "./syntaxes/dbml.language-configuration.json"
+      },
+      {
+        "id": "dbml-diagram",
+        "aliases": [
+          "DBML Diagram"
+        ],
+        "filenamePatterns": [
+          "**/.erd-studio/*/diagrams/*.dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json",
+        "icon": {
+          "light": "./media/file-icons/dbml-diagram-light.svg",
+          "dark": "./media/file-icons/dbml-diagram-dark.svg"
+        }
+      },
+      {
+        "id": "dbml-table",
+        "aliases": [
+          "DBML Table"
+        ],
+        "filenamePatterns": [
+          "**/.erd-studio/*/tables/*/*.dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json",
+        "icon": {
+          "light": "./media/file-icons/dbml-table-light.svg",
+          "dark": "./media/file-icons/dbml-table-dark.svg"
+        }
+      },
+      {
+        "id": "dbml-relationships",
+        "aliases": [
+          "DBML Relationships"
+        ],
+        "filenamePatterns": [
+          "**/.erd-studio/*/relationships/*.dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json",
+        "icon": {
+          "light": "./media/file-icons/dbml-relationships-light.svg",
+          "dark": "./media/file-icons/dbml-relationships-dark.svg"
+        }
       }
     ],
     "grammars": [
@@ -527,10 +569,40 @@
         "language": "dbml",
         "scopeName": "source.dbml",
         "path": "./syntaxes/dbml.tmLanguage.json"
+      },
+      {
+        "language": "dbml-diagram",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      },
+      {
+        "language": "dbml-table",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      },
+      {
+        "language": "dbml-relationships",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
       }
     ],
     "configurationDefaults": {
       "[dbml]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      },
+      "[dbml-diagram]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      },
+      "[dbml-table]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      },
+      "[dbml-relationships]": {
         "editor.defaultFormatter": "liamwynne.erd-studio",
         "editor.tabSize": 2,
         "editor.insertSpaces": true

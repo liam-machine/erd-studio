@@ -162,11 +162,13 @@ describe('DbmlFormattingProvider', () => {
     expect(provider.provideDocumentFormattingEdits(doc as unknown as vscode.TextDocument, options, token)).toEqual([]);
   });
 
-  it('registers for the dbml language and disposes with the extension', () => {
+  it('registers one provider for all four DBML language ids and disposes with the extension', () => {
     const subscriptions: Array<{ dispose(): unknown }> = [];
     const before = vscode._formattingProviders.length;
     registerDbmlFormatting({ subscriptions } as unknown as vscode.ExtensionContext);
-    expect(vscode._formattingProviders.slice(before).map((p) => p.selector)).toEqual([{ language: 'dbml' }]);
+    expect(vscode._formattingProviders.slice(before).map((p) => p.selector)).toEqual([
+      [{ language: 'dbml' }, { language: 'dbml-table' }, { language: 'dbml-relationships' }, { language: 'dbml-diagram' }],
+    ]);
     for (const s of subscriptions) s.dispose();
     expect(vscode._formattingProviders.length).toBe(before);
   });

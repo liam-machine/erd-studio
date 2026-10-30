@@ -28,11 +28,9 @@ import { formatDbml } from '@erd-studio/core/dbml';
 
 import { createLogger } from '../services/logger';
 import { isErdStudioSaving } from './documentSave';
+import { DBML_LANGUAGE_IDS } from './dbmlFileKinds';
 
 const log = createLogger('dbml');
-
-/** The language id `package.json` contributes for `.dbml` files. */
-export const DBML_LANGUAGE_ID = 'dbml';
 
 /** How long the "fix the errors first" message stays in the status bar. */
 export const DBML_FORMAT_STATUS_MS = 5000;
@@ -176,10 +174,14 @@ export class DbmlFormattingProvider implements vscode.DocumentFormattingEditProv
   }
 }
 
-/** Register Format Document for every `.dbml` document, in any folder or none. */
+/**
+ * Register Format Document for every `.dbml` document, in any folder or none:
+ * one provider for all four DBML language ids (`dbml` and the diagram, table
+ * and relationships modes, `dbmlFileKinds.ts`).
+ */
 export function registerDbmlFormatting(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.languages.registerDocumentFormattingEditProvider(
-    { language: DBML_LANGUAGE_ID },
+    DBML_LANGUAGE_IDS.map((language) => ({ language })),
     new DbmlFormattingProvider(),
   ));
 }

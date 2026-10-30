@@ -2,8 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as vscode from 'vscode';
 import { TreeItemCollapsibleState } from 'vscode';
 import { SubjectAreaTreeProvider, type TreeElement } from '../../src/providers/DomainTreeProvider';
+import { dbmlFileIcon, type DbmlFileKind } from '../../src/providers/dbmlFileKinds';
 import type { SubjectAreaService } from '../../src/services/domainService';
 import { LayersFileUnreadableError, type LayerService } from '../../src/services/layerService';
 import type { LayerConfig } from '../../src/types/layer';
@@ -363,6 +365,56 @@ describe('SubjectAreaTreeProvider', () => {
       const item = provider.getTreeItem(element);
 
       expect(item.tooltip).toBe('Silver / orders');
+    });
+  });
+
+  describe('diagram icons', () => {
+    const EXTENSION = vscode.Uri.file('/ext');
+    const icons = (kind: DbmlFileKind) => dbmlFileIcon(EXTENSION, kind);
+    const dbmlRow: TreeElement = {
+      type: 'domain',
+      summary: { domain: 'sales', layer: 'gold', filePath: '/project/.erd-studio/gold/diagrams/sales.dbml', storage: 'dbml' },
+      modelCount: 2,
+      designCount: 0,
+    };
+    const jsonRow: TreeElement = {
+      type: 'domain',
+      summary: { domain: 'orders', layer: 'gold', filePath: '/project/.erd-studio/gold/orders.json', storage: 'json' },
+      modelCount: 2,
+      designCount: 0,
+    };
+
+    it('gives a DBML diagram row the DBML Diagram icon pair, from the extension\'s media/file-icons', () => {
+      const withIcons = new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH, undefined, undefined, icons);
+      const item = withIcons.getTreeItem(dbmlRow);
+      expect(item.iconPath).toBe(dbmlFileIcon(EXTENSION, 'diagram'));
+      const { light, dark } = item.iconPath as { light: vscode.Uri; dark: vscode.Uri };
+      expect(light.fsPath).toBe('/ext/media/file-icons/dbml-diagram-light.svg');
+      expect(dark.fsPath).toBe('/ext/media/file-icons/dbml-diagram-dark.svg');
+      // An icon of its own, not one from the user's icon theme: no resourceUri.
+      expect(item.resourceUri).toBeUndefined();
+    });
+
+    it('keeps the json codicon for a JSON diagram row, and a summary with no storage', () => {
+      const withIcons = new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH, undefined, undefined, icons);
+      for (const row of [jsonRow, { ...jsonRow, summary: { domain: 'x', layer: 'gold', filePath: '/x.json' } } as TreeElement]) {
+        const item = withIcons.getTreeItem(row);
+        expect(item.iconPath).toBeInstanceOf(vscode.ThemeIcon);
+        expect((item.iconPath as vscode.ThemeIcon).id).toBe('json');
+        expect(item.resourceUri).toBeUndefined();
+      }
+    });
+
+    it('falls back to the json codicon for a DBML row without a resolver', () => {
+      const item = provider.getTreeItem(dbmlRow);
+      expect((item.iconPath as vscode.ThemeIcon).id).toBe('json');
+      expect(item.resourceUri).toBeUndefined();
+    });
+
+    it('leaves the layer and New Subject Area rows\' codicons alone', () => {
+      const withIcons = new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH, undefined, undefined, icons);
+      expect((withIcons.getTreeItem({ type: 'layer', layer: 'gold' }).iconPath as vscode.ThemeIcon).id).toBe('folder');
+      expect((withIcons.getTreeItem({ type: 'newDomain', layer: 'gold' }).iconPath as vscode.ThemeIcon).id).toBe('add');
     });
   });
 

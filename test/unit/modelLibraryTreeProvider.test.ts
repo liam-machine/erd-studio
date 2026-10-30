@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { TreeItemCollapsibleState, ThemeIcon, ThemeColor, MarkdownString } from 'vscode';
+import { TreeItemCollapsibleState, ThemeIcon, ThemeColor, MarkdownString, Uri as vscodeUri } from 'vscode';
+import { dbmlFileIcon, type DbmlFileIconResolver } from '../../src/providers/dbmlFileKinds';
 import type { TableLibraryFolderNode, TableLibraryTableNode } from '../../src/providers/ModelLibraryTreeProvider';
 import { TableLibraryTreeProvider, type TableLibraryNode } from '../../src/providers/ModelLibraryTreeProvider';
 import type { TableLibraryService, TableFileEntry } from '../../src/services/logicalModelService';
@@ -575,10 +576,18 @@ describe('TableLibraryTreeProvider: native DBML storage, the layer-first tree (Â
   });
   const SALES: SubjectAreaSummary = { domain: 'sales', layer: 'gold', filePath: `${SEMANTIC}/gold/diagrams/sales.dbml`, storage: 'dbml' };
 
-  function providerFor(entries: TableFileEntry[], storage: 'yaml' | 'dbml' | 'mixed', layers: () => LayerConfig[] = () => []) {
+  function providerFor(
+    entries: TableFileEntry[],
+    storage: 'yaml' | 'dbml' | 'mixed',
+    layers: () => LayerConfig[] = () => [],
+    icons?: DbmlFileIconResolver,
+    errors: Record<string, Partial<import('../../src/services/logicalModelService').TableFileError>> = {},
+  ) {
     const service = createMockTableLibraryServiceFromEntries(entries, `${SEMANTIC}/logical-models`);
     (service as unknown as { projectStorage: () => string }).projectStorage = () => storage;
-    return new TableLibraryTreeProvider(service, createMockSubjectAreaService([SALES]), '/project', '.erd-studio', layers);
+    (service.getTableFileError as ReturnType<typeof vi.fn>).mockImplementation((name: string) =>
+      errors[name] ? { name, filePath: `${SEMANTIC}/gold/tables/gold/${name}.dbml`, message: '', ...errors[name] } : null);
+    return new TableLibraryTreeProvider(service, createMockSubjectAreaService([SALES]), '/project', '.erd-studio', layers, undefined, icons);
   }
 
   beforeEach(() => {
@@ -640,6 +649,59 @@ describe('TableLibraryTreeProvider: native DBML storage, the layer-first tree (Â
     // A layer missing from layers.json still gets its folder, after the configured ones.
     const extra = providerFor([dbmlEntry('x', 'zeta', 'z'), dbmlEntry('fct_order')], 'dbml', () => LAYERS);
     expect((extra.getChildren() as TableLibraryFolderNode[]).map((f) => `${f.layer}/${f.folder}`)).toEqual(['gold/gold', 'zeta/z']);
+  });
+
+  describe('table icons', () => {
+    const EXTENSION = vscodeUri.file('/ext');
+    const icons: DbmlFileIconResolver = (kind) => dbmlFileIcon(EXTENSION, kind);
+    const itemOf = (provider: TableLibraryTreeProvider, name: string, folder?: string) =>
+      provider.getTreeItem(tableNodes(provider).find((n) => n.name === name && (folder === undefined || n.folder === folder))!);
+    const codicon = (item: { iconPath?: unknown }) => (item.iconPath as ThemeIcon).id;
+
+    it('gives a healthy DBML table the DBML Table icon pair from media/file-icons, with the resourceUri it always had', () => {
+      const provider = providerFor([dbmlEntry('fct_order')], 'dbml', () => [], icons);
+      const item = itemOf(provider, 'fct_order');
+      expect(item.iconPath).toBe(dbmlFileIcon(EXTENSION, 'table'));
+      const { light, dark } = item.iconPath as { light: { fsPath: string }; dark: { fsPath: string } };
+      expect(light.fsPath).toBe('/ext/media/file-icons/dbml-table-light.svg');
+      expect(dark.fsPath).toBe('/ext/media/file-icons/dbml-table-dark.svg');
+      expect(item.resourceUri?.fsPath).toBe(`${SEMANTIC}/gold/tables/gold/fct_order.dbml`);
+      expect(item.contextValue).toBe('logicalModel');
+    });
+
+    it('keeps the codicons of an unused, a broken and a duplicate DBML table', () => {
+      const provider = providerFor([
+        dbmlEntry('fct_order'),
+        dbmlEntry('dim_unused'),
+        { ...dbmlEntry('fct_order', 'gold', 'sales'), shadowedBy: `${SEMANTIC}/gold/tables/gold/fct_order.dbml` },
+      ], 'dbml', () => [], icons);
+      expect(codicon(itemOf(provider, 'dim_unused'))).toBe('warning');
+      expect(codicon(itemOf(provider, 'fct_order', 'sales'))).toBe('error');
+
+      const broken = providerFor([dbmlEntry('fct_order')], 'dbml', () => [], icons, { fct_order: { kind: 'dbmlSyntax', line: 3 } });
+      expect(codicon(itemOf(broken, 'fct_order'))).toBe('error');
+      const twice = providerFor([dbmlEntry('fct_order')], 'dbml', () => [], icons, { fct_order: { kind: 'dbmlSyntax', line: 3, readable: true, key: 'note' } });
+      expect(codicon(itemOf(twice, 'fct_order'))).toBe('warning');
+    });
+
+    it('keeps the codicon of a DBML copy of a YAML table (part-way through Convert)', () => {
+      const yml: TableFileEntry = { name: 'fct_order', folder: '', filePath: `${SEMANTIC}/logical-models/fct_order.yml`, storage: 'yaml' };
+      const provider = providerFor([yml, { ...dbmlEntry('fct_order'), shadowedBy: yml.filePath }], 'mixed', () => [], icons);
+      expect(codicon(itemOf(provider, 'fct_order', 'gold'))).toBe('error');
+    });
+
+    it('a YAML table keeps symbol-class with the resolver; a DBML table keeps it without one', () => {
+      const yml: TableFileEntry = { name: 'fct_order', folder: '', filePath: `${SEMANTIC}/logical-models/fct_order.yml`, storage: 'yaml' };
+      expect(codicon(itemOf(providerFor([yml], 'yaml', () => [], icons), 'fct_order'))).toBe('symbol-class');
+      expect(codicon(itemOf(providerFor([dbmlEntry('fct_order')], 'dbml'), 'fct_order'))).toBe('symbol-class');
+    });
+
+    it('leaves the schema folders\' folder codicon alone', () => {
+      const provider = providerFor([dbmlEntry('fct_order'), dbmlEntry('dim_date', 'silver', 'calendar')], 'dbml', () => LAYERS, icons);
+      for (const folder of provider.getChildren() as TableLibraryFolderNode[]) {
+        expect(codicon(provider.getTreeItem(folder))).toBe('folder');
+      }
+    });
   });
 
   it('a mixed project shows the YAML folders first, then the DBML schema folders', () => {
