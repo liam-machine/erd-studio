@@ -305,7 +305,9 @@ export function NewFkDialog() {
 
   // "Mark as primary key" (#133 L1): offered when the "one" side's model
   // flags no key and nothing says the columns are not its key; ticked when
-  // dbt says they are unique.
+  // dbt says they are unique, or when the user just answered which way it
+  // points (their answer says those columns are the key, and marking it
+  // means the next relationship to that table is not asked again).
   const toModelDef = models.find((m) => m.name === toModel);
   const markKey = useMemo(() => {
     if (!complete || (direction !== 'decided' && direction !== 'chosen')) return null;
@@ -314,9 +316,12 @@ export function NewFkDialog() {
     const evidence = keyEvidenceDetail(toModelDef, toCols);
     if (evidence.evidence === 'not-key') return null;
     const id = `${linkId}|${toModel}`.toLowerCase();
-    const checked = markKeyChoice?.for === id ? markKeyChoice.checked : evidence.source === 'dbt' && evidence.evidence === 'whole-key';
+    const answered = direction === 'chosen' && chosenDirection === fromEndId;
+    const checked = markKeyChoice?.for === id
+      ? markKeyChoice.checked
+      : answered || (evidence.source === 'dbt' && evidence.evidence === 'whole-key');
     return { id, checked, label: markKeyLabel(toModel, toCols) };
-  }, [complete, direction, cardinality, toModelDef, toCols, linkId, toModel, markKeyChoice]);
+  }, [complete, direction, cardinality, toModelDef, toCols, linkId, toModel, markKeyChoice, chosenDirection, fromEndId]);
 
   // Keys win (#133): warn, but allow, a many side that is its model's whole key.
   const keysWarning = useMemo(
