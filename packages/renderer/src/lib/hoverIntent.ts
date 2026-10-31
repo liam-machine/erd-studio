@@ -9,6 +9,9 @@
  *     or `hold()` (the pointer is on one of the focus's bright lines), cancels
  *     the clear.
  *
+ * `cancelEnter()` drops only a pending enter; a pending clear still runs, so
+ * a pointer that has left a table never leaves its focus behind.
+ *
  * An enter is ignored while a mouse button is held (`buttons !== 0`), while
  * `isSuppressed()` says so (it is asked again when the timer fires), or when
  * the table is already the focus. At most two timers exist at a time.
@@ -37,6 +40,7 @@ export interface HoverIntent {
   enter(id: string, buttons: number): void;
   leave(): void;
   hold(): void;
+  cancelEnter(): void;
   cancelPending(): void;
   dispose(): void;
 }
@@ -94,6 +98,9 @@ export function createHoverIntent(options: HoverIntentOptions): HoverIntent {
     hold() {
       if (disposed) return;
       cancelLeave();
+    },
+    cancelEnter() {
+      cancelEnter();
     },
     cancelPending() {
       cancelEnter();

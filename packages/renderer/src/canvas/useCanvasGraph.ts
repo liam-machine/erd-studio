@@ -72,6 +72,7 @@ export function useCanvasGraph({
   const selectedEdge = useEditorStore((s) => s.selectedEdge);
   const setSelectedEdge = useEditorStore((s) => s.setSelectedEdge);
   const selectAnnotation = useEditorStore((s) => s.selectAnnotation);
+  const setHoverFocus = useEditorStore((s) => s.setHoverFocus);
   const searchQuery = useEditorStore((s) => s.searchQuery);
 
   const { isExpanded, toggleExpansion } = useColumnExpansion();
@@ -231,13 +232,16 @@ export function useCanvasGraph({
   );
 
   // Handle clicks on blank canvas to close the detail panel and clear selection.
+  // The pointer is on the blank canvas, so no table is hovered either: the
+  // hover preview and its moving arrows stop now, not after the leave grace.
   const onPaneClick = useCallback(() => {
     setDetailPanelOpen(false);
     selectNode(null);
     selectAnnotation(null);
     setHighlightedColumns(new Set());
     setSelectedEdge(null);
-  }, [setDetailPanelOpen, selectNode, selectAnnotation, setHighlightedColumns, setSelectedEdge]);
+    setHoverFocus(null);
+  }, [setDetailPanelOpen, selectNode, selectAnnotation, setHighlightedColumns, setSelectedEdge, setHoverFocus]);
 
   // Close detail panel when multi-selecting (selection mismatch with single-node panel).
   // But don't close if the selection reset was caused by a domain update (nodes recreated).

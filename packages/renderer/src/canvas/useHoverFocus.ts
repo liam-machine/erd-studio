@@ -221,10 +221,13 @@ export function useHoverFocus(): UseHoverFocusResult {
     };
   }, [storeApi, flowApi]);
 
-  // Pans, wheel zooms and inertia: no new focus while the viewport moves.
+  // Pans, wheel zooms and inertia: no new focus while the viewport moves. A
+  // press on the blank canvas starts one too, often inside the leave grace of
+  // the table just left, so the pending clear must still run: dropping it left
+  // that table's preview, and its moving arrows, on until the next hover.
   const onViewportStart = useCallback(() => {
     movingRef.current = true;
-    controllerRef.current?.cancelPending();
+    controllerRef.current?.cancelEnter();
   }, []);
   const onViewportEnd = useCallback(() => {
     movingRef.current = false;

@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createElement, type ReactNode } from 'react';
 import { renderHook, act } from '@testing-library/react';
-import { ReactFlowProvider } from '@xyflow/react';
+import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
 import type { DisplaySubjectArea, DisplayTable } from '@erd-studio/core';
 
 import { useCanvasGraph } from '../../src/canvas/useCanvasGraph';
@@ -55,8 +55,8 @@ function setup() {
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(CanvasStoreProvider, { store, children: createElement(ReactFlowProvider, null, children) });
   const hook = renderHook(() => {
-    useCanvasGraph();
-    return useHoverFocus();
+    const { onPaneClick } = useCanvasGraph();
+    return { ...useHoverFocus(), onPaneClick, flowApi: useStoreApi() };
   }, { wrapper });
   act(() => { store.getState().setDomain(domain()); });
   const node = (id: string) => store.getState().nodes.find((n) => n.id === id) as GraphNode;
@@ -105,6 +105,33 @@ describe('useHoverFocus — leaving', () => {
     expect(store.getState().hoverFocus).toBeNull();
     expect(store.getState().flowFocus).toBeNull();
     expect(hook.result.current.flowClassName).toBe('erd-flow');
+  });
+
+  it('a viewport gesture inside the leave grace still clears the hover', () => {
+    // Click a table, move straight off it and press on the canvas (or start a
+    // pan): the press starts a viewport gesture before the 150ms grace runs out.
+    const { store, hook, enter, leave, wait } = setup();
+    enter('t5');
+    wait(120);
+    leave('t5');
+    wait(50);
+    act(() => { hook.result.current.flowApi.getState().onViewportChangeStart?.({ x: 0, y: 0, zoom: 1 }); });
+    wait(100);
+    expect(store.getState().hoverFocus).toBeNull();
+    expect(store.getState().flowFocus).toBeNull();
+    expect(hook.result.current.flowClassName).toBe('erd-flow');
+  });
+
+  it('a click on the blank canvas stops the arrows at once', () => {
+    const { store, hook, enter, leave, wait } = setup();
+    enter('t5');
+    wait(120);
+    act(() => { store.getState().selectNode('t5'); });
+    leave('t5');
+    act(() => { hook.result.current.onPaneClick(); });
+    expect(store.getState().selectedNode).toBeNull();
+    expect(store.getState().hoverFocus).toBeNull();
+    expect(store.getState().flowFocus).toBeNull();
   });
 
   it('falls back to the clicked table, which flows again', () => {

@@ -150,6 +150,21 @@ describe('hover intent', () => {
     expect(commits).toEqual(['a']);
   });
 
+  it('cancelEnter() drops a pending enter but lets a pending clear run', () => {
+    const h = make();
+    h.enter('a', 0);
+    vi.advanceTimersByTime(120);
+    h.leave();
+    h.cancelEnter();
+    vi.advanceTimersByTime(HOVER_LEAVE_GRACE_MS);
+    expect(commits).toEqual(['a', null]);
+
+    h.enter('b', 0);
+    h.cancelEnter();
+    vi.advanceTimersByTime(1000);
+    expect(commits).toEqual(['a', null]);
+  });
+
   it('after dispose() nothing ever commits', () => {
     const h = make();
     h.enter('a', 0);
