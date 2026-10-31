@@ -143,15 +143,18 @@ describe('SubjectAreaTreeProvider', () => {
   });
 
   describe('getChildren (root)', () => {
-    it('returns three layer nodes at root (no stage header)', () => {
+    it('returns the three layer nodes at root (no stage header), then New Layer…', () => {
       const children = provider.getChildren(undefined);
 
-      expect(children).toHaveLength(3);
       expect(children).toEqual([
         { type: 'layer', layer: 'bronze' },
         { type: 'layer', layer: 'silver' },
         { type: 'layer', layer: 'gold' },
+        { type: 'newLayer' },
       ]);
+      const item = provider.getTreeItem({ type: 'newLayer' });
+      expect([item.label, item.contextValue, (item.iconPath as { id: string }).id]).toEqual(['New Layer…', 'newLayer', 'new-folder']);
+      expect(item.command).toEqual({ command: 'erdStudio.addLayer', title: 'New Layer…' });
     });
 
     it('returns empty array when semantic directory does not exist (F408 welcome)', () => {
@@ -171,7 +174,7 @@ describe('SubjectAreaTreeProvider', () => {
 
       const children = provider.getChildren(undefined)!;
       expect(children[0]).toEqual({ type: 'project', name: 'datamodels', location: 'workspace folder' });
-      expect(children.slice(1).map((c) => c.type)).toEqual(['layer', 'layer', 'layer']);
+      expect(children.slice(1).map((c) => c.type)).toEqual(['layer', 'layer', 'layer', 'newLayer']);
       expect(fired).toHaveBeenCalled();
 
       const item = provider.getTreeItem(children[0]);
@@ -184,7 +187,7 @@ describe('SubjectAreaTreeProvider', () => {
     it('is removed again with undefined', () => {
       provider.setProjectRow({ name: 'datamodels', location: 'workspace folder' });
       provider.setProjectRow(undefined);
-      expect(provider.getChildren(undefined)!.every((c) => c.type === 'layer')).toBe(true);
+      expect(provider.getChildren(undefined)!.some((c) => c.type === 'project')).toBe(false);
     });
 
     it('never makes an empty tree non-empty, so the welcome view still shows', () => {
@@ -198,20 +201,15 @@ describe('SubjectAreaTreeProvider', () => {
     it('returns domain nodes for silver layer', () => {
       const children = provider.getChildren({ type: 'layer', layer: 'silver' })!;
 
-      // 2 silver domains + "New Domain..."
-      expect(children).toHaveLength(3);
-      expect(children[0].type).toBe('domain');
-      expect(children[1].type).toBe('domain');
-      expect(children[2].type).toBe('newDomain');
+      // 2 silver domains, then New Diagram… (silver is creatable)
+      expect(children.map((c) => c.type)).toEqual(['domain', 'domain', 'newDomain']);
     });
 
     it('returns domain nodes for gold layer', () => {
       const children = provider.getChildren({ type: 'layer', layer: 'gold' })!;
 
-      // 1 gold domain + "New Domain..."
-      expect(children).toHaveLength(2);
-      expect(children[0].type).toBe('domain');
-      expect(children[1].type).toBe('newDomain');
+      // 1 gold domain, then New Diagram…
+      expect(children.map((c) => c.type)).toEqual(['domain', 'newDomain']);
     });
 
     it('returns empty array for bronze (no domains, not creatable)', () => {
@@ -231,11 +229,11 @@ describe('SubjectAreaTreeProvider', () => {
       }
     });
 
-    it('shows New Domain node for creatable layers', () => {
-      const children = provider.getChildren({ type: 'layer', layer: 'silver' })!;
-      const newDomain = children[children.length - 1];
-
-      expect(newDomain).toEqual({ type: 'newDomain', layer: 'silver' });
+    it('ends every creatable layer with a New Diagram… row, saying so when the layer has none yet', () => {
+      expect(provider.getChildren({ type: 'layer', layer: 'silver' })!.at(-1)).toEqual({ type: 'newDomain', layer: 'silver', first: false });
+      expect(provider.getTreeItem({ type: 'newDomain', layer: 'silver', first: false }).description).toBeUndefined();
+      layerService.isCreatable = () => true;
+      expect(provider.getChildren({ type: 'layer', layer: 'bronze' })).toEqual([{ type: 'newDomain', layer: 'bronze', first: true }]);
     });
 
     it('hides New Domain node for non-creatable layers', () => {
@@ -273,7 +271,7 @@ describe('SubjectAreaTreeProvider', () => {
     });
 
     it('returns undefined for newDomain nodes', () => {
-      const children = provider.getChildren({ type: 'newDomain', layer: 'silver' });
+      const children = provider.getChildren({ type: 'newDomain', layer: 'silver', first: false });
       expect(children).toBeUndefined();
     });
   });
@@ -284,7 +282,9 @@ describe('SubjectAreaTreeProvider', () => {
 
       expect(item.label).toBe('Silver');
       expect(item.collapsibleState).toBe(TreeItemCollapsibleState.Expanded);
-      expect(item.contextValue).toBe('layer');
+      // Creatable: the row offers New Diagram (inline + and right-click).
+      expect(item.contextValue).toBe('layerCreatable');
+      expect(provider.getTreeItem({ type: 'layer', layer: 'bronze' }).contextValue).toBe('layer');
     });
 
     it('creates domain item with badge showing design count', () => {
@@ -337,20 +337,21 @@ describe('SubjectAreaTreeProvider', () => {
 
       expect(item.command).toEqual({
         command: 'erdStudio.openDomain',
-        title: 'Open Subject Area',
+        title: 'Open Diagram',
         arguments: ['/path/to/test.json'],
       });
     });
 
     it('creates New Domain item with add icon and createDomain command', () => {
-      const item = provider.getTreeItem({ type: 'newDomain', layer: 'gold' });
+      const item = provider.getTreeItem({ type: 'newDomain', layer: 'gold', first: true });
 
-      expect(item.label).toBe('New Subject Area...');
+      expect(item.label).toBe('New Diagram…');
+      expect(item.description).toBe('none in this layer yet');
       expect(item.collapsibleState).toBe(TreeItemCollapsibleState.None);
       expect(item.contextValue).toBe('newDomain');
       expect(item.command).toEqual({
         command: 'erdStudio.createDomain',
-        title: 'New Subject Area',
+        title: 'New Diagram…',
         arguments: ['gold'],
       });
     });
@@ -414,7 +415,7 @@ describe('SubjectAreaTreeProvider', () => {
     it('leaves the layer and New Subject Area rows\' codicons alone', () => {
       const withIcons = new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH, undefined, undefined, icons);
       expect((withIcons.getTreeItem({ type: 'layer', layer: 'gold' }).iconPath as vscode.ThemeIcon).id).toBe('folder');
-      expect((withIcons.getTreeItem({ type: 'newDomain', layer: 'gold' }).iconPath as vscode.ThemeIcon).id).toBe('add');
+      expect((withIcons.getTreeItem({ type: 'newDomain', layer: 'gold', first: false }).iconPath as vscode.ThemeIcon).id).toBe('add');
     });
   });
 

@@ -21,6 +21,7 @@ import { Panel, useReactFlow, useStore } from '@xyflow/react';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
 import { useFirstOpenAutoLayout } from '../../hooks/useFirstOpenAutoLayout';
+import { useRevealRelationship } from '../../hooks/useRevealRelationship';
 import {
   runElkLayout,
   detectLayerBound,
@@ -506,6 +507,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
    * `domainLoaded.autoLayout`): run the same layout once, persisted the same way.
    */
   useFirstOpenAutoLayout(runLayout, domain, nodes, isLayouting);
+
+  /** The sidebar's Open in Diagram: select and centre a relationship once the layout above has settled. */
+  useRevealRelationship(isLayouting);
 
   /** Register auto-layout function for Shift+L shortcut */
   useEffect(() => {

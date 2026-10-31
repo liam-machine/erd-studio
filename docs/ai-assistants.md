@@ -54,7 +54,7 @@ Both routes use a small read-only `erd-studio` helper that ERD Studio installs i
 
 The guide is an [Agent Skill](https://agentskills.io): Claude Code reads it from `.claude/skills/`, and GitHub Copilot, Codex, Gemini CLI and Cursor read the copy in `.agents/skills/`. It has been tested end to end with Claude Code; the other four read the same skill from the shared `.agents/skills/` folder.
 
-To choose exactly which files are added, run **ERD Studio: Install AI Helper Files…** from the Command Palette, or click the robot icon in the ERD Studio sidebar's title bar. Pick the assistants you use: it adds instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini's style guide, or Codex's `AGENTS.md` (with the two format guides it points at, `DBML.md` and `LEGACY.md` in `.agents/skills/erd-studio/`).
+To choose exactly which files are added, run **ERD Studio: Install AI Helper Files…** from the Command Palette, or choose it from the **…** menu of the ERD Studio sidebar's **Help & Feedback** section. Pick the assistants you use: it adds instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini's style guide, or Codex's `AGENTS.md` (with the two format guides it points at, `DBML.md` and `LEGACY.md` in `.agents/skills/erd-studio/`).
 
 ## The `erd-studio` helper
 

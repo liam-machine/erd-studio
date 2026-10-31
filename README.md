@@ -38,7 +38,7 @@
 
 1. [Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) (VS Code 1.85+, or [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) for VSCodium, Cursor and Windsurf). Open any folder and click **ERD Studio** in the Activity Bar.
 2. Make your first diagram:
-   - **From scratch:** click **New Diagram** in the ERD Studio sidebar, choose a layer and a name, then use **+ Add → New Design Table** and **+ Add → New Relationship** on the canvas. (The commands call a diagram a *subject area*, so in the Command Palette it is **ERD Studio: New Subject Area**.)
+   - **From scratch:** click **New Diagram** in the ERD Studio sidebar, choose a layer and a name, then use **+ Add → New Design Table** and **+ Add → New Relationship** on the canvas. (In the Command Palette it is **ERD Studio: New Diagram…**.)
    - **From DBML:** click **Import DBML** in the sidebar (or run **ERD Studio: Import DBML…**) and pick a `.dbml` file. You see what it will create before anything is written. Positions an ERD Studio export saved in the file keep your tables in place.
    - **From an example:** run **ERD Studio: Open Example Diagram** for a coffee-shop model.
 3. Commit the `.erd-studio/` folder. That's your data model.

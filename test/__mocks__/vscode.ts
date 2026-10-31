@@ -279,6 +279,12 @@ export enum QuickPickItemKind {
   Default = 0,
 }
 
+export enum InputBoxValidationSeverity {
+  Info = 1,
+  Warning = 2,
+  Error = 3,
+}
+
 export enum StatusBarAlignment {
   Left = 1,
   Right = 2,

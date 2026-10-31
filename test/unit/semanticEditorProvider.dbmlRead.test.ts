@@ -237,13 +237,13 @@ describe('removing a DBML table from a JSON diagram (D16)', () => {
     const provider = buildProvider(root);
     const panel = await resolve(provider, openDoc('gold/mixed.json'));
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string, ...items: string[]) =>
-      (String(m).includes('Delete the table file') ? items[0] : undefined)) as never);
+      (String(m).includes('Delete its table file') ? items[0] : undefined)) as never);
 
     await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_customer'] } });
     await vi.waitFor(() => expect(fs.existsSync(at('gold/tables/gold/dim_customer.dbml'))).toBe(false));
     // The replaced files are saved after the edit lands.
     await vi.waitFor(() => expect(fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')).not.toMatch(/dim_customer/));
-    const prompt = info.mock.calls.find((c) => String(c[0]).includes('Delete the table file'));
+    const prompt = info.mock.calls.find((c) => String(c[0]).includes('Delete its table file'));
     expect(String(prompt?.[0])).toContain("This removes the table's file, its 3 relationships and its place in 1 other diagram.");
     // Its Refs and every use line naming it are gone; the diagram that used it no longer does.
     for (const file of ['gold/relationships/gold.dbml', 'gold/relationships/customers.dbml']) {
@@ -252,8 +252,8 @@ describe('removing a DBML table from a JSON diagram (D16)', () => {
 
     await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_yaml'] } });
     await vi.waitFor(() => expect(fs.existsSync(at('logical-models/dim_yaml.yml'))).toBe(false));
-    expect(info.mock.calls.filter((c) => String(c[0]).includes('Delete the table file') && String(c[0]).includes('dim_yaml'))).toEqual([
-      ['Table "dim_yaml" removed from this subject area. Delete the table file entirely?', 'Delete Table File', 'Keep File'],
+    expect(info.mock.calls.filter((c) => String(c[0]).includes('Delete its table file') && String(c[0]).includes('dim_yaml'))).toEqual([
+      ['Removed "dim_yaml" from this diagram. It stays in the Table Library for other diagrams. Delete its table file too?', 'Delete Table File', 'Keep File'],
     ]);
   });
 });

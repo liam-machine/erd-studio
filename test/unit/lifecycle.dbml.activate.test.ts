@@ -126,12 +126,14 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
   it('New Diagram writes <layer>/diagrams/x.dbml, layers.json and the README, and nothing else', async () => {
     await activate(context);
     vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value: string }>) => items.find((i) => i.value === 'gold')) as never);
-    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('orders').mockResolvedValueOnce('Orders');
+    // One question after the layer: the name, as people write it.
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('Orders');
     await vscode.commands.executeCommand('erdStudio.createDomain');
+    expect(input).toHaveBeenCalledTimes(1);
     expect(files()).toEqual(['README.md', 'gold/diagrams/orders.dbml', 'layers.json']);
     expect(fs.readFileSync(erd('README.md'), 'utf-8')).toBe(semanticReadmeText());
     const text = fs.readFileSync(erd('gold', 'diagrams', 'orders.dbml'), 'utf-8');
-    expect(parseSubjectAreaDbml(text, 'gold/diagrams/orders.dbml').obj).toMatchObject({ domain: 'orders', description: 'Orders', logical: { models: [] } });
+    expect(parseSubjectAreaDbml(text, 'gold/diagrams/orders.dbml').obj).toMatchObject({ domain: 'orders', logical: { models: [] } });
   });
 
   /** Import DBML's file dialog and reads, from disk. */
@@ -446,7 +448,7 @@ describe('in a native DBML project', () => {
     warn.mockResolvedValue(undefined);
     await vscode.commands.executeCommand('erdStudio.deleteLogicalModel', { type: 'model', name: 'dim_old', filePath: erd('logical-models', 'dim_old.yml') });
     expect(warn).toHaveBeenCalledWith(
-      'Delete table "dim_old"? This removes the table\'s file — subject area references are not cleaned up.', { modal: true }, 'Delete',
+      'Delete table "dim_old"? This removes the table\'s file — diagrams that show it are not updated.', { modal: true }, 'Delete',
     );
   });
 

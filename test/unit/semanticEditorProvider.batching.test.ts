@@ -516,7 +516,7 @@ describe('Delete Table File after a remove (#205)', () => {
   it('a delete that fails names the file, says nothing was deleted, and offers Try Again and Reveal in Explorer', async () => {
     const { panel } = await openShowcase();
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
-      (String(m).includes('Delete the table file entirely') ? 'Delete Table File' : undefined)) as never);
+      (String(m).includes('Delete its table file too') ? 'Delete Table File' : undefined)) as never);
     const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
     const applyEdit = vscode.workspace.applyEdit;
     vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
@@ -540,7 +540,7 @@ describe('Delete Table File after a remove (#205)', () => {
     const lib = path.join(root, '.erd-studio', 'logical-models');
     const before = ['dim_task', 'dim_project'].map((n) => fs.readFileSync(path.join(lib, `${n}.yml`), 'utf-8'));
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
-      (String(m).includes('Delete their table files entirely') ? 'Delete Table Files' : undefined)) as never);
+      (String(m).includes('Delete their table files too') ? 'Delete Table Files' : undefined)) as never);
     const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
     // The delete removes its first file and fails; the reconcile applies. (The diagram edit is the spy's.)
     vscode._mockWorkspaceState.applyEditPrefixes.push(1);
@@ -555,7 +555,7 @@ describe('Delete Table File after a remove (#205)', () => {
   it('when the reconcile cannot put a file back either, only its modal speaks', async () => {
     const { panel } = await openShowcase();
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
-      (String(m).includes('Delete their table files entirely') ? 'Delete Table Files' : undefined)) as never);
+      (String(m).includes('Delete their table files too') ? 'Delete Table Files' : undefined)) as never);
     const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
     vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
 

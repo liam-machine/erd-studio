@@ -82,7 +82,7 @@ A few things come back written a little differently but mean the same: a one-to-
 
 ## Coming back: Import DBML…
 
-**ERD Studio: Import DBML…** (in the Command Palette, the **ERD Studio** view's **…** menu, and the empty sidebar) turns a DBML file into a new diagram. It reads ERD Studio's own exports and DBML from dbdiagram.io or any other tool. It doesn't need dbt or an AI assistant.
+**ERD Studio: Import DBML…** (in the Command Palette, the **+** menu of the sidebar's **Diagrams** view, and the empty sidebar) turns a DBML file into a new diagram. It reads ERD Studio's own exports and DBML from dbdiagram.io or any other tool. It doesn't need dbt or an AI assistant.
 
 1. Pick the `.dbml` file. If its `Project` has an `erd_layout` (an ERD Studio export does), the tables and sticky notes go where it says; otherwise ERD Studio lays them out the first time the diagram opens.
 2. Pick the layer. The one the file's `TableGroup` or schema names is suggested first.

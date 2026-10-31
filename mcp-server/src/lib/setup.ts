@@ -13,7 +13,7 @@ export const EXTENSION_REPO_URL = 'https://github.com/liam-machine/erd-studio';
 export const NOT_INITIALIZED_TIP =
   "This project doesn't have a .erd-studio/ directory yet. To start designing ERDs, " +
   `install the ERD Studio VS Code extension: ${EXTENSION_MARKETPLACE_URL} ` +
-  "Then run Command Palette → 'ERD Studio: New Subject Area'. " +
+  "Then run Command Palette → 'ERD Studio: New Diagram…' (called New Subject Area before ERD Studio 2.0). " +
   "Command Palette → 'ERD Studio: Set Up My AI Helper' installs an AI coding skill (.claude/skills/erd-studio/SKILL.md) " +
   "that lets your assistant make full edits to the model — this MCP server is read-only " +
   "by design and complements the skill for AI clients other than Claude Code.";

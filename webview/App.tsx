@@ -278,6 +278,10 @@ function EditorCanvas() {
         case 'openFeedback':
           useEditorStore.getState().setFeedbackDialogOpen(true, msg.payload ?? null);
           break;
+        case 'revealRelationship':
+          // Shown once the diagram has settled (useRevealRelationship, in the Toolbar).
+          useEditorStore.getState().setPendingReveal(msg.payload);
+          break;
         case 'feedbackContext':
           useEditorStore
             .getState()

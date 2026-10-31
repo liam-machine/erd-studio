@@ -81,8 +81,8 @@ Pick it yourself when the evidence is clear, say it in one line, and carry on:
 2. **From a DBML file** — the user mentions DBML, dbdiagram.io or a `.dbml` file, or Glob finds
    one (`**/*.dbml`, skipping `node_modules` and the ERD Studio folder itself, `.erd-studio/`,
    whose own files are DBML too). Do not convert it yourself: ask them to run
-   **ERD Studio: Import DBML…** (Command Palette, or the **…** menu of the ERD Studio sidebar's
-   diagram list). It needs no AI, shows what it will create before writing anything, and places
+   **ERD Studio: Import DBML…** (Command Palette, or the **+** menu of the ERD Studio sidebar's
+   Diagrams view). It needs no AI, shows what it will create before writing anything, and places
    the tables from the file's own `erd_layout` positions when it has them. DBML is an
    open format (the schema language behind dbdiagram.io); ERD Studio reads it in and writes it
    out, and ERD Studio stores its own model as DBML too, split into one file per table. When they say "done", re-run doctor and

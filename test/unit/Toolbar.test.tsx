@@ -45,6 +45,7 @@ vi.mock('@xyflow/react', () => ({
     getNode: vi.fn(),
   }),
   useStore: () => 1, // zoom level
+  useNodesInitialized: () => true, // useRevealRelationship
 }));
 
 vi.mock('../../webview/components/Toolbar/StageTabs', () => ({

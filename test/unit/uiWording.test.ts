@@ -52,10 +52,18 @@ describe('package.json wording (#179)', () => {
 
   it('renames the commands and views the issue names, keeping their ids', () => {
     const title = (id: string) => pkg.contributes.commands.find((c: { command: string }) => c.command === id)?.title;
-    expect(title('erdStudio.createDomain')).toBe('New Subject Area');
     expect(title('erdStudio.moveRelationshipsToLibrary')).toBe('Move Relationships to Table Library');
     const views = Object.values(pkg.contributes.views).flat() as Array<{ id: string; name: string }>;
     expect(views.find(v => v.id === 'erdStudio.modelLibrary')?.name).toBe('Table Library');
+  });
+
+  it('calls a diagram a diagram in the commands on one; only the two file-format commands keep "Subject Area"', () => {
+    const title = (id: string) => pkg.contributes.commands.find((c: { command: string }) => c.command === id)?.title;
+    expect(['createDomain', 'openDomain', 'renameDomain', 'deleteDomain'].map((id) => title(`erdStudio.${id}`)))
+      .toEqual(['New Diagram…', 'Open Diagram', 'Rename Diagram…', 'Delete Diagram']);
+    const subjectArea = (pkg.contributes.commands as Array<{ command: string; title: string }>)
+      .filter((c) => /subject area/i.test(c.title)).map((c) => c.command);
+    expect(subjectArea).toEqual(['erdStudio.setupSemanticDirectory', 'erdStudio.migrateToV5']);
   });
 });
 

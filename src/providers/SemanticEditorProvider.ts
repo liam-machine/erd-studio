@@ -150,7 +150,7 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplaySubjectArea, DisplayRelationship } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from '../types/semantic';
-import type { UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import type { RevealRelationshipMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, SemanticTable, UnifiedSubjectArea } from '../types/semantic';
 import { describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat } from '../types/semantic';
@@ -522,6 +522,9 @@ export const DBML_CONVERSION_DECLINED_KEY = 'erdStudio.dbmlConversionDeclined';
 
 /** How long outside changes to table files are collected into one canvas refresh. */
 export const TABLE_REFRESH_BATCH_MS = 150;
+
+/** How long a relationship reveal waits for its canvas to load (a large diagram can take a few seconds). */
+export const PENDING_REVEAL_MS = 60_000;
 /** The Convert offer's dialog (§6.4): its title and its two buttons (VS Code adds Cancel, which is Not Now). */
 export const DBML_CONVERSION_OFFER_TITLE = 'Convert this project to DBML?';
 export const DBML_CONVERSION_OFFER_CONVERT = 'Convert…';
@@ -876,8 +879,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       lastDiscrepancyReport?: DiscrepancyReport | null;
       /** The target stage from the last discrepancy comparison (used to refresh after stub toggle). */
       lastCompareAgainst?: Stage;
+      /** The webview answered `ready` with its diagram: a reveal can be posted now. */
+      loaded?: boolean;
     }
   >();
+
+  /**
+   * Relationship reveals asked for before their canvas had loaded (Open in
+   * Diagram on a diagram that is still opening), by diagram path. The `ready`
+   * handler posts one once the diagram is on the canvas; one older than
+   * {@link PENDING_REVEAL_MS} is dropped, so a canvas that failed to open
+   * does not jump to it the next time it is opened by hand.
+   */
+  private readonly pendingReveals = new Map<string, { target: RevealRelationshipMessage['payload']; at: number }>();
 
   /**
    * Webviews whose panel has been disposed. Refresh paths iterate a snapshot
@@ -1358,6 +1372,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               canvasLog.info(posted === undefined
                 ? `Opening ${document.uri.fsPath} ended without a diagram after ${elapsedMs(readyAt)} ms`
                 : `Opened ${document.uri.fsPath}: ${plural(posted, 'table')} posted ${elapsedMs(readyAt)} ms after ready`);
+              const entry = this.openPanels.get(panelKey);
+              if (posted !== undefined && entry?.webview === webviewPanel.webview) {
+                entry.loaded = true;
+                this.flushPendingReveal(document.uri.fsPath, webviewPanel.webview);
+              }
             }
             void this.offerRelationshipPrompts(document, webviewPanel.webview, panelKey);
             break;
@@ -4301,6 +4320,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /**
+   * Select and centre one relationship on the canvas of `uri` (the
+   * Relationships view's Open in Diagram). A canvas that has loaded its
+   * diagram gets it at once, switched to the logical stage first (the line is
+   * a design relationship); one still opening gets it from the `ready`
+   * handler, so the caller may ask before or after opening the editor.
+   */
+  async revealRelationship(uri: vscode.Uri, target: RevealRelationshipMessage['payload']): Promise<void> {
+    const open = Array.from(this.openPanels.entries()).find(([, p]) =>
+      p.loaded && !this.disposedWebviews.has(p.webview) && samePath(p.document.uri.fsPath, uri.fsPath));
+    if (!open) {
+      this.pendingReveals.set(uri.fsPath, { target, at: Date.now() });
+      return;
+    }
+    const [panelKey, panel] = open;
+    if (panel.activeStage !== 'logical') {
+      await this.handleSwitchStage(panelKey, panel.document, panel.webview, 'logical');
+    }
+    this.post(panel.webview, { type: 'revealRelationship', payload: target } satisfies RevealRelationshipMessage);
+  }
+
+  /** Post the reveal held for the diagram at `fsPath`, if it is still fresh. */
+  private flushPendingReveal(fsPath: string, webview: vscode.Webview): void {
+    for (const [key, pending] of Array.from(this.pendingReveals.entries())) {
+      if (!samePath(key, fsPath)) continue;
+      this.pendingReveals.delete(key);
+      if (Date.now() - pending.at <= PENDING_REVEAL_MS) {
+        this.post(webview, { type: 'revealRelationship', payload: pending.target } satisfies RevealRelationshipMessage);
+      }
+    }
+  }
+
   /** Drop everything kept for one canvas (on its dispose, or when it is found gone). */
   private forgetPanel(panelKey: string, webview: vscode.Webview): void {
     this.disposedWebviews.add(webview);
@@ -4401,7 +4452,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const modelNames = (section.models ?? []) as string[];
         const inDomain = modelNames.find((n) => sameName(n, model.name));
         if (inDomain !== undefined) {
-          webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this subject area.` } });
+          webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this diagram.` } });
           return;
         }
         // A new table's name follows the authoring rule (a letter first).
@@ -4414,7 +4465,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             type: 'error',
             payload: {
               message: `Table "${inLibrary}" already exists in the Table Library (${this.libraryRelativePath(inLibrary)}). ` +
-                'Use "Add Existing Table" to reference it in this subject area, or, for a separate table also called ' +
+                'Use "Add Existing Table" to add it to this diagram, or, for a separate table also called ' +
                 `${model.name}, name it ${sameTableName(model.name, document.uri.fsPath)} and set its warehouse name to ${model.name}.`,
             },
           });
@@ -4458,7 +4509,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (success) {
           this.selectorsService.scheduleRegenerate();
         } else {
-          webview.postMessage({ type: 'error', payload: { message: 'Failed to add table to subject area.' } });
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to add the table to this diagram.' } });
         }
         return;
       }
@@ -4472,7 +4523,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           if (models.some((m) => typeof m.name === 'string' && sameName(m.name, model.name))) {
             webview.postMessage({
               type: 'error',
-              payload: { message: `Table "${model.name}" already exists in this subject area.` },
+              payload: { message: `Table "${model.name}" already exists in this diagram.` },
             });
             throw new EditAborted();
           }
@@ -4504,7 +4555,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         {
           webview,
           stage,
-          errorLabel: 'Failed to add table to subject area.',
+          errorLabel: 'Failed to add the table to this diagram.',
           onSuccess: () => this.selectorsService.scheduleRegenerate(),
         },
       );
@@ -5095,7 +5146,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const currentNames = (section.models ?? []) as string[];
         const inDomain = currentNames.find((n) => sameName(n, trimmedNew));
         if (inDomain !== undefined) {
-          webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this subject area.` } });
+          webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this diagram.` } });
           return;
         }
         // The model library is shared across domains — renaming onto an
@@ -5106,7 +5157,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             type: 'error',
             payload: {
               message: `Table "${inLibrary}" already exists in the Table Library (${this.libraryRelativePath(inLibrary)}). ` +
-                'Choose a different name, or use "Add Existing Table" to reference it in this subject area.',
+                'Choose a different name, or use "Add Existing Table" to add it to this diagram.',
             },
           });
           return;
@@ -5185,7 +5236,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             throw new EditAborted();
           }
           if (models.some((m) => m !== model && typeof m.name === 'string' && sameName(m.name, trimmedNew))) {
-            webview.postMessage({ type: 'error', payload: { message: `Table "${trimmedNew}" already exists in this subject area.` } });
+            webview.postMessage({ type: 'error', payload: { message: `Table "${trimmedNew}" already exists in this diagram.` } });
             throw new EditAborted();
           }
 
@@ -5292,8 +5343,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           const dbmlNames = filesToOffer.filter((name) => this.tableLibraryService.tableStorage(name) === 'dbml');
           const cascade = dbmlNames.length > 0 ? this.describeDbmlDeleteCascade(dbmlNames) : '';
           const prompt = fileIsSingle
-            ? `Table "${filesToOffer[0]}" removed from this subject area. Delete the table file entirely?${cascade}`
-            : `${filesToOffer.length} tables removed from this subject area. Delete their table files entirely?${cascade}`;
+            ? `Removed "${filesToOffer[0]}" from this diagram. It stays in the Table Library for other diagrams. Delete its table file too?${cascade}`
+            : `Removed ${filesToOffer.length} tables from this diagram. They stay in the Table Library for other diagrams. Delete their table files too?${cascade}`;
           const deleteLabel = fileIsSingle ? 'Delete Table File' : 'Delete Table Files';
           const keepLabel = fileIsSingle ? 'Keep File' : 'Keep Files';
           void vscode.window
@@ -5814,7 +5865,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.isSubjectAreaV5(parsed)) {
         const modelNames = (section.models ?? []) as string[];
         if (modelNames.includes(payload.modelName)) {
-          webview.postMessage({ type: 'error', payload: { message: `Table "${payload.modelName}" already exists in this subject area.` } });
+          webview.postMessage({ type: 'error', payload: { message: `Table "${payload.modelName}" already exists in this diagram.` } });
           return;
         }
 
@@ -5887,7 +5938,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           this.selectorsService.scheduleRegenerate();
           if (routed.unstored) void vscode.window.showInformationMessage(`Added ${payload.modelName}. ${routed.unstored}`);
         } else {
-          webview.postMessage({ type: 'error', payload: { message: 'Failed to add table to subject area.' } });
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to add the table to this diagram.' } });
         }
         return;
       }
@@ -5920,7 +5971,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           if (models.some((m) => m.name === payload.modelName)) {
             webview.postMessage({
               type: 'error',
-              payload: { message: `Table "${payload.modelName}" already exists in this subject area.` },
+              payload: { message: `Table "${payload.modelName}" already exists in this diagram.` },
             });
             throw new EditAborted();
           }
@@ -5968,7 +6019,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         {
           webview,
           stage,
-          errorLabel: 'Failed to add table to subject area.',
+          errorLabel: 'Failed to add the table to this diagram.',
           onSuccess: () => this.selectorsService.scheduleRegenerate(),
         },
       );
@@ -6822,7 +6873,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       font-src ${webview.cspSource};
       connect-src ${webview.cspSource};
       worker-src blob:;">
-  <title>Subject Area Editor</title>
+  <title>ERD Studio Diagram</title>
   <link rel="stylesheet" href="${styleUri}">
 </head>
 <body>

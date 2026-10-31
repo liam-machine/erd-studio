@@ -3,7 +3,9 @@
  *
  * Displays semantic domains grouped by layer (bronze, silver, gold).
  * Each domain shows a badge with model count (from the logical stage).
- * "New Domain..." items appear inside creatable layers.
+ * Creating is always a visible, labelled row: each creatable layer ends with
+ * "New Diagram…", and the tree ends with "New Layer…" (the + menu and the
+ * layer row's inline + are shortcuts to the same commands).
  *
  * Supports drag-and-drop to reorder layers. Stages are handled entirely
  * by the editor tabs — the tree is stage-agnostic.
@@ -46,6 +48,13 @@ interface SubjectAreaNode {
 interface NewSubjectAreaNode {
   readonly type: 'newDomain';
   readonly layer: Layer;
+  /** The layer has no diagram yet: the row says so. */
+  readonly first: boolean;
+}
+
+/** The tree's last row, under the layers. */
+interface NewLayerNode {
+  readonly type: 'newLayer';
 }
 
 /**
@@ -59,7 +68,7 @@ interface ProjectNode {
   readonly location: string;
 }
 
-export type TreeElement = ProjectNode | LayerNode | SubjectAreaNode | NewSubjectAreaNode;
+export type TreeElement = ProjectNode | LayerNode | SubjectAreaNode | NewSubjectAreaNode | NewLayerNode;
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -273,6 +282,8 @@ export class SubjectAreaTreeProvider
         return this.createSubjectAreaItem(element);
       case 'newDomain':
         return this.createNewSubjectAreaItem(element);
+      case 'newLayer':
+        return this.createNewLayerItem();
     }
   }
 
@@ -318,7 +329,8 @@ export class SubjectAreaTreeProvider
     treeLog.debug(`Listed ${plural(layers.length, 'layer')} in ${elapsedMs(start)} ms`);
     // Only alongside real content: an empty tree must stay empty so the
     // welcome view (which has its own Select dbt Project button) shows.
-    return this.projectRow ? [this.projectRow, ...layerNodes] : layerNodes;
+    if (layerNodes.length === 0) return this.projectRow ? [this.projectRow] : [];
+    return [...(this.projectRow ? [this.projectRow] : []), ...layerNodes, { type: 'newLayer' }];
   }
 
   /** Every subject area, grouped by layer (one listing of the project). */
@@ -349,7 +361,7 @@ export class SubjectAreaTreeProvider
     const children: TreeElement[] = [...domainNodes];
 
     if (this.layerService.isCreatable(layer)) {
-      children.push({ type: 'newDomain', layer });
+      children.push({ type: 'newDomain', layer, first: domainNodes.length === 0 });
     }
 
     treeLog.debug(`Layer ${layer} listed ${plural(domainNodes.length, 'diagram')} in ${elapsedMs(start)} ms`);
@@ -372,7 +384,8 @@ export class SubjectAreaTreeProvider
       layerConfig?.label ?? element.layer,
       vscode.TreeItemCollapsibleState.Expanded,
     );
-    item.contextValue = 'layer';
+    // `layerCreatable` offers New Diagram on the row (inline + and right-click).
+    item.contextValue = this.layerService.isCreatable(element.layer) ? 'layerCreatable' : 'layer';
     item.iconPath = new vscode.ThemeIcon('folder');
 
     // Assign a resource URI so FileDecorationProvider can apply colors
@@ -404,7 +417,7 @@ export class SubjectAreaTreeProvider
     item.tooltip = `${this.layerService.getLabel(element.summary.layer)} / ${element.summary.domain}`;
     item.command = {
       command: 'erdStudio.openDomain',
-      title: 'Open Subject Area',
+      title: 'Open Diagram',
       arguments: [element.summary.filePath],
     };
 
@@ -413,16 +426,28 @@ export class SubjectAreaTreeProvider
 
   private createNewSubjectAreaItem(element: NewSubjectAreaNode): vscode.TreeItem {
     const item = new vscode.TreeItem(
-      'New Subject Area...',
+      'New Diagram…',
       vscode.TreeItemCollapsibleState.None,
     );
+    if (element.first) item.description = 'none in this layer yet';
+    item.tooltip = `Start a diagram in ${this.layerService.getLabel(element.layer)}`;
     item.contextValue = 'newDomain';
     item.iconPath = new vscode.ThemeIcon('add');
     item.command = {
       command: 'erdStudio.createDomain',
-      title: 'New Subject Area',
+      title: 'New Diagram…',
       arguments: [element.layer],
     };
+    return item;
+  }
+
+  private createNewLayerItem(): vscode.TreeItem {
+    const item = new vscode.TreeItem('New Layer…', vscode.TreeItemCollapsibleState.None);
+    item.id = 'erdStudio.newLayer';
+    item.tooltip = 'Add a layer: a stage of your warehouse, such as bronze, silver or gold, that holds diagrams';
+    item.contextValue = 'newLayer';
+    item.iconPath = new vscode.ThemeIcon('new-folder');
+    item.command = { command: 'erdStudio.addLayer', title: 'New Layer…' };
     return item;
   }
 

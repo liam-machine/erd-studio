@@ -85,7 +85,7 @@ function validateForm(
     // Compared without case, like the host: `DimDate` and `dimdate` are one
     // file on macOS/Windows and one table in dbt.
     const existing = existingModelNames.find((n) => sameName(n, modelName));
-    errors.modelName = `Table "${existing}" already exists in this subject area`;
+    errors.modelName = `Table "${existing}" already exists in this diagram`;
   } else if (libraryModelNames.some((n) => sameName(n, modelName))) {
     // The model library (logical-models/) is shared across domains — a new
     // model must not overwrite one another domain already uses.

@@ -21,7 +21,7 @@ import type { DisplaySubjectArea, ManifestModelPreview } from '../../src/types/d
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { TableTemplate, Stage } from '../../src/types/semantic';
 import type { GroundTruth } from '../../src/types/syncPlan';
-import type { ErrorMessage } from '../../src/types/messages';
+import type { ErrorMessage, RevealRelationshipMessage } from '../../src/types/messages';
 import type {
   FeedbackAnalysis,
   FeedbackCapabilities,
@@ -153,6 +153,12 @@ export interface EditorState extends CanvasState {
   /** Transient toast message raised from anywhere in the webview (null = none). */
   toastMessage: string | null;
   /**
+   * A relationship the host asked to show (`revealRelationship`, the sidebar's
+   * Open in Diagram). `useRevealRelationship` selects and centres its line
+   * once the diagram has settled, then clears it. Not persisted.
+   */
+  pendingReveal: RevealRelationshipMessage['payload'] | null;
+  /**
    * Whether the "no compiled dbt artifacts" strip has been dismissed.
    *
    * Session state only — deliberately not persisted. If dbt still has not been
@@ -271,6 +277,8 @@ export interface EditorActions extends CanvasActions {
   setCanvasMode: (mode: 'pan' | 'select') => void;
   /** Show (or clear with null) a transient toast notification. */
   setToastMessage: (message: string | null) => void;
+  /** Set / clear the relationship to show (see `pendingReveal`). */
+  setPendingReveal: (target: RevealRelationshipMessage['payload'] | null) => void;
 }
 
 /**
@@ -330,6 +338,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   syncPlanGenerated: null,
   canvasMode: 'pan',
   toastMessage: null,
+  pendingReveal: null,
   physicalSourceNoticeDismissed: false,
   manifestMissing: false,
   manifestHintDismissed: false,
@@ -441,6 +450,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
 
   setCanvasMode: (mode) => set({ canvasMode: mode }),
   setToastMessage: (message) => set({ toastMessage: message }),
+  setPendingReveal: (target) => set({ pendingReveal: target }),
 
   // Full editor reset on a new domain payload. Overrides the canvas slice's
   // setDomain (which only clears the column selection) and must stay last.
