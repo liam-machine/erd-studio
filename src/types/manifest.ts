@@ -45,6 +45,13 @@ export interface ManifestModelInfo {
   /** Schema the model is materialised in */
   schema: string;
   /**
+   * The custom schema the developer configured (`config.schema`: `+schema:`
+   * or `config(schema=…)`), which is the same on every machine, unlike
+   * `schema` (`dbt_liam_finance` in dev, `finance` in prod). Absent when none
+   * is set. A DBML table's schema folder (§2.4).
+   */
+  configSchema?: string;
+  /**
    * Relation name dbt builds the model as, when it differs from `name` (the
    * `alias` config). dbt fills `alias` in on every node — equal to the name
    * when none is configured — so it is recorded here only when it differs.

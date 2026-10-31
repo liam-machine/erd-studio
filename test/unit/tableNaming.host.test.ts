@@ -365,6 +365,36 @@ describe('a mixed project (#181)', () => {
     // No "Fix…": that fix rewrites files, and the v6 one is not written. Open Both Files is the way to them (#205).
     expect(warn.mock.calls.find(([m]) => (m as string).includes('old and the new'))!.slice(1)).toEqual(['Open Both Files']);
   });
+
+  it('a table in both folders only half-way through a held migration or Convert is not reported', async () => {
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
+    const { provider, tableLibraryService } = buildProvider();
+    const panel = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      makeDoc(path.join(erd, 'silver', 'showcase.json')) as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    await panel._simulateMessage({ type: 'ready' });
+    await vi.waitFor(() => expect(posted(panel).some((m) => m.type === 'domainLoaded')).toBe(true), { timeout: 4000, interval: 20 });
+    const bothFolders = (): string[] => warn.mock.calls.map(([m]) => m as string).filter((m) => m.includes('old and the new'));
+
+    // Mid-apply: the new file exists, the old one is not deleted yet, and the watcher refreshes.
+    const release = provider.holdRefreshes();
+    fs.mkdirSync(path.join(erd, 'tables'));
+    fs.writeFileSync(path.join(erd, 'tables', 'dim_task.yml'), 'name: dim_task\ncolumns:\n  - name: id\n    dataType: INT\n');
+    tableLibraryService.invalidateCache();
+    await provider.refreshSubjectAreasReferencingTable('dim_task');
+    await provider.refreshAllOpenSubjectAreas();
+    await provider.refreshSubjectAreaPanel(path.join(erd, 'silver', 'showcase.json'));
+    expect(bothFolders()).toEqual([]);
+
+    // Released with both files really there: the warning is still given.
+    release();
+    release();
+    await provider.refreshAllOpenSubjectAreas();
+    expect(bothFolders()).toHaveLength(1);
+  });
 });
 
 describe('TableLibraryService with tables/', () => {
@@ -405,14 +435,6 @@ describe('TableLibraryService with tables/', () => {
     lib.saveTable({ name: 'dim_newer', columns: [], modelRole: 'reference' });
     const text = fs.readFileSync(path.join(erd, 'tables', 'dim_newer.yml'), 'utf-8');
     expect(text).toMatch(/^tableRole: reference$/m);
-  });
-
-  it('a project with no library folder at all writes its first table to tables/ in v6', () => {
-    fs.rmSync(erd, { recursive: true });
-    const lib = new TableLibraryService(root, '.erd-studio');
-    lib.saveTable({ name: 'dim_first', columns: [], modelRole: 'reference' });
-    expect(fs.readFileSync(path.join(erd, 'tables', 'dim_first.yml'), 'utf-8')).toMatch(/^tableRole: reference$/m);
-    expect(fs.existsSync(path.join(erd, 'logical-models'))).toBe(false);
   });
 
   it('reports a table in both folders, ignoring case', () => {
@@ -594,7 +616,7 @@ describe('doctor reports the naming (#181)', () => {
     expect(r.erd.naming).toBe('v6');
     expect(r.erd.logicalModels).toBe(9);
     expect(r.erd.domainFormatIssues).toEqual([]);
-    expect(formatDoctor(r, makePaint(false))).toContain('9 tables — file naming v6');
+    expect(formatDoctor(r, makePaint(false))).toContain('9 tables — storage YAML, file naming v6');
   });
 
   it('mixed, with the table in both folders as a finding and the first step after any merge conflict', async () => {

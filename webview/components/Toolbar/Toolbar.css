@@ -255,6 +255,16 @@
   color: var(--button-fg);
 }
 
+.toolbar__dropdown-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toolbar__dropdown-item:disabled:hover {
+  background: transparent;
+  color: var(--editor-fg);
+}
+
 .toolbar__dropdown-item:not(:last-child) {
   border-bottom: 1px solid var(--panel-border);
 }

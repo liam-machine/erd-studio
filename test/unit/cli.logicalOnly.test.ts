@@ -191,10 +191,11 @@ describe('inventory on a logical-only root', () => {
     expect(r.relationships).toEqual([]);
     expect(r.clusters).toEqual([]);
     expect(r.inputs).toEqual({ manifest: 'missing', catalog: 'missing' });
-    expect(r.domains).toEqual([{ file: '.erd-studio/gold/sales.json', layer: 'gold', domain: 'sales', models: ['customer'] }]);
+    expect(r.domains).toEqual([{ file: '.erd-studio/gold/sales.json', layer: 'gold', domain: 'sales', models: ['customer'], format: 'json' }]);
     expect(r.logicalTables).toEqual([{
       name: 'customer',
       file: '.erd-studio/tables/customer.yml',
+      format: 'yaml',
       folder: '',
       description: 'One row per customer.',
       grain: 'customer_id',
@@ -229,6 +230,49 @@ describe('inventory on a logical-only root', () => {
     const r = runInventory(ctx, { summary: true });
     expect(r.models.length).toBeGreaterThan(0);
     expect(r.logicalTables.map((t) => t.name)).toContain('dim_customer');
+  });
+});
+
+describe('a logical-only DBML project (test/fixtures/dbml-native)', () => {
+  const NATIVE = path.join(FIXTURES, 'dbml-native');
+
+  it('doctor reports storage dbml, every diagram, no DBML problem and Ready', async () => {
+    const r = await runDoctor({ project: NATIVE, semanticDir: '.erd-studio', noDbt: true });
+    expect(r.dbtProject).toBe(false);
+    expect(r.erd.storage).toBe('dbml');
+    // In layers.json order (silver, then gold).
+    expect(r.erd.diagrams).toEqual([
+      { file: '.erd-studio/silver/diagrams/staging.dbml', format: 'dbml' },
+      { file: '.erd-studio/gold/diagrams/sales.dbml', format: 'dbml' },
+    ]);
+    expect(r.erd.dbmlProblems).toEqual([]);
+    expect(r.erd.dbmlConversion).toBeUndefined();
+    expect(r.nextSteps.map((s) => s.id)).toEqual(['ready']);
+  });
+
+  it('inventory lists DBML tables and diagrams with their format and use-line members', async () => {
+    const ctx = await buildCliContext({ project: NATIVE, semanticDir: '.erd-studio' });
+    const r = runInventory(ctx, { summary: true });
+    expect(r.domains.map((d) => [d.file, d.format, d.models])).toEqual([
+      ['.erd-studio/silver/diagrams/staging.dbml', 'dbml', ['fct_order', 'dim_date']],
+      ['.erd-studio/gold/diagrams/sales.dbml', 'dbml', ['fct_order', 'dim_customer', 'dim_date', 'dim_region', 'customer_profile', 'bridge_empty']],
+    ]);
+    expect(r.logicalTables.every((t) => t.format === 'dbml' && t.file.endsWith('.dbml'))).toBe(true);
+    expect(r.logicalTables.find((t) => t.name === 'fct_order')).toMatchObject({
+      file: '.erd-studio/gold/tables/gold/fct_order.dbml', folder: 'gold', primaryKey: ['order_line_id'],
+    });
+  });
+
+  it('exports each DBML diagram, and diff still needs dbt', async () => {
+    const one = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/gold/diagrams/sales.dbml', '--format', 'dbml']);
+    expect(one.code).toBe(0);
+    expect(one.out).toContain('Table gold.fct_order {');
+    const all = await run(['export', '--project', NATIVE, '--all', '--format', 'mermaid', '--json']);
+    expect(all.code).toBe(0);
+    expect((JSON.parse(all.out) as { files: Array<{ fileName: string }> }).files.map((f) => f.fileName).sort()).toEqual(['sales.mmd', 'staging.mmd']);
+    const diff = await run(['diff', '--json', '--project', NATIVE, '--all']);
+    expect(diff.code).toBe(3);
+    expect(JSON.parse(diff.out).error.code).toBe('not-dbt-project');
   });
 });
 

@@ -1,0 +1,8 @@
+Table fct_sale [schema: 'gold'] {
+  sale_id bigint [pk, note: 'Sale id']
+  net_amount "DECIMAL(18,2)" [note: 'Net amount after every discount, rebate and loyalty voucher is applied', additive_type: 'additive']
+  an_extremely_long_column_name_past_the_alignment_cap int [note: 'A long name']
+  qty int [note: 'Quantity']
+  description_text "VARCHAR(16777216) COLLATE 'en-ci'" [note: 'A long type']
+  loaded_at timestamp [not null, default: `now()`, note: 'Load time']
+}

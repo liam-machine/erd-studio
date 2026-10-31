@@ -13,10 +13,11 @@
 
 import {
   canonicalRelationship, compositeGroupProblem, contradictsKeys, contradictsKeysOf, keyedRelationship, linkKey,
-  mergeLibraryRelationships, normaliseRelationshipRole, relationshipKey, respellRelationship, reverseRelationship, sameLink,
+  mergeLibraryRelationships, nextCompositeKey, normaliseRelationshipRole, relationshipKey, respellRelationship, reverseRelationship, sameLink,
 } from '@erd-studio/core';
 import type { ColumnPair, DbtKeyIndex, KeyedTable } from '@erd-studio/core';
 import type { TableRelationship, Relationship, SemanticTable } from '../types/semantic';
+import { sameName } from '../types/naming';
 
 type RelationshipEnds = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
 
@@ -36,9 +37,36 @@ export function usesLibraryRelationships(
   domainFileRelationshipCount: number,
   /** A model file that does not parse still lists some (`hasUnreadableRelationships`). */
   unreadableModelRelationships = false,
+  /**
+   * The library holds a DBML table or a relationships file (native DBML
+   * storage, §5.1): a DBML table's relationships can only live in the
+   * library, so the project keeps them there whatever the diagrams hold.
+   */
+  dbmlLibrary = false,
 ): boolean {
-  return domainFileRelationshipCount === 0 || unreadableModelRelationships
+  return dbmlLibrary || domainFileRelationshipCount === 0 || unreadableModelRelationships
     || models.some((m) => (m.relationships?.length ?? 0) > 0);
+}
+
+/**
+ * The library tables whose relationships name `tableName` as their other
+ * end (any case), each a copy with those entries removed — what Delete Table
+ * saves so no relationship is left pointing at a table that is gone (D16).
+ * The table itself is not among them; its own file goes with it.
+ */
+export function dropRelationshipsTo(models: readonly SemanticTable[], tableName: string): SemanticTable[] {
+  const out: SemanticTable[] = [];
+  for (const model of models) {
+    if (same(model.name, tableName)) continue;
+    const list = model.relationships ?? [];
+    const kept = list.filter((rel) => !same(rel.toModel, tableName));
+    if (kept.length === list.length) continue;
+    const copy: SemanticTable = { ...model };
+    if (kept.length > 0) copy.relationships = kept;
+    else delete copy.relationships;
+    out.push(copy);
+  }
+  return out;
 }
 
 /** The full relationships stored in `model`'s library file. */
@@ -223,17 +251,8 @@ export function expandToGroups(
   return out;
 }
 
-/**
- * A new composite's name in a file (#133 L2): `fk_<toModel>`, lowercased,
- * then `_2`, `_3`, … while the file already uses it. Depends only on the
- * file's entries.
- */
-export function nextCompositeKey(fileEntries: ReadonlyArray<Pick<TableRelationship, 'compositeKey'>>, toModel: string): string {
-  const used = new Set(fileEntries.map((e) => e.compositeKey?.toLowerCase()).filter((k): k is string => !!k));
-  const base = `fk_${toModel}`.toLowerCase();
-  if (!used.has(base)) return base;
-  for (let n = 2; ; n++) if (!used.has(`${base}_${n}`)) return `${base}_${n}`;
-}
+/** A new composite's name in a file (#133 L2): moved to core, re-exported here. */
+export { nextCompositeKey };
 
 /**
  * Follow a column rename: the model's own relationships leaving that column,
@@ -326,6 +345,52 @@ export function renameTableInSubjectAreaRelationships(
     }
     if (same(rel.toModel, oldName)) {
       rel.toModel = newName;
+      touched = true;
+    }
+  }
+  return touched;
+}
+
+/**
+ * Follow a model rename in another v5 domain file, in place (#133 L5): its
+ * `logical.models` entry, its stored position and its own relationship
+ * copies, matched without case. A DBML diagram (`storage: 'dbml'`) also has
+ * each sticky note linked to the table re-pointed (its `linked_table`,
+ * §2.8). Returns whether anything changed.
+ */
+export function renameTableInSubjectArea(parsed: Record<string, unknown>, oldName: string, newName: string, storage: 'json' | 'dbml' = 'json'): boolean {
+  let touched = storage === 'dbml' && relinkSticky(parsed, oldName, newName);
+  const logical = parsed.logical as Record<string, unknown> | undefined;
+  if (logical && Array.isArray(logical.models)) {
+    logical.models = (logical.models as unknown[]).map((m) => {
+      if (typeof m !== 'string' || !sameName(m, oldName)) return m;
+      touched = true;
+      return newName;
+    });
+  }
+  const positions = ((parsed.viewConfig ?? {}) as Record<string, unknown>).positions as Record<string, unknown> | undefined;
+  if (positions && typeof positions === 'object') {
+    const key = Object.keys(positions).find((k) => sameName(k, oldName));
+    if (key !== undefined && !(newName in positions)) {
+      positions[newName] = positions[key];
+      delete positions[key];
+      touched = true;
+    }
+  }
+  const relationships = logical && Array.isArray(logical.relationships) ? logical.relationships as Array<Record<string, unknown>> : [];
+  return renameTableInSubjectAreaRelationships(relationships, oldName, newName) || touched;
+}
+
+/** Re-point every sticky note linked to `oldName` (`sameName`) at `newName`; true when any changed. DBML diagrams only. */
+export function relinkSticky(parsed: Record<string, unknown>, oldName: string, newName: string): boolean {
+  const annotations = ((parsed.viewConfig ?? {}) as Record<string, unknown>).annotations;
+  if (!Array.isArray(annotations)) return false;
+  let touched = false;
+  for (const annotation of annotations) {
+    if (!annotation || typeof annotation !== 'object') continue;
+    const ann = annotation as Record<string, unknown>;
+    if (typeof ann.linkedModel === 'string' && sameName(ann.linkedModel, oldName)) {
+      ann.linkedModel = newName;
       touched = true;
     }
   }
@@ -723,6 +788,17 @@ export function routeToLibrary(
     if (upsertLibraryRelationship(model, rel)) changed.set(model.name, model);
   }
   return { kept, changed: [...changed.values()] };
+}
+
+/**
+ * The sentence for relationships a DBML diagram cannot store (D5): `routeToLibrary`
+ * kept them because their many-side table's file could not be read. Undefined
+ * when there are none. Shared by the canvas and Draw from dbt.
+ */
+export function describeUnstoredRelationships(kept: readonly Relationship[]): string | undefined {
+  if (kept.length === 0) return undefined;
+  const named = kept.slice(0, 3).map((r) => `${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn}`).join(', ');
+  return `Not stored, because a table's file could not be read: ${named}${kept.length > 3 ? ` and ${kept.length - 3} more` : ''}.`;
 }
 
 /** One way a relationship is defined in some diagrams, as the move would store it. */
@@ -1173,7 +1249,7 @@ function planGroupMoves(
     }
     const owner = libraryModel(head[0].fromModel);
     if (!owner) {
-      leave(`${head[0].fromModel} has no readable file in logical-models/`);
+      leave(`${head[0].fromModel} has no readable file in the Table Library`);
       continue;
     }
     // What the library already says about these pairs.
@@ -1447,7 +1523,7 @@ export function describeMovePlan(plan: MoveToLibraryPlan, fileOf: (model: string
     lines.push(
       '',
       `${plural(plan.skippedNoModel.length, 'relationship starts', 'relationships start')} at a table with no readable ` +
-      'file in logical-models/ and will stay in the diagram files.',
+      'file in the Table Library and will stay in the diagram files.',
     );
   }
   // Every entry the move turns round is listed: the preview is the only chance to check them.

@@ -1,0 +1,14 @@
+// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
+use { table dim_date } from '../dim_date.dbml'
+use { table customer_profile } from './customer_profile.dbml'
+use { table dim_customer } from './dim_customer.dbml'
+use { table dim_region } from './dim_region.dbml'
+use { table fct_order } from './fct_order.dbml'
+
+Ref: dim_customer.customer_key ?- customer_profile.customer_key
+Ref region: customer_profile.preferred_region_code <>? dim_region.region_code
+Ref parent: dim_customer.parent_customer_key >? dim_customer.customer_key
+Ref: fct_order.customer_key >? dim_customer.customer_key
+Ref "order date": fct_order.order_date_key >? dim_date.date_key
+Ref "ship date": fct_order.ship_date_key >? dim_date.date_key
+Ref region: fct_order.(region_code, country_code) >? dim_region.(region_code, country_code)

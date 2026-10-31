@@ -14,9 +14,11 @@ import './ReconnectOverlay.css';
 
 export interface ReconnectOverlayProps {
   onReload: () => void;
+  /** Open the ERD Studio log (what the host was busy with). Absent: no button. */
+  onShowLogs?: () => void;
 }
 
-export function ReconnectOverlay({ onReload }: ReconnectOverlayProps) {
+export function ReconnectOverlay({ onReload, onShowLogs }: ReconnectOverlayProps) {
   return (
     <div className="reconnect-overlay" role="alert">
       <div className="reconnect-overlay__panel">
@@ -24,9 +26,16 @@ export function ReconnectOverlay({ onReload }: ReconnectOverlayProps) {
         <p className="reconnect-overlay__body">
           ERD Studio looks like it was updated or restarted. Reload the window to reconnect — your work will be saved first.
         </p>
-        <button className="reconnect-overlay__button" onClick={onReload}>
-          Reload Window
-        </button>
+        <div className="reconnect-overlay__actions">
+          <button className="reconnect-overlay__button" onClick={onReload}>
+            Reload Window
+          </button>
+          {onShowLogs && (
+            <button className="reconnect-overlay__button reconnect-overlay__button--secondary" onClick={onShowLogs}>
+              Show Logs
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

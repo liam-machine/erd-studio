@@ -66,6 +66,8 @@ function fixLine(f: Fix, p: Paint): string {
       return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  not tested in dbt`;
     case 'set-cardinality':
       return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  cardinality: ${f.from} (logical) vs ${f.to} (dbt)`;
+    case 'import-relationships-file':
+      return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  not drawn: the diagram does not import ${f.storedIn}`;
     case 'declare-composite-foreign-key': {
       const pairs = f.relationship!.pairs ?? [];
       return `  ${mark} ${f.relationship!.fromModel} (${pairs.map((x) => x.fromColumn).join(', ')}) → ${f.relationship!.toModel} `
@@ -91,7 +93,7 @@ function subjectAreaBlock(d: SubjectAreaDiff, p: Paint): string[] {
     ].filter(Boolean).join(', ');
   const unreadable = new Map(d.unreadableModelFiles.map((u) => [u.name, u]));
   const lines = [`${head} — ${summary}`, ...d.fixes.map((f) => {
-    const u = f.kind === 'fix-model-yaml' ? unreadable.get(f.model) : undefined;
+    const u = f.kind === 'fix-model-yaml' || f.kind === 'fix-dbml-file' ? unreadable.get(f.model) : undefined;
     return u ? `  ${p.red('✗')} ${describeUnreadable(u, 'diff')}` : fixLine(f, p);
   })];
   if (d.modelsWithoutColumns.length > 0) {
@@ -129,7 +131,11 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
   }
   lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'subject area')}, ${plural(r.erd.logicalModels, 'table')}`
-    + (r.erd.semanticDirExists ? ` — file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}` : ''));
+    + (r.erd.semanticDirExists
+      ? (r.erd.storage === 'dbml'
+        ? ' — storage DBML'
+        : ` — storage ${r.erd.storage === 'mixed' ? 'mixed' : 'YAML'}, file naming ${r.erd.naming}${r.erd.tablesFolderIsLayer ? ' (tables/ is a layer folder)' : ''}`)
+      : ''));
   const migration = r.erd.namingMigration;
   if (migration && migration.moves + migration.rewrites > 0) {
     lines.push(`${p.yellow('!')} "Migrate to the New File Naming" in VS Code would `
@@ -138,14 +144,45 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
         .filter(Boolean).join(' and ')
       + (migration.refusals.length > 0 ? ` (not yet: ${migration.refusals.join(' ')})` : ''));
   }
+  const conversion = r.erd.dbmlConversion;
+  if (conversion && (conversion.tables + conversion.diagrams > 0 || conversion.refusals.length > 0 || conversion.v4SubjectAreas.length > 0)) {
+    lines.push(`${p.yellow('!')} "Convert Project to DBML" in VS Code would write `
+      + `${plural(conversion.tables, 'table')}, ${plural(conversion.diagrams, 'diagram')} and ${plural(conversion.relationships, 'relationship')} as DBML`
+      // The counts leave out a v4 file's inline tables and its diagram: the command converts them after its v4 → v5 step.
+      + (conversion.v4SubjectAreas.length > 0
+        ? `, after the v4 → v5 step for ${conversion.v4SubjectAreas.join(', ')}, which also adds ${conversion.v4SubjectAreas.length === 1 ? 'that file\'s' : 'those files\''} tables and ${conversion.v4SubjectAreas.length === 1 ? 'diagram' : 'diagrams'} (not counted here)`
+        : '')
+      + (conversion.refusals.length > 0 ? ` (not yet: ${conversion.refusals.join(' ')})` : ''));
+  }
+  // The files it would leave as they are, each with its problem: what to fix (an empty or non-table .yml,
+  // a name that is not its file's, one table in two files, a column listed twice, …).
+  if (conversion && conversion.refusals.length === 0) {
+    for (const l of conversion.leftAsIs ?? []) {
+      lines.push(`${p.yellow('!')} ${r.semanticDir}/${l.path}${l.line !== undefined ? ` line ${l.line}` : ''}: Convert leaves it as it is until fixed — ${l.problem}`);
+    }
+  }
   for (const c of r.erd.namingConflicts ?? []) {
     lines.push(`${p.red('✗')} ${c.name} is in both ${c.kept} and ${c.ignored} — ${c.kept} is used; keep one`);
   }
   for (const c of r.erd.conflictedDomainFiles) {
     lines.push(`${p.red('✗')} ${c.file} line ${c.line}: ${mergeConflictHumanHint('doctor')}`);
   }
-  for (const u of r.erd.unreadableModelFiles) {
-    lines.push(`${p.red('✗')} ${describeUnreadable(u, 'doctor')}`);
+  // DBML table files are reported once, as DBML problems, below.
+  // A file Convert fixes by itself (a key written twice with the same value) says so, so the two never disagree.
+  const handledByConvert = new Map((conversion?.refusals.length === 0 ? conversion.handled ?? [] : []).map((h) => [`${r.semanticDir}/${h.path}`, h.text]));
+  for (const u of r.erd.unreadableModelFiles.filter((f) => !f.file.toLowerCase().endsWith('.dbml'))) {
+    const handled = handledByConvert.get(u.file);
+    lines.push(`${p.red('✗')} ${describeUnreadable(u, 'doctor')}${handled ? ` ("Convert Project to DBML" fixes it: ${handled.replace(/\.$/, '')})` : ''}`);
+  }
+  // DBML problems by severity: errors first, then warnings.
+  const problems = r.erd.dbmlProblems ?? [];
+  for (const severity of ['error', 'warning'] as const) {
+    for (const d of problems.filter((q) => q.severity === severity)) {
+      if (d.mergeConflict && r.erd.conflictedDomainFiles.some((c) => c.file === d.file)) continue;
+      const where = `${d.file}${d.line !== undefined ? ` line ${d.line}` : ''}`;
+      const text = d.mergeConflict ? mergeConflictHumanHint('doctor') : `${d.message} (${d.code})`;
+      lines.push(`${severity === 'error' ? p.red('✗') : p.yellow('!')} ${where}: ${text}`);
+    }
   }
   for (const a of r.erd.dataTypeAliasFiles) {
     if (a.columns.length > 0) {
@@ -168,6 +205,9 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
       + ` (it starts at ${foreignKeyAtTo(b.cardinality) ? b.toModel : b.fromModel}'s key) — in ${b.domains.join(', ')}`);
   }
   lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
+  if ((r.harness.newer ?? []).length > 0) {
+    lines.push(`${p.yellow('!')} Update ERD Studio: these helper files are from a newer version: ${r.harness.newer.join(', ')}`);
+  }
   lines.push('', 'Next steps:');
   r.nextSteps.forEach((s, i) => {
     lines.push(`  ${i + 1}. ${s.title}${s.command ? ` — ${s.command}` : ''}`);
@@ -182,6 +222,7 @@ function formatLogicalInventory(r: InventoryResult, p: Paint): string {
     const where = t.domains.length > 0 ? p.dim(` — in ${t.domains.join(', ')}`) : p.dim(' — in no subject area');
     lines.push(`    ${t.name}  ${t.unreadable ? p.red('does not parse') : plural(t.columnCount, 'column')}${where}`);
   }
+  if (r.legacyDbmlTree) lines.push(`${p.red('✗')} ${r.legacyDbmlTree}`);
   return lines.join('\n') + '\n';
 }
 
@@ -209,5 +250,6 @@ export function formatInventory(r: InventoryResult, p: Paint): string {
     if (meta.models.length > 0) { lines.push(p.dim(`    models: ${meta.models.map((k) => `${k.key} (${k.count})`).join(', ')}`)); }
     if (meta.columns.length > 0) { lines.push(p.dim(`    columns: ${meta.columns.map((k) => `${k.key} (${k.count})`).join(', ')}`)); }
   }
+  if (r.legacyDbmlTree) lines.push('', `${p.red('✗')} ${r.legacyDbmlTree}`);
   return lines.join('\n') + '\n';
 }

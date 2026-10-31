@@ -36,6 +36,13 @@ import { GETTING_STARTED_VIEW_TYPE, GettingStartedPanel } from '../../src/provid
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { telemetry } from '../../src/services/telemetryService';
+import { clearLogBuffer, hasLogSink, recentLogLines } from '../../src/services/logger';
+
+import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+
+/** The message of the last "Found dbt project" line in the ERD Studio log (it no longer goes to console.log). */
+const lastFoundProjectLine = (): string | undefined =>
+  recentLogLines().filter((l) => l.includes('Found dbt project at')).at(-1)?.replace(/^\S+ \[info\] /, '');
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
@@ -147,6 +154,15 @@ describe('activate() with no folder open (empty window)', () => {
     }
     // No toast on activation: the sidebar's welcome view explains a missing project.
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('registers Format Document for .dbml files once (all four DBML language ids), before the no-project early return', async () => {
+    const before = vscode._formattingProviders.length;
+    await activate(context);
+    const added = vscode._formattingProviders.slice(before);
+    expect(added.map((p) => p.selector)).toEqual([
+      [{ language: 'dbml' }, { language: 'dbml-table' }, { language: 'dbml-relationships' }, { language: 'dbml-diagram' }],
+    ]);
   });
 
   it('still reports an erdStudio.projectPath that points at no dbt project', async () => {
@@ -379,7 +395,8 @@ describe('activate() with a dbt project', () => {
     expect(createTreeView.mock.calls.map((c) => c[0])).toEqual([
       'erdStudio.domainTree',
       'erdStudio.modelLibrary',
-      'erdStudio.myReports',
+      'erdStudio.relationships',
+      'erdStudio.help',
     ]);
     expect(registerDecorations).toHaveBeenCalledTimes(2);
     expect(context.subscriptions.length).toBeGreaterThan(CONTRIBUTED.length * 2);
@@ -407,6 +424,77 @@ describe('activate() with a dbt project', () => {
     provider._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: false });
 
     expect(refreshes).toBeGreaterThan(0);
+  });
+
+  it('refreshes neither tree for a layout-only write (a drag, a layout, a note moved)', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    await activate(context);
+
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider & {
+      _onDidWriteSubjectArea: { fire: (e: { uri: unknown; modelLibraryChanged: boolean; layoutOnly?: boolean }) => void };
+    };
+    const treeOf = (id: string) => (createTreeView.mock.calls.find((c) => c[0] === id)![1] as {
+      treeDataProvider: { onDidChangeTreeData: (cb: () => void) => void };
+    }).treeDataProvider;
+    let refreshes = 0;
+    treeOf('erdStudio.modelLibrary').onDidChangeTreeData(() => { refreshes++; });
+    treeOf('erdStudio.domainTree').onDidChangeTreeData(() => { refreshes++; });
+
+    const uri = vscode.Uri.file(path.join(root, '.erd-studio', 'silver', 'showcase.json'));
+    provider._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: false, layoutOnly: true });
+    expect(refreshes).toBe(0);
+
+    // Anything else still refreshes both.
+    provider._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: false });
+    expect(refreshes).toBeGreaterThanOrEqual(2);
+  });
+
+  it('the ERD Studio view has a provider from where hasProject is set and shows "Loading diagrams…" (no rows) until the real listing, so neither "no data provider" nor "No diagrams yet" shows', async () => {
+    const order: string[] = [];
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    exec.mockImplementation((async (command: string, ...args: unknown[]) => {
+      if (command === 'setContext') order.push(`${String(args[0])}=${String(args[1])}`);
+      return undefined;
+    }) as never);
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView').mockImplementation(((id: string) => {
+      order.push(`createTreeView:${id}`);
+      return { dispose: () => {} };
+    }) as never);
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    // Registered once, right where hasProject is set: before any service,
+    // the canvas's editor provider or any other view.
+    expect(createTreeView.mock.calls.filter((c) => c[0] === 'erdStudio.domainTree')).toHaveLength(1);
+    const at = (entry: string): number => order.indexOf(entry);
+    expect(at('erdStudio.diagramsLoading=true')).toBeLessThan(at('createTreeView:erdStudio.domainTree'));
+    expect(at('erdStudio.hasProject=true')).toBeLessThan(at('createTreeView:erdStudio.domainTree'));
+    expect(at('createTreeView:erdStudio.domainTree')).toBeLessThan(at('erdStudio.hasMultipleDbtProjects=false'));
+    // Both views' loading keys are set before hasProject, so neither empty state can show first.
+    expect(at('erdStudio.tablesLoading=true')).toBeLessThan(at('erdStudio.hasProject=true'));
+    expect(at('erdStudio.tablesLoading=true')).toBeLessThan(at('createTreeView:erdStudio.modelLibrary'));
+    expect(createTreeView.mock.invocationCallOrder[0]).toBeLessThan(registerEditor.mock.invocationCallOrder[0]);
+
+    const tree = (createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.domainTree')![1] as {
+      treeDataProvider: { getChildren(element?: unknown): unknown[] | undefined; onDidChangeTreeData(cb: () => void): void };
+    }).treeDataProvider;
+    let changes = 0;
+    tree.onDidChangeTreeData(() => { changes++; });
+    const loadingKeys = (): string[] => order.filter((o) => o.startsWith('erdStudio.diagramsLoading'));
+    // VS Code's first request, once activation yields: no rows, so the
+    // "Loading diagrams…" welcome shows; the key stays set.
+    expect(tree.getChildren()).toEqual([]);
+    expect(loadingKeys()).toEqual(['erdStudio.diagramsLoading=true']);
+    expect(changes).toBe(0);
+    // A turn later the view is told to list again, and lists the diagrams.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(changes).toBe(1);
+    expect((tree.getChildren() ?? []).length).toBeGreaterThan(0);
+    // A listing with rows never clears the key: VS Code applies it at once
+    // but draws the rows a little later, so "No diagrams yet" flashed.
+    expect(loadingKeys()).toEqual(['erdStudio.diagramsLoading=true']);
+    tree.getChildren();
+    expect(loadingKeys()).toEqual(['erdStudio.diagramsLoading=true']);
   });
 
   it('routes erdStudio.reportBug through the focused canvas instead of input boxes', async () => {
@@ -527,7 +615,7 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(listTree(ws)).toEqual(before);
     expect(fs.existsSync(path.join(ws, 'selectors.yml'))).toBe(false);
     const patterns = vscode._mockFileWatchers.map((w) => (w._pattern as vscode.RelativePattern).pattern);
-    expect(patterns).toEqual(['.erd-studio/**/*.json', '.erd-studio/{logical-models,tables}/**/*.yml']);
+    expect(patterns).toEqual(['.erd-studio/**/*.{json,dbml}', '.erd-studio/{logical-models,tables}/**/*.yml', '.erd-studio/*/tables/*/*.dbml']);
   });
 
   /** Activate in `ws` (holding the logical-only fixture) and open its diagram in the real editor provider. */
@@ -606,30 +694,38 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(listTree(ws)).toEqual([]);
   });
 
-  it('New Diagram works in a folder with no .erd-studio: layers.json first, then the diagram, then it opens', async () => {
+  it('New Diagram works in a folder with no .erd-studio: one Main layer, layers.json first, then the diagram, then it opens', async () => {
     await activate(context);
-    pick.mockImplementation((async (items: Array<{ label: string; value: string }>) =>
-      items.find((i) => i.value === 'gold')) as never);
-    vi.spyOn(vscode.window, 'showInputBox')
-      .mockResolvedValueOnce('orders')
-      .mockResolvedValueOnce('Orders and customers');
+    // The name as people write it; it is saved as `orders`. No description or dbt folder is asked for.
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('Orders');
     const real = vscode.commands.executeCommand;
     const exec = vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) =>
       real(command, ...args)) as never);
 
     await vscode.commands.executeCommand('erdStudio.createDomain');
 
-    // Only the layer QuickPick: no "filter dbt models by folder" in a plain folder.
-    expect(pick).toHaveBeenCalledTimes(1);
-    const layers = JSON.parse(fs.readFileSync(path.join(ws, '.erd-studio', 'layers.json'), 'utf-8')) as { layers: Array<{ id: string }> };
-    expect(layers.layers.map((l) => l.id)).toContain('gold');
-    const domainPath = path.join(ws, '.erd-studio', 'gold', 'orders.json');
-    const domain = JSON.parse(fs.readFileSync(domainPath, 'utf-8')) as { schemaVersion: number; subjectArea: string; description: string };
-    expect(domain).toMatchObject({ schemaVersion: 6, subjectArea: 'orders', description: 'Orders and customers' });
-    expect(listTree(ws)).toEqual(['.erd-studio/', '.erd-studio/gold/', '.erd-studio/gold/orders.json', '.erd-studio/layers.json']);
+    // A new project without dbt starts with one neutral layer, so only the name is asked.
+    expect(pick).not.toHaveBeenCalled();
+    expect(input).toHaveBeenCalledTimes(1);
+    expect((input.mock.calls[0][0] as { prompt: string }).prompt).toBe('Name the diagram. It is saved in the Main layer.');
+    const layers = JSON.parse(fs.readFileSync(path.join(ws, '.erd-studio', 'layers.json'), 'utf-8')) as { layers: Array<{ id: string; label: string }> };
+    expect(layers.layers.map((l) => [l.id, l.label])).toEqual([['main', 'Main']]);
+    // A new project stores its diagrams as DBML (native DBML storage, §3.2) in <layer>/diagrams/, with the README that says what the folder is.
+    const domainPath = path.join(ws, '.erd-studio', 'main', 'diagrams', 'orders.dbml');
+    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'main/diagrams/orders.dbml').obj;
+    expect(domain).toMatchObject({ domain: 'orders', layer: 'main' });
+    expect(listTree(ws)).toEqual([
+      '.erd-studio/', '.erd-studio/README.md', '.erd-studio/layers.json', '.erd-studio/main/', '.erd-studio/main/diagrams/', '.erd-studio/main/diagrams/orders.dbml',
+    ]);
     const opened = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
     expect((opened[0][1] as { fsPath: string }).fsPath).toBe(domainPath);
     expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasSemanticDir', true);
+  });
+
+  it('activation writes no README (and nothing else) in an empty folder: only a create does (§1.7)', async () => {
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(listTree(ws)).toEqual([]);
   });
 
   it('New Diagram cancelled at the name box leaves the folder untouched', async () => {
@@ -651,6 +747,12 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
   });
 
   it('Set Up My AI Helper works in a plain folder: installs the guide and offers to start its no-dbt route', async () => {
+    // The launcher copies the extension's built dist/cli.js. Give it one, so the
+    // test does not depend on `npm run build` having run (it failed without it).
+    const extensionRoot = path.join(root, 'extension');
+    fs.mkdirSync(path.join(extensionRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(extensionRoot, 'dist', 'cli.js'), '// stub\n');
+    (context as { extensionUri: unknown }).extensionUri = vscode.Uri.file(extensionRoot);
     await activate(context);
     await vscode.commands.executeCommand('erdStudio.setupAiHelper');
     const calls = info.mock.calls.filter((c) => String(c[0]).startsWith('AI helper ready'));
@@ -676,11 +778,14 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     await vscode.commands.executeCommand('erdStudio.openExampleDiagram');
 
     expect(input).toHaveBeenCalledTimes(1);
-    expect(pick).not.toHaveBeenCalled(); // the default layers have gold
+    expect(pick).not.toHaveBeenCalled(); // a new project without dbt has one layer, Main
     const confirm = info.mock.calls.find((c) => c.includes('Import'))!;
-    expect(confirm[0]).toBe('Import 6 tables into a new diagram "coffee-shop" in the Gold layer.');
-    const domainPath = path.join(ws, '.erd-studio', 'gold', 'coffee-shop.json');
+    expect(confirm[0]).toBe('Import 6 tables into a new diagram "coffee-shop" in the Main layer.');
+    // A new project stores the example as DBML (native DBML storage, §3.2).
+    const domainPath = path.join(ws, '.erd-studio', 'main', 'diagrams', 'coffee-shop.dbml');
     expect(fs.existsSync(domainPath)).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'tables', 'main', 'fct_orders.dbml'))).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.erd-studio', 'README.md'))).toBe(true);
     expect(fs.existsSync(path.join(ws, '.erd-studio', 'layers.json'))).toBe(true);
     expect(fs.existsSync(path.join(ws, 'coffee-shop.dbml'))).toBe(false); // nothing but the diagram's own files
     const opened = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
@@ -733,6 +838,390 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
       type: 'status',
       payload: expect.objectContaining({ logicalOnly: true, project: expect.objectContaining({ name: 'diagrams' }), domainCount: 1 }),
     }));
+  });
+});
+
+describe('activate() in a native DBML project (S4)', () => {
+  let ws: string;
+  beforeEach(() => {
+    ws = path.join(root, 'dbml');
+    fs.cpSync(path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native'), ws, { recursive: true });
+    openWorkspace(ws);
+  });
+
+  it('sets erdStudio.storage to dbml and shows the Table Library, writes nothing, and opens a .dbml diagram', async () => {
+    const setContext = vi.spyOn(vscode.commands, 'executeCommand');
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    const before = listTree(ws);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(setContext).toHaveBeenCalledWith('setContext', 'erdStudio.storage', 'dbml');
+    expect(setContext).toHaveBeenCalledWith('setContext', 'erdStudio.hasLogicalModelsDir', true);
+    expect(listTree(ws)).toEqual(before);
+
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const file = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
+    const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
+    const panel = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    await panel._simulateMessage({ type: 'ready' });
+    const loaded = panel._postedMessages.find((m) => (m as { type: string }).type === 'domainLoaded') as { payload: { schemaVersion: number } };
+    expect(loaded.payload.schemaVersion).toBe(7);
+    expect(listTree(ws)).toEqual(before);
+  });
+
+  /** The watcher over the semantic dir's diagrams and layouts. */
+  const semanticWatcher = () => vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('{json,dbml}'))!;
+  const foreignToasts = () => warn.mock.calls.filter((c) => String(c[0]).includes('was just added to this DBML project'));
+
+  it('activation writes no README into an existing DBML project that has none (§1.7: only a create writes it)', async () => {
+    fs.rmSync(path.join(ws, '.erd-studio', 'README.md'));
+    const before = listTree(ws);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(listTree(ws)).toEqual(before);
+    expect(fs.existsSync(path.join(ws, '.erd-studio', 'README.md'))).toBe(false);
+  });
+
+  it('the foreign-format toast is never raised by ERD Studio\'s own New Diagram (§5.4)', async () => {
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    // New Diagram writes a .dbml in a DBML project (S6), never a foreign format.
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value: string }>) =>
+      items.find((i) => i.value === 'gold')) as never);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('orders').mockResolvedValueOnce('');
+    await vscode.commands.executeCommand('erdStudio.createDomain');
+    const created = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'orders.dbml');
+    expect(fs.existsSync(created)).toBe(true);
+    semanticWatcher()._simulateCreate(vscode.Uri.file(created));
+    await vi.advanceTimersByTimeAsync(400);
+    expect(foreignToasts()).toHaveLength(0);
+    expect(featureOnce).not.toHaveBeenCalledWith('dbmlForeignFormatWarned');
+  });
+
+  it('the foreign-format toast: once per session for a .json or .yml someone else adds, with the Update action, counted once', async () => {
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const external = path.join(ws, '.erd-studio', 'gold', 'from_helper.json');
+    fs.writeFileSync(external, '{"schemaVersion": 5, "domain": "from_helper", "layer": "gold", "logical": {"models": []}}\n');
+    semanticWatcher()._simulateCreate(vscode.Uri.file(external));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(foreignToasts()).toHaveLength(1);
+    expect(foreignToasts()[0][0]).toContain('(.erd-studio/gold/from_helper.json)');
+    // A teammate or another window on an older ERD Studio is as likely as a helper,
+    // and no release number is named (a 1.9 pre-release user reads this too).
+    expect(foreignToasts()[0][0]).toContain('or by a teammate or another window on an older ERD Studio');
+    expect(foreignToasts()[0][0]).not.toMatch(/\b2\.0\b/);
+    expect(foreignToasts()[0].slice(1)).toEqual(['Update AI Helper Files', 'Not Now']);
+    expect(featureOnce).toHaveBeenCalledWith('dbmlForeignFormatWarned');
+
+    const yml = path.join(ws, '.erd-studio', 'tables', 'gold', 'dim_new.yml');
+    fs.mkdirSync(path.dirname(yml), { recursive: true });
+    fs.writeFileSync(yml, 'name: dim_new\ncolumns: []\n');
+    for (const w of vscode._mockFileWatchers) w._simulateCreate(vscode.Uri.file(yml));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(foreignToasts()).toHaveLength(1);
+    expect(featureOnce.mock.calls.filter((c) => c[0] === 'dbmlForeignFormatWarned')).toHaveLength(1);
+  });
+
+  it('"Subject area file deleted": not for a diagram whose name is back as .json (Undo of Convert), still for one really deleted', async () => {
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const deletedToasts = () => info.mock.calls.filter((c) => /diagram files? deleted/i.test(String(c[0])));
+
+    // Undo of Convert Project to DBML: the .json comes back and the .dbml goes.
+    const salesDbml = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
+    fs.writeFileSync(path.join(ws, '.erd-studio', 'gold', 'sales.json'), '{"schemaVersion": 5, "domain": "sales", "layer": "gold", "logical": {"models": []}}\n');
+    fs.rmSync(salesDbml);
+    semanticWatcher()._simulateDelete(vscode.Uri.file(salesDbml));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(deletedToasts()).toHaveLength(0);
+
+    // A diagram the user deletes: the toast, as before.
+    const staging = path.join(ws, '.erd-studio', 'silver', 'diagrams', 'staging.dbml');
+    fs.rmSync(staging);
+    semanticWatcher()._simulateDelete(vscode.Uri.file(staging));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(deletedToasts()).toHaveLength(1);
+    expect(deletedToasts()[0][0]).toBe('Diagram file deleted. Regenerate dbt selectors.yml to drop the removed diagram from the selector set.');
+  });
+
+  it('a burst of outside table-file changes (Edit > Undo of Convert) builds the library index and refreshes each view and canvas O(1) times', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const tables = (provider as unknown as { tableLibraryService: { indexBuilds: number } }).tableLibraryService;
+    const file = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
+    const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
+    const panel = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    await panel._simulateMessage({ type: 'ready' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const treeOf = (id: string) => (createTreeView.mock.calls.find((c) => c[0] === id)![1] as {
+      treeDataProvider: { onDidChangeTreeData: (cb: () => void) => void };
+    }).treeDataProvider;
+    let treeRefreshes = 0;
+    treeOf('erdStudio.domainTree').onDidChangeTreeData(() => { treeRefreshes++; });
+    treeOf('erdStudio.modelLibrary').onDidChangeTreeData(() => { treeRefreshes++; });
+    const sends = (): number => panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
+    const sendsBefore = sends();
+    const buildsBefore = tables.indexBuilds;
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('/tables/*/*.dbml'))!;
+
+    // 300 table files appear over ~2.5 s, a few at a time, as VS Code's Undo writes them.
+    const N = 300;
+    for (let i = 0; i < N; i++) {
+      const tableFile = path.join(ws, '.erd-studio', 'gold', 'tables', 'gold', `t_${i}.dbml`);
+      fs.writeFileSync(tableFile, `Table gold.t_${i} {\n  id int [pk]\n}\n`);
+      tableWatcher._simulateCreate(vscode.Uri.file(tableFile));
+      if (i % 10 === 9) await vi.advanceTimersByTimeAsync(80);
+    }
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(tables.indexBuilds - buildsBefore).toBeLessThanOrEqual(2);
+    // Once each, when the burst settles: the ERD Studio view and the Table Library, and the open canvas.
+    expect(treeRefreshes).toBe(2);
+    expect(sends() - sendsBefore).toBe(1);
+  });
+
+  it('a burst of outside table-file deletions (Edit > Undo of Convert) whose folder changed just now builds the library index O(1) times, not once per table', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    // 120 tables of the library, written before the window opened.
+    const gold = path.join(ws, '.erd-studio', 'gold', 'tables', 'gold');
+    const N = 120;
+    const tableFiles = Array.from({ length: N }, (_, i) => path.join(gold, `t_${i}.dbml`));
+    for (const [i, tableFile] of tableFiles.entries()) fs.writeFileSync(tableFile, `Table gold.t_${i} {\n  id int [pk]\n}\n`);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const tables = (provider as unknown as { tableLibraryService: { indexBuilds: number } }).tableLibraryService;
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('/tables/*/*.dbml'))!;
+
+    // VS Code's Undo deletes them; the folder's mtime is a whole second (a
+    // coarse file system clock), so every index built in the next 2 s is
+    // racy: listed again on its next use, as when the Undo is still
+    // deleting while the batch runs.
+    for (const tableFile of tableFiles) {
+      fs.rmSync(tableFile);
+      tableWatcher._simulateDelete(vscode.Uri.file(tableFile));
+    }
+    const wholeSecond = Math.floor(Date.now() / 1000) + 1;
+    fs.utimesSync(gold, wholeSecond, wholeSecond);
+    const buildsBefore = tables.indexBuilds;
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    // One look at the library for the batch, one for the context keys when
+    // the burst settles, and the background warm-up's few while the folder is
+    // still racy — never one (or four) per table, as before (489 here).
+    expect(tables.indexBuilds - buildsBefore).toBeLessThanOrEqual(10);
+  });
+
+  it('a canvas redraw asked for during a burst of ERD Studio\'s own writes (Convert) is made once the burst settles', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const file = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
+    const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
+    const panel = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    await panel._simulateMessage({ type: 'ready' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const sends = (): number => panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
+    const sendsBefore = sends();
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('/tables/*/*.dbml'))!;
+
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const ownBurst = (from: number): void => {
+      for (let i = from; i < from + 40; i++) {
+        const tableFile = path.join(ws, '.erd-studio', 'gold', 'tables', 'gold', `t_${i}.dbml`);
+        fs.writeFileSync(tableFile, `Table gold.t_${i} {\n  id int [pk]\n}\n`);
+        ownWrites.recordWrite(tableFile);
+        tableWatcher._simulateCreate(vscode.Uri.file(tableFile));
+      }
+    };
+
+    // Our own writes alone, nothing asked for meanwhile: no redraw.
+    ownBurst(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sends() - sendsBefore).toBe(0);
+
+    // Convert's files: their events arrive while it is still saving, so the
+    // bulk change outlasts Convert's own hold, and the redraw Convert asks for
+    // after its write (onConverted) is held. It is made when the burst settles.
+    ownBurst(100);
+    await provider.refreshAllOpenSubjectAreas();
+    expect(sends() - sendsBefore).toBe(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sends() - sendsBefore).toBe(1);
+  });
+
+  it('a Cmd+Z on a canvas during a bulk change is flushed when it settles, never dropped; an undo in another file\'s own tab stays the user\'s', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const file = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
+    const otherFile = path.join(ws, '.erd-studio', 'silver', 'diagrams', 'staging.dbml');
+    const doc = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
+    const otherDoc = vscode.createMockTextDocument(otherFile, fs.readFileSync(otherFile, 'utf-8'));
+    vscode.workspace.textDocuments.push(otherDoc);
+    const panel = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    await panel._simulateMessage({ type: 'ready' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const sends = (): number => panel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded').length;
+    const sendsBefore = sends();
+    const tableWatcher = vscode._mockFileWatchers.find((w) => JSON.stringify(w._pattern ?? '').includes('/tables/*/*.dbml'))!;
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+
+    // A big edit's own writes (a rename across many tables): a bulk change, which holds the canvas.
+    for (let i = 0; i < 40; i++) {
+      const tableFile = path.join(ws, '.erd-studio', 'gold', 'tables', 'gold', `t_${i}.dbml`);
+      fs.writeFileSync(tableFile, `Table gold.t_${i} {\n  id int [pk]\n}\n`);
+      ownWrites.recordWrite(tableFile);
+      tableWatcher._simulateCreate(vscode.Uri.file(tableFile));
+    }
+    // Meanwhile: an undo typed in another diagram's own tab (the canvas is not
+    // in front), then Cmd+Z on the canvas.
+    panel.active = false;
+    (otherDoc as unknown as { _setText(t: string): void })._setText(`${otherDoc.getText()}\n`);
+    await vscode._fireDidChangeTextDocument(otherDoc, vscode.TextDocumentChangeReason.Undo);
+    panel.active = true;
+    (doc as unknown as { _setText(t: string): void })._setText(`${doc.getText()}\n`);
+    await vscode._fireDidChangeTextDocument(doc, vscode.TextDocumentChangeReason.Undo);
+    expect(doc.isDirty).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    // The canvas's undo is saved and drawn; the other tab's is left for the user.
+    expect(doc.isDirty).toBe(false);
+    expect(sends() - sendsBefore).toBe(1);
+    expect(otherDoc.isDirty).toBe(true);
+  });
+
+  it('the foreign-format toast is not raised outside a DBML project', async () => {
+    for (const layer of ['gold', 'silver']) {
+      for (const dir of ['tables', 'relationships', 'diagrams']) fs.rmSync(path.join(ws, '.erd-studio', layer, dir), { recursive: true, force: true });
+    }
+    fs.mkdirSync(path.join(ws, '.erd-studio', 'logical-models'), { recursive: true });
+    fs.writeFileSync(path.join(ws, '.erd-studio', 'logical-models', 'dim_a.yml'), 'name: dim_a\ncolumns: []\n');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const external = path.join(ws, '.erd-studio', 'gold', 'from_helper.json');
+    fs.writeFileSync(external, '{"schemaVersion": 5, "domain": "from_helper", "layer": "gold", "logical": {"models": []}}\n');
+    semanticWatcher()._simulateCreate(vscode.Uri.file(external));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(foreignToasts()).toHaveLength(0);
+  });
+
+  it('a change to a diagram (its erd_layout included) reaches its canvas through its document: the watcher redraws nothing; a .dbdiagram is not watched', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const refresh = vi.spyOn(provider, 'refreshSubjectAreaPanel').mockResolvedValue(undefined as never);
+    const diagram = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
+    semanticWatcher()._simulateChange(vscode.Uri.file(diagram));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(refresh).not.toHaveBeenCalled();
+    semanticWatcher()._simulateChange(vscode.Uri.file(path.join(ws, '.erd-studio', 'gold', 'sales.dbdiagram')));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('a .dbdiagram changed outside ERD Studio refreshes neither sidebar tree (it is no file of the project)', async () => {
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    vi.spyOn(provider, 'refreshSubjectAreaPanel').mockResolvedValue(undefined as never);
+    const treeOf = (id: string) => (createTreeView.mock.calls.find((c) => c[0] === id)![1] as {
+      treeDataProvider: { onDidChangeTreeData: (cb: () => void) => void };
+    }).treeDataProvider;
+    let refreshes = 0;
+    treeOf('erdStudio.modelLibrary').onDidChangeTreeData(() => { refreshes++; });
+    treeOf('erdStudio.domainTree').onDidChangeTreeData(() => { refreshes++; });
+    semanticWatcher()._simulateChange(vscode.Uri.file(path.join(ws, '.erd-studio', 'gold', 'sales.dbdiagram')));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(refreshes).toBe(0);
+    semanticWatcher()._simulateChange(vscode.Uri.file(path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml')));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(refreshes).toBeGreaterThan(0);
+  });
+
+  it('a tables layer in layers.json is no conflict any more: no toast (the DBML tree lives under the layers)', async () => {
+    const layersFile = path.join(ws, '.erd-studio', 'layers.json');
+    const layers = JSON.parse(fs.readFileSync(layersFile, 'utf-8'));
+    layers.layers.push({ id: 'tables', label: 'Tables', abbreviation: 'TBL', color: '#888888', creatable: true, order: 3 });
+    fs.writeFileSync(layersFile, JSON.stringify(layers, null, 2));
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('tables/'))).toEqual([]);
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('1.9 pre-release'))).toEqual([]);
+  });
+});
+
+describe('activate() in a 1.9 pre-release DBML tree (§1.8)', () => {
+  let ws: string;
+  beforeEach(() => {
+    ws = path.join(root, 'old');
+    fs.cpSync(path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-1.9-tree'), ws, { recursive: true });
+    openWorkspace(ws);
+  });
+
+  const legacyToasts = () => warn.mock.calls.filter((c) => String(c[0]).includes('written by an ERD Studio 1.9 pre-release'));
+
+  it('warns once per session, with the steps, however often the context keys refresh; reads no 1.9 file as a table', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    const before = listTree(ws);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(legacyToasts()).toHaveLength(1);
+    const message = String(legacyToasts()[0][0]);
+    expect(message.startsWith("ERD Studio: This project's DBML files were written by an ERD Studio 1.9 pre-release")).toBe(true);
+    expect(message).toContain('gold/sales.dbdiagram');
+    expect(message).toContain('Then run ERD Studio: Convert Project to DBML again.');
+    // More refreshes (a layer added, a file changed) never repeat it.
+    const layersJson = vscode.Uri.file(path.join(ws, '.erd-studio', 'layers.json'));
+    for (let i = 0; i < 3; i++) {
+      for (const w of vscode._mockFileWatchers) w._simulateChange(layersJson);
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    expect(legacyToasts()).toHaveLength(1);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const library = (provider as unknown as { tableLibraryService: { listTableFiles(): unknown[]; listRelationshipsFiles(): unknown[] } }).tableLibraryService;
+    expect(library.listTableFiles()).toEqual([]);
+    expect(library.listRelationshipsFiles()).toEqual([]);
+    expect(listTree(ws)).toEqual(before);
+  });
+
+  it('a project in the layer-first tree gets no 1.9 toast', async () => {
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.cpSync(path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native'), ws, { recursive: true });
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(legacyToasts()).toHaveLength(0);
   });
 });
 
@@ -970,7 +1459,7 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
     // The gold domain keeps the gold file, byte for byte.
     expect(fs.readFileSync(path.join(erd(), 'gold', 'reporting.json'), 'utf-8')).toBe(goldDomainBefore);
     expect(fs.existsSync(path.join(lib(), 'gold', 'date.yml'))).toBe(true);
-    expect(info).toHaveBeenCalledWith(expect.stringMatching(/"silver_date" \(warehouse table: date\)\. Repointed 1 subject area\.$/));
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/"silver_date" \(warehouse table: date\)\. Updated 1 diagram\.$/));
   });
 
   it('changes nothing when the confirmation is dismissed', async () => {
@@ -996,6 +1485,35 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
     expect(error).toHaveBeenCalledWith('VS Code rejected the rename; nothing was changed.');
     expect(fs.existsSync(ignored())).toBe(true);
     expect(readJson(path.join(erd(), 'silver', 'calendar.json')).logical.models).toContain('date');
+  });
+
+  it('a rename VS Code applies only part of is put back before it says nothing was changed (D23)', async () => {
+    const silverBefore = fs.readFileSync(path.join(erd(), 'silver', 'calendar.json'), 'utf-8');
+    const ignoredBefore = fs.readFileSync(ignored(), 'utf-8');
+    await activate(context);
+    answer('Rename');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    // The new file lands, then the edit fails; the reconcile applies.
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1);
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(error).toHaveBeenCalledWith('VS Code rejected the rename; nothing was changed.');
+    expect(fs.existsSync(path.join(lib(), 'silver', 'silver_date.yml'))).toBe(false);
+    expect(fs.readFileSync(ignored(), 'utf-8')).toBe(ignoredBefore);
+    expect(fs.readFileSync(path.join(erd(), 'silver', 'calendar.json'), 'utf-8')).toBe(silverBefore);
+  });
+
+  it('when the reconcile cannot put a file back either, only its modal speaks', async () => {
+    await activate(context);
+    answer('Rename');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*silver_date\.yml.*Restore these from source control\.$/), { modal: true });
   });
 
   it('reports and counts a repointed diagram it could not save as a rename save failure', async () => {
@@ -1036,6 +1554,70 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
   });
 });
 
+describe('erdStudio.renameDomain on a JSON diagram (D23: one edit through applyFileWrites)', () => {
+  const erd = (...p: string[]) => path.join(root, '.erd-studio', ...p);
+  const element = () => ({ type: 'domain', summary: { domain: 'bob', layer: 'silver', filePath: erd('silver', 'bob.json'), storage: 'json' } });
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+  });
+
+  it('renames the file, recording both halves as its own writes', async () => {
+    await activate(context);
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const written = vi.spyOn(ownWrites, 'recordWrite');
+    const deleted = vi.spyOn(ownWrites, 'recordDelete');
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('robert');
+    await vscode.commands.executeCommand('erdStudio.renameDomain', element());
+    expect(fs.existsSync(erd('silver', 'bob.json'))).toBe(false);
+    expect(JSON.parse(fs.readFileSync(erd('silver', 'robert.json'), 'utf-8')).domain).toBe('robert');
+    expect(written).toHaveBeenCalledWith(erd('silver', 'robert.json'));
+    expect(deleted).toHaveBeenCalledWith(erd('silver', 'bob.json'));
+  });
+
+  it('refreshes the table library and open canvases itself, since the watcher skips its own writes', async () => {
+    await activate(context);
+    const { TableLibraryTreeProvider } = await import('../../src/providers/ModelLibraryTreeProvider');
+    const { SemanticEditorProvider } = await import('../../src/providers/SemanticEditorProvider');
+    const library = vi.spyOn(TableLibraryTreeProvider.prototype, 'refresh');
+    const presence = vi.spyOn(SemanticEditorProvider.prototype, 'syncSubjectAreaFilePresence');
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('robert');
+    await vscode.commands.executeCommand('erdStudio.renameDomain', element());
+    expect(fs.existsSync(erd('silver', 'robert.json'))).toBe(true);
+    expect(library).toHaveBeenCalled();
+    expect(presence).toHaveBeenCalled();
+  });
+
+  it('an edit VS Code applies only part of is put back before it says nothing was changed', async () => {
+    const before = fs.readFileSync(erd('silver', 'bob.json'), 'utf-8');
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('robert');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    // The new file lands, then the delete fails; the reconcile applies.
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1);
+    await vscode.commands.executeCommand('erdStudio.renameDomain', element());
+    // #229's words: VS Code refused it, with Try Again and Send Feedback.
+    expect(error).toHaveBeenCalledWith(
+      'VS Code didn\'t accept renaming "bob" to "robert", usually because another program has the file open ' +
+        "or ERD Studio isn't allowed to write to that folder. Nothing was changed.",
+      'Try Again', 'Send Feedback',
+    );
+    expect(fs.existsSync(erd('silver', 'robert.json'))).toBe(false);
+    expect(fs.readFileSync(erd('silver', 'bob.json'), 'utf-8')).toBe(before);
+  });
+
+  it('when the reconcile cannot put a file back either, only its modal speaks', async () => {
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('robert');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
+    await vscode.commands.executeCommand('erdStudio.renameDomain', element());
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*robert\.json.*Restore these from source control\.$/), { modal: true });
+  });
+});
+
 describe('activate() project-root resolution', () => {
   it('reads projectPath through getErdStudioSetting, so a legacy dbtSemantic.projectPath still wins over auto-detection', async () => {
     // Two candidate projects: auto-detection would pick "a" (shallowest, sorted first);
@@ -1047,7 +1629,7 @@ describe('activate() project-root resolution', () => {
 
     await activate(context);
 
-    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${path.join(root, 'b')}`);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${path.join(root, 'b')}`);
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Open a folder first'), expect.anything());
   });
 
@@ -1060,7 +1642,7 @@ describe('activate() project-root resolution', () => {
 
     await activate(context);
 
-    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${path.join(root, 'a')}`);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${path.join(root, 'a')}`);
   });
 });
 
@@ -1132,7 +1714,7 @@ describe('Select dbt Project… (#82)', () => {
     const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
     context = makeContext(root, { workspaceState: ws });
     await activate(context);
-    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${a}`);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${a}`);
 
     const quickPick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(
       (async (items: Pick[]) => items.find((i) => i.projectRoot === b)) as never,
@@ -1159,14 +1741,14 @@ describe('Select dbt Project… (#82)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
     await activate(context);
-    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${b}`);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${b}`);
   });
 
   it('Auto-detect clears the pick and reloads back to the auto-detected project', async () => {
     const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], ['erdStudio.selectedProjectRoot', b]]);
     context = makeContext(root, { workspaceState: ws });
     await activate(context);
-    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${b}`);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${b}`);
 
     vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(
       (async (items: Pick[]) => items.find((i) => i.label.includes('Auto-detect'))) as never,
@@ -1236,7 +1818,7 @@ describe('Welcome panel: commands', () => {
     expect(count('erdStudio.showGettingStarted')).toBe(1);
     expect(registered().indexOf('erdStudio.showGettingStarted')).toBe(1);
     expect(PRE_REGISTERED_COMMANDS).toEqual(
-      new Set(['erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject']),
+      new Set(['erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject', 'erdStudio.showLogs']),
     );
     // setupAiHelper needs a project: it gets the standard no-project stub instead.
     expect(count('erdStudio.setupAiHelper')).toBe(1);
@@ -1397,6 +1979,15 @@ describe('Welcome panel: first run', () => {
     expect(step('newDiagram').description).toContain('(command:erdStudio.createDomain)');
     // The example is a second button in the same step, not a step of its own.
     expect(step('newDiagram').description).toContain('[Open Example Diagram](command:erdStudio.openExampleDiagram)');
+    // Native DBML storage (2.0): format-neutral, because the step also shows in a YAML project from before 2.0;
+    // its picture shows a new project, which is DBML.
+    expect(step('newDiagram').description).toContain('Each table is a file in .erd-studio/');
+    expect(step('newDiagram').description).not.toMatch(/YAML|JSON/);
+    expect((step('newDiagram').media as { altText?: string }).altText).toContain('the DBML files a new project keeps it in');
+    const svg = fs.readFileSync(path.join(REPO_ROOT, step('newDiagram').media.svg), 'utf-8');
+    // The layer-first tree: <layer>/diagrams/, <layer>/tables/<schema>/, <layer>/relationships/.
+    for (const file of ['gold/', 'diagrams/', 'sales.dbml', 'tables/', 'customer.dbml', 'relationships/', 'gold.dbml']) expect(svg).toContain(`>${file}</text>`);
+    expect(svg).not.toMatch(/\.yml<|sales\.json<|\.dbdiagram<|_relationships\.dbml</);
     expect(step('importDbml').description).toContain('(command:erdStudio.importDbml)');
     expect(step('draw').description).toContain('(command:erdStudio.drawFromDbt)');
     expect(step('sample').description).toContain('(command:erdStudio.trySampleProject)');
@@ -1553,21 +2144,21 @@ describe('erdStudio.drawFromDbt', () => {
     expect((input.mock.calls[0][0] as { value: string; prompt: string }).value).toBe('silver');
     expect((input.mock.calls[0][0] as { prompt: string }).prompt).toContain('Silver layer');
     expect(fs.existsSync(path.join(erd(), 'layers.json'))).toBe(true);
-    const domainPath = path.join(erd(), 'silver', 'silver.json');
-    // A new project is written in the v6 naming (#182).
-    const domain = JSON.parse(fs.readFileSync(domainPath, 'utf-8')) as {
-      schemaVersion: number; subjectArea: string; layer: string; logical: { tables: string[]; relationships: unknown[] }; viewConfig: unknown;
+    // A new project is written as DBML (native DBML storage, §3.2).
+    const domainPath = path.join(erd(), 'silver', 'diagrams', 'silver.dbml');
+    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'silver/diagrams/silver.dbml').obj as {
+      domain: string; layer: string; logical: { models: string[]; relationships: unknown[] };
     };
-    expect(domain.schemaVersion).toBe(6);
-    expect(domain.subjectArea).toBe('silver');
+    expect(domain.domain).toBe('silver');
     expect(domain.layer).toBe('silver');
-    expect(domain.viewConfig).toEqual({}); // fresh: the canvas lays it out on first open
-    expect(domain.logical.tables.length).toBeGreaterThan(1);
-    expect(domain.logical.tables).not.toContain('dim_region'); // a .sql with no columns to copy
-    // An empty library is grouped by layer from the start, in tables/.
-    for (const model of domain.logical.tables) {
-      expect(fs.existsSync(path.join(erd(), 'tables', 'silver', `${model}.yml`)), model).toBe(true);
+    expect(fs.readFileSync(domainPath, 'utf-8')).not.toContain('erd_layout'); // fresh: the canvas lays it out on first open
+    expect(domain.logical.models.length).toBeGreaterThan(1);
+    expect(domain.logical.models).not.toContain('dim_region'); // a .sql with no columns to copy
+    // Each table in the layer's own tables, its schema the layer (the models set no custom schema), and the README.
+    for (const model of domain.logical.models) {
+      expect(fs.existsSync(path.join(erd(), 'silver', 'tables', 'silver', `${model}.dbml`)), model).toBe(true);
     }
+    expect(fs.existsSync(path.join(erd(), 'README.md'))).toBe(true);
     expect(fs.existsSync(lib())).toBe(false);
     expect(opened()).toHaveLength(1);
     expect(String((opened()[0][1] as { fsPath: string }).fsPath)).toBe(domainPath);
@@ -1613,7 +2204,7 @@ describe('erdStudio.drawFromDbt', () => {
     await vscode.commands.executeCommand('erdStudio.drawFromDbt');
 
     const validate = (input.mock.calls[0][0] as { validateInput: (v: string) => string | undefined }).validateInput;
-    expect(validate('showcase')).toContain('already exists in the silver layer');
+    expect(validate('showcase')).toBe('There is already a diagram named "showcase" in this layer');
     expect(validate('Bad Name')).toBeDefined();
     expect(validate('brand-new')).toBeUndefined();
   });
@@ -1727,6 +2318,37 @@ describe('existing-diagrams notice', () => {
     expect(nudgeCalls(info)).toHaveLength(0);
   });
 
+  it('comes before the AI helper offer, which waits for the next window and is a notification, not a picker', async () => {
+    // No AI helper files yet, and neither prompt offered in this workspace.
+    fs.rmSync(path.join(root, '.claude'), { recursive: true, force: true });
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { workspaceState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
+    const offers = () => info.mock.calls.filter((c) => String(c[0]).startsWith('Let your AI assistant'));
+
+    await activate(context);
+    expect(nudgeCalls(info)).toHaveLength(1);
+    expect(offers()).toEqual([]);
+    expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBeUndefined();
+
+    tearDownActivation();
+    info.mockClear();
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    info.mockImplementation((async (message: string) =>
+      (message.startsWith('Let your AI assistant') ? 'Set Up My AI Helper' : undefined)) as never);
+    await activate(context);
+    expect(nudgeCalls(info)).toEqual([]);
+    expect(offers()).toEqual([[
+      'Let your AI assistant read and write these diagrams? ERD Studio can add a guide for it to this project.',
+      'Set Up My AI Helper', 'Not now',
+    ]]);
+    expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBe(true);
+    expect(pick).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.setupAiHelper'));
+    exec.mockRestore();
+  });
+
   it('is not shown while a diagram is already open', async () => {
     const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
     context = makeContext(root, { workspaceState });
@@ -1823,5 +2445,51 @@ describe('erdStudio.exportDiagram', () => {
     expect(shown).toHaveBeenCalledWith(
       ".erd-studio/silver/missing.json can't be exported because the diagram file has a problem: it was deleted or renamed.",
     );
+  });
+});
+
+describe('ERD Studio output channel and Show Logs', () => {
+  const logChannels = () => vscode._outputChannels.filter((c) => c.name === 'ERD Studio');
+
+  it('works in an empty window: the channel is the log sink and Show Logs opens it', async () => {
+    clearLogBuffer();
+    const before = logChannels().length;
+    await activate(context);
+
+    expect(logChannels()).toHaveLength(before + 1);
+    expect(hasLogSink()).toBe(true);
+    expect(count('erdStudio.showLogs')).toBe(1);
+    // Registered after the three that must come first; reportBug stays registered()[0].
+    expect(registered()[0]).toBe('erdStudio.reportBug');
+    const channel = logChannels().at(-1)!;
+    expect(channel._lines.some((l) => /\[info\] ERD Studio .* activating \(VS Code /.test(l))).toBe(true);
+
+    await vscode.commands.executeCommand('erdStudio.showLogs');
+    expect(channel._shown).toBe(1);
+  });
+
+  it('logs what kind of project opened: storage, table and diagram counts, dbt or not', async () => {
+    clearLogBuffer();
+    openWorkspace(FIXTURE_ROOT);
+    await activate(context);
+    const summary = recentLogLines().find((l) => l.includes('Project: '));
+    expect(summary).toMatch(/Project: (DBML|YAML|mixed \(DBML and YAML\)) storage, \d+ table file\(s\), \d+ diagram\(s\), dbt project; project read \d+ ms into activation/);
+  });
+
+  it('logs the whole activation time at the end of activate(), after the project summary', async () => {
+    clearLogBuffer();
+    openWorkspace(FIXTURE_ROOT);
+    await activate(context);
+    const lines = recentLogLines();
+    const total = lines.findIndex((l) => /\[info\] Activated in \d+ ms$/.test(l));
+    expect(total).toBeGreaterThan(lines.findIndex((l) => l.includes('Project: ')));
+  });
+
+  it('disposing the extension unplugs the sink', async () => {
+    await activate(context);
+    expect(hasLogSink()).toBe(true);
+    for (const sub of [...context.subscriptions].reverse()) await sub.dispose();
+    context.subscriptions.length = 0;
+    expect(hasLogSink()).toBe(false);
   });
 });

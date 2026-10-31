@@ -443,7 +443,7 @@ describe('loadDisplaySubjectArea', () => {
       { maxYamlChars: 200, warn },
     ).result;
     expect(domain.models.map((m) => [m.name, m.columns.length])).toEqual([['big', 0], ['small', 1]]);
-    expect(warn).toHaveBeenCalledWith('Model "big" not found in logical-models/');
+    expect(warn).toHaveBeenCalledWith('Model "big" not found in the table library');
   });
 
   it('shows a model over maxYamlNodes, or with a YAML error, as a placeholder', async () => {

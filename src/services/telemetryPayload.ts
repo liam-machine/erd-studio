@@ -192,9 +192,9 @@ export const FEATURES = [
   'exportCancelled',
   // A project state, not a cancel: run with no canvas focused and no diagram to pick.
   'exportNoDiagrams',
-  // DBML round trip: the rich export (with its .dbdiagram layout), Export All
-  // Diagrams…, and Import DBML… — a completed import, one that also read a
-  // layout file, a cancel at any step, and a file DBML could not read (the
+  // DBML round trip: the rich export (positions in its erd_layout), Export All
+  // Diagrams…, and Import DBML… — a completed import, one whose file had an
+  // erd_layout, a cancel at any step, and a file DBML could not read (the
   // user's file, not a failure of ours). A failure is `importDbmlFailed`.
   'exportDbmlRich',
   'exportAll',
@@ -208,6 +208,19 @@ export const FEATURES = [
   'logicalOnlyProject',
   'exampleDiagram',
   'blankDiagram',
+  // Native DBML storage (2.0): a DBML project was open (presence, once a day);
+  // Convert Project to DBML finished; its offer was shown and answered
+  // (declined for good, or Not Now); the command was closed before it wrote,
+  // or refused the project (a user's state, not a failure); and the toast
+  // that an older helper wrote a .yml or .json into a DBML project.
+  'dbmlProject',
+  'convertToDbml',
+  'convertToDbmlOffered',
+  'convertToDbmlDeclined',
+  'convertToDbmlNotNow',
+  'convertToDbmlCancelled',
+  'convertToDbmlRefused',
+  'dbmlForeignFormatWarned',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -330,6 +343,15 @@ export const ERROR_CODES = [
   'saveFailedUndoRedo',
   // Import DBML… could not write the new diagram (appended after the saveFailed split).
   'importDbmlFailed',
+  // Native DBML storage (2.0): why a .dbml table file failed, counted beside
+  // modelFileParse (a DBML syntax error, a file DBML rejects, a file that is
+  // not one self-contained Table); a .dbml diagram DBML could not read,
+  // beside domainLoad; and Convert Project to DBML failed while writing.
+  'modelFileDbmlSyntax',
+  'modelFileDbmlInvalid',
+  'modelFileDbmlStructure',
+  'domainLoadDbml',
+  'convertToDbmlFailed',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
@@ -792,6 +814,9 @@ const TABLE_FILE_ERROR_CODES: Record<TableLoadErrorKind, TelemetryErrorCode> = {
   yamlStructure: 'modelFileYamlStructure',
   yamlDuplicateKey: 'modelFileYamlDuplicateKey',
   yamlOther: 'modelFileYamlOther',
+  dbmlSyntax: 'modelFileDbmlSyntax',
+  dbmlInvalid: 'modelFileDbmlInvalid',
+  dbmlStructure: 'modelFileDbmlStructure',
 };
 
 /** The error sub-code counted for a model-file failure of `kind`; recorded alongside `modelFileParse`. */
@@ -803,9 +828,10 @@ export function tableFileErrorCode(kind: TableLoadErrorKind): TelemetryErrorCode
  * Why a canvas could not load its domain: not a domain path, the file is gone
  * or cannot be read, its text is not JSON, it is empty, it holds git conflict
  * markers, it is JSON that fails validation (schema version, format, layer),
- * or anything else threw.
+ * anything else threw, or (native DBML storage) a `.dbml` diagram's text is
+ * not DBML ERD Studio can read.
  */
-export type SubjectAreaLoadFailure = 'notDomain' | 'missing' | 'unreadable' | 'json' | 'empty' | 'conflict' | 'invalid' | 'internal';
+export type SubjectAreaLoadFailure = 'notDomain' | 'missing' | 'unreadable' | 'json' | 'empty' | 'conflict' | 'invalid' | 'internal' | 'dbml';
 
 const SUBJECT_AREA_LOAD_ERROR_CODES: Record<SubjectAreaLoadFailure, TelemetryErrorCode> = {
   notDomain: 'domainLoadNotDomain',
@@ -816,6 +842,7 @@ const SUBJECT_AREA_LOAD_ERROR_CODES: Record<SubjectAreaLoadFailure, TelemetryErr
   conflict: 'domainLoadConflict',
   invalid: 'domainLoadInvalid',
   internal: 'domainLoadInternal',
+  dbml: 'domainLoadDbml',
 };
 
 /** The error sub-code counted for a canvas load failure of `kind`; recorded alongside `domainLoad`. */

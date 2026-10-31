@@ -14,9 +14,19 @@
  * `addExistingModel { modelName }` as before; more post one `addExistingModels`, which
  * the host adds in one edit (one undo step). Double-click adds that row, with
  * any others ticked. A v4 domain (no central model store) picks one at a time.
+ *
+ * On a large Table Library opened before its files were read, some rows
+ * arrive with `detailsPending` (name and file only). Opening the dialog then
+ * asks the host for the rest (`requestExistingTables`); the rows fill in when
+ * its `existingTables` answer arrives.
+ *
+ * The New Table dialog opens this one with its search filled in
+ * (`addExistingModelDialogSearch`) when the name typed there is already a
+ * Table Library table. With nothing to add and no dbt project, the empty
+ * state offers "New table" instead.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
@@ -44,6 +54,8 @@ const SOURCE_CONFIG: Record<SourceKey, { label: string; description: string }> =
 export function AddExistingTableDialog() {
   const isOpen = useEditorStore((s) => s.addExistingModelDialogOpen);
   const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
+  const initialSearch = useEditorStore((s) => s.addExistingModelDialogSearch);
+  const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
   const existingModels = useEditorStore((s) => s.existingModels);
   const manifestModels = useEditorStore((s) => s.manifestModels);
   const modelFolder = useEditorStore((s) => s.domain?.modelFolder);
@@ -100,14 +112,38 @@ export function AddExistingTableDialog() {
     return result;
   }, [models, searchQuery, activeFilters]);
 
-  // Escape closes the dialog through the store, not handleClose: start the
-  // next opening clean either way, so no tick survives into it unseen.
+  // Rows the host has not read yet: ask for them once each time the dialog opens.
+  const detailsPending = useMemo(
+    () => existingModels.some((m) => m.detailsPending === true),
+    [existingModels],
+  );
+  // Asked when the dialog opens with rows pending, and again when a refresh
+  // while it is open brings rows back pending (an outside change to many
+  // table files); never twice while a request is outstanding.
+  const asked = useRef(false);
   useEffect(() => {
-    if (isOpen) return;
+    if (!isOpen || !detailsPending) {
+      asked.current = false;
+      return;
+    }
+    if (asked.current) return;
+    asked.current = true;
+    send({ type: 'requestExistingTables' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, detailsPending]);
+
+  // Escape closes the dialog through the store, not handleClose: start the
+  // next opening clean either way, so no tick survives into it unseen. An
+  // opening with a search (from the New Table dialog) starts filtered by it.
+  useEffect(() => {
+    if (isOpen) {
+      if (initialSearch) setSearchQuery(initialSearch);
+      return;
+    }
     setSearchQuery('');
     setSelected([]);
     setActiveFilters(new Set(['logical', 'yml', 'manifest']));
-  }, [isOpen]);
+  }, [isOpen, initialSearch]);
 
   // Handlers
   const handleClose = useCallback(() => {
@@ -116,6 +152,12 @@ export function AddExistingTableDialog() {
     setSelected([]);
     setActiveFilters(new Set(['logical', 'yml', 'manifest']));
   }, [setAddExistingModelDialogOpen]);
+
+  // Nothing to add: swap to the New Table dialog.
+  const handleNewTable = useCallback(() => {
+    handleClose();
+    setNewModelDialogOpen(true);
+  }, [handleClose, setNewModelDialogOpen]);
 
   // Only the rows on screen count: a pick hidden by the search or a filter is
   // dropped, so Add never adds a model the user cannot see ticked.
@@ -229,6 +271,15 @@ export function AddExistingTableDialog() {
                 </>
               )}
             </p>
+            {logicalOnly && (
+              <button
+                type="button"
+                className="add-existing-model-dialog__button add-existing-model-dialog__button--primary"
+                onClick={handleNewTable}
+              >
+                New table
+              </button>
+            )}
           </div>
         </div>
       </Panel>
@@ -266,6 +317,12 @@ export function AddExistingTableDialog() {
             {filteredModels.length} of {models.length}
           </span>
         </div>
+
+        {detailsPending && (
+          <div className="add-existing-model-dialog__pending" role="status">
+            Reading table details…
+          </div>
+        )}
 
         {/* Selection */}
         {canPickMany && <div className="add-existing-model-dialog__selection">
@@ -413,7 +470,9 @@ function TableItem({ model, source, sourcePath, isSelected, showCheck, onToggle,
       )}
       <div className="add-existing-model-dialog__item-meta">
         <span className="add-existing-model-dialog__item-columns">
-          {model.columnCount} column{model.columnCount !== 1 ? 's' : ''}
+          {'detailsPending' in model && model.detailsPending
+            ? 'Reading…'
+            : `${model.columnCount} column${model.columnCount !== 1 ? 's' : ''}`}
         </span>
         {model.description && (
           <span className="add-existing-model-dialog__item-desc" title={model.description}>

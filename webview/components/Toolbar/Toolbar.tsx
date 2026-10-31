@@ -21,6 +21,7 @@ import { Panel, useReactFlow, useStore } from '@xyflow/react';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
 import { useFirstOpenAutoLayout } from '../../hooks/useFirstOpenAutoLayout';
+import { useRevealRelationship } from '../../hooks/useRevealRelationship';
 import {
   runElkLayout,
   detectLayerBound,
@@ -43,6 +44,9 @@ import './Toolbar.css';
  * panels, so "touching" already reads as broken.
  */
 const CORNER_MIN_GAP = 16;
+
+/** Why "+ Add → New Relationship" is greyed out on a diagram with no tables. */
+export const NO_TABLES_FOR_RELATIONSHIP = 'This diagram has no tables yet — add one first';
 
 // ---------------------------------------------------------------------------
 // Layer badge display
@@ -507,6 +511,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
    */
   useFirstOpenAutoLayout(runLayout, domain, nodes, isLayouting);
 
+  /** The sidebar's Open in Diagram: select and centre a relationship once the layout above has settled. */
+  useRevealRelationship(isLayouting);
+
   /** Register auto-layout function for Shift+L shortcut */
   useEffect(() => {
     registerAutoLayout(handleAutoLayout);
@@ -959,6 +966,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       className="toolbar__dropdown-item"
                       onClick={() => { setModelDropdownOpen(false); handleNewRelationship(); }}
                       role="menuitem"
+                      disabled={domain.models.length === 0}
+                      title={domain.models.length === 0 ? NO_TABLES_FOR_RELATIONSHIP : undefined}
                     >
                       New Relationship
                     </button>
@@ -1023,9 +1032,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                     className="toolbar__dropdown-item"
                     onClick={handleViewFile}
                     role="menuitem"
-                    title="Open the underlying JSON file in a text editor"
+                    title="Open the diagram's file in a text editor"
                   >
-                    {'{ }'} Open as JSON file
+                    {'{ }'} Open file
                   </button>
                 </div>
               )}
@@ -1051,8 +1060,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               <button
                 className="toolbar__corner-button"
                 onClick={handleViewFile}
-                title="Open as JSON file"
-                aria-label="Open underlying JSON file in text editor"
+                title="Open file"
+                aria-label="Open the diagram's file in a text editor"
               >
                 {'{ }'} View File
               </button>

@@ -2,8 +2,9 @@
  * Read a DBML file into one plain shape for **Import DBML…** — the reading
  * half of the import; the pure planner is `src/services/dbmlImport.ts`.
  *
- * The parser is `@dbml/parse` (the one dbdiagram.io runs), bundled into
- * `dist/extension.js` only. Its raw model is close to what the import needs,
+ * The parser is the pinned `@dbml/parse` 11.0.0 (the one dbdiagram.io runs),
+ * bundled into `dist/extension.js` (one copy, shared with
+ * `@erd-studio/core/dbml`). Its raw model is close to what the import needs,
  * but not quite, so this module evens it out:
  *
  *  - custom-property values come as a plain string up to 10.x and as
@@ -24,6 +25,9 @@
  */
 
 import { Compiler, DEFAULT_ENTRY, MemoryProjectLayout } from '@dbml/parse';
+import { ERD_STUDIO_DBML_HEADER_PREFIX } from '@erd-studio/core';
+import { readErdLayoutDbml } from '@erd-studio/core/dbml';
+import type { DbmlImportLayout } from './dbmlImport';
 
 // ---------------------------------------------------------------------------
 // The normalised model
@@ -170,12 +174,88 @@ export interface DbmlModel {
 
 export type ReadDbmlResult =
   | { ok: true; model: DbmlModel }
-  | { ok: false; diagnostics: DbmlDiagnostic[] };
+  /** `importsOtherFiles`: the file has a `use` declaration (§5.7), so it is part of a multi-file project; nothing was parsed. */
+  | { ok: false; diagnostics: DbmlDiagnostic[]; importsOtherFiles?: true };
+
+/**
+ * Import DBML's refusal for a file with `use` lines (native DBML storage,
+ * §5.7): `Parser.parse` rejects `use`, and the file is one part of a
+ * multi-file project, so Import names the route that works instead.
+ */
+export const IMPORT_MULTI_FILE_MESSAGE =
+  // Plain text: a VS Code notification renders no Markdown.
+  'This DBML file imports other files (use lines), so it is part of a multi-file project, such as another ERD Studio project stored as DBML. ' +
+  'Import reads one self-contained file: open that project\'s diagram in ERD Studio and use Export Diagram… → DBML (rich), then import the exported file.';
+
+/**
+ * The 1-based line of the first `use` declaration in `text` (a line whose
+ * first token is `use`, outside a comment or a string, at the top level:
+ * inside a `Table` or `Enum` body `use` is a column or value name), or
+ * undefined.
+ */
+export function firstUseDeclarationLine(text: string): number | undefined {
+  return useDeclarationLines(text, true)[0];
+}
+
+/**
+ * The 1-based lines of every `use` declaration in `text`, in order, by the
+ * rule {@link firstUseDeclarationLine} applies; only the first when `first`.
+ */
+export function useDeclarationLines(text: string, first = false): number[] {
+  const found: number[] = [];
+  let line = 1;
+  let atLineStart = true;
+  // Bracket depth outside comments and strings: `{`, `[` and `(` together.
+  let depth = 0;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (c === '\n') { line++; atLineStart = true; i++; continue; }
+    if (c === ' ' || c === '\t' || c === '\r' || c === '\uFEFF') { i++; continue; }
+    if (text.startsWith('//', i)) {
+      while (i < n && text[i] !== '\n') i++;
+      continue;
+    }
+    if (text.startsWith('/*', i)) {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end < 0 ? n : end + 2;
+      for (let j = i; j < stop; j++) if (text[j] === '\n') line++;
+      i = stop;
+      atLineStart = false;
+      continue;
+    }
+    if (text.startsWith("'''", i)) {
+      const end = text.indexOf("'''", i + 3);
+      const stop = end < 0 ? n : end + 3;
+      for (let j = i; j < stop; j++) if (text[j] === '\n') line++;
+      i = stop;
+      atLineStart = false;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1;
+      while (j < n && text[j] !== c && text[j] !== '\n') j += text[j] === '\\' ? 2 : 1;
+      i = j + 1;
+      atLineStart = false;
+      continue;
+    }
+    if (atLineStart && depth === 0 && /^use(?=[\s{*'"])/.test(text.slice(i, i + 4))) {
+      found.push(line);
+      if (first) return found;
+    }
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if ((c === '}' || c === ']' || c === ')') && depth > 0) depth--;
+    atLineStart = false;
+    i++;
+  }
+  return found;
+}
 
 /**
  * The parts of an `@dbml/parse` module the reader uses. Tests pass the 9.x and
- * 11.x releases (`dbml-parse-v9`, `dbml-parse-v11`) to read the same text with
- * each; the extension always uses the pinned `@dbml/parse`.
+ * 10.x releases (`dbml-parse-v9`, `dbml-parse-v10`) to read the same text with
+ * each; the extension always uses the pinned `@dbml/parse` 11.0.0.
  */
 export interface DbmlParserModule {
   // The parser's classes are typed per release; the reader only relies on this much.
@@ -191,9 +271,10 @@ const PINNED_PARSER: DbmlParserModule = { Compiler, MemoryProjectLayout, DEFAULT
 
 /**
  * The first line of ERD Studio's rich export starts with this
- * (`DBML_RICH_EXPORT_HEADER` in `@erd-studio/core` is the whole line).
+ * (`DBML_RICH_EXPORT_HEADER` in `@erd-studio/core` is the whole line). It
+ * lives in core, where the file classifier reads it too.
  */
-export const ERD_STUDIO_DBML_HEADER_PREFIX = '// erd-studio dbml-export';
+export { ERD_STUDIO_DBML_HEADER_PREFIX };
 
 // ---------------------------------------------------------------------------
 // Reading
@@ -205,6 +286,10 @@ export const ERD_STUDIO_DBML_HEADER_PREFIX = '// erd-studio dbml-export';
  * Warnings (a Records row a ref does not match, …) are ignored. Never throws.
  */
 export function readDbml(text: string, parser: DbmlParserModule = PINNED_PARSER): ReadDbmlResult {
+  const useLine = firstUseDeclarationLine(text);
+  if (useLine !== undefined) {
+    return { ok: false, importsOtherFiles: true, diagnostics: [{ line: useLine, column: 1, message: IMPORT_MULTI_FILE_MESSAGE }] };
+  }
   let raw: unknown;
   try {
     const layout = new parser.MemoryProjectLayout();
@@ -225,6 +310,38 @@ export function readDbml(text: string, parser: DbmlParserModule = PINNED_PARSER)
     ok: true,
     model: normaliseRawDbml(raw, { erdStudioExport: isErdStudioExport(text), erdStudioPlainExport: isErdStudioPlainExport(text) }),
   };
+}
+
+/**
+ * The positions a DBML file being imported carries: its first Project's
+ * `erd_layout` (core's `readErdLayoutDbml`, the reader stored diagrams use),
+ * with what could not be read as sentences for the dry run. Undefined when
+ * the file has no `erd_layout`, or does not parse (`readDbml` reports that).
+ */
+export function readDbmlImportLayout(text: string): DbmlImportLayout | undefined {
+  const reading = readErdLayoutDbml(text);
+  if (!reading || reading.keyCount === 0) return undefined;
+  // The reader's own messages describe the editor, which rewrites the diagram;
+  // Import only reads the source. `layoutBadLine` problems are the codec's
+  // `problems`, in order.
+  let lineProblem = 0;
+  const problems = reading.problemsAt.map((p) => {
+    switch (p.code) {
+      case 'layoutDuplicateKey':
+        return `erd_layout appears ${reading.keyCount} times; only the first is read`;
+      case 'layoutBadValue':
+        return 'erd_layout is not a string, so its positions are not read';
+      case 'layoutMergeConflict':
+        return `erd_layout has an unresolved git merge conflict (line ${p.line}); both sides are read, and a table listed twice takes its first position`;
+      case 'layoutBadLine': {
+        const problem = reading.problems[lineProblem++];
+        return problem?.kind === 'duplicate'
+          ? problem.message
+          : `Line ${p.line} of the file is not <name> <x> <y> in erd_layout; that table is placed when the diagram opens`;
+      }
+    }
+  });
+  return { positions: reading.positions, stickies: reading.stickies, problems };
 }
 
 /** The first non-blank line of `text`, trimmed. */

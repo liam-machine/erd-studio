@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { TreeItemCollapsibleState, ThemeIcon, ThemeColor, MarkdownString } from 'vscode';
+import { TreeItemCollapsibleState, ThemeIcon, ThemeColor, MarkdownString, Uri as vscodeUri } from 'vscode';
+import { dbmlFileIcon, type DbmlFileIconResolver } from '../../src/providers/dbmlFileKinds';
 import type { TableLibraryFolderNode, TableLibraryTableNode } from '../../src/providers/ModelLibraryTreeProvider';
 import { TableLibraryTreeProvider, type TableLibraryNode } from '../../src/providers/ModelLibraryTreeProvider';
 import type { TableLibraryService, TableFileEntry } from '../../src/services/logicalModelService';
@@ -226,7 +227,9 @@ describe('TableLibraryTreeProvider', () => {
       const item = provider.getTreeItem(node);
       expect(item.label).toBe('dim_date');
       expect(item.description).toBe('(unused)');
-      expect(item.tooltip).toBe('Not referenced by any subject area');
+      expect(item.tooltip).toBe('Not used in any diagram');
+      // A screen reader hears the table's name, not only the tooltip.
+      expect(item.accessibilityInformation).toEqual({ label: 'dim_date, not used in any diagram' });
       expect((item.iconPath as ThemeIcon).id).toBe('warning');
       expect(item.collapsibleState).toBe(TreeItemCollapsibleState.None);
       expect(item.contextValue).toBe('logicalModel');
@@ -242,7 +245,7 @@ describe('TableLibraryTreeProvider', () => {
 
       const item = provider.getTreeItem(node);
       expect(item.label).toBe('dim_customer');
-      expect(item.description).toBe('2 subject areas');
+      expect(item.description).toBe('2 diagrams');
       expect((item.iconPath as ThemeIcon).id).toBe('symbol-class');
       expect(item.tooltip).toBeInstanceOf(MarkdownString);
       expect((item.tooltip as MarkdownString).value).toContain('customer-360');
@@ -258,7 +261,7 @@ describe('TableLibraryTreeProvider', () => {
       };
 
       const item = provider.getTreeItem(node);
-      expect(item.description).toBe('1 subject area');
+      expect(item.description).toBe('1 diagram');
     });
 
     it('sets click command to open the .yml file', () => {
@@ -417,6 +420,40 @@ describe('TableLibraryTreeProvider', () => {
       expect(items[0].tooltip).toContain('Keep one of the two files');
     });
 
+    it('reports a DBML copy of a YAML table (part-way through Convert) with no fix; a DBML copy of a DBML table is an ordinary duplicate', () => {
+      const GOLD = '/project/.erd-studio/gold/tables/gold';
+      const SALES = '/project/.erd-studio/gold/tables/sales';
+      const p = build([
+        entry('dim_a'),
+        { name: 'dim_a', folder: 'gold', layer: 'gold', storage: 'dbml', filePath: `${GOLD}/dim_a.dbml`, shadowedBy: `${DIR}/dim_a.yml` },
+        { name: 'dim_b', folder: 'gold', layer: 'gold', storage: 'dbml', filePath: `${GOLD}/dim_b.dbml` },
+        { name: 'dim_b', folder: 'sales', layer: 'gold', storage: 'dbml', filePath: `${SALES}/dim_b.dbml`, shadowedBy: `${GOLD}/dim_b.dbml` },
+      ]);
+      const items = folders(p.getChildren() as TableLibraryNode[]).flatMap((f) => f.children).map((c) => p.getTreeItem(c));
+      const byPath = (file: string) => items.find((i) => (i.resourceUri as { fsPath: string }).fsPath === file)!;
+      expect(byPath(`${GOLD}/dim_a.dbml`).contextValue).toBe('logicalModelReadOnly');
+      expect(byPath(`${GOLD}/dim_a.dbml`).description).toBe('(also in logical-models — ignored)');
+      expect(byPath(`${GOLD}/dim_a.dbml`).tooltip).toContain('This DBML copy is ignored. Keep one of the two files.');
+      expect(byPath(`${SALES}/dim_b.dbml`).contextValue).toBe('logicalModelDuplicate');
+    });
+
+    it('a duplicate\'s tooltip names the name Give Duplicate Table Its Own Name offers: its layer for a DBML copy, its folder for a YAML one', () => {
+      const SILVER = '/project/.erd-studio/silver/tables/crm';
+      const SALES = '/project/.erd-studio/gold/tables/sales';
+      const p = build([
+        { name: 'dim_c', folder: 'crm', layer: 'silver', storage: 'dbml', filePath: `${SILVER}/dim_c.dbml` },
+        { name: 'dim_c', folder: 'sales', layer: 'gold', storage: 'dbml', filePath: `${SALES}/dim_c.dbml`, shadowedBy: `${SILVER}/dim_c.dbml` },
+        entry('dim_y'),
+        entry('dim_y', 'silver', `${DIR}/dim_y.yml`),
+      ]);
+      const items = folders(p.getChildren() as TableLibraryNode[]).flatMap((f) => f.children).map((c) => p.getTreeItem(c));
+      const byPath = (file: string) => items.find((i) => (i.resourceUri as { fsPath: string }).fsPath === file)!;
+      const dbmlTip = String(byPath(`${SALES}/dim_c.dbml`).tooltip);
+      expect(dbmlTip).toContain('to make this copy "gold_dim_c"');
+      expect(dbmlTip).not.toContain('sales_dim_c');
+      expect(String(byPath(`${DIR}/silver/dim_y.yml`).tooltip)).toContain('to make this copy "silver_dim_y"');
+    });
+
     it('treats a duplicate within tables/ as an ordinary duplicate, with the fix offered (#182)', () => {
       const V6 = '/project/.erd-studio/tables';
       const p = build([
@@ -462,6 +499,7 @@ describe('TableLibraryTreeProvider', () => {
       expect(item.contextValue).toBe('logicalModelDuplicate');
       expect((item.iconPath as ThemeIcon).id).toBe('error');
       expect(item.description).toBe('(duplicate — ignored)');
+      expect(item.accessibilityInformation).toEqual({ label: 'dim_customer, duplicate, ignored' });
       expect(String(item.tooltip)).toContain(winner);
       // Clicking opens the duplicate itself, so the user can fix it.
       expect(item.command?.command).toBe('vscode.open');
@@ -523,13 +561,171 @@ describe('TableLibraryTreeProvider: a model file that needs fixing (#164)', () =
     const item = itemFor(provider, 'dim_customer');
     expect((item.iconPath as ThemeIcon).id).toBe('error');
     expect(item.description).toBe('(YAML error — line 4)');
+    expect(item.accessibilityInformation).toEqual({ label: 'dim_customer, YAML error — line 4' });
+  });
+
+  it('calls a .dbml table file\'s error a DBML error, and keeps the YAML and unreadable wording', () => {
+    const provider = providerWith({
+      dim_customer: { kind: 'dbmlSyntax', line: 3, filePath: `${DIR}/dim_customer.dbml` },
+      fct_orders: { kind: 'dbmlStructure', code: 'structure:notOneTable', filePath: `${DIR}/fct_orders.dbml` },
+    });
+    const item = itemFor(provider, 'dim_customer');
+    expect((item.iconPath as ThemeIcon).id).toBe('error');
+    expect(item.description).toBe('(DBML error — line 3)');
+    expect(itemFor(provider, 'fct_orders').description).toBe('(DBML error)');
+    expect(itemFor(providerWith({ dim_customer: { kind: 'yamlIndent', line: 3 } }), 'dim_customer').description).toBe('(YAML error — line 3)');
+    expect(itemFor(providerWith({ dim_customer: { kind: 'read' } }), 'dim_customer').description).toBe('(can\'t be read)');
   });
 
   it('leaves a clean file as it was', () => {
     const provider = providerWith({ dim_customer: { kind: 'yamlScalar', line: 4 } });
     const item = itemFor(provider, 'fct_orders');
     expect((item.iconPath as ThemeIcon).id).toBe('symbol-class');
-    expect(item.description).toBe('2 subject areas');
+    expect(item.description).toBe('2 diagrams');
   });
 });
 
+
+describe('TableLibraryTreeProvider: native DBML storage, the layer-first tree (§5.5)', () => {
+  const SEMANTIC = '/project/.erd-studio';
+  const dbmlEntry = (name: string, layer = 'gold', schema = layer): TableFileEntry => ({
+    name, folder: schema, layer, filePath: `${SEMANTIC}/${layer}/tables/${schema}/${name}.dbml`, storage: 'dbml',
+  });
+  const SALES: SubjectAreaSummary = { domain: 'sales', layer: 'gold', filePath: `${SEMANTIC}/gold/diagrams/sales.dbml`, storage: 'dbml' };
+
+  function providerFor(
+    entries: TableFileEntry[],
+    storage: 'yaml' | 'dbml' | 'mixed',
+    layers: () => LayerConfig[] = () => [],
+    icons?: DbmlFileIconResolver,
+    errors: Record<string, Partial<import('../../src/services/logicalModelService').TableFileError>> = {},
+  ) {
+    const service = createMockTableLibraryServiceFromEntries(entries, `${SEMANTIC}/logical-models`);
+    (service as unknown as { projectStorage: () => string }).projectStorage = () => storage;
+    (service.getTableFileError as ReturnType<typeof vi.fn>).mockImplementation((name: string) =>
+      errors[name] ? { name, filePath: `${SEMANTIC}/gold/tables/gold/${name}.dbml`, message: '', ...errors[name] } : null);
+    return new TableLibraryTreeProvider(service, createMockSubjectAreaService([SALES]), '/project', '.erd-studio', layers, undefined, icons);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockReadFileSync.mockImplementation((p: string) => (String(p).endsWith('.dbml')
+      ? "use { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nProject sales {\n  erd_schema_version: '7'\n}\n"
+      : '{}'));
+  });
+
+  function tableNodes(provider: TableLibraryTreeProvider): TableLibraryTableNode[] {
+    return (provider.getChildren() as TableLibraryNode[]).flatMap((n) => (n.type === 'folder' ? n.children : [n]));
+  }
+
+  it('opens a .dbml table with plain vscode.open (the canvas selector never matches a table)', () => {
+    const provider = providerFor([dbmlEntry('fct_order')], 'dbml');
+    const item = provider.getTreeItem(tableNodes(provider).find((n) => n.name === 'fct_order')!);
+    expect(item.command?.command).toBe('vscode.open');
+    expect(item.command?.arguments?.[0].fsPath).toBe(`${SEMANTIC}/gold/tables/gold/fct_order.dbml`);
+  });
+
+  it('counts a DBML diagram\'s use lines as usage', () => {
+    const provider = providerFor([dbmlEntry('fct_order'), dbmlEntry('dim_date', 'silver', 'calendar')], 'dbml');
+    const nodes = tableNodes(provider);
+    expect(nodes.find((n) => n.name === 'fct_order')?.referencingDomains).toEqual(['sales']);
+    expect(nodes.find((n) => n.name === 'dim_date')?.referencingDomains).toEqual([]);
+  });
+
+  it('names each table\'s format only while the project is mixed', () => {
+    const yml: TableFileEntry = { name: 'dim_old', folder: '', filePath: `${DIR}/dim_old.yml`, storage: 'yaml' };
+    const mixed = providerFor([dbmlEntry('fct_order'), yml], 'mixed');
+    const items = tableNodes(mixed).map((n) => mixed.getTreeItem(n));
+    expect(items.find((i) => i.label === 'fct_order')?.description).toBe('1 diagram · DBML');
+    expect(items.find((i) => i.label === 'dim_old')?.description).toBe('(unused) · YAML');
+    expect(items.find((i) => i.label === 'dim_old')?.command?.command).toBe('vscode.open');
+
+    const dbml = providerFor([dbmlEntry('fct_order')], 'dbml');
+    expect(dbml.getTreeItem(tableNodes(dbml)[0]).description).toBe('1 diagram');
+  });
+
+  it('groups DBML tables one level deep by layer and schema: the layer\'s name for its own schema, else "<schema> · <layer>", layers in layers.json order', () => {
+    const provider = providerFor(
+      [dbmlEntry('fct_order'), dbmlEntry('dim_customer'), dbmlEntry('dim_date', 'silver', 'calendar'), dbmlEntry('afih', 'bronze', 'sap')],
+      'dbml',
+      () => LAYERS,
+    );
+    const roots = provider.getChildren() as TableLibraryNode[];
+    expect(roots.every((n) => n.type === 'folder')).toBe(true);
+    const folders = roots as TableLibraryFolderNode[];
+    expect(folders.map((f) => `${f.layer}/${f.folder}`)).toEqual(['bronze/sap', 'silver/calendar', 'gold/gold']);
+    const gold = folders[2];
+    expect(gold.filePath).toBe(`${SEMANTIC}/gold/tables/gold`);
+    expect(gold.children.map((c) => c.name)).toEqual(['dim_customer', 'fct_order']);
+    const item = provider.getTreeItem(gold);
+    expect(item.label).toBe('Gold');
+    expect(item.description).toBe('2 tables');
+    expect(item.tooltip).toBe('Tables in schema gold of the Gold layer (gold/tables/gold/)');
+    expect(item.id).toBe('erdStudio.modelLibrary.folder:gold/tables/gold');
+    expect(provider.getTreeItem(folders[1]).label).toBe('calendar · Silver');
+    // A layer missing from layers.json still gets its folder, after the configured ones.
+    const extra = providerFor([dbmlEntry('x', 'zeta', 'z'), dbmlEntry('fct_order')], 'dbml', () => LAYERS);
+    expect((extra.getChildren() as TableLibraryFolderNode[]).map((f) => `${f.layer}/${f.folder}`)).toEqual(['gold/gold', 'zeta/z']);
+  });
+
+  describe('table icons', () => {
+    const EXTENSION = vscodeUri.file('/ext');
+    const icons: DbmlFileIconResolver = (kind) => dbmlFileIcon(EXTENSION, kind);
+    const itemOf = (provider: TableLibraryTreeProvider, name: string, folder?: string) =>
+      provider.getTreeItem(tableNodes(provider).find((n) => n.name === name && (folder === undefined || n.folder === folder))!);
+    const codicon = (item: { iconPath?: unknown }) => (item.iconPath as ThemeIcon).id;
+
+    it('gives a healthy DBML table the DBML Table icon pair from media/file-icons, with the resourceUri it always had', () => {
+      const provider = providerFor([dbmlEntry('fct_order')], 'dbml', () => [], icons);
+      const item = itemOf(provider, 'fct_order');
+      expect(item.iconPath).toBe(dbmlFileIcon(EXTENSION, 'table'));
+      const { light, dark } = item.iconPath as { light: { fsPath: string }; dark: { fsPath: string } };
+      expect(light.fsPath).toBe('/ext/media/file-icons/dbml-table-light.svg');
+      expect(dark.fsPath).toBe('/ext/media/file-icons/dbml-table-dark.svg');
+      expect(item.resourceUri?.fsPath).toBe(`${SEMANTIC}/gold/tables/gold/fct_order.dbml`);
+      expect(item.contextValue).toBe('logicalModel');
+    });
+
+    it('keeps the codicons of an unused, a broken and a duplicate DBML table', () => {
+      const provider = providerFor([
+        dbmlEntry('fct_order'),
+        dbmlEntry('dim_unused'),
+        { ...dbmlEntry('fct_order', 'gold', 'sales'), shadowedBy: `${SEMANTIC}/gold/tables/gold/fct_order.dbml` },
+      ], 'dbml', () => [], icons);
+      expect(codicon(itemOf(provider, 'dim_unused'))).toBe('warning');
+      expect(codicon(itemOf(provider, 'fct_order', 'sales'))).toBe('error');
+
+      const broken = providerFor([dbmlEntry('fct_order')], 'dbml', () => [], icons, { fct_order: { kind: 'dbmlSyntax', line: 3 } });
+      expect(codicon(itemOf(broken, 'fct_order'))).toBe('error');
+      const twice = providerFor([dbmlEntry('fct_order')], 'dbml', () => [], icons, { fct_order: { kind: 'dbmlSyntax', line: 3, readable: true, key: 'note' } });
+      expect(codicon(itemOf(twice, 'fct_order'))).toBe('warning');
+    });
+
+    it('keeps the codicon of a DBML copy of a YAML table (part-way through Convert)', () => {
+      const yml: TableFileEntry = { name: 'fct_order', folder: '', filePath: `${SEMANTIC}/logical-models/fct_order.yml`, storage: 'yaml' };
+      const provider = providerFor([yml, { ...dbmlEntry('fct_order'), shadowedBy: yml.filePath }], 'mixed', () => [], icons);
+      expect(codicon(itemOf(provider, 'fct_order', 'gold'))).toBe('error');
+    });
+
+    it('a YAML table keeps symbol-class with the resolver; a DBML table keeps it without one', () => {
+      const yml: TableFileEntry = { name: 'fct_order', folder: '', filePath: `${SEMANTIC}/logical-models/fct_order.yml`, storage: 'yaml' };
+      expect(codicon(itemOf(providerFor([yml], 'yaml', () => [], icons), 'fct_order'))).toBe('symbol-class');
+      expect(codicon(itemOf(providerFor([dbmlEntry('fct_order')], 'dbml'), 'fct_order'))).toBe('symbol-class');
+    });
+
+    it('leaves the schema folders\' folder codicon alone', () => {
+      const provider = providerFor([dbmlEntry('fct_order'), dbmlEntry('dim_date', 'silver', 'calendar')], 'dbml', () => LAYERS, icons);
+      for (const folder of provider.getChildren() as TableLibraryFolderNode[]) {
+        expect(codicon(provider.getTreeItem(folder))).toBe('folder');
+      }
+    });
+  });
+
+  it('a mixed project shows the YAML folders first, then the DBML schema folders', () => {
+    const yml: TableFileEntry = { name: 'dim_old', folder: 'gold', filePath: `${DIR}/gold/dim_old.yml`, storage: 'yaml' };
+    const provider = providerFor([dbmlEntry('fct_order'), yml], 'mixed', () => LAYERS);
+    const roots = provider.getChildren() as TableLibraryFolderNode[];
+    expect(roots.map((f) => (f.layer ? `${f.layer}/${f.folder}` : `yaml:${f.folder}`))).toEqual(['yaml:gold', 'gold/gold']);
+    expect(provider.getTreeItem(roots[0]).label).toBe('Gold');
+  });
+});

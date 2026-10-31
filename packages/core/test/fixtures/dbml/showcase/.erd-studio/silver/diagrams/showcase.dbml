@@ -1,0 +1,21 @@
+use { table silver.fct_task_event } from '../tables/silver/fct_task_event.dbml'
+use { table silver.dim_task }       from '../tables/silver/dim_task.dbml'
+use { table silver.dim_project }    from '../tables/silver/dim_project.dbml'
+use { table silver.dim_customer }   from '../tables/silver/dim_customer.dbml'
+use { table silver.dim_date }       from '../tables/silver/dim_date.dbml'
+use { table public.fct_order }      from '../tables/public/fct_order.dbml'
+use * from '../relationships/silver.dbml'
+
+Project showcase {
+  Note: 'Project task management — tracks projects, tasks, events, and customers'
+  erd_schema_version: '7'
+  erd_model_folder: 'models/silver'
+  erd_layout: '''
+    dim_customer 40 60
+    dim_date 40 520
+    dim_project 980 60
+    dim_task 1026 586
+    fct_order 500 250
+    fct_task_event 438 544
+  '''
+}

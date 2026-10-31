@@ -4,11 +4,12 @@
  * flag says, no editing affordance is rendered and no canvas interaction is
  * captured for an edit (right-click and double-click reach the page).
  */
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { render, fireEvent, act, cleanup } from '@testing-library/react';
 import type { DisplaySubjectArea } from '@erd-studio/core';
 import { ErdCanvas } from '../../src/ErdCanvas';
 import { toRenderableSubjectArea } from '../../src/ErdCanvas';
+import { NOOP_CANVAS_HOST } from '../../src/host/canvasEnvironment';
 
 beforeAll(() => {
   // React Flow measures nodes with a ResizeObserver, which jsdom lacks.
@@ -271,4 +272,66 @@ describe('toRenderableSubjectArea', () => {
     domain.models[1].columns[0] = { ...domain.models[1].columns[0], dataType: 'bigint' };
     expect(toRenderableSubjectArea(domain)).toBe(domain);
   });
+});
+
+describe('ErdCanvas — hover preview and relationship flow', () => {
+  // Edges only render once React Flow has measured their nodes, which needs a
+  // ResizeObserver that reports and elements with a size.
+  const saved: { ro?: unknown; matrix?: unknown; w?: PropertyDescriptor; h?: PropertyDescriptor } = {};
+  beforeAll(() => {
+    saved.ro = (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+    saved.matrix = (window as { DOMMatrixReadOnly?: unknown }).DOMMatrixReadOnly;
+    // React Flow reads the zoom from the viewport's transform matrix.
+    (window as { DOMMatrixReadOnly?: unknown }).DOMMatrixReadOnly ??= class { m22 = 1; };
+    saved.w = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+    saved.h = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+    class MeasuringResizeObserver {
+      constructor(private readonly cb: (entries: { target: Element }[], ro: unknown) => void) {}
+      observe(target: Element) { setTimeout(() => this.cb([{ target }], this), 0); }
+      unobserve() {}
+      disconnect() {}
+    }
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = MeasuringResizeObserver;
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 240 });
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 120 });
+  });
+  afterAll(() => {
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = saved.ro;
+    (window as { DOMMatrixReadOnly?: unknown }).DOMMatrixReadOnly = saved.matrix;
+    if (saved.w) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', saved.w);
+    if (saved.h) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', saved.h);
+  });
+
+  const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+
+  for (const readOnly of [false, true]) {
+    it(`fades the rest and flows the hovered table's lines, posting nothing (readOnly: ${readOnly})`, async () => {
+      const post = vi.spyOn(NOOP_CANVAS_HOST, 'postMessage');
+      const { container } = await renderCanvas(readOnly);
+      await wait(20);
+      const root = container.querySelector('.react-flow')!;
+      expect(root.classList.contains('erd-flow')).toBe(true);
+      expect(root.classList.contains('erd-flow--hover-focus')).toBe(false);
+      expect(container.querySelector('path.fk-edge')).not.toBeNull();
+
+      fireEvent.mouseEnter(tableNode(container, 'customers'));
+      await wait(200);
+
+      expect(root.classList.contains('erd-flow--hover-focus')).toBe(true);
+      expect(tableNode(container, 'customers').querySelector('.model-node--focus-origin')).not.toBeNull();
+      expect(tableNode(container, 'orders').querySelector('.model-node--focus-related')).not.toBeNull();
+      expect(container.querySelector('.fk-edge__flow')).not.toBeNull();
+      expect(container.querySelector('.fk-edge__swap-btn')).toBeNull();
+      expect(container.querySelector('.fk-edge__swap-zone')).toBeNull();
+      expect(container.querySelector('.fk-edge__backwards-btn')).toBeNull();
+      expect(container.textContent).not.toContain('Turn round');
+
+      fireEvent.mouseLeave(tableNode(container, 'customers'));
+      await wait(250);
+      expect(root.classList.contains('erd-flow--hover-focus')).toBe(false);
+      expect(container.querySelector('.fk-edge__flow')).toBeNull();
+      expect(post).not.toHaveBeenCalled();
+      post.mockRestore();
+    });
+  }
 });

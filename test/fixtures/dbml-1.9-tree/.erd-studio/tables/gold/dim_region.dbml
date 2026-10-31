@@ -1,0 +1,8 @@
+Table dim_region [schema: 'gold', role: 'dimension'] {
+  region_code VARCHAR
+  country_code VARCHAR
+  region_name VARCHAR [note: 'Display name']
+  indexes {
+    (region_code, country_code) [pk]
+  }
+}

@@ -29,6 +29,14 @@ describe('root CLAUDE.md pointers', () => {
         expect(paths).toContain('src/harness/CLAUDE.md');
     });
 
+    it('points at the native DBML storage docs (2.0)', () => {
+        expect(paths).toContain('docs/dev/dbml.md');
+        expect(paths).toContain('docs/plans/native-dbml-storage.md');
+        expect(text).toMatch(/DBML storage, import and export/);
+        expect(text).toMatch(/DBML, an open format/);
+        expect(text).not.toMatch(/open standard/);
+    });
+
     it.each(paths)('%s exists', (p) => {
         expect(fs.existsSync(path.join(ROOT, p))).toBe(true);
     });

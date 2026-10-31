@@ -31,7 +31,8 @@ Checklist for this route (show it at each step boundary, as SKILL.md's "Show pro
 Greet the user in about four short lines:
 
 - ERD Studio keeps a *logical data model* — the tables, their keys and how they connect — as
-  plain YAML and JSON files in `.erd-studio/`, so it is reviewed and versioned like code.
+  plain text files in `.erd-studio/` (DBML, an open format; YAML and JSON in a project from before
+  ERD Studio 2.0), so it is reviewed and versioned like code.
 - You will design one diagram with them, write its files, check them, and open it on the canvas.
   Nothing outside `.erd-studio/` changes.
 - Want to see a finished one first? **ERD Studio: Open Example Diagram** (Command Palette) opens
@@ -50,9 +51,9 @@ written. Then:
   and carry on from Stage 1 with this doctor result.
 - **`erd.semanticDirExists: false`** → there is nothing to check yet: say "This folder has no
   ERD Studio files yet, so we'll start fresh." Say nothing about the rest of the result (no dbt
-  project, no skills, empty `nextSteps` — all expected here). A new project writes the **v6**
-  names (doctor's `erd.naming` says `v6`): `tables/`, `"subjectArea"`, `logical.tables`,
-  `fromTable` / `toTable`, `tableRole`, `"schemaVersion": 6`. But if the user says they already
+  project, no skills, empty `nextSteps` — all expected here). A new project writes **DBML**
+  (doctor's `erd.storage` says `dbml`): `.erd-studio/layers.json` first, then everything under a
+  layer folder (`<layer>/tables/<schema>/`, `<layer>/relationships/`, `<layer>/diagrams/`), as the schema skill's `DBML.md` says. But if the user says they already
   have diagrams (the ERD Studio sidebar lists them), their ERD Studio folder has another name —
   the `erdStudio.semanticDir` setting changed after **Set Up My AI Helper** ran. Ask them to run
   **ERD Studio: Set Up My AI Helper** again (it writes the new folder name into these files), or
@@ -62,9 +63,10 @@ written. Then:
   `dbtProject: false` and `skippedChecks` with reason `not-dbt-project`: the dbt checks were
   skipped on purpose — say nothing about them. (Its `project.found` is `false` here too, for the
   same reason; do not ask which folder holds a dbt project.) Read:
-  - `erd.naming` — which file names to write (the schema skill's "File naming");
+  - `erd.storage` — which format to write (the schema skill's "What to write": `dbml`, `yaml` or `mixed`);
   - `erd.domains` and `erd.logicalModels` — whether diagrams and tables exist already;
-  - `nextSteps` — handle `fix-model-yaml`, `resolve-merge-conflicts` and
+  - `nextSteps` — handle `fix-model-yaml`, `fix-dbml-file`, `resolve-merge-conflicts`,
+    `resolve-format-conflicts`, `finish-dbml-conversion`, `import-dbml-file` and
     `turn-round-relationships` as SKILL.md and `references/troubleshooting.md` say;
     `fix-subject-area-naming` by using one set of key names in each file it lists, as its `why`
     says; `resolve-naming-conflicts` by showing the user both files and asking which to keep. A
@@ -77,12 +79,13 @@ Pick it yourself when the evidence is clear, say it in one line, and carry on:
 1. **Enrich what is there** — doctor reports diagrams or tables and the user did not name a new
    area: follow "Enriching existing tables" below.
 2. **From a DBML file** — the user mentions DBML, dbdiagram.io or a `.dbml` file, or Glob finds
-   one (`**/*.dbml`, skipping `node_modules`). Do not convert it yourself: ask them to run
-   **ERD Studio: Import DBML…** (Command Palette, or the **…** menu of the ERD Studio sidebar's
-   diagram list). It needs no AI, shows what it will create before writing anything, and places
-   the tables from a `.dbdiagram` layout file beside the `.dbml` when there is one. DBML is an
+   one (`**/*.dbml`, skipping `node_modules` and the ERD Studio folder itself, `.erd-studio/`,
+   whose own files are DBML too). Do not convert it yourself: ask them to run
+   **ERD Studio: Import DBML…** (Command Palette, or the **+** menu of the ERD Studio sidebar's
+   Diagrams view). It needs no AI, shows what it will create before writing anything, and places
+   the tables from the file's own `erd_layout` positions when it has them. DBML is an
    open format (the schema language behind dbdiagram.io); ERD Studio reads it in and writes it
-   out, but its own YAML and JSON stay the only copy. When they say "done", re-run doctor and
+   out, and ERD Studio stores its own model as DBML too, split into one file per table. When they say "done", re-run doctor and
    enrich the new diagram (route 1). Convert by hand only if they ask; then follow the schema
    skill's "Building Models from External Sources".
 3. **From a description** — everyone else, the default.
@@ -119,17 +122,20 @@ one round at a time. This is the one place you invent columns rather than copyin
 
 - **Names** match `^[A-Za-z][A-Za-z0-9_]*$`: lowercase snake_case, unique across the library.
   Use the style's prefixes (`dim_`, `fct_`) only when the agreed style uses them.
-- **Every table has a primary key** (`isPrimaryKey: true`) — a surrogate key when the style
-  wants one, plus `isNaturalKey: true` on the business identifier (customer code, SKU).
+- **Every table has a primary key** (`pk` in DBML, `isPrimaryKey: true` in YAML) — a surrogate key
+  when the style wants one, plus a natural key (`natural_key: 'true'`, `isNaturalKey: true` in YAML)
+  on the business identifier (customer code, SKU).
 - **Every foreign key** is named after the key it points at (`customer_id` →
-  `customer.customer_id`), marked `isForeignKey: true`, and has a `many-to-one` relationship in
-  the file of the table that holds it.
+  `customer.customer_id`), marked `foreign_key: 'true'` (`isForeignKey: true` in YAML), and has a
+  `many-to-one` relationship owned by the table that holds it (a `>?` Ref in a
+  `<layer>/relationships/` file; in YAML, in its own file).
 - **Types** are plain SQL (`INTEGER`, `VARCHAR`, `DECIMAL(18,2)`, `DATE`, `TIMESTAMP`, `BOOLEAN`),
   or the warehouse's own spelling when the user names one.
-- **Design fields** — `grain` on every table; the role (`tableRole`, or `modelRole` in v5) only
-  from the values in `references/modelling-approaches.md` section 2; `scdType` and
-  `additiveType` where the style makes them clear; a one-line `rationale.purpose`, and
-  `rationale.design` citing the approach. Without dbt these record the intended design, so the
+- **Design fields** — `grain` on every table; the role (`role` in DBML; `tableRole`, or `modelRole`
+  in v5 YAML) only from the values in `references/modelling-approaches.md` section 2; the SCD and
+  additive types (`scd_type` / `additive_type`, `scdType` / `additiveType` in YAML) where the style
+  makes them clear; a one-line purpose (`rationale_purpose`, `rationale.purpose` in YAML), and
+  the design rationale (`rationale_design`) citing the approach. Without dbt these record the intended design, so the
   dbt route's "describe what dbt does today" rule and its Target-design backlog do not apply.
 - **Descriptions**: one plain line per table and column. Leave out audit columns
   (`created_at`, `loaded_at`) unless the style asks for them.
@@ -143,13 +149,13 @@ one round at a time. This is the one place you invent columns rather than copyin
 The tables are someone's design (perhaps an Import DBML or a canvas draft): add what is missing,
 never rebuild them.
 
-1. Glob the subject area files (`.erd-studio/*/*.json`) and propose one (the one named, else the
+1. Glob the subject area files (`.erd-studio/*/diagrams/*.dbml` and `.erd-studio/*/*.json`) and propose one (the one named, else the
    largest): "You have the **sales** diagram (6 tables). I'll add what's missing — keys, grain,
    roles, descriptions and the connections the columns suggest — and leave the rest alone. OK?"
 2. Read the subject area and each of its table files.
-3. Draft, per table, only what is missing: a primary key, `isForeignKey` on columns that point at
+3. Draft, per table, only what is missing: a primary key, the foreign-key flag on columns that point at
    another table's key, the relationships those columns imply (between tables in this diagram),
-   `grain`, the role (section 2's values), `isNaturalKey`, descriptions and `rationale.purpose`.
+   the grain, the role (section 2's values), natural keys, descriptions and the rationale's purpose.
    With an agreed approach, follow it. Never rename a table or column, change a type, or remove
    anything without asking.
 4. Show the drafts as one short list per table, ask "Add these?" once, and write them on a yes —
@@ -161,15 +167,17 @@ never rebuild them.
    steps 1 and 2.
 2. Save the modelling approach, when one was agreed (step 3).
 3. Write the files following `references/building-the-model.md` — "Which files to write", "Where
-   a new model file goes", "layers.json", "Quote every text value" and "Domain JSON" — in the
-   naming from step 1. Without dbt:
+   a new model file goes", "layers.json", "Quote every text value" and "Diagram file" — in the
+   format from step 1 (`erd.storage`; a new project is DBML). Without dbt:
    - **Layer**: the one the user named, else the one their existing diagrams use, else `gold` for
-     a reporting design and `silver` for anything else — both are built in, so no `layers.json` is
-     needed. Tell them layers are only folders for organising diagrams.
-   - **Subject area file**: `.erd-studio/<layer>/<name>.json` listing the tables, with no
-     `modelFolder` (that is dbt's folder filter) and `"viewConfig": {}` so the canvas arranges it
-     the first time it opens.
-   - **Relationships** go in the model library — in the table file holding the foreign key —
+     a reporting design and `silver` for anything else. A new project writes `.erd-studio/layers.json`
+     first (building-the-model.md, "layers.json"). Tell them layers are only folders for organising diagrams.
+   - **Diagram file**: in DBML, `.erd-studio/<layer>/diagrams/<name>.dbml` with one `use` line per
+     table and its `Project` last, and no `erd_layout`, so the canvas arranges it the first
+     time it opens; in a YAML project, `.erd-studio/<layer>/<name>.json` listing the tables, with
+     no `modelFolder` (that is dbt's folder filter) and `"viewConfig": {}`.
+   - **Relationships** go in the table library: in DBML, a Ref line in the relationships file
+     that already holds the foreign-key table's Refs, else `<layer>/relationships/<layer>.dbml`; in YAML, in the table file holding the foreign key —
      unless the project's existing diagrams keep theirs in the subject area file
      (building-the-model.md, "Where they go").
    - A table that already has a file is **referenced by name, never rewritten**.
@@ -179,10 +187,11 @@ never rebuild them.
 ## 5. Check the files
 
 Say "Checking the files ERD Studio will read," then run doctor (as in step 1). Fix each
-`fix-model-yaml` it lists (the file and line that do not parse) — except a merge conflict — and
+`fix-model-yaml` and `fix-dbml-file` it lists (the file and line, usually a value to quote) — except a merge conflict — and
 each `fix-subject-area-naming`, and offer `turn-round-relationships` fixes. Then check the
 diagram loads end to end: say "Checking the whole diagram loads," and run
-`~/.erd-studio-cli/bin/erd-studio export --domain .erd-studio/<layer>/<name>.json --format dbml --semantic-dir .erd-studio`.
+`~/.erd-studio-cli/bin/erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml --semantic-dir .erd-studio`
+(the `.json` file in a YAML project).
 Exit 3 means the subject area file itself cannot be read: the message names the problem; fix it
 and run it again. Exit 0 means the subject area file loaded — not yet that every table did. Read
 the output (do not paste it) for lines starting `// Table … is not exported` (a table with no
@@ -193,8 +202,9 @@ header's own "Not exported: canvas positions and sizes…" line is always there 
 each and run it again; the check passes only when exit 0 comes with none of those lines.
 
 Then your own silent cross-check, reporting only problems: every table in the subject area has a
-file; every relationship's columns exist on both tables; every `isForeignKey` column has a
-relationship; no key is written twice in one block. Stop after three rounds of fixes and list
+file; every relationship's columns exist on both tables; every foreign-key column has a
+relationship; no key or setting is written twice in one block; in DBML, doctor's `dbmlProblems`
+lists no warning about a `use` line you wrote. Stop after three rounds of fixes and list
 what remains.
 
 Without the helper, re-read every file you wrote for these same checks, and tell the user a

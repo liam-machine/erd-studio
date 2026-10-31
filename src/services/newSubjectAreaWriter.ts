@@ -13,6 +13,14 @@
  * file removed, changed library files restored to the text they held, and a
  * folder the write created removed again.
  *
+ * In a project that writes DBML (§3.2) the subject area is a `.dbml` diagram
+ * (`<layer>/diagrams/<name>.dbml`): its table files, relationships files,
+ * diagram (positions in its `erd_layout`), the settle re-render of other DBML
+ * diagrams and a new project's `README.md` are one library batch
+ * (`applyDbmlBatch`), written by `writeFilesWithRollback`, which restores a
+ * snapshot of every file it wrote on failure — never a `deleteTable`, which
+ * for DBML is the D16 cascade and would edit other owners' files.
+ *
  * Neither a direct `fs` write in a provider handler nor a canvas edit: these
  * are new files a command creates, which is why they are not an
  * `applySubjectAreaEdit` (the same as `createDomain`). What a failure means to
@@ -23,6 +31,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { diagramPathOf, subjectAreaStorageOf } from '@erd-studio/core';
+import type { Annotation, NodePosition } from '@erd-studio/core';
+import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
+import { renderNewSubjectAreaDbml } from './dbmlWriters';
+
 import { ownWrites } from './ownWriteTracker';
 import { classifyWriteFailure, failedPath, projectRelative } from './commandErrors';
 import {
@@ -32,17 +45,27 @@ import {
   type TableLibraryService,
 } from './logicalModelService';
 import type { LayerService } from './layerService';
+import type { FileWrite } from './fileWrites';
+import { FileWriteExists, FileWriteRollbackFailed, type FileWriteIo } from './fsFileWrites';
+import { UnsavedFilesRefused } from './fileWrites';
+import type { DbmlLibraryWritePlan } from './dbmlLibraryWrites';
+import { semanticReadmeCreate } from './semanticReadme';
 import type { SemanticTable } from '../types/semantic';
 
 export interface NewSubjectAreaWrite {
   workspaceRoot: string;
   semanticDir: string;
-  /** The new subject area file: `<workspaceRoot>/<semanticDir>/<layer>/<name>.json`. */
+  /** The new subject area file: `<semanticDir>/<layer>/<name>.json`, or `<semanticDir>/<layer>/diagrams/<name>.dbml`. */
   domainPath: string;
   /** Table files to create, each with `saveTable(table, folder)`. */
   newTables: readonly SemanticTable[];
   /** The library folder new tables go in (a layer folder), or undefined for the top level. */
   folder?: string;
+  /**
+   * New DBML tables keep the schema they bring as their schema folder
+   * (Import: the source's qualifier), instead of the diagram layer's (§2.4).
+   */
+  schemaFromSource?: boolean;
   /**
    * Existing library tables that gained relationships, saved after the
    * subject area file is on disk. One that is also in `newTables` is skipped
@@ -50,17 +73,42 @@ export interface NewSubjectAreaWrite {
    */
   changedTables: readonly SemanticTable[];
   /**
-   * The subject area file's text. `tableNaming` is whether the project
-   * writes the v6 naming (#182), asked before the first table file lands.
-   * Called inside the write, so a throw is rolled back like any failure.
+   * The subject area: a JSON file's text, or (for a `.dbml` `domainPath`)
+   * the v5 object a DBML diagram is rendered from (`domain`, `description`,
+   * `modelFolder`, `logical.models`, `viewConfig.positions` and
+   * `.annotations`; its relationships must already be routed to the
+   * library, D5). `tableNaming` is whether the project writes the v6 naming
+   * (#182), asked before the first table file lands. Called inside the
+   * write, so a throw is rolled back like any failure.
    */
   documentText(tableNaming: boolean): string;
+  /** The DBML diagram's v5 object (`domainPath` ends in `.dbml`). */
+  document?(): Record<string, unknown>;
 }
 
 export interface NewSubjectAreaWriteServices {
   layerService: Pick<LayerService, 'getAllLayers' | 'saveConfig'>;
-  tableLibraryService: Pick<TableLibraryService, 'saveTable' | 'deleteTable' | 'tablePath' | 'writesTableNaming'>;
+  tableLibraryService: Pick<TableLibraryService, 'saveTable' | 'deleteTable' | 'tablePath' | 'writesTableNaming'>
+    /** Every file a save writes (a DBML table's relationships files too), to snapshot before it; the DBML plan. */
+    & Partial<Pick<TableLibraryService, 'planTableWrites' | 'invalidateCache' | 'applyDbmlBatch' | 'writesTableAsDbml' | 'dbmlHomeOf'>>;
+  /** The file operations of the DBML write (a test makes one fail). */
+  io?: FileWriteIo;
+  /**
+   * A file's text for the DBML settle pass: an open document's (unsaved edits
+   * included), else the disk's without a byte-order mark; null when there is
+   * none. Default: the disk's.
+   */
+  readText?(filePath: string): string | null;
+  /**
+   * Those of `filePaths` open with unsaved edits (`dirtyFiles`). Every file
+   * the DBML write plans, the settled diagrams included, is checked before the
+   * first write; a dirty one refuses with {@link UnsavedFilesRefused}.
+   */
+  dirtyFiles?(filePaths: readonly string[]): string[];
 }
+
+// A file the DBML write would change is open with unsaved edits (it lives with FileWrite, so the library's batch throws it too).
+export { UnsavedFilesRefused };
 
 export type NewSubjectAreaWriteResult =
   | {
@@ -87,14 +135,18 @@ export async function writeNewSubjectArea(
   write: NewSubjectAreaWrite,
   services: NewSubjectAreaWriteServices,
 ): Promise<NewSubjectAreaWriteResult> {
+  if (subjectAreaStorageOf(write.domainPath) === 'dbml') return writeNewDbmlSubjectArea(write, services);
   const { layerService, tableLibraryService } = services;
   const { domainPath } = write;
   const layerDir = path.dirname(domainPath);
   const written: string[] = [];
   const changed: string[] = [];
+  /** The YAML tables this write created (deleted again on failure; the DBML batch's files are put back from `before`). */
+  const writtenYaml: string[] = [];
   let domainWritten = false;
-  // What each existing library file held before the write changed it, to put back on failure.
-  const before = new Map<string, string>();
+  // What each library file held before the write changed it (null: it was
+  // not there), to put back on failure.
+  const before = new Map<string, string | null>();
   // Asked before any table file lands: the subject area is written in the naming the project writes (#182).
   const tableNaming = tableLibraryService.writesTableNaming();
   // Folders the write creates, removed again if it fails (a new project's layers.json with them).
@@ -107,9 +159,28 @@ export async function writeNewSubjectArea(
     }
     fs.mkdirSync(layerDir, { recursive: true });
 
+    // The DBML tables, new and changed, are one batch (§2.6): one plan, one
+    // settle, one all-or-nothing write. Each file it wrote is put back on failure.
+    const isDbml = (t: SemanticTable): boolean => !!tableLibraryService.applyDbmlBatch && !!tableLibraryService.writesTableAsDbml?.(t.name);
+    const dbmlNew = write.newTables.filter(isDbml);
+    const dbmlChanged = write.changedTables.filter((t) => !write.newTables.includes(t) && isDbml(t));
     for (const table of write.newTables) {
+      if (dbmlNew.includes(table)) continue;
       tableLibraryService.saveTable(table, write.folder);
       written.push(table.name);
+      writtenYaml.push(table.name);
+    }
+    if (dbmlNew.length > 0 || dbmlChanged.length > 0) {
+      const batch = tableLibraryService.applyDbmlBatch!({
+        ops: {
+          save: [...dbmlNew, ...dbmlChanged].map((model) => ({ model })),
+          ...(tableLibraryService.dbmlHomeOf ? { newTableHome: tableLibraryService.dbmlHomeOf(write.folder) } : {}),
+        },
+        ...(services.dirtyFiles ? { dirtyFiles: services.dirtyFiles } : {}),
+      });
+      for (const [filePath, text] of batch.before) if (!before.has(filePath)) before.set(filePath, text);
+      written.push(...dbmlNew.map((t) => t.name));
+      changed.push(...dbmlChanged.map((t) => t.name));
     }
 
     fs.writeFileSync(domainPath, write.documentText(tableNaming), { encoding: 'utf-8', flag: 'wx' });
@@ -117,9 +188,16 @@ export async function writeNewSubjectArea(
     ownWrites.recordWrite(domainPath);
     // Existing library tables that gained a relationship, once the subject area is on disk.
     for (const table of write.changedTables) {
-      if (write.newTables.includes(table)) continue;
-      const tablePath = tableLibraryService.tablePath(table.name);
-      if (fs.existsSync(tablePath)) before.set(tablePath, fs.readFileSync(tablePath, 'utf-8'));
+      if (write.newTables.includes(table) || dbmlChanged.includes(table)) continue;
+      // A DBML table's save also writes the relationships files holding its
+      // Refs: snapshot every file the save plans.
+      const paths = tableLibraryService.planTableWrites
+        ? tableLibraryService.planTableWrites({ save: [{ model: table }] }).writes.map((w) => w.path)
+        : [tableLibraryService.tablePath(table.name)];
+      for (const filePath of paths) {
+        if (before.has(filePath)) continue;
+        before.set(filePath, fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : null);
+      }
       tableLibraryService.saveTable(table);
       changed.push(table.name);
     }
@@ -127,15 +205,24 @@ export async function writeNewSubjectArea(
     // Leave nothing behind: no orphan table files, no subject area naming
     // tables that were just removed, no library file half way through.
     let undone = true;
-    for (const name of written) {
+    for (const name of writtenYaml) {
       try { tableLibraryService.deleteTable(name); } catch { undone = false; }
     }
     if (domainWritten) {
       try { fs.unlinkSync(domainPath); ownWrites.recordDelete(domainPath); } catch { undone = false; }
     }
-    for (const [tablePath, text] of before) {
-      try { fs.writeFileSync(tablePath, text, 'utf-8'); ownWrites.recordWrite(tablePath); } catch { undone = false; }
+    for (const [filePath, text] of before) {
+      try {
+        if (text !== null) {
+          fs.writeFileSync(filePath, text, 'utf-8');
+          ownWrites.recordWrite(filePath);
+        } else if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          ownWrites.recordDelete(filePath);
+        }
+      } catch { undone = false; }
     }
+    if (before.size > 0) tableLibraryService.invalidateCache?.();
     if (undone && createdRoot) {
       try { fs.rmSync(semanticRoot, { recursive: true, force: true }); } catch { undone = false; }
     } else if (undone && createdLayerDir) {
@@ -149,12 +236,114 @@ export async function writeNewSubjectArea(
   return { ok: true, written, changed };
 }
 
+/**
+ * {@link writeNewSubjectArea} for a `.dbml` diagram (`<layer>/diagrams/<name>.dbml`,
+ * §2.8): every table file (in `<layer>/tables/<schema>/`), relationships
+ * file, the diagram (its positions and sticky-note boxes in its Project's
+ * `erd_layout`), the settle re-render of other DBML diagrams and, when this
+ * write starts the project, its `README.md`: ONE library batch
+ * (`applyDbmlBatch`: one plan, one settle, one all-or-nothing write; new
+ * files with `wx`).
+ */
+async function writeNewDbmlSubjectArea(
+  write: NewSubjectAreaWrite,
+  services: NewSubjectAreaWriteServices,
+): Promise<NewSubjectAreaWriteResult> {
+  const { layerService, tableLibraryService } = services;
+  const { domainPath } = write;
+  const semanticRoot = path.join(write.workspaceRoot, write.semanticDir);
+  const createdRoot = !fs.existsSync(semanticRoot);
+  const changedNames = write.changedTables.filter((t) => !write.newTables.includes(t)).map((t) => t.name);
+  const rel = path.relative(semanticRoot, domainPath).split(path.sep).join('/');
+  /** Every file was put back; the folder this write made goes with them. */
+  const removeCreatedRoot = (): boolean => {
+    if (!createdRoot) return true;
+    try {
+      fs.rmSync(semanticRoot, { recursive: true, force: true });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  let planned = false;
+  try {
+    if (createdRoot) await layerService.saveConfig(layerService.getAllLayers());
+    if (!tableLibraryService.applyDbmlBatch) throw new Error('A DBML diagram needs the library planner.');
+    // New tables go in the diagram's layer, its name as the schema (§2.4), unless they bring their own.
+    const layer = diagramPathOf(rel)?.layer ?? write.folder;
+    const saves = [
+      ...write.newTables.map((model) => ({ model })),
+      ...write.changedTables.filter((t) => !write.newTables.includes(t)).map((model) => ({ model })),
+    ];
+    const diagramWrites = (plan: DbmlLibraryWritePlan): FileWrite[] => {
+      planned = true;
+      const doc = write.document?.() ?? {};
+      const logical = (doc.logical ?? {}) as { models?: unknown };
+      const names = Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
+      // A DBML diagram's members are DBML tables (D20): a `use` line cannot point at a `.yml`.
+      const members = names.map((name) => {
+        const table = plan.resolveTable(name);
+        if (!table || table.storage !== 'dbml') {
+          throw new DbmlEditRefused(rel, `"${name}" is a YAML table, and a DBML diagram can only hold DBML tables. ${DBML_CONVERT_FIRST_MESSAGE}.`);
+        }
+        return { name: table.name, reference: table.reference, path: table.path };
+      });
+      const view = (doc.viewConfig ?? {}) as { positions?: Record<string, NodePosition>; annotations?: Annotation[] };
+      const text = renderNewSubjectAreaDbml({
+        filePath: rel,
+        domain: typeof doc.domain === 'string' ? doc.domain : path.basename(domainPath, '.dbml'),
+        ...(typeof doc.description === 'string' ? { description: doc.description } : {}),
+        ...(typeof doc.modelFolder === 'string' ? { modelFolder: doc.modelFolder } : {}),
+        members,
+        relationshipsFiles: plan.relationshipsImportsFor(members.map((m) => m.name), []),
+        annotations: Array.isArray(view.annotations) ? view.annotations : [],
+        ...(view.positions ? { positions: view.positions } : {}),
+      });
+      // A project this write starts gets the README that says what the folder is (§1.7).
+      const readme = createdRoot ? semanticReadmeCreate(semanticRoot, (p) => fs.existsSync(p)) : null;
+      return [{ kind: 'create', path: domainPath, text }, ...(readme ? [readme] : [])];
+    };
+    tableLibraryService.applyDbmlBatch({
+      ops: {
+        save: saves,
+        ...(tableLibraryService.dbmlHomeOf ? { newTableHome: tableLibraryService.dbmlHomeOf(layer) } : {}),
+        ...(write.schemaFromSource ? { schemaFromSource: true } : {}),
+      },
+      exceptDiagrams: [domainPath],
+      extraWrites: diagramWrites,
+      // Nothing is written under the user's unsaved edits: not a library file,
+      // and not another diagram the settle pass re-renders.
+      ...(services.dirtyFiles ? { dirtyFiles: services.dirtyFiles } : {}),
+      ...(services.readText ? { readText: services.readText } : {}),
+      ...(services.io ? { io: services.io } : {}),
+    });
+  } catch (error) {
+    // A refusal before the first write (planned or not) left nothing; a failed write was put back unless it says so.
+    const undone = !(error instanceof FileWriteRollbackFailed) && removeCreatedRoot();
+    tableLibraryService.invalidateCache?.();
+    // The diagram's own exclusive create: the name was taken since it was checked.
+    const nameTaken = planned && error instanceof FileWriteExists && path.resolve(error.filePath) === path.resolve(domainPath);
+    return { ok: false, error, undone, nameTaken };
+  }
+  return { ok: true, written: write.newTables.map((t) => t.name), changed: changedNames };
+}
+
 /** A write refused because of what is in the user's file, which names file and line. */
-export type RefusedWrite = DuplicateKeyWriteRefused | RelationshipsRewriteRefused | TableNamingWriteRefused;
+export type RefusedWrite = DuplicateKeyWriteRefused | RelationshipsRewriteRefused | TableNamingWriteRefused | DbmlEditRefused;
 
 export function isRefusedWrite(err: unknown): err is RefusedWrite {
   return err instanceof DuplicateKeyWriteRefused || err instanceof RelationshipsRewriteRefused
-    || err instanceof TableNamingWriteRefused;
+    || err instanceof TableNamingWriteRefused || err instanceof DbmlEditRefused;
+}
+
+/** Where a refusal points: the file and line to open, when it names them. */
+export function refusalLocation(err: RefusedWrite, semanticRoot: string): { filePath: string; line?: number } | undefined {
+  if (err instanceof DbmlEditRefused) {
+    if (!err.file) return undefined;
+    const filePath = path.isAbsolute(err.file) ? err.file : path.join(semanticRoot, ...err.file.split('/'));
+    return { filePath, ...(err.line !== undefined ? { line: err.line } : {}) };
+  }
+  return err.location;
 }
 
 /** The sentence that ends every failed write's message. */

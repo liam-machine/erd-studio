@@ -33,6 +33,8 @@ import { ManifestService } from '../../src/services/manifestService';
 import { YmlParserService } from '../../src/services/ymlParserService';
 import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
+import { hostErrorLog } from '../../src/services/feedbackService';
+import { setLogSink, type LogSink } from '../../src/services/logger';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
@@ -161,6 +163,45 @@ describe('a diagram whose file is deleted while its canvas is open', () => {
     provider.syncSubjectAreaFilePresence();
     expect(errors(panel)).toHaveLength(1);
     expect(error.mock.calls.map((c) => c[0])).toEqual(['domainLoad', 'domainLoadMissing']);
+  });
+
+  it('logs the delete at info, not as an error, and adds nothing to the bug-report error log', async () => {
+    // An Undo of Convert removes the diagram it made: an expected event,
+    // which used to write two [error] lines ("[sendDomainData] … was deleted
+    // or renamed outside ERD Studio." and "Failed to load domain").
+    const { provider, file, panel } = await openLoaded();
+    const lines: Array<{ level: string; message: string }> = [];
+    const at = (level: string) => (message: string | Error) => { lines.push({ level, message: String(message) }); };
+    const sink: LogSink = { trace: at('trace'), debug: at('debug'), info: at('info'), warn: at('warn'), error: at('error') };
+    const previous = setLogSink(sink);
+    hostErrorLog.clear();
+    try {
+      fs.rmSync(file);
+      provider.syncSubjectAreaFilePresence();
+      await provider.refreshAllOpenSubjectAreas();
+    } finally {
+      setLogSink(previous);
+    }
+    expect(errors(panel).map((m) => m.payload)).toEqual([MISSING]);
+    expect(lines.filter((l) => l.level === 'error')).toEqual([]);
+    expect(lines.filter((l) => l.level === 'info' && l.message.includes(MISSING.message))).toHaveLength(1);
+    expect(hostErrorLog.recent()).toEqual([]);
+  });
+
+  it('still logs a load failure that is not a delete as an error', async () => {
+    const { provider, file, panel } = await openLoaded();
+    const lines: string[] = [];
+    const previous = setLogSink({ trace() {}, debug() {}, info() {}, warn() {}, error: (m: string | Error) => { lines.push(String(m)); } });
+    hostErrorLog.clear();
+    try {
+      fs.writeFileSync(file, '{ not json');
+      await provider.refreshAllOpenSubjectAreas();
+    } finally {
+      setLogSink(previous);
+    }
+    await vi.waitFor(() => expect(errors(panel).length).toBeGreaterThan(0), { timeout: 4000, interval: 10 });
+    expect(lines.some((l) => l.includes('Failed to load domain'))).toBe(true);
+    expect(hostErrorLog.recent().length).toBeGreaterThan(0);
   });
 
   it('leaves a canvas alone when the "deleted" file is still there (git delete-then-rename)', async () => {

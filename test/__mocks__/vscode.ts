@@ -61,8 +61,25 @@ const _textDocumentChangeListeners: Array<(e: unknown) => unknown> = [];
  * `document` — e.g. `reason: TextDocumentChangeReason.Undo` for the native
  * undo Cmd+Z runs. Resolves once every (async) listener has finished.
  */
-export async function _fireDidChangeTextDocument(document: unknown, reason?: TextDocumentChangeReason): Promise<void> {
-  await Promise.all([..._textDocumentChangeListeners].map((listener) => listener({ document, contentChanges: [], reason })));
+export async function _fireDidChangeTextDocument(
+  document: unknown,
+  reason?: TextDocumentChangeReason,
+  /** The changes; `[]` is a dirty-state event (a save), as VS Code fires it. Defaults to one text change. */
+  contentChanges: unknown[] = [{ rangeOffset: 0, rangeLength: 0, text: '' }],
+): Promise<void> {
+  await Promise.all([..._textDocumentChangeListeners].map((listener) => listener({ document, contentChanges, reason })));
+}
+
+/** Listeners registered through workspace.onDidRenameFiles. */
+const _renameFilesListeners: Array<(e: unknown) => unknown> = [];
+
+/**
+ * Fire workspace.onDidRenameFiles as VS Code does after the Explorer (a drag
+ * and drop, F2) or a WorkspaceEdit moved files. Resolves once every (async)
+ * listener has finished.
+ */
+export async function _fireDidRenameFiles(files: ReadonlyArray<{ oldUri: unknown; newUri: unknown }>): Promise<void> {
+  await Promise.all([..._renameFilesListeners].map((listener) => listener({ files })));
 }
 
 export enum TextDocumentChangeReason {
@@ -119,6 +136,16 @@ export const workspace = {
       },
     };
   },
+  /** Registers a listener; `_fireDidRenameFiles` (and a WorkspaceEdit's renameFile) calls it. */
+  onDidRenameFiles: (listener: (e: unknown) => unknown) => {
+    _renameFilesListeners.push(listener);
+    return {
+      dispose: () => {
+        const idx = _renameFilesListeners.indexOf(listener);
+        if (idx !== -1) _renameFilesListeners.splice(idx, 1);
+      },
+    };
+  },
   onDidChangeConfiguration: () => ({ dispose: () => {} }),
   onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
   /** Mirrors VS Code: the folder whose path contains the uri, deepest first. */
@@ -139,6 +166,9 @@ export const workspace = {
   },
 };
 
+/** Every output channel created, oldest first (tests read `_lines` and `_shown`). */
+export const _outputChannels: Array<{ name?: string; _lines: string[]; _shown: number }> = [];
+
 export const window = {
   showInformationMessage: async () => undefined,
   showWarningMessage: async () => undefined,
@@ -147,11 +177,32 @@ export const window = {
   showQuickPick: async () => undefined,
   showOpenDialog: async () => _mockOpenDialogResult,
   setStatusBarMessage: (_message: string, _hideAfterTimeout?: number) => ({ dispose: () => {} }),
-  createOutputChannel: () => ({
-    appendLine: () => {},
-    show: () => {},
-    dispose: () => {},
-  }),
+  /** A plain channel, or with `{ log: true }` a LogOutputChannel whose lines are kept in `_lines` (`[level] message args`). */
+  createOutputChannel: (name?: string, _options?: unknown) => {
+    const lines: string[] = [];
+    const at = (level: string) => (message: unknown, ...args: unknown[]) => {
+      lines.push([`[${level}] ${message instanceof Error ? message.message : String(message)}`, ...args.map((a) => (a instanceof Error ? a.message : String(a)))].join(' '));
+    };
+    const channel = {
+      name,
+      _lines: lines,
+      _shown: 0,
+      appendLine: (line: string) => { lines.push(line); },
+      append: (text: string) => { lines.push(text); },
+      show: () => { channel._shown++; },
+      hide: () => {},
+      clear: () => { lines.length = 0; },
+      dispose: () => {},
+      logLevel: 2,
+      trace: at('trace'),
+      debug: at('debug'),
+      info: at('info'),
+      warn: at('warn'),
+      error: at('error'),
+    };
+    _outputChannels.push(channel);
+    return channel;
+  },
   showTextDocument: async () => undefined,
   /** Runs the task immediately with a no-op progress reporter. */
   withProgress: async <R>(
@@ -226,6 +277,12 @@ export interface MockStatusBarItem {
 export enum QuickPickItemKind {
   Separator = -1,
   Default = 0,
+}
+
+export enum InputBoxValidationSeverity {
+  Info = 1,
+  Warning = 2,
+  Error = 3,
 }
 
 export enum StatusBarAlignment {
@@ -608,6 +665,26 @@ export class Range {
   constructor(public readonly start: Position, public readonly end: Position) {}
 }
 
+/** A text edit, as a formatting provider returns them. */
+export class TextEdit {
+  constructor(public readonly range: Range, public readonly newText: string) {}
+  static replace(range: Range, newText: string): TextEdit { return new TextEdit(range, newText); }
+  static insert(position: Position, newText: string): TextEdit { return new TextEdit(new Range(position, position), newText); }
+  static delete(range: Range): TextEdit { return new TextEdit(range, ''); }
+}
+
+/** Document formatting providers registered through `languages`, in order (tests read and clear it). */
+export const _formattingProviders: Array<{ selector: unknown; provider: { provideDocumentFormattingEdits: (...args: unknown[]) => unknown } }> = [];
+
+export const languages = {
+  getLanguages: async (): Promise<string[]> => ['plaintext', 'json', 'yaml', 'dbml'],
+  registerDocumentFormattingEditProvider: (selector: unknown, provider: { provideDocumentFormattingEdits: (...args: unknown[]) => unknown }) => {
+    const entry = { selector, provider };
+    _formattingProviders.push(entry);
+    return { dispose: () => { const i = _formattingProviders.indexOf(entry); if (i >= 0) _formattingProviders.splice(i, 1); } };
+  },
+};
+
 export interface MockTextDocument {
   uri: ReturnType<typeof createUri>;
   fileName: string;
@@ -668,8 +745,14 @@ export class WorkspaceEdit {
 /** Every WorkspaceEdit passed to workspace.applyEdit, in order. */
 export const _appliedEdits: WorkspaceEdit[] = [];
 
-/** Set to false to make workspace.applyEdit reject (nothing is applied). */
-export const _mockWorkspaceState = { applyEditResult: true };
+/**
+ * Set `applyEditResult` to false to make workspace.applyEdit reject (nothing
+ * is applied). `applyEditPrefixes` scripts the next calls, one entry each: a
+ * number n applies the edit's first n operations and then returns false, as
+ * VS Code does when a file operation fails part way (it keeps the steps that
+ * ran); `'ok'` applies the call normally.
+ */
+export const _mockWorkspaceState: { applyEditResult: boolean; applyEditPrefixes: Array<number | 'ok'> } = { applyEditResult: true, applyEditPrefixes: [] };
 
 /** fsPaths whose document save() resolves false (see `_failMockSave`). */
 const _failingSaves = new Set<string>();
@@ -704,14 +787,38 @@ export function _closeMockDocument(fsPath: string): void {
   doc.save = async () => { throw new Error('Document has been closed'); };
 }
 
+/**
+ * `editor.formatOnSave` for `.dbml` documents. When on, every save() runs the
+ * registered document formatting providers first and applies their edits, as
+ * VS Code's format-on-save participant does for an extension's save() too.
+ */
+export const _mockFormatOnSave: { enabled: boolean } = { enabled: false };
+
+/** Run the formatting providers over `doc` and return its text with their edits applied (format on save). */
+function formatOnSaveText(doc: MockTextDocument, text: string): string {
+  if (!_mockFormatOnSave.enabled || !doc.uri.fsPath.endsWith('.dbml')) return text;
+  let current = text;
+  for (const { provider } of _formattingProviders) {
+    const edits = (provider.provideDocumentFormattingEdits(doc, { tabSize: 2, insertSpaces: true }) ?? []) as TextEdit[];
+    const spans = edits
+      .map((e) => ({ start: doc.offsetAt(e.range.start), end: doc.offsetAt(e.range.end), text: e.newText }))
+      .sort((a, b) => b.start - a.start);
+    for (const e of spans) current = current.slice(0, e.start) + e.text + current.slice(e.end);
+  }
+  return current;
+}
+
 /** Reset documents, applied edits and applyEdit behaviour (call in beforeEach). */
 export function _resetMockWorkspace(): void {
+  _mockFormatOnSave.enabled = false;
   _failingSaves.clear();
   _mockDocuments.clear();
   _appliedEdits.length = 0;
   _mockWorkspaceState.applyEditResult = true;
+  _mockWorkspaceState.applyEditPrefixes.length = 0;
   workspace.textDocuments = [];
   _textDocumentChangeListeners.length = 0;
+  _renameFilesListeners.length = 0;
 }
 
 /**
@@ -747,6 +854,8 @@ export function createMockTextDocument(fsPath: string, text = '{}', options: { p
     },
     save: async () => {
       if (_failingSaves.has(path.resolve(fsPath))) return false;
+      const formatted = formatOnSaveText(doc, current);
+      if (formatted !== current) doc._setText(formatted);
       if (doc._persist) {
         fs.writeFileSync(fsPath, current, 'utf-8');
       }
@@ -771,10 +880,14 @@ export function createMockTextDocument(fsPath: string, text = '{}', options: { p
  */
 async function applyMockEdit(edit: WorkspaceEdit): Promise<boolean> {
   _appliedEdits.push(edit);
-  if (!_mockWorkspaceState.applyEditResult) {
+  const scripted = _mockWorkspaceState.applyEditPrefixes.shift();
+  if (scripted === undefined && !_mockWorkspaceState.applyEditResult) {
     return false;
   }
-  for (const op of edit._ops) {
+  const prefix = typeof scripted === 'number' ? scripted : edit._ops.length;
+  // The files the edit moved: VS Code fires onDidRenameFiles for them, as for the Explorer's moves.
+  const renamed: Array<{ oldUri: MockUri; newUri: MockUri }> = [];
+  for (const op of edit._ops.slice(0, prefix)) {
     switch (op.kind) {
       case 'replace':
       case 'insert': {
@@ -807,11 +920,13 @@ async function applyMockEdit(edit: WorkspaceEdit): Promise<boolean> {
       case 'renameFile': {
         fs.mkdirSync(path.dirname(op.newUri.fsPath), { recursive: true });
         fs.renameSync(op.oldUri.fsPath, op.newUri.fsPath);
+        renamed.push({ oldUri: op.oldUri, newUri: op.newUri });
         break;
       }
     }
   }
-  return true;
+  if (renamed.length > 0) void _fireDidRenameFiles(renamed);
+  return prefix >= edit._ops.length;
 }
 
 /** Open (or return the already-open) persisted document backed by a real file. */

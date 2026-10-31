@@ -8,28 +8,52 @@
     .ew-btnfg{fill:var(--vscode-button-foreground,#ffffff)}
     .ew-folder{fill:var(--vscode-textLink-foreground,#3794ff);fill-opacity:0.18;stroke:var(--vscode-textLink-foreground,#3794ff);stroke-width:1.5}
   </style>
-  <!-- the files the diagram is saved as -->
-  <rect x="16" y="40" width="150" height="220" rx="8" class="ew-card"/>
-  <g transform="translate(28 56)">
+  <!-- the files the diagram is saved as: the layer-first tree, with the DBML language icons -->
+  <rect x="16" y="24" width="150" height="252" rx="8" class="ew-card"/>
+  <g transform="translate(28 38)">
     <path d="M0 4a2 2 0 0 1 2-2h6l3 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" class="ew-folder"/>
     <text x="30" y="15" font-size="11" font-weight="600" class="ew-fg">.erd-studio/</text>
   </g>
-  <g font-size="10" class="ew-muted">
-    <g transform="translate(40 90)">
+  <g font-size="9.5" class="ew-muted">
+    <g transform="translate(40 64)">
       <path d="M0 2a2 2 0 0 1 2-2h8l4 4v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
-      <text x="22" y="11">layers.json</text>
+      <text x="18" y="11">layers.json</text>
     </g>
-    <g transform="translate(40 118)">
-      <path d="M0 2a2 2 0 0 1 2-2h8l4 4v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="#60a5fa" stroke-width="1.2"/>
-      <text x="22" y="11" class="ew-fg">gold/sales.json</text>
+    <g transform="translate(40 81)">
+      <path d="M0 3a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="21" y="11">gold/</text>
     </g>
-    <g transform="translate(40 146)">
-      <path d="M0 2a2 2 0 0 1 2-2h8l4 4v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="#60a5fa" stroke-width="1.2"/>
-      <text x="22" y="11" class="ew-fg">tables/customer.yml</text>
+    <g transform="translate(50 98)">
+      <path d="M0 3a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="21" y="11">diagrams/</text>
+    </g>
+    <g transform="translate(60 115)">
+      <g transform="scale(.875)"><rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="none" stroke="#0D9488"/><rect x="3" y="3" width="4" height="3" rx=".5" fill="#0D9488"/><rect x="9" y="10" width="4" height="3" rx=".5" fill="#0D9488"/><path d="M5.5 6v5.5H9" fill="none" stroke="#0D9488"/></g>
+      <text x="18" y="11" class="ew-fg">sales.dbml</text>
+    </g>
+    <g transform="translate(50 132)">
+      <path d="M0 3a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="21" y="11">tables/</text>
+    </g>
+    <g transform="translate(60 149)">
+      <path d="M0 3a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="21" y="11">gold/</text>
+    </g>
+    <g transform="translate(70 166)">
+      <g transform="scale(.875)"><path fill="#3B82F6" fill-rule="evenodd" d="M3 2h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM3 6h3v3H3zm4 0h6v3H7zM3 10h3v3H3zm4 0h6v3H7z"/></g>
+      <text x="18" y="11" class="ew-fg">customer.dbml</text>
+    </g>
+    <g transform="translate(50 183)">
+      <path d="M0 3a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="21" y="11">relationships/</text>
+    </g>
+    <g transform="translate(60 200)">
+      <g transform="scale(.875)" fill="none" stroke="#8B5CF6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.75 8h12.5M4.5 4.75v6.5M14.25 4.25 10 8l4.25 3.75"/></g>
+      <text x="18" y="11" class="ew-fg">gold.dbml</text>
     </g>
   </g>
   <!-- a git commit marker -->
-  <g transform="translate(40 196)">
+  <g transform="translate(40 222)">
     <line x1="0" y1="10" x2="110" y2="10" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2" stroke-dasharray="3 3"/>
     <circle cx="16" cy="10" r="6" class="ew-bg" stroke="#22c55e" stroke-width="2"/>
     <text x="30" y="30" font-size="10" class="ew-muted">commit and review</text>

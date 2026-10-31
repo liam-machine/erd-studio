@@ -444,7 +444,8 @@ describe('setup skill: merge conflicts are the user\'s to settle (#150)', () => 
       expect(text, name).not.toMatch(/`fix-model-yaml`(?: step| fix| step or fix)? (?:with|has|marked) `mergeConflict/);
       expect(text, name).not.toContain('Except with `mergeConflict');
       for (const para of text.split(/\n\s*\n|\n(?=\|)/)) {
-        if (para.includes('`mergeConflict: true`')) { expect(para, `${name}: ${para}`).toContain('unreadableModelFiles'); }
+        // Where the flag sits: an unreadableModelFiles entry, or (native DBML storage) a dbmlProblems entry.
+        if (para.includes('`mergeConflict: true`')) { expect(para, `${name}: ${para}`).toMatch(/unreadableModelFiles|dbmlProblems/); }
       }
     }
   });
@@ -515,7 +516,7 @@ describe('setup skill: the Without dbt route', () => {
     expect(cli('doctor.ts')).toContain('semanticDirExists');
     expect(flat(route())).toContain('**`erd.semanticDirExists: false`** → there is nothing to check yet');
     expect(cli('doctor.ts')).toContain("id: 'turn-round-relationships'");
-    for (const id of ['`fix-model-yaml`', '`resolve-merge-conflicts`', '`turn-round-relationships`', '`erd.naming`']) {
+    for (const id of ['`fix-model-yaml`', '`fix-dbml-file`', '`resolve-merge-conflicts`', '`resolve-format-conflicts`', '`finish-dbml-conversion`', '`import-dbml-file`', '`turn-round-relationships`', '`erd.storage`']) {
       expect(route(), id).toContain(id);
     }
   });
@@ -552,5 +553,73 @@ describe('setup skill: the Without dbt route', () => {
     // No Physical tab, Diff or sync plan in a folder without dbt — only the one "Using dbt?" line.
     expect(text).toContain('"Using dbt? Open its folder to compare your design with what dbt built."');
     expect(text).not.toContain('⊕ Sync');
+  });
+});
+
+describe('setup skill: native DBML storage (§7.3)', () => {
+  const body = (): string => splitFrontmatter(skill.content)!.body;
+  const ref = (name: string): string =>
+    CLAUDE_SETUP_SKILL_FILES.find((a) => a.relativePath === `references/${name}`)!.content;
+  const flat = (text: string): string => text.replace(/\s+/g, ' ');
+
+  it('stays under 500 lines with the new next steps and CLI codes routed', () => {
+    expect(skill.content.split('\n').length).toBeLessThan(500);
+    // Each id is in SKILL.md or a reference SKILL.md links.
+    const linked = [...body().matchAll(/`references\/([\w-]+\.md)`/g)].map((m) => m[1]);
+    const reachable = [body(), ...[...new Set(linked)].map(ref)].join('\n');
+    for (const id of ['fix-dbml-file', 'resolve-format-conflicts', 'finish-dbml-conversion', 'import-dbml-file', 'reconvert-dbml-project', 'dbml-invalid', 'not-a-diagram']) {
+      expect(reachable, id).toContain(`\`${id}\``);
+    }
+    // The CLI really emits them.
+    const cli = (name: string): string => fs.readFileSync(path.resolve(__dirname, '../../src/cli', name), 'utf-8');
+    for (const id of ['fix-dbml-file', 'resolve-format-conflicts', 'finish-dbml-conversion', 'import-dbml-file', 'reconvert-dbml-project']) {
+      expect(cli('doctor.ts'), id).toContain(`'${id}'`);
+    }
+    expect(cli('diff.ts')).toContain("'dbml-invalid'");
+    expect(cli('diff.ts')).toContain("'not-a-diagram'");
+  });
+
+  it('replaces the named lines of SKILL.md', () => {
+    expect(flat(body())).toContain('a `fix-model-yaml` or `fix-dbml-file` whose file entry has `mergeConflict: true`, or a `dbmlProblems` entry with `mergeConflict: true`, at any stage): git left two versions in a file.');
+    expect(body()).toContain('run `doctor` and fix each `fix-model-yaml` / `fix-dbml-file` file:line it lists first (usually a value to quote) —');
+    expect(body()).toContain('- **`fix-model-yaml` / `fix-dbml-file`** first, always: the file does not parse — fix that line (DBML: `references/troubleshooting.md`)');
+    expect(body()).toContain('1. Glob `.erd-studio/*/diagrams/*.dbml` and `.erd-studio/*/*.json` and propose one domain (');
+  });
+
+  it('the dbt route names the DBML diagram first, never a bare .json diagram (S9 review)', () => {
+    const text = flat(body());
+    // Every mention of a `<domain>.json` path is the YAML-project alternative of a `.dbml` one.
+    expect(text).not.toMatch(/<domain>\.json/);
+    expect(text).toContain('It is saved as `.erd-studio/<layer>/diagrams/<domain>.dbml` (`.json` in a `yaml` project).');
+    expect(text).toContain('the diagram, `.erd-studio/<layer>/diagrams/<domain>.dbml` (`.json` in a `yaml` project), listing the models; the inventory `relationships` are copied exactly (DBML: into a `<layer>/relationships/` file).');
+    expect(text).toContain('run `diff --domain` on the diagram file you wrote (`.dbml`, or `.json`).');
+    expect(text).toContain('Never delete a table file in the library.');
+    expect(text).not.toContain('under `logical-models/`');
+    const verify = ref('verify-and-fix.md');
+    expect(verify).toContain('diff --domain .erd-studio/<layer>/diagrams/<domain>.dbml --json');
+    expect(verify).not.toMatch(/diff --domain \S*<domain>\.json/);
+    expect(flat(verify)).toContain('In a `yaml` project the diagram is the `.json` file.');
+  });
+
+  it("route 2's Glob skips node_modules and the ERD Studio folder, whose own files are DBML", () => {
+    const text = flat(ref('without-dbt.md'));
+    expect(text).toContain('one (`**/*.dbml`, skipping `node_modules` and the ERD Studio folder itself, `.erd-studio/`');
+    expect(text).toContain('ERD Studio stores its own model as DBML too, split into one file per table');
+    expect(text).not.toContain('stay the only copy');
+    expect(text).toContain('A new project writes **DBML** (doctor\'s `erd.storage` says `dbml`)');
+  });
+
+  it('writes DBML first in the build recipe, with YAML as the legacy branch', () => {
+    const building = ref('building-the-model.md');
+    for (const heading of ['## Table file (DBML) — field by field', '## Relationships (DBML)', '## Diagram file (DBML)', '## Worked example (DBML)', '## Legacy: model yml — field by field', '## Legacy: domain JSON']) {
+      expect(building, heading).toContain(heading);
+    }
+    expect(building.indexOf('## Table file (DBML)')).toBeLessThan(building.indexOf('## Legacy: model yml'));
+    // Each fix kind has its DBML translation, and the ids are unchanged.
+    const fix = ref('verify-and-fix.md');
+    expect(fix).toContain('| `fix-dbml-file` |');
+    expect(fix).toContain('| kind | Edit (DBML) |');
+    // A conflicted relationships file: keep both sides, then doctor reports a Ref twice.
+    expect(flat(ref('troubleshooting.md'))).toContain("offer to keep both sides' Ref lines and both sides' `use` lines, then run doctor");
   });
 });

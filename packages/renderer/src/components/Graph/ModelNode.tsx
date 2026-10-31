@@ -31,6 +31,7 @@ import { DataTypeSelect } from '../common/DataTypeSelect';
 import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
 import { useHoverTip } from './HoverTip';
 import { metaRows } from '../../lib/metaFormat';
+import { tableFocusRole } from '../../lib/canvasFocus';
 import { STAGE_HEX } from '../../lib/stageColors';
 import { getDataTypeColor } from '../../lib/dataTypeColors';
 import {
@@ -556,9 +557,12 @@ function describeLoadError(error: TableLoadError): string {
       ? `Unresolved git merge conflict on line ${error.line} — ERD Studio can't read this file.`
       : "Unresolved git merge conflict — ERD Studio can't read this file.";
   }
+  // A `.dbml` table file (native DBML storage); an older core never sends
+  // these kinds, so its nodes read exactly as before.
+  const format = typeof error.kind === 'string' && error.kind.startsWith('dbml') ? 'DBML' : 'YAML';
   return error.line !== undefined
-    ? `YAML error on line ${error.line} — ERD Studio can't read this file.`
-    : "YAML error — ERD Studio can't read this file.";
+    ? `${format} error on line ${error.line} — ERD Studio can't read this file.`
+    : `${format} error — ERD Studio can't read this file.`;
 }
 
 /** The node's one line for a model read from a file that needs fixing (#164). */
@@ -567,9 +571,12 @@ function describeLoadWarning(warning: TableLoadWarning): string {
   return `${key} is written twice (line ${warning.line}) — the last one is shown. Remove the other copy to edit this table.`;
 }
 
-function TableNodeComponent({ data, selected }: NodeProps<TableFlowNode>) {
+function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
   const { modelName, label, stage, layer, layerConfig, schema, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
+  // Hover preview (useHoverFocus): the hovered table and its related tables
+  // stay bright. A primitive, so a table outside the focus never re-renders.
+  const focusRole = useEditorStore((s) => tableFocusRole(s.hoverFocus, id));
   const send = useSend();
   const viewer = useIsViewer();
 
@@ -666,7 +673,7 @@ function TableNodeComponent({ data, selected }: NodeProps<TableFlowNode>) {
 
   return (
     <div
-      className={`model-node model-node--${stageClass}${ghostReason ? ` model-node--ghost-${ghostReason}` : ''}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}`}
+      className={`model-node model-node--${stageClass}${ghostReason ? ` model-node--ghost-${ghostReason}` : ''}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}${focusRole ? ` model-node--focus-${focusRole}` : ''}`}
       data-model-name={modelName}
       // Viewer: no context menu, so leave right-click to the browser.
       onContextMenu={viewer ? undefined : handleContextMenu}

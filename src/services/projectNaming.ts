@@ -11,7 +11,11 @@ import * as path from 'path';
 import { NON_SUBJECT_AREA_DIRS, TABLES_DIR, detectProjectNaming, detectSubjectAreaFormat } from '@erd-studio/core';
 import type { ProjectNaming, SubjectAreaFormat } from '@erd-studio/core';
 
-/** The format of every subject area file (`{layer}/*.json`) under `semanticRoot`; an unreadable one says nothing. */
+/**
+ * The format of every subject area file (`{layer}/*.json`) under
+ * `semanticRoot`; an unreadable one says nothing. A `.dbml` diagram has no
+ * naming and is ignored: storage is `projectStorageOf`'s answer.
+ */
 export function subjectAreaFormatsIn(semanticRoot: string, tablesIsLibrary: boolean): SubjectAreaFormat[] {
   const formats: SubjectAreaFormat[] = [];
   let dirs: fs.Dirent[];

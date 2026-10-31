@@ -234,7 +234,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
 
     it('still rejects a duplicate within the domain', async () => {
       await h.send({ type: 'addModel', payload: { name: 'fct_order', schema: '', description: '', columns: [] } });
-      expect(h.errors()[0]).toMatch(/already exists in this subject area/);
+      expect(h.errors()[0]).toMatch(/already exists in this diagram/);
       expect(_appliedEdits).toHaveLength(0);
     });
 
@@ -290,7 +290,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
 
       await h.send({ type: 'addModel', payload: { name: 'dim_product', schema: '', description: '', columns: [] } });
 
-      expect(h.errors()).toEqual(['Failed to add table to subject area.']);
+      expect(h.errors()).toEqual(['Failed to add the table to this diagram.']);
       expect(fs.existsSync(ymlPath(h, 'dim_product'))).toBe(false);
       expect(h.readDomain().logical.models).toEqual(['fct_order', 'dim_task']);
     });
@@ -333,7 +333,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
     it('refuses a new model whose name differs from one in the domain only in case', async () => {
       await h.send({ type: 'addModel', payload: { name: 'FCT_ORDER', schema: '', description: '', columns: [] } });
 
-      expect(h.errors()[0]).toMatch(/Table "fct_order" already exists in this subject area/);
+      expect(h.errors()[0]).toMatch(/Table "fct_order" already exists in this diagram/);
       expect(_appliedEdits).toHaveLength(0);
     });
 
@@ -394,7 +394,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
     it('refuses to rename onto a name already used in this domain', async () => {
       await h.send({ type: 'renameModel', payload: { oldName: 'fct_order', newName: 'dim_task' } });
 
-      expect(h.errors()[0]).toMatch(/already exists in this subject area/);
+      expect(h.errors()[0]).toMatch(/already exists in this diagram/);
       expect(_appliedEdits).toHaveLength(0);
       expect(h.readDomain().logical.models).toEqual(['fct_order', 'dim_task']);
     });
@@ -758,6 +758,24 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       }
     });
 
+    it('an edit names a DBML error for a .dbml table file, and YAML kinds keep their text', async () => {
+      // Broken on disk, so the table is unavailable; the error is then reported as a .dbml file's.
+      const file = breakFctOrder();
+      const spy = vi.spyOn(h.tableLibraryService, 'getTableFileError').mockImplementation((name: string) =>
+        name === 'fct_order' ? { name, filePath: file.replace(/\.yml$/, '.dbml'), kind: 'dbmlSyntax', line: 3, code: '1001', message: 'm' } : null);
+      try {
+        await h.send({ type: 'updateModelDescription', payload: { modelName: 'fct_order', description: 'x' } });
+        expect(h.errors()).toEqual([`Failed to update description: Can't edit "fct_order": its file has a DBML error on line 3.`]);
+        spy.mockImplementation((name: string) =>
+          name === 'fct_order' ? { name, filePath: file, kind: 'yamlScalar', line: 3, message: 'm' } : null);
+        await h.send({ type: 'updateModelDescription', payload: { modelName: 'fct_order', description: 'x' } });
+        expect(h.errors()).toEqual([`Failed to update description: Can't edit "fct_order": its file has a YAML error on line 3.`]);
+        expect(_appliedEdits).toHaveLength(0);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     it('the domain payload carries loadError for the broken model', async () => {
       breakFctOrder();
       await h.send({ type: 'ready' });
@@ -997,7 +1015,8 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
 
         expect(listener).not.toHaveBeenCalled();
 
-        // An external edit to the same file is still reported (the record was consumed).
+        // An external edit to the same file is still reported: it holds other bytes than ours.
+        fs.appendFileSync(ymlPath(h, 'fct_order'), '# edited outside ERD Studio\n');
         _mockFileWatchers[3]._simulateChange(vscode.Uri.file(ymlPath(h, 'fct_order')));
         vi.advanceTimersByTime(300);
         expect(listener).toHaveBeenCalledTimes(1);
@@ -1068,7 +1087,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
 
       await h.send({ type: 'addExistingModel', payload: { modelName: 'dim_new' } });
 
-      expect(h.errors()).toEqual(['Failed to add table to subject area.']);
+      expect(h.errors()).toEqual(['Failed to add the table to this diagram.']);
       expect(fs.existsSync(ymlPath(h, 'dim_new'))).toBe(false);
       expect(h.readDomain().logical.models).toEqual(['fct_order', 'dim_task']);
     });

@@ -55,6 +55,16 @@ export function validateTableNameSafety(name: unknown): string | null {
  * Do NOT use this for names discovered in the dbt project — see
  * {@link validateTableNameSafety}.
  */
+/**
+ * Validate the name of a table about to be CREATED as a `.dbml` file in
+ * `<layer>/tables/<schema>/`: the path-safety rule. The layer-first tree
+ * reserves no table name (`_relationships` is an ordinary name). Called only
+ * by create paths (Add, Add Existing, Add from dbt, Rename's new name).
+ */
+export function validateNewDbmlTableName(name: unknown): string | null {
+  return validateTableNameSafety(name);
+}
+
 export function validateTableName(name: unknown): string | null {
   const safetyError = validateTableNameSafety(name);
   if (safetyError) {
@@ -476,6 +486,7 @@ export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
 /**
  * Validate a `submitFeedback` payload: valid `kind`, string `title` and
  * `description`, optional string `steps`, boolean `includeDiagnostics`,
+ * optional boolean `includeLog`,
  * optional positive integer `regressionOf` / `commentOnIssue`, optional
  * string[] `webviewErrors`, optional domain summary.
  */
@@ -489,6 +500,7 @@ export function validateSubmitFeedbackPayload(value: unknown): string | null {
     description?: unknown;
     steps?: unknown;
     includeDiagnostics?: unknown;
+    includeLog?: unknown;
     webviewErrors?: unknown;
     regressionOf?: unknown;
     commentOnIssue?: unknown;
@@ -508,6 +520,9 @@ export function validateSubmitFeedbackPayload(value: unknown): string | null {
   }
   if (typeof payload.includeDiagnostics !== 'boolean') {
     return 'Diagnostics flag must be a boolean.';
+  }
+  if (payload.includeLog !== undefined && typeof payload.includeLog !== 'boolean') {
+    return 'Log flag must be a boolean.';
   }
   for (const key of ['regressionOf', 'commentOnIssue'] as const) {
     if (payload[key] !== undefined && !isIssueNumber(payload[key])) {
@@ -531,6 +546,7 @@ export function validateCopyFeedbackReportPayload(value: unknown): string | null
     description?: unknown;
     steps?: unknown;
     includeDiagnostics?: unknown;
+    includeLog?: unknown;
     webviewErrors?: unknown;
     domain?: unknown;
   };
@@ -548,6 +564,9 @@ export function validateCopyFeedbackReportPayload(value: unknown): string | null
   }
   if (typeof payload.includeDiagnostics !== 'boolean') {
     return 'Diagnostics flag must be a boolean.';
+  }
+  if (payload.includeLog !== undefined && typeof payload.includeLog !== 'boolean') {
+    return 'Log flag must be a boolean.';
   }
   return (
     validateStringList(payload.webviewErrors, 'Webview errors') ??
@@ -655,6 +674,20 @@ export function validateDismissManifestHintPayload(value: unknown): string | nul
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
     return 'Dismissing the dbt parse hint takes no payload.';
+  }
+  return null;
+}
+
+/**
+ * Validate an `importEmbeddedTables` payload (§2.5). It carries nothing — only
+ * an absent payload or an empty object passes.
+ */
+export function validateImportEmbeddedTablesPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Importing the tables of this file takes no payload.';
   }
   return null;
 }

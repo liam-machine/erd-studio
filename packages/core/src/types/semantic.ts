@@ -16,11 +16,30 @@ export type Layer = string;
 export type Stage = 'logical' | 'physical';
 
 /**
- * The newest schema version this version of core reads. A file declaring a
- * higher one is refused with "Please update the extension" rather than read
- * as an empty diagram. Writers use {@link WRITTEN_SCHEMA_VERSION}.
+ * The newest schema version this version of core reads, in any format: 7, a
+ * DBML diagram (native DBML storage, ERD Studio 2.0). A JSON subject area may
+ * declare at most {@link CURRENT_JSON_SCHEMA_VERSION}; a DBML diagram whose
+ * `erd_schema_version` is higher than this one is refused with "Please update
+ * the extension" rather than read as an empty diagram. Writers use
+ * {@link WRITTEN_SCHEMA_VERSION} (JSON) or {@link DBML_SCHEMA_VERSION} (DBML).
  */
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
+
+/**
+ * The newest schema version a JSON subject area file may declare. A JSON file
+ * declaring a higher one is refused with "Please update the extension" (the
+ * same words as before 7 existed), so a JSON file that says 7 is still refused.
+ */
+export const CURRENT_JSON_SCHEMA_VERSION = 6;
+
+/**
+ * The version a DBML diagram declares, as `erd_schema_version: '7'` on its
+ * Project. Table and relationships files carry none: the diagram's version
+ * gates the format. A DBML diagram is read into a v5-shaped object that keeps
+ * `schemaVersion` {@link WRITTEN_SCHEMA_VERSION}; this one travels beside it
+ * and reaches only the Unified and Display `schemaVersion`.
+ */
+export const DBML_SCHEMA_VERSION = 7;
 
 /**
  * Schema v6 (#162): the table naming. `tables/` for the library,
@@ -225,7 +244,13 @@ export type TableLoadErrorKind =
   | 'yamlScalar'
   | 'yamlStructure'
   | 'yamlDuplicateKey'
-  | 'yamlOther';
+  | 'yamlOther'
+  /** A `.dbml` table file with a DBML syntax error (codes 1000–1999), or unresolved merge conflicts. */
+  | 'dbmlSyntax'
+  /** A `.dbml` table file DBML rejects (codes 3000–3999 and 5000+): an unquoted value, a bad setting, … */
+  | 'dbmlInvalid'
+  /** A `.dbml` table file that is not one self-contained Table (ERD Studio's own rules, or a binding error). */
+  | 'dbmlStructure';
 
 /**
  * A model file that exists but is broken, as the canvas shows it. Carries no
@@ -241,6 +266,26 @@ export interface TableLoadError {
    * same file as a YAML error on some line, still true.
    */
   mergeConflict?: true;
+  /**
+   * The parser's code, never its message: a YAML error code (`BAD_INDENT`), a
+   * DBML diagnostic code as text (`'3025'`), or `'structure:<rule>'` for one
+   * of ERD Studio's own DBML table-file rules (`notOneTable`, `nameMismatch`,
+   * `unsupportedElement`, `metadataTarget`). Optional, and absent from older cores.
+   */
+  code?: string;
+  /**
+   * For `structure:metadataTarget` only: the table or column a `Metadata`
+   * block names that the file does not declare, so the message can name it.
+   * Optional, and absent from older cores.
+   */
+  target?: DbmlMetadataTarget;
+}
+
+/** What a `Metadata Table <name>` or `Metadata Column <table>.<name>` block targets (D25). */
+export interface DbmlMetadataTarget {
+  element: 'table' | 'column';
+  /** The table's or column's name as the block spells it (a column without its table). */
+  name: string;
 }
 
 /**
@@ -713,6 +758,65 @@ export function writesTableNaming(naming: ProjectNaming): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Project storage (YAML/JSON vs native DBML)
+// ---------------------------------------------------------------------------
+
+/**
+ * How a project stores its logical model: `yaml` (model `.yml` files and JSON
+ * diagrams, ERD Studio 1.x), `dbml` (native DBML storage, 2.0: `.dbml` table,
+ * relationships and diagram files) or `mixed` while it holds both. The single
+ * answer to "which format do new files use?", kept apart from
+ * {@link ProjectNaming} so its exhaustive switches stay as they are.
+ */
+export type ProjectStorage = 'yaml' | 'dbml' | 'mixed';
+
+/** What {@link detectProjectStorage} decides from: what a host found on disk. */
+export interface ProjectStorageEvidence {
+  /** Any `*.yml` table file in `logical-models/` or `tables/` (top level or one folder down). */
+  hasYamlTables: boolean;
+  /**
+   * `logical-models/` exists, empty or not, and `tables/` is not the DBML
+   * library: the folder an older version made, where its files go (the rule
+   * the extension's `projectNamingOf` already applies).
+   */
+  hasV5Folder: boolean;
+  /** Any `*.dbml` table file in `tables/` (`classifySemanticFile` → `'table'`), or any relationships file. */
+  hasDbmlTables: boolean;
+  /** The storage of every subject area file: `'json'` or `'dbml'`. */
+  subjectAreaStorages: Iterable<'json' | 'dbml'>;
+}
+
+/**
+ * The project's storage, from what is on disk. YAML evidence is a `.yml`
+ * table, the v5 folder, or any JSON subject area; DBML evidence is a DBML
+ * library file only, never a `.dbml` diagram alone (a stray export in a layer
+ * folder must not make a team project write files 1.x teammates cannot read).
+ * A project with neither, a new one, is `dbml`.
+ */
+export function detectProjectStorage(evidence: ProjectStorageEvidence): ProjectStorage {
+  let yaml = evidence.hasYamlTables || evidence.hasV5Folder;
+  if (!yaml) {
+    for (const storage of evidence.subjectAreaStorages) {
+      if (storage === 'json') {
+        yaml = true;
+        break;
+      }
+    }
+  }
+  const dbml = evidence.hasDbmlTables;
+  if (yaml && dbml) return 'mixed';
+  return yaml ? 'yaml' : 'dbml';
+}
+
+/**
+ * Whether a project in `storage` writes DBML for new files: `dbml` and
+ * `mixed`. The caller also checks that `tables/` is not a layer folder.
+ */
+export function writesDbml(storage: ProjectStorage): boolean {
+  return storage !== 'yaml';
+}
+
+// ---------------------------------------------------------------------------
 // Summary (lightweight, for tree view listing)
 // ---------------------------------------------------------------------------
 
@@ -724,6 +828,10 @@ export interface SubjectAreaSummary {
   layer: Layer;
   /** Absolute path to the domain JSON file. */
   filePath: string;
+  /** The file's storage: a `.json` or a `.dbml` diagram. Optional: absent from a host older than native DBML storage. */
+  storage?: 'json' | 'dbml';
+  /** The same stem exists in both formats in one layer (`x.json` and `x.dbml`): the tree names each one's format. */
+  conflict?: true;
 }
 
 // ---------------------------------------------------------------------------

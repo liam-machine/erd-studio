@@ -39,6 +39,14 @@ export interface ExistingTablePreview extends ManifestModelPreview {
   source: 'logical' | 'yml' | 'manifest';
   /** Relative file path showing where this model is defined (e.g. "models/silver/dim_customer.yml") */
   sourcePath: string;
+  /**
+   * A Table Library row whose file has not been read yet (a large library
+   * opened before its files were read): `schema` and `description` are
+   * empty and `columnCount` is 0 until it is. The extension asks for the
+   * read rows when the Add Existing Table dialog opens. Absent on every row
+   * that was read, and on every row an older host sends.
+   */
+  detailsPending?: true;
 }
 
 // ---------------------------------------------------------------------------

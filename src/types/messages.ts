@@ -2,10 +2,12 @@
  * Message protocol types for extension ↔ webview communication.
  *
  * Messages are categorised by direction:
- *   Extension → Webview:  domainLoaded, stageData, discrepancyReport, error,
+ *   Extension → Webview:  loading, domainLoaded, stageData, existingTables,
+ *                         dbmlEmbeddedTables, discrepancyReport,
+ *                         manifestStaleness, syncPlanGenerated, error,
  *                         openFeedback, feedbackContext, feedbackAnalysis,
- *                         feedbackSubmitted
- *   Webview → Extension:  ready, addModel, addColumn, removeColumn, addRelationship,
+ *                         feedbackSubmitted, revealRelationship
+ *   Webview → Extension:  ready, requestExistingTables, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
  *                         addExistingModel(s), updatePositions, switchStage,
  *                         toggleDiscrepancy, requestFeedbackContext,
@@ -97,6 +99,35 @@ export type {
  * Sent when the domain is initially loaded or refreshed.
  * Contains the display-ready domain for rendering.
  */
+/**
+ * The host's first answer to `ready`, posted before it reads anything: the
+ * canvas is connected and its diagram is being read. The webview stops its
+ * "Canvas disconnected" timer and shows "Loading N tables…" until
+ * `domainLoaded` or `error` arrives. Posted again with `tables` once the
+ * diagram's own file has been counted (no table is read for that).
+ */
+export interface LoadingMessage {
+  type: 'loading';
+  payload: {
+    /** How many tables the diagram shows, when known. */
+    tables?: number;
+  };
+}
+
+/**
+ * The full Add Existing Table list, the answer to
+ * {@link RequestExistingTablesMessage}: the same `existingModels` and
+ * `manifestModels` a `domainLoaded` payload carries, with every Table
+ * Library row read (no `detailsPending`).
+ */
+export interface ExistingTablesMessage {
+  type: 'existingTables';
+  payload: {
+    existingModels: import('./display').ExistingTablePreview[];
+    manifestModels: import('./display').ManifestModelPreview[];
+  };
+}
+
 export interface DomainLoadedMessage {
   type: 'domainLoaded';
   payload: DisplaySubjectArea;
@@ -165,6 +196,8 @@ export interface ErrorMessage {
     /** With `fileProblem: 'syntax'`: the 1-based line and column of the mistake, when it was located. */
     line?: number;
     column?: number;
+    /** With `fileProblem: 'syntax'`: the diagram file's format, from its extension ("isn't valid JSON" / "isn't valid DBML"). Absent means JSON. */
+    fileType?: 'JSON' | 'DBML';
   };
 }
 
@@ -276,7 +309,39 @@ export interface FeedbackSubmittedMessage {
 }
 
 /** Union of all messages the extension can send to the webview. */
+/**
+ * Sent after a DBML diagram loads that declares Tables of its own and has no
+ * table `use` line (§2.5): most likely a single-file DBML dropped into a
+ * layer folder (a dbdiagram.io download or a rich export). The canvas shows
+ * "This file holds its own tables. Import these tables…", whose button posts
+ * {@link ImportEmbeddedTablesMessage}. No payload.
+ */
+export interface DbmlEmbeddedTablesMessage {
+  type: 'dbmlEmbeddedTables';
+}
+
+/**
+ * Select and centre one relationship line, as clicking it does (the sidebar's
+ * Relationships view → Open in Diagram). Sent once the canvas has loaded its
+ * diagram (`SemanticEditorProvider.revealRelationship` holds it until then).
+ * The canvas matches each column pair by core's `linkKey`, so the order of the
+ * two tables and the spelling's case do not matter; with no such line on the
+ * diagram it says so in a toast.
+ */
+export interface RevealRelationshipMessage {
+  type: 'revealRelationship';
+  payload: {
+    fromModel: string;
+    toModel: string;
+    /** Every column pair of the line (more than one for a composite key). */
+    pairs: Array<{ fromColumn: string; toColumn: string }>;
+  };
+}
+
 export type ExtensionMessage =
+  | LoadingMessage
+  | ExistingTablesMessage
+  | DbmlEmbeddedTablesMessage
   | OpenFeedbackMessage
   | FeedbackContextMessage
   | FeedbackAnalysisMessage
@@ -286,6 +351,7 @@ export type ExtensionMessage =
   | DiscrepancyReportMessage
   | ManifestStalenessMessage
   | SyncPlanGeneratedMessage
+  | RevealRelationshipMessage
   | ErrorMessage;
 
 // ---------------------------------------------------------------------------
@@ -297,6 +363,17 @@ export type ExtensionMessage =
  */
 export interface ReadyMessage {
   type: 'ready';
+}
+
+/**
+ * Sent when the Add Existing Table dialog opens while some Table Library rows
+ * still have `detailsPending` (a large library opened before its table files
+ * were read). The host reads them and answers with
+ * {@link ExistingTablesMessage}. No payload; reads only, so it is allowed on
+ * the physical stage too.
+ */
+export interface RequestExistingTablesMessage {
+  type: 'requestExistingTables';
 }
 
 /**
@@ -631,6 +708,8 @@ export interface SubmitFeedbackMessage {
     /** Steps to reproduce (bug) or rationale (feature). */
     steps?: string;
     includeDiagnostics: boolean;
+    /** Add the recent ERD Studio log (redacted) to the diagnostics; opt-in, absent = false. */
+    includeLog?: boolean;
     /** Recent errors the webview observed (oldest → newest). */
     webviewErrors?: string[];
     regressionOf?: number;
@@ -653,6 +732,8 @@ export interface CopyFeedbackReportMessage {
     description: string;
     steps?: string;
     includeDiagnostics: boolean;
+    /** Add the recent ERD Studio log (redacted) to the diagnostics; opt-in, absent = false. */
+    includeLog?: boolean;
     webviewErrors?: string[];
     domain?: FeedbackSubjectAreaSummary;
   };
@@ -693,6 +774,16 @@ export interface CloseEditorMessage {
 }
 
 /**
+ * Run Import DBML on this canvas's own file (§2.5): the button of the banner
+ * {@link DbmlEmbeddedTablesMessage} shows. No payload. Writes only through
+ * the Import DBML command, which asks before writing, so it is not on the
+ * physical allowlist.
+ */
+export interface ImportEmbeddedTablesMessage {
+  type: 'importEmbeddedTables';
+}
+
+/**
  * Pick another diagram to open (`erdStudio.openDomain` with no file). Sent by
  * the "deleted or renamed" screen (#161) — the renamed copy is one pick away.
  * No payload; allowed on the physical stage.
@@ -708,6 +799,16 @@ export interface OpenAnotherDomainMessage {
  */
 export interface OpenGettingStartedMessage {
   type: 'openGettingStarted';
+}
+
+/**
+ * Open the ERD Studio output channel (`erdStudio.showLogs`). Sent by the
+ * canvas's load-error screen and the "Canvas disconnected" overlay's
+ * **Show Logs**. No payload; reads nothing and writes nothing, so it is on
+ * the physical-stage allowlist.
+ */
+export interface ShowLogsMessage {
+  type: 'showLogs';
 }
 
 /**
@@ -796,6 +897,7 @@ export interface RemoveAnnotationsMessage {
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
+  | RequestExistingTablesMessage
   | DismissWelcomeMessage
   | DismissManifestHintMessage
   | AddModelMessage
@@ -836,8 +938,10 @@ export type WebviewMessage =
   | OpenFeedbackLinkMessage
   | RequestReloadMessage
   | CloseEditorMessage
+  | ImportEmbeddedTablesMessage
   | OpenAnotherDomainMessage
   | OpenGettingStartedMessage
+  | ShowLogsMessage
   | ExportDiagramMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage

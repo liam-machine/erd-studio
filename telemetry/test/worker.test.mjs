@@ -428,6 +428,20 @@ describe('validation — acceptance and normalisation', () => {
     assert.equal(params[17], '{"logicalOnlyProject":1,"exampleDiagram":2,"blankDiagram":3}');
   });
 
+  it('keeps the native DBML storage keys', async () => {
+    const params = await storedParams(
+      heartbeat({
+        features: { dbmlProject: 1, convertToDbml: 1, convertToDbmlOffered: 2, convertToDbmlDeclined: 1, convertToDbmlNotNow: 1, convertToDbmlCancelled: 1, convertToDbmlRefused: 1, dbmlForeignFormatWarned: 1 },
+        errors: { modelFileDbmlSyntax: 1, modelFileDbmlInvalid: 2, modelFileDbmlStructure: 3, domainLoadDbml: 4, convertToDbmlFailed: 5 },
+      }),
+    );
+    assert.equal(
+      params[17],
+      '{"dbmlProject":1,"convertToDbml":1,"convertToDbmlOffered":2,"convertToDbmlDeclined":1,"convertToDbmlNotNow":1,"convertToDbmlCancelled":1,"convertToDbmlRefused":1,"dbmlForeignFormatWarned":1}',
+    );
+    assert.equal(params[18], '{"modelFileDbmlSyntax":1,"modelFileDbmlInvalid":2,"modelFileDbmlStructure":3,"domainLoadDbml":4,"convertToDbmlFailed":5}');
+  });
+
   it('treats omitted features and errors as empty', async () => {
     const body = heartbeat();
     delete body.features;

@@ -89,7 +89,7 @@ read `.agents/skills/` (Copilot and Cursor also read `.claude/skills/`). Usual c
 3. The skill was installed for a different assistant (only `.claude/skills/` exists, but they use
    Codex or Gemini CLI) → run **ERD Studio: Set Up My AI Helper** again; it installs for every
    assistant it detects. If it still does not detect theirs (an assistant installed where VS Code
-   cannot see it), run **ERD Studio: Install AI Coding Harness** instead and tick
+   cannot see it), run **ERD Studio: Install AI Helper Files…** instead and tick
    "Agent Skills — GitHub Copilot, Codex, Gemini CLI, Cursor".
 4. Gemini CLI has no per-skill command — ask it in a sentence: "Set up ERD Studio for this
    project."
@@ -125,7 +125,11 @@ the helper will be missing: ask them to start it from VS Code's integrated termi
 - a `fix-model-yaml` step or fix whose model file's entry in doctor's `erd.unreadableModelFiles`
   or the diff's `unreadableModelFiles` has `mergeConflict: true` (the step and the fix themselves
   carry no such field);
-- a diff `error` with code `merge-conflict` (a diagram file the diff could not load).
+- a diff `error` with code `merge-conflict` (a diagram file the diff could not load);
+- in a DBML project, doctor's `resolve-merge-conflicts` step naming a `.dbml` file — its entry
+  in `erd.dbmlProblems` has `mergeConflict: true` (a table file, a relationships file or a
+  diagram; `layoutMergeConflict` when the markers are inside a diagram's `erd_layout`; never a
+  `fix-dbml-file`).
 
 The file still holds git's conflict markers (`<<<<<<<` … `=======` … `>>>>>>>`): two people
 changed the same lines, git kept both versions, and ERD Studio cannot read the file until one is
@@ -146,7 +150,12 @@ chosen. Only the user knows which version is right — it is often a teammate's 
    check for every `<<<<<<<`.
    - **Only `viewConfig.positions` differ** (where tables sit on the canvas): say either side is
      safe — the design is the same, only the layout differs. Offer to keep either one, and edit
-     only once the user says which.
+     only once the user says which. The same goes for a DBML diagram's `erd_layout` (its
+     positions): keep one side's lines whole, never a mix, and ERD Studio saves no position
+     until the markers are gone.
+   - **A conflicted relationships file** (`<layer>/relationships/`) usually means both sides added relationships: offer
+     to keep both sides' Ref lines and both sides' `use` lines, then run doctor; a Ref that now
+     appears twice is reported (`duplicateRef`) — delete one copy.
    - **Anything else differs:** describe each version in one line and ask which to keep. Do not
      recommend one.
 4. Never pick a side unasked. Never run `git add`, `git checkout --ours` / `--theirs`,
@@ -158,6 +167,45 @@ chosen. Only the user knows which version is right — it is often a teammate's 
    them to finish the merge in git.
 6. If the user resolves it themselves instead, re-run doctor (or the diff) once they say the file
    is saved, then carry on from where you stopped.
+
+## DBML files
+
+A DBML project (doctor's `erd.storage` is `dbml` or `mixed`) reports its files' problems in
+`erd.dbmlProblems`: `file`, `line`, `code`, `severity` and `message`. Only errors raise a next
+step, but fix these warnings too in any file you wrote: `missingUse`, `missingRelationshipsUse`,
+`unquotedValue` (`natural_key: true` → `natural_key: 'true'`) and `usePathMismatch`. The message
+gives the exact line. ERD Studio reads on without the fix, but other DBML tools reject the file
+and every diagram that imports it. A `foreignMetadata` warning is a Metadata block outside the
+table's own file: do what its message says, moving its properties into the table file (as inline
+settings in a `.dbml` one) and removing the block.
+Other warnings are information.
+
+- **`fix-dbml-file`** — a `.dbml` file ERD Studio or other DBML tools cannot read. The usual cause
+  is an unquoted text value: `grain: One row per order` → `grain: 'One row per order'` (the
+  message says "Quote the value"). Others: a `use`, `Ref` or inline
+  `[ref: …]` inside a table file (move it to a `<layer>/relationships/` file, as the message
+  says), a table file holding two Tables or a name other than its file's, a Ref that is stored
+  twice (`duplicateRef`: delete one), or a table name in two table files (`duplicateTableName`:
+  ask the user which to rename, keeping the warehouse name in `alias`). Fix the line, then re-run
+  doctor. Never "fix" a file by reformatting it. Warnings about where a file sits
+  (`dbmlOutsideKnownFolders`, `dbmlLayerNotConfigured`, `schemaFolderMismatch`) name where it
+  belongs: tell the user, and move a file only when they agree.
+- **`resolve-format-conflicts`** — the same table (or diagram) exists as both YAML/JSON and DBML
+  (`x.yml` and `x.dbml`); only one is read. Show the user both files and ask which to keep;
+  never delete or convert either yourself.
+- **`finish-dbml-conversion`** — a **Convert Project to DBML** stopped part way (some files
+  converted, their YAML/JSON sources still there). Ask the user to run **ERD Studio: Convert
+  Project to DBML** again in VS Code: it checks every file and finishes. Never finish it by hand.
+- **`reconvert-dbml-project`** — the DBML files are from an ERD Studio 1.9 pre-release, whose folder
+  layout 2.0 does not read. Show the user doctor's message; undoing that conversion and running
+  **ERD Studio: Convert Project to DBML** again is theirs to do (git, then VS Code). Never move,
+  edit or delete the 1.9 files yourself.
+- **`import-dbml-file`** — a `.dbml` in a `diagrams/` folder declares its own Tables and imports none:
+  it is a single-file DBML (a dbdiagram.io download or an export), not an ERD Studio diagram. Ask
+  the user to run **ERD Studio: Import DBML…** on it.
+- **diff / export error codes**: `dbml-invalid` — a `.dbml` diagram does not parse (the message
+  names the file and line; fix it as above); `not-a-diagram` — the `--domain` you passed is a
+  table or relationships file: pass the diagram (`.erd-studio/<layer>/diagrams/<name>.dbml`).
 
 ## Manifest stale or unreadable
 

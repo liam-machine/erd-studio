@@ -280,11 +280,16 @@ function extractModelInfo(node: Record<string, unknown>): ManifestModelInfo | nu
   const alias = typeof node.alias === 'string' ? node.alias.trim() : '';
   const hasOwnAlias = alias !== '' && alias !== name && (version === undefined || alias !== `${name}_v${version}`);
 
+  const config = node.config;
+  const configured = config && typeof config === 'object' ? (config as Record<string, unknown>).schema : undefined;
+  const configSchema = typeof configured === 'string' ? configured.trim() : '';
+
   return {
     name,
     uniqueId,
     projectName,
     schema: typeof node.schema === 'string' ? node.schema : '',
+    ...(configSchema !== '' ? { configSchema } : {}),
     ...(hasOwnAlias ? { alias } : {}),
     description: typeof node.description === 'string' ? node.description : '',
     columns,

@@ -470,3 +470,50 @@ describe('MigrationService (domain format → v5)', () => {
     expect(migration.needsMigration()).toBe(false);
   });
 });
+
+describe('MigrationService (domain format → v5) in a project that writes DBML', () => {
+  let workspaceRoot: string;
+  const semantic = (...parts: string[]): string => path.join(workspaceRoot, '.erd-studio', ...parts);
+
+  beforeEach(() => {
+    workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-migration-dbml-'));
+    fs.mkdirSync(semantic('gold', 'tables', 'gold'), { recursive: true });
+    fs.writeFileSync(semantic('gold', 'tables', 'gold', 'dim_existing.dbml'), 'Table gold.dim_existing {\n  id INT [pk]\n}\n');
+    fs.writeFileSync(semantic('layers.json'), JSON.stringify({ schemaVersion: 1, layers: [
+      { id: 'gold', label: 'Gold', abbreviation: 'G', color: '#888888', creatable: true, order: 1 },
+      { id: 'silver', label: 'Silver', abbreviation: 'S', color: '#888888', creatable: true, order: 2 },
+    ] }));
+    fs.mkdirSync(semantic('silver'), { recursive: true });
+    fs.writeFileSync(semantic('silver', 'v4.json'), JSON.stringify({
+      schemaVersion: 4, domain: 'v4', layer: 'silver',
+      logical: {
+        models: [
+          { name: 'dim_a', columns: [{ name: 'a_id', dataType: 'INT', description: '', isPrimaryKey: true }] },
+          { name: 'dim_b', columns: [{ name: 'b_id', dataType: 'INT', description: '' }] },
+        ],
+        relationships: [],
+      },
+      viewConfig: {},
+    }, null, 2));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  });
+
+  it('extracts every model as DBML in ONE batch (one plan, one settle), into <layer>/tables/<layer>/ of its domain\'s layer', () => {
+    const lms = new TableLibraryService(workspaceRoot);
+    expect(lms.writesDbml()).toBe(true);
+    const batch = vi.spyOn(lms, 'applyDbmlBatch');
+    const listing = vi.spyOn(lms, 'listDbmlDiagrams');
+    const save = vi.spyOn(lms, 'saveTable');
+    const result = new MigrationService(workspaceRoot, new LayerService(workspaceRoot), lms).migrate();
+    expect(result).toMatchObject({ domainsConverted: 1, modelsCreated: 2 });
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(listing).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
+    expect(fs.readFileSync(semantic('silver', 'tables', 'silver', 'dim_a.dbml'), 'utf-8')).toMatch(/^Table silver\.dim_a \{/);
+    expect(fs.readFileSync(semantic('silver', 'tables', 'silver', 'dim_b.dbml'), 'utf-8')).toMatch(/^Table silver\.dim_b \{/);
+    expect(lms.getTable('dim_a')?.columns?.[0].name).toBe('a_id');
+  });
+});

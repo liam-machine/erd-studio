@@ -19,8 +19,10 @@ issue, comment, PR and commit you write in the public repo. Public → private i
 **When.** `git diff origin/develop...HEAD` changes something the app consumes:
 - shipped package code: `packages/*/src/**`, a `packages/*/package.json`, or the `--vscode-*`
   list in `packages/renderer/README.md`;
-- the on-disk format the app reads: the subject-area JSON, table yml, or `layers.json`
-  (`docs/semantic-domain-json-reference.md`).
+- the on-disk format the app reads: a DBML table (`<layer>/tables/<schema>/`), relationships
+  file (`<layer>/relationships/`), diagram (`<layer>/diagrams/`) or its `erd_layout` (the DBML
+  codec under `packages/core/src/dbml/`, `erdLayout.ts`, `storage.ts`), the subject-area JSON,
+  table yml, or `layers.json` (`docs/semantic-domain-json-reference.md`).
 
 Package tests, goldens or docs alone don't count. When in doubt, raise it: Liam closes the
 ones that need nothing.

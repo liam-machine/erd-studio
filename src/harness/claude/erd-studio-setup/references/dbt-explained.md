@@ -33,9 +33,9 @@ line, then get back to the task. If the user wants more, expand in your own word
 | **logical data model** | The design of your data — the tables, their columns and keys, and how they connect — kept as plain files you can review like code, whether or not anything has been built yet. |
 | **subject area** | What ERD Studio's commands call a diagram (this guide also says *domain*). |
 | **logical vs physical** | *Physical* is what really exists in the dbt project, worked out by ERD Studio and read-only. *Logical* is your design — the tables, keys and connections you mean to have. |
-| **domain** | One focused diagram of related tables for one business area, like "orders". Saved as `.erd-studio/<layer>/<domain>.json`. |
-| **layer** | A folder for organising diagrams, usually a stage of the warehouse such as silver (cleaned) or gold (ready for reporting). |
-| **logical model file** | One `.erd-studio/logical-models/<name>.yml` per table (or `logical-models/<layer>/<name>.yml` in a library grouped by layer), holding its columns and keys. Shared by every domain that uses the table. |
+| **domain** | One focused diagram of related tables for one business area, like "orders". Saved as `.erd-studio/<layer>/diagrams/<domain>.dbml` (a `.json` in the layer folder, in a project from before ERD Studio 2.0). |
+| **layer** | A folder for organising diagrams and tables, usually a stage of the warehouse such as silver (cleaned) or gold (ready for reporting). |
+| **logical model file** | One `.erd-studio/<layer>/tables/<schema>/<name>.dbml` per table, holding its columns and keys; its relationships are in the layer's `relationships/` files. Shared by every domain that uses the table. A project from before ERD Studio 2.0 has `logical-models/<name>.yml` (or `tables/<name>.yml`) instead. |
 | **PK** (primary key) | The column that uniquely identifies each row, like `order_id`. |
 | **FK** (foreign key) | A column that points at another table's primary key, like `customer_id` in an orders table. |
 | **NK** (natural key) | The real-world identifier a source system uses, like a customer code or product code, as opposed to an ID made up inside the warehouse. |

@@ -18,6 +18,7 @@ import {
   ERROR_CODES,
   saveFailureCode,
   saveFailureCodes,
+  subjectAreaLoadErrorCode,
   FEATURES,
   HARNESSES,
   HOSTS,
@@ -449,7 +450,7 @@ describe('allowlists agree with the Worker', () => {
   it('appends the DBML round-trip keys at the very end: exports, imports and a cancel as features, a failed import as an error', () => {
     const at = FEATURES.indexOf('exportDbmlRich');
     expect(FEATURES.slice(at, at + 6)).toEqual(['exportDbmlRich', 'exportAll', 'importDbml', 'importDbmlLayout', 'importDbmlCancelled', 'importDbmlInvalid']);
-    expect(ERROR_CODES.slice(-1)).toEqual(['importDbmlFailed']);
+    expect(ERROR_CODES.indexOf('importDbmlFailed')).toBe(ERROR_CODES.indexOf('saveFailedUndoRedo') + 1);
     let s = emptyCounters('2026-10-26');
     s = recordFeature(s, 'exportDbmlRich');
     s = recordFeature(s, 'importDbml');
@@ -461,7 +462,8 @@ describe('allowlists agree with the Worker', () => {
   });
 
   it('appends the logical-only keys at the very end, after the DBML round trip: presence once a day, starts counted', () => {
-    expect(FEATURES.slice(-3)).toEqual(['logicalOnlyProject', 'exampleDiagram', 'blankDiagram']);
+    const at = FEATURES.indexOf('logicalOnlyProject');
+    expect(FEATURES.slice(at, at + 3)).toEqual(['logicalOnlyProject', 'exampleDiagram', 'blankDiagram']);
     expect(FEATURES.indexOf('logicalOnlyProject')).toBe(FEATURES.indexOf('importDbmlInvalid') + 1);
     let s = emptyCounters('2026-10-27');
     s = recordFeatureOnce(s, 'logicalOnlyProject');
@@ -470,6 +472,34 @@ describe('allowlists agree with the Worker', () => {
     s = recordFeature(s, 'blankDiagram');
     s = recordFeature(s, 'blankDiagram');
     expect(buildHeartbeat(s, ENV).features).toEqual({ logicalOnlyProject: 1, exampleDiagram: 1, blankDiagram: 2 });
+  });
+
+  it('appends the native DBML storage keys at the very end, after the logical-only ones: features and errors', () => {
+    expect(FEATURES.slice(-8)).toEqual([
+      'dbmlProject', 'convertToDbml', 'convertToDbmlOffered', 'convertToDbmlDeclined', 'convertToDbmlNotNow',
+      'convertToDbmlCancelled', 'convertToDbmlRefused', 'dbmlForeignFormatWarned',
+    ]);
+    expect(FEATURES.indexOf('dbmlProject')).toBe(FEATURES.indexOf('blankDiagram') + 1);
+    expect(ERROR_CODES.slice(-5)).toEqual([
+      'modelFileDbmlSyntax', 'modelFileDbmlInvalid', 'modelFileDbmlStructure', 'domainLoadDbml', 'convertToDbmlFailed',
+    ]);
+    expect(ERROR_CODES.indexOf('modelFileDbmlSyntax')).toBe(ERROR_CODES.indexOf('importDbmlFailed') + 1);
+    expect(tableFileErrorCode('dbmlSyntax')).toBe('modelFileDbmlSyntax');
+    expect(tableFileErrorCode('dbmlInvalid')).toBe('modelFileDbmlInvalid');
+    expect(tableFileErrorCode('dbmlStructure')).toBe('modelFileDbmlStructure');
+    expect(subjectAreaLoadErrorCode('dbml')).toBe('domainLoadDbml');
+    let s = emptyCounters('2026-10-28');
+    s = recordFeatureOnce(s, 'dbmlProject');
+    s = recordFeatureOnce(s, 'dbmlProject');
+    s = recordFeature(s, 'convertToDbmlOffered');
+    s = recordFeature(s, 'convertToDbmlRefused');
+    s = recordError(s, 'modelFileParse');
+    s = recordError(s, tableFileErrorCode('dbmlInvalid'));
+    s = recordError(s, 'domainLoad');
+    s = recordError(s, subjectAreaLoadErrorCode('dbml'));
+    const body = buildHeartbeat(s, ENV);
+    expect(body.features).toEqual({ dbmlProject: 1, convertToDbmlOffered: 1, convertToDbmlRefused: 1 });
+    expect(body.errors).toEqual({ modelFileParse: 1, modelFileDbmlInvalid: 1, domainLoad: 1, domainLoadDbml: 1 });
   });
 
   it('appends the saveFailed split as one run after domainLoadConflict, as errors beside saveFailed', () => {

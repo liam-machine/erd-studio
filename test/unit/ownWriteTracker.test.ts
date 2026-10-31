@@ -7,7 +7,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import {
+  CONSUMED_GRACE_MS,
+  MAX_PENDING_MS,
+  MAX_RECORD_AGE_MS,
+  MAX_RECORDS_PER_PATH,
+  OwnWriteTracker,
+} from '../../src/services/ownWriteTracker';
 
 describe('OwnWriteTracker', () => {
   let tempDir: string;
@@ -31,7 +37,97 @@ describe('OwnWriteTracker', () => {
 
     expect(tracker.has(file)).toBe(true);
     expect(tracker.consume(file)).toBe(true);
-    // Consumed — a second event for the same path is external
+    // A duplicate event for the same save, moments later, is still ours…
+    now += 500;
+    expect(tracker.consume(file)).toBe(true);
+    // …and so is one long after, while the file holds the bytes we last wrote…
+    now += CONSUMED_GRACE_MS + 1;
+    expect(tracker.consume(file)).toBe(true);
+    // …but a change to other bytes is reported.
+    fs.writeFileSync(file, 'name: b\n');
+    expect(tracker.consume(file)).toBe(false);
+  });
+
+  it('two back-to-back own saves: the second event is ours however late it is decided (a host stall)', () => {
+    const file = path.join(tempDir, 'sales.dbdiagram');
+    fs.writeFileSync(file, '{"a":1}');
+    tracker.recordWrite(file);
+    fs.writeFileSync(file, '{"b":22}');
+    tracker.recordWrite(file);
+    // The first save's event is decided after the second landed: it consumes the newest record.
+    expect(tracker.consume(file)).toBe(true);
+    now += CONSUMED_GRACE_MS + 500;
+    // The second save's event, after a stall: the file still holds our bytes.
+    expect(tracker.consume(file)).toBe(true);
+  });
+
+  it('a superseded consumed record matches only within the grace', () => {
+    const file = path.join(tempDir, 'layout.dbdiagram');
+    fs.writeFileSync(file, 'one');
+    tracker.recordWrite(file);
+    expect(tracker.consume(file)).toBe(true);
+    fs.writeFileSync(file, 'two!');
+    tracker.recordWrite(file);
+    fs.writeFileSync(file, 'one');
+    now += 500;
+    expect(tracker.consume(file)).toBe(true);
+    fs.writeFileSync(file, 'two!');
+    tracker.recordWrite(file);
+    now += CONSUMED_GRACE_MS + 1;
+    fs.writeFileSync(file, 'one');
+    expect(tracker.consume(file)).toBe(false);
+  });
+
+  it('reports an external change made right after a consumed own write', () => {
+    const file = path.join(tempDir, 'model.yml');
+    fs.writeFileSync(file, 'name: a\n');
+    tracker.recordWrite(file);
+    expect(tracker.consume(file)).toBe(true);
+    fs.writeFileSync(file, 'name: b\n');
+    expect(tracker.consume(file)).toBe(false);
+    // The mismatch forgot the record: going back to our bytes is a change too.
+    fs.writeFileSync(file, 'name: a\n');
+    expect(tracker.consume(file)).toBe(false);
+  });
+
+  it('still matches after the host was busy for longer than the old 5 s TTL', () => {
+    const file = path.join(tempDir, 'sales.dbdiagram');
+    fs.writeFileSync(file, '{"tablePositions":[]}');
+    tracker.recordWrite(file);
+    now += 12_000; // the watcher's debounced callback ran 12 s after the save
+    expect(tracker.consume(file)).toBe(true);
+  });
+
+  it('matches by content: same size, different bytes is an external change', () => {
+    const file = path.join(tempDir, 'same-size.yml');
+    fs.writeFileSync(file, 'name: a\n');
+    tracker.recordWrite(file);
+    fs.writeFileSync(file, 'name: b\n');
+    // Keep the mtime too, as a coarse-clock file system would.
+    const stat = fs.statSync(file);
+    fs.utimesSync(file, stat.atime, stat.mtime);
+    expect(tracker.consume(file)).toBe(false);
+  });
+
+  it('matches the latest of several writes and drops the older ones', () => {
+    const file = path.join(tempDir, 'layout.dbdiagram');
+    fs.writeFileSync(file, 'one');
+    tracker.recordWrite(file);
+    fs.writeFileSync(file, 'two!');
+    tracker.recordWrite(file);
+    expect(tracker.consume(file)).toBe(true);
+    now += CONSUMED_GRACE_MS + 1;
+    fs.writeFileSync(file, 'one');
+    expect(tracker.consume(file)).toBe(false);
+  });
+
+  it('keeps at most MAX_RECORDS_PER_PATH records per path', () => {
+    const file = path.join(tempDir, 'many.yml');
+    for (let i = 0; i <= MAX_RECORDS_PER_PATH; i++) {
+      fs.writeFileSync(file, `v${i}`);
+      tracker.recordWrite(file);
+    }
+    fs.writeFileSync(file, 'v0');
     expect(tracker.consume(file)).toBe(false);
   });
 
@@ -59,14 +155,57 @@ describe('OwnWriteTracker', () => {
     expect(tracker.consume(file)).toBe(false);
   });
 
-  it('expires records after the TTL', () => {
+  it('drops a record no event consumed after MAX_RECORD_AGE_MS (a memory bound)', () => {
     const file = path.join(tempDir, 'old.yml');
     fs.writeFileSync(file, 'name: a\n');
     tracker.recordWrite(file);
 
     now += 10_000;
+    expect(tracker.has(file)).toBe(true);
+    now += MAX_RECORD_AGE_MS;
     expect(tracker.has(file)).toBe(false);
     expect(tracker.consume(file)).toBe(false);
+  });
+
+  describe('expected writes', () => {
+    it('is pending from expectWrite until the write is recorded', () => {
+      const file = path.join(tempDir, 'x.dbml');
+      tracker.expectWrite([file]);
+      expect(tracker.isPending(file)).toBe(true);
+      fs.writeFileSync(file, 'Table x {}');
+      tracker.recordWrite(file);
+      expect(tracker.isPending(file)).toBe(false);
+    });
+
+    it('counts each announcement, and settleWrites clears what is left of that operation (a save that failed)', () => {
+      const file = path.join(tempDir, 'y.dbml');
+      const expected = tracker.expectWrite([file, file]);
+      tracker.recordWrite(file);
+      expect(tracker.isPending(file)).toBe(true);
+      tracker.settleWrites(expected);
+      expect(tracker.isPending(file)).toBe(false);
+    });
+
+    it('settling one operation keeps another operation\'s announcement for the same file pending', () => {
+      const file = path.join(tempDir, 'shared.dbml');
+      const first = tracker.expectWrite([file]);
+      const second = tracker.expectWrite([file]);
+      fs.writeFileSync(file, 'Table a {}');
+      tracker.recordWrite(file);
+      tracker.settleWrites(first);
+      // The second operation's save has not landed: the watcher must still wait for it.
+      expect(tracker.isPending(file)).toBe(true);
+      tracker.settleWrites(second);
+      expect(tracker.isPending(file)).toBe(false);
+    });
+
+    it('stops holding a watcher back after MAX_PENDING_MS', () => {
+      const file = path.join(tempDir, 'z.dbml');
+      tracker.expectWrite([path.join(tempDir, '.', 'z.dbml')]);
+      expect(tracker.isPending(file)).toBe(true);
+      now += MAX_PENDING_MS + 1;
+      expect(tracker.isPending(file)).toBe(false);
+    });
   });
 
   it('returns false for paths never recorded', () => {

@@ -26,6 +26,7 @@ import {
 } from './dbtProjectConfig';
 import { normaliseName } from './nameUtils';
 import { extractManifestData } from '../workers/manifestExtractor';
+import { log } from './logger';
 
 /** Default upper bound for a single worker parse before it is abandoned. */
 export const DEFAULT_PARSE_TIMEOUT_MS = 120_000;
@@ -202,7 +203,7 @@ export class ManifestService {
           this.lastKnownGood &&
           this.lastKnownGood.models.size > 0
         ) {
-          console.warn(
+          log.warn(
             '[ManifestService] Parse returned 0 models (previously had data). ' +
             'File likely mid-write. Returning last known good data.',
           );
@@ -222,7 +223,7 @@ export class ManifestService {
         // Definitive: the file is gone (dbt clean / never compiled). Serving
         // last-known-good here would show models from a manifest that no
         // longer exists, so drop it and report empty, non-stale data.
-        console.warn(`[ManifestService] ${err.message}`);
+        log.warn(`[ManifestService] ${err.message}`);
         const empty = this.emptyManifest();
         if (currentLoadId === this.loadId) {
           this.onLoadFailure?.('missing');
@@ -237,7 +238,7 @@ export class ManifestService {
       // Parse failed — likely manifest is mid-write by dbt.
       // Return stale data (or empty) so the graph stays visible.
       const message = err instanceof Error ? err.message : String(err);
-      console.warn(
+      log.warn(
         `[ManifestService] Parse failed (file may be mid-write): ${message}. ` +
         'Returning last known good data.',
       );
@@ -386,7 +387,7 @@ export class ManifestService {
         settle();
         void worker.terminate();
         if ('error' in msg) {
-          console.error(`[ManifestService] Failed to parse manifest: ${(msg as ManifestWorkerError).error}`);
+          log.error(`[ManifestService] Failed to parse manifest: ${(msg as ManifestWorkerError).error}`);
           reject(new Error(`Failed to parse manifest.json: ${(msg as ManifestWorkerError).error}`));
           return;
         }
@@ -432,7 +433,7 @@ export class ManifestService {
       result = extractManifestData(JSON.parse(raw) as Record<string, unknown>);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[ManifestService] Failed to parse manifest: ${message}`);
+      log.error(`[ManifestService] Failed to parse manifest: ${message}`);
       throw new Error(`Failed to parse manifest.json: ${message}`);
     }
     return deserializeWorkerResult(result);

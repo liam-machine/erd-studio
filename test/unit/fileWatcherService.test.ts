@@ -6,6 +6,9 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 // Mock fs before importing FileWatcherService
@@ -24,7 +27,8 @@ vi.mock('fs', async () => {
 });
 
 import { FileWatcherService, classifySemanticPath } from '../../src/watchers/FileWatcherService';
-import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import { CONSUMED_GRACE_MS, OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import { setLogSink } from '../../src/services/logger';
 import { defaultDbtProjectConfig } from '../../src/services/dbtProjectConfig';
 import {
   _clearMockFileWatchers,
@@ -46,8 +50,8 @@ describe('FileWatcherService', () => {
   });
 
   describe('initialization', () => {
-    it('creates five file system watchers', () => {
-      expect(_mockFileWatchers).toHaveLength(5);
+    it('creates six file system watchers (the table files have two: YAML and the DBML tree)', () => {
+      expect(_mockFileWatchers).toHaveLength(6);
     });
 
     it('without dbt (logical-only) creates only the semantic-dir watchers', () => {
@@ -55,8 +59,9 @@ describe('FileWatcherService', () => {
       const logicalOnly = new FileWatcherService('/test/workspace', '.erd-studio', undefined, undefined, { dbt: false });
       const patterns = _mockFileWatchers.map(w => (w._pattern as vscode.RelativePattern).pattern);
       expect(patterns).toEqual([
-        '.erd-studio/**/*.json',
+        '.erd-studio/**/*.{json,dbml}',
         '.erd-studio/{logical-models,tables}/**/*.yml',
+        '.erd-studio/*/tables/*/*.dbml',
       ]);
       expect(patterns.some(p => p.includes('manifest') || p.includes('dbt_project') || p.startsWith('{models'))).toBe(false);
       logicalOnly.dispose();
@@ -627,10 +632,36 @@ describe('FileWatcherService', () => {
       expect(listener.mock.calls[0][0].modelName).toBe('dim_x');
     });
 
+    it('reports a batch of outside table changes once more as a whole, after its per-table events, leaving out own writes', () => {
+      const order: string[] = [];
+      service.onTableChanged(({ modelName }) => order.push(modelName));
+      const batches: string[][] = [];
+      service.onTablesChanged(({ tables }) => { batches.push(tables.map((t) => t.modelName)); order.push('batch'); });
+
+      const modelWatcher = _mockFileWatchers[3];
+      const own = '/test/workspace/.erd-studio/gold/tables/gold/own.dbml';
+      tracker.recordWrite(own);
+      for (const name of ['dim_a', 'dim_b', 'dim_c']) {
+        modelWatcher._simulateDelete(vscode.Uri.file(`/test/workspace/.erd-studio/gold/tables/gold/${name}.dbml`));
+      }
+      modelWatcher._simulateChange(vscode.Uri.file(own));
+      vi.advanceTimersByTime(300);
+
+      expect(batches).toEqual([['dim_a', 'dim_b', 'dim_c']]);
+      expect(order).toEqual(['dim_a', 'dim_b', 'dim_c', 'batch']);
+      // Only own writes: no batch at all.
+      tracker.recordWrite(own);
+      modelWatcher._simulateChange(vscode.Uri.file(own));
+      vi.advanceTimersByTime(300);
+      expect(batches).toHaveLength(1);
+    });
+
     it('watches the logical-models/ top level and its layer folders (issue #76)', () => {
       const pattern = _mockFileWatchers[3]._pattern as vscode.RelativePattern;
       // …and v6's tables/ library (#162), in the same glob.
       expect(pattern.pattern).toBe('.erd-studio/{logical-models,tables}/**/*.yml');
+      // The DBML tree's tables have their own watcher: <layer>/tables/<schema>/<name>.dbml.
+      expect((_mockFileWatchers[4]._pattern as vscode.RelativePattern).pattern).toBe('.erd-studio/*/tables/*/*.dbml');
     });
 
     it('reports a change to a model file in a layer folder by model name', () => {
@@ -671,21 +702,37 @@ describe('FileWatcherService', () => {
       expect(listener).not.toHaveBeenCalled();
     });
 
-    it('consumes the record so the next event for the same file is reported', () => {
-      const listener = vi.fn();
-      service.onTableChanged(listener);
+    it('consumes the record: a late event while the file holds our bytes stays ours, a change to other bytes is reported', () => {
+      const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-watch-'));
+      try {
+        _clearMockFileWatchers();
+        service = new FileWatcherService(ws, '.erd-studio', undefined, tracker);
+        const listener = vi.fn();
+        service.onTableChanged(listener);
+        const modelPath = path.join(ws, '.erd-studio', 'logical-models', 'dim_customer.yml');
+        fs.mkdirSync(path.dirname(modelPath), { recursive: true });
+        fs.writeFileSync(modelPath, 'name: dim_customer\n');
+        tracker.recordWrite(modelPath);
 
-      const modelPath = '/test/workspace/.erd-studio/logical-models/dim_customer.yml';
-      tracker.recordWrite(modelPath);
+        const modelWatcher = _mockFileWatchers[3];
+        modelWatcher._simulateChange(vscode.Uri.file(modelPath));
+        vi.advanceTimersByTime(300);
+        expect(listener).not.toHaveBeenCalled();
 
-      const modelWatcher = _mockFileWatchers[3];
-      modelWatcher._simulateChange(vscode.Uri.file(modelPath));
-      vi.advanceTimersByTime(300);
-      expect(listener).not.toHaveBeenCalled();
+        // Past the grace, a second event of the same save (a host stall) is still ours…
+        vi.advanceTimersByTime(CONSUMED_GRACE_MS);
+        modelWatcher._simulateChange(vscode.Uri.file(modelPath));
+        vi.advanceTimersByTime(300);
+        expect(listener).not.toHaveBeenCalled();
 
-      modelWatcher._simulateChange(vscode.Uri.file(modelPath));
-      vi.advanceTimersByTime(300);
-      expect(listener).toHaveBeenCalledTimes(1);
+        // …and the next change to other bytes is reported.
+        fs.writeFileSync(modelPath, 'name: dim_customer\ndescription: edited elsewhere\n');
+        modelWatcher._simulateChange(vscode.Uri.file(modelPath));
+        vi.advanceTimersByTime(300);
+        expect(listener).toHaveBeenCalledTimes(1);
+      } finally {
+        fs.rmSync(ws, { recursive: true, force: true });
+      }
     });
 
     it('drops an own domain delete from the coalesced delete event', () => {
@@ -754,6 +801,219 @@ describe('FileWatcherService', () => {
       expect(classifySemanticPath(root, '/ws/.erd-studio/silver/a/b.json')).toBe('other');
       expect(classifySemanticPath(root, '/ws/.erd-studio/silver/orders.yml')).toBe('other');
       expect(classifySemanticPath(root, '/ws/other/silver/orders.json')).toBe('other');
+    });
+
+    it('a tables/*.json is a domain file, as in develop, whatever else tables/ holds (no DBML special case)', () => {
+      expect(classifySemanticPath(root, '/ws/.erd-studio/tables/report.json')).toBe('domain');
+    });
+
+    it('YAML layers named diagrams and relationships keep their JSON diagrams', () => {
+      expect(classifySemanticPath(root, '/ws/.erd-studio/diagrams/sales.json')).toBe('domain');
+      expect(classifySemanticPath(root, '/ws/.erd-studio/relationships/links.json')).toBe('domain');
+    });
+  });
+
+  // Native DBML storage (§5.4): `.dbml` diagrams (their positions in
+  // erd_layout), relationships files and `.dbml` tables, each classified by core's one
+  // classifier and raising exactly one event.
+  describe('native DBML storage', () => {
+    const ws = '/test/workspace/.erd-studio';
+    const semanticWatcher = () => _mockFileWatchers[1];
+    const tableWatcher = () => _mockFileWatchers[4];
+
+    it('classifies each kind of file under the semantic dir (the layer-first tree)', () => {
+      expect(classifySemanticPath(ws, `${ws}/gold/diagrams/sales.dbml`)).toBe('domain');
+      expect(classifySemanticPath(ws, `${ws}/gold/sales.dbdiagram`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/silver/tables/calendar/dim_date.dbml`)).toBe('table');
+      expect(classifySemanticPath(ws, `${ws}/gold/tables/gold/fct_order.dbml`)).toBe('table');
+      expect(classifySemanticPath(ws, `${ws}/gold/tables/relationships/x.dbml`)).toBe('table');
+      expect(classifySemanticPath(ws, `${ws}/gold/relationships/gold.dbml`)).toBe('relationships');
+      expect(classifySemanticPath(ws, `${ws}/gold/relationships/customers.dbml`)).toBe('relationships');
+      expect(classifySemanticPath(ws, `${ws}/templates/x.dbml`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/gold/nested/x.dbml`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/gold/Diagrams/x.dbml`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/logical-models/x.yml`)).toBe('table');
+      // The 1.9 pre-release tree is never read as tables, relationships or diagrams.
+      expect(classifySemanticPath(ws, `${ws}/gold/sales.dbml`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/tables/dim_date.dbml`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/tables/gold/fct_order.dbml`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/tables/gold/_relationships.dbml`)).toBe('other');
+      expect(classifySemanticPath(ws, `${ws}/tables/tables/s/x.dbml`)).toBe('other');
+    });
+
+    it('a 1.9 pre-release file raises no table, relationships or domain event', () => {
+      const tables = vi.fn();
+      const relationships = vi.fn();
+      const domains = vi.fn();
+      service.onTableChanged(tables);
+      service.onRelationshipsChanged(relationships);
+      service.onSemanticFileChanged(domains);
+      for (const rel of ['tables/gold/_relationships.dbml', 'tables/dim_date.dbml', 'gold/sales.dbml', 'tables/tables/s/x.dbml']) {
+        const uri = vscode.Uri.file(`${ws}/${rel}`);
+        semanticWatcher()._simulateChange(uri);
+        tableWatcher()._simulateChange(uri);
+        _mockFileWatchers[3]._simulateChange(uri);
+      }
+      vi.advanceTimersByTime(300);
+      expect(tables).not.toHaveBeenCalled();
+      expect(relationships).not.toHaveBeenCalled();
+      expect(domains).not.toHaveBeenCalled();
+    });
+
+    it('a .dbml diagram change and create raise the domain events', () => {
+      const listener = vi.fn();
+      service.onSemanticFileChanged(listener);
+      const uri = vscode.Uri.file(`${ws}/gold/diagrams/sales.dbml`);
+      semanticWatcher()._simulateCreate(uri);
+      vi.advanceTimersByTime(300);
+      expect(listener).toHaveBeenCalledWith({ uri, created: true });
+    });
+
+    it('a .dbdiagram is no file of the project: the watcher neither watches nor reports it', () => {
+      const listener = vi.fn();
+      service.onSemanticFileChanged(listener);
+      semanticWatcher()._simulateChange(vscode.Uri.file(`${ws}/gold/sales.dbdiagram`));
+      vi.advanceTimersByTime(300);
+      expect(listener).not.toHaveBeenCalled();
+      // A change to the diagram (a drag rewrote its erd_layout) is a plain diagram change.
+      semanticWatcher()._simulateChange(vscode.Uri.file(`${ws}/gold/diagrams/sales.dbml`));
+      vi.advanceTimersByTime(300);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(Object.keys(listener.mock.calls[0][0])).toEqual(['uri']);
+      expect(listener.mock.calls[0][0].uri.fsPath).toBe(`${ws}/gold/diagrams/sales.dbml`);
+    });
+
+    it('a relationships file raises onRelationshipsChanged, never a table or domain event', () => {
+      const relationships = vi.fn();
+      const tables = vi.fn();
+      const domains = vi.fn();
+      const deleted = vi.fn();
+      service.onRelationshipsChanged(relationships);
+      service.onTableChanged(tables);
+      service.onSemanticFileChanged(domains);
+      service.onSemanticFileDeleted(deleted);
+      const uri = vscode.Uri.file(`${ws}/gold/relationships/gold.dbml`);
+      semanticWatcher()._simulateChange(uri);
+      tableWatcher()._simulateChange(uri);
+      vi.advanceTimersByTime(300);
+      semanticWatcher()._simulateDelete(uri);
+      tableWatcher()._simulateDelete(uri);
+      vi.advanceTimersByTime(300);
+      expect(relationships).toHaveBeenCalledTimes(2);
+      expect(relationships).toHaveBeenCalledWith({ uri });
+      expect(tables).not.toHaveBeenCalled();
+      expect(domains).not.toHaveBeenCalled();
+      expect(deleted).not.toHaveBeenCalled();
+    });
+
+    it('a .dbml table change raises ONE table event (the semantic watcher ignores it), named by its stem', () => {
+      const tables = vi.fn();
+      const domains = vi.fn();
+      service.onTableChanged(tables);
+      service.onSemanticFileChanged(domains);
+      const uri = vscode.Uri.file(`${ws}/gold/tables/gold/fct_order.dbml`);
+      semanticWatcher()._simulateChange(uri);
+      tableWatcher()._simulateChange(uri);
+      vi.advanceTimersByTime(300);
+      expect(tables).toHaveBeenCalledTimes(1);
+      expect(tables).toHaveBeenCalledWith({ uri, modelName: 'fct_order' });
+      expect(domains).not.toHaveBeenCalled();
+    });
+
+    it('a deleted table file never raises the "Subject area file deleted" event', () => {
+      const deleted = vi.fn();
+      service.onSemanticFileDeleted(deleted);
+      semanticWatcher()._simulateDelete(vscode.Uri.file(`${ws}/gold/tables/gold/fct_order.dbml`));
+      semanticWatcher()._simulateDelete(vscode.Uri.file(`${ws}/silver/tables/calendar/dim_date.dbml`));
+      vi.advanceTimersByTime(300);
+      expect(deleted).not.toHaveBeenCalled();
+      semanticWatcher()._simulateDelete(vscode.Uri.file(`${ws}/gold/diagrams/sales.dbml`));
+      vi.advanceTimersByTime(300);
+      expect(deleted).toHaveBeenCalledTimes(1);
+    });
+
+    it('a .yml table or .json diagram CREATED by someone else raises onForeignFormatCreated before its change event', () => {
+      const foreign = vi.fn();
+      const order: string[] = [];
+      service.onForeignFormatCreated((e) => { foreign(e); order.push('foreign'); });
+      service.onSemanticFileChanged(() => order.push('changed'));
+      service.onTableChanged(() => order.push('table'));
+      const yml = vscode.Uri.file(`${ws}/tables/gold/dim_new.yml`);
+      const json = vscode.Uri.file(`${ws}/gold/new.json`);
+      _mockFileWatchers[3]._simulateCreate(yml);
+      semanticWatcher()._simulateCreate(json);
+      vi.advanceTimersByTime(300);
+      expect(foreign).toHaveBeenCalledWith({ uri: yml });
+      expect(foreign).toHaveBeenCalledWith({ uri: json });
+      expect(order).toEqual(['foreign', 'table', 'foreign', 'changed']);
+
+      // A change is not a create, and neither is a .dbml.
+      foreign.mockClear();
+      _mockFileWatchers[3]._simulateChange(yml);
+      tableWatcher()._simulateCreate(vscode.Uri.file(`${ws}/gold/tables/gold/dim_new2.dbml`));
+      semanticWatcher()._simulateCreate(vscode.Uri.file(`${ws}/gold/diagrams/other.dbml`));
+      vi.advanceTimersByTime(300);
+      expect(foreign).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a bulk change (Edit > Undo of Convert, a branch switch)', () => {
+    const ws = '/test/workspace/.erd-studio';
+    const semanticWatcher = () => _mockFileWatchers[1];
+    const tableWatcher = () => _mockFileWatchers[3];
+
+    it('holds every event until the files are quiet, then reports N tables in one batch and one log line, inside one started/settled pair', () => {
+      const lines: string[] = [];
+      const sink = { trace() {}, debug: (m: string) => { lines.push(m); }, info() {}, warn() {}, error() {} };
+      const previous = setLogSink(sink);
+      try {
+        const tables: string[] = [];
+        const order: string[] = [];
+        service.onTableChanged(({ modelName }) => { tables.push(modelName); order.push('table'); });
+        service.onSemanticFileChanged(() => order.push('diagram'));
+        service.onBulkChangeStarted(() => order.push('started'));
+        service.onBulkChangeSettled(({ reported }) => order.push(`settled:${reported}`));
+
+        // Undo of Convert: every .dbml table goes and its .yml comes back, a few
+        // files at a time, over several seconds; a diagram's .json comes back too.
+        const N = 500;
+        for (let i = 0; i < N; i++) {
+          tableWatcher()._simulateDelete(vscode.Uri.file(`${ws}/gold/tables/gold/t${i}.dbml`));
+          tableWatcher()._simulateCreate(vscode.Uri.file(`${ws}/logical-models/gold/t${i}.yml`));
+          if (i === 10) semanticWatcher()._simulateCreate(vscode.Uri.file(`${ws}/gold/sales.json`));
+          if (i % 25 === 0) vi.advanceTimersByTime(200);
+        }
+        expect(order).toEqual(['started']);
+        expect(tables).toEqual([]);
+
+        vi.advanceTimersByTime(1_000);
+        expect(tables).toHaveLength(N);
+        expect(new Set(tables).size).toBe(N);
+        expect(order[0]).toBe('started');
+        expect(order.at(-1)).toBe(`settled:${N + 1}`);
+        expect(order.filter((o) => o.startsWith('settled'))).toHaveLength(1);
+        expect(lines.filter((l) => /External change to (table file|\d+ table files)/.test(l))).toEqual([
+          `[FileWatcherService] External change to ${N} table files: t0, t1, t2 and ${N - 3} more`,
+        ]);
+        expect(lines.length).toBeLessThan(10);
+      } finally {
+        setLogSink(previous);
+      }
+    });
+
+    it('a few changes are no bulk change: reported as before, nothing held', () => {
+      const started = vi.fn();
+      const settled = vi.fn();
+      const tables = vi.fn();
+      service.onBulkChangeStarted(started);
+      service.onBulkChangeSettled(settled);
+      service.onTableChanged(tables);
+      for (let i = 0; i < 5; i++) tableWatcher()._simulateChange(vscode.Uri.file(`${ws}/gold/tables/gold/t${i}.dbml`));
+      vi.advanceTimersByTime(300);
+      expect(tables).toHaveBeenCalledTimes(5);
+      vi.advanceTimersByTime(1_000);
+      expect(started).not.toHaveBeenCalled();
+      expect(settled).not.toHaveBeenCalled();
     });
   });
 

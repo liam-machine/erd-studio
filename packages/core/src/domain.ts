@@ -14,6 +14,7 @@ import type {
   Layer,
   TableLoadError,
   TableLoadErrorKind,
+  DbmlMetadataTarget,
   NodePosition,
   Relationship,
   SemanticSubjectArea,
@@ -24,14 +25,14 @@ import type {
   ViewConfig,
   Annotation,
 } from './types/semantic.js';
-import { CURRENT_SCHEMA_VERSION, TABLE_NAMING_SCHEMA_VERSION, describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat, usesTableLibrary } from './types/semantic.js';
+import { CURRENT_JSON_SCHEMA_VERSION, TABLE_NAMING_SCHEMA_VERSION, describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat, usesTableLibrary } from './types/semantic.js';
 import { LOGICAL_MODELS_DIR, TableMergeConflictError } from './logicalModel.js';
 import {
   canonicalRelationship, compositeGroupProblem, linkKey, normaliseCompositeKey, normaliseRelationshipRole, respellRelationship,
   reverseRelationship,
 } from './relationships.js';
 import { keyEvidence } from './keyEvidence.js';
-import type { DbtKeyIndex } from './keyEvidence.js';
+import type { DbtKeyIndex, KeyedTable } from './keyEvidence.js';
 import { findConflictMarkers } from './mergeConflict.js';
 
 /**
@@ -46,8 +47,13 @@ export const NON_SUBJECT_AREA_DIRS: ReadonlySet<string> = new Set([
   'templates', LOGICAL_MODELS_DIR, 'logical', 'physical',
 ]);
 
-/** Why a domain file could not be turned into a `UnifiedSubjectArea`. */
-export type SubjectAreaFileErrorReason = 'missing' | 'unreadable' | 'empty' | 'invalid-json';
+/**
+ * Why a domain file could not be turned into a `UnifiedSubjectArea`.
+ * `'invalid-dbml'` is a `.dbml` diagram the DBML parser rejects (native DBML
+ * storage); like `'invalid-json'` it is transient unless the file holds
+ * merge conflicts.
+ */
+export type SubjectAreaFileErrorReason = 'missing' | 'unreadable' | 'empty' | 'invalid-json' | 'invalid-dbml';
 
 /**
  * What kind of JSON mistake an 'invalid-json' file holds (#186), worked out
@@ -83,7 +89,7 @@ export type JsonSyntaxProblem = 'trailing-comma' | 'missing-comma' | 'truncated'
  */
 export class SubjectAreaFileError extends Error {
   readonly transient: boolean;
-  /** The file holds unresolved git conflict markers; always false unless reason is 'invalid-json'. */
+  /** The file holds unresolved git conflict markers; always false unless reason is 'invalid-json' or 'invalid-dbml'. */
   readonly mergeConflict: boolean;
   /**
    * 1-based line: of the first conflict marker when `mergeConflict`, else of
@@ -107,7 +113,7 @@ export class SubjectAreaFileError extends Error {
     if (options.line !== undefined) this.line = options.line;
     if (options.column !== undefined) this.column = options.column;
     if (options.syntaxProblem !== undefined) this.syntaxProblem = options.syntaxProblem;
-    this.transient = reason === 'empty' || (reason === 'invalid-json' && !this.mergeConflict);
+    this.transient = reason === 'empty' || ((reason === 'invalid-json' || reason === 'invalid-dbml') && !this.mergeConflict);
   }
 }
 
@@ -364,10 +370,12 @@ export function validateSubjectAreaDocument(
     );
   }
 
-  if (obj.schemaVersion > CURRENT_SCHEMA_VERSION) {
+  // A JSON file is held to the JSON ceiling (6), with the words it always
+  // had: 7 is a DBML diagram's version, never a JSON one.
+  if (obj.schemaVersion > CURRENT_JSON_SCHEMA_VERSION) {
     throw new SubjectAreaValidationError(
       `Subject area file ${filePath} has schemaVersion ${obj.schemaVersion} ` +
-      `but this extension only supports up to version ${CURRENT_SCHEMA_VERSION}. ` +
+      `but this extension only supports up to version ${CURRENT_JSON_SCHEMA_VERSION}. ` +
       'Please update the extension.'
     );
   }
@@ -568,11 +576,7 @@ export function buildUnifiedSubjectArea(
   const emptyStage: StageData = { models: [], relationships: [] };
 
   // Global viewConfig — fall back to stage-level viewConfig for existing files
-  const globalViewConfig = parseViewConfig(
-    obj.viewConfig
-      ?? (obj.logical as Record<string, unknown> | undefined)?.viewConfig,
-    warn,
-  );
+  const globalViewConfig = subjectAreaViewConfig(obj, warn);
 
   // Parse stubColumns — optional string[] of model names with stub display
   const stubColumns = Array.isArray(obj.stubColumns)
@@ -656,7 +660,7 @@ function parseStageData(
             const placeholder: UnreadableTablePlaceholder = { name, columns: [], loadError: { ...loadError } };
             models.push(placeholder);
           } else {
-            warn(`Model "${name}" not found in logical-models/`);
+            warn(`Model "${name}" not found in the table library`);
             models.push({ name, columns: [] });
           }
         }
@@ -700,15 +704,126 @@ const YAML_ERROR_KINDS: Readonly<Record<string, TableLoadErrorKind>> = {
 };
 
 /**
+ * ERD Studio's own rules for a `.dbml` table file (§2.2 of the native DBML
+ * storage spec): it holds exactly one Table (`notOneTable`), the Table is
+ * named as the file (`nameMismatch`, case aside), and it declares nothing a
+ * table file may not (`unsupportedElement`: a Project, TableGroup, top-level
+ * Note, TablePartial, Records or DiagramView), and a `Metadata` block names
+ * a table or column the file declares (`metadataTarget`, D25).
+ */
+export type DbmlTableStructureRule = 'notOneTable' | 'nameMismatch' | 'unsupportedElement' | 'metadataTarget';
+
+/**
+ * What a DBML diagnostic code means, by its range, the same in `@dbml/parse`
+ * 9.1, 10.3 and 11.0: 1000–1999 the lexer and parser (`syntax`), 3000–3999
+ * the validator (`invalid`), 4000–4001 the binder (`binding`: a name that is
+ * not declared), 5000 and up the interpreter. Parser-free.
+ */
+export type DbmlErrorClass = 'syntax' | 'invalid' | 'binding' | 'interpreter';
+
+/** The {@link DbmlErrorClass} of a DBML diagnostic code. A code outside every range is `invalid`. */
+export function dbmlErrorClassOf(code: number): DbmlErrorClass {
+  if (code >= 1000 && code < 2000) return 'syntax';
+  if (code >= 4000 && code < 5000) return 'binding';
+  if (code >= 5000) return 'interpreter';
+  return 'invalid';
+}
+
+/**
+ * DBML codes for an unquoted value in a table file, in the pinned
+ * `@dbml/parse` 11.0.0's numbering (10.3.1 shares it): `3025` a column
+ * setting, `3075` a table setting. 11.0 reads an unquoted number or boolean,
+ * so these are a word, a phrase or `null` (`grain: one row`). Not `3073`,
+ * which is a TablePartial error there (9.1.1 numbers its codes differently).
+ */
+export const DBML_TABLE_QUOTE_HINT_CODES: ReadonlySet<string> = new Set(['3025', '3075']);
+
+/**
+ * DBML codes for an unquoted value in a diagram file, in the same numbering:
+ * `3063` a Project custom key (every parser wants a quoted string there) and
+ * `3051` a Note setting.
+ */
+export const DBML_DIAGRAM_QUOTE_HINT_CODES: ReadonlySet<string> = new Set(['3063', '3051']);
+
+/** The fix for a value DBML wants quoted, with an example that is an error in every parser. */
+export const DBML_QUOTE_HINT = "Quote the value, as in grain: 'One row per order line'.";
+
+/**
+ * A `.dbml` table file that could not be read, as a DBML reader reports it to
+ * {@link classifyTableLoadError}: the diagnostic's numeric `dbmlCode`, or one of
+ * ERD Studio's own `rule`s, and where. `message` is for logs and may quote the
+ * file; the classification never reads it.
+ */
+export class TableDbmlError extends Error {
+  readonly dbmlCode?: number;
+  readonly rule?: DbmlTableStructureRule;
+  readonly line?: number;
+  readonly column?: number;
+  readonly mergeConflict: boolean;
+  /** For the `metadataTarget` rule: the missing table or column. */
+  readonly target?: DbmlMetadataTarget;
+
+  constructor(
+    message: string,
+    options: { dbmlCode?: number; rule?: DbmlTableStructureRule; line?: number; column?: number; mergeConflict?: boolean; target?: DbmlMetadataTarget } = {},
+  ) {
+    super(message);
+    this.name = 'TableDbmlError';
+    if (options.dbmlCode !== undefined) this.dbmlCode = options.dbmlCode;
+    if (options.rule !== undefined) this.rule = options.rule;
+    if (options.target !== undefined) this.target = options.target;
+    if (options.line !== undefined) this.line = options.line;
+    if (options.column !== undefined) this.column = options.column;
+    this.mergeConflict = options.mergeConflict === true;
+  }
+}
+
+/**
+ * The {@link TableLoadError} of a `.dbml` table file: conflict markers are a
+ * `dbmlSyntax` with `mergeConflict`; an ERD Studio rule is a `dbmlStructure`
+ * with code `structure:<rule>`; a parser code maps by {@link dbmlErrorClassOf}
+ * (`syntax` → `dbmlSyntax`, `binding` → `dbmlStructure`, anything else →
+ * `dbmlInvalid`) with the code as text.
+ */
+export function classifyDbmlTableError(error: {
+  dbmlCode?: number; rule?: DbmlTableStructureRule; line?: number; column?: number; mergeConflict?: boolean; target?: DbmlMetadataTarget;
+}): TableLoadError & { column?: number } {
+  const at = {
+    ...(error.line !== undefined ? { line: error.line } : {}),
+    ...(error.column !== undefined ? { column: error.column } : {}),
+  };
+  if (error.mergeConflict) {
+    return { kind: 'dbmlSyntax', ...(error.line !== undefined ? { line: error.line } : {}), mergeConflict: true };
+  }
+  if (error.rule !== undefined) {
+    return {
+      kind: 'dbmlStructure', ...at, code: `structure:${error.rule}`,
+      ...(error.rule === 'metadataTarget' && error.target !== undefined ? { target: { ...error.target } } : {}),
+    };
+  }
+  if (typeof error.dbmlCode === 'number' && Number.isFinite(error.dbmlCode)) {
+    const errorClass = dbmlErrorClassOf(error.dbmlCode);
+    const kind: TableLoadErrorKind = errorClass === 'syntax' ? 'dbmlSyntax' : errorClass === 'binding' ? 'dbmlStructure' : 'dbmlInvalid';
+    return { kind, ...at, code: String(error.dbmlCode) };
+  }
+  return { kind: 'dbmlInvalid', ...at };
+}
+
+/**
  * Classify an error thrown while reading or parsing a model file, from its
  * `code` and `linePos` only (never the message, which may quote the file). A
  * Node fs code (`ENOENT`, `EACCES`, …) is a `read`; a YAML code maps through
  * the table above; anything else is `yamlOther`. A file holding git conflict
  * markers is a `yamlOther` with `mergeConflict` and the first marker's line.
+ * A {@link TableDbmlError} (a `.dbml` table file) goes through
+ * {@link classifyDbmlTableError}.
  */
 export function classifyTableLoadError(err: unknown): TableLoadError & { column?: number; code?: string } {
   if (err instanceof TableMergeConflictError) {
     return { kind: 'yamlOther', line: err.line, mergeConflict: true };
+  }
+  if (err instanceof TableDbmlError) {
+    return classifyDbmlTableError(err);
   }
   const e = err as { code?: unknown; linePos?: Array<{ line: number; col: number }> } | null;
   const code = e && typeof e.code === 'string' ? e.code : undefined;
@@ -724,14 +839,23 @@ export function classifyTableLoadError(err: unknown): TableLoadError & { column?
   };
 }
 
+/** Whether `kind` is one of the `.dbml` table-file kinds. */
+function isDbmlKind(kind: TableLoadErrorKind): boolean {
+  return kind === 'dbmlSyntax' || kind === 'dbmlInvalid' || kind === 'dbmlStructure';
+}
+
 /**
  * One plain phrase for a model file that exists but cannot be read, e.g.
- * `logical-models file has a YAML error on line 4`. Built from the kind and
- * line only, so it never quotes the file.
+ * `logical-models file has a YAML error on line 4`, or for a `.dbml` table
+ * file `table file has a DBML syntax error on line 4`. Built from the kind,
+ * code and line only, so it never quotes the file.
  */
 export function describeTableLoadError(error: TableLoadError): string {
   if (error.kind === 'read') {
-    return 'logical-models file could not be read';
+    return 'table file could not be read';
+  }
+  if (isDbmlKind(error.kind)) {
+    return describeDbmlTableLoadError(error);
   }
   if (error.mergeConflict) {
     return error.line !== undefined
@@ -743,9 +867,58 @@ export function describeTableLoadError(error: TableLoadError): string {
     : 'logical-models file has a YAML error';
 }
 
+function describeDbmlTableLoadError(error: TableLoadError): string {
+  const onLine = error.line !== undefined ? ` on line ${error.line}` : '';
+  if (error.mergeConflict) {
+    return `table file has an unresolved git merge conflict${onLine}`;
+  }
+  switch (error.kind) {
+    case 'dbmlSyntax':
+      return `table file has a DBML syntax error${onLine}`;
+    case 'dbmlStructure':
+      if (error.code === 'structure:metadataTarget') {
+        const named = error.target ? `${error.target.element} '${error.target.name}'` : 'a table or column';
+        return `table file has a Metadata block${onLine} that targets ${named}, which this table does not have; rename or remove the block`;
+      }
+      return `table file must hold exactly one Table that needs no other file${error.line !== undefined ? ` (line ${error.line})` : ''}`;
+    default:
+      if (error.code !== undefined && DBML_TABLE_QUOTE_HINT_CODES.has(error.code)) {
+        return `table file has an unquoted value${onLine}; quote it, as in grain: 'One row per order line'`;
+      }
+      return `table file is not valid DBML${error.code !== undefined ? ` (${error.code})` : ''}${onLine}`;
+  }
+}
+
 /** Identity of a relationship: its four endpoints, compared without case. */
 export function relationshipKey(rel: Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>): string {
   return [rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()).join('\u0000');
+}
+
+/**
+ * How a copy of a link stored twice ranks against its other copies: the
+ * lowest rank is the one drawn, whatever the file or entry order (#133).
+ * First a copy in its home (not one-to-many), then one not leaving its
+ * model's whole key (`keyEvidence`: flags, else dbt's tests — choosing
+ * between copies changes no data, so this needs no evidence about the other
+ * end), then the lowest model name, then the lowest content, then `index`.
+ * `fromTable` is the from-model as read (or undefined when it is unknown).
+ * Shared by {@link mergeLibraryRelationships} and the DBML relationships
+ * reader (`attachRelationships`), which dedupe the same way.
+ */
+export function libraryCopyRank(
+  rel: Relationship,
+  fromTable: KeyedTable | undefined,
+  index: number,
+  dbt?: DbtKeyIndex,
+): string {
+  return [
+    `${rel.cardinality === 'one-to-many' ? 1 : 0}${keyEvidence(fromTable ?? { name: rel.fromModel }, rel.fromColumn, dbt) === 'whole-key' ? 1 : 0}`,
+    ...[rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()),
+    // A copy with a role (or a composite key) before its unlabelled twin: the label is information.
+    rel.cardinality, rel.role ? `0${rel.role}` : '1', rel.compositeKey ? `0${rel.compositeKey}` : '1',
+    // Spelling only splits copies that differ in case; then the index splits identical ones.
+    rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn, String(index).padStart(6, '0'),
+  ].join('\u0000');
 }
 
 /**
@@ -771,19 +944,7 @@ export function mergeLibraryRelationships(
 ): Relationship[] {
   const byName = new Map(models.map((m) => [m.name.toLowerCase(), m]));
   const modelOf = (name: string): SemanticTable | undefined => byName.get(name.toLowerCase());
-  // A link stored twice is drawn from the same copy whatever the file or
-  // entry order (#133): one in its home (not one-to-many), then one not
-  // leaving its model's whole key (`keyEvidence`: flags, else dbt's tests —
-  // choosing between copies changes no data, so this needs no evidence about
-  // the other end), then the lowest model name, then the lowest content.
-  const rankOf = (rel: Relationship, index: number): string => [
-    `${rel.cardinality === 'one-to-many' ? 1 : 0}${keyEvidence(modelOf(rel.fromModel) ?? { name: rel.fromModel }, rel.fromColumn, dbt) === 'whole-key' ? 1 : 0}`,
-    ...[rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()),
-    // A copy with a role (or a composite key) before its unlabelled twin: the label is information.
-    rel.cardinality, rel.role ? `0${rel.role}` : '1', rel.compositeKey ? `0${rel.compositeKey}` : '1',
-    // Spelling only splits copies that differ in case; then the index splits identical ones.
-    rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn, String(index).padStart(6, '0'),
-  ].join('\u0000');
+  const rankOf = (rel: Relationship, index: number): string => libraryCopyRank(rel, modelOf(rel.fromModel), index, dbt);
   type Held = { rel: Relationship; rank: string; at: GroupSource };
   const keep = (map: Map<string, Held>, rel: Relationship, rank: string, at: GroupSource): void => {
     const key = linkKey(rel);
@@ -823,7 +984,7 @@ export function mergeLibraryRelationships(
     if (shared.rel.cardinality !== rel.cardinality) {
       warn(
         `Relationship ${rel.fromModel}.${rel.fromColumn} → ${rel.toModel}.${rel.toColumn} in ${filePath} ` +
-        `is ${rel.cardinality}, but logical-models/ defines it as ${shared.rel.cardinality}; using ${shared.rel.cardinality}`,
+        `is ${rel.cardinality}, but the table library defines it as ${shared.rel.cardinality}; using ${shared.rel.cardinality}`,
       );
     }
     // The library's definition, at the domain entry's place.
@@ -950,6 +1111,16 @@ function parseRelationships(value: unknown, filePath: string, warn: (message: st
     });
   }
   return relationships;
+}
+
+/**
+ * A validated domain document's view config, as the loader reads it: the
+ * top-level `viewConfig`, else the stage-level `logical.viewConfig` older
+ * versions wrote. Malformed positions and sticky notes (no string `id`, or no
+ * numeric `x`/`y`) are dropped, as the canvas never draws them.
+ */
+export function subjectAreaViewConfig(obj: Record<string, unknown>, warn: (message: string) => void = () => { /* silent */ }): ViewConfig {
+  return parseViewConfig(obj.viewConfig ?? (obj.logical as Record<string, unknown> | undefined)?.viewConfig, warn);
 }
 
 function parseViewConfig(value: unknown, warn: (message: string) => void): ViewConfig {

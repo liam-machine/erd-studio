@@ -5,10 +5,15 @@ All notable changes to `@erd-studio/renderer`. While `0.x`, a breaking change bu
 ## 0.4.0
 
 ### Added
-- Re-exports core's rich DBML export and its dbdiagram layout file: `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `toDbdiagramLayout`, `serializeDbdiagramLayout`, `dbdiagramLayoutFileName` and the `DbmlRichOptions`, `DbdiagramLayout` and `DbdiagramTablePosition` types.
+- Re-exports core's rich DBML export: `toDbmlRich`, `DBML_RICH_EXPORT_HEADER` and the `DbmlRichOptions` type. A rich export is one file per diagram, its table and sticky-note positions in its `Project`'s `erd_layout`.
+- Hover focus and relationship flow: `useHoverFocus()` (hover preview handlers and a root class; a host that builds on `/editor` must call it, or nothing flows even on click), `EdgeFlow` / `EdgeFlowGlyphs`, `usePrefersReducedMotion`, `computeCanvasFocus`. `CanvasState` gains the ephemeral `hoverFocus` and `flowFocus` (a host that hand-builds `CanvasState` instead of using `createCanvasSlice` must add them). No `DisplaySubjectArea` change and no new `--vscode-*` variables.
+
+### Changed
+- After a domain update, the canvas keeps the existing React Flow node and edge objects for everything that came out the same, so dragging a table re-renders only the tables that moved and their edges instead of every node. What is drawn is unchanged; no API change.
+- A table whose file cannot be read says which format failed: "DBML error on line N" for a `.dbml` table file (ERD Studio 2.0's native DBML storage), and "YAML error on line N" as before for a `.yml` one. A `DisplaySubjectArea` from an older core never carries the DBML kinds, so its nodes read exactly as before.
 
 ### Changed (breaking)
-- Pins `@erd-studio/core` 0.4.0. The re-exported `DiagramExportFormat` gains `'dbml-rich'` and `DIAGRAM_EXPORT_FORMATS` now ends with it, so a page that offers every format offers it too, and a `Record<DiagramExportFormat, …>` (a label or hint per format) or an exhaustive `switch` over it needs a case.
+- Pins `@erd-studio/core` 0.4.0, whose `TableLoadErrorKind` gains three DBML kinds and whose `@dbml/parse` runtime dependency is loaded only by its `@erd-studio/core/dbml` subpath (the renderer never imports it). The re-exported `DiagramExportFormat` gains `'dbml-rich'` and `DIAGRAM_EXPORT_FORMATS` now ends with it, so a page that offers every format offers it too, and a `Record<DiagramExportFormat, …>` (a label or hint per format) or an exhaustive `switch` over it needs a case.
 
 ## 0.3.0
 

@@ -66,7 +66,6 @@ function recorder(answers: { confirm?: boolean; layer?: string } = {}): Recorder
     dialogs: 0, reads: [], picks: [], inputs: [], confirms: [], opened: [], errors: [],
     pickFile: async () => { ui.dialogs++; return undefined; },
     readFile: async (filePath) => { ui.reads.push(filePath); throw new Error('read from disk'); },
-    exists: async () => true,
     showQuickPick: async <T extends vscode.QuickPickItem>(items: readonly T[]) => {
       const ids = (items as unknown as Array<{ id: string }>).map((i) => i.id);
       ui.picks.push(ids);
@@ -185,9 +184,9 @@ describe('Open Example Diagram', () => {
     expect(pkg.contributes.commands.find((c) => c.command === OPEN_EXAMPLE_DIAGRAM_COMMAND)).toEqual({
       command: OPEN_EXAMPLE_DIAGRAM_COMMAND, title: 'Open Example Diagram', category: 'ERD Studio',
     });
-    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject')!;
+    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
     expect(plain.contents).toContain('New to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)');
-    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject')!;
+    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
     expect(dbt.contents).not.toContain('openExampleDiagram');
   });
 
@@ -197,7 +196,8 @@ describe('Open Example Diagram', () => {
 
     const result = await openExampleDiagram(deps(ui));
 
-    const domainPath = erd(EXAMPLE_LAYER, 'coffee-shop.json');
+    // A new project stores the example as DBML (native DBML storage, §3.2).
+    const domainPath = erd(EXAMPLE_LAYER, 'diagrams', 'coffee-shop.dbml');
     expect(result?.domainPath).toBe(domainPath);
     // No Open dialog, no layer pick (the default layers have gold), no read from disk.
     expect(ui.dialogs).toBe(0);
@@ -211,12 +211,16 @@ describe('Open Example Diagram', () => {
     expect(ui.confirms[0].detail).not.toContain('Left out');
     expect(ui.errors).toEqual([]);
     expect(ui.opened).toEqual([domainPath]);
-    // A project with no library yet writes the table naming (#182), in a layer folder.
+    // A project with no library yet writes DBML (§3.2) in the layer-first tree: the tables in gold/tables/gold/
+    // (layer gold, schema gold), the Refs in gold's relationships file, and the README a new project starts with.
     expect(erdFiles()).toEqual([
-      'gold/coffee-shop.json',
+      'README.md',
+      'gold/diagrams/coffee-shop.dbml',
+      'gold/relationships/gold.dbml',
+      ...SAMPLE_TABLES.map((t) => `gold/tables/gold/${t}.dbml`).sort(),
       'layers.json',
-      ...SAMPLE_TABLES.map((t) => `tables/gold/${t}.yml`).sort(),
     ]);
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'fct_orders.dbml'), 'utf-8')).toMatch(/^Table gold\.fct_orders \[/m);
     // Counted as the example only: the Import DBML counts stay the user's own files.
     expect(features()).toEqual(['exampleDiagram']);
   });
@@ -274,16 +278,19 @@ describe('Open Example Diagram', () => {
     const ui = recorder({ layer: 'marts' });
     const result = await openExampleDiagram(deps(ui));
     expect(ui.picks).toEqual([['staging', 'marts']]);
-    expect(result?.domainPath).toBe(erd('marts', 'coffee-shop.json'));
+    // A project with no tables yet writes DBML (§3.2).
+    expect(result?.domainPath).toBe(erd('marts', 'diagrams', 'coffee-shop.dbml'));
+    expect(fs.existsSync(erd('marts', 'tables', 'marts', 'fct_orders.dbml'))).toBe(true);
   });
 
-  it('exampleDbmlUi reads only the example and finds no layout next to it', async () => {
+  it('exampleDbmlUi reads only the example, which has no erd_layout', async () => {
     const base = recorder();
     const examplePath = path.join(tmp, EXAMPLE_DBML_FILE_NAME);
     const ui = exampleDbmlUi(base, examplePath);
     expect(await ui.pickFile(tmp)).toBe(examplePath);
     expect(await ui.readFile(examplePath)).toBe(EXAMPLE_DBML);
-    expect(await ui.exists(path.join(tmp, 'coffee-shop.dbdiagram'))).toBe(false);
+    expect(ui).not.toHaveProperty('exists');
+    expect(EXAMPLE_DBML).not.toContain('erd_layout');
     await expect(ui.readFile(path.join(tmp, 'other.dbml'))).rejects.toThrow('read from disk');
   });
 });

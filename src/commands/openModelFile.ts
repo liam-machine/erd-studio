@@ -1,18 +1,22 @@
 /**
- * Open a `logical-models` file in a text editor, with the cursor on the line
- * its YAML error was reported on. Shared by the canvas's `openModelFile`
+ * Open a table file (`.yml` or `.dbml`) in a text editor, with the cursor on
+ * the line its YAML or DBML error was reported on. Shared by the canvas's `openModelFile`
  * message and the one-per-broken-file warning notification. Writes nothing.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { DBML_TABLE_QUOTE_HINT_CODES } from '@erd-studio/core';
 import type { TableFileError, TableFileErrorKind } from '../services/logicalModelService';
+import { OPEN_FILE_BUTTON, projectRelative, showErrorWithActions } from '../services/commandErrors';
+import { refusalLocation, type RefusedWrite } from '../services/newSubjectAreaWriter';
+import { log } from '../services/logger';
 
-/** Open `filePath`, placing the cursor at the 1-based `line` / `column` when given. */
-export async function openTableFileAt(filePath: string, line?: number, column?: number): Promise<void> {
+/** Open `filePath`, placing the cursor at the 1-based `line` / `column` when given (in `viewColumn`, else the active one). */
+export async function openTableFileAt(filePath: string, line?: number, column?: number, viewColumn?: vscode.ViewColumn): Promise<void> {
   const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
-  const options: vscode.TextDocumentShowOptions = { preview: false };
+  const options: vscode.TextDocumentShowOptions = { preview: false, ...(viewColumn !== undefined ? { viewColumn } : {}) };
   if (line !== undefined && line >= 1) {
     const lineIndex = Math.min(line - 1, Math.max(document.lineCount - 1, 0));
     const character = column !== undefined && column >= 1 ? column - 1 : 0;
@@ -22,8 +26,46 @@ export async function openTableFileAt(filePath: string, line?: number, column?: 
   await vscode.window.showTextDocument(document, options);
 }
 
-/** The one tip the notification gives, tailored to what went wrong. */
-export function tableFileErrorTip(kind: TableFileErrorKind, mergeConflict?: boolean): string {
+/**
+ * A command's refused write (§4.7 of docs/plans/native-dbml-storage.md): a
+ * modal with the refusal's own sentence and `outcome`, naming the file (and
+ * line) it points at, with Open File there. `refusalLocation` is the one
+ * answer for where a refusal points, shared with Draw from dbt and Import DBML.
+ */
+export function showRefusedWrite(
+  title: string,
+  err: RefusedWrite,
+  where: { semanticRoot: string; workspaceRoot: string; outcome: string },
+): void {
+  const location = refusalLocation(err, where.semanticRoot);
+  const file = location
+    ? `${projectRelative(where.workspaceRoot, location.filePath)}${location.line !== undefined ? `, line ${location.line}` : ''}`
+    : undefined;
+  showErrorWithActions(
+    (message, ...items) => vscode.window.showErrorMessage(message, { modal: true, ...(file ? { detail: `File: ${file}` } : {}) }, ...items),
+    `${title}: ${err.message} ${where.outcome}`,
+    location ? { [OPEN_FILE_BUTTON]: () => openTableFileAt(location.filePath, location.line) } : {},
+    (choice, failure) => {
+      log.error(`[ERD Studio] ${title}: "${choice}" failed:`, failure);
+      void vscode.window.showErrorMessage(`${title}: could not open ${file ?? 'the file'}.`);
+    },
+  );
+}
+
+/** The tip for each of ERD Studio's own DBML table-file rules (`structure:<rule>` codes). */
+const DBML_STRUCTURE_TIPS: Readonly<Record<string, string>> = {
+  'structure:notOneTable': 'Tip: a table file holds exactly one Table. Move any other Table to its own file.',
+  'structure:nameMismatch': "Tip: name the Table as its file, or rename the file to the Table's name.",
+  'structure:unsupportedElement': 'Tip: a table file holds one Table and nothing else. Remove the Project, TableGroup, Note or other block.',
+  'structure:metadataTarget': 'Tip: a Metadata block names a table or column this file does not declare. Rename or remove the block.',
+};
+
+/**
+ * The one tip the notification gives, tailored to what went wrong. For a DBML
+ * table file the `code` decides: the quote advice only for an unquoted value
+ * (`DBML_TABLE_QUOTE_HINT_CODES`), and each `structure:<rule>` its own fix.
+ */
+export function tableFileErrorTip(kind: TableFileErrorKind, mergeConflict?: boolean, code?: string): string {
   if (mergeConflict) {
     return 'Tip: keep one side of each conflict, save, then git add the file.';
   }
@@ -36,6 +78,17 @@ export function tableFileErrorTip(kind: TableFileErrorKind, mergeConflict?: bool
       return 'Tip: the file must be one YAML document — no --- separators or ``` code fences.';
     case 'read':
       return 'Tip: check the file still exists and that VS Code can read it.';
+    case 'dbmlSyntax':
+      return 'Tip: check the DBML syntax on that line (a missing bracket, quote or brace).';
+    case 'dbmlInvalid':
+      return code !== undefined && DBML_TABLE_QUOTE_HINT_CODES.has(code)
+        ? "Tip: quote the value, as in grain: 'One row per order line'."
+        : 'Tip: fix the DBML on that line.';
+    case 'dbmlStructure':
+      if (code !== undefined && DBML_STRUCTURE_TIPS[code]) return DBML_STRUCTURE_TIPS[code];
+      return code !== undefined && !code.startsWith('structure:')
+        ? 'Tip: fix the DBML on that line.'
+        : 'Tip: a table file holds exactly one Table, named as its file, and no Project, TableGroup or Note.';
     case 'yamlScalar':
     case 'yamlOther':
     default:
@@ -45,7 +98,7 @@ export function tableFileErrorTip(kind: TableFileErrorKind, mergeConflict?: bool
 
 /** The notification text for a model file that exists but cannot be read. */
 export function tableFileErrorNotice(
-  error: Pick<TableFileError, 'filePath' | 'kind' | 'line' | 'mergeConflict' | 'readable' | 'key'>,
+  error: Pick<TableFileError, 'filePath' | 'kind' | 'line' | 'mergeConflict' | 'readable' | 'key' | 'code'>,
 ): string {
   const base = path.basename(error.filePath);
   if (error.readable) {
@@ -55,7 +108,7 @@ export function tableFileErrorNotice(
     return `${base}: ${what} in the same block${where}. ERD Studio uses the last one, ` +
       "but can't change this table until you remove the other copy.";
   }
-  const tip = tableFileErrorTip(error.kind, error.mergeConflict);
+  const tip = tableFileErrorTip(error.kind, error.mergeConflict, error.code);
   if (error.kind === 'read') {
     return `${base} couldn't be read and can't be shown on the diagram. ${tip}`;
   }
@@ -63,7 +116,8 @@ export function tableFileErrorNotice(
   if (error.mergeConflict) {
     return `${base} has an unresolved git merge conflict${where} and can't be shown on the diagram. ${tip}`;
   }
-  return `${base} has a YAML error${where} and can't be shown on the diagram. ${tip}`;
+  const format = error.kind.startsWith('dbml') ? 'DBML' : 'YAML';
+  return `${base} has a ${format} error${where} and can't be shown on the diagram. ${tip}`;
 }
 
 /**
@@ -80,7 +134,7 @@ export function notifyTableFileError(error: TableFileError): void {
       return undefined;
     })
     .catch((err: unknown) => {
-      console.error('[ERD Studio] Could not open model file:', err);
+      log.error('[ERD Studio] Could not open model file:', err);
     });
 }
 
@@ -116,7 +170,7 @@ export function shouldWarnAboutTableFile(state: vscode.Memento, filePath: string
     delete warned[old];
   }
   void Promise.resolve(state.update(TABLE_FILE_WARNED_KEY, warned)).catch((err: unknown) => {
-    console.error('[ERD Studio] Could not remember a model file warning:', err);
+    log.error('[ERD Studio] Could not remember a model file warning:', err);
   });
   return true;
 }

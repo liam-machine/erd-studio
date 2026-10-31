@@ -2,9 +2,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DIAGRAM_EXPORT_FORMATS, readDbdiagramLayout } from '@erd-studio/core';
+import { DIAGRAM_EXPORT_FORMATS } from '@erd-studio/core';
+import { readErdLayoutDbml } from '@erd-studio/core/dbml';
 
-import { CLI_EXPORT_FORMATS, CliUsageError, parseArgs, USAGE, type CliExportFormat } from '../../src/cli/args';
+import { CLI_EXPORT_FORMATS, CliUsageError, DBML_LAYOUT_REMOVED_MESSAGE, parseArgs, USAGE, type CliExportFormat } from '../../src/cli/args';
 import { buildCliContext } from '../../src/cli/context';
 import { runExport, runExportAll, type ExportAllResult, type ExportResult } from '../../src/cli/export';
 import { main } from '../../src/cli/index';
@@ -33,18 +34,16 @@ const CORE_CASES: Record<string, string> = {
 };
 
 /** The core golden a CLI format prints. */
-const goldenOf = (fixture: string, format: CliExportFormat): string =>
-  format === 'dbml-layout' ? `${fixture}.dbdiagram` : goldenFileName(fixture, format);
+const goldenOf = (fixture: string, format: CliExportFormat): string => goldenFileName(fixture, format);
 
 /** The first line each format prints. */
 const FIRST_LINE: Record<CliExportFormat, string> = {
   mermaid: 'erDiagram\n%% erd-studio mermaid-export v1\n',
   dbml: '// erd-studio dbml-export v1\n',
   'dbml-rich': '// erd-studio dbml-export v2 (DBML 9.1+)\n',
-  'dbml-layout': '{\n  "version": "3.0.0",\n',
 };
 
-const FORMATS = 'mermaid\\|dbml\\|dbml-rich\\|dbml-layout';
+const FORMATS = 'mermaid\\|dbml\\|dbml-rich';
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-cli-export-')); });
@@ -94,11 +93,19 @@ describe('parseArgs — export', () => {
     expect(parseArgs(['export', '--domain', 'a.json', '--format', 'DBML-Rich']).format).toBe('dbml-rich');
   });
 
-  it('takes every diagram format plus dbml-layout', () => {
-    expect(CLI_EXPORT_FORMATS).toEqual([...DIAGRAM_EXPORT_FORMATS, 'dbml-layout']);
+  it('takes every diagram format, and nothing more', () => {
+    expect(CLI_EXPORT_FORMATS).toEqual([...DIAGRAM_EXPORT_FORMATS]);
     for (const format of CLI_EXPORT_FORMATS) {
       expect(parseArgs(['export', '--domain', 'a.json', '--format', format]).format).toBe(format);
     }
+  });
+
+  it('says --format dbml-layout was removed, and what to use instead', () => {
+    for (const value of ['dbml-layout', 'DBML-Layout']) {
+      expect(() => parseArgs(['export', '--domain', 'a.json', '--format', value])).toThrow(CliUsageError);
+      expect(() => parseArgs(['export', '--domain', 'a.json', '--format', value])).toThrow(DBML_LAYOUT_REMOVED_MESSAGE);
+    }
+    expect(DBML_LAYOUT_REMOVED_MESSAGE).toBe("--format dbml-layout was removed: positions are in the diagram's Project (erd_layout); use --format dbml-rich.");
   });
 
   it('takes --all in place of --domain', () => {
@@ -127,11 +134,15 @@ describe('parseArgs — export', () => {
   });
 
   it('the usage text lists the subcommand, its formats and --all', () => {
-    expect(USAGE).toContain('erd-studio export    [--json] (--domain <path> | --all) --format mermaid|dbml|dbml-rich|dbml-layout');
-    expect(USAGE).toMatch(/dbml-rich +DBML for dbdiagram\.io/);
-    expect(USAGE).toMatch(/dbml-layout +the table positions for dbml-rich, as dbdiagram's \.dbdiagram file/);
+    expect(USAGE).toContain('erd-studio export    [--json] (--domain <path> | --all) --format mermaid|dbml|dbml-rich');
+    expect(USAGE).toMatch(/dbml-rich +rich DBML: every ERD Studio field as a property, the table positions\n +in the Project's erd_layout/);
+    expect(USAGE).not.toContain('dbml-layout');
+    expect(USAGE).not.toContain('.dbdiagram');
     expect(USAGE).toMatch(/--all +every subject area, as a JSON list of \{ fileName, content \}/);
     expect(USAGE).not.toContain('--out');
+    // Native DBML storage (§7.1): the example names a DBML diagram.
+    expect(USAGE).toContain('erd-studio export --domain .erd-studio/gold/diagrams/sales.dbml --format dbml');
+    expect(USAGE).not.toContain('sales.json');
     expect(() => parseArgs(['exprt'])).toThrow(/doctor, inventory, diff, export, version/);
   });
 });
@@ -139,28 +150,32 @@ describe('parseArgs — export', () => {
 describe('export', () => {
   it.each(CLI_EXPORT_FORMATS)('prints exactly the %s text exportSubjectAreaFile builds, and nothing else', async (format) => {
     const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
-    const expected = await exportSubjectAreaFile(ctx.subjectAreaService, path.join(PROJECT, SHOWCASE), format === 'dbml-layout' ? 'dbml-rich' : format, {
+    const expected = await exportSubjectAreaFile(ctx.subjectAreaService, path.join(PROJECT, SHOWCASE), format, {
       dbtKeyIndex: dbtKeyIndexOf(ctx.ymlData, ctx.manifest),
       layers: ctx.layerService,
     });
 
     const { code, out, err } = await run(['export', '--project', PROJECT, '--domain', SHOWCASE, '--format', format]);
     expect(code).toBe(0);
-    expect(out).toBe(format === 'dbml-layout' ? expected.layout!.content : expected.content);
+    expect(out).toBe(expected.content);
     expect(err).toBe('');
     expect(out.startsWith(FIRST_LINE[format])).toBe(true);
     expect(out.endsWith('\n')).toBe(true);
   });
 
-  it('dbml-rich names the layout file dbml-layout prints, by the same base', async () => {
+  it('dbml-rich is one file, its positions in the Project\'s erd_layout', async () => {
     const rich = JSON.parse((await run(['export', '--project', PROJECT, '--domain', SHOWCASE, '--format', 'dbml-rich', '--json'])).out) as ExportResult;
-    const layout = JSON.parse((await run(['export', '--project', PROJECT, '--domain', SHOWCASE, '--format', 'dbml-layout', '--json'])).out) as ExportResult;
-    expect(rich).toMatchObject({ format: 'dbml-rich', fileName: 'showcase.dbml' });
-    expect(layout).toMatchObject({ format: 'dbml-layout', fileName: 'showcase.dbdiagram', domain: SHOWCASE });
-    expect(rich.content).toContain('// Table positions: showcase.dbdiagram, next to this file');
-    const read = readDbdiagramLayout(layout.content);
-    expect(read.problems).toEqual([]);
-    expect(read.tables.length).toBeGreaterThan(0);
+    expect(rich).toMatchObject({ format: 'dbml-rich', fileName: 'showcase.dbml', domain: SHOWCASE });
+    expect(rich.content).not.toContain('dbdiagram');
+    const read = readErdLayoutDbml(rich.content)!;
+    expect(read.problemsAt).toEqual([]);
+    expect(Object.keys(read.positions).length).toBeGreaterThan(0);
+  });
+
+  it('--format dbml-layout is a usage error (exit 2) that names the replacement', async () => {
+    const { code, out } = await run(['export', '--project', PROJECT, '--domain', SHOWCASE, '--format', 'dbml-layout', '--json']);
+    expect(code).toBe(2);
+    expect(JSON.parse(out)).toMatchObject({ error: { code: 'usage', message: DBML_LAYOUT_REMOVED_MESSAGE } });
   });
 
   it('--json prints { cliVersion, domain, format, fileName, content }', async () => {
@@ -278,14 +293,14 @@ describe('export — errors (the same codes as diff --domain)', () => {
     const { code, out, err } = await run(['export', '--project', PROJECT, '--domain', SHOWCASE, '--format', 'svg', '--json']);
     expect(code).toBe(2);
     expect(JSON.parse(out)).toMatchObject({
-      error: { code: 'usage', message: 'Unknown --format "svg". Expected one of: mermaid|dbml|dbml-rich|dbml-layout.' },
+      error: { code: 'usage', message: 'Unknown --format "svg". Expected one of: mermaid|dbml|dbml-rich.' },
     });
     expect(err).toContain('erd-studio export');
 
     const human = await run(['export', '--project', PROJECT, '--domain', SHOWCASE]);
     expect(human.code).toBe(2);
     expect(human.out).toBe('');
-    expect(human.err).toContain('export needs --format mermaid|dbml|dbml-rich|dbml-layout');
+    expect(human.err).toContain('export needs --format mermaid|dbml|dbml-rich');
   });
 
   it('runExport throws a CliEnvError (never a raw error) for a bad file', async () => {
@@ -327,30 +342,17 @@ describe('export --all', () => {
       .toBe((await run(['export', '--project', PROJECT, '--domain', SHOWCASE, '--format', 'dbml'])).out);
   });
 
-  it('with dbml-rich, each .dbml is followed by its .dbdiagram', async () => {
+  it('with dbml-rich, one .dbml per subject area, its positions inside it', async () => {
     const { code, out } = await run(['export', '--project', PROJECT, '--all', '--format', 'dbml-rich']);
     expect(code).toBe(0);
     const list = JSON.parse(out) as Array<{ fileName: string; content: string }>;
-    expect(list.length % 2).toBe(0);
-    for (let i = 0; i < list.length; i += 2) {
-      const base = list[i].fileName.replace(/\.dbml$/, '');
-      expect(list[i].fileName).toMatch(/\.dbml$/);
-      expect(list[i + 1].fileName).toBe(`${base}.dbdiagram`);
-      expect(list[i].content).toContain(`// Table positions: ${base}.dbdiagram,`);
-      expect(readDbdiagramLayout(list[i + 1].content).problems).toEqual([]);
+    expect(list.length).toBeGreaterThan(0);
+    for (const f of list) {
+      expect(f.fileName).toMatch(/\.dbml$/);
+      expect(readErdLayoutDbml(f.content)!.problemsAt).toEqual([]);
     }
     const single = (await run(['export', '--project', PROJECT, '--domain', SHOWCASE, '--format', 'dbml-rich'])).out;
     expect(list.find((f) => f.fileName === 'showcase.dbml')!.content).toBe(single);
-  });
-
-  it('with dbml-layout, lists only the .dbdiagram files', async () => {
-    const { code, out } = await run(['export', '--project', PROJECT, '--all', '--format', 'dbml-layout']);
-    expect(code).toBe(0);
-    const list = JSON.parse(out) as Array<{ fileName: string; content: string }>;
-    expect(list.length).toBeGreaterThan(0);
-    expect(list.every((f) => f.fileName.endsWith('.dbdiagram'))).toBe(true);
-    expect(list.find((f) => f.fileName === 'showcase.dbdiagram')!.content)
-      .toBe((await run(['export', '--project', PROJECT, '--domain', SHOWCASE, '--format', 'dbml-layout'])).out);
   });
 
   it('two subject areas of the same name in two layers become <layer>-<name>', async () => {
@@ -358,9 +360,8 @@ describe('export --all', () => {
     const list = JSON.parse((await run(['export', '--project', root, '--all', '--format', 'dbml-rich'])).out) as Array<{ fileName: string }>;
     const names = list.map((f) => f.fileName);
     expect(names).toContain('gold-showcase.dbml');
-    expect(names).toContain('gold-showcase.dbdiagram');
     expect(names).toContain('silver-showcase.dbml');
-    expect(names).toContain('silver-showcase.dbdiagram');
+    expect(names.every((n) => n.endsWith('.dbml'))).toBe(true);
     expect(names).not.toContain('showcase.dbml');
     expect(new Set(names.map((n) => n.toLowerCase())).size).toBe(names.length);
   });
@@ -420,5 +421,115 @@ describe('export --all', () => {
   it('runExportAll is deterministic', async () => {
     const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
     expect(await runExportAll(ctx, { format: 'dbml-rich' })).toEqual(await runExportAll(ctx, { format: 'dbml-rich' }));
+  });
+});
+
+describe('a 1.9 pre-release tree: --all and inventory name it, not the --semantic-dir setting', () => {
+  const OLD = path.join(ROOT, 'test/fixtures/dbml-1.9-tree');
+
+  it('export --all is exit 3 legacy-dbml-tree with doctor\'s message', async () => {
+    const { code, out } = await run(['export', '--project', OLD, '--all', '--format', 'dbml', '--json']);
+    expect(code).toBe(3);
+    const error = (JSON.parse(out) as { error: { code: string; message: string } }).error;
+    expect(error.code).toBe('legacy-dbml-tree');
+    expect(error.message).toMatch(/^This project's DBML files were written by an ERD Studio 1\.9 pre-release/);
+    expect(error.message).not.toContain('--semantic-dir');
+  });
+
+  it('diff --all in a dbt project says the same', async () => {
+    const root = path.join(tmp, 'old');
+    fs.cpSync(OLD, root, { recursive: true });
+    fs.writeFileSync(path.join(root, 'dbt_project.yml'), "name: old\nversion: '1.0'\nprofile: old\n");
+    const { code, out } = await run(['diff', '--project', root, '--all', '--json']);
+    expect(code).toBe(3);
+    expect((JSON.parse(out) as { error: { code: string } }).error.code).toBe('legacy-dbml-tree');
+  });
+
+  it('inventory carries the message, and prints it', async () => {
+    const json = JSON.parse((await run(['inventory', '--project', OLD, '--summary', '--json'])).out) as { legacyDbmlTree?: string };
+    expect(json.legacyDbmlTree).toMatch(/1\.9 pre-release/);
+    expect((await run(['inventory', '--project', OLD, '--summary'])).out).toContain('ERD Studio 1.9 pre-release');
+    // A 2.0 project has no such note.
+    expect((JSON.parse((await run(['inventory', '--project', PROJECT, '--summary', '--json'])).out) as { legacyDbmlTree?: string }).legacyDbmlTree).toBeUndefined();
+  });
+});
+
+describe('export on native DBML storage (§7.1, S4)', () => {
+  const NATIVE = path.join(ROOT, 'test/fixtures/dbml-native');
+
+  it.each(CLI_EXPORT_FORMATS)('--domain a .dbml diagram exports it as %s', async (format) => {
+    const r = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/gold/diagrams/sales.dbml', '--format', format], NATIVE);
+    expect(r.code).toBe(0);
+    expect(r.out.startsWith(FIRST_LINE[format])).toBe(true);
+    expect(r.out).toContain('fct_order');
+  });
+
+  it('--all exports every DBML diagram, skipping none', async () => {
+    const r = await run(['export', '--project', NATIVE, '--all', '--format', 'dbml', '--json'], NATIVE);
+    expect(r.code).toBe(0);
+    const result = JSON.parse(r.out) as ExportAllResult;
+    expect(result.files.map((f) => [f.domain, f.fileName])).toEqual([
+      ['.erd-studio/gold/diagrams/sales.dbml', 'sales.dbml'],
+      ['.erd-studio/silver/diagrams/staging.dbml', 'staging.dbml'],
+    ]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('--domain a table file is not-a-diagram (exit 3)', async () => {
+    const r = await run(['export', '--project', NATIVE, '--domain', '.erd-studio/gold/tables/gold/fct_order.dbml', '--format', 'dbml', '--json'], NATIVE);
+    expect(r.code).toBe(3);
+    expect(JSON.parse(r.out).error.code).toBe('not-a-diagram');
+  });
+});
+
+describe('export: a DBML diagram exports as its YAML twin does (§9.6, S8)', () => {
+  const CORE = path.join(ROOT, 'packages/core/test/fixtures');
+  const exportOf = async (project: string, domain: string, format: string): Promise<string> => {
+    const r = await run(['export', '--project', project, '--domain', domain, '--format', format], project);
+    expect(r.code, `${project} ${format}`).toBe(0);
+    return r.out;
+  };
+  /**
+   * The schema Convert gave each table whose yml has none (its schema folder in the twin,
+   * `<layer>/tables/<schema>/<name>.dbml`): the one documented difference (convertSchemaFallback).
+   */
+  const givenSchemas = (yamlRoot: string, dbmlRoot: string): Map<string, string> => {
+    const given = new Map<string, string>();
+    const yamlSchema = (name: string): boolean => fs.readdirSync(path.join(yamlRoot, '.erd-studio', 'logical-models'), { recursive: true, encoding: 'utf-8' })
+      .filter((f) => path.basename(f) === `${name}.yml`)
+      .some((f) => /^schema:/m.test(fs.readFileSync(path.join(yamlRoot, '.erd-studio', 'logical-models', f), 'utf-8')));
+    for (const f of fs.readdirSync(path.join(dbmlRoot, '.erd-studio'), { recursive: true, encoding: 'utf-8' })) {
+      const m = /^[^/\\]+[/\\]tables[/\\]([^/\\]+)[/\\]([^/\\]+)\.dbml$/.exec(f);
+      if (m && !yamlSchema(m[2])) given.set(m[2], m[1]);
+    }
+    return given;
+  };
+  /** An export with the schemas Convert gave taken out again (`Table gold.x` → `Table x`, Mermaid's schema line). */
+  const withoutGivenSchemas = (text: string, given: ReadonlyMap<string, string>): string => {
+    let out = text;
+    for (const [name, schema] of given) {
+      out = out.replace(new RegExp(`(^|[^\\w.])${schema}\\.${name}(?!\\w)`, 'gm'), `$1${name}`);
+      out = out.replace(new RegExp(`(Table ${name}) \\[schema: '${schema}'\\]`, 'g'), '$1');
+      out = out.replace(new RegExp(`(Table ${name} \\[)schema: '${schema}', `, 'g'), '$1');
+      out = out.replace(new RegExp(`(%% Table ${name}\\n)  %%   schema: ${schema}\\n`, 'g'), '$1');
+    }
+    return out;
+  };
+
+  it.each(CLI_EXPORT_FORMATS)('composite-and-self: byte for byte as %s, apart from the schema Convert gave each table', async (format) => {
+    const yaml = await exportOf(path.join(CORE, 'composite-and-self'), '.erd-studio/gold/vault.json', format);
+    const dbml = await exportOf(path.join(CORE, 'dbml/composite-and-self'), '.erd-studio/gold/diagrams/vault.dbml', format);
+    const given = givenSchemas(path.join(CORE, 'composite-and-self'), path.join(CORE, 'dbml/composite-and-self'));
+    expect([...given].sort()).toEqual([['employee', 'gold'], ['pit_customer', 'gold'], ['sat_customer', 'gold']]);
+    expect(dbml).not.toBe(yaml);
+    expect(withoutGivenSchemas(dbml, given)).toBe(yaml);
+  });
+
+  it.each(CLI_EXPORT_FORMATS)('showcase: the same lines as %s, apart from the schema Convert gave a table (relationships come in the library\'s sorted order, §2.8)', async (format) => {
+    const yaml = await exportOf(path.join(CORE, 'showcase'), '.erd-studio/silver/showcase.json', format);
+    const dbml = await exportOf(path.join(CORE, 'dbml/showcase'), '.erd-studio/silver/diagrams/showcase.dbml', format);
+    const given = givenSchemas(path.join(CORE, 'showcase'), path.join(CORE, 'dbml/showcase'));
+    expect([...given]).toEqual([['fct_order', 'public']]);
+    expect(withoutGivenSchemas(dbml, given).split('\n').sort()).toEqual(yaml.split('\n').sort());
   });
 });

@@ -21,7 +21,7 @@ import type { DisplaySubjectArea, ManifestModelPreview } from '../../src/types/d
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { TableTemplate, Stage } from '../../src/types/semantic';
 import type { GroundTruth } from '../../src/types/syncPlan';
-import type { ErrorMessage } from '../../src/types/messages';
+import type { ErrorMessage, RevealRelationshipMessage } from '../../src/types/messages';
 import type {
   FeedbackAnalysis,
   FeedbackCapabilities,
@@ -81,6 +81,12 @@ export interface EditorState extends CanvasState {
   fkDialogEditData: FkDialogEditData | null;
   /** Whether the add existing model dialog is open. */
   addExistingModelDialogOpen: boolean;
+  /**
+   * What the Add Existing Table dialog's search starts as when it opens: the
+   * name the New Table dialog refused because the Table Library has it. Empty
+   * for every other opening.
+   */
+  addExistingModelDialogSearch: string;
   /** Error message from the extension host, if any. */
   error: string | null;
   /**
@@ -95,7 +101,7 @@ export interface EditorState extends CanvasState {
    * The domain file is empty or not valid JSON (#186), with where the JSON
    * mistake is when the host located it; null unless the host said so.
    */
-  errorFileProblem: { problem: 'empty' | 'syntax'; line?: number; column?: number } | null;
+  errorFileProblem: { problem: 'empty' | 'syntax'; line?: number; column?: number; fileType?: 'JSON' | 'DBML' } | null;
   /** Available model templates loaded from semantic/templates/*.json. */
   templates: TableTemplate[];
   /** Manifest models available to add to this domain (not already in domain). @deprecated Use existingModels. */
@@ -153,6 +159,12 @@ export interface EditorState extends CanvasState {
   /** Transient toast message raised from anywhere in the webview (null = none). */
   toastMessage: string | null;
   /**
+   * A relationship the host asked to show (`revealRelationship`, the sidebar's
+   * Open in Diagram). `useRevealRelationship` selects and centres its line
+   * once the diagram has settled, then clears it. Not persisted.
+   */
+  pendingReveal: RevealRelationshipMessage['payload'] | null;
+  /**
    * Whether the "no compiled dbt artifacts" strip has been dismissed.
    *
    * Session state only — deliberately not persisted. If dbt still has not been
@@ -169,6 +181,11 @@ export interface EditorState extends CanvasState {
   /** The user closed the "Run dbt parse" hint; the host persists it too. */
   manifestHintDismissed: boolean;
   /**
+   * The user closed the drag-to-relate tip (DragHint). Persisted per webview
+   * by useStatePersistence (vscode.setState); never sent to the host.
+   */
+  dragHintDismissed: boolean;
+  /**
    * The open project has no `dbt_project.yml`, so there is no Physical stage
    * to show (the host's `logicalOnly` envelope flag). The Toolbar hides the
    * stage tabs, Diff (and with it Sync) and the manifest refresh; Alt+2, the
@@ -177,6 +194,12 @@ export interface EditorState extends CanvasState {
    * and is deliberately NOT touched by `setDomain`.
    */
   logicalOnly: boolean;
+  /**
+   * The host said this DBML diagram declares Tables of its own and has no
+   * table `use` line (`dbmlEmbeddedTables`, §2.5): a single-file DBML to
+   * import. Cleared by every `domainLoaded`; the host re-sends it after one.
+   */
+  embeddedTables: boolean;
 }
 
 export interface EditorActions extends CanvasActions {
@@ -191,12 +214,16 @@ export interface EditorActions extends CanvasActions {
   openFkDialogForEdit: (editData: FkDialogEditData) => void;
   /** Clear FK dialog edit data (called on dialog close). */
   clearFkDialogEditData: () => void;
-  /** Open/close the add existing model dialog. */
-  setAddExistingModelDialogOpen: (open: boolean) => void;
+  /** Open/close the add existing model dialog, optionally with its search filled in. */
+  setAddExistingModelDialogOpen: (open: boolean, initialSearch?: string) => void;
+  /** Hide (or, restoring persisted state, keep hidden) the drag-to-relate tip. */
+  setDragHintDismissed: (dismissed: boolean) => void;
   /** Hide the physical-source notice for the rest of this session. */
   dismissPhysicalSourceNotice: () => void;
   /** Store the `manifestMissing` flag of the latest host payload. */
   setManifestMissing: (missing: boolean) => void;
+  /** Show (or clear) the "This file holds its own tables" banner. */
+  setEmbeddedTables: (embedded: boolean) => void;
   /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
   dismissManifestHint: () => void;
   /**
@@ -263,6 +290,8 @@ export interface EditorActions extends CanvasActions {
   setCanvasMode: (mode: 'pan' | 'select') => void;
   /** Show (or clear with null) a transient toast notification. */
   setToastMessage: (message: string | null) => void;
+  /** Set / clear the relationship to show (see `pendingReveal`). */
+  setPendingReveal: (target: RevealRelationshipMessage['payload'] | null) => void;
 }
 
 /**
@@ -295,6 +324,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   fkDialogPrefill: null,
   fkDialogEditData: null,
   addExistingModelDialogOpen: false,
+  addExistingModelDialogSearch: '',
   error: null,
   errorKind: null,
   errorMergeConflict: false,
@@ -322,10 +352,13 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   syncPlanGenerated: null,
   canvasMode: 'pan',
   toastMessage: null,
+  pendingReveal: null,
   physicalSourceNoticeDismissed: false,
   manifestMissing: false,
   manifestHintDismissed: false,
+  dragHintDismissed: false,
   logicalOnly: false,
+  embeddedTables: false,
 
   // Actions
   setViewport: (viewport) => set({ viewport }),
@@ -337,9 +370,12 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   openFkDialogForEdit: (editData) =>
     set({ newFkDialogOpen: true, fkDialogEditData: editData, fkDialogPrefill: null }),
   clearFkDialogEditData: () => set({ fkDialogEditData: null }),
-  setAddExistingModelDialogOpen: (open) => set({ addExistingModelDialogOpen: open }),
+  setAddExistingModelDialogOpen: (open, initialSearch) =>
+    set({ addExistingModelDialogOpen: open, addExistingModelDialogSearch: open ? (initialSearch ?? '') : '' }),
+  setDragHintDismissed: (dismissed) => set({ dragHintDismissed: dismissed }),
   dismissPhysicalSourceNotice: () => set({ physicalSourceNoticeDismissed: true }),
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
+  setEmbeddedTables: (embedded) => set({ embeddedTables: embedded }),
   dismissManifestHint: () => set({ manifestHintDismissed: true }),
   setLogicalOnly: (logicalOnly) => set(
     logicalOnly
@@ -431,6 +467,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
 
   setCanvasMode: (mode) => set({ canvasMode: mode }),
   setToastMessage: (message) => set({ toastMessage: message }),
+  setPendingReveal: (target) => set({ pendingReveal: target }),
 
   // Full editor reset on a new domain payload. Overrides the canvas slice's
   // setDomain (which only clears the column selection) and must stay last.

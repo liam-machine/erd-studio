@@ -22,6 +22,7 @@ import {
   type ErrorActions,
 } from '../services/commandErrors';
 import { SHOW_FOLDER_BUTTON, type CommandFailure } from '../services/diagramCommandErrors';
+import { log } from '../services/logger';
 import { openTableFileAt } from './openModelFile';
 
 /** `p`, or the nearest folder above it that exists, so Show Folder always reveals something. */
@@ -62,7 +63,7 @@ export function showCommandFailure(
     failure.buttons.flatMap((button) => (available[button] ? [[button, available[button]!]] : [])),
   );
   showErrorWithActions((m, ...items) => vscode.window.showErrorMessage(m, ...items), failure.message, actions, (choice, actionErr) => {
-    console.error(`[ERD Studio] ${failure.title}: "${choice}" failed:`, actionErr);
+    log.error(`[ERD Studio] ${failure.title}: "${choice}" failed:`, actionErr);
     const doing = `while running ${choice}`;
     showCommandFailure(
       { title: failure.title, message: oursMessage(failure.title, doing, 'nothing more was changed'), buttons: [SEND_FEEDBACK_BUTTON], doing },

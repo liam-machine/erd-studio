@@ -1,0 +1,16 @@
+Table gold.dim_accounts_000 [
+  role: 'dimension',
+  grain: 'One row per accounts 000'
+] {
+  accounts_000_key BIGINT [pk, note: 'Primary key of dim_accounts_000']
+  code BOOLEAN [note: 'code of the accounts 000 row']
+  updated_at DOUBLE [note: 'updated at of the accounts 000 row']
+  amount BIGINT [note: 'amount of the accounts 000 row']
+  region DATE [note: 'region of the accounts 000 row']
+  loaded_at DATE [note: 'loaded at of the accounts 000 row']
+  currency_code BIGINT [note: 'currency code of the accounts 000 row']
+  external_ref DATE [note: 'external ref of the accounts 000 row']
+  is_active "DECIMAL(18,2)" [note: 'is active of the accounts 000 row']
+  incidents_ts_017_key BIGINT [note: 'FK to fct_incidents_ts_017', foreign_key: 'true']
+  Note: 'Synthetic gold table dim_accounts_000'
+}

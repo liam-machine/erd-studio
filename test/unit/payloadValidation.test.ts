@@ -12,6 +12,7 @@ import {
   validateColumnDefs,
   validateTableName,
   validateTableNameSafety,
+  validateNewDbmlTableName,
   validateAnnotationPositions,
   validateAnnotationUpdate,
   validatePoint,
@@ -24,6 +25,7 @@ import {
   validateRelationshipEnds,
   validateOpenModelFilePayload,
   validateDismissManifestHintPayload,
+  validateImportEmbeddedTablesPayload,
   validateExportDiagramPayload,
 } from '../../src/providers/payloadValidation';
 import { TABLE_NAME_PATTERN } from '../../src/types/naming';
@@ -302,6 +304,17 @@ describe('validateDismissManifestHintPayload (#113)', () => {
   });
 });
 
+describe('validateImportEmbeddedTablesPayload (native DBML storage, §2.5)', () => {
+  it('accepts no payload or an empty object', () => {
+    expect(validateImportEmbeddedTablesPayload(undefined)).toBeNull();
+    expect(validateImportEmbeddedTablesPayload({})).toBeNull();
+  });
+
+  it.each([null, 'x', 3, [], { file: '/etc/passwd' }])('rejects %j', (value) => {
+    expect(validateImportEmbeddedTablesPayload(value)).toMatch(/takes no payload/);
+  });
+});
+
 describe('validateExportDiagramPayload', () => {
   it('accepts no payload or an empty object', () => {
     expect(validateExportDiagramPayload(undefined)).toBeNull();
@@ -386,5 +399,15 @@ describe('validateExtraPairs — a composite key\'s other column pairs (#133 L2)
     expect(validateMarkKey({ model: 'sat', columns: ['load_date', 'HK'] }, composite)).toBeNull();
     expect(validateMarkKey({ model: 'sat', columns: ['hk'] }, composite)).not.toBeNull();
     expect(validateRelationshipEnds({ ...composite, toModel: 'pit', extraPairs: [{ fromColumn: 'as_of', toColumn: 'AS_OF' }] })).toBe("a column can't point at itself.");
+  });
+});
+
+describe('validateNewDbmlTableName (the layer-first tree reserves no table name)', () => {
+  it('keeps the path-safety rule only: `_relationships` is an ordinary name', () => {
+    expect(validateNewDbmlTableName('_relationships')).toBeNull();
+    expect(validateNewDbmlTableName('_Relationships')).toBeNull();
+    expect(validateNewDbmlTableName('dim_customer')).toBeNull();
+    expect(validateNewDbmlTableName('../x')).toBe(validateTableNameSafety('../x'));
+    expect(validateNewDbmlTableName('')).not.toBeNull();
   });
 });

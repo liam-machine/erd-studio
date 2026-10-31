@@ -165,6 +165,8 @@ describe('planMoveToLibrary', () => {
 describe('TableLibraryService writes relationships', () => {
   it('round-trips the list and leaves an unchanged one (and its comment) alone', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-rels-yml-'));
+    // A YAML project (an empty logical-models/ is YAML evidence): a new project would write DBML (§3.2).
+    fs.mkdirSync(path.join(root, '.erd-studio', 'logical-models'), { recursive: true });
     try {
       const service = new TableLibraryService(root, '.erd-studio');
       service.saveTable(fct([STORED]));

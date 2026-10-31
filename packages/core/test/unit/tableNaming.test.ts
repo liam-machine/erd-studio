@@ -11,6 +11,7 @@ import * as path from 'path';
 
 import {
   CURRENT_SCHEMA_VERSION,
+  CURRENT_JSON_SCHEMA_VERSION,
   LIBRARY_SCHEMA_VERSION,
   TABLE_NAMING_SCHEMA_VERSION,
   WRITTEN_SCHEMA_VERSION,
@@ -45,8 +46,9 @@ function fsReadFile(root: string) {
 }
 
 describe('schema versions', () => {
-  it('reads up to v6 and still writes v5', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(6);
+  it('reads JSON up to v6 (DBML diagrams up to v7) and still writes v5', () => {
+    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+    expect(CURRENT_JSON_SCHEMA_VERSION).toBe(6);
     expect(TABLE_NAMING_SCHEMA_VERSION).toBe(6);
     expect(LIBRARY_SCHEMA_VERSION).toBe(5);
     // Writers emit v5 keys; stamping 6 on them would make a half-v6 file.

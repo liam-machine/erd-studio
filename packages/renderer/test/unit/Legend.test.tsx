@@ -142,6 +142,39 @@ describe('Legend — stages, cardinality and comparison', () => {
   });
 });
 
+describe('Legend — relationship flow', () => {
+  it('explains the moving arrows with the canvas\'s own glyphs: one-way, many-to-many, one-to-one', () => {
+    const { container } = render(<Legend />);
+    const rows = container.querySelectorAll('.legend__items--flow .legend__item');
+    expect(Array.from(rows).map((r) => r.querySelector('.legend__item-desc')!.textContent)).toEqual([
+      'Arrows run 1 → *',
+      'Both ways: many-to-many',
+      'Dots meet: one-to-one',
+    ]);
+    // Each sample sits between the same 1 / * end labels as the cardinality rows.
+    expect(Array.from(rows).map((r) => Array.from(r.querySelectorAll('.legend__cardinality-label')).map((l) => l.textContent).join(' ')))
+      .toEqual(['1 *', '* *', '1 1']);
+    for (const row of rows) expect(row.querySelector('.fk-edge__flow')).not.toBeNull();
+    expect(rows[2].querySelectorAll('.fk-edge__flow-dot')).toHaveLength(2);
+    expect(container.querySelector('.legend__items--flow [repeatCount="indefinite"]')).not.toBeNull();
+  });
+
+  it('stands the arrows still under the reduce-motion setting', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('reduce'), media: query,
+      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+    }));
+    try {
+      const { container } = render(<Legend />);
+      const flows = container.querySelectorAll('.legend__items--flow .fk-edge__flow');
+      expect(flows).toHaveLength(3);
+      expect(container.querySelector('[repeatCount="indefinite"]')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('Legend — collapsed', () => {
   it('renders only the toggle when closed', () => {
     mockStoreState.legendOpen = false;

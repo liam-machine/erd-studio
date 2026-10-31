@@ -105,6 +105,12 @@ const PERMISSION_CODES = new Set(['EACCES', 'EPERM', 'EROFS', 'NoPermissions']);
 const DISK_FULL_CODES = new Set(['ENOSPC', 'EDQUOT']);
 
 export function classifyWriteFailure(err: unknown): WriteFailure {
+  // A DBML write that could not be put back (`FileWriteRollbackFailed`) carries the fs error as its cause.
+  const cause = causeOf(err);
+  if (cause !== undefined) {
+    const inner = classifyWriteFailure(cause);
+    if (inner !== 'other') return inner;
+  }
   const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
   if (PERMISSION_CODES.has(code)) return 'permission';
   if (DISK_FULL_CODES.has(code)) return 'disk-full';
@@ -117,7 +123,15 @@ export function classifyWriteFailure(err: unknown): WriteFailure {
 /** The file a Node `fs` error names (`err.path`), when it names one. */
 export function failedPath(err: unknown): string | undefined {
   const p = err && typeof err === 'object' && 'path' in err ? (err as { path: unknown }).path : undefined;
-  return typeof p === 'string' && p.length > 0 ? p : undefined;
+  if (typeof p === 'string' && p.length > 0) return p;
+  const cause = causeOf(err);
+  return cause === undefined ? undefined : failedPath(cause);
+}
+
+/** The error a wrapper names as its `cause` (one level), when it is an object. */
+function causeOf(err: unknown): object | undefined {
+  const cause = err && typeof err === 'object' && 'cause' in err ? (err as { cause: unknown }).cause : undefined;
+  return cause && typeof cause === 'object' && cause !== err ? cause : undefined;
 }
 
 /** `filePath` relative to `root` with `/` separators; the base name when it is outside `root`. */
@@ -146,8 +160,23 @@ export function describeJsonMistake(shown: string, err: Pick<SubjectAreaFileErro
   return at ? `${shown} has a mistake ${at}.` : `${shown} is not valid JSON.`;
 }
 
+/**
+ * The sentence for a `.dbml` diagram that does not parse (`invalid-dbml`):
+ * "<shown> has a mistake at line L, column C: <the parser's words> [code]."
+ * when core located it, else "<shown> is not valid DBML.". The parser's
+ * words are taken from core's message, after its "column C: ".
+ */
+export function describeDbmlMistake(shown: string, err: Pick<SubjectAreaFileError, 'line' | 'column' | 'message'>): string {
+  if (err.line === undefined || err.column === undefined) return `${shown} is not valid DBML.`;
+  const marker = `line ${err.line}, column ${err.column}: `;
+  const at = err.message.indexOf(marker);
+  const detail = at === -1 ? '' : err.message.slice(at + marker.length).trim();
+  const ended = detail === '' ? '' : `: ${detail}${/[.!?]$/.test(detail) ? '' : '.'}`;
+  return `${shown} has a mistake at line ${err.line}, column ${err.column}${ended || '.'}`;
+}
+
 /** "at line L, column C: <hint>" for a located JSON mistake, else undefined. */
-function jsonMistakeAt(err: Pick<SubjectAreaFileError, 'line' | 'column' | 'syntaxProblem'>): string | undefined {
+export function jsonMistakeAt(err: Pick<SubjectAreaFileError, 'line' | 'column' | 'syntaxProblem'>): string | undefined {
   if (err.line === undefined || err.column === undefined || err.syntaxProblem === undefined) return undefined;
   return `at line ${err.line}, column ${err.column}: ${JSON_MISTAKE_HINTS[err.syntaxProblem]}`;
 }
@@ -176,12 +205,24 @@ export function describeDiagramFileProblem(err: unknown, filePath: string, shown
         return { reason: 'ERD Studio could not read it. Check that the file is not locked or blocked by permissions', openable: false };
       case 'empty':
         return { reason: 'it has no content', openable: true };
-      case 'invalid-json': {
+      case 'invalid-json':
+      case 'invalid-dbml': {
         if (err.mergeConflict) {
           return {
             reason: `it has unresolved git merge conflicts${err.line !== undefined ? `, first at line ${err.line}` : ''}. Keep one side of each conflict, then try again`,
             openable: true,
             ...(err.line !== undefined ? { line: err.line } : {}),
+          };
+        }
+        if (err.reason === 'invalid-dbml') {
+          const where = err.line !== undefined
+            ? ` at line ${err.line}${err.column !== undefined ? `, column ${err.column}` : ''}`
+            : '';
+          return {
+            reason: where ? `there is a DBML mistake${where}` : 'it is not valid DBML',
+            openable: true,
+            ...(err.line !== undefined ? { line: err.line } : {}),
+            ...(err.column !== undefined ? { column: err.column } : {}),
           };
         }
         const at = jsonMistakeAt(err);

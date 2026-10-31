@@ -31,6 +31,7 @@ import {
   type FeedbackKind,
   redactPaths,
 } from '../types/feedback';
+import { LOG_BUFFER_CAPACITY, recentLogLines, writeLog } from './logger';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -81,6 +82,11 @@ export interface Diagnostics {
   hostErrors: string[];
   /** Recent errors observed by the webview (posted with the report), newest last. */
   webviewErrors: string[];
+  /**
+   * The recent ERD Studio log, oldest first, paths redacted — only when the
+   * user ticked the opt-in log box. Absent otherwise.
+   */
+  recentLog?: string[];
 }
 
 /** What the user typed into the dialog (or the command palette flow). */
@@ -89,6 +95,8 @@ export interface BugReportDraft {
   description: string;
   steps?: string;
   includeDiagnostics: boolean;
+  /** Add the recent ERD Studio log to the diagnostics (opt-in). */
+  includeLog?: boolean;
   /** Errors the webview collected (from `error` messages and window errors). */
   webviewErrors?: string[];
 }
@@ -110,6 +118,9 @@ export class ErrorLog {
   /** Record an error. Accepts anything `catch` can hand us. */
   record(source: string, error: unknown, now: Date = new Date()): void {
     const message = error instanceof Error ? error.message : String(error);
+    // The ERD Studio log shows it too (raw, like every local log line); the
+    // console keeps exactly what it printed before this log existed.
+    writeLog('error', `[${source}] ${message}`, [], now, false);
     const line = `${now.toISOString()} [${source}] ${message}`.replace(/\s+/g, ' ').trim();
     this.entries.push(line);
     while (this.entries.length > this.capacity) {
@@ -154,7 +165,39 @@ export function formatDiagnostics(d: Diagnostics): string {
   if (d.webviewErrors.length > 0) {
     lines.push('', 'Recent canvas errors:', ...d.webviewErrors.map((e) => `  ${e}`));
   }
+  if (d.recentLog && d.recentLog.length > 0) {
+    lines.push('', `Recent ERD Studio log (${d.recentLog.length} line${d.recentLog.length === 1 ? '' : 's'}):`, ...d.recentLog.map((l) => `  ${l}`));
+  }
   return lines.join('\n');
+}
+
+/**
+ * The issue form's fields with as much of the log as fits the link, newest
+ * lines kept: the whole log when it fits, else the longest tail that keeps
+ * the URL under `maxLength`, else none. Every other field is as composed.
+ * `buildIssueUrl` would otherwise cut the diagnostics from the end, which
+ * drops the newest lines — the ones a report is about.
+ */
+export function fitLogToIssueUrl(
+  compose: (diagnostics: Diagnostics | null) => Record<string, string>,
+  diagnostics: Diagnostics | null,
+  urlOf: (fields: Record<string, string>) => string,
+  maxLength: number = MAX_ISSUE_URL_LENGTH,
+): Record<string, string> {
+  const full = diagnostics?.recentLog;
+  if (!diagnostics || !full || full.length === 0) return compose(diagnostics);
+  const withTail = (count: number): Record<string, string> =>
+    compose({ ...diagnostics, recentLog: count > 0 ? full.slice(full.length - count) : undefined });
+  if (urlOf(withTail(full.length)).length <= maxLength) return withTail(full.length);
+  // Binary search for the longest tail that fits (URL length grows with the tail).
+  let lo = 0;
+  let hi = full.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (urlOf(withTail(mid)).length <= maxLength) lo = mid;
+    else hi = mid - 1;
+  }
+  return withTail(lo);
 }
 
 /** Truncate `text` to `max` characters, appending a marker when cut. */
@@ -365,8 +408,18 @@ export function buildDiagnosticsChips(d: Diagnostics): FeedbackDiagnosticsChip[]
 }
 
 /** The dialog-facing view of diagnostics: chips plus the verbatim text. */
-export function buildDiagnosticsView(d: Diagnostics): FeedbackDiagnosticsView {
-  return { chips: buildDiagnosticsChips(d), text: formatDiagnostics(d) };
+export function buildDiagnosticsView(d: Diagnostics, logLines: readonly string[] = []): FeedbackDiagnosticsView {
+  const { recentLog: _omitted, ...withoutLog } = d;
+  return {
+    chips: buildDiagnosticsChips(withoutLog),
+    text: formatDiagnostics(withoutLog),
+    ...(logLines.length > 0 ? { log: [...logLines] } : {}),
+  };
+}
+
+/** The recent ERD Studio log as the report would carry it: every path reduced to its shape. */
+export function redactedRecentLog(): string[] {
+  return recentLogLines().map(redactPaths);
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +437,13 @@ export function collectDiagnostics(
   context: vscode.ExtensionContext,
   domain?: Diagnostics['domain'],
   webviewErrors: string[] = [],
+  options: { includeLog?: boolean; log?: readonly string[] } = {},
 ): Diagnostics {
+  // `log`: the lines the dialog showed (redacted again, as any text is);
+  // without it, the buffer as it is now.
+  const recentLog = !options.includeLog ? []
+    : options.log !== undefined ? options.log.slice(-LOG_BUFFER_CAPACITY).map(redactPaths)
+      : redactedRecentLog();
   return {
     extensionVersion: String(context.extension.packageJSON.version ?? 'unknown'),
     vscodeVersion: vscode.version,
@@ -393,7 +452,18 @@ export function collectDiagnostics(
     domain,
     hostErrors: hostErrorLog.recent().map(redactPaths),
     webviewErrors: webviewErrors.slice(-ERROR_LOG_CAPACITY).map(redactPaths),
+    ...(recentLog.length > 0 ? { recentLog } : {}),
   };
+}
+
+/**
+ * The log a report may carry: exactly the lines the dialog previewed
+ * (FEEDBACK_LOG_NOTE promises "Below is exactly what is added"). A line
+ * written while the dialog was open is never sent unseen; with no preview,
+ * no log is sent.
+ */
+export interface SubmitLogOptions {
+  previewedLog?: readonly string[];
 }
 
 /**
@@ -413,10 +483,11 @@ export async function submitFeedback(
   context: vscode.ExtensionContext,
   draft: FeedbackDraft,
   domain?: Diagnostics['domain'],
+  options: SubmitLogOptions = {},
 ): Promise<{ ok: boolean; commentedOn?: number; error?: string }> {
   try {
     const diagnostics = draft.includeDiagnostics
-      ? collectDiagnostics(context, domain, draft.webviewErrors ?? [])
+      ? collectDiagnostics(context, domain, draft.webviewErrors ?? [], { includeLog: draft.includeLog === true, log: options.previewedLog ?? [] })
       : null;
     const commentOn = draft.commentOnIssue;
 
@@ -438,10 +509,13 @@ export async function submitFeedback(
       return { ok: true, commentedOn: commentOn };
     }
 
-    const url = buildIssueUrl(composeFeedbackFields(draft, diagnostics), {
-      template: templateForKind(draft.kind),
-      truncationOrder: truncationOrderForKind(draft.kind),
-    });
+    const urlOptions = { template: templateForKind(draft.kind), truncationOrder: truncationOrderForKind(draft.kind) };
+    const fields = fitLogToIssueUrl(
+      (d) => composeFeedbackFields(draft, d),
+      diagnostics,
+      (f) => buildIssueUrl(f, { ...urlOptions, maxLength: Number.MAX_SAFE_INTEGER }),
+    );
+    const url = buildIssueUrl(fields, urlOptions);
     const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
     if (!opened) {
       void vscode.window.showErrorMessage(
@@ -465,9 +539,10 @@ export async function copyFeedbackReport(
   context: vscode.ExtensionContext,
   draft: FeedbackDraft,
   domain?: Diagnostics['domain'],
+  options: SubmitLogOptions = {},
 ): Promise<void> {
   const diagnostics = draft.includeDiagnostics
-    ? collectDiagnostics(context, domain, draft.webviewErrors ?? [])
+    ? collectDiagnostics(context, domain, draft.webviewErrors ?? [], { includeLog: draft.includeLog === true, log: options.previewedLog ?? [] })
     : null;
   await vscode.env.clipboard.writeText(composeMarkdownReport(draft, diagnostics));
   void vscode.window.showInformationMessage('ERD Studio: the report is on your clipboard.');
@@ -479,5 +554,5 @@ export function buildFeedbackContext(
   domain?: Diagnostics['domain'],
   webviewErrors?: string[],
 ): FeedbackDiagnosticsView {
-  return buildDiagnosticsView(collectDiagnostics(context, domain, webviewErrors ?? []));
+  return buildDiagnosticsView(collectDiagnostics(context, domain, webviewErrors ?? []), redactedRecentLog());
 }

@@ -20,9 +20,11 @@ import type { SyncPlan } from '../types/syncPlan';
 import { SubjectAreaFileError } from '../services/domainService';
 import type { TableFileError, TableFileErrorKind } from '../services/logicalModelService';
 import { usesLibraryRelationships } from '../services/libraryRelationships';
-import { canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship } from '@erd-studio/core';
+import { DBML_TABLE_QUOTE_HINT_CODES, canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship, subjectAreaStorageOf } from '@erd-studio/core';
 import type { ColumnPair } from '@erd-studio/core';
+import { usePathBetween } from '@erd-studio/core/dbml';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
+import { detectLegacyDbmlTree, legacyDbmlTreeMessage } from '../services/legacyDbmlTree';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
 
@@ -30,14 +32,27 @@ export type FixKind =
   | 'add-column' | 'remove-column' | 'set-type'
   | 'add-relationship' | 'remove-relationship' | 'set-cardinality'
   | 'declare-composite-foreign-key'
-  | 'resolve-phantom' | 'fix-model-yaml';
+  | 'resolve-phantom' | 'fix-model-yaml'
+  /** A `.dbml` table file that does not read (native DBML storage, §7.1); `fix-model-yaml` stays for YAML. */
+  | 'fix-dbml-file'
+  /**
+   * A relationship dbt tests whose Ref a relationships file already holds
+   * (`storedIn`), which the DBML diagram (`file`) does not draw because it
+   * does not import that file: add `useLine` to the diagram, never the Ref again.
+   */
+  | 'import-relationships-file';
 
 export interface Fix {
   severity: 'blocking' | 'advisory';
   kind: FixKind;
   model: string;
   column?: string;
-  /** The file to edit: `<semanticDir>/logical-models/<m>.yml` or the domain JSON, project-relative. */
+  /**
+   * The file to edit, project-relative: the table's file (`<layer>/tables/<schema>/<m>.dbml`,
+   * or `logical-models/<m>.yml` before 2.0); for a relationship a DBML table owns, the
+   * relationships file that holds it (a removal or a cardinality change, in place) or
+   * where a new one goes (an addition); or the domain JSON.
+   */
   file: string;
   /** Types (set-type) or cardinalities (set-cardinality). */
   from?: string;
@@ -52,9 +67,13 @@ export interface Fix {
     pairs?: ColumnPair[];
     compositeKey?: string;
   };
-  /** set-cardinality: the file the link is stored in now, when the fix moves it to `file`. */
+  /** set-cardinality: the file the link is stored in now, when the fix moves it to `file` (YAML only: a DBML Ref is changed in place). */
   movesFrom?: string;
-  /** fix-model-yaml: where the parser stopped (1-based). */
+  /** import-relationships-file: the relationships file that holds the Ref already, project-relative. */
+  storedIn?: string;
+  /** import-relationships-file: the exact line to add to the diagram (`use * from '…'`). */
+  useLine?: string;
+  /** fix-model-yaml / fix-dbml-file: where the parser stopped (1-based). */
   line?: number;
   explain: string;
 }
@@ -71,7 +90,7 @@ export interface UnreadableTableFile {
   kind: TableFileErrorKind;
   line?: number;
   column?: number;
-  /** The `yaml` library's error code, e.g. `BLOCK_AS_IMPLICIT_KEY`. */
+  /** The parser's code: the `yaml` library's (`BLOCK_AS_IMPLICIT_KEY`) or a DBML diagnostic's (`3025`, `structure:notOneTable`). */
   code?: string;
   /** The file holds unresolved git merge conflicts (#145); `line` is the first `<<<<<<<`. */
   mergeConflict?: true;
@@ -86,15 +105,50 @@ export interface UnreadableTableFile {
   message: string;
 }
 
-/** One-line advice per failure kind, for the fix text and the human output. */
-export const TABLE_YAML_HINTS: Record<TableFileErrorKind, string> = {
+/**
+ * One-line advice per failure kind, for the fix text and the human output.
+ * `at that line` in a DBML hint becomes the line when one is known
+ * ({@link unreadableHint}). A DBML hint is refined by the error's code
+ * ({@link kindHint}): the quote advice only for an unquoted value
+ * (`DBML_TABLE_QUOTE_HINT_CODES`), and a `structure:<rule>` its own fix.
+ */
+export const TABLE_FILE_HINTS: Record<TableFileErrorKind, string> = {
   yamlScalar: 'wrap the value in double quotes',
   yamlIndent: 'indent with spaces, never tabs',
   yamlDuplicateKey: 'a key appears twice — keep one',
   yamlStructure: 'one YAML document per file — remove any `---` separator or code fence',
   yamlOther: 'check the YAML syntax there',
   read: 'the file could not be read — check it exists and is readable',
+  dbmlSyntax: 'fix the DBML at that line',
+  dbmlInvalid: 'fix the DBML at that line',
+  dbmlStructure: 'a table file holds exactly one Table, named as its file, and no Project, TableGroup or Note',
 };
+
+/** The quote advice, appended to a `dbmlInvalid` hint only for the codes of an unquoted value. */
+const DBML_QUOTE_ADVICE = "quote the value, as in grain: 'One row per order line'";
+
+/** The fix for each of ERD Studio's own table-file rules (`structure:<rule>` codes). */
+const DBML_STRUCTURE_HINTS: Readonly<Record<string, string>> = {
+  'structure:notOneTable': 'a table file holds exactly one Table — move any other Table to its own file',
+  'structure:nameMismatch': 'name the Table as its file (or rename the file to the Table\'s name)',
+  'structure:unsupportedElement': 'a table file holds one Table and nothing else — remove the Project, TableGroup, Note or other block',
+  'structure:metadataTarget': 'a Metadata block names a table or column this file does not declare — rename or remove the block',
+};
+
+/**
+ * The hint for `kind` and `code`, with a DBML hint's `at that line` made
+ * `at line N` when the line is known. A `dbmlStructure` with a parser
+ * (binding) code is fixed where the parser points.
+ */
+function kindHint(kind: TableFileErrorKind, line: number | undefined, code?: string): string {
+  let hint = TABLE_FILE_HINTS[kind];
+  if (kind === 'dbmlInvalid' && code !== undefined && DBML_TABLE_QUOTE_HINT_CODES.has(code)) {
+    hint = `${hint} — ${DBML_QUOTE_ADVICE}`;
+  } else if (kind === 'dbmlStructure' && code !== undefined) {
+    hint = DBML_STRUCTURE_HINTS[code] ?? (code.startsWith('structure:') ? hint : TABLE_FILE_HINTS.dbmlInvalid);
+  }
+  return line !== undefined ? hint.replace('at that line', `at line ${line}`) : hint;
+}
 
 /**
  * The advice an AI assistant reads for an unreadable model file (doctor's
@@ -102,7 +156,7 @@ export const TABLE_YAML_HINTS: Record<TableFileErrorKind, string> = {
  * of a conflict to keep is the user's call — it is usually a teammate's work —
  * so the conflict advice asks the assistant to show it, not to resolve it.
  */
-export function unreadableHint(u: Pick<UnreadableTableFile, 'kind' | 'mergeConflict' | 'readable' | 'key'>): string {
+export function unreadableHint(u: Pick<UnreadableTableFile, 'kind' | 'mergeConflict' | 'readable' | 'key' | 'line' | 'code'>): string {
   if (u.readable) {
     return `${u.key ? `\`${u.key}\`` : 'a key'} is written twice in one block — the last copy is what loads; `
       + 'delete the other copy (ERD Studio will not change this file until you do)';
@@ -110,7 +164,7 @@ export function unreadableHint(u: Pick<UnreadableTableFile, 'kind' | 'mergeConfl
   return u.mergeConflict
     ? 'unresolved git merge conflict — git left two versions there: show the user the file and line and ask which side '
       + "to keep (don't pick a side or run git commands yourself)"
-    : TABLE_YAML_HINTS[u.kind];
+    : kindHint(u.kind, u.line, u.code);
 }
 
 /** The terminal line's advice for a conflicted file: short, and it picks no side. */
@@ -143,8 +197,9 @@ export function describeUnreadable(u: UnreadableTableFile, rerun: 'doctor' | 'di
   const where = `${path.posix.basename(u.file)}${u.line !== undefined ? ` line ${u.line}` : ''}`;
   if (u.mergeConflict) { return `${where}: ${mergeConflictHumanHint(rerun)}`; }
   if (u.readable) { return `${where}: ${unreadableHint(u)}`; }
-  const what = u.kind === 'read' ? 'could not be read' : `YAML error${u.code ? ` (${u.code})` : ''}`;
-  return u.kind === 'read' ? `${where}: ${TABLE_YAML_HINTS.read}` : `${where}: ${what} — ${TABLE_YAML_HINTS[u.kind]}`;
+  const format = u.kind.startsWith('dbml') ? 'DBML' : 'YAML';
+  const what = u.kind === 'read' ? 'could not be read' : `${format} error${u.code ? ` (${u.code})` : ''}`;
+  return u.kind === 'read' ? `${where}: ${TABLE_FILE_HINTS.read}` : `${where}: ${what} — ${kindHint(u.kind, u.line, u.code)}`;
 }
 
 export interface SubjectAreaDiff {
@@ -233,10 +288,18 @@ export function describeSubjectAreaError(ctx: CliContext, file: string, err: unk
   const message = redactPaths(raw.split(file).join(rel));
   if (err instanceof SubjectAreaFileError) {
     if (err.mergeConflict) { return { code: 'merge-conflict', message: conflictedSubjectAreaMessage(rel, err.line) }; }
+    // A `.dbml` diagram that does not parse: named with its file and line.
+    if (err.reason === 'invalid-dbml') {
+      return { code: 'dbml-invalid', message: `${rel}${err.line !== undefined ? `:${err.line}` : ''}: ${message}` };
+    }
     return { code: err.reason === 'missing' ? 'domain-missing' : 'domain-invalid', message };
   }
+  // A `--domain` that is a table or relationships file, not a diagram.
+  if (/is a DBML table or relationships file, not a diagram/.test(raw)) {
+    return { code: 'not-a-diagram', message };
+  }
   if (/invalid layer/.test(raw)) { return { code: 'unknown-layer', message }; }
-  if (/pre-v\d|mixes inline (?:model|table)|schemaVersion/.test(raw)) { return { code: 'unsupported-format', message }; }
+  if (/pre-v\d|mixes inline (?:model|table)|schemaVersion|erd_schema_version/.test(raw)) { return { code: 'unsupported-format', message }; }
   return { code: 'domain-invalid', message };
 }
 
@@ -284,12 +347,16 @@ export function fixesFromPlan(
 ): Fix[] {
   const ymlFile = (model: string): string =>
     plan.modelContext[model]?.logicalModelPath ?? `${semanticDir}/logical-models/${model}.yml`;
+  // Where a table's NEW relationship goes: the relationships file the project
+  // places it in for a DBML table (§2.4), its own yml otherwise. A stored DBML
+  // Ref is edited where it is (`storedIn`).
+  const ownerFile = (model: string): string => plan.modelContext[model]?.relationshipsPath ?? ymlFile(model);
   // A relationship is fixed where it is defined (#126): the yml of the model
   // holding its foreign key when the library holds it, else the domain file.
   // A new one goes where the project keeps relationships.
   const relationshipFile = (r: Parameters<typeof linkKey>[0], adding: boolean): string =>
     (adding ? relationshipHome.addToLibrary : relationshipHome.inLibrary.has(linkKey(r)))
-      ? ymlFile(r.fromModel)
+      ? ownerFile(r.fromModel)
       : domainFile;
   const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
   const fixes: Fix[] = [];
@@ -369,6 +436,21 @@ export function fixesFromPlan(
     }
     switch (r.action) {
       case 'add-relationship-to-logical': {
+        // The Ref is already in a relationships file the diagram does not
+        // import: the import is the fix. A second copy of the Ref would be
+        // a duplicate (error 5001) in every diagram importing that file.
+        if (r.storedIn !== undefined && domainFile.toLowerCase().endsWith('.dbml')) {
+          const useLine = `use * from '${usePathBetween(domainFile, r.storedIn)}'`;
+          const what = pairs ? `the composite foreign key ${describeComposite(r.fromModel, r.toModel, pairs)}` : `the link ${link}`;
+          fixes.push({
+            severity: 'blocking', kind: 'import-relationships-file', model: r.fromModel, column: r.fromColumn, file: domainFile,
+            relationship: { ...rel, ...(r.targetCardinality ? { cardinality: r.targetCardinality } : {}), ...(pairs ? { pairs: [...pairs] } : {}) },
+            storedIn: r.storedIn, useLine,
+            explain: `dbt tests ${what}, and ${r.storedIn} already holds it, but this diagram does not import that file — `
+              + `add the line \`${useLine}\` to ${domainFile}. Do not add the Ref again.`,
+          });
+          break;
+        }
         if (pairs) {
           const c = canonicalPairs(r.targetCardinality);
           const cardinality = r.targetCardinality === 'one-to-many' ? 'many-to-one' : (r.targetCardinality ?? 'many-to-one');
@@ -397,7 +479,7 @@ export function fixesFromPlan(
         const stored = relationshipHome.inLibrary.get(linkKey(rel));
         const entry = stored ?? { ...rel, ...(r.sourceCardinality ? { cardinality: r.sourceCardinality } : {}) };
         fixes.push({
-          severity: 'blocking', kind: 'remove-relationship', model: entry.fromModel, column: entry.fromColumn, file: relationshipFile(entry, false),
+          severity: 'blocking', kind: 'remove-relationship', model: entry.fromModel, column: entry.fromColumn, file: r.storedIn ?? relationshipFile(entry, false),
           relationship: pickRelationship(entry),
           explain: `The logical stage draws ${link}, but dbt has no relationships test for it — remove it, or add the test to dbt.`,
         });
@@ -415,9 +497,10 @@ export function fixesFromPlan(
             entry = reverseRelationship(entry);
           }
           entry = canonicalRelationship(entry);
-          if (!same(stored.fromModel, entry.fromModel)) movesFrom = ymlFile(stored.fromModel);
+          // A DBML Ref is changed in place, turned round or not; a YAML entry moves to its many side's file.
+          if (r.storedIn === undefined && !same(stored.fromModel, entry.fromModel)) movesFrom = ownerFile(stored.fromModel);
         }
-        const file = stored ? ymlFile(entry.fromModel) : domainFile;
+        const file = r.storedIn ?? (stored ? ownerFile(entry.fromModel) : domainFile);
         // A composite's pairs, read from the end the entry is stored from.
         const entryPairs = pairs && (same(entry.fromModel, r.fromModel) && same(entry.fromColumn, r.fromColumn) ? [...pairs] : pairs && reversePairs(pairs));
         fixes.push({
@@ -449,7 +532,7 @@ export function fixesFromPlan(
   }
   for (const u of unreadable) {
     fixes.push({
-      severity: 'blocking', kind: 'fix-model-yaml', model: u.name, file: u.file,
+      severity: 'blocking', kind: u.file.toLowerCase().endsWith('.dbml') ? 'fix-dbml-file' : 'fix-model-yaml', model: u.name, file: u.file,
       ...(u.line !== undefined ? { line: u.line } : {}),
       explain: u.mergeConflict
         ? `${u.file}${u.line !== undefined ? ` line ${u.line}` : ''}: ${unreadableHint(u)}. Raise this before anything `
@@ -475,9 +558,10 @@ export function fixesFromPlan(
 export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean): SubjectAreaDiff {
   const rel = relPath(ctx.root, file);
 
+  // The v4 probe is for JSON files only: a `.dbml` diagram is never v4.
   let raw: unknown;
   try {
-    raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    raw = subjectAreaStorageOf(file) === 'json' ? JSON.parse(fs.readFileSync(file, 'utf-8')) : undefined;
   } catch {
     raw = undefined; // getSubjectArea below produces the precise error
   }
@@ -492,7 +576,7 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
   if (format === 'v4' && typeof obj.schemaVersion === 'number') {
     return {
       file: rel,
-      domain: typeof obj.domain === 'string' ? obj.domain : path.basename(file, '.json'),
+      domain: typeof obj.domain === 'string' ? obj.domain : path.basename(file, path.extname(file)),
       layer: typeof obj.layer === 'string' ? obj.layer : path.basename(path.dirname(file)),
       clean: false,
       counts: { blocking: 0, advisory: 0, matchedModels: 0, matchedColumns: 0, matchedRelationships: 0 },
@@ -534,6 +618,17 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
     modelFolder: (name) => ctx.tableLibraryService.tableFolder(name),
     tableLibraryFile: (name) => ctx.tableLibraryService.tableLibraryFile(name),
     newTableLibraryDir: ctx.tableLibraryService.newTableLibraryDirName(),
+    newTableFilePath: (name) => {
+      try { return ctx.tableLibraryService.libraryRelativePath(ctx.tableLibraryService.pathForNewTable(name)); } catch { return undefined; }
+    },
+    relationshipsFile: (name) => {
+      const file = ctx.tableLibraryService.relationshipsFileForNewRef(name);
+      return file === undefined ? undefined : ctx.tableLibraryService.libraryRelativePath(file);
+    },
+    relationshipStoredIn: (rel) => {
+      const file = ctx.tableLibraryService.relationshipsFileHolding(rel);
+      return file === undefined ? undefined : ctx.tableLibraryService.libraryRelativePath(file);
+    },
   });
   const unreadableModelFiles = unreadableTables(ctx, unified);
   // The entry each link is drawn from (core's read winner), keyed by link.
@@ -544,6 +639,8 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
       ctx.tableLibraryService.listTables(),
       ctx.subjectAreaService.countSubjectAreaFileRelationships(ctx.root, ctx.semanticDir),
       ctx.tableLibraryService.hasUnreadableRelationships(),
+      // A DBML table's relationships can only live in the library (D5, §5.1).
+      ctx.tableLibraryService.hasDbmlLibrary(),
     ),
   };
   const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms, unreadableModelFiles, relationshipHome);
@@ -590,7 +687,8 @@ function unreadableTables(ctx: CliContext, unified: UnifiedSubjectArea): Unreada
  * `--all` over nothing must never read as a result: a wrong or omitted
  * `--semantic-dir` (the CLI cannot see VS Code settings) would otherwise
  * hand the skill a verified match — or an empty export — over zero domains.
- * So no folder is `no-semantic-dir` and no domain is `no-domains` (exit 3).
+ * So no folder is `no-semantic-dir` and no domain is `no-domains` (exit 3),
+ * or `legacy-dbml-tree` when the folder is an ERD Studio 1.9 pre-release tree.
  */
 export function listAllSubjectAreas(ctx: CliContext): SubjectAreaSummary[] {
   const semanticRoot = path.join(ctx.root, ctx.semanticDir);
@@ -602,6 +700,9 @@ export function listAllSubjectAreas(ctx: CliContext): SubjectAreaSummary[] {
   }
   const summaries = ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir);
   if (summaries.length === 0) {
+    // A 1.9 pre-release tree has no diagram 2.0 reads: say so, not "check --semantic-dir".
+    const legacy = detectLegacyDbmlTree(semanticRoot);
+    if (legacy) throw new CliEnvError('legacy-dbml-tree', legacyDbmlTreeMessage(legacy));
     throw new CliEnvError(
       'no-domains',
       `No subject area files under ${ctx.semanticDir}/ — check --semantic-dir (it must match the erdStudio.semanticDir setting).`,

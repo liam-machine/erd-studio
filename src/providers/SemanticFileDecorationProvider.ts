@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 
+import { classifySemanticFile } from '@erd-studio/core';
+
 import type { LayerService } from '../services/layerService';
 
 /**
@@ -39,9 +41,13 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
     }
 
     // --- Domain file decoration ---
-    // Only decorate .json files inside a known layer directory of the
-    // configured semantic dir (extractLayerId returns null otherwise).
-    if (!fsPath.endsWith('.json')) {
+    // Only decorate diagrams — .json files, and .dbml files the classifier
+    // calls diagrams (never a table, relationships or layout file) — inside
+    // a known layer directory of the configured semantic dir
+    // (extractLayerId returns null otherwise).
+    if (fsPath.endsWith('.dbml')) {
+      if (!this.isDbmlDiagram(fsPath)) return undefined;
+    } else if (!fsPath.endsWith('.json')) {
       return undefined;
     }
 
@@ -52,7 +58,7 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
       return undefined;
     }
 
-    return { tooltip: `${layerConfig.label} subject area (opens in visual editor)` };
+    return { tooltip: `${layerConfig.label} diagram (opens on the canvas)` };
   }
 
   /**
@@ -74,8 +80,25 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
   }
 
   /**
-   * Extract the layer ID from a domain file path.
-   * Expects: .../<semanticDir>/<layerId>/<domain>.json
+   * Whether a `.dbml` path is a diagram, by the single classifier and the
+   * path only: `<layer>/diagrams/<name>.dbml` under the semantic dir, never
+   * a table (`<layer>/tables/<schema>/`), a relationships file
+   * (`<layer>/relationships/`) or a 1.9 pre-release file, so this needs no
+   * file access.
+   */
+  private isDbmlDiagram(fsPath: string): boolean {
+    const normalised = fsPath.replace(/\\/g, '/');
+    const marker = `/${this.semanticDir}/`;
+    const idx = normalised.lastIndexOf(marker);
+    if (idx === -1) return false;
+    return classifySemanticFile(normalised.substring(idx + marker.length), { tablesDirIsLayer: false }).kind === 'diagram';
+  }
+
+  /**
+   * Extract the layer ID from a domain file path: the first segment under
+   * the semantic dir, which is the layer for both shapes.
+   * Expects: .../<semanticDir>/<layerId>/<domain>.json or
+   * .../<semanticDir>/<layerId>/diagrams/<domain>.dbml
    */
   private extractLayerId(fsPath: string): string | null {
     // Normalise separators to forward slash for matching

@@ -305,7 +305,9 @@ export function deriveAiHelperState(
 ): AiHelperState {
   const folders = recommendedSkillTargets(assistants).map((t) => harness[t]);
   if (folders.some((f) => f.schemaSkill === 'unmanaged' || f.setupSkill === 'unmanaged')) { return 'unmanaged'; }
-  if (folders.every((f) => f.schemaSkill === 'current' && f.setupSkill === 'current') && cli === 'ready') { return 'ready'; }
+  // A newer marker (a teammate on a later ERD Studio) is never replaced, so it counts as set up.
+  const upToDate = (state: FileState): boolean => state === 'current' || state === 'newer';
+  if (folders.every((f) => upToDate(f.schemaSkill) && upToDate(f.setupSkill)) && cli === 'ready') { return 'ready'; }
   // Never set up: no setup skill anywhere and no helper tool (the schema skill alone is the old harness).
   if (harness.claude.setupSkill === 'missing' && harness.agents.setupSkill === 'missing' && cli === 'missing') {
     return 'missing';
@@ -1048,7 +1050,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 
   <section class="gs-noproject" aria-label="Open a folder">
     <h2 class="gs-sample__title">Open the folder your data model lives in</h2>
-    <p class="gs-sample__text">Any folder works: your design is saved as plain YAML and JSON in <code>.erd-studio/</code>, next to your code. If the folder holds a dbt project (<code>dbt_project.yml</code>), ERD Studio also shows what dbt built.</p>
+    <p class="gs-sample__text">Any folder works: your design is saved in <code>.erd-studio/</code>, next to your code (a new project as DBML, an open format; a project from an older ERD Studio keeps its YAML and JSON files). If the folder holds a dbt project (<code>dbt_project.yml</code>), ERD Studio also shows what dbt built.</p>
     <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">Open a folder&hellip;</button>
   </section>
   <section class="gs-sample" aria-label="Try the sample project">
@@ -1081,7 +1083,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         <div class="gs-step__body">
           <h3 class="gs-step__title" data-when="first">Draw your first diagram</h3>
           <h3 class="gs-step__title" data-when="more" hidden>Draw another diagram</h3>
-          <p class="gs-step__text">Add tables on a blank canvas. Each table is a YAML file in <code>.erd-studio/</code> that you commit and review like code. No dbt needed.</p>
+          <p class="gs-step__text">Add tables on a blank canvas. Each table is a file in <code>.erd-studio/</code> that you commit and review like code. No dbt needed.</p>
           <div class="gs-step__actions" data-when="first">
             <button class="gs-btn gs-btn--primary" type="button" data-action="createDomain">New diagram</button>
           </div>
@@ -1138,7 +1140,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
             <button class="gs-btn" type="button" data-action="refreshStatus">Re-check</button>
           </div>
           <p class="gs-get" data-when="none" hidden>Also supported: ${otherLinks}</p>
-          <p class="gs-recheck" data-when="found" hidden>Use another one? Install it, then <button class="gs-link" type="button" data-action="refreshStatus">Re-check</button>. Already installed but not listed? Command Palette &rarr; <em>ERD Studio: Install AI Coding Harness</em> &rarr; <em>Agent Skills</em>.</p>
+          <p class="gs-recheck" data-when="found" hidden>Use another one? Install it, then <button class="gs-link" type="button" data-action="refreshStatus">Re-check</button>. Already installed but not listed? Command Palette &rarr; <em>ERD Studio: Install AI Helper Files…</em> &rarr; <em>Agent Skills</em>.</p>
         </div>
       </section>
 

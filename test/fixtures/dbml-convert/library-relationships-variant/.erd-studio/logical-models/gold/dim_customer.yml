@@ -1,0 +1,17 @@
+# ERD Studio 1.6.6 / 1.6.7 stored a line drawn from a dimension to a fact on
+# the "one" side, as one-to-many. Still read: drawn as fct_order → dim_customer.
+name: dim_customer
+alias: customer
+schema: gold
+modelRole: dimension
+columns:
+  - name: customer_key
+    dataType: INT
+    isPrimaryKey: true
+  - name: customer_name
+    dataType: VARCHAR
+relationships:
+  - fromColumn: customer_key
+    toModel: fct_order
+    toColumn: customer_key
+    cardinality: one-to-many

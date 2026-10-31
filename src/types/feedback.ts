@@ -74,6 +74,17 @@ export const FEEDBACK_COPY: Readonly<Record<FeedbackKind, FeedbackKindCopy>> = {
 export const FEEDBACK_IMAGE_NOTE =
   'Images are added on the GitHub page. When the form opens, click the Screenshot box and paste (Ctrl+V / \u2318V) or drag them in \u2014 GitHub accepts no image from here.';
 
+/** The opt-in box for the recent ERD Studio log (off by default, never remembered). */
+export const FEEDBACK_LOG_LABEL = 'Include the recent ERD Studio log';
+
+/**
+ * What the log box means, said before it is ticked: the log can name the
+ * user's tables and diagrams, and the report becomes a public GitHub issue.
+ */
+export const FEEDBACK_LOG_NOTE =
+  'The log can name your tables, columns and diagrams, and your report will be a public GitHub issue. ' +
+  'File paths are shortened. Below is exactly what is added; a long log is cut to its newest lines to fit the GitHub link.';
+
 // ---------------------------------------------------------------------------
 // Which model does the analysis
 // ---------------------------------------------------------------------------
@@ -139,6 +150,12 @@ export interface FeedbackDraft {
   /** Steps to reproduce (bug) or rationale (feature). */
   steps?: string;
   includeDiagnostics: boolean;
+  /**
+   * Add the recent ERD Studio log (the host's in-memory buffer, paths
+   * redacted) to the diagnostics. Opt-in, off by default; ignored when
+   * `includeDiagnostics` is false. Absent means false.
+   */
+  includeLog?: boolean;
   /** Recent errors observed by the webview (oldest → newest). */
   webviewErrors?: string[];
   /** Filing fresh against an issue that was closed as fixed — title gets "Regression: ". */
@@ -165,6 +182,12 @@ export interface FeedbackDiagnosticsView {
   chips: FeedbackDiagnosticsChip[];
   /** Verbatim `formatDiagnostics()` output, shown in the `<details><pre>`. */
   text: string;
+  /**
+   * The recent ERD Studio log, oldest first, already through `redactPaths()`:
+   * exactly the lines the opt-in log box would add. Absent or empty: nothing
+   * logged yet, and the box is not offered.
+   */
+  log?: string[];
 }
 
 /** Capability snapshot pushed alongside the diagnostics view. */
@@ -691,6 +714,9 @@ const KEPT_FILE_NAMES = new Set([
   '.sync-plan.json',
 ]);
 
+/** The ERD Studio 1.9 pre-release's relationships file (`tables/[<folder>/]_relationships.dbml`): a fixed name, so it is kept. */
+const DBML_RELATIONSHIPS_FILE = '_relationships.dbml';
+
 /** The extension's own install folder, e.g. `liamwynne.erd-studio-1.0.7`. */
 const EXTENSION_DIR_PATTERN = /^liamwynne\.erd-studio-/i;
 
@@ -706,7 +732,7 @@ const SPACED_SEGMENT = String.raw`${SEGMENT}(?: +${SEGMENT})*`;
  * extension, so `sales report.json` is one file name but `/a/b was missing`
  * stops at `b`. Over-reach only ever swallows prose into a placeholder.
  */
-const LAST_SEGMENT = String.raw`(?:${SPACED_SEGMENT}\.[A-Za-z0-9]{1,8}(?![\w\\/])|${SEGMENT})`;
+const LAST_SEGMENT = String.raw`(?:${SPACED_SEGMENT}\.[A-Za-z0-9]{1,9}(?![\w\\/])|${SEGMENT})`;
 /**
  * A path may not start mid-word, mid-URL or straight after a placeholder —
  * the last is what makes {@link redactPaths} idempotent.
@@ -735,8 +761,9 @@ const LOCAL_PATH_PATTERN = new RegExp(
 const LOCAL_URL_PATTERN =
   /\b(?:file:\/\/[^\s/"'<>]*|https?:\/\/[^\s/"'<>]*vscode-(?:resource|cdn)[^\s/"'<>]*)(\/[^\s"'<>)]*)/gi;
 
+/** A file's extension, up to nine characters (the 1.9 pre-release's `.dbdiagram` layout file keeps its own). */
 function extensionOf(name: string): string {
-  const match = /\.([A-Za-z0-9]{1,8})$/.exec(name);
+  const match = /\.([A-Za-z0-9]{1,9})$/.exec(name);
   return match ? `.${match[1]}` : '';
 }
 
@@ -748,8 +775,14 @@ function describeSemanticPath(rest: string[]): string {
   if (rest.length === 1) return KEPT_FILE_NAMES.has(last.toLowerCase()) ? last : `{file}${ext}`;
   if (rest[0] === 'templates') return `templates/{template}${ext}`;
   if (rest[0] === 'logical-models') return `logical-models/{model}${ext}`;
+  // The 1.9 pre-release's relationships file has a fixed name, so it is kept.
+  if (rest[0] === 'tables' && last.toLowerCase() === DBML_RELATIONSHIPS_FILE) return `tables/${DBML_RELATIONSHIPS_FILE}`;
   if (rest[0] === 'tables' && ext !== '.json') return `tables/{table}${ext}`;
   if (rest.length === 2) return `{layer}/{domain}${ext}`;
+  // The layer-first DBML tree (2.0): its fixed folder names say what the file is.
+  if (rest.length === 3 && rest[1] === 'diagrams') return `{layer}/diagrams/{diagram}${ext}`;
+  if (rest.length === 3 && rest[1] === 'relationships') return `{layer}/relationships/{file}${ext}`;
+  if (rest.length === 4 && rest[1] === 'tables') return `{layer}/tables/{schema}/{table}${ext}`;
   return `{path}/{file}${ext}`;
 }
 

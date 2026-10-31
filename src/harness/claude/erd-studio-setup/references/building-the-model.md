@@ -12,34 +12,43 @@ from `inventory --models` output. Anything you had to guess is marked "(draft)" 
 
 ## Which files to write
 
-**File naming first.** Doctor's `erd.naming` says which names this project writes. This page uses
-the v5 names (`logical-models/`, `"domain"`, `logical.models`, `fromModel` / `toModel`,
-`modelRole`). When `naming` is `v6` or `mixed` — and in a project with no `.erd-studio/` yet —
-write the v6 names instead (`tables/`, `"subjectArea"`, `logical.tables`, `fromTable` /
-`toTable`, `tableRole`, `"schemaVersion": 6`), exactly as the schema skill's "File naming"
-section maps them. Never mix the two in one file.
+**Format first.** Doctor's `erd.storage` says which format this project writes (the schema
+skill's "What to write"): `dbml` — and a project with no `.erd-studio/` yet — writes DBML, as this
+page shows first; `yaml` writes YAML tables and JSON diagrams ("Legacy" sections below, in the
+naming doctor's `erd.naming` reports); `mixed` writes new files as DBML and edits an existing file
+in its own format. Never convert a file between the formats yourself.
 
-| File | Write it when |
+| File (DBML) | Write it when |
 |---|---|
-| `.erd-studio/layers.json` | It does not exist and the chosen layer is not `silver` or `gold` (e.g. `bronze` or `core`), or it exists and lacks the chosen layer |
-| `.erd-studio/logical-models/<layer>/<name>.yml` (or `logical-models/<name>.yml` in a flat library — see below) | Once per chosen model that is **not** in `alreadyModelled` |
-| `.erd-studio/<layer>/<domain>.json` | Once per domain |
+| `.erd-studio/layers.json` | It does not exist (a new project), or it lacks the chosen layer |
+| `.erd-studio/<layer>/tables/<schema>/<name>.dbml` (see below) | Once per chosen model that is **not** in `alreadyModelled` |
+| `.erd-studio/<layer>/relationships/<layer>.dbml` | When the chosen models hold foreign keys: one Ref per relationship (add to it when it exists; see "Relationships (DBML)") |
+| `.erd-studio/<layer>/diagrams/<domain>.dbml` | Once per domain (the diagram) |
 
-**Where a new model file goes.** Model files may sit at the top of `logical-models/` or one folder
-down in a folder named after a layer. Use the domain's layer folder (`logical-models/<layer>/`)
-when the library is empty or a `logical-models/<layer>/` folder already holds a `.yml` file; if every
-existing model file is at the top level, the library is flat — write at the top level and leave
-the choice to organise to the user (**ERD Studio: Organise Model Library by Layer**). Model names
-are unique across all folders, and the domain file lists models by name, never by path.
+**Where a new model file goes.** In the domain's layer: `.erd-studio/<layer>/tables/<schema>/`.
+The schema folder is the model's dbt custom schema when it has one (`config: schema:` in its yml
+or `config()`, or `+schema:` for its folder in `dbt_project.yml`), never the inventory's `schema`
+(the built schema, which differs per dbt target); otherwise the layer's name. When the layer
+already has a schema folder spelled differently in case, use that spelling. Table names are unique
+across the whole project, and the diagram lists tables by their `use` lines.
 
-Models in `alreadyModelled` are referenced by name in the domain file and their yml is left
+Models in `alreadyModelled` are referenced by name in the diagram and their file is left
 alone, wherever it is. Someone may have designed them by hand, and other domains may share them. If their content
 disagrees with dbt, Stage 5 will say so and ask.
 
+**Legacy (`erd.storage: yaml`).** Doctor's `erd.naming` says which names this project writes. The
+Legacy sections use the v5 names (`logical-models/`, `"domain"`, `logical.models`, `fromModel` /
+`toModel`, `modelRole`); when `naming` is `v6` or `mixed`, write the v6 names instead
+(`tables/`, `"subjectArea"`, `logical.tables`, `fromTable` / `toTable`, `tableRole`,
+`"schemaVersion": 6`), exactly as the schema skill's `LEGACY.md` "File naming" maps them. Never mix
+the two in one file. The files are `.erd-studio/logical-models/<layer>/<name>.yml` per model (top
+level in a flat library) and `.erd-studio/<layer>/<domain>.json` per domain.
+
 ## layers.json
 
-With no `layers.json`, ERD Studio uses two built-in layers, `silver` and `gold`, so a domain in
-either needs no layers file. For any other layer (for example the `core` default when
+A new DBML project writes `layers.json` first, with the built-ins `silver` and `gold` and any
+other layer it uses. In an existing project with no `layers.json`, ERD Studio uses those two
+built-in layers, so a domain in either needs no layers file. For any other layer (for example the `core` default when
 `suggestedLayer` is null), write the file with the built-ins **plus** the new layer, because
 writing the file replaces the built-ins:
 
@@ -86,7 +95,113 @@ In order of preference:
 
 Layers are only folders for organising diagrams; tell the user they can move a domain later.
 
-## Model yml — field by field
+## Table file (DBML) — field by field
+
+For each `InventoryModel` in the `inventory --models` output, one `<layer>/tables/<schema>/<name>.dbml`
+holding one Table declared `Table <schema>.<name>`, with `name` exactly. **Quote every custom value**, even `'true'` and numbers
+(the schema skill's `DBML.md`): an unquoted word breaks the file everywhere, an unquoted `true`
+or `2` breaks it in other DBML tools.
+
+| DBML | Comes from |
+|---|---|
+| `Table <schema>.<name>` | the schema folder, then `name`, exactly (each part double-quoted only when it is not a plain identifier) |
+| `Note: '<text>'` (first line of the block, then a blank line) | `description`; if empty, a one-line plain draft ending in "(draft)" |
+| column lines, in order | `columns[].name` — an all-UPPERCASE warehouse spelling in lowercase, mixed case kept |
+| the column's type | `columns[].dataType`, copied exactly, double-quoted when it is not a plain identifier (`"NUMBER(38,0)"`). If it is `''`, see "When dbt has no type" |
+| `note: '…'` (column setting) | `columns[].description`; if empty, a short draft ending in "(draft)" when the meaning is obvious from the name, else leave it out |
+| `pk` (or `indexes { (a, b) [pk] }`) | as `isPrimaryKey` in the Legacy table below |
+| `foreign_key: 'true'` | Every column listed in `foreignKeys` |
+| `meta_<key>` / `meta_json` | Only with a team metadata list: its `dbt` keys — `references/metadata.md` section 5 |
+
+The design fields (`role`, `grain`, `rationale_<field>`, `scd_type`, `additive_type`,
+`natural_key`) come from the modelling approach, as the paragraph after "Quote every text value"
+below says. A text with a line break is triple-quoted (`'''…'''`); escape `'` as `\'`. A
+table file holds no `use`, `Ref` or `[ref: …]` — relationships go in the relationships file.
+
+## Relationships (DBML)
+
+The inventory's `relationships`, **copied verbatim** — including `cardinality` — each as one Ref,
+its ends qualified as the tables declare themselves. A Ref goes in the relationships file that
+already holds the most Refs of its foreign-key (`fromModel`) table, else in that table's layer's
+`<layer>/relationships/<layer>.dbml`; never add one that a relationships file already holds. The
+file has a `use { table s.x } from '../tables/s/x.dbml'` line for every table its Refs name:
+`Ref: s.fct.fk >? s.dim.pk` (`many-to-one`), `Ref: s.dim.pk ?- s.fct.fk` (`one-to-one`, key end first),
+`Ref: a.x <>? b.y` (`many-to-many`); a `one-to-many` is written from the other end as `>?`; a
+composite key is one Ref with both column lists. Do not add connections you inferred from column
+names: a connection dbt does not test would be drift. Offer those as dbt tests in Stage 6 instead.
+
+## Diagram file (DBML)
+
+```dbml
+use { table gold.fct_order }    from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.dim_product }  from '../tables/gold/dim_product.dbml'
+use * from '../relationships/gold.dbml'
+
+Project orders {
+  Note: 'Orders and the customers and products they reference'
+  erd_schema_version: '7'
+  erd_model_folder: 'models/marts'
+}
+```
+
+- The Project name matches the file name; lowercase letters, digits, `-` and `_`, starting with a
+  letter. Double-quote a name with a `-` (`Project "customer-360" {`), or every DBML tool and
+  ERD Studio reject the file. `erd_schema_version: '7'` always; `erd_model_folder` is optional (the common folder of
+  the chosen models' files).
+- One table `use` line per chosen name, including already-modelled ones, with the path from the
+  diagram to the table's file; then one `use *` line per relationships file holding a Ref between
+  two of those tables. The `Project` block comes last.
+- Write no `erd_layout`: ERD Studio auto-arranges a new diagram the first time it opens and saves
+  the positions in its Project. Never write positions yourself.
+- Do not set `erd_stub_columns`. It hides differences, and the point of this walkthrough is to see
+  them.
+
+If the diagram already exists (a re-run), add `use` lines for new names and new Refs where they
+belong (skip any already there), and never touch its `erd_layout` — that is the user's layout.
+
+## Worked example (DBML)
+
+For the inventory in "Legacy worked example" below, with the Kimball approach, you write
+`gold/tables/gold/fct_order.dbml`:
+
+```dbml
+Table gold.fct_order [
+  role: 'transaction-fact',
+  grain: 'One row per order',
+  rationale_design: 'Kimball transaction fact, per .erd-studio/modelling-approach.md'
+] {
+  Note: 'One row per order (draft)'
+
+  order_id    INT             [pk, note: 'Order identifier']
+  customer_id INT             [
+    foreign_key: 'true',
+    note: 'The customer who placed the order (draft)'
+  ]
+  product_id  INT             [foreign_key: 'true', note: 'The product ordered (draft)']
+  order_total "DECIMAL(18,2)" [additive_type: 'additive', note: 'Order value (draft)']
+}
+```
+
+and `gold/relationships/gold.dbml`:
+
+```dbml
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.dim_product }  from '../tables/gold/dim_product.dbml'
+use { table gold.fct_order }    from '../tables/gold/fct_order.dbml'
+
+Ref: gold.fct_order.customer_id >? gold.dim_customer.customer_id
+Ref: gold.fct_order.product_id >? gold.dim_product.product_id
+```
+
+Both are in the layout ERD Studio writes (the schema skill's `DBML.md`, "Layout"): Note first,
+columns aligned, a column line over 100 characters with its settings one per line, `use` lines
+with their `from` aligned. `dim_customer.dbml` gets `customer_id INT [pk, natural_key: 'true', …]`, `role: 'conformed-dim'`
+and `grain: 'One row per customer'`; the other choices are as in the legacy example. Then the
+diagram above.
+
+## Legacy: model yml — field by field
 
 For each `InventoryModel` in the `inventory --models` output:
 
@@ -159,7 +274,7 @@ ending in "(draft)" and add it to "types to confirm".
 Only draft when dbt has **no** columns for the model. If dbt lists some columns, copy those and
 nothing else — a drafted extra column would show up as drift.
 
-## Domain JSON
+## Legacy: domain JSON
 
 ```json
 {
@@ -195,7 +310,7 @@ nothing else — a drafted extra column would show up as drift.
     `toModel`, `toColumn`, `cardinality`).
   - Never write one in both places, and never move existing relationships from one place to the
     other yourself — that is the user's choice, made with **ERD Studio: Move Relationships to
-    Model Library**, which explains the move and lets them settle conflicts.
+    Table Library**, which explains the move and lets them settle conflicts.
   - A foreign key over several columns (a Data Vault PIT or bridge, a multi-column natural key)
     is one entry per column pair, all sharing one `compositeKey` (e.g. `fk_sat_customer`), as the
     `/erd-studio` skill's "Composite foreign keys" shows.
@@ -209,7 +324,7 @@ If the domain file already exists (a re-run), add new names to `logical.models` 
 relationships where the project keeps them (skip any already defined in the model library), and
 never touch `viewConfig.positions` — that is the user's layout.
 
-## Worked example
+## Legacy worked example
 
 `inventory --models fct_order,dim_customer,dim_product` returns (summarised):
 

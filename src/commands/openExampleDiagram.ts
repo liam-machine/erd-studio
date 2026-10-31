@@ -13,16 +13,18 @@
  * No dbt needed, and nothing new ships in the VSIX: the DBML is inline.
  *
  * Only the file-reading half of the import UI is replaced (`exampleDbmlUi`):
- * the "file" is a name that is never opened, and there is no `.dbdiagram`
- * layout, so the canvas lays the diagram out when it opens. The diagram goes
- * in the `gold` layer when the project has it (the default layers do), else
- * the import asks for a layer as usual.
+ * the "file" is a name that is never opened, and its DBML has no
+ * `erd_layout`, so the canvas lays the diagram out when it opens. The diagram goes
+ * in the `gold` layer when the project has it (a dbt project's default layers
+ * do), in the only layer of a project that has one (a new project without dbt
+ * starts with `main`), else the import asks for a layer as usual. Its tables
+ * are unqualified, so in a DBML project they take the layer's name as their
+ * schema (`gold/tables/gold/`).
  */
 
 import * as path from 'path';
 
 import {
-  dbdiagramLayoutPathFor,
   importDbml,
   vscodeImportDbmlUi,
   type ImportDbmlDeps,
@@ -132,16 +134,14 @@ Table fct_order_items [role: 'transaction-fact', grain: 'One row per item on an 
 
 /**
  * The import UI with the file supplied: `examplePath` reads as
- * `EXAMPLE_DBML` and has no layout file next to it. Everything else (the
- * pickers, the dry run, opening the diagram) is `base`'s.
+ * `EXAMPLE_DBML`. Everything else (the pickers, the dry run, opening the
+ * diagram) is `base`'s.
  */
 export function exampleDbmlUi(base: ImportDbmlUi, examplePath: string): ImportDbmlUi {
-  const layoutPath = dbdiagramLayoutPathFor(examplePath);
   return {
     ...base,
     pickFile: async () => examplePath,
     readFile: async (filePath) => (filePath === examplePath ? EXAMPLE_DBML : base.readFile(filePath)),
-    exists: async (filePath) => (filePath === examplePath ? true : filePath === layoutPath ? false : base.exists(filePath)),
   };
 }
 

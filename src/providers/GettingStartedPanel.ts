@@ -62,6 +62,7 @@ import type { DraftModelEntry } from '../services/dbtDraft';
 import type { ManifestData } from '../types/manifest';
 import { normaliseName } from '../services/nameUtils';
 import { detectConventions, type ConventionModel } from '../cli/conventions';
+import { log } from '../services/logger';
 
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
 /** The no-AI first diagram (`extension.ts`): the Welcome panel's lead button runs it. */
@@ -154,7 +155,7 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
       return 'cloned';
     } catch (err) {
       telemetry.error('sampleCloneFailed');
-      console.warn('[ERD Studio] git.clone of the sample project failed; offering the GitHub page instead:', err);
+      log.warn('[ERD Studio] git.clone of the sample project failed; offering the GitHub page instead:', err);
     }
   } else {
     telemetry.feature('trySampleNoGit');
@@ -400,7 +401,7 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
         await vscode.commands.executeCommand(open);
       } catch (err) {
         telemetry.error('claudeOpenFailed');
-        console.warn('[GettingStarted] Could not open Claude Code:', err);
+        log.warn('[GettingStarted] Could not open Claude Code:', err);
       }
     } else {
       // CLAUDE_CODE_OPEN_COMMANDS are best guesses: this says they have gone stale.
@@ -473,7 +474,7 @@ export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceF
       telemetry.feature('copilotChatNoArgs');
     } catch (err) {
       telemetry.error('copilotChatOpenFailed');
-      console.warn('[GettingStarted] Could not open Copilot Chat:', err);
+      log.warn('[GettingStarted] Could not open Copilot Chat:', err);
     }
   }
   const nested = opts.dbtRoot && opts.workspaceFolder
@@ -693,7 +694,7 @@ export class GettingStartedPanel {
       panel.webview.onDidReceiveMessage((message: unknown) => {
         void this.handleMessage(message).catch((err) => {
           telemetry.error('welcomePanelFailed');
-          console.error('[GettingStarted] Message handler failed:', err);
+          log.error('[GettingStarted] Message handler failed:', err);
         });
       }),
       panel.onDidDispose(() => this.dispose()),
@@ -743,7 +744,7 @@ export class GettingStartedPanel {
       if (summary && current()) { this.post({ type: 'status', payload: { ...status, summary } }); }
     } catch (err) {
       telemetry.error('welcomePanelFailed');
-      console.error('[GettingStarted] Status check failed:', err);
+      log.error('[GettingStarted] Status check failed:', err);
     }
   }
 
@@ -753,7 +754,7 @@ export class GettingStartedPanel {
     try {
       return await this.deps.getProjectSummary();
     } catch (err) {
-      console.warn('[GettingStarted] Project summary unavailable:', err);
+      log.warn('[GettingStarted] Project summary unavailable:', err);
       return null;
     }
   }
@@ -800,7 +801,7 @@ export class GettingStartedPanel {
   /** Every `GettingStartedToHost` type is handled here; anything else is warned about and ignored. */
   async handleMessage(message: unknown): Promise<void> {
     if (!isGettingStartedToHost(message)) {
-      console.warn('[GettingStarted] Ignoring unknown message:', message);
+      log.warn('[GettingStarted] Ignoring unknown message:', message);
       return;
     }
     const msg: GettingStartedToHost = message;
@@ -862,14 +863,14 @@ export class GettingStartedPanel {
         break;
       case 'videoError':
         telemetry.feature('videoError');
-        console.warn(`[GettingStarted] Video could not play here (code ${msg.code}); showing the poster fallback.`);
+        log.warn(`[GettingStarted] Video could not play here (code ${msg.code}); showing the poster fallback.`);
         break;
       case 'videoProgress':
         telemetry.feature(msg.milestone === 'half' ? 'videoHalf' : 'videoEnded');
         break;
       default: {
         const unhandled: never = msg;
-        console.warn('[GettingStarted] Unhandled message:', unhandled);
+        log.warn('[GettingStarted] Unhandled message:', unhandled);
       }
     }
   }

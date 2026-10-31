@@ -2,7 +2,7 @@
 /**
  * The viewer entry (`@erd-studio/renderer`) re-exports core's diagram export
  * API, so a page that depends only on the renderer can offer Mermaid and DBML
- * downloads (rich DBML with its `.dbdiagram` layout file too). They must be core's own functions, not copies.
+ * downloads (rich DBML carries its positions in the Project's `erd_layout`). They must be core's own functions, not copies.
  */
 import { describe, it, expect } from 'vitest';
 import * as core from '@erd-studio/core';
@@ -18,9 +18,6 @@ describe('renderer entry re-exports the diagram export API', () => {
     'diagramExportFileName',
     'DIAGRAM_EXPORT_FORMATS',
     'DIAGRAM_EXPORT_FILE_EXTENSIONS',
-    'toDbdiagramLayout',
-    'serializeDbdiagramLayout',
-    'dbdiagramLayoutFileName',
   ] as const)(
     '%s is core\'s own',
     (name) => {
@@ -53,7 +50,11 @@ describe('renderer entry re-exports the diagram export API', () => {
       expect(lines.slice(0, expected.length)).toEqual(expected);
       expect(renderer.diagramExportFileName(domain, format)).toBe(`viewer.${renderer.DIAGRAM_EXPORT_FILE_EXTENSIONS[format]}`);
     }
-    expect(renderer.dbdiagramLayoutFileName(domain)).toBe('viewer.dbdiagram');
-    expect(JSON.parse(renderer.serializeDbdiagramLayout(domain))).toEqual(renderer.toDbdiagramLayout(domain));
+  });
+
+  it('no longer re-exports the dbdiagram.io layout file helpers', () => {
+    for (const gone of ['toDbdiagramLayout', 'serializeDbdiagramLayout', 'dbdiagramLayoutFileName']) {
+      expect(renderer, gone).not.toHaveProperty(gone);
+    }
   });
 });

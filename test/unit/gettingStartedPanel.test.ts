@@ -305,7 +305,7 @@ describe('panel script', () => {
       expect(visible('.gs-launch__row')).toEqual([]);
       expect(visible('[data-step="start"] .gs-btn')).toEqual([]);
       expect(visible('[data-step="start"] .gs-step__hint').join()).toContain('First press Set up my AI helper above: it installs the guide your assistant runs.');
-      expect(visible('[data-step="assistant"] .gs-recheck').join()).toContain('ERD Studio: Install AI Coding Harness → Agent Skills');
+      expect(visible('[data-step="assistant"] .gs-recheck').join()).toContain('ERD Studio: Install AI Helper Files… → Agent Skills');
       send({ type: 'status', payload: { ...STATUS, assistants: ['claude'], helper: 'ready' } });
       expect(visible('.gs-launch__name')).toEqual(['Claude Code']);
       expect(visible('[data-step="start"] .gs-step__hint').join()).not.toContain('First press');
@@ -322,6 +322,13 @@ describe('panel script', () => {
     } finally {
       dom.window.close();
     }
+  });
+
+  it('the open-a-folder card says a new project is DBML and an older one keeps YAML/JSON, not "saved as DBML" for every folder', () => {
+    const html = buildGettingStartedHtml(HTML_INPUT);
+    const card = html.slice(html.indexOf('<section class="gs-noproject"'), html.indexOf('<section class="gs-sample"'));
+    expect(card).toContain('a new project as DBML, an open format; a project from an older ERD Studio keeps its YAML and JSON files');
+    expect(card).not.toContain('saved as DBML');
   });
 
   it('offers the sample project: a card with no project, a small link with one', () => {
@@ -443,6 +450,9 @@ describe('panel script', () => {
       expect(visible('[data-step="dbml"] .gs-step__title')).toEqual(['Have a DBML file?']);
       expect(visible('[data-step="dbml"] .gs-btn')).toEqual(['Import DBML\u2026']);
       expect(visible('[data-step="dbml"] .gs-step__text').join()).toContain('an open format, no lock-in');
+      // Native DBML storage (2.0): the step is format-neutral, since a YAML project from before 2.0 shows it too.
+      expect(visible('[data-step="new"] .gs-step__text').join()).toContain('Each table is a file in .erd-studio/');
+      expect(visible('[data-step="new"] .gs-step__text').join()).not.toMatch(/YAML|JSON/);
       // No dbt wording where it no longer applies; the summary describes dbt models, so it stays off.
       expect(visible('.gs-section-intro').join()).not.toContain('dbt');
       expect(visible('.gs-sample-link')).toEqual([]);

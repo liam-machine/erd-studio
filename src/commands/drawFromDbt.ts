@@ -31,8 +31,8 @@ import {
 } from '../services/dbtDraft';
 import { pickDraftScope, type DraftScopePick } from '../providers/dbtDraftPicker';
 import { openTableFileAt } from './openModelFile';
-import { dirtyFiles } from '../providers/dirtyDocuments';
-import { drawnDiagramCopies, routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
+import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
+import { describeUnstoredRelationships, drawnDiagramCopies, routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import {
   ADD_LAYER_BUTTON,
@@ -57,13 +57,18 @@ import type { TableLibraryService } from '../services/logicalModelService';
 import {
   environmentWriteProblem,
   isRefusedWrite,
+  refusalLocation,
   writeNewSubjectArea,
   writeOutcome,
+  UnsavedFilesRefused,
   type RefusedWrite,
 } from '../services/newSubjectAreaWriter';
+import { diagramFilePath } from '@erd-studio/core';
+import { DbmlEditRefused } from '@erd-studio/core/dbml';
 import type { CatalogData } from '../types/catalog';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
+import { log } from '../services/logger';
 
 export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
 
@@ -90,7 +95,7 @@ export interface DrawFromDbtDeps {
   tableLibraryService: Pick<
     TableLibraryService,
     'tableExists' | 'saveTable' | 'serializeTable' | 'groupsByFolder' | 'deleteTable' | 'listTables' | 'getTable' | 'hasUnreadableRelationships' | 'tablePath' | 'getTablesDir' | 'writesTableNaming'
-  >;
+  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites' | 'writesDbml' | 'tableStorage' | 'invalidateCache'>>;
   /** Schema yml, manifest and catalog; each may be undefined (no yml, never compiled, no `dbt docs generate`). */
   loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData; catalog?: CatalogData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
@@ -144,7 +149,7 @@ export async function drawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtRes
 function showErrorWithActions(message: string, actions: ErrorActions): void {
   // A button that fails (a re-run whose dbt read throws) still says so, rather than seeming to do nothing.
   showErrorWith((m, ...items) => vscode.window.showErrorMessage(m, ...items), message, actions, (choice, err) => {
-    console.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+    log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
     const doing = `while running ${choice}`;
     showErrorWithActions(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
   });
@@ -212,12 +217,15 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   if (!name) { telemetry.feature('drawCancelName'); return undefined; }
   const slug = name.trim();
 
+  // A project that writes DBML (§3.2) gets a `.dbml` diagram, whose members are DBML tables (D20).
+  const dbml = tableLibraryService.writesDbml?.() ?? false;
   const draft = buildDbtDraft({
     modelNames: pick.modelNames,
     ymlData,
     manifest,
     catalog,
     libraryHas: (n) => tableLibraryService.tableExists(n),
+    ...(dbml ? { dbml: { tableStorage: (n: string) => tableLibraryService.tableStorage?.(n) } } : {}),
   });
   if (draft.modelNames.length === 0) {
     telemetry.feature('drawNothingDrawable');
@@ -226,7 +234,9 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   }
 
   const layerDir = path.join(workspaceRoot, semanticDir, chosenLayer);
-  const domainPath = path.join(layerDir, `${slug}.json`);
+  // A DBML diagram is `<layer>/diagrams/<slug>.dbml` (§1.1); a JSON one `<layer>/<slug>.json`.
+  const dbmlDiagramPath = path.join(workspaceRoot, semanticDir, ...diagramFilePath(chosenLayer, slug).split('/'));
+  const domainPath = dbml ? dbmlDiagramPath : path.join(layerDir, `${slug}.json`);
   const again: DrawFromDbtResume = { pick, layer: chosenLayer, name: slug };
   const tryAgain = (): unknown => drawFromDbt(deps, again);
   // The name box already refuses a name in use; this is a diagram that
@@ -235,7 +245,8 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     [OPEN_IT_BUTTON]: () => vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE),
     [CHOOSE_ANOTHER_NAME_BUTTON]: () => drawFromDbt(deps, { pick, layer: chosenLayer }),
   });
-  if (fs.existsSync(domainPath)) {
+  // A name is taken in either format: `<slug>.json` and `diagrams/<slug>.dbml` would be one diagram's name twice.
+  if (fs.existsSync(path.join(layerDir, `${slug}.json`)) || fs.existsSync(dbmlDiagramPath)) {
     nameTaken();
     return undefined;
   }
@@ -250,27 +261,46 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   let folder: string | undefined;
   let routed: { kept: DbtDraft['relationships']; changed: DbtDraft['newModels'] };
   let dirty: string[];
+  // Relationships a DBML diagram cannot store (their many-side table's file could not be read): named in the notice.
+  let unstored: DbtDraft['relationships'] = [];
   try {
-    folder = tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
-    routed = usesLibraryRelationships(
-      tableLibraryService.listTables(),
-      subjectAreaService.countSubjectAreaFileRelationships(workspaceRoot, semanticDir),
-      tableLibraryService.hasUnreadableRelationships(),
-    )
-      ? routeToLibrary(draft.relationships, draft.newModels, (n) => tableLibraryService.getTable(n),
-        drawnDiagramCopies(readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir)))
-      : { kept: draft.relationships, changed: [] };
+    // A DBML table always goes to the chosen layer's folder: groupsByFolder speaks for YAML libraries only.
+    folder = dbml || tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
+    // A DBML diagram holds no relationships (D5): every one goes to the library,
+    // none stays behind as a diagram copy.
+    routed = dbml
+      ? routeToLibrary(draft.relationships, draft.newModels, (n) => tableLibraryService.getTable(n))
+      : usesLibraryRelationships(
+        tableLibraryService.listTables(),
+        subjectAreaService.countSubjectAreaFileRelationships(workspaceRoot, semanticDir),
+        tableLibraryService.hasUnreadableRelationships(),
+        // A DBML table's relationships can only live in the library (D5, §5.1).
+        tableLibraryService.hasDbmlLibrary?.() ?? false,
+      )
+        ? routeToLibrary(draft.relationships, draft.newModels, (n) => tableLibraryService.getTable(n),
+          drawnDiagramCopies(readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir)))
+        : { kept: draft.relationships, changed: [] };
+    if (dbml && routed.kept.length > 0) {
+      unstored = routed.kept;
+      routed = { kept: [], changed: routed.changed };
+    }
+    const planned = dbml && tableLibraryService.planTableWrites
+      // Every file the DBML save writes (relationships files too); a refusal surfaces here, before any write.
+      ? tableLibraryService.planTableWrites({ save: [...draft.newModels, ...routed.changed].map((model) => ({ model })) }, folder, { dbml: true })
+        .writes.map((w) => w.path)
+      : [];
     dirty = dirtyFiles([
       ...draft.newModels.map((m) => tableLibraryService.tablePath(m.name, folder)),
       ...routed.changed.map((m) => tableLibraryService.tablePath(m.name)),
+      ...planned,
     ]);
     // Throws DuplicateKeyWriteRefused for a library file that is read but may
     // not be written (#164), or RelationshipsRewriteRefused, before the diagram
-    // is on disk rather than after.
-    for (const model of routed.changed) tableLibraryService.serializeTable(model);
+    // is on disk rather than after. (A DBML plan above already checked its files.)
+    if (!dbml) for (const model of routed.changed) tableLibraryService.serializeTable(model);
   } catch (err) {
     if (isRefusedWrite(err)) {
-      showRefusal(err, 'Nothing was changed.');
+      showRefusal(err, 'Nothing was changed.', path.join(workspaceRoot, semanticDir));
       return undefined;
     }
     telemetry.error('drawFromDbtFailed');
@@ -281,13 +311,14 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     });
     return undefined;
   }
-  if (dirty.length > 0) {
-    const libraryRoot = path.dirname(tableLibraryService.getTablesDir());
-    const file = path.relative(libraryRoot, dirty[0]).split(path.sep).join('/');
-    const dirtyPath = dirty[0];
+  const showUnsaved = (dirtyPath: string): void => {
+    const file = path.relative(path.dirname(tableLibraryService.getTablesDir()), dirtyPath).split(path.sep).join('/');
     showErrorWithActions(`${TITLE}: ${file} has unsaved changes. Save or revert it, then try again. Nothing was changed.`, {
       [SHOW_FILE_BUTTON]: () => vscode.window.showTextDocument(vscode.Uri.file(dirtyPath)),
     });
+  };
+  if (dirty.length > 0) {
+    showUnsaved(dirty[0]);
     return undefined;
   }
 
@@ -308,17 +339,29 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
       modelNames: draft.modelNames,
       relationships: routed.kept,
     }), tableNaming),
-  }, { layerService, tableLibraryService });
+    document: () => buildDraftSubjectAreaDocument({
+      domain: slug,
+      layer: chosenLayer,
+      description: `Drawn from dbt: ${pick.scope.label}.`,
+      modelNames: draft.modelNames,
+      relationships: [],
+    }) as unknown as Record<string, unknown>,
+  }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
   if (!outcome.ok) {
     const { error: err, undone } = outcome;
     if (outcome.nameTaken) {
       nameTaken();
       return undefined;
     }
+    // A file the write would change (another diagram it re-renders, §5.7) has unsaved edits.
+    if (err instanceof UnsavedFilesRefused) {
+      showUnsaved(err.filePaths[0]);
+      return undefined;
+    }
     const result = writeOutcome(undone, semanticDir);
     // A refusal is explained, not a failure, so it is not counted (as on the canvas).
     if (isRefusedWrite(err)) {
-      showRefusal(err, result);
+      showRefusal(err, result, path.join(workspaceRoot, semanticDir));
       return undefined;
     }
     telemetry.error('drawWriteFailed');
@@ -342,14 +385,14 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
 
   await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE);
 
-  const notice = describeDraftNotice(draft);
+  const notice = [describeDraftNotice(draft), describeUnstoredRelationships(unstored)].filter(Boolean).join(' ');
   if (notice) { void vscode.window.showInformationMessage(notice); }
   return { domainPath, draft };
 }
 
 /** The refusal's own sentence, with Open File when it knows the file. */
-function showRefusal(err: RefusedWrite, outcome: string): void {
-  const location = err.location;
+function showRefusal(err: RefusedWrite, outcome: string, semanticRoot?: string): void {
+  const location = semanticRoot === undefined ? (err instanceof DbmlEditRefused ? undefined : err.location) : refusalLocation(err, semanticRoot);
   showErrorWithActions(`${TITLE}: ${err.message} ${outcome}`, location
     ? { [OPEN_FILE_BUTTON]: () => openTableFileAt(location.filePath, location.line) }
     : {});
@@ -371,12 +414,26 @@ export function describeDraftNotice(draft: Pick<DbtDraft, 'modelNames' | 'skippe
 }
 
 /** A repeated pick or the cap is not worth a sentence; these are. */
-const SKIP_REASONS_WORTH_NAMING = new Set<DraftSkipped['reason']>(['invalid-name', 'not-found', 'disabled']);
+const SKIP_REASONS_WORTH_NAMING = new Set<DraftSkipped['reason']>(['invalid-name', 'not-found', 'disabled', 'yaml-table']);
+
+/** The reasons a DBML diagram adds (§5.7), each with its own sentence. */
+const DBML_SKIP_REASONS: Partial<Record<DraftSkipped['reason'], string>> = {
+  'yaml-table': "a YAML table can't join a DBML diagram; convert the project first",
+};
 
 function describeSkipped(skipped: readonly DraftSkipped[]): string {
   const relevant = skipped.filter((s) => SKIP_REASONS_WORTH_NAMING.has(s.reason));
   if (relevant.length === 0) { return ''; }
-  const names = relevant.slice(0, 3).map((s) => s.name).join(', ');
-  const more = relevant.length > 3 ? ` and ${relevant.length - 3} more` : '';
-  return `Skipped ${names}${more}: disabled in dbt, missing columns, or a name ERD Studio cannot use.`;
+  const parts: string[] = [];
+  const general = relevant.filter((s) => DBML_SKIP_REASONS[s.reason] === undefined);
+  if (general.length > 0) {
+    const names = general.slice(0, 3).map((s) => s.name).join(', ');
+    const more = general.length > 3 ? ` and ${general.length - 3} more` : '';
+    parts.push(`Skipped ${names}${more}: disabled in dbt, missing columns, or a name ERD Studio cannot use.`);
+  }
+  for (const [reason, why] of Object.entries(DBML_SKIP_REASONS)) {
+    const names = relevant.filter((s) => s.reason === reason).map((s) => s.name);
+    if (names.length > 0) parts.push(`Skipped ${names.join(', ')}: ${why}.`);
+  }
+  return parts.join(' ');
 }

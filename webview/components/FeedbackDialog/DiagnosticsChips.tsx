@@ -10,7 +10,7 @@
  * diagnostics, so a chip can never disagree with the text below it.
  */
 
-import type { FeedbackDiagnosticsView } from '../../../src/types/feedback';
+import { FEEDBACK_LOG_LABEL, FEEDBACK_LOG_NOTE, type FeedbackDiagnosticsView } from '../../../src/types/feedback';
 
 export interface DiagnosticsChipsProps {
   /** Host-supplied chips and exact text, or null before the first `feedbackContext`. */
@@ -19,10 +19,17 @@ export interface DiagnosticsChipsProps {
   included: boolean;
   /** Flip `included`. */
   onToggle: () => void;
+  /** Whether the recent ERD Studio log rides along (opt-in, off by default). */
+  includeLog?: boolean;
+  /** Flip `includeLog`. Absent: the log box is not offered. */
+  onToggleLog?: () => void;
 }
 
-export function DiagnosticsChips({ view, included, onToggle }: DiagnosticsChipsProps) {
+export function DiagnosticsChips({ view, included, onToggle, includeLog = false, onToggleLog }: DiagnosticsChipsProps) {
   if (!view) return null;
+  const logLines = view.log ?? [];
+  // Offered only with something to add, and only while diagnostics are on the report (the log rides in them).
+  const offerLog = onToggleLog !== undefined && logLines.length > 0;
 
   return (
     <div className="feedback__diagnostics">
@@ -64,6 +71,25 @@ export function DiagnosticsChips({ view, included, onToggle }: DiagnosticsChipsP
         <summary>See the exact text</summary>
         <pre className="feedback__pre">{view.text}</pre>
       </details>
+
+      {offerLog && (
+        <div className={`feedback__log${included ? '' : ' feedback__log--muted'}`}>
+          <label className="feedback__log-option">
+            <input
+              type="checkbox"
+              className="feedback__log-checkbox"
+              checked={included && includeLog}
+              disabled={!included}
+              onChange={onToggleLog}
+            />
+            <span>{FEEDBACK_LOG_LABEL} ({logLines.length} line{logLines.length === 1 ? '' : 's'})</span>
+          </label>
+          <p className="feedback__note">{FEEDBACK_LOG_NOTE}</p>
+          {included && includeLog && (
+            <pre className="feedback__pre feedback__log-pre" aria-label="Log lines added to the report">{logLines.join('\n')}</pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }

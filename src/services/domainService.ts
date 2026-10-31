@@ -14,18 +14,28 @@ import * as path from 'path';
 
 import {
   SubjectAreaFileError,
+  SubjectAreaValidationError,
   NON_SUBJECT_AREA_DIRS,
+  DIAGRAMS_DIR,
   buildUnifiedSubjectArea,
+  classifySemanticFile,
+  dbmlNotADiagramMessage,
+  diagramPathOf,
+  isDbmlLayerName,
   compositeGroupProblem,
   detectSubjectAreaFormat,
+  getRawSubjectAreaTableNames,
   groupKey,
   linkKey,
   parseSubjectAreaJson,
+  subjectAreaStorageOf,
   toLogicalStage,
   validateSubjectAreaDocument,
 } from '@erd-studio/core';
-import type { DbtKeyIndex } from '@erd-studio/core';
-import type { SubjectAreaSummary, SemanticSubjectArea, UnifiedSubjectArea } from '../types/semantic';
+import { subjectAreaMembersDbml } from '@erd-studio/core/dbml';
+import { readDbmlDiagram, rememberedDbmlMembers } from './dbmlDiagramReadings';
+import type { DbmlSubjectAreaReading, DbtKeyIndex, SubjectAreaFormat } from '@erd-studio/core';
+import type { SubjectAreaSummary, SemanticSubjectArea, SemanticTable, UnifiedSubjectArea } from '../types/semantic';
 import type { DisplaySubjectArea, DisplayTable, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
 import type { CompositeForeignKey, ManifestData } from '../types/manifest';
 import type { CatalogData, CatalogColumn } from '../types/catalog';
@@ -35,6 +45,7 @@ import type { LayerService } from './layerService';
 import type { TableLibraryService } from './logicalModelService';
 import { normaliseName } from './nameUtils';
 import { catalogNodeFor, resolveColumnType } from './columnTypes';
+import { log } from './logger';
 
 // The pure domain parsing lives in @erd-studio/core; these are re-exported so
 // existing imports of this module keep working.
@@ -55,25 +66,63 @@ interface RelationshipTest {
 const DEFAULT_SEMANTIC_DIR = '.erd-studio';
 
 /**
- * Does `fsPath` have the shape of a domain file — `{layer}/{domain}.json`,
- * where the parent segment is a layer rather than one of the reserved
- * directories, and neither segment is hidden?
+ * Does `fsPath` have the shape of a domain file — `{layer}/{domain}.json`
+ * (the parent segment is a layer rather than one of the reserved
+ * directories, and neither segment is hidden) or a DBML diagram
+ * `{layer}/diagrams/{domain}.dbml` (core's `diagramPathOf`: a DBML layer
+ * name, the `diagrams` folder and `.dbml` spelled exactly)?
  *
  * Shape only: it says nothing about whether the layer is configured or the
  * file parses. Callers that know the semantic root should prefer
  * `classifySemanticPath()`, which also proves the path is *under* it; this one
  * exists for the custom editor, which is handed a document whose path the
- * `**​/.erd-studio/*​/*.json` selector has already placed.
+ * selector has already placed.
  */
 export function isSubjectAreaFilePath(fsPath: string): boolean {
   const file = path.basename(fsPath);
   const dir = path.basename(path.dirname(fsPath));
+  if (file.endsWith('.dbml')) return diagramPathOf(fsPath) !== undefined;
   return (
     file.endsWith('.json') &&
     !file.startsWith('.') &&
     !dir.startsWith('.') &&
     !NON_SUBJECT_AREA_DIRS.has(dir)
   );
+}
+
+/**
+ * Core's `dbmlNotADiagramMessage` for `fsPath` (§1.8), shared by the editor's
+ * not-a-diagram page and `readDbmlSubjectArea`. Core finds the semantic dir by
+ * its default names, so a file inside one with another name (a custom
+ * `erdStudio.semanticDir`) is named relative to `semanticRoot`, and a 1.9
+ * pre-release shape is still told; any other path is named as given.
+ */
+export function notADiagramMessage(fsPath: string, semanticRoot: string | undefined): string {
+  if (semanticRoot === undefined) return dbmlNotADiagramMessage(fsPath);
+  const rel = path.relative(semanticRoot, fsPath);
+  const inside = rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  const defaultName = ['.erd-studio', 'erd-studio'].includes(path.basename(semanticRoot));
+  return dbmlNotADiagramMessage(inside && !defaultName ? rel.split(path.sep).join('/') : fsPath);
+}
+
+/**
+ * The tables a diagram file names, from its raw text, for the callers that
+ * only count or find usage (§5.2): a JSON file's `logical.models` in any
+ * format (`getRawSubjectAreaTableNames`), a DBML diagram's table `use` lines
+ * (`subjectAreaMembersDbml`, from the AST). Null when the text does not
+ * parse. The only raw membership reader, shared by the trees, the commands,
+ * the CLI and the MCP server.
+ */
+export function subjectAreaTableNames(text: string, filePath: string): string[] | null {
+  if (subjectAreaStorageOf(filePath) === 'dbml') {
+    // A diagram just read (or just dragged) has its members remembered: no parse.
+    return rememberedDbmlMembers(text, filePath) ?? subjectAreaMembersDbml(text, filePath);
+  }
+  try {
+    return getRawSubjectAreaTableNames(JSON.parse(text.replace(/^\uFEFF/, '')) as unknown);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -106,8 +155,35 @@ export function renameSubjectAreaInRaw(rawText: string, newSlug: string): string
   return JSON.stringify(doc, null, 2) + '\n';
 }
 
+/**
+ * What a DBML diagram itself says about its tables (§2.3 display parity):
+ * each member's `use` path (semantic-relative, by lower-case name) and the
+ * relationships files it imports. The canvas draws only these, as core does.
+ */
+interface DbmlDiagramView {
+  memberPaths: ReadonlyMap<string, string>;
+  /** The table folders its `use` lines name, relative to the semantic dir, byte-sorted (core's `useTableDirs`). */
+  useTableDirs: readonly string[];
+  imports: ReadonlySet<string>;
+  /**
+   * Its `erd_unlinked_tables` members (D26) the next edit keeps there, lower-case: one whose
+   * table has a .dbml file now gains a `use` line on that edit, so it counts as a member.
+   */
+  unlinked: ReadonlySet<string>;
+  /** Filled while reading: the files holding a relationship between two members that the diagram does not import. */
+  drift: Set<string>;
+}
+
+/** The canvas warning for a relationships file a diagram does not import but holds a Ref between its tables. */
+export function unimportedRelationshipsMessage(file: string): string {
+  return `${file} holds a relationship between tables of this diagram, but the diagram does not import it; `
+    + 'other DBML tools do not draw it. Any edit to this diagram adds the import.';
+}
+
 export class SubjectAreaService {
   private tableLibraryService: TableLibraryService | null = null;
+  /** The last read of each DBML diagram: the relationships files it should import but does not (path → files). */
+  private readonly importDrift = new Map<string, string[]>();
 
   constructor(private readonly layerService: LayerService) {}
 
@@ -121,11 +197,15 @@ export class SubjectAreaService {
   }
 
   /**
-   * Discover all semantic domain JSON files under .erd-studio/,
-   * grouped by layer. Returns lightweight summaries (no full parse).
+   * Discover every diagram under .erd-studio/ — `{layer}/*.json` and the
+   * layer's DBML diagrams `{layer}/diagrams/*.dbml` (through the single
+   * classifier, `classifySemanticFile`) — grouped by configured layer.
+   * Returns lightweight summaries (no full parse). A stem found in both
+   * formats in one layer is listed twice, each marked `conflict`.
    *
    * Directory structure:
    *   .erd-studio/{layer}/*.json
+   *   .erd-studio/{layer}/diagrams/*.dbml
    */
   listSubjectAreas(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): SubjectAreaSummary[] {
     const basePath = path.join(projectPath, semanticDir);
@@ -148,23 +228,38 @@ export class SubjectAreaService {
       try {
         entries = fs.readdirSync(layerDir);
       } catch (err) {
-        console.warn(
+        log.warn(
           `[DomainService] Unable to read directory ${layerDir}: ` +
           `${err instanceof Error ? err.message : String(err)}`
         );
         continue;
       }
 
+      const inLayer: SubjectAreaSummary[] = [];
       for (const entry of entries) {
         if (!entry.endsWith('.json')) {
           continue;
         }
-
-        summaries.push({
-          domain: path.basename(entry, '.json'),
-          layer,
-          filePath: path.join(layerDir, entry),
-        });
+        inLayer.push({ domain: path.basename(entry, '.json'), layer, filePath: path.join(layerDir, entry), storage: 'json' });
+      }
+      // The layer's DBML diagrams, listed only when `diagrams/` is there (the layer's own listing says so).
+      if (isDbmlLayerName(layer) && entries.includes(DIAGRAMS_DIR)) {
+        const diagramsDir = path.join(layerDir, DIAGRAMS_DIR);
+        let diagrams: string[] = [];
+        try {
+          diagrams = fs.readdirSync(diagramsDir);
+        } catch {
+          // Not a folder, or not readable: no DBML diagrams here.
+        }
+        for (const entry of diagrams) {
+          const kind = classifySemanticFile(`${layer}/${DIAGRAMS_DIR}/${entry}`, { tablesDirIsLayer: false });
+          if (kind.kind !== 'diagram' || kind.storage !== 'dbml' || kind.name === undefined) continue;
+          inLayer.push({ domain: kind.name, layer, filePath: path.join(diagramsDir, entry), storage: 'dbml' });
+        }
+      }
+      for (const summary of inLayer) {
+        if (inLayer.some((other) => other !== summary && other.domain === summary.domain)) summary.conflict = true;
+        summaries.push(summary);
       }
     }
 
@@ -182,6 +277,8 @@ export class SubjectAreaService {
   countSubjectAreaFileRelationships(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): number {
     let count = 0;
     for (const summary of this.listSubjectAreas(projectPath, semanticDir)) {
+      // A DBML diagram holds no relationships (D5): they live in the library.
+      if (summary.storage === 'dbml') continue;
       let text: string;
       try {
         text = fs.readFileSync(summary.filePath, 'utf-8');
@@ -212,6 +309,12 @@ export class SubjectAreaService {
    * canvas and the diff pass it; callers that only list or count need not.
    */
   getSubjectArea(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex } = {}): UnifiedSubjectArea {
+    // One check of the library index for the whole read, not one per table looked up.
+    const library = this.tableLibraryService;
+    return library ? library.withIndexSnapshot(() => this.readSubjectArea(filePath, options)) : this.readSubjectArea(filePath, options);
+  }
+
+  private readSubjectArea(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex }): UnifiedSubjectArea {
     if (!fs.existsSync(filePath)) {
       throw new SubjectAreaFileError('missing', filePath, `Subject area file not found: ${filePath}`);
     }
@@ -224,16 +327,144 @@ export class SubjectAreaService {
       throw new SubjectAreaFileError('unreadable', filePath, `Failed to read subject area file: ${message}`);
     }
 
+    if (subjectAreaStorageOf(filePath) === 'dbml') {
+      const reading = this.readDbmlSubjectArea(filePath, raw);
+      const { obj, format } = validateSubjectAreaDocument(reading.obj, filePath);
+      const view: DbmlDiagramView = {
+        memberPaths: new Map((reading.uses ?? []).map((u) => [u.name.toLowerCase(), u.resolved])),
+        useTableDirs: reading.useTableDirs ?? [],
+        imports: new Set(reading.relationshipsUses),
+        unlinked: new Set((reading.unlinked ?? [])
+          .filter((n) => this.tableLibraryService?.tableStorage(n) !== 'dbml')
+          .map((n) => n.toLowerCase())),
+        drift: new Set(),
+      };
+      const unified = this.buildUnified(obj, format, filePath, path.basename(filePath, '.dbml'), { ...options, dbml: view });
+      const drift = [...view.drift].sort();
+      this.importDrift.set(path.resolve(filePath), drift);
+      for (const file of drift) log.warn(`[DomainService] ${filePath}: ${unimportedRelationshipsMessage(file)}`);
+      // D8: the diagram's own version, on the Unified shape only.
+      unified.schemaVersion = reading.schemaVersion;
+      return unified;
+    }
+
     // Empty / invalid JSON (SubjectAreaFileError), then validation and repair
     // (SubjectAreaValidationError, warnings) — shared with every other host.
     const { obj, format } = validateSubjectAreaDocument(parseSubjectAreaJson(raw, filePath), filePath);
+    return this.buildUnified(obj, format, filePath, path.basename(filePath, '.json'), options);
+  }
+
+  /**
+   * How many tables a diagram file shows — the length of its logical
+   * stage's `models` — without resolving a single table, for the Subject
+   * Areas tree's count: a JSON file validated as `getSubjectArea` validates
+   * it (name strings in v5 / v6, named objects in v4), a DBML diagram's
+   * members from its `use` lines (`subjectAreaMembersDbml`, no compile of
+   * the library). Throws when the file cannot be read, is not valid JSON or
+   * does not validate, or (DBML) has a syntax error.
+   */
+  countSubjectAreaTables(filePath: string): number {
+    return this.countSubjectAreaTablesInText(fs.readFileSync(filePath, 'utf-8'), filePath);
+  }
+
+  /** {@link countSubjectAreaTables} over a diagram's text (an open document's). */
+  countSubjectAreaTablesInText(raw: string, filePath: string): number {
+    if (subjectAreaStorageOf(filePath) === 'dbml') {
+      // A diagram just read (or just dragged) has its members remembered: no parse.
+      const members = rememberedDbmlMembers(raw, filePath) ?? subjectAreaMembersDbml(raw, filePath);
+      if (members === null) throw new SubjectAreaValidationError(`${filePath} has a DBML syntax error`);
+      return members.length;
+    }
+    const { obj, format } = validateSubjectAreaDocument(parseSubjectAreaJson(raw, filePath), filePath);
+    const logical = obj.logical;
+    if (!logical || typeof logical !== 'object' || Array.isArray(logical)) return 0;
+    const models = (logical as { models?: unknown }).models;
+    if (!Array.isArray(models)) return 0;
+    // As `parseStageData` reads them: one table per name (a missing one is a placeholder), or per named inline table.
+    return format === 'v5' || format === 'v6'
+      ? models.filter((m) => typeof m === 'string').length
+      : models.filter((m) => !!m && typeof m === 'object' && typeof (m as { name?: unknown }).name === 'string').length;
+  }
+
+  /**
+   * Read a `.dbml` diagram (§5.5), positions from its `erd_layout`,
+   * through core's `parseSubjectAreaDbml` (which throws `SubjectAreaFileError`
+   * / `SubjectAreaValidationError`). A table or relationships file passed as
+   * a diagram is refused with core's not-a-diagram message. Each member that
+   * resolves to a `.yml` is drawn with a warning (D20).
+   */
+  readDbmlSubjectArea(filePath: string, text?: string): DbmlSubjectAreaReading {
+    // A diagram is `<layer>/diagrams/<name>.dbml`: its semantic dir is three levels up.
+    const segments = filePath.split(/[\\/]/).filter((s) => s !== '');
+    if (classifySemanticFile(segments.slice(-3).join('/'), { tablesDirIsLayer: false }).kind !== 'diagram' || !filePath.endsWith('.dbml')) {
+      const semanticRoot = this.tableLibraryService ? path.dirname(this.tableLibraryService.getTablesDir()) : undefined;
+      throw new SubjectAreaValidationError(notADiagramMessage(filePath, semanticRoot));
+    }
+    const raw = text ?? fs.readFileSync(filePath, 'utf-8');
+    const reading = readDbmlDiagram(raw, filePath);
+    for (const warning of reading.warnings) log.warn(`[DomainService] ${filePath}: ${warning}`);
+    // Only a library that holds a YAML table can resolve a member to one.
+    if (this.tableLibraryService?.hasYamlTableFiles()) {
+      for (const name of new Set(reading.members)) {
+        if (this.tableLibraryService.tableStorage(name) === 'yaml') {
+          log.warn(
+            `[DomainService] Table "${name}" is a YAML table (${this.tableLibraryService.tableLibraryFile(name)}); the DBML diagram shows it, ` +
+            'but run ERD Studio: Convert Project to DBML before editing its relationships (fix the file first if Convert leaves it as it is)',
+          );
+        }
+      }
+    }
+    return reading;
+  }
+
+  /**
+   * The relationships files the last read of the DBML diagram `filePath`
+   * found holding a relationship between two of its tables that it does
+   * not import (so neither the canvas nor other DBML tools draw it), sorted;
+   * empty when there are none or it was never read.
+   */
+  relationshipsImportDrift(filePath: string): string[] {
+    return [...(this.importDrift.get(path.resolve(filePath)) ?? [])];
+  }
+
+  /** `buildUnifiedSubjectArea` with this host's library and layers. */
+  private buildUnified(
+    obj: Record<string, unknown>,
+    format: SubjectAreaFormat,
+    filePath: string,
+    domainNameFallback: string,
+    options: { dbtKeyIndex?: DbtKeyIndex; dbml?: DbmlDiagramView },
+  ): UnifiedSubjectArea {
+    // The diagram's own tables are read with only the relationships they own
+    // worked out (`readingTables`), not an attach over the whole library.
+    const library = this.tableLibraryService;
+    return library
+      ? library.readingTables(tableNamesOf(obj), () => this.buildUnifiedNow(obj, format, filePath, domainNameFallback, options))
+      : this.buildUnifiedNow(obj, format, filePath, domainNameFallback, options);
+  }
+
+  private buildUnifiedNow(
+    obj: Record<string, unknown>,
+    format: SubjectAreaFormat,
+    filePath: string,
+    domainNameFallback: string,
+    options: { dbtKeyIndex?: DbtKeyIndex; dbml?: DbmlDiagramView },
+  ): UnifiedSubjectArea {
+    const view = options.dbml;
+    const library = this.tableLibraryService;
+    const members = new Set(tableNamesOf(obj).map((n) => n.toLowerCase()));
     return buildUnifiedSubjectArea(obj, format, {
       filePath,
-      domainNameFallback: path.basename(filePath, '.json'),
-      parentDirName: path.basename(path.dirname(filePath)),
+      domainNameFallback,
+      // A DBML diagram's layer is the folder above `diagrams/`.
+      parentDirName: diagramPathOf(filePath)?.layer ?? path.basename(path.dirname(filePath)),
       layers: this.layerService,
-      getModel: this.tableLibraryService
-        ? (name) => this.tableLibraryService!.getTable(name)
+      getModel: library
+        ? (name) => {
+          if (!view) return library.getTable(name);
+          const model = this.dbmlMember(library, name, view);
+          return model ? this.importedRelationshipsOnly(library, model, view, members) : null;
+        }
         : undefined,
       getModelError: this.tableLibraryService
         ? (name) => {
@@ -243,13 +474,87 @@ export class SubjectAreaService {
               kind: error.kind,
               ...(error.line !== undefined ? { line: error.line } : {}),
               ...(error.mergeConflict ? { mergeConflict: true as const } : {}),
+              // A DBML table's error carries its code (and a Metadata block's target), as core's loader does.
+              ...(error.kind.startsWith('dbml') && error.code !== undefined && !error.mergeConflict ? { code: error.code } : {}),
+              ...(error.kind.startsWith('dbml') && error.target !== undefined ? { target: error.target } : {}),
             }
             : null;
         }
         : undefined,
-      warn: (message) => console.warn(`[DomainService] ${message}`),
+      warn: (message) => log.warn(`[DomainService] ${message}`),
       ...(options.dbtKeyIndex ? { dbtKeyIndex: options.dbtKeyIndex } : {}),
     });
+  }
+
+  /**
+   * A DBML diagram's member as core's loader reads it (§2.3): the table in
+   * the file its `use` line resolves to when that is a listed table file
+   * other than the one the library picks by name (a name in two layers),
+   * else the table by name. A member with no `use` line (D26,
+   * `erd_unlinked_tables`) is looked for only where core looks, since core
+   * cannot list folders: `<dir>/<name>.dbml` in each table folder the
+   * diagram's `use` lines name, then a YAML table by name. A `.dbml` table
+   * anywhere else is drawn missing, as core draws it, until the next edit
+   * gives it a `use` line.
+   */
+  private dbmlMember(library: TableLibraryService, name: string, view: DbmlDiagramView): SemanticTable | null {
+    const usePath = view.memberPaths.get(name.toLowerCase());
+    if (usePath === undefined) {
+      const listed = new Map(library.listTableFiles().map((e) => [path.resolve(e.filePath).toLowerCase(), e.filePath]));
+      for (const dir of view.useTableDirs) {
+        if (dir.startsWith('../')) continue;
+        const file = listed.get(path.resolve(library.semanticAbsolute(`${dir}/${name}.dbml`)).toLowerCase());
+        if (file === undefined) continue;
+        const byName = library.findTableFile(name);
+        return byName !== null && path.resolve(byName) === path.resolve(file) ? library.getTable(name) : library.getTableAt(file, name);
+      }
+      return library.tableStorage(name) === 'dbml' ? null : library.getTable(name);
+    }
+    if (!usePath.startsWith('../')) {
+      const file = library.semanticAbsolute(usePath);
+      const byName = library.findTableFile(name);
+      if (byName !== null && path.resolve(byName) !== path.resolve(file)
+        && library.listTableFiles().some((e) => path.resolve(e.filePath) === path.resolve(file))) {
+        return library.getTableAt(file, name);
+      }
+    }
+    return library.getTable(name);
+  }
+
+  /**
+   * `model` with only the relationships held in a file the DBML diagram
+   * imports, as core draws it (§2.3): a relationship no imported file holds
+   * a copy of is left out of the display (never out of the library, which
+   * edits read). Each file the shared import rule (`relationshipsImportsFor`)
+   * wants for it is recorded as drift for the canvas warning, since the next
+   * edit imports those: a live Ref between two `use` members (an unlinked
+   * one whose table has a .dbml file counts: that edit gives it a line), or
+   * a pending line (D27) between two tables the diagram draws (unlinked ones
+   * too). A
+   * YAML table's own relationships (held in no relationships file) are kept.
+   */
+  private importedRelationshipsOnly(
+    library: TableLibraryService,
+    model: SemanticTable,
+    view: DbmlDiagramView,
+    members: ReadonlySet<string>,
+  ): SemanticTable {
+    const relationships = model.relationships ?? [];
+    if (relationships.length === 0) return model;
+    const kept = relationships.filter((rel) => {
+      const holders = library.relationshipHolders(model.name, rel);
+      if (holders.length === 0 || holders.some((h) => view.imports.has(h.path))) return true;
+      const owner = model.name.toLowerCase();
+      const target = rel.toModel.toLowerCase();
+      if (members.has(owner) && members.has(target)) {
+        const linked = !view.unlinked.has(owner) && !view.unlinked.has(target);
+        for (const h of holders) if (h.pending || linked) view.drift.add(h.path);
+      }
+      return false;
+    });
+    if (kept.length === relationships.length) return model;
+    const { relationships: _all, ...rest } = model;
+    return kept.length > 0 ? { ...rest, relationships: kept } : rest;
   }
 
   /**
@@ -976,4 +1281,12 @@ export function mergeCompositeGroups(
     merged.set(model, existing);
   }
   return merged;
+}
+
+/** The table names a validated diagram object's logical stage lists (v5 / v6 name strings; none for v4's inline tables). */
+function tableNamesOf(obj: Record<string, unknown>): string[] {
+  const logical = obj.logical;
+  if (!logical || typeof logical !== 'object' || Array.isArray(logical)) return [];
+  const models = (logical as { models?: unknown }).models;
+  return Array.isArray(models) ? models.filter((m): m is string => typeof m === 'string') : [];
 }

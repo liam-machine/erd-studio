@@ -1,10 +1,8 @@
 /**
  * The base of every export's file name (`showcase` in `showcase.dbml` and
- * `showcase.dbdiagram`), in one place so a rich DBML export and its layout
- * file always share it — `dbdiagram push` finds the layout by that base.
+ * `showcase.mmd`).
  *
- * Internal to core — `diagramExportFileName` and `dbdiagramLayoutFileName`
- * are the public names.
+ * Internal to core — `diagramExportFileName` is the public name.
  */
 
 import type { DisplaySubjectArea } from './types/display.js';

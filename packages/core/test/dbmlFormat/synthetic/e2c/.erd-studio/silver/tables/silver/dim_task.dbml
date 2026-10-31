@@ -1,0 +1,14 @@
+Table silver.dim_task [
+  role: 'domain-dim',
+  grain: 'One row per task version',
+  rationale_purpose: 'Tracks individual tasks and their lifecycle',
+  rationale_design: 'SCD Type 2 on status to track historical state changes',
+  rationale_scd_strategy: 'task_key is unique per row; task_id repeats across the versions of one task, which is why it cannot be the primary key'
+] {
+  task_key INT [pk, note: 'Surrogate key — one per row, so one per version of the task', scd_type: '0']
+  task_id VARCHAR [note: 'Business key — repeats across the versions of one task', natural_key: 'true', scd_type: '0']
+  project_key INT [note: 'FK to dim_project', foreign_key: 'true']
+  name VARCHAR [note: 'Task name', scd_type: '1']
+  status STRING [note: 'Current lifecycle status', scd_type: '2']
+  Note: 'Task dimension tracking individual project tasks'
+}

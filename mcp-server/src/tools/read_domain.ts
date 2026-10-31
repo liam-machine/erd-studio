@@ -1,5 +1,4 @@
 import * as path from 'node:path';
-import * as fs from 'node:fs';
 import { z } from 'zod';
 import { buildServices } from '../services.js';
 import { isInitialized, NOT_INITIALIZED_TIP } from '../lib/setup.js';
@@ -9,7 +8,7 @@ export const read_domain = {
   config: {
     title: 'Read a domain (logical stage)',
     description:
-      'Read a full ERD domain by name + layer. Returns the logical stage: ' +
+      'Read a full ERD domain (diagram) by name + layer — a .dbml diagram, or a .json one in a project from before ERD Studio 2.0. Returns the logical stage: ' +
       'models with columns (data types, PK/FK/NK flags, SCD types), grain, model role, ' +
       'rationale, and the relationships drawn between them with cardinality. ' +
       'This is the design source-of-truth. For what dbt actually built, see list_manifest_models.',
@@ -22,7 +21,7 @@ export const read_domain = {
         .describe('Layer name (e.g. "silver", "gold").'),
       domain: z
         .string()
-        .describe('Domain slug (filename without .json).'),
+        .describe("The diagram's file name without .dbml or .json."),
     },
     annotations: {
       readOnlyHint: true,
@@ -44,10 +43,16 @@ export const read_domain = {
       throw new Error(NOT_INITIALIZED_TIP);
     }
 
-    const filePath = path.join(projectPath, semanticDir, layer, `${domain}.json`);
-    if (!fs.existsSync(filePath)) {
+    // Found through the listing, as the extension finds it: a `.dbml` diagram first, then a `.json` one.
+    const stemOf = (filePath: string): string => path.basename(filePath).replace(/\.(dbml|json)$/i, '');
+    const candidates = subjectAreaService.listSubjectAreas(projectPath, semanticDir)
+      .filter((s) => s.layer === layer && stemOf(s.filePath) === domain)
+      .sort((a, b) => (a.storage === 'dbml' ? 0 : 1) - (b.storage === 'dbml' ? 0 : 1));
+    const filePath = candidates[0]?.filePath;
+    if (!filePath) {
       throw new Error(
-        `Domain not found: ${layer}/${domain}.json. Use list_domains to see what's available, or call get_editor_setup if you haven't created any ERDs yet.`,
+        `Domain not found: ${layer}/${domain} (looked for ${domain}.dbml and ${domain}.json, the diagram's file name without .dbml or .json). `
+          + "Use list_domains to see what's available, or call get_editor_setup if you haven't created any ERDs yet.",
       );
     }
 
@@ -62,6 +67,7 @@ export const read_domain = {
             {
               domain: stage.domain,
               layer: stage.layer,
+              file_format: candidates[0].storage ?? 'json',
               stage: stage.stage,
               description: stage.description ?? null,
               model_folder: stage.modelFolder ?? null,

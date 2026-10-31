@@ -68,6 +68,86 @@ export const DBML_RICH_META_JSON_PROPERTY = 'meta_json';
 export const DBML_RICH_PLACEHOLDER_COLUMN = '_erd_no_columns';
 export const DBML_RICH_PLACEHOLDER_PROPERTY = 'erd_placeholder';
 
+/**
+ * The note on the placeholder column: shared by the rich export and native
+ * DBML storage, which both give a table with no columns that one column.
+ */
+export const DBML_STORAGE_PLACEHOLDER_NOTE = 'ERD Studio: this table has no columns yet, and DBML needs one';
+
+/**
+ * The first line of ERD Studio's rich export starts with this
+ * (`DBML_RICH_EXPORT_HEADER` is the whole line). A `.dbml` in a layer folder
+ * whose first line starts with it is an export someone saved there, not a
+ * diagram (`classifySemanticFile`).
+ */
+export const ERD_STUDIO_DBML_HEADER_PREFIX = '// erd-studio dbml-export';
+
+// ---------------------------------------------------------------------------
+// Native DBML storage (ERD Studio 2.0)
+// ---------------------------------------------------------------------------
+
+/**
+ * A DBML diagram's Project keys (native DBML storage). Every value is a
+ * quoted string: Project custom keys must be quoted in every DBML parser.
+ */
+export const DBML_DIAGRAM_PROPERTIES = Object.freeze({
+  /** The diagram's schema version, `'7'` (`DBML_SCHEMA_VERSION`); 7 when missing. */
+  schemaVersion: 'erd_schema_version',
+  modelFolder: 'erd_model_folder',
+  /** `viewConfig.showFkEdges`: `'true'` / `'false'`. */
+  showFkEdges: 'erd_show_fk_edges',
+  /** `viewConfig.layoutOptions`, as JSON of the `Record<string, string>`. */
+  layoutOptions: 'erd_layout_options',
+  /** `stubColumns`, as a JSON array of strings. */
+  stubColumns: 'erd_stub_columns',
+  /**
+   * Diagram members that have no `.dbml` table file to `use` (no table file
+   * at all, or a table still stored as YAML), as one comma-separated string
+   * in member order: `'gld_fct_risk_child, gld_fct_risk_parent'`. Read by
+   * name like any member; never written empty (the key is dropped). DBML
+   * Project keys take no lists ([3006]), hence the one string (D26).
+   */
+  unlinkedTables: 'erd_unlinked_tables',
+  /**
+   * Table positions and sticky-note boxes, one line each in one
+   * triple-quoted string, always the Project's last key (`erdLayout.ts`).
+   * The first entry of the key (any case) is read and written.
+   */
+  layout: 'erd_layout',
+} as const);
+
+/** The names an `erd_unlinked_tables` value lists: split on commas, trimmed, empty parts dropped, in order. */
+export function parseUnlinkedTables(value: string): string[] {
+  return value.split(',').map((part) => part.trim()).filter((part) => part !== '');
+}
+
+/** The `erd_unlinked_tables` value for `names` (in order). */
+export function formatUnlinkedTables(names: readonly string[]): string {
+  return names.join(', ');
+}
+
+/**
+ * The start of a pending relationship (D27): a whole-line comment holding a
+ * Ref ERD Studio keeps and draws but cannot write as a live Ref yet, because
+ * an end has no `.dbml` table file (or no such column). In a relationships
+ * file it belongs to its foreign-key table like a live Ref; in a diagram file
+ * it is one of the diagram's own relationships (its foreign-key table has no
+ * table file). Other DBML tools see only a comment.
+ */
+export const DBML_PENDING_REF_PREFIX = '// erd-studio pending: ';
+
+/** A pending relationship line: its Ref text after the marker (group 1). Case-insensitive, any indent. */
+export const DBML_PENDING_REF_PATTERN = /^[ \t]*\/\/[ \t]*erd-studio pending:[ \t]*(\S.*?)[ \t]*$/i;
+
+/** The pending line for a Ref line (`Ref: a.x >? b.y` → `// erd-studio pending: Ref: a.x >? b.y`). */
+export function pendingRefLine(refLine: string): string {
+  return `${DBML_PENDING_REF_PREFIX}${refLine}`;
+}
+
+/** The first line of a relationships file, written only when the writer creates it and never required on read. */
+export const DBML_RELATIONSHIPS_FILE_HEADER =
+  '// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.';
+
 /** The property for one rationale key: `scdStrategy` → `rationale_scd_strategy`. */
 export function rationaleProperty(key: keyof Rationale): string {
   return DBML_RICH_RATIONALE_PREFIX + key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);

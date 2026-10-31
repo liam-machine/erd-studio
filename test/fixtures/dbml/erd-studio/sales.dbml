@@ -1,9 +1,16 @@
 // erd-studio dbml-export v2 (DBML 9.1+)
-// Canvas layout: sales.dbdiagram, next to this file (dbdiagram push reads it).
 // A ? next to a Ref's operator: the end across from it may be null. ERD Studio does not record nullability.
 
 Project sales {
   Note: 'Orders and the customers who place them'
+  erd_layout: '''
+    dim_customer 0 0
+    dim_date 800 -60
+    dim_passport -320 40.5
+    empty_stub 900 500
+    fct_order 400 120
+    fct_shipment 400 520
+  '''
 }
 
 Table gold.fct_order [

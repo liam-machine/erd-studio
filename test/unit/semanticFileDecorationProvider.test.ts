@@ -17,13 +17,13 @@ describe('SemanticFileDecorationProvider (H30 semanticDir)', () => {
   it('decorates domain files under the default .erd-studio directory', () => {
     const provider = new SemanticFileDecorationProvider(fakeLayerService());
     const deco = provider.provideFileDecoration(uri('/proj/.erd-studio/silver/customer.json'));
-    expect(deco?.tooltip).toBe('Silver subject area (opens in visual editor)');
+    expect(deco?.tooltip).toBe('Silver diagram (opens on the canvas)');
   });
 
   it('decorates domain files under a custom semanticDir', () => {
     const provider = new SemanticFileDecorationProvider(fakeLayerService(), '.erd');
     const deco = provider.provideFileDecoration(uri('/proj/.erd/silver/customer.json'));
-    expect(deco?.tooltip).toBe('Silver subject area (opens in visual editor)');
+    expect(deco?.tooltip).toBe('Silver diagram (opens on the canvas)');
 
     const folder = provider.provideFileDecoration(uri('/proj/.erd/silver'));
     expect(folder?.tooltip).toBe('Silver layer');
@@ -32,7 +32,7 @@ describe('SemanticFileDecorationProvider (H30 semanticDir)', () => {
   it('supports a nested semanticDir and tolerates ./ and trailing slashes', () => {
     const provider = new SemanticFileDecorationProvider(fakeLayerService(), './docs/erd/');
     const deco = provider.provideFileDecoration(uri('/proj/docs/erd/silver/customer.json'));
-    expect(deco?.tooltip).toBe('Silver subject area (opens in visual editor)');
+    expect(deco?.tooltip).toBe('Silver diagram (opens on the canvas)');
   });
 
   it('does not decorate the default directory when a custom semanticDir is configured', () => {
@@ -45,5 +45,29 @@ describe('SemanticFileDecorationProvider (H30 semanticDir)', () => {
     expect(provider.provideFileDecoration(uri('/proj/models/silver/customer.json'))).toBeUndefined();
     expect(provider.provideFileDecoration(uri('/proj/.erd-studio/unknown/customer.json'))).toBeUndefined();
     expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/customer.yml'))).toBeUndefined();
+  });
+
+  it('decorates a .dbml diagram (<layer>/diagrams/), but never a table, relationships, layout or 1.9 file', () => {
+    const provider = new SemanticFileDecorationProvider(fakeLayerService());
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/diagrams/customer.dbml'))?.tooltip)
+      .toBe('Silver diagram (opens on the canvas)');
+    // The layer is the first segment: an unknown layer is not decorated.
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/gold/diagrams/customer.dbml'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/tables/silver/customer.dbml'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/relationships/silver.dbml'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/Diagrams/customer.dbml'))).toBeUndefined();
+    // The 1.9 pre-release tree.
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/customer.dbml'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/customer.dbdiagram'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/silver/_relationships.dbml'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/tables/silver.dbml'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/tables/silver/customer.dbml'))).toBeUndefined();
+    expect(provider.provideFileDecoration(uri('/proj/.erd-studio/tables/silver/_relationships.dbml'))).toBeUndefined();
+  });
+
+  it('decorates a .dbml diagram under a custom semanticDir', () => {
+    const provider = new SemanticFileDecorationProvider(fakeLayerService(), '.erd');
+    expect(provider.provideFileDecoration(uri('/proj/.erd/silver/diagrams/customer.dbml'))?.tooltip)
+      .toBe('Silver diagram (opens on the canvas)');
   });
 });

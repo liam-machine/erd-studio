@@ -150,6 +150,25 @@ describe('migrateToTableNaming (#182)', () => {
     expect(order).toEqual(['hold', 'apply', 'release', 'redraw']);
   });
 
+  it('announces the files it moves and rewrites to the own-write tracker while the edit and its saves run, and settles them after', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(MIGRATE_NAMING_BUTTON as never);
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const d = deps();
+    const plan = planProjectNamingMigration(d);
+    const touched = [...plan.moves.flatMap((m) => [m.from, m.to]), ...plan.rewrites.map((r) => r.path)]
+      .map((rel) => path.join(erd, ...rel.split('/')));
+    expect(touched.length).toBeGreaterThan(0);
+    let pendingDuringApply: boolean[] = [];
+    const apply = vscode.workspace.applyEdit;
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      pendingDuringApply = touched.map((p) => ownWrites.isPending(p));
+      return apply(edit);
+    });
+    expect(await migrateToTableNaming(d)).toBe('migrated');
+    expect(pendingDuringApply.every(Boolean)).toBe(true);
+    expect(touched.some((p) => ownWrites.isPending(p))).toBe(false);
+  });
+
   it('writes nothing when the dialog is cancelled', async () => {
     const before = snapshot();
     vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
@@ -165,6 +184,20 @@ describe('migrateToTableNaming (#182)', () => {
     expect(await migrateToTableNaming(deps())).toBe('failed');
     expect(snapshot()).toEqual(before);
     expect(fs.existsSync(path.join(erd, 'tables'))).toBe(false);
+  });
+
+  it('puts back what landed when VS Code applies only part of the edit (applyFileWrites reconciles)', async () => {
+    const before = snapshot();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(MIGRATE_NAMING_BUTTON as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    // The first three operations land (a rewrite and two file operations), then one fails; the reconcile runs normally.
+    vscode._mockWorkspaceState.applyEditPrefixes.push(3, 'ok');
+    expect(await migrateToTableNaming(deps())).toBe('failed');
+    expect(vscode._appliedEdits).toHaveLength(2);
+    // Nothing is left half-moved: every file is back, and no empty tables/ is left to read as a layer.
+    expect(snapshot()).toEqual(before);
+    expect(fs.existsSync(path.join(erd, 'tables'))).toBe(false);
+    expect(error.mock.calls[0][0]).toMatch(/didn't accept the file moves, so nothing was changed/);
   });
 
   it('refuses, saying why, a project with a layer called tables', async () => {

@@ -45,6 +45,7 @@ vi.mock('@xyflow/react', () => ({
     getNode: vi.fn(),
   }),
   useStore: () => 1, // zoom level
+  useNodesInitialized: () => true, // useRevealRelationship
 }));
 
 vi.mock('../../webview/components/Toolbar/StageTabs', () => ({
@@ -104,7 +105,7 @@ vi.mock('../../webview/store/editorStore', () => ({
 // Fixtures
 // ---------------------------------------------------------------------------
 
-import { Toolbar } from '../../webview/components/Toolbar/Toolbar';
+import { Toolbar, NO_TABLES_FOR_RELATIONSHIP } from '../../webview/components/Toolbar/Toolbar';
 import type { TableFlowNode, FkFlowEdge } from '@erd-studio/renderer/editor';
 
 function makeNode(id: string): TableFlowNode {
@@ -321,7 +322,7 @@ describe('the top-right corner actions', () => {
     render(<Toolbar {...defaultProps} />);
 
     expect(screen.getByRole('button', { name: /send feedback/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /open underlying json file/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /open the diagram's file in a text editor/i })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /more actions/i })).toBeNull();
   });
 
@@ -386,7 +387,7 @@ describe('the top-right corner actions', () => {
     expect(trigger().getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('menuitem', { name: /Export as Mermaid or DBML/ })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /Send feedback/ })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /Open as JSON file/ })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /Open file/ })).toBeTruthy();
   });
 
   it('posts exportDiagram (no payload) from the labelled button', () => {
@@ -482,5 +483,44 @@ describe('the top-right corner actions', () => {
 
     expect(screen.queryByRole('menu')).toBeNull();
     expect(screen.getByRole('button', { name: /send feedback/i })).toBeTruthy();
+  });
+});
+
+describe('+ Add → New Relationship', () => {
+  const openAddMenu = () => fireEvent.click(screen.getByRole('button', { name: /add table or relationship/i }));
+  const newRelationship = () => screen.getByRole('menuitem', { name: 'New Relationship' }) as HTMLButtonElement;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    mockStoreState.domain = mockSubjectArea;
+    mockStoreState.setNewFkDialogOpen = noop;
+  });
+
+  it('opens the dialog on a diagram with tables', () => {
+    const setNewFkDialogOpen = vi.fn();
+    mockStoreState.setNewFkDialogOpen = setNewFkDialogOpen;
+    render(<Toolbar {...defaultProps} />);
+    openAddMenu();
+    expect(newRelationship().disabled).toBe(false);
+    expect(newRelationship().getAttribute('title')).toBeNull();
+    fireEvent.click(newRelationship());
+    expect(setNewFkDialogOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('is disabled, saying why, on a diagram with no tables', () => {
+    const setNewFkDialogOpen = vi.fn();
+    mockStoreState.setNewFkDialogOpen = setNewFkDialogOpen;
+    mockStoreState.domain = { ...mockSubjectArea, models: [] };
+    render(<Toolbar {...defaultProps} nodes={[]} />);
+    openAddMenu();
+    expect(newRelationship().disabled).toBe(true);
+    expect(newRelationship().getAttribute('title')).toBe(NO_TABLES_FOR_RELATIONSHIP);
+    expect(NO_TABLES_FOR_RELATIONSHIP).toMatch(/diagram/);
+    expect(NO_TABLES_FOR_RELATIONSHIP).not.toMatch(/\b(models?|domains?|subject areas?)\b/i);
+    fireEvent.click(newRelationship());
+    expect(setNewFkDialogOpen).not.toHaveBeenCalled();
   });
 });

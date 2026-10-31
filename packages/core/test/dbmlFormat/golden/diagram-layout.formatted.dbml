@@ -1,0 +1,19 @@
+// A diagram as a hand edit leaves it: use lines out of line, a Note, and the Project last
+// with erd_layout's lines indented every which way.
+use { table silver.fct_order }    from '../tables/silver/fct_order.dbml'
+use { table silver.dim_customer } from '../tables/silver/dim_customer.dbml'
+use * from '../relationships/silver.dbml'
+
+Note "n-1" [color: #f59e0b] {
+  'Check the grain'
+}
+
+Project sales {
+  Note: 'Sales'
+  erd_schema_version: '7'
+  erd_layout: '''
+    dim_customer 40 60
+         fct_order 400.5 -20
+    note/n-1 720 40 220 120
+  '''
+}

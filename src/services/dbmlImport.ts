@@ -2,7 +2,7 @@
  * Import DBML — turn a DBML file (ERD Studio's own rich export, or one from
  * dbdiagram.io or any other tool) into a NEW logical subject area: the table
  * files the library does not have yet, the subject area document, its
- * relationships and, when a `.dbdiagram` layout sits next to the file, the
+ * relationships and, from the file's own `erd_layout` when it has one, the
  * canvas positions and sticky notes. The reading half is
  * `src/services/dbmlImportParse.ts`; the command writes what this plans the
  * way Draw from dbt writes a draft (`saveTable`, the subject area file created
@@ -26,6 +26,7 @@
  * | column `note` | column description |
  * | `Ref`, and `[ref: …]` on a column | a relationship stored from its FK (many) side — of a one-to-one, the column that declared it, else the second end as DBML reads it; a composite one is one entry per column pair sharing `compositeKey`, imported whole or not at all; the ref's name is its role; `?` (optional) is not kept |
  * | `Note name [color]` and its layout | an annotation; `linked_table` links it to a table (in ERD Studio's own export, even one not in the diagram, as the diagram had it) |
+ * | the Project's `erd_layout` | table positions (by name: the DBML name, then the imported one, then ignoring case) and sticky-note boxes (by Note name) |
  * | the placeholder column (`erd_placeholder`) | dropped: the table has no columns |
  *
  * What DBML can say and ERD Studio has no field for is kept under the
@@ -63,6 +64,7 @@
  */
 
 import {
+  DBML_DIAGRAM_PROPERTIES,
   DBML_RICH_COLUMN_PROPERTIES,
   DBML_RICH_META_JSON_PROPERTY,
   DBML_RICH_META_PREFIX,
@@ -113,14 +115,16 @@ export const DBML_IMPORT_DEFAULT_NAME = 'dbml-import';
 // ---------------------------------------------------------------------------
 
 /**
- * Table positions and sticky-note layouts from the `.dbdiagram` file next to
- * the DBML: the result of `readDbdiagramLayout` in `@erd-studio/core`
- * (structurally the same type). `schemaName` is as the file writes it;
- * `'public'` means no schema.
+ * Table positions and sticky-note boxes from the file's own `erd_layout`
+ * (its Project's last key, as ERD Studio's rich export and its stored
+ * diagrams write it): what `readErdLayoutDbml` in `@erd-studio/core/dbml`
+ * reads, structurally the same. Positions are keyed by table name, with no
+ * schema; a sticky note's `id` is its Note's name.
  */
 export interface DbmlImportLayout {
-  tables: ReadonlyArray<{ name: string; schemaName: string; x: number; y: number }>;
-  stickies: ReadonlyArray<{ name: string; x: number; y: number; width?: number; height?: number }>;
+  positions: Readonly<Record<string, { x: number; y: number }>>;
+  stickies: ReadonlyArray<{ id: string; x: number; y: number; width?: number; height?: number }>;
+  /** Sentences for what in `erd_layout` could not be read. */
   problems?: readonly string[];
 }
 
@@ -134,7 +138,7 @@ export interface DbmlImportLibrary {
 
 export interface PlanDbmlImportInput {
   model: DbmlModel;
-  /** The sibling `.dbdiagram` layout, when there is one. */
+  /** The file's `erd_layout`, when it has one. */
   layout?: DbmlImportLayout;
   /** The layer id the subject area goes in. */
   layer: string;
@@ -153,6 +157,13 @@ export interface PlanDbmlImportInput {
   libraryRelationships: boolean;
   /** `drawnDiagramCopies(...)` of the project's other diagrams: a link one keeps a copy of stays in this file (see `routeToLibrary`). */
   diagramCopies?: readonly Relationship[];
+  /**
+   * The new diagram can hold no relationships (a `.dbml` diagram, D5): a
+   * relationship the library cannot take (its foreign-key table's file could
+   * not be read) is left out and named in `report.dropped`, never kept in
+   * the document or counted. Needs `libraryRelationships`.
+   */
+  diagramHoldsNoRelationships?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +252,7 @@ export interface DbmlImportReport {
   positioned: number;
   unpositioned: number;
   stickyNotes: number;
-  /** Whether a layout file was read, and what in it could not be. */
+  /** Whether the file had an `erd_layout`, and what in it could not be read. */
   layoutRead: boolean;
   layoutProblems: string[];
 }
@@ -490,6 +501,22 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
     relationships = relationships.filter((r) => !left.has(r));
     const routed = routeToLibrary(relationships.filter((r) => !keptHere.has(r)), newTables, libraryCopy, input.diagramCopies ?? []);
     const kept = new Set([...keptHere, ...routed.kept]);
+    if (input.diagramHoldsNoRelationships && kept.size > 0) {
+      // Nowhere to store them: named, not counted (the S5 rule for a DBML diagram).
+      const unstored = relationships.filter((r) => kept.has(r));
+      const groups = compositeGroupsOf(unstored);
+      const grouped = new Set(groups.flat());
+      const why = "not stored, because its table's file could not be read.";
+      for (const members of groups) {
+        const what = describeComposite(members);
+        report.dropped.push({ kind: 'reference', what, item: what.replace(/^Reference /, ''), why });
+      }
+      for (const rel of unstored.filter((r) => !grouped.has(r))) {
+        report.dropped.push({ kind: 'reference', what: `Reference ${describeLink(rel)}`, item: describeLink(rel), why });
+      }
+      relationships = relationships.filter((r) => !kept.has(r));
+      kept.clear();
+    }
     domainRelationships = relationships.filter((r) => kept.has(r));
     changedLibraryTables = routed.changed.filter((m) => !newTables.includes(m));
     report.relationshipsAlreadyInLibrary = relationships.filter((r) => !kept.has(r) && stored.has(r)).length;
@@ -1162,13 +1189,16 @@ const STICKY_ABOVE = 200;
 function planViewConfig(model: DbmlModel, planned: readonly PlannedTable[], layout: DbmlImportLayout | undefined, ctx: Context): ViewConfig {
   const viewConfig: ViewConfig = {};
   const positions: Record<string, NodePosition> = {};
-  const schemaOf = (s: string | null): string => (s === null || s === '' ? 'public' : s);
+  const placed = layout?.positions ?? {};
+  // Own entries only: a table may be called `constructor` or `toString`.
+  const own = (name: string): { x: number; y: number } | undefined => (Object.hasOwn(placed, name) ? placed[name] : undefined);
+  const anyCase = (name: string): { x: number; y: number } | undefined => {
+    const key = Object.keys(placed).find((k) => normaliseName(k) === normaliseName(name));
+    return key === undefined ? undefined : placed[key];
+  };
   for (const p of planned) {
-    const schema = schemaOf(p.dbml.schema);
-    const tables = layout?.tables ?? [];
-    const at = tables.find((t) => t.name === p.dbml.name && schemaOf(t.schemaName) === schema)
-      ?? tables.find((t) => normaliseName(t.name) === normaliseName(p.dbml.name) && normaliseName(schemaOf(t.schemaName)) === normaliseName(schema));
-    // Own entries only: a table may be called `constructor` or `toString`.
+    // The name as the file writes it, then the name it is imported as, then either ignoring case.
+    const at = own(p.dbml.name) ?? own(p.name) ?? anyCase(p.dbml.name) ?? anyCase(p.name);
     if (at && finite(at.x) && finite(at.y) && !Object.hasOwn(positions, p.name)) {
       positions[p.name] = { x: at.x, y: at.y };
       ctx.report.positioned++;
@@ -1198,7 +1228,7 @@ function planAnnotations(
   return model.notes.map((note) => {
     const id = freeName(`dbml-${sanitiseDbmlColumnName(note.name)}`, ids);
     const stickies = layout?.stickies ?? [];
-    const at = stickies.find((s) => s.name === note.name) ?? stickies.find((s) => normaliseName(s.name) === normaliseName(note.name));
+    const at = stickies.find((s) => s.id === note.name) ?? stickies.find((s) => normaliseName(s.id) === normaliseName(note.name));
     const annotation: Annotation = at && finite(at.x) && finite(at.y)
       ? { id, text: note.content, x: at.x, y: at.y }
       : { id, text: note.content, x: originX + STICKY_GAP * unplaced++, y: originY };
@@ -1260,6 +1290,8 @@ function reportFileExtras(model: DbmlModel, layer: string, ctx: Context): void {
     });
   }
   for (const [key, value] of Object.entries(model.project?.properties ?? {})) {
+    // The positions: read into the layout, not left out.
+    if (key.toLowerCase() === DBML_DIAGRAM_PROPERTIES.layout) continue;
     dropped.push(key === 'database_type'
       ? { kind: 'database-type', what: `The database type (${value})`, item: value, why: 'ERD Studio does not record the database type.' }
       : { kind: 'project-setting', what: `Project setting ${key} (${value})`, item: key, why: 'ERD Studio subject areas have no project settings.' });
@@ -1304,12 +1336,28 @@ function someOf(names: readonly string[], shown = 4): string {
   return names.length > shown ? `${head} and ${names.length - shown} more` : head;
 }
 
+/** What {@link describeDbmlImportPlan} needs to know beyond the plan. */
+export interface DescribeDbmlImportOptions {
+  /** The layer as the user sees it (default: its id). */
+  layerLabel?: string;
+  /**
+   * A project that stores DBML: where its relationships are written, as the
+   * user sees the paths (`gold/relationships/gold.dbml`). Absent for a
+   * YAML project, whose relationships go in the tables' own files. Either
+   * way the layout goes in the diagram file (a DBML diagram's `erd_layout`).
+   * `respelledSchemas`: new tables whose schema is written as the layer's
+   * existing folder spells it (§1.2 One spelling), or, with `newFolder`, as
+   * another table of the file spells the folder this import creates.
+   */
+  dbml?: { relationshipsFiles: readonly string[]; respelledSchemas?: ReadonlyArray<{ table: string; from: string; to: string; newFolder?: boolean }> };
+}
+
 /**
  * The dry-run summary the command shows before writing: what is created,
  * what is reused, where the relationships go, the layout, and what was
  * renamed or left out. Plain text, one point per line.
  */
-export function describeDbmlImportPlan(plan: DbmlImportPlan, options: { layerLabel?: string; layoutFileName?: string } = {}): string {
+export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): string {
   const { report } = plan;
   const lines: string[] = [];
   const layer = options.layerLabel ?? plan.layer;
@@ -1321,32 +1369,49 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: { layerLab
       + (differ > 0 ? ` ${plural(differ, 'of them has', 'of them have')} columns the file has and the library does not; those are not added.` : ''));
   }
   if (report.relationships > 0) {
+    // A DBML project writes them to the library's relationships files, a YAML one to the tables' own files.
+    const home = options.dbml
+      ? (options.dbml.relationshipsFiles.length > 0 ? someOf(options.dbml.relationshipsFiles, 3) : 'the Table Library\'s relationships files')
+      : 'the tables\' files';
     const where = report.relationshipsInLibrary > 0
-      // "All saved in the tables' files" only when every one is: links the
-      // library already stores are counted in `relationships` but not written.
+      // "All saved in …" only when every one is: links the library already
+      // stores are counted in `relationships` but not written.
       ? (report.relationshipsInLibrary === report.relationships
-        ? ' saved in the tables\' files'
-        : ` (${report.relationshipsInLibrary} saved in the tables' files)`)
+        ? ` saved in ${home}`
+        : ` (${report.relationshipsInLibrary} saved in ${home})`)
       : '';
     const already = report.relationshipsAlreadyInLibrary > 0
       ? ` ${plural(report.relationshipsAlreadyInLibrary, 'is', 'are')} already in your Table Library and kept as it has them.`
       : '';
     lines.push(`• ${plural(report.relationships, 'relationship')}${where}.${already}`);
   }
+  // One spelling per schema folder: a file's `Table Sales.x` joins the layer's `sales/` as `Table sales.x`.
+  const respelled = new Map<string, { to: string; tables: string[]; newFolder: boolean }>();
+  for (const r of options.dbml?.respelledSchemas ?? []) {
+    const key = `${r.from}\u0000${r.to}`;
+    respelled.set(key, { to: r.to, tables: [...(respelled.get(key)?.tables ?? []), r.table], newFolder: r.newFolder === true });
+  }
+  for (const [key, { to, tables, newFolder }] of respelled) {
+    const why = newFolder ? 'as another table in this file spells it (one folder per schema)' : `as the layer's existing ${to}/ folder spells it`;
+    lines.push(`• Schema ${key.split('\u0000')[0]} is written ${to}, ${why}: ${someOf(tables)}.`);
+  }
   if (report.optionalRefs > 0 && !report.erdStudioExport) {
     lines.push(`• ${plural(report.optionalRefs, 'reference is', 'references are')} optional (?). ERD Studio doesn't record that, so they are imported as plain relationships.`);
   }
-  const layoutName = options.layoutFileName ?? 'the layout file';
+  // Opening it lays it out and saves that layout, as for any new diagram: in a DBML project, in the diagram file's erd_layout.
+  const laidOut = options.dbml
+    ? 'the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.'
+    : 'the diagram is laid out automatically when it opens.';
   if (!report.layoutRead) {
-    lines.push('• No layout file: the diagram is laid out automatically when it opens.');
+    lines.push(`• No erd_layout in the file: ${laidOut}`);
   } else if (report.positioned === 0) {
-    lines.push(`• ${layoutName} has no positions for these tables: the diagram is laid out automatically when it opens.`);
+    lines.push(`• The file's erd_layout has no positions for these tables: ${laidOut}`);
   } else if (report.unpositioned > 0) {
-    lines.push(`• Layout: ${report.positioned} of ${plan.modelNames.length} tables placed from ${layoutName}; the rest are placed when it opens.`);
+    lines.push(`• Layout: ${report.positioned} of ${plan.modelNames.length} tables placed from the file's erd_layout; the rest are placed when it opens.`);
   } else {
-    lines.push(`• Layout: every table placed from ${layoutName}.`);
+    lines.push(`• Layout: every table placed from the file's erd_layout.`);
   }
-  for (const problem of report.layoutProblems) lines.push(`• ${layoutName}: ${problem}`);
+  for (const problem of report.layoutProblems) lines.push(`• ${problem}.`);
   if (report.stickyNotes > 0) lines.push(`• ${plural(report.stickyNotes, 'sticky note')}.`);
   if (report.keptInMeta > 0) {
     lines.push(`• DBML settings ERD Studio has no field for (not null, defaults, indexes, …) are kept in the meta of ${plural(report.keptInMeta, 'table or column', 'tables and columns')}, under "${DBML_META_KEY}".`);

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
  * The New Relationship dialog says which side holds the foreign key and why,
- * asks when nothing says, and offers to mark the "one" side's key (#133 L1).
+ * asks which way it points when nothing says, and offers to mark the "one"
+ * side's key — ticked once the user has answered (#133 L1).
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, render, screen, fireEvent } from '@testing-library/react';
@@ -42,19 +43,18 @@ describe('NewFkDialog — which side holds the foreign key (#133 L1)', () => {
 
   it('with no evidence, asks with two choices named after the models, no default, and Create disabled until one is picked', () => {
     open(bare, drag);
-    expect(screen.getByText('Which side holds the foreign key?')).toBeTruthy();
+    expect(screen.getByText('Which way does this relationship point?')).toBeTruthy();
     const radios = screen.getAllByRole('radio') as HTMLInputElement[];
     expect(radios.map((r) => r.checked)).toEqual([false, false]);
     expect(screen.getByText('Each dim_customer row points at one fct_order')).toBeTruthy();
     expect(screen.getByText('Each fct_order row points at one dim_customer')).toBeTruthy();
-    expect(screen.getByText(/ERD Studio has no key or dbt test to tell/)).toBeTruthy();
+    expect(screen.getByText(/neither table marks these columns as its key, and dbt has no test to tell/)).toBeTruthy();
     expect(create().disabled).toBe(true);
 
     fireEvent.click(screen.getByText('Each fct_order row points at one dim_customer'));
     expect(create().disabled).toBe(false);
     fireEvent.click(create());
     expect(sent()).toEqual([expect.objectContaining({ fromModel: 'fct_order', toModel: 'dim_customer', cardinality: 'many-to-one' })]);
-    expect(sent()[0]).not.toHaveProperty('markKey');
   });
 
   it('says what decided it: the key flags', () => {
@@ -86,14 +86,28 @@ describe('NewFkDialog — which side holds the foreign key (#133 L1)', () => {
     expect(sent()).toEqual([expect.objectContaining({ fromModel: 'fct_order', markKey: { model: 'dim_customer', columns: ['customer_id'] } })]);
   });
 
-  it('leaves the box unticked after a pick with no evidence, and sends no key unless ticked', () => {
+  it('ticks the box once the user answers which way it points, so the next drag onto that table is not asked', () => {
     open(bare, drag);
+    expect(screen.queryByRole('checkbox')).toBeNull();
     fireEvent.click(screen.getByText('Each fct_order row points at one dim_customer'));
     const box = screen.getByRole('checkbox') as HTMLInputElement;
-    expect(box.checked).toBe(false);
-    fireEvent.click(box);
+    expect(box.checked).toBe(true);
+    expect(screen.getByText("Mark dim_customer.customer_id as dim_customer's primary key")).toBeTruthy();
     fireEvent.click(create());
     expect(sent()[0].markKey).toEqual({ model: 'dim_customer', columns: ['customer_id'] });
+  });
+
+  it('follows the answer when it changes, and sends no key once unticked', () => {
+    open(bare, drag);
+    fireEvent.click(screen.getByText('Each fct_order row points at one dim_customer'));
+    fireEvent.click(screen.getByText('Each dim_customer row points at one fct_order'));
+    const box = screen.getByRole('checkbox') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(screen.getByText("Mark fct_order.customer_id as fct_order's primary key")).toBeTruthy();
+    fireEvent.click(box);
+    fireEvent.click(create());
+    expect(sent()[0]).toEqual(expect.objectContaining({ fromModel: 'dim_customer', toModel: 'fct_order' }));
+    expect(sent()[0]).not.toHaveProperty('markKey');
   });
 });
 

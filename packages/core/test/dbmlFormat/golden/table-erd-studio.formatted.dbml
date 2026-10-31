@@ -1,0 +1,22 @@
+Table fct_task_event [
+  schema: 'silver',
+  role: 'transaction-fact',
+  grain: 'One row per task event',
+  rationale_purpose: 'Central fact table tracking all task activity for reporting and analysis',
+  rationale_design: 'Transaction grain with surrogate foreign keys to all relevant dimensions',
+  rationale_measures: 'duration_hours (additive), amount (additive)'
+] {
+  event_id       INT     [
+    pk,
+    note: 'Event id from the source system — a degenerate dimension, and this fact\'s own key',
+    natural_key: 'true'
+  ]
+  task_key       INT     [note: 'FK to dim_task', foreign_key: 'true']
+  project_key    INT     [note: 'FK to dim_project', foreign_key: 'true']
+  customer_key   INT     [note: 'FK to dim_customer', foreign_key: 'true']
+  event_date     DATE    [note: 'Date the event occurred']
+  event_type     VARCHAR [note: 'Type of task event (started, completed, blocked)']
+  amount         DECIMAL [note: 'Cost or value of the event', additive_type: 'additive']
+  duration_hours DECIMAL [note: 'Hours spent on this event', additive_type: 'additive']
+  Note: 'Records every task event across all projects and tasks'
+}

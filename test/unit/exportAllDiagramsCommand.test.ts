@@ -99,21 +99,12 @@ const SUMMARIES: SubjectAreaSummary[] = [
   { domain: 'sales', layer: 'gold', filePath: '/project/.erd-studio/gold/sales.json' },
 ];
 
-const file = (domainPath: string, fileName: string, kind: ExportedFile['kind'] = 'diagram'): ExportedFile =>
-  ({ domainPath, kind, fileName, content: `${fileName} text\n` });
+const file = (domainPath: string, fileName: string): ExportedFile =>
+  ({ domainPath, fileName, content: `${fileName} text\n` });
 
-/** What the fake exportAll gives for each format: two diagrams, with layout files for rich DBML. */
+/** What the fake exportAll gives for each format: two diagrams, one file each. */
 function fakeExport(format: DiagramExportFormat): SubjectAreaFilesExport {
   const [silver, gold] = SUMMARIES.map((s) => s.filePath);
-  if (format === 'dbml-rich') {
-    return {
-      files: [
-        file(gold, 'sales.dbml'), file(gold, 'sales.dbdiagram', 'layout'),
-        file(silver, 'showcase.dbml'), file(silver, 'showcase.dbdiagram', 'layout'),
-      ],
-      skipped: [],
-    };
-  }
   const ext = format === 'mermaid' ? 'mmd' : 'dbml';
   return { files: [file(gold, `sales.${ext}`), file(silver, `showcase.${ext}`)], skipped: [] };
 }
@@ -210,26 +201,26 @@ describe('Export All Diagrams', () => {
     expect(errors()).toEqual([]);
   });
 
-  it('with DBML for dbdiagram.io, writes each .dbml with its .dbdiagram and says so', async () => {
+  it('with rich DBML, writes one .dbml per diagram, its positions inside it', async () => {
     const ui = fakeUi({ format: 'dbml-rich', folders: ['/out'] });
     await exportAllDiagramsCommand(deps(ui).deps);
-    expect(ui.written.map((w) => w.fsPath)).toEqual(['/out/sales.dbml', '/out/sales.dbdiagram', '/out/showcase.dbml', '/out/showcase.dbdiagram']);
+    expect(ui.written.map((w) => w.fsPath)).toEqual(['/out/sales.dbml', '/out/showcase.dbml']);
     // Outside the project, the folder is named by its own name.
-    expect(ui.infos).toEqual(['Exported 2 diagrams as DBML for dbdiagram.io to out, each with its table positions in a .dbdiagram file.']);
+    expect(ui.infos).toEqual(['Exported 2 diagrams as Rich DBML to out.']);
     expect(features()).toEqual(['exportAll']);
   });
 
   it('asks once, with the count and the names, before replacing files already there; Replace writes them all', async () => {
     const ui = fakeUi({
-      format: 'dbml-rich', folders: ['/out'], existing: ['/out/sales.dbml', '/out/showcase.dbdiagram'], modalChoice: REPLACE_FILES_BUTTON,
+      format: 'dbml-rich', folders: ['/out'], existing: ['/out/sales.dbml', '/out/showcase.dbml'], modalChoice: REPLACE_FILES_BUTTON,
     });
     await exportAllDiagramsCommand(deps(ui).deps);
     expect(ui.modals).toEqual([{
-      message: '2 of the 4 files already exist in out. Replace them?',
-      detail: 'Already there: sales.dbml, showcase.dbdiagram.',
+      message: '2 of the 2 files already exist in out. Replace them?',
+      detail: 'Already there: sales.dbml, showcase.dbml.',
       items: [REPLACE_FILES_BUTTON],
     }]);
-    expect(ui.written).toHaveLength(4);
+    expect(ui.written).toHaveLength(2);
     expect(features()).toEqual(['exportAll']);
   });
 
@@ -387,7 +378,8 @@ describe('with the real exporter', () => {
     const expected = await d.exportAll(d.listSubjectAreas().map((s) => s.filePath), 'dbml-rich');
     expect(ui.written).toEqual(expected.files.map((f) => ({ fsPath: path.join('/out', f.fileName), content: f.content })));
     expect(ui.written.map((w) => path.basename(w.fsPath))).toContain('showcase.dbml');
-    expect(ui.written.map((w) => path.basename(w.fsPath))).toContain('showcase.dbdiagram');
+    expect(ui.written.every((w) => w.fsPath.endsWith('.dbml'))).toBe(true);
+    expect(ui.written.find((w) => path.basename(w.fsPath) === 'showcase.dbml')!.content).toContain("  erd_layout: '''");
     expect(ui.errors).toEqual([]);
   });
 

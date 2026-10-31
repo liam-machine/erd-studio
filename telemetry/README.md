@@ -308,6 +308,29 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 Prefer aggregates. There is rarely a reason to look at individual rows, and
 none to copy `install_id` anywhere.
 
+### Native DBML storage (2.0)
+
+ERD Studio 2.0 stores a project's logical model as DBML files. Its keys are
+appended to the end of both lists, in this order, and none of them holds a
+name, path or message:
+
+- **`features`**: `dbmlProject` (at most once a day: a DBML project was
+  open), `convertToDbml` (Convert Project to DBML finished),
+  `convertToDbmlOffered`, `convertToDbmlDeclined`, `convertToDbmlNotNow`
+  (the offer and its answers), `convertToDbmlCancelled`,
+  `convertToDbmlRefused` (the command refused the project: a project state,
+  not a failure) and `dbmlForeignFormatWarned` (an older helper wrote a `.yml`
+  table or `.json` diagram into a DBML project, and the user was told).
+- **`errors`**: `modelFileDbmlSyntax`, `modelFileDbmlInvalid`,
+  `modelFileDbmlStructure` (why a `.dbml` table file failed, beside
+  `modelFileParse`), `domainLoadDbml` (a `.dbml` diagram could not be read,
+  beside `domainLoad`) and `convertToDbmlFailed`.
+
+`schemaFormats` is unchanged: a DBML canvas counts as `v5`, and `dbmlProject`
+says it was DBML. A new `schemaFormats` value would make a deployed Worker
+reject whole heartbeats; new `features` / `errors` keys are only dropped by an
+older one, so deploy the Worker before the release.
+
 ### Relationship health (#133)
 
 The relationship code reports three kinds of key, all under a `rel` prefix:

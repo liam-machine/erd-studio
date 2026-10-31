@@ -38,6 +38,7 @@ import {
   clearKnownIssueCache,
 } from '../../src/services/feedbackAnalysisService';
 import { hostErrorLog } from '../../src/services/feedbackService';
+import { log } from '../../src/services/logger';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
@@ -270,6 +271,20 @@ describe('submitFeedback', () => {
     await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1));
     expect(String(open.mock.calls[0][0])).toContain('template=bug_report.yml');
     await vi.waitFor(() => expect(lastOf(panel, 'feedbackSubmitted')).toEqual({ ok: true }));
+  });
+
+  it('a ticked log carries only the lines the dialog previewed, not one logged after it opened', async () => {
+    const { panel } = await openShowcase(root);
+    log.info('[Canvas] previewed line');
+    panel._simulateMessage({ type: 'requestFeedbackContext', payload: {} });
+    await vi.waitFor(() => expect(types(panel)).toContain('feedbackContext'));
+    log.info('[Canvas] Opening hidden_area.dbml');
+    const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+    panel._simulateMessage({ type: 'submitFeedback', payload: validSubmit({ includeLog: true }) });
+    await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    const diagnostics = new URL(String(open.mock.calls[0][0])).searchParams.get('diagnostics')!;
+    expect(diagnostics).toContain('previewed line');
+    expect(diagnostics).not.toContain('hidden_area');
   });
 
   it('opens the feature template for a feature request', async () => {

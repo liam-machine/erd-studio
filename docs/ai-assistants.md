@@ -1,6 +1,6 @@
 # Working with your AI assistant
 
-ERD Studio's data model is plain files, so any AI coding assistant can read and change it: one YAML per table and one JSON per diagram (the files and commands call a diagram a *subject area*), under `.erd-studio/`. It works the same in any folder, with or without dbt. What ERD Studio adds is the instructions that teach your assistant those files, so it writes them correctly the first time. Your assistant's changes are ordinary file edits: you see them as a diff and on the canvas before anything is committed.
+ERD Studio's data model is plain files in DBML, an open format, so any AI coding assistant can read and change it: one `.dbml` file per table, the relationships in their own `.dbml` files, and one `.dbml` file per diagram (the commands call a diagram a *subject area*), under a layer folder in `.erd-studio/` (`gold/tables/`, `gold/relationships/`, `gold/diagrams/`). A project from before ERD Studio 2.0 keeps one YAML per table and one JSON per diagram, and the instructions cover both. It works the same in any folder, with or without dbt. What ERD Studio adds is the instructions that teach your assistant those files, so it writes them correctly the first time. Your assistant's changes are ordinary file edits: you see them as a diff and on the canvas before anything is committed.
 
 ## Set Up My AI Helper
 
@@ -12,7 +12,7 @@ Then ask for what you want, for example:
 
 > Add a dim_date table and link every date column in fct_order to it.
 
-> Read the diagram in .erd-studio/silver/orders.json and list any table with no grain statement.
+> Read the diagram in .erd-studio/silver/diagrams/orders.dbml and list any table with no grain statement.
 
 ## The guided setup
 
@@ -54,7 +54,7 @@ Both routes use a small read-only `erd-studio` helper that ERD Studio installs i
 
 The guide is an [Agent Skill](https://agentskills.io): Claude Code reads it from `.claude/skills/`, and GitHub Copilot, Codex, Gemini CLI and Cursor read the copy in `.agents/skills/`. It has been tested end to end with Claude Code; the other four read the same skill from the shared `.agents/skills/` folder.
 
-To choose exactly which files are added, run **ERD Studio: Install AI Coding Harness** from the Command Palette, or click the robot icon in the ERD Studio sidebar's title bar. Pick the assistants you use: it adds instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini's style guide, or Codex's `AGENTS.md`.
+To choose exactly which files are added, run **ERD Studio: Install AI Helper Files…** from the Command Palette, or choose it from the **…** menu of the ERD Studio sidebar's **Help & Feedback** section. Pick the assistants you use: it adds instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini's style guide, or Codex's `AGENTS.md` (with the two format guides it points at, `DBML.md` and `LEGACY.md` in `.agents/skills/erd-studio/`).
 
 ## The `erd-studio` helper
 

@@ -1,10 +1,10 @@
 /**
  * **Import DBML…** (`erdStudio.importDbml`) — a DBML file in as a NEW logical
- * subject area: ERD Studio's own rich export (`toDbmlRich`, "DBML (rich, with
- * layout)") or a file from dbdiagram.io or any other DBML tool. No dbt needed:
- * it reads only the chosen file and, when there is one next to it, the
- * dbdiagram layout file `<name>.dbdiagram` (`dbdiagram pull` writes it, and
- * so does ERD Studio's rich export), which places the tables and sticky notes.
+ * subject area: ERD Studio's own rich export (`toDbmlRich`, "Rich DBML") or
+ * a file from dbdiagram.io or any other DBML tool. No dbt needed: it reads
+ * only the chosen file. Its Project's `erd_layout`, when it has one (the rich
+ * export writes it), places the tables and sticky notes; a dbdiagram.io
+ * layout file beside it is not read.
  *
  * Steps: file → read it (`workspace.fs`) → `readDbml` (a file that is not
  * valid DBML is reported with its line numbers and an Open File button) →
@@ -30,7 +30,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { readDbdiagramLayout } from '@erd-studio/core';
+import { classifySemanticFile, diagramFilePath } from '@erd-studio/core';
+import { DBML_CONVERT_FIRST_MESSAGE } from '@erd-studio/core/dbml';
 
 import {
   analyseDbml,
@@ -38,7 +39,6 @@ import {
   planDbmlImport,
   serializeDbmlImportDocument,
   suggestDbmlSubjectAreaName,
-  type DbmlImportLayout,
   type DbmlImportPlan,
 } from '../services/dbmlImport';
 import type { DbmlDiagnostic } from '../services/dbmlImportParse';
@@ -62,8 +62,10 @@ import { drawnDiagramCopies, usesLibraryRelationships } from '../services/librar
 import {
   environmentWriteProblem,
   isRefusedWrite,
+  refusalLocation,
   writeNewSubjectArea,
   writeOutcome,
+  UnsavedFilesRefused,
   type RefusedWrite,
 } from '../services/newSubjectAreaWriter';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../services/recoveryService';
@@ -71,9 +73,11 @@ import { telemetry } from '../services/telemetryService';
 import type { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import type { TableLibraryService } from '../services/logicalModelService';
-import { dirtyFiles } from '../providers/dirtyDocuments';
+import type { SemanticTable } from '../types/semantic';
+import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
+import { log } from '../services/logger';
 
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
 
@@ -94,8 +98,6 @@ export interface ImportDbmlUi {
   pickFile(defaultFolder: string | undefined): Promise<string | undefined>;
   /** A file's text (`workspace.fs`). Throws when it cannot be read. */
   readFile(filePath: string): Promise<string>;
-  /** Whether a file exists (the layout next to the DBML). */
-  exists(filePath: string): Promise<boolean>;
   showQuickPick<T extends vscode.QuickPickItem>(items: readonly T[], options: vscode.QuickPickOptions): Promise<T | undefined>;
   showInputBox(options: vscode.InputBoxOptions): Promise<string | undefined>;
   /** A modal: `message`, the `detail` under it, `button` and Cancel. True when `button` was picked. */
@@ -124,7 +126,7 @@ export interface ImportDbmlDeps {
     TableLibraryService,
     'findTableNameIgnoringCase' | 'getTable' | 'saveTable' | 'serializeTable' | 'groupsByFolder' | 'deleteTable'
       | 'listTables' | 'hasUnreadableRelationships' | 'tablePath' | 'getTablesDir' | 'writesTableNaming'
-  >;
+  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites' | 'writesDbml' | 'tableStorage' | 'invalidateCache' | 'listsSchemaFolder'>>;
   /** `createDomain`'s rule for a new subject area name in `layer` (undefined = valid). */
   validateDomainName: (value: string, layer: string) => string | undefined;
   /**
@@ -158,8 +160,6 @@ export interface ImportDbmlResume {
 export interface ImportDbmlResult {
   domainPath: string;
   plan: DbmlImportPlan;
-  /** The layout file used, when there was one. */
-  layoutPath?: string;
 }
 
 /**
@@ -175,12 +175,6 @@ export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume
     telemetry.error('importDbmlFailed');
     throw err;
   }
-}
-
-/** The layout file dbdiagram keeps next to `<name>.dbml`: `<name>.dbdiagram`. */
-export function dbdiagramLayoutPathFor(dbmlPath: string): string {
-  const parsed = path.parse(dbmlPath);
-  return path.join(parsed.dir, `${/\.dbml$/i.test(parsed.base) ? parsed.name : parsed.base}.dbdiagram`);
 }
 
 /**
@@ -213,7 +207,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   const showError = (message: string, actions: ErrorActions = {}): void => {
     // A button that fails (a re-run whose read throws) still says so, rather than seeming to do nothing.
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
-      console.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+      log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
       const doing = `while running ${choice}`;
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
     });
@@ -231,7 +225,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   try {
     text = stripBom(await ui.readFile(filePath));
   } catch (err) {
-    console.error(`[ERD Studio] ${TITLE}: could not read the file:`, err);
+    log.error(`[ERD Studio] ${TITLE}: could not read the file:`, err);
     showError(`${TITLE} couldn't read ${fileName}. Check that the file still exists and that you can open it, then try again.`, {
       [TRY_AGAIN_BUTTON]: again(),
     });
@@ -239,12 +233,12 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   }
 
   // Loaded on first use: the parser is a third of the bundle, and only this command needs it.
-  const { readDbml } = await import('../services/dbmlImportParse');
+  const { readDbml, readDbmlImportLayout } = await import('../services/dbmlImportParse');
   const read = readDbml(text);
   if (!read.ok) {
     if (!fromExample) telemetry.feature('importDbmlInvalid');
     const first = read.diagnostics[0];
-    showError(describeInvalidDbml(fileName, read.diagnostics), {
+    showError(read.importsOtherFiles ? `${TITLE}: ${first.message}` : describeInvalidDbml(fileName, read.diagnostics), {
       [OPEN_FILE_BUTTON]: () => ui.openFileAt(filePath, first?.line, first?.column),
     });
     return undefined;
@@ -255,23 +249,10 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     return undefined;
   }
 
-  // The layout next to it, when there is one. A layout that cannot be read
-  // is not a reason to stop: the canvas lays the diagram out instead.
-  const layoutPath = dbdiagramLayoutPathFor(filePath);
-  let layout: DbmlImportLayout | undefined;
-  let layoutUsed = false;
-  if (await ui.exists(layoutPath).catch(() => false)) {
-    try {
-      layout = readDbdiagramLayout(await ui.readFile(layoutPath));
-      // readDbdiagramLayout never throws: a file it could not make sense of
-      // comes back empty with a problem, which the dry run names; only a
-      // layout that yielded something counts as used.
-      layoutUsed = layout.tables.length > 0 || layout.stickies.length > 0;
-    } catch (err) {
-      console.error(`[ERD Studio] ${TITLE}: could not read the layout file:`, err);
-      layout = { tables: [], stickies: [], problems: ['The layout file could not be read.'] };
-    }
-  }
+  // The positions in the file's own Project (`erd_layout`), when it has
+  // them. Lines that cannot be read are not a reason to stop: the dry run
+  // names them and the canvas places those tables instead.
+  const layout = readDbmlImportLayout(text);
 
   // 2. The layer: the one the file's TableGroup or schema names, offered first.
   const creatable = layerService.getCreatableLayers();
@@ -312,7 +293,12 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   if (!name) return cancelled();
   const slug = name.trim();
 
-  const domainPath = path.join(workspaceRoot, semanticDir, chosenLayer, `${slug}.json`);
+  // A project that writes DBML (§3.2) gets a `.dbml` diagram whose relationships all live in the library (D5).
+  const dbml = tableLibraryService.writesDbml?.() ?? false;
+  const layerDir = path.join(workspaceRoot, semanticDir, chosenLayer);
+  // A DBML diagram is `<layer>/diagrams/<slug>.dbml` (§1.1); a JSON one `<layer>/<slug>.json`.
+  const dbmlDiagramPath = path.join(workspaceRoot, semanticDir, ...diagramFilePath(chosenLayer, slug).split('/'));
+  const domainPath = dbml ? dbmlDiagramPath : path.join(layerDir, `${slug}.json`);
   const tryAgain = again({ layer: chosenLayer, name: slug });
   // The name box already refuses a name in use; this is a diagram that
   // appeared since (another window, git), so the choices are kept.
@@ -320,7 +306,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     [OPEN_IT_BUTTON]: () => ui.openDiagram(domainPath),
     [CHOOSE_ANOTHER_NAME_BUTTON]: again({ layer: chosenLayer }),
   });
-  if (fs.existsSync(domainPath)) {
+  // A name is taken in either format: `<slug>.json` and `diagrams/<slug>.dbml` would be one diagram's name twice.
+  if (fs.existsSync(path.join(layerDir, `${slug}.json`)) || fs.existsSync(dbmlDiagramPath)) {
     nameTaken();
     return undefined;
   }
@@ -332,12 +319,19 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   let plan: DbmlImportPlan;
   let folder: string | undefined;
   let dirty: string[];
+  /** Every file a DBML project's save writes (empty for a YAML project). */
+  let planned: string[] = [];
+  /** New tables whose schema is written as the layer's existing folder spells it (or, `newFolder`, as an earlier table of the file does). */
+  let respelled: Array<{ table: string; from: string; to: string; newFolder?: boolean }> = [];
   try {
-    folder = tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
-    const libraryRelationships = usesLibraryRelationships(
+    // A DBML table always goes to the chosen layer's folder: groupsByFolder speaks for YAML libraries only.
+    folder = dbml || tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
+    const libraryRelationships = dbml || usesLibraryRelationships(
       tableLibraryService.listTables(),
       subjectAreaService.countSubjectAreaFileRelationships(workspaceRoot, semanticDir),
       tableLibraryService.hasUnreadableRelationships(),
+      // A DBML table's relationships can only live in the library (D5, §5.1).
+      tableLibraryService.hasDbmlLibrary?.() ?? false,
     );
     plan = planDbmlImport({
       model,
@@ -350,18 +344,40 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         getTable: (n) => tableLibraryService.getTable(n),
       },
       libraryRelationships,
-      diagramCopies: libraryRelationships
+      // A DBML diagram keeps no copy: every relationship goes to the library.
+      diagramCopies: libraryRelationships && !dbml
         ? drawnDiagramCopies(readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir))
         : [],
+      // A DBML diagram holds no relationships (D5): one the library cannot take is named, not dropped silently.
+      ...(dbml ? { diagramHoldsNoRelationships: true } : {}),
     });
+    if (dbml) {
+      const refusal = dbmlImportRefusal(plan, (n) => tableLibraryService.tableStorage?.(n));
+      if (refusal) {
+        showError(`${TITLE}: ${refusal} Nothing was changed.`);
+        return undefined;
+      }
+    }
+    // Every file the DBML save writes (relationships files too); a refusal surfaces here, before any write.
+    // Each new table keeps the schema the file gives it (its qualifier), as the layer's folder spells it (§2.4).
+    const planWrites = dbml && tableLibraryService.planTableWrites
+      ? tableLibraryService.planTableWrites({ save: [...plan.newTables, ...plan.changedLibraryTables].map((model) => ({ model })) }, folder, { dbml: true, schemaFromSource: true })
+      : undefined;
+    planned = (planWrites?.writes ?? []).map((w) => w.path);
+    if (planWrites?.plan) {
+      respelled = respelledSchemas(plan.newTables, (name) => planWrites.plan!.resolveTable(name)?.reference)
+        // A folder the layer does not list yet is made by this import, for the file's first spelling.
+        .map((r) => (tableLibraryService.listsSchemaFolder?.(chosenLayer, r.to) ?? true ? r : { ...r, newFolder: true }));
+    }
     dirty = dirtyFiles([
       ...plan.newTables.map((t) => tableLibraryService.tablePath(t.name, folder)),
       ...plan.changedLibraryTables.map((t) => tableLibraryService.tablePath(t.name)),
+      ...planned,
     ]);
     // Throws DuplicateKeyWriteRefused for a library file that is read but may
     // not be written (#164), or RelationshipsRewriteRefused, before the diagram
-    // is on disk rather than after.
-    for (const table of plan.changedLibraryTables) tableLibraryService.serializeTable(table);
+    // is on disk rather than after. (A DBML plan above already checked its files.)
+    if (!dbml) for (const table of plan.changedLibraryTables) tableLibraryService.serializeTable(table);
   } catch (err) {
     if (isRefusedWrite(err)) {
       showRefusal(err, 'Nothing was changed.');
@@ -375,20 +391,30 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     });
     return undefined;
   }
-  if (dirty.length > 0) {
-    const libraryRoot = path.dirname(tableLibraryService.getTablesDir());
-    const file = path.relative(libraryRoot, dirty[0]).split(path.sep).join('/');
-    const dirtyPath = dirty[0];
+  const showUnsaved = (dirtyPath: string): void => {
+    const file = path.relative(path.dirname(tableLibraryService.getTablesDir()), dirtyPath).split(path.sep).join('/');
     showError(`${TITLE}: ${file} has unsaved changes. Save or revert it, then try again. Nothing was changed.`, {
       [SHOW_FILE_BUTTON]: () => ui.showFile(dirtyPath),
     });
+  };
+  if (dirty.length > 0) {
+    showUnsaved(dirty[0]);
     return undefined;
   }
 
   // 5. The dry run: what it creates, reuses and leaves out, before any write.
+  const semanticRoot = path.join(workspaceRoot, semanticDir);
   const [headline, ...details] = describeDbmlImportPlan(plan, {
     layerLabel,
-    layoutFileName: layout ? path.basename(layoutPath) : undefined,
+    ...(dbml ? {
+      dbml: {
+        // Where the relationships go: the `<layer>/relationships/` files this save writes.
+        relationshipsFiles: planned
+          .map((p) => path.relative(semanticRoot, p).split(path.sep).join('/'))
+          .filter((rel) => classifySemanticFile(rel, { tablesDirIsLayer: false }).kind === 'relationships'),
+        respelledSchemas: respelled,
+      },
+    } : {}),
   }).split('\n');
   if (!await ui.confirm(headline, details.join('\n'), IMPORT_BUTTON)) return cancelled();
 
@@ -399,13 +425,21 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     domainPath,
     newTables: plan.newTables,
     folder,
+    ...(dbml ? { schemaFromSource: true } : {}),
     changedTables: plan.changedLibraryTables,
     documentText: (tableNaming) => serializeDbmlImportDocument(plan.document, tableNaming),
-  }, { layerService, tableLibraryService });
+    // The source's positions and sticky-note boxes go where the project keeps a new diagram's layout.
+    document: () => ({ ...plan.document, logical: { ...plan.document.logical, relationships: [] } }) as unknown as Record<string, unknown>,
+  }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
   if (!outcome.ok) {
     const { error: err, undone } = outcome;
     if (outcome.nameTaken) {
       nameTaken();
+      return undefined;
+    }
+    // A file the write would change (another diagram it re-renders, §5.7) has unsaved edits.
+    if (err instanceof UnsavedFilesRefused) {
+      showUnsaved(err.filePaths[0]);
       return undefined;
     }
     const result = writeOutcome(undone, semanticDir);
@@ -434,19 +468,55 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     telemetry.feature('exampleDiagram');
   } else {
     telemetry.feature('importDbml');
-    if (layoutUsed) telemetry.feature('importDbmlLayout');
+    if (layout) telemetry.feature('importDbmlLayout');
   }
 
   await ui.openDiagram(domainPath);
-  return { domainPath, plan, ...(layoutUsed ? { layoutPath } : {}) };
+  return { domainPath, plan };
 
   /** The refusal's own sentence, with Open File when it knows the file. */
   function showRefusal(err: RefusedWrite, outcomeSentence: string): void {
-    const location = err.location;
+    const location = refusalLocation(err, path.join(workspaceRoot, semanticDir));
     showError(`${TITLE}: ${err.message} ${outcomeSentence}`, location
       ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(location.filePath, location.line) }
       : {});
   }
+}
+
+/**
+ * Why a plan cannot become a DBML diagram, or undefined (D20): a table it
+ * would reuse is stored as YAML (a `use` line cannot import a `.yml`). In
+ * the layer-first tree any table name is a table's (`_relationships`
+ * included): relationships files live in their own folder.
+ */
+export function dbmlImportRefusal(plan: DbmlImportPlan, tableStorage: (name: string) => 'yaml' | 'dbml' | undefined): string | undefined {
+  const yaml = plan.reusedTables.filter((n) => tableStorage(n) === 'yaml');
+  if (yaml.length > 0) {
+    return `${yaml.join(', ')} ${yaml.length === 1 ? 'is a YAML table' : 'are YAML tables'} in the Table Library, and a YAML table can't join a DBML diagram. ${DBML_CONVERT_FIRST_MESSAGE}.`;
+  }
+  return undefined;
+}
+
+/**
+ * The new tables whose schema is written in another spelling (§1.2 One
+ * spelling: a layer that already has `sales/` gets `Table sales.x` for the
+ * file's `Table Sales.x`), from each one's reference as the plan writes it.
+ */
+export function respelledSchemas(
+  tables: readonly SemanticTable[],
+  referenceOf: (name: string) => string | undefined,
+): Array<{ table: string; from: string; to: string }> {
+  const out: Array<{ table: string; from: string; to: string }> = [];
+  for (const table of tables) {
+    const reference = referenceOf(table.name);
+    if (!table.schema || reference === undefined) continue;
+    const dot = reference.lastIndexOf('.');
+    const written = dot > 0 ? reference.slice(0, dot).replace(/^"(.*)"$/, '$1') : undefined;
+    if (written !== undefined && written !== table.schema && written.toLowerCase() === table.schema.toLowerCase()) {
+      out.push({ table: table.name, from: table.schema, to: written });
+    }
+  }
+  return out;
 }
 
 function stripBom(text: string): string {
@@ -469,14 +539,6 @@ export function vscodeImportDbmlUi(): ImportDbmlUi {
       return picked?.[0]?.fsPath;
     },
     readFile: async (filePath) => new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
-    exists: async (filePath) => {
-      try {
-        await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
-        return true;
-      } catch {
-        return false;
-      }
-    },
     showQuickPick: async (items, options) => vscode.window.showQuickPick([...items], options),
     showInputBox: async (options) => vscode.window.showInputBox(options),
     confirm: async (message, detail, button) =>

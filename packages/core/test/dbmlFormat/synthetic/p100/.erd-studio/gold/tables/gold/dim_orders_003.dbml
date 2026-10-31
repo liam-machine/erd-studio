@@ -1,0 +1,17 @@
+Table gold.dim_orders_003 [
+  role: 'dimension',
+  grain: 'One row per orders 003'
+] {
+  orders_003_key BIGINT [pk, note: 'Primary key of dim_orders_003']
+  country_code STRING [note: 'country code of the orders 003 row']
+  duration_minutes BIGINT [note: 'duration minutes of the orders 003 row']
+  category TIMESTAMP_NTZ [note: 'category of the orders 003 row']
+  duration_minutes_3 TIMESTAMP_NTZ [note: 'duration minutes 3 of the orders 003 row']
+  unit_price DATE [note: 'unit price of the orders 003 row']
+  country_code_5 STRING [note: 'country code 5 of the orders 003 row']
+  priority "DECIMAL(18,2)" [note: 'priority of the orders 003 row']
+  label TIMESTAMP_NTZ [note: 'label of the orders 003 row']
+  amount BOOLEAN [note: 'amount of the orders 003 row']
+  code INT [note: 'code of the orders 003 row']
+  Note: 'Synthetic gold table dim_orders_003'
+}

@@ -11,6 +11,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_PATH = path.resolve(__dirname, '../test/fixtures/dbt-project');
 // A logical-only project: .erd-studio/ and no dbt_project.yml.
 const LOGICAL_PATH = path.resolve(__dirname, '../test/fixtures/logical-only');
+// A project stored as DBML (ERD Studio 2.0): tables, relationships files and diagrams.
+const DBML_PATH = path.resolve(__dirname, '../test/fixtures/dbml-native');
 const SERVER = path.resolve(__dirname, 'dist/index.js');
 
 // Build a temporary "uninitialized" project — has dbt_project.yml but no .erd-studio/
@@ -190,6 +192,44 @@ async function main() {
     fail('list_manifest_models on a logical-only project');
     console.log(lommText.slice(0, 300));
   }
+
+  // 11. Native DBML storage: diagrams, relationships and tables read from .dbml files
+  console.log('\n--- DBML project (test/fixtures/dbml-native) ---');
+  const parsed = (msg) => {
+    try { return msg.error || msg.result?.isError ? null : JSON.parse(msg.result?.content?.[0]?.text ?? ''); } catch { return null; }
+  };
+  const check = (ok, label, detail) => {
+    if (ok) { console.log(`✅ ${label}`); } else { fail(label); if (detail !== undefined) console.log(JSON.stringify(detail, null, 2).slice(0, 600)); }
+  };
+  const dld = parsed(await rpc('tools/call', { name: 'list_domains', arguments: { project_path: DBML_PATH } }));
+  check(
+    dld && dld.count === 2 && dld.domains.every((d) => d.file_format === 'dbml' && d.file_path.endsWith('.dbml'))
+      && dld.domains.map((d) => `${d.layer}/${d.domain}`).sort().join(',') === 'gold/sales,silver/staging',
+    'list_domains lists both DBML diagrams with file_format dbml', dld,
+  );
+  const drd = parsed(await rpc('tools/call', { name: 'read_domain', arguments: { project_path: DBML_PATH, layer: 'gold', domain: 'sales' } }));
+  const rels = drd?.relationships ?? [];
+  const has = (pred) => rels.some(pred);
+  check(drd && drd.file_format === 'dbml' && drd.models.length === 6, 'read_domain reads the DBML diagram with its six tables', drd && { file_format: drd.file_format, models: drd.models.map((m) => m.name) });
+  check(
+    rels.filter((r) => r.from_model === 'fct_order' && r.to_model === 'dim_region').map((r) => r.from_column).sort().join(',') === 'country_code,region_code',
+    'read_domain: the composite foreign key, one entry per column pair', rels,
+  );
+  check(has((r) => r.from_model === 'fct_order' && r.from_column === 'ship_date_key' && r.role === 'ship date'), 'read_domain: a role (ship date)', rels);
+  check(has((r) => r.cardinality === 'one-to-one' && r.from_model === 'customer_profile' && r.to_model === 'dim_customer'), 'read_domain: a one-to-one, foreign key on customer_profile', rels);
+  check(has((r) => r.from_model === 'dim_customer' && r.to_model === 'dim_customer' && r.role === 'parent'), 'read_domain: a self-reference', rels);
+  check(has((r) => r.cardinality === 'many-to-many'), 'read_domain: a many-to-many', rels);
+  const missing = await rpc('tools/call', { name: 'read_domain', arguments: { project_path: DBML_PATH, layer: 'gold', domain: 'nope' } });
+  const missingText = missing.result?.content?.[0]?.text ?? missing.error?.message ?? '';
+  check(missingText.includes("without .dbml or .json"), 'read_domain names the file name rule when a diagram is not found', missingText);
+  const dlm = parsed(await rpc('tools/call', { name: 'list_models', arguments: { project_path: DBML_PATH } }));
+  check(dlm && dlm.count === 6 && dlm.models.every((m) => m.file_format === 'dbml'), 'list_models lists the six DBML tables with file_format dbml', dlm);
+  const drm = parsed(await rpc('tools/call', { name: 'read_model', arguments: { project_path: DBML_PATH, model_name: 'fct_order' } }));
+  check(
+    drm && drm.grain === 'One row per order line' && drm.model_role === 'transaction-fact' && drm.alias === 'orders'
+      && drm.columns.some((c) => c.name === 'order_number' && c.is_natural_key) && drm.columns.some((c) => c.name === 'order_line_id' && c.is_primary_key),
+    'read_model reads a DBML table file (grain, role, alias, keys)', drm,
+  );
 
   // Cleanup
   fs.rmSync(UNINIT_PATH, { recursive: true, force: true });

@@ -43,6 +43,17 @@ import {
   type LoadDisplaySubjectAreaOptions,
 } from '@erd-studio/core';
 import {
+  dbmlStorageReader,
+  parseTableDbml,
+  readRelationshipsDbml,
+  parseSubjectAreaDbml,
+  subjectAreaMembersDbml,
+  compileDbmlProject,
+  attachRelationships,
+  DbmlEditRefused,
+  type DbmlParserModule,
+} from '@erd-studio/core/dbml';
+import {
   ErdCanvas,
   transformSubjectArea,
   repickHandleSides,
@@ -61,6 +72,15 @@ import { CanvasEnvironmentProvider, TableNode, useCanvasGraph, type CanvasHost }
 
 const options: LoadDisplaySubjectAreaOptions = { domainPath: 'a/b/c.json', readFile: async () => null, readOnly: true };
 export const loaded: Promise<DisplaySubjectArea> = loadDisplaySubjectArea(options);
+export const loadedDbml: Promise<DisplaySubjectArea> = loadDisplaySubjectArea({ ...options, domainPath: 'a/b/c.dbml', dbml: dbmlStorageReader });
+export const tableReading = parseTableDbml('Table a { id int }', 'a');
+export const relationshipsReading = readRelationshipsDbml('');
+export const diagramReading = () => parseSubjectAreaDbml('Project a {}', 'a/diagrams/a.dbml');
+export const members: string[] | null = subjectAreaMembersDbml('', 'a/diagrams/a.dbml');
+export const diagnostics = compileDbmlProject({ 'tables/a.dbml': 'Table a { id int }' }, ['tables/a.dbml']);
+export const attach = attachRelationships;
+export const refused: Error = new DbmlEditRefused('tables/a.dbml', 'no');
+export const parserModule: DbmlParserModule | null = null;
 export const errors = [SubjectAreaValidationError, TooManyTablesError, FileTooLargeError, YamlNodeLimitError, YamlCharLimitError];
 export const model = parseTableText('name: a', 'a')?.name;
 export const store = createCanvasStore();
@@ -107,7 +127,7 @@ describe('published declarations', () => {
     addDtsExtensions(path.join(rendererDir, 'dist/types'));
 
     // Their dependencies, from the repo's install.
-    for (const dep of ['react', 'react-dom', 'zustand', 'yaml', '@xyflow', '@types']) {
+    for (const dep of ['react', 'react-dom', 'zustand', 'yaml', '@xyflow', '@types', '@dbml']) {
       const target = path.join(modules, dep);
       if (!fs.existsSync(target)) {
         fs.symlinkSync(path.join(ROOT, 'node_modules', dep), target, 'junction');
@@ -120,6 +140,15 @@ describe('published declarations', () => {
 
   afterAll(() => {
     if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('declares the @erd-studio/core/dbml subpath without naming @dbml/parse (D12)', () => {
+    const dir = path.join(tmp, 'node_modules/@erd-studio/core/dist/dbml');
+    const declarations = fs.readdirSync(dir).filter((f) => f.endsWith('.d.ts'));
+    expect(declarations).toContain('index.d.ts');
+    for (const file of declarations) {
+      expect(fs.readFileSync(path.join(dir, file), 'utf8'), file).not.toContain('@dbml/parse');
+    }
   });
 
   it.each(['nodenext', 'node16', 'bundler'])('type-check for a consumer on moduleResolution %s', (resolution) => {

@@ -20,12 +20,14 @@ export {
 
 // Canvas
 export { useCanvasGraph } from './canvas/useCanvasGraph';
+export { useHoverFocus, type UseHoverFocusResult, type HoverFocusHandlers } from './canvas/useHoverFocus';
 export { CanvasBackdrop, ANNOTATION_MINIMAP_COLORS } from './canvas/CanvasBackdrop';
 export { canvasNodeTypes, canvasEdgeTypes } from './canvas/flowTypes';
 
 // Components
 export { TableNode } from './components/Graph/ModelNode';
 export { FkEdge } from './components/Graph/FkEdge';
+export { EdgeFlow, EdgeFlowGlyphs, type EdgeFlowProps } from './components/Graph/EdgeFlow';
 export { AnnotationNode } from './components/Graph/AnnotationNode';
 export { AnnotationEdge } from './components/Graph/AnnotationEdge';
 export { DetailPanel } from './components/DetailPanel/DetailPanel';
@@ -40,9 +42,11 @@ export * from './hooks/useColumnExpansion';
 export * from './hooks/useColumnReorder';
 export * from './hooks/useFocusWithinRow';
 export * from './hooks/useLongPressDrag';
+export { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion';
 
 // Helpers
 export { applyNodeOverlays, type GraphNode, type GraphEdge } from './lib/nodeOverlays';
+export { computeCanvasFocus, sameFocus, type CanvasFocus } from './lib/canvasFocus';
 export * from './lib/stageColors';
 export * from './lib/dataTypeColors';
 export * from './lib/badgeLabels';

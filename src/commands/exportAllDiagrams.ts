@@ -1,9 +1,8 @@
 /**
  * **Export All Diagrams…** (`erdStudio.exportAllDiagrams`) — every subject
  * area's logical (design) stage, one file each, into a folder the user picks:
- * format → folder → write. With DBML for dbdiagram.io (`dbml-rich`) each
- * `.dbml` gets its `.dbdiagram` layout file beside it, so the folder is
- * ready for `dbdiagram push`.
+ * format → folder → write. With rich DBML (`dbml-rich`) each `.dbml`
+ * carries its table positions in its Project's `erd_layout`.
  *
  * The files come from `exportSubjectAreaFiles` (`src/services/diagramExport.ts`),
  * the same read and the same names `erd-studio export --all` prints: one
@@ -39,7 +38,8 @@ import {
 import type { ExportedFile, SubjectAreaFilesExport } from '../services/diagramExport';
 import { telemetry } from '../services/telemetryService';
 import type { SubjectAreaSummary } from '../types/semantic';
-import { FORMAT_ITEMS, FORMAT_LABELS, NO_DIAGRAMS_MESSAGE } from './exportDiagram';
+import { FORMAT_ITEMS, FORMAT_LABELS, NO_DIAGRAMS_MESSAGE, exportInsideSemanticDirMessage, isInsideFolder } from './exportDiagram';
+import { log } from '../services/logger';
 
 export const EXPORT_ALL_DIAGRAMS_COMMAND = 'erdStudio.exportAllDiagrams';
 
@@ -80,6 +80,8 @@ export interface ExportAllDiagramsDeps {
   exportAll: (domainPaths: readonly string[], format: DiagramExportFormat) => Promise<SubjectAreaFilesExport>;
   /** Where the folder picker starts (the project root). */
   defaultFolder?: string;
+  /** The semantic dir, absolute: a folder inside it is refused (§5.7), since files there are the diagrams' own storage. */
+  semanticRoot?: string;
   /** The dbt project root, which messages name files and folders relative to. */
   projectRoot?: string;
   ui?: ExportAllDiagramsUi;
@@ -128,7 +130,7 @@ function oursFailure(err: unknown, ui: ExportAllDiagramsUi, doing = 'while expor
 
 function showFailure(ui: ExportAllDiagramsUi, failure: ShownFailure): void {
   showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), failure.message, failure.actions, (choice, err) => {
-    console.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
+    log.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
     showFailure(ui, oursFailure(err, ui, `while running ${choice}`));
   });
 }
@@ -228,6 +230,14 @@ async function chooseFolderAndWrite(
   const folderUri = picked?.[0];
   if (!folderUri) { return cancelled(); }
   const folder = folderUri.fsPath;
+  if (deps.semanticRoot !== undefined && isInsideFolder(deps.semanticRoot, folder)) {
+    const outside = path.dirname(deps.semanticRoot);
+    showFailure(ui, {
+      message: exportInsideSemanticDirMessage(deps.semanticRoot),
+      actions: { [CHOOSE_ANOTHER_FOLDER_BUTTON]: () => retryFolder(deps, ui, format, exported, skipped, outside) },
+    });
+    return cancelled();
+  }
   const shownFolder = folderShown(deps, folder);
   const targets = exported.files.map((file) => ({ file, uri: vscode.Uri.file(path.join(folder, file.fileName)) }));
 
@@ -311,9 +321,7 @@ function reportDone(
   skipped: readonly SkippedInWords[],
   shownFolder: string,
 ): void {
-  const diagrams = files.filter((f) => f.kind === 'diagram').length;
-  const withLayout = files.some((f) => f.kind === 'layout') ? ', each with its table positions in a .dbdiagram file' : '';
-  const done = `Exported ${count(diagrams, 'diagram')} as ${FORMAT_LABELS[format]} to ${shownFolder}${withLayout}.`;
+  const done = `Exported ${count(files.length, 'diagram')} as ${FORMAT_LABELS[format]} to ${shownFolder}.`;
   if (skipped.length === 0) {
     void ui.showInformationMessage(done);
     return;

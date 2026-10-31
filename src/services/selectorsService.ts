@@ -49,6 +49,7 @@ import type { YAMLMap, YAMLSeq, Node, Scalar } from 'yaml';
 
 import type { SubjectAreaService } from './domainService';
 import { hasDbtProjectFile } from './projectDiscovery';
+import { log } from './logger';
 
 const SELECTORS_FILENAME = 'selectors.yml';
 const GENERATED_PREFIX = 'domain_';
@@ -148,7 +149,7 @@ export class SelectorsService {
         this.regenerate();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[SelectorsService] Regenerate failed: ${msg}`);
+        log.error(`[SelectorsService] Regenerate failed: ${msg}`);
       }
     }, delayMs);
   }
@@ -217,7 +218,7 @@ export class SelectorsService {
         unified = this.subjectAreaService.getSubjectArea(summary.filePath);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[SelectorsService] Skipping ${summary.filePath}: ${msg}`);
+        log.warn(`[SelectorsService] Skipping ${summary.filePath}: ${msg}`);
         continue;
       }
 
@@ -341,7 +342,7 @@ export class SelectorsService {
       const conflictsWith = owners.get(requested) ?? 'unknown';
       owners.set(assigned, gen.source);
       gen.name = assigned;
-      console.warn(
+      log.warn(
         `[SelectorsService] Selector name "${requested}" for domain ${gen.source} collides with ` +
         `${conflictsWith}; wrote "${assigned}" instead.`,
       );

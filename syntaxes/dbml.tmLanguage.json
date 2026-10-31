@@ -1,0 +1,1427 @@
+{
+  "information_for_contributors": [
+    "DBML grammar for ERD Studio. Its tokens follow the Monarch tokenizer that ships in @dbml/parse",
+    "(dbmlMonarchTokensProvider and dbmlLanguageConfig, Apache-2.0, https://github.com/holistics/dbml),",
+    "translated to TextMate and extended with declaration-aware scopes (table, column and type names, built-in",
+    "settings and custom properties) so it highlights the syntax the pinned parser (11.0.0) accepts.",
+    "Edit it as JSON; test/unit/dbmlGrammar.test.ts tokenizes samples with the real oniguruma WASM."
+  ],
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "DBML",
+  "scopeName": "source.dbml",
+  "fileTypes": [
+    "dbml"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#use"
+    },
+    {
+      "include": "#project"
+    },
+    {
+      "include": "#table"
+    },
+    {
+      "include": "#tablepartial"
+    },
+    {
+      "include": "#enum"
+    },
+    {
+      "include": "#tablegroup"
+    },
+    {
+      "include": "#ref"
+    },
+    {
+      "include": "#note"
+    },
+    {
+      "include": "#records"
+    },
+    {
+      "include": "#diagramview"
+    },
+    {
+      "include": "#metadata"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#color"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#relation-operator"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.dbml",
+          "begin": "/\\*",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.begin.dbml"
+            }
+          },
+          "end": "\\*/",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.end.dbml"
+            }
+          }
+        },
+        {
+          "name": "comment.line.double-slash.dbml",
+          "match": "(//).*$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.comment.dbml"
+            }
+          }
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.dbml",
+          "begin": "'''",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.dbml"
+            }
+          },
+          "end": "'''",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.dbml",
+          "begin": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.dbml"
+            }
+          },
+          "end": "(')|(?=$)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.dbml",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.dbml"
+            }
+          },
+          "end": "(\")|(?=$)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "name": "string.interpolated.backtick.dbml",
+          "begin": "`",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.dbml"
+            }
+          },
+          "end": "`",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        }
+      ]
+    },
+    "escape": {
+      "name": "constant.character.escape.dbml",
+      "match": "\\\\."
+    },
+    "numbers": {
+      "name": "constant.numeric.dbml",
+      "match": "(?<![\\w.#])-?(?:0[xX][0-9a-fA-F]+|(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)(?![\\w.])"
+    },
+    "color": {
+      "name": "constant.other.color.rgb-value.hex.dbml",
+      "match": "#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?!\\w)"
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.dbml",
+          "match": "(?i)(?<![\\w.\"])(true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.dbml",
+          "match": "(?i)(?<![\\w.\"])null\\b"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.comma.dbml",
+          "match": ","
+        },
+        {
+          "name": "punctuation.separator.key-value.dbml",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.accessor.dot.dbml",
+          "match": "\\."
+        },
+        {
+          "name": "keyword.operator.wildcard.dbml",
+          "match": "\\*"
+        }
+      ]
+    },
+    "relation-operator": {
+      "name": "keyword.operator.relation.dbml",
+      "match": "\\??(?:<>|<|>|-)\\??"
+    },
+    "column-reference": {
+      "patterns": [
+        {
+          "name": "meta.column-reference.composite.dbml",
+          "begin": "((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))?)(\\.)(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "entity.name.type.table.dbml"
+            },
+            "2": {
+              "name": "punctuation.accessor.dot.dbml"
+            },
+            "3": {
+              "name": "punctuation.section.parens.begin.dbml"
+            }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.parens.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "name": "variable.other.column.dbml",
+              "match": "(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)"
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        },
+        {
+          "name": "meta.column-reference.dbml",
+          "match": "((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))?)(\\.)((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.table.dbml"
+            },
+            "2": {
+              "name": "punctuation.accessor.dot.dbml"
+            },
+            "3": {
+              "name": "variable.other.column.dbml"
+            }
+          }
+        }
+      ]
+    },
+    "settings": {
+      "name": "meta.settings.dbml",
+      "begin": "\\[",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.brackets.begin.dbml"
+        }
+      },
+      "end": "\\]",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.brackets.end.dbml"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "match": "(:)\\s*(?i:(true|false)|(null))(?![\\w.])",
+          "captures": {
+            "1": {
+              "name": "punctuation.separator.key-value.dbml"
+            },
+            "2": {
+              "name": "constant.language.boolean.dbml"
+            },
+            "3": {
+              "name": "constant.language.null.dbml"
+            }
+          }
+        },
+        {
+          "name": "keyword.other.setting.dbml",
+          "match": "(?i)(?<![\\w.\"])(?:not\\s+null|primary\\s+key)\\b"
+        },
+        {
+          "name": "keyword.other.setting.dbml",
+          "match": "(?i)(?<![\\w.\"])(?:pk|null|unique|increment|default|note|ref|dep|name|type|headercolor|color|check|update|delete|inactive|example)\\b(?=\\s*(?:[:,\\]]|//|/\\*|$))"
+        },
+        {
+          "name": "variable.other.property.erd-studio.dbml",
+          "match": "(?i)(?<![\\w.\"])(?:role|grain|schema|alias|rationale_\\w*|natural_key|scd_type|additive_type|foreign_key|linked_table|meta_\\w+|erd_\\w+)\\b(?=\\s*:)"
+        },
+        {
+          "name": "variable.other.property.dbml",
+          "match": "(?<![\\w.\"])(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?=\\s*:)"
+        },
+        {
+          "include": "#color"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "name": "support.constant.dbml",
+          "match": "(?i)(?<![\\w.\"])(?:cascade|restrict|set\\s+null|set\\s+default|no\\s+action|btree|hash|gin|gist|brin)\\b"
+        },
+        {
+          "include": "#column-reference"
+        },
+        {
+          "include": "#relation-operator"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
+    "note-property": {
+      "match": "(?i)(?:^\\s*|(?<![\\w.\"]))(note)\\s*(:)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.note.dbml"
+        },
+        "2": {
+          "name": "punctuation.separator.key-value.dbml"
+        }
+      }
+    },
+    "note-block": {
+      "name": "meta.block.note.dbml",
+      "begin": "(?i)(?:^\\s*|(?<![\\w.\"]))(note)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.note.dbml"
+        },
+        "2": {
+          "name": "punctuation.section.block.begin.dbml"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.dbml"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        }
+      ]
+    },
+    "use": {
+      "name": "meta.use.dbml",
+      "begin": "(?i)^\\s*(use|reuse)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.import.dbml"
+        }
+      },
+      "end": "(?<=['\"])|$",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "name": "meta.use.specifiers.dbml",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.dbml"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "match": "(?i)(?<![\\w.\"])(tablepartial|tablegroup|table|enum|note|schema)\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)",
+              "captures": {
+                "1": {
+                  "name": "keyword.other.${1:/downcase}.dbml"
+                },
+                "2": {
+                  "name": "entity.name.type.${1:/downcase}.dbml"
+                }
+              }
+            },
+            {
+              "match": "(?i)(?<![\\w.\"])(as)\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))",
+              "captures": {
+                "1": {
+                  "name": "keyword.other.as.dbml"
+                },
+                "2": {
+                  "name": "entity.name.type.alias.dbml"
+                }
+              }
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        },
+        {
+          "name": "keyword.operator.wildcard.dbml",
+          "match": "\\*"
+        },
+        {
+          "name": "keyword.control.from.dbml",
+          "match": "(?i)(?<![\\w.\"])from\\b"
+        },
+        {
+          "include": "#strings"
+        }
+      ]
+    },
+    "project": {
+      "name": "meta.project.dbml",
+      "begin": "(?i)^\\s*(project)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.project.dbml"
+        }
+      },
+      "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
+      "patterns": [
+        {
+          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
+          "captures": {
+            "1": {
+              "name": "entity.name.namespace.project.dbml"
+            },
+            "2": {
+              "name": "keyword.other.as.dbml"
+            },
+            "3": {
+              "name": "entity.name.type.alias.dbml"
+            }
+          }
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "name": "meta.block.project.dbml",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.dbml"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#note-property"
+            },
+            {
+              "include": "#note-block"
+            },
+            {
+              "match": "(?i)^\\s*(database_type)\\s*(:)",
+              "captures": {
+                "1": {
+                  "name": "keyword.other.setting.dbml"
+                },
+                "2": {
+                  "name": "punctuation.separator.key-value.dbml"
+                }
+              }
+            },
+            {
+              "match": "(?i)^\\s*(erd_\\w+)\\s*(:)",
+              "captures": {
+                "1": {
+                  "name": "variable.other.property.erd-studio.dbml"
+                },
+                "2": {
+                  "name": "punctuation.separator.key-value.dbml"
+                }
+              }
+            },
+            {
+              "match": "^\\s*((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))\\s*(:)",
+              "captures": {
+                "1": {
+                  "name": "variable.other.property.dbml"
+                },
+                "2": {
+                  "name": "punctuation.separator.key-value.dbml"
+                }
+              }
+            },
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#color"
+            },
+            {
+              "include": "#constants"
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        }
+      ]
+    },
+    "table": {
+      "name": "meta.table.dbml",
+      "begin": "(?i)^\\s*(table)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.table.dbml"
+        }
+      },
+      "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
+      "patterns": [
+        {
+          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.table.dbml"
+            },
+            "2": {
+              "name": "keyword.other.as.dbml"
+            },
+            "3": {
+              "name": "entity.name.type.alias.dbml"
+            }
+          }
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "include": "#table-body"
+        }
+      ]
+    },
+    "tablepartial": {
+      "name": "meta.tablepartial.dbml",
+      "begin": "(?i)^\\s*(tablepartial)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.tablepartial.dbml"
+        }
+      },
+      "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
+      "patterns": [
+        {
+          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.tablepartial.dbml"
+            },
+            "2": {
+              "name": "keyword.other.as.dbml"
+            },
+            "3": {
+              "name": "entity.name.type.alias.dbml"
+            }
+          }
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "include": "#table-body"
+        }
+      ]
+    },
+    "table-body": {
+      "name": "meta.block.table.dbml",
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.block.begin.dbml"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.dbml"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#note-property"
+        },
+        {
+          "include": "#note-block"
+        },
+        {
+          "name": "meta.block.indexes.dbml",
+          "begin": "(?i)(?:^\\s*|(?<![\\w.\"]))(indexes)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.indexes.dbml"
+            },
+            "2": {
+              "name": "punctuation.section.block.begin.dbml"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#settings"
+            },
+            {
+              "name": "meta.index.columns.dbml",
+              "begin": "\\(",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.section.parens.begin.dbml"
+                }
+              },
+              "end": "\\)",
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.section.parens.end.dbml"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#comments"
+                },
+                {
+                  "include": "#strings"
+                },
+                {
+                  "name": "variable.other.column.dbml",
+                  "match": "(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)"
+                },
+                {
+                  "include": "#punctuation"
+                }
+              ]
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "name": "variable.other.column.dbml",
+              "match": "(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)"
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        },
+        {
+          "name": "meta.block.checks.dbml",
+          "begin": "(?i)(?:^\\s*|(?<![\\w.\"]))(checks)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.checks.dbml"
+            },
+            "2": {
+              "name": "punctuation.section.block.begin.dbml"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#settings"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        },
+        {
+          "include": "#records"
+        },
+        {
+          "match": "(~)((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.partial-injection.dbml"
+            },
+            "2": {
+              "name": "entity.other.inherited-class.dbml"
+            }
+          }
+        },
+        {
+          "include": "#column"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#color"
+        },
+        {
+          "include": "#constants"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
+    "column": {
+      "name": "meta.column.dbml",
+      "match": "(?:^|(?<=\\{))\\s*((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:(\\()([^)\\n]*)(\\)))?(\\[\\])?",
+      "captures": {
+        "1": {
+          "name": "variable.other.column.dbml"
+        },
+        "2": {
+          "name": "support.type.dbml"
+        },
+        "3": {
+          "name": "punctuation.section.parens.begin.dbml"
+        },
+        "4": {
+          "patterns": [
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        },
+        "5": {
+          "name": "punctuation.section.parens.end.dbml"
+        },
+        "6": {
+          "name": "support.type.dbml"
+        }
+      }
+    },
+    "enum": {
+      "name": "meta.enum.dbml",
+      "begin": "(?i)^\\s*(enum)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.enum.dbml"
+        }
+      },
+      "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
+      "patterns": [
+        {
+          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.enum.dbml"
+            },
+            "2": {
+              "name": "keyword.other.as.dbml"
+            },
+            "3": {
+              "name": "entity.name.type.alias.dbml"
+            }
+          }
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "name": "meta.block.enum.dbml",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.dbml"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "match": "^\\s*((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))",
+              "captures": {
+                "1": {
+                  "name": "variable.other.enummember.dbml"
+                }
+              }
+            },
+            {
+              "include": "#settings"
+            },
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#color"
+            },
+            {
+              "include": "#constants"
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        }
+      ]
+    },
+    "tablegroup": {
+      "name": "meta.tablegroup.dbml",
+      "begin": "(?i)^\\s*(tablegroup)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.tablegroup.dbml"
+        }
+      },
+      "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
+      "patterns": [
+        {
+          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.tablegroup.dbml"
+            },
+            "2": {
+              "name": "keyword.other.as.dbml"
+            },
+            "3": {
+              "name": "entity.name.type.alias.dbml"
+            }
+          }
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "name": "meta.block.tablegroup.dbml",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.dbml"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#note-property"
+            },
+            {
+              "include": "#note-block"
+            },
+            {
+              "match": "^\\s*((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)",
+              "captures": {
+                "1": {
+                  "name": "entity.name.type.table.dbml"
+                }
+              }
+            },
+            {
+              "include": "#settings"
+            },
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#color"
+            },
+            {
+              "include": "#constants"
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        }
+      ]
+    },
+    "ref": {
+      "name": "meta.ref.dbml",
+      "begin": "(?i)^\\s*(?:(ref)|(dep))\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.ref.dbml"
+        },
+        "2": {
+          "name": "keyword.other.dep.dbml"
+        }
+      },
+      "end": "(?<=\\})|$",
+      "patterns": [
+        {
+          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.ref.dbml"
+            }
+          }
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "name": "meta.block.ref.dbml",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.dbml"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#settings"
+            },
+            {
+              "include": "#column-reference"
+            },
+            {
+              "include": "#relation-operator"
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        },
+        {
+          "include": "#column-reference"
+        },
+        {
+          "include": "#relation-operator"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
+    "note": {
+      "name": "meta.note.dbml",
+      "begin": "(?i)^\\s*(note)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.note.dbml"
+        }
+      },
+      "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
+      "patterns": [
+        {
+          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.note.dbml"
+            },
+            "2": {
+              "name": "keyword.other.as.dbml"
+            },
+            "3": {
+              "name": "entity.name.type.alias.dbml"
+            }
+          }
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "name": "meta.block.note.dbml",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.dbml"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            }
+          ]
+        }
+      ]
+    },
+    "records": {
+      "name": "meta.records.dbml",
+      "begin": "(?i)(?<![\\w.\"])(records)\\b(?=\\s*[({]|\\s+(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*\\s*[({])",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.records.dbml"
+        }
+      },
+      "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
+      "patterns": [
+        {
+          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.table.dbml"
+            }
+          }
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "begin": "\\(",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.parens.begin.dbml"
+            }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.parens.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "name": "variable.other.column.dbml",
+              "match": "(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)"
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "name": "meta.block.records.dbml",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.dbml"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#color"
+            },
+            {
+              "include": "#constants"
+            },
+            {
+              "include": "#punctuation"
+            },
+            {
+              "include": "#relation-operator"
+            }
+          ]
+        }
+      ]
+    },
+    "diagramview": {
+      "name": "meta.diagramview.dbml",
+      "begin": "(?i)^\\s*(diagramview)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.diagramview.dbml"
+        }
+      },
+      "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
+      "patterns": [
+        {
+          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.diagramview.dbml"
+            },
+            "2": {
+              "name": "keyword.other.as.dbml"
+            },
+            "3": {
+              "name": "entity.name.type.alias.dbml"
+            }
+          }
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "include": "#diagramview-body"
+        }
+      ]
+    },
+    "diagramview-body": {
+      "name": "meta.block.diagramview.dbml",
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.block.begin.dbml"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.dbml"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "match": "(?i)(?<![\\w.\"])(tables|tablegroups|notes|schemas)\\b(?=\\s*\\{)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.${1:/downcase}.dbml"
+            }
+          }
+        },
+        {
+          "include": "#diagramview-body"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#color"
+        },
+        {
+          "include": "#constants"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
+    "metadata": {
+      "name": "meta.metadata.dbml",
+      "begin": "(?i)^\\s*(metadata)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.metadata.dbml"
+        }
+      },
+      "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
+      "patterns": [
+        {
+          "match": "(?i)\\G\\s+(table|tablegroup|schema|column|note)\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.${1:/downcase}.dbml"
+            },
+            "2": {
+              "name": "entity.name.type.${1:/downcase}.dbml"
+            }
+          }
+        },
+        {
+          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.table.dbml"
+            },
+            "2": {
+              "name": "keyword.other.as.dbml"
+            },
+            "3": {
+              "name": "entity.name.type.alias.dbml"
+            }
+          }
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#settings"
+        },
+        {
+          "name": "meta.block.metadata.dbml",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.dbml"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.dbml"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#note-block"
+            },
+            {
+              "match": "(?i)^\\s*(database_type)\\s*(:)",
+              "captures": {
+                "1": {
+                  "name": "keyword.other.setting.dbml"
+                },
+                "2": {
+                  "name": "punctuation.separator.key-value.dbml"
+                }
+              }
+            },
+            {
+              "match": "(?i)^\\s*(erd_\\w+)\\s*(:)",
+              "captures": {
+                "1": {
+                  "name": "variable.other.property.erd-studio.dbml"
+                },
+                "2": {
+                  "name": "punctuation.separator.key-value.dbml"
+                }
+              }
+            },
+            {
+              "match": "^\\s*((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))\\s*(:)",
+              "captures": {
+                "1": {
+                  "name": "variable.other.property.dbml"
+                },
+                "2": {
+                  "name": "punctuation.separator.key-value.dbml"
+                }
+              }
+            },
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#color"
+            },
+            {
+              "include": "#constants"
+            },
+            {
+              "include": "#punctuation"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

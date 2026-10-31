@@ -4,6 +4,9 @@
  * compared the way the file system compares them (`pathKey`).
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 import * as vscode from 'vscode';
 
 import { pathKey } from '../services/pathKey';
@@ -20,4 +23,15 @@ export function dirtyFiles(filePaths: Iterable<string>): string[] {
     seen.add(key);
     return true;
   });
+}
+
+/** A file's text: an open document's (unsaved edits included), else the disk's without a byte-order mark; null when there is none. */
+export function openOrDiskText(filePath: string): string | null {
+  const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && path.resolve(d.uri.fsPath) === path.resolve(filePath));
+  if (doc) return doc.getText();
+  try {
+    return fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
+  } catch {
+    return null;
+  }
 }

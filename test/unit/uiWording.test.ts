@@ -52,9 +52,96 @@ describe('package.json wording (#179)', () => {
 
   it('renames the commands and views the issue names, keeping their ids', () => {
     const title = (id: string) => pkg.contributes.commands.find((c: { command: string }) => c.command === id)?.title;
-    expect(title('erdStudio.createDomain')).toBe('New Subject Area');
     expect(title('erdStudio.moveRelationshipsToLibrary')).toBe('Move Relationships to Table Library');
     const views = Object.values(pkg.contributes.views).flat() as Array<{ id: string; name: string }>;
     expect(views.find(v => v.id === 'erdStudio.modelLibrary')?.name).toBe('Table Library');
+  });
+
+  it('calls a diagram a diagram in the commands on one; only the two file-format commands keep "Subject Area"', () => {
+    const title = (id: string) => pkg.contributes.commands.find((c: { command: string }) => c.command === id)?.title;
+    expect(['createDomain', 'openDomain', 'renameDomain', 'deleteDomain'].map((id) => title(`erdStudio.${id}`)))
+      .toEqual(['New Diagram…', 'Open Diagram', 'Rename Diagram…', 'Delete Diagram']);
+    const subjectArea = (pkg.contributes.commands as Array<{ command: string; title: string }>)
+      .filter((c) => /subject area/i.test(c.title)).map((c) => c.command);
+    expect(subjectArea).toEqual(['erdStudio.setupSemanticDirectory', 'erdStudio.migrateToV5']);
+  });
+});
+
+describe('package.json storage wording (native DBML storage, 2.0)', () => {
+  const texts: Array<[string, string]> = [];
+  userText({ description: pkg.description, displayName: pkg.displayName }, 'package', texts);
+  userText(pkg.contributes, 'contributes', texts);
+
+  it('describes new projects as DBML, an open format, and says YAML/JSON projects keep working, on the Marketplace', () => {
+    expect(pkg.description).toBe(
+      'Logical data modeling in Git: draw ERDs in VS Code as plain files your AI assistant can read. New projects are DBML, an open format; YAML/JSON projects keep working. Import from dbdiagram.io, compare with dbt.',
+    );
+    // Not "saved as DBML" for every project: a YAML/JSON project keeps writing YAML and JSON.
+    expect(pkg.description).not.toMatch(/saved as DBML/);
+    expect(pkg.keywords).toContain('dbml editor');
+    expect(pkg.keywords.length).toBeLessThanOrEqual(30);
+  });
+
+  it('never says "open standard", and never calls the storage YAML or JSON', () => {
+    expect(texts.filter(([, text]) => /open standard/i.test(text)).map(([at]) => at)).toEqual([]);
+    // Welcome views and walkthrough steps can show in a YAML project too, so they stay format-neutral
+    // ("Each table is a file in .erd-studio/") or say DBML; none of them says the storage is YAML or JSON.
+    const storageClaims = texts.filter(([at, text]) => /^contributes\.(viewsWelcome|walkthroughs)/.test(at) && /(YAML|JSON)/.test(text));
+    expect(storageClaims.map(([at, text]) => `${at}: ${text}`)).toEqual([]);
+  });
+
+  it('keeps "an open format, no lock-in" where DBML import and export are offered', () => {
+    const welcome = pkg.contributes.viewsWelcome as Array<{ contents: string; when?: string }>;
+    for (const entry of welcome.filter((w) => w.contents.includes('command:erdStudio.importDbml'))) {
+      expect(entry.contents).toContain('an open format, no lock-in');
+    }
+    const library = welcome.find((w) => w.contents.startsWith('No tables yet.'));
+    expect(library?.contents).toContain('Each table is a file in .erd-studio/ you can commit.');
+  });
+
+  it('the ERD Studio view says "Loading diagrams…" while it loads, and "No diagrams yet." only once loaded', () => {
+    const diagrams = (pkg.contributes.viewsWelcome as Array<{ view: string; contents: string; when?: string }>)
+      .filter((w) => w.view === 'erdStudio.domainTree');
+    expect(diagrams.find((w) => w.contents === 'Loading diagrams…')?.when).toBe('erdStudio.hasProject && erdStudio.diagramsLoading');
+    const empty = diagrams.filter((w) => w.contents.startsWith('No diagrams yet.'));
+    expect(empty).toHaveLength(2);
+    for (const w of empty) expect(w.when).toMatch(/&& !erdStudio\.diagramsLoading$/);
+  });
+
+  it('the Table Library says "Loading tables…" while it loads, and its empty state only once loaded', () => {
+    const library = (pkg.contributes.viewsWelcome as Array<{ view: string; contents: string; when?: string }>)
+      .filter((w) => w.view === 'erdStudio.modelLibrary');
+    expect(library.map((w) => [w.contents.split('\n')[0], w.when])).toEqual([
+      ['Loading tables…', 'erdStudio.tablesLoading'],
+      ['No tables yet.', '!erdStudio.tablesLoading'],
+    ]);
+    // True in a DBML and a YAML project alike: no format, no folder, no "subject area" or "ERD editor".
+    const empty = library[1].contents;
+    expect(empty).not.toMatch(/YAML|DBML|logical-models|tables\/|subject area|ERD editor/i);
+    expect(empty).toContain('diagram');
+  });
+
+  it('walkthrough and welcome views never claim every project is saved as DBML', () => {
+    const claims = texts.filter(([at, text]) => /^contributes\.(viewsWelcome|walkthroughs)/.test(at) && /saved as DBML/i.test(text));
+    expect(claims.map(([at]) => at)).toEqual([]);
+  });
+});
+
+describe('package.json: commands for older projects and the AI helper files', () => {
+  const commands = pkg.contributes.commands as Array<{ command: string; title: string }>;
+  const palette = pkg.contributes.menus.commandPalette as Array<{ command: string; when?: string }>;
+
+  it('hides Migrate Subject Areas to the Central Table Library in a DBML project, as the other YAML-only commands', () => {
+    for (const id of ['erdStudio.migrateToV5', 'erdStudio.moveRelationshipsToLibrary']) {
+      expect(palette.find((m) => m.command === id)?.when, id).toBe('erdStudio.storage != dbml');
+    }
+    // Migrate to Table Naming renames YAML files only: never offered in a DBML or mixed project.
+    expect(palette.find((m) => m.command === 'erdStudio.migrateToTableNaming')?.when).toBe('erdStudio.storage == yaml');
+  });
+
+  it('names the AI helper install command in plain words, never "harness", keeping its id', () => {
+    const title = commands.find((c) => c.command === 'erdStudio.installCodingHarness')?.title;
+    expect(title).toBe('Install AI Helper Files…');
+    expect(commands.filter((c) => /harness/i.test(c.title)).map((c) => c.command)).toEqual([]);
   });
 });

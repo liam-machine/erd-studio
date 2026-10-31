@@ -13,6 +13,12 @@
  * Without a dbt project (`logicalOnly`) there is nothing to pull in: the card
  * drops "Add tables from dbt" and makes "New table" the primary action.
  *
+ * "Add existing tables" opens the Add Existing Table dialog, as the toolbar's
+ * "+ Add" menu does. It shows only when there is something to add (the host's
+ * `existingModels` already leaves out this diagram's tables), and becomes the
+ * primary action when the Table Library holds tables this diagram doesn't:
+ * reusing a table beats drawing it again.
+ *
  * Only the card takes pointer events; the overlay around it lets drags and
  * wheel zooms through to the canvas. It disappears as soon as the domain has a
  * model, on the physical stage and for a read-only domain.
@@ -29,28 +35,52 @@ export const EmptyCanvas: React.FC = () => {
   const newModelDialogOpen = useEditorStore((s) => s.newModelDialogOpen);
   const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
   const logicalOnly = useEditorStore((s) => s.logicalOnly);
+  const existingModels = useEditorStore((s) => s.existingModels);
+  const manifestModels = useEditorStore((s) => s.manifestModels);
+  const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
+  const addExistingOpen = useEditorStore((s) => s.addExistingModelDialogOpen);
   const send = useSend();
 
   if (!domain || domain.stage !== 'logical' || domain.readOnly || domain.models.length > 0) {
     return null;
   }
-  // The dialog it opens sits in the same spot; one thing at a time.
-  if (newModelDialogOpen) { return null; }
+  // The dialogs it opens sit in the same spot; one thing at a time.
+  if (newModelDialogOpen || addExistingOpen) { return null; }
+
+  const existing = existingModels ?? [];
+  const libraryHasTables = existing.some((m) => m.source === 'logical');
+  const canAddExisting = existing.length > 0 || (manifestModels ?? []).length > 0;
+  const primary: 'existing' | 'dbt' | 'new' = libraryHasTables ? 'existing' : !logicalOnly ? 'dbt' : 'new';
+  const buttonClass = (which: typeof primary): string =>
+    `empty-canvas__button${primary === which ? ' empty-canvas__button--primary' : ''}`;
 
   return (
     <div className="empty-canvas">
       <section className="empty-canvas__card" aria-labelledby="empty-canvas-title">
         <h2 id="empty-canvas-title" className="empty-canvas__title">This diagram is empty</h2>
         <p className="empty-canvas__body">
-          {logicalOnly
-            ? 'Add your first table. Each one is a YAML file you can commit.'
-            : 'Start from your dbt project, or add a table by hand.'}
+          {libraryHasTables
+            ? (logicalOnly
+              ? 'Reuse tables from your Table Library, or add a new one.'
+              : 'Reuse tables from your Table Library, start from your dbt project, or add a table by hand.')
+            : logicalOnly
+              ? 'Add your first table. Each one is a file you can commit.'
+              : 'Start from your dbt project, or add a table by hand.'}
         </p>
         <div className="empty-canvas__actions">
+          {libraryHasTables && (
+            <button
+              type="button"
+              className={buttonClass('existing')}
+              onClick={() => setAddExistingModelDialogOpen(true)}
+            >
+              Add existing tables
+            </button>
+          )}
           {!logicalOnly && (
             <button
               type="button"
-              className="empty-canvas__button empty-canvas__button--primary"
+              className={buttonClass('dbt')}
               onClick={() => send({ type: 'addModelsFromDbt' })}
             >
               Add tables from dbt
@@ -58,11 +88,20 @@ export const EmptyCanvas: React.FC = () => {
           )}
           <button
             type="button"
-            className={`empty-canvas__button${logicalOnly ? ' empty-canvas__button--primary' : ''}`}
+            className={buttonClass('new')}
             onClick={() => setNewModelDialogOpen(true)}
           >
             New table
           </button>
+          {!libraryHasTables && canAddExisting && (
+            <button
+              type="button"
+              className={buttonClass('existing')}
+              onClick={() => setAddExistingModelDialogOpen(true)}
+            >
+              Add existing tables
+            </button>
+          )}
         </div>
         <p className="empty-canvas__hint">
           Or let your AI assistant draw it:{' '}

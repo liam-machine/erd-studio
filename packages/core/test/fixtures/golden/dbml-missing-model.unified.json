@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 7,
+  "domain": "partial",
+  "layer": "silver",
+  "description": "A domain whose model references do not all resolve",
+  "logical": {
+    "models": [
+      {
+        "name": "dim_customer",
+        "schema": "silver",
+        "description": "Customers",
+        "columns": [
+          {
+            "name": "customer_key",
+            "dataType": "INT",
+            "description": "Surrogate key",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "customer_name",
+            "dataType": "VARCHAR",
+            "description": "Display name"
+          }
+        ]
+      },
+      {
+        "name": "dim_missing",
+        "columns": []
+      },
+      {
+        "name": "broken",
+        "columns": [],
+        "loadError": {
+          "kind": "dbmlSyntax",
+          "line": 5,
+          "code": "1005"
+        }
+      },
+      {
+        "name": "nameless",
+        "columns": []
+      }
+    ],
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {
+      "dim_customer": {
+        "x": 0,
+        "y": 0
+      },
+      "dim_missing": {
+        "x": 400,
+        "y": 0
+      },
+      "broken": {
+        "x": 0,
+        "y": 300
+      },
+      "nameless": {
+        "x": 400,
+        "y": 300
+      }
+    }
+  }
+}

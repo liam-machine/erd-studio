@@ -3,7 +3,9 @@
  *
  * Displays semantic domains grouped by layer (bronze, silver, gold).
  * Each domain shows a badge with model count (from the logical stage).
- * "New Domain..." items appear inside creatable layers.
+ * Creating is always a visible, labelled row: each creatable layer ends with
+ * "New Diagram…", and the tree ends with "New Layer…" (the + menu and the
+ * layer row's inline + are shortcuts to the same commands).
  *
  * Supports drag-and-drop to reorder layers. Stages are handled entirely
  * by the editor tabs — the tree is stage-agnostic.
@@ -17,11 +19,15 @@ import * as path from 'path';
 import type { SubjectAreaSummary, Layer } from '../types/semantic';
 import { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
+import { createLogger, elapsedMs, log, plural } from '../services/logger';
 import { layersFailure } from '../services/diagramCommandErrors';
 import { showCommandFailure } from '../commands/commandFailure';
+import type { DbmlFileIconResolver } from './dbmlFileKinds';
+
+const treeLog = createLogger('Subject Areas');
 
 /** MIME type for layer drag-drop within the tree. */
-const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer';
+export const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer';
 
 // ---------------------------------------------------------------------------
 // Tree element types (discriminated union)
@@ -42,6 +48,13 @@ interface SubjectAreaNode {
 interface NewSubjectAreaNode {
   readonly type: 'newDomain';
   readonly layer: Layer;
+  /** The layer has no diagram yet: the row says so. */
+  readonly first: boolean;
+}
+
+/** The tree's last row, under the layers. */
+interface NewLayerNode {
+  readonly type: 'newLayer';
 }
 
 /**
@@ -55,7 +68,7 @@ interface ProjectNode {
   readonly location: string;
 }
 
-export type TreeElement = ProjectNode | LayerNode | SubjectAreaNode | NewSubjectAreaNode;
+export type TreeElement = ProjectNode | LayerNode | SubjectAreaNode | NewSubjectAreaNode | NewLayerNode;
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -77,16 +90,32 @@ export class SubjectAreaTreeProvider
   private readonly semanticDir: string;
 
   /**
-   * Parsed-domain cache keyed by file path. Resolving a v5 domain means one
-   * YAML parse per referenced model, so without this every tree refresh cost
-   * O(domains x models) reads. Entries are validated by mtime + size so an
-   * edit is never served stale; invalidateSubjectArea() drops entries eagerly when
-   * the file watcher reports a change.
+   * Table-count cache keyed by file path. The count comes from the diagram
+   * file alone (`countSubjectAreaTables`: no table is resolved), and is
+   * validated by mtime + size so an edit is never served stale;
+   * invalidateSubjectArea() drops entries eagerly when the file watcher
+   * reports a change.
    */
   private readonly summaryCache = new Map<string, CachedSubjectAreaSummary>();
 
+  /**
+   * The subject areas by layer, listed once per render: the root's
+   * getChildren lists them, and the first getChildren of each layer that
+   * follows reads this instead of listing every layer folder again (a later
+   * one, such as expanding a collapsed layer, lists afresh). Dropped on refresh().
+   */
+  private summariesByLayer: { byLayer: Map<string, SubjectAreaSummary[]>; unread: Set<string> } | undefined;
+
   /** The project row, or undefined while the workspace has one dbt project. */
   private projectRow: ProjectNode | undefined;
+
+  /**
+   * `erdStudio.diagramsLoading`: true until a root listing finds no rows.
+   * A listing with rows leaves it set: VS Code applies a context key the
+   * moment it arrives but draws the rows a little later, so clearing it on
+   * every first listing flashed "No diagrams yet" over a full project.
+   */
+  private loading = true;
 
   // TreeDragAndDropController properties
   readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE];
@@ -97,8 +126,17 @@ export class SubjectAreaTreeProvider
     private readonly layerService: LayerService,
     private readonly projectPath: string,
     semanticDir?: string,
+    /** Told whether the empty-state text may show: false once a root listing finds no rows, true again once one finds rows (the extension sets `erdStudio.diagramsLoading`). Optional. */
+    private readonly onLoadingChange?: (loading: boolean) => void,
+    /** The DBML Diagram icon for `.dbml` rows (`dbmlFileIcon`). Optional: without it every diagram row keeps the `json` codicon. */
+    private readonly dbmlIcon?: DbmlFileIconResolver,
   ) {
     this.semanticDir = semanticDir ?? DEFAULT_SEMANTIC_DIR;
+  }
+
+  /** Whether the empty-state text is held back: no root listing has found the tree empty (since it last had rows). */
+  isLoading(): boolean {
+    return this.loading;
   }
 
   // -------------------------------------------------------------------------
@@ -156,7 +194,7 @@ export class SubjectAreaTreeProvider
       this.refresh();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[DomainTreeProvider] Failed to reorder layers: ${message}`);
+      log.error(`[DomainTreeProvider] Failed to reorder layers: ${message}`);
       // Reorder is refused when layers.json is unreadable (H18) — tell the user, in words (#229)
       showCommandFailure(layersFailure('Reorder Layers', err, {
         workspaceRoot: this.projectPath, layersPath: this.layerService.getConfigPath(),
@@ -167,6 +205,7 @@ export class SubjectAreaTreeProvider
 
   /** Refresh the entire tree (or a specific element). */
   refresh(element?: TreeElement): void {
+    this.summariesByLayer = undefined;
     this._onDidChangeTreeData.fire(element);
   }
 
@@ -207,10 +246,12 @@ export class SubjectAreaTreeProvider
 
     let modelCount = 0;
     try {
-      const domain = this.subjectAreaService.getSubjectArea(filePath);
-      modelCount = domain.logical.models.length;
+      // Counted from the diagram file alone: resolving every table (a full
+      // getSubjectArea) only to count them made each refresh as slow as
+      // opening every diagram.
+      modelCount = this.subjectAreaService.countSubjectAreaTables(filePath);
     } catch (err) {
-      console.warn(`[DomainTreeProvider] Failed to load ${filePath}:`, err);
+      log.warn(`[DomainTreeProvider] Failed to load ${filePath}:`, err);
       // Do not cache failures — the file may be mid-write
       this.summaryCache.delete(key);
       return 0;
@@ -241,20 +282,28 @@ export class SubjectAreaTreeProvider
         return this.createSubjectAreaItem(element);
       case 'newDomain':
         return this.createNewSubjectAreaItem(element);
+      case 'newLayer':
+        return this.createNewLayerItem();
     }
   }
 
   getChildren(element?: TreeElement): TreeElement[] | undefined {
     if (!element) {
-      const fullSemanticDir = path.join(this.projectPath, this.semanticDir);
-      if (!fs.existsSync(fullSemanticDir)) {
-        return [];
+      // `erdStudio.diagramsLoading` is cleared only by a listing with no
+      // rows, so the "No diagrams yet" welcome never flashes over a project
+      // that has diagrams while the window opens.
+      let rows = 0;
+      try {
+        const children = this.rootChildren();
+        rows = children.length;
+        return children;
+      } finally {
+        const loading = rows > 0;
+        if (this.loading !== loading) {
+          this.loading = loading;
+          this.onLoadingChange?.(loading);
+        }
       }
-      const layers = this.layerService.getAllLayers();
-      const layerNodes = layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
-      // Only alongside real content: an empty tree must stay empty so the
-      // welcome view (which has its own Select dbt Project button) shows.
-      return this.projectRow ? [this.projectRow, ...layerNodes] : layerNodes;
     }
 
     if (element.type === 'layer') {
@@ -268,9 +317,39 @@ export class SubjectAreaTreeProvider
   // Private helpers
   // -------------------------------------------------------------------------
 
+  private rootChildren(): TreeElement[] {
+    const fullSemanticDir = path.join(this.projectPath, this.semanticDir);
+    if (!fs.existsSync(fullSemanticDir)) {
+      return [];
+    }
+    const start = Date.now();
+    const layers = this.layerService.getAllLayers();
+    const layerNodes = layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
+    this.summariesByLayer = { byLayer: this.listByLayer(), unread: new Set(layers.map((l) => l.id)) };
+    treeLog.debug(`Listed ${plural(layers.length, 'layer')} in ${elapsedMs(start)} ms`);
+    // Only alongside real content: an empty tree must stay empty so the
+    // welcome view (which has its own Select dbt Project button) shows.
+    if (layerNodes.length === 0) return this.projectRow ? [this.projectRow] : [];
+    return [...(this.projectRow ? [this.projectRow] : []), ...layerNodes, { type: 'newLayer' }];
+  }
+
+  /** Every subject area, grouped by layer (one listing of the project). */
+  private listByLayer(): Map<string, SubjectAreaSummary[]> {
+    const byLayer = new Map<string, SubjectAreaSummary[]>();
+    for (const summary of this.subjectAreaService.listSubjectAreas(this.projectPath, this.semanticDir)) {
+      const list = byLayer.get(summary.layer);
+      if (list) list.push(summary);
+      else byLayer.set(summary.layer, [summary]);
+    }
+    return byLayer;
+  }
+
   private getLayerChildren(layer: Layer): TreeElement[] {
-    const summaries = this.subjectAreaService.listSubjectAreas(this.projectPath, this.semanticDir);
-    const layerDomains = summaries.filter(s => s.layer === layer);
+    // A layer asked for on its own (no root call just before it) lists afresh.
+    const start = Date.now();
+    const memo = this.summariesByLayer;
+    const byLayer = memo?.unread.delete(layer) ? memo.byLayer : this.listByLayer();
+    const layerDomains = byLayer.get(layer) ?? [];
 
     const domainNodes: SubjectAreaNode[] = layerDomains.map(summary => ({
       type: 'domain' as const,
@@ -282,9 +361,10 @@ export class SubjectAreaTreeProvider
     const children: TreeElement[] = [...domainNodes];
 
     if (this.layerService.isCreatable(layer)) {
-      children.push({ type: 'newDomain', layer });
+      children.push({ type: 'newDomain', layer, first: domainNodes.length === 0 });
     }
 
+    treeLog.debug(`Layer ${layer} listed ${plural(domainNodes.length, 'diagram')} in ${elapsedMs(start)} ms`);
     return children;
   }
 
@@ -304,7 +384,8 @@ export class SubjectAreaTreeProvider
       layerConfig?.label ?? element.layer,
       vscode.TreeItemCollapsibleState.Expanded,
     );
-    item.contextValue = 'layer';
+    // `layerCreatable` offers New Diagram on the row (inline + and right-click).
+    item.contextValue = this.layerService.isCreatable(element.layer) ? 'layerCreatable' : 'layer';
     item.iconPath = new vscode.ThemeIcon('folder');
 
     // Assign a resource URI so FileDecorationProvider can apply colors
@@ -324,13 +405,19 @@ export class SubjectAreaTreeProvider
     item.description = element.designCount > 0
       ? `${element.modelCount} ${modelWord}, ${element.designCount} ${designWord}`
       : `${element.modelCount} ${modelWord}`;
+    // The same name in both formats in one layer (native DBML storage): say which is which.
+    if (element.summary.conflict) {
+      item.description += element.summary.storage === 'dbml' ? ' (DBML)' : ' (JSON)';
+    }
 
     item.contextValue = 'domain';
-    item.iconPath = new vscode.ThemeIcon('json');
+    item.iconPath = element.summary.storage === 'dbml' && this.dbmlIcon
+      ? this.dbmlIcon('diagram')
+      : new vscode.ThemeIcon('json');
     item.tooltip = `${this.layerService.getLabel(element.summary.layer)} / ${element.summary.domain}`;
     item.command = {
       command: 'erdStudio.openDomain',
-      title: 'Open Subject Area',
+      title: 'Open Diagram',
       arguments: [element.summary.filePath],
     };
 
@@ -339,16 +426,28 @@ export class SubjectAreaTreeProvider
 
   private createNewSubjectAreaItem(element: NewSubjectAreaNode): vscode.TreeItem {
     const item = new vscode.TreeItem(
-      'New Subject Area...',
+      'New Diagram…',
       vscode.TreeItemCollapsibleState.None,
     );
+    if (element.first) item.description = 'none in this layer yet';
+    item.tooltip = `Start a diagram in ${this.layerService.getLabel(element.layer)}`;
     item.contextValue = 'newDomain';
     item.iconPath = new vscode.ThemeIcon('add');
     item.command = {
       command: 'erdStudio.createDomain',
-      title: 'New Subject Area',
+      title: 'New Diagram…',
       arguments: [element.layer],
     };
+    return item;
+  }
+
+  private createNewLayerItem(): vscode.TreeItem {
+    const item = new vscode.TreeItem('New Layer…', vscode.TreeItemCollapsibleState.None);
+    item.id = 'erdStudio.newLayer';
+    item.tooltip = 'Add a layer: a stage of your warehouse, such as bronze, silver or gold, that holds diagrams';
+    item.contextValue = 'newLayer';
+    item.iconPath = new vscode.ThemeIcon('new-folder');
+    item.command = { command: 'erdStudio.addLayer', title: 'New Layer…' };
     return item;
   }
 

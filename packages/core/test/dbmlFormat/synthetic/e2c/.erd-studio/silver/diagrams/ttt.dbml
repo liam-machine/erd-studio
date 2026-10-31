@@ -1,0 +1,4 @@
+Project ttt {
+  erd_schema_version: '7'
+  erd_model_folder: 'models/silver'
+}

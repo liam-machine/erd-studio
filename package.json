@@ -1,7 +1,7 @@
 {
   "name": "erd-studio",
   "displayName": "ERD Studio",
-  "description": "Logical data modeling in Git: draw ERDs in VS Code, saved as plain YAML your AI assistant can read. DBML import and export, no lock-in. Compare with dbt.",
+  "description": "Logical data modeling in Git: draw ERDs in VS Code as plain files your AI assistant can read. New projects are DBML, an open format; YAML/JSON projects keep working. Import from dbdiagram.io, compare with dbt.",
   "version": "1.7.2",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
@@ -20,6 +20,7 @@
   "keywords": [
     "ERD",
     "DBML",
+    "dbml editor",
     "dbdiagram",
     "logical data model",
     "data model",
@@ -121,7 +122,7 @@
       },
       {
         "command": "erdStudio.createDomain",
-        "title": "New Subject Area",
+        "title": "New Diagram…",
         "category": "ERD Studio",
         "icon": "$(add)"
       },
@@ -132,12 +133,12 @@
       },
       {
         "command": "erdStudio.openDomain",
-        "title": "Open Subject Area",
+        "title": "Open Diagram",
         "category": "ERD Studio"
       },
       {
         "command": "erdStudio.deleteDomain",
-        "title": "Delete Subject Area",
+        "title": "Delete Diagram",
         "category": "ERD Studio"
       },
       {
@@ -147,13 +148,14 @@
       },
       {
         "command": "erdStudio.renameDomain",
-        "title": "Rename Subject Area",
+        "title": "Rename Diagram…",
         "category": "ERD Studio"
       },
       {
         "command": "erdStudio.addLayer",
-        "title": "Layer +",
-        "category": "ERD Studio"
+        "title": "New Layer…",
+        "category": "ERD Studio",
+        "icon": "$(new-folder)"
       },
       {
         "command": "erdStudio.editLayer",
@@ -172,7 +174,7 @@
       },
       {
         "command": "erdStudio.installCodingHarness",
-        "title": "Install AI Coding Harness",
+        "title": "Install AI Helper Files…",
         "category": "ERD Studio",
         "icon": "$(hubot)"
       },
@@ -194,6 +196,11 @@
       {
         "command": "erdStudio.migrateToTableNaming",
         "title": "Migrate to the New File Naming",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.convertProjectToDbml",
+        "title": "Convert Project to DBML",
         "category": "ERD Studio"
       },
       {
@@ -224,10 +231,38 @@
         "icon": "$(wand)"
       },
       {
+        "command": "erdStudio.moveTable",
+        "title": "Move Table…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.moveDiagram",
+        "title": "Move Diagram to Layer…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.openInDiagram",
+        "title": "Open in Diagram…",
+        "category": "ERD Studio",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "erdStudio.openRelationshipSource",
+        "title": "Open in File",
+        "category": "ERD Studio",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "erdStudio.reportBug",
         "title": "Send Feedback",
         "category": "ERD Studio",
         "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "erdStudio.showLogs",
+        "title": "Show Logs",
+        "category": "ERD Studio",
+        "icon": "$(output)"
       },
       {
         "command": "erdStudio.showGettingStarted",
@@ -270,6 +305,13 @@
         "icon": "$(folder-library)"
       }
     ],
+    "submenus": [
+      {
+        "id": "erdStudio.newMenu",
+        "label": "New…",
+        "icon": "$(add)"
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -283,7 +325,7 @@
       "erd-studio": [
         {
           "id": "erdStudio.domainTree",
-          "name": "ERD Studio"
+          "name": "Diagrams"
         },
         {
           "id": "erdStudio.modelLibrary",
@@ -291,9 +333,15 @@
           "when": "erdStudio.hasLogicalModelsDir"
         },
         {
-          "id": "erdStudio.myReports",
-          "name": "My Reports",
-          "when": "erdStudio.hasTrackedReports"
+          "id": "erdStudio.relationships",
+          "name": "Relationships",
+          "when": "erdStudio.hasLogicalModelsDir"
+        },
+        {
+          "id": "erdStudio.help",
+          "name": "Help & Feedback",
+          "when": "erdStudio.hasProject",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -347,18 +395,23 @@
     "viewsWelcome": [
       {
         "view": "erdStudio.domainTree",
-        "contents": "Design your data model as plain files in a Git repo.\n\n[Open Folder](command:workbench.action.files.openFolder)\n\nAny folder works. If it holds a dbt project, ERD Studio also shows what dbt built.",
+        "contents": "Design your data model as DBML files in a Git repo: an open format, no lock-in.\n\n[Open Folder](command:workbench.action.files.openFolder)\n\nAny folder works. If it holds a dbt project, ERD Studio also shows what dbt built.",
         "when": "workspaceFolderCount == 0"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nSaved as YAML and JSON in .erd-studio/, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nNew to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)\n\nUsing dbt? Open its folder to compare your design with what dbt built.\n\n[Get started](command:erdStudio.showGettingStarted)",
-        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject"
+        "contents": "Loading diagrams…",
+        "when": "erdStudio.hasProject && erdStudio.diagramsLoading"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nNew to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)\n\nUsing dbt? Open its folder to compare your design with what dbt built.\n\n[Get started](command:erdStudio.showGettingStarted)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading"
       },
       {
         "view": "erdStudio.domainTree",
         "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\nRather start blank? [New Diagram](command:erdStudio.createDomain)\n\nAlready have a DBML file, from dbdiagram.io or another tool? [Import DBML](command:erdStudio.importDbml) Export back to DBML or Mermaid any time — an open format, no lock-in.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
-        "when": "erdStudio.hasDbtProject"
+        "when": "erdStudio.hasDbtProject && !erdStudio.diagramsLoading"
       },
       {
         "view": "erdStudio.domainTree",
@@ -367,7 +420,17 @@
       },
       {
         "view": "erdStudio.modelLibrary",
-        "contents": "No tables found.\n\nTables are stored as one YAML file each under .erd-studio/.\n\nAdd tables to a subject area using the ERD editor to create them here."
+        "contents": "Loading tables…",
+        "when": "erdStudio.tablesLoading"
+      },
+      {
+        "view": "erdStudio.modelLibrary",
+        "contents": "No tables yet.\n\nEach table is a file in .erd-studio/ you can commit.\n\nOpen a diagram and add a table on the canvas, or ask your AI assistant to add one: it shows here, ready to use in any diagram.",
+        "when": "!erdStudio.tablesLoading"
+      },
+      {
+        "view": "erdStudio.relationships",
+        "contents": "No relationships yet.\n\nOpen a diagram and use + Add → New Relationship, or press and hold a column on the canvas and drag it onto a column of another table. Your AI assistant can add them too. Each relationship shows here under both of its tables."
       }
     ],
     "walkthroughs": [
@@ -405,11 +468,11 @@
           {
             "id": "newDiagram",
             "title": "Draw your first data model — no dbt needed",
-            "description": "Start a blank diagram and add tables on the canvas. Each table is a YAML file in .erd-studio/ that you commit and review like code.\n[New Diagram](command:erdStudio.createDomain)\nNew to data modelling? Start from a small coffee-shop star schema instead.\n[Open Example Diagram](command:erdStudio.openExampleDiagram)",
+            "description": "Start a blank diagram and add tables on the canvas. Each table is a file in .erd-studio/ you can commit and review like code.\n[New Diagram](command:erdStudio.createDomain)\nNew to data modelling? Start from a small coffee-shop star schema instead.\n[Open Example Diagram](command:erdStudio.openExampleDiagram)",
             "when": "!erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/new-diagram.svg",
-              "altText": "A new diagram with its first table, saved as YAML and JSON files in .erd-studio."
+              "altText": "A new diagram with its first table, and the DBML files a new project keeps it in under .erd-studio."
             },
             "completionEvents": [
               "onCommand:erdStudio.createDomain",
@@ -472,18 +535,119 @@
     "customEditors": [
       {
         "viewType": "erdStudio.domainEditor",
-        "displayName": "Subject Area Editor",
+        "displayName": "ERD Studio Diagram",
         "selector": [
           {
             "filenamePattern": "**/.erd-studio/*/*.json"
           },
           {
             "filenamePattern": "**/erd-studio/*/*.json"
+          },
+          {
+            "filenamePattern": "**/.erd-studio/*/diagrams/*.dbml"
           }
         ],
         "priority": "default"
       }
     ],
+    "languages": [
+      {
+        "id": "dbml",
+        "aliases": [
+          "DBML"
+        ],
+        "extensions": [
+          ".dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json"
+      },
+      {
+        "id": "dbml-diagram",
+        "aliases": [
+          "DBML Diagram"
+        ],
+        "filenamePatterns": [
+          "**/.erd-studio/*/diagrams/*.dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json",
+        "icon": {
+          "light": "./media/file-icons/dbml-diagram-light.svg",
+          "dark": "./media/file-icons/dbml-diagram-dark.svg"
+        }
+      },
+      {
+        "id": "dbml-table",
+        "aliases": [
+          "DBML Table"
+        ],
+        "filenamePatterns": [
+          "**/.erd-studio/*/tables/*/*.dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json",
+        "icon": {
+          "light": "./media/file-icons/dbml-table-light.svg",
+          "dark": "./media/file-icons/dbml-table-dark.svg"
+        }
+      },
+      {
+        "id": "dbml-relationships",
+        "aliases": [
+          "DBML Relationships"
+        ],
+        "filenamePatterns": [
+          "**/.erd-studio/*/relationships/*.dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json",
+        "icon": {
+          "light": "./media/file-icons/dbml-relationships-light.svg",
+          "dark": "./media/file-icons/dbml-relationships-dark.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dbml",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      },
+      {
+        "language": "dbml-diagram",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      },
+      {
+        "language": "dbml-table",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      },
+      {
+        "language": "dbml-relationships",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[dbml]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      },
+      "[dbml-diagram]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      },
+      "[dbml-table]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      },
+      "[dbml-relationships]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      }
+    },
     "menus": {
       "view/item/context": [
         {
@@ -497,24 +661,54 @@
           "group": "7_modification@1"
         },
         {
-          "command": "erdStudio.deleteDomain",
-          "when": "view == erdStudio.domainTree && viewItem == domain",
+          "command": "erdStudio.moveDiagram",
+          "when": "view == erdStudio.domainTree && viewItem == domain && erdStudio.storage =~ /^(dbml|mixed)$/",
           "group": "7_modification@2"
         },
         {
+          "command": "erdStudio.deleteDomain",
+          "when": "view == erdStudio.domainTree && viewItem == domain",
+          "group": "7_modification@3"
+        },
+        {
+          "command": "erdStudio.createDomain",
+          "when": "view == erdStudio.domainTree && viewItem == layerCreatable",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.createDomain",
+          "when": "view == erdStudio.domainTree && viewItem == layerCreatable",
+          "group": "1_new@1"
+        },
+        {
           "command": "erdStudio.editLayer",
-          "when": "view == erdStudio.domainTree && viewItem == layer",
+          "when": "view == erdStudio.domainTree && viewItem =~ /^layer/",
           "group": "7_modification@1"
         },
         {
           "command": "erdStudio.removeLayer",
-          "when": "view == erdStudio.domainTree && viewItem == layer",
+          "when": "view == erdStudio.domainTree && viewItem =~ /^layer/",
           "group": "7_modification@2"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate|ReadOnly)?$/",
+          "group": "navigation@0"
         },
         {
           "command": "erdStudio.revealLogicalModel",
           "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate)?$/",
           "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.moveTable",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "7_modification@0"
         },
         {
           "command": "erdStudio.deleteLogicalModel",
@@ -530,71 +724,109 @@
           "command": "erdStudio.resolveDuplicateModel",
           "when": "view == erdStudio.modelLibrary && viewItem == logicalModelDuplicate",
           "group": "7_modification@0"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.relationships && viewItem == relationshipsTable",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.openRelationshipSource",
+          "when": "view == erdStudio.relationships && viewItem == relationship",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.relationships && viewItem =~ /^(relationship|relationshipsTable)$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.openRelationshipSource",
+          "when": "view == erdStudio.relationships && viewItem == relationship",
+          "group": "navigation@2"
+        },
+        {
+          "command": "erdStudio.refreshMyReports",
+          "when": "view == erdStudio.help && viewItem == myReports",
+          "group": "inline"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "erdStudio.moveTable",
+          "when": "resourceLangId == dbml-table && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "7_modification@9"
+        },
+        {
+          "command": "erdStudio.moveDiagram",
+          "when": "resourceLangId == dbml-diagram && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "7_modification@9"
         }
       ],
       "view/title": [
         {
-          "command": "erdStudio.organizeModelLibrary",
-          "when": "view == erdStudio.modelLibrary",
-          "group": "navigation@0"
-        },
-        {
-          "command": "erdStudio.moveRelationshipsToLibrary",
-          "when": "view == erdStudio.modelLibrary",
-          "group": "1_organise@1"
-        },
-        {
-          "command": "erdStudio.migrateToTableNaming",
-          "when": "view == erdStudio.modelLibrary",
-          "group": "1_organise@2"
-        },
-        {
-          "command": "erdStudio.drawFromDbt",
-          "when": "view == erdStudio.domainTree && erdStudio.hasDbtProject",
-          "group": "navigation@0"
-        },
-        {
-          "command": "erdStudio.createDomain",
+          "submenu": "erdStudio.newMenu",
           "when": "view == erdStudio.domainTree && erdStudio.hasProject",
           "group": "navigation@0"
-        },
-        {
-          "command": "erdStudio.importDbml",
-          "when": "view == erdStudio.domainTree && erdStudio.hasProject",
-          "group": "1_create@1"
-        },
-        {
-          "command": "erdStudio.installCodingHarness",
-          "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
-          "group": "navigation@1"
-        },
-        {
-          "command": "erdStudio.addLayer",
-          "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
-          "group": "navigation@2"
         },
         {
           "command": "erdStudio.selectDbtProject",
           "when": "view == erdStudio.domainTree && erdStudio.hasMultipleDbtProjects",
-          "group": "navigation@7"
+          "group": "1_project@1"
         },
         {
-          "command": "erdStudio.showGettingStarted",
-          "when": "view == erdStudio.domainTree",
-          "group": "navigation@8"
+          "command": "erdStudio.exportAllDiagrams",
+          "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
+          "group": "2_export@1"
         },
         {
-          "command": "erdStudio.reportBug",
-          "when": "view == erdStudio.domainTree",
-          "group": "navigation@9"
+          "command": "erdStudio.organizeModelLibrary",
+          "when": "view == erdStudio.modelLibrary",
+          "group": "1_organise@0"
+        },
+        {
+          "command": "erdStudio.moveRelationshipsToLibrary",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage != dbml",
+          "group": "1_organise@1"
+        },
+        {
+          "command": "erdStudio.migrateToTableNaming",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage == yaml",
+          "group": "1_organise@2"
+        },
+        {
+          "command": "erdStudio.convertProjectToDbml",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage != dbml",
+          "group": "1_organise@3"
+        },
+        {
+          "command": "erdStudio.installCodingHarness",
+          "when": "view == erdStudio.help && erdStudio.hasSemanticDir",
+          "group": "1_ai@1"
         },
         {
           "command": "erdStudio.refreshMyReports",
-          "when": "view == erdStudio.myReports",
-          "group": "navigation@0"
+          "when": "view == erdStudio.help && erdStudio.hasTrackedReports",
+          "group": "2_reports@1"
         }
       ],
       "commandPalette": [
+        {
+          "command": "erdStudio.moveRelationshipsToLibrary",
+          "when": "erdStudio.storage != dbml"
+        },
+        {
+          "command": "erdStudio.migrateToV5",
+          "when": "erdStudio.storage != dbml"
+        },
+        {
+          "command": "erdStudio.migrateToTableNaming",
+          "when": "erdStudio.storage == yaml"
+        },
+        {
+          "command": "erdStudio.convertProjectToDbml",
+          "when": "erdStudio.hasProject"
+        },
         {
           "command": "erdStudio.importDbml",
           "when": "erdStudio.hasProject"
@@ -618,6 +850,44 @@
         {
           "command": "erdStudio.stripLegacyDomainTags",
           "when": "erdStudio.hasDbtProject"
+        },
+        {
+          "command": "erdStudio.moveTable",
+          "when": "erdStudio.storage =~ /^(dbml|mixed)$/"
+        },
+        {
+          "command": "erdStudio.moveDiagram",
+          "when": "erdStudio.storage =~ /^(dbml|mixed)$/"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.openRelationshipSource",
+          "when": "false"
+        }
+      ],
+      "erdStudio.newMenu": [
+        {
+          "command": "erdStudio.createDomain",
+          "when": "erdStudio.hasProject",
+          "group": "1_diagram@1"
+        },
+        {
+          "command": "erdStudio.drawFromDbt",
+          "when": "erdStudio.hasDbtProject",
+          "group": "1_diagram@2"
+        },
+        {
+          "command": "erdStudio.importDbml",
+          "when": "erdStudio.hasProject",
+          "group": "1_diagram@3"
+        },
+        {
+          "command": "erdStudio.addLayer",
+          "when": "erdStudio.hasSemanticDir",
+          "group": "2_layer@1"
         }
       ]
     },
@@ -632,7 +902,7 @@
         "erdStudio.semanticDir": {
           "type": "string",
           "default": ".erd-studio",
-          "description": "Relative path to ERD Studio subject area files within the project. Changing this requires a window reload."
+          "description": "Folder, relative to the project, that holds ERD Studio's tables and diagrams. Changing this requires a window reload."
         },
         "erdStudio.claudeSync.skipPermissions": {
           "type": "boolean",
@@ -711,6 +981,26 @@
           ],
           "markdownDescription": "When ERD Studio hits an error that a newer release already fixes, say so and offer **Update**. The first error in a session downloads the list of known fixes (once a day at most) from ERD Studio's server; the request carries nothing about you, your project or the error — the list is matched on your machine. Works whether or not `#erdStudio.telemetry.enabled#` is on."
         },
+        "erdStudio.dbml.offerConvert": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When you open a diagram in a YAML/JSON project, offer once a session to convert it to DBML. Your project keeps working as it is either way; turn this off to stop the offer in every workspace. **ERD Studio: Convert Project to DBML** still works from the Command Palette."
+        },
+        "erdStudio.dbml.updateReferencesOnMove": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Ask each time, with Update, Always and Never.",
+            "Update the files that point at it without asking.",
+            "Leave every file as it is, and ask nothing. A file moved where ERD Studio does not read it is still pointed out."
+          ],
+          "default": "prompt",
+          "markdownDescription": "When you move or rename a `.dbml` file (or a folder of them) in the Explorer in a DBML project, update the diagrams and relationships files that point at it: their `use` lines, and the table's schema (`Table crm.fct_order`) when it lands in another schema folder. Renaming a table file renames the table everywhere, since its file name is its name. Each update is one step for **Edit > Undo**. **Move Table…** and **Move Diagram to Layer…** always update them, whatever this says."
+        },
         "dbtSemantic.projectPath": {
           "type": "string",
           "markdownDeprecationMessage": "Deprecated: use `#erdStudio.projectPath#` instead. Legacy values are still honoured.",
@@ -719,7 +1009,7 @@
         "dbtSemantic.semanticDir": {
           "type": "string",
           "markdownDeprecationMessage": "Deprecated: use `#erdStudio.semanticDir#` instead. Legacy values are still honoured.",
-          "description": "Relative path to ERD Studio subject area files within the project"
+          "description": "Folder, relative to the project, that holds ERD Studio's tables and diagrams"
         }
       }
     }
@@ -733,7 +1023,8 @@
     "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json && npm run typecheck --workspaces",
     "test": "vitest run",
     "test:watch": "vitest",
-    "regen-fixtures": "tsx scripts/regen-fixtures.ts"
+    "regen-fixtures": "tsx scripts/regen-fixtures.ts",
+    "test:e2e:dbml": "node scripts/e2e-dbml.mjs"
   },
   "devDependencies": {
     "@testing-library/react": "^16.1.0",
@@ -746,10 +1037,12 @@
     "jsdom": "^25.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
   },
   "dependencies": {
-    "@dbml/parse": "10.3.1",
+    "@dbml/parse": "11.0.0",
     "@erd-studio/core": "0.4.0",
     "@erd-studio/renderer": "0.4.0",
     "@xyflow/react": "^12.4.0",

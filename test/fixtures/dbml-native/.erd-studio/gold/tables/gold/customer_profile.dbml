@@ -1,0 +1,6 @@
+// One profile per customer: a one-to-one with dim_customer.
+Table gold.customer_profile {
+  customer_key INT [pk, foreign_key: 'true']
+  loyalty_tier VARCHAR
+  preferred_region_code VARCHAR
+}

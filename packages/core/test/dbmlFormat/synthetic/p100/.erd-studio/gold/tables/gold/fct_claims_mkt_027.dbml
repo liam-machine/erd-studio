@@ -1,0 +1,16 @@
+Table gold.fct_claims_mkt_027 [
+  role: 'fact',
+  grain: 'One row per claims mkt 027'
+] {
+  claims_mkt_027_key BIGINT [pk, note: 'Primary key of fct_claims_mkt_027']
+  score BIGINT [note: 'score of the claims mkt 027 row', additive_type: 'semi-additive']
+  label DATE [note: 'label of the claims mkt 027 row']
+  external_ref "DECIMAL(18,2)" [note: 'external ref of the claims mkt 027 row']
+  region TIMESTAMP_NTZ [note: 'region of the claims mkt 027 row']
+  valid_to STRING [note: 'valid to of the claims mkt 027 row']
+  score_5 BIGINT [note: 'score 5 of the claims mkt 027 row', additive_type: 'non-additive']
+  amount TIMESTAMP_NTZ [note: 'amount of the claims mkt 027 row', additive_type: 'semi-additive']
+  updated_at BOOLEAN [note: 'updated at of the claims mkt 027 row']
+  priority INT [note: 'priority of the claims mkt 027 row']
+  Note: 'Synthetic gold table fct_claims_mkt_027'
+}

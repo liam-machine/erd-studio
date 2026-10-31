@@ -135,6 +135,28 @@
   color: var(--error-fg, #f48771);
 }
 
+/* "Add <name> from the Table Library": swaps to Add Existing Table. */
+.new-model-dialog__add-existing {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: none;
+  border-radius: 3px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.new-model-dialog__add-existing:hover {
+  background: var(--button-hover-bg);
+}
+
+.new-model-dialog__add-existing:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
 /* ---------------------------------------------------------------------------
    Bridge Entity Fields (side-by-side)
    --------------------------------------------------------------------------- */

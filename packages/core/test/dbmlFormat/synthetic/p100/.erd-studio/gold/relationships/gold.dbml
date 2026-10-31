@@ -1,0 +1,53 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table silver.int_ecom_assets_015 } from '../../silver/tables/silver/int_ecom_assets_015.dbml'
+use { table silver.int_safety_products_005 } from '../../silver/tables/silver/int_safety_products_005.dbml'
+use { table gold.dim_accounts_000 } from '../tables/gold/dim_accounts_000.dbml'
+use { table gold.dim_addresses_002 } from '../tables/gold/dim_addresses_002.dbml'
+use { table gold.dim_contacts_001 } from '../tables/gold/dim_contacts_001.dbml'
+use { table gold.dim_invoice_lines_008 } from '../tables/gold/dim_invoice_lines_008.dbml'
+use { table gold.dim_invoices_007 } from '../tables/gold/dim_invoices_007.dbml'
+use { table gold.dim_order_lines_004 } from '../tables/gold/dim_order_lines_004.dbml'
+use { table gold.dim_products_005 } from '../tables/gold/dim_products_005.dbml'
+use { table gold.dim_suppliers_006 } from '../tables/gold/dim_suppliers_006.dbml'
+use { table gold.fct_assets_safety_015 } from '../tables/gold/fct_assets_safety_015.dbml'
+use { table gold.fct_budgets_erp_021 } from '../tables/gold/fct_budgets_erp_021.dbml'
+use { table gold.fct_contracts_qa_019 } from '../tables/gold/fct_contracts_qa_019.dbml'
+use { table gold.fct_cost_codes_crm_020 } from '../tables/gold/fct_cost_codes_crm_020.dbml'
+use { table gold.fct_deliveries_fin_026 } from '../tables/gold/fct_deliveries_fin_026.dbml'
+use { table gold.fct_employees_fleet_010 } from '../tables/gold/fct_employees_fleet_010.dbml'
+use { table gold.fct_incidents_ts_017 } from '../tables/gold/fct_incidents_ts_017.dbml'
+use { table gold.fct_inspections_bim_018 } from '../tables/gold/fct_inspections_bim_018.dbml'
+use { table gold.fct_materials_ecom_025 } from '../tables/gold/fct_materials_ecom_025.dbml'
+use { table gold.fct_payments_iot_009 } from '../tables/gold/fct_payments_iot_009.dbml'
+use { table gold.fct_projects_sap_013 } from '../tables/gold/fct_projects_sap_013.dbml'
+use { table gold.fct_tasks_gis_014 } from '../tables/gold/fct_tasks_gis_014.dbml'
+use { table gold.fct_timesheets_pos_022 } from '../tables/gold/fct_timesheets_pos_022.dbml'
+use { table gold.fct_vehicles_wms_023 } from '../tables/gold/fct_vehicles_wms_023.dbml'
+
+Ref: gold.dim_accounts_000.incidents_ts_017_key >? gold.fct_incidents_ts_017.incidents_ts_017_key
+Ref: gold.dim_addresses_002.accounts_000_key >? gold.dim_accounts_000.accounts_000_key
+Ref: gold.dim_addresses_002.contracts_qa_019_key >? gold.fct_contracts_qa_019.contracts_qa_019_key
+Ref: gold.dim_addresses_002.safety_products_005_id >? silver.int_safety_products_005.safety_products_005_id
+Ref: gold.dim_invoice_lines_008.inspections_bim_018_key >? gold.fct_inspections_bim_018.inspections_bim_018_key
+Ref: gold.dim_invoice_lines_008.vehicles_wms_023_key >? gold.fct_vehicles_wms_023.vehicles_wms_023_key
+Ref: gold.dim_invoices_007.payments_iot_009_key >? gold.fct_payments_iot_009.payments_iot_009_key
+Ref: gold.dim_products_005.contracts_qa_019_key >? gold.fct_contracts_qa_019.contracts_qa_019_key
+Ref: gold.dim_products_005.projects_sap_013_key >? gold.fct_projects_sap_013.projects_sap_013_key
+Ref: gold.dim_suppliers_006.assets_safety_015_key >? gold.fct_assets_safety_015.assets_safety_015_key
+Ref: gold.fct_assets_safety_015.invoice_lines_008_key >? gold.dim_invoice_lines_008.invoice_lines_008_key
+Ref: gold.fct_budgets_erp_021.ecom_assets_015_id >? silver.int_ecom_assets_015.ecom_assets_015_id
+Ref: gold.fct_cost_codes_crm_020.accounts_000_key >? gold.dim_accounts_000.accounts_000_key
+Ref: gold.fct_cost_codes_crm_020.contacts_001_key >? gold.dim_contacts_001.contacts_001_key
+Ref: gold.fct_deliveries_fin_026.contacts_001_key >? gold.dim_contacts_001.contacts_001_key
+Ref: gold.fct_employees_fleet_010.addresses_002_key >? gold.dim_addresses_002.addresses_002_key
+Ref: gold.fct_incidents_ts_017.accounts_000_key >? gold.dim_accounts_000.accounts_000_key
+Ref: gold.fct_incidents_ts_017.invoices_007_key >? gold.dim_invoices_007.invoices_007_key
+Ref: gold.fct_inspections_bim_018.accounts_000_key >? gold.dim_accounts_000.accounts_000_key
+Ref: gold.fct_materials_ecom_025.addresses_002_key >? gold.dim_addresses_002.addresses_002_key
+Ref: gold.fct_materials_ecom_025.order_lines_004_key >? gold.dim_order_lines_004.order_lines_004_key
+Ref: gold.fct_payments_iot_009.order_lines_004_key >? gold.dim_order_lines_004.order_lines_004_key
+Ref: gold.fct_projects_sap_013.invoice_lines_008_key >? gold.dim_invoice_lines_008.invoice_lines_008_key
+Ref: gold.fct_tasks_gis_014.invoice_lines_008_key >? gold.dim_invoice_lines_008.invoice_lines_008_key
+Ref: gold.fct_tasks_gis_014.invoices_007_key >? gold.dim_invoices_007.invoices_007_key
+Ref: gold.fct_timesheets_pos_022.addresses_002_key >? gold.dim_addresses_002.addresses_002_key
+Ref: gold.fct_vehicles_wms_023.invoices_007_key >? gold.dim_invoices_007.invoices_007_key

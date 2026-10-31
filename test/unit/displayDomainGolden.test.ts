@@ -54,6 +54,7 @@ import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
 import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
 import type { ManifestData } from '../../src/types/manifest';
+import { normaliseStorageRows } from '../../packages/core/src/storageEquivalence';
 import type { YmlData } from '../../src/types/ymlData';
 
 const UPDATE = process.env.UPDATE_GOLDEN === '1';
@@ -99,6 +100,15 @@ const ERROR_CASES: Record<string, string> = {
   // #145: unresolved git merge conflicts, in positions only and in the model list.
   'conflict-positions': 'silver/conflict-positions.json',
   'conflict-models': 'silver/conflict-models.json',
+  // Native DBML storage: a DBML diagram that does not parse, one from a newer
+  // schema, one with git conflict markers, a table file opened as a diagram,
+  // and a diagram where the 1.9 pre-release kept it (core's loader holds the
+  // same goldens).
+  'dbml-syntax': 'silver/diagrams/dbml-syntax.dbml',
+  'dbml-future': 'silver/diagrams/dbml-future.dbml',
+  'dbml-conflict': 'silver/diagrams/dbml-conflict.dbml',
+  'dbml-not-a-diagram': 'silver/tables/silver/dim_customer.dbml',
+  'dbml-legacy': 'gold/old.dbml',
 };
 
 const EXPECTED_FILES = [
@@ -108,14 +118,31 @@ const EXPECTED_FILES = [
   'dbt-project.stage-physical.json',
   'dbt-project.physical.host.json',
   ...Object.keys(ERROR_CASES).map((c) => `errors.${c}.host.json`),
+  // The DBML twins whose Unified shape cannot equal their YAML case's.
+  'dbml-missing-model.unified.json',
+  'dbml-library-relationships.unified.json',
   'logs.json',
   // The diagram export goldens, owned by packages/core/test/unit/exportDiagram.golden.test.ts.
   ...Object.keys(SUBJECT_AREA_CASES).flatMap((c) => [`${c}.dbml`, `${c}.mmd`]),
-  // The rich DBML goldens and their layout files, owned by exportDiagram.golden.test.ts and exportDbmlRich.test.ts.
-  ...Object.keys(SUBJECT_AREA_CASES).flatMap((c) => [`${c}.rich.dbml`, `${c}.dbdiagram`]),
+  // The rich DBML goldens (positions in erd_layout), owned by exportDiagram.golden.test.ts and exportDbmlRich.test.ts.
+  ...Object.keys(SUBJECT_AREA_CASES).flatMap((c) => [`${c}.rich.dbml`]),
   'rich-features.rich.dbml',
-  'rich-features.dbdiagram',
 ].sort();
+
+/**
+ * What a DBML twin cannot hold beyond the §2.8 rows, applied to the YAML
+ * golden first (as core's loader golden test does): missing-model's two
+ * diagram-file relationships are owned by tables that have no readable DBML
+ * file (§2.4), and `broken`'s load error is a DBML one.
+ */
+const DBML_TWIN_EXCEPTIONS: Record<string, (expected: Record<string, unknown>) => void> = {
+  'missing-model': (expected) => {
+    expected.relationships = [];
+    const models = expected.models as Array<Record<string, unknown>>;
+    const broken = models.find((m) => m.name === 'broken')!;
+    broken.loadError = { kind: 'dbmlSyntax', line: 5, code: '1005' };
+  },
+};
 
 const LINE_COLUMN = / \(line \d+ column \d+\)/g;
 
@@ -488,6 +515,53 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
       expect(after.viewConfig.positions.dim_task).toEqual(payload.viewConfig.positions.dim_task);
       delete after.viewConfig.positions.dim_task;
       expect(JSON.stringify(after)).toBe(JSON.stringify(doc));
+    });
+  });
+
+  // Native DBML storage: the DBML twins of the YAML cases
+  // (packages/core/test/fixtures/dbml/<case>) read through the HOST — the
+  // canvas's posted payload and the Unified shape `getSubjectArea` returns —
+  // draw what the YAML goldens pin once both go through only the §2.8 rows
+  // each case lists (core's loader holds the same table for its own read).
+  // library-relationships' domain file holds a copy of a relationship that
+  // disagrees with the library; a DBML diagram holds none (D5), so its
+  // Unified shape has goldens of its own.
+  describe.each([
+    // The YAML showcase keeps its relationships in the diagram file; a DBML
+    // diagram holds none (D5): its library relationships are drawn into the
+    // stage's list as well as being their owners', so the comparison moves the
+    // stage's list to the owners on both sides and keeps each link once.
+    // `convertSchemaFallback`: a table whose YAML file names no schema is in the
+    // schema folder Convert gave it (the library folder, else `public`).
+    ['showcase', 'silver/diagrams/showcase.dbml', ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertSchemaFallback'], ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertDiagramRelationships', 'convertLinkStoredTwice', 'convertSchemaFallback'], { fct_order: 'public' }],
+    ['composite-and-self', 'gold/diagrams/vault.dbml', ['schemaVersion', 'convertSchemaFallback'], ['schemaVersion', 'loneCompositeKey', 'respelling', 'convertSchemaFallback'], { employee: 'gold', pit_customer: 'gold', sat_customer: 'gold' }],
+    ['missing-positions', 'silver/diagrams/showcase.dbml', ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertSchemaFallback'], ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertDiagramRelationships', 'convertLinkStoredTwice', 'convertSchemaFallback'], { fct_order: 'public' }],
+    ['missing-model', 'silver/diagrams/partial.dbml', ['schemaVersion'], undefined, {}],
+    ['library-relationships', 'gold/diagrams/sales.dbml', ['oneToMany', 'schemaVersion'], undefined, {}],
+  ] as const)('the DBML twin of %s (%s), read by the host', (name, relative, displayRows, unifiedRows, schemas) => {
+    const root = path.join(FIXTURES, 'dbml', name);
+    const options = { schemaFallback: (table: string) => (schemas as Record<string, string>)[table] };
+
+    it(`posts what the YAML golden draws through its listed §2.8 rows (${displayRows.join(', ')})`, async () => {
+      const posted = await sendSubjectAreaData(buildHost(root), subjectAreaFile(root, relative));
+      expect(posted).toHaveLength(1);
+      expect(posted[0].type).toBe('domainLoaded');
+      const twin = (normalise(posted[0], root) as { payload: Record<string, unknown> }).payload;
+      expect(twin.schemaVersion).toBe(7);
+      const expected = { ...(readGolden(`${name}.host.json`) as { payload: Record<string, unknown> }).payload };
+      DBML_TWIN_EXCEPTIONS[name]?.(expected);
+      expect(normaliseStorageRows(twin, [...displayRows], options)).toEqual(normaliseStorageRows(expected, [...displayRows], options));
+    });
+
+    it('reads the Unified shape', () => {
+      const unified = normalise(JSON.parse(JSON.stringify(buildHost(root).subjectAreaService.getSubjectArea(subjectAreaFile(root, relative)))), root);
+      if (unifiedRows === undefined) {
+        // Its own golden: what the twin holds cannot equal the YAML case's Unified shape (see above).
+        matchGolden(`dbml-${name}.unified.json`, unified);
+        return;
+      }
+      const expected = readGolden(`${name}.unified.json`);
+      expect(normaliseStorageRows(unified, [...unifiedRows], options)).toEqual(normaliseStorageRows(expected, [...unifiedRows], options));
     });
   });
 

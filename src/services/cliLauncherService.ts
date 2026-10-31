@@ -29,6 +29,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { compareVersions } from '../types/feedback';
+import { log } from './logger';
 
 export const LAUNCHER_DIR_NAME = '.erd-studio-cli';
 export const LAUNCHER_RECORD_FILE = 'launcher.json';
@@ -296,7 +297,7 @@ export class CliLauncherService {
 
   constructor(deps: CliLauncherDeps = {}) {
     this.verifyRuntime = deps.verifyRuntime ?? ((p) => verifyElectronRuntime(p));
-    this.log = deps.log ?? ((m) => console.warn(`[CliLauncher] ${m}`));
+    this.log = deps.log ?? ((m) => log.warn(`[CliLauncher] ${m}`));
     this.now = deps.now ?? (() => new Date());
   }
 

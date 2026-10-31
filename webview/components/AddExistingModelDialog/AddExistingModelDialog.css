@@ -108,6 +108,11 @@
   opacity: 0.7;
 }
 
+.add-existing-model-dialog__pending {
+  font-size: 11px;
+  color: var(--dim-fg);
+}
+
 .add-existing-model-dialog__search-count {
   flex-shrink: 0;
   font-size: 11px;

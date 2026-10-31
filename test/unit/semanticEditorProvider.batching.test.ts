@@ -343,7 +343,7 @@ describe('undo / redo (H27)', () => {
     vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (cmd: string) => {
       if (cmd === 'undo' || cmd === 'redo') {
         doc._setText(doc.getText());
-        await changeListener!({ document: doc });
+        await changeListener!({ document: doc, contentChanges: [{ text: 'x' }] });
       }
       return undefined;
     }) as any);
@@ -361,7 +361,7 @@ describe('undo / redo (H27)', () => {
     const { doc, panel } = await openShowcase();
     const before = counters(panel, doc);
     doc._setText(doc.getText());
-    await changeListener!({ document: doc });
+    await changeListener!({ document: doc, contentChanges: [{ text: 'x' }] });
     const after = counters(panel, doc);
     expect(after.saves - before.saves).toBe(1);
     expect(after.loads - before.loads).toBe(1);
@@ -383,7 +383,7 @@ describe('applySubjectAreaEdit pipeline (H35)', () => {
     // An external change after the failure must still be picked up.
     const before = counters(panel, doc);
     doc._setText(doc.getText());
-    await changeListener!({ document: doc });
+    await changeListener!({ document: doc, contentChanges: [{ text: 'x' }] });
     expect(counters(panel, doc).loads - before.loads).toBe(1);
   });
 
@@ -516,7 +516,7 @@ describe('Delete Table File after a remove (#205)', () => {
   it('a delete that fails names the file, says nothing was deleted, and offers Try Again and Reveal in Explorer', async () => {
     const { panel } = await openShowcase();
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
-      (String(m).includes('Delete the table file entirely') ? 'Delete Table File' : undefined)) as never);
+      (String(m).includes('Delete its table file too') ? 'Delete Table File' : undefined)) as never);
     const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
     const applyEdit = vscode.workspace.applyEdit;
     vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
@@ -533,6 +533,37 @@ describe('Delete Table File after a remove (#205)', () => {
       'Try Again',
       'Reveal in Explorer',
     ]);
+  });
+
+  it('a delete VS Code applies only part of is put back before it says nothing was deleted (D23)', async () => {
+    const { panel } = await openShowcase();
+    const lib = path.join(root, '.erd-studio', 'logical-models');
+    const before = ['dim_task', 'dim_project'].map((n) => fs.readFileSync(path.join(lib, `${n}.yml`), 'utf-8'));
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
+      (String(m).includes('Delete their table files too') ? 'Delete Table Files' : undefined)) as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    // The delete removes its first file and fails; the reconcile applies. (The diagram edit is the spy's.)
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1);
+
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_task', 'dim_project'] } });
+
+    await vi.waitFor(() => expect(error).toHaveBeenCalled());
+    expect(error.mock.calls[0]).toEqual([tableFileDeleteFailedMessage(['logical-models/dim_task.yml', 'logical-models/dim_project.yml']), 'Try Again']);
+    expect(['dim_task', 'dim_project'].map((n) => fs.readFileSync(path.join(lib, `${n}.yml`), 'utf-8'))).toEqual(before);
+  });
+
+  it('when the reconcile cannot put a file back either, only its modal speaks', async () => {
+    const { panel } = await openShowcase();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
+      (String(m).includes('Delete their table files too') ? 'Delete Table Files' : undefined)) as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
+
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_task', 'dim_project'] } });
+
+    await vi.waitFor(() => expect(error).toHaveBeenCalled());
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*dim_task\.yml.*Restore these from source control\.$/), { modal: true });
   });
 
   it('names the count, not a file, when several could not be deleted', () => {

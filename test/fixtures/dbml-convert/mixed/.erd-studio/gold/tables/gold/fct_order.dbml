@@ -1,0 +1,5 @@
+Table gold.fct_order {
+  order_line_id BIGINT          [pk]
+  customer_key  INT
+  amount        "DECIMAL(18,2)"
+}
