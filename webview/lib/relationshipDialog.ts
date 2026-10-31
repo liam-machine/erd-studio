@@ -73,8 +73,9 @@ export function directionChoice(
   return { text: `Each ${from.model} row points at one ${to.model}`, detail };
 }
 
-export const DIRECTION_QUESTION = 'Which side holds the foreign key?';
-export const DIRECTION_MISSING_HINT = 'Pick which side holds the foreign key — ERD Studio has no key or dbt test to tell.';
+// About what the relationship means, not where it is saved: the Ref (or yml entry) records it either way.
+export const DIRECTION_QUESTION = 'Which way does this relationship point?';
+export const DIRECTION_MISSING_HINT = "Pick one: neither table marks these columns as its key, and dbt has no test to tell. Once a table's primary key is marked, ERD Studio works this out itself.";
 
 /** The "mark as primary key" checkbox's label. */
 export function markKeyLabel(model: string, columns: readonly string[]): string {

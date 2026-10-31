@@ -19,6 +19,11 @@
  * arrive with `detailsPending` (name and file only). Opening the dialog then
  * asks the host for the rest (`requestExistingTables`); the rows fill in when
  * its `existingTables` answer arrives.
+ *
+ * The New Table dialog opens this one with its search filled in
+ * (`addExistingModelDialogSearch`) when the name typed there is already a
+ * Table Library table. With nothing to add and no dbt project, the empty
+ * state offers "New table" instead.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -49,6 +54,8 @@ const SOURCE_CONFIG: Record<SourceKey, { label: string; description: string }> =
 export function AddExistingTableDialog() {
   const isOpen = useEditorStore((s) => s.addExistingModelDialogOpen);
   const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
+  const initialSearch = useEditorStore((s) => s.addExistingModelDialogSearch);
+  const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
   const existingModels = useEditorStore((s) => s.existingModels);
   const manifestModels = useEditorStore((s) => s.manifestModels);
   const modelFolder = useEditorStore((s) => s.domain?.modelFolder);
@@ -126,13 +133,17 @@ export function AddExistingTableDialog() {
   }, [isOpen, detailsPending]);
 
   // Escape closes the dialog through the store, not handleClose: start the
-  // next opening clean either way, so no tick survives into it unseen.
+  // next opening clean either way, so no tick survives into it unseen. An
+  // opening with a search (from the New Table dialog) starts filtered by it.
   useEffect(() => {
-    if (isOpen) return;
+    if (isOpen) {
+      if (initialSearch) setSearchQuery(initialSearch);
+      return;
+    }
     setSearchQuery('');
     setSelected([]);
     setActiveFilters(new Set(['logical', 'yml', 'manifest']));
-  }, [isOpen]);
+  }, [isOpen, initialSearch]);
 
   // Handlers
   const handleClose = useCallback(() => {
@@ -141,6 +152,12 @@ export function AddExistingTableDialog() {
     setSelected([]);
     setActiveFilters(new Set(['logical', 'yml', 'manifest']));
   }, [setAddExistingModelDialogOpen]);
+
+  // Nothing to add: swap to the New Table dialog.
+  const handleNewTable = useCallback(() => {
+    handleClose();
+    setNewModelDialogOpen(true);
+  }, [handleClose, setNewModelDialogOpen]);
 
   // Only the rows on screen count: a pick hidden by the search or a filter is
   // dropped, so Add never adds a model the user cannot see ticked.
@@ -254,6 +271,15 @@ export function AddExistingTableDialog() {
                 </>
               )}
             </p>
+            {logicalOnly && (
+              <button
+                type="button"
+                className="add-existing-model-dialog__button add-existing-model-dialog__button--primary"
+                onClick={handleNewTable}
+              >
+                New table
+              </button>
+            )}
           </div>
         </div>
       </Panel>

@@ -395,7 +395,8 @@ describe('activate() with a dbt project', () => {
     expect(createTreeView.mock.calls.map((c) => c[0])).toEqual([
       'erdStudio.domainTree',
       'erdStudio.modelLibrary',
-      'erdStudio.myReports',
+      'erdStudio.relationships',
+      'erdStudio.help',
     ]);
     expect(registerDecorations).toHaveBeenCalledTimes(2);
     expect(context.subscriptions.length).toBeGreaterThan(CONTRIBUTED.length * 2);
@@ -693,29 +694,28 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(listTree(ws)).toEqual([]);
   });
 
-  it('New Diagram works in a folder with no .erd-studio: layers.json first, then the diagram, then it opens', async () => {
+  it('New Diagram works in a folder with no .erd-studio: one Main layer, layers.json first, then the diagram, then it opens', async () => {
     await activate(context);
-    pick.mockImplementation((async (items: Array<{ label: string; value: string }>) =>
-      items.find((i) => i.value === 'gold')) as never);
-    vi.spyOn(vscode.window, 'showInputBox')
-      .mockResolvedValueOnce('orders')
-      .mockResolvedValueOnce('Orders and customers');
+    // The name as people write it; it is saved as `orders`. No description or dbt folder is asked for.
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('Orders');
     const real = vscode.commands.executeCommand;
     const exec = vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) =>
       real(command, ...args)) as never);
 
     await vscode.commands.executeCommand('erdStudio.createDomain');
 
-    // Only the layer QuickPick: no "filter dbt models by folder" in a plain folder.
-    expect(pick).toHaveBeenCalledTimes(1);
-    const layers = JSON.parse(fs.readFileSync(path.join(ws, '.erd-studio', 'layers.json'), 'utf-8')) as { layers: Array<{ id: string }> };
-    expect(layers.layers.map((l) => l.id)).toContain('gold');
+    // A new project without dbt starts with one neutral layer, so only the name is asked.
+    expect(pick).not.toHaveBeenCalled();
+    expect(input).toHaveBeenCalledTimes(1);
+    expect((input.mock.calls[0][0] as { prompt: string }).prompt).toBe('Name the diagram. It is saved in the Main layer.');
+    const layers = JSON.parse(fs.readFileSync(path.join(ws, '.erd-studio', 'layers.json'), 'utf-8')) as { layers: Array<{ id: string; label: string }> };
+    expect(layers.layers.map((l) => [l.id, l.label])).toEqual([['main', 'Main']]);
     // A new project stores its diagrams as DBML (native DBML storage, §3.2) in <layer>/diagrams/, with the README that says what the folder is.
-    const domainPath = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'orders.dbml');
-    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'gold/diagrams/orders.dbml').obj;
-    expect(domain).toMatchObject({ domain: 'orders', layer: 'gold', description: 'Orders and customers' });
+    const domainPath = path.join(ws, '.erd-studio', 'main', 'diagrams', 'orders.dbml');
+    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'main/diagrams/orders.dbml').obj;
+    expect(domain).toMatchObject({ domain: 'orders', layer: 'main' });
     expect(listTree(ws)).toEqual([
-      '.erd-studio/', '.erd-studio/README.md', '.erd-studio/gold/', '.erd-studio/gold/diagrams/', '.erd-studio/gold/diagrams/orders.dbml', '.erd-studio/layers.json',
+      '.erd-studio/', '.erd-studio/README.md', '.erd-studio/layers.json', '.erd-studio/main/', '.erd-studio/main/diagrams/', '.erd-studio/main/diagrams/orders.dbml',
     ]);
     const opened = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
     expect((opened[0][1] as { fsPath: string }).fsPath).toBe(domainPath);
@@ -747,6 +747,12 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
   });
 
   it('Set Up My AI Helper works in a plain folder: installs the guide and offers to start its no-dbt route', async () => {
+    // The launcher copies the extension's built dist/cli.js. Give it one, so the
+    // test does not depend on `npm run build` having run (it failed without it).
+    const extensionRoot = path.join(root, 'extension');
+    fs.mkdirSync(path.join(extensionRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(extensionRoot, 'dist', 'cli.js'), '// stub\n');
+    (context as { extensionUri: unknown }).extensionUri = vscode.Uri.file(extensionRoot);
     await activate(context);
     await vscode.commands.executeCommand('erdStudio.setupAiHelper');
     const calls = info.mock.calls.filter((c) => String(c[0]).startsWith('AI helper ready'));
@@ -772,13 +778,13 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     await vscode.commands.executeCommand('erdStudio.openExampleDiagram');
 
     expect(input).toHaveBeenCalledTimes(1);
-    expect(pick).not.toHaveBeenCalled(); // the default layers have gold
+    expect(pick).not.toHaveBeenCalled(); // a new project without dbt has one layer, Main
     const confirm = info.mock.calls.find((c) => c.includes('Import'))!;
-    expect(confirm[0]).toBe('Import 6 tables into a new diagram "coffee-shop" in the Gold layer.');
+    expect(confirm[0]).toBe('Import 6 tables into a new diagram "coffee-shop" in the Main layer.');
     // A new project stores the example as DBML (native DBML storage, §3.2).
-    const domainPath = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'coffee-shop.dbml');
+    const domainPath = path.join(ws, '.erd-studio', 'main', 'diagrams', 'coffee-shop.dbml');
     expect(fs.existsSync(domainPath)).toBe(true);
-    expect(fs.existsSync(path.join(ws, '.erd-studio', 'gold', 'tables', 'gold', 'fct_orders.dbml'))).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'tables', 'main', 'fct_orders.dbml'))).toBe(true);
     expect(fs.existsSync(path.join(ws, '.erd-studio', 'README.md'))).toBe(true);
     expect(fs.existsSync(path.join(ws, '.erd-studio', 'layers.json'))).toBe(true);
     expect(fs.existsSync(path.join(ws, 'coffee-shop.dbml'))).toBe(false); // nothing but the diagram's own files
@@ -927,7 +933,7 @@ describe('activate() in a native DBML project (S4)', () => {
     await activate(context);
     await vi.advanceTimersByTimeAsync(5_000);
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
-    const deletedToasts = () => info.mock.calls.filter((c) => /subject area files? deleted/i.test(String(c[0])));
+    const deletedToasts = () => info.mock.calls.filter((c) => /diagram files? deleted/i.test(String(c[0])));
 
     // Undo of Convert Project to DBML: the .json comes back and the .dbml goes.
     const salesDbml = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
@@ -943,7 +949,7 @@ describe('activate() in a native DBML project (S4)', () => {
     semanticWatcher()._simulateDelete(vscode.Uri.file(staging));
     await vi.advanceTimersByTimeAsync(1_000);
     expect(deletedToasts()).toHaveLength(1);
-    expect(deletedToasts()[0][0]).toBe('Subject area file deleted. Regenerate dbt selectors.yml to drop the removed subject area from the selector set.');
+    expect(deletedToasts()[0][0]).toBe('Diagram file deleted. Regenerate dbt selectors.yml to drop the removed diagram from the selector set.');
   });
 
   it('a burst of outside table-file changes (Edit > Undo of Convert) builds the library index and refreshes each view and canvas O(1) times', async () => {
@@ -1453,7 +1459,7 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
     // The gold domain keeps the gold file, byte for byte.
     expect(fs.readFileSync(path.join(erd(), 'gold', 'reporting.json'), 'utf-8')).toBe(goldDomainBefore);
     expect(fs.existsSync(path.join(lib(), 'gold', 'date.yml'))).toBe(true);
-    expect(info).toHaveBeenCalledWith(expect.stringMatching(/"silver_date" \(warehouse table: date\)\. Repointed 1 subject area\.$/));
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/"silver_date" \(warehouse table: date\)\. Updated 1 diagram\.$/));
   });
 
   it('changes nothing when the confirmation is dismissed', async () => {
@@ -2198,7 +2204,7 @@ describe('erdStudio.drawFromDbt', () => {
     await vscode.commands.executeCommand('erdStudio.drawFromDbt');
 
     const validate = (input.mock.calls[0][0] as { validateInput: (v: string) => string | undefined }).validateInput;
-    expect(validate('showcase')).toContain('already exists in the silver layer');
+    expect(validate('showcase')).toBe('There is already a diagram named "showcase" in this layer');
     expect(validate('Bad Name')).toBeDefined();
     expect(validate('brand-new')).toBeUndefined();
   });
@@ -2310,6 +2316,37 @@ describe('existing-diagrams notice', () => {
     info.mockClear();
     await activate(context);
     expect(nudgeCalls(info)).toHaveLength(0);
+  });
+
+  it('comes before the AI helper offer, which waits for the next window and is a notification, not a picker', async () => {
+    // No AI helper files yet, and neither prompt offered in this workspace.
+    fs.rmSync(path.join(root, '.claude'), { recursive: true, force: true });
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { workspaceState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
+    const offers = () => info.mock.calls.filter((c) => String(c[0]).startsWith('Let your AI assistant'));
+
+    await activate(context);
+    expect(nudgeCalls(info)).toHaveLength(1);
+    expect(offers()).toEqual([]);
+    expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBeUndefined();
+
+    tearDownActivation();
+    info.mockClear();
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    info.mockImplementation((async (message: string) =>
+      (message.startsWith('Let your AI assistant') ? 'Set Up My AI Helper' : undefined)) as never);
+    await activate(context);
+    expect(nudgeCalls(info)).toEqual([]);
+    expect(offers()).toEqual([[
+      'Let your AI assistant read and write these diagrams? ERD Studio can add a guide for it to this project.',
+      'Set Up My AI Helper', 'Not now',
+    ]]);
+    expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBe(true);
+    expect(pick).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.setupAiHelper'));
+    exec.mockRestore();
   });
 
   it('is not shown while a diagram is already open', async () => {

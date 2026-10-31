@@ -39,7 +39,7 @@ export const get_editor_setup = {
       'In VS Code, open Command Palette (`Cmd+Shift+P`) and run:',
       '',
       '```',
-      'ERD Studio: New Subject Area',
+      'ERD Studio: New Diagram…',
       '```',
       '',
       'This creates `.erd-studio/` with `layers.json` and the diagram (`<layer>/diagrams/<name>.dbml`); the table library (`<layer>/tables/<schema>/`, one `.dbml` file per table) comes with the first table.',

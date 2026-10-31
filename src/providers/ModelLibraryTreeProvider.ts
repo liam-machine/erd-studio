@@ -405,10 +405,16 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     return item;
   }
 
-  /** A DBML schema folder (`<layer>/tables/<schema>/`): `<schema> (<layer>)`, coloured by its layer. */
+  /**
+   * A DBML schema folder (`<layer>/tables/<schema>/`), coloured by its layer:
+   * the layer's name when the schema is the layer's own (a new table's
+   * default, so not "gold (gold)"), else `<schema> · <layer name>`.
+   */
   private schemaFolderItem(element: TableLibraryFolderNode, layerId: string): vscode.TreeItem {
     const layer = this.getLayers().find(l => l.id === layerId);
-    const item = new vscode.TreeItem(`${element.folder} (${layerId})`, vscode.TreeItemCollapsibleState.Expanded);
+    const layerName = layer?.label ?? layerId;
+    const label = element.folder.toLowerCase() === layerId.toLowerCase() ? layerName : `${element.folder} · ${layerName}`;
+    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
     item.id = `erdStudio.modelLibrary.folder:${layerId}/tables/${element.folder}`;
     item.contextValue = 'logicalModelFolder';
     const colorId = LAYER_COLOR_IDS.has(layerId) ? layerId : layer ? 'custom' : undefined;
@@ -417,7 +423,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       : new vscode.ThemeIcon('folder');
     const count = element.children.length;
     item.description = `${count} ${count === 1 ? 'table' : 'tables'}`;
-    item.tooltip = `Tables in schema ${element.folder} of layer ${layerId}`;
+    item.tooltip = `Tables in schema ${element.folder} of the ${layerName} layer (${layerId}/tables/${element.folder}/)`;
     return item;
   }
 

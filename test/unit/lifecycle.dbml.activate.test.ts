@@ -125,13 +125,15 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
 
   it('New Diagram writes <layer>/diagrams/x.dbml, layers.json and the README, and nothing else', async () => {
     await activate(context);
-    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value: string }>) => items.find((i) => i.value === 'gold')) as never);
-    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('orders').mockResolvedValueOnce('Orders');
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value: string }>) => items.find((i) => i.value === 'main')) as never);
+    // One question after the layer: the name, as people write it.
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('Orders');
     await vscode.commands.executeCommand('erdStudio.createDomain');
-    expect(files()).toEqual(['README.md', 'gold/diagrams/orders.dbml', 'layers.json']);
+    expect(input).toHaveBeenCalledTimes(1);
+    expect(files()).toEqual(['README.md', 'layers.json', 'main/diagrams/orders.dbml']);
     expect(fs.readFileSync(erd('README.md'), 'utf-8')).toBe(semanticReadmeText());
-    const text = fs.readFileSync(erd('gold', 'diagrams', 'orders.dbml'), 'utf-8');
-    expect(parseSubjectAreaDbml(text, 'gold/diagrams/orders.dbml').obj).toMatchObject({ domain: 'orders', description: 'Orders', logical: { models: [] } });
+    const text = fs.readFileSync(erd('main', 'diagrams', 'orders.dbml'), 'utf-8');
+    expect(parseSubjectAreaDbml(text, 'main/diagrams/orders.dbml').obj).toMatchObject({ domain: 'orders', logical: { models: [] } });
   });
 
   /** Import DBML's file dialog and reads, from disk. */
@@ -148,7 +150,7 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
       (typeof args[1] === 'object' && (args[1] as { modal?: boolean }).modal ? 'Import' : undefined)) as never);
   }
 
-  const IMPORTED = ['README.md', 'gold/diagrams/shop.dbml', 'gold/relationships/gold.dbml', 'gold/tables/gold/customers.dbml', 'gold/tables/gold/orders.dbml', 'layers.json'];
+  const IMPORTED = ['README.md', 'layers.json', 'main/diagrams/shop.dbml', 'main/relationships/main.dbml', 'main/tables/main/customers.dbml', 'main/tables/main/orders.dbml'];
 
   it('Import DBML writes the tables in <layer>/tables/<layer>/, the Ref in the layer\'s relationships file, and the source erd_layout into the new diagram\'s own', async () => {
     const inbox = path.join(root, 'inbox');
@@ -159,12 +161,12 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     importFrom(path.join(inbox, 'shop.dbml'));
     await vscode.commands.executeCommand('erdStudio.importDbml');
     expect(files()).toEqual(IMPORTED);
-    const shopText = fs.readFileSync(erd('gold', 'diagrams', 'shop.dbml'), 'utf-8');
-    const shop = parseSubjectAreaDbml(shopText, 'gold/diagrams/shop.dbml').obj as { viewConfig: { positions: unknown } };
+    const shopText = fs.readFileSync(erd('main', 'diagrams', 'shop.dbml'), 'utf-8');
+    const shop = parseSubjectAreaDbml(shopText, 'main/diagrams/shop.dbml').obj as { viewConfig: { positions: unknown } };
     expect(shop.viewConfig.positions).toEqual({ customers: { x: 40, y: 60 }, orders: { x: 400, y: 60 } });
     expect(shopText).toMatch(/Project shop \{[^]*erd_layout: '''\n    customers 40 60\n    orders 400 60\n  '''\n\}\n$/);
-    expect(shopText).toContain("use * from '../relationships/gold.dbml'");
-    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'orders.dbml'), 'utf-8')).toMatch(/^Table gold\.orders \{/);
+    expect(shopText).toContain("use * from '../relationships/main.dbml'");
+    expect(fs.readFileSync(erd('main', 'tables', 'main', 'orders.dbml'), 'utf-8')).toMatch(/^Table main\.orders \{/);
     compilesClean();
   });
 
@@ -178,11 +180,11 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     const modal = (vscode.window.showInformationMessage as unknown as { mock: { calls: unknown[][] } }).mock.calls
       .find((c) => typeof c[1] === 'object' && (c[1] as { modal?: boolean }).modal)!;
     const detail = (modal[1] as { detail: string }).detail;
-    expect(detail).toContain('• 1 relationship saved in gold/relationships/gold.dbml.');
+    expect(detail).toContain('• 1 relationship saved in main/relationships/main.dbml.');
     expect(detail).not.toContain('the tables\' files');
     expect(detail).toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
     // The import itself writes no positions: the first open's auto layout does, as a JSON diagram's first open writes its positions.
-    expect(fs.readFileSync(erd('gold', 'diagrams', 'shop.dbml'), 'utf-8')).not.toContain('erd_layout');
+    expect(fs.readFileSync(erd('main', 'diagrams', 'shop.dbml'), 'utf-8')).not.toContain('erd_layout');
     expect(files()).toEqual(IMPORTED);
   });
 
@@ -446,7 +448,7 @@ describe('in a native DBML project', () => {
     warn.mockResolvedValue(undefined);
     await vscode.commands.executeCommand('erdStudio.deleteLogicalModel', { type: 'model', name: 'dim_old', filePath: erd('logical-models', 'dim_old.yml') });
     expect(warn).toHaveBeenCalledWith(
-      'Delete table "dim_old"? This removes the table\'s file — subject area references are not cleaned up.', { modal: true }, 'Delete',
+      'Delete table "dim_old"? This removes the table\'s file — diagrams that show it are not updated.', { modal: true }, 'Delete',
     );
   });
 

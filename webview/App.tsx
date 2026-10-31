@@ -54,6 +54,7 @@ import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
 import { ManifestHint } from './components/Canvas/ManifestHint';
 import { EmbeddedTablesBanner } from './components/Canvas/EmbeddedTablesBanner';
 import { EmptyCanvas } from './components/EmptyCanvas/EmptyCanvas';
+import { DragHint } from './components/Canvas/DragHint';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { FeedbackDialog } from './components/FeedbackDialog/FeedbackDialog';
@@ -277,6 +278,10 @@ function EditorCanvas() {
           break;
         case 'openFeedback':
           useEditorStore.getState().setFeedbackDialogOpen(true, msg.payload ?? null);
+          break;
+        case 'revealRelationship':
+          // Shown once the diagram has settled (useRevealRelationship, in the Toolbar).
+          useEditorStore.getState().setPendingReveal(msg.payload);
           break;
         case 'feedbackContext':
           useEditorStore
@@ -704,6 +709,8 @@ function EditorCanvas() {
         <CanvasBackdrop />
         {/* "This diagram is empty" card — logical stage, zero models only. */}
         <EmptyCanvas />
+        {/* One-time drag-to-relate tip — 2+ tables, no relationships yet. */}
+        <DragHint />
         <Toolbar
           nodes={nodes}
           edges={edges}

@@ -3,8 +3,10 @@
  *
  * Messages are categorised by direction:
  *   Extension → Webview:  loading, domainLoaded, stageData, existingTables,
- *                         discrepancyReport, error, openFeedback,
- *                         feedbackContext, feedbackAnalysis, feedbackSubmitted
+ *                         dbmlEmbeddedTables, discrepancyReport,
+ *                         manifestStaleness, syncPlanGenerated, error,
+ *                         openFeedback, feedbackContext, feedbackAnalysis,
+ *                         feedbackSubmitted, revealRelationship
  *   Webview → Extension:  ready, requestExistingTables, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
  *                         addExistingModel(s), updatePositions, switchStage,
@@ -318,6 +320,24 @@ export interface DbmlEmbeddedTablesMessage {
   type: 'dbmlEmbeddedTables';
 }
 
+/**
+ * Select and centre one relationship line, as clicking it does (the sidebar's
+ * Relationships view → Open in Diagram). Sent once the canvas has loaded its
+ * diagram (`SemanticEditorProvider.revealRelationship` holds it until then).
+ * The canvas matches each column pair by core's `linkKey`, so the order of the
+ * two tables and the spelling's case do not matter; with no such line on the
+ * diagram it says so in a toast.
+ */
+export interface RevealRelationshipMessage {
+  type: 'revealRelationship';
+  payload: {
+    fromModel: string;
+    toModel: string;
+    /** Every column pair of the line (more than one for a composite key). */
+    pairs: Array<{ fromColumn: string; toColumn: string }>;
+  };
+}
+
 export type ExtensionMessage =
   | LoadingMessage
   | ExistingTablesMessage
@@ -331,6 +351,7 @@ export type ExtensionMessage =
   | DiscrepancyReportMessage
   | ManifestStalenessMessage
   | SyncPlanGeneratedMessage
+  | RevealRelationshipMessage
   | ErrorMessage;
 
 // ---------------------------------------------------------------------------

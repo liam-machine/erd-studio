@@ -1032,7 +1032,7 @@ describe('Import DBML — contributed', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8')) as {
     contributes: {
       commands: Array<{ command: string; title: string; category?: string }>;
-      menus: Record<string, Array<{ command: string; when?: string; group?: string }>>;
+      menus: Record<string, Array<{ command?: string; submenu?: string; when?: string; group?: string }>>;
       viewsWelcome: Array<{ view: string; contents: string; when?: string }>;
     };
   };
@@ -1048,9 +1048,13 @@ describe('Import DBML — contributed', () => {
       .toEqual([{ command: IMPORT_DBML_COMMAND, when: 'erdStudio.hasProject' }]);
   });
 
-  it('is in the Subject Areas view\'s title menu and both "No diagrams yet" welcomes (with and without dbt)', () => {
+  it('is in the Diagrams view\'s + menu and both "No diagrams yet" welcomes (with and without dbt)', () => {
+    // The + on the Diagrams view's title bar is the New… submenu, holding every way to start a diagram.
     expect(pkg.contributes.menus['view/title']).toContainEqual({
-      command: IMPORT_DBML_COMMAND, when: 'view == erdStudio.domainTree && erdStudio.hasProject', group: '1_create@1',
+      submenu: 'erdStudio.newMenu', when: 'view == erdStudio.domainTree && erdStudio.hasProject', group: 'navigation@0',
+    });
+    expect(pkg.contributes.menus['erdStudio.newMenu']).toContainEqual({
+      command: IMPORT_DBML_COMMAND, when: 'erdStudio.hasProject', group: '1_diagram@3',
     });
     const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
     expect(dbt.contents.startsWith('No diagrams yet.')).toBe(true);

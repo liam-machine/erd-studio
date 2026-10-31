@@ -1208,6 +1208,16 @@ export class TableLibraryService {
   }
 
   /**
+   * {@link relationshipsFileHolding} with the line: where the relationship
+   * `rel` is written (absolute path, 1-based line of its Ref). Undefined when
+   * no relationships file holds it (a YAML table's own relationship).
+   */
+  relationshipLocation(rel: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }): { filePath: string; line: number } | undefined {
+    const at = this.libraryAttachment()?.locations?.get(linkKey(rel));
+    return at === undefined ? undefined : { filePath: this.semanticAbsolute(at.path), line: at.line };
+  }
+
+  /**
    * Every relationships file (relative to the semantic dir) holding a copy
    * of `owner`'s relationship `rel`, as the attachment `owner`'s list came
    * from read it (the members' own while {@link readingTables} runs, else

@@ -114,7 +114,7 @@ describe.skipIf(AS_ROOT)('New Diagram when it cannot write (#229)', () => {
     await openProject(project);
     const gold = path.join(project, '.erd-studio', 'gold');
     readOnly(gold);
-    const input = answer('gold', 'orders', 'Orders');
+    const input = answer('gold', 'orders');
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
     error.mockImplementationOnce((async () => { writable(gold); return 'Try Again'; }) as never);
 
@@ -125,10 +125,10 @@ describe.skipIf(AS_ROOT)('New Diagram when it cannot write (#229)', () => {
       message: "New Diagram: ERD Studio isn't allowed to write to .erd-studio/gold/. Check the folder's permissions, then try again. Nothing was created.",
       buttons: ['Show Folder', 'Try Again'],
     }]);
-    // Try Again: the file is written and opened, and the name and description were asked once.
+    // Try Again: the file is written and opened, and the name was asked once.
     const created = path.join(gold, 'orders.json');
-    expect(JSON.parse(fs.readFileSync(created, 'utf-8'))).toMatchObject({ description: 'Orders' });
-    expect(input).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fs.readFileSync(created, 'utf-8'))).toMatchObject({ domain: 'orders' });
+    expect(input).toHaveBeenCalledTimes(1);
     expect(exec.mock.calls.some((c) => c[0] === 'vscode.openWith' && (c[1] as vscode.Uri).fsPath === created)).toBe(true);
   });
 
@@ -157,8 +157,8 @@ describe.skipIf(AS_ROOT)('New Diagram when it cannot write (#229)', () => {
     await openProject(project);
     const gold = path.join(project, '.erd-studio', 'gold');
     fs.rmSync(gold, { recursive: true });
-    // A name no file system takes (the name box would refuse it): Node throws, not the disk.
-    answer('gold', 'orders\0', '');
+    // A name too long for any file system (the name box would refuse it): Node throws, not the disk.
+    answer('gold', 'x'.repeat(300));
     const real = vscode.commands.executeCommand;
     const exec = vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) =>
       (command === 'erdStudio.reportBug' ? undefined : real(command, ...args))) as never);
@@ -174,7 +174,7 @@ describe.skipIf(AS_ROOT)('New Diagram when it cannot write (#229)', () => {
     expect(fs.existsSync(gold)).toBe(false);
     const prefill = exec.mock.calls.find((c) => c[0] === 'erdStudio.reportBug')?.[1] as { title: string; description: string };
     expect(prefill.title).toBe('New Diagram failed');
-    expect(prefill.description).toContain('null bytes');
+    expect(prefill.description).toContain('ENAMETOOLONG');
     expect(prefill.description).not.toContain(root);
   });
 });
@@ -408,13 +408,12 @@ describe('the layer commands (#229)', () => {
     fs.cpSync(FIXTURE_ROOT, project, { recursive: true });
     await openProject(project);
     const layersPath = path.join(project, '.erd-studio', 'layers.json');
-    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('platinum' as never);
-    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value?: string }>) => {
-      // Another window adds it while the colour list is open.
+    vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async () => {
+      // Another window adds it while the name box is open.
       const layers = JSON.parse(fs.readFileSync(layersPath, 'utf-8'));
       layers.layers.push({ id: 'platinum', label: 'Platinum', abbreviation: 'PLA', color: '#ffffff', creatable: true, order: 99 });
       fs.writeFileSync(layersPath, JSON.stringify(layers, null, 2));
-      return items[0];
+      return 'platinum';
     }) as never);
 
     await vscode.commands.executeCommand('erdStudio.addLayer');

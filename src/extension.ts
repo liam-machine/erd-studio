@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { SubjectAreaService, renameSubjectAreaInRaw, subjectAreaTableNames } from './services/domainService';
-import { LayerService, LayersFileUnreadableError, reservedLayerNameMessage } from './services/layerService';
+import { LayerService, LayersFileUnreadableError, NEW_PROJECT_LAYERS_WITHOUT_DBT, reservedLayerNameMessage } from './services/layerService';
 import { removedSubjectAreaPaths } from './services/removedSubjectAreas';
 import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, type SubjectAreaSummary, type Layer, type Stage, type UnifiedSubjectArea, type StageData } from './types/semantic';
 import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
@@ -50,7 +50,7 @@ import { TableLibraryTreeProvider, type TableLibraryNode, type TableLibraryTable
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
-import { RELATIONSHIPS_DIR, SubjectAreaFileError, dbmlTablePath, diagramFilePath, isDbmlLayerName, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
+import { AUTO_DETECT_COLORS, RELATIONSHIPS_DIR, SubjectAreaFileError, dbmlTablePath, diagramFilePath, isDbmlLayerName, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
 import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
@@ -89,7 +89,10 @@ import {
   unsavedSaveFailure,
   writeFailure,
 } from './services/diagramCommandErrors';
-import { MyReportsTreeProvider, type MyReportNode } from './providers/MyReportsTreeProvider';
+import type { MyReportNode } from './providers/MyReportsTreeProvider';
+import { HelpTreeProvider } from './providers/HelpTreeProvider';
+import { RelationshipsTreeProvider, type RelationshipsNode } from './providers/RelationshipsTreeProvider';
+import { openInDiagram, openRelationshipSource, type RelationshipsViewDeps } from './commands/relationshipsView';
 import type { FeedbackKind } from './types/feedback';
 import { CliLauncherService, type CliLauncherOptions } from './services/cliLauncherService';
 import {
@@ -539,6 +542,8 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.showLogs',
   'erdStudio.moveTable',
   'erdStudio.moveDiagram',
+  'erdStudio.openRelationshipSource',
+  'erdStudio.openInDiagram',
 ]);
 
 /**
@@ -719,7 +724,7 @@ async function handleUnsavedChanges(
   }
 
   const saveChoice = await vscode.window.showWarningMessage(
-    `Subject area "${domainName}" has unsaved changes. Save before ${operation}?`,
+    `The diagram "${domainName}" has unsaved changes. Save before ${operation}?`,
     { modal: true },
     'Save',
     'Discard',
@@ -749,6 +754,19 @@ async function handleUnsavedChanges(
   return true;
 }
 
+/**
+ * The file name a typed name becomes, for a diagram or a layer folder: lower
+ * case, every run of other characters one `-` ("Customer 360" →
+ * `customer-360`), no `-` at either end. It may still start with a digit,
+ * which the name checks refuse.
+ */
+export function slugFromName(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** A layer's id (its folder) from the name the user typed for it. */
+const layerIdFromName = slugFromName;
+
 function validateSubjectAreaSlug(
   value: string,
   layer: Layer,
@@ -756,28 +774,28 @@ function validateSubjectAreaSlug(
   currentDomainName?: string,
 ): string | undefined {
   if (!value || !value.trim()) {
-    return 'Subject area name is required';
+    return 'Give the diagram a name';
   }
 
   const slug = value.trim();
 
   if (currentDomainName && slug === currentDomainName) {
-    return 'Subject area name unchanged';
+    return 'That is its name already';
   }
 
   if (!/^[a-z][a-z0-9_-]*$/.test(slug)) {
-    return 'Subject area name must start with a lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores';
+    return 'Use lowercase letters, numbers, - and _, starting with a letter (e.g. customer-360)';
   }
 
   if (slug.length > 64) {
-    return 'Subject area name must be 64 characters or less';
+    return 'Keep the name to 64 characters or fewer';
   }
 
   const collision = existingDomains.find(
     d => d.domain === slug && d.layer === layer,
   );
   if (collision) {
-    return `A subject area named "${slug}" already exists in the ${layer} layer`;
+    return `There is already a diagram named "${slug}" in this layer`;
   }
 
   return undefined;
@@ -1106,6 +1124,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const dbtConfig = readDbtProjectConfig(workspaceRoot);
 
   const layerService = new LayerService(workspaceRoot, semanticDir);
+  // A brand-new project without dbt starts with one neutral layer, not
+  // silver and gold; anything already on disk keeps what it has.
+  if (!hasDbt && !fs.existsSync(path.join(workspaceRoot, semanticDir))) {
+    layerService.useDefaultLayers(NEW_PROJECT_LAYERS_WITHOUT_DBT);
+  }
   const subjectAreaService = new SubjectAreaService(layerService);
   const tableLibraryService = new TableLibraryService(workspaceRoot, semanticDir);
   tableLibraryService.onParseFailure = (error) => {
@@ -1253,6 +1276,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const viewRefreshes = new RefreshGate();
   viewRefreshes.gateMethod(treeProvider, 'refresh', 'subjectAreas');
   viewRefreshes.gateMethod(tableLibraryProvider, 'refresh', 'tableLibrary');
+  // Relationships live in the table files (and, in a YAML/JSON project, the
+  // diagrams), so the view lists again whenever the Table Library does —
+  // after the gate, so a bulk change still refreshes it once. VS Code asks
+  // only while the view is visible.
+  const relationshipsProvider = new RelationshipsTreeProvider(
+    tableLibraryService,
+    subjectAreaService,
+    workspaceRoot,
+    semanticDir,
+    (kind) => dbmlFileIcon(context.extensionUri, kind),
+  );
+  context.subscriptions.push(tableLibraryProvider.onDidChangeTreeData(() => relationshipsProvider.refresh()));
   const editorProvider = new SemanticEditorProvider(
     context,
     subjectAreaService,
@@ -1271,7 +1306,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // yet. It owns its own `erdStudio.hasTrackedReports` context key (which gates
   // the My Reports view) — refreshContextKeys deliberately knows nothing about it.
   const trackingService = new ReportTrackingService(context);
-  const myReportsProvider = new MyReportsTreeProvider(trackingService);
+  // Help & Feedback lists the reports under "My Reports" once there is one.
+  const helpProvider = new HelpTreeProvider(trackingService);
   trackingServiceForFeedback = trackingService;
   editorProvider.setReportTracking(trackingService);
   editorProvider.setCatalogService(catalogService);
@@ -1348,6 +1384,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     activationMs: elapsedMs(activationStart),
   });
 
+  // A diagram in a picker: its layer and table count, and its tables as the
+  // detail line, so typing a table's name finds every diagram that shows it.
+  const diagramPickItems = (domains: readonly SubjectAreaSummary[]) => domains.map((d) => {
+    let tables: string[] | null = null;
+    try { tables = subjectAreaTableNames(fs.readFileSync(d.filePath, 'utf-8'), d.filePath); } catch { /* listed without its tables */ }
+    return {
+      label: d.domain,
+      description: tables ? `${layerService.getLabel(d.layer)} · ${tables.length} table${tables.length === 1 ? '' : 's'}` : layerService.getLabel(d.layer),
+      ...(tables && tables.length > 0 ? { detail: tables.join(', ') } : {}),
+      summary: d,
+    };
+  });
   // The one domain picker: straight to the only domain, a QuickPick when
   // there are several. Shared by openCanvas and Export Diagram.
   const pickDomainFile = async (
@@ -1355,11 +1403,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     placeHolder: string,
   ): Promise<string | undefined> => {
     if (domains.length <= 1) { return domains[0]?.filePath; }
-    const picked = await vscode.window.showQuickPick(
-      domains.map((d) => ({ label: d.domain, description: d.layer, summary: d })),
-      { placeHolder },
-    );
+    const picked = await vscode.window.showQuickPick(diagramPickItems(domains), { placeHolder, matchOnDetail: true });
     return picked?.summary.filePath;
+  };
+  // Rename / Delete Diagram: the row they were run on, else (the Command
+  // Palette) the diagram open on the canvas, else one the user picks, even
+  // when there is only one: these change files.
+  const diagramToChange = async (element: TreeElement | undefined, placeHolder: string): Promise<SubjectAreaSummary | undefined> => {
+    if (element?.type === 'domain') { return element.summary; }
+    const domains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+    const active = editorProvider.activeSubjectAreaPath();
+    const open = active ? domains.find((d) => samePath(d.filePath, active)) : undefined;
+    if (open) { return open; }
+    if (domains.length === 0) {
+      void vscode.window.showInformationMessage('ERD Studio: There are no diagrams yet.');
+      return undefined;
+    }
+    const picked = await vscode.window.showQuickPick(diagramPickItems(domains), { placeHolder, matchOnDetail: true });
+    return picked?.summary;
   };
   // "Open a domain" (Welcome panel, status bar, palette): straight in when
   // there is one, a pick when there are several, the create flow when none.
@@ -1373,7 +1434,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
       return;
     }
-    const target = await pickDomainFile(domains, 'Open which subject area?');
+    const target = await pickDomainFile(domains, 'Open which diagram? Type a diagram or a table name');
     if (!target) { return; }
     await vscode.commands.executeCommand('erdStudio.openDomain', target);
   };
@@ -1682,10 +1743,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const removed = removedSubjectAreaPaths(uris.map((u) => u.fsPath), fs.existsSync);
     if (removed.length === 0) return;
     const subject = removed.length === 1
-      ? 'Subject area file deleted.'
-      : `${removed.length} subject area files deleted.`;
+      ? 'Diagram file deleted.'
+      : `${removed.length} diagram files deleted.`;
     void vscode.window.showInformationMessage(
-      `${subject} Regenerate dbt selectors.yml to drop the removed subject area${removed.length === 1 ? '' : 's'} from the selector set.`,
+      `${subject} Regenerate dbt selectors.yml to drop the removed diagram${removed.length === 1 ? '' : 's'} from the selector set.`,
       'Regenerate Now',
     ).then(choice => {
       if (choice === 'Regenerate Now') {
@@ -2121,17 +2182,44 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         treeDataProvider: tableLibraryProvider,
         // Move Table moves every selected table to one folder.
         canSelectMany: true,
+        showCollapseAll: true,
       });
     })(),
-    trackingService,
-    myReportsProvider,
-    vscode.window.createTreeView('erdStudio.myReports', {
-      treeDataProvider: myReportsProvider,
+    relationshipsProvider,
+    vscode.window.createTreeView('erdStudio.relationships', {
+      treeDataProvider: relationshipsProvider,
+      showCollapseAll: true,
       canSelectMany: false,
     }),
-    trackingService.onDidChangeReports(() => {
-      myReportsProvider.refresh();
+    trackingService,
+    helpProvider,
+    vscode.window.createTreeView('erdStudio.help', {
+      treeDataProvider: helpProvider,
+      canSelectMany: false,
     }),
+    (() => {
+      const deps: RelationshipsViewDeps = {
+        relationshipLocation: (rel) => tableLibraryService.relationshipLocation(rel),
+        findTableFile: (name) => tableLibraryService.findTableFile(name),
+        listSubjectAreas: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir),
+        memberNames: (filePath) => subjectAreaTableNames(fs.readFileSync(filePath, 'utf-8'), filePath),
+        layerLabel: (layer) => layerService.getLabel(layer),
+        revealRelationship: (filePath, target) => editorProvider.revealRelationship(vscode.Uri.file(filePath), target),
+      };
+      return vscode.Disposable.from(
+        vscode.commands.registerCommand('erdStudio.openRelationshipSource', (node?: RelationshipsNode) => openRelationshipSource(node, deps)),
+        // A relationship row's click passes `{ fallBackToFile: true }`: with no
+        // diagram to show it on, it opens where it is written.
+        vscode.commands.registerCommand('erdStudio.openInDiagram', (node?: RelationshipsNode | TableLibraryTableNode, options?: unknown) => {
+          if (!node) {
+            void vscode.window.showErrorMessage('Open in Diagram: Right-click a table in the Table Library, or a relationship or table in the Relationships view.');
+            return;
+          }
+          const fallBackToFile = typeof options === 'object' && options !== null && (options as { fallBackToFile?: unknown }).fallBackToFile === true;
+          return openInDiagram(node, deps, { fallBackToFile });
+        }),
+      );
+    })(),
     vscode.commands.registerCommand('erdStudio.setFeedbackApiKey', () => setFeedbackApiKey(context)),
     vscode.commands.registerCommand('erdStudio.clearFeedbackApiKey', () => clearFeedbackApiKey(context)),
     vscode.commands.registerCommand('erdStudio.refreshMyReports', () => trackingService.refresh({ force: true })),
@@ -2162,8 +2250,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         yamlNames.length === 0
           ? `Delete ${subject}?${editorProvider.describeDbmlDeleteCascade(dbmlNames, false)}`
           : dbmlNames.length === 0
-            ? `Delete ${subject}? This removes the ${names.length === 1 ? "table's file" : "tables' files"} — subject area references are not cleaned up.`
-            : `Delete ${subject}?${editorProvider.describeDbmlDeleteCascade(dbmlNames, false)} The YAML ${yamlNames.length === 1 ? 'table' : 'tables'} (${yamlNames.join(', ')}) ${yamlNames.length === 1 ? 'loses its file' : 'lose their files'}; subject area references to ${yamlNames.length === 1 ? 'it' : 'them'} are not cleaned up.`,
+            ? `Delete ${subject}? This removes the ${names.length === 1 ? "table's file" : "tables' files"} — diagrams that show ${names.length === 1 ? 'it' : 'them'} are not updated.`
+            : `Delete ${subject}?${editorProvider.describeDbmlDeleteCascade(dbmlNames, false)} The YAML ${yamlNames.length === 1 ? 'table' : 'tables'} (${yamlNames.join(', ')}) ${yamlNames.length === 1 ? 'loses its file' : 'lose their files'}; diagrams that show ${yamlNames.length === 1 ? 'it' : 'them'} are not updated.`,
         { modal: true },
         'Delete',
       );
@@ -2445,7 +2533,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await editorProvider.refreshAllOpenSubjectAreas();
         void vscode.window.showInformationMessage(
           `${libPath(planned.newPath)} is now its own table, "${newName}" (warehouse table: ${alias}).` +
-          (repointed.length ? ` Repointed ${repointed.length} subject area${repointed.length === 1 ? '' : 's'}.` : ''),
+          (repointed.length ? ` Updated ${repointed.length} diagram${repointed.length === 1 ? '' : 's'}.` : ''),
         );
       }
 
@@ -2559,7 +2647,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await editorProvider.refreshAllOpenSubjectAreas();
       void vscode.window.showInformationMessage(
         `${libPath(newPath)} is now its own table, "${newName}" (warehouse table: ${plan.alias}).` +
-        (repointedPaths.length ? ` Repointed ${repointedPaths.length} subject area${repointedPaths.length === 1 ? '' : 's'}.` : ''),
+        (repointedPaths.length ? ` Updated ${repointedPaths.length} diagram${repointedPaths.length === 1 ? '' : 's'}.` : ''),
       );
     }),
     // Store every domain file's relationships once, in their from-models'
@@ -2712,90 +2800,85 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.commands.registerCommand(
       'erdStudio.createDomain',
-      async (layerArg?: Layer) => {
-        // Step 1: Determine layer
-        let layer: Layer | undefined = layerArg;
+      async (layerArg?: Layer | { type: 'layer'; layer: Layer }) => {
+        // Step 1: Determine layer. A layer row's inline + and right-click
+        // pass the row itself; the "New Diagram…" row and callers pass its id.
+        let layer: Layer | undefined = typeof layerArg === 'object' && layerArg?.type === 'layer' ? layerArg.layer
+          : typeof layerArg === 'string' ? layerArg : undefined;
         if (!layer) {
           const creatableLayers = layerService.getCreatableLayers();
           if (creatableLayers.length === 0) {
             showCommandFailure({ title: NEW_DIAGRAM_TITLE, message: NO_LAYERS_MESSAGE, buttons: [ADD_LAYER_BUTTON] }, undefined);
             return;
           }
-          const layerItems = creatableLayers.map(l => ({ label: l.label, value: l.id }));
-          const layerChoice = await vscode.window.showQuickPick(layerItems, {
-            placeHolder: 'Select layer for the new subject area',
-            ignoreFocusOut: true,
-          });
-          if (!layerChoice) { return; }
-          layer = layerChoice.value;
-        }
-
-        // Step 2: Get domain name
-        const existingDomains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
-        const domainSlug = await vscode.window.showInputBox({
-          prompt: 'Enter subject area name (slug format)',
-          placeHolder: 'e.g. customer-360, sales-analytics, orders',
-          ignoreFocusOut: true,
-          validateInput: (value: string) =>
-            validateSubjectAreaSlug(value, layer, existingDomains),
-        });
-        if (!domainSlug) { return; }
-        const slug = domainSlug.trim();
-
-        // Step 3: Get description
-        const description = await vscode.window.showInputBox({
-          prompt: 'Enter subject area description (optional)',
-          placeHolder: 'e.g. Customer 360 view with orders and interactions',
-          ignoreFocusOut: true,
-        });
-        if (description === undefined) { return; }
-
-        // Step 4: Get model folder filter (try yml source files first, fall back to manifest)
-        let modelFolder: string | undefined;
-        try {
-          await ymlParserService.loadYmlData(workspaceRoot);
-          let availableFolders = ymlParserService.getModelFolders(workspaceRoot);
-          if (availableFolders.length === 0) {
-            await manifestService.loadManifest(workspaceRoot);
-            availableFolders = manifestService.getModelFolders();
-          }
-          if (availableFolders.length > 0) {
-            const folderItems: Array<{ label: string; value: string | undefined }> = [
-              { label: '$(folder) Any folder (no filter)', value: undefined },
-              ...availableFolders.map((folder) => ({ label: `$(folder) ${folder}`, value: folder })),
+          if (creatableLayers.length === 1) {
+            layer = creatableLayers[0].id;
+          } else {
+            // Each layer with how many diagrams it holds, then a way to make another.
+            const counts = new Map<string, number>();
+            for (const s of subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)) counts.set(s.layer, (counts.get(s.layer) ?? 0) + 1);
+            type LayerPick = vscode.QuickPickItem & { value?: Layer; newLayer?: true };
+            const layerItems: LayerPick[] = [
+              ...creatableLayers.map((l): LayerPick => {
+                const n = counts.get(l.id) ?? 0;
+                return { label: l.label, description: n === 0 ? 'no diagrams yet' : `${n} diagram${n === 1 ? '' : 's'}`, value: l.id };
+              }),
+              { label: '', kind: vscode.QuickPickItemKind.Separator },
+              { label: '$(new-folder) New Layer…', description: 'a new stage, such as staging or marts', newLayer: true },
             ];
-            const folderChoice = await vscode.window.showQuickPick(folderItems, {
-              placeHolder: 'Filter dbt models by folder (optional)',
+            const layerChoice = await vscode.window.showQuickPick(layerItems, {
+              title: NEW_DIAGRAM_TITLE,
+              placeHolder: 'Which layer is the diagram in? A layer groups diagrams by stage, such as silver or gold.',
               ignoreFocusOut: true,
             });
-            if (folderChoice === undefined) { return; }
-            modelFolder = folderChoice.value;
+            if (!layerChoice) { return; }
+            layer = layerChoice.newLayer
+              ? await vscode.commands.executeCommand<string | undefined>('erdStudio.addLayer', { thenNewDiagram: true })
+              : layerChoice.value;
+            if (!layer) { return; }
           }
-        } catch {
-          log.warn('[createDomain] Failed to load manifest for folder detection, skipping folder picker');
         }
+        const chosenLayer = layer;
 
-        // Step 5: Create the diagram file, and open it.
-        await createDiagramFile(layer, slug, description, modelFolder);
+        // Step 2: The name, as people would write it: "Customer 360" is saved as customer-360.
+        const existingDomains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+        const typed = await vscode.window.showInputBox({
+          title: NEW_DIAGRAM_TITLE,
+          prompt: `Name the diagram. It is saved in the ${layerService.getLabel(chosenLayer)} layer.`,
+          placeHolder: 'e.g. Customer 360, Sales, Orders',
+          ignoreFocusOut: true,
+          validateInput: (value: string) => {
+            if (!value.trim()) { return 'Give the diagram a name'; }
+            const asSlug = slugFromName(value);
+            const problem = validateSubjectAreaSlug(asSlug, chosenLayer, existingDomains);
+            if (problem) { return problem; }
+            return asSlug === value.trim() ? undefined : { message: `Saved as ${asSlug}`, severity: vscode.InputBoxValidationSeverity.Info };
+          },
+        });
+        if (!typed?.trim()) { return; }
+        const slug = slugFromName(typed);
+
+        // Create the diagram file, and open it. Its description and dbt folder
+        // filter are no longer asked for: nothing on the canvas shows them, and
+        // your AI assistant (or the file) can add a description later.
+        await createDiagramFile(chosenLayer, slug, '', undefined);
       },
     ),
     vscode.commands.registerCommand(
       'erdStudio.deleteDomain',
       async (element?: TreeElement) => {
-        if (!element || element.type !== 'domain') {
-          void vscode.window.showErrorMessage('Delete Subject Area: No subject area selected. Right-click a subject area in the tree view.');
-          return;
-        }
+        const target = await diagramToChange(element, 'Delete which diagram?');
+        if (!target) { return; }
 
-        const domainName = element.summary.domain;
-        const filePath = element.summary.filePath;
+        const domainName = target.domain;
+        const filePath = target.filePath;
         const fileUri = vscode.Uri.file(filePath);
 
         const shouldProceed = await handleUnsavedChanges(fileUri, domainName, 'deleting');
         if (!shouldProceed) { return; }
 
         const confirm = await vscode.window.showWarningMessage(
-          `Are you sure you want to delete subject area "${domainName}"?`,
+          `Delete the diagram "${domainName}"? Its tables stay in the Table Library.`,
           { modal: true },
           'Delete',
         );
@@ -2840,21 +2923,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(
       'erdStudio.renameDomain',
       async (element?: TreeElement) => {
-        if (!element || element.type !== 'domain') {
-          void vscode.window.showErrorMessage('Rename Subject Area: No subject area selected. Right-click a subject area in the tree view.');
-          return;
-        }
+        const target = await diagramToChange(element, 'Rename which diagram?');
+        if (!target) { return; }
 
-        const oldDomainName = element.summary.domain;
-        const oldFilePath = element.summary.filePath;
+        const oldDomainName = target.domain;
+        const oldFilePath = target.filePath;
         const oldFileUri = vscode.Uri.file(oldFilePath);
-        const layer = element.summary.layer;
+        const layer = target.layer;
         const shouldProceed = await handleUnsavedChanges(oldFileUri, oldDomainName, 'renaming');
         if (!shouldProceed) { return; }
 
         const existingDomains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
         const newDomainSlug = await vscode.window.showInputBox({
-          prompt: 'Enter new subject area name',
+          prompt: 'New name for the diagram',
           value: oldDomainName,
           ignoreFocusOut: true,
           validateInput: (value: string) =>
@@ -3184,49 +3265,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // -------------------------------------------------------------------------
     vscode.commands.registerCommand(
       'erdStudio.addLayer',
-      async () => {
-        // Step 1: Layer ID
-        const id = await vscode.window.showInputBox({
-          prompt: 'Layer name (lowercase, e.g., platinum)',
-          placeHolder: 'e.g., platinum, staging, raw',
+      // New Diagram's layer picker passes `{ thenNewDiagram: true }` and goes on
+      // with the id this returns; anywhere else, the toast offers that step.
+      async (options?: unknown): Promise<string | undefined> => {
+        const thenNewDiagram = typeof options === 'object' && options !== null
+          && (options as { thenNewDiagram?: unknown }).thenNewDiagram === true;
+        // One question: the name people read. Its folder (the id) follows from it.
+        const typed = await vscode.window.showInputBox({
+          title: 'New Layer',
+          prompt: 'Name the layer: a stage of your warehouse, such as Staging or Marts. Each layer holds its own diagrams.',
+          placeHolder: 'e.g. Staging, Marts, Platinum',
           ignoreFocusOut: true,
           validateInput: (value: string) => {
-            if (!value || !value.trim()) { return 'Layer name is required'; }
-            if (!/^[a-z][a-z0-9_-]*$/.test(value.trim())) { return 'Must start with lowercase letter, contain only lowercase letters, numbers, hyphens, underscores'; }
-            if (layerService.hasLayer(value.trim())) { return `Layer "${value.trim()}" already exists`; }
+            if (!value.trim()) { return 'Give the layer a name'; }
+            const id = layerIdFromName(value);
+            if (!/^[a-z]/.test(id)) { return 'Start the name with a letter'; }
+            if (layerService.hasLayer(id)) { return `There is already a layer "${layerService.getLabel(id)}"`; }
             // ERD Studio's own folders (#162, §1.1: `tables`, `templates`, `logical-models`, any case); a project that already has the layer keeps it.
-            if (isReservedLayerName(value.trim())) { return reservedLayerNameMessage(value.trim()); }
-            return undefined;
+            if (isReservedLayerName(id)) { return reservedLayerNameMessage(id); }
+            return { message: `Its folder: ${semanticDir}/${id}/`, severity: vscode.InputBoxValidationSeverity.Info };
           },
         });
-        if (!id) return;
-        const layerId = id.trim();
-
-        // Step 2: Color
-        const colorPick = await vscode.window.showQuickPick(LAYER_COLOR_OPTIONS, {
-          placeHolder: `Select color for "${layerId}" layer`,
-          ignoreFocusOut: true,
-        });
-        if (!colorPick) return;
-
-        let color = colorPick.value;
-        if (color === 'custom') {
-          const customColor = await vscode.window.showInputBox({
-            prompt: 'Enter hex color (e.g., #ff5733)',
-            placeHolder: '#ff5733',
-            ignoreFocusOut: true,
-            validateInput: (value: string) => {
-              if (!/^#[0-9a-fA-F]{6}$/.test(value)) { return 'Invalid hex color format (e.g., #ff5733)'; }
-              return undefined;
-            },
-          });
-          if (!customColor) return;
-          color = customColor;
-        }
-
-        // Auto-generate label and abbreviation from ID
-        const label = layerId.charAt(0).toUpperCase() + layerId.slice(1);
-        const abbreviation = layerId.slice(0, 3).toUpperCase();
+        if (!typed?.trim()) return undefined;
+        const layerId = layerIdFromName(typed);
+        const label = typed.trim().charAt(0).toUpperCase() + typed.trim().slice(1);
+        const abbreviation = layerId.replace(/[^a-z0-9]/g, '').slice(0, 3).toUpperCase();
+        // A colour no layer uses yet; Edit Layer → Change Color picks another.
+        const used = new Set(layerService.getAllLayers().map((l) => l.color.toLowerCase()));
+        const palette = [...LAYER_COLOR_OPTIONS.filter((o) => o.value !== 'custom').map((o) => o.value), ...AUTO_DETECT_COLORS];
+        const color = palette.find((c) => !used.has(c.toLowerCase())) ?? palette[layerService.getAllLayers().length % palette.length];
 
         let added = false;
         try {
@@ -3249,7 +3316,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           treeProvider.refresh();
           layerDecorationProvider.refresh();
           decorationProvider.refresh();
-          void vscode.window.showInformationMessage(`Layer "${label}" added. Use Edit Layer to customize display name or abbreviation.`);
+          if (thenNewDiagram) return layerId;
+          // The next step is a diagram in it; renaming and recolouring are on the layer's right-click menu.
+          const NEW_DIAGRAM = 'New Diagram in It…';
+          void Promise.resolve(vscode.window.showInformationMessage(
+            `Layer "${label}" added. Right-click it to rename or recolour it.`, NEW_DIAGRAM,
+          )).then((choice) => {
+            if (choice === NEW_DIAGRAM) void vscode.commands.executeCommand('erdStudio.createDomain', layerId);
+          });
+          return layerId;
         } catch (err) {
           if (added) { refreshContextKeys(); treeProvider.refresh(); layerDecorationProvider.refresh(); decorationProvider.refresh(); }
           // Added since the name box checked (another window, git): the sidebar was stale.
@@ -3261,13 +3336,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             showCommandFailure({
               title: 'Add Layer', message: `The layer "${layerId}" is already in layers.json. The sidebar has been refreshed.`, buttons: [],
             }, undefined);
-            return;
+            return undefined;
           }
           showCommandFailure(layersFailure('Add Layer', err, {
             workspaceRoot, layersPath: layerService.getConfigPath(),
             doing: added ? 'while creating the layer\'s folder' : 'while saving layers.json',
             outcome: added ? `The layer was added, but its folder in ${semanticDir}/ wasn't created.` : 'The layer wasn\'t added.',
           }), err);
+          return undefined;
         }
       },
     ),
@@ -3384,7 +3460,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const layerDomains = domains.filter(d => d.layer === layerId);
         if (layerDomains.length > 0) {
           void vscode.window.showErrorMessage(
-            `Cannot remove layer "${layer.label}" — it contains ${layerDomains.length} subject area(s). Delete or move subject areas first.`,
+            `Can't remove the layer "${layer.label}": it holds ${layerDomains.length === 1 ? '1 diagram' : `${layerDomains.length} diagrams`}. Delete or move ${layerDomains.length === 1 ? 'it' : 'them'} first.`,
           );
           return;
         }
@@ -3742,10 +3818,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   }
 
+  // Existing diagrams, once per workspace: a teammate's clone already holds
+  // .erd-studio/ domains the user may never have seen. It comes before the AI
+  // helper prompts below (one prompt at a time: they wait for the next
+  // window). Not on the walkthrough run, beside the upgrade notice, or when a
+  // canvas is already open.
+  // Writes nothing to the workspace.
+  let diagramsNudgeShown = false;
+  if (
+    !suppressHarnessQuickPick &&
+    !firstRunNoticeShown &&
+    !context.workspaceState.get<boolean>(DIAGRAMS_NUDGE_SHOWN_KEY) &&
+    !hasOpenSubjectAreaCanvas()
+  ) {
+    const domains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+    const latest = mostRecentlyModified(domains);
+    if (latest) {
+      diagramsNudgeShown = true;
+      await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
+      const open = `Open ${latest.domain}`;
+      void vscode.window.showInformationMessage(
+        `This project has ${domains.length} ERD Studio diagram${domains.length === 1 ? '' : 's'}.`,
+        open,
+        'Not now',
+      ).then((choice) => {
+        if (choice === open) { void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath); }
+      });
+    }
+  }
+
+
   // AI coding harness — prompt to update stale files; offer install once per
   // workspace when none are present. Never overwrite anything silently:
   // harness files (AGENTS.md in particular) can hold user content.
-  let harnessPromptShown = false;
   {
     const harnessService = new HarnessService(semanticDir);
     const existing = harnessService.detectExisting(workspaceRoot);
@@ -3761,8 +3866,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       telemetry.harnesses(managed.map(target => target.id));
     } catch { /* telemetry must never break activation */ }
 
-    if (staleTargets.length > 0) {
-      harnessPromptShown = true;
+    if (diagramsNudgeShown) {
+      // One prompt per window: the diagrams notice above went first.
+    } else if (staleTargets.length > 0) {
       const names = staleTargets.map(t => t.label.replace(/\$\([^)]+\)\s*/g, '')).join(', ');
       void vscode.window.showWarningMessage(
         `ERD Studio: ${staleTargets.length} AI helper file(s) come from an older ERD Studio (${names}). Update to v${HARNESS_VERSION}?`,
@@ -3797,38 +3903,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       installedCount === 0 &&
       !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)
     ) {
-      // No harnesses installed — offer the QuickPick once per workspace, not
-      // on every window open. The command stays available in the palette.
-      harnessPromptShown = true;
+      // No AI helper files: offer Set Up My AI Helper once per workspace, as
+      // a notification rather than a picker that takes over the window. Install
+      // AI Helper Files… stays in the palette for choosing them one by one.
       void context.workspaceState.update(HARNESS_INSTALL_PROMPTED_KEY, true);
-      void vscode.commands.executeCommand('erdStudio.installCodingHarness');
-    }
-  }
-
-  // Existing diagrams, once per workspace: a teammate's clone already holds
-  // .erd-studio/ domains the user may never have seen. Not on the walkthrough
-  // run, beside the upgrade notice or beside either harness prompt above (one
-  // prompt at a time; the flag stays unset, so it comes next time), and not
-  // when a canvas is already open.
-  // Writes nothing to the workspace.
-  if (
-    !suppressHarnessQuickPick &&
-    !firstRunNoticeShown &&
-    !harnessPromptShown &&
-    !context.workspaceState.get<boolean>(DIAGRAMS_NUDGE_SHOWN_KEY) &&
-    !hasOpenSubjectAreaCanvas()
-  ) {
-    const domains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
-    const latest = mostRecentlyModified(domains);
-    if (latest) {
-      await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
-      const open = `Open ${latest.domain}`;
-      void vscode.window.showInformationMessage(
-        `This project has ${domains.length} ERD Studio diagram${domains.length === 1 ? '' : 's'}.`,
-        open,
+      const SET_UP = 'Set Up My AI Helper';
+      void Promise.resolve(vscode.window.showInformationMessage(
+        'Let your AI assistant read and write these diagrams? ERD Studio can add a guide for it to this project.',
+        SET_UP,
         'Not now',
-      ).then((choice) => {
-        if (choice === open) { void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath); }
+      )).then((choice) => {
+        if (choice === SET_UP) { void vscode.commands.executeCommand('erdStudio.setupAiHelper'); }
       });
     }
   }
