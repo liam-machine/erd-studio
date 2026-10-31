@@ -694,10 +694,8 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(listTree(ws)).toEqual([]);
   });
 
-  it('New Diagram works in a folder with no .erd-studio: layers.json first, then the diagram, then it opens', async () => {
+  it('New Diagram works in a folder with no .erd-studio: one Main layer, layers.json first, then the diagram, then it opens', async () => {
     await activate(context);
-    pick.mockImplementation((async (items: Array<{ label: string; value: string }>) =>
-      items.find((i) => i.value === 'gold')) as never);
     // The name as people write it; it is saved as `orders`. No description or dbt folder is asked for.
     const input = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('Orders');
     const real = vscode.commands.executeCommand;
@@ -706,17 +704,18 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
 
     await vscode.commands.executeCommand('erdStudio.createDomain');
 
-    // Only the layer QuickPick and the name box.
-    expect(pick).toHaveBeenCalledTimes(1);
+    // A new project without dbt starts with one neutral layer, so only the name is asked.
+    expect(pick).not.toHaveBeenCalled();
     expect(input).toHaveBeenCalledTimes(1);
-    const layers = JSON.parse(fs.readFileSync(path.join(ws, '.erd-studio', 'layers.json'), 'utf-8')) as { layers: Array<{ id: string }> };
-    expect(layers.layers.map((l) => l.id)).toContain('gold');
+    expect((input.mock.calls[0][0] as { prompt: string }).prompt).toBe('Name the diagram. It is saved in the Main layer.');
+    const layers = JSON.parse(fs.readFileSync(path.join(ws, '.erd-studio', 'layers.json'), 'utf-8')) as { layers: Array<{ id: string; label: string }> };
+    expect(layers.layers.map((l) => [l.id, l.label])).toEqual([['main', 'Main']]);
     // A new project stores its diagrams as DBML (native DBML storage, §3.2) in <layer>/diagrams/, with the README that says what the folder is.
-    const domainPath = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'orders.dbml');
-    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'gold/diagrams/orders.dbml').obj;
-    expect(domain).toMatchObject({ domain: 'orders', layer: 'gold' });
+    const domainPath = path.join(ws, '.erd-studio', 'main', 'diagrams', 'orders.dbml');
+    const domain = parseSubjectAreaDbml(fs.readFileSync(domainPath, 'utf-8'), 'main/diagrams/orders.dbml').obj;
+    expect(domain).toMatchObject({ domain: 'orders', layer: 'main' });
     expect(listTree(ws)).toEqual([
-      '.erd-studio/', '.erd-studio/README.md', '.erd-studio/gold/', '.erd-studio/gold/diagrams/', '.erd-studio/gold/diagrams/orders.dbml', '.erd-studio/layers.json',
+      '.erd-studio/', '.erd-studio/README.md', '.erd-studio/layers.json', '.erd-studio/main/', '.erd-studio/main/diagrams/', '.erd-studio/main/diagrams/orders.dbml',
     ]);
     const opened = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
     expect((opened[0][1] as { fsPath: string }).fsPath).toBe(domainPath);
@@ -779,13 +778,13 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     await vscode.commands.executeCommand('erdStudio.openExampleDiagram');
 
     expect(input).toHaveBeenCalledTimes(1);
-    expect(pick).not.toHaveBeenCalled(); // the default layers have gold
+    expect(pick).not.toHaveBeenCalled(); // a new project without dbt has one layer, Main
     const confirm = info.mock.calls.find((c) => c.includes('Import'))!;
-    expect(confirm[0]).toBe('Import 6 tables into a new diagram "coffee-shop" in the Gold layer.');
+    expect(confirm[0]).toBe('Import 6 tables into a new diagram "coffee-shop" in the Main layer.');
     // A new project stores the example as DBML (native DBML storage, §3.2).
-    const domainPath = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'coffee-shop.dbml');
+    const domainPath = path.join(ws, '.erd-studio', 'main', 'diagrams', 'coffee-shop.dbml');
     expect(fs.existsSync(domainPath)).toBe(true);
-    expect(fs.existsSync(path.join(ws, '.erd-studio', 'gold', 'tables', 'gold', 'fct_orders.dbml'))).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'tables', 'main', 'fct_orders.dbml'))).toBe(true);
     expect(fs.existsSync(path.join(ws, '.erd-studio', 'README.md'))).toBe(true);
     expect(fs.existsSync(path.join(ws, '.erd-studio', 'layers.json'))).toBe(true);
     expect(fs.existsSync(path.join(ws, 'coffee-shop.dbml'))).toBe(false); // nothing but the diagram's own files
@@ -2317,6 +2316,37 @@ describe('existing-diagrams notice', () => {
     info.mockClear();
     await activate(context);
     expect(nudgeCalls(info)).toHaveLength(0);
+  });
+
+  it('comes before the AI helper offer, which waits for the next window and is a notification, not a picker', async () => {
+    // No AI helper files yet, and neither prompt offered in this workspace.
+    fs.rmSync(path.join(root, '.claude'), { recursive: true, force: true });
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { workspaceState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
+    const offers = () => info.mock.calls.filter((c) => String(c[0]).startsWith('Let your AI assistant'));
+
+    await activate(context);
+    expect(nudgeCalls(info)).toHaveLength(1);
+    expect(offers()).toEqual([]);
+    expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBeUndefined();
+
+    tearDownActivation();
+    info.mockClear();
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    info.mockImplementation((async (message: string) =>
+      (message.startsWith('Let your AI assistant') ? 'Set Up My AI Helper' : undefined)) as never);
+    await activate(context);
+    expect(nudgeCalls(info)).toEqual([]);
+    expect(offers()).toEqual([[
+      'Let your AI assistant read and write these diagrams? ERD Studio can add a guide for it to this project.',
+      'Set Up My AI Helper', 'Not now',
+    ]]);
+    expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBe(true);
+    expect(pick).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.setupAiHelper'));
+    exec.mockRestore();
   });
 
   it('is not shown while a diagram is already open', async () => {

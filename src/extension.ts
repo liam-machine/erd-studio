@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { SubjectAreaService, renameSubjectAreaInRaw, subjectAreaTableNames } from './services/domainService';
-import { LayerService, LayersFileUnreadableError, reservedLayerNameMessage } from './services/layerService';
+import { LayerService, LayersFileUnreadableError, NEW_PROJECT_LAYERS_WITHOUT_DBT, reservedLayerNameMessage } from './services/layerService';
 import { removedSubjectAreaPaths } from './services/removedSubjectAreas';
 import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, type SubjectAreaSummary, type Layer, type Stage, type UnifiedSubjectArea, type StageData } from './types/semantic';
 import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
@@ -1124,6 +1124,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const dbtConfig = readDbtProjectConfig(workspaceRoot);
 
   const layerService = new LayerService(workspaceRoot, semanticDir);
+  // A brand-new project without dbt starts with one neutral layer, not
+  // silver and gold; anything already on disk keeps what it has.
+  if (!hasDbt && !fs.existsSync(path.join(workspaceRoot, semanticDir))) {
+    layerService.useDefaultLayers(NEW_PROJECT_LAYERS_WITHOUT_DBT);
+  }
   const subjectAreaService = new SubjectAreaService(layerService);
   const tableLibraryService = new TableLibraryService(workspaceRoot, semanticDir);
   tableLibraryService.onParseFailure = (error) => {
@@ -1379,6 +1384,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     activationMs: elapsedMs(activationStart),
   });
 
+  // A diagram in a picker: its layer and table count, and its tables as the
+  // detail line, so typing a table's name finds every diagram that shows it.
+  const diagramPickItems = (domains: readonly SubjectAreaSummary[]) => domains.map((d) => {
+    let tables: string[] | null = null;
+    try { tables = subjectAreaTableNames(fs.readFileSync(d.filePath, 'utf-8'), d.filePath); } catch { /* listed without its tables */ }
+    return {
+      label: d.domain,
+      description: tables ? `${layerService.getLabel(d.layer)} · ${tables.length} table${tables.length === 1 ? '' : 's'}` : layerService.getLabel(d.layer),
+      ...(tables && tables.length > 0 ? { detail: tables.join(', ') } : {}),
+      summary: d,
+    };
+  });
   // The one domain picker: straight to the only domain, a QuickPick when
   // there are several. Shared by openCanvas and Export Diagram.
   const pickDomainFile = async (
@@ -1386,10 +1403,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     placeHolder: string,
   ): Promise<string | undefined> => {
     if (domains.length <= 1) { return domains[0]?.filePath; }
-    const picked = await vscode.window.showQuickPick(
-      domains.map((d) => ({ label: d.domain, description: layerService.getLabel(d.layer), summary: d })),
-      { placeHolder },
-    );
+    const picked = await vscode.window.showQuickPick(diagramPickItems(domains), { placeHolder, matchOnDetail: true });
     return picked?.summary.filePath;
   };
   // Rename / Delete Diagram: the row they were run on, else (the Command
@@ -1405,10 +1419,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void vscode.window.showInformationMessage('ERD Studio: There are no diagrams yet.');
       return undefined;
     }
-    const picked = await vscode.window.showQuickPick(
-      domains.map((d) => ({ label: d.domain, description: layerService.getLabel(d.layer), summary: d })),
-      { placeHolder },
-    );
+    const picked = await vscode.window.showQuickPick(diagramPickItems(domains), { placeHolder, matchOnDetail: true });
     return picked?.summary;
   };
   // "Open a domain" (Welcome panel, status bar, palette): straight in when
@@ -1423,7 +1434,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
       return;
     }
-    const target = await pickDomainFile(domains, 'Open which diagram?');
+    const target = await pickDomainFile(domains, 'Open which diagram? Type a diagram or a table name');
     if (!target) { return; }
     await vscode.commands.executeCommand('erdStudio.openDomain', target);
   };
@@ -3807,10 +3818,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   }
 
+  // Existing diagrams, once per workspace: a teammate's clone already holds
+  // .erd-studio/ domains the user may never have seen. It comes before the AI
+  // helper prompts below (one prompt at a time: they wait for the next
+  // window). Not on the walkthrough run, beside the upgrade notice, or when a
+  // canvas is already open.
+  // Writes nothing to the workspace.
+  let diagramsNudgeShown = false;
+  if (
+    !suppressHarnessQuickPick &&
+    !firstRunNoticeShown &&
+    !context.workspaceState.get<boolean>(DIAGRAMS_NUDGE_SHOWN_KEY) &&
+    !hasOpenSubjectAreaCanvas()
+  ) {
+    const domains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+    const latest = mostRecentlyModified(domains);
+    if (latest) {
+      diagramsNudgeShown = true;
+      await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
+      const open = `Open ${latest.domain}`;
+      void vscode.window.showInformationMessage(
+        `This project has ${domains.length} ERD Studio diagram${domains.length === 1 ? '' : 's'}.`,
+        open,
+        'Not now',
+      ).then((choice) => {
+        if (choice === open) { void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath); }
+      });
+    }
+  }
+
+
   // AI coding harness — prompt to update stale files; offer install once per
   // workspace when none are present. Never overwrite anything silently:
   // harness files (AGENTS.md in particular) can hold user content.
-  let harnessPromptShown = false;
   {
     const harnessService = new HarnessService(semanticDir);
     const existing = harnessService.detectExisting(workspaceRoot);
@@ -3826,8 +3866,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       telemetry.harnesses(managed.map(target => target.id));
     } catch { /* telemetry must never break activation */ }
 
-    if (staleTargets.length > 0) {
-      harnessPromptShown = true;
+    if (diagramsNudgeShown) {
+      // One prompt per window: the diagrams notice above went first.
+    } else if (staleTargets.length > 0) {
       const names = staleTargets.map(t => t.label.replace(/\$\([^)]+\)\s*/g, '')).join(', ');
       void vscode.window.showWarningMessage(
         `ERD Studio: ${staleTargets.length} AI helper file(s) come from an older ERD Studio (${names}). Update to v${HARNESS_VERSION}?`,
@@ -3862,38 +3903,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       installedCount === 0 &&
       !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)
     ) {
-      // No harnesses installed — offer the QuickPick once per workspace, not
-      // on every window open. The command stays available in the palette.
-      harnessPromptShown = true;
+      // No AI helper files: offer Set Up My AI Helper once per workspace, as
+      // a notification rather than a picker that takes over the window. Install
+      // AI Helper Files… stays in the palette for choosing them one by one.
       void context.workspaceState.update(HARNESS_INSTALL_PROMPTED_KEY, true);
-      void vscode.commands.executeCommand('erdStudio.installCodingHarness');
-    }
-  }
-
-  // Existing diagrams, once per workspace: a teammate's clone already holds
-  // .erd-studio/ domains the user may never have seen. Not on the walkthrough
-  // run, beside the upgrade notice or beside either harness prompt above (one
-  // prompt at a time; the flag stays unset, so it comes next time), and not
-  // when a canvas is already open.
-  // Writes nothing to the workspace.
-  if (
-    !suppressHarnessQuickPick &&
-    !firstRunNoticeShown &&
-    !harnessPromptShown &&
-    !context.workspaceState.get<boolean>(DIAGRAMS_NUDGE_SHOWN_KEY) &&
-    !hasOpenSubjectAreaCanvas()
-  ) {
-    const domains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
-    const latest = mostRecentlyModified(domains);
-    if (latest) {
-      await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
-      const open = `Open ${latest.domain}`;
-      void vscode.window.showInformationMessage(
-        `This project has ${domains.length} ERD Studio diagram${domains.length === 1 ? '' : 's'}.`,
-        open,
+      const SET_UP = 'Set Up My AI Helper';
+      void Promise.resolve(vscode.window.showInformationMessage(
+        'Let your AI assistant read and write these diagrams? ERD Studio can add a guide for it to this project.',
+        SET_UP,
         'Not now',
-      ).then((choice) => {
-        if (choice === open) { void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath); }
+      )).then((choice) => {
+        if (choice === SET_UP) { void vscode.commands.executeCommand('erdStudio.setupAiHelper'); }
       });
     }
   }

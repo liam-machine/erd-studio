@@ -125,6 +125,7 @@ const TEMPLATE_ROLE_MAP: Record<string, TableRole> = {
 export function NewTableDialog() {
   const isOpen = useEditorStore((s) => s.newModelDialogOpen);
   const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
+  const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
   const domain = useEditorStore((s) => s.domain);
   const templates = useEditorStore((s) => s.templates);
   const existingModels = useEditorStore((s) => s.existingModels);
@@ -200,6 +201,16 @@ export function NewTableDialog() {
 
   const isValid = Object.keys(errors).length === 0 && modelName.trim() !== '' && !hasInvalidColumns;
 
+  // The name was refused because the Table Library already has the table
+  // (and this diagram does not): offer to add that one instead.
+  const libraryMatch = useMemo(
+    () => (existingModelNames.some((n) => sameName(n, modelName))
+      ? undefined
+      : libraryModelNames.find((n) => sameName(n, modelName))),
+    [existingModelNames, libraryModelNames, modelName],
+  );
+  const libraryRefused = !!libraryMatch && !!errors.modelName && errors.modelName.includes('Table Library');
+
   // Handlers
   const resetForm = useCallback(() => {
     setModelName('');
@@ -216,6 +227,13 @@ export function NewTableDialog() {
     setNewModelDialogOpen(false);
     resetForm();
   }, [setNewModelDialogOpen, resetForm]);
+
+  // Swap to Add Existing Table, its search already narrowed to the table.
+  const handleAddExistingInstead = useCallback(() => {
+    if (!libraryMatch) return;
+    handleClose();
+    setAddExistingModelDialogOpen(true, libraryMatch);
+  }, [libraryMatch, handleClose, setAddExistingModelDialogOpen]);
 
   const handleSubmit = useCallback(() => {
     if (!isValid) return;
@@ -362,6 +380,15 @@ export function NewTableDialog() {
           />
           {touched.modelName && errors.modelName && (
             <span className="new-model-dialog__error">{errors.modelName}</span>
+          )}
+          {libraryRefused && (
+            <button
+              type="button"
+              className="new-model-dialog__add-existing"
+              onClick={handleAddExistingInstead}
+            >
+              Add &quot;{libraryMatch}&quot; from the Table Library
+            </button>
           )}
         </div>
 

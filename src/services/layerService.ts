@@ -58,7 +58,7 @@ const NO_FILE_SIGNATURE = 'missing';
  * Copy a layer list so the caller can mutate it freely. LayerConfig holds only
  * primitives, so a shallow copy per layer fully detaches it from the cache.
  */
-function cloneLayers(layers: LayerConfig[]): LayerConfig[] {
+function cloneLayers(layers: readonly LayerConfig[]): LayerConfig[] {
   return layers.map(l => ({ ...l }));
 }
 
@@ -80,8 +80,22 @@ export class LayersFileUnreadableError extends Error {
   }
 }
 
+/**
+ * The layer a brand-new project without dbt starts with (no `.erd-studio/`
+ * yet): one neutral layer, so the first diagram needs no layer question and
+ * no warehouse vocabulary. Written to layers.json by the first create, like
+ * the defaults; a project with dbt, or one that already has `.erd-studio/`,
+ * keeps core's `DEFAULT_LAYERS` (silver, gold), which is also what the
+ * Confluence app reads when a repo has no layers.json.
+ */
+export const NEW_PROJECT_LAYERS_WITHOUT_DBT: readonly LayerConfig[] = [
+  { id: 'main', label: 'Main', abbreviation: 'MAIN', color: '#6366f1', creatable: true, order: 1 },
+];
+
 export class LayerService {
   private config: LayersConfigFile | null = null;
+  /** The layers used while there is no layers.json (see {@link useDefaultLayers}). */
+  private defaults: readonly LayerConfig[] = DEFAULT_LAYERS;
   private readonly configPath: string;
   private readonly semanticPath: string;
 
@@ -102,6 +116,15 @@ export class LayerService {
   ) {
     this.semanticPath = path.join(projectPath, semanticDir);
     this.configPath = path.join(this.semanticPath, LAYERS_CONFIG_FILE);
+  }
+
+  /**
+   * Use `layers` instead of core's defaults while there is no layers.json
+   * (a new project without dbt, {@link NEW_PROJECT_LAYERS_WITHOUT_DBT}).
+   */
+  useDefaultLayers(layers: readonly LayerConfig[]): void {
+    this.defaults = layers;
+    this.invalidateCache();
   }
 
   /**
@@ -168,7 +191,7 @@ export class LayerService {
       // Use defaults
       this.config = {
         schemaVersion: LAYERS_SCHEMA_VERSION,
-        layers: cloneLayers(DEFAULT_LAYERS),
+        layers: cloneLayers(this.defaults),
       };
     }
     this.loadedSignature = signature;

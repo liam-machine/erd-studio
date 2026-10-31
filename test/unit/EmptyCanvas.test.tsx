@@ -12,6 +12,7 @@ const send = vi.hoisted(() => vi.fn());
 vi.mock('../../webview/hooks/useMessageBus', () => ({ useSend: () => send }));
 
 const setNewTableDialogOpen = vi.hoisted(() => vi.fn());
+const setAddExistingDialogOpen = vi.hoisted(() => vi.fn());
 const storeState = vi.hoisted(() => ({}) as Record<string, unknown>);
 vi.mock('../../webview/store/editorStore', () => ({
   useEditorStore: (selector: (s: Record<string, unknown>) => unknown) => selector(storeState),
@@ -24,7 +25,11 @@ function setSubjectArea(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  Object.assign(storeState, { newModelDialogOpen: false, setNewModelDialogOpen: setNewTableDialogOpen, logicalOnly: false });
+  Object.assign(storeState, {
+    newModelDialogOpen: false, setNewModelDialogOpen: setNewTableDialogOpen, logicalOnly: false,
+    addExistingModelDialogOpen: false, setAddExistingModelDialogOpen: setAddExistingDialogOpen,
+    existingModels: [], manifestModels: [],
+  });
   setSubjectArea();
 });
 
@@ -32,6 +37,7 @@ afterEach(() => {
   cleanup();
   send.mockClear();
   setNewTableDialogOpen.mockClear();
+  setAddExistingDialogOpen.mockClear();
 });
 
 describe('EmptyCanvas', () => {
@@ -121,5 +127,52 @@ describe('EmptyCanvas', () => {
     storeState.newModelDialogOpen = true;
     const { container } = render(<EmptyCanvas />);
     expect(container.innerHTML).toBe('');
+  });
+
+  describe('"Add existing tables"', () => {
+    const libraryRow = (name: string) => ({ name, schema: '', description: '', columnCount: 2, source: 'logical', sourcePath: `.erd-studio/tables/${name}.dbml` });
+    const dbtRow = (name: string) => ({ ...libraryRow(name), source: 'yml', sourcePath: `models/${name}.yml` });
+    const addExisting = (get: (role: string, opts: { name: string }) => HTMLElement) => get('button', { name: 'Add existing tables' });
+
+    it('is the primary action, opening the Add Existing Table dialog, when the Table Library has tables this diagram lacks', () => {
+      storeState.existingModels = [libraryRow('dim_customer')];
+      const { getByRole } = render(<EmptyCanvas />);
+      const button = addExisting(getByRole);
+      expect(button.className).toContain('empty-canvas__button--primary');
+      expect(getByRole('button', { name: 'Add tables from dbt' }).className).not.toContain('empty-canvas__button--primary');
+      expect(getByRole('button', { name: 'New table' }).className).not.toContain('empty-canvas__button--primary');
+      fireEvent.click(button);
+      expect(setAddExistingDialogOpen).toHaveBeenCalledWith(true);
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('is the primary action without a dbt project too, and the text says to reuse the library', () => {
+      storeState.logicalOnly = true;
+      storeState.existingModels = [libraryRow('dim_customer')];
+      const { getByRole, getByText } = render(<EmptyCanvas />);
+      expect(addExisting(getByRole).className).toContain('empty-canvas__button--primary');
+      expect(getByRole('button', { name: 'New table' }).className).not.toContain('empty-canvas__button--primary');
+      expect(getByText('Reuse tables from your Table Library, or add a new one.')).toBeTruthy();
+      expect(document.body.textContent).not.toContain('dbt');
+    });
+
+    it('is a secondary button when only dbt models are there to add', () => {
+      storeState.existingModels = [dbtRow('stg_orders')];
+      const { getByRole } = render(<EmptyCanvas />);
+      expect(addExisting(getByRole).className).not.toContain('empty-canvas__button--primary');
+      expect(getByRole('button', { name: 'Add tables from dbt' }).className).toContain('empty-canvas__button--primary');
+    });
+
+    it('is not offered when there is nothing to add', () => {
+      const { queryByRole } = render(<EmptyCanvas />);
+      expect(queryByRole('button', { name: 'Add existing tables' })).toBeNull();
+    });
+
+    it('steps aside while the Add Existing Table dialog is open', () => {
+      storeState.existingModels = [libraryRow('dim_customer')];
+      storeState.addExistingModelDialogOpen = true;
+      const { container } = render(<EmptyCanvas />);
+      expect(container.innerHTML).toBe('');
+    });
   });
 });

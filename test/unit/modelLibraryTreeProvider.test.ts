@@ -644,7 +644,7 @@ describe('TableLibraryTreeProvider: native DBML storage, the layer-first tree (Â
     expect(dbml.getTreeItem(tableNodes(dbml)[0]).description).toBe('1 diagram');
   });
 
-  it('groups DBML tables one level deep by layer and schema: "<schema> (<layer>)", layers in layers.json order', () => {
+  it('groups DBML tables one level deep by layer and schema: the layer\'s name for its own schema, else "<schema> Â· <layer>", layers in layers.json order', () => {
     const provider = providerFor(
       [dbmlEntry('fct_order'), dbmlEntry('dim_customer'), dbmlEntry('dim_date', 'silver', 'calendar'), dbmlEntry('afih', 'bronze', 'sap')],
       'dbml',
@@ -658,11 +658,11 @@ describe('TableLibraryTreeProvider: native DBML storage, the layer-first tree (Â
     expect(gold.filePath).toBe(`${SEMANTIC}/gold/tables/gold`);
     expect(gold.children.map((c) => c.name)).toEqual(['dim_customer', 'fct_order']);
     const item = provider.getTreeItem(gold);
-    expect(item.label).toBe('gold (gold)');
+    expect(item.label).toBe('Gold');
     expect(item.description).toBe('2 tables');
-    expect(item.tooltip).toBe('Tables in schema gold of layer gold');
+    expect(item.tooltip).toBe('Tables in schema gold of the Gold layer (gold/tables/gold/)');
     expect(item.id).toBe('erdStudio.modelLibrary.folder:gold/tables/gold');
-    expect(provider.getTreeItem(folders[1]).label).toBe('calendar (silver)');
+    expect(provider.getTreeItem(folders[1]).label).toBe('calendar Â· Silver');
     // A layer missing from layers.json still gets its folder, after the configured ones.
     const extra = providerFor([dbmlEntry('x', 'zeta', 'z'), dbmlEntry('fct_order')], 'dbml', () => LAYERS);
     expect((extra.getChildren() as TableLibraryFolderNode[]).map((f) => `${f.layer}/${f.folder}`)).toEqual(['gold/gold', 'zeta/z']);

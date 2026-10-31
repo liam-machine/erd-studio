@@ -92,7 +92,7 @@ describe('erdStudio.importDbml in activate()', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Open a folder first'), 'Open Folder…', 'Open Settings');
   });
 
-  it('in a plain folder (no dbt_project.yml, no .erd-studio): makes layers.json, the README, the diagram in gold/diagrams/ and its table in gold/tables/gold/', async () => {
+  it('in a plain folder (no dbt_project.yml, no .erd-studio): makes layers.json (one Main layer), the README, the diagram in main/diagrams/ and its table in main/tables/main/', async () => {
     const plain = path.join(root, 'plain');
     fs.mkdirSync(plain);
     vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(plain), name: 'plain', index: 0 }];
@@ -106,20 +106,21 @@ describe('erdStudio.importDbml in activate()', () => {
       if (!fs.existsSync(uri.fsPath)) throw new Error('FileNotFound');
       return { type: 1, ctime: 0, mtime: 0, size: 0 };
     }) as never);
-    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ id?: string }>) =>
-      items.find((i) => i.id === 'gold')) as never);
+    // One layer: no layer question.
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
     vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o?: { value?: string }) => o?.value) as never);
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
       (typeof args[1] === 'object' && (args[1] as { modal?: boolean }).modal ? 'Import' : undefined)) as never);
 
     await vscode.commands.executeCommand('erdStudio.importDbml');
 
-    expect(fs.existsSync(path.join(plain, '.erd-studio', 'layers.json'))).toBe(true);
+    expect(pick).not.toHaveBeenCalled();
+    expect(JSON.parse(fs.readFileSync(path.join(plain, '.erd-studio', 'layers.json'), 'utf-8')).layers.map((l: { id: string }) => l.id)).toEqual(['main']);
     // A new project stores its model as DBML (native DBML storage, §3.2).
     expect(fs.existsSync(path.join(plain, '.erd-studio', 'README.md'))).toBe(true);
-    const diagram = path.join(plain, '.erd-studio', 'gold', 'diagrams', 'shop.dbml');
+    const diagram = path.join(plain, '.erd-studio', 'main', 'diagrams', 'shop.dbml');
     expect(subjectAreaTableNames(fs.readFileSync(diagram, 'utf-8'), diagram)).toEqual(['shop_customer']);
-    expect(fs.readFileSync(path.join(plain, '.erd-studio', 'gold', 'tables', 'gold', 'shop_customer.dbml'), 'utf-8')).toMatch(/^Table gold\.shop_customer \{/);
+    expect(fs.readFileSync(path.join(plain, '.erd-studio', 'main', 'tables', 'main', 'shop_customer.dbml'), 'utf-8')).toMatch(/^Table main\.shop_customer \{/);
   });
 
   it('with a project: picks the file, reads it (positions in its erd_layout) through workspace.fs, writes the diagram and opens it', async () => {

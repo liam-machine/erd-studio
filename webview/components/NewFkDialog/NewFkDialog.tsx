@@ -30,6 +30,7 @@ import {
 } from '../../lib/relationshipDialog';
 import { MAX_COMPOSITE_PAIRS } from '@erd-studio/core';
 import type { Cardinality } from '../../../src/types/semantic';
+import { sameName } from '../../../src/types/naming';
 import './NewFkDialog.css';
 
 // ---------------------------------------------------------------------------
@@ -123,6 +124,21 @@ function isAbsorbable(rel: ExistingLink, fromModel: string, toModel: string): bo
   const lower = (x: string): string => x.toLowerCase();
   const ends = [lower(rel.fromModel), lower(rel.toModel)].sort().join('\u0000');
   return !rel.compositeKey && ends === [lower(fromModel), lower(toModel)].sort().join('\u0000');
+}
+
+/** The columns the dialog reads from a model when it suggests defaults. */
+type ModelColumns = { name: string; columns: ReadonlyArray<{ name: string; isPrimaryKey?: boolean }> };
+
+/** The model's only primary-key column; none for no key or a composite key. */
+function singlePrimaryKey(model: ModelColumns | undefined): string {
+  const pk = (model?.columns ?? []).filter((c) => c.isPrimaryKey);
+  return pk.length === 1 ? pk[0].name : '';
+}
+
+/** The model's column named like `column` (any case), as the model spells it; none without one. */
+function columnNamedLike(model: ModelColumns | undefined, column: string): string {
+  if (!column.trim()) return '';
+  return (model?.columns ?? []).find((c) => sameName(c.name, column))?.name ?? '';
 }
 
 // ---------------------------------------------------------------------------
@@ -405,19 +421,42 @@ export function NewFkDialog() {
     setTouched((prev) => ({ ...prev, [field]: true }));
   }, []);
 
+  // Defaults while creating a relationship by hand: the target's single
+  // primary-key column, and the source column named like the target column.
+  // Never while editing, and only ever into an empty field — a prefill from a
+  // drag or anything the user picked stays as it is. A self-reference gets no
+  // source default: the same-named column would be the target column itself.
+  const findModel = useCallback(
+    (name: string) => (name ? models.find((m) => m.name === name) : undefined),
+    [models],
+  );
+  const sourceColumnFor = useCallback(
+    (source: string, target: string, targetColumn: string): string =>
+      (!source || sameName(source, target) ? '' : columnNamedLike(findModel(source), targetColumn)),
+    [findModel],
+  );
+
   // Reset source column when source model changes
   const handleFromModelChange = useCallback((value: string) => {
     setFromModel(value);
-    setFromColumn('');
+    setFromColumn(isEditMode ? '' : sourceColumnFor(value, toModel, toColumn));
     setExtraPairs((pairs) => pairs.map((p) => ({ ...p, fromColumn: '' })));
-  }, []);
+  }, [isEditMode, sourceColumnFor, toModel, toColumn]);
 
   // Reset target column when target model changes
   const handleToModelChange = useCallback((value: string) => {
     setToModel(value);
-    setToColumn('');
+    const pk = isEditMode ? '' : singlePrimaryKey(findModel(value));
+    setToColumn(pk);
+    if (pk && !fromColumn.trim()) setFromColumn(sourceColumnFor(fromModel, value, pk));
     setExtraPairs((pairs) => pairs.map((p) => ({ ...p, toColumn: '' })));
-  }, []);
+  }, [isEditMode, findModel, fromColumn, fromModel, sourceColumnFor]);
+
+  // A target column picked by hand also suggests the source column, if that is still empty.
+  const handleToColumnChange = useCallback((value: string) => {
+    setToColumn(value);
+    if (!isEditMode && !fromColumn.trim()) setFromColumn(sourceColumnFor(fromModel, toModel, value));
+  }, [isEditMode, fromColumn, fromModel, toModel, sourceColumnFor]);
 
   // "+ Add another column pair" and its rows (#133 L2).
   const addPair = useCallback(() => {
@@ -598,7 +637,7 @@ export function NewFkDialog() {
               id="toColumn"
               className={`new-fk-dialog__select ${touched.toColumn && errors.toColumn ? 'new-fk-dialog__select--error' : ''}`}
               value={toColumn}
-              onChange={(e) => setToColumn(e.target.value)}
+              onChange={(e) => handleToColumnChange(e.target.value)}
               onBlur={() => handleBlur('toColumn')}
             >
               <option value="">Select column...</option>

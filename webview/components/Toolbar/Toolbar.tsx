@@ -45,6 +45,9 @@ import './Toolbar.css';
  */
 const CORNER_MIN_GAP = 16;
 
+/** Why "+ Add → New Relationship" is greyed out on a diagram with no tables. */
+export const NO_TABLES_FOR_RELATIONSHIP = 'This diagram has no tables yet — add one first';
+
 // ---------------------------------------------------------------------------
 // Layer badge display
 // ---------------------------------------------------------------------------
@@ -963,6 +966,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       className="toolbar__dropdown-item"
                       onClick={() => { setModelDropdownOpen(false); handleNewRelationship(); }}
                       role="menuitem"
+                      disabled={domain.models.length === 0}
+                      title={domain.models.length === 0 ? NO_TABLES_FOR_RELATIONSHIP : undefined}
                     >
                       New Relationship
                     </button>

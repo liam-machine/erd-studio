@@ -184,8 +184,12 @@ describe('Rename and Delete Diagram from the Command Palette', () => {
     await vscode.commands.executeCommand('erdStudio.deleteDomain');
 
     expect(pick.mock.calls.map((c) => (c[1] as { placeHolder: string }).placeHolder)).toEqual(['Rename which diagram?', 'Delete which diagram?']);
-    const items = pick.mock.calls[0][0] as Array<{ label: string; description: string }>;
-    expect(items.find((i) => i.label === 'showcase')?.description).toBe('Silver');
+    // Each diagram with its layer and tables, searchable by a table's name (matchOnDetail).
+    const items = pick.mock.calls[0][0] as Array<{ label: string; description: string; detail?: string }>;
+    const showcase = items.find((i) => i.label === 'showcase')!;
+    expect(showcase.description).toMatch(/^Silver · \d+ tables$/);
+    expect(showcase.detail).toContain('fct_order');
+    expect((pick.mock.calls[0][1] as { matchOnDetail?: boolean }).matchOnDetail).toBe(true);
     expect(error).not.toHaveBeenCalled();
     expect(fs.readdirSync(path.join(project, '.erd-studio', 'gold')).sort()).toEqual(before);
   });

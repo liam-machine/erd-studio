@@ -15,10 +15,11 @@
  * Only the file-reading half of the import UI is replaced (`exampleDbmlUi`):
  * the "file" is a name that is never opened, and its DBML has no
  * `erd_layout`, so the canvas lays the diagram out when it opens. The diagram goes
- * in the `gold` layer when the project has it (the default layers do), else
- * the import asks for a layer as usual. Its tables are unqualified, so in a
- * DBML project they take the layer's name as their schema
- * (`gold/tables/gold/`).
+ * in the `gold` layer when the project has it (a dbt project's default layers
+ * do), in the only layer of a project that has one (a new project without dbt
+ * starts with `main`), else the import asks for a layer as usual. Its tables
+ * are unqualified, so in a DBML project they take the layer's name as their
+ * schema (`gold/tables/gold/`).
  */
 
 import * as path from 'path';

@@ -81,6 +81,12 @@ export interface EditorState extends CanvasState {
   fkDialogEditData: FkDialogEditData | null;
   /** Whether the add existing model dialog is open. */
   addExistingModelDialogOpen: boolean;
+  /**
+   * What the Add Existing Table dialog's search starts as when it opens: the
+   * name the New Table dialog refused because the Table Library has it. Empty
+   * for every other opening.
+   */
+  addExistingModelDialogSearch: string;
   /** Error message from the extension host, if any. */
   error: string | null;
   /**
@@ -175,6 +181,11 @@ export interface EditorState extends CanvasState {
   /** The user closed the "Run dbt parse" hint; the host persists it too. */
   manifestHintDismissed: boolean;
   /**
+   * The user closed the drag-to-relate tip (DragHint). Persisted per webview
+   * by useStatePersistence (vscode.setState); never sent to the host.
+   */
+  dragHintDismissed: boolean;
+  /**
    * The open project has no `dbt_project.yml`, so there is no Physical stage
    * to show (the host's `logicalOnly` envelope flag). The Toolbar hides the
    * stage tabs, Diff (and with it Sync) and the manifest refresh; Alt+2, the
@@ -203,8 +214,10 @@ export interface EditorActions extends CanvasActions {
   openFkDialogForEdit: (editData: FkDialogEditData) => void;
   /** Clear FK dialog edit data (called on dialog close). */
   clearFkDialogEditData: () => void;
-  /** Open/close the add existing model dialog. */
-  setAddExistingModelDialogOpen: (open: boolean) => void;
+  /** Open/close the add existing model dialog, optionally with its search filled in. */
+  setAddExistingModelDialogOpen: (open: boolean, initialSearch?: string) => void;
+  /** Hide (or, restoring persisted state, keep hidden) the drag-to-relate tip. */
+  setDragHintDismissed: (dismissed: boolean) => void;
   /** Hide the physical-source notice for the rest of this session. */
   dismissPhysicalSourceNotice: () => void;
   /** Store the `manifestMissing` flag of the latest host payload. */
@@ -311,6 +324,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   fkDialogPrefill: null,
   fkDialogEditData: null,
   addExistingModelDialogOpen: false,
+  addExistingModelDialogSearch: '',
   error: null,
   errorKind: null,
   errorMergeConflict: false,
@@ -342,6 +356,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   physicalSourceNoticeDismissed: false,
   manifestMissing: false,
   manifestHintDismissed: false,
+  dragHintDismissed: false,
   logicalOnly: false,
   embeddedTables: false,
 
@@ -355,7 +370,9 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   openFkDialogForEdit: (editData) =>
     set({ newFkDialogOpen: true, fkDialogEditData: editData, fkDialogPrefill: null }),
   clearFkDialogEditData: () => set({ fkDialogEditData: null }),
-  setAddExistingModelDialogOpen: (open) => set({ addExistingModelDialogOpen: open }),
+  setAddExistingModelDialogOpen: (open, initialSearch) =>
+    set({ addExistingModelDialogOpen: open, addExistingModelDialogSearch: open ? (initialSearch ?? '') : '' }),
+  setDragHintDismissed: (dismissed) => set({ dragHintDismissed: dismissed }),
   dismissPhysicalSourceNotice: () => set({ physicalSourceNoticeDismissed: true }),
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
   setEmbeddedTables: (embedded) => set({ embeddedTables: embedded }),
