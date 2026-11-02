@@ -177,7 +177,8 @@ never rebuild them.
      time it opens; in a YAML project, `.erd-studio/<layer>/<name>.json` listing the tables, with
      no `modelFolder` (that is dbt's folder filter) and `"viewConfig": {}`.
    - **Relationships** go in the table library: in DBML, a Ref line in the relationships file
-     that already holds the foreign-key table's Refs, else `<layer>/relationships/<layer>.dbml`; in YAML, in the table file holding the foreign key —
+     that already holds the foreign-key table's Refs, else `<layer>/relationships/<schema>.dbml`
+     when that file already exists, else `<layer>/relationships/<layer>.dbml`; in YAML, in the table file holding the foreign key —
      unless the project's existing diagrams keep theirs in the diagram file
      (building-the-model.md, "Where they go").
    - A table that already has a file is **referenced by name, never rewritten**.

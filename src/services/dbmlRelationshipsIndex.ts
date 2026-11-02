@@ -207,7 +207,8 @@ export interface RefPlacement {
   file: string;
   /** The file does not exist yet. */
   create: boolean;
-  rule: 1 | 2;
+  /** 1: the file holding the FK table's Refs; 2: its schema's own file; 3: its layer's default file. */
+  rule: 1 | 2 | 3;
 }
 
 /**
@@ -216,16 +217,22 @@ export interface RefPlacement {
  * 1. the file, in any layer, holding the most Refs and pending lines of
  *    `fk.table` (its name BEFORE the edit: the index is the pre-edit
  *    snapshot), ties going to path byte order;
- * 2. otherwise the FK table's layer's default file,
- *    `<L>/relationships/<L>.dbml`, with `<L>` spelled as its folder is listed
- *    (`listedLayer`, given the lower-case layer; else `fk.layer`). A listed
- *    file equal to that path in another case is reused (`create: false`), so
- *    a create never collides with a case twin.
+ * 2. otherwise its schema's own file, `<L>/relationships/<schema>.dbml`,
+ *    **only when that file already exists** (and reads), its schema being
+ *    other than its layer: creating the file is how a team opts a schema
+ *    into a file of its own, and nothing creates one unasked;
+ * 3. otherwise the FK table's layer's default file,
+ *    `<L>/relationships/<L>.dbml`.
+ *
+ * `<L>` is spelled as its folder is listed (`listedLayer`, given the
+ * lower-case layer; else `fk.layer`). A listed file equal to a wanted path
+ * in another case is used (`create: false`), so a create never collides with
+ * a case twin. The same rule places Convert's new Refs.
  *
  * `layerDefaultOnly` (Convert) skips rule 1.
  */
 export function placeNewRef(
-  fk: { table: string; layer: string },
+  fk: { table: string; layer: string; schema?: string },
   index: RelationshipsIndex,
   listedLayer?: (layerLower: string) => string | undefined,
   options: { layerDefaultOnly?: boolean } = {},
@@ -242,9 +249,15 @@ export function placeNewRef(
   }
   if (best !== undefined) return { file: best, create: false, rule: 1 };
   const layer = listedLayer?.(lower(fk.layer)) ?? fk.layer;
+  const listedAs = (wanted: string): string | undefined =>
+    index.files.find((f) => f === wanted) ?? index.files.find((f) => lower(f) === lower(wanted));
+  if (fk.schema !== undefined && lower(fk.schema) !== lower(layer)) {
+    const schemaFile = listedAs(relationshipsFilePath(layer, fk.schema));
+    if (schemaFile !== undefined && !index.unreadable.has(schemaFile)) return { file: schemaFile, create: false, rule: 2 };
+  }
   const wanted = relationshipsFilePath(layer, layer);
-  const listed = index.files.find((f) => f === wanted) ?? index.files.find((f) => lower(f) === lower(wanted));
-  return listed !== undefined ? { file: listed, create: false, rule: 2 } : { file: wanted, create: true, rule: 2 };
+  const listed = listedAs(wanted);
+  return listed !== undefined ? { file: listed, create: false, rule: 3 } : { file: wanted, create: true, rule: 3 };
 }
 
 /**

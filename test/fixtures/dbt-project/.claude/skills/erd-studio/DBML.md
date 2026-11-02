@@ -85,7 +85,7 @@ Ref: sales.fct_order.(region_code, country_code) >? sales.dim_region.(region_cod
 - **Only `use` lines, Refs, comments and pending lines.** A diagram imports the whole file, so a `Table`, `Enum` or `TableGroup` here reaches every importing diagram in other DBML tools (doctor: `relationshipsFileHoldsOther`).
 - **`use` lines: one for every table any Ref in the file names**, `use { table <schema>.<name> } from '<path from this file, with .dbml>'`, sorted by path, in one block under the header comment: `../tables/<schema>/<name>.dbml` within the layer, `../../<other layer>/tables/<schema>/<name>.dbml` across layers. Spell the table and the path exactly as the table's file does. Without the line every DBML tool fails the file (`use` is not transitive); ERD Studio reads the Ref anyway and doctor reports `missingUse` with the line to add.
 - **Ends are qualified** exactly as the table declares itself: `sales.fct_order.customer_key`.
-- **Where a new Ref goes**: the file that already holds the most Refs of its foreign-key table, in any layer (ties: the first path); else that table's layer default file, created when missing with the header comment above. An existing Ref stays in the file that holds it: change it there, never move it.
+- **Where a new Ref goes**: the file that already holds the most Refs of its foreign-key table, in any layer (ties: the first path); else its schema's own file `<layer>/relationships/<schema>.dbml` when that file already exists (a team creates it to keep a schema's Refs apart; never create one yourself); else that table's layer default file, created when missing with the header comment above. An existing Ref stays in the file that holds it: change it there, never move it.
 - **Operators**, with the foreign-key end marked possibly null by `?`:
 
   | Cardinality | Write | Notes |
@@ -170,4 +170,4 @@ The project's own files are DBML; these commands bring other DBML in and send di
 - **dbdiagram.io** — `dbdiagram push <name>.dbml --name "<Name>"` (dbdiagram's own CLI: `npm install -g dbdiagram`, then `dbdiagram auth login`) uploads an exported diagram's tables and Refs; dbdiagram.io lays them out itself and ignores `erd_layout`. It sends the data model to dbdiagram.io under the user's account: run it only when the user asks, and show the command first. ERD Studio itself never contacts dbdiagram.io.
 - **`meta.dbml`** — an imported table or column may carry a `dbml` entry in its metadata (`meta_json` in DBML, `meta.dbml` in YAML): what the DBML file said that ERD Studio has no field for (`not_null`, `unique`, `default`, `increment`, `checks`, `enum`, `indexes`, `header_color`, the original `name` when it had to change, another tool's own `properties`). Keep it exactly as it is — the next DBML export carries it back out — and write or change it only when the user asks.
 
-<!-- erd-studio-harness: 40 -->
+<!-- erd-studio-harness: 41 -->

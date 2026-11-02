@@ -985,12 +985,22 @@ async function planOnce(
   /** Every relationships file there is, readable or not. */
   const listedRelationships = [...relationshipsReadings.keys(), ...unreadableRelationships.keys()].sort(byteOrder);
   /**
-   * Where a NEW Ref of a table goes (plan decision 5, rule 2): its layer's default file,
-   * `<layer>/relationships/<layer>.dbml`, or a listed file of that path in another case.
+   * Where a NEW Ref of a table goes (plan decision 5, rules 2 and 3, as
+   * `placeNewRef`): its schema's own file `<layer>/relationships/<schema>.dbml`
+   * when one is listed and reads (a schema other than its layer), else its
+   * layer's default file `<layer>/relationships/<layer>.dbml`; a listed file of
+   * either path in another case is used. So a project gets per-schema files
+   * only where someone created them.
    */
+  const listedAs = (wanted: string): string | undefined =>
+    listedRelationships.find((p) => p === wanted) ?? listedRelationships.find((p) => lower(p) === lower(wanted));
   const homeFileOf = (t: LibraryTable): string => {
+    if (lower(t.schema) !== lower(t.layer)) {
+      const schemaFile = listedAs(relationshipsFilePath(t.layer, t.schema));
+      if (schemaFile !== undefined && !unreadableRelationships.has(schemaFile)) return schemaFile;
+    }
     const wanted = relationshipsFilePath(t.layer, t.layer);
-    return listedRelationships.find((p) => p === wanted) ?? listedRelationships.find((p) => lower(p) === lower(wanted)) ?? wanted;
+    return listedAs(wanted) ?? wanted;
   };
   /** The file holding a stored Ref of `owner` (attach `locations`), else the owner's default file. */
   const holderOf = (owner: LibraryTable, rel: Relationship): string => attachment.locations?.get(linkKey(rel))?.path ?? homeFileOf(owner);

@@ -22,7 +22,7 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 import { NewTableDialog, schemaFieldState } from '../../webview/components/NewModelDialog/NewModelDialog';
-import { NewFkDialog, storedInText } from '../../webview/components/NewFkDialog/NewFkDialog';
+import { NewFkDialog, schemaFileHint, storedInText } from '../../webview/components/NewFkDialog/NewFkDialog';
 import { useEditorStore } from '../../webview/store/editorStore';
 import { SCHEMA_FOLDER_RULE } from '../../src/types/schemaFolder';
 
@@ -128,6 +128,22 @@ describe('New Table: the Schema field', () => {
     const [message] = sent();
     expect(message.type).toBe('addModel');
     expect('schemaFolder' in message.payload).toBe(false);
+  });
+});
+
+describe("New Relationship: how to give a schema its own relationships file", () => {
+  it("says how, only when the relationship goes to its layer's shared file and the schema is not the layer", () => {
+    expect(schemaFileHint('.erd-studio/source_aligned/relationships/source_aligned.dbml', 'accounts')).toBe(
+      "That is the source_aligned layer's shared file. To keep the accounts schema's relationships apart, "
+      + 'create .erd-studio/source_aligned/relationships/accounts.dbml (it can hold just a comment).',
+    );
+    // Already the schema's own file, or a team's split: nothing to suggest.
+    expect(schemaFileHint('.erd-studio/source_aligned/relationships/shipping.dbml', 'shipping')).toBeUndefined();
+    expect(schemaFileHint('.erd-studio/gold/relationships/finance.dbml', 'gold')).toBeUndefined();
+    // A schema named as its layer (medallion, dbt layers): its layer's file is its own.
+    expect(schemaFileHint('.erd-studio/gold/relationships/gold.dbml', 'GOLD')).toBeUndefined();
+    expect(schemaFileHint(undefined, 'accounts')).toBeUndefined();
+    expect(schemaFileHint('.erd-studio/gold/relationships/gold.dbml', undefined)).toBeUndefined();
   });
 });
 

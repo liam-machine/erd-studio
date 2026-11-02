@@ -162,6 +162,23 @@ export function storedInText(
   return file ? `Will be stored in ${file}` : undefined;
 }
 
+/**
+ * Under "Will be stored in …": how to give the foreign-key table's schema a
+ * file of its own, when the new relationship is about to go into its layer's
+ * shared file (`<layer>/relationships/<layer>.dbml`) and the schema is not the
+ * layer's name. `placeNewRef` uses `<layer>/relationships/<schema>.dbml` once
+ * that file exists, and never creates it. Undefined otherwise.
+ */
+export function schemaFileHint(file: string | undefined, schema: string | undefined): string | undefined {
+  if (!file || !schema) return undefined;
+  const m = /^(.*\/)?([^/]+)\/relationships\/([^/]+)\.dbml$/.exec(file);
+  if (!m) return undefined;
+  const [, , layer, stem] = m;
+  if (stem.toLowerCase() !== layer.toLowerCase() || schema.toLowerCase() === layer.toLowerCase()) return undefined;
+  const dir = file.slice(0, file.length - `${stem}.dbml`.length);
+  return `That is the ${layer} layer's shared file. To keep the ${schema} schema's relationships apart, create ${dir}${schema}.dbml (it can hold just a comment).`;
+}
+
 export function NewFkDialog() {
   const isOpen = useEditorStore((s) => s.newFkDialogOpen);
   const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
@@ -365,6 +382,12 @@ export function NewFkDialog() {
     () => storedInText(newRefFiles, { fromModel, toModel, cardinality }),
     [newRefFiles, fromModel, toModel, cardinality],
   );
+  const storedInHint = useMemo(() => {
+    if (!newRefFiles || !fromModel || !toModel) return undefined;
+    const fk = foreignKeyEnd({ fromModel, fromColumn: '', toModel, toColumn: '', cardinality });
+    const table = domain?.models.find((m) => m.name.toLowerCase() === fk.model.toLowerCase());
+    return schemaFileHint(newRefFiles[fk.model.toLowerCase()], table?.schema);
+  }, [newRefFiles, fromModel, toModel, cardinality, domain]);
 
   // Validation — pass original key when editing to skip self-duplicate check
   const errors = useMemo(
@@ -892,7 +915,10 @@ export function NewFkDialog() {
 
       {/* Where a new relationship is stored (DBML), just above the buttons. */}
       {!isEditMode && storedIn && (
-        <div className="new-fk-dialog__stored-in">{storedIn}</div>
+        <div className="new-fk-dialog__stored-in">
+          {storedIn}
+          {storedInHint && <div className="new-fk-dialog__stored-in-hint">{storedInHint}</div>}
+        </div>
       )}
 
       {/* Footer */}

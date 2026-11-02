@@ -1218,7 +1218,8 @@ export class TableLibraryService {
         const filePath = this.findTableFile(tableName);
         if (filePath === null || !isDbmlFile(filePath)) continue;
         const rel = this.semanticRelative(filePath);
-        const layer = classifySemanticFile(rel, { tablesDirIsLayer: this.tablesDirIsLayer() }).layer ?? this.defaultDbmlLayer();
+        const kind = classifySemanticFile(rel, { tablesDirIsLayer: this.tablesDirIsLayer() });
+        const layer = kind.layer ?? this.defaultDbmlLayer();
         // The library listed once, by resolved path (the first entry for a path wins, as `find` did).
         if (names === undefined) {
           names = new Map();
@@ -1229,7 +1230,7 @@ export class TableLibraryService {
         }
         const name = names.get(path.resolve(filePath)) ?? tableName;
         index ??= this.relationshipsIndex();
-        out.set(tableName.toLowerCase(), this.semanticAbsolute(placeNewRef({ table: name, layer }, index).file));
+        out.set(tableName.toLowerCase(), this.semanticAbsolute(placeNewRef({ table: name, layer, ...(kind.schema !== undefined ? { schema: kind.schema } : {}) }, index).file));
       } catch {
         // Not placed: the caller says nothing about it.
       }

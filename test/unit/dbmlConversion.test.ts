@@ -418,6 +418,28 @@ describe('planDbmlConversion: what ERD Studio does not read is kept as a // bloc
   });
 });
 
+describe('planDbmlConversion: where a new Ref goes', () => {
+  const base = {
+    'logical-models/dim.yml': DIM,
+    'logical-models/fct.yml': yml('fct', [['fct_key', 'INT', true], 'dim_key'], [FCT_REL]),
+    'gold/a.json': diagram('a', 'gold', ['fct', 'dim']),
+  };
+
+  it("writes a Ref to its FK table's layer file when its schema has no file of its own", async () => {
+    const plan = await planDbmlConversion(inputOf(base));
+    expect(plan.refusals).toEqual([]);
+    expect(refLines(written(plan, 'gold/relationships/gold.dbml'))).toEqual(['Ref: public.fct.dim_key >? public.dim.dim_key']);
+    expect(written(plan, 'gold/relationships/public.dbml')).toBeUndefined();
+  });
+
+  it("writes it to the schema's own file when someone created one first", async () => {
+    const plan = await planDbmlConversion(inputOf({ ...base, 'gold/relationships/public.dbml': '// The public schema\'s relationships.\n' }));
+    expect(plan.refusals).toEqual([]);
+    expect(refLines(written(plan, 'gold/relationships/public.dbml'))).toEqual(['Ref: public.fct.dim_key >? public.dim.dim_key']);
+    expect(written(plan, 'gold/relationships/gold.dbml')).toBeUndefined();
+  });
+});
+
 describe('planDbmlConversion: diagram-held relationships and v4 files', () => {
   it('lists each moved relationship with the other diagrams it will now draw in', async () => {
     const plan = await planDbmlConversion(inputOf({

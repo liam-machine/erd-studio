@@ -683,7 +683,11 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   for (const { plan, member } of newMembers) {
     const owner = after.get(plan.key);
     const placement = placeNewRef(
-      { table: plan.oldKey, layer: owner ? layerOf(owner.path) : defaultHome().layer },
+      {
+        table: plan.oldKey,
+        layer: owner ? layerOf(owner.path) : defaultHome().layer,
+        ...(owner && dbmlTreePathOf(owner.path)?.schema !== undefined ? { schema: dbmlTreePathOf(owner.path)!.schema } : {}),
+      },
       index,
       (l) => listedLayers.get(l),
       ops.newRefsToLayerDefault ? { layerDefaultOnly: true } : {},

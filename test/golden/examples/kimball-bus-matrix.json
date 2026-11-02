@@ -80,7 +80,7 @@
         "supplier_name STRING scd1",
         "payment_terms STRING scd1"
       ],
-      "newRelationshipsFile": "presentation/relationships/presentation.dbml"
+      "newRelationshipsFile": "presentation/relationships/procurement.dbml"
     },
     "procurement.fct_purchase_order_pipeline": {
       "layer": "presentation",
@@ -114,7 +114,7 @@
         "start_date DATE",
         "end_date DATE"
       ],
-      "newRelationshipsFile": "presentation/relationships/presentation.dbml"
+      "newRelationshipsFile": "presentation/relationships/sales.dbml"
     },
     "sales.fct_retail_sales": {
       "layer": "presentation",

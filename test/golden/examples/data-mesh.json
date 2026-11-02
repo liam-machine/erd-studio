@@ -94,7 +94,7 @@
         "carrier_name STRING",
         "service_level STRING"
       ],
-      "newRelationshipsFile": "source_aligned/relationships/source_aligned.dbml"
+      "newRelationshipsFile": "source_aligned/relationships/shipping.dbml"
     },
     "shipping.shipment": {
       "layer": "source_aligned",

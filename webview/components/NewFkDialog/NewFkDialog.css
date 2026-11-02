@@ -348,3 +348,8 @@
   color: var(--dim-fg);
   overflow-wrap: anywhere;
 }
+
+/* How to give the schema a relationships file of its own (only under its layer's shared file). */
+.new-fk-dialog__stored-in-hint {
+  margin-top: 2px;
+}
