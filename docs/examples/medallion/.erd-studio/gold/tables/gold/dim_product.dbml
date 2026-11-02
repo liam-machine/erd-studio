@@ -1,0 +1,11 @@
+Table gold.dim_product [
+  role: 'conformed-dim',
+  grain: 'One row per product per version'
+] {
+  Note: 'Products, with history of their category.'
+
+  product_key  BIGINT [pk, note: 'Surrogate key']
+  product_id   BIGINT [natural_key: 'true']
+  product_name STRING [scd_type: '1']
+  category     STRING [scd_type: '2']
+}

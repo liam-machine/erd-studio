@@ -32,13 +32,13 @@
 - **In your repo.** Plain DBML files, reviewed in the same pull request as your code. No account, server or database.
 - **Works with the AI you already use.** Claude Code, GitHub Copilot, Codex, Gemini CLI and Cursor read and write the same files. Review their proposals on the canvas before anyone writes SQL.
 - **No lock-in.** Your files are [DBML](https://dbml.dbdiagram.io/docs), the open-source schema language behind dbdiagram.io; DBML parsers read your files as a multi-file project (the versions are in [Leaving ERD Studio](docs/leaving-erd-studio.md)). Import DBML from any DBML tool, and export a single file for dbdiagram.io (keys, grain and notes) or Mermaid any time.
-- **Checked against dbt.** A read-only **Physical** view shows what your dbt project has; **⊕ Diff** highlights every difference from your design and makes a sync plan your AI applies. More stacks later.
+- **Checked against dbt.** A read-only **Physical** view shows what your dbt project has; **Compare with dbt** highlights every difference from your design and makes a sync plan your AI applies. More stacks later.
 
 ## Get started
 
 1. [Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) (VS Code 1.85+, or [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) for VSCodium, Cursor and Windsurf). Open any folder and click **ERD Studio** in the Activity Bar.
 2. Make your first diagram:
-   - **From scratch:** click **New Diagram** in the ERD Studio sidebar, choose a layer and a name, then use **+ Add → New Design Table** and **+ Add → New Relationship** on the canvas. (In the Command Palette it is **ERD Studio: New Diagram…**.)
+   - **From scratch:** click **New Diagram** in the ERD Studio sidebar, choose a layer and a name, then use **+ Add → New Table** and **+ Add → New Relationship** on the canvas. (In the Command Palette it is **ERD Studio: New Diagram…**.)
    - **From DBML:** click **Import DBML** in the sidebar (or run **ERD Studio: Import DBML…**) and pick a `.dbml` file. You see what it will create before anything is written. Positions an ERD Studio export saved in the file keep your tables in place.
    - **From an example:** run **ERD Studio: Open Example Diagram** for a coffee-shop model.
 3. Commit the `.erd-studio/` folder. That's your data model.
@@ -72,6 +72,22 @@ Table sales.fct_order [grain: 'One row per order'] {
 
 Edit on the canvas or in the files, by hand or with AI, and the other follows: ERD Studio edits the files in place, so your comments and hand edits stay ([file format reference](docs/semantic-domain-json-reference.md)). A project from before ERD Studio 2.0 keeps its YAML and JSON files and works as before; run **ERD Studio: Convert Project to DBML** to move it over.
 
+### Fits how your team works
+
+Each folder answers one question: the **layer** is the stage of your warehouse, the **schema folder** is the warehouse's own schema, a **diagram** is what people look at together, and a **relationships file** is who owns the joins. A table belongs to one layer and one schema, and appears on as many diagrams as need it, so a shared dimension is one file used by every star.
+
+| Your warehouse | Layers | Example project |
+|---|---|---|
+| Medallion lakehouse (Databricks, Fabric) | `bronze` · `silver` · `gold` | [medallion](docs/examples/medallion/) |
+| dbt Labs' project structure | `staging` · `intermediate` · `marts` | [dbt-project-layers](docs/examples/dbt-project-layers/) |
+| Kimball stars and a bus matrix | `presentation`, with a `conformed` schema | [kimball-bus-matrix](docs/examples/kimball-bus-matrix/) |
+| Data Vault 2.0 | `raw_vault` · `business_vault` · `information_mart` | [data-vault](docs/examples/data-vault/) |
+| A database per stage (GitLab's handbook) | `raw` · `prep` · `prod` | [gitlab-style](docs/examples/gitlab-style/) |
+| The stage in the dataset name (Mozilla's BigQuery) | `live` · `stable` · `derived` · `views` | [bigquery-versioned](docs/examples/bigquery-versioned/) |
+| Data mesh | `source_aligned` · `aggregate` · `consumer_aligned`, a schema per domain | [data-mesh](docs/examples/data-mesh/) |
+
+[Modelling patterns](docs/modelling-patterns.md) explains how each one fits, the four rules that keep any layout tidy, and how several teams share one model.
+
 ### Common questions
 
 **Do I have to convert my project to DBML?** No. A YAML/JSON project from before 2.0 keeps working, and its new tables and diagrams are still written as YAML and JSON. Only a new project starts as DBML. **ERD Studio: Convert Project to DBML** is up to you: it shows every change before it writes anything.
@@ -97,7 +113,7 @@ Its changes are file edits you review like any other. The helper also adds a gui
 Open the folder that holds your `dbt_project.yml` and ERD Studio also reads dbt. The canvas gets two tabs, **Logical** (your design) · **Physical** (read from dbt):
 
 - **ERD Studio: Draw from dbt…** turns your dbt models into a first diagram in under a minute, no AI needed.
-- The read-only **Physical** tab shows what dbt has, from your schema YAMLs (plus `manifest.json` and `catalog.json` when present). **⊕ Diff** highlights missing columns, type differences and relationship mismatches.
+- The read-only **Physical** tab shows what dbt has, from your schema YAMLs (plus `manifest.json` and `catalog.json` when present). **Compare with dbt** highlights missing columns, type differences and relationship mismatches.
 
 <table align="center"><tr>
 <td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="300" alt="Play the getting-started video (1:00): install ERD Studio, open your dbt project, click Draw from dbt and get a laid-out diagram of your models, no AI needed. Click to watch." /></a></td>
@@ -112,6 +128,7 @@ No dbt project to hand? Run **ERD Studio: Try the Sample Project** ([on GitHub](
 - [AI assistants](docs/ai-assistants.md)
 - [DBML import and export](docs/leaving-erd-studio.md)
 - [Choosing the project folder](docs/project-folder.md)
+- [Modelling patterns](docs/modelling-patterns.md), with seven [example projects](docs/examples/)
 - [File format reference](docs/semantic-domain-json-reference.md) and [glossary](docs/glossary.md)
 - Bug or idea? Run **ERD Studio: Send Feedback**, or [open an issue](https://github.com/liam-machine/erd-studio/issues).
 

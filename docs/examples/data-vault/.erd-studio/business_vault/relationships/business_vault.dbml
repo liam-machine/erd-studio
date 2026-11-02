@@ -1,0 +1,20 @@
+// Business vault relationships. Most point at the raw vault's hubs and satellites, in another layer: a Ref lives with its foreign-key table, so they are kept here.
+use { table raw_vault.hub_customer }         from '../../raw_vault/tables/raw_vault/hub_customer.dbml'
+use { table raw_vault.hub_policy }           from '../../raw_vault/tables/raw_vault/hub_policy.dbml'
+use { table raw_vault.link_customer_policy } from '../../raw_vault/tables/raw_vault/link_customer_policy.dbml'
+use { table raw_vault.sat_customer_crm }     from '../../raw_vault/tables/raw_vault/sat_customer_crm.dbml'
+use { table raw_vault.sat_customer_policy_admin } from '../../raw_vault/tables/raw_vault/sat_customer_policy_admin.dbml'
+use { table business_vault.bridge_customer_policy } from '../tables/business_vault/bridge_customer_policy.dbml'
+use { table business_vault.pit_customer }    from '../tables/business_vault/pit_customer.dbml'
+use { table business_vault.sat_customer_risk_score } from '../tables/business_vault/sat_customer_risk_score.dbml'
+
+Ref: business_vault.bridge_customer_policy.customer_hk >? raw_vault.hub_customer.customer_hk
+Ref: business_vault.bridge_customer_policy.policy_hk >? raw_vault.hub_policy.policy_hk
+Ref: business_vault.bridge_customer_policy.customer_policy_hk >? raw_vault.link_customer_policy.customer_policy_hk
+
+Ref: business_vault.pit_customer.customer_hk >? raw_vault.hub_customer.customer_hk
+Ref crm: business_vault.pit_customer.(customer_hk, sat_customer_crm_ldts) >? raw_vault.sat_customer_crm.(customer_hk, load_datetime)
+Ref "policy admin": business_vault.pit_customer.(customer_hk, sat_customer_policy_admin_ldts) >? raw_vault.sat_customer_policy_admin.(customer_hk, load_datetime)
+Ref "risk score": business_vault.pit_customer.(customer_hk, sat_customer_risk_score_ldts) >? business_vault.sat_customer_risk_score.(customer_hk, load_datetime)
+
+Ref: business_vault.sat_customer_risk_score.customer_hk >? raw_vault.hub_customer.customer_hk

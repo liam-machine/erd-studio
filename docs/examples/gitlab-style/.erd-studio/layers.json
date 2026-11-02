@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    {
+      "id": "raw",
+      "label": "RAW",
+      "abbreviation": "RAW",
+      "color": "#cd7f32",
+      "creatable": true,
+      "order": 1
+    },
+    {
+      "id": "prep",
+      "label": "PREP",
+      "abbreviation": "PRP",
+      "color": "#a0a0a0",
+      "creatable": true,
+      "order": 2
+    },
+    {
+      "id": "prod",
+      "label": "PROD",
+      "abbreviation": "PRD",
+      "color": "#d4a800",
+      "creatable": true,
+      "order": 3
+    }
+  ]
+}

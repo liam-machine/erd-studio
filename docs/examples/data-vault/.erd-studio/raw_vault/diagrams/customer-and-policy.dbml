@@ -1,0 +1,13 @@
+use { table raw_vault.hub_customer }            from '../tables/raw_vault/hub_customer.dbml'
+use { table raw_vault.hub_policy }              from '../tables/raw_vault/hub_policy.dbml'
+use { table raw_vault.link_customer_policy }    from '../tables/raw_vault/link_customer_policy.dbml'
+use { table raw_vault.sat_customer_crm }        from '../tables/raw_vault/sat_customer_crm.dbml'
+use { table raw_vault.sat_customer_policy_admin } from '../tables/raw_vault/sat_customer_policy_admin.dbml'
+use { table raw_vault.sat_policy_policy_admin } from '../tables/raw_vault/sat_policy_policy_admin.dbml'
+use { table raw_vault.sat_customer_policy_effectivity } from '../tables/raw_vault/sat_customer_policy_effectivity.dbml'
+use * from '../relationships/raw_vault.dbml'
+
+Project "customer-and-policy" {
+  Note: 'Hubs, the link between them, and their satellites.'
+  erd_schema_version: '7'
+}

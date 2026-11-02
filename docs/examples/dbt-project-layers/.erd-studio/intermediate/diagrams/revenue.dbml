@@ -1,0 +1,12 @@
+use { table intermediate.int_invoices_allocated_to_months } from '../tables/intermediate/int_invoices_allocated_to_months.dbml'
+use { table staging.stg_stripe__invoices } from '../../staging/tables/staging/stg_stripe__invoices.dbml'
+use * from '../relationships/intermediate.dbml'
+
+Project revenue {
+  Note: 'Revenue building blocks, drawn with the staging model they read.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    int_invoices_allocated_to_months 12 49
+    stg_stripe__invoices 506 12
+  '''
+}

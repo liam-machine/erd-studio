@@ -1,0 +1,11 @@
+Table shared.dim_date [
+  role: 'conformed-dim',
+  grain: 'One row per calendar day'
+] {
+  Note: 'The calendar every mart shares.'
+
+  date_key         INT [pk, note: 'yyyymmdd']
+  calendar_date    DATE
+  month_start_date DATE
+  is_month_end     BOOLEAN
+}

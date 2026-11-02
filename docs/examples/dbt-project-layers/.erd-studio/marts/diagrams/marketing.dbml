@@ -1,0 +1,12 @@
+use { table marts.customers } from '../tables/marts/customers.dbml'
+use { table marts.users }     from '../tables/marts/users.dbml'
+use * from '../relationships/marts.dbml'
+
+Project marketing {
+  Note: 'The marketing marts (models/marts/marketing/). customers is shared with finance.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    customers 578 39
+    users -8 26
+  '''
+}

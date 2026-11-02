@@ -1,0 +1,11 @@
+Table atlas.clients_first_seen [
+  grain: 'One row per client',
+  rationale_design: 'A view of atlas_derived.clients_first_seen_v1. Queries use the view, so the next version of the table can replace this one behind it.',
+  meta_materialized: 'view'
+] {
+  Note: 'When each client was first seen.'
+
+  client_id       STRING [pk, natural_key: 'true']
+  first_seen_date DATE
+  country         STRING
+}

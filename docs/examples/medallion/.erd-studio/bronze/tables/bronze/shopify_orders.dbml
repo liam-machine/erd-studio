@@ -1,0 +1,10 @@
+Table bronze.shopify_orders {
+  Note: 'Orders as Shopify sends them.'
+
+  id           BIGINT    [pk, note: 'Shopify order id']
+  customer_id  BIGINT    [foreign_key: 'true']
+  created_at   STRING
+  total_price  STRING    [note: 'Text as the API sends it']
+  currency     STRING
+  _ingested_at TIMESTAMP [note: 'When the loader landed the row']
+}

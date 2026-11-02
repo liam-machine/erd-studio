@@ -1,0 +1,8 @@
+Table staging.stg_app__users [grain: 'One row per user in the app'] {
+  Note: 'Users from the product database.'
+
+  user_id        STRING [pk, natural_key: 'true']
+  account_id     STRING [foreign_key: 'true']
+  role           STRING
+  last_active_at TIMESTAMP
+}

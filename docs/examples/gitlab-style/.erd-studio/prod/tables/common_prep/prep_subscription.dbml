@@ -1,0 +1,12 @@
+// A prep_ model builds into PROD (schema common_prep), not the PREP database: the layer is
+// the database, whatever the model is called.
+Table common_prep.prep_subscription [grain: 'One row per subscription'] {
+  Note: 'Subscriptions with their latest version, ready for the dimensional model.'
+
+  dim_subscription_id    STRING [pk]
+  dim_billing_account_id STRING
+  subscription_name      STRING
+  subscription_status    STRING
+  term_start_date        DATE
+  term_end_date          DATE
+}

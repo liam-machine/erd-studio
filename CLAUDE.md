@@ -17,13 +17,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Send Feedback (dialog, AI analysis tiers, consent, redaction, My Reports) | `docs/dev/feedback.md` |
 | Usage telemetry (extension side and the Worker) | `telemetry/README.md` |
 | Getting Started panel, CLI launcher, the `erd-studio` CLI | `docs/dev/onboarding-and-cli.md` |
-| The README or a user guide (`docs/dbt.md`, `docs/ai-assistants.md`, `docs/project-folder.md`), Marketplace copy, walkthrough or welcome-view text | the wording rules in `docs/dev/onboarding-and-cli.md` |
+| The README or a user guide (`docs/dbt.md`, `docs/ai-assistants.md`, `docs/project-folder.md`, `docs/modelling-patterns.md`), Marketplace copy, walkthrough or welcome-view text | the wording rules in `docs/dev/onboarding-and-cli.md` |
 | DBML storage, import and export: `packages/core/src/dbml/`, the subject-area codec, `planDbmlLibraryWrites`, `applyFileWrites`, Convert Project to DBML, the `erd_layout` codec, Ref placement and diagram imports, the rich export, Export All Diagrams, Import DBML (parser pin, property names, `meta.dbml`) | `docs/dev/dbml.md` |
 | Native DBML storage: the decisions (D1–D33), the normative format, the stages and their review log | `docs/plans/native-dbml-storage.md` |
 | `SCHEMA_CONTENT`, harness generators, the `/erd-studio-setup` skill | `src/harness/CLAUDE.md` |
 | Releases, package publishing, manual publish | `docs/dev/releasing.md` |
 | Rendering the webview in Chrome | `docs/dev/webview-preview.md` |
 | The on-disk file format (DBML tables, relationships and diagrams, `erd_layout`; legacy domain JSON and model yml; `layers.json`) | `docs/semantic-domain-json-reference.md` |
+| The example projects in `docs/examples/` (one per modelling pattern, the shapes customers' repos take) and their tests — see **Example projects** under Rules | `docs/modelling-patterns.md` |
 | `proxy/`, `telemetry/`, `video/` | their own `README.md` |
 
 `test/unit/claudeMdPointers.test.ts` fails if a path in this table stops existing — update the table when you move a doc.
@@ -163,11 +164,23 @@ The Confluence app renders whatever is committed in a customer's repo — writte
 - **Telemetry:** no field may hold a name, path or message. `installId` is `crypto.randomUUID()`, never `vscode.env.machineId`. The contract with the Worker is additive (`HEARTBEAT_VERSION` stays `1`); change both sides and `telemetry.json` in one PR and deploy the Worker first. The root README never mentions telemetry.
 - **Harness hook:** the PreToolUse hook only ever denies; never add an allow path.
 - **dbt:** never run a project-venv dbt that `PATH` does not resolve to without `--trust-venv`; keep the skill's pre-approved dbt rules subcommand-scoped.
-- **CLI:** read-only (`doctor`, `inventory`, `diff`, `export`, `version`). Never add a writing subcommand or an `--out` flag; assistants write `.erd-studio` files with Edit/Write so the writes stay visible.
+- **CLI:** read-only (`doctor`, `inventory`, `diff`, `export`, `changes`, `version`; `changes` reads its base from git objects and never checks out, stashes or writes). Never add a writing subcommand or an `--out` flag; assistants write `.erd-studio` files with Edit/Write so the writes stay visible.
 - **No unprompted writes on activation**, apart from the legacy `erd-studio/` → `.erd-studio/` rename and refreshing `~/.erd-studio-cli` when `launcher.json` already exists. Only **Set Up My AI Helper** installs the launcher.
 - Getting Started panel URLs come from fixed constants, never from the webview; its CSP stays nonce-only.
 - Keep `vscode` out of worker-shared, mcp-server-shared and CLI-bundled modules (`nameUtils`, `manifestExtractor`, and every service `dist/cli.js` bundles).
 - The getting-started video's audio is MP3, never AAC (VS Code's ffmpeg has no AAC decoder). The README links only the AAC copy in `docs/assets/`.
+
+### Example projects: the customer corpus
+
+`docs/examples/` holds seven small DBML projects, one per modelling pattern customers use (medallion, dbt staging/intermediate/marts, Kimball bus matrix, Data Vault 2.0, a database per stage, BigQuery datasets per stage, data mesh), explained in `docs/modelling-patterns.md`. They are the stand-in for customers' repos: use them to judge any decision that changes how projects are read, written, drawn or laid out.
+
+- **Before changing** the file format, readers or writers, Ref placement, layers or schemas, what the canvas or sidebar shows, `doctor`, Convert or export: open the examples (in a dev host, one window each, `code -n --user-data-dir /tmp/erdxN --extensionDevelopmentPath=<repo> docs/examples/<name>`) and say in the PR which patterns the change affects and how.
+- **Three tests run over them**, and none may be weakened to make a change pass:
+  - `test/unit/docExamplesProjects.test.ts`: each is a clean DBML project (`doctor` finds nothing, every file in the canonical layout, each diagram draws exactly the tables and Refs its files hold, the README tree matches the files).
+  - `test/unit/dbmlDisplayParity.test.ts`: the canvas draws exactly what core draws for every example diagram.
+  - `test/unit/exampleProjectsSnapshot.test.ts`: what core draws for each example (layers, tables with layer/schema/alias/role/grain/columns, each diagram's tables and relationships; no positions), against `test/golden/examples/<example>.json`. A diff there is "what changes for teams modelled this way": explain it in the PR, and regenerate (`UPDATE_GOLDEN=1`) only for an intended change, never to silence one.
+- **Keep them generic.** Public patterns and invented companies only: never a customer's or an employer's real tables, names or data.
+- **Add an example** when a new modelling pattern turns up (a folder with `.erd-studio/`, a README with the tree, a row in `docs/examples/README.md` and `docs/modelling-patterns.md`); every test above picks it up, and the snapshot is created with `UPDATE_GOLDEN=1`.
 
 ### Harness
 
@@ -200,4 +213,5 @@ Rules reviewers (human or AI) apply to every PR:
 - No comparison logic outside `computeSubjectAreaDiff` / `buildSyncPlan` — the canvas and the CLI must share one diff
 - Old files keep rendering: reject a change to `@erd-studio/core` that stops reading an on-disk shape a released extension wrote, a new field without a default for its absence, an unknown key that now fails validation, or a renderer change that requires a `DisplaySubjectArea` field older cores did not produce. A package API break must be a pinned MINOR (while `0.x`), never an automatic patch
 - Webview: BEM classes, theme CSS variables (no hardcoded colours), module-level node/edge type maps, `useSend()` rather than `useMessageBus(() => {})`
+- A change to how projects are read, written or drawn says which example projects (`docs/examples/`) it affects; a `test/golden/examples/` diff is explained, never regenerated just to pass
 - Skip: lock-file formatting, `test/fixtures/` sample data, deploy-workflow version bump commits

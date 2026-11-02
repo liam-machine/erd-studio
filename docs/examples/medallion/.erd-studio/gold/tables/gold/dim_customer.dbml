@@ -1,0 +1,16 @@
+Table gold.dim_customer [
+  role: 'conformed-dim',
+  grain: 'One row per customer per version',
+  rationale_scd_strategy: 'Type 2 on segment so revenue stays with the segment the customer was in at the time; type 1 on email.',
+  rationale_design: 'Built from silver customers.'
+] {
+  Note: 'Customers, with history of their segment.'
+
+  customer_key     BIGINT [pk, note: 'Surrogate key']
+  customer_id      BIGINT [natural_key: 'true']
+  email            STRING [scd_type: '1']
+  customer_segment STRING [scd_type: '2']
+  valid_from       DATE
+  valid_to         DATE
+  is_current       BOOLEAN
+}

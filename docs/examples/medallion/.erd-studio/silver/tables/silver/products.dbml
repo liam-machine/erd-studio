@@ -1,0 +1,7 @@
+Table silver.products [grain: 'One row per product'] {
+  Note: 'The product catalogue, cleaned.'
+
+  product_id   BIGINT [pk, natural_key: 'true']
+  product_name STRING
+  category     STRING
+}

@@ -1,0 +1,16 @@
+Table marts.monthly_revenue [
+  role: 'periodic-snapshot',
+  grain: 'One row per customer per month',
+  rationale_measures: 'mrr is additive across customers, not across months: a quarter\'s MRR is its last month\'s, not the sum.'
+] {
+  Note: 'Monthly recurring revenue, for finance.'
+
+  customer_id   STRING          [foreign_key: 'true']
+  revenue_month DATE
+  mrr           "DECIMAL(12,2)" [additive_type: 'semi-additive']
+  is_new        BOOLEAN
+  is_churned    BOOLEAN
+  indexes {
+    (customer_id, revenue_month) [pk]
+  }
+}

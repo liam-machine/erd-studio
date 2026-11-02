@@ -1,0 +1,15 @@
+Table atlas.clients_last_seen [
+  grain: 'One row per client per day',
+  rationale_design: 'A view of atlas_derived.clients_last_seen_v2. Queries use the view, so the next version of the table can replace this one behind it.',
+  meta_materialized: 'view'
+] {
+  Note: 'Which of the last 28 days each client was active.'
+
+  submission_date DATE
+  client_id       STRING [foreign_key: 'true']
+  days_seen_bits  INT
+  days_since_seen INT
+  indexes {
+    (submission_date, client_id) [pk]
+  }
+}

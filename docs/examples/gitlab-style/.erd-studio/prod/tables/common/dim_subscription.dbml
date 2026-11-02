@@ -1,0 +1,13 @@
+Table common.dim_subscription [
+  role: 'domain-dim',
+  grain: 'One row per subscription'
+] {
+  Note: 'Subscriptions.'
+
+  dim_subscription_id    STRING [pk]
+  dim_billing_account_id STRING [foreign_key: 'true']
+  subscription_name      STRING [natural_key: 'true']
+  subscription_status    STRING [scd_type: '1']
+  term_start_date        DATE
+  term_end_date          DATE
+}

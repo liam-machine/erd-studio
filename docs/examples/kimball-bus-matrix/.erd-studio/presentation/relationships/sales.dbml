@@ -1,0 +1,11 @@
+// Retail sales relationships, owned by the sales analytics team. New Refs of fct_retail_sales land here.
+use { table conformed.dim_date }     from '../tables/conformed/dim_date.dbml'
+use { table conformed.dim_product }  from '../tables/conformed/dim_product.dbml'
+use { table conformed.dim_store }    from '../tables/conformed/dim_store.dbml'
+use { table sales.dim_promotion }    from '../tables/sales/dim_promotion.dbml'
+use { table sales.fct_retail_sales } from '../tables/sales/fct_retail_sales.dbml'
+
+Ref: sales.fct_retail_sales.date_key >? conformed.dim_date.date_key
+Ref: sales.fct_retail_sales.product_key >? conformed.dim_product.product_key
+Ref: sales.fct_retail_sales.promotion_key >? sales.dim_promotion.promotion_key
+Ref: sales.fct_retail_sales.store_key >? conformed.dim_store.store_key

@@ -1,0 +1,9 @@
+use { table common_mart.mart_arr } from '../tables/common_mart/mart_arr.dbml'
+
+Project "arr-mart" {
+  Note: 'The pre-joined ARR mart: one wide table, nothing to join.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    mart_arr 12 12
+  '''
+}

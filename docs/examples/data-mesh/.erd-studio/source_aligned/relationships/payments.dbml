@@ -1,0 +1,5 @@
+// The payments domain's relationships. CODEOWNERS: the payments team.
+use { table orders.customer_order } from '../tables/orders/customer_order.dbml'
+use { table payments.payment }      from '../tables/payments/payment.dbml'
+
+Ref: payments.payment.order_id >? orders.customer_order.order_id

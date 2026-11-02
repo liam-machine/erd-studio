@@ -1,0 +1,16 @@
+use { table inventory.fct_inventory_snapshot } from '../tables/inventory/fct_inventory_snapshot.dbml'
+use { table conformed.dim_date }               from '../tables/conformed/dim_date.dbml'
+use { table conformed.dim_product }            from '../tables/conformed/dim_product.dbml'
+use { table conformed.dim_store }              from '../tables/conformed/dim_store.dbml'
+use * from '../relationships/inventory.dbml'
+
+Project inventory {
+  Note: 'Daily inventory snapshot: the inventory row of the bus matrix.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    dim_date 12 470
+    dim_product 403 284
+    dim_store 596 12
+    fct_inventory_snapshot 869 309
+  '''
+}

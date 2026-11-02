@@ -1,0 +1,14 @@
+use { table staging.stg_stripe__customers }     from '../tables/staging/stg_stripe__customers.dbml'
+use { table staging.stg_stripe__subscriptions } from '../tables/staging/stg_stripe__subscriptions.dbml'
+use { table staging.stg_stripe__invoices }      from '../tables/staging/stg_stripe__invoices.dbml'
+use * from '../relationships/staging.dbml'
+
+Project stripe {
+  Note: 'Staging models for the Stripe source (models/staging/stripe/).'
+  erd_schema_version: '7'
+  erd_layout: '''
+    stg_stripe__customers 884 49
+    stg_stripe__invoices 12 12
+    stg_stripe__subscriptions 438 12
+  '''
+}

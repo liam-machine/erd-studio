@@ -1,0 +1,12 @@
+Table payments.payment [
+  grain: 'One row per captured payment',
+  meta_owner: 'payments-team'
+] {
+  Note: 'Payments, published by the payments domain.'
+
+  payment_id     STRING [pk, natural_key: 'true']
+  order_id       STRING [foreign_key: 'true', note: 'Owned by the orders domain']
+  amount         "DECIMAL(12,2)"
+  payment_method STRING
+  captured_at    TIMESTAMP
+}

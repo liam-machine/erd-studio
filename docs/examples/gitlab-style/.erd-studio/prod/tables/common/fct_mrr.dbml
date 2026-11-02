@@ -1,0 +1,15 @@
+Table common.fct_mrr [
+  role: 'periodic-snapshot',
+  grain: 'One row per subscription per month',
+  rationale_measures: 'mrr is additive across subscriptions and accounts, not across months.'
+] {
+  Note: 'Monthly recurring revenue.'
+
+  mrr_id                 STRING          [pk, note: 'Surrogate key of subscription and month']
+  dim_date_id            INT             [foreign_key: 'true', note: 'The first day of the month']
+  dim_subscription_id    STRING          [foreign_key: 'true']
+  dim_billing_account_id STRING          [foreign_key: 'true']
+  dim_crm_account_id     STRING          [foreign_key: 'true']
+  mrr                    "DECIMAL(18,2)" [additive_type: 'semi-additive']
+  arr                    "DECIMAL(18,2)" [additive_type: 'semi-additive', note: 'mrr × 12']
+}

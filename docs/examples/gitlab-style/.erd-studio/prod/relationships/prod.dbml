@@ -1,0 +1,15 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table common.dim_billing_account } from '../tables/common/dim_billing_account.dbml'
+use { table common.dim_crm_account }     from '../tables/common/dim_crm_account.dbml'
+use { table common.dim_date }            from '../tables/common/dim_date.dbml'
+use { table common.dim_subscription }    from '../tables/common/dim_subscription.dbml'
+use { table common.fct_mrr }             from '../tables/common/fct_mrr.dbml'
+
+Ref: common.dim_billing_account.dim_crm_account_id >? common.dim_crm_account.dim_crm_account_id
+
+Ref: common.dim_subscription.dim_billing_account_id >? common.dim_billing_account.dim_billing_account_id
+
+Ref: common.fct_mrr.dim_billing_account_id >? common.dim_billing_account.dim_billing_account_id
+Ref: common.fct_mrr.dim_crm_account_id >? common.dim_crm_account.dim_crm_account_id
+Ref: common.fct_mrr.dim_date_id >? common.dim_date.date_id
+Ref: common.fct_mrr.dim_subscription_id >? common.dim_subscription.dim_subscription_id
