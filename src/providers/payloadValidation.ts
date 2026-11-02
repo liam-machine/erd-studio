@@ -15,7 +15,7 @@ import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN, TABLE_NAME_RULE, findDuplicate
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
 import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, GO_TO_TABLE_QUERY_MAX } from '../types/messages';
 import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
-import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, isValidTableAlias } from '@erd-studio/core';
+import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, classifySemanticFile, isValidTableAlias, normalisePosix } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
@@ -328,6 +328,43 @@ export function validateMarkKey(markKey: unknown, link: LinkPayloadEnds): string
   const pairs = pairsOfPayload(link);
   const ends: Array<[string, string[]]> = [[link.fromModel, pairs.map((p) => p.fromColumn)], [link.toModel, pairs.map((p) => p.toColumn)]];
   return ends.some(([m, cols]) => sameText(m, model) && sameColumnSet(columns, cols)) ? null : invalid;
+}
+
+/** The longest `relationshipsFile` an `addRelationship` may name. */
+export const RELATIONSHIPS_FILE_MAX_LENGTH = 1024;
+
+/**
+ * The New Relationship dialog's `relationshipsFile` (DBML, 2.0): absent, or
+ * a relationships file's path relative to the semantic dir, by its shape
+ * alone — posix, normalised (no `.` or `..` segment, no empty one), not
+ * absolute, and one `classifySemanticFile` calls a relationships file
+ * (`<layer>/relationships/<name>.dbml`). Whether it exists, reads and stays
+ * inside the semantic dir is the host's check, made when the edit runs.
+ * Returns an error, or null.
+ */
+export function validateRelationshipsFileChoice(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'string' || value === '' || value.length > RELATIONSHIPS_FILE_MAX_LENGTH) {
+    return 'the relationships file must be a path inside the project\'s ERD Studio folder.';
+  }
+  const shape = /^[A-Za-z]:/.test(value) || value.includes('\0') || value.includes('\\') || value.startsWith('/')
+    || normalisePosix(value) !== value || value.split('/').some((segment) => segment === '..' || segment === '.' || segment === '');
+  if (shape) return `"${value}" is not a path inside the project's ERD Studio folder.`;
+  if (classifySemanticFile(value, { tablesDirIsLayer: true }).kind !== 'relationships') {
+    return `"${value}" is not a relationships file (<layer>/relationships/<name>.dbml).`;
+  }
+  return null;
+}
+
+/**
+ * An `editRelationship` names no relationships file: an existing
+ * relationship stays in the file that holds it (decision 5). Returns an
+ * error when the payload carries a `relationshipsFile`, else null.
+ */
+export function validateNoRelationshipsFile(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || !('relationshipsFile' in payload)) return null;
+  if ((payload as { relationshipsFile?: unknown }).relationshipsFile === undefined) return null;
+  return 'an existing relationship stays in the file that holds it; a relationships file can be chosen only for a new one.';
 }
 
 export const TABLE_ROLES: readonly TableRole[] = [

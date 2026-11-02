@@ -144,7 +144,27 @@ export interface ExistingTablesMessage {
  */
 export interface NewRelationshipFilesMessage {
   type: 'newRelationshipFiles';
-  payload: { files: Record<string, string> };
+  payload: {
+    files: Record<string, string>;
+    /**
+     * Optional (2.0): for each of those tables (the same lower-case keys),
+     * the relationships files a new relationship of it may be saved in, the
+     * New Relationship dialog's "Stored in" choice: `placeNewRef`'s answer
+     * first (the one in `files`, which may not exist yet), then every other
+     * readable relationships file of the table's layer, in path byte order.
+     * Absent when no table has a choice to offer (a YAML project); an older
+     * webview ignores it.
+     */
+    choices?: Record<string, NewRelationshipFileChoice[]>;
+  };
+}
+
+/** One relationships file a new relationship may be saved in ({@link NewRelationshipFilesMessage}). */
+export interface NewRelationshipFileChoice {
+  /** Relative to the semantic dir (`marts/relationships/marketing.dbml`): what `addRelationship`'s `relationshipsFile` sends. */
+  path: string;
+  /** Project-relative (`.erd-studio/marts/relationships/marketing.dbml`): what the dialog shows. */
+  projectPath: string;
 }
 
 export interface DomainLoadedMessage {
@@ -488,6 +508,20 @@ export interface AddRelationshipMessage {
      * [] is a single-column relationship.
      */
     extraPairs?: ColumnPair[];
+    /**
+     * DBML only, optional (2.0): the relationships file to save the new
+     * relationship in, relative to the semantic dir
+     * (`marts/relationships/marketing.dbml`), one of the dialog's
+     * {@link NewRelationshipFilesMessage} choices. Sent only when the user
+     * picked a file other than the default; absent = where `placeNewRef`
+     * says, as before. It must be an existing, readable relationships file
+     * inside the semantic dir (`validateRelationshipsFileChoice`, then the
+     * host's checks), else the add is refused and nothing is written; a
+     * YAML/JSON project refuses it. Every column pair goes there, and the
+     * table's later relationships follow it (`placeNewRef`'s rule 1).
+     * `editRelationship` takes none: an existing relationship stays where it is.
+     */
+    relationshipsFile?: string;
   };
 }
 

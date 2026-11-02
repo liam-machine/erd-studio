@@ -158,6 +158,25 @@ export interface DbmlLibraryOps {
    * an earlier run or a hand edit left. A Ref already stored stays where it is.
    */
   newRefsToLayerDefault?: boolean;
+  /**
+   * The New Relationship dialog's pick (one relationship being added): every
+   * NEW unit holding one of `links` (core `linkKey`; a composite's pairs are
+   * one unit) goes to `file`, an existing, readable relationships file
+   * (semantic-relative, as the snapshot lists it, any case), instead of where
+   * `placeNewRef` says. Only the first placement changes: the table's later
+   * Refs follow it by rule 1. It never moves a stored Ref: a unit of these
+   * links already held in another file (a composite taking in a single) is
+   * refused rather than left where the user did not choose.
+   */
+  newRefFile?: NewRefFileChoice;
+}
+
+/** Where the New Relationship dialog asks a new relationship to be saved ({@link DbmlLibraryOps.newRefFile}). */
+export interface NewRefFileChoice {
+  /** The relationships file, posix, relative to the semantic dir. */
+  file: string;
+  /** The new relationship's column pairs, as core `linkKey`s. */
+  links: readonly string[];
 }
 
 /** A table as the plan leaves it. */
@@ -680,7 +699,35 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   // --- Placement of new units (decision 5) ------------------------------------------------------
   const layerOf = (p: string): string => dbmlTreePathOf(p)?.layer ?? (p.includes('/') ? p.slice(0, p.indexOf('/')) : defaultHome().layer);
   const placed = new Map<Member, string>();
+  // The New Relationship dialog's pick: a listed relationships file that reads, spelled as listed.
+  const chosen = ops.newRefFile;
+  const chosenLinks = new Set(chosen?.links ?? []);
+  const takesChosen = (unit: RefUnit): boolean => chosen !== undefined && unitLinks(unit).some((l) => chosenLinks.has(l));
+  let chosenFile: string | undefined;
+  if (chosen) {
+    const listed = [...snapshot.relationshipsFiles.keys()];
+    chosenFile = listed.find((f) => f === chosen.file) ?? listed.find((f) => lower(f) === lower(chosen.file));
+    if (chosenFile === undefined) refuse(chosen.file, `${chosen.file} is not a relationships file of this project; nothing was changed.`);
+    if (index.unreadable.has(chosenFile)) {
+      const why = notReading(chosenFile);
+      refuse(chosenFile, `${why.text}; fix it first, or save the relationship in another file.`, why.line);
+    }
+    // A unit of these links stored in another file stays there (an existing Ref is never moved).
+    for (const plan of ownerPlans) {
+      for (const [member, refs] of plan.matched) {
+        if (!takesChosen(member.unit)) continue;
+        const elsewhere = refs.find((r) => r.file !== chosenFile);
+        if (elsewhere) {
+          refuse(elsewhere.file, `${describeUnit(member.unit)} takes in a relationship ${elsewhere.file} line ${elsewhere.line} already holds, and an existing relationship is never moved to another file. Save it in ${elsewhere.file}, or leave the file as it is.`, elsewhere.line);
+        }
+      }
+    }
+  }
   for (const { plan, member } of newMembers) {
+    if (chosenFile !== undefined && takesChosen(member.unit)) {
+      placed.set(member, chosenFile);
+      continue;
+    }
     const owner = after.get(plan.key);
     const placement = placeNewRef(
       {
