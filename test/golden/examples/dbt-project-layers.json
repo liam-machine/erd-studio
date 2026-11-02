@@ -27,7 +27,8 @@
         "revenue_month DATE pk",
         "customer_id STRING",
         "allocated_amount DECIMAL(12,2) additive"
-      ]
+      ],
+      "newRelationshipsFile": "intermediate/relationships/intermediate.dbml"
     },
     "marts.customers": {
       "layer": "marts",
@@ -42,7 +43,8 @@
         "plan_code STRING",
         "first_paid_at TIMESTAMP",
         "is_active BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "marts/relationships/marts.dbml"
     },
     "marts.invoices": {
       "layer": "marts",
@@ -56,7 +58,8 @@
         "amount_due DECIMAL(12,2) additive",
         "amount_paid DECIMAL(12,2) additive",
         "is_paid BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "marts/relationships/marts.dbml"
     },
     "marts.monthly_revenue": {
       "layer": "marts",
@@ -69,7 +72,8 @@
         "mrr DECIMAL(12,2) semi-additive",
         "is_new BOOLEAN",
         "is_churned BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "marts/relationships/marts.dbml"
     },
     "marts.users": {
       "layer": "marts",
@@ -82,7 +86,8 @@
         "role STRING",
         "days_since_active INT",
         "is_power_user BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "marts/relationships/marts.dbml"
     },
     "staging.stg_app__accounts": {
       "layer": "staging",
@@ -93,7 +98,8 @@
         "account_name STRING",
         "industry STRING",
         "signed_up_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "staging/relationships/staging.dbml"
     },
     "staging.stg_app__users": {
       "layer": "staging",
@@ -104,7 +110,8 @@
         "account_id STRING fk",
         "role STRING",
         "last_active_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "staging/relationships/staging.dbml"
     },
     "staging.stg_stripe__customers": {
       "layer": "staging",
@@ -115,7 +122,8 @@
         "email STRING",
         "app_account_id STRING",
         "created_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "staging/relationships/staging.dbml"
     },
     "staging.stg_stripe__invoices": {
       "layer": "staging",
@@ -128,7 +136,8 @@
         "amount_paid DECIMAL(12,2)",
         "period_start DATE",
         "period_end DATE"
-      ]
+      ],
+      "newRelationshipsFile": "staging/relationships/staging.dbml"
     },
     "staging.stg_stripe__subscriptions": {
       "layer": "staging",
@@ -141,7 +150,8 @@
         "status STRING",
         "started_at TIMESTAMP",
         "cancelled_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "staging/relationships/staging.dbml"
     }
   },
   "diagrams": [

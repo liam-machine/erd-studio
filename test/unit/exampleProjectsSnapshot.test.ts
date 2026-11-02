@@ -8,9 +8,10 @@
  * Each example's snapshot (test/golden/examples/<example>.json) is built by
  * core's `loadDisplaySubjectArea` — what the canvas and the Confluence app
  * draw — and lists its layers, every table on any diagram (layer, schema,
- * warehouse name, role, grain, columns with keys and types) and each diagram's
- * tables and relationships. Layout positions are left out: moving a table is
- * not a change to the model.
+ * warehouse name, role, grain, columns with keys and types, and the
+ * relationships file its next new relationship would be saved in) and each
+ * diagram's tables and relationships. Layout positions are left out: moving
+ * a table is not a change to the model.
  *
  * A diff here is a decision, not a failure to silence: read it as "this is
  * what changes for a team modelled this way". When the change is intended,
@@ -25,6 +26,8 @@ import * as path from 'path';
 import { loadDisplaySubjectArea } from '@erd-studio/core';
 import { dbmlStorageReader } from '@erd-studio/core/dbml';
 import type { DisplayColumn, DisplayRelationship, DisplayTable } from '@erd-studio/core';
+
+import { buildCliContext } from '../../src/cli/context';
 
 const REPO = path.resolve(__dirname, '../..');
 const EXAMPLES = path.join(REPO, 'docs', 'examples');
@@ -70,7 +73,7 @@ function relationshipLine(r: DisplayRelationship): string {
 }
 
 /** A table as the snapshot keeps it: everything but its position. */
-function tableOf(t: DisplayTable): Record<string, unknown> {
+function tableOf(t: DisplayTable, newRelationshipsFile: string | undefined): Record<string, unknown> {
   return {
     layer: t.layer ?? null,
     schema: t.schema,
@@ -78,6 +81,8 @@ function tableOf(t: DisplayTable): Record<string, unknown> {
     ...(t.modelRole ? { role: t.modelRole } : {}),
     ...(t.grain ? { grain: t.grain } : {}),
     columns: t.columns.map(columnLine),
+    // Where a new relationship with this table holding the foreign key is saved (`placeNewRef`).
+    newRelationshipsFile: newRelationshipsFile ?? null,
   };
 }
 
@@ -86,6 +91,13 @@ async function snapshotOf(example: string): Promise<Record<string, unknown>> {
   const layers = (JSON.parse(fs.readFileSync(path.join(root, SEMANTIC_DIR, 'layers.json'), 'utf-8')) as {
     layers: Array<{ id: string; label: string; abbreviation?: string }>;
   }).layers.map((l) => ({ id: l.id, label: l.label, ...(l.abbreviation ? { abbreviation: l.abbreviation } : {}) }));
+  const ctx = await buildCliContext({ project: root, semanticDir: SEMANTIC_DIR });
+  const semanticRoot = path.join(root, SEMANTIC_DIR);
+  const placement = ctx.tableLibraryService.relationshipsFilesForNewRefs(ctx.tableLibraryService.listTableFiles().map((e) => e.name));
+  const placedFor = (name: string): string | undefined => {
+    const file = placement.get(name.toLowerCase());
+    return file === undefined ? undefined : path.relative(semanticRoot, file).split(path.sep).join('/');
+  };
   const tables = new Map<string, Record<string, unknown>>();
   const diagrams: Array<Record<string, unknown>> = [];
   for (const diagram of diagramsOf(root)) {
@@ -102,7 +114,7 @@ async function snapshotOf(example: string): Promise<Record<string, unknown>> {
       warn: () => {},
       dbml: dbmlStorageReader,
     });
-    for (const t of display.models) tables.set(`${t.schema}.${t.name}`, tableOf(t));
+    for (const t of display.models) tables.set(`${t.schema}.${t.name}`, tableOf(t, placedFor(t.name)));
     diagrams.push({
       file: diagram,
       name: display.domain,

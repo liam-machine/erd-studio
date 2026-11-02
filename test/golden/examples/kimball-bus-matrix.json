@@ -20,7 +20,8 @@
         "week_start_date DATE",
         "fiscal_period STRING",
         "is_holiday BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "presentation/relationships/presentation.dbml"
     },
     "conformed.dim_product": {
       "layer": "presentation",
@@ -36,7 +37,8 @@
         "department STRING scd2",
         "valid_from DATE",
         "valid_to DATE"
-      ]
+      ],
+      "newRelationshipsFile": "presentation/relationships/presentation.dbml"
     },
     "conformed.dim_store": {
       "layer": "presentation",
@@ -49,7 +51,8 @@
         "store_name STRING scd1",
         "region STRING scd2",
         "store_format STRING scd1"
-      ]
+      ],
+      "newRelationshipsFile": "presentation/relationships/presentation.dbml"
     },
     "inventory.fct_inventory_snapshot": {
       "layer": "presentation",
@@ -63,7 +66,8 @@
         "quantity_on_hand INT semi-additive",
         "inventory_value DECIMAL(12,2) semi-additive",
         "days_of_supply DECIMAL(8,2) non-additive"
-      ]
+      ],
+      "newRelationshipsFile": "presentation/relationships/inventory.dbml"
     },
     "procurement.dim_supplier": {
       "layer": "presentation",
@@ -75,7 +79,8 @@
         "supplier_number STRING nk",
         "supplier_name STRING scd1",
         "payment_terms STRING scd1"
-      ]
+      ],
+      "newRelationshipsFile": "presentation/relationships/presentation.dbml"
     },
     "procurement.fct_purchase_order_pipeline": {
       "layer": "presentation",
@@ -93,7 +98,8 @@
         "ordered_quantity INT additive",
         "received_quantity INT additive",
         "invoice_amount DECIMAL(12,2) additive"
-      ]
+      ],
+      "newRelationshipsFile": "presentation/relationships/procurement.dbml"
     },
     "sales.dim_promotion": {
       "layer": "presentation",
@@ -107,7 +113,8 @@
         "discount_type STRING",
         "start_date DATE",
         "end_date DATE"
-      ]
+      ],
+      "newRelationshipsFile": "presentation/relationships/presentation.dbml"
     },
     "sales.fct_retail_sales": {
       "layer": "presentation",
@@ -124,7 +131,8 @@
         "sales_amount DECIMAL(12,2) additive",
         "cost_amount DECIMAL(12,2) additive",
         "gross_profit_amount DECIMAL(12,2) additive"
-      ]
+      ],
+      "newRelationshipsFile": "presentation/relationships/sales.dbml"
     }
   },
   "diagrams": [

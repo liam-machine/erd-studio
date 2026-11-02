@@ -27,7 +27,8 @@
         "account_type STRING",
         "country_code STRING",
         "created_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/source_aligned.dbml"
     },
     "customer.customer_profile": {
       "layer": "aggregate",
@@ -39,7 +40,8 @@
         "lifetime_spend DECIMAL(12,2) additive",
         "last_order_at TIMESTAMP",
         "preferred_carrier_code STRING"
-      ]
+      ],
+      "newRelationshipsFile": "aggregate/relationships/customer.dbml"
     },
     "delivery_insights.fct_shipment_delivery": {
       "layer": "consumer_aligned",
@@ -54,7 +56,8 @@
         "delivered_at TIMESTAMP",
         "days_late INT",
         "is_on_time BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "consumer_aligned/relationships/delivery_insights.dbml"
     },
     "orders.customer_order": {
       "layer": "source_aligned",
@@ -66,7 +69,8 @@
         "placed_at TIMESTAMP",
         "parcel_count INT",
         "declared_value DECIMAL(12,2)"
-      ]
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/orders.dbml"
     },
     "payments.payment": {
       "layer": "source_aligned",
@@ -78,7 +82,8 @@
         "amount DECIMAL(12,2)",
         "payment_method STRING",
         "captured_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/payments.dbml"
     },
     "shipping.carrier": {
       "layer": "source_aligned",
@@ -88,7 +93,8 @@
         "carrier_code STRING pk nk",
         "carrier_name STRING",
         "service_level STRING"
-      ]
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/source_aligned.dbml"
     },
     "shipping.shipment": {
       "layer": "source_aligned",
@@ -99,7 +105,8 @@
         "order_id STRING fk",
         "carrier_code STRING fk",
         "promised_delivery_date DATE"
-      ]
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/shipping.dbml"
     },
     "shipping.tracking_event": {
       "layer": "source_aligned",
@@ -111,7 +118,8 @@
         "event_type STRING",
         "event_at TIMESTAMP",
         "depot_code STRING"
-      ]
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/shipping.dbml"
     }
   },
   "diagrams": [
