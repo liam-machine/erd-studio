@@ -195,6 +195,13 @@ describe('HarnessService', () => {
       expect(HARNESS_TARGETS.find((t) => t.id === 'agents')!.relativePath).toBe('.agents/skills/erd-studio/SKILL.md');
     });
 
+    it('names the sidebar views as they are titled: the Table Library, never the Model Library', () => {
+      const legacy = new Map(service.schemaSkillFiles()).get('LEGACY.md')!;
+      expect(legacy).toContain('### Table Library (Sidebar)');
+      expect(legacy).toContain('The **Table Library** panel');
+      for (const [, content] of service.schemaSkillFiles()) expect(content).not.toContain('Model Library');
+    });
+
     it('wraps the Codex section in BEGIN/END region markers with the version marker inside', () => {
       const content = service.generateContent('codex');
       const begin = content.indexOf(CODEX_REGION_BEGIN);
@@ -872,8 +879,8 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 39 (the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
-      expect(HARNESS_VERSION).toBe('39');
+    it('is 40 ("diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
+      expect(HARNESS_VERSION).toBe('40');
     });
 
     it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {

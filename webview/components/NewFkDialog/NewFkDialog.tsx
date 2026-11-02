@@ -6,7 +6,7 @@
  * - Source column (dropdown, filtered by source model)
  * - Target model (dropdown)
  * - Target column (dropdown, filtered by target model)
- * - Cardinality (many-to-one / one-to-one)
+ * - How many? (many-to-one / one-to-one / many-to-many)
  *
  * Mode detection:
  * - Create mode: fkDialogEditData is null (sends addRelationship)
@@ -15,18 +15,19 @@
  * When editing, the approval status is preserved by the extension host.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel } from '@xyflow/react';
-import { canonicalRelationship, keyEvidenceDetail, linkKey, sameLink } from '@erd-studio/core';
+import { canonicalRelationship, foreignKeyEnd, keyEvidenceDetail, linkKey, sameLink } from '@erd-studio/core';
 import type { LinkEnd } from '@erd-studio/core';
 
 import { useEditorStore } from '../../store/editorStore';
-import { useSend } from '../../hooks/useMessageBus';
+import { useMessageBus, useSend } from '../../hooks/useMessageBus';
+import type { ExtensionMessage } from '../../hooks/useMessageBus';
 import { detectCircularFk, formatCyclePath } from '../../lib/validation';
 import { keysContradictionWarning, orientCanvasLink } from '../../lib/relationshipDirection';
 import {
   ABSORB_HINT, ADD_PAIR_LABEL, COMPOSITE_MANY_TO_MANY_ERROR, COMPOSITE_MANY_TO_MANY_TITLE, DIRECTION_MISSING_HINT, DIRECTION_QUESTION,
-  PAIR_INCOMPLETE, dialogTitle, directionChoice, directionSentence, markKeyLabel, pairColumnUsed,
+  HOW_MANY_LABEL, PAIR_INCOMPLETE, cardinalityChoice, dialogTitle, directionChoice, directionSentence, markKeyLabel, pairColumnUsed,
 } from '../../lib/relationshipDialog';
 import { MAX_COMPOSITE_PAIRS } from '@erd-studio/core';
 import type { Cardinality } from '../../../src/types/semantic';
@@ -144,6 +145,22 @@ function columnNamedLike(model: ModelColumns | undefined, column: string): strin
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
+/**
+ * "Will be stored in .erd-studio/gold/relationships/gold.dbml": the file a
+ * new relationship goes to, from the host's `newRelationshipFiles` answer
+ * (`placeNewRef` for the table that holds the foreign key, `foreignKeyEnd`).
+ * Undefined before the answer, for a YAML project, or when that table has none.
+ */
+export function storedInText(
+  newRefFiles: Readonly<Record<string, string>> | undefined,
+  link: { fromModel: string; toModel: string; cardinality: Cardinality },
+): string | undefined {
+  if (!newRefFiles || !link.fromModel || !link.toModel) return undefined;
+  const fk = foreignKeyEnd({ fromModel: link.fromModel, fromColumn: '', toModel: link.toModel, toColumn: '', cardinality: link.cardinality });
+  const file = newRefFiles[fk.model.toLowerCase()];
+  return file ? `Will be stored in ${file}` : undefined;
+}
 
 export function NewFkDialog() {
   const isOpen = useEditorStore((s) => s.newFkDialogOpen);
@@ -331,6 +348,22 @@ export function NewFkDialog() {
       pairsFilled && extraPairs.length > 0 ? allPairs : undefined,
     ),
     [fromModel, fromColumn, toModel, toColumn, cardinality, domain, pairsFilled, extraPairs.length, allPairs],
+  );
+
+  // Where the new relationship goes (DBML; an edited one stays where it is):
+  // asked for when the dialog opens to create one, answered by `newRelationshipFiles`.
+  const [newRefFiles, setNewRefFiles] = useState<Record<string, string> | undefined>(undefined);
+  useMessageBus(useCallback((msg: ExtensionMessage) => {
+    if (msg.type === 'newRelationshipFiles') setNewRefFiles(msg.payload.files);
+  }, []));
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  useEffect(() => {
+    if (isOpen && !isEditMode) sendRef.current({ type: 'requestNewRelationshipFiles' });
+  }, [isOpen, isEditMode]);
+  const storedIn = useMemo(
+    () => storedInText(newRefFiles, { fromModel, toModel, cardinality }),
+    [newRefFiles, fromModel, toModel, cardinality],
   );
 
   // Validation — pass original key when editing to skip self-duplicate check
@@ -724,7 +757,7 @@ export function NewFkDialog() {
         {/* Cardinality */}
         <div className="new-fk-dialog__field">
           <label className="new-fk-dialog__label" htmlFor="cardinality">
-            Cardinality
+            {HOW_MANY_LABEL}
           </label>
           <select
             id="cardinality"
@@ -735,14 +768,18 @@ export function NewFkDialog() {
               setCardinalityChosen(true);
             }}
           >
-            <option value="many-to-one">Many-to-One (*→1)</option>
-            <option value="one-to-one">One-to-One (1→1)</option>
+            <option value="many-to-one" title={cardinalityChoice('many-to-one', fromModel, toModel).title}>
+              {cardinalityChoice('many-to-one', fromModel, toModel).text}
+            </option>
+            <option value="one-to-one" title={cardinalityChoice('one-to-one', fromModel, toModel).title}>
+              {cardinalityChoice('one-to-one', fromModel, toModel).text}
+            </option>
             <option
               value="many-to-many"
               disabled={pairCount > 1}
-              title={pairCount > 1 ? COMPOSITE_MANY_TO_MANY_TITLE : undefined}
+              title={pairCount > 1 ? COMPOSITE_MANY_TO_MANY_TITLE : cardinalityChoice('many-to-many', fromModel, toModel).title}
             >
-              Many-to-Many (*↔*)
+              {cardinalityChoice('many-to-many', fromModel, toModel).text}
             </option>
           </select>
           {errors.cardinality && <span className="new-fk-dialog__error">{errors.cardinality}</span>}
@@ -846,12 +883,17 @@ export function NewFkDialog() {
                 ? `${fromModel}.(${allPairs.map((p) => p.fromColumn || '?').join(', ')}) → ${toModel}.(${allPairs.map((p) => p.toColumn || '?').join(', ')})`
                 : `${fromModel}.${fromColumn || '?'} → ${toModel}.${toColumn || '?'}`}
               <span className="new-fk-dialog__preview-cardinality">
-                ({cardinality === 'many-to-one' ? '*→1' : cardinality === 'many-to-many' ? '*↔*' : '1→1'})
+                ({cardinalityChoice(cardinality === 'many-to-many' || cardinality === 'one-to-one' ? cardinality : 'many-to-one', '', '').text.toLowerCase()})
               </span>
             </span>
           </div>
         )}
       </div>
+
+      {/* Where a new relationship is stored (DBML), just above the buttons. */}
+      {!isEditMode && storedIn && (
+        <div className="new-fk-dialog__stored-in">{storedIn}</div>
+      )}
 
       {/* Footer */}
       <div className="new-fk-dialog__footer">

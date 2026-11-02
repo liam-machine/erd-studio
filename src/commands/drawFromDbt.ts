@@ -69,6 +69,7 @@ import type { CatalogData } from '../types/catalog';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import { log } from '../services/logger';
+import { WHICH_LAYER_FOR_DIAGRAM } from '../services/layerWording';
 
 export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
 
@@ -197,7 +198,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   if (!layer) {
     const choice = await vscode.window.showQuickPick(
       creatable.map((l) => ({ label: l.label, description: l.id === l.label.toLowerCase() ? undefined : l.id, id: l.id })),
-      { title: TITLE, placeHolder: 'Which layer is this diagram for?', ignoreFocusOut: true },
+      { title: TITLE, placeHolder: WHICH_LAYER_FOR_DIAGRAM, ignoreFocusOut: true },
     );
     if (!choice) { telemetry.feature('drawCancelLayer'); return undefined; }
     layer = choice.id;

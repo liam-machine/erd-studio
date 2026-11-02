@@ -380,7 +380,7 @@ describe('activate() with a dbt project', () => {
     expect(opened[0][3]).toEqual({ preview: true });
   });
 
-  it('wires the domain editor (retaining webview context), both tree views and the decoration providers', async () => {
+  it('wires the domain editor (retaining webview context), the tree views and the Explorer decoration provider', async () => {
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
     const registerDecorations = vi.spyOn(vscode.window, 'registerFileDecorationProvider');
@@ -398,8 +398,42 @@ describe('activate() with a dbt project', () => {
       'erdStudio.relationships',
       'erdStudio.help',
     ]);
-    expect(registerDecorations).toHaveBeenCalledTimes(2);
+    // The Explorer's tooltips only: the sidebar draws layer colours with its own icons.
+    expect(registerDecorations).toHaveBeenCalledTimes(1);
     expect(context.subscriptions.length).toBeGreaterThan(CONTRIBUTED.length * 2);
+  });
+
+  it('groups the Relationships view by file or by table from its title toggle, remembered for the workspace', async () => {
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    await activate(context);
+    const view = createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.relationships')!;
+    const provider = (view[1] as { treeDataProvider: { getGrouping(): string } }).treeDataProvider;
+    expect(provider.getGrouping()).toBe('table');
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.relationshipsGrouping', 'table');
+
+    await vscode.commands.executeCommand('erdStudio.groupRelationshipsByFile');
+    expect(provider.getGrouping()).toBe('file');
+    expect(context.workspaceState.get('erdStudio.relationshipsGrouping')).toBe('file');
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.relationshipsGrouping', 'file');
+
+    await vscode.commands.executeCommand('erdStudio.groupRelationshipsByTable');
+    expect(provider.getGrouping()).toBe('table');
+    expect(context.workspaceState.get('erdStudio.relationshipsGrouping')).toBe('table');
+  });
+
+  it('starts the Relationships view grouped by file when the workspace last chose it', async () => {
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    const remembered = makeContext(root, { workspaceState: new Map<string, unknown>([
+      ['erdStudio.harnessInstallPrompted', true],
+      ['erdStudio.diagramsNudgeShown', true],
+      ['erdStudio.relationshipsGrouping', 'file'],
+    ]) });
+    // Disposed with the rest after the test.
+    context = remembered;
+    await activate(remembered);
+    const view = createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.relationships')!;
+    expect((view[1] as { treeDataProvider: { getGrouping(): string } }).treeDataProvider.getGrouping()).toBe('file');
   });
 
   it('refreshes the Model Library on any domain write, not just when a yml file appears or disappears', async () => {
@@ -1906,6 +1940,7 @@ describe('Welcome panel: first run', () => {
   it('a fresh install opens the walkthrough once, writes the flag first and skips the harness QuickPick', async () => {
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
     fs.rmSync(path.join(root, '.claude'), { recursive: true, force: true }); // no harness → the QuickPick would be offered
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true }); // no diagrams yet: the walkthrough's project
     openWorkspace(root);
     const globalState = new Map<string, unknown>();
     const workspaceState = new Map<string, unknown>();
@@ -1930,9 +1965,8 @@ describe('Welcome panel: first run', () => {
     // Skipped for this run only: the once-per-workspace offer is still owed.
     expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBeUndefined();
     expect(pick).not.toHaveBeenCalled();
-    // …and so is the existing-diagrams notice: one prompt at a time.
-    expect(info.mock.calls.some((c) => String(c[0]).startsWith('This project has'))).toBe(false);
-    expect(workspaceState.get(DIAGRAMS_NUDGE_SHOWN_KEY)).toBeUndefined();
+    // One prompt per window: no other notice beside it.
+    expect(info).not.toHaveBeenCalled();
 
     // The next window on this machine does not open it again.
     tearDownActivation();
@@ -1944,6 +1978,7 @@ describe('Welcome panel: first run', () => {
   it('falls back to the Welcome panel when the host has no walkthrough command', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
     openWorkspace(root);
     context = makeContext(root, { globalState: new Map<string, unknown>() });
     const opens = spyWalkthrough({ fail: true });
@@ -1956,23 +1991,28 @@ describe('Welcome panel: first run', () => {
 
   it('the walkthrough is contributed with the logical-first steps and media that ship', () => {
     const pkg = packageJson as unknown as {
-      contributes: { walkthroughs: Array<{ id: string; description: string; steps: Array<{ id: string; when?: string; description: string; media: { svg: string }; completionEvents: string[] }> }> };
+      contributes: { walkthroughs: Array<{ id: string; description: string; steps: Array<{ id: string; title: string; when?: string; description: string; media: { svg: string }; completionEvents: string[] }> }> };
     };
     const walkthrough = pkg.contributes.walkthroughs.find((w) => WALKTHROUGH_ID.endsWith(`#${w.id}`))!;
-    // Existing ids kept (completion state survives an update); newDiagram and importDbml are new.
-    expect(walkthrough.steps.map((s) => s.id)).toEqual(['watch', 'openProject', 'newDiagram', 'draw', 'importDbml', 'enrich', 'sample']);
+    // Existing ids kept (completion state survives an update); newDiagram, importDbml and openDiagram are new.
+    expect(walkthrough.steps.map((s) => s.id)).toEqual(['watch', 'openProject', 'openDiagram', 'newDiagram', 'draw', 'importDbml', 'enrich', 'sample']);
     const step = (id: string) => walkthrough.steps.find((s) => s.id === id)!;
-    // Which window each step shows in: dbt, no folder, a folder without dbt, or always.
+    // Which window each step shows in: dbt, no folder, a folder without dbt, a project with or without diagrams, or always.
     expect(Object.fromEntries(walkthrough.steps.map((s) => [s.id, s.when ?? null]))).toEqual({
       watch: 'erdStudio.hasDbtProject',
       openProject: 'workspaceFolderCount == 0',
-      newDiagram: '!erdStudio.hasDbtProject',
-      draw: 'erdStudio.hasDbtProject',
+      openDiagram: 'erdStudio.hasDiagrams',
+      newDiagram: '!erdStudio.hasDbtProject && !erdStudio.hasDiagrams',
+      draw: 'erdStudio.hasDbtProject && !erdStudio.hasDiagrams',
       importDbml: null,
       enrich: null,
       sample: '!erdStudio.hasDbtProject',
     });
     expect(step('openProject').completionEvents).toEqual(['onContext:erdStudio.hasProject']);
+    // A cloned project's own diagrams: one click to open one (the diagram picker).
+    expect(step('openDiagram').title).toBe('Open a diagram from this project');
+    expect(step('openDiagram').description).toContain('[Open Diagram](command:erdStudio.openDomain)');
+    expect(step('openDiagram').completionEvents).toEqual(['onCommand:erdStudio.openDomain']);
     expect(step('newDiagram').completionEvents).toEqual(['onCommand:erdStudio.createDomain', 'onCommand:erdStudio.openExampleDiagram']);
     expect(step('importDbml').completionEvents).toEqual(['onCommand:erdStudio.importDbml']);
     expect(step('sample').completionEvents).toEqual(['onCommand:erdStudio.trySampleProject']);
@@ -2049,6 +2089,7 @@ describe('Welcome panel: first run', () => {
     for (const p of panelsOfType()) { p.dispose(); }
     vscode._resetMockWebviewPanels();
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true }); // a project with no diagrams yet
     openWorkspace(root);
 
     // lastActivatedVersion is stored now, so without the pending flag this would look like an upgrade.
@@ -2491,5 +2532,163 @@ describe('ERD Studio output channel and Show Logs', () => {
     for (const sub of [...context.subscriptions].reverse()) await sub.dispose();
     context.subscriptions.length = 0;
     expect(hasLogSink()).toBe(false);
+  });
+});
+
+describe('a cloned project opens its own diagrams (onboarding)', () => {
+  const nudges = (info: ReturnType<typeof vi.spyOn>) => info.mock.calls.filter((c) => String(c[0]).startsWith('This project has'));
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+  });
+
+  it('a fresh install in a project with diagrams offers one of them, not the walkthrough, which stays owed', async () => {
+    const globalState = new Map<string, unknown>();
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState });
+    const opens = spyWalkthrough();
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+    await activate(context);
+
+    expect(opens()).toHaveLength(0);
+    expect(nudges(info)).toHaveLength(1);
+    expect(workspaceState.get(DIAGRAMS_NUDGE_SHOWN_KEY)).toBe(true);
+    // Still owed: it opens in a later window whose project has no diagrams.
+    expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBe(true);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBeUndefined();
+    // The one prompt of this window: the AI helper offer waits too.
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBeUndefined();
+  });
+
+  it('keeps erdStudio.hasDiagrams in step with the diagram count', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    const hasDiagrams = () => exec.mock.calls.filter((c) => c[0] === 'setContext' && c[1] === 'erdStudio.hasDiagrams').map((c) => c[2]);
+    await activate(context);
+    expect(hasDiagrams()).toEqual([true]);
+
+    tearDownActivation();
+    exec.mockClear();
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    await activate(context);
+    expect(hasDiagrams()).toEqual([false]);
+
+    // The first diagram flips it (New Diagram refreshes the context keys).
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('Orders' as never);
+    await vscode.commands.executeCommand('erdStudio.createDomain');
+    expect(hasDiagrams()).toEqual([false, true]);
+  });
+});
+
+describe('one activation prompt per window', () => {
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+  });
+
+  const UPGRADE = 'getting-started video';
+  const NUDGE = 'This project has';
+  const OFFER = 'Let your AI assistant';
+  const shown = (info: ReturnType<typeof vi.spyOn>) => info.mock.calls.map((c) => String(c[0]))
+    .map((m) => [UPGRADE, NUDGE, OFFER].find((p) => m.includes(p)) ?? m);
+
+  it('shows the most useful one and leaves the rest, flags untouched, for the next windows', async () => {
+    // An upgrader, a project with diagrams and no AI helper files: three prompts are owed.
+    fs.rmSync(path.join(root, '.claude'), { recursive: true, force: true });
+    const globalState = new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]);
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+    await activate(context);
+    expect(shown(info)).toEqual([NUDGE]);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBeUndefined();
+    expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBeUndefined();
+
+    tearDownActivation();
+    info.mockClear();
+    await activate(context);
+    expect(shown(info)).toEqual([UPGRADE]);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBe(true);
+
+    tearDownActivation();
+    info.mockClear();
+    await activate(context);
+    expect(shown(info)).toEqual([OFFER]);
+
+    tearDownActivation();
+    info.mockClear();
+    await activate(context);
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('old AI helper files come before the upgrade notice', async () => {
+    const skill = path.join(root, '.claude', 'skills', 'erd-studio', 'SKILL.md');
+    fs.writeFileSync(skill, fs.readFileSync(skill, 'utf-8').replace(/erd-studio-harness: \d+/, 'erd-studio-harness: 1'));
+    const globalState = new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]);
+    context = makeContext(root, { globalState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+    await activate(context);
+
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('come from an older ERD Studio'))).toHaveLength(1);
+    expect(info).not.toHaveBeenCalled();
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBeUndefined();
+  });
+
+  it('a second activation in the same window shows none', async () => {
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { workspaceState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    await activate(context);
+    expect(shown(info)).toEqual([NUDGE]);
+
+    // Same extension host: the session's prompt is spent (no _resetFirstRunGuardForTests).
+    for (const sub of [...context.subscriptions].reverse()) { (sub as { dispose(): void }).dispose(); }
+    context.subscriptions.length = 0;
+    vscode._resetRegisteredCommands();
+    workspaceState.delete(DIAGRAMS_NUDGE_SHOWN_KEY);
+    info.mockClear();
+    await activate(context);
+    expect(info).not.toHaveBeenCalled();
+    expect(workspaceState.get(DIAGRAMS_NUDGE_SHOWN_KEY)).toBeUndefined();
+  });
+});
+
+describe('New Diagram in a project with no diagrams yet', () => {
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    openWorkspace(root);
+  });
+
+  it('asks no layer question: the last creatable layer (Gold), named in the name prompt', async () => {
+    await activate(context);
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('Orders' as never);
+
+    await vscode.commands.executeCommand('erdStudio.createDomain');
+
+    expect(pick).not.toHaveBeenCalled();
+    expect((input.mock.calls[0][0] as { prompt: string }).prompt)
+      .toBe('Name the diagram. Saved in the Gold layer — Move Diagram to Layer… changes it later.');
+    expect(fs.existsSync(path.join(root, '.erd-studio', 'gold', 'diagrams', 'orders.dbml'))).toBe(true);
+    // The move it names is a real command.
+    expect(CONTRIBUTED).toContain('erdStudio.moveDiagram');
+  });
+
+  it('asks which layer once there is a diagram', async () => {
+    await activate(context);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('Orders' as never).mockResolvedValueOnce('Returns' as never);
+    await vscode.commands.executeCommand('erdStudio.createDomain');
+
+    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ value?: string }>) =>
+      items.find((i) => i.value === 'silver')) as never);
+    await vscode.commands.executeCommand('erdStudio.createDomain');
+
+    expect(pick).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(path.join(root, '.erd-studio', 'silver', 'diagrams', 'returns.dbml'))).toBe(true);
   });
 });

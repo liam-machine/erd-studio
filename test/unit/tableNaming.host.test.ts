@@ -640,7 +640,7 @@ describe('doctor reports the naming (#181)', () => {
     const step = r.nextSteps.find((s) => s.id === 'fix-subject-area-naming')!;
     expect(step.why).toContain('.erd-studio/silver/mix.json');
     // The fixture's own v4 files still get the migration step, counted without mix.json.
-    expect(r.nextSteps.find((s) => s.id === 'migrate-v5')!.why).toMatch(new RegExp(`^${r.erd.domainFormatIssues.length - 1} subject area file`));
+    expect(r.nextSteps.find((s) => s.id === 'migrate-v5')!.why).toMatch(new RegExp(`^${r.erd.domainFormatIssues.length - 1} diagram file`));
   });
 
   it('v5 with a tables layer, and says so', async () => {

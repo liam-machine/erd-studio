@@ -10,10 +10,10 @@ Rules for this route, on top of SKILL.md's:
 - **Never tell the user to install dbt**, or imply they need it, and never run a `dbt` command.
 - **Never run `diff`.** It compares the design with a dbt project, so here it only exits with an
   error. The helper commands for this route are `doctor` and `export` (below).
-- In a folder without dbt the canvas has no **Physical** tab and no **⊕ Diff** button. Do not
+- In a folder without dbt the canvas has no **Physical** tab and no **Compare with dbt** button. Do not
   mention them, physical models, drift or sync plans — except the one "Using dbt?" line in
   step 6.
-- Say "diagram". The first time, add once: "the commands call a diagram a *subject area*".
+- Say "diagram", never "subject area".
 
 Checklist for this route (show it at each step boundary, as SKILL.md's "Show progress" says):
 
@@ -149,10 +149,10 @@ one round at a time. This is the one place you invent columns rather than copyin
 The tables are someone's design (perhaps an Import DBML or a canvas draft): add what is missing,
 never rebuild them.
 
-1. Glob the subject area files (`.erd-studio/*/diagrams/*.dbml` and `.erd-studio/*/*.json`) and propose one (the one named, else the
+1. Glob the diagram files (`.erd-studio/*/diagrams/*.dbml` and `.erd-studio/*/*.json`) and propose one (the one named, else the
    largest): "You have the **sales** diagram (6 tables). I'll add what's missing — keys, grain,
    roles, descriptions and the connections the columns suggest — and leave the rest alone. OK?"
-2. Read the subject area and each of its table files.
+2. Read the diagram and each of its table files.
 3. Draft, per table, only what is missing: a primary key, the foreign-key flag on columns that point at
    another table's key, the relationships those columns imply (between tables in this diagram),
    the grain, the role (section 2's values), natural keys, descriptions and the rationale's purpose.
@@ -178,7 +178,7 @@ never rebuild them.
      no `modelFolder` (that is dbt's folder filter) and `"viewConfig": {}`.
    - **Relationships** go in the table library: in DBML, a Ref line in the relationships file
      that already holds the foreign-key table's Refs, else `<layer>/relationships/<layer>.dbml`; in YAML, in the table file holding the foreign key —
-     unless the project's existing diagrams keep theirs in the subject area file
+     unless the project's existing diagrams keep theirs in the diagram file
      (building-the-model.md, "Where they go").
    - A table that already has a file is **referenced by name, never rewritten**.
 4. Keep a list of every file you wrote, and tell the user in one line ("Wrote 6 table files and
@@ -192,8 +192,8 @@ each `fix-subject-area-naming`, and offer `turn-round-relationships` fixes. Then
 diagram loads end to end: say "Checking the whole diagram loads," and run
 `~/.erd-studio-cli/bin/erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml --semantic-dir .erd-studio`
 (the `.json` file in a YAML project).
-Exit 3 means the subject area file itself cannot be read: the message names the problem; fix it
-and run it again. Exit 0 means the subject area file loaded — not yet that every table did. Read
+Exit 3 means the diagram file itself cannot be read: the message names the problem; fix it
+and run it again. Exit 0 means the diagram file loaded — not yet that every table did. Read
 the output (do not paste it) for lines starting `// Table … is not exported` (a table with no
 file and a table with no columns both read "has no columns" — check which; a file that does not
 parse names its line) and for `// Not exported:`
@@ -201,7 +201,7 @@ lines after the opening comments (a table or relationship ERD Studio could not w
 header's own "Not exported: canvas positions and sizes…" line is always there and is fine). Fix
 each and run it again; the check passes only when exit 0 comes with none of those lines.
 
-Then your own silent cross-check, reporting only problems: every table in the subject area has a
+Then your own silent cross-check, reporting only problems: every table in the diagram has a
 file; every relationship's columns exist on both tables; every foreign-key column has a
 relationship; no key or setting is written twice in one block; in DBML, doctor's `dbmlProblems`
 lists no warning about a `use` line you wrote. Stop after three rounds of fixes and list

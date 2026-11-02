@@ -87,6 +87,29 @@ export enum TextDocumentChangeReason {
   Redo = 2,
 }
 
+/** Text document content providers registered through `workspace`, in order. */
+export const _contentProviders: Array<{ scheme: string; provider: { provideTextDocumentContent: (...args: unknown[]) => unknown } }> = [];
+
+/** Listeners registered through `window.tabGroups.onDidChangeTabs` / `onDidChangeTabGroups`. */
+const _tabListeners: Array<(e: unknown) => unknown> = [];
+const _tabGroupListeners: Array<(e: unknown) => unknown> = [];
+
+/** Subscribe `listener` to `list`, VS Code style. */
+function _listen(list: Array<(e: unknown) => unknown>, listener: (e: unknown) => unknown) {
+  list.push(listener);
+  return { dispose: () => { const i = list.indexOf(listener); if (i >= 0) list.splice(i, 1); } };
+}
+
+/** Fire `window.tabGroups.onDidChangeTabs` (set `tabGroups.all` first, as VS Code updates it before the event). */
+export function _fireDidChangeTabs(e: { opened?: unknown[]; closed?: unknown[]; changed?: unknown[] } = {}): void {
+  for (const listener of [..._tabListeners]) listener({ opened: [], closed: [], changed: [], ...e });
+}
+
+/** Fire `window.tabGroups.onDidChangeTabGroups`. */
+export function _fireDidChangeTabGroups(e: { opened?: unknown[]; closed?: unknown[]; changed?: unknown[] } = {}): void {
+  for (const listener of [..._tabGroupListeners]) listener({ opened: [], closed: [], changed: [], ...e });
+}
+
 export const workspace = {
   getConfiguration: (section?: string) => ({
     get: (key: string, defaultValue?: unknown) => {
@@ -148,6 +171,12 @@ export const workspace = {
   },
   onDidChangeConfiguration: () => ({ dispose: () => {} }),
   onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
+  /** Records the provider in `_contentProviders` (tests ask it for a document's text). */
+  registerTextDocumentContentProvider: (scheme: string, provider: { provideTextDocumentContent: (...args: unknown[]) => unknown }) => {
+    const entry = { scheme, provider };
+    _contentProviders.push(entry);
+    return { dispose: () => { const i = _contentProviders.indexOf(entry); if (i >= 0) _contentProviders.splice(i, 1); } };
+  },
   /** Mirrors VS Code: the folder whose path contains the uri, deepest first. */
   getWorkspaceFolder(uri: { fsPath: string }) {
     const inside = (root: string) => uri.fsPath === root || uri.fsPath.startsWith(root.endsWith('/') ? root : `${root}/`);
@@ -227,6 +256,10 @@ export const window = {
     all: [] as Array<{ tabs: Array<{ input: unknown }> }>,
     /** Set `activeTab` to `{ input: new TabInputCustom(uri, viewType) }` to simulate a focused canvas. */
     activeTabGroup: { activeTab: undefined as { input: unknown } | undefined },
+    /** `_fireDidChangeTabs` calls these. (`close` is not mocked: a test that needs it sets it.) */
+    onDidChangeTabs: (listener: (e: unknown) => unknown) => _listen(_tabListeners, listener),
+    /** `_fireDidChangeTabGroups` calls these. */
+    onDidChangeTabGroups: (listener: (e: unknown) => unknown) => _listen(_tabGroupListeners, listener),
   },
   /** Open terminals — createTerminal adds to this list; tests may splice to simulate close. */
   terminals: [] as MockTerminal[],
@@ -392,6 +425,11 @@ export function createMockTerminal(name: string): MockTerminal {
 /** Minimal mock of vscode.TabInputCustom for the recovery service. */
 export class TabInputCustom {
   constructor(public readonly uri: unknown, public readonly viewType: string) {}
+}
+
+/** Minimal mock of vscode.TabInputText: a text editor's tab. */
+export class TabInputText {
+  constructor(public readonly uri: unknown) {}
 }
 
 /** Every command registered via commands.registerCommand, in registration order. */
@@ -676,8 +714,22 @@ export class TextEdit {
 /** Document formatting providers registered through `languages`, in order (tests read and clear it). */
 export const _formattingProviders: Array<{ selector: unknown; provider: { provideDocumentFormattingEdits: (...args: unknown[]) => unknown } }> = [];
 
+/** Document drop edit providers registered through `languages`, in order (tests read and clear it). */
+export const _dropEditProviders: Array<{ selector: unknown; provider: { provideDocumentDropEdits: (...args: unknown[]) => unknown } }> = [];
+
+/** A drop-into-editor edit, as a drop edit provider returns it. */
+export class DocumentDropEdit {
+  additionalEdit?: unknown;
+  constructor(public insertText: string) {}
+}
+
 export const languages = {
   getLanguages: async (): Promise<string[]> => ['plaintext', 'json', 'yaml', 'dbml'],
+  registerDocumentDropEditProvider: (selector: unknown, provider: { provideDocumentDropEdits: (...args: unknown[]) => unknown }) => {
+    const entry = { selector, provider };
+    _dropEditProviders.push(entry);
+    return { dispose: () => { const i = _dropEditProviders.indexOf(entry); if (i >= 0) _dropEditProviders.splice(i, 1); } };
+  },
   registerDocumentFormattingEditProvider: (selector: unknown, provider: { provideDocumentFormattingEdits: (...args: unknown[]) => unknown }) => {
     const entry = { selector, provider };
     _formattingProviders.push(entry);
@@ -819,6 +871,10 @@ export function _resetMockWorkspace(): void {
   workspace.textDocuments = [];
   _textDocumentChangeListeners.length = 0;
   _renameFilesListeners.length = 0;
+  _tabListeners.length = 0;
+  _tabGroupListeners.length = 0;
+  _contentProviders.length = 0;
+  _dropEditProviders.length = 0;
 }
 
 /**

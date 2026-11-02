@@ -3,7 +3,12 @@
 This folder is an ERD Studio data model, stored as DBML, an open format (https://dbml.dbdiagram.io).
 Edit it in VS Code with ERD Studio, or with any text editor or AI assistant.
 
-Every file lives under a layer folder (bronze, silver, gold, …), and layers.json lists the layers:
+Every file lives under a layer folder. This project's layers, in order (layers.json lists them):
+
+    1. Silver   silver/
+    2. Gold     gold/
+
+In each layer folder:
 
     <layer>/tables/<schema>/<table>.dbml   one table: Table <schema>.<table> { … }
     <layer>/relationships/<file>.dbml      Refs between tables, split across files however you like

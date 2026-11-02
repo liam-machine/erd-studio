@@ -42,7 +42,7 @@ import type { CatalogData, CatalogColumn } from '../types/catalog';
 import type { YmlData } from '../types/ymlData';
 import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
-import type { TableLibraryService } from './logicalModelService';
+import type { TableFileEntry, TableLibraryService } from './logicalModelService';
 import { normaliseName } from './nameUtils';
 import { catalogNodeFor, resolveColumnType } from './columnTypes';
 import { log } from './logger';
@@ -146,7 +146,7 @@ const SOURCE_AUTHORITY: readonly PhysicalColumnSource[] = ['catalog', 'yml', 'ma
 export function renameSubjectAreaInRaw(rawText: string, newSlug: string): string {
   const parsed = JSON.parse(rawText) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Subject area file does not contain a JSON object');
+    throw new Error('Diagram file does not contain a JSON object');
   }
   const doc = parsed as Record<string, unknown>;
   // A v6 file names its subject area `subjectArea` (#162, #182); writing
@@ -172,6 +172,25 @@ interface DbmlDiagramView {
   unlinked: ReadonlySet<string>;
   /** Filled while reading: the files holding a relationship between two members that the diagram does not import. */
   drift: Set<string>;
+  /** Filled while reading: each DBML member's layer, from the file it was read from (by lower-case name). */
+  memberLayers?: Map<string, string>;
+  /** The library's table files by resolved path (and lower-cased), listed once per diagram read on first use. */
+  listing?: { byPath: Map<string, TableFileEntry>; byLowerPath: Map<string, TableFileEntry> };
+}
+
+/** `view`'s listing of the library's table files, made on first use: one listing per diagram read. */
+function listingOf(library: TableLibraryService, view: DbmlDiagramView): NonNullable<DbmlDiagramView['listing']> {
+  if (!view.listing) {
+    const byPath = new Map<string, TableFileEntry>();
+    const byLowerPath = new Map<string, TableFileEntry>();
+    for (const entry of library.listTableFiles()) {
+      const resolved = path.resolve(entry.filePath);
+      byPath.set(resolved, entry);
+      byLowerPath.set(resolved.toLowerCase(), entry);
+    }
+    view.listing = { byPath, byLowerPath };
+  }
+  return view.listing;
 }
 
 /** The canvas warning for a relationships file a diagram does not import but holds a Ref between its tables. */
@@ -184,6 +203,8 @@ export class SubjectAreaService {
   private tableLibraryService: TableLibraryService | null = null;
   /** The last read of each DBML diagram: the relationships files it should import but does not (path → files). */
   private readonly importDrift = new Map<string, string[]>();
+  /** The last read of each DBML diagram: each member's layer, from the file it was read from (path → lower-case name → layer). */
+  private readonly memberLayers = new Map<string, ReadonlyMap<string, string>>();
 
   constructor(private readonly layerService: LayerService) {}
 
@@ -316,7 +337,7 @@ export class SubjectAreaService {
 
   private readSubjectArea(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex }): UnifiedSubjectArea {
     if (!fs.existsSync(filePath)) {
-      throw new SubjectAreaFileError('missing', filePath, `Subject area file not found: ${filePath}`);
+      throw new SubjectAreaFileError('missing', filePath, `Diagram file not found: ${filePath}`);
     }
 
     let raw: string;
@@ -324,7 +345,7 @@ export class SubjectAreaService {
       raw = fs.readFileSync(filePath, 'utf-8');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new SubjectAreaFileError('unreadable', filePath, `Failed to read subject area file: ${message}`);
+      throw new SubjectAreaFileError('unreadable', filePath, `Failed to read diagram file: ${message}`);
     }
 
     if (subjectAreaStorageOf(filePath) === 'dbml') {
@@ -338,8 +359,10 @@ export class SubjectAreaService {
           .filter((n) => this.tableLibraryService?.tableStorage(n) !== 'dbml')
           .map((n) => n.toLowerCase())),
         drift: new Set(),
+        memberLayers: new Map(),
       };
       const unified = this.buildUnified(obj, format, filePath, path.basename(filePath, '.dbml'), { ...options, dbml: view });
+      this.memberLayers.set(path.resolve(filePath), view.memberLayers!);
       const drift = [...view.drift].sort();
       this.importDrift.set(path.resolve(filePath), drift);
       for (const file of drift) log.warn(`[DomainService] ${filePath}: ${unimportedRelationshipsMessage(file)}`);
@@ -427,6 +450,16 @@ export class SubjectAreaService {
     return [...(this.importDrift.get(path.resolve(filePath)) ?? [])];
   }
 
+  /**
+   * Each table of the DBML diagram `filePath`, as its last read found it: the
+   * layer of the file the table was read from (the diagram's `use` path
+   * first, as core reads it), by lower-case name. Undefined when it was never
+   * read or is not a DBML diagram.
+   */
+  dbmlMemberLayers(filePath: string): ReadonlyMap<string, string> | undefined {
+    return this.memberLayers.get(path.resolve(filePath));
+  }
+
   /** `buildUnifiedSubjectArea` with this host's library and layers. */
   private buildUnified(
     obj: Record<string, unknown>,
@@ -498,15 +531,24 @@ export class SubjectAreaService {
    * gives it a `use` line.
    */
   private dbmlMember(library: TableLibraryService, name: string, view: DbmlDiagramView): SemanticTable | null {
+    // The layer of the file the member is read from, for the canvas's badge (core reads it the
+    // same way): a file that cannot be read is still in its layer, and drawn there with its error.
+    const readFrom = (file: string | null, table: SemanticTable | null): SemanticTable | null => {
+      if (file !== null && view.memberLayers) {
+        const entry = listingOf(library, view).byPath.get(path.resolve(file));
+        if (entry?.layer !== undefined) view.memberLayers.set(name.toLowerCase(), entry.layer);
+      }
+      return table;
+    };
     const usePath = view.memberPaths.get(name.toLowerCase());
     if (usePath === undefined) {
-      const listed = new Map(library.listTableFiles().map((e) => [path.resolve(e.filePath).toLowerCase(), e.filePath]));
+      const listed = listingOf(library, view).byLowerPath;
       for (const dir of view.useTableDirs) {
         if (dir.startsWith('../')) continue;
-        const file = listed.get(path.resolve(library.semanticAbsolute(`${dir}/${name}.dbml`)).toLowerCase());
+        const file = listed.get(path.resolve(library.semanticAbsolute(`${dir}/${name}.dbml`)).toLowerCase())?.filePath;
         if (file === undefined) continue;
         const byName = library.findTableFile(name);
-        return byName !== null && path.resolve(byName) === path.resolve(file) ? library.getTable(name) : library.getTableAt(file, name);
+        return readFrom(file, byName !== null && path.resolve(byName) === path.resolve(file) ? library.getTable(name) : library.getTableAt(file, name));
       }
       return library.tableStorage(name) === 'dbml' ? null : library.getTable(name);
     }
@@ -514,11 +556,11 @@ export class SubjectAreaService {
       const file = library.semanticAbsolute(usePath);
       const byName = library.findTableFile(name);
       if (byName !== null && path.resolve(byName) !== path.resolve(file)
-        && library.listTableFiles().some((e) => path.resolve(e.filePath) === path.resolve(file))) {
-        return library.getTableAt(file, name);
+        && listingOf(library, view).byPath.has(path.resolve(file))) {
+        return readFrom(file, library.getTableAt(file, name));
       }
     }
-    return library.getTable(name);
+    return readFrom(library.findTableFile(name), library.getTable(name));
   }
 
   /**

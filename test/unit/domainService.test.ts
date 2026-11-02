@@ -149,7 +149,7 @@ describe('SubjectAreaService', () => {
 
     it('handles missing files with descriptive error', () => {
       expect(() => service.getSubjectArea('/nonexistent/domain.json')).toThrow(
-        'Subject area file not found'
+        'Diagram file not found'
       );
     });
 

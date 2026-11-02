@@ -140,7 +140,7 @@ tool, so the user sees each change. The commands you will use:
 | `~/.erd-studio-cli/bin/erd-studio doctor --json --semantic-dir .erd-studio` | Is dbt installed, which kind, is there a profile, are the manifest and catalog fresh, what ERD Studio files exist, and suggested `nextSteps` |
 | `~/.erd-studio-cli/bin/erd-studio inventory --summary --json --semantic-dir .erd-studio` | Every dbt model: folder, suggested layer, column count, relationship clusters, what is already modelled, and the project's modelling `conventions` |
 | `~/.erd-studio-cli/bin/erd-studio inventory --models a,b,c --json --semantic-dir .erd-studio` | Full columns, types, keys and relationships for just those models |
-| `~/.erd-studio-cli/bin/erd-studio diff --domain <file> --json --semantic-dir .erd-studio` | The same comparison as the canvas's **⊕ Diff** button, plus a list of fixes |
+| `~/.erd-studio-cli/bin/erd-studio diff --domain <file> --json --semantic-dir .erd-studio` | The same comparison as the canvas's **Compare with dbt** button, plus a list of fixes |
 
 Run them from the dbt project folder (the one with `dbt_project.yml`) or add `--project <folder>`;
 if doctor reports `project.found: false`, ask which folder holds it and pass `--project` from then on.
@@ -391,7 +391,7 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
 Explain "drift" before showing any: *drift* is any difference between the logical design and what
 dbt actually has — a column one side has and the other does not, a different type, or a missing
 connection. Then say "Comparing your logical model with the dbt project — the same check as the
-**⊕ Diff** button on the canvas," and run `diff --domain` on the diagram file you wrote (`.dbml`, or `.json`).
+**Compare with dbt** button on the canvas," and run `diff --domain` on the diagram file you wrote (`.dbml`, or `.json`).
 
 Then loop, following `references/verify-and-fix.md`, which maps every fix to its exact edit:
 
@@ -414,7 +414,7 @@ Then loop, following `references/verify-and-fix.md`, which maps every fix to its
 - **`fix-model-yaml` / `fix-dbml-file`** first, always: the file does not parse — fix that line (DBML: `references/troubleshooting.md`), re-run the diff (a merge conflict: Stage 1). `resolve-format-conflicts`, `finish-dbml-conversion` and `import-dbml-file`: `references/troubleshooting.md`.
 - **`needsMigration`** — older file format; suggest **ERD Studio: Migrate Subject Areas to the Central Table Library**, skip it now.
 - Re-run the diff after each round of edits. **Stop after 3 rounds.** List what remains using
-  each fix's `explain` text and suggest looking at it together with **⊕ Diff** on the canvas.
+  each fix's `explain` text and suggest looking at it together with **Compare with dbt** on the canvas.
 
 At the end:
 - List the **advisory** rows once ("dbt doesn't know these column types yet — the catalog, Stage
@@ -436,7 +436,7 @@ changes in the logical model; never rename a model; never edit dbt files.
 
 - Tell the user how to see it: open the **ERD Studio** sidebar in VS Code, expand the layer,
   click the domain. ERD Studio auto-arranges it the first time it opens (re-run with **Layout**
-  or Shift+L). **Logical** / **Physical** tabs are at the top; **⊕ Diff** compares them. Hovering
+  or Shift+L). **Logical** / **Physical** tabs are at the top; **Compare with dbt** compares them. Hovering
   a table's name or a column shows its description and metadata.
 - Summarise the files you wrote, the approach you applied (or that you drew dbt as it is), and
   the **to confirm** list, if any: guessed column types, and any role or grain left blank
@@ -453,8 +453,8 @@ changes in the logical model; never rename a model; never edit dbt files.
   - fill in any descriptions marked "(draft)" and the blanks on the "to confirm" list;
   - another business area: run `/erd-studio-setup` again (safe — existing models are kept, the
     saved approach reused), or draft it with **Draw from dbt…** and run this again to enrich it;
-  - after changing dbt, run `dbt parse` and click **⊕ Diff** on the canvas;
-  - future logical ↔ dbt changes can go through the canvas: **⊕ Diff** → **⊕ Sync** → **Apply
+  - after changing dbt, run `dbt parse` and click **Compare with dbt** on the canvas;
+  - future logical ↔ dbt changes can go through the canvas: **Compare with dbt** → **⊕ Sync** → **Apply
     Changes** writes a sync plan the schema skill's SYNC.md guide carries out (with a target
     design, backlog items are listed too and kept, being marked intentional).
 - If the inventory hinted at connections dbt does not test yet (a `<thing>_id` column pointing

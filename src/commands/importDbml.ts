@@ -78,6 +78,7 @@ import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
 import { log } from '../services/logger';
+import { WHICH_LAYER_FOR_DIAGRAM } from '../services/layerWording';
 
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
 
@@ -272,7 +273,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         description: l === suggested ? 'suggested by the file' : (l.id === l.label.toLowerCase() ? undefined : l.id),
         id: l.id,
       })),
-      { title: TITLE, placeHolder: 'Which layer is this diagram for?', ignoreFocusOut: true },
+      { title: TITLE, placeHolder: WHICH_LAYER_FOR_DIAGRAM, ignoreFocusOut: true },
     );
     if (!choice) return cancelled();
     layer = choice.id;

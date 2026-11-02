@@ -31,7 +31,7 @@ line, then get back to the task. If the user wants more, expand in your own word
 |---|---|
 | **ERD** | Entity-relationship diagram: boxes for tables, lines for how they connect. |
 | **logical data model** | The design of your data — the tables, their columns and keys, and how they connect — kept as plain files you can review like code, whether or not anything has been built yet. |
-| **subject area** | What ERD Studio's commands call a diagram (this guide also says *domain*). |
+| **subject area** | An older name for a diagram, left only in the file format and two commands for older projects (this guide also says *domain*). |
 | **logical vs physical** | *Physical* is what really exists in the dbt project, worked out by ERD Studio and read-only. *Logical* is your design — the tables, keys and connections you mean to have. |
 | **domain** | One focused diagram of related tables for one business area, like "orders". Saved as `.erd-studio/<layer>/diagrams/<domain>.dbml` (a `.json` in the layer folder, in a project from before ERD Studio 2.0). |
 | **layer** | A folder for organising diagrams and tables, usually a stage of the warehouse such as silver (cleaned) or gold (ready for reporting). |
@@ -43,7 +43,7 @@ line, then get back to the task. If the user wants more, expand in your own word
 | **cardinality** | How many rows on each side of a link can match: *many-to-one* means many orders belong to one customer. |
 | **fact / dimension** | A *fact* table records events or measurements (orders, payments); a *dimension* describes things (customers, products). |
 | **drift** | Any difference between the logical design and what dbt actually has — a missing column, a different type, a missing link. |
-| **diff** | ERD Studio's comparison of logical against physical. The same check as the **⊕ Diff** button in the canvas toolbar. |
+| **diff** | ERD Studio's comparison of logical against physical. The same check as the **Compare with dbt** button in the canvas toolbar. |
 | **canvas** | The diagram view inside VS Code where ERD Studio draws a domain. |
 | **ghost / phantom** | A table in the diagram that the dbt project does not have — usually a typo or something not built yet. |
 

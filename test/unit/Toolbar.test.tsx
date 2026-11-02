@@ -105,7 +105,7 @@ vi.mock('../../webview/store/editorStore', () => ({
 // Fixtures
 // ---------------------------------------------------------------------------
 
-import { Toolbar, NO_TABLES_FOR_RELATIONSHIP } from '../../webview/components/Toolbar/Toolbar';
+import { Toolbar, NO_TABLES_FOR_RELATIONSHIP, compareButtonWording, layerBoundWording } from '../../webview/components/Toolbar/Toolbar';
 import type { TableFlowNode, FkFlowEdge } from '@erd-studio/renderer/editor';
 
 function makeNode(id: string): TableFlowNode {
@@ -246,7 +246,7 @@ describe('Toolbar layout-dirty button', () => {
  * class, which is what the component actually reads.
  */
 describe('logical-only mode (no dbt project)', () => {
-  const diffButton = () => screen.queryByRole('button', { name: /toggle cross-stage comparison/i });
+  const diffButton = () => screen.queryByRole('button', { name: /^(compare with dbt|compare with design|stop comparing)$/i });
   const refreshButton = () => screen.queryByRole('button', { name: /refresh manifest data/i });
 
   beforeEach(() => {
@@ -270,7 +270,7 @@ describe('logical-only mode (no dbt project)', () => {
     render(<Toolbar {...defaultProps} />);
     expect(screen.queryByTestId('stage-tabs')).toBeNull();
     expect(diffButton()).toBeNull();
-    expect(screen.queryByText(/Diff/)).toBeNull();
+    expect(screen.queryByText(/Diff|Compare with/)).toBeNull();
     expect(refreshButton()).toBeNull();
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
@@ -522,5 +522,41 @@ describe('+ Add → New Relationship', () => {
     expect(NO_TABLES_FOR_RELATIONSHIP).not.toMatch(/\b(models?|domains?|subject areas?)\b/i);
     fireEvent.click(newRelationship());
     expect(setNewFkDialogOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe('plain labels', () => {
+  afterEach(() => {
+    mockStoreState.domain = mockSubjectArea;
+    mockStoreState.discrepancyVisible = false;
+  });
+
+  it('the Compare button says what it compares, on each stage', () => {
+    render(<Toolbar {...defaultProps} />);
+    const button = screen.getByRole('button', { name: 'Compare with dbt' });
+    expect(button.textContent).toContain('Compare with dbt');
+    expect(button.getAttribute('title')).toBe('Compare this design with the dbt project');
+    expect(compareButtonWording('physical', false)).toEqual({ label: 'Compare with design', title: 'Compare what dbt has with your design' });
+    expect(compareButtonWording('logical', true, 'physical')).toEqual({ label: 'Stop comparing', title: 'Comparing with dbt — click to stop' });
+  });
+
+  it('+ Add offers New Table and Add Existing Tables', () => {
+    render(<Toolbar {...defaultProps} />);
+    fireEvent.click(screen.getByRole('button', { name: /add table or relationship/i }));
+    expect(screen.getByRole('menuitem', { name: 'New Table' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Add Existing Tables' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /Design Table/ })).toBeNull();
+  });
+
+  it('the layout row counts columns for a left-to-right flow and rows for top-to-bottom', () => {
+    expect(layerBoundWording('RIGHT')).toEqual({ label: 'Max per column', unit: 'per column', hint: 'lower = wider layout, higher = taller layout' });
+    expect(layerBoundWording('DOWN')).toEqual({ label: 'Max per row', unit: 'per row', hint: 'lower = taller layout, higher = wider layout' });
+    render(<Toolbar {...defaultProps} />);
+    openOptionsPanel();
+    expect(screen.getByText('Max per column')).toBeTruthy();
+    expect(screen.getByText(/^auto — \d+ per column for 1 tables$/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '↓' }));
+    expect(screen.getByText('Max per row')).toBeTruthy();
+    expect(screen.queryByText('Max per layer')).toBeNull();
   });
 });

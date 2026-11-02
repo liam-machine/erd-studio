@@ -17,7 +17,7 @@
  *                         feedback (requestFeedbackContext, analyzeFeedback,
  *                         submitFeedback, copyFeedbackReport,
  *                         openFeedbackLink),
- *                         viewFile, requestReload, dismissWelcome,
+ *                         viewFile, requestReload,
  *                         dismissManifestHint, openGettingStarted, showLogs,
  *                         exportDiagram, closeEditor, openAnotherDomain,
  *                         requestExistingTables
@@ -131,6 +131,7 @@ import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
 import { ADD_FROM_DBT_NEEDS_DBT_MESSAGE, findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
 import type {
+  AddModelMessage,
   AddRelationshipMessage,
   AnalyzeFeedbackMessage,
   CopyFeedbackReportMessage,
@@ -150,9 +151,11 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplaySubjectArea, DisplayRelationship } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from '../types/semantic';
-import type { RevealRelationshipMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import type { DropTablesMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import { GO_TO_TABLE_COMMAND, REVEAL_IN_TABLE_LIBRARY_COMMAND, projectRelativePath } from '../commands/goToTable';
+import { MOVE_TABLE_COMMAND } from '../commands/moveDbml';
 import type { GroundTruth } from '../types/syncPlan';
-import type { NodePosition, Relationship, SemanticTable, UnifiedSubjectArea } from '../types/semantic';
+import type { NodePosition, Relationship, SemanticTable, TableRelationship, UnifiedSubjectArea } from '../types/semantic';
 import { describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
 import { saveDocument, saveDocumentByUri, saveWithoutFormatting } from './documentSave';
@@ -199,6 +202,10 @@ import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
 import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused } from '../services/logicalModelService';
+import { tableHomesOf } from '../services/tableHomes';
+import { buildCanvasContext } from '../services/canvasContext';
+import type { CodeOwnersReader } from '../services/codeOwners';
+import { newTableSchemaChoice } from '../services/newTableSchema';
 import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
 import type { FileWrite } from '../services/fileWrites';
 import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
@@ -221,10 +228,12 @@ import {
 } from './subjectAreaCodec';
 import type { ParsedSubjectArea, SubjectAreaResolver } from './subjectAreaCodec';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
+import { withRelationshipHomes } from '../services/diagramRelationshipHomes';
 import { normaliseName } from '../services/nameUtils';
 import { yieldToEventLoop } from '../services/libraryWarmUp';
 import { createLogger, elapsedMs, log, phaseTimer, plural } from '../services/logger';
 import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
+import type { SessionPromptKind } from '../services/activationPrompts';
 
 /** The canvas's lines in the ERD Studio log: opening a diagram, position saves. */
 const canvasLog = createLogger('Canvas');
@@ -450,13 +459,18 @@ import {
   isValidStage,
   validateColumnDef as validateColumnDefPayload,
   validateColumnDefs,
+  validateSchemaFolderPayload,
+  validateRequestNewRelationshipFilesPayload,
   validateTableName,
   validateModelAliasPayload,
   validateMetaPayload,
   validateAnnotationPositions,
   validateAddModelsFromDbtPayload,
   validateAddExistingModelsPayload,
+  validateDropTablesPayload,
   validateOpenModelFilePayload,
+  validateGoToTablePayload,
+  validateTableActionPayload,
   validateLayoutFinishedPayload,
   validateViewFilePayload,
   validateExtraPairs,
@@ -479,6 +493,7 @@ import {
   type AnnotationPositionPayload,
 } from './payloadValidation';
 import { sameName } from '../types/naming';
+import { dropGridPositions, tablesOfDroppedUris } from '../services/tableDrop';
 
 /** A parsed domain file's `logical.relationships`, as a list the rename helpers can rewrite in place. */
 function stageRelationships(parsed: Record<string, unknown>): Array<Record<string, unknown>> {
@@ -525,6 +540,28 @@ export const TABLE_REFRESH_BATCH_MS = 150;
 
 /** How long a relationship reveal waits for its canvas to load (a large diagram can take a few seconds). */
 export const PENDING_REVEAL_MS = 60_000;
+
+/** How long a Table Library drag is remembered for a drop that brings no table file. */
+export const PENDING_LIBRARY_DRAG_MS = 60_000;
+
+/** The answer to a drop on the canvas that names no table. */
+export const DROP_TABLES_NOTHING_MESSAGE =
+  'ERD Studio: Hold Shift and drop a table from the Table Library, or a table file from the Explorer, onto the diagram.';
+
+/** The answer to a drop of tables that are all on the diagram already (they are selected instead). */
+export function alreadyOnDiagramMessage(tables: readonly string[]): string {
+  return tables.length === 1
+    ? `ERD Studio: "${tables[0]}" is already on this diagram.`
+    : `ERD Studio: These ${tables.length} tables are already on this diagram.`;
+}
+
+/** How long the status bar says where a new relationship was saved. */
+export const RELATIONSHIP_SAVED_STATUS_MS = 8000;
+
+/** "ERD Studio: Relationship saved in .erd-studio/gold/relationships/finance.dbml (line 7)". */
+export function relationshipSavedMessage(file: string, line: number): string {
+  return `ERD Studio: Relationship saved in ${file} (line ${line})`;
+}
 /** The Convert offer's dialog (§6.4): its title and its two buttons (VS Code adds Cancel, which is Not Now). */
 export const DBML_CONVERSION_OFFER_TITLE = 'Convert this project to DBML?';
 export const DBML_CONVERSION_OFFER_CONVERT = 'Convert…';
@@ -680,6 +717,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private dbmlConversionEligible = false;
   private dbmlConversion: DbmlConversionHooks | undefined;
   private namingMigration: NamingMigrationHooks | undefined;
+  /**
+   * The window session's one prompt (src/services/activationPrompts.ts): the
+   * Convert and naming offers claim it, and wait for the next window when an
+   * activation prompt already showed. Unset (tests): never gated.
+   */
+  private sessionPrompts: { claim(kind: SessionPromptKind): boolean } | undefined;
   private relationshipBackwardsOffered = false;
   /** Each document's logical relationships flagged `keysContradict` when its canvas last loaded (#163). */
   private readonly backwardsDrawn = new Map<string, DisplayRelationship[]>();
@@ -894,6 +937,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private readonly pendingReveals = new Map<string, { target: RevealRelationshipMessage['payload']; at: number }>();
 
   /**
+   * Table reveals (and Add to Diagram…'s adds) asked for before their canvas
+   * had loaded, by diagram path; run by the `ready` handler, dropped after
+   * {@link PENDING_REVEAL_MS} like {@link pendingReveals}.
+   */
+  private readonly pendingTableActions = new Map<string, { reveal: string; add?: string[]; at: number }>();
+
+  /**
+   * The last drag that started in the Table Library ({@link noteLibraryDrag}):
+   * a drop on a canvas whose DataTransfer names no table file adds these,
+   * once, while younger than {@link PENDING_LIBRARY_DRAG_MS}.
+   */
+  private pendingLibraryDrag: { tables: string[]; at: number } | undefined;
+
+  /**
    * Webviews whose panel has been disposed. Refresh paths iterate a snapshot
    * of openPanels and may race with disposal, and mutation handlers may finish
    * after the user closes the tab — `post()` drops messages to these instead
@@ -1002,6 +1059,118 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       { models: domain.logical.models }, manifest, ymlData, domain.modelFolder, { readAllTables: true },
     );
     this.post(webview, { type: 'existingTables', payload: { existingModels, manifestModels } });
+  }
+
+  /** The repository's CODEOWNERS (read only), for "Reviewed by" in the detail panel. */
+  private codeOwners: Pick<CodeOwnersReader, 'ownersOf'> | undefined;
+
+  /** Hand the editor the CODEOWNERS reader the sidebar uses (set once, at activation). */
+  useCodeOwners(reader: Pick<CodeOwnersReader, 'ownersOf'>): void {
+    this.codeOwners = reader;
+  }
+
+  /** Each webview's latest `canvasContext` request: an older one still running posts nothing. */
+  private readonly canvasContextRuns = new WeakMap<vscode.Webview, number>();
+
+  /** Stop a `canvasContext` still being worked out: the physical stage gets none. */
+  private cancelCanvasContext(webview: vscode.Webview): void {
+    this.canvasContextRuns.set(webview, (this.canvasContextRuns.get(webview) ?? 0) + 1);
+  }
+
+  /**
+   * Post the `canvasContext` for a logical-stage diagram just posted: each
+   * table's file and reviewers, and its relationships to tables not on the
+   * diagram (`buildCanvasContext`). Runs after the diagram has gone out, so
+   * the canvas paints first, and reads no table file a refresh would not:
+   * the Refs of every relationships file (DBML: the whole library, not just
+   * the diagram's imports) and the own relationships of each YAML table
+   * already read (a large YAML library's other tables join as the
+   * background warm-up reads them, on the next refresh). Writes nothing;
+   * never throws.
+   */
+  private async sendCanvasContext(webview: vscode.Webview, members: readonly string[], diagramLayer: string | undefined): Promise<void> {
+    const run = (this.canvasContextRuns.get(webview) ?? 0) + 1;
+    this.canvasContextRuns.set(webview, run);
+    const current = (): boolean => this.canvasContextRuns.get(webview) === run && !this.disposedWebviews.has(webview);
+    try {
+      await yieldToEventLoop();
+      if (!current()) return;
+      const library = this.tableLibraryService;
+      const labels = new Map(this.layerService.getAllLayers().map((l) => [l.id, l.label || l.id]));
+      const labelOf = (layer: string | undefined): string | undefined => (layer === undefined ? undefined : labels.get(layer) ?? layer);
+      // One look at the library's listing for every lookup below, not one per table.
+      const context = library.withIndexSnapshot(() => {
+        const tables = library.dirExists() ? this.knownLibraryRelationships() : [];
+        const entries = library.listTableFiles();
+        const homes = tableHomesOf(entries);
+        // A table's file from the listing: a name with no file gets no File line
+        // (`resolveTablePath` would name where a new one would go).
+        const files = new Map<string, string>();
+        for (const e of entries) if (!e.shadowedBy && !files.has(e.name.toLowerCase())) files.set(e.name.toLowerCase(), e.filePath);
+        const fileOf = (name: string): string | undefined => files.get(name.toLowerCase());
+        return buildCanvasContext({
+          members,
+          libraryTables: tables,
+          fileOf: (name) => {
+            const file = fileOf(name);
+            return file === undefined ? undefined : projectRelative(this.workspaceRoot, file);
+          },
+          layerLabelOf: (name) => labelOf(homes.get(name.toLowerCase())?.layer),
+          ...(diagramLayer !== undefined ? { diagramLayerLabel: labelOf(diagramLayer) } : {}),
+          ...(this.codeOwners ? {
+            ownersOf: (name: string) => {
+              const file = fileOf(name);
+              return file === undefined ? [] : this.codeOwners!.ownersOf(file);
+            },
+          } : {}),
+        });
+      });
+      if (!current()) return;
+      this.post(webview, { type: 'canvasContext', payload: context });
+    } catch (err) {
+      // The canvas works without it: no File line, no "Not on this diagram" list.
+      log.warn(`[SemanticEditorProvider] Canvas context failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Every library table by name (no columns), each with the relationships it
+   * owns as far as is known without reading a table file: the Refs of every
+   * relationships file (a Ref's pairs as one composite line), and each YAML
+   * table's own list when its file is already read. For `buildCanvasContext`.
+   */
+  private knownLibraryRelationships(): SemanticTable[] {
+    const library = this.tableLibraryService;
+    const entries = library.listTableFiles().filter((e) => !e.shadowedBy);
+    const owned = new Map<string, TableRelationship[]>();
+    const own = (owner: string, rel: TableRelationship): void => {
+      const key = owner.toLowerCase();
+      const list = owned.get(key);
+      if (list) list.push(rel);
+      else owned.set(key, [rel]);
+    };
+    for (const file of library.listRelationshipsFiles()) {
+      const reading = library.readRelationshipsFile(file);
+      if (!reading?.readable) continue;
+      for (const ref of [...reading.refs, ...(reading.pending ?? [])]) {
+        const composite = ref.relationships.length > 1 ? `ref:${file}:${ref.line}` : undefined;
+        for (const { fromModel, ...rel } of ref.relationships) {
+          own(fromModel, composite && !rel.compositeKey ? { ...rel, compositeKey: composite } : rel);
+        }
+      }
+    }
+    const unread = new Set(library.unreadTableFiles().map((e) => e.filePath));
+    for (const entry of entries) {
+      if (entry.storage === 'dbml' || unread.has(entry.filePath)) continue;
+      let table: SemanticTable | null = null;
+      try {
+        table = library.getTable(entry.name);
+      } catch {
+        table = null;
+      }
+      for (const rel of table?.relationships ?? []) own(entry.name, rel);
+    }
+    return entries.map((e) => ({ name: e.name, columns: [], relationships: owned.get(e.name.toLowerCase()) ?? [] }) as unknown as SemanticTable);
   }
 
   /**
@@ -1331,13 +1500,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const panel = this.openPanels.get(panelKey);
         const NON_MUTATION_TYPES = new Set([
           'ready', 'updatePositions', 'switchStage', 'toggleDiscrepancy',
-          'refreshManifest', 'dismissWelcome',
+          'refreshManifest',
           'viewFile', 'generateSyncPlan', 'runDbtCompile', 'runDbtParse', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'removeAnnotations',
           'requestReload', 'openGettingStarted', 'showLogs', 'closeEditor', 'openAnotherDomain',
           'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
           'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
-          'openModelFile', 'layoutFinished', 'exportDiagram', 'requestExistingTables',
+          'openModelFile', 'layoutFinished', 'exportDiagram', 'requestExistingTables', 'requestNewRelationshipFiles',
+          // Finding a table elsewhere: they open, select or copy, never write.
+          'goToTable', 'showTableOnOtherDiagrams', 'copyTablePath', 'revealTableInLibrary',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           log.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
@@ -1376,6 +1547,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               if (posted !== undefined && entry?.webview === webviewPanel.webview) {
                 entry.loaded = true;
                 this.flushPendingReveal(document.uri.fsPath, webviewPanel.webview);
+                this.flushPendingTableAction(document.uri.fsPath, panelKey);
               }
             }
             void this.offerRelationshipPrompts(document, webviewPanel.webview, panelKey);
@@ -1383,6 +1555,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'requestExistingTables':
             await this.sendExistingTables(document, webviewPanel.webview);
             break;
+          case 'requestNewRelationshipFiles': {
+            // Reads only, so it is allowed on the physical stage too.
+            const payloadError = validateRequestNewRelationshipFilesPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            this.sendNewRelationshipFiles(document, webviewPanel.webview);
+            break;
+          }
           case 'requestReload':
             // Webview detected it was orphaned (e.g. extension update before
             // activation auto-recovery could fire). Save & reload safely.
@@ -1410,9 +1592,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             await vscode.commands.executeCommand(IMPORT_DBML_COMMAND, document.uri);
             break;
           }
-          case 'dismissWelcome':
-            await this.context.globalState.update('welcomeDismissed', true);
-            break;
           case 'dismissManifestHint': {
             // The webview has already hidden the hint; persisting it is all
             // that is left, so no domain is re-sent.
@@ -1470,7 +1649,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             break;
           }
           case 'addModel': {
-            const payload = (message as { payload?: DesignTable }).payload;
+            const payload = (message as { payload?: AddModelMessage['payload'] }).payload;
             if (payload) {
               telemetry.feature('addModel');
               await this.queueEdit(panelKey, () =>
@@ -1635,6 +1814,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               this.handleAddExistingModels(document, webviewPanel.webview, (payload as { modelNames: string[] }).modelNames));
             break;
           }
+          case 'dropTables': {
+            // A Shift-drop of Table Library rows or Explorer table files. Logical
+            // only, like addExistingModels: not in NON_MUTATION_TYPES.
+            const payload = (message as { payload?: unknown }).payload;
+            const payloadError = validateDropTablesPayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add the dropped tables: ${payloadError}` } });
+              break;
+            }
+            await this.handleDropTables(document, webviewPanel.webview, panelKey, payload as DropTablesMessage['payload']);
+            break;
+          }
           case 'addModelsFromDbt': {
             // Logical only: not in NON_MUTATION_TYPES, so the physical guard
             // above has already refused it there. The QuickPick runs outside
@@ -1694,6 +1885,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             await this.handleOpenModelFile(payload.modelName, webviewPanel.webview);
+            break;
+          }
+          case 'goToTable': {
+            // The search's "Not on this diagram" hint. Writes nothing (physical allowlist).
+            const payload = (message as { payload?: unknown }).payload;
+            const payloadError = validateGoToTablePayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to open Go to Table: ${payloadError}` } });
+              break;
+            }
+            const query = (payload as { query?: string } | undefined)?.query?.trim();
+            await vscode.commands.executeCommand(GO_TO_TABLE_COMMAND, query || undefined);
+            break;
+          }
+          case 'showTableOnOtherDiagrams':
+          case 'moveTable':
+          case 'copyTablePath':
+          case 'revealTableInLibrary': {
+            // A table's context menu. Only moveTable writes (it moves files),
+            // so it alone is left off the physical allowlist.
+            const payload = (message as { payload?: unknown }).payload;
+            const payloadError = validateTableActionPayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await this.handleTableAction(message.type, (payload as { modelName: string }).modelName.trim(), document, webviewPanel.webview);
             break;
           }
           // --- Feedback dialog -------------------------------------------
@@ -2223,6 +2441,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * A table's canvas context menu: Show on Other Diagrams…, Move Table…,
+   * Copy Path and Reveal in Table Library. Each acts on the table's library
+   * file; a table with none (a dbt model the library does not have) is named
+   * in the toast. Only Move Table writes, through its own command.
+   */
+  private async handleTableAction(
+    action: 'showTableOnOtherDiagrams' | 'moveTable' | 'copyTablePath' | 'revealTableInLibrary',
+    modelName: string,
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+  ): Promise<void> {
+    if (action === 'showTableOnOtherDiagrams') {
+      await vscode.commands.executeCommand('erdStudio.openInDiagram', { type: 'model', name: modelName }, { excludeDiagram: document.uri.fsPath });
+      return;
+    }
+    const filePath = this.tableLibraryService.findTableFile(modelName);
+    if (!filePath) {
+      this.post(webview, { type: 'error', payload: { message: `Table "${modelName}" not found in the Table Library.` } });
+      return;
+    }
+    if (action === 'moveTable') {
+      await vscode.commands.executeCommand(MOVE_TABLE_COMMAND, filePath);
+    } else if (action === 'copyTablePath') {
+      const shown = projectRelativePath(this.workspaceRoot, filePath);
+      await vscode.env.clipboard.writeText(shown);
+      vscode.window.setStatusBarMessage(`ERD Studio: Copied ${shown}`, 4000);
+    } else {
+      await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, modelName);
+    }
+  }
+
+  /**
    * Why a model cannot be edited: its file has a YAML error (the file exists
    * but is broken), else the old "not found" wording.
    */
@@ -2390,6 +2640,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.libraryWarmUp = warmUp;
   }
 
+  /** Wire the window session's one-prompt gate; the extension calls it once. */
+  setSessionPrompts(gate: { claim(kind: SessionPromptKind): boolean }): void {
+    this.sessionPrompts = gate;
+  }
+
   /** Wire Convert Project to DBML's offer (§6.4); the extension calls it once. */
   setDbmlConversion(
     candidates: DbmlConversionHooks['candidates'],
@@ -2424,6 +2679,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (candidates.tablesDirIsLayer || candidates.files === 0) return false;
       if (hooks.goesNowhere?.()) return false;
       this.dbmlConversionEligible = true;
+      // Another prompt already showed in this window: ask in the next one.
+      if (this.sessionPrompts && !this.sessionPrompts.claim('dbmlConversion')) return false;
       telemetry.feature('convertToDbmlOffered');
       const message = dbmlConversionOfferDetail(storage, candidates.files);
       // A dialog the user must answer (after pre-release 1.9.0): VS Code adds
@@ -2519,8 +2776,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // A v4 file is no refusal here: the command runs the v5 migration first.
       const refused = plan.v4SubjectAreas.length > 0 ? plan.refusals.length > 1 : plan.refusals.length > 0;
       if (refused || (namingMigrationIsEmpty(plan) && plan.v4SubjectAreas.length === 0)) return false;
+      // Another prompt already showed in this window: ask in the next one.
+      if (this.sessionPrompts && !this.sessionPrompts.claim('namingMigration')) return false;
       const choice = await vscode.window.showInformationMessage(
-        'ERD Studio now says "table" and "subject area", and this project\'s files can say so too: .erd-studio/tables/ ' +
+        'ERD Studio now says "table" where it said "model", and this project\'s files can say so too: .erd-studio/tables/ ' +
           `instead of logical-models/, "subjectArea" instead of "domain". Teammates will need ERD Studio ${hooks.version} or later ` +
           'to open the files afterwards. Review the migration?',
         'Review the Migration…',
@@ -3645,7 +3904,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         throw new EditRefused(`${fileProblem.message} ${next}`);
       }
       if (err instanceof NotASubjectAreaObject) {
-        throw new EditRefused(`Subject area file ${shown} does not contain a JSON object.`);
+        throw new EditRefused(`Diagram file ${shown} does not contain a JSON object.`);
       }
       if (err instanceof SubjectAreaValidationError) throw new EditRefused(err.message);
       throw err;
@@ -3729,6 +3988,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     ymlData: YmlData,
     viewConfig: import('../types/semantic').ViewConfig,
     stubColumns?: string[],
+    /** The diagram's file: a DBML diagram's tables are badged with the layer each was read from. */
+    diagramPath?: string,
   ): DisplaySubjectArea {
     const editorPayload = this.buildWebviewPayload(domain, manifest, ymlData, domain.modelFolder);
     const readOnly = domain.stage === 'physical';
@@ -3744,7 +4005,100 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       dbtKeyIndex,
     });
     // dbt's key evidence orients new relationships on an editable canvas (#133 L1).
-    return readOnly ? display : withDbtKeyHints(display, dbtKeyIndex);
+    return readOnly ? display : this.withWhereThingsLand(this.withOwnRelationships(this.withTableLayers(withDbtKeyHints(display, dbtKeyIndex), diagramPath), diagramPath), diagramPath);
+  }
+
+  /**
+   * Where New Table puts a table, for its Schema field: the layer's schema
+   * folders and the default (`newTableSchemaChoice`), only when the
+   * diagram's new tables are DBML (`newTableFolder`); a YAML project is
+   * unchanged. Lists table files; reads none.
+   */
+  private withWhereThingsLand(display: DisplaySubjectArea, diagramPath: string | undefined): DisplaySubjectArea {
+    if (diagramPath === undefined) return display;
+    try {
+      const home = this.newTableFolder(diagramPath);
+      if (home === undefined || typeof home === 'string') return display;
+      const choice = newTableSchemaChoice({
+        layer: home.layer,
+        layerSchema: home.schema,
+        members: display.models.map((m) => m.name),
+        homes: tableHomesOf(this.tableLibraryService.listTableFiles()),
+      });
+      return { ...display, newTableSchemas: { dir: projectRelative(this.workspaceRoot, this.semanticRootDir()), ...choice } };
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] where new tables go: ${err instanceof Error ? err.message : String(err)}`);
+      return display;
+    }
+  }
+
+  /**
+   * Answer `requestNewRelationshipFiles` (the New Relationship dialog
+   * opening): the relationships file a new relationship of each of the
+   * diagram's DBML tables goes to when that table holds the foreign key
+   * (`placeNewRef`, through `relationshipsFilesForNewRefs`), project-relative.
+   * Asked for on demand, not sent with every payload: it reads every
+   * relationships file. The member names come from the open document's
+   * text (no table is resolved); a YAML project answers empty at once.
+   */
+  private sendNewRelationshipFiles(document: vscode.TextDocument, webview: vscode.Webview): void {
+    const files: Record<string, string> = {};
+    try {
+      // No DBML table in the project: no relationship of this diagram goes to a relationships file.
+      const names = (this.tableLibraryService.writesDbml()
+        ? subjectAreaTableNames(document.getText(), document.uri.fsPath)
+        : null) ?? [];
+      for (const [name, file] of this.tableLibraryService.relationshipsFilesForNewRefs(names)) {
+        files[name] = projectRelative(this.workspaceRoot, file);
+      }
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] where new relationships go: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (this.disposedWebviews.has(webview)) return;
+    this.post(webview, { type: 'newRelationshipFiles', payload: { files } });
+  }
+
+  /**
+   * Which relationships the diagram file holds itself, so the detail panel's
+   * Remove confirmation warns only about the ones that really go with a
+   * table (`withRelationshipHomes`). Reads the open document's text when
+   * there is one; a file that cannot be read is left unmarked.
+   */
+  private withOwnRelationships(display: DisplaySubjectArea, diagramPath: string | undefined): DisplaySubjectArea {
+    if (diagramPath === undefined) return display;
+    if (subjectAreaStorageOf(diagramPath) === 'dbml') return withRelationshipHomes(display, undefined, true);
+    let own: unknown = null;
+    try {
+      const open = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === diagramPath);
+      const text = open ? open.getText() : fs.readFileSync(diagramPath, 'utf-8');
+      const logical = codecFor(diagramPath).parse(text, diagramPath).parsed.logical as { relationships?: unknown } | undefined;
+      own = logical?.relationships;
+    } catch {
+      own = null;
+    }
+    return withRelationshipHomes(display, own, false);
+  }
+
+  /**
+   * Each DBML table's own layer and every layer's config, so the canvas
+   * badges a table borrowed from another layer with that layer, not the
+   * diagram's. A DBML diagram's tables take the layer of the file each was
+   * read from (its `use` path first, as core's loader reads it); a JSON
+   * diagram's DBML tables, their file's. A project with no DBML tables is unchanged.
+   */
+  private withTableLayers(display: DisplaySubjectArea, diagramPath: string | undefined): DisplaySubjectArea {
+    const read = diagramPath !== undefined ? this.subjectAreaService.dbmlMemberLayers(diagramPath) : undefined;
+    const homes = read ? undefined : tableHomesOf(this.tableLibraryService.listTableFiles());
+    const layerOf = (name: string): string | undefined => read ? read.get(name.toLowerCase()) : homes?.get(name.toLowerCase())?.layer;
+    if (!display.models.some((m) => layerOf(m.name) !== undefined)) return display;
+    return {
+      ...display,
+      layerConfigs: this.layerService.getAllLayers(),
+      models: display.models.map((model) => {
+        const layer = layerOf(model.name);
+        return layer !== undefined ? { ...model, layer } : model;
+      }),
+    };
   }
 
   /**
@@ -3866,8 +4220,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const semanticDirName = path.basename(path.dirname(path.dirname(document.uri.fsPath)));
       this.postLoadError(webview, errorKey, {
         message:
-          `${path.basename(document.uri.fsPath)} is not an ERD Studio subject area file — ` +
-          `subject areas live in ${semanticDirName}/{layer}/{domain}.json or ${semanticDirName}/{layer}/diagrams/{domain}.dbml. ` +
+          `${path.basename(document.uri.fsPath)} is not an ERD Studio diagram file — ` +
+          `diagrams live in ${semanticDirName}/{layer}/diagrams/{name}.dbml or ${semanticDirName}/{layer}/{name}.json. ` +
           `Open it as text to edit it.`,
         kind: 'not-a-domain',
       }, undefined, 'notDomain');
@@ -3888,7 +4242,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const catalog = await this.loadCatalog();
-      const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
       const dbtKeyIndex = dbtKeyIndexOf(ymlData, manifest);
 
       timer.phase('reading the diagram and its tables');
@@ -3930,22 +4283,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         postedTables = physicalDomain.models.length;
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
-        this.post(webview, { type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
+        this.post(webview, { type: 'domainLoaded', payload: physicalDomain });
+        this.cancelCanvasContext(webview);
         if (options.persistPositions) this.recordCanvasOpen(document, 'physical', physicalDomain.models.length, catalog !== undefined);
       } else {
         const domain = SubjectAreaService.toLogicalStage(unifiedDomain);
-        const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
+        const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns, document.uri.fsPath);
         postedTables = displayDomain.models.length;
         // What the turn-round offer asks about (#163): the lines this canvas flags, without reading the file again.
         this.backwardsDrawn.set(document.uri.toString(), displayDomain.relationships.filter((r) => r.keysContradict));
         this.post(webview, {
           type: 'domainLoaded',
           payload: displayDomain,
-          welcomeDismissed,
           ...(autoLayout ? { autoLayout: true } : {}),
           ...this.manifestHintFlag(),
           ...this.logicalOnlyFlag(),
         });
+        // What the canvas knows beyond the diagram, once the diagram has gone out.
+        void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer);
         if (subjectAreaStorageOf(document.uri.fsPath) === 'dbml' && this.holdsOwnTables(document)) {
           // A single-file DBML dropped into a layer folder (§2.5): offer Import.
           this.post(webview, { type: 'dbmlEmbeddedTables' });
@@ -4341,6 +4696,154 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.post(panel.webview, { type: 'revealRelationship', payload: target } satisfies RevealRelationshipMessage);
   }
 
+  /**
+   * Select and centre one table, with its detail panel open, on the canvas of
+   * `uri` (Open in Diagram / Go to Table on a table). As
+   * {@link revealRelationship}: posted at once to a loaded canvas (switched
+   * to the logical stage first), else held until its `ready` has its diagram.
+   */
+  async revealTable(uri: vscode.Uri, modelName: string): Promise<void> {
+    await this.runTableAction(uri, { reveal: modelName });
+  }
+
+  /**
+   * Add to Diagram… and a plain drop of Table Library rows on a diagram (its
+   * drop receipt, `src/providers/libraryDropReceipts.ts`): once the canvas of
+   * `uri` has its diagram, add `modelNames` through the Add Existing Tables
+   * edit (`handleAddExistingModels`: one edit, one undo, placed next to
+   * related tables), then select the first one added. When every one is on
+   * the diagram already, the first is selected and named instead. The caller
+   * opens the diagram.
+   */
+  async addTablesToDiagram(uri: vscode.Uri, modelNames: readonly string[]): Promise<void> {
+    if (modelNames.length === 0) return;
+    await this.runTableAction(uri, { reveal: modelNames[0], add: [...modelNames] });
+  }
+
+  /**
+   * A drag started in the Table Library (its drag controller): remember its
+   * tables for a drop that brings no table file ({@link PENDING_LIBRARY_DRAG_MS}),
+   * and tell every loaded canvas on the logical stage, which shows how to drop
+   * them (an editable diagram only; the webview decides).
+   */
+  noteLibraryDrag(tables: readonly string[]): void {
+    if (tables.length === 0) return;
+    this.pendingLibraryDrag = { tables: [...tables], at: Date.now() };
+    const message: LibraryDragStartedMessage = { type: 'libraryDragStarted', payload: { tables: [...tables] } };
+    for (const [panelKey, panel] of Array.from(this.openPanels.entries())) {
+      if (!panel.loaded || panel.activeStage !== 'logical' || this.disposedWebviews.has(panel.webview) || this.forgetIfGone(panelKey)) continue;
+      this.post(panel.webview, message);
+    }
+  }
+
+  /** The remembered Table Library drag's tables, if it is still fresh; forgotten either way. */
+  private takeLibraryDrag(): string[] | undefined {
+    const pending = this.pendingLibraryDrag;
+    this.pendingLibraryDrag = undefined;
+    return pending && Date.now() - pending.at <= PENDING_LIBRARY_DRAG_MS ? pending.tables : undefined;
+  }
+
+  /**
+   * A drop on the canvas (`dropTables`): the table files among the dropped
+   * URIs, else the Table Library drag of the last minute. Tables already on
+   * the diagram are selected and named; the rest are added through the Add
+   * Existing Tables edit with their positions at the drop point (one edit,
+   * one undo step), and the first of them is selected.
+   */
+  private async handleDropTables(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    panelKey: string,
+    payload: DropTablesMessage['payload'],
+  ): Promise<void> {
+    try {
+      const dropped = tablesOfDroppedUris(payload.uris, this.tableLibraryService.listTableFiles());
+      // The drop uses the library drag up, whichever way its tables came.
+      const dragged = (this.takeLibraryDrag() ?? []).filter((name) => validateTableNameSafety(name) === null);
+      const names = dropped.length > 0 ? dropped : dragged;
+      if (names.length === 0) {
+        void vscode.window.showInformationMessage(DROP_TABLES_NOTHING_MESSAGE);
+        return;
+      }
+      const membersOf = (): Set<string> =>
+        new Set((subjectAreaTableNames(document.getText(), document.uri.fsPath) ?? []).map(normaliseName));
+      const members = membersOf();
+      const fresh = names.filter((name) => !members.has(normaliseName(name)));
+      if (fresh.length === 0) {
+        this.post(webview, { type: 'revealTable', payload: { modelName: names[0] } } satisfies RevealTableMessage);
+        void vscode.window.showInformationMessage(alreadyOnDiagramMessage(names));
+        return;
+      }
+      telemetry.feature('addModel');
+      // Every name goes to the add, so its note names the ones already here.
+      await this.queueEdit(panelKey, () => this.handleAddExistingModels(document, webview, names, { dropAt: payload.position }));
+      // Selected only once it is on the diagram: a refused add has said why.
+      const after = membersOf();
+      const added = fresh.find((name) => after.has(normaliseName(name)));
+      if (added !== undefined) {
+        this.post(webview, { type: 'revealTable', payload: { modelName: added } } satisfies RevealTableMessage);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(`[SemanticEditorProvider] Dropping tables failed: ${message}`);
+      this.post(webview, { type: 'error', payload: { message: `Failed to add the dropped tables: ${message}` } });
+    }
+  }
+
+  /** Run a table action on a loaded canvas of `uri` now, or hold it for its `ready`. */
+  private async runTableAction(uri: vscode.Uri, action: { reveal: string; add?: string[] }): Promise<void> {
+    const open = Array.from(this.openPanels.entries()).find(([, p]) =>
+      p.loaded && !this.disposedWebviews.has(p.webview) && samePath(p.document.uri.fsPath, uri.fsPath));
+    if (!open) {
+      this.pendingTableActions.set(uri.fsPath, { ...action, at: Date.now() });
+      return;
+    }
+    await this.applyTableAction(open[0], action);
+  }
+
+  private async applyTableAction(panelKey: string, action: { reveal: string; add?: string[] }): Promise<void> {
+    const panel = this.openPanels.get(panelKey);
+    if (!panel) return;
+    if (panel.activeStage !== 'logical') {
+      await this.handleSwitchStage(panelKey, panel.document, panel.webview, 'logical');
+    }
+    let reveal = action.reveal;
+    if (action.add) {
+      const add = action.add;
+      const membersOf = (): Set<string> =>
+        new Set((subjectAreaTableNames(panel.document.getText(), panel.document.uri.fsPath) ?? []).map(normaliseName));
+      const before = membersOf();
+      const fresh = add.filter((name) => !before.has(normaliseName(name)));
+      if (fresh.length === 0) {
+        // All there already: select the first and say so, briefly.
+        void vscode.window.showInformationMessage(alreadyOnDiagramMessage(add));
+      } else {
+        // Every name goes to the add, so its note names the ones already here.
+        await this.queueEdit(panelKey, () => this.handleAddExistingModels(panel.document, panel.webview, add));
+        const after = membersOf();
+        const added = fresh.find((name) => after.has(normaliseName(name)));
+        // A refused add has said why: nothing to select.
+        if (added === undefined) return;
+        reveal = added;
+      }
+    }
+    this.post(panel.webview, { type: 'revealTable', payload: { modelName: reveal } } satisfies RevealTableMessage);
+  }
+
+  /** Run the table action held for the diagram at `fsPath`, if it is still fresh. */
+  private flushPendingTableAction(fsPath: string, panelKey: string): void {
+    for (const [key, pending] of Array.from(this.pendingTableActions.entries())) {
+      if (!samePath(key, fsPath)) continue;
+      this.pendingTableActions.delete(key);
+      if (Date.now() - pending.at <= PENDING_REVEAL_MS) {
+        const { at: _at, ...action } = pending;
+        void this.applyTableAction(panelKey, action).catch((err: unknown) => {
+          log.error(`[SemanticEditorProvider] Table action failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+    }
+  }
+
   /** Post the reveal held for the diagram at `fsPath`, if it is still fresh. */
   private flushPendingReveal(fsPath: string, webview: vscode.Webview): void {
     for (const [key, pending] of Array.from(this.pendingReveals.entries())) {
@@ -4420,10 +4923,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async handleAddModel(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-    model: DesignTable,
+    payload: AddModelMessage['payload'],
     stage: 'logical',
   ): Promise<void> {
     try {
+      const { schemaFolder, ...given } = payload;
+      let model: DesignTable = given;
       // Validate the payload before anything touches disk: the model name
       // becomes a file name under logical-models/, and column names are used
       // as keys by every later edit/remove path.
@@ -4439,6 +4944,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       if (model.modelRole != null && !isValidTableRole(model.modelRole)) {
         webview.postMessage({ type: 'error', payload: { message: `Failed to add table: unknown role "${String(model.modelRole)}".` } });
+        return;
+      }
+      const schemaError = validateSchemaFolderPayload(schemaFolder);
+      if (schemaError) {
+        webview.postMessage({ type: 'error', payload: { message: `Failed to add table: ${schemaError}` } });
         return;
       }
       model = { ...model, name: model.name.trim() };
@@ -4465,7 +4975,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             type: 'error',
             payload: {
               message: `Table "${inLibrary}" already exists in the Table Library (${this.libraryRelativePath(inLibrary)}). ` +
-                'Use "Add Existing Table" to add it to this diagram, or, for a separate table also called ' +
+                'Use "Add Existing Tables" to add it to this diagram, or, for a separate table also called ' +
                 `${model.name}, name it ${sameTableName(model.name, document.uri.fsPath)} and set its warehouse name to ${model.name}.`,
             },
           });
@@ -4474,12 +4984,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         // Central model file — written via the same WorkspaceEdit as the domain
         // change so creating the model is a single, atomic, undoable step.
-        const semanticModel: import('../types/semantic').SemanticTable = {
+        // A DBML table's schema folder is the one the dialog named (`configuredSchema`:
+        // transient, never written; a YAML table drops it), else the diagram's layer.
+        const semanticModel: DbmlDraftTable = {
           name: model.name,
           schema: model.schema,
           description: model.description,
           columns: model.columns,
           ...(model.modelRole ? { modelRole: model.modelRole } : {}),
+          ...(schemaFolder !== undefined ? { configuredSchema: schemaFolder } : {}),
         };
 
         // Add name reference + position to domain file
@@ -5001,16 +5514,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         fromModel: rest.fromModel, fromColumn: rest.fromColumn, toModel: rest.toModel, toColumn: rest.toColumn,
         cardinality: rest.cardinality, ...(rest.role !== undefined ? { role: rest.role } : {}),
       };
-      await this.commitRelationshipWrite(
+      const written = await this.commitRelationshipWrite(
         document, webview,
         { kind: 'add', drawn, ...(markKey ? { markKey } : {}), ...(extraPairs?.length ? { extraPairs } : {}) },
         stage, 'Failed to add relationship.',
       );
+      if (written?.home === 'library') this.sayWhereRelationshipLanded(drawn);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error(`[SemanticEditorProvider] Add relationship failed: ${message}`);
       this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add relationship: ${message}` } });
+    }
+  }
+
+  /**
+   * After a new relationship is saved in a relationships file (DBML), say
+   * which file and line in the status bar for a few seconds
+   * (`TableLibraryService.relationshipLocation`, read after the write). A
+   * relationship kept in its table's own YAML file has no such line: nothing is said.
+   */
+  private sayWhereRelationshipLanded(rel: Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>): void {
+    try {
+      const at = this.tableLibraryService.relationshipLocation(rel);
+      if (!at) return;
+      vscode.window.setStatusBarMessage(relationshipSavedMessage(projectRelative(this.workspaceRoot, at.filePath), at.line), RELATIONSHIP_SAVED_STATUS_MS);
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] where the relationship was saved: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -5157,7 +5687,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             type: 'error',
             payload: {
               message: `Table "${inLibrary}" already exists in the Table Library (${this.libraryRelativePath(inLibrary)}). ` +
-                'Choose a different name, or use "Add Existing Table" to add it to this diagram.',
+                'Choose a different name, or use "Add Existing Tables" to add it to this diagram.',
             },
           });
           return;
@@ -6090,7 +6620,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const pick = await pickDraftScope(listDraftScopes(source), {
         models,
         excludeNames: inDomain,
-        title: 'Add tables from dbt',
+        title: 'Add Tables from dbt',
       });
       if (!pick) { telemetry.feature('addFromDbtCancelled'); return; }
 
@@ -6119,6 +6649,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     modelNames: readonly string[],
+    /** A drop on the canvas: the new tables go here (`dropTables`), not beside their relations. */
+    options: { dropAt?: NodePosition } = {},
   ): Promise<void> {
     try {
       if (!this.isSubjectAreaV5(this.parseSubjectAreaDocument(document))) {
@@ -6130,7 +6662,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
-      await this.applyDbtModels(document, webview, modelNames, ymlData, manifest, 'picked');
+      await this.applyDbtModels(document, webview, modelNames, ymlData, manifest, 'picked', options.dropAt);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error(`[SemanticEditorProvider] Add existing models failed: ${message}`);
@@ -6152,6 +6684,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     ymlData: YmlData,
     manifest: ManifestData,
     origin: 'dbt' | 'picked' = 'dbt',
+    /** Where a drop on the canvas let go: the new tables are placed there (`dropGridPositions`). */
+    dropAt?: NodePosition,
   ): Promise<void> {
     const fromDbt = origin === 'dbt';
     const from = fromDbt ? ' from dbt' : '';
@@ -6219,7 +6753,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
           const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
           const positions = { ...((vc.positions ?? {}) as Record<string, NodePosition>) };
-          if (wasEmpty) {
+          if (dropAt) {
+            // Dropped on the canvas: each table new to the diagram goes where the
+            // user let go (over a stale position it may still have), whatever
+            // else the diagram holds; a member already listed keeps its place.
+            const added = draft.modelNames.filter((name) => !listed.has(normaliseName(name)));
+            vc.positions = { ...positions, ...dropGridPositions(added, dropAt) };
+          } else if (wasEmpty) {
             // Keep it a fresh layout (isFreshLayout): no stored position for
             // any model, so the refresh asks the webview for an ELK layout.
             for (const name of draft.modelNames) delete positions[name];
@@ -6587,13 +7127,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           physicalDomain.layerConfig = layerConfig;
         }
         this.post(webview, { type: 'stageData', payload: physicalDomain, ...reply });
+        this.cancelCanvasContext(webview);
         // #113: where a missing manifest is met (once per day).
         if (this.manifestService.isMissing) telemetry.featureOnce('manifestMissingPhysical');
       } else {
         // Logical — extract from unified file
         const domain = this.subjectAreaService.getSubjectAreaStage(document.uri.fsPath, { dbtKeyIndex });
-        const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
+        const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns, document.uri.fsPath);
         this.post(webview, { type: 'stageData', payload: displayDomain, ...reply, ...this.manifestHintFlag(), ...this.logicalOnlyFlag() });
+        void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

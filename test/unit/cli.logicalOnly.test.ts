@@ -221,7 +221,7 @@ describe('inventory on a logical-only root', () => {
   it('prints the tables in human mode and exits 0', async () => {
     const { code, out } = await run(['inventory', '--summary', '--project', LOGICAL]);
     expect(code).toBe(0);
-    expect(out).toContain('Not a dbt project: 1 table in 1 subject area');
+    expect(out).toContain('Not a dbt project: 1 table in 1 diagram');
     expect(out).toContain('customer  3 columns');
   });
 

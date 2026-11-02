@@ -26,6 +26,39 @@ describe('semanticReadmeText', () => {
   });
 });
 
+describe('semanticReadmeText with the project\'s layers', () => {
+  it('lists them in order, each with its label and folder, before the tree', () => {
+    const text = semanticReadmeText([
+      { id: 'bronze', label: 'Bronze' },
+      { id: 'raw_vault', label: 'Raw Vault' },
+      { id: 'gold', label: 'Gold' },
+    ]);
+    expect(text).toContain([
+      'Every file lives under a layer folder. This project\'s layers, in order (layers.json lists them):',
+      '',
+      '    1. Bronze      bronze/',
+      '    2. Raw Vault   raw_vault/',
+      '    3. Gold        gold/',
+      '',
+      'In each layer folder:',
+      '',
+      '    <layer>/tables/<schema>/<table>.dbml   one table: Table <schema>.<table> { … }',
+    ].join('\n'));
+    expect(text).not.toContain('(bronze, silver, gold, …)');
+    expect(text.endsWith('Check the files with `erd-studio doctor`.\n')).toBe(true);
+  });
+
+  it('names the usual layers when it has none to list', () => {
+    expect(semanticReadmeText([])).toBe(semanticReadmeText());
+    expect(semanticReadmeText()).toContain('Every file lives under a layer folder (bronze, silver, gold, …), and layers.json lists the layers:\n\n    <layer>/tables/');
+  });
+
+  it('is what semanticReadmeCreate writes', () => {
+    const layers = [{ id: 'main', label: 'Main' }];
+    expect(semanticReadmeCreate('/p/.erd-studio', () => false, layers)).toMatchObject({ text: semanticReadmeText(layers) });
+  });
+});
+
 describe('semanticReadmeCreate', () => {
   const semanticRoot = path.join('/p', '.erd-studio');
   const file = path.join(semanticRoot, SEMANTIC_README_FILE);

@@ -29,7 +29,6 @@ import {
   dbmlTableLookup,
   dbmlTreePathOf,
   dirnamePosix,
-  isLibraryFolderName,
   normalisePosix,
   resolvePosix,
 } from '@erd-studio/core';
@@ -57,6 +56,7 @@ import type { DbmlResolvedTable, RefUnit, RelationshipsFileEdit } from '@erd-stu
 
 import type { FileWrite } from './fileWrites';
 import { mergeFileWrites } from './fileWrites';
+import { isSchemaFolderName } from '../types/schemaFolder';
 import type { SemanticTable, TableRelationship } from '../types/semantic';
 
 /** A table the library lists (the winner of its name). */
@@ -224,20 +224,11 @@ function withExtension(path: string): string {
 
 /**
  * Whether a schema can be a NEW schema folder, the one check every writer
- * shares (Import, Draw from dbt and Add from dbt through this planner, and
- * Convert): a library folder name with no dbt Jinja (`{{ target.schema }}`,
- * `{% … %}`, `{# … #}`, which a schema yml read without a manifest leaves
- * unrendered), no character Windows refuses in a file name, no `'` or `\`
- * (either would end or escape the quoted path of a `use` line, which no
- * parser reads back), no white space at either end, no trailing `.`, and
- * not a Windows device name (`con`, `nul`, `com1`, …). Otherwise the
- * caller falls back (the home's schema here; Convert's next step).
+ * shares (`src/types/schemaFolder.ts`, so the New Table dialog checks the
+ * same rule). Otherwise the caller falls back (the home's schema here;
+ * Convert's next step).
  */
-export function isSchemaFolderName(schema: string): boolean {
-  return isLibraryFolderName(schema) && schema === schema.trim()
-    && !/[{}%#<>:"'|?*\u0000-\u001f\\]/.test(schema) && !/[ .]$/.test(schema)
-    && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(schema);
-}
+export { isSchemaFolderName };
 
 function refuse(file: string, message: string, line?: number): never {
   throw new DbmlEditRefused(file, message, line);

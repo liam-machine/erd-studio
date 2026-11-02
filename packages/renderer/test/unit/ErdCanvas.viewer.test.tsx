@@ -105,7 +105,7 @@ for (const readOnly of [false, true]) {
       expect(panel.querySelector('.detail-panel__title')!.textContent).toBe('orders');
       expect(panel.querySelector('.detail-panel__title--editable')).toBeNull();
       expect(panel.querySelector('.detail-panel__title-edit-btn')).toBeNull();
-      expect(panel.textContent).not.toContain('Remove from Subject Area');
+      expect(panel.textContent).not.toContain('Remove from Diagram');
       expect(panel.textContent).not.toContain('+ Add Column');
       expect(panel.querySelector('.column-row-editor--editable')).toBeNull();
     });
@@ -215,7 +215,7 @@ describe('ErdCanvas onReady', () => {
 });
 
 describe('ErdCanvas with a domain that has no layer', () => {
-  it('leaves the layer badge of a model without a schema empty', async () => {
+  it('draws the model without a layer badge, as there is no layer to name', async () => {
     const { layer: _omitted, ...rest } = makeSubjectArea(true);
     const domain = {
       ...rest,
@@ -229,9 +229,9 @@ describe('ErdCanvas with a domain that has no layer', () => {
       </div>,
     );
     await flush();
-    const badge = tableNode(container, 'orders').querySelector('.model-node__badge--layer');
-    expect(badge).not.toBeNull();
-    expect(badge!.textContent).toBe('');
+    const node = tableNode(container, 'orders');
+    expect(node).not.toBeNull();
+    expect(node.querySelector('.model-node__badge')).toBeNull();
   });
 });
 
@@ -334,4 +334,35 @@ describe('ErdCanvas — hover preview and relationship flow', () => {
       post.mockRestore();
     });
   }
+});
+
+describe('ErdCanvas logicalOnly', () => {
+  it('keeps the stage colours by default, as before', async () => {
+    const { container } = render(
+      <div style={{ width: 1200, height: 800 }}>
+        <ErdCanvas domain={makeSubjectArea(true)} />
+      </div>,
+    );
+    await flush();
+    expect(container.querySelector('.editor-canvas')!.className).toBe('editor-canvas');
+  });
+
+  it('draws a project without dbt with the neutral canvas, and follows the prop', async () => {
+    const domain = makeSubjectArea(true);
+    const view = render(
+      <div style={{ width: 1200, height: 800 }}>
+        <ErdCanvas domain={domain} logicalOnly className="host" />
+      </div>,
+    );
+    await flush();
+    expect(view.container.querySelector('.editor-canvas')!.className).toBe('editor-canvas editor-canvas--neutral host');
+
+    view.rerender(
+      <div style={{ width: 1200, height: 800 }}>
+        <ErdCanvas domain={domain} className="host" />
+      </div>,
+    );
+    await flush();
+    expect(view.container.querySelector('.editor-canvas')!.className).toBe('editor-canvas host');
+  });
 });

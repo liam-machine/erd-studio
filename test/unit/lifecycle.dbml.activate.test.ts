@@ -19,6 +19,7 @@ import * as v9 from 'dbml-parse-v9';
 import * as v10 from 'dbml-parse-v10';
 import { formatWrittenDbml } from '../../src/services/dbmlWriters';
 import { semanticReadmeText } from '../../src/services/semanticReadme';
+import { parseLayersText } from '@erd-studio/core';
 
 /** The expected text in the canonical layout ERD Studio writes every .dbml in (every write is formatted). */
 function canonical(text: string): string {
@@ -131,7 +132,7 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     await vscode.commands.executeCommand('erdStudio.createDomain');
     expect(input).toHaveBeenCalledTimes(1);
     expect(files()).toEqual(['README.md', 'layers.json', 'main/diagrams/orders.dbml']);
-    expect(fs.readFileSync(erd('README.md'), 'utf-8')).toBe(semanticReadmeText());
+    expect(fs.readFileSync(erd('README.md'), 'utf-8')).toBe(semanticReadmeText(parseLayersText(fs.readFileSync(erd('layers.json'), 'utf-8'))));
     const text = fs.readFileSync(erd('main', 'diagrams', 'orders.dbml'), 'utf-8');
     expect(parseSubjectAreaDbml(text, 'main/diagrams/orders.dbml').obj).toMatchObject({ domain: 'orders', logical: { models: [] } });
   });
@@ -223,7 +224,7 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     await vi.advanceTimersByTimeAsync(200);
     await run;
     expect(files()).toEqual(['README.md', 'layers.json']);
-    expect(fs.readFileSync(erd('README.md'), 'utf-8')).toBe(semanticReadmeText());
+    expect(fs.readFileSync(erd('README.md'), 'utf-8')).toBe(semanticReadmeText(parseLayersText(fs.readFileSync(erd('layers.json'), 'utf-8'))));
     for (const layer of (JSON.parse(fs.readFileSync(erd('layers.json'), 'utf-8')) as { layers: Array<{ id: string }> }).layers) {
       expect(fs.statSync(erd(layer.id)).isDirectory(), layer.id).toBe(true);
     }

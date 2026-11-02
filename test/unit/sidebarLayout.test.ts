@@ -35,18 +35,51 @@ describe('sidebar views', () => {
     // Relationships live in the table library, so the view shows with it.
     const views = contributes.views['erd-studio'];
     expect(views[2].when).toBe(views[1].when);
+    // Relationships starts collapsed too: a long list under the Table Library until asked for.
+    expect(views[2].visibility).toBe('collapsed');
     // Help starts collapsed: its header is always there, its rows out of the way.
     expect(views[3].visibility).toBe('collapsed');
   });
 
-  it('give each view at most one title-bar icon; everything else is in the + menu or under …', () => {
-    const titles = contributes.menus['view/title'];
+  it('give each view at most one title-bar icon (plus the filter toggle); everything else is in the + menu or under …', () => {
+    // The filter is a toggle of its own: Filter…, or (while filtered) Clear Filter — see the next test.
+    const isFilter = (m: MenuEntry): boolean => /^erdStudio\.(filter|clear)\w*(Diagrams|TableLibrary|Relationships)(Filter)?$/.test(m.command ?? '');
+    const titles = contributes.menus['view/title'].filter((m) => !isFilter(m));
     for (const view of contributes.views['erd-studio']) {
-      const icons = titles.filter((m) => m.when?.startsWith(`view == ${view.id}`) && m.group?.startsWith('navigation'));
+      // A toggle is one icon: only one of its two states shows at a time.
+      const icons = titles.filter((m) => m.when?.startsWith(`view == ${view.id}`) && m.group?.startsWith('navigation')
+        && !m.when.includes('erdStudio.relationshipsGrouping == file'));
       expect(icons.length, view.id).toBeLessThanOrEqual(1);
     }
+    // The Relationships view's toggle: Group by Relationships File, or (while grouped so) Group by Table.
+    expect(titles.filter((m) => m.when?.startsWith('view == erdStudio.relationships'))).toEqual([
+      { command: 'erdStudio.groupRelationshipsByFile', when: 'view == erdStudio.relationships && erdStudio.relationshipsGrouping != file', group: 'navigation@1' },
+      { command: 'erdStudio.groupRelationshipsByTable', when: 'view == erdStudio.relationships && erdStudio.relationshipsGrouping == file', group: 'navigation@1' },
+    ]);
     expect(titles.filter((m) => m.when?.startsWith('view == erdStudio.domainTree') && m.group?.startsWith('navigation')))
       .toEqual([{ submenu: 'erdStudio.newMenu', when: 'view == erdStudio.domainTree && erdStudio.hasProject', group: 'navigation@0' }]);
+  });
+
+  it('give Diagrams, the Table Library and Relationships one filter icon: Filter…, or Clear Filter while filtered (Filter… then under …)', () => {
+    const titles = contributes.menus['view/title'];
+    for (const [view, name, key] of [
+      ['erdStudio.domainTree', 'Diagrams', 'erdStudio.diagramsFiltered'],
+      ['erdStudio.modelLibrary', 'TableLibrary', 'erdStudio.tableLibraryFiltered'],
+      ['erdStudio.relationships', 'Relationships', 'erdStudio.relationshipsFiltered'],
+    ] as const) {
+      const filter = `erdStudio.filter${name}`;
+      const clear = `erdStudio.clear${name}Filter`;
+      expect(contributes.commands.find((c) => c.command === filter)?.icon, filter).toBe('$(filter)');
+      expect(contributes.commands.find((c) => c.command === clear)?.icon, clear).toBe('$(filter-filled)');
+      const entries = titles.filter((m) => m.command === filter || m.command === clear);
+      const icons = entries.filter((m) => m.group?.startsWith('navigation'));
+      // One slot, two states.
+      expect(icons).toHaveLength(2);
+      expect(new Set(icons.map((m) => m.group)).size).toBe(1);
+      expect(icons.find((m) => m.command === filter)?.when).toMatch(new RegExp(`^view == ${view}( && erdStudio\\.hasProject)? && !${key}$`));
+      expect(icons.find((m) => m.command === clear)?.when).toBe(`view == ${view} && ${key}`);
+      expect(entries.find((m) => !m.group?.startsWith('navigation'))).toEqual({ command: filter, when: `view == ${view} && ${key}`, group: '0_filter@0' });
+    }
   });
 
   it('put every way to start a diagram, and New Layer, in the + menu', () => {

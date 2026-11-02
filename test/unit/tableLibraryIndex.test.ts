@@ -636,6 +636,29 @@ describe('peekTableFileError', () => {
   });
 });
 
+describe('peekTableSummary', () => {
+  it('answers alias and meta from a file read in its current version only, with no copy and no read', () => {
+    write('gold/tables/gold/orders.dbml', 'Table gold.orders [alias: "fct_orders"] {\n  id INT [pk]\n}\n');
+    write('logical-models/dim_account.yml', 'name: dim_account\nalias: accounts\nmeta:\n  owner: accounts-team\ncolumns:\n  - name: id\n    data_type: INT\n');
+    write('gold/tables/gold/broken.dbml', 'Table gold.broken {\n  id INT [pk\n');
+    const lib = service();
+    expect(lib.peekTableSummary('orders')).toBeUndefined();
+    expect(lib.peekTableSummary('dim_account')).toBeUndefined();
+    expect(lib.peekTableSummary('missing')).toBeUndefined();
+    lib.getTableFileError('orders');
+    lib.getTableFileError('dim_account');
+    lib.getTableFileError('broken');
+    expect(lib.peekTableSummary('orders')).toEqual({ alias: 'fct_orders' });
+    const yaml = lib.peekTableSummary('dim_account');
+    expect(yaml).toEqual({ alias: 'accounts', meta: { owner: 'accounts-team' } });
+    // A file that does not read has no summary.
+    expect(lib.peekTableSummary('broken')).toBeUndefined();
+    // A newer version of the file is not answered from the old reading.
+    write('logical-models/dim_account.yml', 'name: dim_account\nalias: accounts_v2\ncolumns:\n  - name: id\n    data_type: INT\n    description: changed so the size differs\n');
+    expect(lib.peekTableSummary('dim_account')).toBeUndefined();
+  });
+});
+
 describe('what one listing costs (readdir calls, counted)', () => {
   const cjsFs = createRequire(__filename)('fs') as typeof fs;
 

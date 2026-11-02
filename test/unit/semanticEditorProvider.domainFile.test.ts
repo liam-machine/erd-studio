@@ -393,7 +393,7 @@ describe('a JSON file under the semantic dir that is not a domain', () => {
     const payload = errors(panel)[0].payload;
     expect(payload.kind).toBe('not-a-domain');
     expect(payload.message).toContain('fact.json');
-    expect(payload.message).toContain('not an ERD Studio subject area file');
+    expect(payload.message).toContain('not an ERD Studio diagram file');
     expect(types(panel)).not.toContain('domainLoaded');
   });
 

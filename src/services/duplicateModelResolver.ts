@@ -78,10 +78,10 @@ export function describeDuplicateFix(plan: DuplicateFixPlan, fromLabel: string, 
     `The table becomes "${plan.newName}" with alias: ${plan.alias}, so dbt still builds a table called ${plan.alias}.`,
   ];
   if (plan.repoint.length > 0) {
-    lines.push('', `Repointed to ${plan.newName} (${plan.folder} subject areas):`);
+    lines.push('', `Repointed to ${plan.newName} (${plan.folder} diagrams):`);
     lines.push(...plan.repoint.map((r) => `  • ${r.layer}/${r.domain}`));
   } else {
-    lines.push('', `No subject area uses this copy yet: add ${plan.newName} to a subject area from "Add Existing Table".`);
+    lines.push('', `No diagram uses this copy yet: add ${plan.newName} to a diagram with "Add Existing Tables".`);
   }
   if (plan.keep.length > 0) {
     lines.push('', `Still using "${plan.name}":`);

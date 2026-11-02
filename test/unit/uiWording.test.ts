@@ -1,7 +1,7 @@
 /**
  * UI wording (#179, part 1 of #162): what a user reads says "table",
- * "Table Library" and "subject area", never "model" for one table or
- * "domain" for a diagram. "dbt model" stays where it means the dbt model.
+ * "Table Library" and "diagram", never "model" for one table or
+ * "domain" for a diagram (string literals in the code: uiWordingSource.test.ts). "dbt model" stays where it means the dbt model.
  *
  * Only the words change: ids, `when` clauses, on-disk paths and the feedback
  * settings (where "model" is a language model) are left out of the scan.
@@ -45,7 +45,7 @@ describe('package.json wording (#179)', () => {
   userText({ description: pkg.description, displayName: pkg.displayName }, 'package', texts);
   userText(pkg.contributes, 'contributes', texts);
 
-  it('says table / subject area, not model / domain, in what users read', () => {
+  it('says table / diagram, not model / domain, in what users read', () => {
     const offenders = texts.filter(([, text]) => oldTerms(text).length > 0).map(([at, text]) => `${at}: ${text}`);
     expect(offenders).toEqual([]);
   });
@@ -137,6 +137,32 @@ describe('package.json: commands for older projects and the AI helper files', ()
     }
     // Migrate to Table Naming renames YAML files only: never offered in a DBML or mixed project.
     expect(palette.find((m) => m.command === 'erdStudio.migrateToTableNaming')?.when).toBe('erdStudio.storage == yaml');
+  });
+
+  it('hides the YAML-era commands in a DBML project, in the palette and the view menus', () => {
+    const viewTitle = pkg.contributes.menus['view/title'] as Array<{ command: string; when?: string }>;
+    for (const id of ['erdStudio.organizeModelLibrary', 'erdStudio.initializeLayerConfig', 'erdStudio.moveRelationshipsToLibrary']) {
+      expect(palette.find((m) => m.command === id)?.when, id).toMatch(/erdStudio\.storage != dbml/);
+    }
+    // Convert stays in the palette of a DBML project: doctor's finish-dbml-conversion step tells the
+    // user to run it there to settle pending relationships and diagram members (its view menu entry is hidden).
+    expect(palette.find((m) => m.command === 'erdStudio.convertProjectToDbml')?.when).toBe('erdStudio.hasProject');
+    // Setup stays offered before there is any .erd-studio folder (a new project reads as DBML).
+    expect(palette.find((m) => m.command === 'erdStudio.setupSemanticDirectory')?.when).toBe('erdStudio.storage != dbml || !erdStudio.hasSemanticDir');
+    for (const id of ['erdStudio.organizeModelLibrary', 'erdStudio.convertProjectToDbml', 'erdStudio.moveRelationshipsToLibrary']) {
+      for (const entry of viewTitle.filter((m) => m.command === id)) expect(entry.when, id).toContain('erdStudio.storage != dbml');
+    }
+    // Their ids stay contributed (and so registered, with their dbtSemantic aliases).
+    for (const id of ['erdStudio.organizeModelLibrary', 'erdStudio.setupSemanticDirectory', 'erdStudio.initializeLayerConfig', 'erdStudio.convertProjectToDbml']) {
+      expect(commands.some((c) => c.command === id), id).toBe(true);
+    }
+  });
+
+  it('has one AI helper entry in the Help view: Install AI Helper Files… is in the palette only', () => {
+    const viewTitle = pkg.contributes.menus['view/title'] as Array<{ command: string; when?: string }>;
+    expect(viewTitle.filter((m) => m.command === 'erdStudio.installCodingHarness')).toEqual([]);
+    // Still in the Command Palette: no entry hides it there.
+    expect(palette.some((m) => m.command === 'erdStudio.installCodingHarness')).toBe(false);
   });
 
   it('names the AI helper install command in plain words, never "harness", keeping its id', () => {

@@ -185,11 +185,11 @@ describe('harnessAssets', () => {
     it("names the canvas's real button labels", () => {
       const toolbar = fs.readFileSync(path.resolve(__dirname, '../../webview/components/Toolbar/Toolbar.tsx'), 'utf-8');
       const panel = fs.readFileSync(path.resolve(__dirname, '../../webview/components/DiscrepancyPanel/DiscrepancyPanel.tsx'), 'utf-8');
-      expect(toolbar).toContain("'⊕ Diff'");
+      expect(toolbar).toContain("'Compare with dbt'");
       expect(panel).toContain('⊕ Sync');
       const all = CLAUDE_SETUP_SKILL_FILES.map((a) => a.content).join('\n');
-      expect(all).toContain('⊕ Diff');
-      expect(all).not.toMatch(/Compare to Physical|\*\*Compare\*\*|All Physical/);
+      expect(all).toContain('**Compare with dbt**');
+      expect(all).not.toMatch(/⊕ Diff|Compare to Physical|\*\*Compare\*\*|All Physical/);
     });
 
     it('uses no `!` dynamic-context injection', () => {
@@ -549,7 +549,9 @@ describe('setup skill: the Without dbt route', () => {
     expect(text).toContain('DBML is an open format');
     expect(text).not.toMatch(/open standard|open[- ]source|lossless|round[- ]trip|sync(?:s|ing)? with dbdiagram/i);
     expect(text).not.toMatch(/\bharness\b/i);
-    expect(text).toContain('the commands call a diagram a *subject area*');
+    expect(text).toContain('Say "diagram", never "subject area".');
+    expect(text).not.toContain('the commands call a diagram a *subject area*');
+    expect(text.replace('never "subject area"', '')).not.toMatch(/subject area/i);
     // No Physical tab, Diff or sync plan in a folder without dbt — only the one "Using dbt?" line.
     expect(text).toContain('"Using dbt? Open its folder to compare your design with what dbt built."');
     expect(text).not.toContain('⊕ Sync');

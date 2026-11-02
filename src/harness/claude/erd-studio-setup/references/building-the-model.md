@@ -26,10 +26,12 @@ in its own format. Never convert a file between the formats yourself.
 | `.erd-studio/<layer>/diagrams/<domain>.dbml` | Once per domain (the diagram) |
 
 **Where a new model file goes.** In the domain's layer: `.erd-studio/<layer>/tables/<schema>/`.
-The schema folder is the model's dbt custom schema when it has one (`config: schema:` in its yml
-or `config()`, or `+schema:` for its folder in `dbt_project.yml`), never the inventory's `schema`
-(the built schema, which differs per dbt target); otherwise the layer's name. When the layer
-already has a schema folder spelled differently in case, use that spelling. Table names are unique
+The schema folder is the one the user names; else the model's dbt custom schema when it has one
+(`config: schema:` in its yml or `config()`, or `+schema:` for its folder in `dbt_project.yml`),
+never the inventory's `schema` (the built schema, which differs per dbt target); else the schema
+folder most of the diagram's tables in that layer already use; else the layer's name. This is the
+rule the canvas's New Table follows. When the layer already has a schema folder spelled differently
+in case, use that spelling. Table names are unique
 across the whole project, and the diagram lists tables by their `use` lines.
 
 Models in `alreadyModelled` are referenced by name in the diagram and their file is left

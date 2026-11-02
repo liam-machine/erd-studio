@@ -243,7 +243,7 @@ export function planNamingMigration(input: NamingMigrationInput): NamingMigratio
   }
   if (v4SubjectAreas.length > 0) {
     refusals.push(
-      `${v4SubjectAreas.length} subject area file${v4SubjectAreas.length === 1 ? ' is' : 's are'} still in schema v4 ` +
+      `${v4SubjectAreas.length} diagram file${v4SubjectAreas.length === 1 ? ' is' : 's are'} still in schema v4 ` +
         `(${v4SubjectAreas.join(', ')}). Run "Migrate Subject Areas to the Central Table Library" first; it carries on into this migration.`,
     );
   }
@@ -264,7 +264,7 @@ export function describeNamingMigration(plan: NamingMigrationPlan): string {
     }
   }
   if (plan.rewrites.length > 0) {
-    lines.push(`Rename keys in ${plan.rewrites.length} subject area file${plan.rewrites.length === 1 ? '' : 's'}:`);
+    lines.push(`Rename keys in ${plan.rewrites.length} diagram file${plan.rewrites.length === 1 ? '' : 's'}:`);
     for (const rewrite of plan.rewrites) lines.push(`• ${rewrite.path} (${rewrite.keys.join(', ')})`);
   }
   for (const note of plan.notes) lines.push(`Note: ${note}`);

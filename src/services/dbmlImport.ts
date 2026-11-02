@@ -1294,7 +1294,7 @@ function reportFileExtras(model: DbmlModel, layer: string, ctx: Context): void {
     if (key.toLowerCase() === DBML_DIAGRAM_PROPERTIES.layout) continue;
     dropped.push(key === 'database_type'
       ? { kind: 'database-type', what: `The database type (${value})`, item: value, why: 'ERD Studio does not record the database type.' }
-      : { kind: 'project-setting', what: `Project setting ${key} (${value})`, item: key, why: 'ERD Studio subject areas have no project settings.' });
+      : { kind: 'project-setting', what: `Project setting ${key} (${value})`, item: key, why: 'ERD Studio diagrams have no project settings.' });
   }
   for (const group of model.tableGroups) {
     // ERD Studio's export writes the layer as a group; a group named after the chosen layer is that.
@@ -1312,7 +1312,7 @@ function reportFileExtras(model: DbmlModel, layer: string, ctx: Context): void {
   }
   if (model.diagramViews > 0) {
     const what = plural(model.diagramViews, 'diagram view');
-    dropped.push({ kind: 'diagram-views', what, item: what, why: 'Each ERD Studio subject area is one view.' });
+    dropped.push({ kind: 'diagram-views', what, item: what, why: 'Each ERD Studio diagram is one view.' });
   }
 }
 

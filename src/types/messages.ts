@@ -2,14 +2,15 @@
  * Message protocol types for extension ↔ webview communication.
  *
  * Messages are categorised by direction:
- *   Extension → Webview:  loading, domainLoaded, stageData, existingTables,
+ *   Extension → Webview:  loading, domainLoaded, stageData, existingTables, newRelationshipFiles,
  *                         dbmlEmbeddedTables, discrepancyReport,
  *                         manifestStaleness, syncPlanGenerated, error,
  *                         openFeedback, feedbackContext, feedbackAnalysis,
- *                         feedbackSubmitted, revealRelationship
- *   Webview → Extension:  ready, requestExistingTables, addModel, addColumn, removeColumn, addRelationship,
+ *                         feedbackSubmitted, revealRelationship, canvasContext,
+ *                         revealTable, libraryDragStarted
+ *   Webview → Extension:  ready, requestExistingTables, requestNewRelationshipFiles, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
- *                         addExistingModel(s), updatePositions, switchStage,
+ *                         addExistingModel(s), dropTables, updatePositions, switchStage,
  *                         toggleDiscrepancy, requestFeedbackContext,
  *                         analyzeFeedback, setFeedbackProvider, submitFeedback,
  *                         copyFeedbackReport, openFeedbackLink,
@@ -61,6 +62,9 @@ import type {
   UpdateAnnotationMessage,
   RemoveAnnotationMessage,
   OpenModelFileMessage,
+  AddExistingModelMessage,
+  AddExistingModelsMessage,
+  CanvasContext,
 } from '@erd-studio/core';
 
 // The edit messages the shared canvas components post live in
@@ -88,7 +92,11 @@ export type {
   UpdateAnnotationMessage,
   RemoveAnnotationMessage,
   OpenModelFileMessage,
+  AddExistingModelMessage,
+  AddExistingModelsMessage,
   CanvasEditMessage,
+  CanvasContext,
+  OffDiagramRelationship,
 } from '@erd-studio/core';
 
 // ---------------------------------------------------------------------------
@@ -128,11 +136,20 @@ export interface ExistingTablesMessage {
   };
 }
 
+/**
+ * The answer to {@link RequestNewRelationshipFilesMessage}: the relationships
+ * file a new relationship of each of the diagram's DBML tables goes to when
+ * that table holds the foreign key (`placeNewRef`), keyed by the table's
+ * lower-case name, project-relative. Empty for a YAML project.
+ */
+export interface NewRelationshipFilesMessage {
+  type: 'newRelationshipFiles';
+  payload: { files: Record<string, string> };
+}
+
 export interface DomainLoadedMessage {
   type: 'domainLoaded';
   payload: DisplaySubjectArea;
-  /** Whether the user has already dismissed the welcome modal (persisted in globalState). */
-  welcomeDismissed?: boolean;
   /**
    * Set on a logical-stage load when the domain has at least one model and
    * NONE of them has a stored `viewConfig.positions` entry — typically a
@@ -338,9 +355,52 @@ export interface RevealRelationshipMessage {
   };
 }
 
+/**
+ * What the host knows beyond the diagram (`CanvasContext`): each table's
+ * file, its relationships to tables not on the diagram, and who reviews it.
+ * Posted after each logical-stage `domainLoaded` / `stageData` (so after
+ * every refresh of the diagram or the library), never on the physical stage.
+ * Kept out of `DisplaySubjectArea`, so the goldens and the viewer contract
+ * are unchanged; a canvas that never gets one shows none of what it feeds.
+ */
+export interface CanvasContextMessage {
+  type: 'canvasContext';
+  payload: CanvasContext;
+}
+
+/**
+ * Select and centre one table, with its detail panel open, as clicking it
+ * does (Open in Diagram and Go to Table on a table, Add to Diagram…). Sent
+ * once the canvas has loaded its diagram (`SemanticEditorProvider.revealTable`
+ * holds it until then). The name is matched ignoring case; a table the
+ * diagram does not show is named in a toast.
+ */
+export interface RevealTableMessage {
+  type: 'revealTable';
+  payload: {
+    modelName: string;
+  };
+}
+
+/**
+ * A drag has started in the sidebar's Table Library (its drag controller's
+ * `handleDrag`, `src/providers/tableLibraryDrag.ts`): posted to every open,
+ * loaded canvas on the logical stage, which shows "Hold Shift and drop to add
+ * … to this diagram" over an editable diagram. VS Code lets a drag that
+ * started in the workbench reach a webview only while Shift is held. The
+ * tables are the drag's, in order, at most {@link ADD_EXISTING_TABLES_LIMIT}.
+ */
+export interface LibraryDragStartedMessage {
+  type: 'libraryDragStarted';
+  payload: {
+    tables: string[];
+  };
+}
+
 export type ExtensionMessage =
   | LoadingMessage
   | ExistingTablesMessage
+  | NewRelationshipFilesMessage
   | DbmlEmbeddedTablesMessage
   | OpenFeedbackMessage
   | FeedbackContextMessage
@@ -352,6 +412,9 @@ export type ExtensionMessage =
   | ManifestStalenessMessage
   | SyncPlanGeneratedMessage
   | RevealRelationshipMessage
+  | CanvasContextMessage
+  | RevealTableMessage
+  | LibraryDragStartedMessage
   | ErrorMessage;
 
 // ---------------------------------------------------------------------------
@@ -377,11 +440,27 @@ export interface RequestExistingTablesMessage {
 }
 
 /**
+ * Sent when the New Relationship dialog opens to create one: asks where a
+ * new relationship of each table would be stored, answered by
+ * {@link NewRelationshipFilesMessage}. No payload; reads only.
+ */
+export interface RequestNewRelationshipFilesMessage {
+  type: 'requestNewRelationshipFiles';
+}
+
+/**
  * Request to add a new model to the domain.
  */
 export interface AddModelMessage {
   type: 'addModel';
-  payload: DesignTable;
+  payload: DesignTable & {
+    /**
+     * DBML only: the schema folder the New Table dialog's Schema field names
+     * (`<layer>/tables/<schemaFolder>/`), checked by `isSchemaFolderName`.
+     * Absent (and ignored for a YAML table): the diagram's layer id, as before.
+     */
+    schemaFolder?: string;
+  };
 }
 
 /**
@@ -473,31 +552,34 @@ export interface EditRelationshipMessage {
   };
 }
 
-/**
- * Request to add an existing model from the manifest to the domain.
- */
-export interface AddExistingModelMessage {
-  type: 'addExistingModel';
-  payload: {
-    modelName: string;
-  };
-}
+// `AddExistingModelMessage` and `AddExistingModelsMessage` live in
+// `@erd-studio/core` (the detail panel posts them too) and are re-exported above.
 
 /** Most models one `addExistingModels` request may add (the dialog's "Select all" stops here). */
 export const ADD_EXISTING_TABLES_LIMIT = 200;
 
+/** Most URIs one {@link DropTablesMessage} carries (the webview keeps the first ones). */
+export const DROP_TABLES_URI_LIMIT = ADD_EXISTING_TABLES_LIMIT;
+
+/** The longest URI a {@link DropTablesMessage} carries (the webview leaves longer ones out). */
+export const DROP_TABLES_URI_MAX_LENGTH = 4096;
+
 /**
- * Add several picked models to the domain in one edit (#160): the Add
- * Existing Model dialog with more than one row ticked. Library models are
- * referenced; dbt-only ones are seeded into the library, as with
- * `addExistingModel`. Names already in the domain are skipped. One
- * WorkspaceEdit, one undo step. v5 domains only; at most
- * {@link ADD_EXISTING_TABLES_LIMIT} names.
+ * Something was dropped on the canvas (a Shift-drag from the Table Library,
+ * or a table file from the Explorer): `position` is the drop point in flow
+ * coordinates, `uris` whatever URIs the drop's DataTransfer held (possibly
+ * none). The host resolves each `file:` URI to a table file, else uses the
+ * Table Library drag that started in the last minute, and adds the tables
+ * not yet on the diagram through the Add Existing Tables edit with their
+ * positions at the drop point: one edit, one undo step. Logical only — it is
+ * not on the physical allowlist.
  */
-export interface AddExistingModelsMessage {
-  type: 'addExistingModels';
+export interface DropTablesMessage {
+  type: 'dropTables';
   payload: {
-    modelNames: string[];
+    position: { x: number; y: number };
+    /** At most {@link DROP_TABLES_URI_LIMIT}, each at most {@link DROP_TABLES_URI_MAX_LENGTH} characters. */
+    uris: string[];
   };
 }
 
@@ -584,14 +666,6 @@ export interface SwitchStageMessage {
 export interface ToggleDiscrepancyMessage {
   type: 'toggleDiscrepancy';
   payload: { enabled: boolean; compareAgainst?: Stage };
-}
-
-/**
- * Notification that the user dismissed the welcome modal.
- * Extension persists this in globalState so it never shows again.
- */
-export interface DismissWelcomeMessage {
-  type: 'dismissWelcome';
 }
 
 /**
@@ -794,7 +868,7 @@ export interface OpenAnotherDomainMessage {
 
 /**
  * Open the "Welcome to ERD Studio" panel (the getting-started video). Sent by
- * the canvas WelcomeModal's "Watch the short tour" link; the host runs
+ * the empty-diagram card's "set it up in the Welcome panel" link; the host runs
  * `erdStudio.showGettingStarted`. No payload; allowed on the physical stage.
  */
 export interface OpenGettingStartedMessage {
@@ -898,7 +972,7 @@ export interface RemoveAnnotationsMessage {
 export type WebviewMessage =
   | ReadyMessage
   | RequestExistingTablesMessage
-  | DismissWelcomeMessage
+  | RequestNewRelationshipFilesMessage
   | DismissManifestHintMessage
   | AddModelMessage
   | AddColumnMessage
@@ -915,6 +989,7 @@ export type WebviewMessage =
   | AddExistingModelMessage
   | AddExistingModelsMessage
   | AddModelsFromDbtMessage
+  | DropTablesMessage
   | UpdatePositionsMessage
   | RefreshManifestMessage
   | UndoMessage
@@ -952,7 +1027,79 @@ export type WebviewMessage =
   | RemoveAnnotationMessage
   | RemoveAnnotationsMessage
   | OpenModelFileMessage
+  | GoToTableMessage
+  | ShowTableOnOtherDiagramsMessage
+  | MoveTableMessage
+  | CopyTablePathMessage
+  | RevealTableInLibraryMessage
   | LayoutFinishedMessage;
+
+// ---------------------------------------------------------------------------
+// Finding a table across the project (the canvas's ways out of one diagram)
+// ---------------------------------------------------------------------------
+
+/**
+ * Run **Go to Table…** with the toolbar search's text filled in: the hint
+ * under a search that finds no table on this diagram but some in the project.
+ * Writes nothing, so it is on the physical allowlist. `query` is at most
+ * {@link GO_TO_TABLE_QUERY_MAX} characters.
+ */
+export interface GoToTableMessage {
+  type: 'goToTable';
+  payload: {
+    query?: string;
+  };
+}
+
+/** The longest search text {@link GoToTableMessage} carries. */
+export const GO_TO_TABLE_QUERY_MAX = 200;
+
+/**
+ * A table's context menu → **Show on Other Diagrams…**: the other diagrams
+ * that show it, picked when there are several, opened with it selected.
+ * Writes nothing (physical allowlist).
+ */
+export interface ShowTableOnOtherDiagramsMessage {
+  type: 'showTableOnOtherDiagrams';
+  payload: {
+    modelName: string;
+  };
+}
+
+/**
+ * A table's context menu → **Move Table…**: the sidebar's Move Table on the
+ * table's file (a DBML table only). It moves files, so it is logical only:
+ * not on the physical allowlist.
+ */
+export interface MoveTableMessage {
+  type: 'moveTable';
+  payload: {
+    modelName: string;
+  };
+}
+
+/**
+ * A table's context menu → **Copy Path**: the table file's path from the
+ * project folder (`.erd-studio/gold/tables/sales/fct_order.dbml`) on the
+ * clipboard. Writes nothing (physical allowlist).
+ */
+export interface CopyTablePathMessage {
+  type: 'copyTablePath';
+  payload: {
+    modelName: string;
+  };
+}
+
+/**
+ * A table's context menu → **Reveal in Table Library**: the table's row
+ * selected in the sidebar's Table Library. Writes nothing (physical allowlist).
+ */
+export interface RevealTableInLibraryMessage {
+  type: 'revealTableInLibrary';
+  payload: {
+    modelName: string;
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Utility types

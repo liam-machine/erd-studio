@@ -533,11 +533,11 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
     // stage's list to the owners on both sides and keeps each link once.
     // `convertSchemaFallback`: a table whose YAML file names no schema is in the
     // schema folder Convert gave it (the library folder, else `public`).
-    ['showcase', 'silver/diagrams/showcase.dbml', ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertSchemaFallback'], ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertDiagramRelationships', 'convertLinkStoredTwice', 'convertSchemaFallback'], { fct_order: 'public' }],
-    ['composite-and-self', 'gold/diagrams/vault.dbml', ['schemaVersion', 'convertSchemaFallback'], ['schemaVersion', 'loneCompositeKey', 'respelling', 'convertSchemaFallback'], { employee: 'gold', pit_customer: 'gold', sat_customer: 'gold' }],
-    ['missing-positions', 'silver/diagrams/showcase.dbml', ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertSchemaFallback'], ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertDiagramRelationships', 'convertLinkStoredTwice', 'convertSchemaFallback'], { fct_order: 'public' }],
-    ['missing-model', 'silver/diagrams/partial.dbml', ['schemaVersion'], undefined, {}],
-    ['library-relationships', 'gold/diagrams/sales.dbml', ['oneToMany', 'schemaVersion'], undefined, {}],
+    ['showcase', 'silver/diagrams/showcase.dbml', ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'tableLayers', 'convertSchemaFallback'], ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertDiagramRelationships', 'convertLinkStoredTwice', 'convertSchemaFallback'], { fct_order: 'public' }],
+    ['composite-and-self', 'gold/diagrams/vault.dbml', ['schemaVersion', 'tableLayers', 'convertSchemaFallback'], ['schemaVersion', 'loneCompositeKey', 'respelling', 'convertSchemaFallback'], { employee: 'gold', pit_customer: 'gold', sat_customer: 'gold' }],
+    ['missing-positions', 'silver/diagrams/showcase.dbml', ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'tableLayers', 'convertSchemaFallback'], ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'convertDiagramRelationships', 'convertLinkStoredTwice', 'convertSchemaFallback'], { fct_order: 'public' }],
+    ['missing-model', 'silver/diagrams/partial.dbml', ['schemaVersion', 'tableLayers'], undefined, {}],
+    ['library-relationships', 'gold/diagrams/sales.dbml', ['oneToMany', 'schemaVersion', 'tableLayers'], undefined, {}],
   ] as const)('the DBML twin of %s (%s), read by the host', (name, relative, displayRows, unifiedRows, schemas) => {
     const root = path.join(FIXTURES, 'dbml', name);
     const options = { schemaFallback: (table: string) => (schemas as Record<string, string>)[table] };
@@ -550,7 +550,18 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
       expect(twin.schemaVersion).toBe(7);
       const expected = { ...(readGolden(`${name}.host.json`) as { payload: Record<string, unknown> }).payload };
       DBML_TWIN_EXCEPTIONS[name]?.(expected);
-      expect(normaliseStorageRows(twin, [...displayRows], options)).toEqual(normaliseStorageRows(expected, [...displayRows], options));
+      // Where the relationships are stored is the editor's own note (the Remove confirmation's):
+      // a DBML diagram holds none, the YAML case's JSON file holds its own.
+      expect(twin.relationshipsInDiagramFile).toBe(false);
+      const withoutHomes = (area: Record<string, unknown>): Record<string, unknown> => {
+        const { relationshipsInDiagramFile: _homes, ...rest } = area;
+        const relationships = Array.isArray(rest.relationships)
+          ? (rest.relationships as Array<Record<string, unknown>>).map(({ inDiagramFile: _own, ...r }) => r)
+          : rest.relationships;
+        return { ...rest, relationships };
+      };
+      expect(normaliseStorageRows(withoutHomes(twin), [...displayRows], options))
+        .toEqual(normaliseStorageRows(withoutHomes(expected), [...displayRows], options));
     });
 
     it('reads the Unified shape', () => {

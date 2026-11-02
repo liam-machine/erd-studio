@@ -21,9 +21,9 @@ This page shows how to move every diagram to dbdiagram.io, what goes with it, an
 2. Choose **Rich DBML**.
 3. Pick a folder and click **Export Here**. If any of the files are already there, ERD Studio asks once before replacing them.
 
-You get one file for each subject area (diagram), such as `sales.dbml`: the tables, columns, keys and relationships, with ERD Studio's fields as DBML properties, and where each table and sticky note sits (`erd_layout`, which only ERD Studio reads).
+You get one file for each diagram, such as `sales.dbml`: the tables, columns, keys and relationships, with ERD Studio's fields as DBML properties, and where each table and sticky note sits (`erd_layout`, which only ERD Studio reads).
 
-Each file is named after its subject area. When two layers have a subject area with the same name, the layer goes in front (`gold-sales.dbml`). Save the export outside `.erd-studio/`: ERD Studio refuses a folder inside it, where the files are your diagrams' own storage.
+Each file is named after its diagram. When two layers have a diagram with the same name, the layer goes in front (`gold-sales.dbml`). Save the export outside `.erd-studio/`: ERD Studio refuses a folder inside it, where the files are your diagrams' own storage.
 
 Then upload them with dbdiagram.io's own command-line tool, under your own dbdiagram.io account:
 
@@ -33,13 +33,13 @@ dbdiagram auth login
 dbdiagram push sales.dbml --name "Sales"
 ```
 
-dbdiagram.io lays the tables out itself: it does not read ERD Studio's positions. Run one `push` per subject area.
+dbdiagram.io lays the tables out itself: it does not read ERD Studio's positions. Run one `push` per diagram.
 
 ERD Studio never connects to dbdiagram.io itself. It only writes the files; you choose what to upload.
 
 ### Just one diagram
 
-**ERD Studio: Export Diagram…** (also in a subject area's right-click menu, and the canvas toolbar's **Export** button) exports the diagram you are looking at. Choose **Rich DBML**, then **Save As…**, **Copy to Clipboard** or **Open in Editor**: each gives the same single file, positions included.
+**ERD Studio: Export Diagram…** (also in a diagram's right-click menu, and the canvas toolbar's **Export** button) exports the diagram you are looking at. Choose **Rich DBML**, then **Save As…**, **Copy to Clipboard** or **Open in Editor**: each gives the same single file, positions included.
 
 The plain **DBML** choice is for older DBML tools: it opens anywhere, but ERD Studio's fields go into notes, and it has no positions. Use **Rich DBML** whenever the tool reads DBML 9.1 or later, as dbdiagram.io and dbdocs do.
 
@@ -48,19 +48,19 @@ The plain **DBML** choice is for older DBML tools: it opens anywhere, but ERD St
 The read-only `erd-studio` helper (installed in `~/.erd-studio-cli` by **Set Up My AI Helper**) prints the same file:
 
 ```sh
-~/.erd-studio-cli/bin/erd-studio export --domain .erd-studio/silver/diagrams/sales.dbml --format dbml-rich > sales.dbml
+~/.erd-studio-cli/bin/erd-studio export --diagram .erd-studio/silver/diagrams/sales.dbml --format dbml-rich > sales.dbml
 ```
 
-`--all` in place of `--domain` prints every subject area as a JSON list of `{ "fileName", "content" }`, the same files and names **Export All Diagrams…** writes. The helper only ever prints; it never writes a file.
+`--all` in place of `--diagram` prints every diagram as a JSON list of `{ "fileName", "content" }`, the same files and names **Export All Diagrams…** writes. The helper only ever prints; it never writes a file.
 
 ## What goes with it
 
 | In ERD Studio | In the DBML |
 |---|---|
-| Subject area name and description | `Project` and its note |
+| Diagram name and description | `Project` and its note |
 | Layer, and its colour | a `TableGroup` holding every table |
 | Table, schema, description | `Table schema.name` and its note |
-| Role, grain, warehouse name (alias) | `role`, `grain`, `alias` |
+| Table type, grain, warehouse name (alias) | `role`, `grain`, `alias` |
 | Design rationale | `rationale_purpose`, `rationale_grain_choice`, … |
 | Metadata (`meta`) | `meta_<key>` for a text value; everything else (numbers, lists, nested maps, …) in one `meta_json` |
 | Column type, description, primary key (also composite) | the column's type, note and `pk` |

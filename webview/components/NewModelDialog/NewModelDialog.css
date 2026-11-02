@@ -430,3 +430,15 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* One line under a field, e.g. the starter columns' table-name prefix. */
+.new-model-dialog__hint {
+  font-size: 11px;
+  color: var(--dim-fg);
+}
+
+/* The file New Table creates (DBML): a path, so it may wrap anywhere. */
+.new-model-dialog__path {
+  font-family: var(--vscode-editor-font-family, monospace);
+  overflow-wrap: anywhere;
+}

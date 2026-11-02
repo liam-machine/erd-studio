@@ -114,15 +114,15 @@ describe('parseArgs — export', () => {
   });
 
   it.each([
-    [['export', '--format', 'dbml'], new RegExp(`export needs --domain <path> \\(or --all\\) and --format ${FORMATS}`)],
+    [['export', '--format', 'dbml'], new RegExp(`export needs --diagram <path> \\(or --all\\) and --format ${FORMATS}`)],
     [['export', '--domain', 'a.json'], new RegExp(`export needs --format ${FORMATS}`)],
     [['export', '--all'], new RegExp(`export needs --format ${FORMATS}`)],
     [['export', '--domain', 'a.json', '--format', 'svg'], new RegExp(`Unknown --format "svg"\\. Expected one of: ${FORMATS}\\.`)],
     [['export', '--domain', 'a.json', '--format'], /--format needs a value/],
-    [['export', '--domain', 'a.json', '--domain', 'b.json', '--format', 'dbml'], /export takes one --domain/],
+    [['export', '--domain', 'a.json', '--domain', 'b.json', '--format', 'dbml'], /export takes one --diagram/],
     [['export', '--domain', 'a.json', '--format', 'dbml', '--format', 'mermaid'], /Use --format once/],
-    [['export', '--domain', 'a.json', '--format', 'dbml', '--all'], /Use either --domain or --all, not both/],
-    [['export', '--all', '--format', 'dbml', '--domain', 'a.json', '--domain', 'b.json'], /Use either --domain or --all, not both/],
+    [['export', '--domain', 'a.json', '--format', 'dbml', '--all'], /Use either --diagram or --all, not both/],
+    [['export', '--all', '--format', 'dbml', '--domain', 'a.json', '--domain', 'b.json'], /Use either --diagram or --all, not both/],
     [['export', '--all=yes', '--format', 'dbml'], /--all does not take a value/],
     [['export', '--domain', 'a.json', '--format', 'dbml', '--strict'], /--strict is not an option of "export"/],
     [['export', '--domain', 'a.json', '--format', 'dbml', '--out', 'x.dbml'], /Unknown option --out/],
@@ -134,16 +134,16 @@ describe('parseArgs — export', () => {
   });
 
   it('the usage text lists the subcommand, its formats and --all', () => {
-    expect(USAGE).toContain('erd-studio export    [--json] (--domain <path> | --all) --format mermaid|dbml|dbml-rich');
+    expect(USAGE).toContain('erd-studio export    [--json] (--diagram <path> | --all) --format mermaid|dbml|dbml-rich');
     expect(USAGE).toMatch(/dbml-rich +rich DBML: every ERD Studio field as a property, the table positions\n +in the Project's erd_layout/);
     expect(USAGE).not.toContain('dbml-layout');
     expect(USAGE).not.toContain('.dbdiagram');
-    expect(USAGE).toMatch(/--all +every subject area, as a JSON list of \{ fileName, content \}/);
+    expect(USAGE).toMatch(/--all +every diagram, as a JSON list of \{ fileName, content \}/);
     expect(USAGE).not.toContain('--out');
     // Native DBML storage (§7.1): the example names a DBML diagram.
-    expect(USAGE).toContain('erd-studio export --domain .erd-studio/gold/diagrams/sales.dbml --format dbml');
+    expect(USAGE).toContain('erd-studio export --diagram .erd-studio/gold/diagrams/sales.dbml --format dbml');
     expect(USAGE).not.toContain('sales.json');
-    expect(() => parseArgs(['exprt'])).toThrow(/doctor, inventory, diff, export, version/);
+    expect(() => parseArgs(['exprt'])).toThrow(/doctor, inventory, diff, export, changes, version/);
   });
 });
 
@@ -248,7 +248,7 @@ describe('export — errors (the same codes as diff --domain)', () => {
   it('a missing domain file is exit 3 domain-missing', async () => {
     const { exportJson, diffJson } = await both(['--project', PROJECT, '--domain', 'nope.json']);
     expect(exportJson.code).toBe(3);
-    expect(exportJson.json.error).toEqual({ code: 'domain-missing', message: 'Subject area file not found: nope.json' });
+    expect(exportJson.json.error).toEqual({ code: 'domain-missing', message: 'Diagram file not found: nope.json' });
     expect(exportJson.json.error).toEqual(diffJson.error);
     expect(Object.keys(exportJson.json)).toEqual(['cliVersion', 'error']);
   });

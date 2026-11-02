@@ -41,6 +41,7 @@ import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { SemanticTable } from '../../src/types/semantic';
 import { formatWrittenDbml } from '../../src/services/dbmlWriters';
 import { semanticReadmeText } from '../../src/services/semanticReadme';
+import { parseLayersText } from '@erd-studio/core';
 
 /** The expected text in the canonical layout ERD Studio writes every .dbml in (every write is formatted). */
 function canonical(text: string): string {
@@ -164,7 +165,7 @@ describe('writeNewSubjectArea for a .dbml diagram (§2.8)', () => {
       'README.md', 'layers.json', 'silver/diagrams/shop.dbml', 'silver/relationships/silver.dbml',
       'silver/tables/silver/customers.dbml', 'silver/tables/silver/orders.dbml',
     ]);
-    expect(snapshot().get('README.md')).toBe(semanticReadmeText());
+    expect(snapshot().get('README.md')).toBe(semanticReadmeText(parseLayersText(snapshot().get('layers.json'))));
     const text = fs.readFileSync(shopPath(), 'utf-8');
     expect(text).toMatch(/\nProject shop \{\n[^]*  erd_layout: '''\n    customers 300 20\n    orders 10 20\n  '''\n\}\n$/);
     expect(subjectAreaTableNames(text, shopPath())).toEqual(['orders', 'customers']);

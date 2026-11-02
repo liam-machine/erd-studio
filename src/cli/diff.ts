@@ -259,7 +259,7 @@ export function resolveSubjectAreaPath(ctx: CliContext, arg: string, cwd: string
   const candidates = path.isAbsolute(arg) ? [arg] : [path.resolve(cwd, arg), path.resolve(ctx.root, arg)];
   const hit = candidates.find((c) => fs.existsSync(c));
   if (!hit) {
-    throw new CliEnvError('domain-missing', `Subject area file not found: ${redactPaths(arg)}`);
+    throw new CliEnvError('domain-missing', `Diagram file not found: ${redactPaths(arg)}`);
   }
   return hit;
 }
@@ -526,8 +526,8 @@ export function fixesFromPlan(
     fixes.push({
       severity: 'blocking', kind: 'resolve-phantom', model: p.name, file: domainFile,
       explain: p.reason === 'disabled'
-        ? `${p.name} is disabled in dbt — ask whether to remove it from this subject area or re-enable it in dbt.`
-        : `dbt has no model called ${p.name} — ask whether it is a typo for a real model, or should be removed from this subject area.`,
+        ? `${p.name} is disabled in dbt — ask whether to remove it from this diagram or re-enable it in dbt.`
+        : `dbt has no model called ${p.name} — ask whether it is a typo for a real model, or should be removed from this diagram.`,
     });
   }
   for (const u of unreadable) {
@@ -547,7 +547,7 @@ export function fixesFromPlan(
     if (phantomNames.has(m.modelName)) { continue; }
     fixes.push({
       severity: 'blocking', kind: 'resolve-phantom', model: m.modelName, file: domainFile,
-      explain: `${m.modelName} is in only one of the two views — ask the user whether to keep it in this subject area.`,
+      explain: `${m.modelName} is in only one of the two views — ask the user whether to keep it in this diagram.`,
     });
   }
 
@@ -705,7 +705,7 @@ export function listAllSubjectAreas(ctx: CliContext): SubjectAreaSummary[] {
     if (legacy) throw new CliEnvError('legacy-dbml-tree', legacyDbmlTreeMessage(legacy));
     throw new CliEnvError(
       'no-domains',
-      `No subject area files under ${ctx.semanticDir}/ — check --semantic-dir (it must match the erdStudio.semanticDir setting).`,
+      `No diagram files under ${ctx.semanticDir}/ — check --semantic-dir (it must match the erdStudio.semanticDir setting).`,
     );
   }
   return summaries;

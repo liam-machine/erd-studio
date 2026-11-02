@@ -82,6 +82,13 @@ export interface ErdCanvasProps {
   onLayoutModifiedChange?: (modified: boolean) => void;
   /** Called once, when the first nodes have been measured and fitted into view. */
   onReady?: () => void;
+  /**
+   * Draw the diagram of a project with no dbt project: no stage colours on
+   * tables, lines or the selection ring (the layer badge carries the colour)
+   * and no Physical, ghost or comparison entries in the legend. Default
+   * false: the stage colours, as before.
+   */
+  logicalOnly?: boolean;
   className?: string;
   style?: CSSProperties;
 }
@@ -186,6 +193,7 @@ function ErdCanvasInner({
   nodesDraggable = false,
   onLayoutModifiedChange,
   onReady,
+  logicalOnly = false,
   className,
   style,
   handleRef,
@@ -204,6 +212,13 @@ function ErdCanvasInner({
       storeApi.getState().setDomain(domainProp);
     }
   }, [domainProp, storeApi]);
+
+  // The logical-only look follows the prop (the legend reads it from the store).
+  useEffect(() => {
+    if (storeApi.getState().logicalOnly !== logicalOnly) {
+      storeApi.setState({ logicalOnly });
+    }
+  }, [logicalOnly, storeApi]);
 
   // Latest callbacks, so a parent passing new closures re-runs nothing.
   const onLayoutModifiedChangeRef = useRef(onLayoutModifiedChange);
@@ -333,7 +348,7 @@ function ErdCanvasInner({
 
   return (
     <div
-      className={className ? `editor-canvas ${className}` : 'editor-canvas'}
+      className={`editor-canvas${logicalOnly ? ' editor-canvas--neutral' : ''}${className ? ` ${className}` : ''}`}
       // The extension's canvas layout (a column flex box around the flow area),
       // positioned so the legend and panels anchor to the canvas.
       style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', ...style }}
@@ -381,7 +396,7 @@ function ErdCanvasInner({
 
 export const ErdCanvas = forwardRef<ErdCanvasHandle, ErdCanvasProps>(function ErdCanvas(props, ref) {
   const renderable = useMemo(() => toRenderableSubjectArea(props.domain), [props.domain]);
-  const [store] = useState(() => createCanvasStore({ domain: renderable }));
+  const [store] = useState(() => createCanvasStore({ domain: renderable, logicalOnly: props.logicalOnly === true }));
 
   return (
     <CanvasStoreProvider store={store}>

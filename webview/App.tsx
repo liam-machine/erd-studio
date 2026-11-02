@@ -56,12 +56,13 @@ import { EmbeddedTablesBanner } from './components/Canvas/EmbeddedTablesBanner';
 import { EmptyCanvas } from './components/EmptyCanvas/EmptyCanvas';
 import { DragHint } from './components/Canvas/DragHint';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
-import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { FeedbackDialog } from './components/FeedbackDialog/FeedbackDialog';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
 import { LOADING_STALL_MS, RECONNECT_GRACE_MS, useReconnectWatchdog } from './hooks/useReconnectWatchdog';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
+import { useLibraryDrop } from './hooks/useLibraryDrop';
+import { LibraryDropOverlay } from './components/Canvas/LibraryDropOverlay';
 import type { DisplaySubjectArea } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
 import { orientDraggedRelationship } from './lib/relationshipDirection';
@@ -85,6 +86,11 @@ function applySubjectAreaPayload(payload: DisplaySubjectArea): void {
   }
   if (payload.existingModels) {
     s.setExistingModels(payload.existingModels);
+  }
+  // The host's canvas context is logical-stage only: the physical stage drops
+  // it. A logical payload keeps the last one until the host's next arrives.
+  if (payload.stage !== 'logical') {
+    s.setCanvasContext(null);
   }
 }
 
@@ -112,6 +118,8 @@ function EditorCanvas() {
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
   const canvasMode = useEditorStore((s) => s.canvasMode);
+  // No dbt project: one stage, so the canvas drops the stage colours.
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
   const annotationLinkDrag = useEditorStore((s) => s.annotationLinkDrag);
   const updateAnnotationLinkDrag = useEditorStore((s) => s.updateAnnotationLinkDrag);
   const endAnnotationLinkDrag = useEditorStore((s) => s.endAnnotationLinkDrag);
@@ -206,6 +214,10 @@ function EditorCanvas() {
   // diagram or an error arrives: proof the host is connected.
   const [hostLoading, setHostLoading] = useState<{ tables?: number } | null>(null);
 
+  // Drops of tables on the canvas (a Shift-drag from the Table Library or the
+  // Explorer): the drop handlers, the highlight and the "Hold Shift" hint.
+  const { dropHandlers, dropActive, hintTables, libraryDragStarted } = useLibraryDrop();
+
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
       switch (msg.type) {
@@ -230,11 +242,6 @@ function EditorCanvas() {
           // No dbt project: no Physical tab, no Diff. Absent means today's
           // behaviour, so an older host keeps both.
           useEditorStore.getState().setLogicalOnly(msg.logicalOnly === true);
-          // "The Two Stages" explains a tab the user cannot see, so it waits
-          // (undismissed) until they open a dbt project.
-          if (!msg.welcomeDismissed && msg.logicalOnly !== true) {
-            useEditorStore.getState().setWelcomeModalOpen(true);
-          }
           break;
         case 'stageData':
           // A reply for a stage the user has since switched away from — drop it
@@ -279,9 +286,23 @@ function EditorCanvas() {
         case 'openFeedback':
           useEditorStore.getState().setFeedbackDialogOpen(true, msg.payload ?? null);
           break;
+        case 'canvasContext':
+          // Follows each logical payload (the file line, "Not on this diagram", the "+n" chip).
+          if (useEditorStore.getState().domain?.stage === 'logical') {
+            useEditorStore.getState().setCanvasContext(msg.payload);
+          }
+          break;
         case 'revealRelationship':
           // Shown once the diagram has settled (useRevealRelationship, in the Toolbar).
           useEditorStore.getState().setPendingReveal(msg.payload);
+          break;
+        case 'revealTable':
+          // Shown once the diagram has settled (useRevealTable, in the Toolbar).
+          useEditorStore.getState().setPendingTableReveal(msg.payload.modelName);
+          break;
+        case 'libraryDragStarted':
+          // "Hold Shift and drop to add …": an editable logical diagram only (useLibraryDrop).
+          if (Array.isArray(msg.payload?.tables)) libraryDragStarted(msg.payload.tables);
           break;
         case 'feedbackContext':
           useEditorStore
@@ -290,7 +311,7 @@ function EditorCanvas() {
           break;
       }
     },
-    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated],
+    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated, libraryDragStarted],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
@@ -661,11 +682,13 @@ function EditorCanvas() {
   const selectModeActive = canvasMode === 'select' && !domain.readOnly;
   return (
     <div
-      className={`editor-canvas${selectModeActive ? ' editor-canvas--select-mode' : ''}`}
+      className={`editor-canvas${selectModeActive ? ' editor-canvas--select-mode' : ''}${logicalOnly ? ' editor-canvas--neutral' : ''}`}
       // Column flex so the physical-source notice is a strip ABOVE the flow
       // area rather than an overlay on top of the nodes. With the notice
       // hidden this is a one-child flex container — i.e. unchanged.
       style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
+      // Undefined on the physical stage or a read-only diagram: nothing to drop on.
+      {...dropHandlers}
     >
       {/* "dbt has not been compiled" strip. Renders nothing on the logical
           stage or when any dbt artifact was found. */}
@@ -707,6 +730,8 @@ function EditorCanvas() {
         proOptions={{ hideAttribution: true }}
       >
         <CanvasBackdrop />
+        {/* The drop highlight and the "Hold Shift and drop" hint (useLibraryDrop). */}
+        <LibraryDropOverlay active={dropActive} hintTables={hintTables} />
         {/* "This diagram is empty" card — logical stage, zero models only. */}
         <EmptyCanvas />
         {/* One-time drag-to-relate tip — 2+ tables, no relationships yet. */}
@@ -749,9 +774,6 @@ function EditorCanvas() {
 
       {/* Legend panel (bottom-left) */}
       <Legend />
-
-      {/* Welcome modal (first-time users) */}
-      <WelcomeModal />
 
       {/* Feedback dialog (bug reports and feature requests) */}
       <FeedbackDialog />

@@ -1,6 +1,6 @@
 # File format reference
 
-> On screen ERD Studio says **table**, **Table Library** and **diagram** (the commands say *subject area*). A **DBML project** (ERD Studio 2.0, the default for every new project) uses those words in its files too. A **YAML/JSON project** from before 2.0 keeps its own names (`logical-models/` or `tables/`, `logical.models` or `logical.tables`, `domain` or `subjectArea`); see [YAML/JSON projects](#yamljson-projects-schema-v4v6-still-read-and-edited) and the [glossary](glossary.md).
+> On screen ERD Studio says **table**, **Table Library** and **diagram** (only the two commands for older projects say *subject area*). A **DBML project** (ERD Studio 2.0, the default for every new project) uses those words in its files too. A **YAML/JSON project** from before 2.0 keeps its own names (`logical-models/` or `tables/`, `logical.models` or `logical.tables`, `domain` or `subjectArea`); see [YAML/JSON projects](#yamljson-projects-schema-v4v6-still-read-and-edited) and the [glossary](glossary.md).
 
 > Context document for AI agents writing ERD Studio files. **Run `erd-studio doctor --json` and read `erd.storage` first:** `dbml` (or no `.erd-studio` folder yet) means write DBML, as the next section says; `yaml` means follow [YAML/JSON projects](#yamljson-projects-schema-v4v6-still-read-and-edited); `mixed` means new tables and diagrams are DBML and an existing file keeps its format. Never convert a project by hand: **ERD Studio: Convert Project to DBML** does it in one undoable step. The authoritative, always-current copy of this guidance is the `SCHEMA_CONTENT` string in `src/services/harnessService.ts`, which **Set Up My AI Helper** installs (`SKILL.md`, `DBML.md` and `LEGACY.md`).
 
@@ -50,8 +50,8 @@ Every DBML file lives under a **layer folder** (one per id in `layers.json`), at
 - **A layer folder** is a lower-case layer id (letters, digits, `-` and `_`, starting with a letter); its display name is the layer's `label` in `layers.json` (`{ "id": "silver", "label": "Silver" }`). A `Silver/` folder is not a layer: `doctor` says to rename it `silver/` and set the label. `tables`, `templates` and `logical-models` are never layers (Add Layer and Convert refuse them, in every project); `relationships` and `diagrams` may be. A layer folder holding tables or relationships that `layers.json` does not list is still read (`dbmlLayerNotConfigured`, a warning); a diagram opens only in a configured layer, and `doctor` reports a diagram folder in any other (`dbmlLayerNotConfigured` too).
 - `tables`, `relationships`, `diagrams` and `.dbml` are spelled exactly, in lower case.
 - **A table name is unique across the whole project**, every layer and schema, case-insensitively (`duplicateTableName`). Tables that share a warehouse name get unique names (`silver_customer`, `gold_customer`), with the warehouse name in `alias`.
-- **The schema folder** is the table's schema, written as its qualifier (`Table calendar.dim_date`). It is free: a source system, a domain, the warehouse schema. A table ERD Studio creates goes into the layer of the diagram it was added to, in the schema folder of dbt's configured schema when it comes from a dbt model with one (`+schema` or `config(schema=…)`; never the built schema in `manifest.json`, which differs per target), the source's qualifier for Import DBML…, and otherwise a folder named after the layer. An existing schema folder of that layer that differs only in case is reused, spelling and all.
-- **README.md** is written only when ERD Studio creates the folder (a new diagram, Set Up, Draw from dbt, Import, Open Example) or by Convert, and never replaces one.
+- **The schema folder** is the table's schema, written as its qualifier (`Table calendar.dim_date`). It is free: a source system, a domain, the warehouse schema. A table ERD Studio creates goes into the layer of the diagram it was added to, in the schema folder the New Table dialog's **Schema** field names (filled in with the schema most of that diagram's tables in the layer already use, else the layer's name), the schema folder of dbt's configured schema when it comes from a dbt model with one (`+schema` or `config(schema=…)`; never the built schema in `manifest.json`, which differs per target), the source's qualifier for Import DBML…, and otherwise a folder named after the layer. An existing schema folder of that layer that differs only in case is reused, spelling and all.
+- **README.md** is written only when ERD Studio creates the folder (a new diagram, Set Up, Draw from dbt, Import, Open Example) or by Convert, and never replaces one. It lists the project's layers in layers.json order, each with its label and folder (Convert, with no layers.json, names the usual ones instead); an older README without the list is still a README like any other.
 
 A new project also needs `.erd-studio/layers.json` (see [Layers File](#layers-file-erd-studiolayersjson)).
 
@@ -308,7 +308,7 @@ One JSON file per subject area. The file and its `domain` field keep the old nam
   "domain": "sales",                     // REQUIRED. Slug; matches filename without .json.
   "layer": "silver",                     // REQUIRED. Must match a layer id from layers.json and the parent directory.
   "description": "Sales subject area",   // Optional. Defaults to "".
-  "modelFolder": "models/silver",        // Optional. Filters the "Add Existing Table" dialog.
+  "modelFolder": "models/silver",        // Optional. Filters the "Add Existing Tables" dialog.
   "stubColumns": ["dim_date"],           // Optional. Tables whose physical-only columns are ignored in sync comparison.
   "logical": {
     "models": ["dim_customer", "fct_order_line"],   // REQUIRED. Table NAME STRINGS (refs to logical-models/[folder/]*.yml).
@@ -324,7 +324,7 @@ One JSON file per subject area. The file and its `domain` field keep the old nam
 | `domain` | string | Yes | The subject area's slug. Should equal the filename without `.json`. |
 | `layer` | string | Yes | Must match an `id` in `layers.json` and the parent directory name. |
 | `description` | string | No | Human-readable subject area description. |
-| `modelFolder` | string | No | Path prefix filter for the "Add Existing Table" dialog (e.g. `"models/silver"`). |
+| `modelFolder` | string | No | Path prefix filter for the "Add Existing Tables" dialog (e.g. `"models/silver"`). |
 | `stubColumns` | string[] | No | Table names (typically conformed dimensions / reference tables) that define only key columns. Missing-column discrepancies for these tables are hidden; extra and type-mismatch discrepancies still surface. |
 | `logical.models` | string[] | Yes | Table **name strings**. Each must correspond to `.erd-studio/logical-models/{name}.yml` or `.erd-studio/logical-models/{folder}/{name}.yml`. |
 | `logical.relationships` | array | Yes | Array of `Relationship` objects. |
@@ -850,8 +850,10 @@ mismatch; writing `data_type:` into the schema yml, or running
 under another name, then a catalog relation named otherwise, then the logical
 `alias`. `schema` is the manifest's `schema`, then the catalog's
 `metadata.schema`, then blank — it cannot be derived from the filesystem (it needs
-`generate_schema_name` and `profiles.yml`), so with neither artifact the node badge
-falls back to the ERD **layer** abbreviation and says so. Every real physical table
+`generate_schema_name` and `profiles.yml`). The node badge always names the ERD
+**layer** the table lives in; the schema is in its hover card and, when it is not
+the layer's name, a dim prefix of the table name (`analytics_gold.fct_order`). With
+neither artifact the hover card says no dbt schema was resolved. Every real physical table
 also carries **provenance**: which sources contributed its columns, and which one
 supplied its types. That is runtime state shown on the node and in the detail
 panel; it is never written to disk.

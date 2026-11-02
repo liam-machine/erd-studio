@@ -53,4 +53,5 @@ export * from './lib/badgeLabels';
 export { swapCardinality } from './lib/cardinalityUtils';
 export { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId } from './lib/relationshipDisplayKey';
 export { computeTableLabels, matchesTableSearch, type LabelledTable } from './lib/modelLabels';
+export { LAYER_BADGE_FALLBACK, layerAbbreviation, isSingleLayerProject } from './lib/layerCues';
 export { ANNOTATION_COLORS } from './lib/annotationColors';

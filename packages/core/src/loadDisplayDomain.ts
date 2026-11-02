@@ -370,6 +370,8 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
 
   // 7. v5 model files: each unique, allowed name read and parsed once.
   const parsed = new Map<string, ParsedTable>();
+  // A DBML diagram's members: the layer of the file each was read from, by lower-case name (§2.3).
+  let tableLayers: Map<string, string> | undefined;
   if (usesTableLibrary(format) && rawModels) {
     const names = [...new Set(rawModels.filter((m): m is string => typeof m === 'string'))]
       .filter((name) => modelNameFilter(name));
@@ -397,6 +399,8 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     };
     // A DBML member found as a `.dbml` file (its path relative to the semantic dir).
     const dbmlFound = new Set<string>();
+    // Each such member's layer: the layer folder of the file it was read from.
+    tableLayers = new Map<string, string>();
     await mapWithLimit(names, maxParallelReads, async (name) => {
       // One lane probes one candidate at a time, so maxParallelReads holds.
       const dbmlPaths = dbmlCandidates(name);
@@ -414,8 +418,10 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
       const path = candidates[index];
       if (dbml && index < dbmlPaths.length) {
         dbmlFound.add(name);
-        // Its schema folder, the schema of an unqualified Table (§1.2).
-        const schemaFolder = dbmlTreePathOf(dbmlPaths[index])?.schema;
+        // Its schema folder, the schema of an unqualified Table (§1.2), and its layer.
+        const tree = dbmlTreePathOf(dbmlPaths[index]);
+        const schemaFolder = tree?.schema;
+        if (tree) tableLayers?.set(name.toLowerCase(), tree.layer);
         parsed.set(name, parseDbmlTable(name, text, dbml, maxYamlChars, warn, schemaFolder));
         return;
       }
@@ -501,6 +507,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
       ignoreStrayPositions,
       warn: callerWarn,
       ...(reading ? { schemaVersion: reading.schemaVersion, domainNameFallback: fileName.slice(0, -'.dbml'.length) } : {}),
+      ...(tableLayers && tableLayers.size > 0 ? { tableLayers } : {}),
     });
   } catch (err) {
     if (err instanceof TypeError && !callerErrors.has(err)) {
@@ -531,6 +538,8 @@ function buildDisplaySubjectArea(
     schemaVersion?: number;
     /** The name when the file names none (a DBML diagram's stem). */
     domainNameFallback?: string;
+    /** A DBML diagram's members: the layer of the file each was read from, by lower-case name. */
+    tableLayers?: ReadonlyMap<string, string>;
   },
 ): DisplaySubjectArea {
   const { domainPath, fileName, parentDirName, layers, layerLookup, parsed, readOnly, ignoreStrayPositions, warn } = ctx;
@@ -575,13 +584,25 @@ function buildDisplaySubjectArea(
     unified.viewConfig.positions = { ...(unified.viewConfig.positions ?? {}), ...computed };
   }
 
-  // 10. The logical stage, as the canvas renders it.
-  return toDisplaySubjectArea(toLogicalStage(unified), {
+  // 10. The logical stage, as the canvas renders it: each DBML table with
+  // the layer it was read from, and every layer, so a table from another
+  // layer is drawn in that layer's colour.
+  const display = toDisplaySubjectArea(toLogicalStage(unified), {
     viewConfig: unified.viewConfig,
     stubColumns: unified.stubColumns,
     layerConfig: layers.find((l) => l.id === unified.layer),
     readOnly,
   });
+  const layerOf = (name: string): string | undefined => ctx.tableLayers?.get(name.toLowerCase());
+  if (!display.models.some((m) => layerOf(m.name) !== undefined)) return display;
+  return {
+    ...display,
+    layerConfigs: ctx.layers.map((l) => ({ ...l })),
+    models: display.models.map((m) => {
+      const layer = layerOf(m.name);
+      return layer !== undefined ? { ...m, layer } : m;
+    }),
+  };
 }
 
 /** The entries of `positions` that name one of `models`. */

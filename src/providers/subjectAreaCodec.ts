@@ -77,7 +77,7 @@ export interface SubjectAreaCodec {
 /** Thrown by the JSON codec for a file that parses but is not a JSON object. */
 export class NotASubjectAreaObject extends Error {
   constructor(readonly filePath: string) {
-    super(`Subject area file ${filePath} does not contain a JSON object.`);
+    super(`Diagram file ${filePath} does not contain a JSON object.`);
     this.name = 'NotASubjectAreaObject';
   }
 }

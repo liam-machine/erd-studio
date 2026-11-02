@@ -1026,3 +1026,111 @@
   background: var(--button-bg);
   color: var(--button-fg);
 }
+
+/* ---------------------------------------------------------------------------
+   File line (editing host only): the table's file, with Open
+   --------------------------------------------------------------------------- */
+
+.detail-panel__file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-panel__file-open,
+.detail-panel__off-add,
+.detail-panel__off-add-all {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.detail-panel__file-open:hover,
+.detail-panel__off-add:hover,
+.detail-panel__off-add-all:hover {
+  background: var(--button-hover-bg);
+  border-color: var(--focus-border);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Not on this diagram (editing host, logical stage)
+   --------------------------------------------------------------------------- */
+
+.detail-panel__off-diagram-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.detail-panel__off-diagram-title {
+  margin: 0;
+}
+
+.detail-panel__off-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-panel__off-detail {
+  color: var(--dim-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Modelling detail (optional): folded until one of its fields is set
+   --------------------------------------------------------------------------- */
+
+.detail-panel__modelling {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.detail-panel__modelling-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--dim-fg);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.detail-panel__modelling-toggle:hover {
+  color: var(--editor-fg);
+}
+
+.detail-panel__modelling-toggle:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 2px;
+}
+
+.detail-panel__modelling-chevron {
+  width: 10px;
+  font-size: 10px;
+}
+
+.detail-panel__modelling-optional {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}

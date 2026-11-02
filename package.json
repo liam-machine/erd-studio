@@ -253,6 +253,80 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "erdStudio.goToTable",
+        "title": "Go to Table…",
+        "category": "ERD Studio",
+        "icon": "$(search)"
+      },
+      {
+        "command": "erdStudio.addToDiagram",
+        "title": "Add to Diagram…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.revealInTableLibrary",
+        "title": "Reveal in Table Library",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.filterDiagrams",
+        "title": "Filter Diagrams…",
+        "category": "ERD Studio",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "erdStudio.clearDiagramsFilter",
+        "title": "Clear Diagrams Filter",
+        "category": "ERD Studio",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "erdStudio.filterTableLibrary",
+        "title": "Filter Table Library…",
+        "category": "ERD Studio",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "erdStudio.clearTableLibraryFilter",
+        "title": "Clear Table Library Filter",
+        "category": "ERD Studio",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "erdStudio.filterRelationships",
+        "title": "Filter Relationships…",
+        "category": "ERD Studio",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "erdStudio.clearRelationshipsFilter",
+        "title": "Clear Relationships Filter",
+        "category": "ERD Studio",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "erdStudio.showRowDetails",
+        "title": "Show Row Details",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.hideRowDetails",
+        "title": "Hide Row Details",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.groupRelationshipsByFile",
+        "title": "Group by Relationships File",
+        "category": "ERD Studio",
+        "icon": "$(files)"
+      },
+      {
+        "command": "erdStudio.groupRelationshipsByTable",
+        "title": "Group by Table",
+        "category": "ERD Studio",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "erdStudio.reportBug",
         "title": "Send Feedback",
         "category": "ERD Studio",
@@ -335,7 +409,8 @@
         {
           "id": "erdStudio.relationships",
           "name": "Relationships",
-          "when": "erdStudio.hasLogicalModelsDir"
+          "when": "erdStudio.hasLogicalModelsDir",
+          "visibility": "collapsed"
         },
         {
           "id": "erdStudio.help",
@@ -466,10 +541,23 @@
             ]
           },
           {
+            "id": "openDiagram",
+            "title": "Open a diagram from this project",
+            "description": "This project already has diagrams in .erd-studio/. Open one to see its tables and how they relate. Each table is a file you can commit and review like code.\n[Open Diagram](command:erdStudio.openDomain)",
+            "when": "erdStudio.hasDiagrams",
+            "media": {
+              "svg": "media/walkthrough/sample.svg",
+              "altText": "A project folder holding .erd-studio/, and a star schema diagram opened from it."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.openDomain"
+            ]
+          },
+          {
             "id": "newDiagram",
             "title": "Draw your first data model — no dbt needed",
             "description": "Start a blank diagram and add tables on the canvas. Each table is a file in .erd-studio/ you can commit and review like code.\n[New Diagram](command:erdStudio.createDomain)\nNew to data modelling? Start from a small coffee-shop star schema instead.\n[Open Example Diagram](command:erdStudio.openExampleDiagram)",
-            "when": "!erdStudio.hasDbtProject",
+            "when": "!erdStudio.hasDbtProject && !erdStudio.hasDiagrams",
             "media": {
               "svg": "media/walkthrough/new-diagram.svg",
               "altText": "A new diagram with its first table, and the DBML files a new project keeps it in under .erd-studio."
@@ -483,7 +571,7 @@
             "id": "draw",
             "title": "Draw your dbt project — no AI needed",
             "description": "Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.\n[Draw from dbt](command:erdStudio.drawFromDbt)",
-            "when": "erdStudio.hasDbtProject",
+            "when": "erdStudio.hasDbtProject && !erdStudio.hasDiagrams",
             "media": {
               "svg": "media/walkthrough/draw.svg",
               "altText": "dbt models picked from a list and drawn as a diagram with relationships."
@@ -706,6 +794,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "erdStudio.addToDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "group": "navigation@2"
+        },
+        {
           "command": "erdStudio.moveTable",
           "when": "view == erdStudio.modelLibrary && viewItem == logicalModel && erdStudio.storage =~ /^(dbml|mixed)$/",
           "group": "7_modification@0"
@@ -780,8 +873,13 @@
           "group": "2_export@1"
         },
         {
+          "command": "erdStudio.goToTable",
+          "when": "view == erdStudio.modelLibrary && erdStudio.hasProject",
+          "group": "navigation@0"
+        },
+        {
           "command": "erdStudio.organizeModelLibrary",
-          "when": "view == erdStudio.modelLibrary",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage != dbml",
           "group": "1_organise@0"
         },
         {
@@ -800,19 +898,91 @@
           "group": "1_organise@3"
         },
         {
-          "command": "erdStudio.installCodingHarness",
-          "when": "view == erdStudio.help && erdStudio.hasSemanticDir",
-          "group": "1_ai@1"
+          "command": "erdStudio.groupRelationshipsByFile",
+          "when": "view == erdStudio.relationships && erdStudio.relationshipsGrouping != file",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.groupRelationshipsByTable",
+          "when": "view == erdStudio.relationships && erdStudio.relationshipsGrouping == file",
+          "group": "navigation@1"
         },
         {
           "command": "erdStudio.refreshMyReports",
           "when": "view == erdStudio.help && erdStudio.hasTrackedReports",
           "group": "2_reports@1"
+        },
+        {
+          "command": "erdStudio.filterDiagrams",
+          "when": "view == erdStudio.domainTree && erdStudio.hasProject && !erdStudio.diagramsFiltered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.clearDiagramsFilter",
+          "when": "view == erdStudio.domainTree && erdStudio.diagramsFiltered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.filterDiagrams",
+          "when": "view == erdStudio.domainTree && erdStudio.diagramsFiltered",
+          "group": "0_filter@0"
+        },
+        {
+          "command": "erdStudio.filterTableLibrary",
+          "when": "view == erdStudio.modelLibrary && !erdStudio.tableLibraryFiltered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.clearTableLibraryFilter",
+          "when": "view == erdStudio.modelLibrary && erdStudio.tableLibraryFiltered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.filterTableLibrary",
+          "when": "view == erdStudio.modelLibrary && erdStudio.tableLibraryFiltered",
+          "group": "0_filter@0"
+        },
+        {
+          "command": "erdStudio.filterRelationships",
+          "when": "view == erdStudio.relationships && !erdStudio.relationshipsFiltered",
+          "group": "navigation@2"
+        },
+        {
+          "command": "erdStudio.clearRelationshipsFilter",
+          "when": "view == erdStudio.relationships && erdStudio.relationshipsFiltered",
+          "group": "navigation@2"
+        },
+        {
+          "command": "erdStudio.filterRelationships",
+          "when": "view == erdStudio.relationships && erdStudio.relationshipsFiltered",
+          "group": "0_filter@0"
+        },
+        {
+          "command": "erdStudio.showRowDetails",
+          "when": "view =~ /^erdStudio\\.(domainTree|modelLibrary|relationships)$/ && erdStudio.hasProject && erdStudio.sidebarRowDetails != full",
+          "group": "9_rowDetails@0"
+        },
+        {
+          "command": "erdStudio.hideRowDetails",
+          "when": "view =~ /^erdStudio\\.(domainTree|modelLibrary|relationships)$/ && erdStudio.hasProject && erdStudio.sidebarRowDetails == full",
+          "group": "9_rowDetails@0"
         }
       ],
       "commandPalette": [
         {
           "command": "erdStudio.moveRelationshipsToLibrary",
+          "when": "erdStudio.storage != dbml"
+        },
+        {
+          "command": "erdStudio.organizeModelLibrary",
+          "when": "erdStudio.hasProject && erdStudio.storage != dbml"
+        },
+        {
+          "command": "erdStudio.setupSemanticDirectory",
+          "when": "erdStudio.storage != dbml || !erdStudio.hasSemanticDir"
+        },
+        {
+          "command": "erdStudio.initializeLayerConfig",
           "when": "erdStudio.storage != dbml"
         },
         {
@@ -866,6 +1036,58 @@
         {
           "command": "erdStudio.openRelationshipSource",
           "when": "false"
+        },
+        {
+          "command": "erdStudio.goToTable",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.addToDiagram",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.revealInTableLibrary",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.filterDiagrams",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.clearDiagramsFilter",
+          "when": "erdStudio.diagramsFiltered"
+        },
+        {
+          "command": "erdStudio.filterTableLibrary",
+          "when": "erdStudio.hasLogicalModelsDir"
+        },
+        {
+          "command": "erdStudio.clearTableLibraryFilter",
+          "when": "erdStudio.tableLibraryFiltered"
+        },
+        {
+          "command": "erdStudio.filterRelationships",
+          "when": "erdStudio.hasLogicalModelsDir"
+        },
+        {
+          "command": "erdStudio.clearRelationshipsFilter",
+          "when": "erdStudio.relationshipsFiltered"
+        },
+        {
+          "command": "erdStudio.showRowDetails",
+          "when": "erdStudio.hasProject && erdStudio.sidebarRowDetails != full"
+        },
+        {
+          "command": "erdStudio.hideRowDetails",
+          "when": "erdStudio.hasProject && erdStudio.sidebarRowDetails == full"
+        },
+        {
+          "command": "erdStudio.groupRelationshipsByFile",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.groupRelationshipsByTable",
+          "when": "false"
         }
       ],
       "erdStudio.newMenu": [
@@ -891,6 +1113,31 @@
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "erdStudio.filterDiagrams",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "focusedView == erdStudio.domainTree"
+      },
+      {
+        "command": "erdStudio.filterTableLibrary",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "focusedView == erdStudio.modelLibrary"
+      },
+      {
+        "command": "erdStudio.filterRelationships",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "focusedView == erdStudio.relationships"
+      },
+      {
+        "command": "erdStudio.cancelSidebarFilter",
+        "key": "escape",
+        "when": "erdStudio.sidebarFilterOpen"
+      }
+    ],
     "configuration": {
       "title": "ERD Studio",
       "properties": {
@@ -1000,6 +1247,19 @@
           ],
           "default": "prompt",
           "markdownDescription": "When you move or rename a `.dbml` file (or a folder of them) in the Explorer in a DBML project, update the diagrams and relationships files that point at it: their `use` lines, and the table's schema (`Table crm.fct_order`) when it lands in another schema folder. Renaming a table file renames the table everywhere, since its file name is its name. Each update is one step for **Edit > Undo**. **Move Table…** and **Move Diagram to Layer…** always update them, whatever this says."
+        },
+        "erdStudio.sidebar.rowDetails": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "full"
+          ],
+          "enumDescriptions": [
+            "Quiet rows: beside each name, only what is unusual or tells it apart (a warehouse name that differs, a table on no diagram, tables from other layers, a problem). Counts, owners and which diagrams show a table are in each row's hover.",
+            "Every detail beside every name: how many diagrams, tables, schemas and relationships each row holds, each table's owner and how many diagrams show it."
+          ],
+          "default": "compact",
+          "markdownDescription": "How much the rows of the **Diagrams**, **Table Library** and **Relationships** views say beside their names. **Show Row Details** and **Hide Row Details**, in each view's **…** menu, switch it."
         },
         "dbtSemantic.projectPath": {
           "type": "string",

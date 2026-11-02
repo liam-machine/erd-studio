@@ -54,12 +54,12 @@ Everything else — `layer`, `modelFolder` (the dbt `models/` path filter), `vie
 - **To find a model**, look at `logical-models/{name}.yml` first, then in each folder (`logical-models/*/{name}.yml`). If the same name exists twice, the top-level file wins, then folders in alphabetical order; the others are ignored.
 - **Folders are opt-in per project.** Check first: if a folder named after a layer in `layers.json` (`logical-models/{layer}/`) already holds a `.yml` file (or `logical-models/` is empty), the project uses layer folders — create a new model in the folder of the layer of the domain you are adding it to (adding `fct_sale` to `gold/reporting.json` creates `logical-models/gold/fct_sale.yml`). If every model file is at the top level, the project is **flat** — create the new file at the top level too, and never start the folder layout on your own (the user opts in with **ERD Studio: Organise Table Library by Layer**). When editing or renaming an existing model, keep its file in the folder it is already in.
 
-### Model Library (Sidebar)
+### Table Library (Sidebar)
 
-The **Model Library** panel in the ERD Studio sidebar shows all YAML files in `logical-models/`, grouped by folder. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
+The **Table Library** panel in the ERD Studio sidebar shows all YAML files in `logical-models/`, grouped by folder. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
 
-- **Referenced models** show how many domains use them (e.g. "2 domains")
-- **Orphaned models** show a warning icon and "(unused)" — these exist as `.yml` files but are not in any domain's `logical.models[]` array
+- **Referenced models** show how many diagrams use them (e.g. "on 2 diagrams")
+- **Models on no diagram** show "on no diagram" — these exist as `.yml` files but are not in any domain's `logical.models[]` array
 
 **Important for AI agents:** Before saying a model "already exists in the ERD", check whether it is referenced by the target domain's `logical.models[]` array — not just whether the `.yml` file exists. A model file in `logical-models/` may be unused (orphaned) or only referenced by other domains.
 
@@ -304,4 +304,4 @@ relationships:
 
 **Which to use:** put new relationships in the model YAML when **any** model file already has a `relationships:` list, or **no** domain file has a `logical.relationships` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's `logical.relationships[]`, and leave that choice to the user (the **ERD Studio: Move Relationships to Table Library** command moves them). Never define the same two columns twice — not in both places, and not once in each direction; if a domain and the model YAML disagree, the model YAML wins.
 
-<!-- erd-studio-harness: 39 -->
+<!-- erd-studio-harness: 40 -->

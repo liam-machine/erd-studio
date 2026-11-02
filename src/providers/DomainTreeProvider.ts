@@ -1,11 +1,16 @@
 /**
  * SubjectAreaTreeProvider — VS Code TreeDataProvider for the sidebar.
  *
- * Displays semantic domains grouped by layer (bronze, silver, gold).
- * Each domain shows a badge with model count (from the logical stage).
- * Creating is always a visible, labelled row: each creatable layer ends with
- * "New Diagram…", and the tree ends with "New Layer…" (the + menu and the
- * layer row's inline + are shortcuts to the same commands).
+ * Displays the diagrams grouped by layer (bronze, silver, gold): each layer
+ * row is drawn in its layers.json colour and says it is a layer, and each
+ * diagram says how many of its tables it borrows from other layers (a
+ * diagram belongs to one layer but can show any table). With
+ * `erdStudio.sidebar.rowDetails` set to `full` (`rowDetails.ts`), each row
+ * also says how many diagrams or tables it holds; compact, those counts are
+ * in the hover only. A creatable layer row has an inline + (New Diagram in
+ * that layer); a layer with no diagram yet ends with a labelled
+ * "New Diagram…" row (full: every creatable layer does), and the tree ends
+ * with "New Layer…" (the + menu is a shortcut to the same commands).
  *
  * Supports drag-and-drop to reorder layers. Stages are handled entirely
  * by the editor tabs — the tree is stage-agnostic.
@@ -17,12 +22,29 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { SubjectAreaSummary, Layer } from '../types/semantic';
-import { SubjectAreaService } from '../services/domainService';
+import { SubjectAreaService, subjectAreaTableNames } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import { createLogger, elapsedMs, log, plural } from '../services/logger';
 import { layersFailure } from '../services/diagramCommandErrors';
 import { showCommandFailure } from '../commands/commandFailure';
 import type { DbmlFileIconResolver } from './dbmlFileKinds';
+import { layerSwatchIcon } from './layerSwatch';
+import { otherLayerCounts, type TableHome } from '../services/tableHomes';
+import { LAYER_DEFINITION } from '../services/layerWording';
+import {
+  DIAGRAMS_FILTER,
+  isEmptyQuery,
+  labelHighlights,
+  matchTreeQuery,
+  parseTreeQuery,
+  withReasons,
+  type FilterOutcome,
+  type SearchSubject,
+  type TreeMatch,
+  type TreeQuery,
+} from '../services/treeSearch';
+import { FILTER_COMMANDS, noMatchItem } from './sidebarFilter';
+import { DEFAULT_ROW_DETAILS, type RowDetails } from './rowDetails';
 
 const treeLog = createLogger('Subject Areas');
 
@@ -36,13 +58,25 @@ export const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer
 interface LayerNode {
   readonly type: 'layer';
   readonly layer: Layer;
+  /** How many diagrams the layer holds (while filtered, how many match). */
+  readonly diagramCount?: number;
+  /** Listed while filtered: the filter's generation, part of the row's id so VS Code shows it expanded. */
+  readonly filterGeneration?: number;
 }
 
 interface SubjectAreaNode {
   readonly type: 'domain';
   readonly summary: SubjectAreaSummary;
   readonly modelCount: number;
-  readonly designCount: number;
+  /** The diagram's tables that live in other layers, per layer (layers.json order). */
+  readonly otherLayers?: ReadonlyArray<{ layer: string; count: number }>;
+  /** While filtered: what of the row matched (its name's highlights, and why when not its name). */
+  readonly match?: TreeMatch;
+}
+
+/** The one row while a filter matches no diagram: clicking it clears the filter. */
+interface NoMatchNode {
+  readonly type: 'noMatch';
 }
 
 interface NewSubjectAreaNode {
@@ -68,7 +102,7 @@ interface ProjectNode {
   readonly location: string;
 }
 
-export type TreeElement = ProjectNode | LayerNode | SubjectAreaNode | NewSubjectAreaNode | NewLayerNode;
+export type TreeElement = ProjectNode | LayerNode | SubjectAreaNode | NewSubjectAreaNode | NewLayerNode | NoMatchNode;
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -81,6 +115,12 @@ const DEFAULT_SEMANTIC_DIR = '.erd-studio';
 interface CachedSubjectAreaSummary {
   readonly signature: string;
   readonly modelCount: number;
+  /** The diagram's member table names (null when the file lists none it can read, or they were not asked for). */
+  readonly members: readonly string[] | null;
+  /** Whether {@link members} was read: names are read only when some table has a layer (or the view is filtered). */
+  readonly membersRead: boolean;
+  /** The diagram's description, read with its members (a JSON `description`, a DBML Project `Note`). */
+  readonly description?: string;
 }
 
 export class SubjectAreaTreeProvider
@@ -104,7 +144,12 @@ export class SubjectAreaTreeProvider
    * follows reads this instead of listing every layer folder again (a later
    * one, such as expanding a collapsed layer, lists afresh). Dropped on refresh().
    */
-  private summariesByLayer: { byLayer: Map<string, SubjectAreaSummary[]>; unread: Set<string> } | undefined;
+  private summariesByLayer: {
+    byLayer: Map<string, SubjectAreaSummary[]>;
+    unread: Set<string>;
+    /** Each table's home, worked out once for the layers of this listing (on the first that has a diagram). */
+    homes?: ReadonlyMap<string, TableHome>;
+  } | undefined;
 
   /** The project row, or undefined while the workspace has one dbt project. */
   private projectRow: ProjectNode | undefined;
@@ -116,6 +161,20 @@ export class SubjectAreaTreeProvider
    * every first listing flashed "No diagrams yet" over a full project.
    */
   private loading = true;
+
+  /** The sidebar filter (session only), or undefined while every diagram shows. */
+  private filterQuery: TreeQuery | undefined;
+  /** Counts filter changes: part of a filtered layer row's id, so VS Code shows it expanded. */
+  private filterGeneration = 0;
+  /** While filtered: each layer's matching diagrams, from the root listing that found them. */
+  private filteredLayers: Map<string, TreeElement[]> | undefined;
+  private readonly _onDidFilter = new vscode.EventEmitter<FilterOutcome | undefined>();
+  /** After each root listing: what the filter found (undefined while not filtered), for the view's message. */
+  readonly onDidFilter = this._onDidFilter.event;
+  /** How much each row says beside its name (`erdStudio.sidebar.rowDetails`). */
+  private rowDetails: RowDetails = DEFAULT_ROW_DETAILS;
+  /** How many diagrams the last root listing found (in the configured layers); undefined before one. */
+  private diagramTotal: number | undefined;
 
   // TreeDragAndDropController properties
   readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE];
@@ -130,6 +189,8 @@ export class SubjectAreaTreeProvider
     private readonly onLoadingChange?: (loading: boolean) => void,
     /** The DBML Diagram icon for `.dbml` rows (`dbmlFileIcon`). Optional: without it every diagram row keeps the `json` codicon. */
     private readonly dbmlIcon?: DbmlFileIconResolver,
+    /** Each DBML table's layer and schema, by lower-cased name (`tableHomesOf`). Optional: without it no diagram names other layers. */
+    private readonly tableHomes?: () => ReadonlyMap<string, TableHome>,
   ) {
     this.semanticDir = semanticDir ?? DEFAULT_SEMANTIC_DIR;
   }
@@ -206,7 +267,47 @@ export class SubjectAreaTreeProvider
   /** Refresh the entire tree (or a specific element). */
   refresh(element?: TreeElement): void {
     this.summariesByLayer = undefined;
+    this.filteredLayers = undefined;
     this._onDidChangeTreeData.fire(element);
+  }
+
+  /**
+   * Show only the diagrams `text` matches (`treeSearch` syntax: a name, a
+   * layer, a description, a table the diagram shows), under their layers;
+   * `''` shows every row again. Lists again.
+   */
+  setFilter(text: string): void {
+    const query = parseTreeQuery(text, DIAGRAMS_FILTER);
+    const next = isEmptyQuery(query) ? undefined : query;
+    if (next?.text === this.filterQuery?.text) return;
+    this.filterQuery = next;
+    this.filterGeneration++;
+    this.refresh();
+  }
+
+  /** The filter as typed (`''` when none). */
+  getFilter(): string {
+    return this.filterQuery?.text ?? '';
+  }
+
+  isFiltered(): boolean {
+    return this.filterQuery !== undefined;
+  }
+
+  /** Compact rows (only what is unusual) or full ones (every count); lists again when it changes. */
+  setRowDetails(mode: RowDetails): void {
+    if (mode === this.rowDetails) return;
+    this.rowDetails = mode;
+    this.refresh();
+  }
+
+  getRowDetails(): RowDetails {
+    return this.rowDetails;
+  }
+
+  /** The view's total beside its title (`5 diagrams`); undefined when none, or before the first listing. */
+  headerTotal(): string | undefined {
+    return this.diagramTotal ? plural(this.diagramTotal, 'diagram') : undefined;
   }
 
   /**
@@ -223,11 +324,12 @@ export class SubjectAreaTreeProvider
   }
 
   /**
-   * Model count for a domain file, served from the cache while the file on
-   * disk is unchanged. Falls back to an uncached parse when the file cannot
-   * be stat'ed (e.g. virtual paths in tests).
+   * Table count (and, when table homes are known, the member names) for a
+   * domain file, served from the cache while the file on disk is unchanged.
+   * Falls back to an uncached parse when the file cannot be stat'ed (e.g.
+   * virtual paths in tests).
    */
-  private getTableCount(filePath: string): number {
+  private getDiagramSummary(filePath: string, wantMembers: boolean): { modelCount: number; members: readonly string[] | null; description?: string } {
     let signature: string | null = null;
     try {
       const stat = fs.statSync(filePath);
@@ -239,28 +341,48 @@ export class SubjectAreaTreeProvider
     const key = path.normalize(filePath);
     if (signature !== null) {
       const cached = this.summaryCache.get(key);
-      if (cached && cached.signature === signature) {
-        return cached.modelCount;
+      if (cached && cached.signature === signature && (cached.membersRead || !wantMembers)) {
+        return cached;
       }
     }
 
     let modelCount = 0;
+    let raw: string | undefined;
     try {
       // Counted from the diagram file alone: resolving every table (a full
       // getSubjectArea) only to count them made each refresh as slow as
-      // opening every diagram.
-      modelCount = this.subjectAreaService.countSubjectAreaTables(filePath);
+      // opening every diagram. With the member names wanted too, the file
+      // is read once for both.
+      if (wantMembers) {
+        raw = fs.readFileSync(filePath, 'utf-8');
+        modelCount = this.subjectAreaService.countSubjectAreaTablesInText(raw, filePath);
+      } else {
+        modelCount = this.subjectAreaService.countSubjectAreaTables(filePath);
+      }
     } catch (err) {
       log.warn(`[DomainTreeProvider] Failed to load ${filePath}:`, err);
       // Do not cache failures — the file may be mid-write
       this.summaryCache.delete(key);
-      return 0;
+      return { modelCount: 0, members: null };
+    }
+
+    // The member names say which layers the tables come from (read only when some table has a layer);
+    // a diagram whose names cannot be read still shows its count.
+    let members: string[] | null = null;
+    let description: string | undefined;
+    if (raw !== undefined) {
+      try {
+        members = subjectAreaTableNames(raw, filePath);
+      } catch {
+        members = null;
+      }
+      description = diagramDescriptionOf(raw, filePath) || undefined;
     }
 
     if (signature !== null) {
-      this.summaryCache.set(key, { signature, modelCount });
+      this.summaryCache.set(key, { signature, modelCount, members, membersRead: wantMembers, ...(description ? { description } : {}) });
     }
-    return modelCount;
+    return { modelCount, members, ...(description ? { description } : {}) };
   }
 
   /**
@@ -277,14 +399,35 @@ export class SubjectAreaTreeProvider
       case 'project':
         return this.createProjectItem(element);
       case 'layer':
-        return this.createLayerItem(element);
+        return this.filteredLayerItem(element, this.createLayerItem(element));
       case 'domain':
-        return this.createSubjectAreaItem(element);
+        return this.matchedDiagramItem(element, this.createSubjectAreaItem(element));
       case 'newDomain':
         return this.createNewSubjectAreaItem(element);
       case 'newLayer':
         return this.createNewLayerItem();
+      case 'noMatch':
+        return noMatchItem('diagrams', FILTER_COMMANDS.diagrams.clear);
     }
+  }
+
+  /** A layer row listed while filtered: a new id (so VS Code shows it expanded) and its matched label highlighted. */
+  private filteredLayerItem(element: LayerNode, item: vscode.TreeItem): vscode.TreeItem {
+    if (element.filterGeneration === undefined) return item;
+    item.id = `${item.id}#filter${element.filterGeneration}`;
+    item.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
+    const label = typeof item.label === 'string' ? item.label : item.label?.label ?? '';
+    const highlights = labelHighlights(this.filterQuery, label, ['layer']);
+    if (highlights.length > 0) item.label = { label, highlights };
+    return item;
+  }
+
+  /** A diagram row that matched the filter: its name highlighted, and why it matched when its name did not (`· has dim_customer`). */
+  private matchedDiagramItem(element: SubjectAreaNode, item: vscode.TreeItem): vscode.TreeItem {
+    if (!element.match) return item;
+    if (element.match.highlights.length > 0) item.label = { label: element.summary.domain, highlights: [...element.match.highlights] };
+    item.description = withReasons(typeof item.description === 'string' ? item.description : undefined, element.match.reasons);
+    return item;
   }
 
   getChildren(element?: TreeElement): TreeElement[] | undefined {
@@ -307,6 +450,10 @@ export class SubjectAreaTreeProvider
     }
 
     if (element.type === 'layer') {
+      if (this.filterQuery) {
+        if (!this.filteredLayers) this.filteredRoot(this.filterQuery);
+        return this.filteredLayers?.get(element.layer) ?? [];
+      }
       return this.getLayerChildren(element.layer);
     }
 
@@ -320,17 +467,89 @@ export class SubjectAreaTreeProvider
   private rootChildren(): TreeElement[] {
     const fullSemanticDir = path.join(this.projectPath, this.semanticDir);
     if (!fs.existsSync(fullSemanticDir)) {
+      this.diagramTotal = 0;
+      if (!this.filterQuery) this._onDidFilter.fire(undefined);
       return [];
     }
+    if (this.filterQuery) return this.filteredRoot(this.filterQuery);
     const start = Date.now();
     const layers = this.layerService.getAllLayers();
-    const layerNodes = layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
-    this.summariesByLayer = { byLayer: this.listByLayer(), unread: new Set(layers.map((l) => l.id)) };
+    const byLayer = this.listByLayer();
+    const layerNodes = layers.map((layerConfig): LayerNode => ({
+      type: 'layer', layer: layerConfig.id, diagramCount: byLayer.get(layerConfig.id)?.length ?? 0,
+    }));
+    this.summariesByLayer = { byLayer, unread: new Set(layers.map((l) => l.id)) };
+    this.diagramTotal = layerNodes.reduce((sum, n) => sum + (n.diagramCount ?? 0), 0);
     treeLog.debug(`Listed ${plural(layers.length, 'layer')} in ${elapsedMs(start)} ms`);
+    // Not filtered: the view's title shows the total (`SidebarFilter`).
+    this._onDidFilter.fire(undefined);
     // Only alongside real content: an empty tree must stay empty so the
     // welcome view (which has its own Select dbt Project button) shows.
     if (layerNodes.length === 0) return this.projectRow ? [this.projectRow] : [];
     return [...(this.projectRow ? [this.projectRow] : []), ...layerNodes, { type: 'newLayer' }];
+  }
+
+  /**
+   * The root while filtered: each layer with a diagram `query` matches (in
+   * layers.json order), with its matching diagrams kept for its children;
+   * no project, New Diagram… or New Layer… rows. Every diagram's members and
+   * description are read (once per file version, through the summary cache).
+   */
+  private filteredRoot(query: TreeQuery): TreeElement[] {
+    const start = Date.now();
+    const layers = this.layerService.getAllLayers();
+    const byLayer = this.listByLayer();
+    const homes = this.tableHomes?.();
+    const order = layers.map((l) => l.id);
+    const generation = this.filterGeneration;
+    const filtered = new Map<string, TreeElement[]>();
+    const rows: TreeElement[] = [];
+    let shown = 0;
+    let total = 0;
+    for (const { id: layer } of layers) {
+      const summaries = [...(byLayer.get(layer) ?? [])].sort((a, b) => a.domain.localeCompare(b.domain));
+      total += summaries.length;
+      const kept: SubjectAreaNode[] = [];
+      for (const summary of summaries) {
+        const { modelCount, members, description } = this.getDiagramSummary(summary.filePath, true);
+        const match = matchTreeQuery(query, this.diagramSubject(summary, members, description, homes));
+        if (!match) continue;
+        const otherLayers = homes && homes.size > 0 && members ? otherLayerCounts(members, layer, homes, order) : [];
+        kept.push({ type: 'domain', summary, modelCount, ...(otherLayers.length > 0 ? { otherLayers } : {}), match });
+      }
+      if (kept.length === 0) continue;
+      shown += kept.length;
+      filtered.set(layer, kept);
+      rows.push({ type: 'layer', layer, diagramCount: kept.length, filterGeneration: generation });
+    }
+    this.filteredLayers = filtered;
+    this.diagramTotal = total;
+    treeLog.debug(`Filtered ${plural(total, 'diagram')} to ${shown} in ${elapsedMs(start)} ms`);
+    this._onDidFilter.fire({ query, shown, total });
+    // Nothing matches: one row that clears the filter (an empty view would show "No diagrams yet").
+    return rows.length > 0 || layers.length === 0 ? rows : [{ type: 'noMatch' }];
+  }
+
+  /** A diagram as the filter searches it: its name, layer, description and the tables it shows (and their schemas). */
+  private diagramSubject(
+    summary: SubjectAreaSummary,
+    members: readonly string[] | null,
+    description: string | undefined,
+    homes: ReadonlyMap<string, TableHome> | undefined,
+  ): SearchSubject {
+    const schemas = homes && members
+      ? [...new Set(members.map((m) => homes.get(m.toLowerCase())?.schema).filter((s): s is string => !!s))]
+      : [];
+    return {
+      name: summary.domain,
+      nameKeys: ['diagram'],
+      facets: [
+        { key: 'layer', values: [summary.layer, this.layerService.getLabel(summary.layer)] },
+        { values: [description], reason: () => 'in description' },
+        { key: 'table', values: members ?? [], reason: (v) => `has ${v}` },
+        { key: 'schema', text: false, values: schemas, reason: (v) => `has schema ${v}` },
+      ],
+    };
   }
 
   /** Every subject area, grouped by layer (one listing of the project). */
@@ -348,19 +567,34 @@ export class SubjectAreaTreeProvider
     // A layer asked for on its own (no root call just before it) lists afresh.
     const start = Date.now();
     const memo = this.summariesByLayer;
-    const byLayer = memo?.unread.delete(layer) ? memo.byLayer : this.listByLayer();
-    const layerDomains = byLayer.get(layer) ?? [];
+    const fromMemo = memo?.unread.delete(layer) === true;
+    const byLayer = fromMemo ? memo!.byLayer : this.listByLayer();
+    // By name, so a layer reads the same on every machine (the disk lists in any order).
+    const layerDomains = [...(byLayer.get(layer) ?? [])].sort((a, b) => a.domain.localeCompare(b.domain));
+    // Worked out once per listing, and only for a layer that has a diagram.
+    let homes: ReadonlyMap<string, TableHome> | undefined;
+    if (this.tableHomes && layerDomains.length > 0) {
+      homes = fromMemo ? (memo!.homes ??= this.tableHomes()) : this.tableHomes();
+    }
+    // A YAML project's tables have no layer: no diagram names another one, so no names are read.
+    const wantMembers = homes !== undefined && homes.size > 0;
+    const order = this.layerService.getAllLayers().map((l) => l.id);
 
-    const domainNodes: SubjectAreaNode[] = layerDomains.map(summary => ({
-      type: 'domain' as const,
-      summary,
-      modelCount: this.getTableCount(summary.filePath),
-      designCount: 0,
-    }));
+    const domainNodes: SubjectAreaNode[] = layerDomains.map((summary) => {
+      const { modelCount, members } = this.getDiagramSummary(summary.filePath, wantMembers);
+      const otherLayers = homes && members ? otherLayerCounts(members, layer, homes, order) : [];
+      return {
+        type: 'domain' as const,
+        summary,
+        modelCount,
+        ...(otherLayers.length > 0 ? { otherLayers } : {}),
+      };
+    });
 
     const children: TreeElement[] = [...domainNodes];
 
-    if (this.layerService.isCreatable(layer)) {
+    // Compact: only where it is the call to action (a layer with no diagram); elsewhere the layer row's inline + does it.
+    if (this.layerService.isCreatable(layer) && (this.rowDetails === 'full' || domainNodes.length === 0)) {
       children.push({ type: 'newDomain', layer, first: domainNodes.length === 0 });
     }
 
@@ -384,13 +618,18 @@ export class SubjectAreaTreeProvider
       layerConfig?.label ?? element.layer,
       vscode.TreeItemCollapsibleState.Expanded,
     );
+    item.id = `erdStudio.diagrams.layer:${element.layer}`;
     // `layerCreatable` offers New Diagram on the row (inline + and right-click).
     item.contextValue = this.layerService.isCreatable(element.layer) ? 'layerCreatable' : 'layer';
-    item.iconPath = new vscode.ThemeIcon('folder');
-
-    // Assign a resource URI so FileDecorationProvider can apply colors
-    item.resourceUri = vscode.Uri.parse(`erd-studio-layer:/${element.layer}`);
-
+    // The layer's own colour, on its icon: the label keeps the theme's text colour, so it reads in every theme.
+    item.iconPath = layerSwatchIcon(layerConfig?.color);
+    const count = element.diagramCount;
+    // Compact: what the row is; how many it holds is in the hover.
+    item.description = count === undefined || this.rowDetails === 'compact'
+      ? 'Layer'
+      : `Layer · ${count === 0 ? 'no diagrams' : plural(count, 'diagram')}`;
+    item.tooltip = layerTooltip(layerConfig?.label ?? element.layer, element.layer, this.semanticDir, count,
+      this.layerService.isCreatable(element.layer));
     return item;
   }
 
@@ -400,21 +639,28 @@ export class SubjectAreaTreeProvider
       vscode.TreeItemCollapsibleState.None,
     );
 
-    const modelWord = element.modelCount === 1 ? 'table' : 'tables';
-    const designWord = element.designCount === 1 ? 'design' : 'designs';
-    item.description = element.designCount > 0
-      ? `${element.modelCount} ${modelWord}, ${element.designCount} ${designWord}`
-      : `${element.modelCount} ${modelWord}`;
+    // Compact: no table count (it is in the hover), only the exceptions below.
+    const parts: string[] = [];
+    if (this.rowDetails === 'full') parts.push(plural(element.modelCount, 'table'));
     // The same name in both formats in one layer (native DBML storage): say which is which.
     if (element.summary.conflict) {
-      item.description += element.summary.storage === 'dbml' ? ' (DBML)' : ' (JSON)';
+      const format = element.summary.storage === 'dbml' ? '(DBML)' : '(JSON)';
+      if (parts.length > 0) parts[0] += ` ${format}`;
+      else parts.push(format);
     }
 
     item.contextValue = 'domain';
     item.iconPath = element.summary.storage === 'dbml' && this.dbmlIcon
       ? this.dbmlIcon('diagram')
       : new vscode.ThemeIcon('json');
-    item.tooltip = `${this.layerService.getLabel(element.summary.layer)} / ${element.summary.domain}`;
+    // Tables borrowed from other layers: a diagram belongs to one layer but can show any table.
+    const others = element.otherLayers ?? [];
+    if (others.length > 0) {
+      parts.push(others.map((o) => `${o.count} from ${this.layerService.getLabel(o.layer)}`).join(', '));
+    }
+    if (parts.length > 0) item.description = parts.join(' · ');
+    item.tooltip = diagramTooltip(element, this.layerService.getLabel(element.summary.layer), this.diagramPath(element.summary.filePath),
+      others.map((o) => ({ label: this.layerService.getLabel(o.layer), count: o.count })));
     item.command = {
       command: 'erdStudio.openDomain',
       title: 'Open Diagram',
@@ -422,6 +668,12 @@ export class SubjectAreaTreeProvider
     };
 
     return item;
+  }
+
+  /** A diagram file's path from the project folder, `/`-separated (its name alone when it is outside the project). */
+  private diagramPath(filePath: string): string {
+    const rel = path.relative(this.projectPath, filePath);
+    return (rel.startsWith('..') || path.isAbsolute(rel) ? path.basename(filePath) : rel).split(path.sep).join('/');
   }
 
   private createNewSubjectAreaItem(element: NewSubjectAreaNode): vscode.TreeItem {
@@ -444,7 +696,7 @@ export class SubjectAreaTreeProvider
   private createNewLayerItem(): vscode.TreeItem {
     const item = new vscode.TreeItem('New Layer…', vscode.TreeItemCollapsibleState.None);
     item.id = 'erdStudio.newLayer';
-    item.tooltip = 'Add a layer: a stage of your warehouse, such as bronze, silver or gold, that holds diagrams';
+    item.tooltip = `Add a layer. ${LAYER_DEFINITION}`;
     item.contextValue = 'newLayer';
     item.iconPath = new vscode.ThemeIcon('new-folder');
     item.command = { command: 'erdStudio.addLayer', title: 'New Layer…' };
@@ -454,5 +706,67 @@ export class SubjectAreaTreeProvider
   dispose(): void {
     this.summaryCache.clear();
     this._onDidChangeTreeData.dispose();
+    this._onDidFilter.dispose();
+  }
+}
+
+/** A layer row's tooltip: what a layer is, where its folder is, how many diagrams it holds, and how to start one. */
+function layerTooltip(label: string, id: string, semanticDir: string, diagrams: number | undefined, creatable: boolean): vscode.MarkdownString {
+  const lines = [
+    `**${label}** — a layer`,
+    '',
+    'A stage of your warehouse. Each table belongs to one layer and one schema; a diagram belongs to one layer and can show tables from any layer.',
+    '',
+    `Folder: \`${semanticDir}/${id}/\``,
+  ];
+  if (diagrams !== undefined) lines.push('', diagrams === 0 ? 'No diagrams yet.' : plural(diagrams, 'diagram'));
+  // The row's inline + (its title is the command's, which cannot name the layer).
+  if (creatable) lines.push('', `**+** on this row starts a new diagram in ${label}.`);
+  return new vscode.MarkdownString(lines.join('\n'));
+}
+
+/** A diagram row's tooltip: its layer, its file and where its tables come from. */
+function diagramTooltip(
+  element: SubjectAreaNode,
+  layerLabel: string,
+  file: string,
+  others: ReadonlyArray<{ label: string; count: number }>,
+): vscode.MarkdownString {
+  const own = element.modelCount - others.reduce((sum, o) => sum + o.count, 0);
+  const lines = [
+    `**${element.summary.domain}** — a diagram in the ${layerLabel} layer`,
+    '',
+    `File: \`${file}\``,
+    '',
+    others.length === 0
+      ? plural(element.modelCount, 'table')
+      : `${plural(element.modelCount, 'table')}: ${[`${own} from ${layerLabel}`, ...others.map((o) => `${o.count} from ${o.label}`)].join(', ')}`,
+  ];
+  return new vscode.MarkdownString(lines.join('\n'));
+}
+
+/**
+ * A diagram's description, from its file's text, for the sidebar filter: a
+ * JSON diagram's `description`, or a DBML diagram's Project `Note` (found by
+ * pattern, not parsed: the tree never compiles a diagram to list it). `''`
+ * when there is none or it cannot be read.
+ */
+export function diagramDescriptionOf(text: string, filePath: string): string {
+  if (/\.dbml$/i.test(filePath)) {
+    const project = /^[ \t]*Project\b[^{\n]*\{/m.exec(text);
+    if (!project) return '';
+    const rest = text.slice(project.index + project[0].length);
+    const end = rest.search(/^\}/m);
+    const body = end === -1 ? rest : rest.slice(0, end);
+    const note = /^[ \t]*Note\s*(?::\s*|\{\s*)('''[\s\S]*?'''|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")/m.exec(body);
+    if (!note) return '';
+    const literal = note[1];
+    return (literal.startsWith("'''") ? literal.slice(3, -3) : literal.slice(1, -1)).trim();
+  }
+  try {
+    const raw = JSON.parse(text.replace(/^\uFEFF/, '')) as { description?: unknown } | null;
+    return typeof raw?.description === 'string' ? raw.description.trim() : '';
+  } catch {
+    return '';
   }
 }

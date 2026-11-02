@@ -147,7 +147,7 @@ export function describeOrganizePlan(plan: OrganizePlan): string {
       const more = relocated.length > 3 ? ` and ${relocated.length - 3} more` : '';
       lines.push(
         `${relocated.length === 1 ? 'One is' : `${relocated.length} are`} in another layer's folder, ` +
-        `because the subject areas that use ${relocated.length === 1 ? 'it' : 'them'} are now in a different layer ` +
+        `because the diagrams that use ${relocated.length === 1 ? 'it' : 'them'} are now in a different layer ` +
         `(${examples.join('; ')}${more}).`,
       );
     }
@@ -169,6 +169,6 @@ export function describeOrganizePlan(plan: OrganizePlan): string {
     const folders = plan.otherFolders.map(f => `${f.folder}/ (${f.count})`).join(', ');
     lines.push(`Left alone: folders that are not a layer in layers.json — ${folders}.`);
   }
-  lines.push('Subject area files reference tables by name, so no subject area file changes.');
+  lines.push('Diagram files reference tables by name, so no diagram file changes.');
   return lines.join('\n\n');
 }

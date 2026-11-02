@@ -85,6 +85,15 @@ body {
   --stage-ghost:    #9ca3af;
   --stage-ghost-bg: rgba(156, 163, 175, 0.08);
 
+  /* Logical-only canvas (no dbt project, `.editor-canvas--neutral`): one
+     stage, so no stage colour. Tables, lines and the selection ring take the
+     theme's own colours and the layer badge carries the colour. */
+  --canvas-neutral-line:   var(--vscode-descriptionForeground, #8a94a3);
+  --canvas-neutral-border: color-mix(in srgb, var(--canvas-neutral-line) 55%, transparent);
+  --canvas-neutral-ring:   color-mix(in srgb, var(--canvas-neutral-line) 30%, transparent);
+  --canvas-selection:      var(--vscode-focusBorder, #007fd4);
+  --canvas-selection-glow: color-mix(in srgb, var(--canvas-selection) 40%, transparent);
+
   /* Halo around the moving relationship arrows (EdgeFlow): the canvas
      background, so a glyph reads against the line it shares a colour with. */
   --edge-flow-halo: var(--editor-bg);
@@ -130,6 +139,16 @@ body {
   /* Gold layer */
   --layer-gold: #d4a800;
   --layer-gold-bg: rgba(255, 215, 0, 0.2);
+}
+
+/* A logical-only canvas draws its lines, their end labels, the moving
+   arrows, the hover ring and the legend's samples in the neutral line colour
+   rather than the logical stage's blue. Scoped to the diagram and the legend,
+   so the editor's own controls keep their colours. */
+.editor-canvas--neutral .react-flow__viewport,
+.editor-canvas--neutral .legend {
+  --stage-logical: var(--canvas-neutral-line);
+  --stage-logical-ring: var(--canvas-neutral-ring);
 }
 
 /* -----------------------------------------------------------------------

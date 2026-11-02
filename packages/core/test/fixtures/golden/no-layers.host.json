@@ -150,7 +150,8 @@
         "fromColumn": "account_key",
         "toModel": "dim_account",
         "toColumn": "account_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       }
     ],
     "viewConfig": {
@@ -189,7 +190,7 @@
       "order": 2
     },
     "readOnly": false,
-    "positionDraggable": true
-  },
-  "welcomeDismissed": false
+    "positionDraggable": true,
+    "relationshipsInDiagramFile": true
+  }
 }

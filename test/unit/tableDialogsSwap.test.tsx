@@ -4,7 +4,7 @@
  *  - New Table refuses a name the Table Library already has and offers to add
  *    that table instead, opening Add Existing Table with its search filled in;
  *  - Add Existing Table with nothing to add, and no dbt project, offers
- *    "New table".
+ *    "New Table".
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -94,12 +94,12 @@ describe('New Table → Add Existing Table', () => {
 });
 
 describe('Add Existing Table with nothing to add', () => {
-  it('offers "New table" without a dbt project, swapping to the New Table dialog', () => {
+  it('offers "New Table" without a dbt project, swapping to the New Table dialog', () => {
     useEditorStore.setState({ logicalOnly: true });
     act(() => { useEditorStore.getState().setAddExistingModelDialogOpen(true); });
     renderBoth();
     expect(screen.getByText('No tables available to add.')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'New table' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Table' }));
     const s = useEditorStore.getState();
     expect(s.addExistingModelDialogOpen).toBe(false);
     expect(s.newModelDialogOpen).toBe(true);
@@ -111,6 +111,6 @@ describe('Add Existing Table with nothing to add', () => {
     act(() => { useEditorStore.getState().setAddExistingModelDialogOpen(true); });
     render(<AddExistingTableDialog />);
     expect(screen.getByText(/dbt compile/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'New table' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New Table' })).toBeNull();
   });
 });

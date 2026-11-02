@@ -55,10 +55,29 @@ export type TableNodeData = {
   stage: Stage;
   /** Data warehouse layer. */
   layer: Layer;
-  /** Database schema the model materializes in (shown as badge text). */
+  /** Database schema the model materializes in (named in the badge's hover card). */
   schema?: string;
   /** Layer configuration for dynamic badge styling (color, abbreviation). */
   layerConfig?: LayerConfig;
+  /**
+   * The layer the table itself belongs to (`DisplayTable.layer`), when known.
+   * The header's badge always names the layer the table lives in: this one,
+   * else the diagram's `layer`. A known layer also draws the colour strip.
+   */
+  tableLayer?: Layer;
+  /** {@link tableLayer}'s config (its colour and abbreviation). */
+  tableLayerConfig?: LayerConfig;
+  /** Set when {@link tableLayer} is not the diagram's layer: a table this diagram borrows. */
+  otherLayer?: true;
+  /** The schema as a prefix of the name (`sales.fct_order`): set only when it is not the badge's layer id. */
+  shownSchema?: string;
+  /**
+   * Set when the project has one layer and every table is in it
+   * (`isSingleLayerProject`): the layer badge and colour strip are left off.
+   */
+  singleLayer?: true;
+  /** The warehouse name when it differs from the model name (`alias`), shown after it: `gold_orders  as orders`. */
+  alias?: string;
   /** Columns to display, enriched with PK/FK flags. */
   columns: ColumnDisplay[];
   /** Whether the node is dimmed (doesn't match current search query). */

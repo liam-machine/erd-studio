@@ -2,9 +2,15 @@
  * DetailPanel — floating detail view for the selected model.
  *
  * Displays at top-right when a node is clicked. Shows:
- * - Model metadata (name, schema, description)
+ * - Model metadata (its file, when the editing host says, then name, schema, description)
  * - Editable column list
- * - Incoming and outgoing FK relationships
+ * - Incoming and outgoing FK relationships, then (editing host only) the
+ *   relationships to tables not on this diagram, each with "+ Add"
+ * - "Modelling detail (optional)": table type, grain, meta and design
+ *   rationale, folded until one of them is set
+ *
+ * The viewer (`useIsViewer`) never has the host's context and keeps the
+ * layout it always had: every section open, in the old order.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -20,10 +26,11 @@ import { MetaEditor } from './MetaEditor';
 import { useEditorStore } from '../../store/editorStore';
 import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
 import { backwardsRelationshipNote } from '@erd-studio/core';
-import type { ColumnPair, DisplayRelationship, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
+import type { ColumnPair, DisplayRelationship, DisplayTable, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
 import { swapCardinality } from '../../lib/cardinalityUtils';
 import type { FkEdgeData } from '../../types/graph';
 import { columnPairs, foldComposites, relationshipEdgeId } from '../../lib/relationshipDisplayKey';
+import { cardinalityLabel, offDiagramRows, offDiagramTables, ownValue } from '../../lib/canvasContext';
 import './DetailPanel.css';
 
 /** A relationship row: a composite foreign key carries all its column pairs. */
@@ -76,6 +83,44 @@ function describeProvenance(provenance: PhysicalProvenance, untyped: number): st
 }
 
 // ---------------------------------------------------------------------------
+// Remove confirmation
+// ---------------------------------------------------------------------------
+
+/**
+ * The detail panel's "Remove from Diagram" question. A table's relationships
+ * go with it only when the diagram file holds them itself (a YAML/JSON
+ * domain's own list); in the Table Library (every DBML diagram) they stay.
+ * `inDiagramFile` is absent from an older core: then every relationship the
+ * table draws is counted, the old warning.
+ */
+export function removeConfirmText(
+  tableName: string,
+  relationshipsInDiagramFile: boolean | undefined,
+  outgoing: readonly Pick<DisplayRelationship, 'inDiagramFile'>[],
+  incoming: readonly Pick<DisplayRelationship, 'inDiagramFile'>[],
+): string {
+  const question = `Remove ${tableName} from this diagram?`;
+  if (relationshipsInDiagramFile === false) {
+    return `${question} The table and its relationships stay in the Table Library.`;
+  }
+  const all = [...outgoing, ...incoming];
+  const going = relationshipsInDiagramFile === true ? all.filter((r) => r.inDiagramFile).length : all.length;
+  if (going === 0) return question;
+  return `${question} ${going === 1 ? 'Its 1 relationship in this diagram file' : `Its ${going} relationships in this diagram file`} will also be removed.`;
+}
+
+/** Most tables one "Add all related" asks for (the host's `addExistingModels` limit). */
+const ADD_ALL_RELATED_LIMIT = 200;
+
+/** Whether any of the folded modelling fields holds something, so the section opens by itself. */
+export function hasModellingDetail(model: Pick<DisplayTable, 'modelRole' | 'grain' | 'meta' | 'rationale'>): boolean {
+  return !!model.modelRole
+    || !!model.grain?.trim()
+    || (!!model.meta && Object.keys(model.meta).length > 0)
+    || hasRationaleContent(model.rationale);
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -91,6 +136,8 @@ export function DetailPanel() {
   const pendingDeleteConfirmation = useEditorStore((s) => s.pendingDeleteConfirmation);
   const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
+  // The editing host's context (never set in the viewer).
+  const canvasContext = useEditorStore((s) => s.canvasContext);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
@@ -272,6 +319,38 @@ export function DetailPanel() {
 
   const isReadOnly = domain?.readOnly ?? false;
 
+  // Relationships to tables not on this diagram (the host's context, logical stage).
+  const offRows = useMemo(
+    () => (selectedNode ? offDiagramRows(canvasContext, domain, selectedNode) : []),
+    [canvasContext, domain, selectedNode],
+  );
+
+  // "Modelling detail (optional)": open when any field is set, else folded.
+  // It opens by itself once one is set and only a new selection folds it
+  // again, so it never shuts while someone is filling it in.
+  const hasModelling = model ? hasModellingDetail(model) : false;
+  const [modellingOpen, setModellingOpen] = useState(hasModelling);
+  useEffect(() => {
+    setModellingOpen(hasModelling);
+    // Only a new selection resets it; `hasModelling` turning true opens it below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNode]);
+  useEffect(() => {
+    if (hasModelling) setModellingOpen(true);
+  }, [hasModelling]);
+
+  const handleAddTables = useCallback(
+    (names: readonly string[]) => {
+      if (names.length === 0) return;
+      if (names.length === 1) {
+        host.postMessage({ type: 'addExistingModel', payload: { modelName: names[0] } });
+      } else {
+        host.postMessage({ type: 'addExistingModels', payload: { modelNames: names.slice(0, ADD_ALL_RELATED_LIMIT) } });
+      }
+    },
+    [host],
+  );
+
   // --- Early returns -----------------------------------------------------
 
   if (!detailPanelOpen || !selectedNode || !domain) {
@@ -285,122 +364,45 @@ export function DetailPanel() {
   const { outgoing, incoming } = relationships;
   const totalRelationships = outgoing.length + incoming.length;
 
-  // --- Render ------------------------------------------------------------
+  // Editing host, logical stage only: the viewer never has a context, and shows nothing it feeds.
+  const hostContext = domain.stage === 'logical' ? canvasContext : null;
+  const tableFile = viewer ? undefined : ownValue(hostContext?.tableFiles, model.name);
+  const reviewers = viewer ? undefined : ownValue(hostContext?.owners, model.name);
+  const showOffDiagram = viewer ? false : !isReadOnly && offRows.length > 0;
 
-  return (
-    <Panel position="top-right" className="detail-panel">
-      {/* Header */}
-      <div className="detail-panel__header">
-        {editingName ? (
-          <div className="detail-panel__title-edit">
-            <input
-              className={`detail-panel__title-input${nameError ? ' detail-panel__title-input--error' : ''}`}
-              value={nameValue}
-              onChange={(e) => handleNameChange(e.target.value)}
-              onBlur={() => {
-                if (nameError) {
-                  handleCancelRename();
-                } else {
-                  handleSubmitRename();
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleSubmitRename();
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  handleCancelRename();
-                }
-              }}
-              autoFocus
-              spellCheck={false}
-            />
-            {nameError && (
-              <span className="detail-panel__title-error">{nameError}</span>
-            )}
-          </div>
-        ) : (
-          <h3
-            className={`detail-panel__title${!isReadOnly ? ' detail-panel__title--editable' : ''}`}
-            title={!isReadOnly ? 'Double-click to rename' : model.name}
-            onDoubleClick={!isReadOnly ? handleStartRename : undefined}
-          >
-            {model.name}
-          </h3>
-        )}
-        {!isReadOnly && !editingName && (
-          <button
-            className="detail-panel__title-edit-btn"
-            onClick={handleStartRename}
-            title="Rename table"
-            aria-label="Rename table"
-          >
-            ✎
-          </button>
-        )}
-        <button
-          className="detail-panel__close"
-          onClick={handleClose}
-          title="Close detail panel"
-          aria-label="Close detail panel"
-        >
-          ×
-        </button>
-      </div>
-
-      {/* Metadata */}
-      <div className="detail-panel__section">
-        <div className="detail-panel__metadata">
-          <div className="detail-panel__metadata-row">
-            <span className="detail-panel__label detail-panel__label--wide">Schema</span>
-            <span className="detail-panel__value">{model.schema || '—'}</span>
-          </div>
-          <AliasEditor modelName={model.name} alias={model.alias} readOnly={isReadOnly || viewer} />
-          {/* Physical stage only — logical models never carry provenance, so the
-              logical panel does not sprout an empty row. */}
-          {model.provenance && (
-            <div className="detail-panel__metadata-row">
-              <span className="detail-panel__label detail-panel__label--wide">Columns from</span>
-              <span className="detail-panel__value detail-panel__value--provenance">
-                {describeProvenance(
-                  model.provenance,
-                  model.columns.filter((c) => !c.dataType).length,
-                )}
-              </span>
-            </div>
-          )}
-        </div>
-        {isReadOnly ? (
-          model.description && (
-            <p className="detail-panel__description">{model.description}</p>
-          )
-        ) : (
-          <DescriptionEditor modelName={model.name} description={model.description} />
-        )}
-      </div>
-
+  // The sections, placed below in the viewer's order or the editor's.
+  const roleSection = (
+    <>
       {/* Model role */}
       {!isReadOnly && (
         <div className="detail-panel__section">
           <RoleEditor modelName={model.name} modelRole={model.modelRole} />
         </div>
       )}
-
+    </>
+  );
+  const grainSection = (
+    <>
       {/* Grain statement */}
       {!isReadOnly && (
         <div className="detail-panel__section">
           <GrainEditor modelName={model.name} grain={model.grain} />
         </div>
       )}
-
+    </>
+  );
+  const metaSection = (
+    <>
       {/* Structured metadata (a read-only panel shows it only when there is some) */}
       {((!isReadOnly && !viewer) || (model.meta && Object.keys(model.meta).length > 0)) && (
         <div className="detail-panel__section">
           <MetaEditor modelName={model.name} meta={model.meta} readOnly={isReadOnly} />
         </div>
       )}
-
+    </>
+  );
+  const rationaleSection = (
+    <>
       {/* Design Rationale (the viewer shows the section only when there is some) */}
       {(!viewer || hasRationaleContent(model.rationale)) && (
         <div className="detail-panel__section">
@@ -412,14 +414,17 @@ export function DetailPanel() {
           />
         </div>
       )}
-
-      {/* Remove from Domain button */}
+    </>
+  );
+  const removeSection = (
+    <>
+      {/* Remove from Diagram button */}
       {!isReadOnly && (
         <div className="detail-panel__section detail-panel__section--actions">
           {confirmingDelete ? (
             <>
               <span className="detail-panel__confirm-label">
-                Remove table from subject area?{totalRelationships > 0 ? ` (${totalRelationships} relationship(s) will also be removed)` : ''}
+                {removeConfirmText(model.name, domain.relationshipsInDiagramFile, outgoing, incoming)}
               </span>
               <div className="detail-panel__confirm-actions">
                 <button
@@ -442,15 +447,18 @@ export function DetailPanel() {
             <button
               className="detail-panel__button detail-panel__button--danger"
               onClick={() => setConfirmingDelete(true)}
-              title="Remove this table from the subject area"
-              aria-label="Remove this table from the subject area"
+              title="Remove this table from this diagram"
+              aria-label="Remove this table from this diagram"
             >
-              Remove from Subject Area
+              Remove from Diagram
             </button>
           )}
         </div>
       )}
-
+    </>
+  );
+  const columnsSection = (
+    <>
       {/* Columns (editable) */}
       <div className="detail-panel__section">
         <ColumnEditor
@@ -460,7 +468,10 @@ export function DetailPanel() {
           modelRole={model.modelRole}
         />
       </div>
-
+    </>
+  );
+  const relationshipsSection = (
+    <>
       {/* Relationships */}
       {totalRelationships > 0 && (
         <div className="detail-panel__section">
@@ -589,6 +600,212 @@ export function DetailPanel() {
             ))}
           </div>
         </div>
+      )}
+    </>
+  );
+
+  // --- Render ------------------------------------------------------------
+
+  return (
+    <Panel position="top-right" className="detail-panel">
+      {/* Header */}
+      <div className="detail-panel__header">
+        {editingName ? (
+          <div className="detail-panel__title-edit">
+            <input
+              className={`detail-panel__title-input${nameError ? ' detail-panel__title-input--error' : ''}`}
+              value={nameValue}
+              onChange={(e) => handleNameChange(e.target.value)}
+              onBlur={() => {
+                if (nameError) {
+                  handleCancelRename();
+                } else {
+                  handleSubmitRename();
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSubmitRename();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  handleCancelRename();
+                }
+              }}
+              autoFocus
+              spellCheck={false}
+            />
+            {nameError && (
+              <span className="detail-panel__title-error">{nameError}</span>
+            )}
+          </div>
+        ) : (
+          <h3
+            className={`detail-panel__title${!isReadOnly ? ' detail-panel__title--editable' : ''}`}
+            title={!isReadOnly ? 'Double-click to rename' : model.name}
+            onDoubleClick={!isReadOnly ? handleStartRename : undefined}
+          >
+            {model.name}
+          </h3>
+        )}
+        {!isReadOnly && !editingName && (
+          <button
+            className="detail-panel__title-edit-btn"
+            onClick={handleStartRename}
+            title="Rename table"
+            aria-label="Rename table"
+          >
+            ✎
+          </button>
+        )}
+        <button
+          className="detail-panel__close"
+          onClick={handleClose}
+          title="Close detail panel"
+          aria-label="Close detail panel"
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Metadata */}
+      <div className="detail-panel__section">
+        <div className="detail-panel__metadata">
+          {/* Editing host only: the table's file, and who reviews a change to it. */}
+          {tableFile !== undefined && (
+            <div className="detail-panel__metadata-row detail-panel__metadata-row--file">
+              <span className="detail-panel__label detail-panel__label--wide">File</span>
+              <span className="detail-panel__value detail-panel__file-path" title={tableFile}>{tableFile}</span>
+              <button
+                type="button"
+                className="detail-panel__file-open"
+                onClick={() => host.postMessage({ type: 'openModelFile', payload: { modelName: model.name } })}
+                title={`Open ${tableFile}`}
+                aria-label="Open this table's file"
+              >
+                Open
+              </button>
+            </div>
+          )}
+          {reviewers !== undefined && (
+            <div className="detail-panel__metadata-row">
+              <span className="detail-panel__label detail-panel__label--wide">Reviewed by</span>
+              <span className="detail-panel__value detail-panel__value--provenance" title={reviewers}>{reviewers}</span>
+            </div>
+          )}
+          <div className="detail-panel__metadata-row">
+            <span className="detail-panel__label detail-panel__label--wide">Schema</span>
+            <span className="detail-panel__value">{model.schema || '—'}</span>
+          </div>
+          <AliasEditor modelName={model.name} alias={model.alias} readOnly={isReadOnly || viewer} />
+          {/* Physical stage only — logical models never carry provenance, so the
+              logical panel does not sprout an empty row. */}
+          {model.provenance && (
+            <div className="detail-panel__metadata-row">
+              <span className="detail-panel__label detail-panel__label--wide">Columns from</span>
+              <span className="detail-panel__value detail-panel__value--provenance">
+                {describeProvenance(
+                  model.provenance,
+                  model.columns.filter((c) => !c.dataType).length,
+                )}
+              </span>
+            </div>
+          )}
+        </div>
+        {isReadOnly ? (
+          model.description && (
+            <p className="detail-panel__description">{model.description}</p>
+          )
+        ) : (
+          <DescriptionEditor modelName={model.name} description={model.description} />
+        )}
+      </div>
+
+      {viewer ? (
+        <>
+          {roleSection}
+          {grainSection}
+          {metaSection}
+          {rationaleSection}
+          {removeSection}
+          {columnsSection}
+          {relationshipsSection}
+        </>
+      ) : (
+        <>
+          {columnsSection}
+          {relationshipsSection}
+          {/* Editing host, logical stage: relationships to tables not on this diagram. */}
+          {showOffDiagram && (
+            <div className="detail-panel__section detail-panel__off-diagram">
+              <div className="detail-panel__off-diagram-head">
+                <h4 className="detail-panel__section-title detail-panel__off-diagram-title">
+                  Not on this diagram ({offRows.length})
+                </h4>
+                <button
+                  type="button"
+                  className="detail-panel__off-add-all"
+                  onClick={() => handleAddTables(offDiagramTables(offRows))}
+                  title="Add every table listed here to this diagram"
+                >
+                  Add all related
+                </button>
+              </div>
+              <div className="detail-panel__relationships">
+                {offRows.map((row) => {
+                  const text = [row.columns, cardinalityLabel(row.cardinality), ...(row.otherLayer ? [`in ${row.otherLayer}`] : [])].join(' \u00b7 ');
+                  return (
+                    <div
+                      key={`off-${row.direction}-${row.otherTable}-${row.columns}`}
+                      className="detail-panel__relationship detail-panel__off-row"
+                    >
+                      <span className="detail-panel__rel-direction" title={row.direction === 'out' ? 'Outgoing FK' : 'Incoming FK'}>
+                        {row.direction === 'out' ? '\u2192' : '\u2190'}
+                      </span>
+                      <span className="detail-panel__off-text" title={`${row.otherTable} \u00b7 ${text}`}>
+                        <span className="detail-panel__rel-target">{row.otherTable}</span>
+                        <span className="detail-panel__off-detail">{` \u00b7 ${text}`}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="detail-panel__off-add"
+                        onClick={() => handleAddTables([row.otherTable])}
+                        title={`Add ${row.otherTable} to this diagram`}
+                        aria-label={`Add ${row.otherTable} to this diagram`}
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Table type, grain, meta and rationale: folded until one is set. */}
+          <div className="detail-panel__section detail-panel__modelling">
+            <button
+              type="button"
+              className="detail-panel__modelling-toggle"
+              aria-expanded={modellingOpen}
+              onClick={() => setModellingOpen((open) => !open)}
+            >
+              <span className="detail-panel__modelling-chevron" aria-hidden="true">{modellingOpen ? '\u25be' : '\u25b8'}</span>
+              <span className="detail-panel__modelling-title">Modelling detail</span>{' '}
+              <span className="detail-panel__modelling-optional">(optional)</span>
+            </button>
+          </div>
+          {modellingOpen && (
+            <div className="detail-panel__modelling-body">
+              {roleSection}
+              {grainSection}
+              {metaSection}
+              {rationaleSection}
+            </div>
+          )}
+
+          {removeSection}
+        </>
       )}
     </Panel>
   );

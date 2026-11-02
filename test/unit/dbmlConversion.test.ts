@@ -13,7 +13,7 @@ import * as path from 'path';
 import * as v9 from 'dbml-parse-v9';
 import * as v10 from 'dbml-parse-v10';
 
-import { classifySemanticFile, detectProjectStorage, loadDisplaySubjectArea } from '@erd-studio/core';
+import { classifySemanticFile, detectProjectStorage, loadDisplaySubjectArea, parseLayersText } from '@erd-studio/core';
 import type { DisplaySubjectArea } from '@erd-studio/core';
 import { compileDbmlProject, dbmlStorageReader, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
 import type { DbmlParserModule } from '@erd-studio/core/dbml';
@@ -1153,7 +1153,8 @@ describe('planDbmlConversion: smoother and deterministic (D26/D27, pre-release 1
     });
   };
   /** Models without their schema: a converted table gains its folder's (§1.2). */
-  const withoutSchema = (models: DisplaySubjectArea['models']): unknown[] => models.map(({ schema: _schema, ...rest }) => rest);
+  // A converted table is in the schema and layer of its folder; a YAML one has no layer.
+  const withoutSchema = (models: DisplaySubjectArea['models']): unknown[] => models.map(({ schema: _schema, layer: _layer, ...rest }) => rest);
   const DUPLICATE_SAME = 'name: fct\ncolumns:\n  - name: fct_key\n    dataType: INT\n    isPrimaryKey: true\n    isPrimaryKey: true\n  - name: dim_key\n    dataType: INT\nrelationships:\n  - fromColumn: dim_key\n    toModel: dim\n    toColumn: dim_key\n    cardinality: many-to-one\n';
   const DUPLICATE_DIFFERENT = 'name: other\ndescription: one\ndescription: two\ncolumns:\n  - name: other_key\n    dataType: INT\n  - name: dim_key\n    dataType: INT\nrelationships:\n  - fromColumn: dim_key\n    toModel: dim\n    toColumn: dim_key\n    cardinality: many-to-one\n';
 
@@ -1758,7 +1759,9 @@ describe('planDbmlConversion: the layer-first tree (ERD Studio 2.0)', () => {
     const fresh = await planDbmlConversion(inputOf(files, { readme: false }));
     expect(fresh.refusals).toEqual([]);
     expect(createdPaths(fresh)).toEqual(['gold/tables/public/dim.dbml', 'gold/diagrams/d.dbml', 'README.md']);
-    expect(created(fresh, 'README.md')).toBe(semanticReadmeText());
+    // It lists the project's layers, from its layers.json.
+    expect(created(fresh, 'README.md')).toBe(semanticReadmeText(parseLayersText(LAYERS)));
+    expect(created(fresh, 'README.md')).toContain('    1. Silver   silver/\n    2. Gold     gold/\n');
     const kept = await planDbmlConversion(inputOf(files));
     expect(createdPaths(kept)).not.toContain('README.md');
     expect(written(kept, 'README.md')).toBeUndefined();

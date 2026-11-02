@@ -1,10 +1,14 @@
 /**
  * NewTableDialog — dialog for creating new design models with configurable templates.
  *
- * Form fields:
- * - Model name (text input, validated for template prefix)
+ * Form fields, in order:
+ * - Table name (text input, validated for template prefix)
+ * - Schema (DBML projects only, from the host's `newTableSchemas`): the
+ *   schema folder, with the layer's existing ones offered and the file it
+ *   creates previewed
+ * - Starter columns (optional): the template picker, Blank first (loaded
+ *   from .erd-studio/templates/*.json files, else the built-in ones)
  * - Description (textarea)
- * - Template picker (loaded from semantic/templates/*.json files)
  * - Left/Right entity (text inputs, shown only for bridge-type templates)
  *
  * Templates are loaded from the extension host and pre-populate columns.
@@ -19,6 +23,8 @@ import { useSend } from '../../hooks/useMessageBus';
 import { KeyBadgeGroup } from '@erd-studio/renderer/editor';
 import type { ColumnDef, DesignTable, TableRole, TableTemplate } from '../../../src/types/semantic';
 import { COLUMN_NAME_PATTERN, COLUMN_NAME_RULE, TABLE_NAME_PATTERN, findDuplicateNames, sameName } from '../../../src/types/naming';
+import { SCHEMA_FOLDER_RULE, isSchemaFolderName, newTablePathPreview } from '../../../src/types/schemaFolder';
+import type { DisplaySubjectArea } from '../../../src/types/display';
 import './NewModelDialog.css';
 
 // ---------------------------------------------------------------------------
@@ -90,7 +96,7 @@ function validateForm(
     // The model library (logical-models/) is shared across domains — a new
     // model must not overwrite one another domain already uses.
     const existing = libraryModelNames.find((n) => sameName(n, modelName));
-    errors.modelName = `Table "${existing}" already exists in the Table Library — use "Add Existing Table" instead`;
+    errors.modelName = `Table "${existing}" already exists in the Table Library — use "Add Existing Tables" instead`;
   }
 
   // Bridge entity validation (check for requiresLeftEntity/requiresRightEntity flags)
@@ -108,6 +114,48 @@ function validateForm(
   }
 
   return errors;
+}
+
+/** The template picker's label: a template only fills in columns to start from. */
+export const STARTER_COLUMNS_LABEL = 'Starter columns (optional)';
+
+/** One line on what each built-in template is for; a project's own templates use their description. */
+const STARTER_HINTS: Record<string, string> = {
+  blank: 'no columns yet',
+  dimension: 'something you describe (customer, product)',
+  fact: 'something that happens (an order, a payment)',
+  bridge: 'links two tables many-to-many',
+  scd2: 'a dimension that keeps its history',
+};
+
+/** "Dimension — something you describe (customer, product)". */
+export function starterOptionText(t: Pick<TableTemplate, 'id' | 'label' | 'description'>): string {
+  const hint = STARTER_HINTS[t.id] ?? t.description?.trim();
+  return hint ? `${t.label} — ${hint}` : t.label;
+}
+
+/** Blank first, then the templates in the host's order. */
+export function starterOrder<T extends { id: string }>(templates: readonly T[]): T[] {
+  return [...templates.filter((t) => t.id === 'blank'), ...templates.filter((t) => t.id !== 'blank')];
+}
+
+/**
+ * The Schema field of a DBML diagram's New Table (`newTableSchemas` from the
+ * host): the schema the table goes in (what the user typed, trimmed; blank
+ * is the default, the schema most of this diagram's tables in the layer
+ * use, else the layer id), whether the schema folder rule refuses it, and
+ * the file it creates. Undefined when the host sends no choice (a YAML
+ * project): the dialog shows no field and sends no schema.
+ */
+export function schemaFieldState(
+  choice: DisplaySubjectArea['newTableSchemas'],
+  typed: string | null,
+  tableName: string,
+): { schema: string; error?: string; preview: string } | undefined {
+  if (!choice) return undefined;
+  const schema = typed === null || typed.trim() === '' ? choice.defaultSchema : typed.trim();
+  const preview = `Creates ${newTablePathPreview(choice.dir, choice.layer, choice.schemas, schema, tableName.trim() || 'table_name')}`;
+  return isSchemaFolderName(schema) ? { schema, preview } : { schema, error: SCHEMA_FOLDER_RULE, preview };
 }
 
 /** Auto-suggested model role based on template ID. */
@@ -139,6 +187,10 @@ export function NewTableDialog() {
   const [rightEntity, setRightEntity] = useState('');
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [customColumns, setCustomColumns] = useState<ColumnDef[]>([]);
+  // The Schema field as typed; null until the user types (the host's default shows).
+  const [schemaTyped, setSchemaTyped] = useState<string | null>(null);
+  const schemaChoice = domain?.newTableSchemas;
+  const schemaField = useMemo(() => schemaFieldState(schemaChoice, schemaTyped, modelName), [schemaChoice, schemaTyped, modelName]);
 
   // Derived state — find the selected template from the store.
   // Fallback to a minimal empty template when no templates are loaded (e.g., physical stage).
@@ -199,7 +251,7 @@ export function NewTableDialog() {
     [customColumns, duplicateColumnNames]
   );
 
-  const isValid = Object.keys(errors).length === 0 && modelName.trim() !== '' && !hasInvalidColumns;
+  const isValid = Object.keys(errors).length === 0 && modelName.trim() !== '' && !hasInvalidColumns && !schemaField?.error;
 
   // The name was refused because the Table Library already has the table
   // (and this diagram does not): offer to add that one instead.
@@ -221,6 +273,7 @@ export function NewTableDialog() {
     setRightEntity('');
     setTouched({});
     setCustomColumns([]);
+    setSchemaTyped(null);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -228,7 +281,7 @@ export function NewTableDialog() {
     resetForm();
   }, [setNewModelDialogOpen, resetForm]);
 
-  // Swap to Add Existing Table, its search already narrowed to the table.
+  // Swap to Add Existing Tables, its search already narrowed to the table.
   const handleAddExistingInstead = useCallback(() => {
     if (!libraryMatch) return;
     handleClose();
@@ -258,11 +311,11 @@ export function NewTableDialog() {
 
     send({
       type: 'addModel',
-      payload: newModel,
+      payload: schemaField ? { ...newModel, schemaFolder: schemaField.schema } : newModel,
     });
 
     handleClose();
-  }, [isValid, modelName, description, template, leftEntity, rightEntity, customColumns, send, handleClose]);
+  }, [isValid, modelName, description, template, leftEntity, rightEntity, customColumns, schemaField, send, handleClose]);
 
   const handleBlur = useCallback((field: string) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
@@ -345,25 +398,6 @@ export function NewTableDialog() {
 
       {/* Content */}
       <div className="new-model-dialog__content">
-        {/* Template Selector */}
-        <div className="new-model-dialog__field">
-          <label className="new-model-dialog__label" htmlFor="template">
-            Template
-          </label>
-          <select
-            id="template"
-            className="new-model-dialog__select"
-            value={templateId}
-            onChange={(e) => handleTemplateChange(e.target.value)}
-          >
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.label} {t.prefix && `(${t.prefix}*)`}
-              </option>
-            ))}
-          </select>
-        </div>
-
         {/* Model Name */}
         <div className="new-model-dialog__field">
           <label className="new-model-dialog__label" htmlFor="modelName">
@@ -389,6 +423,54 @@ export function NewTableDialog() {
             >
               Add &quot;{libraryMatch}&quot; from the Table Library
             </button>
+          )}
+        </div>
+
+        {/* Schema folder (DBML only): where the table's file goes. */}
+        {schemaChoice && schemaField && (
+          <div className="new-model-dialog__field">
+            <label className="new-model-dialog__label" htmlFor="tableSchema">
+              Schema
+            </label>
+            <input
+              id="tableSchema"
+              type="text"
+              list="tableSchemaChoices"
+              className={`new-model-dialog__input ${schemaField.error ? 'new-model-dialog__input--error' : ''}`}
+              value={schemaTyped ?? schemaChoice.defaultSchema}
+              onChange={(e) => setSchemaTyped(e.target.value)}
+              placeholder={schemaChoice.defaultSchema}
+              spellCheck={false}
+            />
+            <datalist id="tableSchemaChoices">
+              {schemaChoice.schemas.map((s) => <option key={s} value={s} />)}
+            </datalist>
+            {schemaField.error && (
+              <span className="new-model-dialog__error">{schemaField.error}</span>
+            )}
+            <span className="new-model-dialog__hint new-model-dialog__path">{schemaField.preview}</span>
+          </div>
+        )}
+
+        {/* Starter columns (a template). Each field is its own block, so another can sit between them. */}
+        <div className="new-model-dialog__field">
+          <label className="new-model-dialog__label" htmlFor="template">
+            {STARTER_COLUMNS_LABEL}
+          </label>
+          <select
+            id="template"
+            className="new-model-dialog__select"
+            value={templateId}
+            onChange={(e) => handleTemplateChange(e.target.value)}
+          >
+            {starterOrder(templates).map((t) => (
+              <option key={t.id} value={t.id} title={t.description || undefined}>
+                {starterOptionText(t)}
+              </option>
+            ))}
+          </select>
+          {template.prefix && (
+            <span className="new-model-dialog__hint">Table names start with {template.prefix}</span>
           )}
         </div>
 
