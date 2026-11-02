@@ -1,0 +1,22 @@
+// One big table: everything a relationship manager's dashboard shows about a customer, already joined,
+// so the dashboard reads one table. It has no relationships to draw; its grain and columns are the design.
+Table reporting.obt_customer_360 [
+  role: 'gold-dim',
+  grain: 'One row per customer',
+  rationale_design: 'Rebuilt every night from the marts and the enterprise warehouse. Wide on purpose: the dashboard tool is fastest with no joins.',
+  meta_owner: 'bi-platform'
+] {
+  Note: 'Everything about a customer in one wide row.'
+
+  customer_key             BIGINT          [pk]
+  customer_name            STRING
+  segment                  STRING
+  home_branch_name         STRING
+  product_count            INT
+  total_balance            "DECIMAL(18,2)" [additive_type: 'semi-additive']
+  last_interaction_at      TIMESTAMP
+  last_interaction_channel STRING
+  open_fraud_alerts        INT
+  marketing_consent        BOOLEAN
+  as_of_date               DATE            [note: 'The night it was built']
+}

@@ -1,0 +1,8 @@
+Table cards.cards_account [meta_owner: 'data-engineering'] {
+  Note: 'Credit card accounts from the card platform.'
+
+  card_account_id STRING    [pk, natural_key: 'true']
+  customer_no     STRING    [note: 'The core banking CIF, as the card platform stores it']
+  credit_limit    "DECIMAL(18,2)"
+  _loaded_at      TIMESTAMP [note: 'When the loader landed the row']
+}

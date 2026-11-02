@@ -1,0 +1,22 @@
+// An activity stream (the Activity Schema pattern): every customer action in one narrow table,
+// told apart by its activity column, so a new kind of event needs no new table.
+Table reporting.customer_activity [
+  role: 'transaction-fact',
+  grain: 'One row per thing a customer did',
+  meta_owner: 'bi-platform'
+] {
+  Note: 'Every customer action, oldest first: opened an account, called the bank, responded to a campaign.'
+
+  activity_id    STRING          [pk]
+  customer_key   BIGINT          [
+    note: 'Not declared as a key on purpose: the stream is read on its own'
+  ]
+  ts             TIMESTAMP
+  activity       STRING          [note: 'opened_account, called_support, responded_to_campaign, …']
+  feature_1      STRING          [
+    note: 'What the activity needs: the product, the call reason, the campaign'
+  ]
+  feature_2      STRING
+  feature_3      STRING
+  revenue_impact "DECIMAL(18,2)" [additive_type: 'additive']
+}

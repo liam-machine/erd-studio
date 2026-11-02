@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    {
+      "id": "landing",
+      "label": "Landing",
+      "abbreviation": "LND",
+      "color": "#94a3b8",
+      "creatable": true,
+      "order": 1
+    },
+    {
+      "id": "edw",
+      "label": "Enterprise warehouse",
+      "abbreviation": "EDW",
+      "color": "#0ea5e9",
+      "creatable": true,
+      "order": 2
+    },
+    {
+      "id": "marts",
+      "label": "Marts",
+      "abbreviation": "MRT",
+      "color": "#f59e0b",
+      "creatable": true,
+      "order": 3
+    },
+    {
+      "id": "reporting",
+      "label": "Reporting",
+      "abbreviation": "RPT",
+      "color": "#10b981",
+      "creatable": true,
+      "order": 4
+    }
+  ]
+}

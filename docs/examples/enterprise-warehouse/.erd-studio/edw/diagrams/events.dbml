@@ -1,0 +1,10 @@
+use { table event.transaction_event } from '../tables/event/transaction_event.dbml'
+use { table event.interaction_event } from '../tables/event/interaction_event.dbml'
+use { table arrangement.account }     from '../tables/arrangement/account.dbml'
+use { table party.party }             from '../tables/party/party.dbml'
+use * from '../relationships/edw.dbml'
+
+Project events {
+  Note: 'Money moving and customers getting in touch, joined to the accounts and parties they concern.'
+  erd_schema_version: '7'
+}

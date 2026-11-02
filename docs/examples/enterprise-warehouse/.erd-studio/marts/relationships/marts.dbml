@@ -1,0 +1,5 @@
+// The marts' shared relationships, kept by the BI platform team. A new marts table's first relationship lands here unless you choose a team's file in New Relationship.
+use { table marts.dim_branch }   from '../tables/marts/dim_branch.dbml'
+use { table marts.dim_customer } from '../tables/marts/dim_customer.dbml'
+
+Ref: marts.dim_customer.home_branch_key >? marts.dim_branch.branch_key

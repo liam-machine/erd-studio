@@ -1,0 +1,13 @@
+Table event.transaction_event [
+  grain: 'One row per posted transaction or card authorisation',
+  meta_owner: 'data-architecture'
+] {
+  Note: 'Money moving on an account, from core banking and the card platform.'
+
+  event_id      BIGINT [pk]
+  account_id    BIGINT [foreign_key: 'true']
+  posted_at     TIMESTAMP
+  amount        "DECIMAL(18,2)"
+  channel       STRING
+  source_system STRING [note: 'core_banking or cards']
+}

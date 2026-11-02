@@ -1,0 +1,11 @@
+use { table marts.fct_campaign_response } from '../tables/marts/fct_campaign_response.dbml'
+use { table marts.fct_campaign_cost }     from '../tables/marts/fct_campaign_cost.dbml'
+use { table marts.dim_campaign }          from '../tables/marts/dim_campaign.dbml'
+use { table marts.dim_customer }          from '../tables/marts/dim_customer.dbml'
+use { table marts.dim_date }              from '../tables/marts/dim_date.dbml'
+use * from '../relationships/marketing.dbml'
+
+Project marketing {
+  Note: 'Marketing\'s star: campaign responses, and campaign costs whose relationships are yours to draw.'
+  erd_schema_version: '7'
+}

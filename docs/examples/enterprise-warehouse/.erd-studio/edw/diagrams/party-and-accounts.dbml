@@ -1,0 +1,15 @@
+use { table party.party }                    from '../tables/party/party.dbml'
+use { table party.person }                   from '../tables/party/person.dbml'
+use { table party.organisation }             from '../tables/party/organisation.dbml'
+use { table party.party_relationship }       from '../tables/party/party_relationship.dbml'
+use { table arrangement.account }            from '../tables/arrangement/account.dbml'
+use { table arrangement.account_party_role } from '../tables/arrangement/account_party_role.dbml'
+use { table product.product }                from '../tables/product/product.dbml'
+use { table location.branch }                from '../tables/location/branch.dbml'
+use * from '../relationships/edw.dbml'
+use * from '../relationships/party.dbml'
+
+Project "party-and-accounts" {
+  Note: 'Who the bank deals with, and the accounts they hold: the normalised core.'
+  erd_schema_version: '7'
+}

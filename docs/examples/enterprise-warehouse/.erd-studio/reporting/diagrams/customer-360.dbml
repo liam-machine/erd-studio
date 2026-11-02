@@ -1,0 +1,7 @@
+use { table reporting.obt_customer_360 }  from '../tables/reporting/obt_customer_360.dbml'
+use { table reporting.customer_activity } from '../tables/reporting/customer_activity.dbml'
+
+Project "customer-360" {
+  Note: 'What the dashboards read: one big table and an activity stream, with no joins.'
+  erd_schema_version: '7'
+}

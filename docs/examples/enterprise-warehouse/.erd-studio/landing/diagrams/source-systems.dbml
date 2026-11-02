@@ -1,0 +1,18 @@
+use { table core_banking.core_customer }    from '../tables/core_banking/core_customer.dbml'
+use { table core_banking.core_account }     from '../tables/core_banking/core_account.dbml'
+use { table core_banking.core_transaction } from '../tables/core_banking/core_transaction.dbml'
+use { table cards.cards_account }           from '../tables/cards/cards_account.dbml'
+use { table cards.cards_transaction }       from '../tables/cards/cards_transaction.dbml'
+use { table crm.crm_contact }               from '../tables/crm/crm_contact.dbml'
+use { table loans.loans_application }       from '../tables/loans/loans_application.dbml'
+use { table branches.branches_site }        from '../tables/branches/branches_site.dbml'
+use { table web.web_session }               from '../tables/web/web_session.dbml'
+use { table call_centre.call_centre_call }  from '../tables/call_centre/call_centre_call.dbml'
+use { table fraud.fraud_alert }             from '../tables/fraud/fraud_alert.dbml'
+use { table campaigns.campaigns_send }      from '../tables/campaigns/campaigns_send.dbml'
+use * from '../relationships/landing.dbml'
+
+Project "source-systems" {
+  Note: 'Every source system as it lands: nine schemas, one per source.'
+  erd_schema_version: '7'
+}
