@@ -80,10 +80,10 @@
     <rect width="104" height="60" rx="4" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.5" stroke-dasharray="5 4"/>
     <path d="M52 20 V40 M42 30 H62" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="2" stroke-linecap="round"/>
   </g>
-  <!-- New table button -->
+  <!-- New Table button -->
   <g transform="translate(214 222)">
     <rect width="104" height="28" rx="14" class="ew-btn"/>
     <path d="M18 14 H28 M23 9 V19" fill="none" stroke="var(--vscode-button-foreground,#ffffff)" stroke-width="2" stroke-linecap="round"/>
-    <text x="36" y="18" font-size="11" font-weight="600" class="ew-btnfg">New table</text>
+    <text x="36" y="18" font-size="11" font-weight="600" class="ew-btnfg">New Table</text>
   </g>
 </svg>

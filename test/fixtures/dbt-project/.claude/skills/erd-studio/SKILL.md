@@ -65,7 +65,7 @@ A new project also needs `.erd-studio/layers.json`, which lists the layer folder
 - **Schema folders.** Each table file is `<layer>/tables/<schema>/<name>.dbml` and declares `Table <schema>.<name>`, the qualifier spelled exactly as its folder (case included). The schema is free: a source system, a domain or the warehouse schema.
 - A table's **name is its identity everywhere** and is unique across the whole project, every layer and schema, ignoring case: never create a second file with a name that exists in another folder. Tables that share a warehouse name get unique names (`silver_customer`, `gold_customer`), with the warehouse name in `alias`.
 - **To find a table**, look for `*/tables/*/{name}.dbml`.
-- **Where a new table goes.** In the layer of the diagram you are adding it to. Its schema folder: for a dbt model with a custom schema, dbt's configured schema (`+schema` / `config.schema`; for a source, its `schema:`), never the built schema in `manifest.json`; otherwise the layer's name (adding `fct_sale` to `gold/diagrams/reporting.dbml` creates `gold/tables/gold/fct_sale.dbml` holding `Table gold.fct_sale`). When the layer already has a schema folder spelled differently in case, use its spelling. Keep an existing table's file where it is.
+- **Where a new table goes.** In the layer of the diagram you are adding it to. Its schema folder, the rule the canvas's **New Table** follows: the schema the user names; else, for a dbt model with a custom schema, dbt's configured schema (`+schema` / `config.schema`; for a source, its `schema:`), never the built schema in `manifest.json`; else the schema folder most of the diagram's tables in that layer already use; else the layer's name. So adding `fct_sale` to `gold/diagrams/reporting.dbml`, whose gold tables are mostly in `gold/tables/sales/`, creates `gold/tables/sales/fct_sale.dbml` holding `Table sales.fct_sale`; with no gold table in the diagram yet, `gold/tables/gold/fct_sale.dbml` holding `Table gold.fct_sale`. When the layer already has a schema folder spelled differently in case, use its spelling. Keep an existing table's file where it is.
 - `tables`, `templates` and `logical-models` are never layer names; `layers.json` ids are lower-case, and the display name is the layer's `label`.
 
 ## Edit rules
@@ -78,6 +78,7 @@ A new project also needs `.erd-studio/layers.json`, which lists the layer folder
 - **Rename, move or delete a table**: prefer the canvas or the Table Library (one undoable step). By hand, update every file that points at it in the same change: the table file's path and `Table` line, the `use` lines in relationships files and diagrams, every Ref end, the `erd_layout` lines and sticky notes' `linked_table`.
 - **Never hand-merge a conflicted file.** When a file holds git conflict markers (`<<<<<<<` … `>>>>>>>`), show the user the file and line and ask which side to keep; never pick a side yourself or run git commands. A conflict inside a diagram's `erd_layout` only differs in positions: keep either side whole, never a mix of lines.
 - **Check your work** with `erd-studio doctor` (its `erd.dbmlProblems` names every problem with its file, line and the exact line to write) and `erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml` (the diagram's path from the project folder, `.erd-studio/` included). Fix every `fix-dbml-file` error before anything else. Then fix every `missingUse`, `missingRelationshipsUse`, `unquotedValue` and `usePathMismatch` warning in a file you wrote (the message gives the exact line): ERD Studio reads on without the fix, but other DBML tools reject the file and every diagram that imports it. Fix a `foreignMetadata` warning too: a Metadata block outside the table's own file, whose values the canvas never shows while other DBML tools apply them; do what its message says: move its properties into the table file (as inline settings in a `.dbml` one) and remove the block. Other warnings are information.
+- **Summarise a pull request's model changes** with `erd-studio changes --base <git-ref> --format markdown` (for example `--base origin/main`): the tables, columns, keys, relationships and diagrams changed since that ref, ready to paste as a review comment (`--json` for the same as data). It reads the ref from git and changes nothing.
 
 ## Team Modelling Approach
 
@@ -190,7 +191,7 @@ Every entry in "in source but not in the file" must have a specific reason. A cl
 
 ## Physical Stage (Read-Only)
 
-**A folder without `dbt_project.yml` is logical-only.** ERD Studio works there as a logical data modelling tool: the canvas shows no Physical tab and no ⊕ Diff, there is no sync plan, and `erd-studio diff` exits with `not-dbt-project` (`doctor` and `export` still work). The `.erd-studio` files are the whole model. Never tell the user they need dbt, and never run dbt there; if they use dbt elsewhere, opening that folder adds the Physical view.
+**A folder without `dbt_project.yml` is logical-only.** ERD Studio works there as a logical data modelling tool: the canvas shows no Physical tab and no Compare with dbt button, there is no sync plan, and `erd-studio diff` exits with `not-dbt-project` (`doctor` and `export` still work). The `.erd-studio` files are the whole model. Never tell the user they need dbt, and never run dbt there; if they use dbt elsewhere, opening that folder adds the Physical view.
 
 The physical stage has **no files on disk**. It is derived at runtime from the dbt project itself — source files, schema `.yml` files, `{target-path}/manifest.json` and `{target-path}/catalog.json`. None of those four is required, and in particular a project that has never been compiled still renders real models.
 
@@ -246,4 +247,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 4. Write each logical-side change in the project's format: SYNC.md gives the DBML lines (a column line in the Table block, a new Ref line in `relationshipsPath`, a change to an existing Ref in `storedIn`) and the YAML ones (legacy)
 
-<!-- erd-studio-harness: 39 -->
+<!-- erd-studio-harness: 40 -->

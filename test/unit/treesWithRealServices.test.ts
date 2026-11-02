@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as vscode from 'vscode';
 
 import { SubjectAreaTreeProvider, type TreeElement } from '../../src/providers/DomainTreeProvider';
 import { TableLibraryTreeProvider, type TableLibraryNode, type TableLibraryTableNode } from '../../src/providers/ModelLibraryTreeProvider';
@@ -131,8 +132,11 @@ describe('Table Library tree with the real library', () => {
     write('gold/diagrams/other.dbml', "Project other {\n  erd_schema_version: '7'\n}\n\nuse { table t2 } from '../tables/gold/t2.dbml'\n");
   });
 
+  // Every table row, at any depth (layer → schema → table, or layer → table).
+  const tablesUnder = (rows: readonly TableLibraryNode[]): TableLibraryTableNode[] =>
+    rows.flatMap((n) => (n.type === 'model' ? [n] : tablesUnder(n.children)));
   const nodes = (provider: TableLibraryTreeProvider): TableLibraryTableNode[] =>
-    (provider.getChildren() as TableLibraryNode[]).flatMap((n) => (n.type === 'folder' ? n.children : [n]));
+    tablesUnder(provider.getChildren() as TableLibraryNode[]);
 
   async function settle(): Promise<void> {
     for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
@@ -185,10 +189,26 @@ describe('Table Library tree with the real library', () => {
     provider.dispose();
   });
 
+  it('shows a DBML table\'s meta_owner as its owner once its file has been read', async () => {
+    write('gold/tables/gold/t4.dbml', "Table gold.t4 [\n  meta_owner: 'orders-team'\n] {\n  id INT [pk]\n}\n");
+    const { subjectAreaService, tableLibraryService } = services();
+    const provider = new TableLibraryTreeProvider(tableLibraryService, subjectAreaService, root, '.erd-studio');
+    expect(nodes(provider).find((n) => n.name === 't4')?.owner).toBeUndefined();
+    await settle();
+    const t4 = nodes(provider).find((n) => n.name === 't4')!;
+    expect(t4.owner).toBe('orders-team');
+    // Compact (the default): the owner is in the hover; full rows name it beside the table.
+    expect(provider.getTreeItem(t4).description).toBe('on no diagram');
+    expect((provider.getTreeItem(t4).tooltip as vscode.MarkdownString).value).toContain('Owner: orders-team');
+    provider.setRowDetails('full');
+    expect(provider.getTreeItem(t4).description).toBe('orders-team · on no diagram');
+    provider.dispose();
+  });
+
   it('reads a diagram\'s members once per version of the file', () => {
     const { subjectAreaService, tableLibraryService } = services();
     const provider = new TableLibraryTreeProvider(tableLibraryService, subjectAreaService, root, '.erd-studio');
-    const cache = (provider as unknown as { membersCache: Map<string, unknown> }).membersCache;
+    const cache = (provider as unknown as { members: { cache: Map<string, unknown> } }).members.cache;
     const sales = path.join(semantic, 'gold/diagrams/sales.dbml');
     const other = path.join(semantic, 'gold/diagrams/other.dbml');
     nodes(provider);

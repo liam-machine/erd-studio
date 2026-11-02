@@ -338,7 +338,8 @@ function renderTree<T>(tp: { getChildren(e?: T): T[] | undefined | Thenable<T[] 
     for (const child of children ?? []) {
       const item = tp.getTreeItem(child);
       items++;
-      if (item.collapsibleState === vscode.TreeItemCollapsibleState.Expanded) walk(child);
+      // Every row, as after expanding them all: a large library's layer rows start collapsed.
+      if (item.collapsibleState !== vscode.TreeItemCollapsibleState.None) walk(child);
     }
   };
   walk(undefined);
@@ -470,6 +471,10 @@ describe('rendering both sidebar trees', () => {
 
       const tl = await measure(`${_kind}: Table Library render (cold)`, 500, () => renderTree(library));
       expect(tl.result).toBeGreaterThanOrEqual(TABLES);
+      // More than 30 tables: the layer (or folder) rows start collapsed, so the view opens short.
+      const groups = (library.getChildren() ?? []).filter((n) => n.type !== 'model');
+      expect(groups.length).toBeGreaterThan(0);
+      for (const g of groups) expect(library.getTreeItem(g).collapsibleState).toBe(vscode.TreeItemCollapsibleState.Collapsed);
       // Unread table files are shown at once and read in the background later;
       // a render that reads a file per table (or lists a folder per table, as
       // the old error lookup did: ~24,000 listings) is the regression.

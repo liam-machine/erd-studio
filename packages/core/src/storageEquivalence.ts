@@ -22,6 +22,10 @@
  * - a one-member composite group's key dropped, and every composite key
  *   renamed to the `nextCompositeKey` sequence in its owner's order;
  * - `schemaVersion` overridden (4/5/6 → 7);
+ * - a Display table's `layer` and the Display's `layerConfigs` dropped: a
+ *   DBML read records the layer of each table's file, a YAML read has none
+ *   (and so the editor's `newTableSchemas`, where a new DBML table goes, is
+ *   dropped with them);
  * - every relationship list in one order: by from table, to table, from
  *   column and to column (case-insensitive), as a relationships file keeps
  *   its Refs sorted (§4.5), so the drawn order of a link carries no meaning;
@@ -74,6 +78,7 @@ export type StorageEquivalenceRow =
   | 'loneCompositeKey'
   | 'compositeKeyNames'
   | 'schemaVersion'
+  | 'tableLayers'
   | 'relationshipOrder'
   | 'convertLinkStoredTwice'
   | 'convertCompositeRole'
@@ -85,7 +90,7 @@ export type StorageEquivalenceRow =
 /** The rows every comparison applies. Internal. */
 export const STORAGE_EQUIVALENCE_ROWS: readonly StorageEquivalenceRow[] = [
   'noteText', 'positions', 'emptyAnnotations', 'emptyPositions', 'emptyRationale', 'respelling', 'oneToMany',
-  'loneCompositeKey', 'compositeKeyNames', 'schemaVersion', 'relationshipOrder',
+  'loneCompositeKey', 'compositeKeyNames', 'schemaVersion', 'tableLayers', 'relationshipOrder',
 ];
 
 /** The Convert-only rows (`convert: true`). Internal. */
@@ -345,6 +350,10 @@ export function normaliseStorageRows<T>(
   };
 
   if (rows.has('schemaVersion') && isFiniteNumber(copy.schemaVersion)) copy.schemaVersion = DBML_SCHEMA_VERSION;
+  if (rows.has('tableLayers')) {
+    delete copy.layerConfigs;
+    delete copy.newTableSchemas;
+  }
   text(copy, 'description');
 
   const logical = isObject(copy.logical) ? copy.logical : undefined;
@@ -356,6 +365,7 @@ export function normaliseStorageRows<T>(
   for (const model of Array.isArray(models) ? models : []) {
     if (!isObject(model)) continue;
     text(model, 'description');
+    if (rows.has('tableLayers') && Array.isArray(copy.models)) delete model.layer;
     if (rows.has('convertSchemaFallback') && options.schemaFallback && typeof model.name === 'string'
       && (model.schema === undefined || model.schema === '')) {
       const schema = options.schemaFallback(model.name);

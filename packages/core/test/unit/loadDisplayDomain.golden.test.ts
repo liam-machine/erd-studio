@@ -5,7 +5,8 @@
  * test/unit/displayDomainGolden.test.ts, which drives the real extension host
  * over the same fixture projects. This proves the one-call core pipeline
  * builds the same DisplaySubjectArea the extension posts to its webview — minus
- * the editor-only `templates`, `manifestModels` and `existingModels` — and
+ * the editor-only `templates`, `manifestModels`, `existingModels` and
+ * `relationshipsInDiagramFile` / `inDiagramFile` — and
  * fails bad domains with the same messages.
  *
  * Domain paths are passed relative to each fixture project, the way a host
@@ -86,6 +87,7 @@ const DBML_TWIN_CASES: Record<string, {
       relationshipOrder: 'the diagram file held the relationships in its own order; a relationships file keeps its Refs sorted',
       emptyAnnotations: 'the JSON file holds "annotations": []; a diagram with no Note blocks reads back with no list',
       schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+      tableLayers: 'a DBML table records the layer of its file; a YAML table has none',
       convertSchemaFallback: 'fct_order.yml names no schema and sits at the top of the library: Convert files it in silver/tables/public/',
     },
     schemas: { fct_order: 'public' },
@@ -94,6 +96,7 @@ const DBML_TWIN_CASES: Record<string, {
     domainPath: '.erd-studio/gold/diagrams/vault.dbml',
     rows: {
       schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+      tableLayers: 'a DBML table records the layer of its file; a YAML table has none',
       convertSchemaFallback: 'the YAML files name no schema: Convert takes their library folder, logical-models/gold/',
     },
     schemas: { employee: 'gold', pit_customer: 'gold', sat_customer: 'gold' },
@@ -104,13 +107,17 @@ const DBML_TWIN_CASES: Record<string, {
       relationshipOrder: 'the diagram file held the relationships in its own order; a relationships file keeps its Refs sorted',
       emptyAnnotations: 'the JSON file holds "annotations": []; a diagram with no Note blocks reads back with no list',
       schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+      tableLayers: 'a DBML table records the layer of its file; a YAML table has none',
       convertSchemaFallback: 'fct_order.yml names no schema and sits at the top of the library: Convert files it in silver/tables/public/',
     },
     schemas: { fct_order: 'public' },
   },
   'missing-model': {
     domainPath: '.erd-studio/silver/diagrams/partial.dbml',
-    rows: { schemaVersion: 'the YAML case is 5, a DBML diagram is 7' },
+    rows: {
+      schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+      tableLayers: 'a DBML table records the layer of its file; a YAML table has none',
+    },
   },
   // Convert's own output for missing-model (D26/D27): dim_missing, broken (left as YAML: it does not
   // parse) and nameless (left as YAML: no name) are named in erd_unlinked_tables, and the diagram's two
@@ -118,13 +125,17 @@ const DBML_TWIN_CASES: Record<string, {
   // JSON diagram drew, broken's YAML load error included.
   'missing-model-converted': {
     domainPath: '.erd-studio/silver/diagrams/partial.dbml',
-    rows: { schemaVersion: 'the YAML case is 5, a DBML diagram is 7' },
+    rows: {
+      schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+      tableLayers: 'a DBML table records the layer of its file; a YAML table has none',
+    },
   },
   'library-relationships': {
     domainPath: '.erd-studio/gold/diagrams/sales.dbml',
     rows: {
       oneToMany: 'a library one-to-many (1.6.6 / 1.6.7) is stored canonically, as fct_order many-to-one',
       schemaVersion: 'the YAML case is 5, a DBML diagram is 7',
+      tableLayers: 'a DBML table records the layer of its file; a YAML table has none',
     },
   },
 };
@@ -182,6 +193,9 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
       delete expected.templates;
       delete expected.manifestModels;
       delete expected.existingModels;
+      // The editor notes which relationships the diagram file holds (the Remove confirmation's); core does not.
+      delete expected.relationshipsInDiagramFile;
+      expected.relationships = (expected.relationships as Array<Record<string, unknown>>).map(({ inDiagramFile: _own, ...r }) => r);
 
       // postMessage serialises the payload, which drops undefined values.
       expect(JSON.parse(JSON.stringify(domain))).toEqual(expected);
@@ -238,6 +252,9 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
       delete expected.templates;
       delete expected.manifestModels;
       delete expected.existingModels;
+      // The editor notes which relationships the diagram file holds (the Remove confirmation's); core does not.
+      delete expected.relationshipsInDiagramFile;
+      expected.relationships = (expected.relationships as Array<Record<string, unknown>>).map(({ inDiagramFile: _own, ...r }) => r);
       DBML_TWIN_EXCEPTIONS[name]?.(expected);
       return { twin: JSON.parse(JSON.stringify(domain)), expected };
     };

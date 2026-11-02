@@ -1,0 +1,19 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table raw_vault.hub_customer }            from '../tables/raw_vault/hub_customer.dbml'
+use { table raw_vault.hub_policy }              from '../tables/raw_vault/hub_policy.dbml'
+use { table raw_vault.link_customer_policy }    from '../tables/raw_vault/link_customer_policy.dbml'
+use { table raw_vault.sat_customer_crm }        from '../tables/raw_vault/sat_customer_crm.dbml'
+use { table raw_vault.sat_customer_policy_admin } from '../tables/raw_vault/sat_customer_policy_admin.dbml'
+use { table raw_vault.sat_customer_policy_effectivity } from '../tables/raw_vault/sat_customer_policy_effectivity.dbml'
+use { table raw_vault.sat_policy_policy_admin } from '../tables/raw_vault/sat_policy_policy_admin.dbml'
+
+Ref: raw_vault.link_customer_policy.customer_hk >? raw_vault.hub_customer.customer_hk
+Ref: raw_vault.link_customer_policy.policy_hk >? raw_vault.hub_policy.policy_hk
+
+Ref: raw_vault.sat_customer_crm.customer_hk >? raw_vault.hub_customer.customer_hk
+
+Ref: raw_vault.sat_customer_policy_admin.customer_hk >? raw_vault.hub_customer.customer_hk
+
+Ref: raw_vault.sat_customer_policy_effectivity.customer_policy_hk >? raw_vault.link_customer_policy.customer_policy_hk
+
+Ref: raw_vault.sat_policy_policy_admin.policy_hk >? raw_vault.hub_policy.policy_hk

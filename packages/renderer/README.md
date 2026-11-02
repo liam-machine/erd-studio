@@ -43,6 +43,7 @@ function Diagram({ domain }: { domain: DisplaySubjectArea }) {
 | `nodesDraggable` | Let readers move model and annotation nodes (default `false`). Moves are never saved; the edges on a moved node re-pick their sides as it moves. |
 | `onLayoutModifiedChange(modified)` | Called when the layout starts or stops differing from the domain's positions (a node moved; `resetLayout()`, a new domain, or a node moved back). |
 | `onReady()` | Called once, after the first nodes are measured and fitted into view (straight away for an empty domain). |
+| `logicalOnly` | Draw the diagram of a project with no dbt project (default `false`): tables, lines and the selection ring take neutral theme colours instead of the logical stage's blue, so the layer badge carries the colour, and the legend leaves out the Physical stage, ghosts, provenance chips and comparison colours. |
 | `className`, `style` | Applied to the canvas's wrapper element, which fills its parent. |
 
 The ref exposes `resetLayout()`, which puts every node back at its position in the domain with its original edge sides.

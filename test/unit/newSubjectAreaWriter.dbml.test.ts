@@ -15,6 +15,7 @@ import { writeNewSubjectArea } from '../../src/services/newSubjectAreaWriter';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
 import { semanticReadmeText } from '../../src/services/semanticReadme';
+import { parseLayersText } from '@erd-studio/core';
 import type { FileWriteIo } from '../../src/services/fsFileWrites';
 import type { SemanticTable } from '../../src/types/semantic';
 
@@ -137,7 +138,8 @@ describe('writeNewSubjectArea for a DBML diagram in a project it starts: the REA
   it('creates README.md with the tree\'s description, last, in the same batch as the diagram', async () => {
     const result = await write();
     expect(result).toMatchObject({ ok: true, written: ['customers'] });
-    expect(fs.readFileSync(path.join(plain, '.erd-studio', 'README.md'), 'utf-8')).toBe(semanticReadmeText());
+    expect(fs.readFileSync(path.join(plain, '.erd-studio', 'README.md'), 'utf-8'))
+      .toBe(semanticReadmeText(parseLayersText(fs.readFileSync(path.join(plain, '.erd-studio', 'layers.json'), 'utf-8'))));
     expect(fs.existsSync(path.join(plain, '.erd-studio', 'gold', 'tables', 'gold', 'customers.dbml'))).toBe(true);
   });
 

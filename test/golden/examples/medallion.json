@@ -1,0 +1,311 @@
+{
+  "example": "medallion",
+  "layers": [
+    {
+      "id": "bronze",
+      "label": "Bronze",
+      "abbreviation": "BRZ"
+    },
+    {
+      "id": "silver",
+      "label": "Silver",
+      "abbreviation": "SLV"
+    },
+    {
+      "id": "gold",
+      "label": "Gold",
+      "abbreviation": "GLD"
+    }
+  ],
+  "tables": {
+    "bronze.shopify_customers": {
+      "layer": "bronze",
+      "schema": "bronze",
+      "columns": [
+        "id BIGINT pk",
+        "email STRING",
+        "first_name STRING",
+        "last_name STRING",
+        "created_at STRING",
+        "_ingested_at TIMESTAMP"
+      ]
+    },
+    "bronze.shopify_order_line_items": {
+      "layer": "bronze",
+      "schema": "bronze",
+      "columns": [
+        "id BIGINT pk",
+        "order_id BIGINT fk",
+        "product_id BIGINT fk",
+        "quantity STRING",
+        "price STRING",
+        "_ingested_at TIMESTAMP"
+      ]
+    },
+    "bronze.shopify_orders": {
+      "layer": "bronze",
+      "schema": "bronze",
+      "columns": [
+        "id BIGINT pk",
+        "customer_id BIGINT fk",
+        "created_at STRING",
+        "total_price STRING",
+        "currency STRING",
+        "_ingested_at TIMESTAMP"
+      ]
+    },
+    "bronze.shopify_products": {
+      "layer": "bronze",
+      "schema": "bronze",
+      "columns": [
+        "id BIGINT pk",
+        "title STRING",
+        "product_type STRING",
+        "_ingested_at TIMESTAMP"
+      ]
+    },
+    "bronze.stripe_charges": {
+      "layer": "bronze",
+      "schema": "bronze",
+      "columns": [
+        "id STRING pk",
+        "customer STRING fk",
+        "amount BIGINT",
+        "currency STRING",
+        "status STRING",
+        "created BIGINT",
+        "_ingested_at TIMESTAMP"
+      ]
+    },
+    "bronze.stripe_customers": {
+      "layer": "bronze",
+      "schema": "bronze",
+      "columns": [
+        "id STRING pk",
+        "email STRING",
+        "metadata STRING",
+        "_ingested_at TIMESTAMP"
+      ]
+    },
+    "gold.dim_customer": {
+      "layer": "gold",
+      "schema": "gold",
+      "role": "conformed-dim",
+      "grain": "One row per customer per version",
+      "columns": [
+        "customer_key BIGINT pk",
+        "customer_id BIGINT nk",
+        "email STRING scd1",
+        "customer_segment STRING scd2",
+        "valid_from DATE",
+        "valid_to DATE",
+        "is_current BOOLEAN"
+      ]
+    },
+    "gold.dim_date": {
+      "layer": "gold",
+      "schema": "gold",
+      "role": "conformed-dim",
+      "grain": "One row per calendar day",
+      "columns": [
+        "date_key INT pk",
+        "calendar_date DATE",
+        "month_start_date DATE",
+        "fiscal_quarter STRING",
+        "is_weekend BOOLEAN"
+      ]
+    },
+    "gold.dim_product": {
+      "layer": "gold",
+      "schema": "gold",
+      "role": "conformed-dim",
+      "grain": "One row per product per version",
+      "columns": [
+        "product_key BIGINT pk",
+        "product_id BIGINT nk",
+        "product_name STRING scd1",
+        "category STRING scd2"
+      ]
+    },
+    "gold.fct_order_line": {
+      "layer": "gold",
+      "schema": "gold",
+      "role": "transaction-fact",
+      "grain": "One row per order line",
+      "columns": [
+        "order_line_id BIGINT pk",
+        "order_date_key INT fk",
+        "customer_key BIGINT fk",
+        "product_key BIGINT fk",
+        "order_id BIGINT",
+        "quantity INT additive",
+        "net_amount DECIMAL(12,2) additive"
+      ]
+    },
+    "gold.fct_payment": {
+      "layer": "gold",
+      "schema": "gold",
+      "role": "transaction-fact",
+      "grain": "One row per successful payment",
+      "columns": [
+        "payment_id STRING pk",
+        "payment_date_key INT fk",
+        "customer_key BIGINT fk",
+        "amount DECIMAL(12,2) additive"
+      ]
+    },
+    "gold.gold_orders": {
+      "layer": "gold",
+      "schema": "gold",
+      "alias": "orders",
+      "role": "gold-fact",
+      "grain": "One row per order",
+      "columns": [
+        "order_id BIGINT pk",
+        "order_date DATE",
+        "customer_email STRING",
+        "customer_segment STRING",
+        "line_count INT additive",
+        "net_amount DECIMAL(12,2) additive",
+        "is_first_order BOOLEAN"
+      ]
+    },
+    "silver.customers": {
+      "layer": "silver",
+      "schema": "silver",
+      "grain": "One row per customer, matched across Shopify and Stripe",
+      "columns": [
+        "customer_id BIGINT pk nk",
+        "email STRING",
+        "full_name STRING",
+        "stripe_customer_id STRING",
+        "first_seen_at TIMESTAMP"
+      ]
+    },
+    "silver.order_lines": {
+      "layer": "silver",
+      "schema": "silver",
+      "grain": "One row per order line",
+      "columns": [
+        "order_line_id BIGINT pk nk",
+        "order_id BIGINT fk",
+        "product_id BIGINT fk",
+        "quantity INT",
+        "unit_price DECIMAL(12,2)"
+      ]
+    },
+    "silver.payments": {
+      "layer": "silver",
+      "schema": "silver",
+      "grain": "One row per Stripe charge",
+      "columns": [
+        "payment_id STRING pk nk",
+        "customer_id BIGINT fk",
+        "amount DECIMAL(12,2)",
+        "status STRING",
+        "paid_at TIMESTAMP"
+      ]
+    },
+    "silver.products": {
+      "layer": "silver",
+      "schema": "silver",
+      "grain": "One row per product",
+      "columns": [
+        "product_id BIGINT pk nk",
+        "product_name STRING",
+        "category STRING"
+      ]
+    },
+    "silver.silver_orders": {
+      "layer": "silver",
+      "schema": "silver",
+      "alias": "orders",
+      "grain": "One row per order",
+      "columns": [
+        "order_id BIGINT pk nk",
+        "customer_id BIGINT fk",
+        "ordered_at TIMESTAMP",
+        "order_total DECIMAL(12,2)",
+        "source_currency STRING"
+      ]
+    }
+  },
+  "diagrams": [
+    {
+      "file": "bronze/diagrams/sources.dbml",
+      "name": "sources",
+      "layer": "bronze",
+      "tables": [
+        "bronze.shopify_customers",
+        "bronze.shopify_order_line_items",
+        "bronze.shopify_orders",
+        "bronze.shopify_products",
+        "bronze.stripe_charges",
+        "bronze.stripe_customers"
+      ],
+      "relationships": [
+        "shopify_order_line_items.order_id -> shopify_orders.id many-to-one",
+        "shopify_order_line_items.product_id -> shopify_products.id many-to-one",
+        "shopify_orders.customer_id -> shopify_customers.id many-to-one",
+        "stripe_charges.customer -> stripe_customers.id many-to-one"
+      ]
+    },
+    {
+      "file": "gold/diagrams/finance.dbml",
+      "name": "finance",
+      "layer": "gold",
+      "tables": [
+        "gold.dim_customer",
+        "gold.dim_date",
+        "gold.fct_payment"
+      ],
+      "relationships": [
+        "fct_payment.customer_key -> dim_customer.customer_key many-to-one",
+        "fct_payment.payment_date_key -> dim_date.date_key many-to-one"
+      ]
+    },
+    {
+      "file": "gold/diagrams/orders-dashboard.dbml",
+      "name": "orders-dashboard",
+      "layer": "gold",
+      "tables": [
+        "gold.gold_orders"
+      ],
+      "relationships": []
+    },
+    {
+      "file": "gold/diagrams/sales.dbml",
+      "name": "sales",
+      "layer": "gold",
+      "tables": [
+        "gold.dim_customer",
+        "gold.dim_date",
+        "gold.dim_product",
+        "gold.fct_order_line"
+      ],
+      "relationships": [
+        "fct_order_line.customer_key -> dim_customer.customer_key many-to-one",
+        "fct_order_line.order_date_key -> dim_date.date_key many-to-one",
+        "fct_order_line.product_key -> dim_product.product_key many-to-one"
+      ]
+    },
+    {
+      "file": "silver/diagrams/core-entities.dbml",
+      "name": "core-entities",
+      "layer": "silver",
+      "tables": [
+        "silver.customers",
+        "silver.order_lines",
+        "silver.payments",
+        "silver.products",
+        "silver.silver_orders"
+      ],
+      "relationships": [
+        "order_lines.order_id -> silver_orders.order_id many-to-one",
+        "order_lines.product_id -> products.product_id many-to-one",
+        "payments.customer_id -> customers.customer_id many-to-one",
+        "silver_orders.customer_id -> customers.customer_id many-to-one"
+      ]
+    }
+  ]
+}

@@ -53,6 +53,7 @@ import { SelectorsService } from '../../src/services/selectorsService';
 import { telemetry } from '../../src/services/telemetryService';
 import { clearLogBuffer, recentLogLines } from '../../src/services/logger';
 import { sameConvertedTable } from '../../src/services/dbmlConversion';
+import { SessionPromptGate } from '../../src/services/activationPrompts';
 
 const CORE_FIXTURES = path.resolve(__dirname, '../../packages/core/test/fixtures');
 const TWIN = path.join(CORE_FIXTURES, 'dbml', 'composite-and-self', '.erd-studio');
@@ -410,7 +411,7 @@ describe('convertProjectToDbml', () => {
     const { view } = shown[0];
     expect(view.sections[0].items[0].text).toBe(`This diagram is still in schema v4 after ${MIGRATE_TO_V5_COMMAND_TITLE}. Open it and check its tables, then choose Check Again.`);
     expect(view.intro[0]).toContain('Migrate Subject Areas to the Central Table Library ran, but nothing else was changed.');
-    expect(view.intro[0]).not.toContain('The v4 subject areas were converted');
+    expect(view.intro[0]).not.toContain('The v4 diagrams were converted');
   });
 
   it('VS Code applying only part of the edit: applyFileWrites puts it all back, and the failure is counted', async () => {
@@ -634,9 +635,9 @@ describe('the canvas offer (§6.4)', () => {
   const YAML_OFFER = 'Your project keeps working as YAML and JSON — converting is optional.';
   /** The offer's dialogs among the information messages. */
   const offers = (info: { mock: { calls: unknown[][] } }): unknown[][] => info.mock.calls.filter((c) => c[0] === DBML_CONVERSION_OFFER_TITLE);
-  const NAMING_OFFER = 'ERD Studio now says "table" and "subject area"';
+  const NAMING_OFFER = 'ERD Studio now says "table" where it said "model"';
 
-  function openWith(state: Map<string, unknown>) {
+  function openWith(state: Map<string, unknown>, sessionPrompts?: SessionPromptGate) {
     const layerService = new LayerService(root, '.erd-studio');
     const subjectAreaService = new SubjectAreaService(layerService);
     const tableLibraryService = new TableLibraryService(root, '.erd-studio');
@@ -657,6 +658,7 @@ describe('the canvas offer (§6.4)', () => {
     const namingRun = vi.fn(async () => true);
     const candidates = vi.fn(() => countDbmlConversionCandidates(root, '.erd-studio'));
     provider.setDbmlConversion(candidates, run, () => dbmlConversionGoesNowhere(context.workspaceState, root, '.erd-studio'));
+    if (sessionPrompts) provider.setSessionPrompts(sessionPrompts);
     provider.setNamingMigration(
       () => ({ moves: [{ from: 'logical-models/x.yml', to: 'tables/x.yml', keys: [] }], rewrites: [], refusals: [], v4SubjectAreas: [], notes: [] }),
       () => 'v5',
@@ -777,6 +779,40 @@ describe('the canvas offer (§6.4)', () => {
     answerPanel((panel) => panel._simulateMessage({ type: 'convert' }));
     expect(await convertProjectToDbml(deps({ workspaceState: workspaceState as never }))).toBe('converted');
     expect(state.get(DBML_CONVERSION_DEAD_END_KEY)).toBeUndefined();
+  });
+
+  it('waits for the next window when another prompt already showed in this one (one prompt per window)', async () => {
+    useFixture('composite-and-self');
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const gate = new SessionPromptGate();
+    gate.claim('diagramsNudge');
+    await openWith(new Map(), gate).open('gold/vault.json');
+    expect(offers(info)).toEqual([]);
+    expect(info.mock.calls.map((c) => String(c[0])).filter((c) => c.startsWith(NAMING_OFFER))).toEqual([]);
+    expect(feature).not.toHaveBeenCalledWith('convertToDbmlOffered');
+
+    // The next window (a new host, so a new gate): offered, and it holds that window.
+    gate.reset();
+    await openWith(new Map(), gate).open('gold/vault.json');
+    expect(offers(info)).toHaveLength(1);
+    expect(gate.claimed).toBe('dbmlConversion');
+  });
+
+  it('the naming offer waits too when another prompt already showed', async () => {
+    useFixture('library-relationships');
+    fs.mkdirSync(path.join(erd, 'tables'), { recursive: true });
+    fs.writeFileSync(path.join(erd, 'tables', 'old.json'), JSON.stringify({ schemaVersion: 5, domain: 'old', layer: 'tables', logical: { models: [], relationships: [] } }));
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Not Now' as never);
+    const naming = () => info.mock.calls.map((c) => String(c[0])).filter((c) => c.startsWith(NAMING_OFFER));
+    const gate = new SessionPromptGate();
+    gate.claim('harnessInstall');
+    await openWith(new Map(), gate).open('gold/sales.json');
+    expect(naming()).toEqual([]);
+
+    gate.reset();
+    await openWith(new Map(), gate).open('gold/sales.json');
+    expect(naming()).toHaveLength(1);
+    expect(gate.claimed).toBe('namingMigration');
   });
 
   it('is not made when the conversion would be refused, and the naming offer is then still made', async () => {

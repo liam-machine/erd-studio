@@ -128,8 +128,8 @@ export function TableRationale({ modelName, rationale, modelRole, grain }: Table
               modelName={modelName}
               rationale={rationale}
               fieldKey="roleChoice"
-              label="Role Choice"
-              placeholder="Why was this table role selected?"
+              label="Table Type Choice"
+              placeholder="Why was this table type chosen?"
             />
           )}
 

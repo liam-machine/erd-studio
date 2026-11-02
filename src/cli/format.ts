@@ -103,7 +103,7 @@ function subjectAreaBlock(d: SubjectAreaDiff, p: Paint): string[] {
 }
 
 export function formatDiff(r: DiffResult, p: Paint): string {
-  if (r.domains.length === 0) { return 'No subject areas to compare.\n'; }
+  if (r.domains.length === 0) { return 'No diagrams to compare.\n'; }
   return r.domains.map((d) => subjectAreaBlock(d, p).join('\n')).join('\n\n') + '\n';
 }
 
@@ -130,7 +130,7 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
       + (r.artifacts.manifest.models !== null ? ` (${plural(r.artifacts.manifest.models, 'model')})` : ''));
     lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
   }
-  lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'subject area')}, ${plural(r.erd.logicalModels, 'table')}`
+  lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'diagram')}, ${plural(r.erd.logicalModels, 'table')}`
     + (r.erd.semanticDirExists
       ? (r.erd.storage === 'dbml'
         ? ' — storage DBML'
@@ -140,7 +140,7 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   if (migration && migration.moves + migration.rewrites > 0) {
     lines.push(`${p.yellow('!')} "Migrate to the New File Naming" in VS Code would `
       + [migration.moves > 0 ? `move ${plural(migration.moves, 'table file')} to tables/` : '',
-        migration.rewrites > 0 ? `rename keys in ${plural(migration.rewrites, 'subject area')}` : '']
+        migration.rewrites > 0 ? `rename keys in ${plural(migration.rewrites, 'diagram')}` : '']
         .filter(Boolean).join(' and ')
       + (migration.refusals.length > 0 ? ` (not yet: ${migration.refusals.join(' ')})` : ''));
   }
@@ -217,9 +217,9 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
 
 /** inventory in a logical-only folder: the designed tables, by name. */
 function formatLogicalInventory(r: InventoryResult, p: Paint): string {
-  const lines = [`Not a dbt project: ${plural(r.logicalTables.length, 'table')} in ${plural(r.domains.length, 'subject area')} (your ERD Studio files)`];
+  const lines = [`Not a dbt project: ${plural(r.logicalTables.length, 'table')} in ${plural(r.domains.length, 'diagram')} (your ERD Studio files)`];
   for (const t of r.logicalTables) {
-    const where = t.domains.length > 0 ? p.dim(` — in ${t.domains.join(', ')}`) : p.dim(' — in no subject area');
+    const where = t.domains.length > 0 ? p.dim(` — in ${t.domains.join(', ')}`) : p.dim(' — in no diagram');
     lines.push(`    ${t.name}  ${t.unreadable ? p.red('does not parse') : plural(t.columnCount, 'column')}${where}`);
   }
   if (r.legacyDbmlTree) lines.push(`${p.red('✗')} ${r.legacyDbmlTree}`);

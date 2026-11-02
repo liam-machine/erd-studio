@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    {
+      "id": "raw_vault",
+      "label": "Raw Vault",
+      "abbreviation": "RV",
+      "color": "#64748b",
+      "creatable": true,
+      "order": 1
+    },
+    {
+      "id": "business_vault",
+      "label": "Business Vault",
+      "abbreviation": "BV",
+      "color": "#8b5cf6",
+      "creatable": true,
+      "order": 2
+    },
+    {
+      "id": "information_mart",
+      "label": "Information Marts",
+      "abbreviation": "IM",
+      "color": "#d4a800",
+      "creatable": true,
+      "order": 3
+    }
+  ]
+}

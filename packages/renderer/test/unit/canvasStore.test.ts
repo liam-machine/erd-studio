@@ -53,6 +53,8 @@ describe('createCanvasSlice', () => {
       lastSelectedColumn: null,
       editingColumn: null,
       selectedAnnotation: null,
+      // Today's look: the stage colours, until a host says there is no dbt project.
+      logicalOnly: false,
     });
     expect(slice.highlightedColumns).toEqual(new Set());
     expect(slice.expandedNodes).toEqual(new Set());

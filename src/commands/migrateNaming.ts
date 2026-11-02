@@ -161,7 +161,7 @@ interface MigrationProgress {
 /** What a run that stopped before the file moves left behind, lower case: the v4 step's files, when it ran. */
 function nothingChanged(progress: MigrationProgress): string {
   return progress.v5Converted
-    ? 'the v4 subject areas were converted to the Table Library, but nothing else was changed'
+    ? 'the v4 diagrams were converted to the Table Library, but nothing else was changed'
     : 'nothing was changed';
 }
 
@@ -201,7 +201,7 @@ class V5StepFailed extends Error {
 
 /** Why the new naming, for the prompt and the dialog. */
 export function namingMigrationReason(version: string): string {
-  return 'ERD Studio now says "table" and "subject area", and its files can say so too: the Table Library moves from ' +
+  return 'ERD Studio now says "table" where it said "model", and its files can say so too: the Table Library moves from ' +
     `.erd-studio/${LOGICAL_MODELS_DIR}/ to .erd-studio/${TABLES_DIR}/, and keys such as "domain" and "logical.models" become ` +
     `"subjectArea" and "logical.tables". Teammates need ERD Studio ${version} or later to open the migrated files.`;
 }
@@ -225,7 +225,7 @@ export async function migrateToTableNaming(deps: MigrateNamingDeps): Promise<Mig
     log.error('[migrateNaming] failed:', err);
     if (err instanceof V5StepFailed) {
       // The v4 step counted its own failure, and writes its files one by one.
-      const doing = 'while converting the v4 subject areas';
+      const doing = 'while converting the v4 diagrams';
       showErrorWithActions(oursMessage(MIGRATE_NAMING_TITLE, doing, 'some files may already be converted (source control shows which)'), {
         [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err.cause),
         [TRY_AGAIN_BUTTON]: retry,
@@ -481,7 +481,7 @@ async function applyMigrationEdit(
   if (unsaved.length === 0) {
     const parts = [
       plan.moves.length > 0 ? `${plan.moves.length} table file${plan.moves.length === 1 ? '' : 's'} moved to ${TABLES_DIR}/` : '',
-      plan.rewrites.length > 0 ? `${plan.rewrites.length} subject area${plan.rewrites.length === 1 ? '' : 's'} updated` : '',
+      plan.rewrites.length > 0 ? `${plan.rewrites.length} diagram${plan.rewrites.length === 1 ? '' : 's'} updated` : '',
     ].filter(Boolean);
     void vscode.window.showInformationMessage(`Migrated to the new file naming: ${parts.join(', ')}. Edit > Undo, straight away, puts every file back.`);
   }

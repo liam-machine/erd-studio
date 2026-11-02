@@ -59,14 +59,16 @@
         "fromColumn": "customer_key",
         "toModel": "dim_customer",
         "toColumn": "customer_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       },
       {
         "fromModel": "broken",
         "fromColumn": "customer_key",
         "toModel": "dim_customer",
         "toColumn": "customer_key",
-        "cardinality": "one-to-one"
+        "cardinality": "one-to-one",
+        "inDiagramFile": true
       }
     ],
     "viewConfig": {
@@ -101,7 +103,7 @@
       "order": 0
     },
     "readOnly": false,
-    "positionDraggable": true
-  },
-  "welcomeDismissed": false
+    "positionDraggable": true,
+    "relationshipsInDiagramFile": true
+  }
 }

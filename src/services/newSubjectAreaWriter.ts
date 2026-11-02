@@ -300,7 +300,7 @@ async function writeNewDbmlSubjectArea(
         ...(view.positions ? { positions: view.positions } : {}),
       });
       // A project this write starts gets the README that says what the folder is (§1.7).
-      const readme = createdRoot ? semanticReadmeCreate(semanticRoot, (p) => fs.existsSync(p)) : null;
+      const readme = createdRoot ? semanticReadmeCreate(semanticRoot, (p) => fs.existsSync(p), layerService.getAllLayers()) : null;
       return [{ kind: 'create', path: domainPath, text }, ...(readme ? [readme] : [])];
     };
     tableLibraryService.applyDbmlBatch({

@@ -13,7 +13,8 @@
 import type { Cardinality, ColumnDef, TableRole, Stage } from '../types/semantic';
 import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN, TABLE_NAME_RULE, findDuplicateNames } from '../types/naming';
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
-import { ADD_EXISTING_TABLES_LIMIT } from '../types/messages';
+import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, GO_TO_TABLE_QUERY_MAX } from '../types/messages';
+import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
 import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, isValidTableAlias } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
@@ -189,6 +190,18 @@ export function validateColumnDef(column: unknown): string | null {
   if (typeof col.dataType !== 'string' || !col.dataType.trim()) {
     return 'Data type is required';
   }
+  return null;
+}
+
+/**
+ * Validate an `addModel` payload's optional `schemaFolder` (the New Table
+ * dialog's Schema field, DBML only): absent, or a string that is a schema
+ * folder name (`isSchemaFolderName`, the rule every DBML writer shares).
+ */
+export function validateSchemaFolderPayload(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'string') return 'The schema must be text.';
+  if (!isSchemaFolderName(value)) return `"${value}" cannot be a schema folder. ${SCHEMA_FOLDER_RULE}`;
   return null;
 }
 
@@ -632,10 +645,10 @@ export function validateAddModelsFromDbtPayload(value: unknown): string | null {
     return null;
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return 'Add tables from dbt takes no payload.';
+    return 'Add Tables from dbt takes no payload.';
   }
   if (Object.keys(value).length > 0) {
-    return 'Add tables from dbt takes no payload.';
+    return 'Add Tables from dbt takes no payload.';
   }
   return null;
 }
@@ -660,6 +673,45 @@ export function validateAddExistingModelsPayload(value: unknown): string | null 
   for (const name of modelNames) {
     const nameError = validateTableNameSafety(name);
     if (nameError) return nameError;
+  }
+  return null;
+}
+
+/**
+ * Validate a `dropTables` payload (a drop on the canvas): `{ position: { x, y },
+ * uris }`, the point finite, `uris` a list of at most
+ * {@link DROP_TABLES_URI_LIMIT} strings of at most
+ * {@link DROP_TABLES_URI_MAX_LENGTH} characters (possibly empty: a drag from
+ * the Table Library may bring none). The URIs are only compared with the
+ * library's file paths, never opened.
+ */
+export function validateDropTablesPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'A drop needs a position and a list of URIs.';
+  }
+  const { position, uris } = value as { position?: unknown; uris?: unknown };
+  const pointError = validatePoint(position);
+  if (pointError) return pointError;
+  if (!Array.isArray(uris)) return 'A drop needs a list of URIs.';
+  if (uris.length > DROP_TABLES_URI_LIMIT) return `At most ${DROP_TABLES_URI_LIMIT} files can be dropped at once.`;
+  for (const uri of uris) {
+    if (typeof uri !== 'string') return 'Each dropped URI must be text.';
+    if (uri.length > DROP_TABLES_URI_MAX_LENGTH) return `A dropped URI can be at most ${DROP_TABLES_URI_MAX_LENGTH} characters.`;
+  }
+  return null;
+}
+
+/**
+ * Validate a `requestNewRelationshipFiles` payload. It carries nothing — the
+ * host answers for the open diagram — so only an absent payload or an empty
+ * object passes.
+ */
+export function validateRequestNewRelationshipFilesPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Asking where new relationships go takes no payload.';
   }
   return null;
 }
@@ -852,4 +904,35 @@ export function validateAnnotationUpdate(value: unknown): string | null {
     }
   }
   return null;
+}
+
+/**
+ * `goToTable` (the toolbar search's "Not on this diagram" hint): an object
+ * with an optional `query` of at most {@link GO_TO_TABLE_QUERY_MAX}
+ * characters and no line breaks.
+ */
+export function validateGoToTablePayload(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Go to Table needs an object payload.';
+  }
+  const { query } = value as { query?: unknown };
+  if (query === undefined) return null;
+  if (typeof query !== 'string') return 'The search text must be text.';
+  if (query.length > GO_TO_TABLE_QUERY_MAX) return `The search text can be at most ${GO_TO_TABLE_QUERY_MAX} characters.`;
+  if (/[\r\n\0]/.test(query)) return 'The search text must be one line.';
+  return null;
+}
+
+/**
+ * A table context-menu action's payload (`showTableOnOtherDiagrams`,
+ * `moveTable`, `copyTablePath`, `revealTableInLibrary`): `{ modelName }`,
+ * held to the path-safety rule as `openModelFile` is (a table drawn from dbt
+ * may carry any name dbt allows).
+ */
+export function validateTableActionPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'This action needs a table name.';
+  }
+  return validateTableNameSafety((value as { modelName?: unknown }).modelName);
 }

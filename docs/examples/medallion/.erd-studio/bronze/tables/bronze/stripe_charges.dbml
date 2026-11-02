@@ -1,0 +1,11 @@
+Table bronze.stripe_charges {
+  Note: 'Card charges as Stripe sends them.'
+
+  id           STRING    [pk, note: 'Stripe charge id (ch_…)']
+  customer     STRING    [foreign_key: 'true', note: 'Stripe customer id']
+  amount       BIGINT    [note: 'In cents']
+  currency     STRING
+  status       STRING
+  created      BIGINT    [note: 'Unix seconds']
+  _ingested_at TIMESTAMP [note: 'When the loader landed the row']
+}

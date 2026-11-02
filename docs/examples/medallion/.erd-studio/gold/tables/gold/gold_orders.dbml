@@ -1,0 +1,18 @@
+// Same warehouse name as silver_orders (orders), in another layer: see that file.
+Table gold.gold_orders [
+  role: 'gold-fact',
+  grain: 'One row per order',
+  alias: 'orders',
+  rationale_purpose: 'The orders dashboard, in a tool that cannot join tables.',
+  rationale_design: 'Pre-joined from fct_order_line and its dimensions: no foreign keys, so nothing to draw between it and the star.'
+] {
+  Note: 'Orders with their customer and totals, ready for a dashboard.'
+
+  order_id         BIGINT          [pk]
+  order_date       DATE
+  customer_email   STRING
+  customer_segment STRING
+  line_count       INT             [additive_type: 'additive']
+  net_amount       "DECIMAL(12,2)" [additive_type: 'additive']
+  is_first_order   BOOLEAN
+}

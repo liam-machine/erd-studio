@@ -44,6 +44,7 @@ import { LayerService } from '../../src/services/layerService';
 import { DuplicateKeyWriteRefused, TableLibraryService } from '../../src/services/logicalModelService';
 import { buildLogicalDisplaySubjectArea } from '../../src/services/stageDisplay';
 import { telemetry } from '../../src/services/telemetryService';
+import { WHICH_LAYER_FOR_DIAGRAM } from '../../src/services/layerWording';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
@@ -249,7 +250,7 @@ describe('Import DBML — a file from another tool', () => {
     expect(ui.dialogs).toEqual([tmp]);
     // Layer, then the name, suggested from the file's name.
     expect(ui.picks[0].items.map((i) => i.id)).toEqual(['silver', 'gold']);
-    expect(ui.picks[0].options.placeHolder).toBe('Which layer is this diagram for?');
+    expect(ui.picks[0].options.placeHolder).toBe(WHICH_LAYER_FOR_DIAGRAM);
     expect(ui.inputs[0].value).toBe('shop');
     expect(ui.inputs[0].prompt).toBe('Name the diagram. It is saved in the Gold layer.');
     // The dry run, before anything is written.

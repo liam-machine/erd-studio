@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '39';
+export const HARNESS_VERSION = '40';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -213,7 +213,7 @@ A new project also needs \`.erd-studio/layers.json\`, which lists the layer fold
 - **Schema folders.** Each table file is \`<layer>/tables/<schema>/<name>.dbml\` and declares \`Table <schema>.<name>\`, the qualifier spelled exactly as its folder (case included). The schema is free: a source system, a domain or the warehouse schema.
 - A table's **name is its identity everywhere** and is unique across the whole project, every layer and schema, ignoring case: never create a second file with a name that exists in another folder. Tables that share a warehouse name get unique names (\`silver_customer\`, \`gold_customer\`), with the warehouse name in \`alias\`.
 - **To find a table**, look for \`*/tables/*/{name}.dbml\`.
-- **Where a new table goes.** In the layer of the diagram you are adding it to. Its schema folder: for a dbt model with a custom schema, dbt's configured schema (\`+schema\` / \`config.schema\`; for a source, its \`schema:\`), never the built schema in \`manifest.json\`; otherwise the layer's name (adding \`fct_sale\` to \`gold/diagrams/reporting.dbml\` creates \`gold/tables/gold/fct_sale.dbml\` holding \`Table gold.fct_sale\`). When the layer already has a schema folder spelled differently in case, use its spelling. Keep an existing table's file where it is.
+- **Where a new table goes.** In the layer of the diagram you are adding it to. Its schema folder, the rule the canvas's **New Table** follows: the schema the user names; else, for a dbt model with a custom schema, dbt's configured schema (\`+schema\` / \`config.schema\`; for a source, its \`schema:\`), never the built schema in \`manifest.json\`; else the schema folder most of the diagram's tables in that layer already use; else the layer's name. So adding \`fct_sale\` to \`gold/diagrams/reporting.dbml\`, whose gold tables are mostly in \`gold/tables/sales/\`, creates \`gold/tables/sales/fct_sale.dbml\` holding \`Table sales.fct_sale\`; with no gold table in the diagram yet, \`gold/tables/gold/fct_sale.dbml\` holding \`Table gold.fct_sale\`. When the layer already has a schema folder spelled differently in case, use its spelling. Keep an existing table's file where it is.
 - \`tables\`, \`templates\` and \`logical-models\` are never layer names; \`layers.json\` ids are lower-case, and the display name is the layer's \`label\`.
 
 ## Edit rules
@@ -226,6 +226,7 @@ A new project also needs \`.erd-studio/layers.json\`, which lists the layer fold
 - **Rename, move or delete a table**: prefer the canvas or the Table Library (one undoable step). By hand, update every file that points at it in the same change: the table file's path and \`Table\` line, the \`use\` lines in relationships files and diagrams, every Ref end, the \`erd_layout\` lines and sticky notes' \`linked_table\`.
 - **Never hand-merge a conflicted file.** When a file holds git conflict markers (\`<<<<<<<\` … \`>>>>>>>\`), show the user the file and line and ask which side to keep; never pick a side yourself or run git commands. A conflict inside a diagram's \`erd_layout\` only differs in positions: keep either side whole, never a mix of lines.
 - **Check your work** with \`erd-studio doctor\` (its \`erd.dbmlProblems\` names every problem with its file, line and the exact line to write) and \`erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml\` (the diagram's path from the project folder, \`.erd-studio/\` included). Fix every \`fix-dbml-file\` error before anything else. Then fix every \`missingUse\`, \`missingRelationshipsUse\`, \`unquotedValue\` and \`usePathMismatch\` warning in a file you wrote (the message gives the exact line): ERD Studio reads on without the fix, but other DBML tools reject the file and every diagram that imports it. Fix a \`foreignMetadata\` warning too: a Metadata block outside the table's own file, whose values the canvas never shows while other DBML tools apply them; do what its message says: move its properties into the table file (as inline settings in a \`.dbml\` one) and remove the block. Other warnings are information.
+- **Summarise a pull request's model changes** with \`erd-studio changes --base <git-ref> --format markdown\` (for example \`--base origin/main\`): the tables, columns, keys, relationships and diagrams changed since that ref, ready to paste as a review comment (\`--json\` for the same as data). It reads the ref from git and changes nothing.
 
 ## Team Modelling Approach
 
@@ -338,7 +339,7 @@ Every entry in "in source but not in the file" must have a specific reason. A cl
 
 ## Physical Stage (Read-Only)
 
-**A folder without \`dbt_project.yml\` is logical-only.** ERD Studio works there as a logical data modelling tool: the canvas shows no Physical tab and no ⊕ Diff, there is no sync plan, and \`erd-studio diff\` exits with \`not-dbt-project\` (\`doctor\` and \`export\` still work). The \`.erd-studio\` files are the whole model. Never tell the user they need dbt, and never run dbt there; if they use dbt elsewhere, opening that folder adds the Physical view.
+**A folder without \`dbt_project.yml\` is logical-only.** ERD Studio works there as a logical data modelling tool: the canvas shows no Physical tab and no Compare with dbt button, there is no sync plan, and \`erd-studio diff\` exits with \`not-dbt-project\` (\`doctor\` and \`export\` still work). The \`.erd-studio\` files are the whole model. Never tell the user they need dbt, and never run dbt there; if they use dbt elsewhere, opening that folder adds the Physical view.
 
 The physical stage has **no files on disk**. It is derived at runtime from the dbt project itself — source files, schema \`.yml\` files, \`{target-path}/manifest.json\` and \`{target-path}/catalog.json\`. None of those four is required, and in particular a project that has never been compiled still renders real models.
 
@@ -622,12 +623,12 @@ Everything else — \`layer\`, \`modelFolder\` (the dbt \`models/\` path filter)
 - **To find a model**, look at \`logical-models/{name}.yml\` first, then in each folder (\`logical-models/*/{name}.yml\`). If the same name exists twice, the top-level file wins, then folders in alphabetical order; the others are ignored.
 - **Folders are opt-in per project.** Check first: if a folder named after a layer in \`layers.json\` (\`logical-models/{layer}/\`) already holds a \`.yml\` file (or \`logical-models/\` is empty), the project uses layer folders — create a new model in the folder of the layer of the domain you are adding it to (adding \`fct_sale\` to \`gold/reporting.json\` creates \`logical-models/gold/fct_sale.yml\`). If every model file is at the top level, the project is **flat** — create the new file at the top level too, and never start the folder layout on your own (the user opts in with **ERD Studio: Organise Table Library by Layer**). When editing or renaming an existing model, keep its file in the folder it is already in.
 
-### Model Library (Sidebar)
+### Table Library (Sidebar)
 
-The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`logical-models/\`, grouped by folder. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
+The **Table Library** panel in the ERD Studio sidebar shows all YAML files in \`logical-models/\`, grouped by folder. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
 
-- **Referenced models** show how many domains use them (e.g. "2 domains")
-- **Orphaned models** show a warning icon and "(unused)" — these exist as \`.yml\` files but are not in any domain's \`logical.models[]\` array
+- **Referenced models** show how many diagrams use them (e.g. "on 2 diagrams")
+- **Models on no diagram** show "on no diagram" — these exist as \`.yml\` files but are not in any domain's \`logical.models[]\` array
 
 **Important for AI agents:** Before saying a model "already exists in the ERD", check whether it is referenced by the target domain's \`logical.models[]\` array — not just whether the \`.yml\` file exists. A model file in \`logical-models/\` may be unused (orphaned) or only referenced by other domains.
 

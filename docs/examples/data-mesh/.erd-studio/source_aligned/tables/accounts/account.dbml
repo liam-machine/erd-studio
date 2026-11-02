@@ -1,0 +1,11 @@
+Table accounts.account [
+  grain: 'One row per customer account',
+  meta_owner: 'accounts-team'
+] {
+  Note: 'Customer accounts, published by the accounts domain.'
+
+  account_id   STRING [pk, natural_key: 'true']
+  account_type STRING [note: 'Personal or business']
+  country_code STRING
+  created_at   TIMESTAMP
+}

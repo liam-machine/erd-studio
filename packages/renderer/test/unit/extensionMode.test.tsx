@@ -6,7 +6,7 @@
  * the relationship rows clickable and the key-badge menus open.
  */
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import type { DisplaySubjectArea } from '@erd-studio/core';
 import { createCanvasStore, CanvasStoreProvider } from '../../src/store/editorStore';
@@ -79,8 +79,11 @@ describe('shared components outside a CanvasEnvironmentProvider', () => {
         }
       });
 
-      it('offers "+ Add Rationale" for a model without one', () => {
+      it('offers "+ Add Rationale" for a model without one, under "Modelling detail (optional)"', () => {
         renderPanel(readOnly);
+        // Folded while none of its fields is set; one click opens it.
+        expect(screen.queryByText('+ Add Rationale')).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: /Modelling detail/ }));
         expect(screen.getByText('+ Add Rationale')).toBeTruthy();
       });
     });

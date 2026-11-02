@@ -1,0 +1,12 @@
+Table shipping.tracking_event [
+  grain: 'One row per scan of a parcel',
+  meta_owner: 'shipping-team'
+] {
+  Note: 'Every scan of every parcel.'
+
+  event_id    STRING [pk, natural_key: 'true']
+  shipment_id STRING [foreign_key: 'true']
+  event_type  STRING [note: 'Picked up, at depot, out for delivery, delivered']
+  event_at    TIMESTAMP
+  depot_code  STRING
+}

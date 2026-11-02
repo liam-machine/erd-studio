@@ -14,6 +14,7 @@
  */
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 
 import type { RelationshipEntry } from '../services/relationshipsOverview';
 import type { RevealRelationshipMessage } from '../types/messages';
@@ -33,7 +34,14 @@ export interface RelationshipsViewDeps {
   layerLabel(layer: string): string;
   /** Select and centre the line on the diagram at `filePath`, once it is open (`SemanticEditorProvider.revealRelationship`). */
   revealRelationship(filePath: string, target: RevealRelationshipMessage['payload']): Promise<void>;
+  /** Select and centre a table on the diagram at `filePath`, once it is open (`SemanticEditorProvider.revealTable`). Optional. */
+  revealTable?(filePath: string, modelName: string): Promise<void>;
+  /** Add to Diagram… for `tables` (`erdStudio.addToDiagram`), offered when no diagram shows them. Optional: without it the message only says so. */
+  addToDiagram?(tables: readonly string[]): Promise<void>;
 }
+
+/** The button a "No diagram shows …" message offers. */
+export const ADD_TO_DIAGRAM = 'Add to Diagram…';
 
 /** What the canvas needs to find a relationship's line: its tables and every column pair. */
 export function revealTarget(entry: RelationshipEntry): RevealRelationshipMessage['payload'] {
@@ -121,19 +129,24 @@ export function diagramsShowing(tables: readonly string[], deps: Pick<Relationsh
  * selected and centred, or a table row's table. A relationship that a
  * diagram file keeps (YAML/JSON) is shown on that diagram. With no diagram to
  * show it on, a relationship opens where it is written (`fallBackToFile`, a
- * row's click) or says so (the menu item, which the user picked by name).
+ * row's click); otherwise the message says so and offers Add to Diagram….
+ * A table is selected and centred on the diagram it opens (`revealTable`).
+ * `excludeDiagram` leaves one diagram out (the canvas's Show on Other
+ * Diagrams…, from the diagram already open).
  */
 export async function openInDiagram(
-  node: RelationshipsNode | TableLibraryTableNode | undefined,
+  node: RelationshipsNode | TableLibraryTableNode | Pick<TableLibraryTableNode, 'type' | 'name'> | undefined,
   deps: RelationshipsViewDeps,
-  options: { fallBackToFile?: boolean } = {},
+  options: { fallBackToFile?: boolean; excludeDiagram?: string } = {},
 ): Promise<void> {
   if (!node || node.type === 'attention') return;
   const relationship = node.type === 'relationship' ? node : undefined;
   const entry = relationship?.entry;
+  const tableName = node.type === 'model' ? node.name : node.type === 'table' ? node.group.table : undefined;
   const open = async (filePath: string): Promise<void> => {
     await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
     if (entry) await deps.revealRelationship(filePath, revealTarget(entry));
+    else if (tableName) await deps.revealTable?.(filePath, tableName);
   };
   if (entry?.source.kind === 'diagram') {
     await open(entry.source.filePath);
@@ -143,21 +156,31 @@ export async function openInDiagram(
   const subject = tables.length === 1 || normaliseName(tables[0]) === normaliseName(tables[1])
     ? `"${tables[0]}"`
     : `both "${tables[0]}" and "${tables[1]}"`;
-  const found = diagramsShowing(tables, deps);
+  const excluded = options.excludeDiagram;
+  const found = diagramsShowing(tables, deps)
+    .filter((s) => excluded === undefined || path.resolve(s.filePath) !== path.resolve(excluded));
+  const other = excluded !== undefined ? ' other' : '';
   if (found.length === 0) {
     if (relationship && options.fallBackToFile) {
       vscode.window.setStatusBarMessage(`ERD Studio: No diagram shows ${subject} yet, so this is where the relationship is written.`, 8000);
       await openRelationshipSource(relationship, deps);
       return;
     }
-    void vscode.window.showInformationMessage(`ERD Studio: No diagram shows ${subject} yet. To add ${tables.length === 1 ? 'it' : 'them'}, open a diagram and use + Add → Add Existing Table.`);
+    const them = [...new Set(tables.map(normaliseName))].length === 1 ? 'it' : 'them';
+    const message = `ERD Studio: No${other} diagram shows ${subject} yet.`;
+    if (!deps.addToDiagram) {
+      void vscode.window.showInformationMessage(`${message} To add ${them}, open a diagram and use + Add → Add Existing Tables.`);
+      return;
+    }
+    const choice = await vscode.window.showInformationMessage(`${message} Add ${them} to one?`, ADD_TO_DIAGRAM);
+    if (choice === ADD_TO_DIAGRAM) await deps.addToDiagram(tables);
     return;
   }
   let pick = found[0];
   if (found.length > 1) {
     const choice = await vscode.window.showQuickPick(
       found.map((s) => ({ label: s.domain, description: deps.layerLabel(s.layer), summary: s })),
-      { placeHolder: `${found.length} diagrams show ${subject}. Open which?` },
+      { placeHolder: `${found.length}${other} diagrams show ${subject}. Open which?` },
     );
     if (!choice) return;
     pick = choice.summary;

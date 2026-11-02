@@ -70,14 +70,16 @@
         "fromColumn": "customer_key",
         "toModel": "stg_customers",
         "toColumn": "Customer_Key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       },
       {
         "fromModel": "stg_orders",
         "fromColumn": "dropped_column",
         "toModel": "stg_customers",
         "toColumn": "Customer_Key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       }
     ],
     "viewConfig": {
@@ -104,7 +106,7 @@
       "order": 1
     },
     "readOnly": false,
-    "positionDraggable": true
-  },
-  "welcomeDismissed": false
+    "positionDraggable": true,
+    "relationshipsInDiagramFile": true
+  }
 }

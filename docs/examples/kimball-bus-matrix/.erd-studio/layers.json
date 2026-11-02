@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    {
+      "id": "presentation",
+      "label": "Presentation",
+      "abbreviation": "PRS",
+      "color": "#d4a800",
+      "creatable": true,
+      "order": 1
+    }
+  ]
+}

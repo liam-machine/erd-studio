@@ -1,7 +1,7 @@
 # Verify and fix
 
 Stage 5 compares the logical model you wrote with the physical dbt project and fixes the logical
-side until they match. The comparison is the **same code** as the canvas's **⊕ Diff** button
+side until they match. The comparison is the **same code** as the canvas's **Compare with dbt** button
 (on the Logical tab it compares against Physical), so a clean result here means a clean result
 on the canvas.
 
@@ -153,7 +153,7 @@ types yet. Generating the catalog (Stage 2) will fill them in."
 5. Repeat — **at most 3 rounds.** Each round should shrink the list; if it does not, something
    is off that edits will not solve (a stale manifest, a model dbt disables, a case the rules do
    not cover). Stop, list what remains using each fix's `explain`, and suggest opening the domain
-   and clicking **⊕ Diff** in the canvas toolbar to look at it together.
+   and clicking **Compare with dbt** in the canvas toolbar to look at it together.
 
 Success line, from `counts`:
 
@@ -217,7 +217,7 @@ link appears even without dbt), then run the diff again.
 Use this when the helper cannot run. Ask the user to:
 
 > 1. Open the domain from the ERD Studio sidebar.
-> 2. On the **Logical** tab, click **⊕ Diff** in the toolbar.
+> 2. On the **Logical** tab, click **Compare with dbt** in the toolbar.
 > 3. In the comparison panel that opens, click **⊕ Sync**.
 > 4. In the window that opens, click **Keep all** in the **Physical** column for each model, and
 >    pick the Physical side for any row still waiting (relationships have their own rows). Then
@@ -241,7 +241,7 @@ edits above:
 | `add-to-logical` / `remove-from-logical` | ask first — adding or removing a whole model from the domain |
 
 Apply the same rules from section 3 about who decides. Delete `.erd-studio/.sync-plan.json` when
-you are done, then ask the user to click **⊕ Diff** again to confirm. Treat the canvas's result as the
+you are done, then ask the user to click **Compare with dbt** again to confirm. Treat the canvas's result as the
 check, up to the same 3 rounds.
 
 ## 7. Fallback B — manual comparison
@@ -254,4 +254,4 @@ exists), list its columns and `data_type:` values, and compare them with the log
 ignoring case. Compare `relationships` tests between two models in the domain with the
 relationships the domain draws: its own `logical.relationships` plus every model yml
 `relationships:` entry whose two models are both in the domain. Fix the logical side as in section 2, and recommend opening the canvas
-and clicking **⊕ Diff** as soon as they can.
+and clicking **Compare with dbt** as soon as they can.

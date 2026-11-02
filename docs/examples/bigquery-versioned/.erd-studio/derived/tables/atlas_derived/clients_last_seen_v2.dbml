@@ -1,0 +1,11 @@
+Table atlas_derived.clients_last_seen_v2 [grain: 'One row per client per day'] {
+  Note: 'For each client and day, which of the last 28 days they were active.'
+
+  submission_date DATE
+  client_id       STRING [foreign_key: 'true']
+  days_seen_bits  INT    [note: 'One bit per day for the last 28 days']
+  days_since_seen INT
+  indexes {
+    (submission_date, client_id) [pk]
+  }
+}

@@ -260,7 +260,7 @@ describe('migrateToTableNaming (#182)', () => {
 });
 
 describe('the canvas offer (#182)', () => {
-  const OFFER = 'ERD Studio now says "table" and "subject area"';
+  const OFFER = 'ERD Studio now says "table" where it said "model"';
 
   function openWith(state: Map<string, unknown>) {
     const { layerService, subjectAreaService, tableLibraryService } = services();

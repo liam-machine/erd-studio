@@ -23,7 +23,7 @@
  * The New Table dialog opens this one with its search filled in
  * (`addExistingModelDialogSearch`) when the name typed there is already a
  * Table Library table. With nothing to add and no dbt project, the empty
- * state offers "New table" instead.
+ * state offers "New Table" instead.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -243,7 +243,7 @@ export function AddExistingTableDialog() {
     return (
       <Panel position="top-center" className="add-existing-model-dialog">
         <div className="add-existing-model-dialog__header">
-          <h3 className="add-existing-model-dialog__title">Add Existing Table</h3>
+          <h3 className="add-existing-model-dialog__title">Add Existing Tables</h3>
           <button
             className="add-existing-model-dialog__close"
             onClick={handleClose}
@@ -277,7 +277,7 @@ export function AddExistingTableDialog() {
                 className="add-existing-model-dialog__button add-existing-model-dialog__button--primary"
                 onClick={handleNewTable}
               >
-                New table
+                New Table
               </button>
             )}
           </div>
@@ -290,7 +290,7 @@ export function AddExistingTableDialog() {
     <Panel position="top-center" className="add-existing-model-dialog">
       {/* Header */}
       <div className="add-existing-model-dialog__header">
-        <h3 className="add-existing-model-dialog__title">Add Existing Table</h3>
+        <h3 className="add-existing-model-dialog__title">Add Existing Tables</h3>
         <button
           className="add-existing-model-dialog__close"
           onClick={handleClose}

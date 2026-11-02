@@ -65,10 +65,12 @@ describe('Legend — physical provenance chips', () => {
     expect(yml.className).not.toContain('legend__badge--source-catalog');
   });
 
-  it('explains the schema abbreviation that shares the header row', () => {
+  it('explains the layer badge and the schema prefix that share the header row', () => {
     const { container } = render(<Legend />);
     const section = container.querySelector('.legend__section:has(.legend__items--sources)')!;
-    expect(section.textContent).toContain('Database schema');
+    expect(section.textContent).toContain('The layer the table lives in');
+    expect(section.textContent).not.toContain('Database schema');
+    expect(section.querySelector('.legend__schema-sample')!.textContent).toBe('sales.');
   });
 });
 
@@ -131,6 +133,13 @@ describe('Legend — stages, cardinality and comparison', () => {
     expect(section.querySelector('.legend__edge--logical')).not.toBeNull();
   });
 
+  it('names the comparison controls as the toolbar labels them (there is no "Diff" button any more)', () => {
+    const { container } = render(<Legend />);
+    const text = container.querySelector('.legend__content')!.textContent!;
+    expect(text).toContain('Shown while a comparison is open (Compare with dbt or Compare with design).');
+    expect(text).not.toContain('(Diff)');
+  });
+
   it('explains the comparison colours, which had no entry at all', () => {
     const { container } = render(<Legend />);
     const section = container.querySelector('.legend__section:has(.legend__swatch)')!;
@@ -182,5 +191,79 @@ describe('Legend — collapsed', () => {
     expect(container.querySelector('.legend__content')).toBeNull();
     expect(container.querySelector('.legend-toggle__button')).not.toBeNull();
     mockStoreState.legendOpen = true;
+  });
+});
+
+describe('Legend — notes', () => {
+  it('calls them notes, as the toolbar and context menu do', () => {
+    const { container } = render(<Legend />);
+    const text = container.querySelector('.legend__content')!.textContent!;
+    expect(text).toContain('Notes');
+    expect(text).not.toContain('Build Note');
+    expect(text).not.toContain('Annotations');
+  });
+});
+
+describe('Legend — a project without dbt (logicalOnly)', () => {
+  function renderLogicalOnly() {
+    mockStoreState.logicalOnly = true;
+    try {
+      return render(<Legend />);
+    } finally {
+      mockStoreState.logicalOnly = undefined;
+    }
+  }
+
+  it('leaves out the Physical stage, the ghosts, the provenance chips and the comparison colours', () => {
+    const { container } = renderLogicalOnly();
+    const text = container.querySelector('.legend__content')!.textContent!;
+
+    expect(text).toContain('Logical');
+    expect(container.querySelector('.legend__model-card--physical')).toBeNull();
+    expect(container.querySelector('.legend__model-card--ghost')).toBeNull();
+    expect(container.querySelector('.legend__items--sources')).toBeNull();
+    expect(container.querySelector('.legend__edge--physical')).toBeNull();
+    expect(container.querySelector('.legend__swatch')).toBeNull();
+    expect(text).not.toContain('dbt');
+  });
+
+  it('still explains the layer badge, the cardinalities and the column badges', () => {
+    const { container } = renderLogicalOnly();
+    const text = container.querySelector('.legend__content')!.textContent!;
+    expect(text).toContain('The layer the table lives in');
+    expect(container.querySelectorAll('.legend__items--cardinality .legend__item')).toHaveLength(4);
+    for (const label of ['PK', 'FK', 'NK']) expect(text).toContain(label);
+  });
+
+  it('keeps every entry with dbt, as before', () => {
+    const { container } = render(<Legend />);
+    expect(container.querySelector('.legend__model-card--physical')).not.toBeNull();
+    expect(container.querySelector('.legend__items--sources')).not.toBeNull();
+    expect(container.querySelector('.legend__swatch')).not.toBeNull();
+  });
+});
+
+describe('Legend — a single-layer project', () => {
+  const ONLY = { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', order: 0, creatable: true };
+
+  it('leaves out the layer badge the canvas does not draw, and keeps the schema prefix', () => {
+    mockStoreState.domain = { layer: 'silver', layerConfigs: [ONLY], models: [{ name: 'a', layer: 'silver' }] };
+    try {
+      const { container } = render(<Legend />);
+      expect(container.querySelector('.legend__badge--layer')).toBeNull();
+      expect(container.querySelector('.legend__schema-sample')).not.toBeNull();
+    } finally {
+      mockStoreState.domain = undefined;
+    }
+  });
+
+  it('shows the layer badge when the domain lists no layers (an older core)', () => {
+    mockStoreState.domain = { layer: 'silver', models: [{ name: 'a' }] };
+    try {
+      const { container } = render(<Legend />);
+      expect(container.querySelector('.legend__badge--layer')).not.toBeNull();
+    } finally {
+      mockStoreState.domain = undefined;
+    }
   });
 });

@@ -1,0 +1,9 @@
+use { table gold.gold_orders } from '../tables/gold/gold_orders.dbml'
+
+Project "orders-dashboard" {
+  Note: 'One wide table for the orders dashboard: nothing to join.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    gold_orders 12 12
+  '''
+}

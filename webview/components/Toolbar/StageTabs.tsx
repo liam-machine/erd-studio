@@ -1,7 +1,8 @@
 /**
  * StageTabs — stage tab switcher for the toolbar.
  *
- * Renders two tabs (Logical / Physical) with the active tab highlighted.
+ * Renders two tabs ("Logical · your design" / "Physical · read from dbt")
+ * with the active tab highlighted.
  * Clicking a tab sends a switchStage message to the extension host.
  *
  * Keyboard shortcuts: Alt+1 = Logical, Alt+2 = Physical
@@ -20,9 +21,13 @@ import './StageTabs.css';
 // Constants
 // ---------------------------------------------------------------------------
 
-const STAGE_LABELS: { stage: Stage; label: string; shortcut: string; tooltip: string }[] = [
-  { stage: 'logical', label: 'Logical', shortcut: 'Alt+1', tooltip: 'Your design blueprint \u2014 the ideal data model' },
-  { stage: 'physical', label: 'Physical', shortcut: 'Alt+2', tooltip: "What's declared in your dbt .yml schema files \u2014 read-only" },
+/**
+ * Each tab says what it is, as the wording rules explain the tabs:
+ * **Logical** (your design) · **Physical** (read from dbt).
+ */
+export const STAGE_LABELS: { stage: Stage; label: string; hint: string; shortcut: string; tooltip: string }[] = [
+  { stage: 'logical', label: 'Logical', hint: 'your design', shortcut: 'Alt+1', tooltip: 'Your design: the tables, keys and relationships you mean to have' },
+  { stage: 'physical', label: 'Physical', hint: 'read from dbt', shortcut: 'Alt+2', tooltip: 'Read from dbt: what your dbt project has. Read-only, never saved' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -55,7 +60,7 @@ export function StageTabs({ activeStage, readOnly }: StageTabsProps) {
 
   return (
     <div className="stage-tabs" role="tablist" aria-label="Design stage">
-      {STAGE_LABELS.map(({ stage, label, shortcut, tooltip }) => {
+      {STAGE_LABELS.map(({ stage, label, hint, shortcut, tooltip }) => {
         const isActive = stage === activeStage;
         const showLock = isActive && readOnly;
         return (
@@ -69,6 +74,7 @@ export function StageTabs({ activeStage, readOnly }: StageTabsProps) {
           >
             {showLock && <span className="stage-tabs__lock" aria-hidden="true">🔒</span>}
             {label}
+            <span className="stage-tabs__hint">{`\u00b7 ${hint}`}</span>
           </button>
         );
       })}

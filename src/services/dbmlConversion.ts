@@ -1675,7 +1675,9 @@ async function planOnce(
   // The folder's README (§1.7), for anyone who opens it without ERD Studio: created when absent, never replaced.
   const writesSomething = creates.size > 0 || replaces.size > 0 || plan.deletes.length > 0;
   if (writesSomething && !input.readmeInOtherCase && !files.some((f) => f.kind === 'readme') && !fileAtLower.has(lower(SEMANTIC_README_NAME))) {
-    creates.set(SEMANTIC_README_NAME, semanticReadmeText());
+    // It lists the project's layers, in layers.json order; with no layers.json, the usual ones by name.
+    const layersJson = files.find((f) => f.kind === 'layers')?.text;
+    creates.set(SEMANTIC_README_NAME, semanticReadmeText(layersJson === undefined ? undefined : parseLayersText(layersJson, () => { /* the defaults either way */ })));
   }
   plan.creates = orderCreates([...creates].map(([path, text]) => ({ path, text })));
   plan.replaces = [...replaces].map(([path, text]) => ({ path, text }));

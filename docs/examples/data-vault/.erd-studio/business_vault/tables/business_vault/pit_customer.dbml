@@ -1,0 +1,15 @@
+Table business_vault.pit_customer [
+  grain: 'One row per customer per snapshot date',
+  meta_vault_type: 'pit'
+] {
+  Note: 'Point-in-time table: for each customer and day, which row of each satellite was current.'
+
+  customer_hk                    BINARY    [foreign_key: 'true']
+  snapshot_date                  DATE
+  sat_customer_crm_ldts          TIMESTAMP [foreign_key: 'true']
+  sat_customer_policy_admin_ldts TIMESTAMP [foreign_key: 'true']
+  sat_customer_risk_score_ldts   TIMESTAMP [foreign_key: 'true']
+  indexes {
+    (customer_hk, snapshot_date) [pk]
+  }
+}

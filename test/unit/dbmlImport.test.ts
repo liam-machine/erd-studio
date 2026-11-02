@@ -772,7 +772,7 @@ describe('foreign DBML (dbdiagram syntax)', () => {
     const p = planDbmlImport({ model: m, layer: 'gold', subjectAreaName: 'x', library: library(), libraryRelationships: false });
     expect(p.report.dropped).toEqual([
       { kind: 'dependencies', what: '2 dependency arrows', item: '2 dependency arrows', why: 'ERD Studio draws relationships, not dependencies.' },
-      { kind: 'diagram-views', what: '1 diagram view', item: '1 diagram view', why: 'Each ERD Studio subject area is one view.' },
+      { kind: 'diagram-views', what: '1 diagram view', item: '1 diagram view', why: 'Each ERD Studio diagram is one view.' },
     ]);
   });
 

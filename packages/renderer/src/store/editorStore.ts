@@ -15,7 +15,7 @@
 
 import { createContext, createElement, useContext, type ReactNode } from 'react';
 import { createStore, useStore, type StoreApi } from 'zustand';
-import type { DisplaySubjectArea, ExistingTablePreview } from '@erd-studio/core';
+import type { CanvasContext, DisplaySubjectArea, ExistingTablePreview } from '@erd-studio/core';
 import type { TableFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
 import { sameFocus, type CanvasFocus } from '../lib/canvasFocus';
 
@@ -125,6 +125,22 @@ export interface CanvasState {
    * focus of the clicked table or line. Ephemeral, like `hoverFocus`.
    */
   flowFocus: CanvasFocus | null;
+  /**
+   * The project has no dbt project, so there is one stage only: the canvas
+   * drops the stage colours (`editor-canvas--neutral`) and the legend its
+   * Physical, ghost and comparison entries. Default false, today's look. The
+   * extension's store sets it from the host's `logicalOnly` flag; ErdCanvas
+   * from its `logicalOnly` prop.
+   */
+  logicalOnly: boolean;
+  /**
+   * What the editing host knows beyond the diagram (`CanvasContext`): each
+   * table's file, its relationships to tables not on the diagram, who reviews
+   * it. Logical stage only. Null by default and in the viewer, which never
+   * gets one: then the detail panel has no File line or "Not on this
+   * diagram" list and no node shows a "+n" chip.
+   */
+  canvasContext: CanvasContext | null;
 }
 
 export interface CanvasActions {
@@ -191,6 +207,8 @@ export interface CanvasActions {
   setHoverFocus: (focus: CanvasFocus | null) => void;
   /** Set the flowing focus; a focus equal by value is not written. */
   setFlowFocus: (focus: CanvasFocus | null) => void;
+  /** Store the host's canvas context, or clear it (null). */
+  setCanvasContext: (context: CanvasContext | null) => void;
 }
 
 export type CanvasStore = CanvasState & CanvasActions;
@@ -233,6 +251,8 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
     selectedAnnotation: null,
     hoverFocus: null,
     flowFocus: null,
+    logicalOnly: false,
+    canvasContext: null,
 
     // Actions
     setSearchQuery: (query) => set({ searchQuery: query }),
@@ -348,6 +368,9 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
     // Hover focus and relationship flow (ephemeral, see useHoverFocus)
     setHoverFocus: (focus) => set((s) => (sameFocus(s.hoverFocus, focus) ? s : { hoverFocus: focus })),
     setFlowFocus: (focus) => set((s) => (sameFocus(s.flowFocus, focus) ? s : { flowFocus: focus })),
+
+    // Host context (editing hosts only)
+    setCanvasContext: (context) => set({ canvasContext: context }),
   };
 }
 

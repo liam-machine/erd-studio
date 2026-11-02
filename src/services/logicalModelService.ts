@@ -148,6 +148,22 @@ const TABLE_FOLDER_PATTERN = /^[a-z][a-z0-9_-]*$/;
  */
 export type TableFileErrorKind = TableLoadErrorKind;
 
+/** What the sidebar shows of a table already read: {@link TableLibraryService.peekTableSummary}. */
+export interface TableSummary {
+  readonly alias?: string;
+  readonly meta?: Readonly<Record<string, unknown>>;
+}
+
+/** What the sidebar's filter searches in a table already read: {@link TableLibraryService.peekTableSearchFacts}. */
+export interface TableSearchFacts {
+  readonly description?: string;
+  /** Its role as stored (`conformed-dim`, `transaction-fact`, …). */
+  readonly role?: string;
+  /** The schema its file declares, when it names one (a YAML table's `schema:`). */
+  readonly schema?: string;
+  readonly columns: readonly string[];
+}
+
 /**
  * A model file that exists but cannot be read or parsed. `message` is the
  * parser's own text and may quote the file — show it locally, never send it.
@@ -1185,16 +1201,40 @@ export class TableLibraryService {
    * may not exist yet. Absolute; undefined for a YAML table or no table.
    */
   relationshipsFileForNewRef(tableName: string): string | undefined {
-    try {
-      const filePath = this.findTableFile(tableName);
-      if (filePath === null || !isDbmlFile(filePath)) return undefined;
-      const rel = this.semanticRelative(filePath);
-      const layer = classifySemanticFile(rel, { tablesDirIsLayer: this.tablesDirIsLayer() }).layer ?? this.defaultDbmlLayer();
-      const name = this.listTableFiles().find((e) => path.resolve(e.filePath) === path.resolve(filePath))?.name ?? tableName;
-      return this.semanticAbsolute(placeNewRef({ table: name, layer }, this.relationshipsIndex()).file);
-    } catch {
-      return undefined;
+    return this.relationshipsFilesForNewRefs([tableName]).get(tableName.toLowerCase());
+  }
+
+  /**
+   * {@link relationshipsFileForNewRef} for several tables, reading the
+   * relationships files and the table list once: lower-case name → absolute
+   * file. A YAML table, or a name with no table, is left out.
+   */
+  relationshipsFilesForNewRefs(tableNames: Iterable<string>): Map<string, string> {
+    const out = new Map<string, string>();
+    let index: RelationshipsIndex | undefined;
+    let names: Map<string, string> | undefined;
+    for (const tableName of tableNames) {
+      try {
+        const filePath = this.findTableFile(tableName);
+        if (filePath === null || !isDbmlFile(filePath)) continue;
+        const rel = this.semanticRelative(filePath);
+        const layer = classifySemanticFile(rel, { tablesDirIsLayer: this.tablesDirIsLayer() }).layer ?? this.defaultDbmlLayer();
+        // The library listed once, by resolved path (the first entry for a path wins, as `find` did).
+        if (names === undefined) {
+          names = new Map();
+          for (const e of this.listTableFiles()) {
+            const key = path.resolve(e.filePath);
+            if (!names.has(key)) names.set(key, e.name);
+          }
+        }
+        const name = names.get(path.resolve(filePath)) ?? tableName;
+        index ??= this.relationshipsIndex();
+        out.set(tableName.toLowerCase(), this.semanticAbsolute(placeNewRef({ table: name, layer }, index).file));
+      } catch {
+        // Not placed: the caller says nothing about it.
+      }
     }
+    return out;
   }
 
   /**
@@ -1845,6 +1885,56 @@ export class TableLibraryService {
       ? this.dbmlCache.get(filePath)?.signature === signature
       : this.yamlReadSignatures.get(filePath) === signature;
     return read ? this.getTableFileError(name) : undefined;
+  }
+
+  /**
+   * A table's warehouse name (`alias`) and `meta`, from the reading of its
+   * file already cached in the file's current version: no read, no copy and
+   * no relationships attached, so a tree render can ask for every table.
+   * Undefined when the file has not been read in this version, did not read
+   * as a table, or is gone. `meta` is the cached object: read it, never change it.
+   */
+  peekTableSummary(name: string): TableSummary | undefined {
+    const table = this.peekCachedTable(name);
+    if (!table) return undefined;
+    return {
+      ...(table.alias ? { alias: table.alias } : {}),
+      ...(table.meta ? { meta: table.meta } : {}),
+    };
+  }
+
+  /**
+   * What the sidebar's filter searches in a table beyond its summary — its
+   * description, role, schema and column names — from the same cached
+   * reading as {@link peekTableSummary}: never a read. Undefined while the
+   * file has not been read in its current version.
+   */
+  peekTableSearchFacts(name: string): TableSearchFacts | undefined {
+    const table = this.peekCachedTable(name);
+    if (!table) return undefined;
+    const columns = (table.columns ?? []).map((c) => (typeof c.name === 'string' ? c.name : '')).filter((c) => c !== '');
+    return {
+      ...(typeof table.description === 'string' && table.description.trim() !== '' ? { description: table.description } : {}),
+      ...(typeof table.modelRole === 'string' && (table.modelRole as string) !== '' ? { role: table.modelRole } : {}),
+      ...(typeof table.schema === 'string' && table.schema !== '' ? { schema: table.schema } : {}),
+      columns,
+    };
+  }
+
+  /** The cached reading of `name`'s file in its current version (no read), or undefined. Read it, never change it. */
+  private peekCachedTable(name: string): SemanticTable | undefined {
+    const filePath = this.resolveTablePath(name);
+    if (filePath === null) return undefined;
+    const signature = fileSignature(filePath);
+    if (signature === null) return undefined;
+    if (isDbmlFile(filePath)) {
+      const cached = this.dbmlCache.get(filePath);
+      if (cached?.signature !== signature || !cached.reading.ok) return undefined;
+      return cached.reading.table;
+    }
+    const cached = this.cache.get(filePath);
+    if (cached?.signature !== signature) return undefined;
+    return cached.model;
   }
 
   /**

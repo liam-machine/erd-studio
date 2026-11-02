@@ -3,8 +3,9 @@
  * editor draws for a DBML diagram (SubjectAreaService and the canvas
  * payload) equals what `@erd-studio/core`'s `loadDisplaySubjectArea` draws
  * for the same files — the tables, their columns, the edges and the
- * positions — for every DBML diagram of `test/fixtures/dbml-native` and of
- * the core twins (`packages/core/test/fixtures/dbml/*`).
+ * positions — for every DBML diagram of `test/fixtures/dbml-native`, of
+ * the core twins (`packages/core/test/fixtures/dbml/*`) and of the example
+ * projects (`docs/examples/*`, one per modelling pattern).
  *
  * Two cases where the host's library lookups by name would differ from the
  * diagram's own files are pinned too:
@@ -41,6 +42,7 @@ import type { TemplateService } from '../../src/services/templateService';
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const NATIVE = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native');
 const TWINS = path.join(REPO_ROOT, 'packages', 'core', 'test', 'fixtures', 'dbml');
+const EXAMPLES = path.join(REPO_ROOT, 'docs', 'examples');
 const SEMANTIC_DIR = '.erd-studio';
 
 /** Every DBML diagram of a project, semantic-relative. */
@@ -55,6 +57,12 @@ function diagramsOf(project: string): string[] {
 const CASES: Array<[string, string, string]> = [
   ...diagramsOf(NATIVE).map((d): [string, string, string] => ['dbml-native', NATIVE, d]),
   ...fs.readdirSync(TWINS).sort().flatMap((twin) => diagramsOf(path.join(TWINS, twin)).map((d): [string, string, string] => [`twin ${twin}`, path.join(TWINS, twin), d])),
+  // The example projects: real modelling patterns, the shapes customers' repos take.
+  ...fs.readdirSync(EXAMPLES, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && fs.existsSync(path.join(EXAMPLES, e.name, SEMANTIC_DIR)))
+    .map((e) => e.name)
+    .sort()
+    .flatMap((example) => diagramsOf(path.join(EXAMPLES, example)).map((d): [string, string, string] => [`example ${example}`, path.join(EXAMPLES, example), d])),
 ];
 
 let root: string;

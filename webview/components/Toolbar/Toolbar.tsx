@@ -22,6 +22,9 @@ import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
 import { useFirstOpenAutoLayout } from '../../hooks/useFirstOpenAutoLayout';
 import { useRevealRelationship } from '../../hooks/useRevealRelationship';
+import { useRevealTable } from '../../hooks/useRevealTable';
+import { otherProjectMatches, searchElsewhereLabel } from './searchElsewhere';
+import { GO_TO_TABLE_QUERY_MAX } from '../../../src/types/messages';
 import {
   runElkLayout,
   detectLayerBound,
@@ -32,7 +35,7 @@ import {
   type LayoutDirection,
 } from '../../lib/elkLayout';
 import { StageTabs } from './StageTabs';
-import { matchesTableSearch } from '@erd-studio/renderer/editor';
+import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
 import type { Stage } from '../../../src/types/semantic';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
@@ -47,6 +50,28 @@ const CORNER_MIN_GAP = 16;
 
 /** Why "+ Add → New Relationship" is greyed out on a diagram with no tables. */
 export const NO_TABLES_FOR_RELATIONSHIP = 'This diagram has no tables yet — add one first';
+
+/**
+ * The layout popover's "Max per …" row, worded for the flow direction: a
+ * left-to-right layout (`RIGHT`) stacks each layer as a column, a
+ * top-to-bottom one (`DOWN`) as a row.
+ */
+export function layerBoundWording(direction: LayoutDirection): { label: string; unit: string; hint: string } {
+  return direction === 'DOWN'
+    ? { label: 'Max per row', unit: 'per row', hint: 'lower = taller layout, higher = wider layout' }
+    : { label: 'Max per column', unit: 'per column', hint: 'lower = wider layout, higher = taller layout' };
+}
+
+/** The Compare button's words on each stage: the design against dbt, or dbt against the design. */
+export function compareButtonWording(stage: Stage, comparing: boolean, against?: Stage | null): { label: string; title: string } {
+  if (comparing) {
+    const other = (against ?? (stage === 'physical' ? 'logical' : 'physical')) === 'logical' ? 'your design' : 'dbt';
+    return { label: 'Stop comparing', title: `Comparing with ${other} — click to stop` };
+  }
+  return stage === 'physical'
+    ? { label: 'Compare with design', title: 'Compare what dbt has with your design' }
+    : { label: 'Compare with dbt', title: 'Compare this design with the dbt project' };
+}
 
 // ---------------------------------------------------------------------------
 // Layer badge display
@@ -166,6 +191,14 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       .filter((node) => node.type === 'model' && matchesTableSearch(node.data as TableFlowNode['data'], query))
       .map((node) => node.id);
   }, [searchQuery, nodes]);
+
+  // A search that finds no table here but some elsewhere in the project:
+  // the hint opens Go to Table with it filled in (logical stage only, where
+  // the host lists the project's tables).
+  const elsewhereCount = useMemo(() => {
+    if (!searchQuery.trim() || matchingNodeIds.length > 0 || domain?.stage !== 'logical') return 0;
+    return otherProjectMatches(domain.existingModels, nodes.map((n) => n.id), searchQuery);
+  }, [searchQuery, matchingNodeIds, domain, nodes]);
 
   // Update zoom percentage display
   useEffect(() => {
@@ -513,6 +546,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
   /** The sidebar's Open in Diagram: select and centre a relationship once the layout above has settled. */
   useRevealRelationship(isLayouting);
+  useRevealTable(isLayouting);
 
   /** Register auto-layout function for Shift+L shortcut */
   useEffect(() => {
@@ -586,6 +620,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     ?? LAYER_ABBREV_FALLBACK[domain.layer]
     ?? domain.layer.substring(0, 3).toUpperCase();
   const layerColor = domain.layerConfig?.color;
+  const layerLabel = domain.layerConfig?.label ?? domain.layer;
 
   // --- Render --------------------------------------------------------------
 
@@ -597,15 +632,26 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         {/* Domain info */}
         <div className="toolbar__section toolbar__domain">
           <span className="toolbar__domain-name">{domain.domain}</span>
-          <span
-            className={`toolbar__layer-badge${layerColor ? '' : ` toolbar__layer-badge--${domain.layer}`}`}
-            style={layerColor ? {
-              backgroundColor: `${layerColor}33`, // 20% opacity
-              color: layerColor,
-            } : undefined}
-          >
-            {layerAbbrev}
-          </span>
+          {/* "[GLD] Gold layer": the abbreviation the table badges use, then
+              the label. Not in a single-layer project, which has nothing to
+              tell apart. */}
+          {!isSingleLayerProject(domain) && (
+            <span
+              className="toolbar__layer-badge"
+              title={`This diagram belongs to the ${layerLabel} layer. It can show tables from any layer.`}
+            >
+              <span
+                className={`toolbar__layer-abbrev${layerColor ? '' : ` toolbar__layer-abbrev--${domain.layer}`}`}
+                style={layerColor ? {
+                  backgroundColor: `${layerColor}33`, // 20% opacity
+                  color: layerColor,
+                } : undefined}
+              >
+                {layerAbbrev}
+              </span>
+              {layerLabel} layer
+            </span>
+          )}
         </div>
 
         {/* Divider */}
@@ -784,9 +830,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                   </div>
                 </div>
 
-                {/* Max per layer */}
+                {/* Max per column (left to right) or row (top to bottom) */}
                 <div className="toolbar__lp-section">
-                  <span className="toolbar__lp-label">Max per layer</span>
+                  <span className="toolbar__lp-label">{layerBoundWording(layoutDirection).label}</span>
                   <div className="toolbar__lp-layer-row">
                     <input
                       type="number"
@@ -798,9 +844,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       onChange={(e) => { setLayerBound(Math.max(1, Math.min(20, Number(e.target.value)))); setLayoutDirty(true); }}
                     />
                     {partitionStrategy === 'auto' ? (
-                      <span className="toolbar__lp-desc">auto — {detectLayerBound(nodes.filter((n) => n.type === 'model').length)} for {nodes.filter((n) => n.type === 'model').length} tables</span>
+                      <span className="toolbar__lp-desc">auto — {detectLayerBound(nodes.filter((n) => n.type === 'model').length)} {layerBoundWording(layoutDirection).unit} for {nodes.filter((n) => n.type === 'model').length} tables</span>
                     ) : (
-                      <span className="toolbar__lp-desc">lower = wider layout, higher = taller layout</span>
+                      <span className="toolbar__lp-desc">{layerBoundWording(layoutDirection).hint}</span>
                     )}
                   </div>
                 </div>
@@ -848,6 +894,16 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
             <span className="toolbar__search-count">
               {matchingNodeIds.length}
             </span>
+          )}
+          {elsewhereCount > 0 && (
+            <button
+              type="button"
+              className="toolbar__search-elsewhere"
+              onClick={() => vscode.postMessage({ type: 'goToTable', payload: { query: searchQuery.trim().slice(0, GO_TO_TABLE_QUERY_MAX) } })}
+              title="Go to Table… with this search"
+            >
+              {searchElsewhereLabel(elsewhereCount)}
+            </button>
           )}
         </div>
 
@@ -898,14 +954,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       setDiscrepancyDropdownOpen(!discrepancyDropdownOpen);
                     }
                   }}
-                  title={discrepancyVisible
-                    ? `Comparing to ${discrepancyCompareStage ?? ''} — click to disable`
-                    : 'Compare across stages'}
-                  aria-label="Toggle cross-stage comparison"
+                  title={compareButtonWording(domain.stage, discrepancyVisible, discrepancyCompareStage).title}
+                  aria-label={compareButtonWording(domain.stage, discrepancyVisible, discrepancyCompareStage).label}
                   aria-haspopup={discrepancyOptions.length > 1 ? 'menu' : undefined}
                   aria-expanded={discrepancyDropdownOpen}
                 >
-                  {discrepancyVisible ? '⊘ Diff' : '⊕ Diff'}
+                  {compareButtonWording(domain.stage, discrepancyVisible, discrepancyCompareStage).label}
                   {!discrepancyVisible && discrepancyOptions.length > 1 && (
                     <span className="toolbar__dropdown-arrow">▾</span>
                   )}
@@ -953,14 +1007,14 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       onClick={handleNewModel}
                       role="menuitem"
                     >
-                      New Design Table
+                      New Table
                     </button>
                     <button
                       className="toolbar__dropdown-item"
                       onClick={handleAddExistingModel}
                       role="menuitem"
                     >
-                      Add Existing Table
+                      Add Existing Tables
                     </button>
                     <button
                       className="toolbar__dropdown-item"

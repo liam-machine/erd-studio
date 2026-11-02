@@ -327,12 +327,12 @@ describe('the not-a-diagram page (§1.8): no reroute, ever', () => {
     expect(panel._postedMessages.some((m) => (m as { type: string }).type === 'domainLoaded')).toBe(true);
   });
 
-  it('a JSON file that is not a subject area names both shapes', async () => {
+  it('a JSON file that is not a diagram names both shapes', async () => {
     fs.mkdirSync(at('templates'), { recursive: true });
     fs.writeFileSync(at('templates/fact.json'), '{}');
     const page = await pageFor(openDoc('templates/fact.json'));
-    expect(page.message).toBe('fact.json is not an ERD Studio subject area file — subject areas live in .erd-studio/{layer}/{domain}.json '
-      + 'or .erd-studio/{layer}/diagrams/{domain}.dbml. Open it as text to edit it.');
+    expect(page.message).toBe('fact.json is not an ERD Studio diagram file — diagrams live in .erd-studio/{layer}/diagrams/{name}.dbml '
+      + 'or .erd-studio/{layer}/{name}.json. Open it as text to edit it.');
   });
 });
 

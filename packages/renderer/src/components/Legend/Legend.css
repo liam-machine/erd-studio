@@ -389,15 +389,25 @@ body[data-vscode-theme-kind="vscode-high-contrast"] .legend__annotation-card {
 
 /* The badge sample is fixed-width so the descriptions beside it line up, and
    the three-letter chips (WH/YML/DBT/SQL) differ in width. */
-.legend__badge--schema,
+.legend__badge--layer,
 .legend__badge--source {
   flex-shrink: 0;
   min-width: 26px;
 }
 
-.legend__badge--schema {
-  background: rgba(96, 165, 250, 0.2);
-  color: var(--stage-logical);
+/* A sample layer badge, in the silver layer's colours as the canvas draws one. */
+.legend__badge--layer {
+  background: var(--layer-silver-bg);
+  color: var(--layer-silver);
+}
+
+/* The schema prefix before a table's name, as .model-node__schema draws it. */
+.legend__schema-sample {
+  flex-shrink: 0;
+  min-width: 26px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dim-fg);
 }
 
 /* These two rules mirror .model-node__source / --catalog in ModelNode.css. If

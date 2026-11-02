@@ -1,0 +1,94 @@
+/**
+ * Dropping tables on a canvas (`dropTables`, `SemanticEditorProvider`): which
+ * tables a drop names, and where they go.
+ *
+ * A drop brings whatever URIs its DataTransfer held — a table file dragged
+ * from the Explorer, or the rows of a Table Library drag when VS Code passes
+ * them on — and {@link tablesOfDroppedUris} keeps the ones that are table
+ * files of the library (`.dbml` or `.yml`, never an ignored duplicate). The
+ * new tables are placed by {@link dropGridPositions}: the first one under the
+ * pointer, the rest beside and below it, {@link DROP_GRID_COLUMNS} to a row.
+ *
+ * Pure: no `vscode`, so it is unit-testable.
+ */
+
+import { fileURLToPath } from 'url';
+
+import type { NodePosition } from '../types/semantic';
+import { ADD_EXISTING_TABLES_LIMIT } from '../types/messages';
+import { NODE_HEIGHT, NODE_WIDTH, PADDING } from './positionService';
+import { samePath } from './projectDiscovery';
+import { normaliseName } from './nameUtils';
+
+/** How many dropped tables sit side by side before the next row starts. */
+export const DROP_GRID_COLUMNS = 4;
+
+/** How far above the pointer a dropped table's top edge sits: its header is under the pointer. */
+const DROP_HEADER_OFFSET = 20;
+
+/** A table file of the library, as `TableLibraryService.listTableFiles()` lists it. */
+export interface DroppableTableFile {
+  readonly name: string;
+  readonly filePath: string;
+  /** Set when another file of the same name is the one diagrams use: never dropped. */
+  readonly shadowedBy?: string;
+}
+
+/** The local path a `file:` URI names, or undefined for any other URI (or one that does not parse). */
+function filePathOf(uri: string): string | undefined {
+  const text = uri.trim();
+  if (!/^file:/i.test(text)) return undefined;
+  try {
+    return fileURLToPath(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The tables the dropped `uris` are the files of, in drop order, each once
+ * (ignoring case), at most {@link ADD_EXISTING_TABLES_LIMIT}. Only `file:`
+ * URIs count; one that is not a table file of the library (a README, a
+ * folder, a file elsewhere) is skipped. Paths are compared as the file system
+ * does (ignoring case on macOS and Windows).
+ */
+export function tablesOfDroppedUris(
+  uris: readonly string[],
+  files: readonly DroppableTableFile[],
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const candidates = files.filter((f) => !f.shadowedBy);
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const uri of uris) {
+    const filePath = filePathOf(uri);
+    if (filePath === undefined) continue;
+    const file = candidates.find((f) => samePath(f.filePath, filePath, platform));
+    if (!file) continue;
+    const key = normaliseName(file.name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(file.name);
+    if (names.length >= ADD_EXISTING_TABLES_LIMIT) break;
+  }
+  return names;
+}
+
+/**
+ * Where dropped tables go: the first centred under the drop point with its
+ * header under the pointer, the others in a grid to its right and below,
+ * {@link DROP_GRID_COLUMNS} to a row, one table width and height (plus the
+ * usual padding) apart. Rounded to whole pixels.
+ */
+export function dropGridPositions(names: readonly string[], at: NodePosition): Record<string, NodePosition> {
+  const left = Math.round(at.x - NODE_WIDTH / 2);
+  const top = Math.round(at.y - DROP_HEADER_OFFSET);
+  const positions: Record<string, NodePosition> = {};
+  names.forEach((name, i) => {
+    positions[name] = {
+      x: left + (i % DROP_GRID_COLUMNS) * (NODE_WIDTH + PADDING),
+      y: top + Math.floor(i / DROP_GRID_COLUMNS) * (NODE_HEIGHT + PADDING),
+    };
+  });
+  return positions;
+}

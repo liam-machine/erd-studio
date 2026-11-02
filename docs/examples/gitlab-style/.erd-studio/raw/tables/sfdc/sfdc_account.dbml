@@ -1,0 +1,12 @@
+// Salesforce and Zuora both land a table called account. A table's name is unique across the
+// whole project, so the source goes in the name and the warehouse name in alias.
+Table sfdc.sfdc_account [alias: 'account'] {
+  Note: 'Salesforce accounts, as extracted.'
+
+  id           STRING [pk, note: 'Salesforce account id']
+  name         STRING
+  type         STRING
+  ownerid      STRING
+  isdeleted    BOOLEAN
+  _uploaded_at TIMESTAMP
+}

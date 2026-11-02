@@ -1,0 +1,5 @@
+// The customer domain's relationships. CODEOWNERS: the customer team.
+use { table accounts.account }          from '../../source_aligned/tables/accounts/account.dbml'
+use { table customer.customer_profile } from '../tables/customer/customer_profile.dbml'
+
+Ref: accounts.account.account_id ?- customer.customer_profile.account_id

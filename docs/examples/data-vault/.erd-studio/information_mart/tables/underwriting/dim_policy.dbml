@@ -1,0 +1,12 @@
+Table underwriting.dim_policy [
+  role: 'domain-dim',
+  grain: 'One row per policy'
+] {
+  Note: 'Policies.'
+
+  policy_key    BINARY [pk, note: 'The hub hash key']
+  policy_number STRING [natural_key: 'true']
+  product_code  STRING [scd_type: '1']
+  start_date    DATE
+  end_date      DATE
+}

@@ -1,0 +1,7 @@
+// The finance star's relationships, kept apart from gold.dbml so the finance team owns this file. New Refs of fct_payment land here too.
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.dim_date }     from '../tables/gold/dim_date.dbml'
+use { table gold.fct_payment }  from '../tables/gold/fct_payment.dbml'
+
+Ref: gold.fct_payment.customer_key >? gold.dim_customer.customer_key
+Ref: gold.fct_payment.payment_date_key >? gold.dim_date.date_key

@@ -1,0 +1,13 @@
+Table underwriting.dim_customer [
+  role: 'conformed-dim',
+  grain: 'One row per customer',
+  rationale_design: 'A view over pit_customer and its satellites at the latest snapshot. Built from the vault, so it can be rebuilt at any time.'
+] {
+  Note: 'Customers, as underwriting sees them.'
+
+  customer_key    BINARY [pk, note: 'The hub hash key, reused as the surrogate key']
+  customer_number STRING [natural_key: 'true']
+  full_name       STRING [scd_type: '1']
+  postcode        STRING [scd_type: '1']
+  risk_band       STRING [scd_type: '1']
+}

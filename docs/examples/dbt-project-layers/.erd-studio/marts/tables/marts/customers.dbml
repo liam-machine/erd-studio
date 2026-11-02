@@ -1,0 +1,15 @@
+Table marts.customers [
+  role: 'conformed-dim',
+  grain: 'One row per paying customer',
+  rationale_design: 'Joins stg_stripe__customers to stg_app__accounts on the account id checkout stored.'
+] {
+  Note: 'Every paying customer, with what they pay. Used by finance and marketing.'
+
+  customer_id   STRING [pk, natural_key: 'true', note: 'The Stripe customer id']
+  account_id    STRING [note: 'The app account']
+  account_name  STRING
+  industry      STRING
+  plan_code     STRING
+  first_paid_at TIMESTAMP
+  is_active     BOOLEAN
+}

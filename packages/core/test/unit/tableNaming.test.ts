@@ -246,6 +246,9 @@ describe('loadDisplaySubjectArea on the v6 and mixed fixtures', () => {
       delete expected.templates;
       delete expected.manifestModels;
       delete expected.existingModels;
+      // The editor notes which relationships the diagram file holds (the Remove confirmation's); core does not.
+      delete expected.relationshipsInDiagramFile;
+      expected.relationships = (expected.relationships as Array<Record<string, unknown>>).map(({ inDiagramFile: _own, ...r }) => r);
       expect(JSON.parse(JSON.stringify(await load()))).toEqual({ ...expected, schemaVersion });
     });
 

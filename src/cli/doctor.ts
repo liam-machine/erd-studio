@@ -788,7 +788,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
   if (namingMix.length > 0) {
     steps.push({
       id: 'fix-subject-area-naming',
-      title: `Fix ${namingMix.length === 1 ? 'a subject area file that mixes' : `${namingMix.length} subject area files that mix`} the old and new key names`,
+      title: `Fix ${namingMix.length === 1 ? 'a diagram file that mixes' : `${namingMix.length} diagram files that mix`} the old and new key names`,
       why: `${namingMix.map((i) => i.file).join(', ')}: ${namingMix.length === 1 ? 'it uses' : 'each uses'} the v6 names ("logical.tables", "subjectArea") `
         + 'without "schemaVersion": 6, or beside the v5 names, so it cannot load. Use one set: the v5 names with schemaVersion 5, '
         + 'or the v6 names with schemaVersion 6. '
@@ -802,8 +802,8 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
   if (older > 0) {
     steps.push({
       id: 'migrate-v5',
-      title: 'Migrate older subject area files',
-      why: `${older} subject area file(s) use an older format; run "ERD Studio: Migrate Subject Areas to the Central Table Library" in VS Code before changing them.`,
+      title: 'Migrate older diagram files',
+      why: `${older} diagram file(s) use an older format; run "ERD Studio: Migrate Subject Areas to the Central Table Library" in VS Code before changing them.`,
       command: null,
     });
   }

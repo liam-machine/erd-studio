@@ -19,7 +19,39 @@ This page matches each word on screen to the name you'll find in the files and i
 | **Physical stage** | Nothing: it is never saved | `Stage` = `'physical'`, `SubjectAreaService.buildPhysicalSubjectArea` | What your dbt project has, in green, read from dbt every time. Read-only. Its tab shows only when the open folder has a `dbt_project.yml`. |
 | **Relationship** | DBML: a `Ref` line in a `{layer}/relationships/` file (`Ref: sales.fct_order.customer_key >? sales.dim_customer.customer_key`), stored once. YAML: a `relationships:` entry in the table YAML that holds the foreign key, pointing at `toTable` · `toModel` (no from end, since that is the file's own table), or a `logical.relationships` entry with `fromTable` / `toTable` · `fromModel` / `toModel` in a subject area file | `Relationship`, `DisplayRelationship` | A line between two tables, from the foreign key to the key it points at. |
 
-Other renamed keys: a table's role is `role` in DBML, `tableRole` · `modelRole` in YAML (such as `conformed-dim`), and a note's linked table is `linked_table` in DBML, `linkedTable` · `linkedModel` in JSON. Names that keep the old word in both: `modelFolder` (it is dbt's `models/` path filter), and the `--domain` and `--models` options of the `erd-studio` command-line helper.
+Other renamed keys: a table's role is `role` in DBML, `tableRole` · `modelRole` in YAML (such as `conformed-dim`), and a note's linked table is `linked_table` in DBML, `linkedTable` · `linkedModel` in JSON. Names that keep the old word in both: `modelFolder` (it is dbt's `models/` path filter), and the `--models` option of the `erd-studio` command-line helper. That helper takes `--diagram <path>`; `--domain <path>` still works as its older name.
+
+## Marks in VS Code's Explorer
+
+In a DBML project, each folder and file under `.erd-studio/` has a mark on the right of its name in VS Code's Explorer. Hover over a folder or file to see what it is.
+
+| Mark | What it is |
+|---|---|
+| `1≡` `2≡` … | A layer folder, numbered in `layers.json` order |
+| `⊞` | A layer's `tables/` folder (each table file keeps its DBML Table icon) |
+| `◫` | A schema folder in `tables/` |
+| `⇄` | A layer's `relationships/` folder, and each relationships file in it |
+| `◇` | A layer's `diagrams/` folder, and each diagram file |
+
+## Filtering the sidebar
+
+The **Diagrams**, **Table Library** and **Relationships** views each have a filter icon in their title bar (**Filter Diagrams…**, **Filter Table Library…**, **Filter Relationships…**); **Cmd+F** (**Ctrl+F** on Windows and Linux) opens it too while the view has focus. The view filters as you type: only the rows that match show, under their layers and schemas, with the matched text highlighted. Every word must match, case doesn't matter, `"order line"` keeps a phrase together and `-stg` leaves out what matches it. Enter keeps the filter, Escape puts back the one you had, and the filled filter icon (**Clear Table Library Filter** and so on) shows everything again. **ERD Studio: Go to Table…** takes the same keys as the Table Library.
+
+| Key | Views | Matches |
+|---|---|---|
+| plain words | all | Diagrams: a diagram's name, layer, description or a table it shows. Table Library: a table's name, warehouse name, schema, layer, owner, role or description. Relationships: either table, a column, a layer or the file that stores it |
+| `layer:gold` | all | The layer, by its folder name or its label |
+| `schema:sales` | all | A table's schema (Diagrams: a diagram showing a table in it) |
+| `table:dim_customer` | all | A table's name (Diagrams: a table it shows; Relationships: either end) |
+| `diagram:sales` | Diagrams, Table Library | A diagram's name (Table Library: the tables on it) |
+| `owner:finance` | Table Library | The table's owner |
+| `type:fact` | Table Library | The table's role: `fact`, `dim`, `conformed`, `snapshot`, `bridge`… |
+| `col:customer_id` | Table Library, Relationships | A column name |
+| `file:sales` | Relationships | The relationships file that stores it |
+| `is:unused` | Table Library | A table on no diagram |
+| `is:problem` · `is:cross-layer` · `is:composite` | Relationships | Needs attention · joins two layers · has more than one column pair |
+
+A value with spaces goes in quotes (`owner:"data team"`), and `-` works before a key too (`-layer:bronze`). A key a view doesn't know is searched as plain text, and the view says so above its rows.
 
 ## Command and setting ids
 

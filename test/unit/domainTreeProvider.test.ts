@@ -11,6 +11,15 @@ import { LayersFileUnreadableError, type LayerService } from '../../src/services
 import type { LayerConfig } from '../../src/types/layer';
 import type { SubjectAreaSummary, UnifiedSubjectArea, StageData } from '../../src/types/semantic';
 
+/**
+ * The tests here check the full rows (`erdStudio.sidebar.rowDetails: full`,
+ * today's text); the compact rows have tests of their own.
+ */
+function fullRows<T extends { setRowDetails(mode: 'compact' | 'full'): void }>(provider: T): T {
+  provider.setRowDetails('full');
+  return provider;
+}
+
 // Must be at module level for vitest to hoist correctly
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
@@ -139,7 +148,7 @@ describe('SubjectAreaTreeProvider', () => {
   beforeEach(() => {
     layerService = createMockLayerService();
     subjectAreaService = createMockSubjectAreaService(ALL_SUMMARIES, buildSubjectAreaMap());
-    provider = new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH);
+    provider = fullRows(new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH));
   });
 
   describe('getChildren (root)', () => {
@@ -147,18 +156,26 @@ describe('SubjectAreaTreeProvider', () => {
       const children = provider.getChildren(undefined);
 
       expect(children).toEqual([
-        { type: 'layer', layer: 'bronze' },
-        { type: 'layer', layer: 'silver' },
-        { type: 'layer', layer: 'gold' },
+        { type: 'layer', layer: 'bronze', diagramCount: 0 },
+        { type: 'layer', layer: 'silver', diagramCount: 2 },
+        { type: 'layer', layer: 'gold', diagramCount: 1 },
         { type: 'newLayer' },
       ]);
+      // Each layer row says it is a layer, and how many diagrams it holds.
+      const silver = provider.getTreeItem(children![1]);
+      expect(silver.label).toBe('Silver');
+      expect(silver.description).toBe('Layer · 2 diagrams');
+      expect(silver.id).toBe('erdStudio.diagrams.layer:silver');
+      expect((silver.tooltip as vscode.MarkdownString).value).toContain('**Silver** — a layer');
+      expect((silver.tooltip as vscode.MarkdownString).value).toContain('`.erd-studio/silver/`');
+      expect(provider.getTreeItem(children![0]).description).toBe('Layer · no diagrams');
       const item = provider.getTreeItem({ type: 'newLayer' });
       expect([item.label, item.contextValue, (item.iconPath as { id: string }).id]).toEqual(['New Layer…', 'newLayer', 'new-folder']);
       expect(item.command).toEqual({ command: 'erdStudio.addLayer', title: 'New Layer…' });
     });
 
     it('returns empty array when semantic directory does not exist (F408 welcome)', () => {
-      const providerNoSemantic = new SubjectAreaTreeProvider(subjectAreaService, layerService, '/nonexistent/path');
+      const providerNoSemantic = fullRows(new SubjectAreaTreeProvider(subjectAreaService, layerService, '/nonexistent/path'));
       const children = providerNoSemantic.getChildren(undefined);
 
       expect(children).toHaveLength(0);
@@ -191,7 +208,7 @@ describe('SubjectAreaTreeProvider', () => {
     });
 
     it('never makes an empty tree non-empty, so the welcome view still shows', () => {
-      const providerNoSemantic = new SubjectAreaTreeProvider(subjectAreaService, layerService, '/nonexistent/path');
+      const providerNoSemantic = fullRows(new SubjectAreaTreeProvider(subjectAreaService, layerService, '/nonexistent/path'));
       providerNoSemantic.setProjectRow({ name: 'finance-dbt', location: 'workspace folder' });
       expect(providerNoSemantic.getChildren(undefined)).toEqual([]);
     });
@@ -225,7 +242,6 @@ describe('SubjectAreaTreeProvider', () => {
       expect(customer).toBeDefined();
       if (customer?.type === 'domain') {
         expect(customer.modelCount).toBe(2);
-        expect(customer.designCount).toBe(0);
       }
     });
 
@@ -248,7 +264,7 @@ describe('SubjectAreaTreeProvider', () => {
         [{ domain: 'broken', layer: 'silver', filePath: '/broken.json' }],
         new Map(), // empty — getSubjectArea will throw
       );
-      const failProvider = new SubjectAreaTreeProvider(failService, layerService, PROJECT_PATH);
+      const failProvider = fullRows(new SubjectAreaTreeProvider(failService, layerService, PROJECT_PATH));
       const children = failProvider.getChildren({ type: 'layer', layer: 'silver' })!;
 
       const domain = children.find(c => c.type === 'domain');
@@ -265,7 +281,6 @@ describe('SubjectAreaTreeProvider', () => {
         type: 'domain',
         summary: { domain: 'test', layer: 'silver', filePath: '/test.json' },
         modelCount: 0,
-        designCount: 0,
       });
       expect(children).toBeUndefined();
     });
@@ -287,27 +302,25 @@ describe('SubjectAreaTreeProvider', () => {
       expect(provider.getTreeItem({ type: 'layer', layer: 'bronze' }).contextValue).toBe('layer');
     });
 
-    it('creates domain item with badge showing design count', () => {
+    it('creates domain item with its table count', () => {
       const element: TreeElement = {
         type: 'domain',
         summary: { domain: 'orders', layer: 'silver', filePath: '/test.json' },
         modelCount: 12,
-        designCount: 3,
       };
       const item = provider.getTreeItem(element);
 
       expect(item.label).toBe('orders');
-      expect(item.description).toBe('12 tables, 3 designs');
+      expect(item.description).toBe('12 tables');
       expect(item.collapsibleState).toBe(TreeItemCollapsibleState.None);
       expect(item.contextValue).toBe('domain');
     });
 
-    it('creates domain item with badge omitting design when zero', () => {
+    it('shows the table count alone', () => {
       const element: TreeElement = {
         type: 'domain',
         summary: { domain: 'finance', layer: 'gold', filePath: '/test.json' },
         modelCount: 5,
-        designCount: 0,
       };
       const item = provider.getTreeItem(element);
 
@@ -319,7 +332,6 @@ describe('SubjectAreaTreeProvider', () => {
         type: 'domain',
         summary: { domain: 'test', layer: 'gold', filePath: '/test.json' },
         modelCount: 1,
-        designCount: 0,
       };
       const item = provider.getTreeItem(element);
 
@@ -331,7 +343,6 @@ describe('SubjectAreaTreeProvider', () => {
         type: 'domain',
         summary: { domain: 'test', layer: 'silver', filePath: '/path/to/test.json' },
         modelCount: 0,
-        designCount: 0,
       };
       const item = provider.getTreeItem(element);
 
@@ -361,11 +372,25 @@ describe('SubjectAreaTreeProvider', () => {
         type: 'domain',
         summary: { domain: 'orders', layer: 'silver', filePath: '/test.json' },
         modelCount: 2,
-        designCount: 1,
       };
       const item = provider.getTreeItem(element);
 
-      expect(item.tooltip).toBe('Silver / orders');
+      const tip = (item.tooltip as vscode.MarkdownString).value;
+      expect(tip).toContain('**orders** — a diagram in the Silver layer');
+      expect(tip).toContain('File: `test.json`');
+      expect(tip).toContain('2 tables');
+    });
+
+    it('says how many of a diagram\'s tables come from other layers', () => {
+      const element: TreeElement = {
+        type: 'domain',
+        summary: { domain: 'reporting', layer: 'gold', filePath: '/project/.erd-studio/gold/reporting.json' },
+        modelCount: 5,
+        otherLayers: [{ layer: 'silver', count: 2 }, { layer: 'bronze', count: 1 }],
+      };
+      const item = provider.getTreeItem(element);
+      expect(item.description).toBe('5 tables · 2 from Silver, 1 from Bronze');
+      expect((item.tooltip as vscode.MarkdownString).value).toContain('5 tables: 2 from Gold, 2 from Silver, 1 from Bronze');
     });
   });
 
@@ -376,17 +401,15 @@ describe('SubjectAreaTreeProvider', () => {
       type: 'domain',
       summary: { domain: 'sales', layer: 'gold', filePath: '/project/.erd-studio/gold/diagrams/sales.dbml', storage: 'dbml' },
       modelCount: 2,
-      designCount: 0,
     };
     const jsonRow: TreeElement = {
       type: 'domain',
       summary: { domain: 'orders', layer: 'gold', filePath: '/project/.erd-studio/gold/orders.json', storage: 'json' },
       modelCount: 2,
-      designCount: 0,
     };
 
     it('gives a DBML diagram row the DBML Diagram icon pair, from the extension\'s media/file-icons', () => {
-      const withIcons = new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH, undefined, undefined, icons);
+      const withIcons = fullRows(new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH, undefined, undefined, icons));
       const item = withIcons.getTreeItem(dbmlRow);
       expect(item.iconPath).toBe(dbmlFileIcon(EXTENSION, 'diagram'));
       const { light, dark } = item.iconPath as { light: vscode.Uri; dark: vscode.Uri };
@@ -397,7 +420,7 @@ describe('SubjectAreaTreeProvider', () => {
     });
 
     it('keeps the json codicon for a JSON diagram row, and a summary with no storage', () => {
-      const withIcons = new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH, undefined, undefined, icons);
+      const withIcons = fullRows(new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH, undefined, undefined, icons));
       for (const row of [jsonRow, { ...jsonRow, summary: { domain: 'x', layer: 'gold', filePath: '/x.json' } } as TreeElement]) {
         const item = withIcons.getTreeItem(row);
         expect(item.iconPath).toBeInstanceOf(vscode.ThemeIcon);
@@ -412,9 +435,13 @@ describe('SubjectAreaTreeProvider', () => {
       expect(item.resourceUri).toBeUndefined();
     });
 
-    it('leaves the layer and New Subject Area rows\' codicons alone', () => {
-      const withIcons = new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH, undefined, undefined, icons);
-      expect((withIcons.getTreeItem({ type: 'layer', layer: 'gold' }).iconPath as vscode.ThemeIcon).id).toBe('folder');
+    it('draws a layer row\'s icon in its layers.json colour, and leaves New Diagram\'s codicon alone', () => {
+      const withIcons = fullRows(new SubjectAreaTreeProvider(subjectAreaService, layerService, PROJECT_PATH, undefined, undefined, icons));
+      const layerIcon = withIcons.getTreeItem({ type: 'layer', layer: 'gold' }).iconPath as vscode.Uri;
+      expect(layerIcon.toString()).toMatch(/^data:image\/svg\+xml;base64,/);
+      expect(Buffer.from(layerIcon.toString().split(',')[1], 'base64').toString()).toContain('fill="#d4a800"');
+      // The label keeps the theme's colour: no file decoration recolours it.
+      expect(withIcons.getTreeItem({ type: 'layer', layer: 'gold' }).resourceUri).toBeUndefined();
       expect((withIcons.getTreeItem({ type: 'newDomain', layer: 'gold', first: false }).iconPath as vscode.ThemeIcon).id).toBe('add');
     });
   });
@@ -477,7 +504,7 @@ describe('SubjectAreaTreeProvider', () => {
       }));
       const svc = createMockSubjectAreaService(summaries, domains);
       return {
-        provider: new SubjectAreaTreeProvider(svc, layerService, tempDir),
+        provider: fullRows(new SubjectAreaTreeProvider(svc, layerService, tempDir)),
         getSubjectArea: svc.countSubjectAreaTables as unknown as ReturnType<typeof vi.fn>,
       };
     }
@@ -524,15 +551,170 @@ describe('SubjectAreaTreeProvider', () => {
       expect(getSubjectArea).toHaveBeenCalledTimes(2);
     });
 
+    it('reads a diagram once for its count and member names, and works out the homes once per listing', () => {
+      fs.mkdirSync(path.join(tempDir, '.erd-studio', 'gold'), { recursive: true });
+      const goldPath = path.join(tempDir, '.erd-studio', 'gold', 'sales.json');
+      fs.writeFileSync(goldPath, JSON.stringify({ schemaVersion: 5, domain: 'sales', logical: { models: ['fct_order', 'dim_customer'] } }));
+      fs.writeFileSync(domainPath, JSON.stringify({ schemaVersion: 5, domain: 'orders', logical: { models: ['dim_customer'] } }));
+      const summaries: SubjectAreaSummary[] = [
+        { domain: 'orders', layer: 'silver', filePath: domainPath },
+        { domain: 'sales', layer: 'gold', filePath: goldPath },
+      ];
+      const svc = {
+        listSubjectAreas: vi.fn().mockReturnValue(summaries),
+        countSubjectAreaTables: vi.fn(() => 0),
+        countSubjectAreaTablesInText: vi.fn((raw: string) => (JSON.parse(raw) as { logical: { models: string[] } }).logical.models.length),
+      } as unknown as SubjectAreaService;
+      const homes = vi.fn(() => new Map([['dim_customer', { layer: 'silver', schema: 'crm' }], ['fct_order', { layer: 'gold', schema: 'sales' }]]));
+      const p = fullRows(new SubjectAreaTreeProvider(svc, layerService, tempDir, '.erd-studio', undefined, undefined, homes));
+      const readSpy = vi.spyOn(fs, 'readFileSync');
+      const roots = p.getChildren()!;
+      const layerRows = roots.filter((r) => r.type === 'layer');
+      const children = layerRows.map((l) => p.getChildren(l)!);
+      const sales = children.flat().find((c) => c.type === 'domain' && c.summary.domain === 'sales') as { modelCount: number; otherLayers?: unknown };
+      expect(sales.modelCount).toBe(2);
+      expect(sales.otherLayers).toEqual([{ layer: 'silver', count: 1 }]);
+      expect(homes).toHaveBeenCalledTimes(1);
+      expect(svc.countSubjectAreaTables).not.toHaveBeenCalled();
+      expect(readSpy.mock.calls.filter(([f]) => f === goldPath)).toHaveLength(1);
+      readSpy.mockRestore();
+    });
+
+    it('reads no member names when no table has a layer (a YAML project)', () => {
+      const summaries: SubjectAreaSummary[] = [{ domain: 'orders', layer: 'silver', filePath: domainPath }];
+      const svc = {
+        listSubjectAreas: vi.fn().mockReturnValue(summaries),
+        countSubjectAreaTables: vi.fn(() => 3),
+        countSubjectAreaTablesInText: vi.fn(() => 3),
+      } as unknown as SubjectAreaService;
+      const p = fullRows(new SubjectAreaTreeProvider(svc, layerService, tempDir, '.erd-studio', undefined, undefined, () => new Map()));
+      const readSpy = vi.spyOn(fs, 'readFileSync');
+      const [row] = p.getChildren({ type: 'layer', layer: 'silver' })!;
+      expect((row as { modelCount: number }).modelCount).toBe(3);
+      expect(svc.countSubjectAreaTablesInText).not.toHaveBeenCalled();
+      expect(readSpy.mock.calls.filter(([f]) => f === domainPath)).toHaveLength(0);
+      readSpy.mockRestore();
+    });
+
     it('does not cache a failed parse', () => {
       const summaries: SubjectAreaSummary[] = [{ domain: 'orders', layer: 'silver', filePath: domainPath }];
       const svc = createMockSubjectAreaService(summaries, new Map()); // getSubjectArea throws
-      const p = new SubjectAreaTreeProvider(svc, layerService, tempDir);
+      const p = fullRows(new SubjectAreaTreeProvider(svc, layerService, tempDir));
 
       p.getChildren({ type: 'layer', layer: 'silver' });
       p.getChildren({ type: 'layer', layer: 'silver' });
 
       expect(svc.countSubjectAreaTables).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Compact rows (`erdStudio.sidebar.rowDetails: compact`, the default)
+// ---------------------------------------------------------------------------
+
+describe('SubjectAreaTreeProvider: compact rows (the default)', () => {
+  let layerService: LayerService;
+  let provider: SubjectAreaTreeProvider;
+  const tipOf = (item: vscode.TreeItem): string => (item.tooltip as vscode.MarkdownString).value;
+
+  beforeEach(() => {
+    layerService = createMockLayerService();
+    provider = new SubjectAreaTreeProvider(createMockSubjectAreaService(ALL_SUMMARIES, buildSubjectAreaMap()), layerService, PROJECT_PATH);
+  });
+
+  it('is compact until told otherwise, and lists again only when the mode changes', () => {
+    expect(provider.getRowDetails()).toBe('compact');
+    const fired = vi.fn();
+    provider.onDidChangeTreeData(fired);
+    provider.setRowDetails('compact');
+    expect(fired).not.toHaveBeenCalled();
+    provider.setRowDetails('full');
+    expect(fired).toHaveBeenCalledTimes(1);
+    expect(provider.getRowDetails()).toBe('full');
+  });
+
+  it('a layer row says "Layer" and nothing else; its hover has the count and the + action', () => {
+    const [bronze, silver] = provider.getChildren()!;
+    const silverItem = provider.getTreeItem(silver);
+    expect(silverItem.description).toBe('Layer');
+    expect(tipOf(silverItem)).toContain('2 diagrams');
+    expect(tipOf(silverItem)).toContain('**+** on this row starts a new diagram in Silver.');
+    const bronzeItem = provider.getTreeItem(bronze);
+    expect(bronzeItem.description).toBe('Layer');
+    expect(tipOf(bronzeItem)).toContain('No diagrams yet.');
+    // Bronze takes no new diagrams: no + to point at.
+    expect(tipOf(bronzeItem)).not.toContain('**+**');
+    // The inline + shows on a creatable layer row (package.json: viewItem == layerCreatable).
+    expect(silverItem.contextValue).toBe('layerCreatable');
+  });
+
+  it('shows New Diagram… only in a creatable layer with no diagram, where it is the call to action; New Layer… stays', () => {
+    expect(provider.getChildren({ type: 'layer', layer: 'silver' })!.map((c) => c.type)).toEqual(['domain', 'domain']);
+    expect(provider.getChildren({ type: 'layer', layer: 'gold' })!.map((c) => c.type)).toEqual(['domain']);
+    layerService.isCreatable = () => true;
+    expect(provider.getChildren({ type: 'layer', layer: 'bronze' })).toEqual([{ type: 'newDomain', layer: 'bronze', first: true }]);
+    expect(provider.getTreeItem({ type: 'newDomain', layer: 'bronze', first: true }).description).toBe('none in this layer yet');
+    expect(provider.getChildren()!.at(-1)).toEqual({ type: 'newLayer' });
+    // Full rows keep today's New Diagram… under every creatable layer.
+    provider.setRowDetails('full');
+    expect(provider.getChildren({ type: 'layer', layer: 'silver' })!.map((c) => c.type)).toEqual(['domain', 'domain', 'newDomain']);
+  });
+
+  it('a diagram row drops its table count (the hover has it) and keeps only the cross-layer exception', () => {
+    const plain = provider.getTreeItem({ type: 'domain', summary: { domain: 'orders', layer: 'silver', filePath: '/test.json' }, modelCount: 8 });
+    expect(plain.description).toBeUndefined();
+    expect(tipOf(plain)).toContain('8 tables');
+
+    const borrowed = provider.getTreeItem({
+      type: 'domain',
+      summary: { domain: 'sales', layer: 'gold', filePath: '/project/.erd-studio/gold/sales.json' },
+      modelCount: 8,
+      otherLayers: [{ layer: 'silver', count: 5 }],
+    });
+    expect(borrowed.description).toBe('5 from Silver');
+    expect(tipOf(borrowed)).toContain('8 tables: 3 from Gold, 5 from Silver');
+
+    const several = provider.getTreeItem({
+      type: 'domain',
+      summary: { domain: 'reporting', layer: 'gold', filePath: '/r.json' },
+      modelCount: 5,
+      otherLayers: [{ layer: 'silver', count: 2 }, { layer: 'bronze', count: 1 }],
+    });
+    expect(several.description).toBe('2 from Silver, 1 from Bronze');
+  });
+
+  it('keeps the (DBML) / (JSON) tag of a name both formats use in one layer', () => {
+    const summary = { domain: 'sales', layer: 'gold', filePath: '/x/sales.dbml', storage: 'dbml' as const, conflict: true };
+    expect(provider.getTreeItem({ type: 'domain', summary, modelCount: 3 }).description).toBe('(DBML)');
+    expect(provider.getTreeItem({ type: 'domain', summary, modelCount: 3, otherLayers: [{ layer: 'silver', count: 1 }] }).description)
+      .toBe('(DBML) · 1 from Silver');
+    provider.setRowDetails('full');
+    expect(provider.getTreeItem({ type: 'domain', summary, modelCount: 3, otherLayers: [{ layer: 'silver', count: 1 }] }).description)
+      .toBe('3 tables (DBML) · 1 from Silver');
+  });
+
+  it('keeps the project row\'s Switch… (a call to action)', () => {
+    provider.setProjectRow({ name: 'datamodels', location: 'workspace folder' });
+    expect(provider.getTreeItem(provider.getChildren()![0]).description).toBe('dbt project · Switch…');
+  });
+
+  it('gives the view\'s total for its title: none before a listing, singular for one, none for an empty project', () => {
+    expect(provider.headerTotal()).toBeUndefined();
+    provider.getChildren();
+    expect(provider.headerTotal()).toBe('3 diagrams');
+    const one = new SubjectAreaTreeProvider(createMockSubjectAreaService([GOLD_SUBJECT_AREAS[0]], buildSubjectAreaMap()), layerService, PROJECT_PATH);
+    one.getChildren();
+    expect(one.headerTotal()).toBe('1 diagram');
+    const empty = new SubjectAreaTreeProvider(createMockSubjectAreaService([], new Map()), layerService, PROJECT_PATH);
+    empty.getChildren();
+    expect(empty.headerTotal()).toBeUndefined();
+  });
+
+  it('reports each unfiltered listing (undefined), so the view can show its total', () => {
+    const seen: unknown[] = [];
+    provider.onDidFilter((o) => seen.push(o));
+    provider.getChildren();
+    expect(seen).toEqual([undefined]);
   });
 });

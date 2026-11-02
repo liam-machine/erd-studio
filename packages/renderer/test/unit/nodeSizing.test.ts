@@ -88,4 +88,20 @@ describe('estimateNodeWidth', () => {
     expect(estimateNodeWidth({ modelName: 'dim_customer', columns }))
       .toBe(estimateNodeWidth({ modelName: 'dim_customer', columns, provenance: undefined }));
   });
+
+  it('reserves room for the schema prefix with or without a known layer (physical, YAML)', () => {
+    const columns = cols(1);
+    const name = 'fct_order_line_item_daily_snapshot';
+    const plain = estimateNodeWidth({ modelName: name, columns });
+    const prefixed = estimateNodeWidth({ modelName: name, columns, shownSchema: 'analytics_gold' });
+    expect(prefixed).toBeGreaterThan(plain);
+    expect(estimateNodeWidth({ modelName: name, columns, shownSchema: 'analytics_gold', tableLayer: 'gold' })).toBe(prefixed);
+  });
+
+  it('gives back the badge\'s width in a single-layer project, which draws none', () => {
+    const columns = cols(1);
+    const name = 'fct_order_line_item_daily_snapshot';
+    expect(estimateNodeWidth({ modelName: name, columns, singleLayer: true }))
+      .toBeLessThan(estimateNodeWidth({ modelName: name, columns }));
+  });
 });

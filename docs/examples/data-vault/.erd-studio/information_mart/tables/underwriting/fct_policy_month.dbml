@@ -1,0 +1,16 @@
+Table underwriting.fct_policy_month [
+  role: 'periodic-snapshot',
+  grain: 'One row per policy per month',
+  rationale_design: 'Built from bridge_customer_policy at each month end.'
+] {
+  Note: 'Earned premium by policy and month.'
+
+  policy_key     BINARY          [foreign_key: 'true']
+  customer_key   BINARY          [foreign_key: 'true']
+  month_date_key INT             [foreign_key: 'true']
+  earned_premium "DECIMAL(12,2)" [additive_type: 'additive']
+  is_in_force    BOOLEAN
+  indexes {
+    (policy_key, month_date_key) [pk]
+  }
+}

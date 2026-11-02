@@ -5,15 +5,15 @@
  * said what to do next. This card offers the two ways to start: pull models in
  * from the dbt project (`addModelsFromDbt` — the host asks which ones with a
  * QuickPick and lays the result out), or draw one by hand with the same
- * New Design Model dialog the toolbar's "+ Add" menu opens. The AI route
+ * New Table dialog the toolbar's "+ Add" menu opens. The AI route
  * points at the Welcome panel rather than naming a command: the setup skill
  * may not be installed yet, and each assistant invokes it differently — the
  * panel knows both.
  *
  * Without a dbt project (`logicalOnly`) there is nothing to pull in: the card
- * drops "Add tables from dbt" and makes "New table" the primary action.
+ * drops "Add Tables from dbt" and makes "New Table" the primary action.
  *
- * "Add existing tables" opens the Add Existing Table dialog, as the toolbar's
+ * "Add Existing Tables" opens the Add Existing Tables dialog, as the toolbar's
  * "+ Add" menu does. It shows only when there is something to add (the host's
  * `existingModels` already leaves out this diagram's tables), and becomes the
  * primary action when the Table Library holds tables this diagram doesn't:
@@ -74,7 +74,7 @@ export const EmptyCanvas: React.FC = () => {
               className={buttonClass('existing')}
               onClick={() => setAddExistingModelDialogOpen(true)}
             >
-              Add existing tables
+              Add Existing Tables
             </button>
           )}
           {!logicalOnly && (
@@ -83,7 +83,7 @@ export const EmptyCanvas: React.FC = () => {
               className={buttonClass('dbt')}
               onClick={() => send({ type: 'addModelsFromDbt' })}
             >
-              Add tables from dbt
+              Add Tables from dbt
             </button>
           )}
           <button
@@ -91,7 +91,7 @@ export const EmptyCanvas: React.FC = () => {
             className={buttonClass('new')}
             onClick={() => setNewModelDialogOpen(true)}
           >
-            New table
+            New Table
           </button>
           {!libraryHasTables && canAddExisting && (
             <button
@@ -99,7 +99,7 @@ export const EmptyCanvas: React.FC = () => {
               className={buttonClass('existing')}
               onClick={() => setAddExistingModelDialogOpen(true)}
             >
-              Add existing tables
+              Add Existing Tables
             </button>
           )}
         </div>

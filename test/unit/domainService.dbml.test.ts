@@ -142,9 +142,12 @@ describe('getSubjectArea on dbml-native', () => {
       warn: () => {},
       dbml: dbmlStorageReader,
     });
+    // The layers the canvas adds itself (SemanticEditorProvider: layerConfig, and each table's own layer).
     const strip = (d: Record<string, unknown>): Record<string, unknown> => {
       const copy = JSON.parse(JSON.stringify(d)) as Record<string, unknown>;
       delete copy.layerConfig;
+      delete copy.layerConfigs;
+      for (const model of copy.models as Array<Record<string, unknown>>) delete model.layer;
       return copy;
     };
     expect(strip(host as unknown as Record<string, unknown>)).toEqual(strip(core as unknown as Record<string, unknown>));

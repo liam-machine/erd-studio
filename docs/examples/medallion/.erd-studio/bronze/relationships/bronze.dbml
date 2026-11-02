@@ -1,0 +1,14 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table bronze.shopify_customers }        from '../tables/bronze/shopify_customers.dbml'
+use { table bronze.shopify_order_line_items } from '../tables/bronze/shopify_order_line_items.dbml'
+use { table bronze.shopify_orders }           from '../tables/bronze/shopify_orders.dbml'
+use { table bronze.shopify_products }         from '../tables/bronze/shopify_products.dbml'
+use { table bronze.stripe_charges }           from '../tables/bronze/stripe_charges.dbml'
+use { table bronze.stripe_customers }         from '../tables/bronze/stripe_customers.dbml'
+
+Ref: bronze.shopify_order_line_items.order_id >? bronze.shopify_orders.id
+Ref: bronze.shopify_order_line_items.product_id >? bronze.shopify_products.id
+
+Ref: bronze.shopify_orders.customer_id >? bronze.shopify_customers.id
+
+Ref: bronze.stripe_charges.customer >? bronze.stripe_customers.id

@@ -118,8 +118,6 @@ export interface EditorState extends CanvasState {
    * so a later payload without the flag cancels a layout that has not started.
    */
   pendingAutoLayout: boolean;
-  /** Whether the welcome modal is visible. */
-  welcomeModalOpen: boolean;
   /** Whether the Feedback dialog is visible. */
   feedbackDialogOpen: boolean;
   /** Prefill for the Feedback dialog (from the command palette / error screens). */
@@ -164,6 +162,12 @@ export interface EditorState extends CanvasState {
    * once the diagram has settled, then clears it. Not persisted.
    */
   pendingReveal: RevealRelationshipMessage['payload'] | null;
+  /**
+   * A table the host asked to show (`revealTable`: Open in Diagram or Go to
+   * Table on a table, Add to Diagram…). `useRevealTable` selects and centres
+   * it once the diagram has settled, then clears it. Not persisted.
+   */
+  pendingTableReveal: string | null;
   /**
    * Whether the "no compiled dbt artifacts" strip has been dismissed.
    *
@@ -250,8 +254,6 @@ export interface EditorActions extends CanvasActions {
   triggerAutoLayout: () => void;
   /** Set / clear the first-open auto layout request (see `pendingAutoLayout`). */
   setPendingAutoLayout: (pending: boolean) => void;
-  /** Toggle the welcome modal visibility. */
-  setWelcomeModalOpen: (open: boolean) => void;
   /** Open/close the Feedback dialog, optionally with prefilled fields. */
   setFeedbackDialogOpen: (
     open: boolean,
@@ -292,6 +294,8 @@ export interface EditorActions extends CanvasActions {
   setToastMessage: (message: string | null) => void;
   /** Set / clear the relationship to show (see `pendingReveal`). */
   setPendingReveal: (target: RevealRelationshipMessage['payload'] | null) => void;
+  /** Set / clear the table to show (see `pendingTableReveal`). */
+  setPendingTableReveal: (modelName: string | null) => void;
 }
 
 /**
@@ -334,7 +338,6 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   _searchFocusFn: null,
   _autoLayoutFn: null,
   pendingAutoLayout: false,
-  welcomeModalOpen: false,
   feedbackDialogOpen: false,
   feedbackPrefill: null,
   feedbackDiagnostics: null,
@@ -353,6 +356,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   canvasMode: 'pan',
   toastMessage: null,
   pendingReveal: null,
+  pendingTableReveal: null,
   physicalSourceNoticeDismissed: false,
   manifestMissing: false,
   manifestHintDismissed: false,
@@ -383,9 +387,6 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
           logicalOnly: true,
           discrepancyVisible: false, discrepancyCompareStage: null, discrepancyReport: null,
           syncMode: false, syncSelections: {}, manifestStale: false, syncPlanGenerated: null,
-          // Closed, never dismissed: the host persists nothing, so the modal
-          // still greets this user the first time they open a dbt project.
-          welcomeModalOpen: false,
         }
       : { logicalOnly: false },
   ),
@@ -414,7 +415,6 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     if (_autoLayoutFn) _autoLayoutFn();
   },
   setPendingAutoLayout: (pending) => set({ pendingAutoLayout: pending }),
-  setWelcomeModalOpen: (open) => set({ welcomeModalOpen: open }),
   setFeedbackDialogOpen: (open, prefill = null) =>
     set(
       open
@@ -468,6 +468,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setCanvasMode: (mode) => set({ canvasMode: mode }),
   setToastMessage: (message) => set({ toastMessage: message }),
   setPendingReveal: (target) => set({ pendingReveal: target }),
+  setPendingTableReveal: (modelName) => set({ pendingTableReveal: modelName }),
 
   // Full editor reset on a new domain payload. Overrides the canvas slice's
   // setDomain (which only clears the column selection) and must stay last.

@@ -4,9 +4,9 @@ ERD Studio is a logical modelling tool first: your design lives in `.erd-studio/
 
 - **Draw from dbt**, which turns your existing dbt models into a first diagram;
 - a read-only **Physical** stage, drawn in green, showing what your dbt project has. The canvas then has two tabs, **Logical** (your design) · **Physical** (read from dbt);
-- the **⊕ Diff** overlay, which shows where your design and dbt disagree.
+- the **Compare with dbt** overlay, which shows where your design and dbt disagree.
 
-In a folder without dbt the canvas shows only your logical design: there is no Physical tab, no **⊕ Diff** and nothing to install or run. Started your design in a folder without dbt? Move its `.erd-studio` folder into the dbt project, then open that folder to compare your design with what dbt built.
+In a folder without dbt the canvas shows only your logical design: there is no Physical tab, no **Compare with dbt** and nothing to install or run. Started your design in a folder without dbt? Move its `.erd-studio` folder into the dbt project, then open that folder to compare your design with what dbt built.
 
 <table align="center"><tr>
 <td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/how-it-works.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/how-it-works-play.jpg" width="300" alt="Play the How ERD Studio works video (1:42): why the logical data model belongs in the repo, the files behind the canvas (YAML and JSON in this recording, from before ERD Studio 2.0; a new project's are DBML), Logical versus Physical, and how Compare lights up every mismatch before it ships." /></a></td>
@@ -14,7 +14,7 @@ In a folder without dbt the canvas shows only your logical design: there is no P
 </tr></table>
 
 <!-- TODO: re-shoot readme-workflow.png and how-it-works.mp4 for native DBML storage (2.0): the Explorer shows .erd-studio/logical-models/ and the diff is logical-models/fct_order.yml, but a new project now writes .erd-studio/gold/tables/gold/fct_order.dbml (and its diagrams in gold/diagrams/). The alt text describes the current media until then. -->
-![Your data model lives in the repo; the canvas is a view over it. Left: the VS Code Explorer for a dbt project. Its .erd-studio folder, marked design, holds one YAML per table and one JSON per subject area (a project from before ERD Studio 2.0; a new project holds DBML files instead), next to the models and target folders, marked code and warehouse, where fct_order.sql is modified. The design files render and save as the ERD Studio Logical canvas, in blue: dim_customer joined one to many to fct_order, which has order_total. The dbt project derives the read-only Physical canvas, in green, never written to disk. Comparing the two finds two differences: order_amt is highlighted as only in the warehouse and order_total struck through as logical only, because the column was renamed in the SQL but not the design. The fix is a one-line change to fct_order.yml in the same pull request.](https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/readme-workflow.png)
+![Your data model lives in the repo; the canvas is a view over it. Left: the VS Code Explorer for a dbt project. Its .erd-studio folder, marked design, holds one YAML per table and one JSON per diagram (a project from before ERD Studio 2.0; a new project holds DBML files instead), next to the models and target folders, marked code and warehouse, where fct_order.sql is modified. The design files render and save as the ERD Studio Logical canvas, in blue: dim_customer joined one to many to fct_order, which has order_total. The dbt project derives the read-only Physical canvas, in green, never written to disk. Comparing the two finds two differences: order_amt is highlighted as only in the warehouse and order_total struck through as logical only, because the column was renamed in the SQL but not the design. The fix is a one-line change to fct_order.yml in the same pull request.](https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/readme-workflow.png)
 
 The video and the picture show a project from before ERD Studio 2.0, with YAML tables and JSON diagrams. A new project keeps the same things as DBML files under a layer folder (`.erd-studio/gold/tables/gold/fct_order.dbml`, and `.dbml` diagrams in `gold/diagrams/`), and everything works the same way. A table drawn from a dbt model with a custom schema (`+schema` or `config(schema=…)`) goes in a schema folder of that name, the same on every machine; otherwise in a folder named after its layer.
 
@@ -24,7 +24,7 @@ The video and the picture show a project from before ERD Studio 2.0, with YAML t
 2. Run **Draw from dbt**, from the walkthrough or the Command Palette (**ERD Studio: Draw from dbt…**). ERD Studio copies your dbt models' columns and relationship tests into a logical draft and opens it, laid out automatically.
 3. Edit the draft on the canvas, and switch between **Logical** and **Physical** to compare your design with what dbt has.
 
-The draft is a starting point for your design: it is saved as ordinary ERD Studio files you can change, and the Physical stage is still read from dbt every time, never saved. An empty diagram offers an **Add tables from dbt** button that does the same for one diagram, and the **ERD** count in the status bar (for example **ERD 3**) takes you back to your diagrams at any time. Rather start blank? **New Diagram…** (in the sidebar's Diagrams view, or **ERD Studio: New Diagram…** in the Command Palette) and **Import DBML…** work in a dbt project too.
+The draft is a starting point for your design: it is saved as ordinary ERD Studio files you can change, and the Physical stage is still read from dbt every time, never saved. An empty diagram offers an **Add Tables from dbt** button that does the same for one diagram, and the **ERD** count in the status bar (for example **ERD 3**) takes you back to your diagrams at any time. Rather start blank? **New Diagram…** (in the sidebar's Diagrams view, or **ERD Studio: New Diagram…** in the Command Palette) and **Import DBML…** work in a dbt project too.
 
 **Prefer to watch first?** The [getting-started video](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4) (1:00) shows these three steps. The **Welcome** tab has the same video and a short checklist. Open it any time with **Get started** in the ERD Studio sidebar (or its ▶ button), or **ERD Studio: Watch Getting Started Video**.
 
@@ -44,7 +44,7 @@ Each table shows where its shape came from, so a `varchar` on the canvas is neve
 
 ## Compare and sync
 
-Click **⊕ Diff** on the toolbar to compare your design with dbt. Missing columns, type differences and relationship mismatches appear on the canvas. From the comparison you can generate a sync plan for your AI assistant to apply only the changes you choose. The [AI assistants](ai-assistants.md) page has the guided setup that builds and checks the design against dbt for you.
+Click **Compare with dbt** on the toolbar. Missing columns, type differences and relationship mismatches appear on the canvas. From the comparison you can generate a sync plan for your AI assistant to apply only the changes you choose. The [AI assistants](ai-assistants.md) page has the guided setup that builds and checks the design against dbt for you.
 
 ## Run a whole diagram together
 

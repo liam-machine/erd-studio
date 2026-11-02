@@ -339,7 +339,7 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
       // Cancelled while reading or planning: nothing was written (the v4 step, if it ran, asked first).
       telemetry.feature('convertToDbmlCancelled');
       void vscode.window.showInformationMessage(progress.v5Converted
-        ? `${CONVERT_TO_DBML_TITLE} was cancelled. The v4 subject areas were converted to the Table Library, but nothing else was changed.`
+        ? `${CONVERT_TO_DBML_TITLE} was cancelled. The v4 diagrams were converted to the Table Library, but nothing else was changed.`
         : CONVERT_CANCELLED_MESSAGE);
       return 'cancelled';
     }
@@ -348,7 +348,7 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
     if (progress.applied) { if (!progress.counted) telemetry.feature('convertToDbml'); }
     else telemetry.error('convertToDbmlFailed');
     if (err instanceof V5StepFailed) {
-      const doing = 'while converting the v4 subject areas';
+      const doing = 'while converting the v4 diagrams';
       showErrorWithActions(oursMessage(CONVERT_TO_DBML_TITLE, doing, 'some files may already be converted (source control shows which)'), {
         [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err.cause),
         [TRY_AGAIN_BUTTON]: retry,
@@ -359,7 +359,7 @@ export async function convertProjectToDbml(deps: ConvertProjectDeps): Promise<Co
     const doing = progress.applied ? 'after writing the DBML files' : 'while planning the conversion';
     const outcome = progress.applied
       ? 'open diagrams may not show the DBML files until you reopen them'
-      : progress.v5Converted ? 'the v4 subject areas were converted to the Table Library, but nothing else was changed' : 'nothing was changed';
+      : progress.v5Converted ? 'the v4 diagrams were converted to the Table Library, but nothing else was changed' : 'nothing was changed';
     showErrorWithActions(oursMessage(CONVERT_TO_DBML_TITLE, doing, outcome), {
       [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err),
       ...(progress.applied ? {} : { [TRY_AGAIN_BUTTON]: retry }),
@@ -385,7 +385,7 @@ async function runConversion(
     if (!progress.v5Converted) return 'Nothing was changed.';
     return plan.v4SubjectAreas.length > 0
       ? 'Migrate Subject Areas to the Central Table Library ran, but nothing else was changed.'
-      : 'The v4 subject areas were converted to the Table Library, but nothing else was changed.';
+      : 'The v4 diagrams were converted to the Table Library, but nothing else was changed.';
   };
 
   // 1. Read and plan, with a progress notification Cancel stops (nothing is written).

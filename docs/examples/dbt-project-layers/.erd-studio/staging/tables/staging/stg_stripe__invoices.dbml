@@ -1,0 +1,10 @@
+Table staging.stg_stripe__invoices [grain: 'One row per Stripe invoice'] {
+  Note: 'Stripe invoices, in dollars.'
+
+  invoice_id      STRING          [pk, natural_key: 'true']
+  subscription_id STRING          [foreign_key: 'true']
+  amount_due      "DECIMAL(12,2)" [note: 'Converted from cents']
+  amount_paid     "DECIMAL(12,2)"
+  period_start    DATE
+  period_end      DATE
+}

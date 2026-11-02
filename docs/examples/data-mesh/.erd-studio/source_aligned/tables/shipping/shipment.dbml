@@ -1,0 +1,11 @@
+Table shipping.shipment [
+  grain: 'One row per shipment',
+  meta_owner: 'shipping-team'
+] {
+  Note: 'Shipments, published by the shipping domain.'
+
+  shipment_id            STRING [pk, natural_key: 'true']
+  order_id               STRING [foreign_key: 'true', note: 'Owned by the orders domain']
+  carrier_code           STRING [foreign_key: 'true']
+  promised_delivery_date DATE
+}

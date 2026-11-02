@@ -1,0 +1,10 @@
+Table zuora.zuora_subscription_source [grain: 'One row per Zuora subscription version'] {
+  Note: 'Zuora subscriptions, renamed and typed.'
+
+  subscription_id     STRING [pk, natural_key: 'true']
+  account_id          STRING [foreign_key: 'true']
+  subscription_name   STRING
+  subscription_status STRING
+  term_start_date     DATE
+  term_end_date       DATE
+}

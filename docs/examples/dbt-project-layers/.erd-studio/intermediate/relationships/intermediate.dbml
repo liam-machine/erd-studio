@@ -1,0 +1,5 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table staging.stg_stripe__invoices } from '../../staging/tables/staging/stg_stripe__invoices.dbml'
+use { table intermediate.int_invoices_allocated_to_months } from '../tables/intermediate/int_invoices_allocated_to_months.dbml'
+
+Ref: intermediate.int_invoices_allocated_to_months.invoice_id >? staging.stg_stripe__invoices.invoice_id

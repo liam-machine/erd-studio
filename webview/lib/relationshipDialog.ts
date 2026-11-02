@@ -101,3 +101,43 @@ export function pairColumnUsed(column: string): string {
 export function dialogTitle(editing: boolean, pairCount: number): string {
   return `${editing ? 'Edit' : 'New'} ${pairCount > 1 ? 'Composite ' : ''}Relationship`;
 }
+
+/** The New / Edit Relationship dialog's "How many?" field label. */
+export const HOW_MANY_LABEL = 'How many?';
+
+/** The cardinalities the dialog offers, in its order (one-to-many is stored turned round, #133). */
+export type DialogCardinality = 'many-to-one' | 'one-to-one' | 'many-to-many';
+
+/** The one vocabulary for a cardinality's name, used by every menu and dialog. */
+export const CARDINALITY_NAMES: Record<'many-to-one' | 'one-to-many' | 'one-to-one' | 'many-to-many', string> = {
+  'many-to-one': 'Many-to-one',
+  'one-to-many': 'One-to-many',
+  'one-to-one': 'One-to-one',
+  'many-to-many': 'Many-to-many',
+};
+
+/** The notation, kept for tooltips only. */
+const CARDINALITY_NOTATION: Record<DialogCardinality, string> = {
+  'many-to-one': 'N:1, *→1',
+  'one-to-one': '1:1',
+  'many-to-many': 'N:M, *↔*',
+};
+
+/**
+ * One "How many?" option, phrased with the chosen tables: "Many fct_order
+ * rows → one dim_customer", "One fct_order row → one dim_customer",
+ * "Many → many". Before both tables are chosen it says "Many → one". The
+ * notation is in `title` only.
+ */
+export function cardinalityChoice(cardinality: DialogCardinality, from: string, to: string): { text: string; title: string } {
+  const title = `${CARDINALITY_NAMES[cardinality]} (${CARDINALITY_NOTATION[cardinality]})`;
+  const named = from !== '' && to !== '';
+  switch (cardinality) {
+    case 'many-to-one':
+      return { text: named ? `Many ${from} rows → one ${to}` : 'Many → one', title };
+    case 'one-to-one':
+      return { text: named ? `One ${from} row → one ${to}` : 'One → one', title };
+    default:
+      return { text: 'Many → many', title };
+  }
+}

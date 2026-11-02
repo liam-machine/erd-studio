@@ -2,7 +2,8 @@
  * New Diagram and New Layer as `activate()` wires them, over a temp copy of
  * the fixture project: the questions they ask and what they write. New
  * Diagram asks for the layer (with how many diagrams each holds, and New
- * Layer… to make one and carry on) and the name as people write it; New
+ * Layer… to make one and carry on) once the project has diagrams, and the
+ * name as people write it; New
  * Layer asks for one name. When they fail: `diagramCommands.failures.test.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -106,7 +107,7 @@ describe('New Diagram', () => {
       ['Silver', `${counted} diagrams`],
       ['Gold', expect.stringMatching(/^(no diagrams yet|\d+ diagrams?)$/)],
       ['', undefined],
-      ['$(new-folder) New Layer…', 'a new stage, such as staging or marts'],
+      ['$(new-folder) New Layer…', 'a new stage of your warehouse, such as Staging or Gold'],
     ]);
     expect(items[2].kind).toBe(vscode.QuickPickItemKind.Separator);
     expect(input).toHaveBeenCalledTimes(1);
@@ -117,6 +118,23 @@ describe('New Diagram', () => {
     expect(validate!('360 view')).toMatch(/starting with a letter/);
     expect(validate!('  ')).toBe('Give the diagram a name');
     expect(fs.existsSync(path.join(project, '.erd-studio', 'gold', 'customer-360.json'))).toBe(true);
+  });
+
+  it('with no diagrams yet asks no layer question: the last creatable layer, named in the name box', async () => {
+    // A YAML/JSON project whose diagrams are all gone (its tables stay).
+    for (const layer of ['silver', 'gold']) {
+      const dir = path.join(project, '.erd-studio', layer);
+      for (const f of fs.readdirSync(dir)) if (f.endsWith('.json')) fs.rmSync(path.join(dir, f));
+    }
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('Revenue' as never);
+
+    await vscode.commands.executeCommand('erdStudio.createDomain');
+
+    expect(pick).not.toHaveBeenCalled();
+    // Move Diagram to Layer… is a DBML project's command, so a JSON diagram's prompt does not name it.
+    expect((input.mock.calls[0][0] as { prompt: string }).prompt).toBe('Name the diagram. Saved in the Gold layer.');
+    expect(fs.existsSync(path.join(project, '.erd-studio', 'gold', 'revenue.json'))).toBe(true);
   });
 
   it('New Layer… in the picker makes the layer and goes on to name the diagram in it', async () => {

@@ -179,6 +179,14 @@ describe('normaliseForStorageEquivalence: each §2.8 row in isolation', () => {
     differ(a, b);
   });
 
+  it('a table\'s layer and the layer configs are dropped: a DBML read records them, a YAML read does not', () => {
+    const a = display();
+    const b = display();
+    (b.models[0] as Record<string, unknown>).layer = 'gold';
+    (b as Record<string, unknown>).layerConfigs = [{ id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', order: 0 }];
+    same(a, b);
+  });
+
   it('schemaVersion is overridden', () => {
     const a = display();
     const b = display();
@@ -203,6 +211,10 @@ describe('normaliseStorageRows: one row at a time (the twin goldens\' per-case c
     ['loneCompositeKey', (b) => { b.relationships[0].compositeKey = 'fk_lonely'; }],
     ['compositeKeyNames', (b) => { b.relationships[1].compositeKey = 'region_fk'; b.relationships[2].compositeKey = 'region_fk'; }],
     ['schemaVersion', (b) => { b.schemaVersion = 7; }],
+    ['tableLayers', (b) => {
+      (b.models[0] as Record<string, unknown>).layer = 'gold';
+      (b as Record<string, unknown>).layerConfigs = [{ id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', order: 0 }];
+    }],
     ['relationshipOrder', (b) => { b.relationships = [b.relationships[1], b.relationships[2], b.relationships[0]]; }],
   ];
 

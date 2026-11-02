@@ -16,7 +16,7 @@ ERD Studio looks for its project in this order and uses the first it finds:
 
 So a dbt project anywhere in the workspace wins over a plain folder that holds a design. To keep the design in a folder without dbt in that case, set `erdStudio.projectPath`. With no folder open at all, ERD Studio asks you to open one.
 
-ERD Studio decides whether the folder is a dbt project when the window opens. If you add a `dbt_project.yml` to a folder it already has open, run **Developer: Reload Window** to get the Physical tab and **⊕ Diff**.
+ERD Studio decides whether the folder is a dbt project when the window opens. If you add a `dbt_project.yml` to a folder it already has open, run **Developer: Reload Window** to get the Physical tab and **Compare with dbt**.
 
 ## Keeping the data model in another folder
 

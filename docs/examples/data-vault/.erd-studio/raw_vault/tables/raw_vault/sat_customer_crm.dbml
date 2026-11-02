@@ -1,0 +1,15 @@
+// One satellite per source: the CRM's view of a customer, with every change kept.
+Table raw_vault.sat_customer_crm [meta_vault_type: 'satellite'] {
+  Note: 'Customer details from the CRM.'
+
+  customer_hk   BINARY    [foreign_key: 'true']
+  load_datetime TIMESTAMP [note: 'When the row was loaded']
+  hashdiff      BINARY    [note: 'Hash of the attributes below, to detect a change']
+  full_name     STRING
+  email         STRING
+  phone         STRING
+  record_source STRING    [note: 'The system the row came from']
+  indexes {
+    (customer_hk, load_datetime) [pk]
+  }
+}
