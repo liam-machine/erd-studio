@@ -7,7 +7,8 @@
  * `erd-studio diff` CLI builds its plan here too (with `allSelections(report,
  * 'physical')`), so the fixes it reports are the ones the canvas would write.
  *
- * Pure: no I/O and no `vscode` — bundled into `dist/cli.js`.
+ * `buildSyncPlan` is pure: no I/O and no `vscode` — bundled into `dist/cli.js`.
+ * `syncPlanLibraryLookups` only reads through the table library it is given.
  */
 
 import * as path from 'path';
@@ -36,6 +37,9 @@ import {
   resolveGroundTruthDataType,
 } from '../types/syncPlan';
 import type { YmlData } from '../types/ymlData';
+import { subjectAreaStorageOf } from '@erd-studio/core';
+import { configuredSchemaOf } from './dbtDraft';
+import type { TableLibraryService } from './logicalModelService';
 
 export interface SyncPlanContext {
   manifest: ManifestData;
@@ -71,7 +75,8 @@ export interface SyncPlanContext {
    * Where a table with no file yet would get one, relative to the semantic
    * dir (`tables/gold/x.dbml` in a project that writes DBML, §5.7). Wins
    * over `newTableLibraryDir` and `modelFolder` for a table with no file.
-   * The host passes `TableLibraryService.pathForNewTable`.
+   * The host passes `TableLibraryService.pathForNewTable` at the diagram's
+   * home ({@link syncPlanLibraryLookups}).
    */
   newTableFilePath?: (modelName: string) => string | undefined;
   /**
@@ -86,6 +91,45 @@ export interface SyncPlanContext {
    * Feeds each relationship's `storedIn`.
    */
   relationshipStoredIn?: (rel: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }) => string | undefined;
+}
+
+/** The table library calls {@link syncPlanLibraryLookups} makes. */
+export type SyncPlanLibrary = Pick<TableLibraryService,
+  'tableFolder' | 'tableLibraryFile' | 'newTableLibraryDirName' | 'newTableHomeFor' | 'pathForNewTable'
+  | 'libraryRelativePath' | 'relationshipsFileForNewRef' | 'relationshipsFileHolding'>;
+
+/**
+ * The library lookups of a {@link SyncPlanContext} for the diagram at
+ * `where.diagramFile`, the one place the canvas (`generateSyncPlan`) and the
+ * CLI (`diff`) take them from, so both name the same files. A table with no
+ * file goes where a table created from that diagram goes
+ * (`newTableHomeFor`: its layer), and on a DBML diagram in its dbt custom
+ * schema's folder when the developer configured one, as Draw from dbt and Add
+ * Tables from dbt place it (§2.4). `layerIds`: the layers in `layers.json`.
+ */
+export function syncPlanLibraryLookups(
+  library: SyncPlanLibrary,
+  where: { diagramFile: string; layerIds: ReadonlySet<string>; manifest?: ManifestData; ymlData?: YmlData },
+): Pick<SyncPlanContext, 'modelFolder' | 'tableLibraryFile' | 'newTableLibraryDir' | 'newTableFilePath' | 'relationshipsFile' | 'relationshipStoredIn'> {
+  const dbmlDiagram = subjectAreaStorageOf(where.diagramFile) === 'dbml';
+  let home: ReturnType<SyncPlanLibrary['newTableHomeFor']> | null = null;
+  const relative = (file: string | undefined): string | undefined => (file === undefined ? undefined : library.libraryRelativePath(file));
+  return {
+    modelFolder: (name) => library.tableFolder(name),
+    tableLibraryFile: (name) => library.tableLibraryFile(name),
+    newTableLibraryDir: library.newTableLibraryDirName(),
+    newTableFilePath: (name) => {
+      try {
+        if (home === null) home = library.newTableHomeFor(where.diagramFile, where.layerIds);
+        const configuredSchema = dbmlDiagram ? configuredSchemaOf(name, where.ymlData, where.manifest) : undefined;
+        return library.libraryRelativePath(library.pathForNewTable(name, home, configuredSchema !== undefined ? { configuredSchema } : {}));
+      } catch {
+        return undefined;
+      }
+    },
+    relationshipsFile: (name) => relative(library.relationshipsFileForNewRef(name)),
+    relationshipStoredIn: (rel) => relative(library.relationshipsFileHolding(rel)),
+  };
 }
 
 /** Actions that edit dbt files, after which `dbt compile` is needed. */

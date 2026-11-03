@@ -1,0 +1,14 @@
+{
+  "id": "bridge",
+  "label": "Bridge",
+  "prefix": "brg_",
+  "description": "Many-to-many bridge table linking two entities",
+  "requiresLeftEntity": true,
+  "requiresRightEntity": true,
+  "columns": [
+    { "name": "{name}_key", "dataType": "INTEGER", "description": "Surrogate key — one per link row", "isPrimaryKey": true },
+    { "name": "{left}_key", "dataType": "INTEGER", "description": "FK to {left}", "isForeignKey": true },
+    { "name": "{right}_key", "dataType": "INTEGER", "description": "FK to {right}", "isForeignKey": true },
+    { "name": "dwh_inserted_at", "dataType": "TIMESTAMP_NTZ", "description": "Warehouse insert timestamp" }
+  ]
+}

@@ -32,6 +32,9 @@ jobs:
         run: |
           node dist/cli.js doctor --project test/fixtures/dbt-project --json --no-dbt > /dev/null
           rc=0; node dist/cli.js diff --project test/fixtures/dbt-project --all --json > /dev/null || rc=$?; test "$rc" -le 1
+          # The same dbt project on native DBML storage (its Convert).
+          node dist/cli.js doctor --project test/fixtures/dbt-project-dbml --json --no-dbt > /dev/null
+          rc=0; node dist/cli.js diff --project test/fixtures/dbt-project-dbml --all --json > /dev/null || rc=$?; test "$rc" -le 1
           node dist/cli.js doctor --project test/fixtures/dbml-native --json > /dev/null
           node dist/cli.js export --project test/fixtures/dbml-native --all --format dbml > /dev/null
       # Native DBML storage end to end: Convert the dbt-project fixture, then
