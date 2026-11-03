@@ -109,6 +109,21 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.importModel",
+        "title": "Import…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.importSqlDdl",
+        "title": "Import SQL DDL…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.importSemanticModel",
+        "title": "Import Power BI or Fabric Semantic Model…",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.openExampleProject",
         "title": "Open an Example Project…",
         "icon": "$(book)",
@@ -496,12 +511,12 @@
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\nOr [import a DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22sidebar%22%7D%5D) from dbdiagram.io or any DBML tool (an open format, no lock-in), or [open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22sidebar%22%7D%5D) to see a finished data model first.\n\n[Get started](command:erdStudio.showGettingStarted)",
+        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\nOr [import a data model](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22sidebar%22%7D%5D): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in), SQL DDL scripts or a Power BI semantic model. Or [open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22sidebar%22%7D%5D) to see a finished data model first.\n\n[Get started](command:erdStudio.showGettingStarted)",
         "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\nOr start [blank](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D), [from a DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22sidebar%22%7D%5D) (an open format, no lock-in), or [from an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22sidebar%22%7D%5D).\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
+        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\nOr start [blank](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D), [from an import](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22sidebar%22%7D%5D) (DBML, an open format, no lock-in; SQL DDL scripts; or a Power BI semantic model), or [from an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22sidebar%22%7D%5D).\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
         "when": "erdStudio.hasDbtProject && !erdStudio.diagramsLoading"
       },
       {
@@ -528,7 +543,7 @@
       {
         "id": "erdStudio.getStarted",
         "title": "Get started with ERD Studio",
-        "description": "Design your data model in Git: from scratch, from DBML or from an example, then let your AI assistant fill in the detail.",
+        "description": "Design your data model in Git: from scratch, from an import (DBML, SQL DDL or a Power BI semantic model) or from an example, then let your AI assistant fill in the detail.",
         "steps": [
           {
             "id": "openProject",
@@ -562,7 +577,7 @@
           {
             "id": "newDiagram",
             "title": "Start your data model",
-            "description": "Add tables on a blank canvas. Each table is a file in .erd-studio/ you can commit and review like code.\n[New Diagram](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr [import a DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22walkthrough%22%7D%5D) from dbdiagram.io or any DBML tool (an open format, no lock-in), or [open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22walkthrough%22%7D%5D) to see a finished data model first.",
+            "description": "Add tables on a blank canvas. Each table is a file in .erd-studio/ you can commit and review like code.\n[New Diagram](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr [import a data model](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22walkthrough%22%7D%5D): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in), SQL DDL scripts or a Power BI semantic model. Or [open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22walkthrough%22%7D%5D) to see a finished data model first.",
             "when": "!erdStudio.hasDbtProject && !erdStudio.hasDiagrams",
             "media": {
               "svg": "media/walkthrough/new-diagram.svg",
@@ -571,6 +586,7 @@
             "completionEvents": [
               "onCommand:erdStudio.createDomain",
               "onCommand:erdStudio.importDbml",
+              "onCommand:erdStudio.importModel",
               "onCommand:erdStudio.openExampleProject",
               "onCommand:erdStudio.start"
             ]
@@ -578,7 +594,7 @@
           {
             "id": "draw",
             "title": "Draw your dbt project — no AI needed",
-            "description": "Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr start [blank](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22walkthrough%22%7D%5D), [from a DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22walkthrough%22%7D%5D) (an open format, no lock-in), or [from an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22walkthrough%22%7D%5D).",
+            "description": "Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr start [blank](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22walkthrough%22%7D%5D), [from an import](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22walkthrough%22%7D%5D) (DBML, an open format, no lock-in; SQL DDL scripts; or a Power BI semantic model), or [from an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22walkthrough%22%7D%5D).",
             "when": "erdStudio.hasDbtProject && !erdStudio.hasDiagrams",
             "media": {
               "svg": "media/walkthrough/draw.svg",
@@ -588,6 +604,7 @@
               "onCommand:erdStudio.drawFromDbt",
               "onCommand:erdStudio.createDomain",
               "onCommand:erdStudio.importDbml",
+              "onCommand:erdStudio.importModel",
               "onCommand:erdStudio.start"
             ]
           },
@@ -1032,6 +1049,18 @@
           "when": "erdStudio.hasProject"
         },
         {
+          "command": "erdStudio.importModel",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.importSqlDdl",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.importSemanticModel",
+          "when": "erdStudio.hasProject"
+        },
+        {
           "command": "erdStudio.drawFromDbt",
           "when": "erdStudio.hasDbtProject"
         },
@@ -1143,6 +1172,16 @@
           "command": "erdStudio.importDbml",
           "when": "erdStudio.hasProject",
           "group": "1_diagram@3"
+        },
+        {
+          "command": "erdStudio.importSqlDdl",
+          "when": "erdStudio.hasProject",
+          "group": "1_diagram@4"
+        },
+        {
+          "command": "erdStudio.importSemanticModel",
+          "when": "erdStudio.hasProject",
+          "group": "1_diagram@5"
         },
         {
           "command": "erdStudio.addLayer",
@@ -1325,7 +1364,9 @@
     "regen-fixtures": "esbuild scripts/regen-fixtures.ts --bundle --platform=node --format=cjs --loader:.md=text --log-level=warning --outfile=scripts/.regen-fixtures.cjs && node scripts/.regen-fixtures.cjs",
     "regen:dbt-dbml-fixture": "esbuild scripts/regen-dbt-dbml-fixture.ts --bundle --platform=node --format=cjs --loader:.md=text --log-level=warning --outfile=scripts/.regen-dbt-dbml-fixture.cjs && node scripts/.regen-dbt-dbml-fixture.cjs",
     "test:e2e:dbml": "node scripts/e2e-dbml.mjs",
-    "eval:sync-ai": "node test/skill-evals/sync-apply/run.mjs"
+    "eval:sync-ai": "node test/skill-evals/sync-apply/run.mjs",
+    "stories": "node test/stories/run.mjs",
+    "stories:record": "node test/stories/run.mjs --record"
   },
   "devDependencies": {
     "@testing-library/react": "^16.1.0",
@@ -1343,6 +1384,7 @@
     "vscode-textmate": "9.3.2"
   },
   "dependencies": {
+    "@dbml/core": "11.0.0",
     "@dbml/parse": "11.0.0",
     "@erd-studio/core": "0.4.0",
     "@erd-studio/renderer": "0.4.0",

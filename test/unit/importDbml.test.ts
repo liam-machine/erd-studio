@@ -1063,10 +1063,11 @@ describe('Import DBML — contributed', () => {
     // Each start goes through erdStudio.start, which counts the sidebar click (src/types/startActions.ts).
     expect(dbt.contents).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
     expect(dbt.contents).toContain(`[blank](${startCommandLink('blank', 'sidebar')})`);
-    expect(dbt.contents).toContain(`[from a DBML file](${startCommandLink('import', 'sidebar')})`);
+    // The import start is Import… (DBML, SQL DDL or a semantic model), whose first source is this command.
+    expect(dbt.contents).toContain(`[from an import](${startCommandLink('import', 'sidebar')}) (DBML, an open format, no lock-in;`);
     const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
     expect(plain.contents.startsWith(`No diagrams yet.\n\n[New Diagram](${startCommandLink('blank', 'sidebar')})`)).toBe(true);
-    expect(plain.contents).toContain(`[import a DBML file](${startCommandLink('import', 'sidebar')})`);
+    expect(plain.contents).toContain(`[import a data model](${startCommandLink('import', 'sidebar')}): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in)`);
     expect(plain.contents).not.toContain('drawFromDbt');
   });
 });

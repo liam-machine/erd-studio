@@ -47,7 +47,7 @@ export const START_PICK_ITEMS: Readonly<Record<StartAction, { label: string; det
   convert: { label: '$(arrow-swap) Convert to DBML', detail: 'Move this project from its YAML and JSON files to DBML, an open format' },
   drawFromDbt: { label: '$(wand) Draw from dbt', detail: 'Copy your dbt models and their relationships into a diagram' },
   blank: { label: '$(add) New Diagram', detail: 'Start with an empty canvas and add your own tables' },
-  import: { label: '$(cloud-download) Import DBML…', detail: 'Start from a DBML file, from dbdiagram.io or any DBML tool' },
+  import: { label: '$(cloud-download) Import…', detail: 'Start from a DBML file, SQL DDL scripts or a Power BI semantic model' },
   example: { label: '$(book) Open an Example…', detail: 'See a finished data model first: eight common warehouse patterns' },
 };
 

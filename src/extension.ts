@@ -133,6 +133,9 @@ import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND, importDbml } from './commands/importDbml';
 import { OPEN_EXAMPLE_DIAGRAM_COMMAND, openExampleDiagram } from './commands/openExampleDiagram';
+import { IMPORT_MODEL_COMMAND, runImportModel, vscodeImportModelDeps } from './commands/importModel';
+import { IMPORT_SQL_DDL_COMMAND, importSqlDdl } from './commands/importSqlDdl';
+import { IMPORT_SEMANTIC_MODEL_COMMAND, importSemanticModel } from './commands/importSemanticModel';
 import { runStart } from './commands/start';
 import { OPEN_EXAMPLE_PROJECT_COMMAND, openExampleProject } from './commands/openExampleProject';
 import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/exampleProjects';
@@ -597,6 +600,9 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.hideRowDetails',
   'erdStudio.start',
   'erdStudio.openExampleProject',
+  'erdStudio.importModel',
+  'erdStudio.importSqlDdl',
+  'erdStudio.importSemanticModel',
 ]);
 
 /**
@@ -991,8 +997,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const previousVersion = context.globalState.get<string>(LAST_ACTIVATED_VERSION_KEY);
   await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
   // Fresh install: remember that the Welcome panel is owed, even if this
-  // activation has no dbt project and returns early below.
-  if (previousVersion === undefined && !context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY)) {
+  // activation has no dbt project and returns early below. Captured here,
+  // before telemetry exists, for the funnel's `firstRun` (below).
+  const freshInstall = previousVersion === undefined && !context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY);
+  if (freshInstall) {
     await context.globalState.update(GETTING_STARTED_PENDING_KEY, true);
   }
   if (previousVersion && previousVersion !== currentVersion && hasOpenSubjectAreaCanvas()) {
@@ -1009,6 +1017,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const telemetryService = new TelemetryService(context);
   context.subscriptions.push(telemetryService);
   telemetryService.start();
+  // The onboarding funnel's denominator: a true first run on this machine
+  // (the one that owes the walkthrough), not an existing user's first
+  // heartbeat from a telemetry-bearing version (telemetry/README.md).
+  if (freshInstall) telemetry.featureOnce('firstRun');
 
   // "ERD Studio X fixes this — Update": checks recorded error codes against
   // the known-fixes registry. Independent of telemetry (it sends nothing about
@@ -1127,11 +1139,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // walkthrough: the video, the sample project and how to open a folder.
     const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
     // It is this session's one prompt (there is nothing else to offer here).
-    if (pending && !context.globalState.get<boolean>(GETTING_STARTED_NO_PROJECT_SHOWN_KEY) && !gettingStartedAutoOpened &&
-      sessionPrompts.claim('walkthrough')) {
-      gettingStartedAutoOpened = true;
-      await context.globalState.update(GETTING_STARTED_NO_PROJECT_SHOWN_KEY, true);
-      await openWalkthrough(() => GettingStartedPanel.createOrShow(context, noProjectGettingStartedDeps()));
+    if (pending && !context.globalState.get<boolean>(GETTING_STARTED_NO_PROJECT_SHOWN_KEY) && !gettingStartedAutoOpened) {
+      if (sessionPrompts.claim('walkthrough')) {
+        gettingStartedAutoOpened = true;
+        await context.globalState.update(GETTING_STARTED_NO_PROJECT_SHOWN_KEY, true);
+        await openWalkthrough(() => GettingStartedPanel.createOrShow(context, noProjectGettingStartedDeps()));
+      } else {
+        // Owed, but another prompt had this window: it waits (measured, not guessed).
+        telemetry.featureOnce('walkthroughWaited');
+      }
     }
     // No toast for the ordinary case: an empty window is normal (the
     // extension activates on any of its commands), and the sidebar's welcome
@@ -3029,6 +3045,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         onWritten: refreshAfterNewSubjectArea,
       }, filePath !== undefined ? { filePath } : undefined);
     }),
+    // Import… (the start screen's Import): DBML, SQL DDL or a Power BI /
+    // Fabric semantic model, the source the folder seems to hold first.
+    vscode.commands.registerCommand(IMPORT_MODEL_COMMAND, () => runImportModel(vscodeImportModelDeps(workspaceRoot, semanticDir))),
+    // CREATE TABLE scripts and semantic models are converted to DBML, then go
+    // through Import DBML's own flow (layer, name, dry run, Import).
+    vscode.commands.registerCommand(IMPORT_SQL_DDL_COMMAND, async () => {
+      const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+      await importSqlDdl({
+        workspaceRoot,
+        semanticDir,
+        layerService,
+        subjectAreaService,
+        tableLibraryService,
+        extensionPath: context.extensionPath,
+        validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
+        onWritten: refreshAfterNewSubjectArea,
+      });
+    }),
+    vscode.commands.registerCommand(IMPORT_SEMANTIC_MODEL_COMMAND, async () => {
+      const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+      await importSemanticModel({
+        workspaceRoot,
+        semanticDir,
+        layerService,
+        subjectAreaService,
+        tableLibraryService,
+        validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
+        onWritten: refreshAfterNewSubjectArea,
+      });
+    }),
     // A ready-made coffee-shop star schema, through the same Import DBML flow
     // (name, dry run, Import). Works in any folder; an empty window gets the
     // fallback "Open a folder first".
@@ -4051,6 +4097,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
     const shown = context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY) === true;
     if (pending && !shown && !gettingStartedAutoOpened) {
+      // A first run in a project that already has diagrams (a teammate's
+      // clone) gets their notice instead; the walkthrough waits for a folder
+      // with none. Counted, so the funnel does not read it as "saw no start".
+      if (existingDiagrams.length > 0) telemetry.featureOnce('firstRunHasDiagrams');
       if (existingDiagrams.length === 0) activationPrompts.set('walkthrough', async () => {
         gettingStartedAutoOpened = true;
         await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
@@ -4106,12 +4156,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (latest) activationPrompts.set('diagramsNudge', async () => {
       await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
       const open = `Open ${latest.domain}`;
+      telemetry.feature('diagramsNudgeShown');
       void vscode.window.showInformationMessage(
         `This project has ${domains.length} ERD Studio diagram${domains.length === 1 ? '' : 's'}.`,
         open,
         'Not now',
       ).then((choice) => {
-        if (choice === open) { void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath); }
+        if (choice === open) {
+          telemetry.feature('diagramsNudgeOpened');
+          void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath);
+        }
       });
     });
   }
@@ -4223,7 +4277,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   {
     const offered = [...activationPrompts.keys()];
     const picked = pickActivationPrompt(offered);
-    if (picked && sessionPrompts.claim(picked)) {
+    const claimed = picked !== undefined && sessionPrompts.claim(picked);
+    // The walkthrough was owed and offered, but another prompt has this window.
+    if (offered.includes('walkthrough') && !(claimed && picked === 'walkthrough')) telemetry.featureOnce('walkthroughWaited');
+    if (picked && claimed) {
       const waiting = offered.filter((kind) => kind !== picked);
       log.info(`Activation prompt: ${picked}${waiting.length > 0 ? ` (next window: ${waiting.join(', ')})` : ''}`);
       await activationPrompts.get(picked)?.();

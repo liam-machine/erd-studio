@@ -19,9 +19,10 @@ const NOT_WORDS = new Set(['command', 'id', 'when', 'url', 'fileMatch', 'view', 
 /**
  * The literal dbt `domain:*` tag the command strips is its name, not a diagram.
  * "Data model" is the whole design (the logical-first copy: "Design your data
- * model in Git"), never one table.
+ * model in Git"), never one table. A Power BI / Fabric "semantic model" is
+ * Microsoft's name for the thing Import Semantic Model… reads, never one table.
  */
-const ALLOWED = [/\bLegacy Domain Tags\b/g, /\bdbt models?\b/gi, /\bdbt Model\b/g, /\bdata models?\b/gi];
+const ALLOWED = [/\bLegacy Domain Tags\b/g, /\bdbt models?\b/gi, /\bdbt Model\b/g, /\bdata models?\b/gi, /\bsemantic models?\b/gi];
 
 function userText(node: unknown, at: string, out: Array<[string, string]>): void {
   if (typeof node === 'string') { out.push([at, node]); return; }
@@ -93,8 +94,16 @@ describe('package.json storage wording (native DBML storage, 2.0)', () => {
 
   it('keeps "an open format, no lock-in" where DBML import and export are offered', () => {
     const welcome = pkg.contributes.viewsWelcome as Array<{ contents: string; when?: string }>;
-    for (const entry of welcome.filter((w) => w.contents.includes('command:erdStudio.importDbml'))) {
+    // The import start (Import…, whose first source is DBML) and any direct Import DBML link.
+    const offersImport = welcome.filter((w) => w.contents.includes('command:erdStudio.importDbml') || w.contents.includes(startCommandLink('import', 'sidebar')));
+    expect(offersImport.length).toBeGreaterThanOrEqual(2);
+    for (const entry of offersImport) {
       expect(entry.contents).toContain('an open format, no lock-in');
+      expect(entry.contents).not.toMatch(/open standard/i);
+    }
+    const steps = pkg.contributes.walkthroughs[0].steps as Array<{ description: string }>;
+    for (const step of steps.filter((s) => s.description.includes(startCommandLink('import', 'walkthrough')))) {
+      expect(step.description).toContain('an open format, no lock-in');
     }
     const library = welcome.find((w) => w.contents.startsWith('No tables yet.'));
     expect(library?.contents).toContain('Each table is a file in .erd-studio/ you can commit.');

@@ -26,7 +26,8 @@ export const START_ACTION_COMMANDS: Readonly<Record<StartAction, string>> = {
   convert: 'erdStudio.convertProjectToDbml',
   drawFromDbt: 'erdStudio.drawFromDbt',
   blank: 'erdStudio.createDomain',
-  import: 'erdStudio.importDbml',
+  // Import…: a picker over DBML, SQL DDL and a Power BI / Fabric semantic model.
+  import: 'erdStudio.importModel',
   example: 'erdStudio.openExampleProject',
 };
 

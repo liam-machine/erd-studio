@@ -260,6 +260,35 @@ export const FEATURES = [
   'exampleBigqueryVersioned',
   'exampleDataMesh',
   'exampleDiagramShown',
+  // Import… (erdStudio.importModel): which source was picked, or the picker
+  // closed. Import SQL DDL… and Import Semantic Model…: finished, closed
+  // before writing, the user's files could not be read (not a failure of
+  // ours); which SQL dialect the conversion ran with.
+  'importPickDbml',
+  'importPickSqlDdl',
+  'importPickSemanticModel',
+  'importPickCancelled',
+  'importSqlDdl',
+  'importSqlDdlCancelled',
+  'importSqlDdlInvalid',
+  'importSqlDialectPostgres',
+  'importSqlDialectMysql',
+  'importSqlDialectSqlserver',
+  'importSqlDialectSnowflake',
+  'importSqlDialectDatabricks',
+  'importSemanticModel',
+  'importSemanticModelCancelled',
+  'importSemanticModelInvalid',
+  // First run, measured: a true first activation on this machine (at most 1);
+  // that first run was in a project that already had diagrams, so the
+  // walkthrough waited (at most 1); the "This project has N diagrams" notice
+  // shown, and its Open button pressed; the walkthrough was owed but another
+  // prompt had this window (at most 1).
+  'firstRun',
+  'firstRunHasDiagrams',
+  'diagramsNudgeShown',
+  'diagramsNudgeOpened',
+  'walkthroughWaited',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -393,6 +422,10 @@ export const ERROR_CODES = [
   'convertToDbmlFailed',
   // Open an Example Project… could not write the example's files.
   'exampleWriteFailed',
+  // Import SQL DDL… / Import Semantic Model… failed (loading the SQL
+  // importer, converting, or writing the new diagram) — not the user's files.
+  'importSqlDdlFailed',
+  'importSemanticModelFailed',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 

@@ -538,7 +538,7 @@ describe('allowlists agree with the Worker', () => {
   it('appends the start-screen keys at the very end, after the native DBML ones: features and errors', () => {
     const at = FEATURES.indexOf('welcomeBlank');
     expect(at).toBe(FEATURES.indexOf('dbmlForeignFormatWarned') + 1);
-    expect(FEATURES.slice(at)).toEqual([
+    expect(FEATURES.slice(at, FEATURES.indexOf('exampleDiagramShown') + 1)).toEqual([
       'welcomeBlank', 'welcomeImport', 'welcomeExample', 'welcomeConvert',
       'walkthroughBlank', 'walkthroughImport', 'walkthroughExample', 'walkthroughConvert', 'walkthroughDrawFromDbt',
       'sidebarBlank', 'sidebarImport', 'sidebarExample', 'sidebarConvert', 'sidebarDrawFromDbt',
@@ -548,8 +548,22 @@ describe('allowlists agree with the Worker', () => {
       'exampleDataVault', 'exampleGitlabStyle', 'exampleBigqueryVersioned', 'exampleDataMesh',
       'exampleDiagramShown',
     ]);
-    expect(ERROR_CODES.slice(-1)).toEqual(['exampleWriteFailed']);
     expect(ERROR_CODES.indexOf('exampleWriteFailed')).toBe(ERROR_CODES.indexOf('convertToDbmlFailed') + 1);
+  });
+
+  it('appends the import-source and first-run keys at the very end, after the start-screen ones: features and errors', () => {
+    const at = FEATURES.indexOf('importPickDbml');
+    expect(at).toBe(FEATURES.indexOf('exampleDiagramShown') + 1);
+    expect(FEATURES.slice(at)).toEqual([
+      'importPickDbml', 'importPickSqlDdl', 'importPickSemanticModel', 'importPickCancelled',
+      'importSqlDdl', 'importSqlDdlCancelled', 'importSqlDdlInvalid',
+      'importSqlDialectPostgres', 'importSqlDialectMysql', 'importSqlDialectSqlserver', 'importSqlDialectSnowflake', 'importSqlDialectDatabricks',
+      'importSemanticModel', 'importSemanticModelCancelled', 'importSemanticModelInvalid',
+      'firstRun', 'firstRunHasDiagrams', 'diagramsNudgeShown', 'diagramsNudgeOpened', 'walkthroughWaited',
+    ]);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('exampleWriteFailed'))).toEqual([
+      'exampleWriteFailed', 'importSqlDdlFailed', 'importSemanticModelFailed',
+    ]);
   });
 
   it('telemetry.json documents every feature key', () => {

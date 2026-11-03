@@ -85,8 +85,11 @@ describe('sidebar views', () => {
   it('put every way to start a diagram, and New Layer, in the + menu', () => {
     expect(contributes.submenus).toContainEqual({ id: 'erdStudio.newMenu', label: 'New…', icon: '$(add)' });
     expect(contributes.menus['erdStudio.newMenu'].map((m) => m.command)).toEqual([
-      'erdStudio.createDomain', 'erdStudio.drawFromDbt', 'erdStudio.importDbml', 'erdStudio.addLayer',
+      'erdStudio.createDomain', 'erdStudio.drawFromDbt', 'erdStudio.importDbml', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel', 'erdStudio.addLayer',
     ]);
+    // The imports sit together, after Import DBML…, in the diagram group.
+    expect(contributes.menus['erdStudio.newMenu'].filter((m) => m.command?.startsWith('erdStudio.import')).map((m) => m.group))
+      .toEqual(['1_diagram@3', '1_diagram@4', '1_diagram@5']);
     expect(contributes.commands.find((c) => c.command === 'erdStudio.addLayer')?.title).toBe('New Layer…');
   });
 

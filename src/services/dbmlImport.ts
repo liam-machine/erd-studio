@@ -1350,7 +1350,19 @@ export interface DescribeDbmlImportOptions {
    * another table of the file spells the folder this import creates.
    */
   dbml?: { relationshipsFiles: readonly string[]; respelledSchemas?: ReadonlyArray<{ table: string; from: string; to: string; newFolder?: boolean }> };
+  /**
+   * The DBML is ERD Studio's conversion of another model (Import SQL DDL…,
+   * Import Semantic Model…): `from` follows "Import N tables" in the
+   * headline (`from 2 SQL files (PostgreSQL)`), the layout line does not
+   * talk about a file's erd_layout, and the conversion's own `notes` and
+   * `skipped` lines (counts by kind) are listed, the first few of each.
+   */
+  origin?: { from: string; notes?: readonly string[]; skipped?: readonly string[] };
 }
+
+/** How many of a conversion's notes, and of its skipped lines, the dry run lists. */
+const ORIGIN_NOTES_SHOWN = 3;
+const ORIGIN_SKIPPED_SHOWN = 6;
 
 /**
  * The dry-run summary the command shows before writing: what is created,
@@ -1361,7 +1373,8 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   const { report } = plan;
   const lines: string[] = [];
   const layer = options.layerLabel ?? plan.layer;
-  lines.push(`Import ${plural(plan.modelNames.length, 'table')} into a new diagram "${plan.subjectAreaName}" in the ${layer} layer.`);
+  const from = options.origin ? ` ${options.origin.from}` : '';
+  lines.push(`Import ${plural(plan.modelNames.length, 'table')}${from} into a new diagram "${plan.subjectAreaName}" in the ${layer} layer.`);
   if (report.newTables.length > 0) lines.push(`• New: ${someOf(report.newTables)}.`);
   if (report.reusedTables.length > 0) {
     const differ = report.reusedTables.filter((r) => r.missingColumns.length > 0).length;
@@ -1402,7 +1415,9 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   const laidOut = options.dbml
     ? 'the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.'
     : 'the diagram is laid out automatically when it opens.';
-  if (!report.layoutRead) {
+  if (!report.layoutRead && options.origin) {
+    lines.push(`• Layout: ${laidOut.replace(/^the /, 'The ')}`);
+  } else if (!report.layoutRead) {
     lines.push(`• No erd_layout in the file: ${laidOut}`);
   } else if (report.positioned === 0) {
     lines.push(`• The file's erd_layout has no positions for these tables: ${laidOut}`);
@@ -1423,6 +1438,17 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   }
   for (const note of report.notes.slice(0, 3)) lines.push(`• ${note}`);
   if (report.notes.length > 3) lines.push(`• And ${plural(report.notes.length - 3, 'more note')}.`);
+  const originNotes = options.origin?.notes ?? [];
+  for (const note of originNotes.slice(0, ORIGIN_NOTES_SHOWN)) lines.push(`• ${note}`);
+  if (originNotes.length > ORIGIN_NOTES_SHOWN) lines.push(`• And ${plural(originNotes.length - ORIGIN_NOTES_SHOWN, 'more note')}.`);
+  const skipped = options.origin?.skipped ?? [];
+  if (skipped.length > 0) {
+    lines.push('Not imported:');
+    for (const item of skipped.slice(0, ORIGIN_SKIPPED_SHOWN)) lines.push(`• ${item}`);
+    if (skipped.length > ORIGIN_SKIPPED_SHOWN) {
+      lines.push(`• And ${plural(skipped.length - ORIGIN_SKIPPED_SHOWN, 'more line')}: ERD Studio: Show Logs lists every one.`);
+    }
+  }
   if (report.dropped.length > 0) {
     lines.push('Left out:');
     const groups = droppedGroups(report.dropped);

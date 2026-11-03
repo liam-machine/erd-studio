@@ -23,6 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `SCHEMA_CONTENT`, harness generators, the `/erd-studio-setup` skill | `src/harness/CLAUDE.md` |
 | Releases, package publishing, manual publish | `docs/dev/releasing.md` |
 | Rendering the webview in Chrome | `docs/dev/webview-preview.md` |
+| The onboarding stories in `test/stories/` (user stories as code driving a real VS Code, filmed as captioned videos; `npm run stories`, `stories.yml`), or any first-run surface they cover (start links, walkthrough, empty Diagrams view, Open an Example) | `docs/dev/onboarding-stories.md` |
 | The on-disk file format (DBML tables, relationships and diagrams, `erd_layout`; legacy domain JSON and model yml; `layers.json`) | `docs/semantic-domain-json-reference.md` |
 | The example projects in `docs/examples/` (one per modelling pattern, the shapes customers' repos take) and their tests — see **Example projects** under Rules | `docs/modelling-patterns.md` |
 | `proxy/`, `telemetry/`, `video/` | their own `README.md` |
@@ -82,7 +83,7 @@ npm run build:packages # publishable dist/ of both packages
 
 ## Architecture map
 
-Four esbuild targets (`esbuild.js`, each in both build and watch branches):
+Five esbuild targets (`esbuild.js`, each in both build and watch branches):
 
 | Target | Source → output | Notes |
 |---|---|---|
@@ -90,6 +91,7 @@ Four esbuild targets (`esbuild.js`, each in both build and watch branches):
 | Webview | `webview/` → `dist/webview.js` + `.css` | browser IIFE, React; ELK worker injected via `define` (`importScripts()` is unavailable in webviews) |
 | Manifest worker | `src/workers/manifestWorker.ts` → `dist/manifestWorker.js` | worker thread, plain `JSON.parse` |
 | CLI | `src/cli/index.ts` → `dist/cli.js` | Node 18, **no `external`**: an `import 'vscode'` anywhere in its graph breaks the build (`test/unit/cli.noVscode.test.ts`) |
+| SQL importer | `src/services/sqlImportEngine.ts` → `dist/sqlImport.js` | Node 18, `@dbml/core`'s SQL grammars (Oracle stubbed); `require`d at run time by `sqlImportLoader.ts` on the first **Import SQL DDL…**. Never import `sqlImportEngine.ts` from host code (`test/unit/sqlDdlImport.test.ts` checks the bundles' inputs) |
 
 - Two tsconfigs: `tsconfig.json` (Node) and `tsconfig.webview.json` (DOM, includes `src/types/**`). `@types/vscode` is pinned to `1.85.0` to match `engines.vscode` — **use no newer VS Code APIs**.
 - **Packages are built from source** in the extension: tsconfig `paths` and vitest aliases point `@erd-studio/core` / `@erd-studio/renderer` at `packages/*/src`; their `exports` point only at `dist/`. Core owns the pure raw-files → `DisplaySubjectArea` pipeline and the Mermaid / DBML exporters; host services delegate to it and keep only file access, caching and messaging. The renderer owns the canvas; its components post edits through `CanvasHost`, never `acquireVsCodeApi()`.

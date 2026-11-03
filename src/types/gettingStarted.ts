@@ -153,7 +153,7 @@ export interface GettingStartedStatus {
   hasProject: boolean;
   /**
    * The open folder has no `dbt_project.yml`: the page leads with New diagram
-   * and Import DBML in place of the dbt steps, and names no dbt anywhere.
+   * and Import in place of the dbt steps, and names no dbt anywhere.
    * Optional and additive: absent means a dbt project (the page as
    * it was before logical-only mode). The panel host fills it from
    * `GettingStartedDeps.logicalOnly` when `getStatus()` leaves it out.
@@ -1037,7 +1037,7 @@ export const START_LABELS: Readonly<Record<StartAction, string>> = {
   convert: 'Convert to DBML',
   drawFromDbt: 'Draw from dbt',
   blank: 'New diagram',
-  import: 'Import DBML&hellip;',
+  import: 'Import&hellip;',
   example: 'Open an example&hellip;',
 };
 
@@ -1184,8 +1184,8 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         <div class="gs-step__body">
           <h3 class="gs-step__title" ${only('unknown', 'nofolder', 'logical')}>Start your data model</h3>
           <h3 class="gs-step__title" ${only('dbt')}>Draw your dbt project &mdash; no AI needed</h3>
-          <p class="gs-step__text" ${only('unknown', 'nofolder', 'logical')}>Add tables on a blank canvas, start from a DBML file, or open a finished example.</p>
-          <p class="gs-step__text" ${only('dbt')}>Copies your dbt models and tests into a diagram you can edit. Or start blank, from a DBML file, or from a finished example.</p>
+          <p class="gs-step__text" ${only('unknown', 'nofolder', 'logical')}>Add tables on a blank canvas, import one from DBML, SQL DDL or a Power BI semantic model, or open a finished example.</p>
+          <p class="gs-step__text" ${only('dbt')}>Copies your dbt models and tests into a diagram you can edit. Or start blank, import from DBML, SQL DDL or a Power BI semantic model, or open a finished example.</p>
           <div class="gs-step__actions" data-start-group="first">
             ${startButtons('gs-btn')}
           </div>

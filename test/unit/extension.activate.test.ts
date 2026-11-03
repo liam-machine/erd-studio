@@ -407,7 +407,8 @@ describe('activate() with a dbt project', () => {
     expect(collapsible).toEqual(['erdStudio.domainTree', 'erdStudio.modelLibrary', 'erdStudio.relationships']);
     // The Explorer's tooltips only: the sidebar draws layer colours with its own icons.
     expect(registerDecorations).toHaveBeenCalledTimes(1);
-    expect(context.subscriptions.length).toBeGreaterThan(CONTRIBUTED.length * 2);
+    // Every contributed command once, plus a dbtSemantic.* alias for each pre-rename one, plus the rest.
+    expect(context.subscriptions.length).toBeGreaterThan(CONTRIBUTED.length + CONTRIBUTED.filter((c) => !NO_LEGACY_ALIAS.has(c)).length);
   });
 
   it('groups the Relationships view by table by default, or by file from its title toggle, remembered for the workspace', async () => {
@@ -2080,7 +2081,7 @@ describe('Welcome panel: first run', () => {
       watchLogical: '!erdStudio.hasDbtProject',
       enrich: null,
     });
-    expect(walkthrough.description).toBe('Design your data model in Git: from scratch, from DBML or from an example, then let your AI assistant fill in the detail.');
+    expect(walkthrough.description).toBe('Design your data model in Git: from scratch, from an import (DBML, SQL DDL or a Power BI semantic model) or from an example, then let your AI assistant fill in the detail.');
     // The dbt tour is unchanged in a dbt project; a folder without dbt gets the same video under neutral words.
     expect(step('watch').description).toContain('draw your dbt project with Draw from dbt');
     expect(step('watchLogical').title).toBe('Watch the one-minute tour');
@@ -2090,7 +2091,9 @@ describe('Welcome panel: first run', () => {
     // Every start is one click through erdStudio.start, which counts where it came from: one button, the rest quiet links.
     expect(step('newDiagram').title).toBe('Start your data model');
     expect(step('newDiagram').description).toContain(`[New Diagram](${startCommandLink('blank', 'walkthrough')})`);
-    expect(step('newDiagram').description).toContain(`[import a DBML file](${startCommandLink('import', 'walkthrough')})`);
+    // Import… offers DBML, SQL DDL and a Power BI semantic model; DBML stays "an open format".
+    expect(step('newDiagram').description).toContain(`[import a data model](${startCommandLink('import', 'walkthrough')}): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in), SQL DDL scripts or a Power BI semantic model.`);
+    expect(step('draw').description).toContain(`[from an import](${startCommandLink('import', 'walkthrough')}) (DBML, an open format, no lock-in; SQL DDL scripts; or a Power BI semantic model)`);
     expect(step('newDiagram').description).toContain(`[open an example](${startCommandLink('example', 'walkthrough')})`);
     expect(step('draw').description).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'walkthrough')})`);
     expect(step('draw').description).toContain(`[blank](${startCommandLink('blank', 'walkthrough')})`);
@@ -2104,7 +2107,8 @@ describe('Welcome panel: first run', () => {
     expect(step('openDiagram').title).toBe('Open a diagram from this project');
     expect(step('openDiagram').description).toContain('[Open Diagram](command:erdStudio.openDomain)');
     expect(step('openDiagram').completionEvents).toEqual(['onCommand:erdStudio.openDomain']);
-    expect(step('newDiagram').completionEvents).toEqual(['onCommand:erdStudio.createDomain', 'onCommand:erdStudio.importDbml', 'onCommand:erdStudio.openExampleProject', 'onCommand:erdStudio.start']);
+    expect(step('newDiagram').completionEvents).toEqual(['onCommand:erdStudio.createDomain', 'onCommand:erdStudio.importDbml', 'onCommand:erdStudio.importModel', 'onCommand:erdStudio.openExampleProject', 'onCommand:erdStudio.start']);
+    expect(step('draw').completionEvents).toEqual(['onCommand:erdStudio.drawFromDbt', 'onCommand:erdStudio.createDomain', 'onCommand:erdStudio.importDbml', 'onCommand:erdStudio.importModel', 'onCommand:erdStudio.start']);
     // Native DBML storage (2.0): format-neutral, because the step also shows in a YAML project from before 2.0;
     // its picture shows a new project, which is DBML.
     expect(step('newDiagram').description).toContain('Each table is a file in .erd-studio/');
@@ -2668,6 +2672,139 @@ describe('a cloned project opens its own diagrams (onboarding)', () => {
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('Orders' as never);
     await vscode.commands.executeCommand('erdStudio.createDomain');
     expect(hasDiagrams()).toEqual([false, true]);
+  });
+
+  it('funnel: a first run here counts firstRun and firstRunHasDiagrams, the notice counts as shown, and Open counts', async () => {
+    const globalState = new Map<string, unknown>();
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState });
+    const feature = vi.spyOn(telemetry, 'feature');
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string, ...items: string[]) =>
+      (message.startsWith('This project has') ? items[0] : undefined)) as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+
+    await activate(context);
+
+    expect(nudges(info)).toHaveLength(1);
+    const once = featureOnce.mock.calls.map((c) => c[0]);
+    expect(once).toContain('firstRun');
+    expect(once).toContain('firstRunHasDiagrams');
+    // The walkthrough was not offered here (the project has diagrams), so it did not "wait".
+    expect(once).not.toContain('walkthroughWaited');
+    await vi.waitFor(() => expect(exec.mock.calls.some((c) => c[0] === 'erdStudio.openDomain')).toBe(true));
+    const counted = feature.mock.calls.map((c) => c[0]);
+    expect(counted.filter((k) => k === 'diagramsNudgeShown')).toHaveLength(1);
+    expect(counted.filter((k) => k === 'diagramsNudgeOpened')).toHaveLength(1);
+    expect(counted).not.toContain('walkthroughOpened');
+  });
+
+  it('funnel: the walkthrough owed in a later project of the same window waits for the next one, and says so', async () => {
+    const globalState = new Map<string, unknown>();
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState });
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const opens = spyWalkthrough();
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context); // the diagrams notice has this window
+
+    // Same extension host (the session gate is not reset), now a folder with no diagrams.
+    for (const sub of [...context.subscriptions].reverse()) { (sub as { dispose(): void }).dispose(); }
+    context.subscriptions.length = 0;
+    vscode._resetRegisteredCommands();
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    featureOnce.mockClear();
+    await activate(context);
+
+    expect(opens()).toHaveLength(0);
+    expect(featureOnce.mock.calls.map((c) => c[0])).toContain('walkthroughWaited');
+    // Not the machine's first run any more.
+    expect(featureOnce.mock.calls.map((c) => c[0])).not.toContain('firstRun');
+    expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBe(true);
+  });
+});
+
+describe('first run, measured (onboarding funnel)', () => {
+  it('a fresh install counts firstRun once and opens the walkthrough; an upgrade or a machine that saw it counts nothing', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    openWorkspace(root);
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    const once = () => featureOnce.mock.calls.map((c) => c[0]);
+    const opens = spyWalkthrough();
+    context = makeContext(root, { globalState: new Map<string, unknown>(), workspaceState: new Map<string, unknown>() });
+
+    await activate(context);
+    expect(once().filter((k) => k === 'firstRun')).toHaveLength(1);
+    expect(once()).not.toContain('firstRunHasDiagrams');
+    expect(once()).not.toContain('walkthroughWaited');
+    expect(opens()).toHaveLength(1);
+
+    // The next window: lastActivatedVersion is stored, so it is not a first run.
+    tearDownActivation();
+    featureOnce.mockClear();
+    await activate(context);
+    expect(once()).not.toContain('firstRun');
+
+    // An upgrader, and an install that already saw the Welcome panel.
+    for (const globalState of [new Map<string, unknown>([['lastActivatedVersion', '1.6.2']]), new Map<string, unknown>([[GETTING_STARTED_SHOWN_KEY, true]])]) {
+      tearDownActivation();
+      featureOnce.mockClear();
+      context = makeContext(root, { globalState });
+      await activate(context);
+      expect(once()).not.toContain('firstRun');
+    }
+  });
+
+  it('counts firstRun in an empty window too (before the no-project early return)', async () => {
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    context = makeContext(root, { globalState: new Map<string, unknown>() });
+    spyWalkthrough();
+    await activate(context);
+    expect(featureOnce.mock.calls.map((c) => c[0])).toContain('firstRun');
+  });
+});
+
+describe('Import…, Import SQL DDL… and Import Semantic Model…', () => {
+  it('are registered once with a project (no legacy alias), and are open-a-folder stubs in an empty window', async () => {
+    const ids = ['erdStudio.importModel', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel'];
+    await activate(context); // empty window
+    for (const id of ids) {
+      expect(count(id), id).toBe(1);
+      expect(count(legacyAlias(id)), id).toBe(0);
+    }
+    tearDownActivation();
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    await activate(context);
+    for (const id of ids) {
+      expect(count(id), id).toBe(1);
+      expect(count(legacyAlias(id)), id).toBe(0);
+    }
+  });
+
+  it('the start screen\'s Import runs Import…, which offers the three sources and runs the one picked', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    await activate(context);
+    const feature = vi.spyOn(telemetry, 'feature');
+    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ source?: string }>) =>
+      items.find((i) => i.source === 'sqlDdl')) as never);
+    const ran: string[] = [];
+    const real = vscode.commands.executeCommand;
+    vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) => {
+      ran.push(command);
+      if (command === 'erdStudio.importSqlDdl') return undefined; // the SQL flow has its own tests
+      return real(command, ...args);
+    }) as never);
+
+    await vscode.commands.executeCommand(START_COMMAND, { action: 'import', from: 'sidebar' });
+
+    expect(ran).toContain('erdStudio.importModel');
+    expect(ran).toContain('erdStudio.importSqlDdl');
+    const sources = (pick.mock.calls[0][0] as Array<{ source: string }>).map((i) => i.source);
+    expect([...sources].sort()).toEqual(['dbml', 'semanticModel', 'sqlDdl']);
+    expect(feature.mock.calls.map((c) => c[0])).toEqual(['sidebarImport', 'importPickSqlDdl']);
   });
 });
 

@@ -337,39 +337,71 @@ Why installs stop using ERD Studio, step by step. The start screen
 (`src/types/startActions.ts`) offers the same one-click starts on the Welcome
 panel, the Get Started walkthrough and the empty Diagrams view: Convert to
 DBML (projects from before 2.0 only), Draw from dbt (dbt projects only), New
-Diagram, Import DBML and Open an Example. Every click goes through
-`erdStudio.start`, which counts **which start, on which surface**. All keys
-are `features`, so no D1 migration was needed; none holds a name, path or
-message. They are appended after the native DBML keys:
+Diagram, Import… and Open an Example. Every click goes through
+`erdStudio.start`, which counts **which start, on which surface**. Import…
+(`erdStudio.importModel`) then asks which source: a DBML file, SQL DDL
+scripts or a Power BI / Fabric semantic model, each its own command with its
+own keys. All keys are `features` or `errors`, so no D1 migration was needed;
+none holds a name, path or message (the conversions' skipped lists name
+tables and measures, so only their outcome is counted). They are appended
+after the native DBML keys:
 
 | Step | Keys |
 |---|---|
-| Saw a start screen | `walkthroughOpened` (opened by ERD Studio on first run), `gettingStartedOpened`, `sidebarStartShown` (once a day: the empty Diagrams view, with its starts, was drawn) |
-| Chose a start | `welcomeBlank` `welcomeImport` `welcomeExample` `welcomeConvert` `welcomeDrawFromDbt`; `walkthroughBlank` … `walkthroughDrawFromDbt`; `sidebarBlank` … `sidebarDrawFromDbt` (`welcomeOpenDiagram` is a returning user's "Open your diagrams") |
-| Left without choosing | `welcomeLeftNoChoice` (the Welcome panel closed with no button pressed) |
-| Gave up inside a start | `blankDiagramCancelled`, `importDbmlCancelled`, `exampleCancelled`, `drawCancelScope` / `drawCancelLayer` / `drawCancelName`, `convertToDbmlCancelled` |
-| Got a diagram | `domainCreated` / `blankDiagram`, `importDbml`, `exampleOpened` / `exampleReopened` (+ which: `exampleEnterpriseWarehouse`, `exampleMedallion`, `exampleDbtProjectLayers`, `exampleKimballBusMatrix`, `exampleDataVault`, `exampleGitlabStyle`, `exampleBigqueryVersioned`, `exampleDataMesh`), `drawFromDbt`, `convertToDbml` |
+| A true first run | `firstRun` (at most 1: the first activation on this machine, the one that owes the walkthrough; from the 2.0 release on). `tenure = '0'` alone is **not** a new install: see below |
+| Saw a start screen | `walkthroughOpened` (opened by ERD Studio on first run), `gettingStartedOpened`, `sidebarStartShown` (once a day: the empty Diagrams view, with its starts, was drawn), `diagramsNudgeShown` (a project that already had diagrams got "This project has N ERD Studio diagrams" instead: a teammate's clone's start screen; `firstRunHasDiagrams` marks such a first run) |
+| Owed but waited | `walkthroughWaited` (at most 1: the walkthrough was owed, but another prompt had this window; expected near 0) |
+| Chose a start | `welcomeBlank` `welcomeImport` `welcomeExample` `welcomeConvert` `welcomeDrawFromDbt`; `walkthroughBlank` … `walkthroughDrawFromDbt`; `sidebarBlank` … `sidebarDrawFromDbt` (`welcomeOpenDiagram` is a returning user's "Open your diagrams"); `diagramsNudgeOpened` (its Open button) |
+| Picked an import source | `importPickDbml`, `importPickSqlDdl`, `importPickSemanticModel`; `importPickCancelled` (the source picker was closed) |
+| Gave up inside a start | `blankDiagramCancelled`, `importDbmlCancelled`, `importSqlDdlCancelled`, `importSemanticModelCancelled`, `exampleCancelled`, `drawCancelScope` / `drawCancelLayer` / `drawCancelName`, `convertToDbmlCancelled` |
+| The user's files did not read | `importDbmlInvalid`, `importSqlDdlInvalid` (+ the dialect it ran as: `importSqlDialectPostgres`, `importSqlDialectMysql`, `importSqlDialectSqlserver`, `importSqlDialectSnowflake`, `importSqlDialectDatabricks`, counted when the conversion runs), `importSemanticModelInvalid` |
+| Got a diagram | `domainCreated` / `blankDiagram`, `importDbml`, `importSqlDdl`, `importSemanticModel`, `exampleOpened` / `exampleReopened` (+ which: `exampleEnterpriseWarehouse`, `exampleMedallion`, `exampleDbtProjectLayers`, `exampleKimballBusMatrix`, `exampleDataVault`, `exampleGitlabStyle`, `exampleBigqueryVersioned`, `exampleDataMesh`), `drawFromDbt`, `convertToDbml` |
 | Landed on the canvas | `canvasOpens`, `exampleDiagramShown` (the example's first diagram opened in its new window) |
-| Broke | errors `exampleWriteFailed`, `importDbmlFailed`, `drawFromDbtFailed`, `walkthroughFailed`, `welcomePanelFailed`, `domainLoad*` |
+| Broke | errors `exampleWriteFailed`, `importDbmlFailed`, `importSqlDdlFailed` (the SQL importer did not load, or converting or writing failed), `importSemanticModelFailed`, `drawFromDbtFailed`, `walkthroughFailed`, `welcomePanelFailed`, `domainLoad*` |
 
 A row is one install-day, so the funnel is built per install over its first
 days (the install id stays inside the query; only counts come out). Read it
 for a cohort that has had a week to come back, and compare cohorts across
 releases: a step that falls is where to look.
 
+**Who counts as a new install.** `tenure = '0'` means the first activation
+of a **telemetry-bearing version** on that machine (`firstSeenDay` is set by
+the first 1.5.0+ activation), not the install date: anyone who installed
+before telemetry shipped (2026-09-25) got tenure `0` the day they first ran
+1.5.0 or later, with their old `gettingStartedShown` state, so no start
+screen. The start keys exist only from **1.6.3** (`walkthroughOpened`,
+`gettingStartedOpened`), so a day-0 row from 1.5.0–1.6.2 cannot show a
+start. So the funnel drops installs whose day-0 row is from a version before
+1.6.3 or from the launch period (before 2026-10-05), and `fresh` marks
+day-0 rows with no `.erd-studio`, no diagrams and no harness. From the 2.0
+release on, `firstRun` is the denominator: a tenure-0 install without it is
+a returning user. A day-0 row only arrives when the install activates again
+on a later UTC day (the heartbeat for a day is sent by a later activation),
+so an install that tried ERD Studio once and never came back is not in any
+cohort.
+
 ```bash
-# The funnel: installs first seen 8–35 days ago, each counted once at the furthest step it reached.
+# The funnel: installs first seen 8–35 days ago (and on or after 2026-10-05), each counted once at the furthest step it reached.
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
-  "WITH firsts AS (
+  "WITH firsts0 AS (
      SELECT install_id, MIN(day) AS d0 FROM heartbeats
-     WHERE tenure = '0' AND COALESCE(dev, 0) = 0 AND day >= date('now', '-35 days') AND day < date('now', '-7 days')
+     WHERE tenure = '0' AND COALESCE(dev, 0) = 0
      GROUP BY install_id),
+   firsts AS (
+     SELECT f.install_id, f.d0,
+       (d.has_semantic_dir = 0 AND d.domain_count = '0'
+         AND NOT EXISTS (SELECT 1 FROM json_each(d.features) j WHERE j.key GLOB 'harness*')) AS fresh
+     FROM firsts0 f JOIN heartbeats d ON d.install_id = f.install_id AND d.day = f.d0
+     WHERE f.d0 >= '2026-10-05' AND f.d0 >= date('now', '-35 days') AND f.d0 < date('now', '-7 days')
+       AND d.ext_version NOT IN ('1.5.0', '1.5.1', '1.6.0', '1.6.1', '1.6.2')),
    per AS (
-     SELECT f.install_id,
-       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('walkthroughOpened', 'gettingStartedOpened', 'sidebarStartShown'))) AS saw_start,
-       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE (j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough[A-Z]*' OR j.key GLOB 'sidebar[A-Z]*' OR j.key = 'drawStarted')
-         AND j.key NOT IN ('walkthroughOpened', 'sidebarStartShown', 'welcomeLeftNoChoice', 'welcomeOpenDiagram'))) AS chose_start,
-       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('domainCreated', 'blankDiagram', 'importDbml', 'exampleDiagram', 'exampleOpened', 'exampleReopened', 'drawFromDbt', 'convertToDbml', 'domainCreatedExternal'))) AS got_diagram,
+     SELECT f.install_id, MAX(f.fresh) AS fresh,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key = 'firstRun')) AS first_run,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('walkthroughOpened', 'gettingStartedOpened', 'sidebarStartShown', 'diagramsNudgeShown'))) AS saw_start,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE ((j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough[A-Z]*' OR j.key GLOB 'sidebar[A-Z]*')
+         AND j.key NOT IN ('walkthroughOpened', 'walkthroughWaited', 'sidebarStartShown', 'welcomeLeftNoChoice', 'welcomeOpenDiagram'))
+         OR j.key IN ('drawStarted', 'diagramsNudgeOpened'))) AS chose_start,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('domainCreated', 'blankDiagram', 'importDbml', 'importSqlDdl', 'importSemanticModel', 'exampleDiagram', 'exampleOpened', 'exampleReopened', 'drawFromDbt', 'convertToDbml', 'domainCreatedExternal'))) AS got_diagram,
        MAX(h.canvas_opens > 0) AS opened_canvas,
        MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('editModel', 'editColumn', 'editKey', 'editDetails', 'editRelationship', 'addModel', 'addRelationship', 'addFromDbt'))) AS edited,
        MAX(h.day > f.d0) AS came_back,
@@ -377,26 +409,39 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
        MAX(h.day >= date(f.d0, '+7 days')) AS week_later
      FROM firsts f JOIN heartbeats h ON h.install_id = f.install_id AND COALESCE(h.dev, 0) = 0
      GROUP BY f.install_id)
-   SELECT COUNT(*) AS s1_installed, SUM(saw_start) AS s2_saw_start, SUM(chose_start) AS s3_chose_start,
+   SELECT COUNT(*) AS s1_installed, SUM(fresh) AS s1_fresh, SUM(first_run) AS s1_first_run,
+     SUM(saw_start) AS s2_saw_start, SUM(saw_start AND fresh) AS s2_fresh_saw_start, SUM(saw_start AND first_run) AS s2_first_run_saw_start,
+     SUM(chose_start) AS s3_chose_start,
      SUM(got_diagram) AS s4_got_diagram, SUM(opened_canvas) AS s5_opened_canvas, SUM(edited) AS s6_edited,
      SUM(came_back) AS s7_came_back, SUM(canvas_later) AS s8_canvas_another_day, SUM(week_later) AS s9_week_later
    FROM per"
 
-# Which start, on which surface (28 days, installs): what to keep, what to drop.
+# Which start, on which surface, and which import source (28 days, installs): what to keep, what to drop.
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS clicks FROM heartbeats h, json_each(h.features) j
    WHERE h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0
-     AND (j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough*' OR j.key GLOB 'sidebar*' OR j.key GLOB 'example*' OR j.key GLOB '*Cancel*')
+     AND (j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough*' OR j.key GLOB 'sidebar*' OR j.key GLOB 'example*' OR j.key GLOB 'import*'
+       OR j.key GLOB 'firstRun*' OR j.key GLOB 'diagramsNudge*' OR j.key GLOB '*Cancel*')
    GROUP BY j.key ORDER BY installs DESC"
 ```
 
-Investigate when: `s3_chose_start` is far below `s2_saw_start` (the start
+Read `s2_saw_start / s1_installed` per weekly cohort (from 2026-10-05 it is
+about 64%; about 73% of fresh-looking installs). Once 2.0 ships, read
+`s2_first_run_saw_start / s1_first_run` instead (expected above 90%): a
+first run that saw no start is a real miss.
+
+Investigate when: `s2_first_run_saw_start` is well below `s1_first_run`
+(a true first run missed the walkthrough: look at `walkthroughWaited` and
+`walkthroughFailed`); `s3_chose_start` is far below `s2_saw_start` (the start
 screen does not persuade); `s4_got_diagram` is far below `s3_chose_start` (a
-start's own prompts lose people: look at its `*Cancelled` key); `exampleOpened`
-well above `exampleDiagramShown` (the new window does not open the diagram);
-`welcomeLeftNoChoice` above half of `gettingStartedOpened`; any
-`exampleWriteFailed`. D1 refuses a compound `SELECT` of many `UNION`s, which
-is why the funnel is one row of columns.
+start's own prompts lose people: look at its `*Cancelled` key, and for an
+import at `importPickCancelled` and the source's `*Invalid`); a SQL dialect
+whose `importSqlDialect*` count is high next to `importSqlDdlInvalid` (its
+scripts fail to read); `exampleOpened` well above `exampleDiagramShown` (the
+new window does not open the diagram); `welcomeLeftNoChoice` above half of
+`gettingStartedOpened`; any `exampleWriteFailed`, `importSqlDdlFailed` or
+`importSemanticModelFailed`. D1 refuses a compound `SELECT` of many
+`UNION`s, which is why the funnel is one row of columns.
 
 ### Relationship health (#133)
 

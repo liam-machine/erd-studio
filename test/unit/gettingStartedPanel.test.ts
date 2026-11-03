@@ -287,7 +287,7 @@ describe('panel script', () => {
       expect(visible('[data-step="convert"]')).toEqual([]);
       expect(visible('[data-step="begin"] .gs-step__title')).toEqual(['Draw your dbt project \u2014 no AI needed']);
       expect(visible('[data-step="begin"] .gs-btn--primary')).toEqual(['Draw from dbt']);
-      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['Draw from dbt', 'New diagram', 'Import DBML\u2026', 'Open an example\u2026']);
+      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['Draw from dbt', 'New diagram', 'Import\u2026', 'Open an example\u2026']);
       expect(visible('[data-step="begin"] .gs-link')).toEqual([]);
       expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4']);
       expect(doc.querySelector('.gs-project-path')?.textContent).toBe('jaffle_shop');
@@ -310,7 +310,7 @@ describe('panel script', () => {
       expect(doc.querySelector('.gs-domain-count')?.textContent).toBe('You have 3 diagrams.');
       // Domains exist: "Open your diagrams" leads; the starts drop to one line of links under it.
       expect(visible('[data-step="open"] .gs-btn--primary')).toEqual(['Open your diagrams']);
-      expect(visible('[data-step="open"] .gs-start-more .gs-link')).toEqual(['Draw from dbt', 'New diagram', 'Import DBML\u2026', 'Open an example\u2026']);
+      expect(visible('[data-step="open"] .gs-start-more .gs-link')).toEqual(['Draw from dbt', 'New diagram', 'Import\u2026', 'Open an example\u2026']);
       expect(visible('[data-step="begin"]')).toEqual([]);
       expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4']);
       const shown = [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
@@ -451,7 +451,7 @@ describe('panel script', () => {
     }
   });
 
-  it('logical-only: one start card (New diagram, Import DBML, an example), the AI cards and the guided setup, and no dbt step or line', () => {
+  it('logical-only: one start card (New diagram, Import, an example), the AI cards and the guided setup, and no dbt step or line', () => {
     const { dom, posted, send, visible, doc } = runPanelScript(buildGettingStartedHtml(HTML_INPUT));
     try {
       const summary = { modelCount: 3, layering: null, manifest: { state: 'unknown' as const }, line: 'Found 3 dbt models' };
@@ -464,10 +464,10 @@ describe('panel script', () => {
       expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4']);
       expect(visible('[data-step="begin"] .gs-step__title')).toEqual(['Start your data model']);
       expect(visible('[data-step="begin"] .gs-step__text')).toEqual([
-        'Add tables on a blank canvas, start from a DBML file, or open a finished example.',
+        'Add tables on a blank canvas, import one from DBML, SQL DDL or a Power BI semantic model, or open a finished example.',
       ]);
       // One button per start, in startActionsFor order, the first one primary.
-      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Import DBML\u2026', 'Open an example\u2026']);
+      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Import\u2026', 'Open an example\u2026']);
       expect(visible('[data-step="begin"] .gs-btn--primary')).toEqual(['New diagram']);
       // Native DBML storage (2.0): format-neutral, since a YAML project from before 2.0 shows it too.
       expect(visible('[data-step="begin"] .gs-step__text').join()).not.toMatch(/YAML|JSON|\bdbt\b/i);
@@ -517,7 +517,7 @@ describe('panel script', () => {
       expect(withDiagrams).toEqual(['open', 'assistant', 'helper', 'start']);
       expect(visible('[data-step="open"] .gs-step__text span')).toEqual(['You have 2 diagrams.', 'Open one to keep designing.']);
       expect(shownText('[data-step="open"] .gs-start-more')[0]).toMatch(/^Start another: /);
-      expect(visible('[data-step="open"] .gs-start-more .gs-link')).toEqual(['New diagram', 'Import DBML\u2026', 'Open an example\u2026']);
+      expect(visible('[data-step="open"] .gs-start-more .gs-link')).toEqual(['New diagram', 'Import\u2026', 'Open an example\u2026']);
       posted.length = 0;
       click('[data-step="open"] .gs-start-more [data-start="import"]');
       expect(posted).toEqual([{ type: 'start', action: 'import' }]);
@@ -547,7 +547,7 @@ describe('panel script', () => {
         ]);
         expect(visible('[data-step="convert"] .gs-btn--primary')).toEqual(['Convert to DBML']);
         // Convert is the page's primary start, so the start card's buttons are all plain.
-        expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Import DBML\u2026', 'Open an example\u2026']);
+        expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Import\u2026', 'Open an example\u2026']);
         expect(visible('[data-step="begin"] .gs-btn--primary')).toEqual([]);
       }
       // With diagrams the card stays, above "Open your diagrams".
@@ -582,12 +582,12 @@ describe('panel script', () => {
       expect(visible('[data-start]').filter((t) => t !== 'Open an example\u2026' && t !== 'Convert to DBML')).toEqual([]);
       // A status listing an unknown start, or every start (even Draw from dbt), still shows only buttons that exist here.
       send({ type: 'status', payload: { ...STATUS, logicalOnly: true, starts: ['nope', '<b>x</b>', ...START_ACTIONS] as unknown as StartAction[] } });
-      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Import DBML\u2026', 'Open an example\u2026']);
+      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Import\u2026', 'Open an example\u2026']);
       expect(doc.querySelector('[data-step="begin"] b')).toBeNull();
       expect(visible('[data-start="drawFromDbt"]')).toEqual([]);
       // The order follows the status.
       send({ type: 'status', payload: { ...STATUS, logicalOnly: true, starts: ['example', 'import', 'blank'] } });
-      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['Open an example\u2026', 'Import DBML\u2026', 'New diagram']);
+      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['Open an example\u2026', 'Import\u2026', 'New diagram']);
       expect(visible('[data-step="begin"] .gs-btn--primary')).toEqual(['Open an example\u2026']);
     } finally {
       dom.window.close();
@@ -1600,7 +1600,7 @@ describe('GettingStartedPanel', () => {
       convert: 'erdStudio.convertProjectToDbml',
       drawFromDbt: 'erdStudio.drawFromDbt',
       blank: 'erdStudio.createDomain',
-      import: 'erdStudio.importDbml',
+      import: 'erdStudio.importModel',
       example: 'erdStudio.openExampleProject',
     });
     const ran: Array<{ command: string; args: unknown[] }> = [];

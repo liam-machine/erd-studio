@@ -70,6 +70,7 @@ import {
 } from '../services/newSubjectAreaWriter';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../services/recoveryService';
 import { telemetry } from '../services/telemetryService';
+import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import type { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import type { TableLibraryService } from '../services/logicalModelService';
@@ -83,6 +84,56 @@ import { WHICH_LAYER_FOR_DIAGRAM } from '../services/layerWording';
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
 
 const TITLE = 'Import DBML';
+
+/** Where the DBML comes from: the user's file, the built-in example, or a model ERD Studio converted to DBML first. */
+export type ImportDbmlSource = 'file' | 'example' | 'sql' | 'semanticModel';
+
+/** The title every prompt and message of a run shows, per source. */
+export const IMPORT_TITLES: Readonly<Record<ImportDbmlSource, string>> = {
+  file: TITLE,
+  example: TITLE,
+  sql: 'Import SQL DDL',
+  semanticModel: 'Import Semantic Model',
+};
+
+/**
+ * The funnel keys each source counts (`telemetry/README.md`): a finished
+ * import, a cancel at any step, input that could not be read (the user's
+ * file, not a failure) and a failure of ours. The example counts only its
+ * finish, so the Import DBML counts stay the user's own files.
+ */
+export const IMPORT_SOURCE_TELEMETRY: Readonly<Record<ImportDbmlSource, {
+  done: TelemetryFeature;
+  cancelled?: TelemetryFeature;
+  invalid?: TelemetryFeature;
+  failed: TelemetryErrorCode;
+}>> = {
+  file: { done: 'importDbml', cancelled: 'importDbmlCancelled', invalid: 'importDbmlInvalid', failed: 'importDbmlFailed' },
+  example: { done: 'exampleDiagram', failed: 'importDbmlFailed' },
+  sql: { done: 'importSqlDdl', cancelled: 'importSqlDdlCancelled', invalid: 'importSqlDdlInvalid', failed: 'importSqlDdlFailed' },
+  semanticModel: {
+    done: 'importSemanticModel',
+    cancelled: 'importSemanticModelCancelled',
+    invalid: 'importSemanticModelInvalid',
+    failed: 'importSemanticModelFailed',
+  },
+};
+
+/**
+ * A model ERD Studio converted to DBML before the import (SQL DDL, a
+ * semantic model): what the dry run says it came from, and what the
+ * conversion left out or changed. Shown to the user only, never counted.
+ */
+export interface ImportDbmlOrigin {
+  /** After "Import N tables" in the dry run's headline: `from 2 SQL files (PostgreSQL)`. */
+  from: string;
+  /** The new diagram's description (default: the DBML's Project note). */
+  description?: string;
+  /** Kept, but worth saying (renamed tables, inferred keys…), one point each. */
+  notes?: readonly string[];
+  /** What the conversion left out, counted by kind, one point each. */
+  skipped?: readonly string[];
+}
 
 export { ADD_LAYER_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON, NO_LAYERS_MESSAGE, OPEN_IT_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
 export const IMPORT_BUTTON = 'Import';
@@ -138,12 +189,18 @@ export interface ImportDbmlDeps {
   onWritten: (written: { domainPath: string; modelNames: string[]; changedModelNames: string[] }) => void;
   ui?: ImportDbmlUi;
   /**
-   * `'example'` when Open Example Diagram supplies the DBML: a finished run
-   * counts `exampleDiagram` instead of `importDbml`, and a cancel counts
-   * nothing, so the Import DBML counts stay the user's own files. It travels
-   * with `deps`, so Try Again and Choose Another Name keep it. Default `'file'`.
+   * Where the DBML comes from (default `'file'`). `'example'` when Open
+   * Example Diagram supplies it: a finished run counts `exampleDiagram`
+   * instead of `importDbml`, and a cancel counts nothing, so the Import DBML
+   * counts stay the user's own files. `'sql'` / `'semanticModel'` when Import
+   * SQL DDL… / Import Semantic Model… converted the user's files to DBML:
+   * the run shows that command's title and counts its own keys
+   * ({@link IMPORT_SOURCE_TELEMETRY}). It travels with `deps`, so Try Again
+   * and Choose Another Name keep it.
    */
-  source?: 'file' | 'example';
+  source?: ImportDbmlSource;
+  /** With `'sql'` / `'semanticModel'`: what the dry run says about the conversion. */
+  origin?: ImportDbmlOrigin;
 }
 
 /**
@@ -173,7 +230,7 @@ export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume
   try {
     return await runImportDbml(deps, ui, resume);
   } catch (err) {
-    telemetry.error('importDbmlFailed');
+    telemetry.error(IMPORT_SOURCE_TELEMETRY[deps.source ?? 'file'].failed);
     throw err;
   }
 }
@@ -198,9 +255,13 @@ export function describeInvalidDbml(fileName: string, diagnostics: readonly Dbml
 
 async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: ImportDbmlResume): Promise<ImportDbmlResult | undefined> {
   const { workspaceRoot, semanticDir, layerService, subjectAreaService, tableLibraryService } = deps;
-  const fromExample = deps.source === 'example';
+  const source = deps.source ?? 'file';
+  const counts = IMPORT_SOURCE_TELEMETRY[source];
+  const title = IMPORT_TITLES[source];
+  /** DBML ERD Studio wrote itself (a conversion, the example): a problem in it is ours, not the user's. */
+  const generated = source !== 'file';
   const cancelled = (): undefined => {
-    if (!fromExample) telemetry.feature('importDbmlCancelled');
+    if (counts.cancelled) telemetry.feature(counts.cancelled);
     return undefined;
   };
 
@@ -208,12 +269,12 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   const showError = (message: string, actions: ErrorActions = {}): void => {
     // A button that fails (a re-run whose read throws) still says so, rather than seeming to do nothing.
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
-      log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+      log.error(`[ERD Studio] ${title}: "${choice}" failed:`, err);
       const doing = `while running ${choice}`;
-      showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
+      showError(oursMessage(title, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
     });
   };
-  const sendFeedback = (doing: string, err: unknown) => (): unknown => ui.sendFeedback(feedbackPrefill(TITLE, doing, err));
+  const sendFeedback = (doing: string, err: unknown) => (): unknown => ui.sendFeedback(feedbackPrefill(title, doing, err));
 
   // 1. The file.
   const filePath = resume?.filePath ?? await ui.pickFile(workspaceRoot || undefined);
@@ -226,8 +287,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   try {
     text = stripBom(await ui.readFile(filePath));
   } catch (err) {
-    log.error(`[ERD Studio] ${TITLE}: could not read the file:`, err);
-    showError(`${TITLE} couldn't read ${fileName}. Check that the file still exists and that you can open it, then try again.`, {
+    log.error(`[ERD Studio] ${title}: could not read the file:`, err);
+    showError(`${title} couldn't read ${fileName}. Check that the file still exists and that you can open it, then try again.`, {
       [TRY_AGAIN_BUTTON]: again(),
     });
     return undefined;
@@ -236,17 +297,27 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   // Loaded on first use: the parser is a third of the bundle, and only this command needs it.
   const { readDbml, readDbmlImportLayout } = await import('../services/dbmlImportParse');
   const read = readDbml(text);
+  if (!read.ok && generated) {
+    // DBML ERD Studio converted itself and cannot read back: our failure.
+    telemetry.error(counts.failed);
+    log.error(`[ERD Studio] ${title}: the converted DBML does not read:`, read.diagnostics.slice(0, 5).map((d) => `line ${d.line}: ${d.message}`).join('; '));
+    const doing = 'while reading the converted model';
+    showError(oursMessage(title, doing, 'nothing was changed'), {
+      [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, new Error(read.diagnostics[0]?.message ?? 'unreadable DBML')),
+    });
+    return undefined;
+  }
   if (!read.ok) {
-    if (!fromExample) telemetry.feature('importDbmlInvalid');
+    if (counts.invalid) telemetry.feature(counts.invalid);
     const first = read.diagnostics[0];
-    showError(read.importsOtherFiles ? `${TITLE}: ${first.message}` : describeInvalidDbml(fileName, read.diagnostics), {
+    showError(read.importsOtherFiles ? `${title}: ${first.message}` : describeInvalidDbml(fileName, read.diagnostics), {
       [OPEN_FILE_BUTTON]: () => ui.openFileAt(filePath, first?.line, first?.column),
     });
     return undefined;
   }
   const model = read.model;
   if (model.tables.length === 0) {
-    void ui.showInformationMessage(`${TITLE}: ${fileName} has no tables, so there is nothing to import.`);
+    void ui.showInformationMessage(`${title}: ${fileName} has no tables, so there is nothing to import.`);
     return undefined;
   }
 
@@ -273,7 +344,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         description: l === suggested ? 'suggested by the file' : (l.id === l.label.toLowerCase() ? undefined : l.id),
         id: l.id,
       })),
-      { title: TITLE, placeHolder: WHICH_LAYER_FOR_DIAGRAM, ignoreFocusOut: true },
+      { title: title, placeHolder: WHICH_LAYER_FOR_DIAGRAM, ignoreFocusOut: true },
     );
     if (!choice) return cancelled();
     layer = choice.id;
@@ -285,7 +356,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   const taken = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)
     .filter((d) => d.layer === chosenLayer).map((d) => d.domain);
   const name = await ui.showInputBox({
-    title: TITLE,
+    title: title,
     prompt: `Name the diagram. It is saved in the ${layerLabel} layer.`,
     value: resume?.name ?? suggestDbmlSubjectAreaName(model, fileName, taken),
     ignoreFocusOut: true,
@@ -340,6 +411,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
       layer: chosenLayer,
       subjectAreaName: slug,
       fileName,
+      ...(deps.origin?.description !== undefined ? { description: deps.origin.description } : {}),
       library: {
         findTableName: (n) => tableLibraryService.findTableNameIgnoringCase(n),
         getTable: (n) => tableLibraryService.getTable(n),
@@ -355,7 +427,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     if (dbml) {
       const refusal = dbmlImportRefusal(plan, (n) => tableLibraryService.tableStorage?.(n));
       if (refusal) {
-        showError(`${TITLE}: ${refusal} Nothing was changed.`);
+        showError(`${title}: ${refusal} Nothing was changed.`);
         return undefined;
       }
     }
@@ -384,9 +456,9 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
       showRefusal(err, 'Nothing was changed.');
       return undefined;
     }
-    telemetry.error('importDbmlFailed');
+    telemetry.error(counts.failed);
     const doing = 'while preparing the import';
-    showError(oursMessage(TITLE, doing, 'nothing was changed'), {
+    showError(oursMessage(title, doing, 'nothing was changed'), {
       [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err),
       [TRY_AGAIN_BUTTON]: tryAgain,
     });
@@ -394,7 +466,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   }
   const showUnsaved = (dirtyPath: string): void => {
     const file = path.relative(path.dirname(tableLibraryService.getTablesDir()), dirtyPath).split(path.sep).join('/');
-    showError(`${TITLE}: ${file} has unsaved changes. Save or revert it, then try again. Nothing was changed.`, {
+    showError(`${title}: ${file} has unsaved changes. Save or revert it, then try again. Nothing was changed.`, {
       [SHOW_FILE_BUTTON]: () => ui.showFile(dirtyPath),
     });
   };
@@ -416,6 +488,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         respelledSchemas: respelled,
       },
     } : {}),
+    ...(deps.origin ? { origin: deps.origin } : {}),
   }).split('\n');
   if (!await ui.confirm(headline, details.join('\n'), IMPORT_BUTTON)) return cancelled();
 
@@ -449,28 +522,24 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
       showRefusal(err, result);
       return undefined;
     }
-    telemetry.error('importDbmlFailed');
+    telemetry.error(counts.failed);
     const why = environmentWriteProblem(err, workspaceRoot, `${semanticDir}/${chosenLayer}`);
     if (!why) {
       const doing = 'while saving the diagram';
       const ours = undone ? 'nothing was changed' : `some files in ${semanticDir}/ may already have changed`;
-      showError(oursMessage(TITLE, doing, ours), {
+      showError(oursMessage(title, doing, ours), {
         [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err),
         [TRY_AGAIN_BUTTON]: tryAgain,
       });
       return undefined;
     }
-    showError(`${TITLE} couldn't save the diagram: ${why} ${result}`, { [TRY_AGAIN_BUTTON]: tryAgain });
+    showError(`${title} couldn't save the diagram: ${why} ${result}`, { [TRY_AGAIN_BUTTON]: tryAgain });
     return undefined;
   }
 
   deps.onWritten({ domainPath, modelNames: outcome.written, changedModelNames: outcome.changed });
-  if (fromExample) {
-    telemetry.feature('exampleDiagram');
-  } else {
-    telemetry.feature('importDbml');
-    if (layout) telemetry.feature('importDbmlLayout');
-  }
+  telemetry.feature(counts.done);
+  if (source === 'file' && layout) telemetry.feature('importDbmlLayout');
 
   await ui.openDiagram(domainPath);
   return { domainPath, plan };
@@ -478,7 +547,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   /** The refusal's own sentence, with Open File when it knows the file. */
   function showRefusal(err: RefusedWrite, outcomeSentence: string): void {
     const location = refusalLocation(err, path.join(workspaceRoot, semanticDir));
-    showError(`${TITLE}: ${err.message} ${outcomeSentence}`, location
+    showError(`${title}: ${err.message} ${outcomeSentence}`, location
       ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(location.filePath, location.line) }
       : {});
   }
@@ -518,6 +587,20 @@ export function respelledSchemas(
     }
   }
   return out;
+}
+
+/**
+ * The import UI with the DBML supplied (a conversion's output, the example):
+ * the "file" is `filePath`, which reads as `text` and is never opened from
+ * disk. Everything else (the pickers, the dry run, opening the diagram) is
+ * `base`'s, so the user still picks the layer, names the diagram and confirms.
+ */
+export function suppliedDbmlUi(base: ImportDbmlUi, filePath: string, text: string): ImportDbmlUi {
+  return {
+    ...base,
+    pickFile: async () => filePath,
+    readFile: async (p) => (p === filePath ? text : base.readFile(p)),
+  };
 }
 
 function stripBom(text: string): string {
