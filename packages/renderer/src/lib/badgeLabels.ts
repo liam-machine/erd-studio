@@ -48,6 +48,38 @@ export const SOURCE_LEGEND_DESC: Record<PhysicalColumnSource, string> = {
   file: 'A source file only — nothing declares its columns',
 };
 
+// ---------------------------------------------------------------------------
+// The viewer's words (ErdCanvas outside VS Code)
+// ---------------------------------------------------------------------------
+//
+// A page that embeds the viewer cannot know whether the project it shows uses
+// dbt, so the viewer never names it. These are the same sources in neutral
+// words; the extension keeps the maps above. Pick with `viewer ? … : …`.
+
+/** Viewer twin of `SOURCE_LABEL`: the manifest chip does not say DBT. */
+export const SOURCE_LABEL_NEUTRAL: Record<PhysicalColumnSource, string> = {
+  catalog: 'WH',
+  yml: 'YML',
+  manifest: 'MNF',
+  file: 'SQL',
+};
+
+/** Viewer twin of `SOURCE_PHRASE`. */
+export const SOURCE_PHRASE_NEUTRAL: Record<PhysicalColumnSource, string> = {
+  catalog: 'the warehouse catalog',
+  yml: 'the schema .yml',
+  manifest: 'the compiled manifest',
+  file: 'the source file only',
+};
+
+/** Viewer twin of `SOURCE_LEGEND_DESC`. */
+export const SOURCE_LEGEND_DESC_NEUTRAL: Record<PhysicalColumnSource, string> = {
+  catalog: 'Warehouse catalog — types read back from the database',
+  yml: 'Schema .yml — the types declared there',
+  manifest: 'The compiled project manifest',
+  file: 'A source file only — nothing declares its columns',
+};
+
 /** Unicode circled numbers for SCD type badges. */
 export const SCD_BADGE: Record<number, string> = {
   0: '⓪', // ⓪

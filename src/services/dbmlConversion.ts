@@ -2330,7 +2330,7 @@ async function displayOf(
 // ---------------------------------------------------------------------------
 
 /** The plan in words: the modal's detail and `erd-studio doctor`'s preview. */
-export function describeDbmlConversion(plan: DbmlConversionPlan): string {
+export function describeDbmlConversion(plan: DbmlConversionPlan, options: { hasDbt?: boolean } = {}): string {
   const lines: string[] = [];
   if (plan.refusals.length > 0) {
     lines.push("Can't convert yet:", ...plan.refusals.map((r) => `• ${r}`), '');
@@ -2349,7 +2349,9 @@ export function describeDbmlConversion(plan: DbmlConversionPlan): string {
       for (const l of plan.leftAsIs) lines.push(`• ${l.path}${l.line !== undefined ? `:${l.line}` : ''}: ${l.problem}`);
     }
     if (plan.keptMissing.length > 0) {
-      lines.push('Kept as missing on their diagrams, drawn as before (create them later with Add from dbt):');
+      lines.push(options.hasDbt === false
+        ? 'Kept as missing on their diagrams, drawn as before (give each a table file later, or remove it from its diagram):'
+        : 'Kept as missing on their diagrams, drawn as before (create them later with Add from dbt):');
       for (const k of plan.keptMissing) lines.push(`• ${k.diagram}: ${k.tables.join(', ')}`);
     }
     if (!dbmlConversionIsEmpty(plan)) {

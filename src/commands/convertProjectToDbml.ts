@@ -98,6 +98,8 @@ export interface ConvertProjectDeps {
   workspaceState?: Pick<vscode.Memento, 'get' | 'update'>;
   /** Close (and forget) the canvases of these files, the JSON diagrams Convert replaced. */
   closeCanvasesOf?: (fsPaths: string[]) => void;
+  /** Whether the folder is a dbt project (default true): the review names Add from dbt only then. */
+  hasDbt?: boolean;
 }
 
 /** The fingerprint of a project Convert last stopped on with nothing it could write (refused, or only files to fix). */
@@ -291,7 +293,7 @@ export function convertIntroLines(plan: DbmlConversionPlan): string[] {
  * file that is on disk under the semantic dir.
  */
 function showConvertPanel(
-  deps: Pick<ConvertProjectDeps, 'workspaceRoot' | 'semanticDir'>,
+  deps: Pick<ConvertProjectDeps, 'workspaceRoot' | 'semanticDir' | 'hasDbt'>,
   plan: DbmlConversionPlan,
   nothingChanged: string,
   v4StepRan = false,
@@ -306,6 +308,7 @@ function showConvertPanel(
     introLines: convertIntroLines(plan),
     nothingChanged,
     v4StepRan,
+    hasDbt: deps.hasDbt !== false,
   });
   const selfCheck = plan.refusals.filter(isDbmlSelfCheckRefusal);
   const feedback = view.reportable && selfCheck.length > 0

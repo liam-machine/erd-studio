@@ -3,8 +3,20 @@
 // step open with its real image; the pointer clicks its Try the sample project button
 // and VS Code's modal confirm (SAMPLE_CONFIRM_MESSAGE, src/providers/GettingStartedPanel.ts)
 // appears with Download. The last content scene, just before the end card.
+//
+// The walkthrough has since dropped its sample step (a folder without dbt now gets the logical
+// cut, script.logical.yaml, which never mentions dbt). This scene keeps the retired step, as the
+// shipped dbt cut shows it, so it still renders; rework or drop it when the dbt cut is next
+// re-rendered (npm test lists that as a todo).
 import { easeOut, lerp, path, pointer, seg } from '../lib.js';
-import { ACT, PLAIN_FOLDER, activityBar, editorWindow, walkButton, walkthrough } from '../editor.js';
+import { ACT, PLAIN_FOLDER, activityBar, editorWindow, visibleSteps, walkButton, walkthrough } from '../editor.js';
+
+/** The walkthrough's former sample step (package.json before the logical cut), as rendered. */
+export const RETIRED_SAMPLE_STEP = {
+  id: 'sample', when: '!erdStudio.hasDbtProject', title: 'Using dbt? Try the sample project', svg: 'sample', button: 'Try the sample project',
+  text: 'A small dbt project to compare a design with what dbt built.',
+};
+const STEPS = [...visibleSteps(PLAIN_FOLDER), RETIRED_SAMPLE_STEP];
 
 // SAMPLE_CONFIRM_MESSAGE and SAMPLE_DOWNLOAD_ACTION (GettingStartedPanel.ts).
 export const CONFIRM = "Download the ERD Studio sample project? It's a small dbt project with fake coffee-shop data from github.com/liam-machine/erd-studio-sample (about 1 MB). You'll choose where to save it.";
@@ -21,7 +33,7 @@ export default {
     const clickAt = S + 2.0;
     const modalAt = clickAt + 0.3;
 
-    let body = `<div class="abs" style="left:${ACT}px;top:0;right:0;bottom:0">${walkthrough({ open: 'sample', ctx: PLAIN_FOLDER, done: [], wide: true, glow: easeOut(seg(t, glowAt, glowAt + 0.4)), press: seg(t, clickAt, clickAt + 0.4) })}</div>`;
+    let body = `<div class="abs" style="left:${ACT}px;top:0;right:0;bottom:0">${walkthrough({ open: 'sample', ctx: PLAIN_FOLDER, steps: STEPS, done: [], wide: true, glow: easeOut(seg(t, glowAt, glowAt + 0.4)), press: seg(t, clickAt, clickAt + 0.4) })}</div>`;
     body += activityBar('erd');
     let html = editorWindow({ tabs: [{ label: 'Welcome', on: true }], crumb: '', body });
 
@@ -35,7 +47,7 @@ export default {
         </div>`;
     }
 
-    const btn = walkButton({ wide: true, open: 'sample', ctx: PLAIN_FOLDER, left: ACT });
+    const btn = walkButton({ wide: true, open: 'sample', ctx: PLAIN_FOLDER, steps: STEPS, left: ACT });
     if (t < modalAt + 0.4) {
       const pt = path(t, [{ t: S, x: 1100, y: 880 }, { t: clickAt - 0.1, x: btn.x, y: btn.y }]);
       const op = Math.min(seg(t, S - 0.1, S + 0.2), 1 - seg(t, modalAt, modalAt + 0.4));

@@ -6,7 +6,9 @@
  * header badges (the layer badge, the schema prefix and physical provenance
  * chips) and the column badges. Without a dbt project (`logicalOnly`) the
  * Physical, ghost, provenance and comparison entries are left out, and in a
- * single-layer project the layer badge, which the canvas does not draw. The badge vocabulary is imported from lib/badgeLabels so the
+ * single-layer project the layer badge, which the canvas does not draw. The
+ * viewer (`useIsViewer`) keeps every entry but never names dbt: a page outside
+ * VS Code cannot know whether the project uses it. The badge vocabulary is imported from lib/badgeLabels so the
  * legend cannot fall out of step with what TableNode actually renders. Positioned in the bottom-left corner, collapsible
  * to a `?` icon button.
  */
@@ -14,9 +16,12 @@
 import { useCallback } from 'react';
 import { Panel } from '@xyflow/react';
 import { useEditorStore } from '../../store/editorStore';
+import { useIsViewer } from '../../host/canvasEnvironment';
 import {
   SOURCE_LABEL,
+  SOURCE_LABEL_NEUTRAL,
   SOURCE_LEGEND_DESC,
+  SOURCE_LEGEND_DESC_NEUTRAL,
   SOURCE_ORDER,
   SCD_BADGE,
   ADDITIVE_BADGE,
@@ -58,6 +63,10 @@ export function Legend() {
   const logicalOnly = useEditorStore((s) => s.logicalOnly) === true;
   // One layer in the project: the canvas draws no layer badge.
   const singleLayer = useEditorStore((s) => (s.domain ? isSingleLayerProject(s.domain) : false));
+  // The viewer cannot know whether the project uses dbt, so it never names it.
+  const viewer = useIsViewer();
+  const sourceLabel = viewer ? SOURCE_LABEL_NEUTRAL : SOURCE_LABEL;
+  const sourceDesc = viewer ? SOURCE_LEGEND_DESC_NEUTRAL : SOURCE_LEGEND_DESC;
 
   const handleToggle = useCallback(() => {
     setLegendOpen(!legendOpen);
@@ -120,7 +129,7 @@ export function Legend() {
                   </div>
                   <div className="legend__item-text">
                     <span className="legend__item-label">Physical</span>
-                    <span className="legend__item-desc">Declared in dbt .yml files (read-only)</span>
+                    <span className="legend__item-desc">{viewer ? 'Built from the project (read-only)' : 'Declared in dbt .yml files (read-only)'}</span>
                   </div>
                 </div>
                 <div className="legend__item">
@@ -129,7 +138,7 @@ export function Legend() {
                   </div>
                   <div className="legend__item-text">
                     <span className="legend__item-label">Ghost</span>
-                    <span className="legend__item-desc">Not found in your dbt project</span>
+                    <span className="legend__item-desc">{viewer ? 'Not found in the project' : 'Not found in your dbt project'}</span>
                   </div>
                 </div>
                 <div className="legend__item">
@@ -138,7 +147,11 @@ export function Legend() {
                   </div>
                   <div className="legend__item-text">
                     <span className="legend__item-label">Ghost, dotted</span>
-                    <span className="legend__item-desc">Disabled in dbt &mdash; <code>ref()</code> to it will not compile</span>
+                    <span className="legend__item-desc">
+                      {viewer
+                        ? <>Disabled in the project &mdash; it is not built</>
+                        : <>Disabled in dbt &mdash; <code>ref()</code> to it will not compile</>}
+                    </span>
                   </div>
                 </div>
               </>
@@ -270,9 +283,9 @@ export function Legend() {
                 {SOURCE_ORDER.map((source) => (
                   <div className="legend__item" key={source}>
                     <span className={`legend__badge legend__badge--source legend__badge--source-${source}`}>
-                      {SOURCE_LABEL[source]}
+                      {sourceLabel[source]}
                     </span>
-                    <span className="legend__item-desc">{SOURCE_LEGEND_DESC[source]}</span>
+                    <span className="legend__item-desc">{sourceDesc[source]}</span>
                   </div>
                 ))}
               </div>
@@ -322,7 +335,9 @@ export function Legend() {
           <section className="legend__section">
             <h3 className="legend__section-title">Comparing Stages</h3>
             <p className="legend__note legend__note--lead">
-              Shown while a comparison is open (Compare with dbt or Compare with design).
+              {viewer
+                ? 'Shown while two stages are compared.'
+                : 'Shown while a comparison is open (Compare with dbt or Compare with design).'}
             </p>
             <div className="legend__items">
               <div className="legend__item">

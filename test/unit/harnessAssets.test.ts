@@ -7,8 +7,11 @@ import {
   AGENTS_SETUP_SKILL_DIR,
   CLAUDE_SETUP_SKILL_DIR,
   CLAUDE_SETUP_SKILL_FILES,
+  DBT_SCOPE_MARKER,
   SETUP_SKILL_DIRS,
   agentSkillFrontmatter,
+  applyDbtScope,
+  setupSkillAssets,
   skillForTarget,
   splitFrontmatter,
 } from '../../src/services/harnessAssets';
@@ -68,8 +71,9 @@ describe('harnessAssets', () => {
     ]);
     for (const asset of CLAUDE_SETUP_SKILL_FILES) {
       const onDisk = fs.readFileSync(path.join(SOURCE_DIR, asset.relativePath), 'utf-8');
-      // The md loader inlines the file verbatim.
-      expect(asset.content).toBe(onDisk);
+      // The md loader inlines the file verbatim; `content` is it as a dbt project installs it.
+      expect(asset.source).toBe(onDisk);
+      expect(asset.content).toBe(applyDbtScope(onDisk, true));
       expect(asset.content.trim().length).toBeGreaterThan(0);
     }
   });
@@ -623,5 +627,156 @@ describe('setup skill: native DBML storage (§7.3)', () => {
     expect(fix).toContain('| kind | Edit (DBML) |');
     // A conflicted relationships file: keep both sides, then doctor reports a Ref twice.
     expect(flat(ref('troubleshooting.md'))).toContain("offer to keep both sides' Ref lines and both sides' `use` lines, then run doctor");
+  });
+});
+
+describe('logical first: the dbt scope of the harness sources', () => {
+  const D = (t: string) => `<!-- dbt-only -->${t}<!-- /dbt-only -->`;
+  const N = (t: string) => `<!-- no-dbt -->${t}<!-- /no-dbt -->`;
+
+  it('keeps a span that applies without its markers, and cuts one that does not', () => {
+    const text = `Run doctor${D(' or diff')}${N(' or export')}.\n`;
+    expect(applyDbtScope(text, true)).toBe('Run doctor or diff.\n');
+    expect(applyDbtScope(text, false)).toBe('Run doctor or export.\n');
+  });
+
+  it('cuts a span covering whole lines with its last line break, leaving no blank line', () => {
+    const text = `a\n${D('dbt line one\ndbt line two')}\n${N('plain line')}\nb\n`;
+    expect(applyDbtScope(text, true)).toBe('a\ndbt line one\ndbt line two\nb\n');
+    expect(applyDbtScope(text, false)).toBe('a\nplain line\nb\n');
+  });
+
+  it('drops the marker lines of the block form (around a code block) when kept', () => {
+    const text = 'a\n<!-- dbt-only -->\n```\nx\n```\n<!-- /dbt-only -->\n<!-- no-dbt -->\n```\ny\n```\n<!-- /no-dbt -->\nb\n';
+    expect(applyDbtScope(text, true)).toBe('a\n```\nx\n```\nb\n');
+    expect(applyDbtScope(text, false)).toBe('a\n```\ny\n```\nb\n');
+  });
+
+  it('reads spans in order, so two side by side behave as if the first were already applied', () => {
+    // A whole-line span cut right after another that ended a line takes no blank line with it.
+    const text = `x\n${N('logical\n')}${D('\ndbt')}\n`;
+    expect(applyDbtScope(text, true)).toBe('x\n\ndbt\n');
+    expect(applyDbtScope(text, false)).toBe('x\nlogical\n');
+  });
+
+  it('leaves text without markers alone', () => {
+    expect(applyDbtScope('no markers\n', true)).toBe('no markers\n');
+    expect(applyDbtScope('no markers\n', false)).toBe('no markers\n');
+  });
+
+  it('every source balances its markers, never nests them, and none survives either scope', () => {
+    for (const asset of CLAUDE_SETUP_SKILL_FILES) {
+      const stack: string[] = [];
+      for (const [, close, kind] of asset.source.matchAll(/<!-- (\/?)(dbt-only|no-dbt) -->/g)) {
+        if (close) {
+          expect(stack.pop(), `${asset.relativePath}: a stray /${kind}`).toBe(kind);
+        } else {
+          expect(stack, `${asset.relativePath}: ${kind} inside ${stack[0]}`).toEqual([]);
+          stack.push(kind);
+        }
+      }
+      expect(stack, asset.relativePath).toEqual([]);
+      expect(applyDbtScope(asset.source, true), asset.relativePath).not.toMatch(DBT_SCOPE_MARKER);
+      expect(applyDbtScope(asset.source, false), asset.relativePath).not.toMatch(DBT_SCOPE_MARKER);
+    }
+  });
+
+  it('a scope never leaves a blank-line run the dbt copy does not have', () => {
+    for (const asset of CLAUDE_SETUP_SKILL_FILES) {
+      if (asset.dbtOnly) continue;
+      const runs = (t: string) => t.match(/\n\n\n+/g)?.length ?? 0;
+      expect(runs(applyDbtScope(asset.source, false)), asset.relativePath).toBeLessThanOrEqual(runs(asset.content));
+      expect(applyDbtScope(asset.source, false).endsWith('\n\n'), asset.relativePath).toBe(false);
+    }
+  });
+});
+
+describe('logical first: the setup skill in a folder without dbt_project.yml', () => {
+  const files = setupSkillAssets(false);
+  const file = (p: string): string => files.find((a) => a.relativePath === p)!.content;
+  const logicalSkill = (): string => file('SKILL.md');
+
+  it('installs no dbt-only reference, and the walkthrough and glossary under names without dbt', () => {
+    expect(files.map((a) => a.relativePath)).toEqual([
+      'SKILL.md',
+      'references/glossary.md',
+      'references/modelling-approaches.md',
+      'references/building-the-model.md',
+      'references/troubleshooting.md',
+      'references/walkthrough.md',
+    ]);
+    expect(setupSkillAssets(true)).toBe(CLAUDE_SETUP_SKILL_FILES);
+    expect(CLAUDE_SETUP_SKILL_FILES.filter((a) => a.dbtOnly).map((a) => a.relativePath)).toEqual([
+      'references/dbt-setup.md', 'references/metadata.md', 'references/verify-and-fix.md',
+    ]);
+  });
+
+  it('carries no dbt instruction or wording in any file', () => {
+    for (const a of files) {
+      expect(a.content, a.relativePath).not.toMatch(/\bdbt\b|dbt_|dbt-|getdbt/i);
+      expect(a.content, a.relativePath).not.toMatch(/Physical tab|Compare with dbt|sync plan|manifest|catalog\.json|\bdrift\b/i);
+    }
+    // Not even the one "Using dbt?" line the dbt project's copy keeps for its own Without dbt route.
+    expect(file('references/walkthrough.md')).not.toContain('Using dbt?');
+    expect(CLAUDE_SETUP_SKILL_FILES.find((a) => a.relativePath === 'references/without-dbt.md')!.content).toContain('Using dbt?');
+  });
+
+  it('has valid frontmatter whose description opens with the purpose, and pre-approves no dbt command', () => {
+    const fm = frontmatter(logicalSkill());
+    expect(fm.name).toBe('erd-studio-setup');
+    expect(typeof fm.description).toBe('string');
+    expect((fm.description as string).length).toBeLessThanOrEqual(1024);
+    expect((fm.description as string).split('.')[0]).toMatch(/^Friendly, step-by-step ERD Studio setup/);
+    const tools = fm['allowed-tools'] as string[];
+    expect(tools).toEqual(expect.arrayContaining(['Read', 'Glob', 'Grep', 'Bash(~/.erd-studio-cli/bin/erd-studio:*)', 'Bash(~/.erd-studio-cli/bin/erd-studio.cmd:*)']));
+    expect(tools.filter((t) => /dbt/i.test(t))).toEqual([]);
+    expect(tools).not.toContain('Edit');
+    expect(tools).not.toContain('Write');
+    // The portable .agents copy parses too.
+    expect(frontmatter(skillForTarget(logicalSkill(), 'agents')).name).toBe('erd-studio-setup');
+  });
+
+  it('hands the whole walkthrough to references/walkthrough.md and runs only doctor and export', () => {
+    const text = logicalSkill().replace(/\s+/g, ' ');
+    expect(text).toContain('Follow `references/walkthrough.md` from its start');
+    const all = files.map((a) => a.content).join('\n');
+    const subcommands = [...all.matchAll(/~\/\.erd-studio-cli\/bin\/erd-studio(?:\.cmd)? ([a-z]+)/g)].map((m) => m[1]);
+    expect(subcommands.length).toBeGreaterThan(0);
+    for (const sub of subcommands) {
+      expect(['doctor', 'export'], sub).toContain(sub);
+    }
+    expect(all).not.toMatch(/Stage [0-6]/);
+  });
+
+  it('points only at reference files it ships', () => {
+    const shipped = new Set(files.map((a) => a.relativePath));
+    for (const a of files) {
+      for (const [mention] of a.content.matchAll(/references\/[a-z-]+\.md/g)) {
+        expect(shipped.has(mention), `${a.relativePath}: ${mention}`).toBe(true);
+      }
+    }
+  });
+
+  it('keeps every file under the 500-line skill limit', () => {
+    for (const a of files) {
+      expect(a.content.split('\n').length, a.relativePath).toBeLessThan(500);
+    }
+  });
+
+  it('the saved-approach template has no as-built rule, backlog or dbt-sourced metadata', () => {
+    const approaches = file('references/modelling-approaches.md');
+    expect(approaches).toContain('**Chosen:** proposed for a new design');
+    expect(approaches).not.toContain('Target-design backlog');
+    expect(approaches).not.toContain('Detected from');
+    expect(approaches).toContain('| `owner` | models | team name, e.g. `crm-team` | the team |');
+  });
+
+  it('the diagram example sets no dbt folder filter', () => {
+    const building = file('references/building-the-model.md');
+    expect(building).toContain('## Diagram file (DBML)');
+    expect(building).not.toMatch(/erd_model_folder|modelFolder/);
+    // The dbt project's copy keeps it.
+    expect(CLAUDE_SETUP_SKILL_FILES.find((a) => a.relativePath === 'references/building-the-model.md')!.content)
+      .toContain("erd_model_folder: 'models/marts'");
   });
 });

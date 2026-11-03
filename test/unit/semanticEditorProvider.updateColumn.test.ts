@@ -76,6 +76,7 @@ function makeProvider(models: SemanticTable[]) {
     ensureDir: () => {},
     getTablesDir: () => '/ws/.erd-studio/logical-models',
     groupsByFolder: () => false,
+    yamlTableFolderFor: () => undefined,
     invalidateCache: () => {},
     invalidatePaths: () => {},
   };

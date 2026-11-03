@@ -63,6 +63,8 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURES = path.join(REPO_ROOT, 'packages', 'core', 'test', 'fixtures');
 const GOLDEN_DIR = path.join(FIXTURES, 'golden');
 const DBT_PROJECT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
+/** The same dbt project with its logical model as native DBML (Convert of dbt-project). */
+const DBT_PROJECT_DBML = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project-dbml');
 const SEMANTIC_DIR = '.erd-studio';
 
 /** Fixture projects that load successfully: name -> domain file under the project root. */
@@ -573,6 +575,49 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
       }
       const expected = readGolden(`${name}.unified.json`);
       expect(normaliseStorageRows(unified, [...unifiedRows], options)).toEqual(normaliseStorageRows(expected, [...unifiedRows], options));
+    });
+  });
+
+  // The physical stage of the DBML-stored dbt project draws what the YAML
+  // dbt-project goldens pin, through the same §2.8 rows as the showcase twin
+  // above (Convert put fct_order, which names no schema, in public/). No
+  // golden of its own: the two storages must draw one physical stage.
+  describe('the DBML twin of dbt-project (test/fixtures/dbt-project-dbml), physical stage', () => {
+    const rows = ['relationshipOrder', 'emptyAnnotations', 'schemaVersion', 'tableLayers', 'convertSchemaFallback'] as const;
+    const options = { schemaFallback: (table: string) => ({ fct_order: 'public' } as Record<string, string>)[table] };
+    const diagram = 'silver/diagrams/showcase.dbml';
+    const withoutHomes = (area: Record<string, unknown>): Record<string, unknown> => {
+      const { relationshipsInDiagramFile: _homes, ...rest } = area;
+      const relationships = Array.isArray(rest.relationships)
+        ? (rest.relationships as Array<Record<string, unknown>>).map(({ inDiagramFile: _own, ...r }) => r)
+        : rest.relationships;
+      return { ...rest, relationships };
+    };
+    const same = (twin: Record<string, unknown>, golden: Record<string, unknown>): void => {
+      expect(normaliseStorageRows(withoutHomes(twin), [...rows], options)).toEqual(normaliseStorageRows(withoutHomes(golden), [...rows], options));
+    };
+
+    it('replies to a switch to the physical stage with the stageData dbt-project.stage-physical.json pins', async () => {
+      if (UPDATE) return;
+      const posted = await switchStage(buildHost(DBT_PROJECT_DBML, { dbt: true }), subjectAreaFile(DBT_PROJECT_DBML, diagram), 'physical');
+      logLines = [];
+      expect(posted).toHaveLength(1);
+      expect(posted[0].type).toBe('stageData');
+      const twin = normalise(posted[0], DBT_PROJECT_DBML) as { payload: Record<string, unknown> };
+      const golden = readGolden('dbt-project.stage-physical.json') as { payload: Record<string, unknown> };
+      expect(twin.payload.stage).toBe('physical');
+      same(twin.payload, golden.payload);
+    });
+
+    it('posts the physical domain from sendSubjectAreaData as dbt-project.physical.host.json pins', async () => {
+      if (UPDATE) return;
+      const posted = await sendSubjectAreaData(buildHost(DBT_PROJECT_DBML, { dbt: true }), subjectAreaFile(DBT_PROJECT_DBML, diagram), { stage: 'physical' });
+      logLines = [];
+      expect(posted).toHaveLength(1);
+      expect(posted[0].type).toBe('domainLoaded');
+      const twin = normalise(posted[0], DBT_PROJECT_DBML) as { payload: Record<string, unknown> };
+      const golden = readGolden('dbt-project.physical.host.json') as { payload: Record<string, unknown> };
+      same(twin.payload, golden.payload);
     });
   });
 

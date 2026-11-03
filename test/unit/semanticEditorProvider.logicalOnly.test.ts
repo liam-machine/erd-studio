@@ -162,6 +162,15 @@ describe('SemanticEditorProvider in logical-only mode', () => {
     expect(pick).not.toHaveBeenCalled();
     expect(ofType(panel, 'error')).toEqual([]);
   });
+  it('a batch pick whose table file is gone says it is not in the Table Library, without naming dbt', async () => {
+    const panel = await openIn(buildProvider(root, true), file);
+    // A stale Table Library row, or a drag whose file was renamed meanwhile.
+    await panel._simulateMessage({ type: 'addExistingModels', payload: { modelNames: ['gone_a', 'gone_b'] } });
+    await vi.waitFor(() => expect(ofType(panel, 'error')).toHaveLength(1));
+    const message = (ofType(panel, 'error')[0].payload as { message: string }).message;
+    expect(message).toBe('No tables were added. Left out: gone_a (not in the Table Library), gone_b (not in the Table Library).');
+    expect(message).not.toMatch(/\bdbt\b/i);
+  });
 });
 
 describe('SemanticEditorProvider with a dbt project (flag absent)', () => {

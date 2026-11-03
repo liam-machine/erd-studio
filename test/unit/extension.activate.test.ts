@@ -194,6 +194,8 @@ describe('activate() with no folder open (empty window)', () => {
 
     await vscode.commands.executeCommand('erdStudio.exportDiagram');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Open a folder first'), 'Open Folder…', 'Open Settings');
+    // An empty window is not a dbt project: the sentence says nothing about dbt.
+    expect(warn).toHaveBeenCalledWith('ERD Studio: Open a folder first. Any folder works.', 'Open Folder…', 'Open Settings');
   });
 
   it('registers a stub domain editor and no tree views (early return)', async () => {
@@ -968,6 +970,8 @@ describe('activate() in a native DBML project (S4)', () => {
   });
 
   it('"Subject area file deleted": not for a diagram whose name is back as .json (Undo of Convert), still for one really deleted', async () => {
+    // The selectors.yml prompt is for a dbt project only (below for a plain folder).
+    fs.writeFileSync(path.join(ws, 'dbt_project.yml'), "name: 'dbml_native'\nversion: '1.0.0'\nprofile: 'x'\n");
     await activate(context);
     await vi.advanceTimersByTimeAsync(5_000);
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
@@ -988,6 +992,24 @@ describe('activate() in a native DBML project (S4)', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(deletedToasts()).toHaveLength(1);
     expect(deletedToasts()[0][0]).toBe('Diagram file deleted. Regenerate dbt selectors.yml to drop the removed diagram from the selector set.');
+  });
+
+  it('a diagram deleted outside ERD Studio in a folder without dbt: no selectors.yml prompt', async () => {
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+    const presence = vi.spyOn(provider, 'syncSubjectAreaFilePresence');
+
+    const staging = path.join(ws, '.erd-studio', 'silver', 'diagrams', 'staging.dbml');
+    fs.rmSync(staging);
+    semanticWatcher()._simulateDelete(vscode.Uri.file(staging));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // The delete was handled (open canvases told), only the dbt prompt is gone.
+    expect(presence).toHaveBeenCalled();
+    expect(info.mock.calls.filter((c) => /deleted|selectors|dbt/i.test(String(c[0])))).toEqual([]);
   });
 
   it('a burst of outside table-file changes (Edit > Undo of Convert) builds the library index and refreshes each view and canvas O(1) times', async () => {
@@ -1472,6 +1494,29 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
     expect(count('dbtSemantic.resolveDuplicateModel')).toBe(0);
   });
 
+  const duplicateTexts = async (): Promise<{ prompt: string; detail: string }> => {
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (opts?: { value?: string }) => opts?.value) as never);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    await activate(context);
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+    const modal = info.mock.calls.find((c) => String(c[0]).startsWith('Rename the duplicate'))!;
+    return { prompt: String((input.mock.calls[0][0] as { prompt: string }).prompt), detail: (modal[1] as { detail: string }).detail };
+  };
+
+  it('in a dbt project its prompt and modal say how dbt sees the name', async () => {
+    const { prompt, detail } = await duplicateTexts();
+    expect(prompt).toBe('Table names are unique, as dbt model names are. The warehouse table name stays "date" (set as the table\'s alias).');
+    expect(detail).toContain('so dbt still builds a table called date');
+  });
+
+  it('in a folder without dbt its prompt and modal say nothing about dbt', async () => {
+    fs.rmSync(path.join(root, 'dbt_project.yml'));
+    const { prompt, detail } = await duplicateTexts();
+    expect(prompt).toBe('Table names are unique across the library. The warehouse name stays "date" (set as the table\'s alias).');
+    expect(detail).toContain('The table becomes "silver_date" with alias: date, so the warehouse name stays date.');
+    expect(`${prompt}\n${detail}`).not.toMatch(/dbt/i);
+  });
+
   it('renames the ignored silver copy to silver_date with alias date, and repoints only the silver domain', async () => {
     const goldDomainBefore = fs.readFileSync(path.join(erd(), 'gold', 'reporting.json'), 'utf-8');
     await activate(context);
@@ -1782,6 +1827,26 @@ describe('Select dbt Project… (#82)', () => {
     expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${b}`);
   });
 
+  it('reveals Select dbt Project in a dbt project, and not in a plain folder named by erdStudio.projectPath', async () => {
+    const contextKey = async (): Promise<unknown> => {
+      const exec = vi.spyOn(vscode.commands, 'executeCommand');
+      await activate(context);
+      const call = exec.mock.calls.filter((c) => c[0] === 'setContext' && c[1] === 'erdStudio.hasMultipleDbtProjects').at(-1);
+      exec.mockRestore();
+      return call?.[2];
+    };
+    expect(await contextKey()).toBe(true);
+
+    // The same workspace, with projectPath naming a plain folder (no dbt_project.yml) beside the two
+    // dbt projects: still two dbt candidates, but a plain folder shows no dbt control (#dbt-as-addon).
+    tearDownActivation();
+    const plain = path.join(root, 'plain');
+    fs.cpSync(path.join(FIXTURE_ROOT, '.erd-studio'), path.join(plain, '.erd-studio'), { recursive: true });
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: plain });
+    expect(await contextKey()).toBe(false);
+    expect(recentLogLines().some((l) => l.includes(`Opened ${plain} (no dbt_project.yml: logical-only)`))).toBe(true);
+  });
+
   it('Auto-detect clears the pick and reloads back to the auto-detected project', async () => {
     const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], ['erdStudio.selectedProjectRoot', b]]);
     context = makeContext(root, { workspaceState: ws });
@@ -1998,20 +2063,32 @@ describe('Welcome panel: first run', () => {
       contributes: { walkthroughs: Array<{ id: string; description: string; steps: Array<{ id: string; title: string; when?: string; description: string; media: { svg: string }; completionEvents: string[] }> }> };
     };
     const walkthrough = pkg.contributes.walkthroughs.find((w) => WALKTHROUGH_ID.endsWith(`#${w.id}`))!;
-    // Existing ids kept (completion state survives an update); newDiagram, importDbml and openDiagram are new.
-    expect(walkthrough.steps.map((s) => s.id)).toEqual(['watch', 'openProject', 'openDiagram', 'newDiagram', 'draw', 'importDbml', 'enrich', 'sample']);
+    // Existing ids kept (completion state survives an update); watchLogical, newDiagram, importDbml and openDiagram
+    // are new. The dbt-only "sample" step is gone: dbt shows up only in dbt projects.
+    expect(walkthrough.steps.map((s) => s.id)).toEqual(['watch', 'watchLogical', 'openProject', 'openDiagram', 'newDiagram', 'draw', 'importDbml', 'enrich']);
     const step = (id: string) => walkthrough.steps.find((s) => s.id === id)!;
     // Which window each step shows in: dbt, no folder, a folder without dbt, a project with or without diagrams, or always.
     expect(Object.fromEntries(walkthrough.steps.map((s) => [s.id, s.when ?? null]))).toEqual({
       watch: 'erdStudio.hasDbtProject',
+      watchLogical: '!erdStudio.hasDbtProject',
       openProject: 'workspaceFolderCount == 0',
       openDiagram: 'erdStudio.hasDiagrams',
       newDiagram: '!erdStudio.hasDbtProject && !erdStudio.hasDiagrams',
       draw: 'erdStudio.hasDbtProject && !erdStudio.hasDiagrams',
       importDbml: null,
       enrich: null,
-      sample: '!erdStudio.hasDbtProject',
     });
+    expect(walkthrough.description).toBe('Design your data model in Git, from scratch or from DBML, then let your AI assistant fill in the detail.');
+    // The dbt tour is unchanged in a dbt project; a folder without dbt gets the same video under neutral words.
+    expect(step('watch').description).toContain('draw your dbt project with Draw from dbt');
+    expect(step('watchLogical').title).toBe('Watch the one-minute tour');
+    expect(step('watchLogical').description).toBe('A one-minute video: start a diagram in any folder, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the video](command:erdStudio.showGettingStarted)');
+    expect(step('watchLogical').media.svg).toBe('media/walkthrough/watch.svg');
+    expect(step('watchLogical').completionEvents).toEqual(['onCommand:erdStudio.showGettingStarted']);
+    expect(step('newDiagram').title).toBe('Draw your first data model');
+    expect(step('openProject').description).toBe('Any folder works: ERD Studio keeps your design in .erd-studio/ next to your code.\n[Open Folder](command:workbench.action.files.openFolder)');
+    // No step offers the dbt sample project any more (the Getting Started panel still does, in a dbt project).
+    expect(walkthrough.steps.filter((s) => s.description.includes('erdStudio.trySampleProject')).map((s) => s.id)).toEqual([]);
     expect(step('openProject').completionEvents).toEqual(['onContext:erdStudio.hasProject']);
     // A cloned project's own diagrams: one click to open one (the diagram picker).
     expect(step('openDiagram').title).toBe('Open a diagram from this project');
@@ -2019,7 +2096,6 @@ describe('Welcome panel: first run', () => {
     expect(step('openDiagram').completionEvents).toEqual(['onCommand:erdStudio.openDomain']);
     expect(step('newDiagram').completionEvents).toEqual(['onCommand:erdStudio.createDomain', 'onCommand:erdStudio.openExampleDiagram']);
     expect(step('importDbml').completionEvents).toEqual(['onCommand:erdStudio.importDbml']);
-    expect(step('sample').completionEvents).toEqual(['onCommand:erdStudio.trySampleProject']);
     expect(step('newDiagram').description).toContain('(command:erdStudio.createDomain)');
     // The example is a second button in the same step, not a step of its own.
     expect(step('newDiagram').description).toContain('[Open Example Diagram](command:erdStudio.openExampleDiagram)');
@@ -2034,7 +2110,6 @@ describe('Welcome panel: first run', () => {
     expect(svg).not.toMatch(/\.yml<|sales\.json<|\.dbdiagram<|_relationships\.dbml</);
     expect(step('importDbml').description).toContain('(command:erdStudio.importDbml)');
     expect(step('draw').description).toContain('(command:erdStudio.drawFromDbt)');
-    expect(step('sample').description).toContain('(command:erdStudio.trySampleProject)');
     for (const s of walkthrough.steps) {
       expect(fs.existsSync(path.join(REPO_ROOT, s.media.svg)), s.media.svg).toBe(true);
       expect(s.completionEvents.length, s.id).toBeGreaterThan(0);

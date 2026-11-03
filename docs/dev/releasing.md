@@ -85,3 +85,19 @@ Manual publishing (rare) must follow the same order so `main` never falls behind
 `npx @vscode/vsce ls --no-dependencies` shows exactly what will ship; CI fails if it lists more than 60 files. `.vscodeignore` excludes everything except `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`, `media/` icons, `media/onboarding/` (the video and its poster, about 8 MB) and `dist/` (the four bundles incl. `cli.js`, no sourcemaps) and `schemas/*.schema.json`; `media/walkthrough/*.svg` (the walkthrough illustrations) ship because `media/` is not excluded.
 
 PATs are stored in `.env` as `AZURE_PAT` (Marketplace) and `OVSX_PAT` (Open VSX, also a GitHub Actions secret). The Azure PAT **must** be scoped to "All accessible organizations" (not a single org) — the marketplace sits outside any specific Azure DevOps org.
+
+## Release checklist (by hand)
+
+The workflows do the publishing; these are the steps they cannot do.
+
+- [ ] **The AI sync eval, when SYNC.md changed.** Run `npm run eval:sync-ai` before a release whose changes touch SYNC.md, DBML.md or the sync plan format (`SYNC_CONTENT` / `DBML_CONTENT` in `src/services/harnessService.ts`, `src/types/syncPlan.ts`), and in the PR that changes them. A headless Claude Code applies a sync plan from the installed skill files and must land where the deterministic applier does; it needs a signed-in `claude` and costs about US$0.50–1 a run (5–10 minutes). It must end with `All checks passed.` It is never run by CI or `npm test`. Details: `test/skill-evals/sync-apply/README.md`.
+- [ ] **The getting-started videos in the browser.** The Welcome panel's **Watch in your browser** opens `GETTING_STARTED_EXTERNAL_URLS` (`src/types/gettingStarted.ts`) through jsDelivr on `main`: `videoOnline` is `https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4` and `videoOnlineLogical` is `https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started-logical.mp4`. Both resolve only once the file is on `main`, and jsDelivr keeps serving its cached copy of a changed file until it is purged.
+  - Before the release, when the logical cut was re-rendered: copy its AAC version into `docs/assets/`, as `video/encode.sh` already does for the dbt cut (`docs/assets/getting-started.mp4`, the README's link): `cp video/build-logical/getting-started-logical-share.mp4 docs/assets/getting-started-logical.mp4`. Commit it with `media/onboarding/getting-started-logical.mp4`. (See `video/README.md`: the shipped `media/onboarding/` copies have MP3 audio for VS Code, which Safari and QuickTime play silently; the `docs/assets/` copies have AAC.)
+  - After the release has merged to `main`: purge each video path the release changed, then open each URL once (the first fetch after a purge takes about 15 s for 5 MB, then it is cached):
+    ```bash
+    curl -s https://purge.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started-logical.mp4
+    curl -s https://purge.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started-logical.mp4
+    curl -s https://purge.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4
+    curl -s https://purge.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4
+    ```
+    Then open both `videoOnline` and `videoOnlineLogical` in Chrome: each must play, with sound. Know what the button gives a Safari user: it opens these `media/onboarding/` MP3 copies, which play **silently** in Safari (and QuickTime), so a Safari check passes only on the picture. The AAC copies in `docs/assets/` (open `https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started-logical.mp4` in Safari: it must play with sound) are what the README links; the Welcome panel's button never opens them. Pointing the button at the `docs/assets/` copies would be a code change to `GETTING_STARTED_EXTERNAL_URLS`.

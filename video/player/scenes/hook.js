@@ -1,6 +1,9 @@
 // 1 · The hook: "Your dbt project, as a diagram, in about a minute. / No AI, and nothing to
 // configure." A dbt file tree whose model files fly into three ERD nodes, which then connect;
 // on `noai` three plain claims land top right, above the canvas.
+//
+// `hookScene(data)` draws the same scene from another tree, nodes and claims: the logical cut's
+// hook (scenes/logical/hook.js) is a plain folder whose .dbml table files fly into the nodes.
 import { appear, appIcon, card, easeInOut, edge, ICON, lerp, node, nodeHeight, rowY, seg, COLORS } from '../lib.js';
 
 const TREE = [
@@ -29,9 +32,16 @@ const NODES = [
     cols: [{ key: 'PK', name: 'product_id', type: 'VARCHAR' }, { name: 'product_name', type: 'VARCHAR' }, { name: 'product_price', type: 'DECIMAL' }] },
 ];
 
-export default {
+/**
+ * The hook scene for one cut. `tree` rows ({ d, icon, label, open?, fly?, yml? }; a `fly: k` row's
+ * chip flies to node k), three `nodes` (the middle one has FKs in rows 1 and 2), the canvas card's
+ * `tab` and `crumb`, the `beat` the files start flying on (+0.9 s, "…as a diagram") and `claims`
+ * ([label, beat, offset]).
+ */
+export function hookScene({ tree: TREE, nodes: NODES, tab, crumb, beat, claims: CLAIMS }) {
+  return {
   render(t, { beats }) {
-    const flyAt = (k) => beats.minute.t + 0.9 + k * 0.38;   // from "…as a diagram"
+    const flyAt = (k) => beats[beat].t + 0.9 + k * 0.38;   // from "…as a diagram"
     const FLY = 0.62;
 
     // Explorer tree
@@ -50,14 +60,14 @@ export default {
     const tree = card({ x: TREE_X, y: TREE_Y, w: TREE_W, h: 600, tabs: [{ label: 'EXPLORER', on: true }], headStyle: 'letter-spacing:.08em;font-size:19px' });
 
     // Canvas + nodes
-    const canvas = card({ x: CANVAS.x, y: CANVAS.y, w: CANVAS.w, h: CANVAS.h, tabs: [{ label: 'orders.json', on: true }], crumb: '.erd-studio › gold › orders.json', bodyCls: 'grid-bg', style: appear(t, 0.2) });
+    const canvas = card({ x: CANVAS.x, y: CANVAS.y, w: CANVAS.w, h: CANVAS.h, tabs: [{ label: tab, on: true }], crumb, bodyCls: 'grid-bg', style: appear(t, 0.2) });
 
     // Until the first model lands, the empty canvas carries the app mark.
     const markOut = 1 - seg(t, flyAt(0), flyAt(0) + 0.4);
     const mark = markOut > 0
       ? `<div class="abs" style="left:${CANVAS.x}px;top:${CANVAS.y + 64}px;width:${CANVAS.w}px;height:${CANVAS.h - 64}px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;opacity:${markOut.toFixed(3)}">
-          <div style="${appear(t, beats.minute.t - 0.25, { dy: 12, dur: 0.5 })}">${appIcon(132)}</div>
-          <div style="font-size:52px;font-weight:800;letter-spacing:-.03em;${appear(t, beats.minute.t - 0.05, { dy: 12, dur: 0.5 })}">ERD Studio</div></div>`
+          <div style="${appear(t, beats[beat].t - 0.25, { dy: 12, dur: 0.5 })}">${appIcon(132)}</div>
+          <div style="font-size:52px;font-weight:800;letter-spacing:-.03em;${appear(t, beats[beat].t - 0.05, { dy: 12, dur: 0.5 })}">ERD Studio</div></div>`
       : '';
     let nodes = mark, chips = '';
     NODES.forEach((n, k) => {
@@ -65,7 +75,7 @@ export default {
       const p = easeInOut(seg(t, t0, t0 + FLY));
       // file chip flies from its tree row to the node header
       const srcRow = TREE.findIndex((r) => r.fly === k);
-      const sx = TREE_X + 28 + 3 * 30 + 26, sy = ROW0 + srcRow * ROW - 22;
+      const sx = TREE_X + 28 + TREE[srcRow].d * 30 + 26, sy = ROW0 + srcRow * ROW - 22;
       const tx = n.x + 16, ty = n.y + 12;
       if (p > 0 && p < 1) {
         const x = lerp(sx, tx, p), y = lerp(sy, ty, p) - Math.sin(p * Math.PI) * 24;
@@ -80,16 +90,24 @@ export default {
     const f = NODES[1];
     const c1y = f.y + rowY(1, false), c2y = f.y + rowY(2, false);
     const dc = NODES[0], dp = NODES[2];
-    const e1 = edge([[dc.x + 60, dc.y + nodeHeight(3, false)], [dc.x + 60, c1y], [f.x, c1y]], { progress: seg(t, eAt, eAt + 0.55), one: [dc.x + 72, dc.y + nodeHeight(3, false) + 26], many: [f.x - 26, c1y - 6] });
-    const e2 = edge([[dp.x + W - 60, dp.y + nodeHeight(3, false)], [dp.x + W - 60, c2y], [f.x + W, c2y]], { progress: seg(t, eAt + 0.2, eAt + 0.75), one: [dp.x + W - 50, dp.y + nodeHeight(3, false) + 26], many: [f.x + W + 10, c2y - 6] });
+    const dh = nodeHeight(dc.cols.length, false), ph = nodeHeight(dp.cols.length, false);
+    const e1 = edge([[dc.x + 60, dc.y + dh], [dc.x + 60, c1y], [f.x, c1y]], { progress: seg(t, eAt, eAt + 0.55), one: [dc.x + 72, dc.y + dh + 26], many: [f.x - 26, c1y - 6] });
+    const e2 = edge([[dp.x + W - 60, dp.y + ph], [dp.x + W - 60, c2y], [f.x + W, c2y]], { progress: seg(t, eAt + 0.2, eAt + 0.75), one: [dp.x + W - 50, dp.y + ph + 26], many: [f.x + W + 10, c2y - 6] });
 
     // "No AI, and nothing to configure." — three claims, top right above the canvas
     // "…in about a minute" (+2.3 s into the first line), then "No AI" and "nothing to configure"
-    const claims = [['About a minute', beats.minute.t + 2.3], ['No AI needed', beats.noai.t + 0.1], ['Nothing to configure', beats.noai.t + 0.9]]
+    const claims = CLAIMS.map(([label, b, offset]) => [label, beats[b].t + offset])
       .map(([label, at]) => `<span class="pill" style="font-size:26px;padding:12px 24px;background:#13301f;border:2px solid #1f6b3a;color:#dff7e8;${appear(t, at, { dy: 10 })}"><span style="color:var(--green);display:flex">${ICON.check({ size: 24 })}</span>${label}</span>`)
       .join('');
     const pills = `<div class="abs" style="right:96px;top:236px;display:flex;gap:16px">${claims}</div>`;
 
     return `${tree}${rows}${canvas}${e1}${e2}${nodes}${chips}${pills}`;
   },
-};
+  };
+}
+
+export default hookScene({
+  tree: TREE, nodes: NODES, tab: 'orders.json', crumb: '.erd-studio › gold › orders.json', beat: 'minute',
+  // "…in about a minute" (+2.3 s into the first line), then "No AI" and "nothing to configure"
+  claims: [['About a minute', 'minute', 2.3], ['No AI needed', 'noai', 0.1], ['Nothing to configure', 'noai', 0.9]],
+});

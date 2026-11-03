@@ -26,7 +26,7 @@ import type { ExtensionMessage } from '../../hooks/useMessageBus';
 import { detectCircularFk, formatCyclePath } from '../../lib/validation';
 import { keysContradictionWarning, orientCanvasLink } from '../../lib/relationshipDirection';
 import {
-  ABSORB_HINT, ADD_PAIR_LABEL, COMPOSITE_MANY_TO_MANY_ERROR, COMPOSITE_MANY_TO_MANY_TITLE, DIRECTION_MISSING_HINT, DIRECTION_QUESTION,
+  ABSORB_HINT, ADD_PAIR_LABEL, COMPOSITE_MANY_TO_MANY_ERROR, COMPOSITE_MANY_TO_MANY_TITLE, DIRECTION_MISSING_HINT, DIRECTION_MISSING_HINT_LOGICAL, DIRECTION_QUESTION,
   HOW_MANY_LABEL, PAIR_INCOMPLETE, cardinalityChoice, dialogTitle, directionChoice, directionSentence, markKeyLabel, pairColumnUsed,
 } from '../../lib/relationshipDialog';
 import { MAX_COMPOSITE_PAIRS } from '@erd-studio/core';
@@ -206,6 +206,7 @@ export function NewFkDialog() {
   const isOpen = useEditorStore((s) => s.newFkDialogOpen);
   const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
   const domain = useEditorStore((s) => s.domain);
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
   const fkDialogPrefill = useEditorStore((s) => s.fkDialogPrefill);
   const clearFkDialogPrefill = useEditorStore((s) => s.clearFkDialogPrefill);
   const fkDialogEditData = useEditorStore((s) => s.fkDialogEditData);
@@ -882,7 +883,7 @@ export function NewFkDialog() {
                 </label>
               );
             })}
-            {direction === 'undecided' && <span className="new-fk-dialog__hint">{DIRECTION_MISSING_HINT}</span>}
+            {direction === 'undecided' && <span className="new-fk-dialog__hint">{logicalOnly ? DIRECTION_MISSING_HINT_LOGICAL : DIRECTION_MISSING_HINT}</span>}
           </fieldset>
         )}
         {markKey && (

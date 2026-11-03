@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { ConvertToDbmlPanel } from '../../src/providers/ConvertToDbmlPanel';
-import { DBML_SELF_CHECK_REFUSAL_END, type DbmlConversionPlan } from '../../src/services/dbmlConversion';
+import { DBML_SELF_CHECK_REFUSAL_END, describeDbmlConversion, type DbmlConversionPlan } from '../../src/services/dbmlConversion';
 import {
   CONVERT_PANEL_TITLE,
   CONVERT_PANEL_VIEW_TYPE,
@@ -362,6 +362,24 @@ describe('buildConvertReview: what Convert handles, leaves and keeps missing (D2
     expect(html).toContain('data-action="open" data-index="0"');
     expect(html).toContain('<p class="cdb__summary">1 table and 1 diagram convert to DBML;');
     expect(isConvertPanelToHost({ type: 'open', index: 0 }, locations.length)).toBe(true);
+  });
+
+  it('the Kept as missing hint names Add from dbt only in a dbt project; the preview text likewise', () => {
+    const hint = (hasDbt?: boolean): string | undefined => buildConvertReview(partial, { display, introLines: [], ...(hasDbt === undefined ? {} : { hasDbt }) })
+      .view.sections.find((x) => x.id === 'missing')!.hint;
+    expect(hint()).toContain('Create them later with Add from dbt.');
+    expect(hint(true)).toContain('Create them later with Add from dbt.');
+    expect(hint(false)).toBe('These tables have no table file. They stay on their diagram, drawn as missing exactly as before. Give each a table file later, or remove them from the diagram.');
+    const one = plan({ ...partial, keptMissing: [{ diagram: 'gold/diagrams/commercial.dbml', tables: ['gld_fct_risk_child'] }] });
+    expect(buildConvertReview(one, { display, introLines: [], hasDbt: false }).view.sections.find((x) => x.id === 'missing')!.hint)
+      .toBe('This table has no table file. It stays on its diagram, drawn as missing exactly as before. Give it a table file later, or remove it from the diagram.');
+    const html = buildConvertPanelHtml(buildConvertReview(partial, { display, introLines: [], hasDbt: false }).view, 'n');
+    expect(html).not.toMatch(/dbt/i);
+
+    expect(describeDbmlConversion(partial)).toContain('(create them later with Add from dbt):');
+    const plain = describeDbmlConversion(partial, { hasDbt: false });
+    expect(plain).toContain('Kept as missing on their diagrams, drawn as before (give each a table file later, or remove it from its diagram):');
+    expect(plain).not.toMatch(/dbt/i);
   });
 
   it('titles what is left by its format: YAML, JSON, or a mix', () => {

@@ -145,21 +145,32 @@ export function resolveProjectRoot(
   return below ?? designRoot;
 }
 
-/** Like `resolveProjectRoot`, but a missing project is a `CliEnvError`. */
+/**
+ * Like `resolveProjectRoot`, but a missing project is a `CliEnvError`.
+ * Logical first: the message names only the `.erd-studio/` folder, since a
+ * folder with neither is most often a plain folder about to get its first
+ * diagram; `mentionDbt` (a command that needs dbt, such as `diff`) also names
+ * `dbt_project.yml` and where it was looked for.
+ */
 export function requireProjectRoot(
   project: string | undefined,
   cwd: string = process.cwd(),
   semanticDir: string = DEFAULT_CLI_SEMANTIC_DIR,
+  options: { mentionDbt?: boolean } = {},
 ): string {
   const root = resolveProjectRoot(project, cwd, semanticDir);
   if (!root) {
+    const where = project ? redactPaths(relPath(cwd, path.resolve(cwd, project))) : '';
     throw new CliEnvError(
       'no-project',
-      project
-        ? `No dbt_project.yml or ${semanticDir}/ folder found in ${redactPaths(relPath(cwd, path.resolve(cwd, project)))} `
-          + '(--project must be the folder that holds one).'
-        : `No dbt project or ${semanticDir}/ folder found here: looked for dbt_project.yml in this folder, above it and up to three `
-          + `folders below it, and for ${semanticDir}/ in this folder and above it. Run this from your project folder, or pass --project <dir>.`,
+      options.mentionDbt
+        ? project
+          ? `No dbt_project.yml or ${semanticDir}/ folder found in ${where} (--project must be the folder that holds one).`
+          : `No dbt project or ${semanticDir}/ folder found here: looked for dbt_project.yml in this folder, above it and up to three `
+            + `folders below it, and for ${semanticDir}/ in this folder and above it. Run this from your project folder, or pass --project <dir>.`
+        : project
+          ? `No ${semanticDir}/ folder found in ${where} (--project must be the folder that holds it).`
+          : `No ${semanticDir}/ folder found here: looked in this folder and above it. Run this from your project folder, or pass --project <dir>.`,
     );
   }
   return root;
@@ -247,9 +258,9 @@ function iso(ms: number | null): string | null {
  * `LayerService` + `TableLibraryService` feed `SubjectAreaService` — with the
  * manifest parsed in-process (spec D6).
  */
-export async function buildCliContext(opts: { project?: string; semanticDir: string; cwd?: string }): Promise<CliContext> {
+export async function buildCliContext(opts: { project?: string; semanticDir: string; cwd?: string; mentionDbt?: boolean }): Promise<CliContext> {
   const semanticDir = opts.semanticDir;
-  const root = requireProjectRoot(opts.project, opts.cwd, semanticDir);
+  const root = requireProjectRoot(opts.project, opts.cwd, semanticDir, { mentionDbt: opts.mentionDbt });
   const hasDbt = hasDbtProjectFile(root);
   const dbtConfig = readDbtProjectConfig(root);
 

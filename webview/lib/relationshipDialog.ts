@@ -76,6 +76,8 @@ export function directionChoice(
 // About what the relationship means, not where it is saved: the Ref (or yml entry) records it either way.
 export const DIRECTION_QUESTION = 'Which way does this relationship point?';
 export const DIRECTION_MISSING_HINT = "Pick one: neither table marks these columns as its key, and dbt has no test to tell. Once a table's primary key is marked, ERD Studio works this out itself.";
+/** The same hint in a folder with no dbt project, where no dbt test could tell. */
+export const DIRECTION_MISSING_HINT_LOGICAL = "Pick one: neither table marks these columns as its key. Once a table's primary key is marked, ERD Studio works this out itself.";
 
 /** The "mark as primary key" checkbox's label. */
 export function markKeyLabel(model: string, columns: readonly string[]): string {

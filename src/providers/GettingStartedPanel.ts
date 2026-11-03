@@ -10,9 +10,10 @@
  * The page has three states (`GettingStartedPageMode`): no folder open
  * (`workspaceRoot: null`: "Open the folder your data model lives in"), a
  * folder without dbt (`logicalOnly`: New diagram, Open Example Diagram,
- * Import DBML, the AI cards with the guided setup's no-dbt wording, and
- * "Using dbt? Open its folder to compare"), and a dbt project (Draw from dbt
- * and the guided setup). The video autoplays only in the dbt state.
+ * Import DBML and the AI cards with the guided setup's no-dbt wording — no
+ * dbt text at all), and a dbt project (Draw from dbt and the guided setup).
+ * The dbt page plays the dbt tour; the other two play the logical-first cut
+ * (`GETTING_STARTED_MEDIA`). It autoplays in an open folder.
  *
  * Also home to the host-side pieces the panel and `erdStudio.setupAiHelper`
  * share: AI assistant detection (installed extensions, a PATH scan and the
@@ -48,6 +49,7 @@ import {
   type SetupOutcome,
 } from '../types/gettingStarted';
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedTranscript';
+import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedLogicalTranscript';
 import type { RecommendedInstallResult } from '../types/harness';
 import {
   AI_ASSISTANTS,
@@ -63,6 +65,8 @@ import type { ManifestData } from '../types/manifest';
 import { normaliseName } from '../services/nameUtils';
 import { detectConventions, type ConventionModel } from '../cli/conventions';
 import { log } from '../services/logger';
+import { hasDbtProjectFile } from '../services/projectDiscovery';
+import { venvActivateCommand } from '../services/dbtEnv';
 
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
 /** The no-AI first diagram (`extension.ts`): the Welcome panel's lead button runs it. */
@@ -75,12 +79,35 @@ export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
 export const OPEN_EXAMPLE_DIAGRAM_COMMAND = 'erdStudio.openExampleDiagram';
 export const GETTING_STARTED_TITLE = 'Welcome to ERD Studio';
 
-/** Shipped media, relative to the extension root (spec addendum V4/V5). */
+/**
+ * Shipped media, relative to the extension root (spec addendum V4/V5): the
+ * dbt tour (`video`, `poster`) for the dbt page, and the logical-first cut
+ * (`logicalVideo`, `logicalPoster`) for the no-folder and logical pages.
+ */
 export const GETTING_STARTED_MEDIA = {
   dir: ['media', 'onboarding'],
   video: 'getting-started.mp4',
   poster: 'getting-started-poster.jpg',
+  logicalVideo: 'getting-started-logical.mp4',
+  logicalPoster: 'getting-started-logical-poster.jpg',
 } as const;
+
+/** The cut, poster, captions and transcript a page plays: the dbt tour only on the dbt page. */
+export function gettingStartedCut(mode: GettingStartedPageMode): {
+  video: string;
+  poster: string;
+  cues: ReadonlyArray<{ start: number; end: number; text: string }>;
+  transcript: string;
+} {
+  return mode === 'dbt'
+    ? { video: GETTING_STARTED_MEDIA.video, poster: GETTING_STARTED_MEDIA.poster, cues: GETTING_STARTED_CUES, transcript: GETTING_STARTED_TRANSCRIPT }
+    : {
+      video: GETTING_STARTED_MEDIA.logicalVideo,
+      poster: GETTING_STARTED_MEDIA.logicalPoster,
+      cues: LOGICAL_GETTING_STARTED_CUES,
+      transcript: LOGICAL_GETTING_STARTED_TRANSCRIPT,
+    };
+}
 
 /** Marketplace id of the Claude Code VS Code extension. */
 export const CLAUDE_CODE_EXTENSION_ID = 'anthropic.claude-code';
@@ -320,37 +347,95 @@ export function detectClaude(): { availability: ClaudeAvailability; command: str
 }
 
 /**
- * How the terminal starts the guided setup. On PATH, `claude "/erd-studio-setup"`
- * is typed into the user's shell — that one line parses the same in bash,
- * zsh, PowerShell and cmd. An absolute path found off PATH is instead run as
- * the terminal's own process (`shellPath` + `shellArgs`), so no shell ever
- * parses it: `& "…"` would be PowerShell-only (a syntax error in cmd and Git
- * Bash) and any quoting would still expand `$` in some shell. `display` is
- * what the confirmation modal shows.
+ * How a terminal starts Claude Code with a first prompt (the guided setup's
+ * `/erd-studio-setup`, or Execute with Claude's sync instruction). The prompt
+ * is always Claude Code's positional initial-prompt argument, never text typed
+ * into its TUI later: a first run in a folder shows the folder-trust prompt
+ * ("No, exit" preselected) first, and typed text would be lost there while
+ * its newline confirmed the highlighted option.
+ *
+ * On PATH, `claude [flags] "<prompt>"` is typed into the user's shell (after
+ * the project venv's activation, when `venvDir` is given). That line parses
+ * the same in bash, zsh, fish, PowerShell and cmd only because the prompt
+ * holds nothing any of them expands inside double quotes
+ * (`isShellNeutralPrompt`). An absolute path found off PATH, or a prompt that
+ * is not shell-neutral, is instead run as the terminal's own process
+ * (`shellPath` + `shellArgs`), so no shell ever parses it: `& "…"` would be
+ * PowerShell-only (a syntax error in cmd and Git Bash) and any quoting would
+ * still expand `$` in some shell. The venv is then applied as the
+ * environment its activation sets. `display` is what the confirmation modal shows.
  */
 export type ClaudeTerminalLaunch =
   | { kind: 'sendText'; display: string; line: string }
-  | { kind: 'process'; display: string; shellPath: string; shellArgs: string[] };
+  | { kind: 'process'; display: string; shellPath: string; shellArgs: string[]; env?: Record<string, string> };
 
-export function claudeTerminalLaunch(command: string, platform: NodeJS.Platform): ClaudeTerminalLaunch {
-  if (command === 'claude') {
-    const line = `claude "${SETUP_PROMPT}"`;
+export interface ClaudeLaunchOptions {
+  /** The initial prompt; defaults to the guided setup's `/erd-studio-setup`. */
+  prompt?: string;
+  /** Flags placed before the prompt, such as `--dangerously-skip-permissions`. */
+  args?: string[];
+  /** A project venv to activate first, so Claude's shell finds the project's dbt. */
+  venvDir?: string | null;
+  /** The `PATH` a process launch extends with the venv's bin folder (default: this process's). */
+  envPath?: string;
+}
+
+/** Characters no shell this extension types into (bash, zsh, fish, PowerShell, cmd) treats specially inside double quotes. */
+const SHELL_NEUTRAL_PROMPT = /^[A-Za-z0-9 _.,:/+=@-]+$/;
+const SHELL_NEUTRAL_FLAG = /^--?[A-Za-z0-9][A-Za-z0-9-]*$/;
+
+/** Whether `prompt` can be typed as `"<prompt>"` and reach claude unchanged in every shell. */
+export function isShellNeutralPrompt(prompt: string): boolean {
+  return SHELL_NEUTRAL_PROMPT.test(prompt);
+}
+
+export function claudeTerminalLaunch(
+  command: string,
+  platform: NodeJS.Platform,
+  opts: ClaudeLaunchOptions = {},
+): ClaudeTerminalLaunch {
+  const prompt = opts.prompt ?? SETUP_PROMPT;
+  const args = opts.args ?? [];
+  const venvDir = opts.venvDir ?? null;
+  if (command === 'claude' && isShellNeutralPrompt(prompt) && args.every((a) => SHELL_NEUTRAL_FLAG.test(a))) {
+    const claudeLine = ['claude', ...args, `"${prompt}"`].join(' ');
+    const line = venvDir ? `${venvActivateCommand(venvDir, platform)} && ${claudeLine}` : claudeLine;
     return { kind: 'sendText', display: line, line };
   }
-  return { kind: 'process', display: claudeLaunchLine(command, platform), shellPath: command, shellArgs: [SETUP_PROMPT] };
+  const launch: ClaudeTerminalLaunch = {
+    kind: 'process', display: claudeLaunchLine(command, platform, prompt, args), shellPath: command, shellArgs: [...args, prompt],
+  };
+  if (venvDir) {
+    const p = platform === 'win32' ? path.win32 : path.posix;
+    const bin = p.join(venvDir, platform === 'win32' ? 'Scripts' : 'bin');
+    const basePath = opts.envPath ?? process.env.PATH ?? '';
+    launch.env = { VIRTUAL_ENV: venvDir, PATH: basePath ? `${bin}${p.delimiter}${basePath}` : bin };
+  }
+  return launch;
 }
 
 /** The command as the modal shows it: an absolute CLI path quoted for reading, not for a shell. */
-export function claudeLaunchLine(command: string, platform: NodeJS.Platform): string {
+export function claudeLaunchLine(
+  command: string,
+  platform: NodeJS.Platform,
+  prompt: string = SETUP_PROMPT,
+  args: string[] = [],
+): string {
   const exe = command === 'claude'
     ? 'claude'
     : platform === 'win32' ? `"${command}"` : `'${command.replace(/'/g, `'\\''`)}'`;
-  return `${exe} "${SETUP_PROMPT}"`;
+  return [exe, ...args, `"${prompt}"`].join(' ');
 }
 
 // ---------------------------------------------------------------------------
 // Open Claude Code
 // ---------------------------------------------------------------------------
+
+/** "dbt project" in a dbt project, "project" in a folder without one: dbt is named only where it is. */
+function projectNoun(root: string, logicalOnly: boolean | undefined): string {
+  const hasDbt = logicalOnly === undefined ? hasDbtProjectFile(root) : !logicalOnly;
+  return hasDbt ? 'dbt project' : 'project';
+}
 
 /**
  * "Open Claude Code". With the CLI: a modal naming the exact command (the
@@ -358,8 +443,12 @@ export function claudeLaunchLine(command: string, platform: NodeJS.Platform): st
  * `claude` takes the first prompt as an argument, so nothing is typed into
  * its TUI later. With only the VS Code extension: open its panel and put the
  * prompt on the clipboard. With neither: the install page.
+ *
+ * `logicalOnly`: the root has no dbt_project.yml, so the nested-folder note
+ * says "your project" rather than "your dbt project". Omitted, it is read
+ * from disk (`hasDbtProjectFile`, the check `erdStudio.hasDbtProject` and the harness use).
  */
-export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: string }): Promise<void> {
+export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: string; logicalOnly?: boolean }): Promise<void> {
   const { availability, command } = detectClaude();
   if (availability === 'cli' && command) {
     const launch = claudeTerminalLaunch(command, process.platform);
@@ -418,10 +507,10 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
     }
     // Nested project: the extension's panel starts in the open workspace
     // folder and cannot be pointed elsewhere, so the only route is to open
-    // the dbt folder itself as the workspace.
+    // the project folder itself as the workspace.
     const OPEN_FOLDER = `Open ${folder}`;
     const pick = await vscode.window.showInformationMessage(
-      `${lead}Your dbt project, ${folder}, is a subfolder here, and Claude Code's panel starts in the folder VS Code has open. ` +
+      `${lead}Your ${projectNoun(opts.dbtRoot, opts.logicalOnly)}, ${folder}, is a subfolder here, and Claude Code's panel starts in the folder VS Code has open. ` +
         `If the skill isn't listed, open ${folder} itself (File > Open Folder…) and start Claude Code again.`,
       OPEN_FOLDER,
     );
@@ -458,7 +547,7 @@ export const COPILOT_CHAT_OPENED_MESSAGE =
  * still says how to switch. Editors whose chat command takes no argument get
  * a bare open; with no chat command at all, the Copilot setup page.
  */
-export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceFolder: string | null }): Promise<void> {
+export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceFolder: string | null; logicalOnly?: boolean }): Promise<void> {
   await vscode.env.clipboard.writeText(SETUP_PROMPT);
   const available = new Set(await vscode.commands.getCommands(true));
   if (!available.has(COPILOT_CHAT_OPEN_COMMAND)) {
@@ -480,7 +569,7 @@ export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceF
   const nested = opts.dbtRoot && opts.workspaceFolder
     && path.resolve(opts.dbtRoot) !== path.resolve(opts.workspaceFolder);
   void vscode.window.showInformationMessage(nested
-    ? `${COPILOT_CHAT_OPENED_MESSAGE} Your dbt project, ${path.basename(opts.dbtRoot!)}, is a subfolder here and ` +
+    ? `${COPILOT_CHAT_OPENED_MESSAGE} Your ${projectNoun(opts.dbtRoot!, opts.logicalOnly)}, ${path.basename(opts.dbtRoot!)}, is a subfolder here and ` +
       `Copilot looks for skills in the folder VS Code has open — if the guide isn't found, open ` +
       `${path.basename(opts.dbtRoot!)} itself (File > Open Folder…).`
     : COPILOT_CHAT_OPENED_MESSAGE);
@@ -706,13 +795,15 @@ export class GettingStartedPanel {
       const uri = vscode.Uri.joinPath(extensionUri, ...GETTING_STARTED_MEDIA.dir, file);
       return fs.existsSync(uri.fsPath) ? webview.asWebviewUri(uri).toString() : null;
     };
+    // The mode is fixed for the window (dbt or not is decided at activation), so the cut is picked once.
+    const cut = gettingStartedCut(mode);
     return buildGettingStartedHtml({
       cspSource: webview.cspSource,
       nonce: crypto.randomBytes(16).toString('base64'),
-      videoUri: media(GETTING_STARTED_MEDIA.video),
-      posterUri: media(GETTING_STARTED_MEDIA.poster),
-      cues: GETTING_STARTED_CUES,
-      transcript: GETTING_STARTED_TRANSCRIPT,
+      videoUri: media(cut.video),
+      posterUri: media(cut.poster),
+      cues: cut.cues,
+      transcript: cut.transcript,
       mode,
     });
   }
@@ -773,7 +864,8 @@ export class GettingStartedPanel {
 
   /** Show a setup outcome (from the panel's button or the palette command) and refresh the cards. */
   async postSetupResult(outcome: SetupOutcome): Promise<void> {
-    this.post({ type: 'setupResult', payload: { ...outcome, groups: describeWrittenFiles(outcome.filesWritten) } });
+    const groups = describeWrittenFiles(outcome.filesWritten, { logicalOnly: this.deps.logicalOnly === true });
+    this.post({ type: 'setupResult', payload: { ...outcome, groups } });
     await this.postStatus();
   }
 
@@ -820,13 +912,21 @@ export class GettingStartedPanel {
       case 'openClaude':
         telemetry.feature('openClaude');
         if (this.deps.workspaceRoot && await this.helperInstalledOrOffer()) {
-          await openClaudeCode({ dbtRoot: this.deps.workspaceRoot, clipboardText: this.deps.clipboardText('claude') });
+          await openClaudeCode({
+            dbtRoot: this.deps.workspaceRoot,
+            clipboardText: this.deps.clipboardText('claude'),
+            logicalOnly: this.deps.logicalOnly === true,
+          });
         }
         break;
       case 'openCopilotChat':
         telemetry.feature('openCopilotChat');
         if (await this.helperInstalledOrOffer()) {
-          await openCopilotChat({ dbtRoot: this.deps.workspaceRoot, workspaceFolder: this.deps.workspaceFolder ?? null });
+          await openCopilotChat({
+            dbtRoot: this.deps.workspaceRoot,
+            workspaceFolder: this.deps.workspaceFolder ?? null,
+            logicalOnly: this.deps.logicalOnly === true,
+          });
         }
         break;
       case 'openDomain':

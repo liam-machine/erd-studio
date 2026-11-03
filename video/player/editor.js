@@ -37,78 +37,111 @@ export function activityBar(active, { erd = true, erdOp = 1 } = {}) {
   return h;
 }
 
-// ---------- the Explorer side bar of the jaffle-shop project (body coordinates) ----------
-export function explorerSide({ hot = 0, op = 1 } = {}) {
+// ---------- the Explorer side bar (body coordinates) ----------
+// The dbt cut opens the jaffle-shop dbt project (dbt_project.yml lights on "…your dbt project");
+// the logical cut opens a plain folder with no dbt_project.yml (PLAIN_EXPLORER).
+const JAFFLE_EXPLORER = {
+  root: 'JAFFLE-SHOP',
+  rows: [['models', true], ['seeds', true], ['target', true], ['dbt_project.yml', false, true], ['packages.yml', false]],
+};
+export const PLAIN_EXPLORER = {
+  root: 'SHOP-ANALYTICS',
+  rows: [['docs', true], ['src', true], ['.gitignore', false], ['README.md', false]],
+};
+export function explorerSide({ hot = 0, op = 1, tree = JAFFLE_EXPLORER } = {}) {
   const row = (y, label, { folder = false, lit = 0 } = {}) =>
     `<div class="abs" style="left:0;top:${y}px;width:${SIDE}px;height:44px;background:rgba(27,42,64,${lit.toFixed(3)});${lit > 0 ? `box-shadow:inset 4px 0 0 rgba(96,165,250,${lit.toFixed(3)});` : ''}display:flex;align-items:center;gap:10px;padding-left:${folder ? 18 : 50}px;font-size:23px;white-space:nowrap">
       ${folder ? `<span style="color:var(--text-2)">${ICON.chevRight({ size: 20 })}</span><span style="color:#d9b35a">${ICON.folder({ size: 24 })}</span>` : `<span style="color:#c490e8">${ICON.file({ size: 24 })}</span>`}${label}</div>`;
   return `<div class="abs" style="left:${ACT}px;top:0;width:${SIDE}px;bottom:0;background:#16181b;border-right:1px solid var(--card-border)"></div>
     <div class="abs" style="left:${ACT}px;top:0;width:${SIDE}px;bottom:0;opacity:${op.toFixed(3)}">
     <div class="abs" style="left:24px;top:20px;font-size:20px;font-weight:700;letter-spacing:.08em;color:var(--text-2)">EXPLORER</div>
-    <div class="abs" style="left:14px;top:62px;display:flex;align-items:center;gap:6px;font-size:21px;font-weight:800;letter-spacing:.04em">${ICON.chevDown({ size: 20 })}JAFFLE-SHOP</div>
-    ${row(100, 'models', { folder: true })}${row(144, 'seeds', { folder: true })}${row(188, 'target', { folder: true })}
-    ${row(232, 'dbt_project.yml', { lit: hot })}${row(276, 'packages.yml')}</div>`;
+    <div class="abs" style="left:14px;top:62px;display:flex;align-items:center;gap:6px;font-size:21px;font-weight:800;letter-spacing:.04em">${ICON.chevDown({ size: 20 })}${tree.root}</div>
+    ${tree.rows.map(([label, folder, lit], i) => row(100 + i * 44, label, { folder, lit: lit ? hot : 0 })).join('')}</div>`;
 }
 
 // ---------- the extension listing (package.json) ----------
 export const EXTENSION = {
   name: 'ERD Studio',
   publisher: 'liamwynne',
-  description: 'Logical data modeling in Git: draw ERDs in VS Code, saved as plain YAML your AI assistant can read. DBML import and export, no lock-in. Compare with dbt.',
+  description: 'Logical data modeling in Git: draw ERDs in VS Code as plain files your AI assistant can read. New projects are DBML, an open format; YAML/JSON projects keep working. Import from dbdiagram.io, compare with dbt.',
+};
+/**
+ * The listing's description up to (not including) the first sentence that names dbt: what the
+ * logical cut shows, so a folder without dbt sees no dbt wording. The real words, fewer of them.
+ */
+export const descriptionWithoutDbt = (d = EXTENSION.description) => {
+  const sentences = d.match(/[^.]+(?:\.|$)\s*/g) ?? [d];
+  const i = sentences.findIndex((x) => /\bdbt\b/i.test(x));
+  return (i < 0 ? sentences : sentences.slice(0, i)).join('').trim();
 };
 
 // ---------- the walkthrough (package.json contributes.walkthroughs, id erdStudio.getStarted) ----------
 // Every step, in order, with its real `when` clause; a window shows only the steps whose clause
 // holds there. VS Code renders a step's command link that sits on its own line as a button;
-// `text` is the rest of the description (set only for the steps a scene opens).
+// `text` is the rest of the description (set only for the steps a scene opens), and `more` the
+// description's second paragraph and button, when it has one.
 export const WALKTHROUGH = {
   title: 'Get started with ERD Studio',
-  description: 'Design your data model in Git — from scratch, from DBML or from dbt — then let your AI assistant fill in the detail.',
+  description: 'Design your data model in Git, from scratch or from DBML, then let your AI assistant fill in the detail.',
   steps: [
     { id: 'watch', when: 'erdStudio.hasDbtProject', title: 'Watch the one-minute tour', svg: 'watch' },
+    { id: 'watchLogical', when: '!erdStudio.hasDbtProject', title: 'Watch the one-minute tour', svg: 'watch' },
     { id: 'openProject', when: 'workspaceFolderCount == 0', title: 'Open the folder your data model lives in', svg: 'open-project' },
-    { id: 'newDiagram', when: '!erdStudio.hasDbtProject', title: 'Draw your first data model — no dbt needed', svg: 'new-diagram' },
+    { id: 'openDiagram', when: 'erdStudio.hasDiagrams', title: 'Open a diagram from this project', svg: 'sample' },
     {
-      id: 'draw', when: 'erdStudio.hasDbtProject', title: 'Draw your dbt project — no AI needed', svg: 'draw', button: 'Draw from dbt',
+      id: 'newDiagram', when: '!erdStudio.hasDbtProject && !erdStudio.hasDiagrams', title: 'Draw your first data model', svg: 'new-diagram', button: 'New Diagram',
+      text: 'Start a blank diagram and add tables on the canvas. Each table is a file in .erd-studio/ you can commit and review like code.',
+      more: { text: 'New to data modelling? Start from a small coffee-shop star schema instead.', button: 'Open Example Diagram' },
+    },
+    {
+      id: 'draw', when: 'erdStudio.hasDbtProject && !erdStudio.hasDiagrams', title: 'Draw your dbt project — no AI needed', svg: 'draw', button: 'Draw from dbt',
       text: 'Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.',
     },
-    { id: 'importDbml', title: 'Start from a DBML file', svg: 'import-dbml' },
+    {
+      id: 'importDbml', title: 'Start from a DBML file', svg: 'import-dbml', button: 'Import DBML…',
+      text: 'From dbdiagram.io or any DBML tool. Export back to DBML or Mermaid any time: an open format, no lock-in.',
+    },
     {
       id: 'enrich', title: 'Enrich it with your AI assistant', svg: 'enrich', button: 'Set Up My AI Helper',
       text: "Add grain, keys, rationale and your team's modelling style. This installs a guide for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; then type /erd-studio-setup in your assistant.",
     },
-    {
-      id: 'sample', when: '!erdStudio.hasDbtProject', title: 'Using dbt? Try the sample project', svg: 'sample', button: 'Try the sample project',
-      text: 'A small dbt project to compare a design with what dbt built.',
-    },
   ],
 };
 
-// The two windows the video shows: the tour runs in the jaffle-shop dbt project; the sample scene
-// is a folder without dbt (the sample step is offered only there).
-export const DBT_PROJECT = { 'erdStudio.hasDbtProject': true, workspaceFolderCount: 1 };
-export const PLAIN_FOLDER = { 'erdStudio.hasDbtProject': false, workspaceFolderCount: 1 };
+// The two windows the videos show, before their first diagram: the dbt cut runs in the
+// jaffle-shop dbt project; the logical cut in a folder without dbt.
+export const DBT_PROJECT = { 'erdStudio.hasDbtProject': true, 'erdStudio.hasDiagrams': false, workspaceFolderCount: 1 };
+export const PLAIN_FOLDER = { 'erdStudio.hasDbtProject': false, 'erdStudio.hasDiagrams': false, workspaceFolderCount: 1 };
+/** The plain folder once its first diagram exists: openDiagram replaces newDiagram. */
+export const PLAIN_FOLDER_WITH_DIAGRAM = { ...PLAIN_FOLDER, 'erdStudio.hasDiagrams': true };
+/** The windows by name, for a scene's `props.window` in a script. */
+export const WINDOWS = { dbt: DBT_PROJECT, plain: PLAIN_FOLDER, plainWithDiagram: PLAIN_FOLDER_WITH_DIAGRAM };
 
-/** Evaluates the walkthrough's `when` clauses: `key`, `!key` and `key == n`. Anything else throws. */
+/**
+ * Evaluates the walkthrough's `when` clauses: terms `key`, `!key` and `key == n`, joined by `&&`.
+ * Anything else (`||`, brackets, other operators, a key the context does not set) throws.
+ */
 export function whenHolds(when, ctx) {
   if (when === undefined) return true;
-  let m;
-  if ((m = when.match(/^(!?)([\w.]+)$/))) {
-    if (!(m[2] in ctx)) throw new Error(`unknown context key ${m[2]}`);
-    return Boolean(ctx[m[2]]) !== (m[1] === '!');
-  }
-  if ((m = when.match(/^([\w.]+) == (\d+)$/))) {
-    if (!(m[1] in ctx)) throw new Error(`unknown context key ${m[1]}`);
-    return ctx[m[1]] === Number(m[2]);
-  }
-  throw new Error(`unsupported when clause: ${when}`);
+  return when.split(' && ').every((term) => {
+    let m;
+    if ((m = term.match(/^(!?)([\w.]+)$/))) {
+      if (!(m[2] in ctx)) throw new Error(`unknown context key ${m[2]}`);
+      return Boolean(ctx[m[2]]) !== (m[1] === '!');
+    }
+    if ((m = term.match(/^([\w.]+) == (\d+)$/))) {
+      if (!(m[1] in ctx)) throw new Error(`unknown context key ${m[1]}`);
+      return ctx[m[1]] === Number(m[2]);
+    }
+    throw new Error(`unsupported when clause: ${when}`);
+  });
 }
 /** The steps a window with this context shows, in order. */
 export const visibleSteps = (ctx = DBT_PROJECT) => WALKTHROUGH.steps.filter((s) => whenHolds(s.when, ctx));
 
 // The step images are the real media/walkthrough/*.svg files, inlined (an <img> could not use the
 // page's fonts, and the video uses OFL fonts only). Fetched once, before the first frame.
-const SVG_NAMES = WALKTHROUGH.steps.map((s) => s.svg);
+const SVG_NAMES = [...new Set(WALKTHROUGH.steps.map((s) => s.svg))];
 export const WALK_SVG = Object.fromEntries(await Promise.all(SVG_NAMES.map(async (n) => {
   const txt = await (await fetch(`/media/walkthrough/${n}.svg`, { cache: 'no-store' })).text();
   return [n, txt.replace(/font-family="[^"]*"/, 'font-family="Inter, sans-serif"')];
@@ -119,14 +152,16 @@ export const walkSvg = (name, w) =>
 
 /**
  * Geometry of the walkthrough page, in coordinates relative to its own left edge / the body top.
- * `wide` (no side bar) gives the step column and the image more room.
+ * `wide` (no side bar) gives the step column and the image more room; `dense` (with `wide`) a
+ * wider step column, slightly tighter rows and lines, so a step with two paragraphs and two
+ * buttons (newDiagram) still fits the window. `steps` overrides the step list (see sample.js).
  */
-export function wtGeom({ wide = false, open = 'draw', ctx = DBT_PROJECT } = {}) {
+export function wtGeom({ wide = false, dense = false, open = 'draw', ctx = DBT_PROJECT, steps = visibleSteps(ctx) } = {}) {
   const W = wide ? BODY.w - ACT : BODY.w - ACT - SIDE;
   const g = { W, SX: 48, SW: wide ? 760 : 640, ROW: 48, STEPS_Y: 104, INDENT: 52, TEXT_W: wide ? 680 : 560, TEXT_LH: 28, BTN_H: 46 };
+  if (wide && dense) Object.assign(g, { SW: 980, TEXT_W: 900, TEXT_LH: 27, ROW: 46, STEPS_Y: 100 });
   g.IMG_X = g.SX + g.SW + 44;
   g.IMG_W = Math.min(W - g.IMG_X - 48, wide ? 760 : 520);
-  const steps = visibleSteps(ctx);
   const idx = steps.findIndex((s) => s.id === open);
   if (idx < 0) throw new Error(`walkthrough step ${open} is not shown in this window`);
   g.OPEN_Y = g.STEPS_Y + idx * g.ROW;
@@ -135,6 +170,14 @@ export function wtGeom({ wide = false, open = 'draw', ctx = DBT_PROJECT } = {}) 
   g.TEXT_LINES = step?.text ? Math.ceil(step.text.length / perLine) : 0;
   g.BTN_Y = 54 + g.TEXT_LINES * g.TEXT_LH + 14;         // relative to the open step's top
   g.OPEN_H = g.BTN_Y + g.BTN_H + 18;
+  if (step?.more) {
+    // the second paragraph and its button, below the first button
+    g.MORE_LINES = Math.ceil(step.more.text.length / perLine);
+    g.MORE_Y = g.BTN_Y + g.BTN_H + 14;
+    g.MORE_BTN_Y = g.MORE_Y + g.MORE_LINES * g.TEXT_LH + 10;
+    g.OPEN_H = g.MORE_BTN_Y + g.BTN_H + 18;
+  }
+  g.BOTTOM = g.STEPS_Y + (steps.length - 1) * g.ROW + g.OPEN_H + 6;
   return g;
 }
 
@@ -148,23 +191,28 @@ const openDot = (size) => `<span style="width:${size}px;height:${size}px;border-
  * @param o.glow   0..1 highlight on the open step   @param o.press 0..1 click on its button
  * @param o.img    0..1 opacity of the step's image
  * @param o.ctx    the window's context keys (DBT_PROJECT or PLAIN_FOLDER): which steps show
+ * @param o.steps  the step list, when it is not the walkthrough's own (see sample.js)
  */
-export function walkthrough({ open = 'draw', done = [], glow = 0, press = 0, wide = false, img = 1, ctx = DBT_PROJECT } = {}) {
-  const g = wtGeom({ wide, open, ctx });
+export function walkthrough({ open = 'draw', done = [], glow = 0, press = 0, wide = false, dense = false, img = 1, ctx = DBT_PROJECT, steps = visibleSteps(ctx) } = {}) {
+  const g = wtGeom({ wide, dense, open, ctx, steps });
+  const button = (y, label, bg) => `<div class="abs" style="left:${g.INDENT}px;top:${y}px;height:${g.BTN_H}px;padding:0 22px;border-radius:5px;background:${bg};color:#fff;font-size:21px;font-weight:600;display:flex;align-items:center;white-space:nowrap">${label}</div>`;
   let h = `<div class="abs" style="left:0;top:0;width:${g.W}px;bottom:0;background:var(--card)"></div>`;
   h += `<div class="abs" style="left:${g.SX}px;top:18px;font-size:32px;font-weight:800;letter-spacing:-.01em;white-space:nowrap">${WALKTHROUGH.title}</div>`;
   h += `<div class="abs" style="left:${g.SX}px;top:62px;font-size:20px;color:var(--text-2);white-space:nowrap">${WALKTHROUGH.description}</div>`;
   let y = g.STEPS_Y;
-  for (const s of visibleSteps(ctx)) {
+  for (const s of steps) {
     const dot = done.includes(s.id) ? doneDot(26) : openDot(26);
     if (s.id === open) {
       const bw = `rgba(55,148,255,${(0.3 + 0.7 * glow).toFixed(2)})`;
       const btnBg = press > 0 && press < 1 ? '#0b4f7d' : '#0e639c';
+      const more = s.more
+        ? `<div class="abs" style="left:${g.INDENT}px;top:${g.MORE_Y}px;width:${g.TEXT_W}px;font-size:19px;line-height:${g.TEXT_LH}px;color:var(--text-2)">${esc(s.more.text)}</div>${button(g.MORE_BTN_Y, s.more.button, '#0e639c')}`
+        : '';
       h += `<div class="abs" style="left:${g.SX}px;top:${y}px;width:${g.SW}px;height:${g.OPEN_H}px;border-radius:10px;background:#ffffff0c;border:2px solid ${bw};box-shadow:0 0 ${(26 * glow).toFixed(1)}px rgba(55,148,255,${(0.35 * glow).toFixed(2)})">
         <div class="abs" style="left:13px;top:14px">${dot}</div>
         <div class="abs" style="left:${g.INDENT}px;top:10px;font-size:23px;line-height:34px;font-weight:700;white-space:nowrap">${esc(s.title)}</div>
         <div class="abs" style="left:${g.INDENT}px;top:54px;width:${g.TEXT_W}px;font-size:19px;line-height:${g.TEXT_LH}px;color:var(--text-2)">${esc(s.text)}</div>
-        <div class="abs" style="left:${g.INDENT}px;top:${g.BTN_Y}px;height:${g.BTN_H}px;padding:0 22px;border-radius:5px;background:${btnBg};color:#fff;font-size:21px;font-weight:600;display:flex;align-items:center;white-space:nowrap">${s.button}</div>
+        ${button(g.BTN_Y, s.button, btnBg)}${more}
       </div>`;
       y += g.OPEN_H + 6;
     } else {
@@ -172,16 +220,16 @@ export function walkthrough({ open = 'draw', done = [], glow = 0, press = 0, wid
       y += g.ROW;
     }
   }
-  const step = WALKTHROUGH.steps.find((s) => s.id === open);
+  const step = steps.find((s) => s.id === open);
   if (step && img > 0) {
     h += `<div class="abs" style="left:${g.IMG_X}px;top:${g.STEPS_Y}px;opacity:${img.toFixed(3)}">${walkSvg(step.svg, g.IMG_W)}</div>`;
   }
   return h;
 }
 /** Frame-space centre of the open step's button. `left` = the walkthrough's left edge in body px. */
-export function walkButton({ wide = false, open = 'draw', left = ACT + SIDE, ctx = DBT_PROJECT } = {}) {
-  const g = wtGeom({ wide, open, ctx });
-  const step = WALKTHROUGH.steps.find((s) => s.id === open);
+export function walkButton({ wide = false, dense = false, open = 'draw', left = ACT + SIDE, ctx = DBT_PROJECT, steps = visibleSteps(ctx) } = {}) {
+  const g = wtGeom({ wide, dense, open, ctx, steps });
+  const step = steps.find((s) => s.id === open);
   const w = 22 * 2 + step.button.length * 11.2;
   return { x: BODY.x + left + g.SX + g.INDENT + w / 2, y: BODY.y + g.OPEN_Y + g.BTN_Y + g.BTN_H / 2 };
 }
@@ -246,3 +294,17 @@ export const quickPick = (title, inner, h, style = '') =>
   `<div class="abs" style="left:${QP.x}px;top:${QP.y}px;width:${QP.w}px;height:${h}px;border-radius:10px;background:#252526;border:1px solid #454545;box-shadow:0 18px 50px #000c;overflow:hidden;${style}">
     <div class="abs" style="left:0;right:0;top:0;height:${QP.title}px;display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:600;color:var(--text-2);background:#1f1f20;border-bottom:1px solid #3a3a3c">${title}</div>
     ${inner}</div>`;
+
+// ---------- New Diagram (erdStudio.createDomain), the logical cut's first diagram ----------
+// The name box as a fresh DBML project shows it: no diagrams yet, so the first one goes in the
+// last creatable layer (Gold) by itself and the prompt says where (src/extension.ts). The
+// validator's Info message says what the typed name is saved as (slugFromName).
+export const NEW_DIAGRAM = {
+  title: 'New Diagram',
+  placeholder: 'e.g. Customer 360, Sales, Orders',
+  prompt: 'Name the diagram. Saved in the Gold layer — Move Diagram to Layer… changes it later.',
+  savedAs: (slug) => `Saved as ${slug}`,
+  name: 'Orders',
+  /** The diagram file it writes, relative to the folder (`<layer>/diagrams/<slug>.dbml`). */
+  file: '.erd-studio/gold/diagrams/orders.dbml',
+};

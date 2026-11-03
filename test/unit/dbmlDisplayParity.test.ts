@@ -41,6 +41,8 @@ import type { TemplateService } from '../../src/services/templateService';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const NATIVE = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native');
+/** The dbt fixture after Convert: a dbt project on DBML storage. */
+const DBT_DBML = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project-dbml');
 const TWINS = path.join(REPO_ROOT, 'packages', 'core', 'test', 'fixtures', 'dbml');
 const EXAMPLES = path.join(REPO_ROOT, 'docs', 'examples');
 const SEMANTIC_DIR = '.erd-studio';
@@ -56,6 +58,7 @@ function diagramsOf(project: string): string[] {
 
 const CASES: Array<[string, string, string]> = [
   ...diagramsOf(NATIVE).map((d): [string, string, string] => ['dbml-native', NATIVE, d]),
+  ...diagramsOf(DBT_DBML).map((d): [string, string, string] => ['dbt-project-dbml', DBT_DBML, d]),
   ...fs.readdirSync(TWINS).sort().flatMap((twin) => diagramsOf(path.join(TWINS, twin)).map((d): [string, string, string] => [`twin ${twin}`, path.join(TWINS, twin), d])),
   // The example projects: real modelling patterns, the shapes customers' repos take.
   ...fs.readdirSync(EXAMPLES, { withFileTypes: true })

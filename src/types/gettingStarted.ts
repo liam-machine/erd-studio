@@ -31,7 +31,7 @@ import {
 /** Fixed destinations for `openExternal`. The webview names one; it never sends a URL. */
 export type GettingStartedExternalTarget =
   | 'claudeCodeDocs' | 'copilotDocs' | 'codexDocs' | 'geminiCliDocs' | 'cursorDocs'
-  | 'videoOnline' | 'dbtInstallDocs' | 'sampleRepo' | 'sampleCodespaces';
+  | 'videoOnline' | 'videoOnlineLogical' | 'dbtInstallDocs' | 'sampleRepo' | 'sampleCodespaces';
 
 /**
  * The public sample dbt project (`erdStudio.trySampleProject`): a Kimball
@@ -64,6 +64,8 @@ export const GETTING_STARTED_EXTERNAL_URLS: Readonly<Record<GettingStartedExtern
   // jsDelivr serves the repo file as video/mp4, so a browser plays it in place.
   // The github.com blob page refuses to preview a file this size.
   videoOnline: 'https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4',
+  // The logical-first cut (the no-folder and logical pages), the same way.
+  videoOnlineLogical: 'https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started-logical.mp4',
   dbtInstallDocs: 'https://docs.getdbt.com/docs/core/installation-overview',
   sampleRepo: SAMPLE_REPO_URL,
   sampleCodespaces: SAMPLE_CODESPACES_URL,
@@ -143,8 +145,8 @@ export interface GettingStartedStatus {
   hasProject: boolean;
   /**
    * The open folder has no `dbt_project.yml`: the page leads with New diagram
-   * and Import DBML, and "Using dbt? Open its folder to compare" replaces the
-   * dbt steps. Optional and additive: absent means a dbt project (the page as
+   * and Import DBML in place of the dbt steps, and names no dbt anywhere.
+   * Optional and additive: absent means a dbt project (the page as
    * it was before logical-only mode). The panel host fills it from
    * `GettingStartedDeps.logicalOnly` when `getStatus()` leaves it out.
    */
@@ -260,12 +262,13 @@ export const SETUP_PROMPT = '/erd-studio-setup';
 
 /**
  * The guided-setup card's text on the logical-only page (a folder without
- * dbt_project.yml): the setup's no-dbt route designs the model with you.
+ * dbt_project.yml): the setup's no-dbt route designs the model with you. It
+ * names no dbt: that page never mentions it.
  */
 export const LOGICAL_SETUP_TEXT =
   'Your assistant asks what your business does and designs a first diagram with you — tables, keys, grain and ' +
   'how they connect — or builds on a DBML import or the tables you already have, then checks the files, ' +
-  'explaining each step. No dbt needed.';
+  'explaining each step.';
 
 /**
  * "Found 42 dbt models · medallion layout · manifest 3 days old" — each part
@@ -399,8 +402,9 @@ function samePath(a: string, b: string, platform: string): boolean {
  * Group the files a setup wrote under a plain explanation each, so the
  * result reads as "what just happened" rather than a list of dot-paths.
  * Order is fixed; empty groups are dropped; unknown paths go last.
+ * `logicalOnly` (a folder without dbt_project.yml): no group names dbt.
  */
-export function describeWrittenFiles(paths: readonly string[]): SetupFileGroup[] {
+export function describeWrittenFiles(paths: readonly string[], opts: { logicalOnly?: boolean } = {}): SetupFileGroup[] {
   const groups: Array<SetupFileGroup & { match: (p: string) => boolean }> = [
     {
       title: 'The guided setup for Claude Code',
@@ -428,7 +432,9 @@ export function describeWrittenFiles(paths: readonly string[]): SetupFileGroup[]
     },
     {
       title: 'A small checking tool',
-      why: 'Your assistant runs it to compare your logical data model with your dbt project. It sits in your home folder, outside the project.',
+      why: opts.logicalOnly
+        ? 'Your assistant runs it to check your diagram files. It sits in your home folder, outside the project.'
+        : 'Your assistant runs it to compare your logical data model with your dbt project. It sits in your home folder, outside the project.',
       paths: [],
       match: (p) => p.startsWith('~/.erd-studio-cli/'),
     },
@@ -456,13 +462,19 @@ export function describeWrittenFiles(paths: readonly string[]): SetupFileGroup[]
 export interface GettingStartedHtmlInput {
   cspSource: string;
   nonce: string;
-  /** Webview URI of `media/onboarding/getting-started.mp4`, or null when the file is missing (renders the fallback). */
+  /**
+   * Webview URI of the cut this page plays, or null when the file is missing
+   * (renders the fallback): `media/onboarding/getting-started.mp4` (the dbt
+   * tour) on the dbt page, `getting-started-logical.mp4` on the no-folder and
+   * logical pages. The host picks it, with the matching poster, cues and
+   * transcript; the fallback's online link follows `mode`.
+   */
   videoUri: string | null;
-  /** Webview URI of `media/onboarding/getting-started-poster.jpg`, or null when missing. */
+  /** Webview URI of that cut's poster (`getting-started-poster.jpg` / `getting-started-logical-poster.jpg`), or null when missing. */
   posterUri: string | null;
   cues: ReadonlyArray<{ start: number; end: number; text: string }>;
   transcript: string;
-  /** Offer "Open in Codespaces" on the sample card. Defaults to `SAMPLE_CODESPACES_LIVE`. */
+  /** Offer "Open in Codespaces" next to the dbt page's sample link. Defaults to `SAMPLE_CODESPACES_LIVE`. */
   codespaces?: boolean;
   /**
    * The page the host expects before the first `status` arrives (from its
@@ -660,16 +672,15 @@ body {
   .gs-launch__actions { justify-content: flex-start; }
 }
 
-.gs-noproject, .gs-sample, .gs-usedbt {
+.gs-noproject {
   margin: 14px 0 0; padding: 16px 18px; border-radius: 8px;
   background: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent));
 }
-.gs-noproject, .gs-usedbt { margin-top: 26px; }
+.gs-noproject { margin-top: 26px; }
 .gs-sample__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: var(--vscode-foreground); }
 .gs-sample__text { margin: 0 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
 .gs-sample-link { margin: 0 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.gs-sample__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .gs-sample__note { font-size: 12px; color: var(--vscode-descriptionForeground); }
 .gs-summary { margin: 26px 0 0; font-size: 13px; color: var(--vscode-foreground); }
 .gs-section-intro { margin: -6px 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
@@ -681,8 +692,8 @@ body {
 }
 .gs-footer em { font-style: normal; color: var(--vscode-foreground); }
 .gs[data-project="false"] .gs-steps-wrap { display: none; }
-.gs[data-project="true"] .gs-noproject, .gs[data-project="true"] .gs-sample { display: none; }
-.gs[data-project="unknown"] .gs-noproject, .gs[data-project="unknown"] .gs-sample { display: none; }
+.gs[data-project="true"] .gs-noproject { display: none; }
+.gs[data-project="unknown"] .gs-noproject { display: none; }
 .gs[data-project="unknown"] .gs-step__actions { visibility: hidden; }
 `;
 
@@ -745,9 +756,10 @@ const SCRIPT = `
       var q = video.play();
       if (q && q.catch) { q.catch(function () { /* the viewer can press play */ }); }
     }
-    // The video is a dbt tour: it plays by itself only on the dbt page. Without a
-    // folder, or in a folder without dbt, the poster waits behind "Watch the
-    // one-minute dbt tour" until the viewer asks for it.
+    // The video plays by itself in an open folder: the dbt tour on the dbt page,
+    // the logical-first cut in a folder without dbt (the host picks the file by
+    // page). Without a folder the poster waits behind "Watch the one-minute
+    // tour" until the viewer asks for it.
     startWithSound = function () {
       if (started || fellBack) { return; }
       started = true;
@@ -857,7 +869,7 @@ const SCRIPT = `
     for (var i = 0; i < els.length; i++) {
       els[i].hidden = els[i].getAttribute('data-modes').split(' ').indexOf(mode) < 0;
     }
-    if (mode === 'dbt') { startWithSound(); } else if (mode !== 'unknown') { offerTour(); }
+    if (mode === 'dbt' || mode === 'logical') { startWithSound(); } else if (mode === 'nofolder') { offerTour(); }
   }
 
   function showStep(step, show) {
@@ -993,8 +1005,12 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     `data-modes="${modes.join(' ')}"${modes.includes(mode) ? '' : ' hidden'}`;
   /** `hidden` for a step card that the first status may still reveal. */
   const hiddenUnless = (show: boolean): string => (show ? '' : ' hidden');
+  // No folder is known up front (the empty window), so its page shows from the first paint: the
+  // open-a-folder cards, never the project steps (whose dbt cards would flash before the status).
+  const initialProject = mode === 'nofolder' ? 'false' : 'unknown';
+  // The sample is a dbt project, so it is offered on the dbt page only (never in an empty window).
   const codespacesButton = (input.codespaces ?? SAMPLE_CODESPACES_LIVE)
-    ? `<button class="gs-btn" type="button" data-action="openExternal" data-target="sampleCodespaces">${ICON_EXTERNAL}Open in Codespaces</button>
+    ? ` <button class="gs-link" type="button" data-action="openExternal" data-target="sampleCodespaces">Open it in Codespaces</button>
       <span class="gs-sample__note">Runs in your browser &mdash; nothing to install.</span>`
     : '';
   const n = escapeHtml(nonce);
@@ -1004,8 +1020,10 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         <source src="${escapeHtml(videoUri)}" type="video/mp4">
       </video>
       <button class="gs-video__sound" type="button" hidden>${ICON_SOUND}<span>Turn on sound</span></button>
-      <button class="gs-video__tour" type="button" hidden>${ICON_PLAY}<span>Watch the one-minute dbt tour</span></button>`
+      <button class="gs-video__tour" type="button" hidden>${ICON_PLAY}<span ${only('unknown', 'dbt')}>Watch the one-minute dbt tour</span><span ${only('nofolder', 'logical')}>Watch the one-minute tour</span></button>`
     : '';
+  // The online copy of the cut this page plays: the host picks the logical cut for these pages.
+  const videoOnlineTarget: GettingStartedExternalTarget = mode === 'logical' || mode === 'nofolder' ? 'videoOnlineLogical' : 'videoOnline';
   const fallbackPoster = posterUri ? `<img class="gs-video__poster" src="${escapeHtml(posterUri)}" alt="">` : '';
   const chips = AI_ASSISTANTS.map((a) =>
     `<li class="gs-chip" data-assistant-row="${a.id}" hidden>${ICON_CHECK}${escapeHtml(a.name)}</li>`).join('\n            ');
@@ -1024,12 +1042,11 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 <style nonce="${n}">${STYLE}</style>
 </head>
 <body>
-<main class="gs" data-project="unknown" data-mode="${mode}">
+<main class="gs" data-project="${initialProject}" data-mode="${mode}">
   <header class="gs-hero">
     <p class="gs-hero__kicker">ERD Studio</p>
     <h1 class="gs-hero__title">Welcome to ERD Studio</h1>
-    <p class="gs-hero__sub" ${only('unknown', 'nofolder')}>Design your data model in Git. Let your AI build from it.</p>
-    <p class="gs-hero__sub" ${only('logical')}>Design your data model in your repo; compare it with dbt when you're ready.</p>
+    <p class="gs-hero__sub" ${only('unknown', 'nofolder', 'logical')}>Design your data model in Git. Let your AI build from it.</p>
     <p class="gs-hero__sub" ${only('dbt')}>Turn the dbt project you already have into a data model you can see.</p>
   </header>
 
@@ -1039,7 +1056,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
       ${fallbackPoster}
       <div class="gs-video__fallback-card">
         <p class="gs-video__fallback-text">This editor can't play the video here.</p>
-        <button class="gs-btn gs-btn--primary" type="button" data-action="openExternal" data-target="videoOnline">${ICON_EXTERNAL}Watch in your browser</button>
+        <button class="gs-btn gs-btn--primary" type="button" data-action="openExternal" data-target="${videoOnlineTarget}">${ICON_EXTERNAL}Watch in your browser</button>
       </div>
     </div>
   </section>
@@ -1050,22 +1067,14 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 
   <section class="gs-noproject" aria-label="Open a folder">
     <h2 class="gs-sample__title">Open the folder your data model lives in</h2>
-    <p class="gs-sample__text">Any folder works: your design is saved in <code>.erd-studio/</code>, next to your code (a new project as DBML, an open format; a project from an older ERD Studio keeps its YAML and JSON files). If the folder holds a dbt project (<code>dbt_project.yml</code>), ERD Studio also shows what dbt built.</p>
+    <p class="gs-sample__text">Any folder works: your design is saved in <code>.erd-studio/</code>, next to your code (a new project as DBML, an open format; a project from an older ERD Studio keeps its YAML and JSON files).</p>
     <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">Open a folder&hellip;</button>
-  </section>
-  <section class="gs-sample" aria-label="Try the sample project">
-    <h2 class="gs-sample__title">Using dbt? Try the sample project</h2>
-    <p class="gs-sample__text">A small Kimball-style dbt project with fake coffee-shop data &mdash; runs on your computer, no account needed.</p>
-    <div class="gs-sample__actions">
-      <button class="gs-btn gs-btn--primary" type="button" data-action="trySample">Try the sample project</button>
-      ${codespacesButton}
-    </div>
   </section>
 
   <div class="gs-steps-wrap">
     <p class="gs-summary" role="status" hidden></p>
     <h2 class="gs-section-title">Your diagram</h2>
-    <p class="gs-sample-link" ${only('unknown', 'dbt')}><button class="gs-link" type="button" data-action="trySample">New to this? Try it on the sample project first</button></p>
+    <p class="gs-sample-link" ${only('unknown', 'dbt')}><button class="gs-link" type="button" data-action="trySample">New to this? Try it on the sample project first</button>${codespacesButton}</p>
     <div class="gs-steps">
       <section class="gs-step" data-step="open" data-state="loading" hidden>
         <span class="gs-step__num">1</span>
@@ -1083,7 +1092,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         <div class="gs-step__body">
           <h3 class="gs-step__title" data-when="first">Draw your first diagram</h3>
           <h3 class="gs-step__title" data-when="more" hidden>Draw another diagram</h3>
-          <p class="gs-step__text">Add tables on a blank canvas. Each table is a file in <code>.erd-studio/</code> that you commit and review like code. No dbt needed.</p>
+          <p class="gs-step__text">Add tables on a blank canvas. Each table is a file in <code>.erd-studio/</code> that you commit and review like code.</p>
           <div class="gs-step__actions" data-when="first">
             <button class="gs-btn gs-btn--primary" type="button" data-action="createDomain">New diagram</button>
           </div>
@@ -1174,20 +1183,11 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         </div>
       </section>
     </div>
-
-    <section class="gs-usedbt" aria-label="Using dbt?" ${only('logical')}>
-      <h2 class="gs-sample__title">Using dbt?</h2>
-      <p class="gs-sample__text">Open its folder to compare your design with what dbt built: ERD Studio reads the dbt project and shows it as a read-only Physical view next to your Logical design.</p>
-      <div class="gs-sample__actions">
-        <button class="gs-btn" type="button" data-action="openFolder">Open a folder&hellip;</button>
-        <button class="gs-link" type="button" data-action="trySample">Or try the sample dbt project</button>
-      </div>
-    </section>
   </div>
 
   <footer class="gs-footer">
     <span>Rewatch any time: ERD Studio sidebar &#9654; button, or Command Palette &rarr; <em>ERD Studio: Watch Getting Started Video</em>.</span>
-    <button class="gs-link" type="button" data-action="openExternal" data-target="dbtInstallDocs">New to dbt? How to install it${ICON_EXTERNAL}</button>
+    <button class="gs-link" type="button" data-action="openExternal" data-target="dbtInstallDocs" ${only('unknown', 'dbt')}>New to dbt? How to install it${ICON_EXTERNAL}</button>
   </footer>
 </main>
 <script type="application/json" id="gs-data" nonce="${n}">${inlineJson({

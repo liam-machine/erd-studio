@@ -409,7 +409,7 @@ async function dbmlConversionPreview(ctx: CliContext, storage: ProjectStorage): 
       handled: plan.handled,
       leftAsIs: plan.leftAsIs,
       keptMissing: plan.keptMissing,
-      preview: describeDbmlConversion(plan),
+      preview: describeDbmlConversion(plan, { hasDbt: ctx.hasDbt }),
     },
     // A run that stopped part way, or a project Convert left mixed: files it left as they are (D26/D27).
     // And a DBML project with pending relationships or unlinked members Convert settles now (D26/D27).
@@ -863,7 +863,8 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
       title: 'Ready',
       why: dbtChecked
         ? 'Everything ERD Studio uses is in place.'
-        : 'Your ERD Studio files are in place. This folder is not a dbt project, so the dbt checks were skipped.',
+        // Logical first: nothing about dbt in a folder without it (skippedChecks says why, for machines).
+        : 'Your ERD Studio files are in place.',
       command: null,
     });
   }

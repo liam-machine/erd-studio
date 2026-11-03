@@ -7,14 +7,21 @@
 #   bash encode.sh                 build media/onboarding/getting-started.mp4 + poster
 #   bash encode.sh --placeholder   2 s test pattern + tone through the same encoder and checks
 #                                  (lets the Welcome panel be wired up before the real render)
+#   VARIANT=logical bash encode.sh the cut for a folder without dbt: build-logical/ in,
+#                                  media/onboarding/getting-started-logical.mp4 + poster out
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"
 OUT="$ROOT/media/onboarding"
-MP4="$OUT/getting-started.mp4"
-POSTER="$OUT/getting-started-poster.jpg"
+# VARIANT picks the cut (build-timeline.mjs CUTS): unset is build/ -> getting-started.*,
+# e.g. logical is build-logical/ -> getting-started-logical.*.
+VARIANT="${VARIANT:-}"
+if [[ -z "$VARIANT" ]]; then B=build; NAME=getting-started; else B="build-$VARIANT"; NAME="getting-started-$VARIANT"; fi
+MP4="$OUT/$NAME.mp4"
+POSTER="$OUT/$NAME-poster.jpg"
 MAX_BYTES=$((8 * 1024 * 1024))
-mkdir -p "$OUT" build
+mkdir -p "$OUT" "$B"
+export B
 
 VIDEO_OPTS=(-c:v libx264 -preset slow -tune animation -profile:v high -level 4.1 -pix_fmt yuv420p -r 30 -g 150)
 AUDIO_OPTS=(-c:a libmp3lame -b:a 64k -ac 1 -ar 44100)
@@ -25,28 +32,28 @@ if [[ "${1:-}" == "--placeholder" ]]; then
   ffmpeg -v error -y -f lavfi -i "testsrc2=size=1280x720:rate=1" -frames:v 1 -q:v 3 "$POSTER"
   EXPECT_DUR=2
 else
-  [[ -f build/master.mkv && -f build/narration.wav ]] || { echo "run capture.mjs and build-timeline.mjs first" >&2; exit 1; }
-  EXPECT_DUR=$(node -e "console.log(require('./build/timeline.json').total)")
+  [[ -f $B/master.mkv && -f $B/narration.wav ]] || { echo "run capture.mjs and build-timeline.mjs first" >&2; exit 1; }
+  EXPECT_DUR=$(node -e "console.log(require('./'+process.env.B+'/timeline.json').total)")
   # Background music (music.py) plays at one steady level under the voice, about 10 dB below
   # it: no ducking, so it never pumps between lines. A gentle compressor evens out the track's
   # own loud and quiet sections, then the mix is normalised once.
-  AUDIO_IN=build/narration.wav
-  if [[ -f build/music.wav ]]; then
-    ffmpeg -v error -y -i build/narration.wav -i build/music.wav -filter_complex \
+  AUDIO_IN=$B/narration.wav
+  if [[ -f $B/music.wav ]]; then
+    ffmpeg -v error -y -i $B/narration.wav -i $B/music.wav -filter_complex \
       "[0:a]aresample=48000[voice];[1:a]aresample=48000,acompressor=threshold=-24dB:ratio=3:attack=20:release=300:makeup=2,volume=0.33[bed];[voice][bed]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000" \
-      -ac 1 build/mix.wav
-    AUDIO_IN=build/mix.wav
+      -ac 1 $B/mix.wav
+    AUDIO_IN=$B/mix.wav
   fi
   for CRF in 20 22 24 26; do
-    ffmpeg -v error -y -i build/master.mkv -i "$AUDIO_IN" -map 0:v -map 1:a \
+    ffmpeg -v error -y -i $B/master.mkv -i "$AUDIO_IN" -map 0:v -map 1:a \
       "${VIDEO_OPTS[@]}" -crf "$CRF" "${AUDIO_OPTS[@]}" -movflags +faststart -shortest "$MP4"
     SIZE=$(stat -f %z "$MP4" 2>/dev/null || stat -c %s "$MP4")
     echo "crf $CRF -> $SIZE bytes"
     (( SIZE <= MAX_BYTES )) && break
   done
   # Poster: the end card once everything on it has landed.
-  POSTER_T=$(node -e "const t=require('./build/timeline.json');console.log((t.scenes.at(-1).start+1.5).toFixed(3))")
-  ffmpeg -v error -y -ss "$POSTER_T" -i build/master.mkv -frames:v 1 -vf "scale=1280:720:flags=lanczos,format=yuvj420p" -q:v 3 "$POSTER"
+  POSTER_T=$(node -e "const t=require('./'+process.env.B+'/timeline.json');console.log((t.scenes.at(-1).start+1.5).toFixed(3))")
+  ffmpeg -v error -y -ss "$POSTER_T" -i $B/master.mkv -frames:v 1 -vf "scale=1280:720:flags=lanczos,format=yuvj420p" -q:v 3 "$POSTER"
 fi
 
 # ---- assertions -------------------------------------------------------------------------
@@ -73,10 +80,13 @@ echo "ok: $POSTER (1280x720 jpeg, $(stat -f %z "$POSTER" 2>/dev/null || stat -c 
 # A shareable copy for QuickTime, Slack, LinkedIn and the like: same picture, AAC audio.
 # QuickTime cannot play MP3-in-MP4 (VS Code cannot play AAC), so this never ships in the VSIX.
 if [[ "${1:-}" != "--placeholder" ]]; then
-  ffmpeg -v error -y -i "$MP4" -i "${AUDIO_IN:-build/narration.wav}" -map 0:v -map 1:a -c:v copy \
-    -c:a aac -b:a 128k -ac 1 -ar 48000 -movflags +faststart -shortest build/getting-started-share.mp4
-  echo "ok: build/getting-started-share.mp4 (AAC copy for QuickTime and sharing; not shipped)"
-  # The README links this copy, not the MP3 one: Safari and QuickTime play MP3-in-MP4 silently.
-  cp build/getting-started-share.mp4 ../docs/assets/getting-started.mp4
-  echo "ok: docs/assets/getting-started.mp4 (the README's copy; AAC)"
+  ffmpeg -v error -y -i "$MP4" -i "${AUDIO_IN:-$B/narration.wav}" -map 0:v -map 1:a -c:v copy \
+    -c:a aac -b:a 128k -ac 1 -ar 48000 -movflags +faststart -shortest "$B/$NAME-share.mp4"
+  echo "ok: $B/$NAME-share.mp4 (AAC copy for QuickTime and sharing; not shipped)"
+  # The README links the dbt cut's copy, not the MP3 one: Safari and QuickTime play MP3-in-MP4
+  # silently. Other cuts keep their share copy in their build folder (the README links none).
+  if [[ -z "$VARIANT" ]]; then
+    cp build/getting-started-share.mp4 ../docs/assets/getting-started.mp4
+    echo "ok: docs/assets/getting-started.mp4 (the README's copy; AAC)"
+  fi
 fi

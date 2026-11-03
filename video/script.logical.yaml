@@ -1,0 +1,152 @@
+# Getting-started video, the LOGICAL-FIRST cut (VARIANT=logical): the one-minute tour for a
+# folder without dbt. The Welcome panel plays it where there is no dbt_project.yml (its
+# 'logical' and 'nofolder' pages); script.yaml is the dbt tour, for dbt projects.
+#
+# Format: exactly as script.yaml (see its header), plus an optional `props` map per scene, which
+# the scene module reads as ctx.scene.props. Scenes live in player/scenes/logical/, except
+# install, enrich and endCard, which are shared with the dbt cut and take props.
+#
+# Words to keep OUT of this file and every logical scene (narration, captions, headlines, props,
+# and anything drawn on screen): dbt, Physical, Diff, manifest, sample project. `npm test` checks
+# the file, the modules and the rendered frames. "DBML", "Git", "repo", "AI" and "table" are fine.
+#
+# Length: at most 65 s (maxDuration). The walkthrough's watchLogical step calls this video
+# "one-minute"; keep it between 50 and 60 s.
+
+title: ERD Studio — getting started, logical-first cut
+maxDuration: 65
+
+voice:
+  engine: kokoro        # same voice and speed as script.yaml
+  kokoro: af_heart
+  speed: 1.04
+  say: Karen
+  sayRate: 175
+
+timing:
+  lead: 0.35
+  gap: 0.2
+  tail: 0.45
+  fade: 0.25
+
+chapters: ["1 · OPEN", "2 · DRAW", "3 · SAVE", "4 · ENRICH"]
+
+scenes:
+  - id: hook
+    module: logical/hook
+    chapter: 0
+    minDur: 5
+    accent: blue
+    headline: ["Your data model,", "in {your repo}."]
+    lines:
+      - id: h_model
+        beat: model
+        caption: Your data model, as a diagram, saved as plain files in your repo.
+      - id: h_noai
+        beat: noai
+        caption: No AI, and nothing to configure.
+
+  - id: install
+    module: install
+    chapter: 1
+    minDur: 6
+    accent: blue
+    headline: ["Install it, and a guide", "{opens by itself}."]
+    props:
+      window: plain
+      open: newDiagram
+      offsets: { click: 0.95, open: 1.75, glow: 1.1 }
+    lines:
+      - id: i_install
+        beat: install
+        caption: Install ERD Studio, and open the folder your data model lives in.
+      - id: i_guide
+        beat: guide
+        caption: The Get started guide opens by itself.
+
+  - id: newDiagram
+    module: logical/newDiagram
+    chapter: 2
+    minDur: 5.2
+    accent: blue
+    headline: ["Click {New Diagram}.", "Give it a name."]
+    lines:
+      - id: n_click
+        beat: click
+        caption: Click New Diagram,
+      - id: n_name
+        beat: name
+        caption: and give it a name.
+
+  - id: tables
+    module: logical/tables
+    chapter: 2
+    minDur: 9
+    accent: blue
+    headline: ["Add tables,", "then {connect them}."]
+    lines:
+      - id: t_table
+        beat: table
+        caption: Add a table, with starter columns if you like.
+      - id: t_more
+        beat: more
+        caption: Add another, then link the two with a relationship.
+
+  - id: files
+    module: logical/files
+    chapter: 3
+    minDur: 6.4
+    accent: blue
+    headline: ["Saved as {DBML},", "plain files in Git."]
+    lines:
+      - id: f_files
+        beat: files
+        caption: Each table is a plain DBML file in your repo, to commit and review like code.
+
+  - id: importDbml
+    module: logical/importDbml
+    chapter: 3
+    minDur: 5.2
+    accent: blue
+    headline: ["Have DBML already?", "{Import it}."]
+    lines:
+      - id: m_import
+        beat: import
+        caption: Already have DBML? Import it, and export back any time.
+
+  - id: enrich
+    module: enrich
+    chapter: 4
+    minDur: 9.3
+    accent: blue
+    headline: ["Want the why?", "Ask your {AI assistant}."]
+    props:
+      window: plainWithDiagram
+      done: []
+      tab: orders.dbml
+      crumb: shop-analytics
+      # The setup skill's first line for an existing diagram in a plain folder (its route for
+      # a folder like this one, "Enriching existing tables" step 1), for this diagram.
+      reply: "You have the <b>orders</b> diagram (2 tables). I'll add what's missing — keys, grain, roles, descriptions and the connections the columns suggest — and leave the rest alone. OK?"
+    lines:
+      - id: e_want
+        beat: want
+        caption: Want grain, keys and the why behind each table?
+      - id: e_setup
+        beat: setup
+        caption: Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.
+        say: Click Set Up My AI Helper, then type slash ERD studio setup in your assistant.
+
+  - id: end
+    module: endCard
+    chapter: 0
+    minDur: 5
+    accent: green
+    headline: null
+    props:
+      steps: ["Install ERD Studio", "Open the folder your data model lives in", "New Diagram"]
+      tagline: ["Your data model,", "in your repo."]
+    lines:
+      - id: x_cta
+        beat: cta
+        caption: ERD Studio is free. Install it, and draw your data model today.

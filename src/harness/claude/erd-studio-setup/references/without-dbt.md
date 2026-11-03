@@ -1,4 +1,4 @@
-# Setting up without dbt
+<!-- dbt-only --># Setting up without dbt
 
 This is the whole walkthrough for a project folder with **no `dbt_project.yml`** — SKILL.md's
 "Without dbt" route. It replaces Stages 0–6 there; "How to talk", "Your AI assistant" and the
@@ -13,7 +13,20 @@ Rules for this route, on top of SKILL.md's:
 - In a folder without dbt the canvas has no **Physical** tab and no **Compare with dbt** button. Do not
   mention them, physical models, drift or sync plans — except the one "Using dbt?" line in
   step 6.
-- Say "diagram", never "subject area".
+- Say "diagram", never "subject area".<!-- /dbt-only -->
+<!-- no-dbt --># The guided setup
+
+This is the whole walkthrough, from saying hello to opening the diagram. "How to talk", "Your AI
+assistant" and the helper's exit-code rules in SKILL.md apply throughout. ERD Studio here is a
+logical data modelling tool: the files in `.erd-studio/` are the whole design, and they live in
+the user's repo.
+
+Rules for this walkthrough, on top of SKILL.md's:
+
+- The helper commands are `doctor` and `export` (below). Never run `diff`: there is nothing here
+  for it to compare the design with, so it only exits with an error.
+- Never suggest the user needs another tool, and never run one: the design is the files.
+- Say "diagram", never "subject area".<!-- /no-dbt -->
 
 Checklist for this route (show it at each step boundary, as SKILL.md's "Show progress" says):
 
@@ -46,12 +59,15 @@ written. Then:
 - **The helper is missing or stale** (exit 127 or exit 5) → SKILL.md's exit-code rules. Without
   it, carry on: you re-read every file you write in step 5, and the user checks the diagram on
   the canvas. If the folder has no `.erd-studio/`, start fresh as below.
-- **Doctor reports `dbtProject: true`** → the helper found a dbt project after all (one level
+<!-- dbt-only -->- **Doctor reports `dbtProject: true`** → the helper found a dbt project after all (one level
   up, or a few folders down): this is the dbt route. Go back to SKILL.md, greet as Stage 0 says
-  and carry on from Stage 1 with this doctor result.
+  and carry on from Stage 1 with this doctor result.<!-- /dbt-only -->
+<!-- no-dbt -->- **Doctor's `projectRoot` is not this folder** → the helper looked at another folder (one level
+  up, or a few folders down). Pass `--project .` on this and every later helper command, and run doctor
+  again.<!-- /no-dbt -->
 - **`erd.semanticDirExists: false`** → there is nothing to check yet: say "This folder has no
-  ERD Studio files yet, so we'll start fresh." Say nothing about the rest of the result (no dbt
-  project, no skills, empty `nextSteps` — all expected here). A new project writes **DBML**
+  ERD Studio files yet, so we'll start fresh." Say nothing about the rest of the result (<!-- dbt-only -->no dbt
+  project, <!-- /dbt-only -->no skills, empty `nextSteps` — all expected here). A new project writes **DBML**
   (doctor's `erd.storage` says `dbml`): `.erd-studio/layers.json` first, then everything under a
   layer folder (`<layer>/tables/<schema>/`, `<layer>/relationships/`, `<layer>/diagrams/`), as the schema skill's `DBML.md` says. But if the user says they already
   have diagrams (the ERD Studio sidebar lists them), their ERD Studio folder has another name —
@@ -59,10 +75,12 @@ written. Then:
   **ERD Studio: Set Up My AI Helper** again (it writes the new folder name into these files), or
   ask for the setting and pass it with `--semantic-dir`; do not start fresh beside their
   diagrams.
-- **`erd.semanticDirExists: true`** → say "Checking your ERD Studio files." Doctor reports
+- **`erd.semanticDirExists: true`** → say "Checking your ERD Studio files." <!-- dbt-only -->Doctor reports
   `dbtProject: false` and `skippedChecks` with reason `not-dbt-project`: the dbt checks were
   skipped on purpose — say nothing about them. (Its `project.found` is `false` here too, for the
-  same reason; do not ask which folder holds a dbt project.) Read:
+  same reason; do not ask which folder holds a dbt project.)<!-- /dbt-only --><!-- no-dbt -->Doctor's `skippedChecks`,
+  `project.found: false` and the empty blocks beside them are expected here — say nothing about
+  them, and do not ask about another project folder.<!-- /no-dbt --> Read:
   - `erd.storage` — which format to write (the schema skill's "What to write": `dbml`, `yaml` or `mixed`);
   - `erd.domains` and `erd.logicalModels` — whether diagrams and tables exist already;
   - `nextSteps` — handle `fix-model-yaml`, `fix-dbml-file`, `resolve-merge-conflicts`,
@@ -99,10 +117,11 @@ description of your business? Say yes and tell me what it does — or point me a
 which part should the first diagram cover? For example: 'a coffee shop — orders, customers,
 products and stores'." If they named an area when they started, use it.
 
-**The modelling style.** There is no dbt project to detect it from, so:
+**The modelling style.** <!-- dbt-only -->There is no dbt project to detect it from, so:<!-- /dbt-only --><!-- no-dbt -->Nothing in the folder says it yet, so:<!-- /no-dbt -->
 
-- `.erd-studio/modelling-approach.md` describes a style → confirm it in one line, as SKILL.md
-  Stage 3b says, and follow it.
+- `.erd-studio/modelling-approach.md` describes a style → confirm it in one line<!-- dbt-only -->, as SKILL.md
+  Stage 3b says,<!-- /dbt-only --><!-- no-dbt --> ("I'll follow your saved approach: Kimball dimensional modelling — say
+  'change it' to update."),<!-- /no-dbt --> and follow it.
 - Existing table names show one (`dim_` / `fct_`, `hub_` / `sat_` / `link_`) → offer it as a
   guess with the evidence, in one question.
 - Otherwise propose one that fits what they described, with a yes default: for reporting and
@@ -110,10 +129,14 @@ products and stores'." If they named an area when they started, use it.
   as an order, joined to dimension tables that describe it, such as customer and product. Sound
   right? Or describe how your team models data." For an application's own database, propose a
   normalised design (3NF) the same way. "Not sure" means your proposal.
-- On a yes, or a style in their own words: look it up, play it back and agree it exactly as
-  SKILL.md Stage 3b and `references/modelling-approaches.md` sections 1 and 3 say, then save
-  `.erd-studio/modelling-approach.md` in step 4 (section 5's shape; write
-  `**Chosen:** proposed for a new design, agreed <date>` in place of the "Detected from" line).
+- On a yes, or a style in their own words: <!-- dbt-only -->look it up, play it back and agree it exactly as
+  SKILL.md Stage 3b and `references/modelling-approaches.md` sections 1 and 3 say, then save<!-- /dbt-only --><!-- no-dbt -->look up its standard as
+  `references/modelling-approaches.md` sections 1 and 3 say (narrate it, say whether you used the
+  web or the bundled summary, and never block on the lookup), ask at most one clarifying
+  question, then play it back as 3–6 short, concrete bullets and ask "Sound right?" (default
+  yes), defining each term the first time. Then save<!-- /no-dbt -->
+  `.erd-studio/modelling-approach.md` in step 4 (section 5's shape<!-- dbt-only -->; write
+  `**Chosen:** proposed for a new design, agreed <date>` in place of the "Detected from" line<!-- /dbt-only -->).
 
 **Draft the design**, at most eight tables for a first diagram, and show it as one compact list —
 per table: its name, role, grain ("One row per …"), primary key, a handful of important columns
@@ -135,12 +158,16 @@ one round at a time. This is the one place you invent columns rather than copyin
   in v5 YAML) only from the values in `references/modelling-approaches.md` section 2; the SCD and
   additive types (`scd_type` / `additive_type`, `scdType` / `additiveType` in YAML) where the style
   makes them clear; a one-line purpose (`rationale_purpose`, `rationale.purpose` in YAML), and
-  the design rationale (`rationale_design`) citing the approach. Without dbt these record the intended design, so the
-  dbt route's "describe what dbt does today" rule and its Target-design backlog do not apply.
+  the design rationale (`rationale_design`) citing the approach. <!-- dbt-only -->Without dbt these record the intended design, so the
+  dbt route's "describe what dbt does today" rule and its Target-design backlog do not apply.<!-- /dbt-only --><!-- no-dbt -->They record the intended design.<!-- /no-dbt -->
 - **Descriptions**: one plain line per table and column. Leave out audit columns
   (`created_at`, `loaded_at`) unless the style asks for them.
-- **Metadata** (`meta`): only keys the team's metadata list names (Source `the team`) or the user
-  gives, with values they gave — `references/metadata.md`; never invent one.
+<!-- dbt-only -->- **Metadata** (`meta`): only keys the team's metadata list names (Source `the team`) or the user
+  gives, with values they gave — `references/metadata.md`; never invent one.<!-- /dbt-only --><!-- no-dbt -->- **Metadata** (`meta`): only keys the team's metadata list names or the user gives, with values
+  they gave; never invent one. The list is the `## Metadata` section of
+  `.erd-studio/modelling-approach.md`, a table of **Key**, **On** (models, columns or both),
+  **Values** and **Source** (`the team`). When the user wants a key recorded on every table, offer
+  once to add it there.<!-- /no-dbt -->
 - Anything you are unsure of (a type, a role, a cardinality) goes on a "to confirm" list for
   step 6.
 
@@ -163,19 +190,20 @@ never rebuild them.
 
 ## 4. Write the files
 
-1. Load ERD Studio's format rules and prepare the user for approval prompts — SKILL.md Stage 4
-   steps 1 and 2.
+1. Load ERD Studio's format rules and prepare the user for approval prompts — <!-- dbt-only -->SKILL.md Stage 4
+   steps 1 and 2<!-- /dbt-only --><!-- no-dbt -->as your row in
+   SKILL.md's "Your AI assistant" says (Claude Code has two extra lines to say)<!-- /no-dbt -->.
 2. Save the modelling approach, when one was agreed (step 3).
 3. Write the files following `references/building-the-model.md` — "Which files to write", "Where
    a new model file goes", "layers.json", "Quote every text value" and "Diagram file" — in the
-   format from step 1 (`erd.storage`; a new project is DBML). Without dbt:
+   format from step 1 (`erd.storage`; a new project is DBML).<!-- dbt-only --> Without dbt:<!-- /dbt-only --><!-- no-dbt --> Then:<!-- /no-dbt -->
    - **Layer**: the one the user named, else the one their existing diagrams use, else `gold` for
      a reporting design and `silver` for anything else. A new project writes `.erd-studio/layers.json`
      first (building-the-model.md, "layers.json"). Tell them layers are only folders for organising diagrams.
    - **Diagram file**: in DBML, `.erd-studio/<layer>/diagrams/<name>.dbml` with one `use` line per
      table and its `Project` last, and no `erd_layout`, so the canvas arranges it the first
      time it opens; in a YAML project, `.erd-studio/<layer>/<name>.json` listing the tables, with
-     no `modelFolder` (that is dbt's folder filter) and `"viewConfig": {}`.
+     no `modelFolder`<!-- dbt-only --> (that is dbt's folder filter)<!-- /dbt-only --> and `"viewConfig": {}`.
    - **Relationships** go in the table library: in DBML, a Ref line in the relationships file
      that already holds the foreign-key table's Refs, else `<layer>/relationships/<schema>.dbml`
      when that file already exists, else `<layer>/relationships/<layer>.dbml`; in YAML, in the table file holding the foreign key —
@@ -221,6 +249,6 @@ table drawn with no columns on the canvas means its file did not parse.
     assistant's form of it) — existing tables are kept and shared;
   - review the files in a pull request like any other change;
   - share or take it elsewhere: **ERD Studio: Export Diagram…** writes DBML (for dbdiagram.io
-    or any DBML tool) or Mermaid;
+    or any DBML tool) or Mermaid<!-- dbt-only -->;
   - the one dbt line, said once: "Using dbt? Open its folder to compare your design with what dbt
-    built."
+    built."<!-- /dbt-only --><!-- no-dbt -->.<!-- /no-dbt -->

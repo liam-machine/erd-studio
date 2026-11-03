@@ -35,7 +35,8 @@ export const HELP_ACTIONS: readonly HelpActionNode[] = [
   },
   {
     type: 'action', id: 'gettingStarted', label: 'Watch Getting Started Video', icon: 'play-circle', command: 'erdStudio.showGettingStarted',
-    tooltip: 'A one-minute video and the first steps, for a project with or without dbt.',
+    // Neutral in every folder: the panel plays the cut that matches it.
+    tooltip: 'A one-minute video and your first steps.',
   },
   {
     type: 'action', id: 'feedback', label: 'Send Feedback', icon: 'comment-discussion', command: 'erdStudio.reportBug',

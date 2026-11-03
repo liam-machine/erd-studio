@@ -13,6 +13,14 @@
  *   down to the open standard's portable fields (`agentSkillFrontmatter()`):
  *   Claude's `Bash(prefix:*)` rules mean nothing verified to those tools.
  *
+ * Logical first, dbt as an add-on: what installs into a folder without
+ * `dbt_project.yml` carries no dbt instruction. A whole dbt-only file is
+ * flagged `dbtOnly` and not installed there; text inside a shared file is
+ * scoped with `<!-- dbt-only -->…<!-- /dbt-only -->` (kept only in a dbt
+ * project) and `<!-- no-dbt -->…<!-- /no-dbt -->` (kept only without one) —
+ * see `applyDbtScope()`, the one place either is read. In a dbt project the
+ * installed text is the source with the markers taken out.
+ *
  * vscode-free: bundled into both `dist/extension.js` and `dist/cli.js`.
  */
 
@@ -31,9 +39,20 @@ import withoutDbt from '../harness/claude/erd-studio-setup/references/without-db
 export interface HarnessAsset {
   /** Path relative to the skill directory, POSIX separators. */
   relativePath: string;
+  /** The file as a dbt project installs it: `source` with the scope markers taken out. */
   content: string;
+  /** The authored markdown, scope markers (`applyDbtScope()`) included. */
+  source: string;
   /** Append the harness version marker when installing (SKILL.md only). */
   versioned: boolean;
+  /** Installed only in a dbt project (a folder holding `dbt_project.yml`): the file is dbt instructions throughout. */
+  dbtOnly?: boolean;
+  /**
+   * Where the file installs in a root without `dbt_project.yml`, when its
+   * dbt-project name says dbt (`references/without-dbt.md` is the whole
+   * walkthrough there). Same skill-relative form as `relativePath`.
+   */
+  logicalPath?: string;
 }
 
 /** Workspace-relative directory the setup skill installs into for Claude Code. */
@@ -47,21 +66,94 @@ export const SETUP_SKILL_DIRS: Readonly<Record<SkillHarnessTarget, string>> = {
   agents: AGENTS_SETUP_SKILL_DIR,
 };
 
+/** The two scoped-span kinds: `dbt-only` text is kept in a dbt project, `no-dbt` text in a folder without one. */
+export type DbtScopeKind = 'dbt-only' | 'no-dbt';
+
+/**
+ * A scoped span, `<!-- dbt-only -->…<!-- /dbt-only -->` or
+ * `<!-- no-dbt -->…<!-- /no-dbt -->`, with the line break straight after it.
+ * Spans may cover part of a line or several lines; they never nest.
+ */
+const DBT_SCOPE_SPAN = /<!-- (dbt-only|no-dbt) -->([\s\S]*?)<!-- \/\1 -->(\r?\n)?/g;
+
+/** Any scope marker, opening or closing — none may survive `applyDbtScope()`. */
+export const DBT_SCOPE_MARKER = /<!-- \/?(?:dbt-only|no-dbt) -->/;
+
+/**
+ * The text of a harness source as installed in a root with (`dbt` true) or
+ * without `dbt_project.yml`. A span that applies keeps its text and loses
+ * only its markers, so a dbt project's copy is the source byte for byte
+ * minus the markers. A span that does not apply is cut out; when it covers
+ * whole lines (it starts a line of the text written so far and ends one) its
+ * last line break goes too, so no blank line is left behind. A span whose two
+ * markers each sit alone on a line (the block form, used around a code block
+ * so its fences stay at the start of a line) loses those two lines when kept.
+ * Spans are read in order, so two side by side behave as if the first were
+ * already applied.
+ */
+export function applyDbtScope(text: string, dbt: boolean): string {
+  let out = '';
+  let last = 0;
+  for (const match of text.matchAll(DBT_SCOPE_SPAN)) {
+    const [whole, kind, inner, lineBreak] = match as unknown as [string, DbtScopeKind, string, string | undefined];
+    out += text.slice(last, match.index);
+    last = (match.index ?? 0) + whole.length;
+    const atLineStart = out === '' || out.endsWith('\n');
+    if ((kind === 'dbt-only') === dbt) {
+      // Block form — each marker alone on its line (around a code block, say): the marker lines go.
+      const block = atLineStart && lineBreak !== undefined && /^\r?\n/.test(inner) && inner.endsWith('\n');
+      out += block ? inner.replace(/^\r?\n/, '') : inner + (lineBreak ?? '');
+    } else if (lineBreak !== undefined && !atLineStart) {
+      out += lineBreak;
+    }
+  }
+  return out + text.slice(last);
+}
+
+type AssetSpec = Omit<HarnessAsset, 'content'>;
+
+/** An asset whose `content` is its source as a dbt project installs it. */
+function asset(spec: AssetSpec): HarnessAsset {
+  return { ...spec, content: applyDbtScope(spec.source, true) };
+}
+
 /** Every file of the setup skill. The version marker is never in the source `.md`. */
 export const CLAUDE_SETUP_SKILL_FILES: readonly HarnessAsset[] = [
-  { relativePath: 'SKILL.md', content: setupSkill, versioned: true },
-  { relativePath: 'references/dbt-explained.md', content: dbtExplained, versioned: false },
-  { relativePath: 'references/dbt-setup.md', content: dbtSetup, versioned: false },
-  { relativePath: 'references/modelling-approaches.md', content: modellingApproaches, versioned: false },
-  { relativePath: 'references/metadata.md', content: metadata, versioned: false },
-  { relativePath: 'references/building-the-model.md', content: buildingTheModel, versioned: false },
-  { relativePath: 'references/verify-and-fix.md', content: verifyAndFix, versioned: false },
-  { relativePath: 'references/troubleshooting.md', content: troubleshooting, versioned: false },
-  { relativePath: 'references/without-dbt.md', content: withoutDbt, versioned: false },
+  asset({ relativePath: 'SKILL.md', source: setupSkill, versioned: true }),
+  asset({ relativePath: 'references/dbt-explained.md', source: dbtExplained, versioned: false, logicalPath: 'references/glossary.md' }),
+  asset({ relativePath: 'references/dbt-setup.md', source: dbtSetup, versioned: false, dbtOnly: true }),
+  asset({ relativePath: 'references/modelling-approaches.md', source: modellingApproaches, versioned: false }),
+  asset({ relativePath: 'references/metadata.md', source: metadata, versioned: false, dbtOnly: true }),
+  asset({ relativePath: 'references/building-the-model.md', source: buildingTheModel, versioned: false }),
+  asset({ relativePath: 'references/verify-and-fix.md', source: verifyAndFix, versioned: false, dbtOnly: true }),
+  asset({ relativePath: 'references/troubleshooting.md', source: troubleshooting, versioned: false }),
+  asset({ relativePath: 'references/without-dbt.md', source: withoutDbt, versioned: false, logicalPath: 'references/walkthrough.md' }),
 ];
 
 /** Alias: the files are the same for every target; only SKILL.md's frontmatter differs. */
 export const SETUP_SKILL_FILES = CLAUDE_SETUP_SKILL_FILES;
+
+/**
+ * The setup skill's files for a root with (`dbt` true) or without
+ * `dbt_project.yml`: without it, no dbt-only file, each file at its
+ * `logicalPath` when it has one, and `content` scoped for no dbt.
+ */
+export function setupSkillAssets(dbt: boolean): readonly HarnessAsset[] {
+  if (dbt) { return SETUP_SKILL_FILES; }
+  return SETUP_SKILL_FILES
+    .filter((a) => !a.dbtOnly)
+    .map((a) => ({ ...a, relativePath: a.logicalPath ?? a.relativePath, content: applyDbtScope(a.source, false) }));
+}
+
+/**
+ * The setup skill's paths a dbt project installs and a root without
+ * `dbt_project.yml` does not: every `dbtOnly` file and the dbt-path name of
+ * every file with a `logicalPath`. An install without dbt removes a copy of
+ * one only when it is a text ERD Studio shipped (`isShippedSetupReference()`).
+ */
+export const DBT_SCOPE_SETUP_PATHS: readonly string[] = SETUP_SKILL_FILES
+  .filter((a) => a.dbtOnly === true || a.logicalPath !== undefined)
+  .map((a) => a.relativePath);
 
 /**
  * The frontmatter fields the Agent Skills specification defines. `allowed-tools`
