@@ -208,6 +208,8 @@ describe('SYNC.md describes every action the plan holds', () => {
     expect(sync).toMatch(/no file at `logicalModelPath` yet/);
     expect(sync).toMatch(/no `relationshipsPath`/);
     expect(sync).toMatch(/When `resolvedDataType` is empty,[^.]*nothing to write/);
+    // The applier's add-column-to-physical writes `data_type:` because the row says to.
+    expect(sync).toMatch(/^\| `add-column-to-physical` \|[^\n]*`data_type: <resolvedDataType>`/m);
     expect(sync).toMatch(/`sourceCardinality`\s+when the entry's `groundTruth` is the plan's `sourceStage`/);
   });
 });

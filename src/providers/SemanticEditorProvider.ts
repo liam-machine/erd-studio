@@ -74,7 +74,8 @@ import {
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
 import { buildSyncPlan, countSyncPlanActions, syncPlanLibraryLookups } from '../services/syncPlanBuilder';
-import { findVenvActivate } from '../services/dbtEnv';
+import { findVenvActivate, findVenvDir } from '../services/dbtEnv';
+import { claudeTerminalLaunch } from './GettingStartedPanel';
 import { runDbtParse } from '../commands/runDbtParse';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND } from '../commands/importDbml';
@@ -7439,9 +7440,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * `erdStudio.claudeSync.skipPermissions` setting is enabled (default off),
    * because it lets Claude edit files in the workspace without asking.
    *
-   * The prompt is typed into the Claude TUI after a short delay; if the user
-   * closes the terminal in the meantime the send is skipped rather than
-   * throwing "Terminal has already been disposed" inside the timer.
+   * The prompt is Claude Code's initial-prompt argument (`claude "<prompt>"`,
+   * built by `claudeTerminalLaunch`, the launcher Open Claude Code uses), never
+   * text typed into its TUI after a delay: on a first run Claude Code shows
+   * its folder-trust prompt with "No, exit" preselected, where typed text is
+   * lost and its newline would confirm the highlighted option.
    */
   private async handleLaunchClaudeSync(): Promise<void> {
     const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
@@ -7449,15 +7452,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const planPath = `${semanticDir}/.sync-plan.json`;
     const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read .claude/skills/erd-studio/SYNC.md for the action reference and follow the execution steps.`;
 
-    const claudeCommand = skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude';
-    const activate = findVenvActivate(this.workspaceRoot);
-    const launchCommand = activate ? `${activate} && ${claudeCommand}` : claudeCommand;
+    const launch = claudeTerminalLaunch('claude', process.platform, {
+      prompt,
+      args: skipPermissions ? ['--dangerously-skip-permissions'] : [],
+      venvDir: findVenvDir(this.workspaceRoot),
+    });
 
     const detail = skipPermissions
-      ? `Command: ${claudeCommand}\n\n` +
+      ? `Command: ${launch.display}\n\n` +
         'The --dangerously-skip-permissions flag lets Claude Code edit files in this workspace ' +
         'without asking for confirmation. Set "erdStudio.claudeSync.skipPermissions" to false to keep the permission prompts.'
-      : `Command: ${claudeCommand}\n\n` +
+      : `Command: ${launch.display}\n\n` +
         'Claude Code will ask before editing files. Enable "erdStudio.claudeSync.skipPermissions" ' +
         'to run unattended with --dangerously-skip-permissions.';
     const LAUNCH = 'Launch';
@@ -7470,25 +7475,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       return;
     }
 
+    if (launch.kind === 'process') {
+      vscode.window.createTerminal({
+        name: 'ERD Studio Sync', cwd: this.workspaceRoot, shellPath: launch.shellPath, shellArgs: launch.shellArgs, env: launch.env,
+      }).show();
+      return;
+    }
     const terminal = vscode.window.createTerminal({
       name: 'ERD Studio Sync',
       cwd: this.workspaceRoot,
     });
     terminal.show();
-    terminal.sendText(launchCommand);
-    const CLAUDE_TUI_INIT_DELAY_MS = 2000;
-    setTimeout(() => {
-      try {
-        if (!isTerminalAlive(terminal)) {
-          log.warn('[SemanticEditorProvider] Claude sync terminal closed before the prompt could be sent.');
-          return;
-        }
-        terminal.sendText(prompt);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        log.warn(`[SemanticEditorProvider] Failed to send sync prompt to terminal: ${message}`);
-      }
-    }, CLAUDE_TUI_INIT_DELAY_MS);
+    terminal.sendText(launch.line);
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {
@@ -7550,15 +7548,4 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
 function isTypedMessage(value: unknown): value is { type: string } {
   return typeof value === 'object' && value !== null && 'type' in value && typeof (value as Record<string, unknown>).type === 'string';
-}
-
-/**
- * True while a terminal is still open and its process has not exited.
- * `exitStatus` is set when the shell exits; a closed terminal also drops out of
- * `window.terminals`. Either signal means `sendText` would throw.
- */
-function isTerminalAlive(terminal: vscode.Terminal): boolean {
-  if (terminal.exitStatus !== undefined) return false;
-  const open = vscode.window.terminals;
-  return Array.isArray(open) ? open.includes(terminal) : true;
 }

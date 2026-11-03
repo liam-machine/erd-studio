@@ -750,9 +750,12 @@ describe.each(DBT_FIXTURES)('launchClaudeSync (H36) (%s storage)', (_storage, fi
     expect(options.detail).toContain('Command: claude');
   });
 
-  it('launches plain `claude` by default and types the prompt after the delay', async () => {
+  const SYNC_PROMPT = 'Execute the erd-studio sync plan at .erd-studio/.sync-plan.json using the erd-studio skill. '
+    + 'Read .claude/skills/erd-studio/SYNC.md for the action reference and follow the execution steps.';
+
+  it('passes the prompt as claude\'s initial-prompt argument and never types into its TUI later', async () => {
     const { panel } = await openShowcase(root);
-    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Launch' as never);
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Launch' as never);
     vi.useFakeTimers();
 
     panel._simulateMessage({ type: 'launchClaudeSync' });
@@ -760,11 +763,15 @@ describe.each(DBT_FIXTURES)('launchClaudeSync (H36) (%s storage)', (_storage, fi
 
     expect(vscode.window.terminals).toHaveLength(1);
     const terminal = vscode.window.terminals[0];
-    expect(terminal._sentText).toEqual(['claude']);
+    // One line: a first run's folder-trust prompt holds the argument, and no
+    // later text (or its newline) can land on "No, exit".
+    expect(terminal._sentText).toEqual([`claude "${SYNC_PROMPT}"`]);
+    const [, options] = warn.mock.calls[0] as unknown as [string, { detail: string }];
+    expect(options.detail).toContain(`Command: claude "${SYNC_PROMPT}"`);
 
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(terminal._sentText).toHaveLength(2);
-    expect(terminal._sentText[1]).toMatch(/Execute the erd-studio sync plan at \.erd-studio\/\.sync-plan\.json/);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(terminal._sentText).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('adds --dangerously-skip-permissions only when the setting is enabled and says so in the prompt', async () => {
@@ -780,11 +787,11 @@ describe.each(DBT_FIXTURES)('launchClaudeSync (H36) (%s storage)', (_storage, fi
     await flushMicrotasks();
 
     const [, options] = warn.mock.calls[0] as unknown as [string, { detail: string }];
-    expect(options.detail).toContain('--dangerously-skip-permissions');
-    expect(vscode.window.terminals[0]._sentText[0]).toBe('claude --dangerously-skip-permissions');
+    expect(options.detail).toContain(`Command: claude --dangerously-skip-permissions "${SYNC_PROMPT}"`);
+    expect(vscode.window.terminals[0]._sentText).toEqual([`claude --dangerously-skip-permissions "${SYNC_PROMPT}"`]);
   });
 
-  it('skips the prompt when the terminal was closed before the delay elapsed', async () => {
+  it('closing the terminal right after launch throws nothing later', async () => {
     const { panel } = await openShowcase(root);
     vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Launch' as never);
     vi.useFakeTimers();
@@ -795,7 +802,7 @@ describe.each(DBT_FIXTURES)('launchClaudeSync (H36) (%s storage)', (_storage, fi
     expect(terminal._sentText).toHaveLength(1);
 
     terminal.dispose();
-    await expect(vi.advanceTimersByTimeAsync(2000)).resolves.not.toThrow();
+    await expect(vi.advanceTimersByTimeAsync(10_000)).resolves.not.toThrow();
     expect(terminal._sentText).toHaveLength(1);
   });
 });

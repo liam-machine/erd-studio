@@ -992,6 +992,36 @@ describe.each(DBT_FIXTURES)('SelectorsService on the dbt fixture (%s storage)', 
     expect(fs.readFileSync(path.join(root, 'selectors.yml'), 'utf-8')).toBe(before);
   });
 
+  it('an up-to-date selectors.yml is not written at all: same mtime and inode, still reported as written', () => {
+    // Activation regenerates on every window: rewriting identical bytes changed
+    // the mtime and fired every watcher on the file.
+    const file = path.join(root, 'selectors.yml');
+    const past = new Date('2026-01-01T00:00:00Z');
+    fs.utimesSync(file, past, past);
+    const { ino } = fs.statSync(file);
+    const onWritten = vi.fn();
+    const result = new SelectorsService(realService(), root, '.erd-studio', { onWritten }).regenerate();
+    // Callers read 'written' as "selectors.yml now matches the diagrams".
+    expect(result).toMatchObject({ status: 'written', selectorsWritten: 2, modelsReferenced: 7 });
+    expect(onWritten).toHaveBeenCalledTimes(1);
+    // atomicWrite renames a temp file over it: a write would change both.
+    expect(fs.statSync(file).mtimeMs).toBe(past.getTime());
+    expect(fs.statSync(file).ino).toBe(ino);
+    expect(fs.readdirSync(root).filter((f) => f.startsWith('selectors.yml.tmp'))).toEqual([]);
+  });
+
+  it('a stale selectors.yml is still rewritten', () => {
+    const file = path.join(root, 'selectors.yml');
+    const before = fs.readFileSync(file, 'utf-8');
+    fs.writeFileSync(file, before.replace(/domain_silver_showcase/, 'domain_silver_old'));
+    const past = new Date('2026-01-01T00:00:00Z');
+    fs.utimesSync(file, past, past);
+    const result = new SelectorsService(realService(), root, '.erd-studio').regenerate();
+    expect(result.status).toBe('written');
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+    expect(fs.statSync(file).mtimeMs).not.toBe(past.getTime());
+  });
+
   it('a new diagram gets its domain_ selector, in member order; the user selector and its comments stay', () => {
     const file = diagramPath(root, storage, 'gold', 'reporting');
     fs.mkdirSync(path.dirname(file), { recursive: true });

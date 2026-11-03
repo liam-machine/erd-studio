@@ -121,7 +121,8 @@ export interface NameCollisionInfo {
   conflictsWith: string;
 }
 
-type LoadOk = { status: 'ok'; doc: Document; preservedItems: Node[]; preservedNames: string[] };
+/** `raw`: the file's current text, or null when there is no file. */
+type LoadOk = { status: 'ok'; doc: Document; preservedItems: Node[]; preservedNames: string[]; raw: string | null };
 type LoadMalformed = { status: 'malformed'; detail: string };
 type LoadResult = LoadOk | LoadMalformed;
 
@@ -164,7 +165,9 @@ export class SelectorsService {
    * AST nodes — comments and formatting round-trip across regenerates.
    *
    * Returns a discriminated union:
-   *   - `'written'`: file was rewritten. Includes counts.
+   *   - `'written'`: the file now matches the diagrams. Includes counts. It
+   *     is rewritten only when its text changes: an up-to-date file is left
+   *     untouched (same bytes, same mtime).
    *   - `'skipped'`: file was NOT touched. Includes reason and detail. The
    *     host should surface a notification telling the user what to fix and
    *     offering a re-sync action.
@@ -263,7 +266,7 @@ export class SelectorsService {
       return result;
     }
 
-    const { doc, preservedItems, preservedNames } = loaded;
+    const { doc, preservedItems, preservedNames, raw } = loaded;
 
     this.dedupeSelectorNames(generated, preservedNames);
 
@@ -304,7 +307,11 @@ export class SelectorsService {
     doc.commentBefore = HEADER_COMMENT;
 
     const content = doc.toString({ lineWidth: 0 });
-    this.atomicWrite(filePath, content);
+    // Already up to date (every activation regenerates): rewriting the same
+    // bytes would only change the mtime and fire every watcher on the file.
+    if (content !== raw) {
+      this.atomicWrite(filePath, content);
+    }
 
     this.hooks?.onWritten?.();
 
@@ -368,13 +375,13 @@ export class SelectorsService {
       raw = fs.readFileSync(filePath, 'utf-8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { status: 'ok', doc: new Document({ selectors: [] }), preservedItems: [], preservedNames: [] };
+        return { status: 'ok', doc: new Document({ selectors: [] }), preservedItems: [], preservedNames: [], raw: null };
       }
       throw err;
     }
 
     if (raw.trim() === '') {
-      return { status: 'ok', doc: new Document({ selectors: [] }), preservedItems: [], preservedNames: [] };
+      return { status: 'ok', doc: new Document({ selectors: [] }), preservedItems: [], preservedNames: [], raw };
     }
 
     const doc = parseDocument(raw);
@@ -436,7 +443,7 @@ export class SelectorsService {
       }
     }
 
-    return { status: 'ok', doc, preservedItems: preserved, preservedNames };
+    return { status: 'ok', doc, preservedItems: preserved, preservedNames, raw };
   }
 
   /**

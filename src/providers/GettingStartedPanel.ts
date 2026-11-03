@@ -66,6 +66,7 @@ import { normaliseName } from '../services/nameUtils';
 import { detectConventions, type ConventionModel } from '../cli/conventions';
 import { log } from '../services/logger';
 import { hasDbtProjectFile } from '../services/projectDiscovery';
+import { venvActivateCommand } from '../services/dbtEnv';
 
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
 /** The no-AI first diagram (`extension.ts`): the Welcome panel's lead button runs it. */
@@ -346,32 +347,84 @@ export function detectClaude(): { availability: ClaudeAvailability; command: str
 }
 
 /**
- * How the terminal starts the guided setup. On PATH, `claude "/erd-studio-setup"`
- * is typed into the user's shell — that one line parses the same in bash,
- * zsh, PowerShell and cmd. An absolute path found off PATH is instead run as
- * the terminal's own process (`shellPath` + `shellArgs`), so no shell ever
- * parses it: `& "…"` would be PowerShell-only (a syntax error in cmd and Git
- * Bash) and any quoting would still expand `$` in some shell. `display` is
- * what the confirmation modal shows.
+ * How a terminal starts Claude Code with a first prompt (the guided setup's
+ * `/erd-studio-setup`, or Execute with Claude's sync instruction). The prompt
+ * is always Claude Code's positional initial-prompt argument, never text typed
+ * into its TUI later: a first run in a folder shows the folder-trust prompt
+ * ("No, exit" preselected) first, and typed text would be lost there while
+ * its newline confirmed the highlighted option.
+ *
+ * On PATH, `claude [flags] "<prompt>"` is typed into the user's shell (after
+ * the project venv's activation, when `venvDir` is given). That line parses
+ * the same in bash, zsh, fish, PowerShell and cmd only because the prompt
+ * holds nothing any of them expands inside double quotes
+ * (`isShellNeutralPrompt`). An absolute path found off PATH, or a prompt that
+ * is not shell-neutral, is instead run as the terminal's own process
+ * (`shellPath` + `shellArgs`), so no shell ever parses it: `& "…"` would be
+ * PowerShell-only (a syntax error in cmd and Git Bash) and any quoting would
+ * still expand `$` in some shell. The venv is then applied as the
+ * environment its activation sets. `display` is what the confirmation modal shows.
  */
 export type ClaudeTerminalLaunch =
   | { kind: 'sendText'; display: string; line: string }
-  | { kind: 'process'; display: string; shellPath: string; shellArgs: string[] };
+  | { kind: 'process'; display: string; shellPath: string; shellArgs: string[]; env?: Record<string, string> };
 
-export function claudeTerminalLaunch(command: string, platform: NodeJS.Platform): ClaudeTerminalLaunch {
-  if (command === 'claude') {
-    const line = `claude "${SETUP_PROMPT}"`;
+export interface ClaudeLaunchOptions {
+  /** The initial prompt; defaults to the guided setup's `/erd-studio-setup`. */
+  prompt?: string;
+  /** Flags placed before the prompt, such as `--dangerously-skip-permissions`. */
+  args?: string[];
+  /** A project venv to activate first, so Claude's shell finds the project's dbt. */
+  venvDir?: string | null;
+  /** The `PATH` a process launch extends with the venv's bin folder (default: this process's). */
+  envPath?: string;
+}
+
+/** Characters no shell this extension types into (bash, zsh, fish, PowerShell, cmd) treats specially inside double quotes. */
+const SHELL_NEUTRAL_PROMPT = /^[A-Za-z0-9 _.,:/+=@-]+$/;
+const SHELL_NEUTRAL_FLAG = /^--?[A-Za-z0-9][A-Za-z0-9-]*$/;
+
+/** Whether `prompt` can be typed as `"<prompt>"` and reach claude unchanged in every shell. */
+export function isShellNeutralPrompt(prompt: string): boolean {
+  return SHELL_NEUTRAL_PROMPT.test(prompt);
+}
+
+export function claudeTerminalLaunch(
+  command: string,
+  platform: NodeJS.Platform,
+  opts: ClaudeLaunchOptions = {},
+): ClaudeTerminalLaunch {
+  const prompt = opts.prompt ?? SETUP_PROMPT;
+  const args = opts.args ?? [];
+  const venvDir = opts.venvDir ?? null;
+  if (command === 'claude' && isShellNeutralPrompt(prompt) && args.every((a) => SHELL_NEUTRAL_FLAG.test(a))) {
+    const claudeLine = ['claude', ...args, `"${prompt}"`].join(' ');
+    const line = venvDir ? `${venvActivateCommand(venvDir, platform)} && ${claudeLine}` : claudeLine;
     return { kind: 'sendText', display: line, line };
   }
-  return { kind: 'process', display: claudeLaunchLine(command, platform), shellPath: command, shellArgs: [SETUP_PROMPT] };
+  const launch: ClaudeTerminalLaunch = {
+    kind: 'process', display: claudeLaunchLine(command, platform, prompt, args), shellPath: command, shellArgs: [...args, prompt],
+  };
+  if (venvDir) {
+    const p = platform === 'win32' ? path.win32 : path.posix;
+    const bin = p.join(venvDir, platform === 'win32' ? 'Scripts' : 'bin');
+    const basePath = opts.envPath ?? process.env.PATH ?? '';
+    launch.env = { VIRTUAL_ENV: venvDir, PATH: basePath ? `${bin}${p.delimiter}${basePath}` : bin };
+  }
+  return launch;
 }
 
 /** The command as the modal shows it: an absolute CLI path quoted for reading, not for a shell. */
-export function claudeLaunchLine(command: string, platform: NodeJS.Platform): string {
+export function claudeLaunchLine(
+  command: string,
+  platform: NodeJS.Platform,
+  prompt: string = SETUP_PROMPT,
+  args: string[] = [],
+): string {
   const exe = command === 'claude'
     ? 'claude'
     : platform === 'win32' ? `"${command}"` : `'${command.replace(/'/g, `'\\''`)}'`;
-  return `${exe} "${SETUP_PROMPT}"`;
+  return [exe, ...args, `"${prompt}"`].join(' ');
 }
 
 // ---------------------------------------------------------------------------

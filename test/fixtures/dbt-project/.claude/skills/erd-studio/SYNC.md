@@ -51,11 +51,12 @@ Key fields:
 - **requiresCompile**: If `true`, run `dbt compile` after making physical-side changes
 - **unreadableTables** (present only when there are some): tables whose file does not read (a DBML or YAML error, git conflict markers). Their column and relationship entries are left out of the plan, because a table that fails to read loads with no columns and no Refs, and every difference about it is an artefact of that. Never add or remove anything for them from this plan: tell the user, fix each file first (`erd-studio doctor` gives the line), then compare again
 - **resolvedDataType**: The type to WRITE. Always use this for the two
-  `update-type-*` actions. `sourceDataType` / `targetDataType` are named for the
+  `update-type-*` actions and for `add-column-to-physical`. `sourceDataType` / `targetDataType` are named for the
   comparison direction, so which of them holds the ground-truth value flips when
   the plan was generated from the physical stage — `resolvedDataType` never does.
   When `resolvedDataType` is empty, the ground truth declares no type: there is
-  nothing to write, so skip the entry (Compare keeps showing it as advisory).
+  nothing to write, so skip an `update-type-*` entry (Compare keeps showing it
+  as advisory); an `add-column-to-physical` entry still adds its column, with no `data_type:`.
 - **The cardinality to write** (`add-relationship-to-logical` and the two
   `update-cardinality-*` actions) is the ground truth's: `sourceCardinality`
   when the entry's `groundTruth` is the plan's `sourceStage`, else
@@ -103,7 +104,7 @@ Write each change in the format of the file it touches (the schema skill's "What
 |--------|-----------|
 | `add-to-physical` | Create dbt SQL model file + schema YAML entry (confirm with user first — this is a major change). If the logical model has an `alias`, set `config: { alias: <alias> }` on the dbt model (and its `schema` if set) so it builds the same table name |
 | `remove-from-physical` | Remove dbt SQL file + schema YAML entry (confirm with user first — destructive) |
-| `add-column-to-physical` | Add column to the dbt SQL SELECT statement + add column entry to schema YAML |
+| `add-column-to-physical` | Add column to the dbt SQL SELECT statement + add column entry to schema YAML, with `data_type: <resolvedDataType>` (double-quoted when it is not a plain identifier: `data_type: "DECIMAL(18,2)"`). When `resolvedDataType` is empty, add the entry with no `data_type:` (the ground truth declares no type; Compare keeps showing it as advisory) |
 | `remove-column-from-physical` | Remove column from dbt SQL SELECT + schema YAML (confirm with user first) |
 | `update-type-in-physical` | Update column casting in dbt SQL or `data_type` in schema YAML to `resolvedDataType` |
 | `add-relationship-test-to-physical` | Add `relationships` test to dbt schema YAML (see format below) |

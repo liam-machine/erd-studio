@@ -283,8 +283,8 @@ function applyColumn(root: string, plan: SyncPlan, c: ColumnResolution, log: App
     case 'remove-column-from-logical':
     case 'update-type-in-logical':
       if (c.action === 'update-type-in-logical' && !c.resolvedDataType) {
-        // SYNC.md, Action Reference: "When `resolvedDataType` is empty, the
-        // ground truth declares no type: skip the entry".
+        // SYNC.md, Key fields: "When `resolvedDataType` is empty, the ground
+        // truth declares no type: … skip an `update-type-*` entry".
         log.skipped.push(`${c.action} ${c.modelName}.${c.columnName}: resolvedDataType is empty`);
         return;
       }
@@ -678,7 +678,9 @@ function physicalColumn(root: string, c: ColumnResolution, ctx: TableContext, lo
   editYaml(root, log, abs(root, ctx.dbtSchemaPath), (doc) => {
     const model = dbtModel(doc, c.modelName);
     if (c.action === 'add-column-to-physical') {
-      // "Add column to the dbt SQL SELECT statement + add column entry to schema YAML".
+      // "Add column to the dbt SQL SELECT statement + add column entry to schema YAML,
+      // with `data_type: <resolvedDataType>` … When `resolvedDataType` is empty, add the
+      // entry with no `data_type:`". (The yaml library quotes a value that needs it.)
       const col = dbtColumn(doc, model, c.columnName, true)!;
       if (c.resolvedDataType) col.set('data_type', c.resolvedDataType);
     } else if (c.action === 'remove-column-from-physical') {

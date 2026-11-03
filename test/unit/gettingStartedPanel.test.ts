@@ -979,6 +979,39 @@ describe('pure helpers', () => {
     });
   });
 
+  it('claudeTerminalLaunch passes another prompt as claude\'s initial-prompt argument, after its flags', () => {
+    const prompt = 'Execute the erd-studio sync plan at .erd-studio/.sync-plan.json using the erd-studio skill.';
+    const line = `claude --dangerously-skip-permissions "${prompt}"`;
+    for (const platform of ['darwin', 'linux', 'win32'] as const) {
+      expect(claudeTerminalLaunch('claude', platform, { prompt, args: ['--dangerously-skip-permissions'] }))
+        .toEqual({ kind: 'sendText', display: line, line });
+    }
+  });
+
+  it('claudeTerminalLaunch runs the venv activation first on the typed line, and shows it', () => {
+    const launch = claudeTerminalLaunch('claude', 'darwin', { prompt: 'Run it.', venvDir: "/p/o'neil/.venv" });
+    const line = `source '/p/o'\\''neil/.venv/bin/activate' && claude "Run it."`;
+    expect(launch).toEqual({ kind: 'sendText', display: line, line });
+  });
+
+  it('claudeTerminalLaunch never types a prompt a shell would expand: it runs claude as the terminal process', () => {
+    // A semanticDir setting can hold anything; `$`, backticks, quotes, `%` and `!` all expand in some shell.
+    for (const bad of ['$HOME', '`id`', '"x"', '%PATH%', 'a!b', 'a\\b', "it's"]) {
+      const prompt = `Execute the plan at ${bad}/.sync-plan.json`;
+      const launch = claudeTerminalLaunch('claude', 'darwin', {
+        prompt, args: ['--dangerously-skip-permissions'], venvDir: '/p/.venv', envPath: '/usr/bin',
+      });
+      expect(launch).toMatchObject({
+        kind: 'process', shellPath: 'claude', shellArgs: ['--dangerously-skip-permissions', prompt],
+        // The activation a typed line would run, as the environment it sets.
+        env: { VIRTUAL_ENV: '/p/.venv', PATH: '/p/.venv/bin:/usr/bin' },
+      });
+    }
+    const win = claudeTerminalLaunch('claude', 'win32', { prompt: 'a $b', venvDir: 'C:\\p\\.venv', envPath: 'C:\\Windows' });
+    expect(win).toMatchObject({ kind: 'process', env: { VIRTUAL_ENV: 'C:\\p\\.venv', PATH: 'C:\\p\\.venv\\Scripts;C:\\Windows' } });
+    expect(claudeTerminalLaunch('claude', 'darwin', { prompt: 'a $b' })).not.toHaveProperty('env');
+  });
+
   it('keepMineInstalls names what Keep mine still installs', () => {
     expect(keepMineInstalls(['.claude/skills/erd-studio/SKILL.md'])).toBe('the /erd-studio-setup guide and the safety check');
     expect(keepMineInstalls(['.claude/skills/erd-studio-setup/SKILL.md'])).toBe("ERD Studio's file-format rules and the safety check");

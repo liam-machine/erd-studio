@@ -482,6 +482,19 @@ describe('HarnessService', () => {
       expect(version).toBe(HARNESS_VERSION);
     });
 
+    it("SYNC.md's add-column-to-physical row writes the plan's resolvedDataType, and says what to do without one", () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+      const content = fs.readFileSync(path.join(tmpDir, '.claude', 'skills', 'erd-studio', 'SYNC.md'), 'utf-8');
+      const row = content.split('\n').find((l) => l.startsWith('| `add-column-to-physical`'))!;
+      // Otherwise one run writes `data_type:` and the next does not, and Compare
+      // keeps the column as an advisory "dbt has no type" item.
+      expect(row).toContain('`data_type: <resolvedDataType>`');
+      expect(row).toMatch(/`resolvedDataType` is empty[^|]*no `data_type:`/);
+      // Key fields names it with the two update-type actions.
+      expect(content).toMatch(/\*\*resolvedDataType\*\*: The type to WRITE\. Always use this for the two\s+`update-type-\*` actions and for `add-column-to-physical`/);
+    });
+
     it('writes companion files using the custom semanticDir', () => {
       const custom = new HarnessService('.erd');
       const target = HARNESS_TARGETS.find((t) => t.id === 'claude')!;
