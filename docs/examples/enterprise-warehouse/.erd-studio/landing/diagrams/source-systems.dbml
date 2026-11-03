@@ -15,4 +15,18 @@ use * from '../relationships/landing.dbml'
 Project "source-systems" {
   Note: 'Every source system as it lands: nine schemas, one per source.'
   erd_schema_version: '7'
+  erd_layout: '''
+    branches_site 280 12
+    call_centre_call 1124 12
+    campaigns_send 844 12
+    cards_account 834 332
+    cards_transaction 408 294
+    core_account 1598 294
+    core_customer 2026 331
+    core_transaction 1140 306
+    crm_contact 556 12
+    fraud_alert 12 294
+    loans_application 1434 12
+    web_session 12 12
+  '''
 }

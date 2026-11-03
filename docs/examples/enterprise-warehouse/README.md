@@ -107,7 +107,7 @@ Open this folder in VS Code: **File > Open Folder…**, choose `enterprise-wareh
 
 1. **See the layers.** The **Diagrams** section lists four layers in the order data flows through them: Landing, Enterprise warehouse, Marts, Reporting. The **Table Library** shows each layer's schemas, and **Relationships** each layer's joins. Every layer row has the same icon, in the layer's colour.
 
-2. **Many sources, one file.** Open **Landing → source-systems**: nine schemas, one per system the bank runs, and four relationships, the ones inside a source. In **Relationships**, choose **Group by Relationships File** in its title bar: all four are in `landing.dbml`. Many small schemas don't need many files.
+2. **Many sources, one file.** Open **Landing → source-systems**: nine schemas, one per system the bank runs, and four relationships: three inside a source (an account belongs to a customer in `core_banking`), and one between two (a fraud alert points at a card transaction). In **Relationships**, choose **Group by Relationships File** in its title bar: all four are in `landing.dbml`. Many small schemas don't need many files.
 
 3. **A normalised core.** Open **Enterprise warehouse → party-and-accounts**. Four things a star schema doesn't have:
    - `person` and `organisation` are **one-to-one** with `party`: every person is a party, with the same id.

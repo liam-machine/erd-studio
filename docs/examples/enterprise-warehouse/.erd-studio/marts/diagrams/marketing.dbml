@@ -8,4 +8,11 @@ use * from '../relationships/marketing.dbml'
 Project marketing {
   Note: 'Marketing\'s star: campaign responses, and campaign costs whose relationships are yours to draw.'
   erd_schema_version: '7'
+  erd_layout: '''
+    dim_campaign 438 631
+    dim_customer 283 284
+    dim_date 451 12
+    fct_campaign_cost 12 12
+    fct_campaign_response 709 284
+  '''
 }

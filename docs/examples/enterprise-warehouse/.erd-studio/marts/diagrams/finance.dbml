@@ -11,4 +11,13 @@ use * from '../relationships/marts.dbml'
 Project finance {
   Note: 'Finance\'s stars: daily balances and fees, with the warehouse account they drill through to.'
   erd_schema_version: '7'
+  erd_layout: '''
+    account 1328 521
+    dim_branch 438 598
+    dim_customer 12 548
+    dim_date 436 326
+    dim_product 311 79
+    fct_account_balance_daily 834 521
+    fct_fee 714 12
+  '''
 }

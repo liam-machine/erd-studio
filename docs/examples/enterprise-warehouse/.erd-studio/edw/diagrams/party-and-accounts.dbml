@@ -12,4 +12,14 @@ use * from '../relationships/party.dbml'
 Project "party-and-accounts" {
   Note: 'Who the bank deals with, and the accounts they hold: the normalised core.'
   erd_schema_version: '7'
+  erd_layout: '''
+    account 971 21
+    account_party_role 506 101
+    branch 1412 12
+    organisation 405 380
+    party 831 368
+    party_relationship 520 627
+    person 12 280
+    product 1412 294
+  '''
 }

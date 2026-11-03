@@ -4,4 +4,8 @@ use { table reporting.customer_activity } from '../tables/reporting/customer_act
 Project "customer-360" {
   Note: 'What the dashboards read: one big table and an activity stream, with no joins.'
   erd_schema_version: '7'
+  erd_layout: '''
+    customer_activity 12 12
+    obt_customer_360 351 12
+  '''
 }
