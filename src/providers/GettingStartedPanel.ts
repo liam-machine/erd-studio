@@ -8,10 +8,12 @@
  * (`src/types/gettingStarted.ts`) and its own self-contained HTML — no React
  * bundle. Project-specific behaviour is injected through `GettingStartedDeps`.
  * The page has three states (`GettingStartedPageMode`): no folder open
- * (`workspaceRoot: null`: "Open the folder your data model lives in"), a
- * folder without dbt (`logicalOnly`: New diagram, Open Example Diagram,
- * Import DBML and the AI cards with the guided setup's no-dbt wording — no
- * dbt text at all), and a dbt project (Draw from dbt and the guided setup).
+ * (`workspaceRoot: null`: "Open the folder your data model lives in", or an
+ * example), a folder without dbt (`logicalOnly`: the start card and the AI
+ * cards with the guided setup's no-dbt wording — no dbt text at all), and a
+ * dbt project (the start card led by Draw from dbt, and the guided setup).
+ * Which starts a page offers comes from `startActionsFor()`
+ * (`src/types/startActions.ts`), the list every start surface shares.
  * The dbt page plays the dbt tour; the other two play the logical-first cut
  * (`GETTING_STARTED_MEDIA`). It autoplays in an open folder.
  *
@@ -30,6 +32,7 @@ import * as vscode from 'vscode';
 
 import {
   GETTING_STARTED_EXTERNAL_URLS,
+  GETTING_STARTED_PASSIVE_TYPES,
   SAMPLE_REPO_CLONE_URL,
   SAMPLE_REPO_URL,
   SAMPLE_REPO_ZIP_URL,
@@ -48,6 +51,8 @@ import {
   type ProjectSummary,
   type SetupOutcome,
 } from '../types/gettingStarted';
+import { START_ACTION_COMMANDS, startActionsFor } from '../types/startActions';
+import { recordStart } from '../commands/start';
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedTranscript';
 import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedLogicalTranscript';
 import type { RecommendedInstallResult } from '../types/harness';
@@ -69,14 +74,6 @@ import { hasDbtProjectFile } from '../services/projectDiscovery';
 import { venvActivateCommand } from '../services/dbtEnv';
 
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
-/** The no-AI first diagram (`extension.ts`): the Welcome panel's lead button runs it. */
-export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
-/** The logical-only page's lead button: a blank diagram, no dbt needed. */
-export const CREATE_DOMAIN_COMMAND = 'erdStudio.createDomain';
-/** The logical-only page's "Have a DBML file?" button. */
-export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
-/** The logical-only page's "New to data modelling?" link: the built-in example. */
-export const OPEN_EXAMPLE_DIAGRAM_COMMAND = 'erdStudio.openExampleDiagram';
 export const GETTING_STARTED_TITLE = 'Welcome to ERD Studio';
 
 /**
@@ -744,6 +741,9 @@ export class GettingStartedPanel {
   private statusSeq = 0;
   /** Setups in flight from this panel; no status is posted meanwhile (it would re-enable the button). */
   private setupsRunning = 0;
+  /** The viewer chose something on the page (any message but the page's own: `GETTING_STARTED_PASSIVE_TYPES`). */
+  private choseSomething = false;
+  private disposed = false;
 
   /** Open the panel, or reveal it (with fresh deps and status) when it is already open. */
   static createOrShow(context: vscode.ExtensionContext, deps: GettingStartedDeps): GettingStartedPanel {
@@ -820,9 +820,12 @@ export class GettingStartedPanel {
     try {
       const fetched = await this.deps.getStatus();
       if (!current()) { return; }
+      const logicalOnly = fetched.hasProject && (fetched.logicalOnly ?? this.deps.logicalOnly === true);
       const status: GettingStartedStatus = {
         ...fetched,
-        logicalOnly: fetched.hasProject && (fetched.logicalOnly ?? this.deps.logicalOnly === true),
+        logicalOnly,
+        // The same list the walkthrough and the sidebar offer; no storage reads as dbml.
+        starts: startActionsFor({ hasProject: fetched.hasProject, hasDbt: !logicalOnly, storage: fetched.storage }),
       };
       // The cards go out at once; the summary line can need a manifest parse
       // (seconds on a large project), so it follows in a second status when
@@ -897,6 +900,7 @@ export class GettingStartedPanel {
       return;
     }
     const msg: GettingStartedToHost = message;
+    if (!GETTING_STARTED_PASSIVE_TYPES.includes(msg.type)) { this.choseSomething = true; }
     switch (msg.type) {
       case 'ready':
       case 'refreshStatus':
@@ -933,23 +937,11 @@ export class GettingStartedPanel {
         telemetry.feature('welcomeOpenDiagram');
         await this.deps.openCanvas();
         break;
-      case 'drawFromDbt':
-        telemetry.feature('welcomeDrawFromDbt');
-        await vscode.commands.executeCommand(DRAW_FROM_DBT_COMMAND);
-        // The draft opens in its own tab; this one should now lead with "Open your diagrams".
-        await this.postStatus();
-        break;
-      case 'createDomain':
-        await vscode.commands.executeCommand(CREATE_DOMAIN_COMMAND);
-        // The new diagram opens in its own tab; this one should now lead with "Open your diagrams".
-        await this.postStatus();
-        break;
-      case 'importDbml':
-        await vscode.commands.executeCommand(IMPORT_DBML_COMMAND);
-        await this.postStatus();
-        break;
-      case 'openExample':
-        await vscode.commands.executeCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND);
+      case 'start':
+        recordStart(msg.action, 'welcome');
+        // A fixed command per start (never an id from the webview), run with no argument.
+        await vscode.commands.executeCommand(START_ACTION_COMMANDS[msg.action]);
+        // A new diagram opens in its own tab; this one should now lead with "Open your diagrams".
         await this.postStatus();
         break;
       case 'openExternal':
@@ -977,6 +969,11 @@ export class GettingStartedPanel {
 
   dispose(): void {
     if (GettingStartedPanel.current === this) { GettingStartedPanel.current = undefined; }
+    if (!this.disposed) {
+      this.disposed = true;
+      // Closed without choosing anything (a start, Open your diagrams, the AI steps, a link): the bounce signal.
+      if (!this.choseSomething) { telemetry.feature('welcomeLeftNoChoice'); }
+    }
     while (this.disposables.length) {
       try {
         this.disposables.pop()?.dispose();

@@ -485,7 +485,10 @@ export class SubjectAreaTreeProvider
     this._onDidFilter.fire(undefined);
     // Only alongside real content: an empty tree must stay empty so the
     // welcome view (which has its own Select dbt Project button) shows.
-    if (layerNodes.length === 0) return this.projectRow ? [this.projectRow] : [];
+    // No diagram anywhere yet (a new project's empty layer folders): show
+    // the welcome view's start buttons — New Diagram, Import, an example,
+    // Draw from dbt — rather than bare layer rows, until the first diagram.
+    if (layerNodes.length === 0 || this.diagramTotal === 0) return this.projectRow ? [this.projectRow] : [];
     return [...(this.projectRow ? [this.projectRow] : []), ...layerNodes, { type: 'newLayer' }];
   }
 

@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { startCommandLink } from '../../src/types/startActions';
 
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
 
@@ -236,12 +237,12 @@ describe('package.json: dbt shows up only in dbt projects', () => {
 
   it('keeps the dbt text in a dbt project', () => {
     const welcome = pkg.contributes.viewsWelcome as Array<{ contents: string; when?: string }>;
-    expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')?.contents).toContain('[Draw from dbt](command:erdStudio.drawFromDbt)');
+    expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')?.contents).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
     expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && erdStudio.hasMultipleDbtProjects')?.contents).toContain('[Select dbt Project](command:erdStudio.selectDbtProject)');
     const steps = (pkg.contributes.walkthroughs[0].steps as Array<{ id: string; title: string; when?: string }>);
     expect(steps.filter((s) => dbtOnly(s.when)).map((s) => [s.id, s.title])).toEqual([
-      ['watch', 'Watch the one-minute tour'],
       ['draw', 'Draw your dbt project — no AI needed'],
+      ['watch', 'Watch the one-minute tour'],
     ]);
   });
 });

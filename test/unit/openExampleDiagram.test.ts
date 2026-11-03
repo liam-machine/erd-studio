@@ -174,20 +174,21 @@ describe('Open Example Diagram', () => {
     expect(PRE_REGISTERED_COMMANDS.has(OPEN_EXAMPLE_DIAGRAM_COMMAND)).toBe(false);
   });
 
-  it('is contributed in the ERD Studio category and offered in the no-dbt sidebar welcome', () => {
+  it('is contributed in the ERD Studio category; the start surfaces offer the example projects instead', () => {
     const pkg = packageJson as unknown as {
       contributes: {
         commands: Array<{ command: string; title: string; category?: string }>;
         viewsWelcome: Array<{ view: string; contents: string; when?: string }>;
+        walkthroughs: Array<{ steps: Array<{ description: string }> }>;
       };
     };
+    // It adds the coffee-shop diagram to the open project; "Open an example" on the start
+    // surfaces opens a whole example project in a folder of its own (erdStudio.openExampleProject).
     expect(pkg.contributes.commands.find((c) => c.command === OPEN_EXAMPLE_DIAGRAM_COMMAND)).toEqual({
       command: OPEN_EXAMPLE_DIAGRAM_COMMAND, title: 'Open Example Diagram', category: 'ERD Studio',
     });
-    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
-    expect(plain.contents).toContain('New to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)');
-    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
-    expect(dbt.contents).not.toContain('openExampleDiagram');
+    const surfaces = [...pkg.contributes.viewsWelcome.map((v) => v.contents), ...pkg.contributes.walkthroughs[0].steps.map((s) => s.description)];
+    expect(surfaces.filter((text) => text.includes(OPEN_EXAMPLE_DIAGRAM_COMMAND))).toEqual([]);
   });
 
   it('in a plain folder: name box, dry run, then .erd-studio/ with layers.json, the tables and the diagram, opened', async () => {

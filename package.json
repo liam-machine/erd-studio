@@ -109,6 +109,17 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.openExampleProject",
+        "title": "Open an Example Project…",
+        "icon": "$(book)",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.start",
+        "title": "Start a Data Model…",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.exportDiagram",
         "title": "Export Diagram…",
         "category": "ERD Studio",
@@ -470,7 +481,7 @@
     "viewsWelcome": [
       {
         "view": "erdStudio.domainTree",
-        "contents": "Design your data model as DBML files in a Git repo: an open format, no lock-in.\n\n[Open Folder](command:workbench.action.files.openFolder)\n\nAny folder works: ERD Studio keeps your design in .erd-studio/ next to your code.",
+        "contents": "Design your data model as DBML files in a Git repo: an open format, no lock-in.\n\n[Open Folder](command:workbench.action.files.openFolder)\n\nAny folder works: ERD Studio keeps your design in .erd-studio/ next to your code.\n\nNew to data modelling? [Open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22sidebar%22%7D%5D) to see a finished one first. It opens in a folder of its own.",
         "when": "workspaceFolderCount == 0"
       },
       {
@@ -480,12 +491,17 @@
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nNew to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)\n\n[Get started](command:erdStudio.showGettingStarted)",
+        "contents": "This project is from an older ERD Studio. Convert it once to DBML, an open format: your tables and diagrams stay as they are.\n\n[Convert to DBML](command:erdStudio.start?%5B%7B%22action%22%3A%22convert%22%2C%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && !erdStudio.diagramsLoading && (erdStudio.storage == yaml || erdStudio.storage == mixed)"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\nOr [import a DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22sidebar%22%7D%5D) from dbdiagram.io or any DBML tool (an open format, no lock-in), or [open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22sidebar%22%7D%5D) to see a finished data model first.\n\n[Get started](command:erdStudio.showGettingStarted)",
         "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\nRather start blank? [New Diagram](command:erdStudio.createDomain)\n\nAlready have a DBML file, from dbdiagram.io or another tool? [Import DBML](command:erdStudio.importDbml) Export back to DBML or Mermaid any time — an open format, no lock-in.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
+        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\nOr start [blank](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D), [from a DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22sidebar%22%7D%5D) (an open format, no lock-in), or [from an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22sidebar%22%7D%5D).\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
         "when": "erdStudio.hasDbtProject && !erdStudio.diagramsLoading"
       },
       {
@@ -512,8 +528,82 @@
       {
         "id": "erdStudio.getStarted",
         "title": "Get started with ERD Studio",
-        "description": "Design your data model in Git, from scratch or from DBML, then let your AI assistant fill in the detail.",
+        "description": "Design your data model in Git: from scratch, from DBML or from an example, then let your AI assistant fill in the detail.",
         "steps": [
+          {
+            "id": "openProject",
+            "title": "Open the folder your data model lives in",
+            "description": "Any folder works: ERD Studio keeps your design in .erd-studio/ next to your code.\n[Open Folder](command:workbench.action.files.openFolder)\nNew to data modelling? [Open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22walkthrough%22%7D%5D) to see a finished one first. It opens in a folder of its own.",
+            "when": "workspaceFolderCount == 0",
+            "media": {
+              "svg": "media/walkthrough/open-project.svg",
+              "altText": "A project file list with the .erd-studio folder highlighted."
+            },
+            "completionEvents": [
+              "onContext:erdStudio.hasProject",
+              "onCommand:erdStudio.openExampleProject",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "convert",
+            "title": "Move this project to DBML",
+            "description": "This project is from an older ERD Studio. Convert it once to DBML, an open format: your tables and diagrams stay as they are, and Git shows every file it changes.\n[Convert to DBML](command:erdStudio.start?%5B%7B%22action%22%3A%22convert%22%2C%22from%22%3A%22walkthrough%22%7D%5D)",
+            "when": "erdStudio.hasProject && (erdStudio.storage == yaml || erdStudio.storage == mixed)",
+            "media": {
+              "svg": "media/walkthrough/import-dbml.svg",
+              "altText": "A project's tables and diagrams as DBML files, an open format, with DBML and Mermaid export."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.convertProjectToDbml",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "newDiagram",
+            "title": "Start your data model",
+            "description": "Add tables on a blank canvas. Each table is a file in .erd-studio/ you can commit and review like code.\n[New Diagram](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr [import a DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22walkthrough%22%7D%5D) from dbdiagram.io or any DBML tool (an open format, no lock-in), or [open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22walkthrough%22%7D%5D) to see a finished data model first.",
+            "when": "!erdStudio.hasDbtProject && !erdStudio.hasDiagrams",
+            "media": {
+              "svg": "media/walkthrough/new-diagram.svg",
+              "altText": "A new diagram with its first table, and the DBML files a new project keeps it in under .erd-studio."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.createDomain",
+              "onCommand:erdStudio.importDbml",
+              "onCommand:erdStudio.openExampleProject",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "draw",
+            "title": "Draw your dbt project — no AI needed",
+            "description": "Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr start [blank](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22walkthrough%22%7D%5D), [from a DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22walkthrough%22%7D%5D) (an open format, no lock-in), or [from an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22walkthrough%22%7D%5D).",
+            "when": "erdStudio.hasDbtProject && !erdStudio.hasDiagrams",
+            "media": {
+              "svg": "media/walkthrough/draw.svg",
+              "altText": "dbt models picked from a list and drawn as a diagram with relationships."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.drawFromDbt",
+              "onCommand:erdStudio.createDomain",
+              "onCommand:erdStudio.importDbml",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "openDiagram",
+            "title": "Open a diagram from this project",
+            "description": "This project already has diagrams in .erd-studio/. Open one to see its tables and how they relate. Each table is a file you can commit and review like code.\n[Open Diagram](command:erdStudio.openDomain)",
+            "when": "erdStudio.hasDiagrams",
+            "media": {
+              "svg": "media/walkthrough/sample.svg",
+              "altText": "A project folder holding .erd-studio/, and a star schema diagram opened from it."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.openDomain"
+            ]
+          },
           {
             "id": "watch",
             "title": "Watch the one-minute tour",
@@ -538,71 +628,6 @@
             },
             "completionEvents": [
               "onCommand:erdStudio.showGettingStarted"
-            ]
-          },
-          {
-            "id": "openProject",
-            "title": "Open the folder your data model lives in",
-            "description": "Any folder works: ERD Studio keeps your design in .erd-studio/ next to your code.\n[Open Folder](command:workbench.action.files.openFolder)",
-            "when": "workspaceFolderCount == 0",
-            "media": {
-              "svg": "media/walkthrough/open-project.svg",
-              "altText": "A project file list with the .erd-studio folder highlighted."
-            },
-            "completionEvents": [
-              "onContext:erdStudio.hasProject"
-            ]
-          },
-          {
-            "id": "openDiagram",
-            "title": "Open a diagram from this project",
-            "description": "This project already has diagrams in .erd-studio/. Open one to see its tables and how they relate. Each table is a file you can commit and review like code.\n[Open Diagram](command:erdStudio.openDomain)",
-            "when": "erdStudio.hasDiagrams",
-            "media": {
-              "svg": "media/walkthrough/sample.svg",
-              "altText": "A project folder holding .erd-studio/, and a star schema diagram opened from it."
-            },
-            "completionEvents": [
-              "onCommand:erdStudio.openDomain"
-            ]
-          },
-          {
-            "id": "newDiagram",
-            "title": "Draw your first data model",
-            "description": "Start a blank diagram and add tables on the canvas. Each table is a file in .erd-studio/ you can commit and review like code.\n[New Diagram](command:erdStudio.createDomain)\nNew to data modelling? Start from a small coffee-shop star schema instead.\n[Open Example Diagram](command:erdStudio.openExampleDiagram)",
-            "when": "!erdStudio.hasDbtProject && !erdStudio.hasDiagrams",
-            "media": {
-              "svg": "media/walkthrough/new-diagram.svg",
-              "altText": "A new diagram with its first table, and the DBML files a new project keeps it in under .erd-studio."
-            },
-            "completionEvents": [
-              "onCommand:erdStudio.createDomain",
-              "onCommand:erdStudio.openExampleDiagram"
-            ]
-          },
-          {
-            "id": "draw",
-            "title": "Draw your dbt project — no AI needed",
-            "description": "Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.\n[Draw from dbt](command:erdStudio.drawFromDbt)",
-            "when": "erdStudio.hasDbtProject && !erdStudio.hasDiagrams",
-            "media": {
-              "svg": "media/walkthrough/draw.svg",
-              "altText": "dbt models picked from a list and drawn as a diagram with relationships."
-            },
-            "completionEvents": [
-              "onCommand:erdStudio.drawFromDbt"
-            ]
-          },
-          {
-            "id": "importDbml",
-            "title": "Start from a DBML file",
-            "description": "From dbdiagram.io or any DBML tool. Export back to DBML or Mermaid any time: an open format, no lock-in.\n[Import DBML…](command:erdStudio.importDbml)",
-            "media": {
-              "svg": "media/walkthrough/import-dbml.svg",
-              "altText": "A DBML file turned into a diagram, with DBML and Mermaid export."
-            },
-            "completionEvents": [
-              "onCommand:erdStudio.importDbml"
             ]
           },
           {
@@ -1096,6 +1121,10 @@
         },
         {
           "command": "erdStudio.groupRelationshipsByTable",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.start",
           "when": "false"
         }
       ],

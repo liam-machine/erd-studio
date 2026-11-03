@@ -133,6 +133,10 @@ import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND, importDbml } from './commands/importDbml';
 import { OPEN_EXAMPLE_DIAGRAM_COMMAND, openExampleDiagram } from './commands/openExampleDiagram';
+import { runStart } from './commands/start';
+import { OPEN_EXAMPLE_PROJECT_COMMAND, openExampleProject } from './commands/openExampleProject';
+import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/exampleProjects';
+import { START_COMMAND, type StartContext } from './types/startActions';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
 import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
 import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
@@ -591,6 +595,8 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.cancelSidebarFilter',
   'erdStudio.showRowDetails',
   'erdStudio.hideRowDetails',
+  'erdStudio.start',
+  'erdStudio.openExampleProject',
 ]);
 
 /**
@@ -603,6 +609,8 @@ export const PRE_REGISTERED_COMMANDS = new Set([
   'erdStudio.showGettingStarted',
   'erdStudio.trySampleProject',
   'erdStudio.showLogs',
+  'erdStudio.start',
+  'erdStudio.openExampleProject',
 ]);
 
 /**
@@ -1052,6 +1060,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(SHOW_LOGS_COMMAND, () => { outputChannel.show(true); }),
   );
 
+  // The start screen's one door (src/types/startActions.ts): every start
+  // button on the Welcome panel, the walkthrough and the empty Diagrams view
+  // runs it with `{ action, from }`, so the funnel counts where the click
+  // came from. Pre-registered: an empty window's Open an Example goes
+  // through it too. The project path fills in startContext below.
+  let startContext: () => StartContext = () => ({ hasProject: false, hasDbt: false });
+  // Open an Example Project…: writes an example into a folder of its own and
+  // opens it, so it works in an empty window too.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(OPEN_EXAMPLE_PROJECT_COMMAND, () => openExampleProject({ globalState: context.globalState })),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(START_COMMAND, (arg?: unknown) => runStart(arg, {
+      context: () => startContext(),
+      executeCommand: (command) => vscode.commands.executeCommand(command),
+      pick: (items) => vscode.window.showQuickPick(items, { title: 'Start your data model', placeHolder: 'How would you like to start?' }),
+    })),
+  );
+
   const projectResolution = resolveWorkspaceProject(context);
   const workspaceRoot = projectResolution.root;
   // Logical-only mode: a root without dbt_project.yml (any folder now opens).
@@ -1185,6 +1212,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
   const subjectAreaService = new SubjectAreaService(layerService);
   const tableLibraryService = new TableLibraryService(workspaceRoot, semanticDir);
+  // Which starts the start screen offers here (Convert only for a project from before 2.0).
+  startContext = () => ({ hasProject: true, hasDbt, storage: projectStorageOf(tableLibraryService) });
   tableLibraryService.onParseFailure = (error) => {
     // Fixed keys only — `error.message` may quote the file and never leaves the machine.
     telemetry.error('modelFileParse');
@@ -1317,7 +1346,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     layerService,
     workspaceRoot,
     semanticDir,
-    (loading) => { void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', loading); },
+    (loading) => {
+      void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', loading);
+      // VS Code lists a view only to draw it: a listing with no rows means the
+      // empty view, with its start buttons, is on screen (the funnel's sidebar step).
+      if (!loading) telemetry.featureOnce('sidebarStartShown');
+    },
     (kind) => dbmlFileIcon(context.extensionUri, kind),
     tableHomes,
   );
@@ -3052,11 +3086,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               placeHolder: WHICH_LAYER_FOR_DIAGRAM,
               ignoreFocusOut: true,
             });
-            if (!layerChoice) { return; }
+            if (!layerChoice) { telemetry.feature('blankDiagramCancelled'); return; }
             layer = layerChoice.newLayer
               ? await vscode.commands.executeCommand<string | undefined>('erdStudio.addLayer', { thenNewDiagram: true })
               : layerChoice.value;
-            if (!layer) { return; }
+            if (!layer) { telemetry.feature('blankDiagramCancelled'); return; }
           }
         }
         const chosenLayer = layer;
@@ -3080,7 +3114,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             return asSlug === value.trim() ? undefined : { message: `Saved as ${asSlug}`, severity: vscode.InputBoxValidationSeverity.Info };
           },
         });
-        if (!typed?.trim()) { return; }
+        if (!typed?.trim()) { telemetry.feature('blankDiagramCancelled'); return; }
         const slug = slugFromName(typed);
 
         // Create the diagram file, and open it. Its description and dbt folder
@@ -3886,6 +3920,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return {
       hasProject: true,
       logicalOnly: !hasDbt,
+      // Convert to DBML is offered only for a project from before 2.0.
+      storage: projectStorageOf(tableLibraryService),
       harness,
       cli,
       helper: deriveAiHelperState(harness, cli, assistants),
@@ -4042,6 +4078,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (choice === OPEN) { void vscode.commands.executeCommand('erdStudio.showGettingStarted'); }
       });
     });
+  }
+
+  // An example project from Open an Example Project… opens in a window of
+  // its own; its first diagram opens here, so one click lands on a canvas.
+  // (No "This project has N diagrams" toast on top of it.)
+  {
+    const examplePath = takePendingExample(context.globalState.get(PENDING_EXAMPLE_OPEN_KEY), workspaceRoot, Date.now());
+    if (examplePath) {
+      await context.globalState.update(PENDING_EXAMPLE_OPEN_KEY, undefined);
+      await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
+      void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(examplePath), SUBJECT_AREA_EDITOR_VIEW_TYPE).then(
+        () => telemetry.feature('exampleDiagramShown'),
+        (err) => log.warn('[ERD Studio] Could not open the example\'s first diagram:', err),
+      );
+    }
   }
 
   // Existing diagrams, once per workspace: a teammate's clone already holds

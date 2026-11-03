@@ -134,6 +134,10 @@ const COMMAND_CONTROLS: Record<string, DbtControl> = {
 /** Getting Started panel actions → the dbt control they are. */
 const PANEL_CONTROLS: Record<string, DbtControl> = {
   trySample: 'Try the Sample Project',
+};
+
+/** Getting Started panel starts (`data-action="start" data-start="…"`) → the dbt control they are. */
+const PANEL_START_CONTROLS: Record<string, DbtControl> = {
   drawFromDbt: 'Draw from dbt',
 };
 
@@ -395,7 +399,9 @@ async function gettingStartedText(panel: MockPanel, out: Collected): Promise<voi
     const collect = (when: string) => {
       for (const t of domText(doc, win)) { shown.push({ where: `panel ${when}`, text: t }); }
       for (const el of doc.querySelectorAll<HTMLElement>('[data-action]')) {
-        const control = PANEL_CONTROLS[el.dataset.action ?? ''];
+        const control = el.dataset.action === 'start'
+          ? PANEL_START_CONTROLS[el.dataset.start ?? '']
+          : PANEL_CONTROLS[el.dataset.action ?? ''];
         let visible = true;
         for (let e: Element | null = el; e; e = e.parentElement) {
           if ((e as HTMLElement).hidden || win.getComputedStyle(e).display === 'none') { visible = false; break; }
@@ -888,6 +894,8 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     }
     expect(got.text.gettingStarted.some((s) => s.where === 'panel video' && /getting-started\.mp4/.test(s.text))).toBe(true);
     expect(got.text.gettingStarted.some((s) => s.where === 'panel captions' && DBT_WORD.test(s.text))).toBe(true);
+    // The start card's Draw from dbt button (`data-start="drawFromDbt"`) is reachable on the dbt page itself.
+    expect((got.controls.get('Draw from dbt') ?? []).some((where) => where.startsWith('panel '))).toBe(true);
   });
 
   it('the canvas: the dbt wording on the alias row and the New Relationship hint', () => {

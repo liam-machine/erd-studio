@@ -181,6 +181,18 @@ describe('SubjectAreaTreeProvider', () => {
       expect(children).toHaveLength(0);
       expect(children).toEqual([]);
     });
+
+    it('stays empty while no layer holds a diagram, so the welcome view\'s start buttons show (and loading clears)', () => {
+      const loading: boolean[] = [];
+      const empty = fullRows(new SubjectAreaTreeProvider(createMockSubjectAreaService([], new Map()), layerService, PROJECT_PATH, undefined, (l) => loading.push(l)));
+      expect(empty.getChildren(undefined)).toEqual([]);
+      expect(loading).toEqual([false]);
+      // A project row (several projects to switch between) is still shown alone, as with no layers.
+      empty.setProjectRow({ name: 'jaffle', location: 'here' });
+      expect(empty.getChildren(undefined)).toEqual([{ type: 'project', name: 'jaffle', location: 'here' }]);
+      // The first diagram brings the layers back, empty ones included.
+      expect(provider.getChildren(undefined)).toHaveLength(4);
+    });
   });
 
   describe('project row (#82)', () => {

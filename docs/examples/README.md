@@ -1,6 +1,6 @@
 # Example projects
 
-Eight small data models, each laid out the way a common modelling pattern lays out a warehouse. Each folder is a project of its own: open it in VS Code with **File > Open Folder…**, then click **ERD Studio** in the Activity Bar. None needs dbt.
+Eight small data models, each laid out the way a common modelling pattern lays out a warehouse. Each folder is a project of its own, and every one ships inside ERD Studio: run **ERD Studio: Open an Example Project…**, pick one and a folder to put it in, and it opens with its first diagram on the canvas. From a clone of this repository, open a folder with **File > Open Folder…**, then click **ERD Studio** in the Activity Bar. None needs dbt.
 
 | Example | Pattern | Shows |
 |---|---|---|

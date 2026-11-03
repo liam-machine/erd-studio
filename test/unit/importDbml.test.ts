@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { startCommandLink } from '../../src/types/startActions';
 import * as vscode from 'vscode';
 
 import { toDbmlRich } from '@erd-studio/core';
@@ -1059,12 +1060,13 @@ describe('Import DBML — contributed', () => {
     });
     const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
     expect(dbt.contents.startsWith('No diagrams yet.')).toBe(true);
-    expect(dbt.contents).toContain('(command:erdStudio.drawFromDbt)');
-    expect(dbt.contents).toContain('[New Diagram](command:erdStudio.createDomain)');
-    expect(dbt.contents).toContain('[Import DBML](command:erdStudio.importDbml)');
+    // Each start goes through erdStudio.start, which counts the sidebar click (src/types/startActions.ts).
+    expect(dbt.contents).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
+    expect(dbt.contents).toContain(`[blank](${startCommandLink('blank', 'sidebar')})`);
+    expect(dbt.contents).toContain(`[from a DBML file](${startCommandLink('import', 'sidebar')})`);
     const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
-    expect(plain.contents.startsWith('No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)')).toBe(true);
-    expect(plain.contents).toContain('[Import DBML](command:erdStudio.importDbml)');
-    expect(plain.contents).not.toContain('erdStudio.drawFromDbt');
+    expect(plain.contents.startsWith(`No diagrams yet.\n\n[New Diagram](${startCommandLink('blank', 'sidebar')})`)).toBe(true);
+    expect(plain.contents).toContain(`[import a DBML file](${startCommandLink('import', 'sidebar')})`);
+    expect(plain.contents).not.toContain('drawFromDbt');
   });
 });
