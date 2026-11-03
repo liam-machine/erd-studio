@@ -22,6 +22,15 @@
   flex-direction: column;
 }
 
+/* While the Detail Panel is open (top-right, 340px wide) on a canvas wide
+   enough (BESIDE_DETAIL_MIN_FLOW_PX), sit left of it instead of underneath
+   it: its width + its 15px panel margin + a 12px gap. Keep in step with
+   DETAIL_PANEL_WIDTH_PX / PANEL_MARGIN_PX / DISC_PANEL_GAP_PX
+   (test/unit/fitViewPadding.test.ts checks). */
+.react-flow__panel.disc-panel--beside-detail {
+  margin-right: calc(340px + 15px + 12px);
+}
+
 /* ---------------------------------------------------------------------------
    Header
    --------------------------------------------------------------------------- */

@@ -43,6 +43,8 @@ export interface PersistedState {
   syncMode?: boolean;
   /** Ground-truth choices made in the sync-merge modal. */
   syncSelections?: Record<string, GroundTruth>;
+  /** Which of those table decisions the modal inferred from their columns. Optional for older blobs. */
+  syncInferredTableKeys?: Record<string, GroundTruth>;
   /** The drag-to-relate tip was closed; it stays closed in this webview. */
   dragHintDismissed?: boolean;
 }
@@ -77,6 +79,7 @@ export function useStatePersistence(): {
   const discrepancyCompareStage = useEditorStore((s) => s.discrepancyCompareStage);
   const syncMode = useEditorStore((s) => s.syncMode);
   const syncSelections = useEditorStore((s) => s.syncSelections);
+  const syncInferredTableKeys = useEditorStore((s) => s.syncInferredTableKeys);
   const dragHintDismissed = useEditorStore((s) => s.dragHintDismissed);
 
   // Zustand actions for restoration
@@ -89,6 +92,7 @@ export function useStatePersistence(): {
   const setDiscrepancyCompareStage = useEditorStore((s) => s.setDiscrepancyCompareStage);
   const setSyncMode = useEditorStore((s) => s.setSyncMode);
   const setSyncSelectionBulk = useEditorStore((s) => s.setSyncSelectionBulk);
+  const restoreSyncInferredTableKeys = useEditorStore((s) => s.restoreSyncInferredTableKeys);
   const setDragHintDismissed = useEditorStore((s) => s.setDragHintDismissed);
 
   // Check synchronously on mount if we have a persisted viewport (for fitView skip)
@@ -126,6 +130,7 @@ export function useStatePersistence(): {
   const discrepancyCompareStageRef = useRef(discrepancyCompareStage);
   const syncModeRef = useRef(syncMode);
   const syncSelectionsRef = useRef(syncSelections);
+  const syncInferredTableKeysRef = useRef(syncInferredTableKeys);
   const dragHintDismissedRef = useRef(dragHintDismissed);
 
   // Keep refs in sync with state (single effect for efficiency)
@@ -140,11 +145,12 @@ export function useStatePersistence(): {
     discrepancyCompareStageRef.current = discrepancyCompareStage;
     syncModeRef.current = syncMode;
     syncSelectionsRef.current = syncSelections;
+    syncInferredTableKeysRef.current = syncInferredTableKeys;
     dragHintDismissedRef.current = dragHintDismissed;
   }, [
     selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded,
     canvasMode, discrepancyVisible, discrepancyCompareStage, syncMode, syncSelections,
-    dragHintDismissed,
+    syncInferredTableKeys, dragHintDismissed,
   ]);
 
   // Helper to build and write persisted state (avoids duplication)
@@ -160,6 +166,9 @@ export function useStatePersistence(): {
       discrepancyCompareStage: discrepancyCompareStageRef.current,
       syncMode: syncModeRef.current,
       syncSelections: { ...syncSelectionsRef.current },
+      ...(Object.keys(syncInferredTableKeysRef.current).length > 0
+        ? { syncInferredTableKeys: { ...syncInferredTableKeysRef.current } }
+        : {}),
       ...(dragHintDismissedRef.current ? { dragHintDismissed: true } : {}),
     };
     vscode.setState(state);
@@ -250,6 +259,8 @@ export function useStatePersistence(): {
       }
       if (byChoice.logical.length > 0) setSyncSelectionBulk(byChoice.logical, 'logical');
       if (byChoice.physical.length > 0) setSyncSelectionBulk(byChoice.physical, 'physical');
+      // After the selections (a bulk set marks its keys as the user's own).
+      if (restored.syncInferredTableKeys) restoreSyncInferredTableKeys(restored.syncInferredTableKeys);
 
       const message: WebviewMessage = {
         type: 'toggleDiscrepancy',
@@ -260,7 +271,7 @@ export function useStatePersistence(): {
   }, [
     domain, vscode, setDetailPanelOpen, setViewport, selectNode, setExpandedNodes,
     setCanvasMode, setDiscrepancyVisible, setDiscrepancyCompareStage, setSyncMode, setSyncSelectionBulk,
-    setDragHintDismissed,
+    restoreSyncInferredTableKeys, setDragHintDismissed,
   ]);
 
   // ---------------------------------------------------------------------------
@@ -294,7 +305,7 @@ export function useStatePersistence(): {
   }, [
     selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded,
     canvasMode, discrepancyVisible, discrepancyCompareStage, syncMode, syncSelections,
-    dragHintDismissed, persistState,
+    syncInferredTableKeys, dragHintDismissed, persistState,
   ]);
 
   // Flush a pending debounced write the moment the webview is hidden — the

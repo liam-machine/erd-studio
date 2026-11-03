@@ -35,13 +35,15 @@ vi.mock('../../webview/hooks/useVsCodeApi', () => ({
   }),
 }));
 
-// Minimal React Flow surface used by Toolbar
+// Minimal React Flow surface used by Toolbar. One shared fitView so a test
+// can see the padding Fit asked for.
+const mockFitView = vi.hoisted(() => vi.fn());
 vi.mock('@xyflow/react', () => ({
-  Panel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Panel: ({ children, className }: { children: React.ReactNode; className?: string }) => <div className={className}>{children}</div>,
   useReactFlow: () => ({
     zoomIn: vi.fn(),
     zoomOut: vi.fn(),
-    fitView: vi.fn(),
+    fitView: mockFitView,
     getNode: vi.fn(),
   }),
   useStore: () => 1, // zoom level
@@ -558,5 +560,27 @@ describe('plain labels', () => {
     fireEvent.click(screen.getByRole('button', { name: '↓' }));
     expect(screen.getByText('Max per row')).toBeTruthy();
     expect(screen.queryByText('Max per layer')).toBeNull();
+  });
+});
+
+describe('Toolbar Fit leaves room for itself (dev-host finding 7)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('pads the top by the toolbar\'s bottom edge, not a flat 0.1', () => {
+    const { container } = render(<div className="react-flow"><Toolbar {...defaultProps} /></div>);
+    const flow = container.querySelector('.react-flow') as HTMLElement;
+    const toolbar = container.querySelector('.toolbar-container') as HTMLElement;
+    flow.getBoundingClientRect = () => ({ top: 0, bottom: 800, left: 0, right: 1440, width: 1440, height: 800 }) as DOMRect;
+    toolbar.getBoundingClientRect = () => ({ top: 15, bottom: 87, left: 400, right: 1000, width: 600, height: 72 }) as DOMRect;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fit view to show all nodes' }));
+
+    expect(mockFitView).toHaveBeenCalledTimes(1);
+    expect(mockFitView.mock.calls[0][0]).toEqual({
+      padding: { top: '99px', right: 0.1, bottom: 0.1, left: 0.1 },
+      duration: 200,
+    });
   });
 });

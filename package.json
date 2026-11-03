@@ -1317,7 +1317,7 @@
     "@dbml/parse": "11.0.0",
     "@erd-studio/core": "0.4.0",
     "@erd-studio/renderer": "0.4.0",
-    "@xyflow/react": "^12.4.0",
+    "@xyflow/react": "^12.5.0",
     "elkjs": "^0.9.3",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
