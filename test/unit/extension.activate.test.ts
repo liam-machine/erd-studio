@@ -398,42 +398,46 @@ describe('activate() with a dbt project', () => {
       'erdStudio.relationships',
       'erdStudio.help',
     ]);
+    // Diagrams, Table Library and Relationships each fold to their layers with Collapse All.
+    const collapsible = createTreeView.mock.calls
+      .filter((c) => (c[1] as { showCollapseAll?: boolean }).showCollapseAll === true).map((c) => c[0]);
+    expect(collapsible).toEqual(['erdStudio.domainTree', 'erdStudio.modelLibrary', 'erdStudio.relationships']);
     // The Explorer's tooltips only: the sidebar draws layer colours with its own icons.
     expect(registerDecorations).toHaveBeenCalledTimes(1);
     expect(context.subscriptions.length).toBeGreaterThan(CONTRIBUTED.length * 2);
   });
 
-  it('groups the Relationships view by file by default, or by table from its title toggle, remembered for the workspace', async () => {
+  it('groups the Relationships view by table by default, or by file from its title toggle, remembered for the workspace', async () => {
     const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
     await activate(context);
     const view = createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.relationships')!;
     const provider = (view[1] as { treeDataProvider: { getGrouping(): string } }).treeDataProvider;
-    expect(provider.getGrouping()).toBe('file');
-    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.relationshipsGrouping', 'file');
-
-    await vscode.commands.executeCommand('erdStudio.groupRelationshipsByTable');
     expect(provider.getGrouping()).toBe('table');
-    expect(context.workspaceState.get('erdStudio.relationshipsGrouping')).toBe('table');
     expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.relationshipsGrouping', 'table');
 
     await vscode.commands.executeCommand('erdStudio.groupRelationshipsByFile');
     expect(provider.getGrouping()).toBe('file');
     expect(context.workspaceState.get('erdStudio.relationshipsGrouping')).toBe('file');
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.relationshipsGrouping', 'file');
+
+    await vscode.commands.executeCommand('erdStudio.groupRelationshipsByTable');
+    expect(provider.getGrouping()).toBe('table');
+    expect(context.workspaceState.get('erdStudio.relationshipsGrouping')).toBe('table');
   });
 
-  it('starts the Relationships view grouped by table when the workspace last chose it', async () => {
+  it('starts the Relationships view grouped by file when the workspace last chose it', async () => {
     const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
     const remembered = makeContext(root, { workspaceState: new Map<string, unknown>([
       ['erdStudio.harnessInstallPrompted', true],
       ['erdStudio.diagramsNudgeShown', true],
-      ['erdStudio.relationshipsGrouping', 'table'],
+      ['erdStudio.relationshipsGrouping', 'file'],
     ]) });
     // Disposed with the rest after the test.
     context = remembered;
     await activate(remembered);
     const view = createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.relationships')!;
-    expect((view[1] as { treeDataProvider: { getGrouping(): string } }).treeDataProvider.getGrouping()).toBe('table');
+    expect((view[1] as { treeDataProvider: { getGrouping(): string } }).treeDataProvider.getGrouping()).toBe('file');
   });
 
   it('refreshes the Model Library on any domain write, not just when a yml file appears or disappears', async () => {
