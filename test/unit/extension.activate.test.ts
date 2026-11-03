@@ -398,12 +398,16 @@ describe('activate() with a dbt project', () => {
       'erdStudio.relationships',
       'erdStudio.help',
     ]);
+    // Diagrams, Table Library and Relationships each fold to their layers with Collapse All.
+    const collapsible = createTreeView.mock.calls
+      .filter((c) => (c[1] as { showCollapseAll?: boolean }).showCollapseAll === true).map((c) => c[0]);
+    expect(collapsible).toEqual(['erdStudio.domainTree', 'erdStudio.modelLibrary', 'erdStudio.relationships']);
     // The Explorer's tooltips only: the sidebar draws layer colours with its own icons.
     expect(registerDecorations).toHaveBeenCalledTimes(1);
     expect(context.subscriptions.length).toBeGreaterThan(CONTRIBUTED.length * 2);
   });
 
-  it('groups the Relationships view by file or by table from its title toggle, remembered for the workspace', async () => {
+  it('groups the Relationships view by table by default, or by file from its title toggle, remembered for the workspace', async () => {
     const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
     await activate(context);

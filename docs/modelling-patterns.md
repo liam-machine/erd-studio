@@ -48,8 +48,9 @@ Everything else is your choice: how many layers, how many diagrams, and how you 
 | **A database per stage** (GitLab's handbook) | `raw`, `prep`, `prod` (the databases) | the schemas in each database (`raw.zuora`, `prod.common`) | a source, a star, a mart | [gitlab-style](examples/gitlab-style/) |
 | **Stage in the dataset name** (Mozilla's BigQuery) | `live`, `stable`, `derived`, `views` | the full dataset name (`atlas_derived`) | a group of versioned tables or views | [bigquery-versioned](examples/bigquery-versioned/) |
 | **Data mesh** | the kind of data product: `source_aligned`, `aggregate`, `consumer_aligned` | one per domain (`orders`, `shipping`) | a data product | [data-mesh](examples/data-mesh/) |
+| **Inmon enterprise warehouse** (a normalised core, team-owned marts) | `landing`, `edw`, `marts`, `reporting` | one per source system (landing), one per subject area (`party`, `arrangement`), one shared by several teams (marts) | a subject area, a department's stars | [enterprise-warehouse](examples/enterprise-warehouse/) |
 
-Patterns combine. A medallion's gold layer, a dbt project's marts and a Data Vault's information marts are usually Kimball stars. Other shapes fit the same way: a "one big table" is a wide table with no relationships, on a diagram of its own (the medallion and GitLab-style examples each have one), and an activity schema is one stream table per entity, beside its entity table.
+Patterns combine. A medallion's gold layer, a dbt project's marts and a Data Vault's information marts are usually Kimball stars. Other shapes fit the same way: a "one big table" is a wide table with no relationships, on a diagram of its own (the medallion, GitLab-style and enterprise warehouse examples each have one), and an activity schema is one stream table per entity, beside its entity table (the enterprise warehouse example has one). Anchor modelling (sixth normal form, a table per attribute) fits like the enterprise warehouse's normalised layer, with narrower tables; there is no example of it.
 
 ## Your warehouse's words, in the tree
 
@@ -80,7 +81,8 @@ The tree is built so that teams can work side by side without stepping on each o
   /.erd-studio/source_aligned/relationships/orders.dbml  @acme/orders-team
   ```
 
-- **New relationships go to the right file by themselves.** ERD Studio puts a new relationship in the file that already holds most of its foreign-key table's relationships, so a team's split stays split.
+- **New relationships go to the right file by themselves.** ERD Studio saves a new relationship in the file that already holds most of its foreign-key table's relationships, so a team's split stays split; for a table with none yet, in `<layer>/relationships/<schema>.dbml` if that file exists; otherwise in the layer's shared file. Creating a file named after a schema is how a team gives that schema its own file; ERD Studio never creates one.
+- **Two teams in one schema?** Folders can't say which team a table belongs to, so a brand-new table's first relationship goes to the shared file. Choose your team's file in **New Relationship** once; the table's later relationships follow it. The [enterprise warehouse example](examples/enterprise-warehouse/) walks through this, step by step.
 - **Use another team's table; don't copy it.** A diagram can show any table in the project, from any layer. The [data mesh example](examples/data-mesh/) draws the orders team's `customer_order` on the shipping and payments diagrams.
 - **Diagrams are cheap.** Make one per audience: a team's working view, a dashboard's tables, a source system. Each keeps its own layout, so rearranging one never moves another.
 - **Say who owns a table in the table itself**, with `meta_owner: 'orders-team'`, so people and AI assistants reading the files know who to ask.
@@ -103,7 +105,8 @@ A short list of decisions keeps a shared project consistent. Write them in your 
 - **Lineage between layers.** That gold's `dim_customer` is built from silver's `customers` is a pipeline step, not a foreign key. Write it in the table's design rationale. Using dbt? The **Physical** tab shows what dbt built.
 - **One table in two layers.** No mainstream method has one: Kimball, Data Vault and medallion all build a new table at each stage. A table belongs to one layer and can appear on diagrams in any layer.
 - **Relationships between repositories.** Keep the whole model, even a whole data mesh, in one repository and one `.erd-studio` folder.
+- **Who owns a table, by folder alone,** when teams share a schema. Say it in the table (`meta_owner`) and list the team's files in `CODEOWNERS`, as the [enterprise warehouse example](examples/enterprise-warehouse/) does.
 
 ## Try the examples
 
-Each folder in [`docs/examples/`](examples/) is a small project of its own. Open one in VS Code with **File > Open Folder…**, then click **ERD Studio** in the Activity Bar. None needs dbt. The [file format reference](semantic-domain-json-reference.md) describes each file.
+Each folder in [`docs/examples/`](examples/) is a small project of its own. Open one in VS Code with **File > Open Folder…**, then click **ERD Studio** in the Activity Bar. None needs dbt. New to ERD Studio? The [enterprise warehouse example](examples/enterprise-warehouse/) has a ten-minute walkthrough. The [file format reference](semantic-domain-json-reference.md) describes each file.

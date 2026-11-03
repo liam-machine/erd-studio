@@ -27,6 +27,8 @@ import {
   validateDismissManifestHintPayload,
   validateImportEmbeddedTablesPayload,
   validateExportDiagramPayload,
+  validateNoRelationshipsFile,
+  validateRelationshipsFileChoice,
 } from '../../src/providers/payloadValidation';
 import { TABLE_NAME_PATTERN } from '../../src/types/naming';
 import { ADD_EXISTING_TABLES_LIMIT } from '../../src/types/messages';
@@ -409,5 +411,45 @@ describe('validateNewDbmlTableName (the layer-first tree reserves no table name)
     expect(validateNewDbmlTableName('dim_customer')).toBeNull();
     expect(validateNewDbmlTableName('../x')).toBe(validateTableNameSafety('../x'));
     expect(validateNewDbmlTableName('')).not.toBeNull();
+  });
+});
+
+describe("validateRelationshipsFileChoice — New Relationship's \"Stored in\" (DBML)", () => {
+  it('absent, or a relationships file relative to the semantic dir, passes', () => {
+    expect(validateRelationshipsFileChoice(undefined)).toBeNull();
+    expect(validateRelationshipsFileChoice('marts/relationships/marketing.dbml')).toBeNull();
+    expect(validateRelationshipsFileChoice('gold/relationships/gold.dbml')).toBeNull();
+  });
+
+  it('refuses anything that is not text, or too long', () => {
+    for (const value of [null, 42, {}, [], '', `gold/relationships/${'x'.repeat(1100)}.dbml`]) {
+      expect(validateRelationshipsFileChoice(value)).toBe("the relationships file must be a path inside the project's ERD Studio folder.");
+    }
+  });
+
+  it('refuses a path that could leave the semantic dir, or is not written plainly', () => {
+    for (const value of [
+      '../outside/relationships/x.dbml', 'gold/relationships/../relationships/x.dbml', './gold/relationships/x.dbml',
+      '/abs/gold/relationships/x.dbml', 'C:/gold/relationships/x.dbml', 'gold\\relationships\\x.dbml', 'gold//relationships/x.dbml',
+      'gold/relationships/x.dbml\u0000',
+    ]) {
+      expect(validateRelationshipsFileChoice(value)).toBe(`"${value}" is not a path inside the project's ERD Studio folder.`);
+    }
+  });
+
+  it('refuses a path that is not a relationships file', () => {
+    for (const value of ['gold/tables/gold/fct_order.dbml', 'gold/diagrams/sales.dbml', 'gold/relationships/x.DBML', 'gold/relationships/x.yml', 'tables/relationships/x.dbml', 'gold/relationships/sub/x.dbml', 'layers.json']) {
+      expect(validateRelationshipsFileChoice(value)).toBe(`"${value}" is not a relationships file (<layer>/relationships/<name>.dbml).`);
+    }
+  });
+});
+
+describe('validateNoRelationshipsFile — an edit keeps its relationship where it is', () => {
+  it('refuses an editRelationship payload that names a relationships file', () => {
+    expect(validateNoRelationshipsFile({ fromModel: 'a', relationshipsFile: 'gold/relationships/gold.dbml' }))
+      .toBe('an existing relationship stays in the file that holds it; a relationships file can be chosen only for a new one.');
+    expect(validateNoRelationshipsFile({ fromModel: 'a' })).toBeNull();
+    expect(validateNoRelationshipsFile({ fromModel: 'a', relationshipsFile: undefined })).toBeNull();
+    expect(validateNoRelationshipsFile(undefined)).toBeNull();
   });
 });

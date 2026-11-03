@@ -85,6 +85,7 @@ Each folder answers one question: the **layer** is the stage of your warehouse, 
 | A database per stage (GitLab's handbook) | `raw` · `prep` · `prod` | [gitlab-style](docs/examples/gitlab-style/) |
 | The stage in the dataset name (Mozilla's BigQuery) | `live` · `stable` · `derived` · `views` | [bigquery-versioned](docs/examples/bigquery-versioned/) |
 | Data mesh | `source_aligned` · `aggregate` · `consumer_aligned`, a schema per domain | [data-mesh](docs/examples/data-mesh/) |
+| Inmon: a normalised core, team-owned marts | `landing` · `edw` · `marts` · `reporting` | [enterprise-warehouse](docs/examples/enterprise-warehouse/) |
 
 [Modelling patterns](docs/modelling-patterns.md) explains how each one fits, the four rules that keep any layout tidy, and how several teams share one model.
 
@@ -128,7 +129,7 @@ No dbt project to hand? Run **ERD Studio: Try the Sample Project** ([on GitHub](
 - [AI assistants](docs/ai-assistants.md)
 - [DBML import and export](docs/leaving-erd-studio.md)
 - [Choosing the project folder](docs/project-folder.md)
-- [Modelling patterns](docs/modelling-patterns.md), with seven [example projects](docs/examples/)
+- [Modelling patterns](docs/modelling-patterns.md), with eight [example projects](docs/examples/)
 - [File format reference](docs/semantic-domain-json-reference.md) and [glossary](docs/glossary.md)
 - Bug or idea? Run **ERD Studio: Send Feedback**, or [open an issue](https://github.com/liam-machine/erd-studio/issues).
 

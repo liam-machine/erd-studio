@@ -1,0 +1,11 @@
+Table party.person [
+  grain: 'One row per person',
+  meta_owner: 'customer-data'
+] {
+  Note: 'What only a person has. A subtype of party: one-to-one, with the same id.'
+
+  party_id      BIGINT [pk, note: 'The party this person is']
+  given_name    STRING
+  family_name   STRING
+  date_of_birth DATE
+}

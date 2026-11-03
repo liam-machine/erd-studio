@@ -27,7 +27,8 @@
         "policy_hk BINARY pk fk",
         "customer_policy_hk BINARY fk",
         "snapshot_date DATE pk"
-      ]
+      ],
+      "newRelationshipsFile": "business_vault/relationships/business_vault.dbml"
     },
     "business_vault.pit_customer": {
       "layer": "business_vault",
@@ -39,7 +40,8 @@
         "sat_customer_crm_ldts TIMESTAMP fk",
         "sat_customer_policy_admin_ldts TIMESTAMP fk",
         "sat_customer_risk_score_ldts TIMESTAMP fk"
-      ]
+      ],
+      "newRelationshipsFile": "business_vault/relationships/business_vault.dbml"
     },
     "business_vault.sat_customer_risk_score": {
       "layer": "business_vault",
@@ -50,7 +52,8 @@
         "risk_score DECIMAL(5,2)",
         "risk_band STRING",
         "rule_version STRING"
-      ]
+      ],
+      "newRelationshipsFile": "business_vault/relationships/business_vault.dbml"
     },
     "raw_vault.hub_customer": {
       "layer": "raw_vault",
@@ -60,7 +63,8 @@
         "customer_bk STRING nk",
         "load_datetime TIMESTAMP",
         "record_source STRING"
-      ]
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
     },
     "raw_vault.hub_policy": {
       "layer": "raw_vault",
@@ -70,7 +74,8 @@
         "policy_bk STRING nk",
         "load_datetime TIMESTAMP",
         "record_source STRING"
-      ]
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
     },
     "raw_vault.link_customer_policy": {
       "layer": "raw_vault",
@@ -81,7 +86,8 @@
         "policy_hk BINARY fk",
         "load_datetime TIMESTAMP",
         "record_source STRING"
-      ]
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
     },
     "raw_vault.sat_customer_crm": {
       "layer": "raw_vault",
@@ -94,7 +100,8 @@
         "email STRING",
         "phone STRING",
         "record_source STRING"
-      ]
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
     },
     "raw_vault.sat_customer_policy_admin": {
       "layer": "raw_vault",
@@ -106,7 +113,8 @@
         "date_of_birth DATE",
         "postcode STRING",
         "record_source STRING"
-      ]
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
     },
     "raw_vault.sat_customer_policy_effectivity": {
       "layer": "raw_vault",
@@ -117,7 +125,8 @@
         "start_datetime TIMESTAMP",
         "end_datetime TIMESTAMP",
         "record_source STRING"
-      ]
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
     },
     "raw_vault.sat_policy_policy_admin": {
       "layer": "raw_vault",
@@ -131,7 +140,8 @@
         "end_date DATE",
         "annual_premium DECIMAL(12,2)",
         "record_source STRING"
-      ]
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
     },
     "shared.dim_date": {
       "layer": "information_mart",
@@ -143,7 +153,8 @@
         "calendar_date DATE",
         "month_start_date DATE",
         "is_month_end BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "information_mart/relationships/information_mart.dbml"
     },
     "underwriting.dim_customer": {
       "layer": "information_mart",
@@ -156,7 +167,8 @@
         "full_name STRING scd1",
         "postcode STRING scd1",
         "risk_band STRING scd1"
-      ]
+      ],
+      "newRelationshipsFile": "information_mart/relationships/information_mart.dbml"
     },
     "underwriting.dim_policy": {
       "layer": "information_mart",
@@ -169,7 +181,8 @@
         "product_code STRING scd1",
         "start_date DATE",
         "end_date DATE"
-      ]
+      ],
+      "newRelationshipsFile": "information_mart/relationships/information_mart.dbml"
     },
     "underwriting.fct_policy_month": {
       "layer": "information_mart",
@@ -182,7 +195,8 @@
         "month_date_key INT pk fk",
         "earned_premium DECIMAL(12,2) additive",
         "is_in_force BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "information_mart/relationships/information_mart.dbml"
     }
   },
   "diagrams": [

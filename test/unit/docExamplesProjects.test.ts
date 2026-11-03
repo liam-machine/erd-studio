@@ -124,6 +124,22 @@ describe('the example projects in docs/examples', () => {
       }
     });
 
+    it('stores a position for every table on every diagram, so opening one writes nothing', () => {
+      // A diagram with a table that has no position is laid out and saved the first time it is
+      // opened, which would leave a change in a reader's clone just from looking at the example.
+      const unplaced: string[] = [];
+      for (const d of filesUnder(semantic).filter((f) => /^[^/]+\/diagrams\/[^/]+\.dbml$/.test(f))) {
+        const text = fs.readFileSync(path.join(semantic, d), 'utf-8');
+        const members = [...text.matchAll(/^use \{ table [\w"]+\.([\w"]+) \}/gm)].map((m) => m[1].replace(/"/g, ''));
+        const layout = /erd_layout:\s*'''([\s\S]*?)'''/.exec(text)?.[1] ?? '';
+        // `<name> <x> <y>` per table (sticky notes are `note/<id> …`): the name is everything before the two numbers.
+        const placed = new Set(layout.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('note/'))
+          .map((l) => l.replace(/\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?$/, '')));
+        for (const m of members) if (!placed.has(m)) unplaced.push(`${d}: ${m}`);
+      }
+      expect(unplaced).toEqual([]);
+    });
+
     it('shows the files on disk in its README tree', () => {
       const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf-8');
       const block = /```text\n(\.erd-studio\/\n[\s\S]*?)\n```/.exec(readme);

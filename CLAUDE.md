@@ -172,7 +172,7 @@ The Confluence app renders whatever is committed in a customer's repo — writte
 
 ### Example projects: the customer corpus
 
-`docs/examples/` holds seven small DBML projects, one per modelling pattern customers use (medallion, dbt staging/intermediate/marts, Kimball bus matrix, Data Vault 2.0, a database per stage, BigQuery datasets per stage, data mesh), explained in `docs/modelling-patterns.md`. They are the stand-in for customers' repos: use them to judge any decision that changes how projects are read, written, drawn or laid out.
+`docs/examples/` holds eight small DBML projects, one per modelling pattern customers use (medallion, dbt staging/intermediate/marts, Kimball bus matrix, Data Vault 2.0, a database per stage, BigQuery datasets per stage, data mesh, and an Inmon enterprise warehouse that also covers the edge cases: many small source schemas, two teams sharing one schema, joins across layers, tables with no joins), explained in `docs/modelling-patterns.md`. `enterprise-warehouse/README.md` is the walkthrough a new user follows: keep its steps true to the UI when a label or flow it names changes. They are the stand-in for customers' repos: use them to judge any decision that changes how projects are read, written, drawn or laid out.
 
 - **Before changing** the file format, readers or writers, Ref placement, layers or schemas, what the canvas or sidebar shows, `doctor`, Convert or export: open the examples (in a dev host, one window each, `code -n --user-data-dir /tmp/erdxN --extensionDevelopmentPath=<repo> docs/examples/<name>`) and say in the PR which patterns the change affects and how.
 - **Three tests run over them**, and none may be weakened to make a change pass:

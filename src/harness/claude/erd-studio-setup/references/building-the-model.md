@@ -124,8 +124,10 @@ table file holds no `use`, `Ref` or `[ref: …]` — relationships go in the rel
 
 The inventory's `relationships`, **copied verbatim** — including `cardinality` — each as one Ref,
 its ends qualified as the tables declare themselves. A Ref goes in the relationships file that
-already holds the most Refs of its foreign-key (`fromModel`) table, else in that table's layer's
-`<layer>/relationships/<layer>.dbml`; never add one that a relationships file already holds. The
+already holds the most Refs of its foreign-key (`fromModel`) table, else in its schema's
+`<layer>/relationships/<schema>.dbml` when that file already exists (never create it), else in
+that table's layer's `<layer>/relationships/<layer>.dbml`; never add one that a relationships
+file already holds. The
 file has a `use { table s.x } from '../tables/s/x.dbml'` line for every table its Refs name:
 `Ref: s.fct.fk >? s.dim.pk` (`many-to-one`), `Ref: s.dim.pk ?- s.fct.fk` (`one-to-one`, key end first),
 `Ref: a.x <>? b.y` (`many-to-many`); a `one-to-many` is written from the other end as `>?`; a

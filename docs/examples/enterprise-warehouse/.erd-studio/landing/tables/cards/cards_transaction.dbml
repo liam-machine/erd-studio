@@ -1,0 +1,10 @@
+Table cards.cards_transaction [meta_owner: 'data-engineering'] {
+  Note: 'Card authorisations from the card platform.'
+
+  card_txn_id     STRING    [pk, natural_key: 'true']
+  card_account_id STRING    [foreign_key: 'true']
+  merchant        STRING
+  amount          "DECIMAL(18,2)"
+  authorised_at   TIMESTAMP
+  _loaded_at      TIMESTAMP [note: 'When the loader landed the row']
+}

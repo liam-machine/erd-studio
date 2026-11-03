@@ -1,0 +1,15 @@
+Table marts.fct_campaign_cost [
+  role: 'periodic-snapshot',
+  grain: 'One row per campaign per day',
+  meta_owner: 'marketing-analytics'
+] {
+  Note: 'What each campaign cost each day, for marketing. Its relationships aren\'t drawn yet: the example\'s README walks you through adding them.'
+
+  campaign_key BIGINT          [note: 'Points at dim_campaign; the relationship is yours to draw']
+  date_key     INT             [note: 'Points at dim_date']
+  spend        "DECIMAL(18,2)" [additive_type: 'additive']
+  impressions  BIGINT          [additive_type: 'additive']
+  indexes {
+    (campaign_key, date_key) [pk]
+  }
+}

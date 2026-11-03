@@ -28,7 +28,8 @@
         "last_name STRING",
         "created_at STRING",
         "_ingested_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "bronze/relationships/bronze.dbml"
     },
     "bronze.shopify_order_line_items": {
       "layer": "bronze",
@@ -40,7 +41,8 @@
         "quantity STRING",
         "price STRING",
         "_ingested_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "bronze/relationships/bronze.dbml"
     },
     "bronze.shopify_orders": {
       "layer": "bronze",
@@ -52,7 +54,8 @@
         "total_price STRING",
         "currency STRING",
         "_ingested_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "bronze/relationships/bronze.dbml"
     },
     "bronze.shopify_products": {
       "layer": "bronze",
@@ -62,7 +65,8 @@
         "title STRING",
         "product_type STRING",
         "_ingested_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "bronze/relationships/bronze.dbml"
     },
     "bronze.stripe_charges": {
       "layer": "bronze",
@@ -75,7 +79,8 @@
         "status STRING",
         "created BIGINT",
         "_ingested_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "bronze/relationships/bronze.dbml"
     },
     "bronze.stripe_customers": {
       "layer": "bronze",
@@ -85,7 +90,8 @@
         "email STRING",
         "metadata STRING",
         "_ingested_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "bronze/relationships/bronze.dbml"
     },
     "gold.dim_customer": {
       "layer": "gold",
@@ -100,7 +106,8 @@
         "valid_from DATE",
         "valid_to DATE",
         "is_current BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "gold/relationships/gold.dbml"
     },
     "gold.dim_date": {
       "layer": "gold",
@@ -113,7 +120,8 @@
         "month_start_date DATE",
         "fiscal_quarter STRING",
         "is_weekend BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "gold/relationships/gold.dbml"
     },
     "gold.dim_product": {
       "layer": "gold",
@@ -125,7 +133,8 @@
         "product_id BIGINT nk",
         "product_name STRING scd1",
         "category STRING scd2"
-      ]
+      ],
+      "newRelationshipsFile": "gold/relationships/gold.dbml"
     },
     "gold.fct_order_line": {
       "layer": "gold",
@@ -140,7 +149,8 @@
         "order_id BIGINT",
         "quantity INT additive",
         "net_amount DECIMAL(12,2) additive"
-      ]
+      ],
+      "newRelationshipsFile": "gold/relationships/gold.dbml"
     },
     "gold.fct_payment": {
       "layer": "gold",
@@ -152,7 +162,8 @@
         "payment_date_key INT fk",
         "customer_key BIGINT fk",
         "amount DECIMAL(12,2) additive"
-      ]
+      ],
+      "newRelationshipsFile": "gold/relationships/finance.dbml"
     },
     "gold.gold_orders": {
       "layer": "gold",
@@ -168,7 +179,8 @@
         "line_count INT additive",
         "net_amount DECIMAL(12,2) additive",
         "is_first_order BOOLEAN"
-      ]
+      ],
+      "newRelationshipsFile": "gold/relationships/gold.dbml"
     },
     "silver.customers": {
       "layer": "silver",
@@ -180,7 +192,8 @@
         "full_name STRING",
         "stripe_customer_id STRING",
         "first_seen_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "silver/relationships/silver.dbml"
     },
     "silver.order_lines": {
       "layer": "silver",
@@ -192,7 +205,8 @@
         "product_id BIGINT fk",
         "quantity INT",
         "unit_price DECIMAL(12,2)"
-      ]
+      ],
+      "newRelationshipsFile": "silver/relationships/silver.dbml"
     },
     "silver.payments": {
       "layer": "silver",
@@ -204,7 +218,8 @@
         "amount DECIMAL(12,2)",
         "status STRING",
         "paid_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "silver/relationships/silver.dbml"
     },
     "silver.products": {
       "layer": "silver",
@@ -214,7 +229,8 @@
         "product_id BIGINT pk nk",
         "product_name STRING",
         "category STRING"
-      ]
+      ],
+      "newRelationshipsFile": "silver/relationships/silver.dbml"
     },
     "silver.silver_orders": {
       "layer": "silver",
@@ -227,7 +243,8 @@
         "ordered_at TIMESTAMP",
         "order_total DECIMAL(12,2)",
         "source_currency STRING"
-      ]
+      ],
+      "newRelationshipsFile": "silver/relationships/silver.dbml"
     }
   },
   "diagrams": [

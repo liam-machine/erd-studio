@@ -1,0 +1,12 @@
+Table marts.dim_branch [
+  role: 'conformed-dim',
+  grain: 'One row per branch',
+  meta_owner: 'bi-platform'
+] {
+  Note: 'Branches for every star.'
+
+  branch_key  BIGINT [pk]
+  branch_code STRING [natural_key: 'true']
+  branch_name STRING
+  state       STRING
+}

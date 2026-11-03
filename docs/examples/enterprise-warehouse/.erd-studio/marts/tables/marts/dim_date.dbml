@@ -1,0 +1,13 @@
+Table marts.dim_date [
+  role: 'conformed-dim',
+  grain: 'One row per calendar day',
+  meta_owner: 'bi-platform'
+] {
+  Note: 'The calendar, with the bank\'s July-to-June financial year.'
+
+  date_key       INT    [pk]
+  calendar_date  DATE   [natural_key: 'true']
+  month          STRING
+  quarter        STRING
+  financial_year STRING [note: 'July to June']
+}

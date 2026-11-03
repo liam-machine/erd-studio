@@ -200,7 +200,8 @@ describe('the sidebar views, wired: header totals and Show / Hide Row Details', 
     await listing;
     const total = relProvider.lastOverview()!.entries.length;
     expect(total).toBeGreaterThan(1);
-    expect(relationships.description).toBe(`${total} relationships`);
+    // The header names the grouping too: by table is the default.
+    expect(relationships.description).toBe(`${total} relationships · by table`);
   });
 
   it('Show Row Details writes the setting at user scope, sets the context key and redraws every tree; Hide Row Details undoes it', async () => {

@@ -33,7 +33,8 @@
         "active_hours_sum FLOAT additive",
         "search_count_all INT additive",
         "country STRING"
-      ]
+      ],
+      "newRelationshipsFile": "views/relationships/views.dbml"
     },
     "atlas.clients_first_seen": {
       "layer": "views",
@@ -43,7 +44,8 @@
         "client_id STRING pk nk",
         "first_seen_date DATE",
         "country STRING"
-      ]
+      ],
+      "newRelationshipsFile": "views/relationships/views.dbml"
     },
     "atlas.clients_last_seen": {
       "layer": "views",
@@ -54,7 +56,8 @@
         "client_id STRING pk fk",
         "days_seen_bits INT",
         "days_since_seen INT"
-      ]
+      ],
+      "newRelationshipsFile": "views/relationships/views.dbml"
     },
     "atlas_derived.clients_daily_v6": {
       "layer": "derived",
@@ -68,7 +71,8 @@
         "search_count_all INT additive",
         "country STRING",
         "normalized_channel STRING"
-      ]
+      ],
+      "newRelationshipsFile": "derived/relationships/derived.dbml"
     },
     "atlas_derived.clients_first_seen_v1": {
       "layer": "derived",
@@ -78,7 +82,8 @@
         "client_id STRING pk nk",
         "first_seen_date DATE",
         "country STRING"
-      ]
+      ],
+      "newRelationshipsFile": "derived/relationships/derived.dbml"
     },
     "atlas_derived.clients_last_seen_v2": {
       "layer": "derived",
@@ -89,7 +94,8 @@
         "client_id STRING pk fk",
         "days_seen_bits INT",
         "days_since_seen INT"
-      ]
+      ],
+      "newRelationshipsFile": "derived/relationships/derived.dbml"
     },
     "atlas_live.atlas_live__main_v1": {
       "layer": "live",
@@ -101,7 +107,8 @@
         "submission_timestamp TIMESTAMP",
         "normalized_channel STRING",
         "payload JSON"
-      ]
+      ],
+      "newRelationshipsFile": "live/relationships/live.dbml"
     },
     "atlas_stable.atlas_stable__main_v1": {
       "layer": "stable",
@@ -114,7 +121,8 @@
         "sample_id INT",
         "normalized_channel STRING",
         "payload JSON"
-      ]
+      ],
+      "newRelationshipsFile": "stable/relationships/stable.dbml"
     }
   },
   "diagrams": [

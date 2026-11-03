@@ -28,7 +28,8 @@
         "dim_crm_account_id STRING fk",
         "billing_account_number STRING nk",
         "currency STRING"
-      ]
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
     },
     "common.dim_crm_account": {
       "layer": "prod",
@@ -39,7 +40,8 @@
         "dim_crm_account_id STRING pk",
         "crm_account_name STRING scd1",
         "crm_account_type STRING scd1"
-      ]
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
     },
     "common.dim_date": {
       "layer": "prod",
@@ -51,7 +53,8 @@
         "date_actual DATE",
         "first_day_of_month DATE",
         "fiscal_quarter_name STRING"
-      ]
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
     },
     "common.dim_subscription": {
       "layer": "prod",
@@ -65,7 +68,8 @@
         "subscription_status STRING scd1",
         "term_start_date DATE",
         "term_end_date DATE"
-      ]
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
     },
     "common.fct_mrr": {
       "layer": "prod",
@@ -80,7 +84,8 @@
         "dim_crm_account_id STRING fk",
         "mrr DECIMAL(18,2) semi-additive",
         "arr DECIMAL(18,2) semi-additive"
-      ]
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
     },
     "common_mart.mart_arr": {
       "layer": "prod",
@@ -95,7 +100,8 @@
         "subscription_name STRING",
         "mrr DECIMAL(18,2) semi-additive",
         "arr DECIMAL(18,2) semi-additive"
-      ]
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
     },
     "sfdc.sfdc_account": {
       "layer": "raw",
@@ -108,7 +114,8 @@
         "ownerid STRING",
         "isdeleted BOOLEAN",
         "_uploaded_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "raw/relationships/raw.dbml"
     },
     "sfdc.sfdc_account_source": {
       "layer": "prep",
@@ -119,7 +126,8 @@
         "account_name STRING",
         "account_type STRING",
         "owner_id STRING"
-      ]
+      ],
+      "newRelationshipsFile": "prep/relationships/prep.dbml"
     },
     "zuora.zuora_account": {
       "layer": "raw",
@@ -131,7 +139,8 @@
         "crmid STRING",
         "currency STRING",
         "_uploaded_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "raw/relationships/raw.dbml"
     },
     "zuora.zuora_account_source": {
       "layer": "prep",
@@ -142,7 +151,8 @@
         "account_number STRING",
         "crm_id STRING",
         "currency STRING"
-      ]
+      ],
+      "newRelationshipsFile": "prep/relationships/prep.dbml"
     },
     "zuora.zuora_subscription": {
       "layer": "raw",
@@ -156,7 +166,8 @@
         "termstartdate DATE",
         "termenddate DATE",
         "_uploaded_at TIMESTAMP"
-      ]
+      ],
+      "newRelationshipsFile": "raw/relationships/raw.dbml"
     },
     "zuora.zuora_subscription_source": {
       "layer": "prep",
@@ -169,7 +180,8 @@
         "subscription_status STRING",
         "term_start_date DATE",
         "term_end_date DATE"
-      ]
+      ],
+      "newRelationshipsFile": "prep/relationships/prep.dbml"
     }
   },
   "diagrams": [

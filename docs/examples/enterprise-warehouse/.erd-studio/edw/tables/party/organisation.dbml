@@ -1,0 +1,11 @@
+Table party.organisation [
+  grain: 'One row per organisation',
+  meta_owner: 'customer-data'
+] {
+  Note: 'What only an organisation has. A subtype of party: one-to-one, with the same id.'
+
+  party_id        BIGINT [pk, note: 'The party this organisation is']
+  legal_name      STRING
+  registration_no STRING [natural_key: 'true', note: 'ABN or ACN']
+  industry_code   STRING
+}

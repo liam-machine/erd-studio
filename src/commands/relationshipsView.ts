@@ -1,11 +1,16 @@
 /**
  * The Relationships view's two actions.
  *
- * - **Open in Diagram…** (`erdStudio.openInDiagram`, a relationship row's
- *   click): the diagram that shows a relationship's two tables (or a table
- *   row's table, here or in the Table Library), picked when there are several, with the line selected and
- *   centred (`revealRelationship`). A relationship no diagram shows yet opens
- *   where it is written instead.
+ * A relationship row's click follows the view's grouping: grouped by file it
+ * opens the file, grouped by table it opens a diagram; the row's icon and its
+ * right-click menu offer the other.
+ *
+ * - **Open in Diagram…** (`erdStudio.openInDiagram`): the diagram that shows a
+ *   relationship's two tables (or a table row's table, here or in the Table
+ *   Library), picked when there are several (the picker's last item opens the
+ *   relationship's file instead), with the line selected and centred
+ *   (`revealRelationship`). A relationship no diagram shows yet opens where it
+ *   is written instead.
  * - **Open in File** (`erdStudio.openRelationshipSource`): a DBML Ref at its
  *   line in the relationships file, a YAML table's `relationships:` entry in
  *   the FK table's file, or the diagram that keeps it (YAML/JSON projects).
@@ -178,11 +183,20 @@ export async function openInDiagram(
   }
   let pick = found[0];
   if (found.length > 1) {
+    // A relationship is saved once, whichever diagram shows it: the last item opens that file instead.
+    const at = entry && entry.source.kind === 'library' ? deps.relationshipLocation(entry.first) : undefined;
+    const fileItem = relationship && at
+      ? [{ label: '$(go-to-file) Open in File', description: `${at.filePath.split(/[\\/]/).slice(-3).join('/')}, line ${at.line}`, summary: undefined }]
+      : [];
     const choice = await vscode.window.showQuickPick(
-      found.map((s) => ({ label: s.domain, description: deps.layerLabel(s.layer), summary: s })),
+      [...found.map((s) => ({ label: s.domain, description: deps.layerLabel(s.layer), summary: s as SubjectAreaSummary | undefined })), ...fileItem],
       { placeHolder: `${found.length}${other} diagrams show ${subject}. Open which?` },
     );
     if (!choice) return;
+    if (!choice.summary) {
+      await openRelationshipSource(relationship, deps);
+      return;
+    }
     pick = choice.summary;
   }
   await open(pick.filePath);

@@ -1080,6 +1080,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       treeDataProvider: domainTreeData,
       dragAndDropController: domainTreeData,
       canSelectMany: false,
+      // Collapse All folds every layer to its row, as in the Table Library and Relationships.
+      showCollapseAll: true,
     })
     : undefined;
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', hasDbt);

@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { DbmlEditRefused, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
-import { DBML_RELATIONSHIPS_FILE_HEADER, attachRelationships, dbmlTableLookup, dbmlTreePathOf } from '@erd-studio/core';
+import { DBML_RELATIONSHIPS_FILE_HEADER, attachRelationships, dbmlTableLookup, dbmlTreePathOf, linkKey } from '@erd-studio/core';
 import type { DbmlAttachTable } from '@erd-studio/core';
 import { planDbmlLibraryWrites, relationshipsIndexOf } from '../../src/services/dbmlLibraryWrites';
 import { changedPairs, pairKey, relationshipsImportsFor } from '../../src/services/dbmlRelationshipsIndex';
@@ -722,5 +722,86 @@ describe('the canonical layout (every write is formatted; a no-op stays a no-op)
       "  date_key INT    [foreign_key: 'true']\n" +
       '}\n',
     );
+  });
+});
+
+describe("the New Relationship dialog's pick (newRefFile): only the first placement changes", () => {
+  const SALES = 'gold/relationships/sales.dbml';
+  /** base(), plus an empty team file in gold: fct_order's Refs are all in gold.dbml (rule 1). */
+  const withTeamFile = (): Record<string, string> => ({ ...base(), [SALES]: `${HEADER}` });
+  const link = (fromModel: string, fromColumn: string, toModel: string, toColumn: string): string => linkKey({ fromModel, fromColumn, toModel, toColumn });
+
+  it('a new Ref goes to the chosen file, with its use lines, instead of rule 1; the plan imports it', () => {
+    const files = withTeamFile();
+    const model = modelOf(files, 'fct_order');
+    model.relationships = [...model.relationships!, M21('ship_date_key', 'dim_date', 'date_key', { role: 'ship' })];
+    const { plan, after } = run(files, { save: [{ model }], newRefFile: { file: SALES, links: [link('fct_order', 'ship_date_key', 'dim_date', 'date_key')] } });
+    expect(pathsOf(plan.writes)).toEqual([`replace ${SALES}`]);
+    expect(after[SALES]).toBe(canonical(`${HEADER}use { table calendar.dim_date } from '../../silver/tables/calendar/dim_date.dbml'\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nRef ship: gold.fct_order.ship_date_key >? calendar.dim_date.date_key\n`));
+    expect(after[GOLD]).toBe(files[GOLD]);
+    expect(plan.createdRelationshipsFiles).toEqual([]);
+    expect(plan.changedPairs).toEqual(new Set([pairKey('fct_order', 'dim_date')]));
+    expect(plan.relationshipsImportsFor(['fct_order', 'dim_date'])).toEqual([GOLD, SALES]);
+    expectClean(after);
+    // Without the pick, rule 1: the file holding fct_order's Refs.
+    const plain = run(files, { save: [{ model }] });
+    expect(pathsOf(plain.plan.writes)).toEqual([`replace ${GOLD}`]);
+  });
+
+  it('a composite is one unit: every pair goes there, as one Ref', () => {
+    const files = { ...withTeamFile(), 'gold/tables/gold/dim_region.dbml': 'Table gold.dim_region {\n  region_code VARCHAR\n  country_code VARCHAR\n  indexes {\n    (region_code, country_code) [pk]\n  }\n}\n' };
+    files['gold/tables/gold/fct_order.dbml'] = 'Table gold.fct_order {\n  id INT [pk]\n  date_key INT\n  customer_key INT\n  ship_date_key INT\n  region_code VARCHAR\n  country_code VARCHAR\n}\n';
+    const model = modelOf(files, 'fct_order');
+    model.relationships = [
+      ...model.relationships!,
+      M21('region_code', 'dim_region', 'region_code', { compositeKey: 'fk_region' }),
+      M21('country_code', 'dim_region', 'country_code', { compositeKey: 'fk_region' }),
+    ];
+    const links = [link('fct_order', 'region_code', 'dim_region', 'region_code'), link('fct_order', 'country_code', 'dim_region', 'country_code')];
+    const { plan, after } = run(files, { save: [{ model }], newRefFile: { file: SALES, links } });
+    expect(pathsOf(plan.writes)).toEqual([`replace ${SALES}`]);
+    expect(refLines(after[SALES])).toEqual(['Ref: gold.fct_order.(region_code, country_code) >? gold.dim_region.(region_code, country_code)']);
+    expect(after[SALES]).toMatch(/^use \{ table gold\.dim_region \} +from '\.\.\/tables\/gold\/dim_region\.dbml'$/m);
+    expectClean(after);
+  });
+
+  it('a new unit not holding the links is placed as before; the file is matched without case and spelled as listed', () => {
+    const files = withTeamFile();
+    const model = modelOf(files, 'fct_order');
+    model.relationships = [...model.relationships!, M21('ship_date_key', 'dim_date', 'date_key'), M21('id', 'dim_customer', 'customer_key', { role: 'x' })];
+    const { after } = run(files, { save: [{ model }], newRefFile: { file: 'gold/relationships/SALES.dbml', links: [link('FCT_ORDER', 'SHIP_DATE_KEY', 'dim_date', 'date_key')] } });
+    expect(refLines(after[SALES])).toEqual(['Ref: gold.fct_order.ship_date_key >? calendar.dim_date.date_key']);
+    expect(refLines(after[GOLD])).toContain('Ref x: gold.fct_order.id >? gold.dim_customer.customer_key');
+    expect(Object.keys(after).filter((k) => /sales\.dbml$/i.test(k))).toEqual([SALES]);
+  });
+
+  it('refuses a file that is not a listed relationships file, or does not read', () => {
+    const files = withTeamFile();
+    const model = modelOf(files, 'fct_order');
+    model.relationships = [...model.relationships!, M21('ship_date_key', 'dim_date', 'date_key')];
+    const links = [link('fct_order', 'ship_date_key', 'dim_date', 'date_key')];
+    expect(() => planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }], newRefFile: { file: 'gold/relationships/nope.dbml', links } }))
+      .toThrow('gold/relationships/nope.dbml is not a relationships file of this project; nothing was changed.');
+    expect(() => planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }], newRefFile: { file: 'gold/tables/gold/fct_order.dbml', links } }))
+      .toThrow(DbmlEditRefused);
+    const broken = { ...files, [SALES]: 'Ref: gold.fct_order.ship_date_key > \n' };
+    expect(() => planDbmlLibraryWrites(snapshotOf(broken), { save: [{ model }], newRefFile: { file: SALES, links } })).toThrow(/^gold\/relationships\/sales\.dbml does not read/);
+  });
+
+  it('never moves a stored Ref: a composite taking in a single held elsewhere is refused, and goes through where it is held', () => {
+    const files = {
+      'gold/tables/gold/ord.dbml': 'Table gold.ord {\n  k1 INT\n  k2 INT\n  indexes {\n    (k1, k2) [pk]\n  }\n}\n',
+      'gold/tables/gold/line.dbml': 'Table gold.line {\n  id INT [pk]\n  k1 INT\n  k2 INT\n}\n',
+      [GOLD]: HEADER,
+      'gold/relationships/lines.dbml': `${HEADER}use { table gold.line } from '../tables/gold/line.dbml'\nuse { table gold.ord } from '../tables/gold/ord.dbml'\n\nRef: gold.line.k1 > gold.ord.k1\n`,
+    };
+    const model = modelOf(files, 'line');
+    model.relationships = [M21('k1', 'ord', 'k1', { compositeKey: 'fk_ord' }), M21('k2', 'ord', 'k2', { compositeKey: 'fk_ord' })];
+    const links = [link('line', 'k1', 'ord', 'k1'), link('line', 'k2', 'ord', 'k2')];
+    expect(() => planDbmlLibraryWrites(snapshotOf(files), { save: [{ model }], newRefFile: { file: GOLD, links } }))
+      .toThrow('line.(k1, k2) → ord.(k1, k2) takes in a relationship gold/relationships/lines.dbml line 5 already holds, and an existing relationship is never moved to another file. Save it in gold/relationships/lines.dbml, or leave the file as it is.');
+    const { after } = run(files, { save: [{ model }], newRefFile: { file: 'gold/relationships/lines.dbml', links } });
+    expect(refLines(after['gold/relationships/lines.dbml'])).toEqual(['Ref: gold.line.(k1, k2) > gold.ord.(k1, k2)']);
+    expect(after[GOLD]).toBe(HEADER);
   });
 });

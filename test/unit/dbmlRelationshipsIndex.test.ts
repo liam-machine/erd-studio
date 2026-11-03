@@ -110,7 +110,7 @@ describe('placeNewRef', () => {
     expect(placeNewRef({ table: 'fct_order', layer: 'gold' }, idx)).toEqual({ file: 'silver/relationships/silver.dbml', create: false, rule: 1 });
     expect(placeNewRef({ table: 'FCT_ORDER', layer: 'gold' }, idx).file).toBe('silver/relationships/silver.dbml');
     // A renamed table is placed by its old name: the index is the snapshot before the edit.
-    expect(placeNewRef({ table: 'fct_sales', layer: 'gold' }, idx).rule).toBe(2);
+    expect(placeNewRef({ table: 'fct_sales', layer: 'gold' }, idx).rule).toBe(3);
   });
 
   it('rule 1 keeps using a hand split', () => {
@@ -159,21 +159,53 @@ describe('placeNewRef', () => {
     expect(placeNewRef({ table: 'fct', layer: 'gold' }, idx).file).toBe('gold/relationships/b.dbml');
   });
 
-  it('rule 2 creates <L>/relationships/<L>.dbml, spelled as the layer folder is listed', () => {
+  it('rule 2: a table with no Refs yet goes to its schema\'s own file when that file exists', () => {
+    const idx = index(
+      ['source_aligned/relationships/shipping.dbml', 'source_aligned/relationships/source_aligned.dbml'],
+      [ref('source_aligned/relationships/shipping.dbml', 'shipment', 'carrier', 1)],
+    );
+    expect(placeNewRef({ table: 'carrier', layer: 'source_aligned', schema: 'shipping' }, idx))
+      .toEqual({ file: 'source_aligned/relationships/shipping.dbml', create: false, rule: 2 });
+    // Matched ignoring case, as the file is listed.
+    expect(placeNewRef({ table: 'carrier', layer: 'source_aligned', schema: 'Shipping' }, idx).file).toBe('source_aligned/relationships/shipping.dbml');
+  });
+
+  it('rule 2 never creates a schema file: without one, the layer\'s file (rule 3)', () => {
+    const idx = index(['source_aligned/relationships/source_aligned.dbml'], []);
+    expect(placeNewRef({ table: 'account', layer: 'source_aligned', schema: 'accounts' }, idx))
+      .toEqual({ file: 'source_aligned/relationships/source_aligned.dbml', create: false, rule: 3 });
+    expect(placeNewRef({ table: 'account', layer: 'source_aligned', schema: 'accounts' }, index([], [])))
+      .toEqual({ file: 'source_aligned/relationships/source_aligned.dbml', create: true, rule: 3 });
+  });
+
+  it('rule 2 skips an unreadable schema file, and rule 1 still wins over it', () => {
+    const files = ['gold/relationships/finance.dbml', 'gold/relationships/gold.dbml'];
+    const unreadable = index(files, [], { unreadable: ['gold/relationships/finance.dbml'] });
+    expect(placeNewRef({ table: 'fct', layer: 'gold', schema: 'finance' }, unreadable).file).toBe('gold/relationships/gold.dbml');
+    const held = index(files, [ref('gold/relationships/gold.dbml', 'fct', 'x', 1)]);
+    expect(placeNewRef({ table: 'fct', layer: 'gold', schema: 'finance' }, held)).toEqual({ file: 'gold/relationships/gold.dbml', create: false, rule: 1 });
+  });
+
+  it('a schema named as its layer is the layer\'s file (rule 3)', () => {
+    const idx = index(['gold/relationships/gold.dbml'], []);
+    expect(placeNewRef({ table: 'fct', layer: 'gold', schema: 'gold' }, idx)).toEqual({ file: 'gold/relationships/gold.dbml', create: false, rule: 3 });
+  });
+
+  it('rule 3 creates <L>/relationships/<L>.dbml, spelled as the layer folder is listed', () => {
     const idx = index([], []);
-    expect(placeNewRef({ table: 'fct', layer: 'gold' }, idx)).toEqual({ file: 'gold/relationships/gold.dbml', create: true, rule: 2 });
+    expect(placeNewRef({ table: 'fct', layer: 'gold' }, idx)).toEqual({ file: 'gold/relationships/gold.dbml', create: true, rule: 3 });
     const listed = (l: string): string | undefined => (l === 'gold' ? 'gold' : undefined);
-    expect(placeNewRef({ table: 'fct', layer: 'GOLD' }, idx, listed)).toEqual({ file: 'gold/relationships/gold.dbml', create: true, rule: 2 });
+    expect(placeNewRef({ table: 'fct', layer: 'GOLD' }, idx, listed)).toEqual({ file: 'gold/relationships/gold.dbml', create: true, rule: 3 });
   });
 
-  it('rule 2 reuses the default file when it exists, even holding none of the table\'s Refs', () => {
+  it('rule 3 reuses the default file when it exists, even holding none of the table\'s Refs', () => {
     const idx = index(['gold/relationships/gold.dbml'], [ref('gold/relationships/gold.dbml', 'other', 'x', 1)]);
-    expect(placeNewRef({ table: 'fct', layer: 'gold' }, idx)).toEqual({ file: 'gold/relationships/gold.dbml', create: false, rule: 2 });
+    expect(placeNewRef({ table: 'fct', layer: 'gold' }, idx)).toEqual({ file: 'gold/relationships/gold.dbml', create: false, rule: 3 });
   });
 
-  it('rule 2 reuses a listed file whose name differs only in case', () => {
+  it('rule 3 reuses a listed file whose name differs only in case', () => {
     const idx = index(['gold/relationships/Gold.dbml'], []);
-    expect(placeNewRef({ table: 'fct', layer: 'gold' }, idx)).toEqual({ file: 'gold/relationships/Gold.dbml', create: false, rule: 2 });
+    expect(placeNewRef({ table: 'fct', layer: 'gold' }, idx)).toEqual({ file: 'gold/relationships/Gold.dbml', create: false, rule: 3 });
   });
 });
 
@@ -342,7 +374,7 @@ describe('performance, shaped like the settled rule', () => {
     }
     expect(elapsed).toBeLessThanOrEqual(BUDGET_MS * MARGIN);
     expect(idx.refs).toHaveLength(30_050);
-    expect(placements.filter((p) => p.rule === 2)).toHaveLength(100);
+    expect(placements.filter((p) => p.rule === 3)).toHaveLength(100);
     expect(placeNewRef({ table: 'dim_date', layer: 'silver' }, idx).file).toBe('silver/relationships/calendar.dbml');
     expect(imports.filter((list) => list.length > 0).length).toBeGreaterThan(50);
   });

@@ -97,6 +97,7 @@ import {
   SubjectAreaValidationError,
   EMPTY_DBT_KEY_INDEX,
   backwardsRelationshipNote,
+  foreignKeyEnd,
   linkKey,
   normaliseSubjectAreaDocument,
   sameLink,
@@ -137,6 +138,7 @@ import type {
   CopyFeedbackReportMessage,
   EditRelationshipMessage,
   ErrorMessage,
+  NewRelationshipFileChoice,
   OpenFeedbackLinkMessage,
   OpenModelFileMessage,
   ViewFileMessage,
@@ -213,7 +215,7 @@ import { applyFileWrites, writtenPaths } from './applyFileWrites';
 import { primeLayoutOnlyReading } from '../services/dbmlDiagramReadings';
 import { changedMemberPath, dbmlResolverOf, problemOf, settleDbmlDiagramWrites, settleSignalsOf, settlesNothing, unsettledDiagramRefusal } from '../services/dbmlDiagramSettle';
 import { diagramSummaryForFile } from '../services/dbmlDiagramSummaries';
-import type { DbmlDraftTable, DbmlTableHome } from '../services/dbmlLibraryWrites';
+import type { DbmlDraftTable, DbmlTableHome, NewRefFileChoice } from '../services/dbmlLibraryWrites';
 import type { AppliedFileWrites } from './applyFileWrites';
 import {
   NotASubjectAreaObject,
@@ -312,6 +314,12 @@ interface TableFileOps {
   save?: TableFileSave[];
   /** Model names whose yml should be deleted (e.g. the old name on rename). */
   delete?: string[];
+  /**
+   * DBML only: the relationships file the New Relationship dialog picked for
+   * the relationship being added (`TableLibraryService.planTableWrites` →
+   * `planDbmlLibraryWrites`' `newRefFile`). A YAML write never reads it.
+   */
+  newRefFile?: NewRefFileChoice;
 }
 
 /** A single yml write inside a {@link TableFileOps}. */
@@ -475,7 +483,9 @@ import {
   validateViewFilePayload,
   validateExtraPairs,
   validateMarkKey,
+  validateNoRelationshipsFile,
   validateRelationshipEnds,
+  validateRelationshipsFileChoice,
   validateDismissManifestHintPayload,
   validateImportEmbeddedTablesPayload,
   validateExportDiagramPayload,
@@ -1706,7 +1716,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               }
               // extraPairs first: the other two read every pair once it is valid.
               const linkError = validateExtraPairs(payload.extraPairs, payload) ?? validateRelationshipEnds(payload)
-                ?? validateMarkKey(payload.markKey, payload);
+                ?? validateMarkKey(payload.markKey, payload) ?? validateRelationshipsFileChoice(payload.relationshipsFile);
               if (linkError) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: ${linkError}` } });
                 break;
@@ -1781,8 +1791,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 break;
               }
               // extraPairs first: the other two read every pair once it is valid.
-              const linkError = validateExtraPairs(payload.extraPairs, payload) ?? validateRelationshipEnds(payload)
-                ?? validateMarkKey(payload.markKey, payload);
+              const linkError = validateNoRelationshipsFile(payload) ?? validateExtraPairs(payload.extraPairs, payload)
+                ?? validateRelationshipEnds(payload) ?? validateMarkKey(payload.markKey, payload);
               if (linkError) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to edit relationship: ${linkError}` } });
                 break;
@@ -4036,26 +4046,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Answer `requestNewRelationshipFiles` (the New Relationship dialog
    * opening): the relationships file a new relationship of each of the
    * diagram's DBML tables goes to when that table holds the foreign key
-   * (`placeNewRef`, through `relationshipsFilesForNewRefs`), project-relative.
-   * Asked for on demand, not sent with every payload: it reads every
+   * (`placeNewRef`, through `newRelationshipPlacements`), project-relative,
+   * and the files the dialog may save it in instead (`choices`: that file
+   * first, then the layer's other readable relationships files; omitted when
+   * empty). Asked for on demand, not sent with every payload: it reads every
    * relationships file. The member names come from the open document's
    * text (no table is resolved); a YAML project answers empty at once.
    */
   private sendNewRelationshipFiles(document: vscode.TextDocument, webview: vscode.Webview): void {
     const files: Record<string, string> = {};
+    const choices: Record<string, NewRelationshipFileChoice[]> = {};
     try {
       // No DBML table in the project: no relationship of this diagram goes to a relationships file.
       const names = (this.tableLibraryService.writesDbml()
         ? subjectAreaTableNames(document.getText(), document.uri.fsPath)
         : null) ?? [];
-      for (const [name, file] of this.tableLibraryService.relationshipsFilesForNewRefs(names)) {
-        files[name] = projectRelative(this.workspaceRoot, file);
+      for (const [name, placed] of this.tableLibraryService.newRelationshipPlacements(names)) {
+        files[name] = projectRelative(this.workspaceRoot, placed.file);
+        // The dialog's "Stored in" choice: the default first, then the layer's other readable files.
+        choices[name] = placed.choices.map((rel) => ({
+          path: rel,
+          projectPath: projectRelative(this.workspaceRoot, this.tableLibraryService.semanticAbsolute(rel)),
+        }));
       }
     } catch (err) {
       log.warn(`[SemanticEditorProvider] where new relationships go: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (this.disposedWebviews.has(webview)) return;
-    this.post(webview, { type: 'newRelationshipFiles', payload: { files } });
+    this.post(webview, { type: 'newRelationshipFiles', payload: { files, ...(Object.keys(choices).length > 0 ? { choices } : {}) } });
   }
 
   /**
@@ -5509,15 +5527,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
-      const { markKey, extraPairs, ...rest } = payload;
+      const { markKey, extraPairs, relationshipsFile, ...rest } = payload;
       const drawn: Relationship = {
         fromModel: rest.fromModel, fromColumn: rest.fromColumn, toModel: rest.toModel, toColumn: rest.toColumn,
         cardinality: rest.cardinality, ...(rest.role !== undefined ? { role: rest.role } : {}),
       };
+      // The dialog's "Stored in" pick (DBML): checked now, against the files as they are.
+      let newRefFile: NewRefFileChoice | undefined;
+      if (relationshipsFile !== undefined) {
+        const chosen = this.chosenRelationshipsFile(drawn, relationshipsFile);
+        if ('error' in chosen) {
+          webview.postMessage({ type: 'error', payload: { message: `Failed to add relationship: ${chosen.error}` } });
+          return;
+        }
+        const pairs = [{ fromColumn: drawn.fromColumn, toColumn: drawn.toColumn }, ...(extraPairs ?? [])];
+        newRefFile = {
+          file: chosen.path,
+          links: pairs.map((p) => linkKey({ fromModel: drawn.fromModel, fromColumn: p.fromColumn, toModel: drawn.toModel, toColumn: p.toColumn })),
+        };
+      }
       const written = await this.commitRelationshipWrite(
         document, webview,
         { kind: 'add', drawn, ...(markKey ? { markKey } : {}), ...(extraPairs?.length ? { extraPairs } : {}) },
-        stage, 'Failed to add relationship.',
+        stage, 'Failed to add relationship.', undefined, newRefFile,
       );
       if (written?.home === 'library') this.sayWhereRelationshipLanded(drawn);
     } catch (err) {
@@ -5526,6 +5558,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add relationship: ${message}` } });
     }
+  }
+
+  /**
+   * The relationships file `relPath` (relative to the semantic dir) the New
+   * Relationship dialog picked for `drawn`, when it may hold it: the project
+   * stores DBML, the table holding the foreign key is a DBML table, and the
+   * file is an existing, readable relationships file inside the semantic dir
+   * (`TableLibraryService.chosenRelationshipsFile`). Its listed spelling, or
+   * why not.
+   */
+  private chosenRelationshipsFile(drawn: Relationship, relPath: string): { path: string } | { error: string } {
+    if (this.tableLibraryService.projectStorage() === 'yaml') {
+      return { error: 'this project keeps its relationships in its YAML table files, so there is no relationships file to choose.' };
+    }
+    const fk = foreignKeyEnd(drawn).model;
+    if (this.tableLibraryService.tableStorage(fk) === 'yaml') {
+      return { error: `${fk} is a YAML table: its relationships are kept in its own file, not a relationships file.` };
+    }
+    return this.tableLibraryService.chosenRelationshipsFile(relPath, (filePath) => projectRelative(this.workspaceRoot, filePath));
   }
 
   /**
@@ -5563,6 +5614,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     errorLabel: string,
     /** Called as soon as VS Code applies the edit, before it saves (Turn Round's "was it made?"). */
     onApplied?: () => void,
+    /** DBML: the relationships file the New Relationship dialog picked for the relationship being added (placement only). */
+    newRefFile?: NewRefFileChoice,
   ): Promise<{ home: 'library' | 'domain'; changed: SemanticTable[] } | null> {
     // Several ops (Turn round all, #163) are folded into one plan, so they are one edit and one undo step.
     const ops: readonly RelationshipWriteOp[] = Array.isArray(op) ? op : [op as RelationshipWriteOp];
@@ -5624,7 +5677,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         save.push(...plan.changed.map((model) => ({ model })));
         grouped = plan.grouped;
       },
-      { webview, stage, errorLabel, modelFiles: { save }, onUnsaved: () => telemetry.error('relWriteFailed'), onApplied },
+      { webview, stage, errorLabel, modelFiles: { save, ...(newRefFile ? { newRefFile } : {}) }, onUnsaved: () => telemetry.error('relWriteFailed'), onApplied },
     );
     if (success) telemetry.relationshipUsage(audit?.usage ?? []);
     else telemetry.error('relWriteFailed');

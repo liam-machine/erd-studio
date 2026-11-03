@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '40';
+export const HARNESS_VERSION = '41';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -220,7 +220,7 @@ A new project also needs \`.erd-studio/layers.json\`, which lists the layer fold
 
 - **Edit in place and never reformat.** Change only the lines you mean to change; keep comments, order, spacing and every setting you do not understand exactly as they are. ERD Studio does the same.
 - **Add a table to a diagram** = a new table file (when no file has that name) + a \`use { table <schema>.<name> } from '…'\` line in the diagram + a \`use * from '…'\` line for every relationships file holding a Ref between that table and another table of the diagram, when the diagram does not import it yet.
-- **Add a relationship.** First make sure no relationships file already holds a Ref between the same columns of the same two tables: if one does, change it there. Otherwise write one \`Ref\` line in the relationships file that already holds the most Refs of the foreign-key table (any layer; ties go to the first path), else in the foreign-key table's layer's default file \`<layer>/relationships/<layer>.dbml\` (create it when missing), + a \`use\` line there for every table the Ref names that the file does not import yet. Then add \`use * from '…'\` for that file to every diagram that shows both tables and does not import it yet.
+- **Add a relationship.** First make sure no relationships file already holds a Ref between the same columns of the same two tables: if one does, change it there. Otherwise write one \`Ref\` line in the relationships file that already holds the most Refs of the foreign-key table (any layer; ties go to the first path); if none does, in \`<layer>/relationships/<schema>.dbml\` when that file already exists (the table's own schema; never create it), otherwise in the layer's default file \`<layer>/relationships/<layer>.dbml\` (create it when missing), + a \`use\` line there for every table the Ref names that the file does not import yet. Then add \`use * from '…'\` for that file to every diagram that shows both tables and does not import it yet.
 - **Change a relationship** (columns, cardinality, role) in the file that holds it. Never move a Ref to another file.
 - **Remove a table from a diagram** = delete its \`use\` line there and its line in the diagram's \`erd_layout\`. The table file and its Refs stay: the diagram just stops showing them.
 - **Rename, move or delete a table**: prefer the canvas or the Table Library (one undoable step). By hand, update every file that points at it in the same change: the table file's path and \`Table\` line, the \`use\` lines in relationships files and diagrams, every Ref end, the \`erd_layout\` lines and sticky notes' \`linked_table\`.
@@ -482,7 +482,7 @@ Ref: sales.fct_order.(region_code, country_code) >? sales.dim_region.(region_cod
 - **Only \`use\` lines, Refs, comments and pending lines.** A diagram imports the whole file, so a \`Table\`, \`Enum\` or \`TableGroup\` here reaches every importing diagram in other DBML tools (doctor: \`relationshipsFileHoldsOther\`).
 - **\`use\` lines: one for every table any Ref in the file names**, \`use { table <schema>.<name> } from '<path from this file, with .dbml>'\`, sorted by path, in one block under the header comment: \`../tables/<schema>/<name>.dbml\` within the layer, \`../../<other layer>/tables/<schema>/<name>.dbml\` across layers. Spell the table and the path exactly as the table's file does. Without the line every DBML tool fails the file (\`use\` is not transitive); ERD Studio reads the Ref anyway and doctor reports \`missingUse\` with the line to add.
 - **Ends are qualified** exactly as the table declares itself: \`sales.fct_order.customer_key\`.
-- **Where a new Ref goes**: the file that already holds the most Refs of its foreign-key table, in any layer (ties: the first path); else that table's layer default file, created when missing with the header comment above. An existing Ref stays in the file that holds it: change it there, never move it.
+- **Where a new Ref goes**: the file that already holds the most Refs of its foreign-key table, in any layer (ties: the first path); else its schema's own file \`<layer>/relationships/<schema>.dbml\` when that file already exists (a team creates it to keep a schema's Refs apart; never create one yourself); else that table's layer default file, created when missing with the header comment above. An existing Ref stays in the file that holds it: change it there, never move it.
 - **Operators**, with the foreign-key end marked possibly null by \`?\`:
 
   | Cardinality | Write | Notes |

@@ -1,0 +1,14 @@
+Table marts.dim_campaign [
+  role: 'domain-dim',
+  grain: 'One row per campaign',
+  meta_owner: 'marketing-analytics'
+] {
+  Note: 'Marketing campaigns, for marketing.'
+
+  campaign_key  BIGINT [pk]
+  campaign_code STRING [natural_key: 'true']
+  campaign_name STRING
+  channel       STRING
+  starts_on     DATE
+  ends_on       DATE
+}

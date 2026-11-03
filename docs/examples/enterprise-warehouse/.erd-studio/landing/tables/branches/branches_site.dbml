@@ -1,0 +1,9 @@
+Table branches.branches_site [meta_owner: 'data-engineering'] {
+  Note: 'The branch directory.'
+
+  branch_code STRING    [pk, natural_key: 'true']
+  branch_name STRING
+  state       STRING
+  opened_on   DATE
+  _loaded_at  TIMESTAMP [note: 'When the loader landed the row']
+}

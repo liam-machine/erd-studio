@@ -36,7 +36,7 @@ import type { FileWrite } from './fileWrites';
 import { UnsavedFilesRefused } from './fileWrites';
 import { writeFilesWithRollback, type FileWriteIo } from './fsFileWrites';
 import { planDbmlLibraryWrites, relationshipsIndexOf } from './dbmlLibraryWrites';
-import type { DbmlDraftTable, DbmlLibraryOps, DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable, DbmlTableHome } from './dbmlLibraryWrites';
+import type { DbmlDraftTable, DbmlLibraryOps, DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable, DbmlTableHome, NewRefFileChoice } from './dbmlLibraryWrites';
 import { placeNewRef } from './dbmlRelationshipsIndex';
 import type { RelationshipsIndex } from './dbmlRelationshipsIndex';
 import { settleDbmlDiagramWrites } from './dbmlDiagramSettle';
@@ -51,6 +51,12 @@ export interface TableFileOps {
   save?: Array<{ model: DbmlDraftTable; fromName?: string }>;
   /** Table names whose file is deleted. */
   delete?: string[];
+  /**
+   * DBML only: the relationships file the New Relationship dialog picked for
+   * the relationship being added (`planDbmlLibraryWrites`' `newRefFile`),
+   * already checked by {@link TableLibraryService.chosenRelationshipsFile}.
+   */
+  newRefFile?: NewRefFileChoice;
 }
 
 // The directory name and the YAML -> SemanticTable parsing live in
@@ -1197,8 +1203,9 @@ export class TableLibraryService {
   /**
    * Where a NEW Ref of the foreign-key table `tableName` goes (decision 5,
    * `placeNewRef` over the project's relationships files): the file holding
-   * most of its Refs, else its layer's `<L>/relationships/<L>.dbml`, which
-   * may not exist yet. Absolute; undefined for a YAML table or no table.
+   * most of its Refs, else its schema's own file when one exists, else its
+   * layer's `<L>/relationships/<L>.dbml`, which may not exist yet. Absolute;
+   * undefined for a YAML table or no table.
    */
   relationshipsFileForNewRef(tableName: string): string | undefined {
     return this.relationshipsFilesForNewRefs([tableName]).get(tableName.toLowerCase());
@@ -1210,7 +1217,21 @@ export class TableLibraryService {
    * file. A YAML table, or a name with no table, is left out.
    */
   relationshipsFilesForNewRefs(tableNames: Iterable<string>): Map<string, string> {
-    const out = new Map<string, string>();
+    return new Map([...this.newRelationshipPlacements(tableNames)].map(([name, placed]) => [name, placed.file]));
+  }
+
+  /**
+   * {@link relationshipsFilesForNewRefs} with the New Relationship dialog's
+   * choice: lower-case name → `file`, the absolute file `placeNewRef` puts a
+   * new Ref of that table in (it may not exist yet), and `choices`, the
+   * relationships files (relative to the semantic dir) it may be saved in
+   * instead: that file first, then every other relationships file of the
+   * table's layer that reads, in path byte order (rule 1 can name a file of
+   * another layer; it stays first). A YAML table, or a name with no table, is
+   * left out. Reads the relationships files and the table list once.
+   */
+  newRelationshipPlacements(tableNames: Iterable<string>): Map<string, { file: string; choices: string[] }> {
+    const out = new Map<string, { file: string; choices: string[] }>();
     let index: RelationshipsIndex | undefined;
     let names: Map<string, string> | undefined;
     for (const tableName of tableNames) {
@@ -1218,7 +1239,8 @@ export class TableLibraryService {
         const filePath = this.findTableFile(tableName);
         if (filePath === null || !isDbmlFile(filePath)) continue;
         const rel = this.semanticRelative(filePath);
-        const layer = classifySemanticFile(rel, { tablesDirIsLayer: this.tablesDirIsLayer() }).layer ?? this.defaultDbmlLayer();
+        const kind = classifySemanticFile(rel, { tablesDirIsLayer: this.tablesDirIsLayer() });
+        const layer = kind.layer ?? this.defaultDbmlLayer();
         // The library listed once, by resolved path (the first entry for a path wins, as `find` did).
         if (names === undefined) {
           names = new Map();
@@ -1228,13 +1250,52 @@ export class TableLibraryService {
           }
         }
         const name = names.get(path.resolve(filePath)) ?? tableName;
-        index ??= this.relationshipsIndex();
-        out.set(tableName.toLowerCase(), this.semanticAbsolute(placeNewRef({ table: name, layer }, index).file));
+        const refs = index ??= this.relationshipsIndex();
+        const placed = placeNewRef({ table: name, layer, ...(kind.schema !== undefined ? { schema: kind.schema } : {}) }, refs).file;
+        // The index's files are byte-sorted already.
+        const layerFiles = refs.files.filter((f) => f !== placed && !refs.unreadable.has(f)
+          && dbmlTreePathOf(f)?.layer.toLowerCase() === layer.toLowerCase());
+        out.set(tableName.toLowerCase(), { file: this.semanticAbsolute(placed), choices: [placed, ...layerFiles] });
       } catch {
         // Not placed: the caller says nothing about it.
       }
     }
     return out;
+  }
+
+  /**
+   * The relationships file the New Relationship dialog picked (`relPath`,
+   * relative to the semantic dir; its shape already checked by
+   * `validateRelationshipsFileChoice`), when a new relationship may be saved
+   * there: a relationships file by its path (`classifySemanticFile`), inside
+   * the semantic dir (no symbolic link out of it either), one the library
+   * lists (exactly, else in another case: its listed spelling is returned)
+   * and that reads. Otherwise why not, in words, naming the file as `shown`
+   * spells an absolute path.
+   */
+  chosenRelationshipsFile(relPath: string, shown: (filePath: string) => string = (p) => this.libraryRelativePath(p)): { path: string } | { error: string } {
+    const wanted = path.resolve(this.semanticAbsolute(relPath));
+    const inside = (root: string, p: string): boolean => {
+      const rel = path.relative(root, p);
+      return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    };
+    if (classifySemanticFile(relPath, { tablesDirIsLayer: this.tablesDirIsLayer() }).kind !== 'relationships' || !inside(path.resolve(this.semanticRoot), wanted)) {
+      return { error: `${relPath} is not a relationships file (<layer>/relationships/<name>.dbml) inside ${path.basename(this.semanticRoot)}.` };
+    }
+    const listed = this.listRelationshipsFiles();
+    const found = listed.find((f) => path.resolve(f) === wanted) ?? listed.find((f) => path.resolve(f).toLowerCase() === wanted.toLowerCase());
+    if (found === undefined || !fs.existsSync(found)) return { error: `There is no relationships file ${shown(wanted)}.` };
+    try {
+      if (!inside(fs.realpathSync(this.semanticRoot), fs.realpathSync(found))) {
+        return { error: `${shown(found)} is outside ${path.basename(this.semanticRoot)}; choose a relationships file inside it.` };
+      }
+    } catch {
+      return { error: `There is no relationships file ${shown(wanted)}.` };
+    }
+    const reading = this.readRelationshipsFile(found);
+    if (reading === null) return { error: `There is no relationships file ${shown(wanted)}.` };
+    if (!reading.readable) return { error: `${shown(found)} does not read; fix it first, or save the relationship in another file.` };
+    return { path: this.semanticRelative(found) };
   }
 
   /**
@@ -1455,6 +1516,7 @@ export class TableLibraryService {
       ...dbmlOps,
       newTableHome: this.dbmlHomeOf(home),
       ...(options.schemaFromSource ? { schemaFromSource: true } : {}),
+      ...(ops?.newRefFile ? { newRefFile: ops.newRefFile } : {}),
     });
     for (const w of plan.writes) writes.push({ ...w, path: this.semanticAbsolute(w.path) } as FileWrite);
     return { writes, plan };

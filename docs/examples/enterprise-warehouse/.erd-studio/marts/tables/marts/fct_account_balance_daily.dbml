@@ -1,0 +1,22 @@
+Table marts.fct_account_balance_daily [
+  role: 'periodic-snapshot',
+  grain: 'One row per account per day',
+  rationale_measures: 'closing_balance adds up across accounts but not across days: a month\'s balance is its last day\'s.',
+  meta_owner: 'finance-analytics'
+] {
+  Note: 'Each account\'s balance at the end of every day, for finance.'
+
+  date_key         INT             [foreign_key: 'true']
+  account_id       BIGINT          [
+    foreign_key: 'true',
+    note: 'The account of record in the enterprise warehouse, for drill-through'
+  ]
+  customer_key     BIGINT          [foreign_key: 'true']
+  product_key      BIGINT          [foreign_key: 'true']
+  branch_key       BIGINT          [foreign_key: 'true']
+  closing_balance  "DECIMAL(18,2)" [additive_type: 'semi-additive']
+  interest_accrued "DECIMAL(18,2)" [additive_type: 'additive']
+  indexes {
+    (date_key, account_id) [pk]
+  }
+}
