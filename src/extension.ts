@@ -1358,9 +1358,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Table → Show Relationships); set where they are created, below.
   let tableLibraryView: vscode.TreeView<TableLibraryNode> | undefined;
   let relationshipsView: vscode.TreeView<RelationshipsNode> | undefined;
-  // Grouped under each table (the default) or by relationships file: the
-  // view-title toggle, remembered for this workspace.
-  const savedGrouping: RelationshipsGrouping = context.workspaceState.get<string>(RELATIONSHIPS_GROUPING_KEY) === 'file' ? 'file' : 'table';
+  // Grouped by relationships file (the default: it shows where each
+  // relationship is saved) or under each table: the view-title toggle,
+  // remembered for this workspace.
+  const savedGrouping: RelationshipsGrouping = context.workspaceState.get<string>(RELATIONSHIPS_GROUPING_KEY) === 'table' ? 'table' : 'file';
   relationshipsProvider.setGrouping(savedGrouping);
   void vscode.commands.executeCommand('setContext', 'erdStudio.relationshipsGrouping', savedGrouping);
   const setRelationshipsGrouping = (grouping: RelationshipsGrouping): void => {
