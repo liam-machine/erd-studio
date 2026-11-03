@@ -28,6 +28,7 @@ import { DiscrepancyPanel } from '../../webview/components/DiscrepancyPanel/Disc
 import {
   DETAIL_PANEL_WIDTH_PX,
   FALLBACK_TOP_INSET_PX,
+  MIN_FREE_CANVAS_PX,
   PANEL_MARGIN_PX,
 } from '../../webview/lib/fitViewPadding';
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
@@ -99,6 +100,28 @@ describe('DiscrepancyPanel beside the Detail Panel', () => {
     expect(opts.nodes).toEqual([{ id: 'fct_task_event' }]);
     const right = DETAIL_PANEL_WIDTH_PX + PANEL_MARGIN_PX + 12 + 300 + PANEL_MARGIN_PX;
     expect(opts.padding).toEqual({ top: `${FALLBACK_TOP_INSET_PX}px`, right: `${right}px`, bottom: 0.1, left: 0.1 });
+  });
+
+  it('on a narrow canvas it stays in its corner, and the zoom still leaves room for the table', () => {
+    // A split editor: the canvas is 750px wide.
+    const flow = document.createElement('div');
+    flow.className = 'react-flow';
+    flow.getBoundingClientRect = () => ({ width: 750, height: 700, top: 0, left: 0, right: 750, bottom: 700 }) as DOMRect;
+    document.body.appendChild(flow);
+    try {
+      render(<DiscrepancyPanel />, { container: flow.appendChild(document.createElement('div')) });
+      panel().getBoundingClientRect = () => ({ width: 320, height: 360, top: 0, left: 0, right: 320, bottom: 360 }) as DOMRect;
+      fireEvent.click(screen.getByText('fct_task_event'));
+
+      expect(state().detailPanelOpen).toBe(true);
+      expect(panel().className).not.toContain('disc-panel--beside-detail');
+      const right = parseFloat(mockFitView.mock.calls[0][0].padding.right);
+      expect(right).toBeLessThanOrEqual(DETAIL_PANEL_WIDTH_PX + 2 * PANEL_MARGIN_PX);
+      expect(750 * 0.9 - right).toBeGreaterThanOrEqual(MIN_FREE_CANVAS_PX);
+    } finally {
+      cleanup();
+      flow.remove();
+    }
   });
 
   it('stays in its corner when the selected node is not a table of this diagram', () => {

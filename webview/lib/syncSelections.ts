@@ -7,6 +7,9 @@
  * its columns: it is cleared when a column is cleared (Reset, or clicking the
  * chosen side again) and re-inferred when the columns change. A table
  * decision the user made themselves ("Keep all", "All Logical") is left alone.
+ * Which table keys were inferred, and to which side, is the store's
+ * `syncInferredTableKeys`, so it survives the modal closing; any user action
+ * on a key removes it from there, even one that sets the same side.
  */
 
 import type { GroundTruth } from '../../src/types/syncPlan';
@@ -37,9 +40,9 @@ export interface TableKeyReconcile {
 
 /**
  * Decide what the table key should be after a change to the selections.
- * `lastInferred` is the value this helper set last time (null if none); when
- * the table key no longer holds it, someone else decided the table and the
- * helper stops managing it.
+ * `lastInferred` is the side recorded as inferred for this key
+ * (`syncInferredTableKeys`, null if none); when the table key no longer holds
+ * it, someone else decided the table and the helper stops managing it.
  */
 export function reconcileInferredTableKey(
   selections: Readonly<Record<string, GroundTruth>>,

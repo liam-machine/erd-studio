@@ -9,7 +9,9 @@
  *  - Reset clears every decision.
  *  - "Apply Changes (N)" and "N differences still need a decision" follow.
  *  - The inferred decision for a table that exists on one side only follows
- *    its columns: cleared when a column is cleared.
+ *    its columns: cleared when a column is cleared, also after Sync is closed
+ *    and reopened.
+ *  - A table's "Keep all" shows when it holds and clears on a second click.
  *
  * Runs against the real editor store.
  */
@@ -237,6 +239,82 @@ describe('SyncMergeModal: decided rows stay in place', () => {
     fireEvent.click(within(colRow).getByRole('button', { name: '✓ Physical' }));
     expect(state().syncSelections['model:dim_region']).toBe('physical');
     expect(state().syncSelections['col:dim_region:region_key']).toBeUndefined();
+  });
+});
+
+describe('SyncMergeModal: table decisions survive closing Sync, and Keep all toggles', () => {
+  const colRow = (name: string) => screen.getByText(name, { selector: '.sync-modal__col-name' }).closest('tr') as HTMLElement;
+  const header = () => screen.getByText('dim_region').closest('tr') as HTMLElement;
+  const keepAll = (side: 'logical' | 'physical') =>
+    header().querySelector(`.sync-modal__model-bulk-btn--${side}`) as HTMLButtonElement;
+
+  it('an inferred table decision still follows its columns after Sync is closed and reopened', () => {
+    render(<SyncMergeModal />);
+    fireEvent.click(within(colRow('region_key')).getByRole('button', { name: 'Logical' }));
+    fireEvent.click(within(colRow('region_name')).getByRole('button', { name: 'Logical' }));
+    expect(state().syncSelections['model:dim_region']).toBe('logical');
+
+    // Close Sync (the decisions stay), then open it again.
+    act(() => { state().setSyncMode(false); });
+    expect(document.querySelector('.sync-modal__table')).toBeNull();
+    act(() => { state().setSyncMode(true); });
+    expect(state().syncInferredTableKeys).toEqual({ 'model:dim_region': 'logical' });
+
+    fireEvent.click(within(colRow('region_name')).getByRole('button', { name: '✓ Logical' }));
+    expect(state().syncSelections['model:dim_region']).toBeUndefined();
+    expect(applyButton().textContent).toBe('Apply Changes (1)');
+    fireEvent.click(applyButton());
+    expect(Object.keys(postMessage.mock.calls.at(-1)?.[0].payload.selections)).toEqual(['col:dim_region:region_key']);
+  });
+
+  it('a table decision the user re-makes with the same side as the inferred one is theirs: un-picking a column leaves it', () => {
+    render(<SyncMergeModal />);
+    fireEvent.click(within(colRow('region_key')).getByRole('button', { name: 'Logical' }));
+    fireEvent.click(within(colRow('region_name')).getByRole('button', { name: 'Logical' }));
+    expect(state().syncInferredTableKeys['model:dim_region']).toBe('logical');
+
+    // "All Logical" decides every item, the table included, as the user's own choice.
+    fireEvent.click(screen.getByRole('button', { name: 'All Logical' }));
+    expect(state().syncInferredTableKeys).toEqual({});
+
+    fireEvent.click(within(colRow('region_name')).getByRole('button', { name: '✓ Logical' }));
+    expect(state().syncSelections['model:dim_region']).toBe('logical');
+  });
+
+  it('Keep all shows when it holds, and clicking it again clears the table and its columns', () => {
+    render(<SyncMergeModal />);
+    expect(keepAll('physical').getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(keepAll('physical'));
+    expect(state().syncSelections).toMatchObject({
+      'model:dim_region': 'physical', 'col:dim_region:region_key': 'physical', 'col:dim_region:region_name': 'physical',
+    });
+    expect(keepAll('physical').getAttribute('aria-pressed')).toBe('true');
+    expect(keepAll('physical').textContent).toBe('✓ Keep all');
+    expect(keepAll('physical').className).toContain('sync-modal__model-bulk-btn--selected');
+    expect(keepAll('physical').getAttribute('title')).toMatch(/Click again to clear these choices$/);
+    expect(keepAll('logical').getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(keepAll('physical'));
+    expect(state().syncSelections).toEqual({});
+    expect(keepAll('physical').getAttribute('aria-pressed')).toBe('false');
+
+    // The other side's Keep all switches sides rather than clearing.
+    fireEvent.click(keepAll('physical'));
+    fireEvent.click(keepAll('logical'));
+    expect(state().syncSelections['model:dim_region']).toBe('logical');
+    expect(keepAll('logical').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('Reset is enabled by a decision whose difference has gone, and clears it', () => {
+    act(() => { state().setSyncSelection('col:gone_table:gone_column', 'logical'); });
+    render(<SyncMergeModal />);
+    const reset = screen.getByRole('button', { name: 'Reset' }) as HTMLButtonElement;
+    expect(screen.getByText(`0/${TOTAL}`)).toBeTruthy();
+    expect(reset.disabled).toBe(false);
+    fireEvent.click(reset);
+    expect(state().syncSelections).toEqual({});
+    expect(reset.disabled).toBe(true);
   });
 });
 

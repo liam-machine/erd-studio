@@ -164,15 +164,20 @@ interface TableRowProps {
 }
 
 function TableRow({ model, sourceStage, targetStage, isCollapsed, hasFoldableContent, onToggle, modelSyncKeys, allResolved, selectionSummary }: TableRowProps) {
+  const syncSelections = useEditorStore((s) => s.syncSelections);
   const setSyncSelectionBulk = useEditorStore((s) => s.setSyncSelectionBulk);
+  const clearSyncSelectionBulk = useEditorStore((s) => s.clearSyncSelectionBulk);
 
-  const handleBulk = useCallback(
-    (gt: GroundTruth) => (e: React.MouseEvent) => {
-      e.stopPropagation();
-      setSyncSelectionBulk(modelSyncKeys, gt);
-    },
-    [modelSyncKeys, setSyncSelectionBulk],
-  );
+  // "Keep all" is pressed when every item of the table already keeps that
+  // side; clicking it again clears them, like a row's chosen side.
+  const keepsAll = (gt: GroundTruth): boolean =>
+    modelSyncKeys.length > 0 && modelSyncKeys.every((k) => syncSelections[k] === gt);
+
+  const handleBulk = (gt: GroundTruth) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (keepsAll(gt)) clearSyncSelectionBulk(modelSyncKeys);
+    else setSyncSelectionBulk(modelSyncKeys, gt);
+  };
 
   // Left-edge accent colour on the chevron cell
   const accentColor = allResolved
@@ -236,19 +241,26 @@ function TableRow({ model, sourceStage, targetStage, isCollapsed, hasFoldableCon
   );
 
   // Stage cells — bulk accept button only (status badge handles existence)
-  const renderStageCell = (side: GroundTruth) => (
-    <td className="sync-modal__cell sync-modal__cell--stage sync-modal__cell--model-stage">
-      {modelSyncKeys.length > 0 && (
-        <button
-          className={`sync-modal__model-bulk-btn sync-modal__model-bulk-btn--${side}`}
-          onClick={handleBulk(side)}
-          title={`Keep all ${stageName(side)} for ${model.name}`}
-        >
-          Keep all
-        </button>
-      )}
-    </td>
-  );
+  const renderStageCell = (side: GroundTruth) => {
+    const pressed = keepsAll(side);
+    return (
+      <td className="sync-modal__cell sync-modal__cell--stage sync-modal__cell--model-stage">
+        {modelSyncKeys.length > 0 && (
+          <button
+            type="button"
+            className={`sync-modal__model-bulk-btn sync-modal__model-bulk-btn--${side}${pressed ? ' sync-modal__model-bulk-btn--selected' : ''}`}
+            onClick={handleBulk(side)}
+            aria-pressed={pressed}
+            title={pressed
+              ? `Every item of ${model.name} keeps ${stageName(side)}. Click again to clear these choices`
+              : `Keep all ${stageName(side)} for ${model.name}`}
+          >
+            {pressed ? '✓ Keep all' : 'Keep all'}
+          </button>
+        )}
+      </td>
+    );
+  };
 
   const rowClass = [
     'sync-modal__row',
@@ -408,8 +420,7 @@ interface TableRowGroupProps {
 
 function TableRowGroup({ model, conflictCols, sourceStage, targetStage, isCollapsed, onToggle }: TableRowGroupProps) {
   const syncSelections = useEditorStore((s) => s.syncSelections);
-  const setSyncSelection = useEditorStore((s) => s.setSyncSelection);
-  const clearSyncSelection = useEditorStore((s) => s.clearSyncSelection);
+  const setInferredTableChoice = useEditorStore((s) => s.setInferredTableChoice);
   const hasFoldableContent = conflictCols.length > 0;
 
   const mKey = model.status !== 'matched' ? tableKey(model.name) : null;
@@ -445,18 +456,16 @@ function TableRowGroup({ model, conflictCols, sourceStage, targetStage, isCollap
   // The table key of a table that exists on one side only is inferred from
   // its columns (see lib/syncSelections): set when every column is decided,
   // cleared again when one is cleared, re-inferred when they change. A table
-  // decision the user made with "Keep all" is left alone.
-  const actionsRef = useRef({ setSyncSelection, clearSyncSelection });
-  useEffect(() => { actionsRef.current = { setSyncSelection, clearSyncSelection }; });
-  const inferredRef = useRef<GroundTruth | null>(null);
+  // decision the user made with "Keep all" is left alone. Which keys were
+  // inferred lives in the store, so it survives closing and reopening Sync.
+  const lastInferred = useEditorStore((s) => (mKey ? s.syncInferredTableKeys[mKey] ?? null : null));
 
   useEffect(() => {
     if (!mKey || columnKeys.length === 0) return;
-    const { change, inferred } = reconcileInferredTableKey(syncSelections, mKey, columnKeys, inferredRef.current);
-    inferredRef.current = inferred;
-    if (change?.kind === 'set') actionsRef.current.setSyncSelection(mKey, change.choice);
-    else if (change?.kind === 'clear') actionsRef.current.clearSyncSelection(mKey);
-  }, [mKey, columnKeys, syncSelections]);
+    const { change } = reconcileInferredTableKey(syncSelections, mKey, columnKeys, lastInferred);
+    if (change?.kind === 'set') setInferredTableChoice(mKey, change.choice);
+    else if (change?.kind === 'clear') setInferredTableChoice(mKey, null);
+  }, [mKey, columnKeys, syncSelections, lastInferred, setInferredTableChoice]);
 
   // No auto-collapse when every item is decided: collapsing would pull the
   // rows below up under the pointer. The chevron still folds a table by hand.
@@ -633,9 +642,10 @@ export function SyncMergeModal() {
             <div className="sync-modal__toolbar-center">
               <button
                 type="button"
-                className="sync-modal__toolbar-toggle"
+                className="sync-modal__toolbar-btn"
                 onClick={handleReset}
-                disabled={resolvedCount === 0}
+                // Any stored decision, even one whose difference has gone since: Reset clears them all.
+                disabled={Object.keys(syncSelections).length === 0}
                 title="Clear every decision and start again"
               >
                 Reset

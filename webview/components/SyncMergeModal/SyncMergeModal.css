@@ -123,7 +123,7 @@
   padding: 0 8px;
 }
 
-.sync-modal__toolbar-toggle {
+.sync-modal__toolbar-btn {
   padding: 3px 10px;
   border: 1px solid var(--panel-border);
   border-radius: 4px;
@@ -137,13 +137,13 @@
   white-space: nowrap;
 }
 
-.sync-modal__toolbar-toggle:hover:not(:disabled) {
+.sync-modal__toolbar-btn:hover:not(:disabled) {
   opacity: 1;
   background: var(--selection-bg);
 }
 
 /* Reset with nothing decided yet */
-.sync-modal__toolbar-toggle:disabled {
+.sync-modal__toolbar-btn:disabled {
   opacity: 0.3;
   cursor: default;
 }
@@ -553,6 +553,21 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 .sync-modal__model-bulk-btn:hover {
   opacity: 1;
   background: var(--selection-bg);
+}
+
+/* Pressed: every item of the table keeps this side (click again to clear). */
+.sync-modal__model-bulk-btn--logical.sync-modal__model-bulk-btn--selected {
+  opacity: 1;
+  background: var(--stage-logical, #60a5fa);
+  border-color: var(--stage-logical, #60a5fa);
+  color: var(--button-fg, #fff);
+}
+
+.sync-modal__model-bulk-btn--physical.sync-modal__model-bulk-btn--selected {
+  opacity: 1;
+  background: var(--stage-physical, #22c55e);
+  border-color: var(--stage-physical, #22c55e);
+  color: var(--button-fg, #fff);
 }
 
 /* ---------------------------------------------------------------------------
