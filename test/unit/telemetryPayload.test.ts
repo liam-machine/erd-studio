@@ -474,13 +474,15 @@ describe('allowlists agree with the Worker', () => {
     expect(buildHeartbeat(s, ENV).features).toEqual({ logicalOnlyProject: 1, exampleDiagram: 1, blankDiagram: 2 });
   });
 
-  it('appends the native DBML storage keys at the very end, after the logical-only ones: features and errors', () => {
-    expect(FEATURES.slice(-8)).toEqual([
+  it('appends the native DBML storage keys after the logical-only ones: features and errors', () => {
+    const at = FEATURES.indexOf('dbmlProject');
+    expect(FEATURES.slice(at, at + 8)).toEqual([
       'dbmlProject', 'convertToDbml', 'convertToDbmlOffered', 'convertToDbmlDeclined', 'convertToDbmlNotNow',
       'convertToDbmlCancelled', 'convertToDbmlRefused', 'dbmlForeignFormatWarned',
     ]);
     expect(FEATURES.indexOf('dbmlProject')).toBe(FEATURES.indexOf('blankDiagram') + 1);
-    expect(ERROR_CODES.slice(-5)).toEqual([
+    const errAt = ERROR_CODES.indexOf('modelFileDbmlSyntax');
+    expect(ERROR_CODES.slice(errAt, errAt + 5)).toEqual([
       'modelFileDbmlSyntax', 'modelFileDbmlInvalid', 'modelFileDbmlStructure', 'domainLoadDbml', 'convertToDbmlFailed',
     ]);
     expect(ERROR_CODES.indexOf('modelFileDbmlSyntax')).toBe(ERROR_CODES.indexOf('importDbmlFailed') + 1);
@@ -531,6 +533,23 @@ describe('allowlists agree with the Worker', () => {
     expect(saveFailureCodes(new Set(['refused'] as const), { undoRedo: true })).toEqual([
       'saveFailed', 'saveFailedRefused', 'saveFailedUndoRedo',
     ]);
+  });
+
+  it('appends the start-screen keys at the very end, after the native DBML ones: features and errors', () => {
+    const at = FEATURES.indexOf('welcomeBlank');
+    expect(at).toBe(FEATURES.indexOf('dbmlForeignFormatWarned') + 1);
+    expect(FEATURES.slice(at)).toEqual([
+      'welcomeBlank', 'welcomeImport', 'welcomeExample', 'welcomeConvert',
+      'walkthroughBlank', 'walkthroughImport', 'walkthroughExample', 'walkthroughConvert', 'walkthroughDrawFromDbt',
+      'sidebarBlank', 'sidebarImport', 'sidebarExample', 'sidebarConvert', 'sidebarDrawFromDbt',
+      'sidebarStartShown', 'welcomeLeftNoChoice', 'blankDiagramCancelled',
+      'exampleOpened', 'exampleReopened', 'exampleCancelled',
+      'exampleEnterpriseWarehouse', 'exampleMedallion', 'exampleDbtProjectLayers', 'exampleKimballBusMatrix',
+      'exampleDataVault', 'exampleGitlabStyle', 'exampleBigqueryVersioned', 'exampleDataMesh',
+      'exampleDiagramShown',
+    ]);
+    expect(ERROR_CODES.slice(-1)).toEqual(['exampleWriteFailed']);
+    expect(ERROR_CODES.indexOf('exampleWriteFailed')).toBe(ERROR_CODES.indexOf('convertToDbmlFailed') + 1);
   });
 
   it('telemetry.json documents every feature key', () => {

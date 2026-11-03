@@ -221,6 +221,45 @@ export const FEATURES = [
   'convertToDbmlCancelled',
   'convertToDbmlRefused',
   'dbmlForeignFormatWarned',
+  // The start screen (the first five minutes; src/types/startActions.ts): a
+  // start clicked on the Welcome panel (welcome*, beside the older
+  // welcomeDrawFromDbt / welcomeOpenDiagram), the Get Started walkthrough
+  // (walkthrough*) or the empty Diagrams view (sidebar*); the empty view's
+  // starts were on screen (once a day); the Welcome panel closed with no
+  // button pressed.
+  'welcomeBlank',
+  'welcomeImport',
+  'welcomeExample',
+  'welcomeConvert',
+  'walkthroughBlank',
+  'walkthroughImport',
+  'walkthroughExample',
+  'walkthroughConvert',
+  'walkthroughDrawFromDbt',
+  'sidebarBlank',
+  'sidebarImport',
+  'sidebarExample',
+  'sidebarConvert',
+  'sidebarDrawFromDbt',
+  'sidebarStartShown',
+  'welcomeLeftNoChoice',
+  // New Diagram… closed before it wrote (at the layer or the name).
+  'blankDiagramCancelled',
+  // Open an Example Project…: an example written and its window opened; an
+  // earlier copy opened instead; closed at the picker or the folder dialog;
+  // which example (fixed product ids); its first diagram opened in the new window.
+  'exampleOpened',
+  'exampleReopened',
+  'exampleCancelled',
+  'exampleEnterpriseWarehouse',
+  'exampleMedallion',
+  'exampleDbtProjectLayers',
+  'exampleKimballBusMatrix',
+  'exampleDataVault',
+  'exampleGitlabStyle',
+  'exampleBigqueryVersioned',
+  'exampleDataMesh',
+  'exampleDiagramShown',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -352,6 +391,8 @@ export const ERROR_CODES = [
   'modelFileDbmlStructure',
   'domainLoadDbml',
   'convertToDbmlFailed',
+  // Open an Example Project… could not write the example's files.
+  'exampleWriteFailed',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 

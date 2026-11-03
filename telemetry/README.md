@@ -331,6 +331,73 @@ says it was DBML. A new `schemaFormats` value would make a deployed Worker
 reject whole heartbeats; new `features` / `errors` keys are only dropped by an
 older one, so deploy the Worker before the release.
 
+### Onboarding funnel (the first five minutes)
+
+Why installs stop using ERD Studio, step by step. The start screen
+(`src/types/startActions.ts`) offers the same one-click starts on the Welcome
+panel, the Get Started walkthrough and the empty Diagrams view: Convert to
+DBML (projects from before 2.0 only), Draw from dbt (dbt projects only), New
+Diagram, Import DBML and Open an Example. Every click goes through
+`erdStudio.start`, which counts **which start, on which surface**. All keys
+are `features`, so no D1 migration was needed; none holds a name, path or
+message. They are appended after the native DBML keys:
+
+| Step | Keys |
+|---|---|
+| Saw a start screen | `walkthroughOpened` (opened by ERD Studio on first run), `gettingStartedOpened`, `sidebarStartShown` (once a day: the empty Diagrams view, with its starts, was drawn) |
+| Chose a start | `welcomeBlank` `welcomeImport` `welcomeExample` `welcomeConvert` `welcomeDrawFromDbt`; `walkthroughBlank` … `walkthroughDrawFromDbt`; `sidebarBlank` … `sidebarDrawFromDbt` (`welcomeOpenDiagram` is a returning user's "Open your diagrams") |
+| Left without choosing | `welcomeLeftNoChoice` (the Welcome panel closed with no button pressed) |
+| Gave up inside a start | `blankDiagramCancelled`, `importDbmlCancelled`, `exampleCancelled`, `drawCancelScope` / `drawCancelLayer` / `drawCancelName`, `convertToDbmlCancelled` |
+| Got a diagram | `domainCreated` / `blankDiagram`, `importDbml`, `exampleOpened` / `exampleReopened` (+ which: `exampleEnterpriseWarehouse`, `exampleMedallion`, `exampleDbtProjectLayers`, `exampleKimballBusMatrix`, `exampleDataVault`, `exampleGitlabStyle`, `exampleBigqueryVersioned`, `exampleDataMesh`), `drawFromDbt`, `convertToDbml` |
+| Landed on the canvas | `canvasOpens`, `exampleDiagramShown` (the example's first diagram opened in its new window) |
+| Broke | errors `exampleWriteFailed`, `importDbmlFailed`, `drawFromDbtFailed`, `walkthroughFailed`, `welcomePanelFailed`, `domainLoad*` |
+
+A row is one install-day, so the funnel is built per install over its first
+days (the install id stays inside the query; only counts come out). Read it
+for a cohort that has had a week to come back, and compare cohorts across
+releases: a step that falls is where to look.
+
+```bash
+# The funnel: installs first seen 8–35 days ago, each counted once at the furthest step it reached.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH firsts AS (
+     SELECT install_id, MIN(day) AS d0 FROM heartbeats
+     WHERE tenure = '0' AND COALESCE(dev, 0) = 0 AND day >= date('now', '-35 days') AND day < date('now', '-7 days')
+     GROUP BY install_id),
+   per AS (
+     SELECT f.install_id,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('walkthroughOpened', 'gettingStartedOpened', 'sidebarStartShown'))) AS saw_start,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE (j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough[A-Z]*' OR j.key GLOB 'sidebar[A-Z]*' OR j.key = 'drawStarted')
+         AND j.key NOT IN ('walkthroughOpened', 'sidebarStartShown', 'welcomeLeftNoChoice', 'welcomeOpenDiagram'))) AS chose_start,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('domainCreated', 'blankDiagram', 'importDbml', 'exampleDiagram', 'exampleOpened', 'exampleReopened', 'drawFromDbt', 'convertToDbml', 'domainCreatedExternal'))) AS got_diagram,
+       MAX(h.canvas_opens > 0) AS opened_canvas,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('editModel', 'editColumn', 'editKey', 'editDetails', 'editRelationship', 'addModel', 'addRelationship', 'addFromDbt'))) AS edited,
+       MAX(h.day > f.d0) AS came_back,
+       MAX(h.day > f.d0 AND h.canvas_opens > 0) AS canvas_later,
+       MAX(h.day >= date(f.d0, '+7 days')) AS week_later
+     FROM firsts f JOIN heartbeats h ON h.install_id = f.install_id AND COALESCE(h.dev, 0) = 0
+     GROUP BY f.install_id)
+   SELECT COUNT(*) AS s1_installed, SUM(saw_start) AS s2_saw_start, SUM(chose_start) AS s3_chose_start,
+     SUM(got_diagram) AS s4_got_diagram, SUM(opened_canvas) AS s5_opened_canvas, SUM(edited) AS s6_edited,
+     SUM(came_back) AS s7_came_back, SUM(canvas_later) AS s8_canvas_another_day, SUM(week_later) AS s9_week_later
+   FROM per"
+
+# Which start, on which surface (28 days, installs): what to keep, what to drop.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS clicks FROM heartbeats h, json_each(h.features) j
+   WHERE h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0
+     AND (j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough*' OR j.key GLOB 'sidebar*' OR j.key GLOB 'example*' OR j.key GLOB '*Cancel*')
+   GROUP BY j.key ORDER BY installs DESC"
+```
+
+Investigate when: `s3_chose_start` is far below `s2_saw_start` (the start
+screen does not persuade); `s4_got_diagram` is far below `s3_chose_start` (a
+start's own prompts lose people: look at its `*Cancelled` key); `exampleOpened`
+well above `exampleDiagramShown` (the new window does not open the diagram);
+`welcomeLeftNoChoice` above half of `gettingStartedOpened`; any
+`exampleWriteFailed`. D1 refuses a compound `SELECT` of many `UNION`s, which
+is why the funnel is one row of columns.
+
 ### Relationship health (#133)
 
 The relationship code reports three kinds of key, all under a `rel` prefix:
