@@ -5327,7 +5327,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * The user is shown a modal that names the exact command before anything
    * runs. `--dangerously-skip-permissions` is only added when the
    * `erdStudio.claudeSync.skipPermissions` setting is enabled (default off),
-   * because it lets Claude edit files in the workspace without asking.
+   * because it lets Claude edit files in the workspace without asking. That
+   * setting is user-scoped (`USER_SCOPED_SETTINGS`): a workspace value is ignored.
    *
    * The prompt is typed into the Claude TUI after a short delay; if the user
    * closes the terminal in the meantime the send is skipped rather than
@@ -5349,7 +5350,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         'without asking for confirmation. Set "erdStudio.claudeSync.skipPermissions" to false to keep the permission prompts.'
       : `Command: ${claudeCommand}\n\n` +
         'Claude Code will ask before editing files. Enable "erdStudio.claudeSync.skipPermissions" ' +
-        'to run unattended with --dangerously-skip-permissions.';
+        'in your user settings to run unattended with --dangerously-skip-permissions.';
     const LAUNCH = 'Launch';
     const choice = await vscode.window.showWarningMessage(
       `Launch Claude Code in a terminal to execute the sync plan at ${planPath}?`,

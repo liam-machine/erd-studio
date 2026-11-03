@@ -17,6 +17,10 @@ import * as vscode from 'vscode';
  * checked-in file must not be able to switch the user's telemetry choice, and
  * `checkKnownFixes` (the "a newer version fixes this" check) likewise.
  *
+ * `claudeSync.skipPermissions` decides whether **Execute with Claude** launches
+ * Claude Code with `--dangerously-skip-permissions`; a cloned repository must
+ * not be able to turn that on.
+ *
  * Keys are written without the `erdStudio.` / `dbtSemantic.` prefix, exactly as
  * they are passed to {@link getErdStudioSetting}.
  */
@@ -28,6 +32,7 @@ export const USER_SCOPED_SETTINGS: ReadonlySet<string> = new Set([
   'feedback.provider',
   'telemetry.enabled',
   'checkKnownFixes',
+  'claudeSync.skipPermissions',
 ]);
 
 /**

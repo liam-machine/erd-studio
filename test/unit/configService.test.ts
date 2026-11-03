@@ -6,6 +6,8 @@
  * The package default of erdStudio.<key> must never mask a value a pre-rename
  * user configured under dbtSemantic.<key>.
  */
+import * as fs from 'fs';
+import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 
@@ -139,4 +141,57 @@ describe('getErdStudioSetting: user-scoped feedback keys', () => {
     set('erdStudio', { globalValue: 'g', workspaceValue: 'w' });
     expect(read()).toBe('w');
   });
+});
+
+/**
+ * `claudeSync.skipPermissions` makes **Execute with Claude** pass
+ * `--dangerously-skip-permissions`. A cloned repository's `.vscode/settings.json`
+ * must not be able to turn that on.
+ */
+describe('getErdStudioSetting: claudeSync.skipPermissions', () => {
+  const SKIP = 'claudeSync.skipPermissions';
+
+  it('is user-scoped', () => {
+    expect(USER_SCOPED_SETTINGS.has(SKIP)).toBe(true);
+  });
+
+  it('ignores a workspace or folder value of true', () => {
+    vscode._setMockConfiguration('erdStudio', SKIP, { workspaceValue: true, workspaceFolderValue: true });
+    expect(getErdStudioSetting(SKIP, false)).toBe(false);
+  });
+
+  it('ignores a legacy dbtSemantic workspace value of true', () => {
+    vscode._setMockConfiguration('dbtSemantic', SKIP, { workspaceValue: true });
+    expect(getErdStudioSetting(SKIP, false)).toBe(false);
+  });
+
+  it("honours the user's own global value", () => {
+    vscode._setMockConfiguration('erdStudio', SKIP, { globalValue: true });
+    expect(getErdStudioSetting(SKIP, false)).toBe(true);
+  });
+
+  it('lets a workspace false not override a user true', () => {
+    vscode._setMockConfiguration('erdStudio', SKIP, { globalValue: true, workspaceValue: false });
+    expect(getErdStudioSetting(SKIP, false)).toBe(true);
+  });
+});
+
+/**
+ * Both halves of the guard: every user-scoped key is also contributed with
+ * `"scope": "machine"`, so VS Code itself keeps a workspace value out.
+ */
+describe('USER_SCOPED_SETTINGS and package.json agree', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8'));
+  const properties: Record<string, { scope?: string }> = Object.assign(
+    {},
+    ...([] as Array<{ properties?: Record<string, { scope?: string }> }>)
+      .concat(manifest.contributes.configuration)
+      .map((section) => section.properties ?? {}),
+  );
+
+  for (const key of USER_SCOPED_SETTINGS) {
+    it(`contributes erdStudio.${key} with "scope": "machine"`, () => {
+      expect(properties[`erdStudio.${key}`]?.scope).toBe('machine');
+    });
+  }
 });

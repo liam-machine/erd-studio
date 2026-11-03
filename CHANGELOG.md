@@ -8,6 +8,11 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+- **`erdStudio.claudeSync.skipPermissions` is now read from your user settings only.** A workspace or folder value, such as one in a repository's checked-in `.vscode/settings.json`, is ignored, so opening a cloned project can no longer make **Execute with Claude** launch Claude Code with `--dangerously-skip-permissions`. If you turned it on in your own user settings, nothing changes.
+
 ## 1.7.4 — 2026-10-30
 
 ### Fixed

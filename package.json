@@ -555,9 +555,10 @@
           "description": "Relative path to ERD Studio subject area files within the project. Changing this requires a window reload."
         },
         "erdStudio.claudeSync.skipPermissions": {
+          "scope": "machine",
           "type": "boolean",
           "default": false,
-          "markdownDescription": "When **Execute with Claude** launches Claude Code to apply a sync plan, pass `--dangerously-skip-permissions` so it edits files without asking. Off by default: Claude Code prompts before each file change. The launch command is always shown for confirmation first."
+          "markdownDescription": "When **Execute with Claude** launches Claude Code to apply a sync plan, pass `--dangerously-skip-permissions` so it edits files without asking. Off by default: Claude Code prompts before each file change. The launch command is always shown for confirmation first. Read from your user settings only: a workspace or folder value (for example a checked-in `.vscode/settings.json`) is ignored."
         },
         "erdStudio.feedback.aiAssist": {
           "scope": "machine",

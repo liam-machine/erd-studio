@@ -711,6 +711,25 @@ describe('launchClaudeSync (H36)', () => {
     expect(vscode.window.terminals[0]._sentText[0]).toBe('claude --dangerously-skip-permissions');
   });
 
+  it('ignores a workspace or folder skipPermissions value (a checked-in .vscode/settings.json)', async () => {
+    const { panel } = await openShowcase(root);
+    vi.spyOn(vscode.workspace, 'getConfiguration').mockReturnValue({
+      get: (_k: string, d?: unknown) => d,
+      inspect: (key: string) =>
+        key === 'claudeSync.skipPermissions' ? { workspaceValue: true, workspaceFolderValue: true } : undefined,
+    } as never);
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Launch' as never);
+    vi.useFakeTimers();
+
+    panel._simulateMessage({ type: 'launchClaudeSync' });
+    await flushMicrotasks();
+
+    const [, options] = warn.mock.calls[0] as unknown as [string, { detail: string }];
+    expect(options.detail).toMatch(/^Command: claude\n/);
+    expect(options.detail).toContain('in your user settings');
+    expect(vscode.window.terminals[0]._sentText[0]).toBe('claude');
+  });
+
   it('skips the prompt when the terminal was closed before the delay elapsed', async () => {
     const { panel } = await openShowcase(root);
     vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Launch' as never);
