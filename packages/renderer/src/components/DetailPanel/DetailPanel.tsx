@@ -58,6 +58,14 @@ const SOURCE_NAME: Record<PhysicalColumnSource, string> = {
   file: '.sql file only',
 };
 
+/** The viewer's twin: a page outside VS Code cannot know the project uses dbt. */
+const SOURCE_NAME_NEUTRAL: Record<PhysicalColumnSource, string> = {
+  catalog: 'warehouse catalog',
+  yml: 'schema .yml',
+  manifest: 'compiled manifest',
+  file: 'source file only',
+};
+
 /**
  * One line describing where a physical model's shape came from.
  *
@@ -66,15 +74,16 @@ const SOURCE_NAME: Record<PhysicalColumnSource, string> = {
  * it differs, which happens when the principal supplier contributed column
  * names but no data types.
  */
-function describeProvenance(provenance: PhysicalProvenance, untyped: number): string {
-  const names = provenance.columns.map((c) => SOURCE_NAME[c]);
+function describeProvenance(provenance: PhysicalProvenance, untyped: number, viewer = false): string {
+  const sourceName = viewer ? SOURCE_NAME_NEUTRAL : SOURCE_NAME;
+  const names = provenance.columns.map((c) => sourceName[c]);
   const parts = [
     names.length > 1
       ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
-      : names[0] ?? SOURCE_NAME[provenance.types],
+      : names[0] ?? sourceName[provenance.types],
   ];
   if (provenance.types !== provenance.columns[0]) {
-    parts.push(`types from ${SOURCE_NAME[provenance.types]}`);
+    parts.push(`types from ${sourceName[provenance.types]}`);
   }
   if (untyped > 0) {
     parts.push(`${untyped} untyped`);
@@ -701,9 +710,10 @@ export function DetailPanel() {
           </div>
           {/* Without a dbt project the row shows only for a table that already
               has a warehouse name, so it can be seen and cleared. The viewer
-              keeps the row it always had. */}
+              keeps the row it always had, worded without dbt: a page outside
+              VS Code cannot know whether the project uses it. */}
           {viewer ? (
-            <AliasEditor modelName={model.name} alias={model.alias} readOnly />
+            <AliasEditor modelName={model.name} alias={model.alias} readOnly dbtWording={false} />
           ) : (!logicalOnly || model.alias?.trim()) ? (
             <AliasEditor modelName={model.name} alias={model.alias} readOnly={isReadOnly} dbtWording={!logicalOnly} />
           ) : null}
@@ -716,6 +726,7 @@ export function DetailPanel() {
                 {describeProvenance(
                   model.provenance,
                   model.columns.filter((c) => !c.dataType).length,
+                  viewer,
                 )}
               </span>
             </div>

@@ -3,8 +3,9 @@
  * The detail panel's "Warehouse name" row (the model's alias) without a dbt
  * project (`logicalOnly`): hidden for a table with no alias, shown for one
  * that has one (it is the user's data, so they can see and clear it) and then
- * worded without dbt. In a dbt project, and in the viewer, the row is what it
- * always was.
+ * worded without dbt. In a dbt project the row is what it always was. The
+ * viewer keeps the read-only row, but never names dbt: a page outside VS Code
+ * cannot know whether the project uses it.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/react';
@@ -104,17 +105,18 @@ describe('DetailPanel — Warehouse name without a dbt project (logicalOnly)', (
   });
 });
 
-describe('DetailPanel — Warehouse name in the viewer (unchanged)', () => {
-  it.each([false, true])('keeps the read-only row with dbt wording (logicalOnly %s)', (logicalOnly) => {
+describe('DetailPanel — Warehouse name in the viewer', () => {
+  it.each([false, true])('keeps the read-only row (logicalOnly %s)', (logicalOnly) => {
     const { row } = renderPanel({ logicalOnly, viewer: true });
     expect(row()).not.toBeNull();
     expect(row()!.querySelector('.detail-panel__value')!.textContent).toBe('fct_sale');
     expect(row()!.querySelector('.detail-panel__alias-edit-btn')).toBeNull();
   });
 
-  it('keeps the dbt tooltip for a set alias, even with logicalOnly', () => {
-    const { row } = renderPanel({ logicalOnly: true, alias: 'sale', viewer: true });
-    expect(row()!.querySelector('.detail-panel__value')!.getAttribute('title')).toBe("Built as sale (dbt alias); the table's name is fct_sale");
+  it.each([false, true])('words a set alias without dbt (logicalOnly %s)', (logicalOnly) => {
+    const { row, container } = renderPanel({ logicalOnly, alias: 'sale', viewer: true });
+    expect(row()!.querySelector('.detail-panel__value')!.getAttribute('title')).toBe("Named sale in the warehouse; the table's name is fct_sale");
+    expect(allText(container)).not.toMatch(/dbt/i);
   });
 });
 

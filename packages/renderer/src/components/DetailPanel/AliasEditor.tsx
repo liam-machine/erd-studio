@@ -10,7 +10,8 @@
  * empty value clears the alias.
  *
  * Without a dbt project (`dbtWording` false) the tooltip and hint say the
- * same thing without naming dbt.
+ * same thing without naming dbt. The viewer always passes false: a page
+ * outside VS Code cannot know whether the project uses dbt.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -24,7 +25,8 @@ interface AliasEditorProps {
   readOnly: boolean;
   /**
    * Name dbt in the tooltip and hint (default). False in a folder with no
-   * dbt project, where the alias is just the table's name in the warehouse.
+   * dbt project, where the alias is just the table's name in the warehouse,
+   * and always in the viewer.
    */
   dbtWording?: boolean;
 }

@@ -38,7 +38,9 @@ import { layerAbbreviation } from '../../lib/layerCues';
 import { offDiagramChipTip, offDiagramRows } from '../../lib/canvasContext';
 import {
   SOURCE_LABEL,
+  SOURCE_LABEL_NEUTRAL,
   SOURCE_PHRASE,
+  SOURCE_PHRASE_NEUTRAL,
   SCD_BADGE,
   SCD_TITLE,
   ADDITIVE_BADGE,
@@ -62,9 +64,16 @@ const GHOST_REASON_TITLE: Record<NonNullable<TableNodeData['ghostReason']>, stri
   'missing-in-comparison': 'not present in the stage being compared against',
 };
 
+/** The viewer's twin: a page outside VS Code cannot know the project uses dbt. */
+const GHOST_REASON_TITLE_NEUTRAL: Record<NonNullable<TableNodeData['ghostReason']>, string> = {
+  'not-in-project': 'not found in the project (no source file, schema .yml entry or manifest node)',
+  'disabled': 'disabled in the project (enabled: false), so it is not built',
+  'missing-in-comparison': 'not present in the stage being compared against',
+};
+
 /** Join a contributor list as prose: "a", "a and b", "a, b and c". */
-function joinPhrases(sources: PhysicalColumnSource[]): string {
-  const phrases = sources.map((s) => SOURCE_PHRASE[s]);
+function joinPhrases(sources: PhysicalColumnSource[], phrase: Record<PhysicalColumnSource, string>): string {
+  const phrases = sources.map((s) => phrase[s]);
   if (phrases.length <= 1) { return phrases[0] ?? ''; }
   return `${phrases.slice(0, -1).join(', ')} and ${phrases[phrases.length - 1]}`;
 }
@@ -75,9 +84,11 @@ function joinPhrases(sources: PhysicalColumnSource[]): string {
  * blank?" is the one question the chip has to be able to answer, and the
  * answer is `dataType === ''`.
  */
-function sourceTitle(provenance: PhysicalProvenance, columns: ColumnDisplay[]): string {
+function sourceTitle(provenance: PhysicalProvenance, columns: ColumnDisplay[], viewer: boolean): string {
   const untyped = columns.filter((c) => !c.dataType).length;
-  const base = `${SOURCE_LABEL[provenance.types]} \u2014 types from ${SOURCE_PHRASE[provenance.types]}; columns from ${joinPhrases(provenance.columns)}`;
+  const label = viewer ? SOURCE_LABEL_NEUTRAL : SOURCE_LABEL;
+  const phrase = viewer ? SOURCE_PHRASE_NEUTRAL : SOURCE_PHRASE;
+  const base = `${label[provenance.types]} \u2014 types from ${phrase[provenance.types]}; columns from ${joinPhrases(provenance.columns, phrase)}`;
   return untyped > 0
     ? `${base} \u00b7 ${untyped} column${untyped === 1 ? ' has' : 's have'} no type`
     : base;
@@ -649,7 +660,7 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
   const modelMeta = useMemo(() => metaRows(meta), [meta]);
   const nameTip = useHoverTip<HTMLSpanElement>(
     ghostReason
-      ? `${title} \u2014 ${GHOST_REASON_TITLE[ghostReason]}`
+      ? `${title} \u2014 ${(viewer ? GHOST_REASON_TITLE_NEUTRAL : GHOST_REASON_TITLE)[ghostReason]}`
       : isDiscExtra
         ? `${title} \u2014 only in ${discrepancySourceStage ?? 'this stage'}, not in ${discrepancyTargetStage ?? 'the stage being compared'}`
         : title,
@@ -660,7 +671,7 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
   const offDiagramCount = useEditorStore((s) => (viewer ? 0 : offDiagramRows(s.canvasContext, s.domain, modelName).length));
   const offDiagramTip = useHoverTip<HTMLSpanElement>(offDiagramCount > 0 ? offDiagramChipTip(offDiagramCount) : '');
   const sourceTip = useHoverTip<HTMLSpanElement>(
-    provenance ? sourceTitle(provenance, columns) : '',
+    provenance ? sourceTitle(provenance, columns, viewer) : '',
   );
   // The badge has one meaning: the layer the table lives in — its own when
   // known (DBML storage), else the diagram's. The schema is in the hover card
@@ -677,7 +688,9 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
       `Layer: ${badgeConfig?.label ?? badgeLayer}`,
       ...(schema ? [`Schema: ${schema}`] : []),
       ...(otherLayer ? [`From another layer: this diagram is in ${layerConfig?.label ?? layer}.`] : []),
-      ...(stage === 'physical' && !schema ? ['No dbt schema resolved (run dbt compile or dbt docs generate).'] : []),
+      ...(stage === 'physical' && !schema
+        ? [viewer ? 'No schema resolved.' : 'No dbt schema resolved (run dbt compile or dbt docs generate).']
+        : []),
     ].join('\n'),
   );
 
@@ -727,7 +740,7 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
             className={`model-node__source model-node__source--${provenance.types}`}
             {...sourceTip.anchorProps}
           >
-            {SOURCE_LABEL[provenance.types]}
+            {(viewer ? SOURCE_LABEL_NEUTRAL : SOURCE_LABEL)[provenance.types]}
           </span>
         )}
         {sourceTip.tip}
