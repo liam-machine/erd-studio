@@ -409,6 +409,11 @@ export function fixesFromPlan(
 
   for (const r of plan.relationships) {
     if (phantomNames.has(r.fromModel) || phantomNames.has(r.toModel)) { continue; }
+    // A relationship to a table whose file does not read is meaningless too:
+    // a DBML Ref to it drops out when the relationships file is attached, so
+    // it would read as "add it" and an assistant would write a duplicate Ref.
+    // Its fix-model-yaml / fix-dbml-file comes first, on either storage.
+    if (unreadableNames.has(r.fromModel) || unreadableNames.has(r.toModel)) { continue; }
     const rel = { fromModel: r.fromModel, fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn };
     const link = `${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn}`;
     // A composite foreign key (#133 L2) is one fix for all its pairs, stored

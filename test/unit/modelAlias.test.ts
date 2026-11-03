@@ -256,6 +256,34 @@ describe('TableLibraryService: alias in the model file', () => {
   });
 });
 
+// The DBML counterpart of the yml cases above: in a DBML table file the alias
+// is the Table's `alias` setting, and the physical stage matches it the same way.
+describe('TableLibraryService: alias in a DBML table file', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-alias-dbml-'));
+    const erd = path.join(dir, '.erd-studio');
+    fs.mkdirSync(path.join(erd, 'gold', 'tables', 'gold'), { recursive: true });
+    fs.writeFileSync(path.join(erd, 'layers.json'), JSON.stringify({ schemaVersion: 1, layers: [{ id: 'gold', label: 'Gold', order: 0 }] }));
+    fs.writeFileSync(path.join(erd, 'gold', 'tables', 'gold', 'gold_date.dbml'),
+      "Table gold.gold_date [alias: 'date'] {\n  Note: 'Dates'\n  date_key INT [pk]\n}\n");
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('reads the alias setting, and the physical stage matches dbt by (schema, alias)', () => {
+    const table = new TableLibraryService(dir).getTable('gold_date')!;
+    expect(table).toMatchObject({ name: 'gold_date', schema: 'gold', alias: 'date', description: 'Dates' });
+    const m = service.buildPhysicalSubjectArea(
+      subjectArea([table]),
+      EMPTY_YML,
+      manifest([manifestModel('dim_date', 'gold', 'date', ['date_key', 'fiscal_year'])]),
+    ).models[0];
+    expect(m.name).toBe('gold_date');
+    expect(m.existsInProject).toBe(true);
+    expect(m.columns.map((c) => c.name)).toEqual(['date_key', 'fiscal_year']);
+  });
+});
+
 describe('validateModelAliasPayload', () => {
   it('accepts an identifier, keeping its case', () => {
     expect(validateModelAliasPayload({ modelName: 'gold_date', alias: 'Date' })).toBeNull();

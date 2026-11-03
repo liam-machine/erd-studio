@@ -40,9 +40,13 @@
  *    `manifestMissing` flag forced on (the host never sets it without dbt;
  *    the strip must stay away anyway), a stale webview asking for the
  *    Physical stage (the host must answer with the logical stage), and in the
- *    dbt project Compare with dbt (whose panel offers Sync).
- * 5. **Toasts** — every information / warning / error message shown during
- *    the run (text and buttons).
+ *    dbt project Compare with dbt (whose panel offers Sync). Also the
+ *    right-click menus on a table, a relationship line and a note, each
+ *    table-menu entry that opens a host prompt (Move Table…, Show on Other
+ *    Diagrams…), the New Table dialog and the Send Feedback dialog.
+ * 5. **Toasts and prompts** — every information / warning / error message
+ *    shown during the run (text and buttons), and every QuickPick and input
+ *    box the host opens (title, placeholder, prompt, items).
  * 6. **AI helper files** — what Set Up My AI Helper installs, plus every
  *    harness target written by Install AI Helper Files….
  * 7. **CLI** — `erd-studio doctor` and `erd-studio inventory` human output.
@@ -546,6 +550,45 @@ async function canvasText(provider: SemanticEditorProvider, file: string, c: Cas
   collect('new relationship, direction undecided');
   act(() => { store().setNewFkDialogOpen(false); useEditorStore.setState({ domain: real }); });
 
+  // The canvas's right-click menus: a table, a relationship line, a note.
+  const firstTable = store().domain!.models[0];
+  if (firstTable) {
+    act(() => { store().openNodeContextMenu(40, 40, firstTable.name); });
+    collect(`node context menu ${firstTable.name}`);
+    // Each of its entries that opens a host prompt (Move Table…, Show on Other Diagrams…), answered with nothing.
+    const entries = [...document.querySelectorAll<HTMLElement>('.context-menu [role="menuitem"]')]
+      .filter((el) => /…/.test(el.textContent ?? ''));
+    for (const label of entries.map((el) => el.textContent ?? '')) {
+      act(() => { store().openNodeContextMenu(40, 40, firstTable.name); });
+      const entry = [...document.querySelectorAll<HTMLElement>('.context-menu [role="menuitem"]')].find((el) => el.textContent === label);
+      if (entry) { act(() => { fireEvent.click(entry); }); await pump(); }
+      collect(`node context menu ${firstTable.name}, after "${label}"`);
+    }
+    act(() => { store().closeContextMenu(); });
+  }
+  // A diagram with no relationship still gets the menu, on a line between its first table and itself.
+  const line = store().domain!.relationships[0]
+    ?? (firstTable && { fromModel: firstTable.name, fromColumn: firstTable.columns[0]?.name ?? 'id', toModel: firstTable.name, toColumn: firstTable.columns[0]?.name ?? 'id' });
+  if (line) {
+    act(() => { store().openEdgeContextMenu(40, 40, { cardinality: 'many-to-one', ...line } as never); });
+    collect('edge context menu');
+    act(() => { store().closeContextMenu(); });
+  }
+  const note = store().domain!.viewConfig.annotations?.[0];
+  act(() => { store().openAnnotationContextMenu(40, 40, note?.id ?? 'probe-note'); });
+  collect('annotation context menu');
+  act(() => { store().closeContextMenu(); });
+
+  // The New Table dialog and the Send Feedback dialog.
+  act(() => { store().setNewModelDialogOpen(true); });
+  await pump();
+  collect('new table dialog');
+  act(() => { store().setNewModelDialogOpen(false); });
+  act(() => { store().setFeedbackDialogOpen(true); });
+  await pump();
+  collect('feedback dialog');
+  act(() => { store().setFeedbackDialogOpen(false); });
+
   // An empty diagram: the host's own payload with no tables.
   const loaded = (panel._postedMessages as Array<{ type: string; payload?: object }>).filter((m) => m.type === 'domainLoaded').at(-1)!;
   act(() => {
@@ -620,6 +663,20 @@ async function collect(c: Case): Promise<Collected> {
       return undefined;
     }) as never);
   }
+  // Host prompts (QuickPick, input box) the canvas opens: their words, answered with nothing.
+  type Item = string | { label?: string; description?: string; detail?: string };
+  const promptText = (o: { title?: string; placeHolder?: string; prompt?: string } | undefined) =>
+    [o?.title, o?.placeHolder, o?.prompt].filter((t): t is string => Boolean(t));
+  vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Item[] | Promise<Item[]>, options?: { title?: string; placeHolder?: string }) => {
+    const list = await items;
+    const words = [...promptText(options), ...list.flatMap((i) => (typeof i === 'string' ? [i] : [i.label, i.description, i.detail]))];
+    for (const w of words) { if (w) { out.text.toasts.push({ where: 'showQuickPick', text: w }); } }
+    return undefined;
+  }) as never);
+  vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (options?: { title?: string; prompt?: string; placeHolder?: string }) => {
+    for (const w of promptText(options)) { out.text.toasts.push({ where: 'showInputBox', text: w }); }
+    return undefined;
+  }) as never);
   const exec = vi.spyOn(vscode.commands, 'executeCommand');
   const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
   const trees: Array<{ id: string; provider: TreeLike }> = [];
@@ -766,6 +823,11 @@ describe.each([LOGICAL_YAML, LOGICAL_DBML, PLAIN_FOLDER, EMPTY_WINDOW])('$name: 
       expect(canvas('add existing table')).toContain('Add Existing Tables');
       expect(canvas('new relationship')).toContain('Which way does this relationship point?');
       expect(canvas('empty diagram')).toContain('This diagram is empty');
+      expect(canvas('node context menu')).toContain('Remove from Diagram');
+      expect(canvas('edge context menu').length).toBeGreaterThan(0);
+      expect(canvas('annotation context menu').length).toBeGreaterThan(0);
+      expect(canvas('new table dialog')).toMatch(/New Table/i);
+      expect(canvas('feedback dialog')).toMatch(/Feedback/i);
       expect(got.text.canvas.some((s) => s.where.startsWith('canvas menu'))).toBe(true);
       // The Welcome panel read Set Up My AI Helper's result too.
       expect(got.text.gettingStarted.some((s) => s.where === 'panel after setupResult')).toBe(true);

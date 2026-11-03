@@ -1,0 +1,23 @@
+version: 2
+models:
+  - name: dim_project
+    description: Project dimension table
+    config:
+      tags:
+        - silver
+        - domain:tasks
+        - domain:showcase
+    columns:
+      - name: project_key
+        description: Surrogate key for project
+      - name: project_name
+        description: Project name
+      - name: project_code
+        description: Project code
+        data_type: VARCHAR
+      - name: parent_project_key
+        data_type: INT
+        tests:
+          - relationships:
+              to: ref('dim_project')
+              field: project_key

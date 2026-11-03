@@ -62,12 +62,13 @@ function dbmlWithMissingGoldMember(): string {
   return root;
 }
 
-async function planPath(root: string, diagram: string, model: string): Promise<{ logical?: string; fixFiles: string[] }> {
+async function planPath(root: string, diagram: string, model: string): Promise<{ logical?: string; relationships?: string; fixFiles: string[] }> {
   const ctx = await buildCliContext({ project: root, semanticDir: '.erd-studio' });
   const { result } = runDiff(ctx, { domains: [diagram] });
   const d = result.domains[0];
   return {
     logical: d.plan?.modelContext[model]?.logicalModelPath,
+    relationships: d.plan?.modelContext[model]?.relationshipsPath,
     fixFiles: [...new Set(d.fixes.filter((f) => f.model === model && f.kind === 'add-column').map((f) => f.file))],
   };
 }
@@ -78,6 +79,9 @@ describe('a sync plan puts a new table where Draw from dbt would', () => {
     const got = await planPath(root, '.erd-studio/gold/diagrams/finance.dbml', 'fct_task_event');
     expect(got.logical).toBe('.erd-studio/gold/tables/gold/fct_task_event.dbml');
     expect(got.fixFiles).toEqual(['.erd-studio/gold/tables/gold/fct_task_event.dbml']);
+    // Its new Refs: a relationships file, never the table file. silver.dbml still holds its Refs (only the
+    // table file went), so the rule's first step keeps them together there.
+    expect(got.relationships).toBe('.erd-studio/silver/relationships/silver.dbml');
   });
 
   it('DBML: the dbt custom schema\'s folder in that layer, when the developer configured one', async () => {
@@ -131,6 +135,8 @@ describe('a sync plan puts a new table where Draw from dbt would', () => {
     expect(lookups.tableLibraryFile!('dim_customer')).toBe('silver/tables/silver/dim_customer.dbml');
     expect(lookups.newTableFilePath!('brand_new')).toBe('gold/tables/gold/brand_new.dbml');
     expect(lookups.relationshipsFile!('fct_order')).toBe('silver/relationships/silver.dbml');
+    // A table with no file and no Refs yet: placed from the file it will get, its layer's default file.
+    expect(lookups.relationshipsFile!('brand_new')).toBe('gold/relationships/gold.dbml');
   });
 });
 

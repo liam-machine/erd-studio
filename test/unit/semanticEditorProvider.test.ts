@@ -3,7 +3,12 @@
  *
  * Drives the real provider with the real services over a temp copy of the
  * fixture dbt project, simulating webview messages through the vscode mock's
- * `createMockWebviewPanel`.
+ * `createMockWebviewPanel`. The dbt-facing blocks (positions, the physical
+ * stage and its guard, catalog, dbt parse, the manifest hint, Claude sync,
+ * Add models from dbt) run on both storages: `dbt-project` (YAML/JSON) and
+ * its native-DBML twin `dbt-project-dbml`. The rest are about the message
+ * boundary or the YAML library's own files and stay on `dbt-project`; their
+ * DBML counterparts are in `semanticEditorProvider.dbml.test.ts`.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -30,6 +35,7 @@ import { SelectorsService } from '../../src/services/selectorsService';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import { hostErrorLog } from '../../src/services/feedbackService';
 import { telemetry } from '../../src/services/telemetryService';
+import { DBT_FIXTURES, dbtFixtureRoot, diagramPath, tableFilePath, type DbtStorage } from './helpers/dbtFixtures';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -130,13 +136,21 @@ async function openShowcase(
   root: string,
   opts: { stripPosition?: string; clearViewConfig?: boolean; sendReady?: boolean } = {},
 ) {
-  const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
-  if (opts.stripPosition || opts.clearViewConfig) {
+  const file = showcasePath(root);
+  if ((opts.stripPosition || opts.clearViewConfig) && storageOf(root) === 'yaml') {
     const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
     if (opts.stripPosition) delete json.viewConfig.positions[opts.stripPosition];
     // What an AI assistant writes for a brand-new domain.
     if (opts.clearViewConfig) json.viewConfig = {};
     fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n');
+  } else if (opts.stripPosition || opts.clearViewConfig) {
+    // The DBML equivalents: drop the table's erd_layout line, or the whole erd_layout.
+    const text = fs.readFileSync(file, 'utf-8');
+    let next = text;
+    if (opts.stripPosition) next = next.replace(new RegExp(`^ +${opts.stripPosition} -?\\d+ -?\\d+\\n`, 'm'), '');
+    if (opts.clearViewConfig) next = next.replace(/\n  erd_layout: '''[\s\S]*?'''\n/, '\n');
+    if (next === text) throw new Error(`openShowcase: nothing to strip in ${file}`);
+    fs.writeFileSync(file, next);
   }
   const built = buildProvider(root);
   const doc = makeDoc(file);
@@ -151,6 +165,48 @@ async function openShowcase(
     await waitForType(panel, 'domainLoaded');
   }
   return { ...built, doc, panel, file };
+}
+
+// ---------------------------------------------------------------------------
+// Both storages
+// ---------------------------------------------------------------------------
+
+/** The storage of the fixture copied to `root`: the DBML twin has `<layer>/diagrams/`. */
+function storageOf(root: string): DbtStorage {
+  return fs.existsSync(path.join(root, '.erd-studio', 'silver', 'diagrams')) ? 'dbml' : 'yaml';
+}
+
+function showcasePath(root: string): string {
+  return diagramPath(root, storageOf(root), 'silver', 'showcase');
+}
+
+/**
+ * Run the enclosing describe on `fixture` instead of `dbt-project`: replaces
+ * the copy the top-level beforeEach made (an inner beforeEach runs after it).
+ */
+function useFixture(fixture: string): void {
+  if (fixture === 'dbt-project') return;
+  beforeEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.cpSync(dbtFixtureRoot(fixture), root, { recursive: true, preserveTimestamps: true });
+  });
+}
+
+/**
+ * A diagram as the services read it (members, relationships, positions), on
+ * either storage. `text` (an open document's) is written to the file first.
+ */
+function readDiagram(root: string, file: string, text?: string) {
+  if (text !== undefined) fs.writeFileSync(file, text);
+  const layerService = new LayerService(root, '.erd-studio');
+  const subjectAreaService = new SubjectAreaService(layerService);
+  subjectAreaService.setTableLibraryService(new TableLibraryService(root, '.erd-studio'));
+  const unified = subjectAreaService.getSubjectArea(file);
+  return {
+    models: unified.logical.models.map((m) => m.name),
+    relationships: unified.logical.relationships,
+    positions: (unified.viewConfig.positions ?? {}) as Record<string, { x: number; y: number }>,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -173,11 +229,19 @@ beforeEach(() => {
     // here (they use a minimal positionAt); everything else — yml createFile /
     // deleteFile and edits to documents opened via openTextDocument — goes
     // through the mock's real implementation so it reaches the filesystem.
+    // A replace may cover only part of the text (a DBML diagram's edits are
+    // minimal, its no-change edits a one-character undo anchor): the docs'
+    // positionAt returns plain offsets, so the range is spliced in by offset.
     const rest = new vscode.WorkspaceEdit();
     for (const op of edit._ops ?? []) {
       const own = op.kind === 'replace' ? docs.get(op.uri.fsPath) : undefined;
       if (own) {
-        own._setText(op.newText);
+        const start = (op.range?.start as { offset?: number } | undefined)?.offset;
+        const end = (op.range?.end as { offset?: number } | undefined)?.offset;
+        const current = own.getText();
+        own._setText(typeof start === 'number' && typeof end === 'number'
+          ? current.slice(0, start) + op.newText + current.slice(end)
+          : op.newText);
       } else {
         rest._ops.push(op);
       }
@@ -199,14 +263,15 @@ afterEach(() => {
 // H24 — auto-positioning only writes from the `ready` path
 // ---------------------------------------------------------------------------
 
-describe('auto-positioning (H24)', () => {
+describe.each(DBT_FIXTURES)('auto-positioning (H24) (%s storage)', (_storage, fixture) => {
+  useFixture(fixture);
+
   it('persists missing positions once on ready', async () => {
     const { doc, panel, file } = await openShowcase(root, { stripPosition: 'fct_order' });
 
     expect(applyEditSpy).toHaveBeenCalledTimes(1);
     expect(doc.save).toHaveBeenCalledTimes(1);
-    const onDisk = JSON.parse(fs.readFileSync(file, 'utf-8'));
-    expect(onDisk.viewConfig.positions.fct_order).toBeDefined();
+    expect(readDiagram(root, file).positions.fct_order).toBeDefined();
 
     const loaded = posted(panel).find((m) => m.type === 'domainLoaded')!;
     expect(loaded.payload.viewConfig.positions.fct_order).toBeDefined();
@@ -253,7 +318,9 @@ describe('auto-positioning (H24)', () => {
 // First-open ELK auto layout — a domain with no stored position at all
 // ---------------------------------------------------------------------------
 
-describe('first-open auto layout', () => {
+describe.each(DBT_FIXTURES)('first-open auto layout (%s storage)', (_storage, fixture) => {
+  useFixture(fixture);
+
   it('flags a fresh domain for auto layout and writes nothing on ready', async () => {
     const { doc, panel, file } = await openShowcase(root, { clearViewConfig: true, sendReady: false });
     const before = fs.readFileSync(file, 'utf-8');
@@ -291,7 +358,7 @@ describe('first-open auto layout', () => {
     const { panel, file } = await openShowcase(root, { stripPosition: 'fct_order' });
 
     expect(applyEditSpy).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(fs.readFileSync(file, 'utf-8')).viewConfig.positions.fct_order).toBeDefined();
+    expect(readDiagram(root, file).positions.fct_order).toBeDefined();
     const loaded = posted(panel).find((m) => m.type === 'domainLoaded')!;
     expect(loaded).not.toHaveProperty('autoLayout');
   });
@@ -354,10 +421,12 @@ describe('disposed panels (H24)', () => {
 // target/catalog.json reaches the physical stage (and its absence changes nothing)
 // ---------------------------------------------------------------------------
 
-describe('catalog injection', () => {
+describe.each(DBT_FIXTURES)('catalog injection (%s storage)', (_storage, fixture) => {
+  useFixture(fixture);
+
   /** Open showcase on the physical stage, optionally with a catalog reader injected. */
   async function physicalShowcase(opts: { withCatalog: boolean }) {
-    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    const file = showcasePath(root);
     const built = buildProvider(root);
     if (opts.withCatalog) {
       built.provider.setCatalogService(new CatalogService());
@@ -414,7 +483,9 @@ describe('catalog injection', () => {
 // H23 — physical stage guard & stage switching
 // ---------------------------------------------------------------------------
 
-describe('stage switching and the physical guard (H23)', () => {
+describe.each(DBT_FIXTURES)('stage switching and the physical guard (H23) (%s storage)', (_storage, fixture) => {
+  useFixture(fixture);
+
   it('echoes the requestId on stageData', async () => {
     const { panel } = await openShowcase(root);
 
@@ -655,7 +726,9 @@ describe('payload validation (H21)', () => {
 // H36 — launching Claude Code for a sync plan
 // ---------------------------------------------------------------------------
 
-describe('launchClaudeSync (H36)', () => {
+describe.each(DBT_FIXTURES)('launchClaudeSync (H36) (%s storage)', (_storage, fixture) => {
+  useFixture(fixture);
+
   async function flushMicrotasks(rounds = 20) {
     for (let i = 0; i < rounds; i++) {
       await Promise.resolve();
@@ -731,7 +804,9 @@ describe('launchClaudeSync (H36)', () => {
 // #110 — Run dbt parse from the physical stage
 // ---------------------------------------------------------------------------
 
-describe('runDbtParse (#110)', () => {
+describe.each(DBT_FIXTURES)('runDbtParse (#110) (%s storage)', (_storage, fixture) => {
+  useFixture(fixture);
+
   const savedEnv = { PATH: process.env.PATH, VIRTUAL_ENV: process.env.VIRTUAL_ENV, CONDA_PREFIX: process.env.CONDA_PREFIX };
   let binDir: string;
 
@@ -841,7 +916,9 @@ describe('exportDiagram', () => {
 // #113 — the logical stage's "Run dbt parse" hint
 // ---------------------------------------------------------------------------
 
-describe('manifestMissing hint (#113)', () => {
+describe.each(DBT_FIXTURES)('manifestMissing hint (#113) (%s storage)', (_storage, fixture) => {
+  useFixture(fixture);
+
   const removeManifest = () => fs.rmSync(path.join(root, 'target', 'manifest.json'), { force: true });
   const lastOf = (panel: MockPanel, type: string) => posted(panel).filter((m) => m.type === type).at(-1) as
     | (Posted & { manifestMissing?: boolean })
@@ -1339,8 +1416,9 @@ describe('layer folders in the edit pipeline (issue #76)', () => {
 // Add models from dbt (the empty canvas's batch add)
 // ---------------------------------------------------------------------------
 
-describe('addModelsFromDbt', () => {
-  const lib = () => path.join(root, '.erd-studio', 'logical-models');
+describe.each(DBT_FIXTURES)('addModelsFromDbt (%s storage)', (storage, fixture) => {
+  useFixture(fixture);
+
   const SILVER_MODELS = ['dim_customer', 'dim_project', 'dim_task', 'fct_order', 'fct_sale'];
 
   /** Answer the scope QuickPick with the `folder:<folder>` scope. */
@@ -1352,15 +1430,18 @@ describe('addModelsFromDbt', () => {
   }
 
   async function openEmptySubjectArea(layer: string, domain: string) {
-    const file = path.join(root, '.erd-studio', layer, `${domain}.json`);
-    fs.writeFileSync(file, JSON.stringify({
-      schemaVersion: 5,
-      domain,
-      layer,
-      description: '',
-      logical: { models: [], relationships: [] },
-      viewConfig: { positions: {} },
-    }, null, 2) + '\n');
+    const file = diagramPath(root, storage, layer, domain);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, storage === 'yaml'
+      ? JSON.stringify({
+        schemaVersion: 5,
+        domain,
+        layer,
+        description: '',
+        logical: { models: [], relationships: [] },
+        viewConfig: { positions: {} },
+      }, null, 2) + '\n'
+      : `Project ${domain} {\n  erd_schema_version: '7'\n}\n`);
     const built = buildProvider(root);
     const doc = makeDoc(file);
     const panel = vscode.createMockWebviewPanel();
@@ -1389,7 +1470,7 @@ describe('addModelsFromDbt', () => {
   });
 
   it('fills an empty domain in one edit, seeds missing library files and asks for an auto layout', async () => {
-    fs.unlinkSync(path.join(lib(), 'fct_sale.yml'));
+    fs.unlinkSync(tableFilePath(root, storage, 'fct_sale')!);
     const feature = vi.spyOn(telemetry, 'feature');
     const { panel, doc } = await openEmptySubjectArea('gold', 'reporting');
     const edits = applyEditSpy.mock.calls.length;
@@ -1401,10 +1482,13 @@ describe('addModelsFromDbt', () => {
 
     expect(lastError(panel)).toBeUndefined();
     expect(applyEditSpy.mock.calls.length).toBe(edits + 1);
-    const onDisk = JSON.parse(doc.getText());
-    expect([...onDisk.logical.models].sort()).toEqual(SILVER_MODELS);
-    const rels = onDisk.logical.relationships.map((r: any) => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`).sort();
+    const onDisk = readDiagram(root, doc.uri.fsPath, doc.getText());
+    expect([...onDisk.models].sort()).toEqual(SILVER_MODELS);
+    const rels = onDisk.relationships.map((r: any) => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`).sort();
     expect(rels).toEqual([
+      // DBML keeps every relationship in the library, so a diagram draws each Ref between its
+      // tables: also dim_project's self-reference, which the YAML fixture keeps in showcase.json.
+      ...(storage === 'dbml' ? ['dim_project.parent_project_key->dim_project.project_key'] : []),
       'dim_task.project_key->dim_project.project_key',
       'fct_order.customer_key->dim_customer.customer_key',
       'fct_order.project_key->dim_project.project_key',
@@ -1413,10 +1497,14 @@ describe('addModelsFromDbt', () => {
       'fct_sale.sale_id->dim_project.project_key',
     ]);
     // Still a fresh layout: no stored position, so the webview runs ELK.
-    for (const name of SILVER_MODELS) expect(onDisk.viewConfig.positions?.[name]).toBeUndefined();
+    for (const name of SILVER_MODELS) expect(onDisk.positions[name]).toBeUndefined();
     expect(lastLoaded(panel).autoLayout).toBe(true);
-    // Only the model missing from the library was seeded (flat library → top level).
-    expect(fs.existsSync(path.join(lib(), 'fct_sale.yml'))).toBe(true);
+    // Only the model missing from the library was seeded: flat YAML library → top level;
+    // DBML → the diagram's layer (gold), in its dbt schema's folder or the layer's.
+    const seeded = tableFilePath(root, storage, 'fct_sale');
+    expect(seeded).toBeDefined();
+    const seededRel = path.relative(path.join(root, '.erd-studio'), seeded!).split(path.sep).join('/');
+    expect(seededRel).toMatch(storage === 'yaml' ? /^logical-models\/fct_sale\.yml$/ : /^gold\/tables\/[^/]+\/fct_sale\.dbml$/);
     expect(feature).toHaveBeenCalledWith('addFromDbt');
   });
 
@@ -1424,7 +1512,7 @@ describe('addModelsFromDbt', () => {
     const { panel, doc } = await openShowcase(root);
     const edits = applyEditSpy.mock.calls.length;
     const loads = types(panel).filter((t) => t === 'domainLoaded').length;
-    const before = JSON.parse(doc.getText());
+    const before = readDiagram(root, doc.uri.fsPath);
     const spy = pickFolder('silver');
 
     panel._simulateMessage({ type: 'addModelsFromDbt', payload: {} });
@@ -1434,12 +1522,17 @@ describe('addModelsFromDbt', () => {
     const offered = (await spy.mock.calls[0][0] as any[]).find((i) => i.scope?.id === 'folder:silver');
     expect(offered.scope.modelNames).toEqual(['fct_sale']);
     expect(applyEditSpy.mock.calls.length).toBe(edits + 1);
-    const after = JSON.parse(doc.getText());
-    expect(after.logical.models).toEqual([...before.logical.models, 'fct_sale']);
-    expect(after.viewConfig.positions.fct_sale).toEqual({ x: expect.any(Number), y: expect.any(Number) });
+    const after = readDiagram(root, doc.uri.fsPath, doc.getText());
+    expect(after.models).toEqual([...before.models, 'fct_sale']);
+    expect(after.positions.fct_sale).toEqual({ x: expect.any(Number), y: expect.any(Number) });
     expect(lastLoaded(panel).autoLayout).toBeUndefined();
-    const added = after.logical.relationships.slice(before.logical.relationships.length);
-    expect(added.every((r: any) => r.fromModel === 'fct_sale' || r.toModel === 'fct_sale')).toBe(true);
+    const key = (r: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }) => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`;
+    const had = new Set(before.relationships.map(key));
+    const added = after.relationships.filter((r) => !had.has(key(r)));
+    expect(added.length).toBeGreaterThan(0);
+    expect(added.every((r) => r.fromModel === 'fct_sale' || r.toModel === 'fct_sale')).toBe(true);
+    // Everything that was there stays.
+    expect(after.relationships.map(key)).toEqual(expect.arrayContaining([...had]));
   });
 
   it('writes nothing when the picker is cancelled', async () => {

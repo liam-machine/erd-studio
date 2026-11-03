@@ -91,12 +91,23 @@ export interface SyncPlanContext {
    * Feeds each relationship's `storedIn`.
    */
   relationshipStoredIn?: (rel: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }) => string | undefined;
+  /**
+   * True when a table's file is there but does not read (a YAML or DBML
+   * error, merge conflict markers). Such a table loads with no columns and
+   * none of its Refs, so every column and relationship entry touching it is
+   * an artefact of the failed read ("add it" on one side, "remove it" on the
+   * other): they are left out of the plan and the table is listed in
+   * `unreadableTables` instead. The host passes
+   * `TableLibraryService.getTableFileError` ({@link syncPlanLibraryLookups}).
+   */
+  tableUnreadable?: (modelName: string) => boolean;
 }
 
 /** The table library calls {@link syncPlanLibraryLookups} makes. */
 export type SyncPlanLibrary = Pick<TableLibraryService,
   'tableFolder' | 'tableLibraryFile' | 'newTableLibraryDirName' | 'newTableHomeFor' | 'pathForNewTable'
-  | 'libraryRelativePath' | 'relationshipsFileForNewRef' | 'relationshipsFileHolding'>;
+  | 'libraryRelativePath' | 'relationshipsFileForNewRef' | 'relationshipsFileForNewTable' | 'relationshipsFileHolding'
+  | 'getTableFileError'>;
 
 /**
  * The library lookups of a {@link SyncPlanContext} for the diagram at
@@ -110,25 +121,35 @@ export type SyncPlanLibrary = Pick<TableLibraryService,
 export function syncPlanLibraryLookups(
   library: SyncPlanLibrary,
   where: { diagramFile: string; layerIds: ReadonlySet<string>; manifest?: ManifestData; ymlData?: YmlData },
-): Pick<SyncPlanContext, 'modelFolder' | 'tableLibraryFile' | 'newTableLibraryDir' | 'newTableFilePath' | 'relationshipsFile' | 'relationshipStoredIn'> {
+): Pick<SyncPlanContext, 'modelFolder' | 'tableLibraryFile' | 'newTableLibraryDir' | 'newTableFilePath' | 'relationshipsFile' | 'relationshipStoredIn' | 'tableUnreadable'> {
   const dbmlDiagram = subjectAreaStorageOf(where.diagramFile) === 'dbml';
   let home: ReturnType<SyncPlanLibrary['newTableHomeFor']> | null = null;
   const relative = (file: string | undefined): string | undefined => (file === undefined ? undefined : library.libraryRelativePath(file));
+  const newTableFile = (name: string): string | undefined => {
+    try {
+      if (home === null) home = library.newTableHomeFor(where.diagramFile, where.layerIds);
+      const configuredSchema = dbmlDiagram ? configuredSchemaOf(name, where.ymlData, where.manifest) : undefined;
+      return library.pathForNewTable(name, home, configuredSchema !== undefined ? { configuredSchema } : {});
+    } catch {
+      return undefined;
+    }
+  };
   return {
     modelFolder: (name) => library.tableFolder(name),
     tableLibraryFile: (name) => library.tableLibraryFile(name),
     newTableLibraryDir: library.newTableLibraryDirName(),
-    newTableFilePath: (name) => {
-      try {
-        if (home === null) home = library.newTableHomeFor(where.diagramFile, where.layerIds);
-        const configuredSchema = dbmlDiagram ? configuredSchemaOf(name, where.ymlData, where.manifest) : undefined;
-        return library.libraryRelativePath(library.pathForNewTable(name, home, configuredSchema !== undefined ? { configuredSchema } : {}));
-      } catch {
-        return undefined;
-      }
+    newTableFilePath: (name) => relative(newTableFile(name)),
+    // A table with no file yet (a diagram member the library lacks) has its
+    // new Refs placed from the DBML file it will get, so the plan and diff
+    // name a relationships file for it too, never the table file.
+    relationshipsFile: (name) => {
+      const placed = library.relationshipsFileForNewRef(name);
+      if (placed !== undefined) return relative(placed);
+      const future = library.tableLibraryFile(name) === null ? newTableFile(name) : undefined;
+      return future === undefined ? undefined : relative(library.relationshipsFileForNewTable(name, future));
     },
-    relationshipsFile: (name) => relative(library.relationshipsFileForNewRef(name)),
     relationshipStoredIn: (rel) => relative(library.relationshipsFileHolding(rel)),
+    tableUnreadable: (name) => library.getTableFileError(name) !== null,
   };
 }
 
@@ -188,6 +209,16 @@ export function buildSyncPlan(
   // Every path is project-relative with forward slashes on every platform —
   // the CLI's JSON promises that, and the Claude sync consumer reads either.
   const toSlash = (p: string): string => p.replace(/\\/g, '/');
+  // Tables whose file does not read, and whose entries were therefore left out.
+  const unreadable = new Map<string, boolean>();
+  const skipped = new Set<string>();
+  const isUnreadable = (name: string): boolean => {
+    if (!ctx.tableUnreadable) return false;
+    let known = unreadable.get(name);
+    if (known === undefined) { known = ctx.tableUnreadable(name); unreadable.set(name, known); }
+    if (known) skipped.add(name);
+    return known;
+  };
 
   for (const [key, groundTruth] of Object.entries(selections)) {
     const parts = key.split(':');
@@ -217,6 +248,7 @@ export function buildSyncPlan(
 
       const action = deriveColumnAction(colDisc.status, groundTruth, report.sourceStage);
       if (!action) continue;
+      if (isUnreadable(modelName)) continue;
 
       columns.push({
         modelName,
@@ -247,6 +279,9 @@ export function buildSyncPlan(
 
       let action = deriveRelationshipAction(relDisc.status, groundTruth, report.sourceStage);
       if (!action) continue;
+      // Evaluate both ends, so each unreadable one is listed.
+      const fromUnreadable = isUnreadable(fromModel);
+      if (isUnreadable(toModel) || fromUnreadable) continue;
       // A composite the logical model draws and dbt does not declare as one
       // (#133 L2) is not wrong in the logical model: dbt is asked to declare it.
       if (relDisc.composite && action === 'remove-relationship-from-logical') action = 'add-relationship-test-to-physical';
@@ -324,5 +359,6 @@ export function buildSyncPlan(
     columns,
     relationships,
     requiresCompile,
+    ...(skipped.size > 0 ? { unreadableTables: [...skipped].sort((a, b) => a.localeCompare(b)) } : {}),
   };
 }

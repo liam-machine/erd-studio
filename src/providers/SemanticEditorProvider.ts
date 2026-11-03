@@ -943,6 +943,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       lastDiscrepancyReport?: DiscrepancyReport | null;
       /** The target stage from the last discrepancy comparison (used to refresh after stub toggle). */
       lastCompareAgainst?: Stage;
+      /**
+       * Bumped by every Compare toggle and every stage change: a comparison
+       * still loading when it moves on is dropped, not cached or posted.
+       */
+      compareRequest?: number;
       /** The webview answered `ready` with its diagram: a reveal can be posted now. */
       loaded?: boolean;
     }
@@ -4602,7 +4607,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   async refreshAllOpenSubjectAreas(): Promise<void> {
     // Held (holdRefreshes): the command that holds redraws every canvas once it releases.
     if (this.refreshHolds > 0) { this.droppedRefreshes++; return; }
-    for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
+    for (const [panelKey, { document, webview, activeStage, lastCompareAgainst }] of Array.from(this.openPanels.entries())) {
       // The snapshot may include a panel that was disposed while an earlier
       // iteration awaited — skip it rather than refreshing a dead webview.
       if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey) || this.forgetIfGone(panelKey)) {
@@ -4613,6 +4618,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           await this.handleSwitchStage(panelKey, document, webview, 'physical');
         } else {
           await this.sendSubjectAreaData(document, webview, panelKey);
+        }
+        // An open Compare overlay is worked out again (Refresh Manifest, a new
+        // catalog, …): otherwise it, the staleness banner and the report Sync
+        // plans from would still describe the data before the refresh. Only a
+        // comparison made from the stage on screen: a stage switch closes the
+        // overlay in the webview.
+        // Read from the live entry, not the snapshot: Compare may have been
+        // closed, or the stage switched, while the redraw above awaited.
+        const live = lastCompareAgainst ? this.openPanels.get(panelKey) : undefined;
+        if (live?.lastCompareAgainst && live.lastCompareAgainst !== live.activeStage && !this.logicalOnly
+          && !this.disposedWebviews.has(webview)) {
+          await this.handleToggleDiscrepancy(panelKey, document, webview, { enabled: true, compareAgainst: live.lastCompareAgainst });
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -7188,6 +7205,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // echoing requestId so the webview accepts the reply.
       if (this.logicalOnly) { targetStage = 'logical'; }
 
+      // A stage change closes the Compare overlay in the webview (editorStore's
+      // setDomain), so the host forgets that comparison too: a later redraw
+      // must not re-run it, and Sync must not plan from it.
+      if (panel.activeStage !== targetStage) {
+        panel.lastDiscrepancyReport = null;
+        panel.lastCompareAgainst = undefined;
+        panel.compareRequest = (panel.compareRequest ?? 0) + 1;
+      }
       // Update tracked stage
       panel.activeStage = targetStage;
 
@@ -7249,6 +7274,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (panelEntry) {
         panelEntry.lastDiscrepancyReport = null;
         panelEntry.lastCompareAgainst = undefined;
+        panelEntry.compareRequest = (panelEntry.compareRequest ?? 0) + 1;
       }
       webview.postMessage({ type: 'discrepancyReport', payload: null });
       return;
@@ -7257,10 +7283,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       const panel = this.openPanels.get(panelKey);
       if (!panel) return;
+      const request = (panel.compareRequest ?? 0) + 1;
+      panel.compareRequest = request;
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const catalog = await this.loadCatalog();
+      // Compare was closed, asked again or the stage changed while those
+      // loaded: that later request owns the overlay and the cached report.
+      if (this.openPanels.get(panelKey)?.compareRequest !== request) return;
       const sourceStage = panel.activeStage;
       const targetStage = payload.compareAgainst;
 
@@ -7346,9 +7377,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const totalActions = countSyncPlanActions(syncPlan);
       if (totalActions === 0) {
+        // Everything selected touched a table whose file does not read: say
+        // so, rather than suggest the selection was empty.
+        const unreadable = syncPlan.unreadableTables ?? [];
         webview.postMessage({
           type: 'error',
-          payload: { message: 'No actionable resolutions selected.' },
+          payload: {
+            message: unreadable.length > 0
+              ? `Nothing to sync yet: ${unreadable.join(', ')} could not be read. Fix the file, then compare again.`
+              : 'No actionable resolutions selected.',
+          },
         });
         return;
       }

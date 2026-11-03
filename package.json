@@ -1292,7 +1292,7 @@
     "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json && npm run typecheck --workspaces",
     "test": "vitest run",
     "test:watch": "vitest",
-    "regen-fixtures": "tsx scripts/regen-fixtures.ts",
+    "regen-fixtures": "esbuild scripts/regen-fixtures.ts --bundle --platform=node --format=cjs --loader:.md=text --log-level=warning --outfile=scripts/.regen-fixtures.cjs && node scripts/.regen-fixtures.cjs",
     "regen:dbt-dbml-fixture": "esbuild scripts/regen-dbt-dbml-fixture.ts --bundle --platform=node --format=cjs --loader:.md=text --log-level=warning --outfile=scripts/.regen-dbt-dbml-fixture.cjs && node scripts/.regen-dbt-dbml-fixture.cjs",
     "test:e2e:dbml": "node scripts/e2e-dbml.mjs"
   },

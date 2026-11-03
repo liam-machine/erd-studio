@@ -1,10 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { allSelections, buildSyncPlan, countSyncPlanActions } from '../../src/services/syncPlanBuilder';
+import { allSelections, buildSyncPlan, countSyncPlanActions, syncPlanLibraryLookups } from '../../src/services/syncPlanBuilder';
 import { computeSubjectAreaDiff } from '../../src/services/stageDiff';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
@@ -17,9 +16,9 @@ import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvid
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { ManifestData } from '../../src/types/manifest';
 import type { YmlData } from '../../src/types/ymlData';
+import { DBT_FIXTURES, copyDbtFixture, diagramPath, tableFilePath } from './helpers/dbtFixtures';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
-const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
 
 function report(sourceStage: 'logical' | 'physical' = 'logical'): DiscrepancyReport {
   return {
@@ -100,6 +99,29 @@ describe('buildSyncPlan', () => {
       dbtSchemaPath: null,
     });
     expect(Object.keys(plan.modelContext).sort()).toEqual(['dim_customer', 'dim_extra', 'dim_missing', 'dim_store', 'fct_order']);
+  });
+
+  it('leaves out every column and relationship entry of a table whose file does not read, either way round', () => {
+    // fct_order's file failed to read: every difference about it is an artefact of that.
+    const tableUnreadable = (name: string) => name === 'fct_order';
+    for (const truth of ['physical', 'logical'] as const) {
+      const plan = buildSyncPlan(report(), allSelections(report(), truth), { ...ctx, tableUnreadable });
+      expect(plan.columns.filter((c) => c.modelName === 'fct_order'), truth).toEqual([]);
+      expect(plan.relationships.filter((r) => r.fromModel === 'fct_order' || r.toModel === 'fct_order'), truth).toEqual([]);
+      expect(plan.unreadableTables, truth).toEqual(['fct_order']);
+      // Entries about other tables stay.
+      const whole = buildSyncPlan(report(), allSelections(report(), truth), ctx);
+      expect(plan.models, truth).toEqual(whole.models);
+      expect(plan.columns, truth).toEqual(whole.columns.filter((c) => c.modelName !== 'fct_order'));
+      expect(whole.columns.some((c) => c.modelName === 'fct_order'), truth).toBe(true);
+    }
+    // A relationship whose other end does not read is left out too, and that end is listed.
+    const dimUnreadable = buildSyncPlan(report(), allSelections(report(), 'physical'), { ...ctx, tableUnreadable: (n: string) => n === 'dim_store' });
+    expect(dimUnreadable.relationships.map((r) => r.toModel)).toEqual(['dim_customer']);
+    expect(dimUnreadable.unreadableTables).toEqual(['dim_store']);
+    // Every table read: no field.
+    expect(buildSyncPlan(report(), allSelections(report(), 'physical'), { ...ctx, tableUnreadable: () => false })).not.toHaveProperty('unreadableTables');
+    expect(buildSyncPlan(report(), allSelections(report(), 'physical'), ctx)).not.toHaveProperty('unreadableTables');
   });
 
   it('a composite resolution carries its pairs and is selected by a joined key (#133 L2)', () => {
@@ -190,11 +212,10 @@ describe('buildSyncPlan', () => {
   });
 });
 
-describe('SemanticEditorProvider.handleGenerateSyncPlan parity', () => {
+describe.each(DBT_FIXTURES)('SemanticEditorProvider.handleGenerateSyncPlan parity (%s storage)', (storage, fixture) => {
   it('writes exactly the plan buildSyncPlan builds for the same selections', async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-plan-builder-'));
+    const tmp = copyDbtFixture(fixture, 'sync-plan-builder');
     try {
-      fs.cpSync(FIXTURE_ROOT, tmp, { recursive: true });
       const layerService = new LayerService(tmp, '.erd-studio');
       const subjectAreaService = new SubjectAreaService(layerService);
       const tableLibraryService = new TableLibraryService(tmp, '.erd-studio');
@@ -214,7 +235,7 @@ describe('SemanticEditorProvider.handleGenerateSyncPlan parity', () => {
         layerService, tmp, new SelectorsService(subjectAreaService, tmp, '.erd-studio'), tableLibraryService,
       );
 
-      const file = path.join(tmp, '.erd-studio', 'silver', 'showcase.json');
+      const file = diagramPath(tmp, storage, 'silver', 'showcase');
       const text = fs.readFileSync(file, 'utf-8');
       const doc = {
         uri: vscode.Uri.file(file), isDirty: false, isClosed: false,
@@ -244,8 +265,18 @@ describe('SemanticEditorProvider.handleGenerateSyncPlan parity', () => {
       const expected = buildSyncPlan(shown, selections, {
         manifest, ymlData, projectRoot: tmp, semanticDir: '.erd-studio', domain: 'showcase', layer: 'silver',
         now: new Date(written.generatedAt),
+        // The same library lookups the canvas and the CLI pass (where each table's file is, or goes).
+        ...syncPlanLibraryLookups(tableLibraryService, {
+          diagramFile: file, layerIds: new Set(layerService.getAllLayers().map((l) => l.id)), manifest, ymlData,
+        }),
       });
       expect(written).toEqual(JSON.parse(JSON.stringify(expected)));
+      // Each existing table's path is its own storage's file (yml on YAML, tables/<schema>/x.dbml on DBML).
+      const held = Object.entries(written.modelContext as Record<string, { logicalModelPath?: string }>)
+        .map(([name, c]) => [name, c.logicalModelPath, tableFilePath(tmp, storage, name)] as const)
+        .filter(([, , onDisk]) => onDisk !== undefined);
+      expect(held.length).toBeGreaterThan(0);
+      for (const [, planned, onDisk] of held) expect(planned).toBe(path.relative(tmp, onDisk!).split(path.sep).join('/'));
       expect(posted().find((m) => m.type === 'syncPlanGenerated')!.payload.totalActions).toBe(countSyncPlanActions(expected));
 
       // And the CLI route — computeSubjectAreaDiff + allSelections — sees the same report.

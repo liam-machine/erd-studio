@@ -66,7 +66,7 @@ describe('doctor', () => {
     expect(r.runtime.kind).toBe('node');
     expect(r.artifacts.manifest.path).toBe('target/manifest.json');
     expect(['ok', 'stale']).toContain(r.artifacts.manifest.status);
-    expect(r.artifacts.manifest.models).toBe(4);
+    expect(r.artifacts.manifest.models).toBe(5);
     expect(r.artifacts.catalog.path).toBe('target/catalog.json');
     expect(r.artifacts.catalog.nodes).toBe(5);
     expect(r.erd.semanticDirExists).toBe(true);

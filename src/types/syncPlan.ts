@@ -184,6 +184,12 @@ export interface SyncPlan {
   relationships: RelationshipResolution[];
   /** True if any action targets the physical side (dbt files), meaning dbt compile is needed after. */
   requiresCompile: boolean;
+  /**
+   * Tables whose file does not read: their column and relationship entries
+   * are left out, since they only reflect the failed read. Fix each file and
+   * compare again. Absent when every table read.
+   */
+  unreadableTables?: string[];
 }
 
 // ---------------------------------------------------------------------------

@@ -1219,6 +1219,31 @@ export class TableLibraryService {
   }
 
   /**
+   * Where a new Ref of `tableName` goes when it has no table file yet but
+   * will get the DBML one at `newFilePath` (absolute, or relative to the
+   * semantic dir; `pathForNewTable`'s answer): the same `placeNewRef` rule
+   * {@link relationshipsFileForNewRef} uses, from the layer and schema that
+   * path names: a file already holding Refs of it, else its schema's own
+   * file when that exists, else its layer's default file, which may not
+   * exist yet. Absolute; undefined when the table has a file (ask
+   * {@link relationshipsFileForNewRef}), the path is not a DBML table file,
+   * or the files do not read.
+   */
+  relationshipsFileForNewTable(tableName: string, newFilePath: string): string | undefined {
+    try {
+      if (this.findTableFile(tableName) !== null || !isDbmlFile(newFilePath)) return undefined;
+      const rel = path.isAbsolute(newFilePath) ? this.semanticRelative(newFilePath) : newFilePath.replace(/\\/g, '/');
+      const kind = classifySemanticFile(rel, { tablesDirIsLayer: this.tablesDirIsLayer() });
+      if (kind.kind !== 'table') return undefined;
+      const layer = kind.layer ?? this.defaultDbmlLayer();
+      const placed = placeNewRef({ table: tableName, layer, ...(kind.schema !== undefined ? { schema: kind.schema } : {}) }, this.relationshipsIndex()).file;
+      return this.semanticAbsolute(placed);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * {@link relationshipsFileForNewRef} for several tables, reading the
    * relationships files and the table list once: lower-case name → absolute
    * file. A YAML table, or a name with no table, is left out.

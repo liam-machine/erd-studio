@@ -46,13 +46,21 @@ for each difference. Your job is to execute those choices.
 ```
 
 Key fields:
-- **modelContext**: File paths for every model referenced — use these to locate files to edit. `logicalModelPath` is the table's file (a `.dbml` table file, or a `.yml` in a project from before 2.0, or the path a new one gets); `relationshipsPath`, present only for a DBML table, is the relationships file where a **new** Ref of this foreign-key table goes. A relationship entry that is already stored carries `storedIn`, the relationships file that holds its Ref: change or remove it there
+- **modelContext**: File paths for every model referenced — use these to locate files to edit. `logicalModelPath` is the table's file (a `.dbml` table file, or a `.yml` in a project from before 2.0, or the path a new one gets); `relationshipsPath`, present only for a DBML table (one whose file does not exist yet too), is the relationships file where a **new** Ref of this foreign-key table goes. For a DBML table with no `relationshipsPath` (a plan written by an older ERD Studio), put a new Ref of it where the DBML guide's "Where a new Ref goes" puts one for a table with no Refs, its schema's own `<layer>/relationships/<schema>.dbml` when that file exists, else its layer's default file `<layer>/relationships/<layer>.dbml` (the layer of its `logicalModelPath`), created when missing. A relationship entry that is already stored carries `storedIn`, the relationships file that holds its Ref: change or remove it there
 - **models/columns/relationships**: Arrays of resolved discrepancies with concrete actions
 - **requiresCompile**: If `true`, run `dbt compile` after making physical-side changes
+- **unreadableTables** (present only when there are some): tables whose file does not read (a DBML or YAML error, git conflict markers). Their column and relationship entries are left out of the plan, because a table that fails to read loads with no columns and no Refs, and every difference about it is an artefact of that. Never add or remove anything for them from this plan: tell the user, fix each file first (`erd-studio doctor` gives the line), then compare again
 - **resolvedDataType**: The type to WRITE. Always use this for the two
   `update-type-*` actions. `sourceDataType` / `targetDataType` are named for the
   comparison direction, so which of them holds the ground-truth value flips when
   the plan was generated from the physical stage — `resolvedDataType` never does.
+  When `resolvedDataType` is empty, the ground truth declares no type: there is
+  nothing to write, so skip the entry (Compare keeps showing it as advisory).
+- **The cardinality to write** (`add-relationship-to-logical` and the two
+  `update-cardinality-*` actions) is the ground truth's: `sourceCardinality`
+  when the entry's `groundTruth` is the plan's `sourceStage`, else
+  `targetCardinality`. Like the two data types, those fields are named for the
+  comparison direction, not for a stage.
 
 ## Action Reference
 
@@ -69,12 +77,12 @@ Write each change in the format of the file it touches (the schema skill's "What
 |--------|-----------|
 | `add-to-logical` | Add a `use { table <schema>.<name> } from '…'` line for the table to the diagram (and a `use * from '…'` line for every relationships file holding a Ref between it and another table of the diagram, when the diagram lacks it), and create the table file at `logicalModelPath` from manifest data unless a file for that name already exists in any folder. Copy the dbt `meta` keys the team's metadata list names, reading them from the schema yml or `erd-studio inventory`, not from the manifest (the schema skill's "The team's metadata list") |
 | `remove-from-logical` | Delete the table's `use` line from the diagram and its line in the diagram's `erd_layout`, and any `use *` line only it needed. The table file and its Refs stay |
-| `add-column-to-logical` | Add a column line to the Table block in `logicalModelPath` (`name TYPE [note: '…']`), with the dbt column `meta` keys the team's metadata list names |
-| `remove-column-from-logical` | Delete the column's line from `logicalModelPath`, and every Ref in a relationships file that names it |
+| `add-column-to-logical` | Add a column line to the Table block in `logicalModelPath` (`name TYPE [note: '…']`), with the dbt column `meta` keys the team's metadata list names. When there is no file at `logicalModelPath` yet (a table the diagram lists with no table file: its `use` line points there), create it first as `Table <schema>.<name> {` … `}`, the schema its folder (`<layer>/tables/<schema>/`), and add every column the plan has for it |
+| `remove-column-from-logical` | Delete the column's line from `logicalModelPath`, and every Ref in a relationships file that names it (a later `remove-relationship-from-logical` entry for one of those Refs then has nothing left to do) |
 | `update-type-in-logical` | Change the column's type in `logicalModelPath` to `resolvedDataType` (double-quoted when it is not a plain identifier: `"DECIMAL(18,2)"`) |
-| `add-relationship-to-logical` | When the entry has `storedIn`, the Ref is already there: leave it, and add a `use * from '…'` line for `storedIn` to the diagram (that missing import is why it is not drawn). Otherwise add one Ref line to `relationshipsPath` of the many-side (FK) table — `Ref: s.fk_table.fk_col >? s.pk_table.pk_col` for many-to-one, `Ref: s.pk_table.pk_col ?- s.fk_table.fk_col` for one-to-one, `<>?` for many-to-many, each end spelled as its table declares itself — plus a `use { table s.x }` line there for each table it names that the file does not import, and a `use * from '…'` line for that file in every diagram that shows both tables and lacks it. A `one-to-many` is written from the other end as `>?` |
+| `add-relationship-to-logical` | When the entry has `storedIn`, the Ref is already there: leave it, and add a `use * from '…'` line for `storedIn` to the diagram (that missing import is why it is not drawn). Otherwise add one Ref line, for the cardinality to write, to `relationshipsPath` of the many-side (FK) table (none: see Key fields) — `Ref: s.fk_table.fk_col >? s.pk_table.pk_col` for many-to-one, `Ref: s.pk_table.pk_col ?- s.fk_table.fk_col` for one-to-one, `<>?` for many-to-many, each end spelled as its table declares itself — plus a `use { table s.x }` line there for each table it names that the file does not import, and a `use * from '…'` line for that file in every diagram that shows both tables and lacks it. A `one-to-many` is written from the other end as `>?` |
 | `remove-relationship-from-logical` | Delete the matching Ref line from the relationships file that holds it (`storedIn`). Leave the `use` lines; a diagram's `use *` line for a file that no longer holds a Ref between its tables can go (doctor: `extraRelationshipsUse`) |
-| `update-cardinality-in-logical` | Rewrite the matching Ref's operator to `targetCardinality`, in place in `storedIn`; a change to `one-to-many` turns it round: `>?` from the other end, in the same file |
+| `update-cardinality-in-logical` | Rewrite the matching Ref to the cardinality to write (see Key fields), in place in `storedIn`, with the operator and end order of `add-relationship-to-logical` (one-to-one: the key end first, `?-`); a change to `one-to-many` turns it round: `>?` from the other end, in the same file |
 
 **Legacy (a `.yml` table or `.json` diagram, projects from before 2.0):**
 
@@ -82,12 +90,12 @@ Write each change in the format of the file it touches (the schema skill's "What
 |--------|-----------|
 | `add-to-logical` | Add model name to domain JSON `logical.models[]` + create the model file from manifest data at `logicalModelPath` — `logical-models/{layer}/{name}.yml` (the plan's `layer`) when the project uses layer folders, else `logical-models/{name}.yml` — unless a file for that name already exists in any folder. Copy the dbt `meta` keys the team's metadata list names, as above |
 | `remove-from-logical` | Remove model name from domain JSON `logical.models[]` + remove related relationships from `logical.relationships[]` |
-| `add-column-to-logical` | Add column to the model's yml (`modelContext[name].logicalModelPath`) columns array, with the dbt column `meta` keys the team's metadata list names |
+| `add-column-to-logical` | Add column to the model's yml (`modelContext[name].logicalModelPath`) columns array, with the dbt column `meta` keys the team's metadata list names; when there is no file there yet, create it (`name: <model>` and `columns:`) first |
 | `remove-column-from-logical` | Remove column from the model's yml (`logicalModelPath`) |
 | `update-type-in-logical` | Update column `dataType` in the model's yml (`logicalModelPath`) to the value in `resolvedDataType` |
-| `add-relationship-to-logical` | Add the relationship (fromModel/fromColumn/toModel/toColumn from the action) where the project keeps relationships — the many-side (FK) model's YAML `relationships:` or domain JSON `logical.relationships[]` (see "Where relationships live"). A `one-to-many` is written with its ends swapped as `many-to-one`, in the other model's file |
+| `add-relationship-to-logical` | Add the relationship (fromModel/fromColumn/toModel/toColumn from the action, with the cardinality to write) where the project keeps relationships — the many-side (FK) model's YAML `relationships:` or domain JSON `logical.relationships[]` (see "Where relationships live"). A `one-to-many` is written with its ends swapped as `many-to-one`, in the other model's file |
 | `remove-relationship-from-logical` | Remove the matching relationship from wherever it is defined — the many-side (FK) model's YAML `relationships:` (either end's file, for one written before this rule) or domain JSON `logical.relationships[]` |
-| `update-cardinality-in-logical` | Update `cardinality` on the matching relationship, wherever it is defined, to `targetCardinality`. In a model YAML, a change to `one-to-many` moves the entry: take it out, swap the ends and add it to the other model's file as `many-to-one` |
+| `update-cardinality-in-logical` | Update `cardinality` on the matching relationship, wherever it is defined, to the cardinality to write (see Key fields). In a model YAML, a change to `one-to-many` moves the entry: take it out, swap the ends and add it to the other model's file as `many-to-one` |
 
 ### Physical-side actions (edit dbt project files)
 
@@ -100,7 +108,7 @@ Write each change in the format of the file it touches (the schema skill's "What
 | `update-type-in-physical` | Update column casting in dbt SQL or `data_type` in schema YAML to `resolvedDataType` |
 | `add-relationship-test-to-physical` | Add `relationships` test to dbt schema YAML (see format below) |
 | `remove-relationship-test-from-physical` | Remove the `relationships` test from dbt schema YAML |
-| `update-cardinality-in-physical` | Add/remove `unique` test on FK column in dbt schema YAML to match target cardinality |
+| `update-cardinality-in-physical` | Add/remove `unique` test on FK column in dbt schema YAML to match the cardinality to write (see Key fields): add it for `one-to-one`, remove it for `many-to-one`. A `one-to-many` has its FK at the other end (`toModel`.`toColumn`, the column carrying the `relationships` test): remove any `unique` test there. A `many-to-many` cannot be expressed by a dbt `relationships` test: skip the entry and tell the user (Compare keeps showing it) |
 
 ## dbt Relationship Test Format
 
@@ -135,4 +143,4 @@ models:
 - **Cascade deletions**: When removing a model from a JSON domain, also remove the domain JSON's relationships referencing it. When renaming or deleting a table or column, update every Ref (DBML) or model YAML `relationships:` entry that points at it
 - **Column ordering**: When adding columns, append them after the table's last column (before its `indexes` block in DBML; to the end of the columns array in YAML)
 
-<!-- erd-studio-harness: 42 -->
+<!-- erd-studio-harness: 43 -->

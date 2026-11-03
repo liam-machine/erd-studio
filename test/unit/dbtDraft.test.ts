@@ -32,8 +32,10 @@ import type { YmlData, YmlModelInfo } from '../../src/types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../../src/types/manifest';
 import type { CatalogData, CatalogNodeInfo } from '../../src/types/catalog';
 import type { UnifiedSubjectArea } from '../../src/types/semantic';
+import { DBT_FIXTURES, dbtFixtureRoot } from './helpers/dbtFixtures';
 
-const ROOT = path.resolve(__dirname, '../fixtures/dbt-project');
+// The dbt side (models/, target/) of the dbt fixture, in both storages: the
+// logical model's storage must not change what dbt offers or how it seeds.
 
 // ---------------------------------------------------------------------------
 // Hand-made fixtures
@@ -152,14 +154,16 @@ describe('listDraftScopes', () => {
     expect(scopes[2].suggestedLayer).toBe('silver');
   });
 
-  it('reads the fixture project (yml + manifest)', async () => {
+  it.each(DBT_FIXTURES)('reads the fixture project (yml + manifest, %s storage)', async (_storage, fixture) => {
+    const ROOT = dbtFixtureRoot(fixture);
     const ymlData = await new YmlParserService().loadYmlData(ROOT);
     const manifest = await new ManifestService({ parseInProcess: true }).loadManifest(ROOT);
     const scopes = listDraftScopes({ ymlData, manifest, projectRoot: ROOT, modelPaths: ['models'], includeClusters: false });
     expect(scopes.map((s) => s.id)).toEqual(['folder:gold', 'folder:silver', 'folder:staging']);
     // dim_region has only a .sql file — nothing to copy — so it is not offered.
     expect(scopes.flatMap((s) => s.modelNames)).not.toContain('dim_region');
-    expect(scopes.find((s) => s.id === 'folder:staging')!.modelNames).toEqual(['stg_raw_payments']);
+    // The manifest-only staging models form the staging scope, once each, in manifest order.
+    expect(scopes.find((s) => s.id === 'folder:staging')!.modelNames).toEqual(['stg_raw_payments', 'stg_raw_refunds']);
   });
 });
 
@@ -309,7 +313,8 @@ describe('seedTableFromDbt — column types from catalog.json', () => {
     expect(draft.newModels[0].columns!.map((x) => x.dataType)).toEqual(['NUMBER(38,0)', 'NUMBER(38,0)', '']);
   });
 
-  it('seeds the fixture project with the same types the physical stage shows', async () => {
+  it.each(DBT_FIXTURES)('seeds the fixture project with the same types the physical stage shows (%s storage)', async (_storage, fixture) => {
+    const ROOT = dbtFixtureRoot(fixture);
     const ymlData = await new YmlParserService().loadYmlData(ROOT);
     const manifest = await new ManifestService({ parseInProcess: true }).loadManifest(ROOT);
     const catalog = await new CatalogService().loadCatalog(ROOT);
