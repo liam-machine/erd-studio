@@ -825,7 +825,12 @@
         },
         {
           "command": "erdStudio.openRelationshipSource",
-          "when": "view == erdStudio.relationships && viewItem == relationship",
+          "when": "view == erdStudio.relationships && viewItem == relationship && erdStudio.relationshipsGrouping != file",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.relationships && viewItem == relationship && erdStudio.relationshipsGrouping == file",
           "group": "inline"
         },
         {

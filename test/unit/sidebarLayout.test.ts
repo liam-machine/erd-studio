@@ -103,16 +103,18 @@ describe('sidebar views', () => {
   it('offer Open in Diagram and Open in File on Relationships rows, never in the palette', () => {
     const items = contributes.menus['view/item/context'];
     const entries = (command: string) => items.filter((m) => m.command === command).map((m) => [m.group, m.when]);
-    // A relationship row's click already opens the diagram, so its icon is the other way in: the file.
+    // A relationship row's click follows the grouping (by file: the file; by table: a diagram),
+    // so its icon is always the other way in.
     expect(entries('erdStudio.openInDiagram')).toEqual([
       // A Table Library table too: its click opens its file, so the diagram is the icon.
       ['inline', 'view == erdStudio.modelLibrary && viewItem == logicalModel'],
       ['navigation@0', 'view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate|ReadOnly)?$/'],
       ['inline', 'view == erdStudio.relationships && viewItem == relationshipsTable'],
+      ['inline', 'view == erdStudio.relationships && viewItem == relationship && erdStudio.relationshipsGrouping == file'],
       ['navigation@1', 'view == erdStudio.relationships && viewItem =~ /^(relationship|relationshipsTable)$/'],
     ]);
     expect(entries('erdStudio.openRelationshipSource')).toEqual([
-      ['inline', 'view == erdStudio.relationships && viewItem == relationship'],
+      ['inline', 'view == erdStudio.relationships && viewItem == relationship && erdStudio.relationshipsGrouping != file'],
       ['navigation@2', 'view == erdStudio.relationships && viewItem == relationship'],
     ]);
     for (const command of ['erdStudio.openInDiagram', 'erdStudio.openRelationshipSource']) {

@@ -236,6 +236,20 @@ describe('Relationships view actions', () => {
     expect(d.revealRelationship).not.toHaveBeenCalled();
   });
 
+  it('lists every diagram that shows both tables, then the file the relationship is saved in', async () => {
+    // Both diagrams draw the relationship: it is saved once, so the last choice opens that file.
+    const d = deps({ memberNames: () => ['fct_order', 'dim_customer'], relationshipLocation: () => ({ filePath: '/p/.erd-studio/gold/relationships/gold.dbml', line: 7 }) });
+    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string }>) => items[items.length - 1]) as never);
+    await openInDiagram(await relationshipNode(), d, { fallBackToFile: true });
+    const items = pick.mock.calls[0][0] as Array<{ label: string; description?: string }>;
+    expect(items.map((i) => i.label)).toEqual(['sales', 'crm', '$(go-to-file) Open in File']);
+    expect(items[2].description).toBe('gold/relationships/gold.dbml, line 7');
+    expect(String((pick.mock.calls[0][1] as { placeHolder: string }).placeHolder)).toBe('2 diagrams show both "fct_order" and "dim_customer". Open which?');
+    expect(exec.mock.calls[0][0]).toBe('vscode.open');
+    expect((exec.mock.calls[0][1] as vscode.Uri).fsPath).toBe('/p/.erd-studio/gold/relationships/gold.dbml');
+    expect(d.revealRelationship).not.toHaveBeenCalled();
+  });
+
   it('says so when no diagram shows both tables', async () => {
     const info = vi.spyOn(vscode.window, 'showInformationMessage');
     await openInDiagram(await relationshipNode(), deps({ memberNames: () => ['fct_order'] }));
@@ -378,7 +392,9 @@ describe('RelationshipsTreeProvider: grouped by relationships file', () => {
     expect(refs.map((r) => r.label)).toEqual(['link_order → hub_customer', 'link_order → hub_order']);
     expect(refs[0].description).toBe('customer_hk · N:1 · placed by');
     expect(refs[1].description).toBe('order_hk · N:1');
-    expect(refs[0].command).toMatchObject({ command: 'erdStudio.openInDiagram', arguments: [expect.anything(), { fallBackToFile: true }] });
+    // Grouped by file, a click opens the file at the Ref's line (grouped by table, a diagram).
+    expect(refs[0].command).toMatchObject({ command: 'erdStudio.openRelationshipSource', arguments: [expect.anything()] });
+    expect(String((refs[0].tooltip as vscode.MarkdownString).value)).toContain('Click to open it in its file');
     expect(refs[0].contextValue).toBe('relationship');
   });
 
@@ -626,15 +642,15 @@ describe('RelationshipsTreeProvider: compact rows (the default) and its own colo
     const provider = vault();
     expect(provider.headerTotal()).toBeUndefined();
     await provider.getChildren();
-    expect(provider.headerTotal()).toBe('5 relationships');
+    expect(provider.headerTotal()).toBe('5 relationships · by table');
     provider.setFilter('pit_customer');
     await provider.getChildren();
-    expect(provider.headerTotal()).toBe('5 relationships');
+    expect(provider.headerTotal()).toBe('5 relationships · by table');
     const one = new RelationshipsTreeProvider(libraryWith([
       table('a', ['id']), table('b', ['a_id'], [{ fromColumn: 'a_id', toModel: 'a', toColumn: 'id', cardinality: 'many-to-one' }]),
     ]) as unknown as TableLibraryService, noDiagrams, '/p', '.erd-studio');
     await one.getChildren();
-    expect(one.headerTotal()).toBe('1 relationship');
+    expect(one.headerTotal()).toBe('1 relationship · by table');
     const none = new RelationshipsTreeProvider(libraryWith([table('a', ['id'])]) as unknown as TableLibraryService, noDiagrams, '/p', '.erd-studio');
     await none.getChildren();
     expect(none.headerTotal()).toBeUndefined();

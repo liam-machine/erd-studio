@@ -277,7 +277,8 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
   /** The view's total beside its title (`11 relationships`); undefined when none, or before the first listing. */
   headerTotal(): string | undefined {
     const total = this.overview?.entries.length ?? 0;
-    return total > 0 ? plural(total, 'relationship') : undefined;
+    // The grouping is named in the header, so it is clear how the rows are arranged.
+    return total > 0 ? `${plural(total, 'relationship')} · by ${this.grouping === 'file' ? 'file' : 'table'}` : undefined;
   }
 
   /** The overview the view shows, computed afresh (reading unread table files first). */
@@ -721,8 +722,9 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
       label: `${entry.fromModel} ${columnList(entry.fromColumns)} to ${entry.toModel} ${columnList(entry.toColumns)}, ${entry.cardinality.replace(/-/g, ' ')}${problem ? `, ${describeProblem(problem)}` : ''}`,
     };
     item.contextValue = 'relationship';
-    // A problem is fixed in the file; any other row shows the line on a diagram.
-    item.command = side === 'problem'
+    // A click follows the grouping: grouped by file, it opens the file at the Ref's line;
+    // grouped by table, the line on a diagram. A problem is fixed in the file either way.
+    item.command = side === 'problem' || this.grouping === 'file'
       ? { command: 'erdStudio.openRelationshipSource', title: 'Open in File', arguments: [element] }
       : { command: 'erdStudio.openInDiagram', title: 'Open in Diagram', arguments: [element, { fallBackToFile: true }] };
     return item;
@@ -767,6 +769,9 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
         ? `Stored in \`${this.shownPath(at.filePath)}\` (line ${at.line}), with its foreign-key table ${entry.source.table}`
         : `Kept with the table ${entry.source.table}`);
     for (const problem of entry.problems) lines.push('', `$(warning) ${describeProblem(problem)}`);
+    lines.push('', this.grouping === 'file' || entry.problems.length > 0
+      ? 'Click to open it in its file; **Open in Diagram** is on the row and its right-click menu.'
+      : 'Click to show it on a diagram; **Open in File** is on the row and its right-click menu.');
     const md = new vscode.MarkdownString(lines.join('\n'));
     md.supportThemeIcons = true;
     return md;
