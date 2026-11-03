@@ -252,6 +252,14 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     this.members = diagramMembers ?? new DiagramMembers();
   }
 
+  /** Whether the open folder is a dbt project: only then do tooltips mention dbt. */
+  private hasDbtProject = true;
+
+  /** Set once at activation from `dbt_project.yml` (the `erdStudio.hasDbtProject` context key's source). */
+  setHasDbtProject(hasDbtProject: boolean): void {
+    this.hasDbtProject = hasDbtProject;
+  }
+
   refresh(): void {
     this._onDidChangeTreeData.fire(undefined);
   }
@@ -366,7 +374,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       item.iconPath = new vscode.ThemeIcon('error');
       item.description = '(duplicate — ignored)';
       item.tooltip = `Another file already defines "${element.name}" and is the one diagrams use:\n${element.shadowedBy}\n\n` +
-        'Table names are unique across all folders, as dbt model names are. Use "Give Duplicate Table Its Own Name" ' +
+        `Table names are unique across all folders${this.hasDbtProject ? ', as dbt model names are' : ''}. Use "Give Duplicate Table Its Own Name" ` +
         `to make this copy "${this.duplicateSuggestion(element)}" with the warehouse name (alias) "${element.name}".`;
       item.accessibilityInformation = { label: `${element.name}, duplicate, ignored` };
       item.resourceUri = vscode.Uri.file(element.filePath);

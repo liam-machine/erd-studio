@@ -80,6 +80,12 @@ export type ColumnAction =
 
 export interface ColumnResolution {
   modelName: string;
+  /**
+   * The column's name. On an `add-column-to-logical` for a column neither the
+   * schema yml nor the manifest declares (only `catalog.json` reports it), the
+   * spelling to write: an ALL-CAPS warehouse name lowercased, as Draw from dbt
+   * seeds it (`LOADED_AT` → `loaded_at`). Compare matches names in any case.
+   */
   columnName: string;
   discrepancyStatus: 'extra' | 'missing' | 'type-mismatch' | 'undeclared';
   groundTruth: GroundTruth;
@@ -153,7 +159,13 @@ export interface TableContext {
    * for a YAML table.
    */
   relationshipsPath?: string;
-  /** Relative path to the dbt SQL file (from manifest originalFilePath). Null if not in manifest. */
+  /**
+   * The model's `.sql` file, project-relative, only when it is on disk (the
+   * manifest's `original_file_path`, else `<name>.sql` found under the model
+   * paths). Null when there is none: a model declared only in a schema yml, a
+   * Python model, or a file deleted, renamed or moved outside the model
+   * paths since the last compile.
+   */
   dbtSqlPath: string | null;
   /** Relative path to the dbt schema YAML. Null if not determinable. */
   dbtSchemaPath: string | null;
@@ -184,6 +196,12 @@ export interface SyncPlan {
   relationships: RelationshipResolution[];
   /** True if any action targets the physical side (dbt files), meaning dbt compile is needed after. */
   requiresCompile: boolean;
+  /**
+   * Tables whose file does not read: their column and relationship entries
+   * are left out, since they only reflect the failed read. Fix each file and
+   * compare again. Absent when every table read.
+   */
+  unreadableTables?: string[];
 }
 
 // ---------------------------------------------------------------------------

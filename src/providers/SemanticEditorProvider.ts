@@ -73,8 +73,9 @@ import {
   unimportedRelationshipsMessage,
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
-import { buildSyncPlan, countSyncPlanActions } from '../services/syncPlanBuilder';
-import { findVenvActivate } from '../services/dbtEnv';
+import { buildSyncPlan, countSyncPlanActions, syncPlanLibraryLookups } from '../services/syncPlanBuilder';
+import { findVenvActivate, findVenvDir } from '../services/dbtEnv';
+import { claudeTerminalLaunch } from './GettingStartedPanel';
 import { runDbtParse } from '../commands/runDbtParse';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND } from '../commands/importDbml';
@@ -91,7 +92,6 @@ import {
   classifySemanticFile,
   computeMissingPositions,
   diagramPathOf,
-  isDbmlLayerName,
   isErdLayoutName,
   subjectAreaStorageOf,
   SubjectAreaValidationError,
@@ -172,6 +172,7 @@ import {
   markDraftKeys,
   relationshipsForAddedTables,
   seedTableFromDbt,
+  seededColumnCount,
   configuredSchemaOf,
   type DraftSkipped,
 } from '../services/dbtDraft';
@@ -344,14 +345,26 @@ const DRAFT_SKIP_WORDS: Partial<Record<DraftSkipped['reason'], string>> = {
 };
 
 /**
- * One sentence naming the chosen models a batch "Add models from dbt" left
- * out, or `''` when nothing worth mentioning was. Duplicates and models
- * already in the domain are the expected case and are not listed.
+ * {@link DRAFT_SKIP_WORDS} in a folder without dbt (logical only), where a
+ * pick from the Table Library that has no table file is simply not there.
  */
-export function describeSkippedDbtModels(skipped: readonly DraftSkipped[]): string {
+const LOGICAL_DRAFT_SKIP_WORDS: Partial<Record<DraftSkipped['reason'], string>> = {
+  ...DRAFT_SKIP_WORDS,
+  'not-found': 'not in the Table Library',
+};
+
+/**
+ * One sentence naming the chosen models a batch "Add models from dbt" (or
+ * a batch pick from the Table Library) left out, or `''` when nothing worth
+ * mentioning was. Duplicates and models already in the domain are the
+ * expected case and are not listed. `logicalOnly` (no dbt project): the
+ * reasons are worded without dbt.
+ */
+export function describeSkippedDbtModels(skipped: readonly DraftSkipped[], options: { logicalOnly?: boolean } = {}): string {
+  const words = options.logicalOnly ? LOGICAL_DRAFT_SKIP_WORDS : DRAFT_SKIP_WORDS;
   const parts = skipped
-    .filter((s) => DRAFT_SKIP_WORDS[s.reason])
-    .map((s) => `${s.name} (${DRAFT_SKIP_WORDS[s.reason]})`);
+    .filter((s) => words[s.reason])
+    .map((s) => `${s.name} (${words[s.reason]})`);
   if (parts.length === 0) return '';
   const shown = parts.slice(0, 5).join(', ');
   return `Left out: ${shown}${parts.length > 5 ? ` and ${parts.length - 5} more` : ''}.`;
@@ -932,6 +945,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       lastDiscrepancyReport?: DiscrepancyReport | null;
       /** The target stage from the last discrepancy comparison (used to refresh after stub toggle). */
       lastCompareAgainst?: Stage;
+      /**
+       * Bumped by every Compare toggle and every stage change: a comparison
+       * still loading when it moves on is dropped, not cached or posted.
+       */
+      compareRequest?: number;
       /** The webview answered `ready` with its diagram: a reveal can be posted now. */
       loaded?: boolean;
     }
@@ -1066,7 +1084,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
     const domain = this.subjectAreaService.getSubjectArea(document.uri.fsPath);
     const { existingModels, manifestModels } = this.buildWebviewPayload(
-      { models: domain.logical.models }, manifest, ymlData, domain.modelFolder, { readAllTables: true },
+      { models: domain.logical.models }, manifest, ymlData, domain.modelFolder,
+      { readAllTables: true, catalog: await this.loadCatalog() },
     );
     this.post(webview, { type: 'existingTables', payload: { existingModels, manifestModels } });
   }
@@ -1192,7 +1211,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     manifest: ManifestData,
     ymlData: YmlData,
     modelFolder?: string,
-    options: { readAllTables?: boolean } = {},
+    options: { readAllTables?: boolean; catalog?: CatalogData } = {},
   ): {
     templates: ReturnType<TemplateService['loadTemplates']>;
     manifestModels: Array<{
@@ -1236,6 +1255,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     });
 
+    // A dbt model's count is what adding it gives the table
+    // (`seedTableFromDbt`): its declared columns plus the ones only the
+    // catalog has. The cached catalog when the caller has none to hand.
+    const catalog = 'catalog' in options ? options.catalog : this.catalogService?.peekCatalog();
+
     // 2. dbt .yml source file models (declared in dbt project)
     for (const [name, ymlModel] of ymlData.models) {
       if (existingModelNames.has(name) || addedNames.has(name)) continue;
@@ -1244,7 +1268,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         name,
         schema: manifestModel?.schema ?? '',
         description: ymlModel.description || manifestModel?.description || '',
-        columnCount: ymlModel.columns.length,
+        columnCount: seededColumnCount(name, ymlModel.columns, manifestModel, catalog),
         source: 'yml',
         sourcePath: path.relative(this.workspaceRoot, ymlModel.filePath),
       });
@@ -1268,7 +1292,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         name: m.name,
         schema: m.schema,
         description: m.description,
-        columnCount: m.columns.length,
+        columnCount: seededColumnCount(m.name, m.columns, m, catalog),
         source: 'manifest',
         // Honours a custom `target-path` — the literal 'target/manifest.json'
         // this replaced was wrong for any project that sets one.
@@ -1407,7 +1431,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const current = path.basename(this.workspaceRoot);
     const webview = webviewPanel.webview;
     const nonce = crypto.randomBytes(16).toString('base64');
-    webview.options = { enableScripts: Boolean(owner), localResourceRoots: [] };
+    // A plain (logical-only) window: nothing about dbt applies, even when the
+    // file sits in a dbt project elsewhere, so the page and the toast say only
+    // that it is in another folder or project, and offer no Switch (selecting a
+    // dbt project needs a dbt project in this window's folders).
+    const plainWindow = this.logicalOnly;
+    const outsideFolder = plainWindow && !owner;
+    const switchable = owner !== undefined && !plainWindow;
+    webview.options = { enableScripts: switchable, localResourceRoots: [] };
     webview.html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1416,10 +1447,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
 </head>
 <body style="font-family: var(--vscode-font-family, sans-serif); padding: 24px; color: var(--vscode-foreground); max-width: 44em; line-height: 1.5;">
-  <h2 style="margin-top: 0;">This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>
+  ${outsideFolder ? `<h2 style="margin-top: 0;">This diagram is outside <code>${esc(current)}</code></h2>
+  <p>ERD Studio has <code>${esc(current)}</code> open in this window and draws only the diagrams in that folder.
+  Open this file\u2019s folder to edit it here.</p>` : plainWindow && owner ? `<h2 style="margin-top: 0;">This diagram is in <code>${esc(path.basename(owner))}</code>, another project</h2>
+  <p>ERD Studio has <code>${esc(current)}</code> open in this window and draws only that project\u2019s diagrams.
+  Open <code>${esc(path.basename(owner))}</code> to edit it here.</p>` : `<h2 style="margin-top: 0;">This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>
   <p>ERD Studio has <code>${esc(current)}</code> open in this window, and a window shows one dbt project at a time.
-  Drawing this file here would mix its tables with the wrong project\u2019s dbt data.</p>
-  ${owner ? `<p><button id="switch" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
+  Drawing this file here would mix its tables with the wrong project\u2019s dbt data.</p>`}
+  ${switchable && owner ? `<p><button id="switch" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
     background: var(--vscode-button-background); color: var(--vscode-button-foreground);">Switch ERD Studio to ${esc(path.basename(owner))}</button></p>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -1429,13 +1464,31 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 </html>`;
 
     const name = path.basename(filePath);
-    if (!owner) {
-      // Not a dead end (#205): the file still opens as text, and another project can be picked.
+    if (plainWindow && owner) {
       void vscode.window.showWarningMessage(
-        `ERD Studio: ${name} isn't inside a dbt project, so ERD Studio can't draw it with ${current}'s dbt data.`,
+        `ERD Studio: ${name} is in ${path.basename(owner)}, another project, so ERD Studio can't draw it in ${current}.`,
         OPEN_AS_TEXT_BUTTON,
-        SELECT_DBT_PROJECT_BUTTON,
       ).then(choice => {
+        if (choice === OPEN_AS_TEXT_BUTTON) {
+          void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), 'default');
+        }
+      });
+      return;
+    }
+    if (!owner) {
+      // Not a dead end (#205): the file still opens as text, and (in a dbt
+      // project) another project can be picked.
+      const shown = outsideFolder
+        ? vscode.window.showWarningMessage(
+          `ERD Studio: ${name} is outside ${current}, the folder open in this window, so ERD Studio can't draw it here.`,
+          OPEN_AS_TEXT_BUTTON,
+        )
+        : vscode.window.showWarningMessage(
+          `ERD Studio: ${name} isn't inside a dbt project, so ERD Studio can't draw it with ${current}'s dbt data.`,
+          OPEN_AS_TEXT_BUTTON,
+          SELECT_DBT_PROJECT_BUTTON,
+        );
+      void shown.then(choice => {
         if (choice === OPEN_AS_TEXT_BUTTON) {
           void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), 'default');
         } else if (choice === SELECT_DBT_PROJECT_BUTTON) {
@@ -2389,23 +2442,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * opted into layer folders (see `groupsByFolder`).
    */
   private newTableFolder(domainFilePath: string): string | DbmlTableHome | undefined {
-    const diagram = diagramPathOf(domainFilePath);
-    if (diagram !== undefined && subjectAreaStorageOf(domainFilePath) === 'dbml') {
-      return { layer: diagram.layer, schema: this.tableLibraryService.schemaAsListed(diagram.layer, diagram.layer) };
-    }
-    const layer = tableFolderForSubjectArea(domainFilePath);
-    if (this.tableLibraryService.writesDbml() && isDbmlLayerName(layer)
-      && this.layerService.getAllLayers().some((l) => l.id === layer)) {
-      return { layer, schema: this.tableLibraryService.schemaAsListed(layer, layer) };
-    }
-    return this.newYamlTableFolder(domainFilePath);
+    // One rule with the sync plan's new-table paths (syncPlanLibraryLookups).
+    return this.tableLibraryService.newTableHomeFor(domainFilePath, new Set(this.layerService.getAllLayers().map((l) => l.id)));
   }
 
-  /** {@link newTableFolder} for a JSON diagram's YAML table: the layer folder, or undefined for the top level. */
+  /** {@link newTableFolder} for a JSON diagram's YAML table: the layer folder, or undefined for the top level (the same rule, `yamlTableFolderFor`). */
   private newYamlTableFolder(domainFilePath: string): string | undefined {
-    const layer = tableFolderForSubjectArea(domainFilePath);
-    const layerIds = new Set(this.layerService.getAllLayers().map((l) => l.id));
-    return layerIds.has(layer) && this.tableLibraryService.groupsByFolder(layerIds) ? layer : undefined;
+    return this.tableLibraryService.yamlTableFolderFor(domainFilePath, new Set(this.layerService.getAllLayers().map((l) => l.id)));
   }
 
   /**
@@ -4572,7 +4615,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   async refreshAllOpenSubjectAreas(): Promise<void> {
     // Held (holdRefreshes): the command that holds redraws every canvas once it releases.
     if (this.refreshHolds > 0) { this.droppedRefreshes++; return; }
-    for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
+    for (const [panelKey, { document, webview, activeStage, lastCompareAgainst }] of Array.from(this.openPanels.entries())) {
       // The snapshot may include a panel that was disposed while an earlier
       // iteration awaited — skip it rather than refreshing a dead webview.
       if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey) || this.forgetIfGone(panelKey)) {
@@ -4583,6 +4626,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           await this.handleSwitchStage(panelKey, document, webview, 'physical');
         } else {
           await this.sendSubjectAreaData(document, webview, panelKey);
+        }
+        // An open Compare overlay is worked out again (Refresh Manifest, a new
+        // catalog, …): otherwise it, the staleness banner and the report Sync
+        // plans from would still describe the data before the refresh. Only a
+        // comparison made from the stage on screen: a stage switch closes the
+        // overlay in the webview.
+        // Read from the live entry, not the snapshot: Compare may have been
+        // closed, or the stage switched, while the redraw above awaited.
+        const live = lastCompareAgainst ? this.openPanels.get(panelKey) : undefined;
+        if (live?.lastCompareAgainst && live.lastCompareAgainst !== live.activeStage && !this.logicalOnly
+          && !this.disposedWebviews.has(webview)) {
+          await this.handleToggleDiscrepancy(panelKey, document, webview, { enabled: true, compareAgainst: live.lastCompareAgainst });
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -6468,7 +6523,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (!this.tableLibraryService.tableExists(payload.modelName)) {
           const seed = seedTableFromDbt(payload.modelName, ymlData, manifest, await this.loadCatalog());
           if (!seed) {
-            webview.postMessage({ type: 'error', payload: { message: `Table "${payload.modelName}" not found in your dbt .yml files, the manifest or the table library.` } });
+            webview.postMessage({ type: 'error', payload: { message: this.logicalOnly
+              ? `Table "${payload.modelName}" is not in the Table Library.`
+              : `Table "${payload.modelName}" not found in your dbt .yml files, the manifest or the table library.` } });
             return;
           }
           seededModel = { ...seed, name: payload.modelName };
@@ -6536,7 +6593,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (!ymlModel && !manifestModel) {
         webview.postMessage({
           type: 'error',
-          payload: { message: `Table "${payload.modelName}" not found in your dbt .yml files or the manifest.` },
+          payload: { message: this.logicalOnly
+            ? `Table "${payload.modelName}" is not in the Table Library.`
+            : `Table "${payload.modelName}" not found in your dbt .yml files or the manifest.` },
         });
         return;
       }
@@ -6765,7 +6824,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // without a word. The dbt picker leaves those out up front.
       const alreadyIn = fromDbt ? [] : draft.skipped.filter((s) => s.reason === 'already-in-domain').map((s) => s.name);
       const skippedNote = [
-        describeSkippedDbtModels(draft.skipped),
+        describeSkippedDbtModels(draft.skipped, { logicalOnly: this.logicalOnly }),
         alreadyIn.length > 0 ? `Already in this diagram: ${alreadyIn.slice(0, 5).join(', ')}${alreadyIn.length > 5 ? ` and ${alreadyIn.length - 5} more` : ''}.` : '',
       ].filter(Boolean).join(' ');
       if (draft.modelNames.length === 0) {
@@ -7154,6 +7213,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // echoing requestId so the webview accepts the reply.
       if (this.logicalOnly) { targetStage = 'logical'; }
 
+      // A stage change closes the Compare overlay in the webview (editorStore's
+      // setDomain), so the host forgets that comparison too: a later redraw
+      // must not re-run it, and Sync must not plan from it.
+      if (panel.activeStage !== targetStage) {
+        panel.lastDiscrepancyReport = null;
+        panel.lastCompareAgainst = undefined;
+        panel.compareRequest = (panel.compareRequest ?? 0) + 1;
+      }
       // Update tracked stage
       panel.activeStage = targetStage;
 
@@ -7215,6 +7282,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (panelEntry) {
         panelEntry.lastDiscrepancyReport = null;
         panelEntry.lastCompareAgainst = undefined;
+        panelEntry.compareRequest = (panelEntry.compareRequest ?? 0) + 1;
       }
       webview.postMessage({ type: 'discrepancyReport', payload: null });
       return;
@@ -7223,10 +7291,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       const panel = this.openPanels.get(panelKey);
       if (!panel) return;
+      const request = (panel.compareRequest ?? 0) + 1;
+      panel.compareRequest = request;
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const catalog = await this.loadCatalog();
+      // Compare was closed, asked again or the stage changed while those
+      // loaded: that later request owns the overlay and the cached report.
+      if (this.openPanels.get(panelKey)?.compareRequest !== request) return;
       const sourceStage = panel.activeStage;
       const targetStage = payload.compareAgainst;
 
@@ -7301,27 +7374,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         semanticDir,
         domain: (parsed.domain as string | undefined) ?? '',
         layer: (parsed.layer as string | undefined) ?? '',
-        modelFolder: (name) => this.tableLibraryService.tableFolder(name),
-        tableLibraryFile: (name) => this.tableLibraryService.tableLibraryFile(name),
-        newTableLibraryDir: this.tableLibraryService.newTableLibraryDirName(),
-        newTableFilePath: (name) => {
-          try { return this.tableLibraryService.libraryRelativePath(this.tableLibraryService.pathForNewTable(name)); } catch { return undefined; }
-        },
-        relationshipsFile: (name) => {
-          const file = this.tableLibraryService.relationshipsFileForNewRef(name);
-          return file === undefined ? undefined : this.tableLibraryService.libraryRelativePath(file);
-        },
-        relationshipStoredIn: (rel) => {
-          const file = this.tableLibraryService.relationshipsFileHolding(rel);
-          return file === undefined ? undefined : this.tableLibraryService.libraryRelativePath(file);
-        },
+        // The CLI's lookups (diff): a new table goes where one created from this diagram goes.
+        ...syncPlanLibraryLookups(this.tableLibraryService, {
+          diagramFile: document.uri.fsPath,
+          layerIds: new Set(this.layerService.getAllLayers().map((l) => l.id)),
+          manifest,
+          ymlData,
+        }),
       });
 
       const totalActions = countSyncPlanActions(syncPlan);
       if (totalActions === 0) {
+        // Everything selected touched a table whose file does not read: say
+        // so, rather than suggest the selection was empty.
+        const unreadable = syncPlan.unreadableTables ?? [];
         webview.postMessage({
           type: 'error',
-          payload: { message: 'No actionable resolutions selected.' },
+          payload: {
+            message: unreadable.length > 0
+              ? `Nothing to sync yet: ${unreadable.join(', ')} could not be read. Fix the file, then compare again.`
+              : 'No actionable resolutions selected.',
+          },
         });
         return;
       }
@@ -7374,27 +7447,48 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * `erdStudio.claudeSync.skipPermissions` setting is enabled (default off),
    * because it lets Claude edit files in the workspace without asking.
    *
-   * The prompt is typed into the Claude TUI after a short delay; if the user
-   * closes the terminal in the meantime the send is skipped rather than
-   * throwing "Terminal has already been disposed" inside the timer.
+   * The prompt is Claude Code's initial-prompt argument (`claude "<prompt>"`,
+   * built by `claudeTerminalLaunch`, the launcher Open Claude Code uses), never
+   * text typed into its TUI after a delay: on a first run Claude Code shows
+   * its folder-trust prompt with "No, exit" preselected, where typed text is
+   * lost and its newline would confirm the highlighted option.
    */
   private async handleLaunchClaudeSync(): Promise<void> {
     const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
     const skipPermissions = getErdStudioSetting<boolean>('claudeSync.skipPermissions', false) === true;
     const planPath = `${semanticDir}/.sync-plan.json`;
-    const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read .claude/skills/erd-studio/SYNC.md for the action reference and follow the execution steps.`;
+    const syncGuide = '.claude/skills/erd-studio/SYNC.md';
+    const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read ${syncGuide} for the action reference and follow the execution steps.`;
 
-    const claudeCommand = skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude';
-    const activate = findVenvActivate(this.workspaceRoot);
-    const launchCommand = activate ? `${activate} && ${claudeCommand}` : claudeCommand;
+    // Without the AI helper files the prompt names a guide that isn't there,
+    // and Claude Code goes looking for it across the disk. Offer the setup
+    // instead of launching.
+    if (!fs.existsSync(path.join(this.workspaceRoot, syncGuide))) {
+      const SETUP = 'Set Up My AI Helper';
+      const pick = await vscode.window.showWarningMessage(
+        'Claude Code needs ERD Studio\'s AI helper files to apply the sync plan.',
+        { modal: true, detail: `${syncGuide} is missing. Set Up My AI Helper installs it (choose Claude Code), then run Execute with Claude again. The plan stays at ${planPath}.` },
+        SETUP,
+      );
+      if (pick === SETUP) {
+        await vscode.commands.executeCommand('erdStudio.setupAiHelper');
+      }
+      return;
+    }
+
+    const launch = claudeTerminalLaunch('claude', process.platform, {
+      prompt,
+      args: skipPermissions ? ['--dangerously-skip-permissions'] : [],
+      venvDir: findVenvDir(this.workspaceRoot),
+    });
 
     const detail = skipPermissions
-      ? `Command: ${claudeCommand}\n\n` +
+      ? `Command: ${launch.display}\n\n` +
         'The --dangerously-skip-permissions flag lets Claude Code edit files in this workspace ' +
         'without asking for confirmation. Set "erdStudio.claudeSync.skipPermissions" to false to keep the permission prompts.'
-      : `Command: ${claudeCommand}\n\n` +
-        'Claude Code will ask before editing files. Enable "erdStudio.claudeSync.skipPermissions" ' +
-        'to run unattended with --dangerously-skip-permissions.';
+      : `Command: ${launch.display}\n\n` +
+        'Claude Code asks before editing files unless your own Claude Code settings allow edits. ' +
+        'Enable "erdStudio.claudeSync.skipPermissions" in your user settings to run unattended with --dangerously-skip-permissions.';
     const LAUNCH = 'Launch';
     const choice = await vscode.window.showWarningMessage(
       `Launch Claude Code in a terminal to execute the sync plan at ${planPath}?`,
@@ -7405,25 +7499,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       return;
     }
 
+    if (launch.kind === 'process') {
+      vscode.window.createTerminal({
+        name: 'ERD Studio Sync', cwd: this.workspaceRoot, shellPath: launch.shellPath, shellArgs: launch.shellArgs, env: launch.env,
+      }).show();
+      return;
+    }
     const terminal = vscode.window.createTerminal({
       name: 'ERD Studio Sync',
       cwd: this.workspaceRoot,
     });
     terminal.show();
-    terminal.sendText(launchCommand);
-    const CLAUDE_TUI_INIT_DELAY_MS = 2000;
-    setTimeout(() => {
-      try {
-        if (!isTerminalAlive(terminal)) {
-          log.warn('[SemanticEditorProvider] Claude sync terminal closed before the prompt could be sent.');
-          return;
-        }
-        terminal.sendText(prompt);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        log.warn(`[SemanticEditorProvider] Failed to send sync prompt to terminal: ${message}`);
-      }
-    }, CLAUDE_TUI_INIT_DELAY_MS);
+    terminal.sendText(launch.line);
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {
@@ -7485,15 +7572,4 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
 function isTypedMessage(value: unknown): value is { type: string } {
   return typeof value === 'object' && value !== null && 'type' in value && typeof (value as Record<string, unknown>).type === 'string';
-}
-
-/**
- * True while a terminal is still open and its process has not exited.
- * `exitStatus` is set when the shell exits; a closed terminal also drops out of
- * `window.terminals`. Either signal means `sendText` would throw.
- */
-function isTerminalAlive(terminal: vscode.Terminal): boolean {
-  if (terminal.exitStatus !== undefined) return false;
-  const open = vscode.window.terminals;
-  return Array.isArray(open) ? open.includes(terminal) : true;
 }

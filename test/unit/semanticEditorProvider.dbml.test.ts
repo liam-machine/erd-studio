@@ -122,12 +122,13 @@ interface Run {
 }
 
 /** Open `diagram` on the canvas, send `message`, and report what happened. */
-async function run(message: unknown, diagram = 'gold/diagrams/sales.dbml', prepare?: () => void): Promise<Run> {
+async function run(message: unknown, diagram = 'gold/diagrams/sales.dbml', prepare?: () => void, logicalOnly = false): Promise<Run> {
   const tracker = new OwnWriteTracker();
   const recorded: string[] = [];
   vi.spyOn(tracker, 'recordWrite').mockImplementation((p: string) => { recorded.push(relOf(p)); });
   vi.spyOn(tracker, 'recordDelete').mockImplementation((p: string) => { recorded.push(relOf(p)); });
   const { provider } = buildProvider(tracker);
+  if (logicalOnly) provider.setLogicalOnly(true);
   const document = createMockTextDocument(at(diagram), fs.readFileSync(at(diagram), 'utf-8'), { persist: true });
   (vscode.workspace.textDocuments as unknown[]).push(document);
   const panel = createMockWebviewPanel();
@@ -948,6 +949,12 @@ describe('messages name the project\'s own table library', () => {
   it('adding a table found nowhere says so without naming logical-models/', async () => {
     const r = await run({ type: 'addExistingModel', payload: { modelName: 'dim_nowhere' } });
     expect(r.errors).toEqual(['Table "dim_nowhere" not found in your dbt .yml files, the manifest or the table library.']);
+  });
+
+  it('in a folder without dbt the same message names only the Table Library', async () => {
+    const r = await run({ type: 'addExistingModel', payload: { modelName: 'dim_nowhere' } }, undefined, undefined, true);
+    expect(r.errors).toEqual(['Table "dim_nowhere" is not in the Table Library.']);
+    expect(r.errors.join(' ')).not.toMatch(/dbt|manifest/i);
   });
 });
 

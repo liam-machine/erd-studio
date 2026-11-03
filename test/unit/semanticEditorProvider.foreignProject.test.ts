@@ -120,6 +120,29 @@ describe('opening a domain file from another dbt project', () => {
     await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: file }), 'default'));
   });
 
+  it('a plain (logical-only) folder says the file is outside it, with no dbt wording and no Select dbt Project', async () => {
+    const plain = path.join(root, 'plain');
+    fs.cpSync(path.join(FIXTURE_ROOT, '.erd-studio'), path.join(plain, '.erd-studio'), { recursive: true });
+    const stray = path.join(root, 'stray');
+    fs.cpSync(path.join(FIXTURE_ROOT, '.erd-studio'), path.join(stray, '.erd-studio'), { recursive: true });
+    const file = path.join(stray, '.erd-studio', 'silver', 'showcase.json');
+    warn.mockResolvedValueOnce('Open as Text' as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    const provider = buildProvider(plain);
+    provider.setLogicalOnly(true);
+
+    const panel = await openIn(provider, file);
+
+    expect(panel.webview.html).toContain('This diagram is outside <code>plain</code>');
+    expect(panel.webview.html).not.toMatch(/dbt/i);
+    expect(warn).toHaveBeenCalledWith(
+      "ERD Studio: showcase.json is outside plain, the folder open in this window, so ERD Studio can't draw it here.",
+      'Open as Text',
+    );
+    expect(String(warn.mock.calls[0][0])).not.toMatch(/dbt/i);
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: file }), 'default'));
+  });
+
   it("still opens this project's own domain files normally", async () => {
     const panel = await openIn(buildProvider(active), path.join(active, '.erd-studio', 'silver', 'showcase.json'));
 
@@ -148,5 +171,28 @@ describe('a project folder without dbt_project.yml (#111)', () => {
     const panel = await openIn(buildProvider(standalone), path.join(other, '.erd-studio', 'silver', 'showcase.json'));
 
     expect(panel.webview.html).toContain('belongs to the <code>datamodels</code> dbt project');
+  });
+
+  it('a plain (logical-only) window says a dbt project\'s file is in another project, with no dbt wording and no Switch', async () => {
+    const standalone = standaloneIn(path.join(root, 'diagrams'));
+    const file = path.join(other, '.erd-studio', 'silver', 'showcase.json');
+    warn.mockResolvedValueOnce('Open as Text' as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    const provider = buildProvider(standalone);
+    provider.setLogicalOnly(true);
+
+    const panel = await openIn(provider, file);
+
+    expect(panel.webview.html).toContain('This diagram is in <code>datamodels</code>, another project');
+    expect(panel.webview.html).not.toMatch(/dbt/i);
+    expect(panel.webview.html).not.toContain('id="switch"');
+    expect(panel.webview.options).toMatchObject({ enableScripts: false });
+    expect(warn).toHaveBeenCalledWith(
+      "ERD Studio: showcase.json is in datamodels, another project, so ERD Studio can't draw it in diagrams.",
+      'Open as Text',
+    );
+    expect(String(warn.mock.calls[0][0])).not.toMatch(/dbt/i);
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: file }), 'default'));
+    expect(exec).not.toHaveBeenCalledWith('erdStudio.selectDbtProject', expect.anything());
   });
 });

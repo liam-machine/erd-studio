@@ -136,8 +136,12 @@ export function edge(pts, { color = COLORS.logical, progress = 1, width = 3, one
   return `<svg class="abs" style="left:0;top:0;overflow:visible;opacity:${opacity}" width="1" height="1"><path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linejoin="round" ${dashAttr}/>${marks}</svg>`;
 }
 
-/** Canvas toolbar: domain name + layer badge, Logical/Physical tabs, ⊕/⊘ Diff button. */
-export function toolbar({ x, y, domain = 'orders', layer = 'GLD', stage = 'logical', diff = 'off', layout = null, t = 0, style = '' }) {
+/**
+ * Canvas toolbar: domain name + layer badge, Logical/Physical tabs, ⊕/⊘ Diff button.
+ * A folder without dbt (`logicalOnly`) has no stage tabs and no Diff (Toolbar.tsx renders
+ * neither); `add` draws the "+ Add ▾" menu button (`'open'` while its menu shows).
+ */
+export function toolbar({ x, y, domain = 'orders', layer = 'GLD', stage = 'logical', diff = 'off', layout = null, t = 0, style = '', logicalOnly = false, add = null }) {
   const tab = (s, label, icon = '') => `<span class="tb__tab${stage === s ? ` tb__tab--${s}` : ''}">${icon}${label}</span>`;
   // The real button reads "⊕ Diff" while off and "⊘ Diff" while the comparison is showing
   // (webview/components/Toolbar/Toolbar.tsx); drawn as SVG so the glyphs never fall back to a system font.
@@ -146,9 +150,15 @@ export function toolbar({ x, y, domain = 'orders', layer = 'GLD', stage = 'logic
   const layoutBtn = layout
     ? `<span class="tb__diff${layout === 'busy' ? ' tb__diff--busy' : ''}">${layout === 'busy' ? spinner(t, 20, '#cfe3ff') : '<svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h16"/></svg>'}Layout</span>`
     : '';
+  const addBtn = add
+    ? `<span class="tb__diff${add === 'open' ? ' tb__diff--busy' : ''}">+ Add<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>`
+    : '';
+  if (logicalOnly) {
+    return `<div class="tb" style="left:${x}px;top:${y}px;${style}"><span class="tb__domain">${domain}</span><span class="badge badge--${layer === 'SLV' ? 'slv' : 'gld'}">${layer}</span>${layoutBtn}${addBtn}</div>`;
+  }
   return `<div class="tb" style="left:${x}px;top:${y}px;${style}"><span class="tb__domain">${domain}</span><span class="badge badge--${layer === 'SLV' ? 'slv' : 'gld'}">${layer}</span>
     <span class="tb__tabs">${tab('logical', 'Logical')}${tab('physical', 'Physical', stage === 'physical' ? ICON.lock({ size: 18 }) : '')}</span>
-    <span class="tb__diff${diff !== 'off' ? ` tb__diff--${diff}` : ''}">${diffIcon}Diff</span>${layoutBtn}</div>`;
+    <span class="tb__diff${diff !== 'off' ? ` tb__diff--${diff}` : ''}">${diffIcon}Diff</span>${layoutBtn}${addBtn}</div>`;
 }
 
 /** Mouse pointer at (x, y); `press` 0..1 draws the click ripple. */

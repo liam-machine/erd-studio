@@ -1,0 +1,49 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:04.524
+Your data model, as a diagram, saved as plain files in your repo.
+
+2
+00:00:04.574 --> 00:00:07.061
+No AI, and nothing to configure.
+
+3
+00:00:07.511 --> 00:00:12.035
+Install ERD Studio, and open the folder your data model lives in.
+
+4
+00:00:12.085 --> 00:00:14.399
+The Get started guide opens by itself.
+
+5
+00:00:14.849 --> 00:00:17.417
+Click New Diagram, and give it a name.
+
+6
+00:00:20.049 --> 00:00:22.684
+Add a table, with starter columns if you like.
+
+7
+00:00:22.734 --> 00:00:25.655
+Add another, then link the two with a relationship.
+
+8
+00:00:29.049 --> 00:00:34.667
+Each table is a plain DBML file in your repo, to commit and review like code.
+
+9
+00:00:35.449 --> 00:00:39.543
+Already have DBML? Import it, and export back any time.
+
+10
+00:00:40.649 --> 00:00:43.501
+Want grain, keys and the why behind each table?
+
+11
+00:00:43.551 --> 00:00:48.968
+Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.
+
+12
+00:00:49.949 --> 00:00:54.523
+ERD Studio is free. Install it, and draw your data model today.

@@ -100,6 +100,16 @@ export interface ConvertReviewOptions {
   unsaved?: (relPath: string) => boolean;
   /** This run already ran Migrate Subject Areas to the Central Table Library, and these diagrams are still v4. */
   v4StepRan?: boolean;
+  /** Whether the open folder is a dbt project; default true. Without one, no hint names a dbt command. */
+  hasDbt?: boolean;
+}
+
+/** The last sentence of the "Kept as missing" hint: Add from dbt only exists in a dbt project. */
+function keptMissingNextStep(one: boolean, hasDbt: boolean): string {
+  const it = one ? 'it' : 'them';
+  return hasDbt
+    ? `Create ${it} later with Add from dbt.`
+    : `Give ${one ? 'it a table file' : 'each a table file'} later, or remove ${it} from the diagram.`;
 }
 
 /** The v4 → v5 command, by its title in the palette. */
@@ -158,7 +168,7 @@ export function buildConvertReview(plan: DbmlConversionPlan, options: ConvertRev
     id: 'missing',
     title: 'Kept as missing on their diagrams',
     count: missingTables,
-    ...(plan.keptMissing.length > 0 ? { hint: `${missingTables === 1 ? 'This table has' : 'These tables have'} no table file. ${missingTables === 1 ? 'It stays on its diagram' : `They stay on ${plan.keptMissing.length === 1 ? 'their diagram' : 'their diagrams'}`}, drawn as missing exactly as before. Create ${missingTables === 1 ? 'it' : 'them'} later with Add from dbt.` } : {}),
+    ...(plan.keptMissing.length > 0 ? { hint: `${missingTables === 1 ? 'This table has' : 'These tables have'} no table file. ${missingTables === 1 ? 'It stays on its diagram' : `They stay on ${plan.keptMissing.length === 1 ? 'their diagram' : 'their diagrams'}`}, drawn as missing exactly as before. ${keptMissingNextStep(missingTables === 1, options.hasDbt !== false)}` } : {}),
     items: plan.keptMissing.map((k) => ({ path: display(k.diagram), text: k.tables.join(', ') })),
   };
   const summaryOf = (): string => {

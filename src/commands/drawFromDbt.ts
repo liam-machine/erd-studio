@@ -78,8 +78,10 @@ const TITLE = 'Draw from dbt';
 /**
  * Shown when no model has columns to draw. `listDraftModels` takes a model's
  * columns from its schema yml, else the manifest — which is a compiled copy
- * of the same yml, so running dbt adds none. catalog.json only fills in the
- * types of those columns, never adds one.
+ * of the same yml, so running dbt adds none. catalog.json fills in the types
+ * and adds the columns only the warehouse has to a model that is drawn
+ * (`seedTableFromDbt`, so it matches the Physical tab), but never makes a
+ * model with no declared columns drawable.
  */
 export const NO_DBT_MODELS_MESSAGE =
   'No dbt models with columns found. Draw from dbt reads the columns listed in your schema .yml files — ' +

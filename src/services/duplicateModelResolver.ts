@@ -71,11 +71,24 @@ export function planDuplicateFix(
   return { name, folder, newName, alias: existingAlias || name, repoint, keep };
 }
 
-/** Modal text for a plan. */
-export function describeDuplicateFix(plan: DuplicateFixPlan, fromLabel: string, toLabel: string): string {
+/**
+ * The input box prompt of "Give Duplicate Table Its Own Name". dbt wording
+ * only in a dbt project (`hasDbt`); a plain folder gets the same rule in
+ * neutral words. `warehouseName` is the alias the copy keeps.
+ */
+export function duplicateNamePrompt(warehouseName: string, hasDbt: boolean): string {
+  return hasDbt
+    ? `Table names are unique, as dbt model names are. The warehouse table name stays "${warehouseName}" (set as the table's alias).`
+    : `Table names are unique across the library. The warehouse name stays "${warehouseName}" (set as the table's alias).`;
+}
+
+/** Modal text for a plan. `hasDbt` false (a plain folder) leaves dbt out of it. */
+export function describeDuplicateFix(plan: DuplicateFixPlan, fromLabel: string, toLabel: string, hasDbt = true): string {
   const lines = [
     `${fromLabel} → ${toLabel}`,
-    `The table becomes "${plan.newName}" with alias: ${plan.alias}, so dbt still builds a table called ${plan.alias}.`,
+    hasDbt
+      ? `The table becomes "${plan.newName}" with alias: ${plan.alias}, so dbt still builds a table called ${plan.alias}.`
+      : `The table becomes "${plan.newName}" with alias: ${plan.alias}, so the warehouse name stays ${plan.alias}.`,
   ];
   if (plan.repoint.length > 0) {
     lines.push('', `Repointed to ${plan.newName} (${plan.folder} diagrams):`);

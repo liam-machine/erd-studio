@@ -25,7 +25,7 @@ import type { ColumnPair } from '@erd-studio/core';
 import { usePathBetween } from '@erd-studio/core/dbml';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
 import { detectLegacyDbmlTree, legacyDbmlTreeMessage } from '../services/legacyDbmlTree';
-import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
+import { allSelections, buildSyncPlan, syncPlanLibraryLookups } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
 
 export type FixKind =
@@ -409,6 +409,11 @@ export function fixesFromPlan(
 
   for (const r of plan.relationships) {
     if (phantomNames.has(r.fromModel) || phantomNames.has(r.toModel)) { continue; }
+    // A relationship to a table whose file does not read is meaningless too:
+    // a DBML Ref to it drops out when the relationships file is attached, so
+    // it would read as "add it" and an assistant would write a duplicate Ref.
+    // Its fix-model-yaml / fix-dbml-file comes first, on either storage.
+    if (unreadableNames.has(r.fromModel) || unreadableNames.has(r.toModel)) { continue; }
     const rel = { fromModel: r.fromModel, fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn };
     const link = `${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn}`;
     // A composite foreign key (#133 L2) is one fix for all its pairs, stored
@@ -615,20 +620,13 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
     semanticDir: ctx.semanticDir,
     domain: unified.domain,
     layer: unified.layer,
-    modelFolder: (name) => ctx.tableLibraryService.tableFolder(name),
-    tableLibraryFile: (name) => ctx.tableLibraryService.tableLibraryFile(name),
-    newTableLibraryDir: ctx.tableLibraryService.newTableLibraryDirName(),
-    newTableFilePath: (name) => {
-      try { return ctx.tableLibraryService.libraryRelativePath(ctx.tableLibraryService.pathForNewTable(name)); } catch { return undefined; }
-    },
-    relationshipsFile: (name) => {
-      const file = ctx.tableLibraryService.relationshipsFileForNewRef(name);
-      return file === undefined ? undefined : ctx.tableLibraryService.libraryRelativePath(file);
-    },
-    relationshipStoredIn: (rel) => {
-      const file = ctx.tableLibraryService.relationshipsFileHolding(rel);
-      return file === undefined ? undefined : ctx.tableLibraryService.libraryRelativePath(file);
-    },
+    // The canvas's lookups (generateSyncPlan): a new table goes in this diagram's layer.
+    ...syncPlanLibraryLookups(ctx.tableLibraryService, {
+      diagramFile: file,
+      layerIds: new Set(ctx.layerService.getAllLayers().map((l) => l.id)),
+      manifest: ctx.manifest,
+      ymlData: ctx.ymlData,
+    }),
   });
   const unreadableModelFiles = unreadableTables(ctx, unified);
   // The entry each link is drawn from (core's read winner), keyed by link.

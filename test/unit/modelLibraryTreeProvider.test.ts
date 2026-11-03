@@ -526,6 +526,20 @@ describe('TableLibraryTreeProvider', () => {
       expect(top.referencingDomains).toEqual(['customer-360', 'reporting']);
       expect(p.getTreeItem(top).contextValue).toBe('logicalModel');
     });
+
+    it('a duplicate\'s tooltip names dbt only in a dbt project', () => {
+      const entries = [entry('dim_customer'), entry('dim_customer', 'silver', `${DIR}/dim_customer.yml`)];
+      const tip = (hasDbt: boolean): string => {
+        const p = build(entries);
+        p.setHasDbtProject(hasDbt);
+        const silver = folders(p.getChildren()).find(f => f.folder === 'silver')!;
+        return String(p.getTreeItem((p.getChildren(silver) as TableLibraryTableNode[])[0]).tooltip);
+      };
+      expect(tip(true)).toContain('Table names are unique across all folders, as dbt model names are. Use "Give Duplicate Table Its Own Name"');
+      const plain = tip(false);
+      expect(plain).toContain('Table names are unique across all folders. Use "Give Duplicate Table Its Own Name" to make this copy "silver_dim_customer"');
+      expect(plain).not.toMatch(/dbt/i);
+    });
   });
 
   // -------------------------------------------------------------------------

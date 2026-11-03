@@ -66,7 +66,7 @@ describe('doctor', () => {
     expect(r.runtime.kind).toBe('node');
     expect(r.artifacts.manifest.path).toBe('target/manifest.json');
     expect(['ok', 'stale']).toContain(r.artifacts.manifest.status);
-    expect(r.artifacts.manifest.models).toBe(4);
+    expect(r.artifacts.manifest.models).toBe(5);
     expect(r.artifacts.catalog.path).toBe('target/catalog.json');
     expect(r.artifacts.catalog.nodes).toBe(5);
     expect(r.erd.semanticDirExists).toBe(true);
@@ -1018,9 +1018,12 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
       [SALES]: replace("  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n", "  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n  erd_unlinked_tables: 'gld_fct_risk_child, dim_region'\n"),
       [GOLD_REL]: (text) => `${text}\n// erd-studio pending: Ref: gold.fct_order.risk_key >? gld_fct_risk_child.risk_key\n`,
     }));
+    // dbml-native has no dbt_project.yml: the fix names no dbt command (logical first).
     expect(problem(r, 'unlinkedTable')).toEqual([
-      expect.objectContaining({ file: `.erd-studio/${SALES}`, severity: 'warning', message: expect.stringMatching(/^gld_fct_risk_child is on this diagram but has no table file, so it is drawn as missing .* Add it \(Add from dbt\), or remove it from the diagram\.$/) }),
+      expect.objectContaining({ file: `.erd-studio/${SALES}`, severity: 'warning', message: expect.stringMatching(/^gld_fct_risk_child is on this diagram but has no table file, so it is drawn as missing .* Write its table file, or remove it from the diagram\.$/) }),
     ]);
+    expect(problem(r, 'pendingRelationship')[0].message).toContain('(writing its table file (or New Table on the canvas) makes a missing table)');
+    expect(r.erd.dbmlProblems.map((p) => p.message).join(' ')).not.toMatch(/\bdbt\b/i);
     expect(problem(r, 'pendingRelationship')).toEqual([
       expect.objectContaining({
         file: `.erd-studio/${GOLD_REL}`, line: 12, severity: 'warning',
@@ -1030,6 +1033,17 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     // Warnings only: the project still compiles for every DBML tool, and nothing blocks.
     expect(r.erd.dbmlProblems.filter((p) => p.severity === 'error')).toEqual([]);
     expect(ids(r)).toEqual(['ready']);
+  });
+
+  it('in a dbt project the same warnings point at Add from dbt', async () => {
+    const root = nativeWith({
+      [SALES]: replace("  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n", "  erd_layout_options: '{\"elk.direction\":\"RIGHT\"}'\n  erd_unlinked_tables: 'gld_fct_risk_child, dim_region'\n"),
+      [GOLD_REL]: (text) => `${text}\n// erd-studio pending: Ref: gold.fct_order.risk_key >? gld_fct_risk_child.risk_key\n`,
+    });
+    fs.writeFileSync(path.join(root, 'dbt_project.yml'), "name: 'native'\nversion: '1.0'\nprofile: 'native'\n");
+    const r = await doctor(root);
+    expect(problem(r, 'unlinkedTable')[0].message).toMatch(/ Add it \(Add from dbt\), or remove it from the diagram\.$/);
+    expect(problem(r, 'pendingRelationship')[0].message).toContain('(Add from dbt makes a missing table)');
   });
 
   it('a member whose YAML file holds another name is named as that YAML file, not as missing; a pending line to a YAML table points at Convert, not Add from dbt', async () => {

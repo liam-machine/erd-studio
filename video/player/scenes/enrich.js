@@ -3,8 +3,12 @@
 // with its real image (a model with key badges and a grain note). The pointer clicks Set Up My
 // AI Helper, the step ticks itself done, and a generic AI-assistant chat panel (no vendor name
 // or mark) slides in with /erd-studio-setup typed into it.
+//
+// props (script.logical.yaml): `window` names the window (editor.js WINDOWS; the logical cut's
+// plain folder once its diagram exists), `done` the steps already ticked, `tab` the diagram's tab
+// and `reply` the guide's first line for that window (the Without dbt route's, there).
 import { appear, caret, easeOut, ICON, path, pointer, seg, typed, typedEnd } from '../lib.js';
-import { ACT, BODY, WIN, activityBar, editorWindow, walkButton, walkthrough } from '../editor.js';
+import { ACT, BODY, DBT_PROJECT, WIN, WINDOWS, activityBar, editorWindow, walkButton, walkthrough } from '../editor.js';
 
 // What the user types: the setup skill's command (src/types/aiAssistants.ts, Claude Code's prompt).
 export const PROMPT = '/erd-studio-setup';
@@ -13,7 +17,10 @@ export const PROMPT = '/erd-studio-setup';
 export const REPLY = "You already have the <b>orders</b> diagram (4 models). I'll add what dbt doesn't record — keys, grain, roles and why — and leave its columns and connections alone. OK?";
 
 export default {
-  render(t, { beats }) {
+  render(t, { beats, scene }) {
+    const P = scene?.props ?? {};
+    const ctx = P.window ? WINDOWS[P.window] : DBT_PROJECT;
+    const reply = P.reply ?? REPLY;
     const W = beats.want.t, S = beats.setup.t;
     // e_want: "Want grain, keys"(+0.0–1.2) "and the why behind each table?"(+1.3–2.7)
     const glowAt = W + 0.2;
@@ -26,10 +33,11 @@ export default {
     const sendAt = typeEnd + 0.25;
     const replyAt = sendAt + 0.45;
 
-    const done = t >= doneAt ? ['draw', 'enrich'] : ['draw'];
-    let body = `<div class="abs" style="left:${ACT}px;top:0;right:0;bottom:0">${walkthrough({ open: 'enrich', done, wide: true, glow: easeOut(seg(t, glowAt, glowAt + 0.4)), press: seg(t, clickAt, clickAt + 0.4) })}</div>`;
+    const before = P.done ?? ['draw'];
+    const done = t >= doneAt ? [...before, 'enrich'] : before;
+    let body = `<div class="abs" style="left:${ACT}px;top:0;right:0;bottom:0">${walkthrough({ open: 'enrich', done, wide: true, ctx, glow: easeOut(seg(t, glowAt, glowAt + 0.4)), press: seg(t, clickAt, clickAt + 0.4) })}</div>`;
     body += activityBar('erd');
-    let html = editorWindow({ tabs: [{ label: 'orders.json' }, { label: 'Welcome', on: true }], body });
+    let html = editorWindow({ tabs: [{ label: P.tab ?? 'orders.json' }, { label: 'Welcome', on: true }], body, ...(P.crumb !== undefined ? { crumb: P.crumb } : {}) });
 
     // the AI assistant's chat panel: the command is typed and sent, and the guide answers with
     // the enrich route's opening line (SKILL.md "Enriching an existing diagram")
@@ -43,7 +51,7 @@ export default {
         convo += `<div class="abs" style="right:24px;top:88px;padding:10px 18px;border-radius:12px;background:#2b3a52;font:500 24px var(--mono);color:#e6f0ff;white-space:nowrap;${appear(t, sendAt, { dy: 10, dur: 0.25 })}">${PROMPT}</div>`;
       }
       if (t >= replyAt) {
-        convo += `<div class="abs" style="left:24px;right:32px;top:160px;display:flex;gap:14px;font-size:23px;line-height:34px;color:var(--text);${appear(t, replyAt, { dy: 10 })}"><span style="color:#c490e8;display:flex;margin-top:5px">${ICON.sparkle({ size: 22 })}</span><span>${REPLY}</span></div>`;
+        convo += `<div class="abs" style="left:24px;right:32px;top:160px;display:flex;gap:14px;font-size:23px;line-height:34px;color:var(--text);${appear(t, replyAt, { dy: 10 })}"><span style="color:#c490e8;display:flex;margin-top:5px">${ICON.sparkle({ size: 22 })}</span><span>${reply}</span></div>`;
       }
       html += `<div class="abs" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;border-radius:16px;background:#1b1c20;border:1px solid #3a3c42;box-shadow:-24px 24px 60px #000c;opacity:${p.toFixed(3)};transform:translateX(${(60 * (1 - p)).toFixed(1)}px)">
         <div class="abs" style="left:24px;top:18px;display:flex;align-items:center;gap:12px;font-size:23px;font-weight:700;color:var(--text);white-space:nowrap"><span style="color:#c490e8;display:flex">${ICON.sparkle({ size: 26 })}</span>AI assistant</div>
@@ -53,7 +61,7 @@ export default {
     }
 
     // pointer onto Set Up My AI Helper
-    const btn = walkButton({ wide: true, open: 'enrich', left: ACT });
+    const btn = walkButton({ wide: true, open: 'enrich', left: ACT, ctx });
     if (t < chatAt + 0.2) {
       const pt = path(t, [{ t: S - 0.3, x: 900, y: 880 }, { t: clickAt - 0.1, x: btn.x, y: btn.y }]);
       const op = Math.min(seg(t, S - 0.4, S - 0.1), 1 - seg(t, chatAt - 0.2, chatAt + 0.2));

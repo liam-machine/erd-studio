@@ -18,7 +18,8 @@ import type { Alias, Node, Scalar, ScalarTag, Tags } from 'yaml';
 
 import {
   DIAGRAMS_DIR, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, RELATIONSHIPS_DIR, TABLES_DIR, TableDbmlError, classifySemanticFile, classifyTableLoadError,
-  dbmlName, dbmlTablePath, dbmlTreePathOf, isDbmlLayerName, isLibraryFolderName, linkKey, tableLoadWarningOf, parseTableText, writesDbml, writesTableNaming,
+  dbmlName, dbmlTablePath, dbmlTreePathOf, diagramPathOf, isDbmlLayerName, isLibraryFolderName, linkKey, subjectAreaStorageOf, tableLoadWarningOf, parseTableText,
+  writesDbml, writesTableNaming,
 } from '@erd-studio/core';
 import { attachRelationships, dbmlTableLookup, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
 import { projectNamingOf } from './projectNaming';
@@ -31,6 +32,7 @@ import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
 import { sameName } from '../types/naming';
+import { isSchemaFolderName } from '../types/schemaFolder';
 import { keepLineEndings } from './lineEndings';
 import type { FileWrite } from './fileWrites';
 import { UnsavedFilesRefused } from './fileWrites';
@@ -468,6 +470,11 @@ function namingMaps(root: YAMLMap): Array<{ map: YAMLMap; keys: Readonly<Record<
 function usesTableNamingKeys(root: YAMLMap): boolean {
   return namingMaps(root).some(({ map, keys }) =>
     Object.values(keys).some((v6) => map.items.some((pair) => keyIs(pair, v6))));
+}
+
+/** A diagram file's layer: from its path in the layer-first tree, else its directory's name. */
+function diagramLayerOf(diagramFilePath: string): string {
+  return diagramPathOf(diagramFilePath)?.layer ?? path.basename(path.dirname(diagramFilePath));
 }
 
 /**
@@ -1209,6 +1216,31 @@ export class TableLibraryService {
    */
   relationshipsFileForNewRef(tableName: string): string | undefined {
     return this.relationshipsFilesForNewRefs([tableName]).get(tableName.toLowerCase());
+  }
+
+  /**
+   * Where a new Ref of `tableName` goes when it has no table file yet but
+   * will get the DBML one at `newFilePath` (absolute, or relative to the
+   * semantic dir; `pathForNewTable`'s answer): the same `placeNewRef` rule
+   * {@link relationshipsFileForNewRef} uses, from the layer and schema that
+   * path names: a file already holding Refs of it, else its schema's own
+   * file when that exists, else its layer's default file, which may not
+   * exist yet. Absolute; undefined when the table has a file (ask
+   * {@link relationshipsFileForNewRef}), the path is not a DBML table file,
+   * or the files do not read.
+   */
+  relationshipsFileForNewTable(tableName: string, newFilePath: string): string | undefined {
+    try {
+      if (this.findTableFile(tableName) !== null || !isDbmlFile(newFilePath)) return undefined;
+      const rel = path.isAbsolute(newFilePath) ? this.semanticRelative(newFilePath) : newFilePath.replace(/\\/g, '/');
+      const kind = classifySemanticFile(rel, { tablesDirIsLayer: this.tablesDirIsLayer() });
+      if (kind.kind !== 'table') return undefined;
+      const layer = kind.layer ?? this.defaultDbmlLayer();
+      const placed = placeNewRef({ table: tableName, layer, ...(kind.schema !== undefined ? { schema: kind.schema } : {}) }, this.relationshipsIndex()).file;
+      return this.semanticAbsolute(placed);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -2563,15 +2595,20 @@ export class TableLibraryService {
    * is the layer when it is a layer id, else {@link defaultDbmlLayer}, and
    * the schema is the layer's name as its `tables/` lists it.
    */
-  private newTablePath(name: string, folder?: string, libraryDir?: string): string {
+  private newTablePath(name: string, home?: string | DbmlTableHome, libraryDir?: string, configuredSchema?: string): string {
     if (typeof name !== 'string' || !name.trim() || name.includes('/') || name.includes('\\') || name.includes('..')) {
       throw new Error(`Invalid table name "${String(name)}": must not contain path separators.`);
     }
     // A renamed YAML file passes its own library and stays YAML.
     if (libraryDir === undefined && this.writesDbml()) {
-      const home = this.dbmlHomeOf(folder);
-      return this.semanticAbsolute(dbmlTablePath(home.layer, home.schema, name));
+      const where = this.dbmlHomeOf(home);
+      // As planDbmlLibraryWrites places a new table: the configured schema when it is a folder name, else the home's.
+      const schema = configuredSchema !== undefined && isSchemaFolderName(configuredSchema)
+        ? this.schemaAsListed(where.layer, configuredSchema)
+        : where.schema;
+      return this.semanticAbsolute(dbmlTablePath(where.layer, schema, name));
     }
+    const folder = typeof home === 'string' ? home : home?.layer;
     const ext = '.yml';
     const modelsDir = path.resolve(libraryDir ?? this.newTablesDir());
     const resolved = path.resolve(modelsDir, `${name}${ext}`);
@@ -2593,12 +2630,50 @@ export class TableLibraryService {
   /**
    * Where a new table file for `name` goes, for callers outside this service
    * such as sync plans and `diff`: `<layer>/tables/<schema>/<name>.dbml` when
-   * the project writes DBML (§3.2; `folder` is the layer), else today's rule
-   * (the library new files go to, `{folder}/` when given and allowed).
+   * the project writes DBML (§3.2; `home` is the layer or a diagram's
+   * `{ layer, schema }`, and `options.configuredSchema`, the dbt custom
+   * schema, picks the schema folder when it is a folder name, as
+   * `planDbmlLibraryWrites` does), else today's rule (the library new files
+   * go to, `{home}/` when given and allowed). Pass {@link newTableHomeFor}'s
+   * answer to put it where a table created from a diagram goes.
    * Throws on an unsafe name.
    */
-  pathForNewTable(name: string, folder?: string): string {
-    return this.newTablePath(name, folder);
+  pathForNewTable(name: string, home?: string | DbmlTableHome, options: { configuredSchema?: string } = {}): string {
+    return this.newTablePath(name, home, undefined, options.configuredSchema);
+  }
+
+  /**
+   * Where a table created from the diagram at `diagramFilePath` goes (§2.4
+   * step 2), for {@link planTableWrites} and {@link pathForNewTable}. A DBML
+   * diagram: its layer `L` and the schema folder `L` as `L/tables/` lists it
+   * (case aside). A JSON diagram in a project that writes DBML (a mixed one):
+   * its layer too, when `layerIds` (the layers in `layers.json`) has it. A
+   * JSON diagram whose new tables are YAML: the layer folder, or undefined
+   * for the top level — only when the diagram's directory is a configured
+   * layer AND the library has opted into layer folders ({@link groupsByFolder}).
+   */
+  newTableHomeFor(diagramFilePath: string, layerIds: ReadonlySet<string>): DbmlTableHome | string | undefined {
+    const diagram = diagramPathOf(diagramFilePath);
+    if (diagram !== undefined && subjectAreaStorageOf(diagramFilePath) === 'dbml') {
+      return { layer: diagram.layer, schema: this.schemaAsListed(diagram.layer, diagram.layer) };
+    }
+    const layer = diagramLayerOf(diagramFilePath);
+    if (this.writesDbml() && isDbmlLayerName(layer) && layerIds.has(layer)) {
+      return { layer, schema: this.schemaAsListed(layer, layer) };
+    }
+    return this.yamlTableFolderFor(diagramFilePath, layerIds);
+  }
+
+  /**
+   * The YAML branch of {@link newTableHomeFor}, on its own: the library folder
+   * a YAML table created from the JSON diagram at `diagramFilePath` goes to —
+   * the diagram's layer when `layerIds` has it AND the library has opted into
+   * layer folders ({@link groupsByFolder}), else undefined (the top level).
+   * The canvas's YAML save path calls this so it never names another folder.
+   */
+  yamlTableFolderFor(diagramFilePath: string, layerIds: ReadonlySet<string>): string | undefined {
+    const layer = diagramLayerOf(diagramFilePath);
+    return layerIds.has(layer) && this.groupsByFolder(layerIds) ? layer : undefined;
   }
 
   /** Whether `folder` may be created under logical-models/ (the layer id format). */

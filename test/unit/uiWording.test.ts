@@ -171,3 +171,77 @@ describe('package.json: commands for older projects and the AI helper files', ()
     expect(commands.filter((c) => /harness/i.test(c.title)).map((c) => c.command)).toEqual([]);
   });
 });
+
+/**
+ * Logical first, dbt as an add-on: in a folder without dbt_project.yml (or with no folder open)
+ * nothing VS Code draws from `contributes` names dbt or offers a dbt control. Every dbt word and
+ * dbt command stays, gated to `erdStudio.hasDbtProject`. Settings are out of scope: VS Code cannot
+ * hide a setting by context.
+ */
+describe('package.json: dbt shows up only in dbt projects', () => {
+  type Entry = { command?: string; submenu?: string; when?: string };
+  const DBT_WORDS = /\b(dbt|manifest|catalog|selectors|physical)\b/i;
+  /** True only when the clause requires a dbt project (every clause here is a plain `&&` chain). */
+  const dbtOnly = (when: string | undefined) => !!when && when.split('&&').map((c) => c.trim()).includes('erdStudio.hasDbtProject');
+  const commands = pkg.contributes.commands as Array<{ command: string; title: string }>;
+  const menus = pkg.contributes.menus as Record<string, Entry[]>;
+  /** dbt-only by what they do, even where the title does not say dbt. */
+  const DBT_COMMANDS = new Set([
+    ...commands.filter((c) => DBT_WORDS.test(c.title)).map((c) => c.command),
+    'erdStudio.trySampleProject',
+  ]);
+
+  it('knows the dbt-only commands', () => {
+    expect([...DBT_COMMANDS].sort()).toEqual([
+      'erdStudio.drawFromDbt', 'erdStudio.refreshManifest', 'erdStudio.selectDbtProject',
+      'erdStudio.stripLegacyDomainTags', 'erdStudio.syncDomainTags', 'erdStudio.trySampleProject',
+    ]);
+  });
+
+  it('hides every dbt-only command from the palette and every menu outside a dbt project', () => {
+    for (const id of DBT_COMMANDS) {
+      const palette = menus.commandPalette.filter((m) => m.command === id);
+      expect(palette, id).toHaveLength(1);
+      expect(dbtOnly(palette[0].when), `${id}: ${palette[0].when}`).toBe(true);
+    }
+    for (const [menu, entries] of Object.entries(menus)) {
+      for (const entry of entries.filter((m) => m.command && DBT_COMMANDS.has(m.command))) {
+        expect(dbtOnly(entry.when), `${menu} ${entry.command}: ${entry.when}`).toBe(true);
+      }
+    }
+    // The "Select dbt Project…" title button, not only the multi-project flag.
+    expect(menus['view/title'].find((m) => m.command === 'erdStudio.selectDbtProject')?.when)
+      .toBe('view == erdStudio.domainTree && erdStudio.hasDbtProject && erdStudio.hasMultipleDbtProjects');
+  });
+
+  it('keeps dbt words out of welcome views and walkthrough steps that can show without dbt', () => {
+    const offenders: string[] = [];
+    for (const w of pkg.contributes.viewsWelcome as Array<{ view: string; contents: string; when?: string }>) {
+      if (!dbtOnly(w.when) && DBT_WORDS.test(w.contents)) offenders.push(`viewsWelcome ${w.view} [${w.when}]: ${w.contents}`);
+    }
+    for (const walkthrough of pkg.contributes.walkthroughs as Array<{ id: string; title: string; description: string; steps: Array<{ id: string; title: string; description: string; when?: string; media: { svg: string; altText?: string } }> }>) {
+      // A walkthrough's own title and description cannot be gated.
+      if (DBT_WORDS.test(`${walkthrough.title} ${walkthrough.description}`)) offenders.push(`walkthrough ${walkthrough.id}`);
+      for (const step of walkthrough.steps.filter((s) => !dbtOnly(s.when))) {
+        if (DBT_WORDS.test(`${step.title} ${step.description} ${step.media.altText ?? ''}`)) offenders.push(`step ${step.id}`);
+        expect(step.description, step.id).not.toContain('erdStudio.trySampleProject');
+        // Its picture neither: no dbt project file or dbt folder layout (models/, seeds/, target/).
+        const svg = fs.readFileSync(path.join(__dirname, '../..', step.media.svg), 'utf8');
+        const svgText = [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]).join(' ');
+        if (DBT_WORDS.test(svgText) || /\b(models|seeds|target)\/|dbt_project\.yml/.test(svgText)) offenders.push(`step ${step.id} svg ${step.media.svg}: ${svgText}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps the dbt text in a dbt project', () => {
+    const welcome = pkg.contributes.viewsWelcome as Array<{ contents: string; when?: string }>;
+    expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')?.contents).toContain('[Draw from dbt](command:erdStudio.drawFromDbt)');
+    expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && erdStudio.hasMultipleDbtProjects')?.contents).toContain('[Select dbt Project](command:erdStudio.selectDbtProject)');
+    const steps = (pkg.contributes.walkthroughs[0].steps as Array<{ id: string; title: string; when?: string }>);
+    expect(steps.filter((s) => dbtOnly(s.when)).map((s) => [s.id, s.title])).toEqual([
+      ['watch', 'Watch the one-minute tour'],
+      ['draw', 'Draw your dbt project — no AI needed'],
+    ]);
+  });
+});

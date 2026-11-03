@@ -1,7 +1,7 @@
 ---
 name: erd-studio-setup
 description: >-
-  Friendly, step-by-step ERD Studio setup for people new to dbt or data modelling. In a dbt
+<!-- dbt-only -->  Friendly, step-by-step ERD Studio setup for people new to dbt or data modelling. In a dbt
   project, by default a quick start: checks the dbt CLI, draws one business area as an ERD Studio
   logical model that mirrors dbt, checks it with the ERD Studio diff and opens the canvas within
   minutes - then offers to detect and apply the team's modelling style (medallion or
@@ -12,7 +12,14 @@ description: >-
   Use when the user runs /erd-studio-setup or $erd-studio-setup, is new to ERD Studio, or asks to
   "set up ERD Studio", "design a data model", "create a logical model from my dbt project" or
   "model my dbt project the Kimball way" - even if they only want a diagram of their dbt models
-  or do not know where to start.
+  or do not know where to start.<!-- /dbt-only -->
+<!-- no-dbt -->  Friendly, step-by-step ERD Studio setup for people new to data modelling: designs a first
+  diagram with you from a description of the business, starts from a DBML import, or enriches
+  diagrams that already exist with keys, grain, roles, rationale and metadata instead of
+  rebuilding them, then checks the files and opens the canvas.
+  Use when the user runs /erd-studio-setup or $erd-studio-setup, is new to ERD Studio, or asks to
+  "set up ERD Studio", "design a data model" or "draw a diagram of our tables" - even if they do
+  not know where to start.<!-- /no-dbt -->
 argument-hint: "[business area, e.g. orders]"
 allowed-tools:
   - Read
@@ -20,51 +27,56 @@ allowed-tools:
   - Grep
   - WebSearch
   - WebFetch(domain:www.kimballgroup.com)
-  - WebFetch(domain:docs.getdbt.com)
+<!-- dbt-only -->  - WebFetch(domain:docs.getdbt.com)<!-- /dbt-only -->
   - WebFetch(domain:datavaultalliance.com)
-  - WebFetch(domain:automate-dv.readthedocs.io)
+<!-- dbt-only -->  - WebFetch(domain:automate-dv.readthedocs.io)<!-- /dbt-only -->
   - WebFetch(domain:activityschema.com)
   - Bash(~/.erd-studio-cli/bin/erd-studio:*)
   - Bash(~/.erd-studio-cli/bin/erd-studio.cmd:*)
-  - Bash(dbt --version)
+<!-- dbt-only -->  - Bash(dbt --version)
   - Bash(dbt parse:*)
   - Bash(dbt docs generate:*)
   - Bash(dbt compile --write-catalog:*)
   - Bash(dbt debug:*)
-  - Bash(dbt deps:*)
+  - Bash(dbt deps:*)<!-- /dbt-only -->
 ---
 
 # ERD Studio guided setup
 
-You are walking someone through setting up ERD Studio on their dbt project (or, in a folder with
+<!-- dbt-only -->You are walking someone through setting up ERD Studio on their dbt project (or, in a folder with
 no dbt, the **Without dbt** route). Many are new to dbt, data modelling or AI coding assistants.
 The goal: they finish with a working diagram **and** understand it, so they can keep going alone.
 
 The first result, within minutes, is one ERD Studio *domain* that mirrors the dbt project, has
 been checked against it with the ERD Studio diff, and is open on the canvas. The design work —
-the team's modelling approach, keys, grain, roles — comes next, on a diagram they can already see.
+the team's modelling approach, keys, grain, roles — comes next, on a diagram they can already see.<!-- /dbt-only -->
+<!-- no-dbt -->You are walking someone through designing their data model with ERD Studio. Many are new to data
+modelling or AI coding assistants. The goal: they finish with a working diagram **and** understand
+it, so they can keep going alone. The walkthrough itself is `references/walkthrough.md`; this file
+holds the rules it relies on — how to talk, your assistant, and the helper tool.<!-- /no-dbt -->
 
 ## How to talk
 
 These rules matter most: a beginner who gets lost or scared stops, and nothing gets set up.
 
 - **Talk to a smart beginner.** Define every term the first time you use it, in one plain
-  sentence. `references/dbt-explained.md` has a short definition for each one — use it rather
+  sentence. `references/<!-- dbt-only -->dbt-explained<!-- /dbt-only --><!-- no-dbt -->glossary<!-- /no-dbt -->.md` has a short definition for each one — use it rather
   than improvising, so the wording stays consistent.
 - **Short messages, one question at a time.** Ask at most one question per message and put it
   last. A wall of text with three questions gets one of them answered.
 - **Always offer a default.** Phrase questions so "yes" or "ok" is a complete answer, e.g.
   "Start with `orders` (12 models)? — say yes, or tell me a different area." Never ask cold how
-  the team models data: detect it and confirm (Stage 3b).
+  the team models data: <!-- dbt-only -->detect it and confirm (Stage 3b)<!-- /dbt-only --><!-- no-dbt -->propose one and confirm it<!-- /no-dbt -->.
 - **Narrate before every command.** One sentence on what it does and why, *before* you run it:
-  "Checking whether dbt is installed — this can take a few seconds." Repeats too: a second doctor
+  <!-- dbt-only -->"Checking whether dbt is installed — this can take a few seconds." Repeats too: a second doctor
   or diff run gets its own line ("Checking again now the manifest is built."), as does a web
-  lookup. People trust commands they were told about and are alarmed by ones they were not.
+  lookup.<!-- /dbt-only --><!-- no-dbt -->"Checking this folder — this takes a second." Repeats too: a second doctor run gets its own
+  line ("Checking again now the files are written."), as does a web lookup.<!-- /no-dbt --> People trust commands they were told about and are alarmed by ones they were not.
 - **Keep your own bookkeeping out of the chat.** Your own cross-checks (re-reading a file you
   wrote, counting columns, comparing lists) stay silent unless they find a problem.
 - **Never paste raw JSON or long logs.** Summarise. When a command fails, quote only the one
   line that matters and explain it.
-- **Show progress.** At each stage boundary, show the checklist with finished steps ticked, e.g.:
+<!-- dbt-only -->- **Show progress.** At each stage boundary, show the checklist with finished steps ticked, e.g.:
 
   ```
   ✓ 1. Check dbt
@@ -85,7 +97,17 @@ These rules matter most: a beginner who gets lost or scared stops, and nothing g
 - If the user named a business area when they started (e.g. `/erd-studio-setup orders`, or "set
   up ERD Studio for orders"; in Claude Code it arrives here: `$ARGUMENTS`), use it in Stage 3 and
   do not ask for one. Likewise, if they already described how they model data, their words beat
-  anything detected: play that back in Stage 3b instead of confirming a detected style.
+  anything detected: play that back in Stage 3b instead of confirming a detected style.<!-- /dbt-only -->
+<!-- no-dbt -->- **Show progress.** At each step boundary, show the walkthrough's checklist with finished steps
+  ticked. Mark a skipped step "–" with a few words why, never "✓" — a tick claims work that did
+  not happen.
+- **Never block on something optional.** A web lookup makes the result more exact, but ERD Studio
+  works without it. If something is missing, say what it would add, offer to fix it, and carry on
+  either way.
+- If the user named a business area when they started (e.g. `/erd-studio-setup orders`, or "set
+  up ERD Studio for orders"; in Claude Code it arrives here: `$ARGUMENTS`), design that area and
+  do not ask for one. Likewise, if they already described how they model data, their words beat
+  any guess: play that back instead of proposing a style.<!-- /no-dbt -->
 
 ## Your AI assistant
 
@@ -93,7 +115,7 @@ This skill runs in several AI coding assistants. Everything in it applies to all
 the details in this section differ. Follow the row for the assistant you are, and never tell the
 user to type a command that belongs to a different one.
 
-| Assistant | The user starts this walkthrough with | Load ERD Studio's format rules (Stage 4) |
+| Assistant | The user starts this walkthrough with | Load ERD Studio's format rules<!-- dbt-only --> (Stage 4)<!-- /dbt-only --> |
 |---|---|---|
 | Claude Code | `/erd-studio-setup` | Invoke the `/erd-studio` skill |
 | GitHub Copilot (VS Code agent mode, Copilot CLI) | `/erd-studio-setup` | Read the schema skill file |
@@ -103,11 +125,11 @@ user to type a command that belongs to a different one.
 
 - **The schema skill file** is `SKILL.md` in `.claude/skills/erd-studio/` or
   `.agents/skills/erd-studio/` of the project folder. ERD Studio installs whichever folder the
-  user's assistants read, so check both and read the one that exists, in full. Its `SYNC.md` guide
-  sits next to it. If neither exists, see `references/troubleshooting.md` → "Format rules missing".
+  user's assistants read, so check both and read the one that exists, in full.<!-- dbt-only --> Its `SYNC.md` guide
+  sits next to it.<!-- /dbt-only --> If neither exists, see `references/troubleshooting.md` → "Format rules missing".
 - Wherever this skill says the user can "run `/erd-studio-setup` again", use your own row's form.
 - **Approvals.** Every assistant asks before it changes a file or runs a command unless the user
-  has allowed it. Tell the user once, in Stage 4, in words that fit their assistant, and say that
+  has allowed it. Tell the user once, <!-- dbt-only -->in Stage 4<!-- /dbt-only --><!-- no-dbt -->before your first write<!-- /no-dbt -->, in words that fit their assistant, and say that
   approving is expected. Describe only buttons you are sure your assistant has.
 - **Shell.** bash, zsh, Git Bash or PowerShell; on Windows, see the helper's Windows route below.
 - **A file your reading tool refuses as ignored** (Gemini CLI skips files `.gitignore` matches):
@@ -115,8 +137,8 @@ user to type a command that belongs to a different one.
 
 ### If you are Claude Code
 
-- The frontmatter pre-approves the helper, the safe dbt commands and look-ups on the listed
-  modelling sites. Anything else — a dbt inside the project's `.venv`, another website — makes
+- The frontmatter pre-approves the helper<!-- dbt-only -->, the safe dbt commands<!-- /dbt-only --> and look-ups on the listed
+  modelling sites. Anything else — <!-- dbt-only -->a dbt inside the project's `.venv`, <!-- /dbt-only -->another website — makes
   Claude Code ask the user first. That is intended: they see exactly what runs.
 - Before the first write, say: "Claude Code will show each file before I write it, with options
   to approve it. Choosing the 'don't ask again' option for this session, or pressing
@@ -137,30 +159,35 @@ tool, so the user sees each change. The commands you will use:
 
 | Command | What it tells you |
 |---|---|
-| `~/.erd-studio-cli/bin/erd-studio doctor --json --semantic-dir .erd-studio` | Is dbt installed, which kind, is there a profile, are the manifest and catalog fresh, what ERD Studio files exist, and suggested `nextSteps` |
+<!-- dbt-only -->| `~/.erd-studio-cli/bin/erd-studio doctor --json --semantic-dir .erd-studio` | Is dbt installed, which kind, is there a profile, are the manifest and catalog fresh, what ERD Studio files exist, and suggested `nextSteps` |
 | `~/.erd-studio-cli/bin/erd-studio inventory --summary --json --semantic-dir .erd-studio` | Every dbt model: folder, suggested layer, column count, relationship clusters, what is already modelled, and the project's modelling `conventions` |
 | `~/.erd-studio-cli/bin/erd-studio inventory --models a,b,c --json --semantic-dir .erd-studio` | Full columns, types, keys and relationships for just those models |
 | `~/.erd-studio-cli/bin/erd-studio diff --domain <file> --json --semantic-dir .erd-studio` | The same comparison as the canvas's **Compare with dbt** button, plus a list of fixes |
 
 Run them from the dbt project folder (the one with `dbt_project.yml`) or add `--project <folder>`;
-if doctor reports `project.found: false`, ask which folder holds it and pass `--project` from then on.
+if doctor reports `project.found: false`, ask which folder holds it and pass `--project` from then on.<!-- /dbt-only -->
+<!-- no-dbt -->| `~/.erd-studio-cli/bin/erd-studio doctor --json --semantic-dir .erd-studio` | What ERD Studio files exist, which format to write (`erd.storage`), any file that does not parse, and suggested `nextSteps` |
+| `~/.erd-studio-cli/bin/erd-studio export --domain <diagram file> --format dbml --semantic-dir .erd-studio` | Whether a diagram loads end to end, every table and relationship included |
+
+Run them from the project folder (the one holding `.erd-studio/`, or where it will go) or add
+`--project <folder>`.<!-- /no-dbt -->
 
 **Reading the result:**
 - *command not found* / exit code 127 → the helper is not installed. Follow
   `references/troubleshooting.md` → "Helper missing".
 - Exit code 5 (`launcher-stale`) → the helper exists but needs VS Code to refresh it. Ask the
   user to reopen this project in VS Code once, then say "done". Do not send them to reinstall.
-- Exit code 3 → a JSON `error` saying what is wrong with the project (no `dbt_project.yml`, a
-  broken domain file). Explain it plainly. `no-semantic-dir` / `no-domains` from `diff --all`
+- Exit code 3 → a JSON `error` saying what is wrong with the project (<!-- dbt-only -->no `dbt_project.yml`, <!-- /dbt-only -->a
+  broken domain file). Explain it plainly. `no-semantic-dir` / `no-domains`<!-- dbt-only --> from `diff --all`<!-- /dbt-only -->
   mean the helper is looking in the wrong folder: the ERD Studio folder is set by the
   `erdStudio.semanticDir` setting, which the helper cannot read — ask the user for it and pass
   it with `--semantic-dir`. Never report that as a match.
-- For `diff`, exit code 1 is **not** a failure — it means "differences found" (Stage 5's job).
+<!-- dbt-only -->- For `diff`, exit code 1 is **not** a failure — it means "differences found" (Stage 5's job).<!-- /dbt-only -->
 - On Windows, if the shell cannot run the file above (PowerShell always cannot), use
   `~/.erd-studio-cli/bin/erd-studio.cmd` (in PowerShell: `& "$HOME\.erd-studio-cli\bin\erd-studio.cmd" …`).
   Tell the user which route you are using.
 
-If no route to the helper works, carry on in **canvas-fallback mode**
+<!-- dbt-only -->If no route to the helper works, carry on in **canvas-fallback mode**
 (`references/troubleshooting.md`) and tell the user its checks are less exact.
 
 ---
@@ -480,7 +507,16 @@ not record. Add it — never rebuild, rename, or change a column, type or relati
    `rationale.purpose` from dbt's description; dbt's metadata (`references/metadata.md`, offered
    with these drafts). Anything unclear goes on the "to confirm" list.
 4. Show the drafts as one short list per model, ask "Add these?" once, and write them on a yes.
-5. Re-run the diff, then Stage 6 — whose first next step is the modelling-style offer.
+5. Re-run the diff, then Stage 6 — whose first next step is the modelling-style offer.<!-- /dbt-only -->
+<!-- no-dbt -->If no route to the helper works, carry on without it as the walkthrough says, and tell the user
+its checks are less exact.
+
+---
+
+## The walkthrough
+
+Follow `references/walkthrough.md` from its start: it is the whole guided setup, from saying hello
+to opening the diagram.<!-- /no-dbt -->
 
 ## Reference files
 
@@ -488,11 +524,15 @@ Read these when the stage calls for them — not all up front:
 
 | File | Read it when |
 |---|---|
-| `references/without-dbt.md` | The project has no `dbt_project.yml`: the whole Without dbt route |
+<!-- dbt-only -->| `references/without-dbt.md` | The project has no `dbt_project.yml`: the whole Without dbt route |
 | `references/dbt-explained.md` | You are about to use a term the user may not know |
 | `references/dbt-setup.md` | Installing dbt, writing `profiles.yml`, a dbt command failed |
 | `references/modelling-approaches.md` | Stage 3b (the modelling style), Stage 4 (applying it), the Stage 5 review |
 | `references/metadata.md` | Stage 4 and enriching, before writing model files: dbt's `meta:` and the team's metadata list |
 | `references/building-the-model.md` | Stage 4, before writing any file |
-| `references/verify-and-fix.md` | Stage 5, and for adding dbt relationship tests |
-| `references/troubleshooting.md` | The helper is missing or stale (canvas-fallback mode), the skill or its format rules cannot be found, the safety check keeps blocking, Windows / remote setups, a merge conflict, doctor's `turn-round-relationships` step (relationships drawn backwards) |
+| `references/verify-and-fix.md` | Stage 5, and for adding dbt relationship tests |<!-- /dbt-only -->
+<!-- no-dbt -->| `references/walkthrough.md` | Always: the whole guided setup, from its start |
+| `references/glossary.md` | You are about to use a term the user may not know |
+| `references/modelling-approaches.md` | Choosing, looking up and saving a modelling style (walkthrough step 3) |
+| `references/building-the-model.md` | Writing the files (walkthrough step 4), before writing any file |<!-- /no-dbt -->
+| `references/troubleshooting.md` | The helper is missing or stale<!-- dbt-only --> (canvas-fallback mode)<!-- /dbt-only -->, the skill or its format rules cannot be found, the safety check keeps blocking, Windows / remote setups, a merge conflict, doctor's `turn-round-relationships` step (relationships drawn backwards) |

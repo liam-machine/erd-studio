@@ -111,6 +111,28 @@ describe('NewFkDialog — which side holds the foreign key (#133 L1)', () => {
   });
 });
 
+describe('NewFkDialog — the undecided hint without a dbt project (logicalOnly)', () => {
+  const bare = [{ name: 'dim_customer', columns: [col('customer_id')] }, { name: 'fct_order', columns: [col('customer_id')] }];
+  const drag = { fromModel: 'dim_customer', fromColumn: 'customer_id', toModel: 'fct_order', toColumn: 'customer_id' };
+  // Unmount before the store changes, so no update lands outside act().
+  afterEach(() => { cleanup(); useEditorStore.getState().setLogicalOnly(false); });
+
+  it('asks the same question without naming dbt', () => {
+    useEditorStore.getState().setLogicalOnly(true);
+    open(bare, drag);
+    expect(screen.getByText('Which way does this relationship point?')).toBeTruthy();
+    expect(screen.getByText("Pick one: neither table marks these columns as its key. Once a table's primary key is marked, ERD Studio works this out itself.")).toBeTruthy();
+    expect(screen.queryByText(/dbt has no test to tell/)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/dbt/i);
+  });
+
+  it('keeps the dbt wording in a dbt project', () => {
+    useEditorStore.getState().setLogicalOnly(false);
+    open(bare, drag);
+    expect(screen.getByText(/neither table marks these columns as its key, and dbt has no test to tell/)).toBeTruthy();
+  });
+});
+
 describe('NewFkDialog — self-reference (#133 L3)', () => {
   it('is allowed, oriented by the key: manager_id points at employee_id whichever column the drag started on', () => {
     const employee = [{ name: 'employee', columns: [col('employee_id', { isPrimaryKey: true }), col('manager_id')] }];

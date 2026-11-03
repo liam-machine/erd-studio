@@ -32,3 +32,6 @@ video/node_modules/
 
 # Issue before/after videos and their demo projects (local only)
 /videos/
+
+# Bundles the fixture generators write next to their sources (scripts/regen-*.ts)
+scripts/.regen-*.cjs

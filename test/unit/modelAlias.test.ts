@@ -15,6 +15,7 @@ import { extractManifestData } from '../../src/workers/manifestExtractor';
 import { validateModelAliasPayload } from '../../src/providers/payloadValidation';
 import {
   describeDuplicateFix,
+  duplicateNamePrompt,
   planDuplicateFix,
   repointSubjectAreaTable,
   suggestDuplicateName,
@@ -255,6 +256,34 @@ describe('TableLibraryService: alias in the model file', () => {
   });
 });
 
+// The DBML counterpart of the yml cases above: in a DBML table file the alias
+// is the Table's `alias` setting, and the physical stage matches it the same way.
+describe('TableLibraryService: alias in a DBML table file', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-alias-dbml-'));
+    const erd = path.join(dir, '.erd-studio');
+    fs.mkdirSync(path.join(erd, 'gold', 'tables', 'gold'), { recursive: true });
+    fs.writeFileSync(path.join(erd, 'layers.json'), JSON.stringify({ schemaVersion: 1, layers: [{ id: 'gold', label: 'Gold', order: 0 }] }));
+    fs.writeFileSync(path.join(erd, 'gold', 'tables', 'gold', 'gold_date.dbml'),
+      "Table gold.gold_date [alias: 'date'] {\n  Note: 'Dates'\n  date_key INT [pk]\n}\n");
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('reads the alias setting, and the physical stage matches dbt by (schema, alias)', () => {
+    const table = new TableLibraryService(dir).getTable('gold_date')!;
+    expect(table).toMatchObject({ name: 'gold_date', schema: 'gold', alias: 'date', description: 'Dates' });
+    const m = service.buildPhysicalSubjectArea(
+      subjectArea([table]),
+      EMPTY_YML,
+      manifest([manifestModel('dim_date', 'gold', 'date', ['date_key', 'fiscal_year'])]),
+    ).models[0];
+    expect(m.name).toBe('gold_date');
+    expect(m.existsInProject).toBe(true);
+    expect(m.columns.map((c) => c.name)).toEqual(['date_key', 'fiscal_year']);
+  });
+});
+
 describe('validateModelAliasPayload', () => {
   it('accepts an identifier, keeping its case', () => {
     expect(validateModelAliasPayload({ modelName: 'gold_date', alias: 'Date' })).toBeNull();
@@ -298,6 +327,20 @@ describe('duplicate model files', () => {
     expect(text).toContain('alias: date');
     expect(text).toContain('gold/finance');
     expect(text).toContain('Still using "date"');
+  });
+
+  it('names dbt in the prompt and the modal only in a dbt project', () => {
+    const plan = planDuplicateFix('date', 'gold', 'gold_date', undefined, refs);
+    const dbtText = describeDuplicateFix(plan, 'tables/gold/date.yml', 'tables/gold/gold_date.yml', true);
+    expect(dbtText).toContain('The table becomes "gold_date" with alias: date, so dbt still builds a table called date.');
+    expect(describeDuplicateFix(plan, 'a', 'b')).toContain('so dbt still builds'); // default: unchanged
+    const plain = describeDuplicateFix(plan, 'tables/gold/date.yml', 'tables/gold/gold_date.yml', false);
+    expect(plain).toContain('The table becomes "gold_date" with alias: date, so the warehouse name stays date.');
+    expect(plain).not.toMatch(/dbt/i);
+
+    expect(duplicateNamePrompt('date', true)).toBe('Table names are unique, as dbt model names are. The warehouse table name stays "date" (set as the table\'s alias).');
+    expect(duplicateNamePrompt('date', false)).toBe('Table names are unique across the library. The warehouse name stays "date" (set as the table\'s alias).');
+    expect(duplicateNamePrompt('date', false)).not.toMatch(/dbt/i);
   });
 
   it("keeps an alias the copy already has, and repoints nothing for a top-level copy", () => {

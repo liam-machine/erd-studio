@@ -506,8 +506,9 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
         .map(([table, column]) => `${tableOf(table)!.name} has no column ${column}`),
     ];
     // "Add from dbt" only helps a table with no file; a YAML one is finished by Convert.
+    // Without dbt_project.yml there is no Add from dbt: the table file is written by hand or New Table.
     const how = [
-      ...(waits.some((w) => w.endsWith('has no table file')) ? ['Add from dbt makes a missing table'] : []),
+      ...(waits.some((w) => w.endsWith('has no table file')) ? [ctx.hasDbt ? 'Add from dbt makes a missing table' : 'writing its table file (or New Table on the canvas) makes a missing table'] : []),
       ...(waits.some((w) => w.endsWith('so it is not a table yet')) ? ['write the table in that file, then run Convert Project to DBML'] : []),
       ...(waits.some((w) => w.endsWith('does not read it as a table yet')) ? ['rename that file to .yml, then run Convert Project to DBML'] : []),
       ...(waits.some((w) => w.includes('is still a YAML table')) ? ['Convert Project to DBML converts a YAML table once its file is fixed'] : []),
@@ -764,7 +765,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
             + (wrongName.caseOnly ? ', in lower case, so only a file system that ignores case finds this one' : `, so it draws ${name} as missing`)
             + ` (its name is in the Project's erd_unlinked_tables). Rename it to ${wrongName.stem}.yml, then run ERD Studio: Convert Project to DBML.`
           : !t
-          ? `${name} is on this diagram but has no table file, so it is drawn as missing (its name is in the Project's erd_unlinked_tables). Add it (Add from dbt), or remove it from the diagram.`
+          ? `${name} is on this diagram but has no table file, so it is drawn as missing (its name is in the Project's erd_unlinked_tables). ${ctx.hasDbt ? 'Add it (Add from dbt)' : 'Write its table file'}, or remove it from the diagram.`
           : notTable
             ? `${name} is on this diagram, but its file ${t.path} ${notTable}, so ERD Studio does not read it as a table and draws ${name} as missing (its name is in the Project's erd_unlinked_tables). `
               + `Write the table in that file, then run ERD Studio: Convert Project to DBML; or delete the file and remove ${name} from the diagram.`

@@ -6,16 +6,21 @@ import { EXTENSION, WALKTHROUGH } from '../editor.js';
 // The chips name the real steps: the extension, the walkthrough's open-a-folder step and the
 // Draw from dbt button.
 export const STEPS = ['Install ERD Studio', 'Open the folder your data model lives in', 'Draw from dbt'];
+/** The promise under the name: the first part bright, the second dimmed. */
+export const TAGLINE = ['Your dbt project,', 'drawn in a minute.'];
 
+// props (script.logical.yaml): `steps` and `tagline` replace STEPS and TAGLINE for another cut.
 export default {
-  render(t) {
+  render(t, { scene } = {}) {
+    const P = scene?.props ?? {};
+    const [l1, l2] = P.tagline ?? TAGLINE;
     const chip = (label, green, at) => `<span class="pill" style="background:${green ? '#13301f' : '#1c1e23'};border:2px solid ${green ? '#1f6b3a' : '#34363d'};color:${green ? 'var(--green)' : 'var(--text)'};font-size:30px;padding:16px 28px;border-radius:16px;${appear(t, at, { dy: 10 })}">${green ? ICON.check({ size: 26 }) : ''}${label}</span>`;
     const arrow = (at) => `<span style="color:var(--text-3);${appear(t, at, { dy: 0 })}">${ICON.arrow({ size: 32 })}</span>`;
-    const [a, b, c] = STEPS;
+    const [a, b, c] = P.steps ?? STEPS;
     return `
       <div class="abs" style="left:0;right:0;top:150px;display:flex;justify-content:center;${appear(t, 0.05, { dy: 16 })}">${appIcon(176)}</div>
       <div class="abs" style="left:0;right:0;top:362px;text-align:center;font-size:104px;font-weight:800;letter-spacing:-.035em;${appear(t, 0.15, { dy: 16 })}">${EXTENSION.name}</div>
-      <div class="abs" style="left:0;right:0;top:492px;text-align:center;font-size:42px;font-weight:700;letter-spacing:-.01em;color:var(--text);${appear(t, 0.3)}">Your dbt project, <span style="color:var(--text-2)">drawn in a minute.</span></div>
+      <div class="abs" style="left:0;right:0;top:492px;text-align:center;font-size:42px;font-weight:700;letter-spacing:-.01em;color:var(--text);${appear(t, 0.3)}">${l1} <span style="color:var(--text-2)">${l2}</span></div>
       <div class="abs" style="left:0;right:0;top:600px;display:flex;justify-content:center;align-items:center;gap:22px">
         ${chip(a, false, 0.45)}${arrow(0.5)}${chip(b, false, 0.55)}${arrow(0.6)}${chip(c, true, 0.65)}</div>
       <div class="abs" style="left:0;right:0;top:744px;text-align:center;font-size:32px;font-weight:600;${appear(t, 0.8)}"><span style="color:var(--green);font-weight:700">Free</span><span style="color:var(--text-2)"> · source on GitHub</span><span style="color:var(--text-2)"> · VS Code extension · no AI needed</span></div>

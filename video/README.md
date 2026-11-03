@@ -1,6 +1,17 @@
 # Getting-started video
 
-Source and render pipeline for the one-minute getting-started tour (at most 65 s, `maxDuration` in `script.yaml`; the current render is 60.2 s) that the **Welcome to ERD Studio** panel plays and the README links to. It is hyper-focused on the no-AI first run: install, the **Get started with ERD Studio** walkthrough, **Draw from dbt**, the laid-out Logical diagram, Physical and Diff, then one optional line on the AI helper and one on the sample project. The walkthrough's "watch" step and the sidebar welcome views call it a "one-minute" video; keep `maxDuration` at 65 s or reword them. Nothing in this folder ships: `.vscodeignore` excludes `video/**`, and nothing in `esbuild.js`, the tsconfigs or the root vitest run refers to it. The pipeline writes three committed outputs (plus the README thumbnail, see [Thumbnail](#readme-thumbnail)):
+Source and render pipeline for the one-minute getting-started tours that the **Welcome to ERD Studio** panel plays (the dbt cut is also the one the README links to). There are two cuts, picked with `VARIANT` (`build-timeline.mjs` `CUTS` lists them):
+
+| Cut | `VARIANT` | Script | Build folder | Plays where | Length |
+|---|---|---|---|---|---|
+| dbt tour | unset | `script.yaml` | `build/` | a dbt project (the panel's `dbt` page) | 60.2 s |
+| logical-first | `logical` | `script.logical.yaml` | `build-logical/` | a folder without `dbt_project.yml`, and an empty window (`logical`, `nofolder`) | 54.6 s |
+
+The **dbt tour** is hyper-focused on the no-AI first run: install, the **Get started with ERD Studio** walkthrough, **Draw from dbt**, the laid-out Logical diagram, Physical and Diff, then one optional line on the AI helper and one on the sample project. The **logical-first cut** never mentions dbt (its script's header lists the words to keep out, and `npm test` checks the script, its scene modules and every rendered frame): install in a plain folder, the walkthrough as that folder shows it, **New Diagram**, a blank canvas, two tables from the **New Table** dialog and a relationship from **New Relationship**, the DBML files that writes under `.erd-studio/` (layer first: `gold/tables/gold/<table>.dbml`, `gold/relationships/gold.dbml`, `gold/diagrams/orders.dbml`), Import DBML and Export Diagram, the AI helper (the setup skill's plain-folder opening line), and an end card ending on **New Diagram**. Its own scenes are in `player/scenes/logical/`; `install`, `enrich` and `endCard` are shared and take the scene's `props` from the script, and `logical/hook` is the shared hook (`hookScene`) on another tree.
+
+The dbt tour was last rendered before the walkthrough dropped its sample step and the toolbar's Diff became **Compare with dbt**: `npm test` lists both as todos. Re-rendering it means re-wording its `physical` and `sample` scenes (and their narration) first.
+
+Both walkthrough "watch" steps (`watch`, `watchLogical`) and the sidebar welcome views call these "one-minute" videos; keep each `maxDuration` at 65 s or reword them. Nothing in this folder ships: `.vscodeignore` excludes `video/**`, and nothing in `esbuild.js`, the tsconfigs or the root vitest run refers to it. Each cut writes its committed outputs (plus, for the dbt cut, the README copy and thumbnail, see [Thumbnail](#readme-thumbnail)):
 
 | Output | Used by |
 |---|---|
@@ -8,8 +19,10 @@ Source and render pipeline for the one-minute getting-started tour (at most 65 s
 | `media/onboarding/getting-started-poster.jpg` | the poster and the "can't play here" fallback (ships) |
 | `docs/assets/getting-started.mp4` | the README's link: the same video with **AAC** audio, because Safari and QuickTime play MP3-in-MP4 silently (not shipped; `docs/**` is excluded from the VSIX) |
 | `src/types/gettingStartedTranscript.ts` | `GETTING_STARTED_CUES` (the panel adds them as `VTTCue`s) and `GETTING_STARTED_TRANSCRIPT` (the **Transcript** section). Generated; do not edit by hand. |
+| `media/onboarding/getting-started-logical.mp4`, `-poster.jpg` | the logical-first cut and its poster (ship) |
+| `src/types/gettingStartedLogicalTranscript.ts` | `LOGICAL_GETTING_STARTED_CUES` and `LOGICAL_GETTING_STARTED_TRANSCRIPT`, the same shapes for the logical cut. Generated. |
 
-`video/getting-started.vtt` is the same captions as WebVTT, kept as a source artefact for review and for uploading next to the video elsewhere. It is not shipped.
+`video/getting-started.vtt` (and `getting-started-logical.vtt`) is the same captions as WebVTT, kept as a source artefact for review and for uploading next to the video elsewhere. It is not shipped.
 
 Style reference: `docs/assets/erd-studio-linkedin.mp4` (thumbnail beside it). Colour tokens come from it and from `scripts/social-preview.html`.
 
@@ -35,7 +48,14 @@ npm test           # pipeline self-tests (node:test), incl. that every mock uses
                    # (src/providers/GettingStartedPanel.ts). Reword any of them and the video must be
                    # re-rendered.
 npm run thumbnail  # docs/assets/getting-started-play.jpg, the README's play-button image
+
+npm run all:logical   # the logical-first cut: the same steps with VARIANT=logical (build-logical/ in and out;
+                      # its AAC share copy stays in build-logical/, the README links none)
+npm run qa:logical    # build-logical/qa/contact.png, stills and the A/V check
+npm run preview:logical
 ```
+
+Every step reads `VARIANT` (`tts.py`, `build-timeline.mjs`, `music.py`, `capture.mjs`, `encode.sh`, `qa.sh`; the player takes `?variant=logical`). The Kokoro model and the short espeak copy stay in `build/` for both cuts. A scene's `props` (a map in the script) reaches its module as `ctx.scene.props`.
 
 | Step | Command | What it does |
 |---|---|---|
@@ -91,7 +111,7 @@ To check a new word, run `from kokoro_onnx.tokenizer import Tokenizer` and `Toke
 - **Codec:** MP4 container, **H.264** High profile, yuv420p, `+faststart`, with **MP3** audio (64 kbps, mono, 44.1 kHz): the audio codec VS Code's webview guide documents for video. VS Code's bundled ffmpeg has **no AAC decoder**, so AAC audio plays silently. Opus-in-MP4 shipped first and a user heard no voice, so stay on MP3. Never switch the audio to AAC.
 - **Ceiling: 8 MB** (8 MiB) for the mp4, and 65 s for the timeline. `encode.sh` tries CRF 20, then 22, 24 and 26, and fails if the file is still over. The GOP is 150 frames (5 s). The content is mostly static UI, and the longer GOP roughly halves the size at the same CRF compared with 2 s keyframes. The current render is about 4.4 MiB (4.64 MB, 60.2 s) at CRF 20, well under the ceiling.
 - `encode.sh` asserts: `h264` / `High` / `yuv420p`, `mp3` / 44100 / mono, size ≤ 8 MB, duration within 0.25 s of the timeline, the moov atom before mdat, and a 1280×720 JPEG poster.
-- `test/unit/gettingStartedMedia.test.ts` (root vitest) re-checks the shipped files: only two files in `media/onboarding/`, ≤ 8 MB, cues ending by 65 s, faststart, an MP3 track (esds object type 0x6B, not AAC), a JPEG poster, and well-formed cues.
+- `test/unit/gettingStartedMedia.test.ts` (root vitest) re-checks the shipped files: the two cuts' videos and posters in `media/onboarding/`, ≤ 8 MB, cues ending by 65 s, faststart, an MP3 track (esds object type 0x6B, not AAC), a JPEG poster, and well-formed cues.
 - The poster is the end card 1.5 s in, once every element has landed.
 
 ## README thumbnail
@@ -107,7 +127,7 @@ To check a new word, run `from kokoro_onnx.tokenizer import Tokenizer` and `Toke
 
 ## Manual QA before shipping a new render
 
-- [ ] `npm run qa`: look at `build/qa/contact.png` and at each `scene-NN.png` at full size for clipped text, overflow, misalignment and overlaps. The A/V check must report worst |onset − line start| ≤ 0.12 s.
+- [ ] `npm run qa` (or `npm run qa:logical`): look at `build/qa/contact.png` (`build-logical/qa/contact.png`) and at each `scene-NN.png` at full size for clipped text, overflow, misalignment and overlaps. The A/V check must report worst |onset − line start| ≤ 0.12 s.
 - [ ] It plays **with sound** in the Extension Development Host on macOS, Windows and Linux (it starts with sound; if an editor blocks that, the panel shows **Turn on sound**).
 - [ ] It falls back gracefully in VSCodium, with the poster, "Watch in your browser" and the transcript.
 - [ ] Captions line up with the voice, including after seeking.

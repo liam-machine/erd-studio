@@ -247,4 +247,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 4. Write each logical-side change in the project's format: SYNC.md gives the DBML lines (a column line in the Table block, a new Ref line in `relationshipsPath`, a change to an existing Ref in `storedIn`) and the YAML ones (legacy)
 
-<!-- erd-studio-harness: 41 -->
+<!-- erd-studio-harness: 43 -->

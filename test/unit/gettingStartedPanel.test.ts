@@ -52,7 +52,9 @@ import {
   CREATE_DOMAIN_COMMAND,
   IMPORT_DBML_COMMAND,
   OPEN_EXAMPLE_DIAGRAM_COMMAND,
+  GETTING_STARTED_MEDIA,
   computeProjectSummary,
+  gettingStartedCut,
   pageModeForDeps,
   trySampleProject,
   claudeLaunchLine,
@@ -69,7 +71,9 @@ import {
   type GettingStartedDeps,
   type SetupAiHelperDeps,
 } from '../../src/providers/GettingStartedPanel';
-import { GETTING_STARTED_CUES } from '../../src/types/gettingStartedTranscript';
+import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../../src/types/gettingStartedTranscript';
+import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../../src/types/gettingStartedLogicalTranscript';
+import { HELP_ACTIONS } from '../../src/providers/HelpTreeProvider';
 import { HARNESS_VERSION, HarnessService, extractHarnessVersion } from '../../src/services/harnessService';
 import type { RecommendedInstallResult } from '../../src/types/harness';
 import { telemetry } from '../../src/services/telemetryService';
@@ -161,6 +165,13 @@ describe('buildGettingStartedHtml', () => {
     expect(html).not.toContain('<video');
     expect(html).toContain("This editor can't play the video here.");
     expect(html).toContain('data-target="videoOnline"');
+    // Each cut's fallback opens its own online copy: never the dbt tour from a page without dbt.
+    expect(buildGettingStartedHtml({ ...HTML_INPUT, videoUri: null, mode: 'dbt' })).toContain('data-target="videoOnline"');
+    for (const mode of ['logical', 'nofolder'] as const) {
+      const page = buildGettingStartedHtml({ ...HTML_INPUT, videoUri: null, mode });
+      expect(page, mode).toContain('data-target="videoOnlineLogical"');
+      expect(page, mode).not.toContain('data-target="videoOnline"');
+    }
   });
 
   it('has the hero copy, a diagram first then the optional AI cards, and the rewatch footer', () => {
@@ -326,32 +337,29 @@ describe('panel script', () => {
 
   it('the open-a-folder card says a new project is DBML and an older one keeps YAML/JSON, not "saved as DBML" for every folder', () => {
     const html = buildGettingStartedHtml(HTML_INPUT);
-    const card = html.slice(html.indexOf('<section class="gs-noproject"'), html.indexOf('<section class="gs-sample"'));
+    const card = html.slice(html.indexOf('<section class="gs-noproject"'), html.indexOf('<div class="gs-steps-wrap">'));
     expect(card).toContain('a new project as DBML, an open format; a project from an older ERD Studio keeps its YAML and JSON files');
     expect(card).not.toContain('saved as DBML');
   });
 
-  it('offers the sample project: a card with no project, a small link with one', () => {
+  it('offers the sample project (a dbt project) only on the dbt page: a small link above the steps, no card without a folder', () => {
     const html = buildGettingStartedHtml(HTML_INPUT);
-    // Visibility is CSS-driven by data-project; pin both the markup and the rules.
-    expect(html).toContain('<h2 class="gs-sample__title">Using dbt? Try the sample project</h2>');
-    expect(html).toContain('A small Kimball-style dbt project with fake coffee-shop data &mdash; runs on your computer, no account needed.');
-    expect(html).toContain('<button class="gs-btn gs-btn--primary" type="button" data-action="trySample">Try the sample project</button>');
-    expect(html).toContain('.gs[data-project="true"] .gs-noproject, .gs[data-project="true"] .gs-sample { display: none; }');
+    // The empty window names no dbt control, and the sample is a dbt project.
+    expect(html).not.toContain('<section class="gs-sample"');
+    expect(html).not.toContain('Or try the sample project');
+    expect(html).toContain('.gs[data-project="true"] .gs-noproject { display: none; }');
     expect(html).toContain('.gs[data-project="false"] .gs-steps-wrap { display: none; }');
     // The project-state link lives inside the steps (hidden with them when there is no project).
     const steps = html.slice(html.indexOf('<div class="gs-steps-wrap">'));
+    expect(steps).toContain('<p class="gs-sample-link" data-modes="unknown dbt">');
     expect(steps).toContain('data-action="trySample">New to this? Try it on the sample project first</button>');
-    const sampleCard = html.slice(html.indexOf('<section class="gs-sample"'), html.indexOf('<div class="gs-steps-wrap">'));
-    expect(sampleCard).toContain('data-action="trySample"');
+    expect(html.match(/data-action="trySample"/g)).toHaveLength(1);
 
     const { dom, posted, send, doc } = runPanelScript(html);
     try {
-      send({ type: 'status', payload: { ...STATUS, hasProject: false, project: null } });
-      (doc.querySelector('.gs-sample [data-action="trySample"]') as HTMLElement).click();
       send({ type: 'status', payload: STATUS });
       (doc.querySelector('.gs-sample-link [data-action="trySample"]') as HTMLElement).click();
-      expect(posted.slice(1)).toEqual([{ type: 'trySample' }, { type: 'trySample' }]);
+      expect(posted.slice(1)).toEqual([{ type: 'trySample' }]);
     } finally {
       dom.window.close();
     }
@@ -380,16 +388,16 @@ describe('panel script', () => {
     expect(html).toContain('data-action="trySample"');
   });
 
-  it('without a project, the sample card can also open the sample in Codespaces', () => {
+  it('on the dbt page, the sample link can also open the sample in Codespaces', () => {
     const html = buildGettingStartedHtml({ ...HTML_INPUT, codespaces: true });
-    const sampleCard = html.slice(html.indexOf('<section class="gs-sample"'), html.indexOf('<div class="gs-steps-wrap">'));
-    expect(sampleCard).toContain('data-action="openExternal" data-target="sampleCodespaces"');
-    expect(sampleCard).toContain('Open in Codespaces');
-    expect(sampleCard).toContain('Runs in your browser &mdash; nothing to install.');
+    const sampleLink = html.slice(html.indexOf('<p class="gs-sample-link"'), html.indexOf('<div class="gs-steps">'));
+    expect(sampleLink).toContain('data-action="openExternal" data-target="sampleCodespaces"');
+    expect(sampleLink).toContain('Open it in Codespaces');
+    expect(sampleLink).toContain('Runs in your browser &mdash; nothing to install.');
     const { dom, posted, send, doc } = runPanelScript(html);
     try {
-      send({ type: 'status', payload: { ...STATUS, hasProject: false, project: null } });
-      (doc.querySelector('.gs-sample [data-target="sampleCodespaces"]') as HTMLElement).click();
+      send({ type: 'status', payload: { ...STATUS, domainCount: 0 } });
+      (doc.querySelector('.gs-sample-link [data-target="sampleCodespaces"]') as HTMLElement).click();
       (doc.querySelector('[data-step="draw"] [data-action="drawFromDbt"]') as HTMLElement).click();
       expect(posted.slice(1)).toEqual([{ type: 'openExternal', target: 'sampleCodespaces' }, { type: 'drawFromDbt' }]);
     } finally {
@@ -431,14 +439,14 @@ describe('panel script', () => {
     }
   });
 
-  it('logical-only: leads with New diagram, the example and Import DBML, keeps the AI cards and the guided setup, hides the dbt steps and offers "Using dbt?"', () => {
+  it('logical-only: leads with New diagram, the example and Import DBML, keeps the AI cards and the guided setup, and hides every dbt step and line', () => {
     const { dom, posted, send, visible, doc } = runPanelScript(buildGettingStartedHtml(HTML_INPUT));
     try {
       const summary = { modelCount: 3, layering: null, manifest: { state: 'unknown' as const }, line: 'Found 3 dbt models' };
       send({ type: 'status', payload: { ...STATUS, logicalOnly: true, summary } });
       expect(doc.querySelector('.gs')?.getAttribute('data-mode')).toBe('logical');
       expect(doc.querySelector('.gs')?.getAttribute('data-project')).toBe('true');
-      expect(visible('.gs-hero__sub')).toEqual(["Design your data model in your repo; compare it with dbt when you're ready."]);
+      expect(visible('.gs-hero__sub')).toEqual(['Design your data model in Git. Let your AI build from it.']);
       const shown = [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
       expect(shown).toEqual(['new', 'dbml', 'assistant', 'helper', 'start']);
       expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4', '5']);
@@ -453,6 +461,7 @@ describe('panel script', () => {
       // Native DBML storage (2.0): the step is format-neutral, since a YAML project from before 2.0 shows it too.
       expect(visible('[data-step="new"] .gs-step__text').join()).toContain('Each table is a file in .erd-studio/');
       expect(visible('[data-step="new"] .gs-step__text').join()).not.toMatch(/YAML|JSON/);
+      expect(visible('[data-step="new"] .gs-step__text').join()).not.toMatch(/\bdbt\b/i);
       // No dbt wording where it no longer applies; the summary describes dbt models, so it stays off.
       expect(visible('.gs-section-intro').join()).not.toContain('dbt');
       expect(visible('.gs-sample-link')).toEqual([]);
@@ -465,7 +474,7 @@ describe('panel script', () => {
       // The guided setup card, with its no-dbt text: design it with your assistant, no dbt wording.
       expect(visible('[data-step="start"] .gs-step__title')).toEqual(['Start the guided setup']);
       expect(visible('[data-step="start"] .gs-step__text span')).toEqual([
-        'Your assistant asks what your business does and designs a first diagram with you — tables, keys, grain and how they connect — or builds on a DBML import or the tables you already have, then checks the files, explaining each step. No dbt needed.',
+        'Your assistant asks what your business does and designs a first diagram with you — tables, keys, grain and how they connect — or builds on a DBML import or the tables you already have, then checks the files, explaining each step.',
       ]);
       expect(visible('[data-step="start"] .gs-step__hint').join(' ')).not.toContain('dbt');
       // With an assistant and the helper installed: where to start it, without "dbt project folder".
@@ -481,18 +490,15 @@ describe('panel script', () => {
       expect(shownText('[data-step="start"] .gs-step__hint').join(' ')).not.toContain('dbt');
       send({ type: 'status', payload: { ...STATUS, logicalOnly: true, summary } });
       expect(visible('[data-step="assistant"] .gs-step__text span').join('')).not.toContain('tested with');
-      expect(visible('.gs-usedbt .gs-sample__title')).toEqual(['Using dbt?']);
-      expect(visible('.gs-usedbt .gs-sample__text').join()).toContain('Open its folder to compare your design with what dbt built');
+      // No "Using dbt?" teaser, sample dbt project or dbt install link in a folder without dbt.
+      expect(doc.querySelector('.gs-usedbt')).toBeNull();
+      expect(visible('[data-target="dbtInstallDocs"]')).toEqual([]);
 
       const click = (sel: string) => (doc.querySelector(sel) as HTMLElement).click();
       click('[data-step="new"] [data-when="first"] [data-action="createDomain"]');
       click('[data-step="new"] [data-action="openExample"]');
       click('[data-step="dbml"] [data-action="importDbml"]');
-      click('.gs-usedbt [data-action="openFolder"]');
-      click('.gs-usedbt [data-action="trySample"]');
-      expect(posted.slice(1)).toEqual([
-        { type: 'createDomain' }, { type: 'openExample' }, { type: 'importDbml' }, { type: 'openFolder' }, { type: 'trySample' },
-      ]);
+      expect(posted.slice(1)).toEqual([{ type: 'createDomain' }, { type: 'openExample' }, { type: 'importDbml' }]);
 
       // With a diagram: "Open your diagrams" leads and New diagram drops to a secondary button.
       send({ type: 'status', payload: { ...STATUS, logicalOnly: true, domainCount: 2 } });
@@ -507,8 +513,8 @@ describe('panel script', () => {
       send({ type: 'status', payload: STATUS });
       const dbt = [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
       expect(dbt).toEqual(['draw', 'assistant', 'helper', 'start']);
-      expect(visible('.gs-usedbt')).toEqual([]);
       expect(visible('.gs-hero__sub')).toEqual(['Turn the dbt project you already have into a data model you can see.']);
+      expect(visible('[data-target="dbtInstallDocs"]')).toEqual(['New to dbt? How to install it']);
     } finally {
       dom.window.close();
     }
@@ -520,7 +526,7 @@ describe('panel script', () => {
       send({ type: 'status', payload: { ...STATUS, hasProject: false, logicalOnly: true, project: null } });
       expect(doc.querySelector('.gs')?.getAttribute('data-mode')).toBe('nofolder'); // no folder wins over logicalOnly
       expect(visible('.gs-hero__sub')).toEqual(['Design your data model in Git. Let your AI build from it.']);
-      expect(visible('.gs-usedbt')).toEqual([]);
+      expect(visible('[data-target="dbtInstallDocs"]')).toEqual([]);
     } finally {
       dom.window.close();
     }
@@ -531,7 +537,7 @@ describe('panel script', () => {
       const { dom, visible } = runPanelScript(html);
       try { return visible('.gs-hero__sub'); } finally { dom.window.close(); }
     };
-    expect(subs(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical' }))).toEqual(["Design your data model in your repo; compare it with dbt when you're ready."]);
+    expect(subs(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical' }))).toEqual(['Design your data model in Git. Let your AI build from it.']);
     expect(subs(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'dbt' }))).toEqual(['Turn the dbt project you already have into a data model you can see.']);
     expect(subs(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'nofolder' }))).toEqual(['Design your data model in Git. Let your AI build from it.']);
     expect(subs(buildGettingStartedHtml(HTML_INPUT))).toEqual(['Design your data model in Git. Let your AI build from it.']);
@@ -546,7 +552,7 @@ describe('panel script', () => {
     expect(dbt).toContain('<section class="gs-step" data-step="draw" data-state="loading">');
   });
 
-  it('autoplays the dbt tour only on the dbt page; elsewhere the poster waits behind a Watch button', () => {
+  it('autoplays in an open folder (the dbt tour or the logical cut); without a folder the poster waits behind a Watch button', () => {
     const playsOnLoad = (mode?: 'nofolder' | 'logical' | 'dbt') => {
       let calls = 0;
       const dom = new JSDOM(buildGettingStartedHtml({ ...HTML_INPUT, mode }), {
@@ -559,42 +565,162 @@ describe('panel script', () => {
         },
       });
       const tour = dom.window.document.querySelector('.gs-video__tour') as HTMLElement;
-      return { calls, tourHidden: tour.hidden, dom, tour, plays: () => calls };
+      const tourLabel = () => [...tour.querySelectorAll<HTMLElement>('span')].filter((el) => !el.hidden).map((el) => el.textContent).join('');
+      return { calls, tourHidden: tour.hidden, dom, tour, tourLabel, plays: () => calls };
     };
 
-    const dbt = playsOnLoad('dbt');
-    expect(dbt.calls).toBe(1);
-    expect(dbt.tourHidden).toBe(true);
-    dbt.dom.window.close();
-
-    for (const mode of ['logical', 'nofolder'] as const) {
+    for (const mode of ['dbt', 'logical'] as const) {
       const page = playsOnLoad(mode);
-      expect(page.calls, mode).toBe(0);
-      expect(page.tourHidden, mode).toBe(false);
-      expect(page.tour.textContent).toBe('Watch the one-minute dbt tour');
-      page.tour.click(); // the viewer asks: it plays with sound and the button goes
-      expect(page.plays(), mode).toBe(1);
-      expect(page.tour.hidden, mode).toBe(true);
-      // A later status never restarts what the viewer started, and never autoplays over it.
-      page.dom.window.dispatchEvent(new page.dom.window.MessageEvent('message', { data: { type: 'status', payload: STATUS } }));
-      expect(page.plays(), mode).toBe(1);
+      expect(page.calls, mode).toBe(1);
+      expect(page.tourHidden, mode).toBe(true);
       page.dom.window.close();
     }
+
+    const page = playsOnLoad('nofolder');
+    expect(page.calls).toBe(0);
+    expect(page.tourHidden).toBe(false);
+    expect(page.tourLabel()).toBe('Watch the one-minute tour');
+    page.tour.click(); // the viewer asks: it plays with sound and the button goes
+    expect(page.plays()).toBe(1);
+    expect(page.tour.hidden).toBe(true);
+    // A later status never restarts what the viewer started, and never autoplays over it.
+    page.dom.window.dispatchEvent(new page.dom.window.MessageEvent('message', { data: { type: 'status', payload: STATUS } }));
+    expect(page.plays()).toBe(1);
+    page.dom.window.close();
+
+    // The tour button names dbt only on the dbt page (where it autoplays, so it rarely shows).
+    expect(playsOnLoad('logical').tourLabel()).toBe('Watch the one-minute tour');
+    expect(playsOnLoad('dbt').tourLabel()).toBe('Watch the one-minute dbt tour');
 
     // No expected page: wait for the first status before deciding.
     const unknown = playsOnLoad(undefined);
     expect(unknown.calls).toBe(0);
     expect(unknown.tourHidden).toBe(true);
-    unknown.dom.window.dispatchEvent(new unknown.dom.window.MessageEvent('message', { data: { type: 'status', payload: { ...STATUS, logicalOnly: true } } }));
+    unknown.dom.window.dispatchEvent(new unknown.dom.window.MessageEvent('message', {
+      data: { type: 'status', payload: { ...STATUS, hasProject: false, project: null } },
+    }));
     expect(unknown.tour.hidden).toBe(false);
+    expect(unknown.tourLabel()).toBe('Watch the one-minute tour');
     expect(unknown.plays()).toBe(0);
     unknown.dom.window.close();
 
-    const later = playsOnLoad(undefined);
-    later.dom.window.dispatchEvent(new later.dom.window.MessageEvent('message', { data: { type: 'status', payload: STATUS } }));
-    expect(later.plays()).toBe(1);
-    expect(later.tour.hidden).toBe(true);
-    later.dom.window.close();
+    for (const payload of [STATUS, { ...STATUS, logicalOnly: true }]) {
+      const later = playsOnLoad(undefined);
+      later.dom.window.dispatchEvent(new later.dom.window.MessageEvent('message', { data: { type: 'status', payload } }));
+      expect(later.plays()).toBe(1);
+      expect(later.tour.hidden).toBe(true);
+      later.dom.window.close();
+    }
+  });
+
+  describe('dbt is an add-on: no dbt text without a dbt project, all of it in one', () => {
+    const DBT = /\bdbt\b/i;
+    /**
+     * Everything a viewer of this page can reach: text not under `[hidden]` or
+     * a CSS `display: none` (the data-project rules), with the closed
+     * Transcript included (one click away), every `data-when` variant the
+     * statuses reveal, the captions (inline cues) and aria-label / title text.
+     */
+    const reachableText = (mode: 'nofolder' | 'logical' | 'dbt', statuses: GettingStartedStatus[]): string[] => {
+      const cut = gettingStartedCut(mode);
+      const html = buildGettingStartedHtml({
+        ...HTML_INPUT, mode, cues: cut.cues, transcript: cut.transcript,
+        videoUri: `https://mock-csp-source/media/onboarding/${cut.video}`,
+        posterUri: `https://mock-csp-source/media/onboarding/${cut.poster}`,
+      });
+      const { dom, send, doc } = runPanelScript(html);
+      const out: string[] = [];
+      try {
+        const win = dom.window;
+        const shown = (el: Element): boolean => {
+          for (let e: Element | null = el; e; e = e.parentElement) {
+            if ((e as HTMLElement).hidden || win.getComputedStyle(e).display === 'none') { return false; }
+          }
+          return true;
+        };
+        const collect = () => {
+          const walker = doc.createTreeWalker(doc.body, win.NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const parent = node.parentElement!;
+            if (parent.closest('script, style')) { continue; }
+            const t = (node.textContent ?? '').replace(/\s+/g, ' ').trim();
+            if (t && shown(parent)) { out.push(t); }
+          }
+          for (const el of doc.querySelectorAll('[aria-label], [title]')) {
+            if (!shown(el)) { continue; }
+            out.push(el.getAttribute('aria-label') ?? '', el.getAttribute('title') ?? '');
+          }
+        };
+        collect(); // before any status: the page the host expects
+        for (const status of statuses) { send({ type: 'status', payload: status }); collect(); }
+        out.push(doc.title);
+        const data = JSON.parse(doc.getElementById('gs-data')!.textContent!) as { cues: Array<{ text: string }> };
+        out.push(...data.cues.map((c) => c.text));
+      } finally {
+        dom.window.close();
+      }
+      return out.filter(Boolean);
+    };
+    const variants = (base: GettingStartedStatus): GettingStartedStatus[] => [
+      base,
+      { ...base, domainCount: 2 },
+      { ...base, assistants: ['claude', 'copilot'], claude: 'cli', helper: 'missing' },
+      { ...base, assistants: ['claude', 'copilot'], claude: 'cli', helper: 'ready' },
+      { ...base, assistants: ['claude'], claude: 'cli', helper: 'update' },
+      { ...base, assistants: ['claude'], claude: 'cli', helper: 'unmanaged' },
+      { ...base, assistants: ['claude'], claude: 'extension', helper: 'ready', project: { name: 'model', relativePath: 'model' } },
+    ];
+
+    it('the logical page (a folder without dbt_project.yml) shows no dbt word, in any card state, video or transcript', () => {
+      const text = reachableText('logical', variants({ ...STATUS, logicalOnly: true }));
+      expect(text.join(' ')).toContain('Design your data model in Git');
+      expect(text.join(' ')).toContain('New diagram');
+      expect(text.filter((t) => DBT.test(t))).toEqual([]);
+    });
+
+    it('the no-folder page shows no dbt word either', () => {
+      const text = reachableText('nofolder', [{ ...STATUS, hasProject: false, logicalOnly: true, project: null }]);
+      expect(text.join(' ')).toContain('Open the folder your data model lives in');
+      expect(text.filter((t) => DBT.test(t))).toEqual([]);
+    });
+
+    it('the logical cut its pages play names no dbt (captions and transcript)', () => {
+      expect(LOGICAL_GETTING_STARTED_CUES.filter((c) => DBT.test(c.text))).toEqual([]);
+      expect(LOGICAL_GETTING_STARTED_TRANSCRIPT).not.toMatch(DBT);
+    });
+
+    it('the dbt page keeps all of its dbt text', () => {
+      const text = reachableText('dbt', variants(STATUS)).join(' ').replace(/\s+/g, ' ');
+      for (const line of [
+        'Turn the dbt project you already have into a data model you can see.',
+        'Draw your dbt project',
+        'Draw from dbt',
+        "Your assistant adds what dbt doesn't record",
+        'Your assistant checks your dbt setup',
+        'Start your assistant in your dbt project folder',
+        'New to this? Try it on the sample project first',
+        'New to dbt? How to install it',
+      ]) {
+        expect(text, line).toContain(line);
+      }
+      // The dbt tour, its captions and transcript.
+      expect(text).toContain(GETTING_STARTED_CUES[0].text);
+      expect(text).toContain(GETTING_STARTED_TRANSCRIPT.split('\n\n')[0]);
+    });
+  });
+
+  it('describeWrittenFiles: the checking tool names dbt only in a dbt project', () => {
+    const files = ['~/.erd-studio-cli/bin/erd-studio', '.claude/skills/erd-studio-setup/SKILL.md', '.gitignore'];
+    const tool = (groups: ReturnType<typeof describeWrittenFiles>) => groups.find((g) => g.title === 'A small checking tool')!;
+    expect(tool(describeWrittenFiles(files)).why)
+      .toBe('Your assistant runs it to compare your logical data model with your dbt project. It sits in your home folder, outside the project.');
+    const logical = describeWrittenFiles(files, { logicalOnly: true });
+    expect(tool(logical).why).toBe('Your assistant runs it to check your diagram files. It sits in your home folder, outside the project.');
+    expect(logical.flatMap((g) => [g.title, g.why]).filter((t) => /\bdbt\b/i.test(t))).toEqual([]);
+  });
+
+  it('the Help & Feedback rows name no dbt (they show in every folder)', () => {
+    expect(HELP_ACTIONS.flatMap((a) => [a.label, a.tooltip]).filter((t) => /\bdbt\b/i.test(t))).toEqual([]);
   });
 
   it('falls back to the poster and reports videoError when the video errors', () => {
@@ -653,7 +779,7 @@ describe('isGettingStartedToHost', () => {
   it('external targets map only to fixed https URLs', () => {
     expect(Object.keys(GETTING_STARTED_EXTERNAL_URLS).sort()).toEqual([
       'claudeCodeDocs', 'codexDocs', 'copilotDocs', 'cursorDocs', 'dbtInstallDocs', 'geminiCliDocs', 'sampleCodespaces',
-      'sampleRepo', 'videoOnline',
+      'sampleRepo', 'videoOnline', 'videoOnlineLogical',
     ]);
     expect(GETTING_STARTED_EXTERNAL_URLS.sampleCodespaces)
       .toBe('https://codespaces.new/liam-machine/erd-studio-sample?quickstart=1');
@@ -667,6 +793,8 @@ describe('isGettingStartedToHost', () => {
     // Not the github.com blob page: it refuses to preview an 8 MB video.
     expect(GETTING_STARTED_EXTERNAL_URLS.videoOnline)
       .toBe('https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4');
+    expect(GETTING_STARTED_EXTERNAL_URLS.videoOnlineLogical)
+      .toBe('https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started-logical.mp4');
   });
 });
 
@@ -849,6 +977,39 @@ describe('pure helpers', () => {
     expect(claudeTerminalLaunch(exe, 'win32')).toEqual({
       kind: 'process', display: `"${exe}" "/erd-studio-setup"`, shellPath: exe, shellArgs: ['/erd-studio-setup'],
     });
+  });
+
+  it('claudeTerminalLaunch passes another prompt as claude\'s initial-prompt argument, after its flags', () => {
+    const prompt = 'Execute the erd-studio sync plan at .erd-studio/.sync-plan.json using the erd-studio skill.';
+    const line = `claude --dangerously-skip-permissions "${prompt}"`;
+    for (const platform of ['darwin', 'linux', 'win32'] as const) {
+      expect(claudeTerminalLaunch('claude', platform, { prompt, args: ['--dangerously-skip-permissions'] }))
+        .toEqual({ kind: 'sendText', display: line, line });
+    }
+  });
+
+  it('claudeTerminalLaunch runs the venv activation first on the typed line, and shows it', () => {
+    const launch = claudeTerminalLaunch('claude', 'darwin', { prompt: 'Run it.', venvDir: "/p/o'neil/.venv" });
+    const line = `source '/p/o'\\''neil/.venv/bin/activate' && claude "Run it."`;
+    expect(launch).toEqual({ kind: 'sendText', display: line, line });
+  });
+
+  it('claudeTerminalLaunch never types a prompt a shell would expand: it runs claude as the terminal process', () => {
+    // A semanticDir setting can hold anything; `$`, backticks, quotes, `%` and `!` all expand in some shell.
+    for (const bad of ['$HOME', '`id`', '"x"', '%PATH%', 'a!b', 'a\\b', "it's"]) {
+      const prompt = `Execute the plan at ${bad}/.sync-plan.json`;
+      const launch = claudeTerminalLaunch('claude', 'darwin', {
+        prompt, args: ['--dangerously-skip-permissions'], venvDir: '/p/.venv', envPath: '/usr/bin',
+      });
+      expect(launch).toMatchObject({
+        kind: 'process', shellPath: 'claude', shellArgs: ['--dangerously-skip-permissions', prompt],
+        // The activation a typed line would run, as the environment it sets.
+        env: { VIRTUAL_ENV: '/p/.venv', PATH: '/p/.venv/bin:/usr/bin' },
+      });
+    }
+    const win = claudeTerminalLaunch('claude', 'win32', { prompt: 'a $b', venvDir: 'C:\\p\\.venv', envPath: 'C:\\Windows' });
+    expect(win).toMatchObject({ kind: 'process', env: { VIRTUAL_ENV: 'C:\\p\\.venv', PATH: 'C:\\p\\.venv\\Scripts;C:\\Windows' } });
+    expect(claudeTerminalLaunch('claude', 'darwin', { prompt: 'a $b' })).not.toHaveProperty('env');
   });
 
   it('keepMineInstalls names what Keep mine still installs', () => {
@@ -1160,6 +1321,26 @@ describe('openClaudeCode', () => {
     expect((openFolder[1] as { fsPath: string }).fsPath).toBe('/w/analytics');
   });
 
+  it('nested project message: "Your dbt project" only when the folder is a dbt project', async () => {
+    vscode._setMockExtensions(['anthropic.claude-code']);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const nested = { dbtRoot: path.join(tmp, 'analytics'), clipboardText: `cd '${tmp}/analytics' && claude "/erd-studio-setup"` };
+    fs.mkdirSync(nested.dbtRoot);
+
+    await openClaudeCode({ ...nested, logicalOnly: true });
+    expect(String(info.mock.calls.at(-1)![0])).toContain('Your project, analytics, is a subfolder here');
+    expect(String(info.mock.calls.at(-1)![0])).not.toMatch(/\bdbt\b/i);
+    await openClaudeCode({ ...nested, logicalOnly: false });
+    expect(String(info.mock.calls.at(-1)![0])).toContain('Your dbt project, analytics, is a subfolder here');
+
+    // A caller that does not say: read from the folder itself.
+    await openClaudeCode(nested);
+    expect(String(info.mock.calls.at(-1)![0])).not.toMatch(/\bdbt\b/i);
+    fs.writeFileSync(path.join(nested.dbtRoot, 'dbt_project.yml'), 'name: analytics\n');
+    await openClaudeCode(nested);
+    expect(String(info.mock.calls.at(-1)![0])).toContain('Your dbt project, analytics, is a subfolder here');
+  });
+
   it('with neither: opens the Claude Code install page', async () => {
     const open = vi.spyOn(vscode.env, 'openExternal');
     await openClaudeCode({ dbtRoot: '/w', clipboardText: SETUP_PROMPT });
@@ -1195,6 +1376,22 @@ describe('openCopilotChat', () => {
     await openCopilotChat({ dbtRoot: '/w/analytics', workspaceFolder: '/w' });
     expect(calls).toEqual([[{ query: SETUP_PROMPT, isPartialQuery: true, mode: 'agent' }], []]);
     expect(String(info.mock.calls[0][0])).toContain('File > Open Folder');
+  });
+
+  it('nested project message: "Your dbt project" only when the folder is a dbt project', async () => {
+    vscode.commands.registerCommand(COPILOT_CHAT_OPEN_COMMAND, () => {});
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const dbtRoot = path.join(tmp, 'analytics');
+    fs.mkdirSync(dbtRoot);
+
+    await openCopilotChat({ dbtRoot, workspaceFolder: tmp, logicalOnly: true });
+    expect(String(info.mock.calls.at(-1)![0])).toContain('Your project, analytics, is a subfolder here');
+    expect(String(info.mock.calls.at(-1)![0])).not.toMatch(/\bdbt\b/i);
+    await openCopilotChat({ dbtRoot, workspaceFolder: tmp });
+    expect(String(info.mock.calls.at(-1)![0])).not.toMatch(/\bdbt\b/i);
+    fs.writeFileSync(path.join(dbtRoot, 'dbt_project.yml'), 'name: analytics\n');
+    await openCopilotChat({ dbtRoot, workspaceFolder: tmp });
+    expect(String(info.mock.calls.at(-1)![0])).toContain('Your dbt project, analytics, is a subfolder here');
   });
 
   it('without a chat command: opens the Copilot setup page', async () => {
@@ -1443,6 +1640,50 @@ describe('GettingStartedPanel', () => {
     await panel._simulateMessage({ type: 'ready' });
     const last = panel._postedMessages.filter((m) => (m as { type: string }).type === 'status').at(-1) as { payload: GettingStartedStatus };
     expect(last.payload).toMatchObject({ logicalOnly: false, summary: { line: 'x' } });
+  });
+
+  it('plays the dbt tour on the dbt page and the logical-first cut, with its own captions and transcript, elsewhere', () => {
+    expect(GETTING_STARTED_MEDIA).toMatchObject({
+      video: 'getting-started.mp4', poster: 'getting-started-poster.jpg',
+      logicalVideo: 'getting-started-logical.mp4', logicalPoster: 'getting-started-logical-poster.jpg',
+    });
+    expect(gettingStartedCut('dbt')).toEqual({
+      video: 'getting-started.mp4', poster: 'getting-started-poster.jpg', cues: GETTING_STARTED_CUES, transcript: GETTING_STARTED_TRANSCRIPT,
+    });
+    for (const mode of ['logical', 'nofolder'] as const) {
+      expect(gettingStartedCut(mode), mode).toEqual({
+        video: 'getting-started-logical.mp4',
+        poster: 'getting-started-logical-poster.jpg',
+        cues: LOGICAL_GETTING_STARTED_CUES,
+        transcript: LOGICAL_GETTING_STARTED_TRANSCRIPT,
+      });
+    }
+
+    const escaped = (t: string) => JSON.stringify(t).slice(1, 20);
+    for (const deps of [makeDeps({ logicalOnly: true }), makeDeps({ workspaceRoot: null })]) {
+      GettingStartedPanel.createOrShow(makeContext(), deps);
+      const html = vscode.window._webviewPanels[0].webview.html;
+      if (fs.existsSync(path.join(REPO_ROOT, 'media/onboarding', GETTING_STARTED_MEDIA.logicalVideo))) {
+        expect(html).toContain('media/onboarding/getting-started-logical.mp4');
+      }
+      expect(html).not.toContain('media/onboarding/getting-started.mp4');
+      expect(html).not.toContain('media/onboarding/getting-started-poster.jpg');
+      expect(html).toContain(escaped(LOGICAL_GETTING_STARTED_CUES[0].text));
+      expect(html).not.toContain(escaped(GETTING_STARTED_CUES[0].text));
+      vscode.window._webviewPanels[0].dispose();
+    }
+  });
+
+  it('logical-only deps: the setup result explains the checking tool without naming dbt', async () => {
+    const runSetup = vi.fn(async (): Promise<SetupOutcome> => ({ ok: true, filesWritten: ['~/.erd-studio-cli/bin/erd-studio'], message: 'ok' }));
+    GettingStartedPanel.createOrShow(makeContext(), makeDeps({ logicalOnly: true, runSetup }));
+    const panel = vscode.window._webviewPanels[0];
+    await panel._simulateMessage({ type: 'setupAiHelper' });
+    const result = panel._postedMessages.find((m) => (m as { type: string }).type === 'setupResult') as
+      { payload: { groups: Array<{ title: string; why: string }> } };
+    expect(result.payload.groups.map((g) => g.why)).toEqual([
+      'Your assistant runs it to check your diagram files. It sits in your home folder, outside the project.',
+    ]);
   });
 
   it('createOrShow on an open panel reveals it with the new deps; dispose clears the singleton', async () => {

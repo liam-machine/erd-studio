@@ -37,7 +37,8 @@ mcp-server/**
 proxy/**
 telemetry/**
 # Getting-started video pipeline (see video/README.md). Its outputs that ship
-# are media/onboarding/getting-started.mp4 and getting-started-poster.jpg.
+# are media/onboarding/getting-started.mp4 (the dbt tour), getting-started-logical.mp4
+# (the logical-first tour) and their -poster.jpg files.
 video/**
 # npm workspaces (@erd-studio/core, @erd-studio/renderer). The extension bundles
 # them from source into dist/, so nothing under packages/ is needed at runtime.
