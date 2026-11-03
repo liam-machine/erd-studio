@@ -623,6 +623,28 @@ tbody .sync-modal__row--model-header:not(:first-child) {
   color: var(--editor-fg);
 }
 
+/* Column and relationship item cells: badge + label on one line that never
+   leaves its column. The label shrinks and ends in an ellipsis (its title
+   holds the full text) instead of running under the stage buttons. */
+.sync-modal__cell--item {
+  overflow: hidden;
+}
+
+.sync-modal__item-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sync-modal__item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Relationship labels — structured with hierarchy */
 .sync-modal__rel-label {
   font-family: var(--vscode-editor-font-family, monospace);

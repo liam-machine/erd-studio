@@ -239,3 +239,22 @@ describe('SyncMergeModal: decided rows stay in place', () => {
     expect(state().syncSelections['col:dim_region:region_key']).toBeUndefined();
   });
 });
+
+describe('SyncMergeModal: long labels stay in their column (dev-host finding 5)', () => {
+  it('a relationship label ends in an ellipsis inside its cell and carries the full text as a tooltip', () => {
+    render(<SyncMergeModal />);
+    const label = document.querySelector('.sync-modal__rel-label') as HTMLElement;
+    expect(label.getAttribute('title')).toBe('fct_task_event.customer_key → dim_customer.customer_key');
+    // The truncating class sits on the label, inside the one-line wrapper of the item cell.
+    expect(label.className).toContain('sync-modal__item-label');
+    expect(label.parentElement?.className).toBe('sync-modal__item-content');
+    expect(label.closest('td')?.className).toContain('sync-modal__cell--item');
+  });
+
+  it('column names get the same treatment', () => {
+    render(<SyncMergeModal />);
+    const name = screen.getByText('loaded_at', { selector: '.sync-modal__col-name' });
+    expect(name.getAttribute('title')).toBe('loaded_at');
+    expect(name.className).toContain('sync-modal__item-label');
+  });
+});

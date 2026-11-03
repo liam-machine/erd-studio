@@ -325,10 +325,12 @@ function ColumnRow({ modelName, col, sourceStage, targetStage }: ColumnRowProps)
         {sourceContent}
       </AcceptCell>
       <td className="sync-modal__cell sync-modal__cell--item sync-modal__cell--col-item">
-        <span className={`sync-modal__status-badge sync-modal__status-badge--sm sync-modal__status-badge--${col.status}`}>
-          {itemStatusText(col.status)}
-        </span>
-        <span className="sync-modal__col-name">{col.name}</span>
+        <div className="sync-modal__item-content">
+          <span className={`sync-modal__status-badge sync-modal__status-badge--sm sync-modal__status-badge--${col.status}`}>
+            {itemStatusText(col.status)}
+          </span>
+          <span className="sync-modal__col-name sync-modal__item-label" title={col.name}>{col.name}</span>
+        </div>
       </td>
       <AcceptCell side="physical" selectionKey={key} valueColor={targetColor} hint={physicalHint}>
         {targetContent}
@@ -343,6 +345,7 @@ function ColumnRow({ modelName, col, sourceStage, targetStage }: ColumnRowProps)
 
 function RelationshipRow({ rel, sourceStage, targetStage }: { rel: RelationshipDiscrepancy; sourceStage: string; targetStage: string }) {
   const key = relationshipKey(rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn);
+  const relLabel = `${rel.fromModel}.${rel.fromColumn} → ${rel.toModel}.${rel.toColumn}`;
 
   // Compute action hints for tooltips (only called for non-matched relationships)
   const relStatus = isConflictRelStatus(rel.status) ? rel.status : 'extra';
@@ -368,18 +371,22 @@ function RelationshipRow({ rel, sourceStage, targetStage }: { rel: RelationshipD
       <td className="sync-modal__cell sync-modal__cell--chevron" />
       <AcceptCell side="logical" selectionKey={key} hint={logicalHint}>{sourceContent}</AcceptCell>
       <td className="sync-modal__cell sync-modal__cell--item">
-        <span className={`sync-modal__status-badge sync-modal__status-badge--sm sync-modal__status-badge--${rel.status === 'cardinality-mismatch' ? 'cardinality-mismatch' : rel.status}`}>
-          {itemStatusText(rel.status)}
-        </span>
-        <span className="sync-modal__rel-label">
-          <span className="sync-modal__rel-model">{rel.fromModel}</span>
-          <span className="sync-modal__rel-sep">.</span>
-          <span className="sync-modal__rel-col">{rel.fromColumn}</span>
-          <span className="sync-modal__rel-arrow">→</span>
-          <span className="sync-modal__rel-model">{rel.toModel}</span>
-          <span className="sync-modal__rel-sep">.</span>
-          <span className="sync-modal__rel-col">{rel.toColumn}</span>
-        </span>
+        <div className="sync-modal__item-content">
+          <span className={`sync-modal__status-badge sync-modal__status-badge--sm sync-modal__status-badge--${rel.status === 'cardinality-mismatch' ? 'cardinality-mismatch' : rel.status}`}>
+            {itemStatusText(rel.status)}
+          </span>
+          {/* One line, cut with an ellipsis inside its own column (never under
+              the Physical button in a narrow editor); the full label is the tooltip. */}
+          <span className="sync-modal__rel-label sync-modal__item-label" title={relLabel}>
+            <span className="sync-modal__rel-model">{rel.fromModel}</span>
+            <span className="sync-modal__rel-sep">.</span>
+            <span className="sync-modal__rel-col">{rel.fromColumn}</span>
+            <span className="sync-modal__rel-arrow">→</span>
+            <span className="sync-modal__rel-model">{rel.toModel}</span>
+            <span className="sync-modal__rel-sep">.</span>
+            <span className="sync-modal__rel-col">{rel.toColumn}</span>
+          </span>
+        </div>
       </td>
       <AcceptCell side="physical" selectionKey={key} hint={physicalHint}>{targetContent}</AcceptCell>
     </tr>

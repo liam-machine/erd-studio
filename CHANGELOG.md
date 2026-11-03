@@ -152,6 +152,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - The selection ring is drawn in the colour of the tab you're on (green on the Physical tab, ghost tables included) instead of always blue, and a selected table that is only in the stage you're viewing keeps its amber glow.
 - **The Sync dialog keeps every row where it is.** Picking a side for a relationship no longer moves the row into a collapsed "resolved" list (which slid the next row under the pointer): it stays in place with the chosen side highlighted, as column rows do, and a table whose differences are all decided stays open. Click the chosen side again to clear that choice, or **Reset** to clear them all; **Apply Changes (N)** and "N differences still need a decision" follow, and changing a choice after **Apply Changes** asks you to apply again.
 - **Compare's panel and the Detail Panel sit side by side.** Clicking a table in the Compare panel opens its Detail Panel on the right and moves the Compare panel to its left, instead of under it, and the table is zoomed into the space the two panels leave free.
+- **Long relationship names in the Sync dialog stay in their column.** In a narrow editor a label such as `dim_project.parent_project_key → dim_project.project_key` ends in an ellipsis instead of running under the Physical button; hover it for the full name.
 - **Fit leaves the top row of tables clear of the toolbar,** on the Logical and Physical tabs, and so does the first view of a diagram and an auto layout.
 
 ## 1.7.2 — 2026-10-23
