@@ -5,6 +5,7 @@
 const esbuild = require('esbuild');
 const path = require('path');
 const fs = require('fs');
+const { exampleBundleDefine } = require('./scripts/exampleBundle.cjs');
 
 const args = process.argv.slice(2);
 const isWatch = args.includes('--watch');
@@ -58,6 +59,13 @@ const extensionConfig = {
   logLevel: 'warning',
   // Harness skill files (src/harness/**/*.md) are bundled as plain strings.
   loader: { '.md': 'text' },
+  define: {
+    // The example projects in docs/examples/, for Open an Example Project…
+    // (src/services/exampleProjects.ts). Inlined because the VSIX is capped
+    // at 60 files. Read once per build: `npm run watch` picks up an edit to
+    // docs/examples on its next start.
+    '__ERD_EXAMPLES__': exampleBundleDefine(),
+  },
   plugins: [problemMatcherPlugin],
 };
 
