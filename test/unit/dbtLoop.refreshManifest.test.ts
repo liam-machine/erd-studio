@@ -267,7 +267,10 @@ describe.each([
     editManifest(ws, addDateTest, t0 + 120_000);
     await refresh(panel);
     const now = await waitFor(panel, 'manifestStaleness');
-    expect(now.payload).toMatchObject({ isStale: false, manifestMtime: t0 + 120_000 });
+    expect(now.payload.isStale).toBe(false);
+    // utimes goes through seconds; filesystems keep µs or ns, so the read-back
+    // mtime can differ from the value set in the last fraction of a millisecond.
+    expect(Math.abs((now.payload.manifestMtime as number) - (t0 + 120_000))).toBeLessThan(1);
     expect(errorsOf(panel)).toEqual([]);
   });
 
