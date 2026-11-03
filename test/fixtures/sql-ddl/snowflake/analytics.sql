@@ -1,0 +1,40 @@
+-- Analytics star schema (Snowflake), as GET_DDL writes it.
+create or replace schema ANALYTICS;
+
+create or replace TRANSIENT TABLE RAW_DB.ANALYTICS.DIM_CUSTOMER (
+	CUSTOMER_ID NUMBER(38,0) NOT NULL COMMENT 'Surrogate key',
+	CUSTOMER_NAME VARCHAR(16777216),
+	ATTRIBUTES VARIANT,
+	LOADED_AT TIMESTAMP_NTZ(9) DEFAULT CURRENT_TIMESTAMP(),
+	primary key (CUSTOMER_ID)
+) COMMENT='One row per customer';
+
+create or replace TABLE RAW_DB.ANALYTICS.DIM_PRODUCT (
+	PRODUCT_ID NUMBER(38,0) NOT NULL,
+	PRODUCT_NAME VARCHAR(200),
+	constraint PK_DIM_PRODUCT primary key (PRODUCT_ID)
+);
+
+create or replace TABLE ANALYTICS.DIM_DATE (
+	DATE_KEY NUMBER(8,0) NOT NULL PRIMARY KEY,
+	CALENDAR_DATE DATE
+);
+
+create or replace TABLE RAW_DB.ANALYTICS.FCT_ORDER (
+	ORDER_ID NUMBER(38,0) NOT NULL,
+	LINE_NO NUMBER(4,0) NOT NULL,
+	CUSTOMER_ID NUMBER(38,0) NOT NULL,
+	PRODUCT_ID NUMBER(38,0) NOT NULL,
+	DATE_KEY NUMBER(8,0),
+	AMOUNT NUMBER(12,2),
+	constraint PK_FCT_ORDER primary key (ORDER_ID, LINE_NO),
+	constraint FK_ORDER_CUSTOMER foreign key (CUSTOMER_ID) references RAW_DB.ANALYTICS.DIM_CUSTOMER(CUSTOMER_ID)
+) cluster by (DATE_KEY);
+
+alter table ANALYTICS.FCT_ORDER add constraint FK_ORDER_PRODUCT foreign key (PRODUCT_ID) references ANALYTICS.DIM_PRODUCT (PRODUCT_ID);
+alter table ANALYTICS.FCT_ORDER add constraint FK_ORDER_DATE foreign key (DATE_KEY) references ANALYTICS.DIM_DATE (DATE_KEY);
+
+comment on column ANALYTICS.FCT_ORDER.AMOUNT is 'Order line amount in AUD';
+
+create or replace view ANALYTICS.V_ORDERS as select * from ANALYTICS.FCT_ORDER;
+grant select on all tables in schema ANALYTICS to role REPORTER;

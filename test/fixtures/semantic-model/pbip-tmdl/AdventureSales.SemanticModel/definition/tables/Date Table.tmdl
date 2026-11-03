@@ -1,0 +1,77 @@
+/// The calendar every date in the model uses.
+table 'Date Table'
+	lineageTag: 9c0d1e2f-0004-4000-8000-000000000000
+	dataCategory: Time
+
+	column DateKey
+		dataType: int64
+		formatString: 0
+		lineageTag: 5e6f7081-0004-4000-8000-000000000001
+		summarizeBy: none
+		sourceColumn: [DateKey]
+
+		annotation SummarizationSetBy = Automatic
+
+	column Date
+		dataType: dateTime
+		isKey
+		formatString: Long Date
+		lineageTag: 5e6f7081-0004-4000-8000-000000000002
+		summarizeBy: none
+		sourceColumn: [Date]
+
+		annotation SummarizationSetBy = Automatic
+
+	column Year
+		dataType: int64
+		formatString: 0
+		lineageTag: 5e6f7081-0004-4000-8000-000000000003
+		summarizeBy: none
+		sourceColumn: [Year]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Month Name'
+		dataType: string
+		lineageTag: 5e6f7081-0004-4000-8000-000000000004
+		summarizeBy: none
+		sourceColumn: [Month Name]
+		sortByColumn: 'Month Number'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Month Number'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 5e6f7081-0004-4000-8000-000000000005
+		summarizeBy: none
+		sourceColumn: [Month Number]
+
+		annotation SummarizationSetBy = Automatic
+
+	/// July to June.
+	column 'Fiscal Year' =
+			VAR _y = YEAR ( 'Date Table'[Date] )
+			RETURN
+				IF ( MONTH ( 'Date Table'[Date] ) >= 7, _y + 1, _y )
+		dataType: int64
+		formatString: 0
+		lineageTag: 5e6f7081-0004-4000-8000-000000000006
+		summarizeBy: none
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Date Table' = calculated
+		mode: import
+		source =
+				ADDCOLUMNS (
+					CALENDAR ( DATE ( 2020, 1, 1 ), DATE ( 2026, 12, 31 ) ),
+					"DateKey", YEAR ( [Date] ) * 10000 + MONTH ( [Date] ) * 100 + DAY ( [Date] ),
+					"Year", YEAR ( [Date] ),
+					"Month Name", FORMAT ( [Date], "MMMM" ),
+					"Month Number", MONTH ( [Date] )
+				)
+
+	annotation PBI_Id = 3f9e2d1c0b4a49588f7e6d5c4b3a2918
+
