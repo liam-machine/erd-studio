@@ -35,3 +35,6 @@ video/node_modules/
 
 # Bundles the fixture generators write next to their sources (scripts/regen-*.ts)
 scripts/.regen-*.cjs
+
+# Onboarding stories: videos, logs and screenshots of each run (test/stories/run.mjs)
+test/stories/out/

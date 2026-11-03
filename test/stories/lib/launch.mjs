@@ -1,0 +1,194 @@
+// Build the extension once, stage a copy, and launch an isolated VS Code on it.
+//
+// Each story gets: a fresh profile (--user-data-dir / --extensions-dir) under a
+// SHORT /tmp path (VS Code puts its IPC socket in the profile, and macOS caps a
+// Unix socket path at 104 characters, past which the window silently exits),
+// its own CDP port from 9400 up (9333 is shared with other tools), a fixed
+// window size and a HOME of its own (so dialogs start in a clean temp folder,
+// never the real home). Every process is killed by its --user-data-dir.
+
+import { spawn, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { WORKBENCH, attach, cdpAlive, findTarget } from './cdp.mjs';
+
+export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** The window every story is filmed at (CSS pixels). */
+export const WINDOW = { width: 1440, height: 900 };
+
+/** The VS Code executable: $VSCODE_PATH, else the usual install for this OS. */
+export function findCode() {
+  if (process.env.VSCODE_PATH) return process.env.VSCODE_PATH;
+  const candidates = process.platform === 'darwin'
+    ? ['/Applications/Visual Studio Code.app/Contents/MacOS/Code', path.join(os.homedir(), 'Applications/Visual Studio Code.app/Contents/MacOS/Code')]
+    : process.platform === 'win32'
+      ? [path.join(process.env.LOCALAPPDATA ?? '', 'Programs/Microsoft VS Code/Code.exe')]
+      // The Electron binary, not /usr/bin/code (a launcher script that drops Chromium switches).
+      : ['/usr/share/code/code', '/opt/vscode/code', '/opt/VSCode-linux-x64/code'];
+  const hit = candidates.find((p) => fs.existsSync(p));
+  if (!hit) throw new Error(`VS Code not found (looked in ${candidates.join(', ')}). Set VSCODE_PATH to its executable.`);
+  return hit;
+}
+
+/** `npm run build`, unless told not to. Throws on a failed build. */
+export function buildExtension({ skip = false } = {}) {
+  if (skip) {
+    if (!fs.existsSync(path.join(REPO, 'dist/extension.js'))) throw new Error('--no-build, but dist/extension.js does not exist');
+    return;
+  }
+  const r = spawnSync('npm', ['run', 'build'], { cwd: REPO, encoding: 'utf8', shell: process.platform === 'win32' });
+  if (r.status !== 0) throw new Error(`npm run build failed:\n${r.stdout}\n${r.stderr}`);
+}
+
+/**
+ * Copy what the extension needs at runtime into `dir`, so a rebuild in the
+ * repo while a window runs never films a half-written bundle.
+ */
+export function stageExtension(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  for (const entry of ['dist', 'media', 'schemas', 'syntaxes', 'package.json', 'LICENSE', 'README.md', 'CHANGELOG.md']) {
+    const from = path.join(REPO, entry);
+    if (!fs.existsSync(from)) continue;
+    fs.cpSync(from, path.join(dir, entry), {
+      recursive: true,
+      filter: (src) => !src.endsWith('.map'),
+    });
+  }
+  return dir;
+}
+
+/** A short temp dir: /tmp/erds-XXXXXX (never the long $TMPDIR on macOS). */
+export function shortTempDir(prefix = 'erds-') {
+  const base = process.platform === 'win32' ? os.tmpdir() : '/tmp';
+  return fs.mkdtempSync(path.join(base, prefix));
+}
+
+function portFree(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once('error', () => resolve(false));
+    srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(true)));
+  });
+}
+
+/** The first port from `start` that nothing listens on (and no CDP answers). */
+export async function freePort(start = 9400) {
+  for (let p = start; p < start + 200; p++) {
+    if ((await portFree(p)) && !(await cdpAlive(p))) return p;
+  }
+  throw new Error(`no free port in ${start}–${start + 199}`);
+}
+
+/** The settings every story starts from: a quiet, deterministic window. */
+export const STORY_SETTINGS = {
+  'workbench.startupEditor': 'none',
+  'security.workspace.trust.enabled': false,
+  'update.mode': 'none',
+  'update.showReleaseNotes': false,
+  'extensions.autoUpdate': false,
+  'extensions.autoCheckUpdates': false,
+  'extensions.ignoreRecommendations': true,
+  'workbench.tips.enabled': false,
+  'workbench.enableExperiments': false,
+  'workbench.welcomePage.walkthroughs.openOnInstall': false,
+  'window.titleBarStyle': 'custom',
+  'window.commandCenter': true,
+  'window.zoomLevel': 0,
+  'window.restoreWindows': 'none',
+  'window.dialogStyle': 'custom',
+  // Open/Save folder dialogs are VS Code's own in-window dialog (DOM, drivable); native ones are not.
+  'files.simpleDialog.enable': true,
+  'workbench.colorTheme': 'Default Dark Modern',
+  'telemetry.telemetryLevel': 'off',
+  'erdStudio.telemetry.enabled': false,
+  // No Copilot / chat surfaces in a fresh profile.
+  'chat.disableAIFeatures': true,
+  'workbench.secondarySideBar.defaultVisibility': 'hidden',
+  'git.enabled': false,
+  'git.openRepositoryInParentFolders': 'never',
+};
+
+/**
+ * Launch VS Code for one story. `folder` is undefined for an empty window.
+ * Resolves `{ port, root, ud, home, proc, kill, logFile }` once the workbench is up.
+ */
+export async function launchVSCode({ extDir, folder, root, port, settings = {}, logFile }) {
+  const ud = path.join(root, 'ud');
+  const exts = path.join(root, 'ex');
+  const home = path.join(root, 'home');
+  for (const d of [path.join(ud, 'User'), exts, home]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(ud, 'User/settings.json'), JSON.stringify({ ...STORY_SETTINGS, ...settings }, null, 2));
+  // The window size: VS Code opens the first Extension Development Host window
+  // at the last one's size (Electron has no CDP Browser.setWindowBounds).
+  const uiState = { mode: 1, x: 40, y: 40, width: WINDOW.width, height: WINDOW.height };
+  fs.mkdirSync(path.join(ud, 'User/globalStorage'), { recursive: true });
+  fs.writeFileSync(path.join(ud, 'User/globalStorage/storage.json'), JSON.stringify({
+    windowsState: { lastPluginDevelopmentHostWindow: { uiState }, lastActiveWindow: { uiState }, openedWindows: [] },
+  }, null, 2));
+
+  const args = [
+    `--user-data-dir=${ud}`,
+    `--extensions-dir=${exts}`,
+    `--extensionDevelopmentPath=${extDir}`,
+    `--remote-debugging-port=${port}`,
+    '--skip-welcome',
+    '--skip-release-notes',
+    '--disable-workspace-trust',
+    // Keep painting while the window is hidden behind others or minimised.
+    '--disable-renderer-backgrounding',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-background-timer-throttling',
+  ];
+  if (process.platform === 'linux') args.push('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--password-store=basic');
+  // HOME is a temp folder, so macOS finds no login keychain there and pops up "A keychain
+  // cannot be found to store 'Code Safe Storage'" on every launch. A mock keychain keeps
+  // Code's safe storage in memory and never touches the user's Keychain.
+  if (process.platform === 'darwin') args.push('--use-mock-keychain');
+  if (folder) args.push(`--folder-uri=${pathToFileURL(folder).href}`);
+
+  const env = { ...process.env, HOME: home };
+  if (process.platform === 'win32') env.USERPROFILE = home;
+  // Running from inside VS Code's terminal leaks these; they would make Code act as node or as a CLI.
+  for (const k of Object.keys(env)) if (k === 'ELECTRON_RUN_AS_NODE' || k.startsWith('VSCODE_') && k !== 'VSCODE_PATH') delete env[k];
+
+  const out = fs.openSync(logFile, 'a');
+  const proc = spawn(findCode(), args, { env, stdio: ['ignore', out, out], detached: process.platform !== 'win32' });
+  proc.unref();
+  const handle = { port, root, ud, home, proc, logFile, kill: () => killByProfile(ud) };
+
+  try {
+    const target = await findTarget(port, { match: WORKBENCH, timeoutMs: 90000 });
+    const wb = await attach(target);
+    const until = Date.now() + 60000;
+    while (!(await wb.evaluate(`!!document.querySelector('.monaco-workbench .part.activitybar, .monaco-workbench .activitybar')`).catch(() => false))) {
+      if (Date.now() > until) throw new Error('the workbench never rendered');
+      await sleep(250);
+    }
+    wb.close();
+  } catch (err) {
+    handle.kill();
+    throw new Error(`VS Code did not start on :${port} (${err.message}). Its output is in ${logFile}`);
+  }
+  return handle;
+}
+
+/** Kill every process started with this profile (main, renderers, extension host). */
+export function killByProfile(ud) {
+  if (process.platform === 'win32') {
+    spawnSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${ud}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`]);
+    return;
+  }
+  spawnSync('pkill', ['-f', '--', ud]);
+  const until = Date.now() + 4000;
+  while (Date.now() < until) {
+    if (spawnSync('pgrep', ['-f', '--', ud]).status !== 0) return;
+    spawnSync('sleep', ['0.2']);
+  }
+  spawnSync('pkill', ['-9', '-f', '--', ud]);
+}

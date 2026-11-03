@@ -1,0 +1,82 @@
+name: Onboarding stories
+
+# Runs the onboarding stories (test/stories/: user stories as code that drive a
+# real VS Code with the extension) and, with `record`, films each one as a
+# captioned MP4. Manual only; the videos, logs and failure screenshots are
+# uploaded as the run's `onboarding-stories` artifact.
+#
+#   gh workflow run stories.yml -f record=true
+#   gh workflow run stories.yml -f only=empty-window -f record=true
+#
+# VS Code is Electron, so it needs a display: Xvfb provides one, and the
+# stories film the window over the DevTools protocol, never the screen.
+# How to write and debug a story: docs/dev/onboarding-stories.md.
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Run only the stories whose id or file name contains this (comma-separated; empty runs all)
+        required: false
+        type: string
+        default: ''
+      record:
+        description: Film each story (test/stories/out/<id>.mp4)
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stories-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner uses Node's built-in WebSocket (Node 22+).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install VS Code, Xvfb and ffmpeg
+        run: |
+          sudo apt-get update
+          # ffmpeg from apt has libass (burned-in captions); DejaVu is the caption font.
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xauth ffmpeg fonts-dejavu-core \
+            libnss3 libgbm1 libxkbfile1 libsecret-1-0 libgtk-3-0 libasound2t64 libxss1
+          curl -fsSL -o "$RUNNER_TEMP/vscode.tar.gz" "https://update.code.visualstudio.com/latest/linux-x64/stable"
+          sudo mkdir -p /opt/vscode
+          sudo tar -xzf "$RUNNER_TEMP/vscode.tar.gz" -C /opt/vscode --strip-components=1
+          /opt/vscode/bin/code --version
+          ffmpeg -hide_banner -filters | grep -E ' (ass|subtitles) '
+
+      - run: npm ci
+
+      - name: Run the stories
+        env:
+          VSCODE_PATH: /opt/vscode/code
+          ONLY: ${{ inputs.only }}
+          RECORD: ${{ inputs.record }}
+        run: |
+          args=()
+          if [ "$RECORD" = "true" ]; then args+=(--record); fi
+          if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
+          xvfb-run --auto-servernum --server-args="-screen 0 1600x1000x24" \
+            node test/stories/run.mjs "${args[@]}"
+
+      - name: Upload videos, logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onboarding-stories
+          path: test/stories/out
+          if-no-files-found: warn
+          retention-days: 14
