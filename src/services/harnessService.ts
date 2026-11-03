@@ -1088,6 +1088,7 @@ models:
 2. **Execute each action** in order:
    - For logical-side actions: edit files at \`modelContext[modelName].logicalModelPath\`, \`relationshipsPath\` and/or the diagram file
    - For physical-side actions: edit files at \`modelContext[modelName].dbtSqlPath\` and \`dbtSchemaPath\`
+   - \`dbtSqlPath\` is set only when that SQL file exists; \`null\` means the model has no SQL file on disk (declared only in a schema yml, a Python model, or deleted, renamed or moved outside the model paths since the last compile). Do not create one to add or retype a column: edit the schema yml at \`dbtSchemaPath\`, and ask the user where the model is defined if the action needs its SELECT.
    - For destructive actions (\`remove-*\`): confirm with the user before proceeding
 3. **Compile** if \`requiresCompile\` is \`true\`: run \`dbt compile\` to regenerate the manifest
 4. **Verify**: Re-open the domain in ERD Studio and run the diff comparison to confirm discrepancies are resolved

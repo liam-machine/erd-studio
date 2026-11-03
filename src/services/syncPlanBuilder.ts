@@ -38,7 +38,8 @@ import {
 } from '../types/syncPlan';
 import type { YmlData } from '../types/ymlData';
 import { subjectAreaStorageOf } from '@erd-studio/core';
-import { configuredSchemaOf } from './dbtDraft';
+import { catalogColumnName, configuredSchemaOf } from './dbtDraft';
+import { normaliseName } from './nameUtils';
 import type { TableLibraryService } from './logicalModelService';
 
 export interface SyncPlanContext {
@@ -220,6 +221,15 @@ export function buildSyncPlan(
     return known;
   };
 
+  // Whether the schema yml or the manifest declares a column (any case):
+  // otherwise only catalog.json, i.e. the warehouse, reports it.
+  const declaredInDbt = (modelName: string, columnName: string): boolean => {
+    const key = normaliseName(columnName);
+    const yml = ctx.ymlData.models.get(modelName);
+    const man = ctx.manifest.models.get(modelName);
+    return [...(yml?.columns ?? []), ...(man?.columns ?? [])].some((c) => normaliseName(c.name) === key);
+  };
+
   for (const [key, groundTruth] of Object.entries(selections)) {
     const parts = key.split(':');
     const kind = parts[0];
@@ -252,7 +262,11 @@ export function buildSyncPlan(
 
       columns.push({
         modelName,
-        columnName,
+        // A column only the warehouse reports is written as Draw from dbt
+        // seeds it (`LOADED_AT` → `loaded_at`); a declared one as declared.
+        columnName: action === 'add-column-to-logical' && !declaredInDbt(modelName, columnName)
+          ? catalogColumnName(columnName)
+          : columnName,
         discrepancyStatus: colDisc.status,
         groundTruth,
         action,
@@ -307,23 +321,32 @@ export function buildSyncPlan(
     }
   }
 
-  // Build model context with file paths (prefer yml source, fall back to manifest heuristic).
+  // Build model context with file paths. The schema yml is the one that
+  // declares the model, else a guess next to the manifest's SQL file (where a
+  // new one would go). The SQL file is only ever one that is on disk, i.e. in
+  // the yml walker's listing of the configured model paths (`sourceFiles`):
+  // the manifest's `original_file_path` when it is listed (exact, and right
+  // for a versioned model's `_v2.sql`), else the `.sql` file named after the
+  // model. Never a name guessed from the yml's path: a model with only a yml
+  // has no SQL file, and gets null.
+  const listedSourceFiles = new Set([...(ctx.ymlData.sourceFiles?.values() ?? [])].map(toSlash));
   const modelContext: Record<string, TableContext> = {};
   for (const modelName of referencedModels) {
     const manifestModel = ctx.manifest.models.get(modelName);
     const ymlModel = ctx.ymlData.models.get(modelName);
-    let dbtSqlPath: string | null = null;
     let dbtSchemaPath: string | null = null;
 
     if (ymlModel?.filePath) {
       // Use the actual yml file path from YmlParserService
       dbtSchemaPath = toSlash(path.relative(ctx.projectRoot, ymlModel.filePath));
-      // Heuristic: SQL file is next to the YAML file with .sql extension
-      dbtSqlPath = dbtSchemaPath.replace(/\.ya?ml$/, '.sql');
     } else if (manifestModel?.originalFilePath) {
-      dbtSqlPath = toSlash(manifestModel.originalFilePath);
-      dbtSchemaPath = dbtSqlPath.replace(/\.sql$/, '.yml');
+      dbtSchemaPath = toSlash(manifestModel.originalFilePath).replace(/\.(sql|py)$/i, '.yml');
     }
+    const compiledFrom = manifestModel?.originalFilePath ? toSlash(manifestModel.originalFilePath) : undefined;
+    const sourceFile = compiledFrom && listedSourceFiles.has(compiledFrom)
+      ? compiledFrom
+      : ctx.ymlData.sourceFiles?.get(normaliseName(modelName));
+    const dbtSqlPath = sourceFile && /\.sql$/i.test(sourceFile) ? toSlash(sourceFile) : null;
 
     const relationshipsFile = ctx.relationshipsFile?.(modelName);
     modelContext[modelName] = {

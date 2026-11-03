@@ -172,6 +172,7 @@ import {
   markDraftKeys,
   relationshipsForAddedTables,
   seedTableFromDbt,
+  seededColumnCount,
   configuredSchemaOf,
   type DraftSkipped,
 } from '../services/dbtDraft';
@@ -1083,7 +1084,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
     const domain = this.subjectAreaService.getSubjectArea(document.uri.fsPath);
     const { existingModels, manifestModels } = this.buildWebviewPayload(
-      { models: domain.logical.models }, manifest, ymlData, domain.modelFolder, { readAllTables: true },
+      { models: domain.logical.models }, manifest, ymlData, domain.modelFolder,
+      { readAllTables: true, catalog: await this.loadCatalog() },
     );
     this.post(webview, { type: 'existingTables', payload: { existingModels, manifestModels } });
   }
@@ -1209,7 +1211,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     manifest: ManifestData,
     ymlData: YmlData,
     modelFolder?: string,
-    options: { readAllTables?: boolean } = {},
+    options: { readAllTables?: boolean; catalog?: CatalogData } = {},
   ): {
     templates: ReturnType<TemplateService['loadTemplates']>;
     manifestModels: Array<{
@@ -1253,6 +1255,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     });
 
+    // A dbt model's count is what adding it gives the table
+    // (`seedTableFromDbt`): its declared columns plus the ones only the
+    // catalog has. The cached catalog when the caller has none to hand.
+    const catalog = 'catalog' in options ? options.catalog : this.catalogService?.peekCatalog();
+
     // 2. dbt .yml source file models (declared in dbt project)
     for (const [name, ymlModel] of ymlData.models) {
       if (existingModelNames.has(name) || addedNames.has(name)) continue;
@@ -1261,7 +1268,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         name,
         schema: manifestModel?.schema ?? '',
         description: ymlModel.description || manifestModel?.description || '',
-        columnCount: ymlModel.columns.length,
+        columnCount: seededColumnCount(name, ymlModel.columns, manifestModel, catalog),
         source: 'yml',
         sourcePath: path.relative(this.workspaceRoot, ymlModel.filePath),
       });
@@ -1285,7 +1292,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         name: m.name,
         schema: m.schema,
         description: m.description,
-        columnCount: m.columns.length,
+        columnCount: seededColumnCount(m.name, m.columns, m, catalog),
         source: 'manifest',
         // Honours a custom `target-path` — the literal 'target/manifest.json'
         // this replaced was wrong for any project that sets one.
@@ -7450,7 +7457,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
     const skipPermissions = getErdStudioSetting<boolean>('claudeSync.skipPermissions', false) === true;
     const planPath = `${semanticDir}/.sync-plan.json`;
-    const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read .claude/skills/erd-studio/SYNC.md for the action reference and follow the execution steps.`;
+    const syncGuide = '.claude/skills/erd-studio/SYNC.md';
+    const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read ${syncGuide} for the action reference and follow the execution steps.`;
+
+    // Without the AI helper files the prompt names a guide that isn't there,
+    // and Claude Code goes looking for it across the disk. Offer the setup
+    // instead of launching.
+    if (!fs.existsSync(path.join(this.workspaceRoot, syncGuide))) {
+      const SETUP = 'Set Up My AI Helper';
+      const pick = await vscode.window.showWarningMessage(
+        'Claude Code needs ERD Studio\'s AI helper files to apply the sync plan.',
+        { modal: true, detail: `${syncGuide} is missing. Set Up My AI Helper installs it (choose Claude Code), then run Execute with Claude again. The plan stays at ${planPath}.` },
+        SETUP,
+      );
+      if (pick === SETUP) {
+        await vscode.commands.executeCommand('erdStudio.setupAiHelper');
+      }
+      return;
+    }
 
     const launch = claudeTerminalLaunch('claude', process.platform, {
       prompt,
@@ -7463,8 +7487,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         'The --dangerously-skip-permissions flag lets Claude Code edit files in this workspace ' +
         'without asking for confirmation. Set "erdStudio.claudeSync.skipPermissions" to false to keep the permission prompts.'
       : `Command: ${launch.display}\n\n` +
-        'Claude Code will ask before editing files. Enable "erdStudio.claudeSync.skipPermissions" ' +
-        'to run unattended with --dangerously-skip-permissions.';
+        'Claude Code asks before editing files unless your own Claude Code settings allow edits. ' +
+        'Enable "erdStudio.claudeSync.skipPermissions" in your user settings to run unattended with --dangerously-skip-permissions.';
     const LAUNCH = 'Launch';
     const choice = await vscode.window.showWarningMessage(
       `Launch Claude Code in a terminal to execute the sync plan at ${planPath}?`,

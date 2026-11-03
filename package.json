@@ -1161,9 +1161,10 @@
           "description": "Folder, relative to the project, that holds ERD Studio's tables and diagrams. Changing this requires a window reload."
         },
         "erdStudio.claudeSync.skipPermissions": {
+          "scope": "machine",
           "type": "boolean",
           "default": false,
-          "markdownDescription": "When **Execute with Claude** launches Claude Code to apply a sync plan, pass `--dangerously-skip-permissions` so it edits files without asking. Off by default: Claude Code prompts before each file change. The launch command is always shown for confirmation first."
+          "markdownDescription": "When **Execute with Claude** launches Claude Code to apply a sync plan, pass `--dangerously-skip-permissions` so it edits files without asking. Off by default: Claude Code prompts before each file change. The launch command is always shown for confirmation first. Read from your user settings only: a workspace's `.vscode/settings.json` cannot turn it on."
         },
         "erdStudio.feedback.aiAssist": {
           "scope": "machine",
@@ -1294,7 +1295,8 @@
     "test:watch": "vitest",
     "regen-fixtures": "esbuild scripts/regen-fixtures.ts --bundle --platform=node --format=cjs --loader:.md=text --log-level=warning --outfile=scripts/.regen-fixtures.cjs && node scripts/.regen-fixtures.cjs",
     "regen:dbt-dbml-fixture": "esbuild scripts/regen-dbt-dbml-fixture.ts --bundle --platform=node --format=cjs --loader:.md=text --log-level=warning --outfile=scripts/.regen-dbt-dbml-fixture.cjs && node scripts/.regen-dbt-dbml-fixture.cjs",
-    "test:e2e:dbml": "node scripts/e2e-dbml.mjs"
+    "test:e2e:dbml": "node scripts/e2e-dbml.mjs",
+    "eval:sync-ai": "node test/skill-evals/sync-apply/run.mjs"
   },
   "devDependencies": {
     "@testing-library/react": "^16.1.0",

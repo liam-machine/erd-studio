@@ -156,7 +156,7 @@ The Confluence app renders whatever is committed in a customer's repo — writte
 - All identifiers use the `erdStudio` prefix (`erd-studio` for the activity bar container; palette category `"ERD Studio"`).
 - **Never remove the `dbtSemantic` compatibility shims.** Pre-rename commands are also registered in code as `dbtSemantic.*` (`LEGACY_ALIASED_COMMANDS`, end of `activate()`) — never contribute those in `package.json`. Add every **new** command to `NO_LEGACY_ALIAS` in `src/extension.ts`. `PRE_REGISTERED_COMMANDS` are registered before the no-project early return; never register one twice. The deprecated `dbtSemantic.projectPath` / `.semanticDir` settings stay contributed.
 - **Read settings only through `getErdStudioSetting()`** (`src/services/configService.ts`), never `getConfiguration('erdStudio').get(...)`.
-- The `erdStudio.feedback.*` AI settings, `erdStudio.telemetry.enabled` and `erdStudio.checkKnownFixes` are `"scope": "machine"` **and** listed in `USER_SCOPED_SETTINGS`. Never remove either half: a checked-in `.vscode/settings.json` must not be able to redirect the analysis request (and the API key that travels with it) or flip telemetry or the known-fixes check.
+- The `erdStudio.feedback.*` AI settings, `erdStudio.telemetry.enabled`, `erdStudio.checkKnownFixes` and `erdStudio.claudeSync.skipPermissions` are `"scope": "machine"` **and** listed in `USER_SCOPED_SETTINGS`. Never remove either half: a checked-in `.vscode/settings.json` must not be able to redirect the analysis request (and the API key that travels with it), flip telemetry or the known-fixes check, or turn off Claude Code's permission prompts for Execute with Claude.
 
 ### Security and privacy — do not "fix" these
 

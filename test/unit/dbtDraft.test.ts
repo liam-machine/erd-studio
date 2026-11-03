@@ -13,6 +13,7 @@ import {
   markDraftKeys,
   relationshipsForAddedTables,
   seedTableFromDbt,
+  seededColumnCount,
   serializeDraftSubjectAreaDocument,
   suggestSubjectAreaName,
   suggestDraftLayer,
@@ -271,12 +272,47 @@ describe('seedTableFromDbt — column types from catalog.json', () => {
     return { y, m, c };
   }
 
-  it('fills types from the catalog, keeping the declared names and order and adding no column', () => {
+  // The rule changed deliberately: a drawn table used to leave out what only the
+  // warehouse has, so Compare opened on a column the user never removed.
+  it('fills types from the catalog: declared names and order first, then the catalog-only columns, ALL CAPS lowercased', () => {
     const { y, m, c } = untypedProject();
     expect(seedTableFromDbt('fct_orders', y, m, c)!.columns!.map((x) => [x.name, x.dataType])).toEqual([
       ['order_id', 'NUMBER(38,0)'],
       ['customer_id', 'NUMBER(38,0)'],
       ['note', ''],
+      ['loaded_at', 'TIMESTAMP_NTZ'],
+    ]);
+  });
+
+  it('adds catalog-only columns in catalog order, lowercasing only an ALL-CAPS name', () => {
+    const y = emptyYml();
+    y.models.set('dim_x', ymlModel('dim_x', 'marts', [['id', 'int']]));
+    const c = catalogOf([{
+      uniqueId: 'model.p.dim_x', name: 'dim_x',
+      columns: [
+        col('ZETA', 0, 'TEXT'), col('ID', 1, 'NUMBER'), col('LoadedAt', 2, 'TIMESTAMP'),
+        col('raw_note', 3, 'TEXT'), col('_ROW_2', 4, 'INT'), col('123', 5, 'INT'), col('zeta', 6, 'DUPLICATE'),
+      ],
+    }]);
+    const seeded = seedTableFromDbt('dim_x', y, undefined, c)!;
+    expect(seeded.columns!.map((x) => [x.name, x.dataType])).toEqual([
+      ['id', 'NUMBER'],
+      ['zeta', 'TEXT'],
+      ['LoadedAt', 'TIMESTAMP'],
+      ['raw_note', 'TEXT'],
+      ['_row_2', 'INT'],
+      ['123', 'INT'],
+    ]);
+  });
+
+  it('adds catalog-only columns after a manifest-declared model\'s columns, with the warehouse comment', () => {
+    const m = emptyManifest();
+    m.models.set('dim_m', manifestModel('dim_m', 'models/marts/dim_m.sql', [['id', 'bigint']]));
+    const c = catalogOf([{ uniqueId: 'model.p.dim_m', name: 'dim_m', columns: [col('ID', 0, 'NUMBER'), col('EXTRA', 1, 'TEXT')] }]);
+    c.byUniqueId.get('model.p.dim_m')!.columns[1].comment = 'from the warehouse';
+    expect(seedTableFromDbt('dim_m', undefined, m, c)!.columns).toEqual([
+      { name: 'id', dataType: 'NUMBER', description: 'id doc' },
+      { name: 'extra', dataType: 'TEXT', description: 'from the warehouse' },
     ]);
   });
 
@@ -307,10 +343,32 @@ describe('seedTableFromDbt — column types from catalog.json', () => {
     expect(seedTableFromDbt('orders', y, undefined, c)!.columns![0].dataType).toBe('v1type');
   });
 
+  it('gives a model with no declared columns none from the catalog (Add Existing Model adds it empty)', () => {
+    const y = emptyYml();
+    y.models.set('dim_bare', ymlModel('dim_bare', 'marts', []));
+    const c = catalogOf([{ uniqueId: 'model.p.dim_bare', name: 'dim_bare', columns: [col('ID', 0, 'NUMBER'), col('NAME', 1, 'TEXT')] }]);
+    expect(seedTableFromDbt('dim_bare', y, undefined, c)!.columns).toEqual([]);
+    expect(seededColumnCount('dim_bare', [], undefined, c)).toBe(0);
+  });
+
+  it('seededColumnCount counts exactly the columns seedTableFromDbt gives', () => {
+    const { y, m, c } = untypedProject();
+    const ymlCols = y.models.get('fct_orders')!.columns;
+    expect(seededColumnCount('fct_orders', ymlCols, m.models.get('fct_orders'), c))
+      .toBe(seedTableFromDbt('fct_orders', y, m, c)!.columns!.length);
+    // Without a catalog, the declared count.
+    expect(seededColumnCount('fct_orders', ymlCols, m.models.get('fct_orders'), undefined)).toBe(ymlCols.length);
+    const y2 = emptyYml();
+    y2.models.set('dim_x', ymlModel('dim_x', 'marts', [['id', 'int']]));
+    const c2 = catalogOf([{ uniqueId: 'model.p.dim_x', name: 'dim_x', columns: [col('ZETA', 0, 'TEXT'), col('ID', 1, 'NUMBER'), col('zeta', 2, 'DUP'), col(' ', 3, 'X')] }]);
+    expect(seededColumnCount('dim_x', y2.models.get('dim_x')!.columns, undefined, c2))
+      .toBe(seedTableFromDbt('dim_x', y2, undefined, c2)!.columns!.length);
+  });
+
   it('buildDbtDraft passes the catalog to its default seeding', () => {
     const { y, m, c } = untypedProject();
     const draft = buildDbtDraft({ modelNames: ['fct_orders'], ymlData: y, manifest: m, catalog: c, libraryHas: () => false });
-    expect(draft.newModels[0].columns!.map((x) => x.dataType)).toEqual(['NUMBER(38,0)', 'NUMBER(38,0)', '']);
+    expect(draft.newModels[0].columns!.map((x) => x.dataType)).toEqual(['NUMBER(38,0)', 'NUMBER(38,0)', '', 'TIMESTAMP_NTZ']);
   });
 
   it.each(DBT_FIXTURES)('seeds the fixture project with the same types the physical stage shows (%s storage)', async (_storage, fixture) => {
@@ -326,6 +384,8 @@ describe('seedTableFromDbt — column types from catalog.json', () => {
       ['task_key', 'integer'],
       ['event_date', 'timestamp without time zone'],
       ['amount', 'numeric(15,2)'],
+      // Only the catalog has it: added, as the Physical tab shows it.
+      ['loaded_at', 'timestamp with time zone'],
     ]);
 
     // One rule: the physical stage resolves every column of every drawable model identically.
@@ -336,8 +396,12 @@ describe('seedTableFromDbt — column types from catalog.json', () => {
       logical: { models, relationships: [] }, viewConfig: {},
     };
     const physical = new SubjectAreaService(new LayerService(ROOT)).buildPhysicalSubjectArea(unified, ymlData, manifest, catalog);
+    expect(models.map((mm) => mm.name)).toEqual(expect.arrayContaining(['stg_raw_payments', 'fct_task_event']));
     for (const model of models) {
       const shown = physical.models.find((pm) => pm.name === model.name)!;
+      // The same columns as the Physical tab (catalog-only ones too); order and case aside.
+      expect([model.name, (model.columns ?? []).map((cc) => normaliseName(cc.name)).sort()])
+        .toEqual([model.name, shown.columns.map((pc) => normaliseName(pc.name)).sort()]);
       const shownTypes = new Map(shown.columns.map((pc) => [normaliseName(pc.name), pc.dataType]));
       for (const column of model.columns ?? []) {
         expect([model.name, column.name, column.dataType]).toEqual([model.name, column.name, shownTypes.get(normaliseName(column.name))]);

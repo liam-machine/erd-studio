@@ -205,6 +205,25 @@ describe('erd-studio diff on the YAML and DBML twins of the dbt fixture', () => 
     }
   });
 
+  it('every plan names a dbt SQL file only when it is on disk, on both storages', async () => {
+    for (const root of [YAML, DBML]) {
+      const { byKey } = await diffAll(root);
+      const showcase = byKey.get('silver/showcase')!.plan!.modelContext;
+      // A yml-only model (the dev-host dim_customer) has no SQL file to edit: null, not a guessed name.
+      expect(showcase.dim_customer, root).toMatchObject({ dbtSqlPath: null, dbtSchemaPath: 'models/silver/dim_customer.yml' });
+      expect(showcase.dim_project?.dbtSqlPath, root).toBe('models/silver/dim_project.sql');
+      let named = 0;
+      for (const d of byKey.values()) {
+        for (const [name, c] of Object.entries(d.plan?.modelContext ?? {})) {
+          if (c.dbtSqlPath === null) continue;
+          named++;
+          expect(fs.existsSync(path.join(root, c.dbtSqlPath)), `${d.file} ${name}: ${c.dbtSqlPath}`).toBe(true);
+        }
+      }
+      expect(named, root).toBeGreaterThan(0);
+    }
+  });
+
   it('--domain on a .dbml table file or relationships file is refused, not compared', async () => {
     for (const arg of ['.erd-studio/silver/tables/silver/dim_customer.dbml', '.erd-studio/silver/relationships/silver.dbml']) {
       const r = await cli(['diff', '--json', '--domain', arg], DBML);

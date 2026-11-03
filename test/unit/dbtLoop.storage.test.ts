@@ -29,7 +29,8 @@ import { _resetMockWorkspace, createMockTextDocument, createMockWebviewPanel } f
 
 // The QuickPick of what to draw: the real scopes and models from dbt, answered
 // with the gold folder's scope (layer gold) plus `picker.extra`.
-const picker = vi.hoisted(() => ({ extra: [] as string[], offered: [] as string[], layer: 'gold' }));
+// `only`, when set, is the whole answer instead.
+const picker = vi.hoisted(() => ({ extra: [] as string[], offered: [] as string[], layer: 'gold', only: undefined as string[] | undefined }));
 vi.mock('../../src/providers/dbtDraftPicker', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/providers/dbtDraftPicker')>()),
   pickDraftScope: async (
@@ -39,12 +40,14 @@ vi.mock('../../src/providers/dbtDraftPicker', async (importOriginal) => ({
     const excluded = new Set([...(opts.excludeNames ?? [])].map((n) => n.toLowerCase()));
     picker.offered = opts.models.map((m) => m.name).filter((n) => !excluded.has(n.toLowerCase()));
     const scope = scopes.find((s) => s.suggestedLayer === picker.layer) ?? scopes[0];
-    const modelNames = [...scope.modelNames, ...picker.extra].filter((n) => !excluded.has(n.toLowerCase()));
+    const modelNames = (picker.only ?? [...scope.modelNames, ...picker.extra]).filter((n) => !excluded.has(n.toLowerCase()));
     return { scope, modelNames };
   },
 }));
 
 import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { main as cliMain } from '../../src/cli/index';
+import type { DiffResult } from '../../src/cli/diff';
 import { drawFromDbt, type DrawFromDbtDeps } from '../../src/commands/drawFromDbt';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
@@ -302,7 +305,10 @@ describe.each([
         expect(ctx.relationshipsPath).toBeUndefined();
       }
       if (ctx.dbtSchemaPath) expect(fs.existsSync(path.join(root, ctx.dbtSchemaPath)), ctx.dbtSchemaPath).toBe(true);
+      // The SQL file is one that is there, or null: never a name guessed from the yml's.
+      if (ctx.dbtSqlPath !== null) expect(fs.existsSync(path.join(root, ctx.dbtSqlPath)), ctx.dbtSqlPath).toBe(true);
     }
+    expect(plan.modelContext.dim_customer).toMatchObject({ dbtSqlPath: null, dbtSchemaPath: 'models/silver/dim_customer.yml' });
     for (const r of plan.relationships) {
       if (storage === 'dbml' && r.storedIn) expect(fs.existsSync(path.join(root, '.erd-studio', r.storedIn.replace(/^\.erd-studio\//, ''))) || fs.existsSync(path.join(root, r.storedIn))).toBe(true);
     }
@@ -331,7 +337,8 @@ describe.each([
     const file = s.tableLibraryService.findTableFile('stg_raw_payments')!;
     const rel = path.relative(path.join(root, '.erd-studio'), file).split(path.sep).join('/');
     expect(rel).toBe(storage === 'dbml' ? 'silver/tables/silver/stg_raw_payments.dbml' : 'logical-models/stg_raw_payments.yml');
-    expect(s.tableLibraryService.getTable('stg_raw_payments')!.columns.map((c) => c.name)).toEqual(['payment_id', 'order_id', 'amount', 'payment_method']);
+    // The declared columns, then the one only the catalog has (Snowflake's LOADED_AT, lowercased).
+    expect(s.tableLibraryService.getTable('stg_raw_payments')!.columns.map((c) => c.name)).toEqual(['payment_id', 'order_id', 'amount', 'payment_method', 'loaded_at']);
     const unified = s.subjectAreaService.getSubjectArea(path.join(root, '.erd-studio', ...showcase.split('/')));
     run().added = buildLogicalDisplaySubjectArea(SubjectAreaService.toLogicalStage(unified), unified.viewConfig, unified.stubColumns);
   });
@@ -454,6 +461,127 @@ describe.each([
     expect(fs.readFileSync(path.join(root, 'selectors.yml'), 'utf-8')).toContain('# Keep in sync with airflow DAG `incrementals_v2`');
     run().selectors = managed.map((sel) => ({ name: sel.name, values: sel.definition.union.map((u) => u.value).sort() }));
     run().userSelectors = userSelectors;
+  });
+});
+
+/** `erd-studio diff --json --domain <diagram>`, in-process through the CLI's own `main()`. */
+async function cliDiff(root: string, diagram: string): Promise<DiffResult> {
+  let out = '';
+  await cliMain(['diff', '--json', '--domain', diagram], {
+    stdout: { write: (t: string) => { out += t; } },
+    stderr: { write: () => undefined },
+    cwd: root,
+    env: {},
+  });
+  return JSON.parse(out) as DiffResult;
+}
+
+/** A table's columns as compared: normalised names, sorted (Compare keys on `normaliseName`). */
+const columnKeys = (columns: ReadonlyArray<{ name: string }>): string[] => columns.map((c) => c.name.toLowerCase()).sort();
+
+/**
+ * The dev-host case: stg_raw_payments declares four columns and the
+ * Snowflake catalog reports a fifth, LOADED_AT. A table drawn (or added)
+ * from dbt is what the Physical tab shows, so Compare and `erd-studio diff`
+ * have nothing to say right after.
+ */
+describe.each([
+  ['yaml', 'dbt-project'],
+  ['dbml', 'dbt-project-dbml'],
+] as Array<[Storage, string]>)('a table drawn from dbt opens with nothing to compare (%s storage)', (storage, fixture) => {
+  let root: string;
+  const DECLARED_THEN_CATALOG = ['payment_id', 'order_id', 'amount', 'payment_method', 'loaded_at'];
+
+  beforeAll(() => {
+    _resetMockWorkspace();
+    root = copyFixture(fixture);
+  });
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it('Draw from dbt seeds the catalog-only column, the Physical tab shows the same columns, and diff is clean', async () => {
+    const s = services(root);
+    expect(s.tableLibraryService.tableExists('stg_raw_payments')).toBe(false);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('payments' as never);
+    vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+    picker.only = ['stg_raw_payments'];
+    let result;
+    try {
+      result = await drawFromDbt({
+        workspaceRoot: root, semanticDir: '.erd-studio', modelPaths: ['models'],
+        layerService: s.layerService, subjectAreaService: s.subjectAreaService, tableLibraryService: s.tableLibraryService,
+        loadDbt: async () => ({
+          ymlData: await s.ymlParserService.loadYmlData(root, undefined),
+          manifest: await s.manifestService.loadManifest(root),
+          catalog: (await s.catalogService.loadCatalog(root)) ?? undefined,
+        }),
+        validateDomainName: () => undefined,
+        onWritten: () => undefined,
+      });
+    } finally {
+      picker.only = undefined;
+      vi.restoreAllMocks();
+    }
+    expect(error).not.toHaveBeenCalled();
+    expect(result?.domainPath).toBeDefined();
+    const drawn = services(root).tableLibraryService.getTable('stg_raw_payments')!;
+    expect(drawn.columns.map((c) => [c.name, c.dataType])).toEqual([
+      ['payment_id', 'NUMBER(38,0)'], ['order_id', 'NUMBER(38,0)'], ['amount', 'FLOAT'], ['payment_method', 'TEXT'], ['loaded_at', 'TIMESTAMP_NTZ'],
+    ]);
+
+    // The Physical tab draws the same columns (in catalog order, as the warehouse spells them).
+    const diagram = path.relative(path.join(root, '.erd-studio'), result!.domainPath).split(path.sep).join('/');
+    const { panel } = await open(root, diagram);
+    await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    const stage = await waitFor(panel, 'stageData', (m) => m.requestId === 1);
+    const shown = (stage.payload as { models: Array<{ name: string; columns: Array<{ name: string }> }> }).models
+      .find((m) => m.name === 'stg_raw_payments')!;
+    expect(columnKeys(shown.columns)).toEqual(columnKeys(drawn.columns));
+
+    // Compare on the canvas: every column matched.
+    await panel._simulateMessage({ type: 'toggleDiscrepancy', payload: { enabled: true, compareAgainst: 'physical' } });
+    const report = (await waitFor(panel, 'discrepancyReport', (m) => !!m.payload)).payload as DiscrepancyReport;
+    expect(errorsOf(panel)).toEqual([]);
+    const payments = report.models.find((m) => m.name === 'stg_raw_payments')!;
+    expect(payments.status).toBe('matched');
+    expect(payments.columns.filter((c) => c.status !== 'matched')).toEqual([]);
+    expect(payments.columns.map((c) => c.name.toLowerCase()).sort()).toEqual([...DECLARED_THEN_CATALOG].sort());
+
+    // erd-studio diff right after drawing: clean, no fix.
+    const diff = await cliDiff(root, path.relative(root, result!.domainPath));
+    expect(diff.domains).toHaveLength(1);
+    expect(diff.domains[0].fixes).toEqual([]);
+    expect(diff.domains[0].clean).toBe(true);
+  });
+
+  it('Add Existing Model seeds the same columns as Draw from dbt, and Compare matches every one', async () => {
+    // A fresh copy, so the table is new to the library and Add Existing seeds it from dbt.
+    const fresh = copyFixture(fixture);
+    try {
+      expect(services(fresh).tableLibraryService.tableExists('stg_raw_payments')).toBe(false);
+      const showcase = DIAGRAM[storage]('silver', 'showcase');
+      const { panel, provider } = await open(fresh, showcase);
+      // The dialog's count is what adding it gives: four declared columns and LOADED_AT. (The
+      // showcase diagram lists only models/silver, so ask for the rows with no folder filter.)
+      const s = services(fresh);
+      const rows = (provider as unknown as { buildWebviewPayload: (...a: unknown[]) => { existingModels: Array<{ name: string; columnCount: number }> } })
+        .buildWebviewPayload({ models: [] }, await s.manifestService.loadManifest(fresh), await s.ymlParserService.loadYmlData(fresh, undefined),
+          undefined, { catalog: await s.catalogService.loadCatalog(fresh) }).existingModels;
+      expect(rows.find((r) => r.name === 'stg_raw_payments')?.columnCount).toBe(DECLARED_THEN_CATALOG.length);
+      await panel._simulateMessage({ type: 'addExistingModel', payload: { modelName: 'stg_raw_payments' } });
+      await vi.waitFor(() => {
+        const unified = services(fresh).subjectAreaService.getSubjectArea(path.join(fresh, '.erd-studio', ...showcase.split('/')));
+        expect(unified.logical.models.map((m) => m.name)).toContain('stg_raw_payments');
+      }, { timeout: 8000, interval: 20 });
+      expect(errorsOf(panel)).toEqual([]);
+      expect(services(fresh).tableLibraryService.getTable('stg_raw_payments')!.columns.map((c) => c.name)).toEqual(DECLARED_THEN_CATALOG);
+      await panel._simulateMessage({ type: 'toggleDiscrepancy', payload: { enabled: true, compareAgainst: 'physical' } });
+      const report = (await waitFor(panel, 'discrepancyReport', (m) => !!m.payload)).payload as DiscrepancyReport;
+      const payments = report.models.find((m) => m.name === 'stg_raw_payments')!;
+      expect(payments.columns.filter((c) => c.status !== 'matched')).toEqual([]);
+    } finally {
+      fs.rmSync(fresh, { recursive: true, force: true });
+    }
   });
 });
 

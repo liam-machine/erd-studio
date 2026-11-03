@@ -19,10 +19,11 @@
  *
  * `ERD_SYNC_APPLY_EXPORT=<dir>` keeps the mixed DBML case's project before
  * (`<dir>/ai`, plan included) and after (`<dir>/det`) the apply, for running
- * a real assistant on the same plan and diffing. One such run is recorded in
- * `test/fixtures/sync-apply-assistant` (what an assistant wrote, following
- * the installed SYNC.md and DBML.md), and the last test checks it still
- * lands where the applier does.
+ * a real assistant on the same plan and diffing by hand. The check that a
+ * real assistant following the installed SYNC.md lands where the applier
+ * does is the opt-in AI eval, `npm run eval:sync-ai`
+ * (`test/skill-evals/sync-apply/`): not part of `npm test`, since it runs
+ * Claude Code.
  */
 
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
@@ -239,7 +240,7 @@ describe.each(['dbml', 'yaml'] as Storage[])('a sync plan applied as SYNC.md say
       expect(read(root, '.erd-studio/silver/tables/silver/stg_raw_payments.dbml')).toBe([
         // The types dbt observed (catalog.json wins over the yml's data_type), quoted where they are no identifier.
         'Table silver.stg_raw_payments {', '  payment_id "NUMBER(38,0)"', '  order_id "NUMBER(38,0)"', '  amount FLOAT',
-        '  payment_method TEXT', '  LOADED_AT TIMESTAMP_NTZ', '}', '',
+        '  payment_method TEXT', '  loaded_at TIMESTAMP_NTZ', '}', '',
       ].join('\n'));
       // fct_order's new Ref: in orders.dbml, the file holding most of its Refs (relationshipsPath), not the layer's.
       expect(plan.modelContext.fct_order.relationshipsPath).toBe('.erd-studio/silver/relationships/orders.dbml');
@@ -329,52 +330,5 @@ describe('both storages end in the same place', () => {
     });
     expect(shape(dbml!.after)).toEqual(shape(yaml!.after));
     expect(dbml!.tests).toEqual(yaml!.tests);
-  });
-});
-
-describe('an assistant following SYNC.md lands where the applier does', () => {
-  // test/fixtures/sync-apply-assistant: the mixed DBML plan, applied by a real
-  // assistant from the installed SYNC.md and DBML.md (its README says how).
-  const RECORDED = path.join(__dirname, '..', 'fixtures', 'sync-apply-assistant');
-  const recordedFiles = (dir: string, base = dir): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (
-    e.isDirectory() ? recordedFiles(path.join(dir, e.name), base) : [path.relative(base, path.join(dir, e.name)).split(path.sep).join('/')]
-  ));
-
-  it('the same plan, the same Compare, the same dbt tests, and no DBML error', async () => {
-    const root = copyFixture('dbml');
-    roots.push(root);
-    applyScenario(root, 'dbml');
-    const { plan } = await generatePlan(root, SHOWCASE.dbml, SELECT.mixed);
-    // A different plan needs a new assistant run (the fixture's README says how).
-    expect({ ...plan, generatedAt: '' }, 'the plan the assistant applied').toEqual(JSON.parse(read(RECORDED, 'plan.json')));
-    fs.rmSync(path.join(root, '.erd-studio', '.sync-plan.json'));
-
-    const before = dbtTests(root);
-    const files = recordedFiles(path.join(RECORDED, 'files'));
-    expect(files.length).toBeGreaterThan(5);
-    for (const f of files) {
-      fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
-      fs.copyFileSync(path.join(RECORDED, 'files', ...f.split('/')), path.join(root, ...f.split('/')));
-    }
-    _resetMockWorkspace();
-    const { panel, report: after } = await compare(root, SHOWCASE.dbml);
-    expect(errorsOf(panel)).toEqual([]);
-    expect(unresolved(plan, after)).toEqual(NEEDS_DBT_REBUILD.mixed);
-    expect(await doctorDbmlErrors(root)).toEqual([]);
-
-    // Where the applier ended, on the same plan (the run above).
-    const det = runs['dbml:mixed'];
-    expect(det, 'the applier\'s mixed DBML run above').toBeTruthy();
-    const key = (r: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }): string => `${r.fromModel}.${r.fromColumn}>${r.toModel}.${r.toColumn}`.toLowerCase();
-    const shape = (report: DiscrepancyReport): unknown => ({
-      models: report.models.map((m) => ({ name: m.name, status: m.status, columns: m.columns.map((c) => `${c.name}:${c.status}`).sort() })).sort((a, b) => a.name.localeCompare(b.name)),
-      relationships: report.relationships.map((r) => `${key(r)}:${r.status}:${r.sourceCardinality ?? ''}/${r.targetCardinality ?? ''}`).sort(),
-    });
-    expect(shape(after)).toEqual(shape(det!.after));
-    expect(testChanges(before, dbtTests(root))).toEqual(det!.tests);
-    // Each Ref in the file the plan names.
-    expect(read(root, '.erd-studio/silver/relationships/orders.dbml')).toMatch(/^Ref: public\.fct_order\.customer_key >\? silver\.dim_customer\.customer_key$/m);
-    expect(read(root, '.erd-studio/silver/relationships/orders.dbml')).toMatch(/^Ref: public\.fct_order\.project_key >\? silver\.dim_project\.project_key$/m);
-    expect(read(root, '.erd-studio/silver/relationships/silver.dbml')).toMatch(/^Ref: silver\.stg_raw_payments\.order_id >\? public\.fct_order\.order_id$/m);
   });
 });

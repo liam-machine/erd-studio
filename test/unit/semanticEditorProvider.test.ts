@@ -729,6 +729,32 @@ describe('payload validation (H21)', () => {
 describe.each(DBT_FIXTURES)('launchClaudeSync (H36) (%s storage)', (_storage, fixture) => {
   useFixture(fixture);
 
+  // Execute with Claude needs the AI helper's sync guide (the DBML twin ships without .claude/).
+  const SYNC_GUIDE = path.join('.claude', 'skills', 'erd-studio', 'SYNC.md');
+  beforeEach(() => {
+    const guide = path.join(root, SYNC_GUIDE);
+    if (!fs.existsSync(guide)) {
+      fs.mkdirSync(path.dirname(guide), { recursive: true });
+      fs.writeFileSync(guide, '# ERD Studio — Sync Reconciliation Guide\n');
+    }
+  });
+
+  it('offers Set Up My AI Helper instead of launching when the sync guide is missing', async () => {
+    fs.rmSync(path.join(root, SYNC_GUIDE));
+    const { panel } = await openShowcase(root);
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Set Up My AI Helper' as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+
+    panel._simulateMessage({ type: 'launchClaudeSync' });
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.setupAiHelper'));
+
+    expect(vscode.window.terminals).toHaveLength(0);
+    const [message, options] = warn.mock.calls[0] as unknown as [string, { modal: boolean; detail: string }];
+    expect(message).toMatch(/AI helper files/);
+    expect(options.modal).toBe(true);
+    expect(options.detail).toContain('.claude/skills/erd-studio/SYNC.md is missing');
+  });
+
   async function flushMicrotasks(rounds = 20) {
     for (let i = 0; i < rounds; i++) {
       await Promise.resolve();

@@ -125,6 +125,14 @@ export class CatalogService {
     }
   }
 
+  /**
+   * The catalog a finished {@link loadCatalog} cached, without reading: for a
+   * synchronous caller. Undefined when there is none or it has not been read.
+   */
+  peekCatalog(): CatalogData | undefined {
+    return this.loaded ? this.cache : undefined;
+  }
+
   /** Drop the cached catalog so the next load re-reads from disk. */
   invalidate(): void {
     this.loadId++;

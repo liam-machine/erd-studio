@@ -1,9 +1,0 @@
-Table silver.stg_raw_payments {
-  Note: 'Raw payments, staged'
-
-  payment_id     "NUMBER(38,0)" [note: 'Payment identifier']
-  order_id       "NUMBER(38,0)" [note: 'FK to orders']
-  amount         FLOAT          [note: 'Payment amount']
-  payment_method TEXT           [note: 'Payment method (credit_card, bank_transfer, etc.)']
-  LOADED_AT      TIMESTAMP_NTZ
-}

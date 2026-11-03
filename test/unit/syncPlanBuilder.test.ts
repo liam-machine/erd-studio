@@ -163,17 +163,69 @@ describe('buildSyncPlan', () => {
     expect(plan.modelContext).toEqual({});
   });
 
-  it('prefers the yml path, then the manifest path, for dbt file context', () => {
+  it('prefers the yml path, then the manifest path, for the schema yml; the SQL file only when it is on disk', () => {
     const manifest = { ...emptyManifest, models: new Map([['dim_missing', { originalFilePath: 'models/dims/dim_missing.sql' }]]) } as unknown as ManifestData;
-    const ymlData = { models: new Map([['dim_extra', { filePath: '/proj/models/schema.yaml' }]]) } as unknown as YmlData;
+    const ymlData = {
+      models: new Map([['dim_extra', { filePath: '/proj/models/schema.yaml' }]]),
+      sourceFiles: new Map([['dim_missing', 'models/dims/dim_missing.sql']]),
+    } as unknown as YmlData;
     const plan = buildSyncPlan(report(), allSelections(report(), 'physical'), { ...ctx, manifest, ymlData });
-    expect(plan.modelContext.dim_extra).toMatchObject({ dbtSchemaPath: 'models/schema.yaml', dbtSqlPath: 'models/schema.sql' });
+    // dim_extra has only a yml: no SQL file is guessed next to it.
+    expect(plan.modelContext.dim_extra).toMatchObject({ dbtSchemaPath: 'models/schema.yaml', dbtSqlPath: null });
     expect(plan.modelContext.dim_missing).toMatchObject({ dbtSqlPath: 'models/dims/dim_missing.sql', dbtSchemaPath: 'models/dims/dim_missing.yml' });
+  });
+
+  it('names a SQL file only when the yml walker found it (the dev-host dim_customer had only a yml)', () => {
+    const manifest = { ...emptyManifest, models: new Map([
+      // Compiled from a file that is gone (deleted or renamed, or a stale manifest).
+      ['dim_missing', { originalFilePath: 'models/dims/dim_missing.sql' }],
+      // A versioned model: the manifest names the real file, which is not `<name>.sql`.
+      ['dim_extra', { originalFilePath: 'models/marts/dim_extra_v2.sql' }],
+      // A Python model: there is no SQL file to edit.
+      ['fct_order', { originalFilePath: 'models/marts/fct_order.py' }],
+    ]) } as unknown as ManifestData;
+    const ymlData = {
+      models: new Map([['dim_customer', { filePath: '/proj/models/silver/dim_customer.yml' }]]),
+      sourceFiles: new Map([
+        ['dim_extra_v2', 'models/marts/dim_extra_v2.sql'],
+        ['fct_order', 'models/marts/fct_order.py'],
+        // Found by name in another folder than its yml.
+        ['dim_store', 'models/sql/dim_store.sql'],
+      ]),
+    } as unknown as YmlData;
+    const plan = buildSyncPlan(report(), allSelections(report(), 'physical'), { ...ctx, manifest, ymlData });
+    expect(plan.modelContext.dim_customer).toMatchObject({ dbtSqlPath: null, dbtSchemaPath: 'models/silver/dim_customer.yml' });
+    expect(plan.modelContext.dim_missing).toMatchObject({ dbtSqlPath: null, dbtSchemaPath: 'models/dims/dim_missing.yml' });
+    expect(plan.modelContext.dim_extra).toMatchObject({ dbtSqlPath: 'models/marts/dim_extra_v2.sql' });
+    expect(plan.modelContext.fct_order).toMatchObject({ dbtSqlPath: null, dbtSchemaPath: 'models/marts/fct_order.yml' });
+    expect(plan.modelContext.dim_store).toMatchObject({ dbtSqlPath: 'models/sql/dim_store.sql', dbtSchemaPath: null });
+    // Without a source-file listing nothing proves a SQL file exists.
+    expect(buildSyncPlan(report(), allSelections(report(), 'physical'), { ...ctx, manifest }).modelContext.dim_missing.dbtSqlPath).toBeNull();
+  });
+
+  it('writes a column only the warehouse reports as Draw from dbt seeds it: ALL-CAPS lowercased', () => {
+    const r: DiscrepancyReport = { ...report(), models: [{ name: 'fct_order', status: 'matched', columns: [
+      { name: 'LOADED_AT', status: 'missing', targetDataType: 'TIMESTAMP_NTZ' },
+      { name: 'REGION', status: 'missing', targetDataType: 'TEXT' },
+      { name: 'LoadedBy', status: 'missing', targetDataType: 'TEXT' },
+      { name: 'OLD_COL', status: 'extra', sourceDataType: 'int' },
+    ] }], relationships: [] };
+    // REGION is declared in the schema yml in capitals: kept as declared.
+    const ymlData = { models: new Map([['fct_order', { columns: [{ name: 'REGION' }] }]]) } as unknown as YmlData;
+    const plan = buildSyncPlan(r, allSelections(r, 'physical'), { ...ctx, ymlData });
+    expect(plan.columns.map((c) => `${c.action} ${c.columnName}`)).toEqual([
+      'add-column-to-logical loaded_at',
+      'add-column-to-logical REGION',
+      'add-column-to-logical LoadedBy',
+      // Not a logical-side add: the name is the one on the logical side.
+      'remove-column-from-logical OLD_COL',
+    ]);
   });
 
   it('emits forward-slash paths even from Windows-style inputs', () => {
     const manifest = { ...emptyManifest, models: new Map([['dim_missing', { originalFilePath: 'models\\dims\\dim_missing.sql' }]]) } as unknown as ManifestData;
-    const plan = buildSyncPlan(report(), allSelections(report(), 'physical'), { ...ctx, manifest, semanticDir: 'my erd\\data' });
+    const ymlData = { models: new Map(), sourceFiles: new Map([['dim_missing', 'models\\dims\\dim_missing.sql']]) } as unknown as YmlData;
+    const plan = buildSyncPlan(report(), allSelections(report(), 'physical'), { ...ctx, manifest, ymlData, semanticDir: 'my erd\\data' });
     expect(plan.modelContext.dim_missing).toMatchObject({
       dbtSqlPath: 'models/dims/dim_missing.sql',
       dbtSchemaPath: 'models/dims/dim_missing.yml',
@@ -278,6 +330,13 @@ describe.each(DBT_FIXTURES)('SemanticEditorProvider.handleGenerateSyncPlan parit
       expect(held.length).toBeGreaterThan(0);
       for (const [, planned, onDisk] of held) expect(planned).toBe(path.relative(tmp, onDisk!).split(path.sep).join('/'));
       expect(posted().find((m) => m.type === 'syncPlanGenerated')!.payload.totalActions).toBe(countSyncPlanActions(expected));
+      // dbtSqlPath names a SQL file that is there, or is null: dim_customer has only a yml.
+      const contexts = written.modelContext as Record<string, { dbtSqlPath: string | null }>;
+      for (const [name, c] of Object.entries(contexts)) {
+        if (c.dbtSqlPath !== null) expect(fs.existsSync(path.join(tmp, c.dbtSqlPath)), `${name}: ${c.dbtSqlPath}`).toBe(true);
+      }
+      expect(contexts.dim_customer?.dbtSqlPath).toBeNull();
+      expect(contexts.dim_project?.dbtSqlPath).toBe('models/silver/dim_project.sql');
 
       // And the CLI route — computeSubjectAreaDiff + allSelections — sees the same report.
       const cli = computeSubjectAreaDiff({ subjectAreaService, ymlData, manifest }, file, 'logical');
