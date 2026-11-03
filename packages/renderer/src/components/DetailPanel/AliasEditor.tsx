@@ -8,6 +8,9 @@
  * Read mode shows the table name (the model name, dimmed, when there is no
  * alias). Edit mode is a single input: Enter saves, Escape cancels, and an
  * empty value clears the alias.
+ *
+ * Without a dbt project (`dbtWording` false) the tooltip and hint say the
+ * same thing without naming dbt.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -19,9 +22,29 @@ interface AliasEditorProps {
   alias?: string;
   /** Physical stage and the viewer: show the value, offer no edit. */
   readOnly: boolean;
+  /**
+   * Name dbt in the tooltip and hint (default). False in a folder with no
+   * dbt project, where the alias is just the table's name in the warehouse.
+   */
+  dbtWording?: boolean;
 }
 
-export function AliasEditor({ modelName, alias, readOnly }: AliasEditorProps) {
+/** The edit-mode hint under the input. */
+export function aliasHint(dbtWording: boolean): string {
+  return dbtWording
+    ? "The table dbt builds (its alias). Leave blank to use the table's name."
+    : "The table's name in the warehouse (its alias). Leave blank to use the table's name.";
+}
+
+/** The read-mode tooltip on the value. */
+export function aliasTitle(modelName: string, alias: string | undefined, dbtWording: boolean): string {
+  if (!alias) return "Same as the table's name";
+  return dbtWording
+    ? `Built as ${alias} (dbt alias); the table's name is ${modelName}`
+    : `Named ${alias} in the warehouse; the table's name is ${modelName}`;
+}
+
+export function AliasEditor({ modelName, alias, readOnly, dbtWording = true }: AliasEditorProps) {
   const host = useCanvasHost();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(alias ?? '');
@@ -92,7 +115,7 @@ export function AliasEditor({ modelName, alias, readOnly }: AliasEditorProps) {
             autoFocus
           />
           <span className={`detail-panel__alias-hint${error ? ' detail-panel__alias-hint--error' : ''}`}>
-            {error ?? "The table dbt builds (its alias). Leave blank to use the table's name."}
+            {error ?? aliasHint(dbtWording)}
           </span>
         </span>
       </div>
@@ -104,7 +127,7 @@ export function AliasEditor({ modelName, alias, readOnly }: AliasEditorProps) {
       <span className="detail-panel__label detail-panel__label--wide">Warehouse name</span>
       <span
         className={`detail-panel__value${alias ? '' : ' detail-panel__value--muted'}`}
-        title={alias ? `Built as ${alias} (dbt alias); the table's name is ${modelName}` : "Same as the table's name"}
+        title={aliasTitle(modelName, alias, dbtWording)}
         onDoubleClick={readOnly ? undefined : startEditing}
       >
         {alias || modelName}

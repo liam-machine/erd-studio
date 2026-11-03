@@ -15,6 +15,7 @@ import { extractManifestData } from '../../src/workers/manifestExtractor';
 import { validateModelAliasPayload } from '../../src/providers/payloadValidation';
 import {
   describeDuplicateFix,
+  duplicateNamePrompt,
   planDuplicateFix,
   repointSubjectAreaTable,
   suggestDuplicateName,
@@ -298,6 +299,20 @@ describe('duplicate model files', () => {
     expect(text).toContain('alias: date');
     expect(text).toContain('gold/finance');
     expect(text).toContain('Still using "date"');
+  });
+
+  it('names dbt in the prompt and the modal only in a dbt project', () => {
+    const plan = planDuplicateFix('date', 'gold', 'gold_date', undefined, refs);
+    const dbtText = describeDuplicateFix(plan, 'tables/gold/date.yml', 'tables/gold/gold_date.yml', true);
+    expect(dbtText).toContain('The table becomes "gold_date" with alias: date, so dbt still builds a table called date.');
+    expect(describeDuplicateFix(plan, 'a', 'b')).toContain('so dbt still builds'); // default: unchanged
+    const plain = describeDuplicateFix(plan, 'tables/gold/date.yml', 'tables/gold/gold_date.yml', false);
+    expect(plain).toContain('The table becomes "gold_date" with alias: date, so the warehouse name stays date.');
+    expect(plain).not.toMatch(/dbt/i);
+
+    expect(duplicateNamePrompt('date', true)).toBe('Table names are unique, as dbt model names are. The warehouse table name stays "date" (set as the table\'s alias).');
+    expect(duplicateNamePrompt('date', false)).toBe('Table names are unique across the library. The warehouse name stays "date" (set as the table\'s alias).');
+    expect(duplicateNamePrompt('date', false)).not.toMatch(/dbt/i);
   });
 
   it("keeps an alias the copy already has, and repoints nothing for a top-level copy", () => {

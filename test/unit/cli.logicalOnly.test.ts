@@ -115,10 +115,29 @@ describe('project resolution', () => {
     expect(ctx.envelope.dbtProject).toBe(true);
   });
 
-  it('the no-project error names both things it looked for', async () => {
-    const { code, err } = await run(['inventory'], tmp);
+  it('in a folder with neither, the no-project error names only the .erd-studio/ folder (logical first)', async () => {
+    for (const argv of [['inventory'], ['export', '--all', '--format', 'mermaid'], ['changes', '--base', 'HEAD'], ['inventory', '--project', '.']]) {
+      const { code, err } = await run(argv, tmp);
+      expect(code, argv.join(' ')).toBe(3);
+      expect(err, argv.join(' ')).toContain('No .erd-studio/ folder found');
+      expect(err, argv.join(' ')).not.toMatch(/\bdbt\b|dbt_project/);
+    }
+  });
+
+  it('diff, which compares with dbt, names both things it looked for', async () => {
+    const { code, err } = await run(['diff', '--all'], tmp);
     expect(code).toBe(3);
     expect(err).toContain('No dbt project or .erd-studio/ folder found');
+    const withProject = await run(['diff', '--all', '--project', '.'], tmp);
+    expect(withProject.err).toContain('No dbt_project.yml or .erd-studio/ folder found');
+  });
+
+  it('doctor in a folder with neither names no dbt, unless a dbt flag was passed', async () => {
+    const plain = await run(['doctor'], tmp);
+    expect(plain.out).toContain('No .erd-studio/ folder found (looked near');
+    expect(plain.out).not.toMatch(/\bdbt\b|dbt_project/);
+    const flagged = await run(['doctor', '--no-dbt'], tmp);
+    expect(flagged.out).toContain('No dbt project or .erd-studio/ folder found');
   });
 });
 
@@ -139,7 +158,8 @@ describe('doctor on a logical-only root', () => {
     expect(r.projectFiles).toEqual({ schemaYmlFiles: 0, sourceFiles: 0, modelsDiscovered: 0 });
     expect(r.erd).toMatchObject({ semanticDirExists: true, layers: ['silver', 'gold'], domains: 1, logicalModels: 1, naming: 'v6' });
     expect(r.nextSteps.map((s) => s.id)).toEqual(['ready']);
-    expect(r.nextSteps[0].why).toContain('not a dbt project');
+    // Logical first: the prose says nothing about dbt; skippedChecks carries the reason for machines.
+    expect(r.nextSteps[0].why).toBe('Your ERD Studio files are in place.');
   });
 
   it('still reports a logical problem as a next step, and no dbt step', async () => {
@@ -163,12 +183,12 @@ describe('doctor on a logical-only root', () => {
     expect(step?.why).not.toContain('erd-studio diff');
   });
 
-  it('exits 0 and says the dbt checks were skipped', async () => {
+  it('exits 0 and names no dbt check in human mode (the JSON still lists them as skipped)', async () => {
     const human = await run(['doctor', '--project', LOGICAL]);
     expect(human.code).toBe(0);
     expect(human.out).toContain(`ERD Studio project at ${LOGICAL}`);
-    expect(human.out).toContain('skipped — not a dbt project');
-    expect(human.out).not.toMatch(/install dbt/i);
+    // (The worktree path itself may say dbt; only ERD Studio's own words count.)
+    expect(human.out.split(LOGICAL).join('<root>')).not.toMatch(/dbt|profiles\.yml|manifest|catalog/i);
 
     const json = await run(['doctor', '--json', '--project', LOGICAL]);
     expect(json.code).toBe(0);
@@ -221,8 +241,9 @@ describe('inventory on a logical-only root', () => {
   it('prints the tables in human mode and exits 0', async () => {
     const { code, out } = await run(['inventory', '--summary', '--project', LOGICAL]);
     expect(code).toBe(0);
-    expect(out).toContain('Not a dbt project: 1 table in 1 diagram');
+    expect(out).toContain('1 table in 1 diagram (your ERD Studio files)');
     expect(out).toContain('customer  3 columns');
+    expect(out).not.toMatch(/dbt/i);
   });
 
   it('a dbt project lists its logical tables too', async () => {
@@ -304,5 +325,61 @@ describe('diff on a logical-only root', () => {
     expect(human.code).toBe(3);
     expect(human.err).toContain('needs a dbt project');
     expect(human.err).not.toMatch(/install dbt/i);
+  });
+});
+
+describe('logical first: no dbt wording in human output on a logical-only root', () => {
+  it('doctor, inventory and export say nothing about dbt; a dbt project still does', async () => {
+    const root = copyLogical();
+    // A yml table spelling dbt's data_type key, so doctor has a warning to word.
+    fs.writeFileSync(path.join(root, '.erd-studio/tables/order.yml'),
+      'name: order\ncolumns:\n  - name: order_id\n    data_type: INT\n');
+    for (const argv of [
+      ['doctor', '--project', root],
+      ['inventory', '--project', root],
+      ['inventory', '--summary', '--project', root],
+    ]) {
+      const r = await run(argv, root);
+      expect(r.code, argv.join(' ')).toBeLessThanOrEqual(1);
+      expect((r.out + r.err).split(root).join('<root>'), argv.join(' ')).not.toMatch(/\bdbt\b/i);
+    }
+    // export's own lines (the fixture's description is the user's text, and mentions dbt).
+    const exported = await run(['export', '--domain', '.erd-studio/gold/sales.json', '--format', 'dbml', '--project', root], root);
+    expect(exported.code).toBe(0);
+    expect(exported.out.split('\n').filter((l) => l.startsWith('//')).join('\n')).not.toMatch(/\bdbt\b/i);
+    const doctor = await run(['doctor', '--project', root]);
+    expect(doctor.out).toContain("uses data_type");
+
+    const dbt = await run(['doctor', '--no-dbt', '--project', DBT]);
+    expect(dbt.out).toMatch(/dbt project .* at /);
+    expect(dbt.out).toMatch(/manifest/);
+    const inventory = await run(['inventory', '--summary', '--project', DBT]);
+    expect(inventory.out).toMatch(/manifest/);
+  });
+
+  it("doctor's Convert preview words a table kept as missing without Add from dbt; a dbt root keeps it", async () => {
+    const root = copyLogical();
+    const diagram = path.join(root, '.erd-studio/gold/sales.json');
+    const doc = JSON.parse(fs.readFileSync(diagram, 'utf-8'));
+    doc.logical.tables.push('gone');
+    fs.writeFileSync(diagram, JSON.stringify(doc, null, 2));
+    const preview = async (): Promise<string> =>
+      (JSON.parse((await run(['doctor', '--json', '--no-dbt', '--project', root])).out).erd.dbmlConversion?.preview ?? '') as string;
+
+    const logical = await preview();
+    expect(logical).toContain('Kept as missing on their diagrams');
+    expect(logical).toContain('give each a table file later');
+    expect(logical).not.toMatch(/\bdbt\b/i);
+
+    fs.writeFileSync(path.join(root, 'dbt_project.yml'), "name: shop\nversion: '1.0.0'\n");
+    expect(await preview()).toContain('create them later with Add from dbt');
+  });
+
+  it('the --json shape keeps its dbt keys on a logical-only root', async () => {
+    const json = JSON.parse((await run(['doctor', '--json', '--project', LOGICAL])).out);
+    expect(json).toMatchObject({ dbtProject: false, skippedChecks: { reason: 'not-dbt-project' } });
+    for (const key of ['dbt', 'profiles', 'artifacts', 'projectFiles']) {
+      expect(json, key).toHaveProperty(key);
+    }
   });
 });

@@ -99,7 +99,8 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
           cwd: io.cwd,
           env: io.env,
         });
-        out(result, () => formatDoctor(result, paint));
+        // A dbt flag says the user is after a dbt project: a missing one may say so.
+        out(result, () => formatDoctor(result, paint, { mentionDbt: opts.noDbt || opts.dbt !== undefined || opts.trustVenv }));
         return EXIT.ok;
       }
 
@@ -111,7 +112,8 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
       }
 
       case 'diff': {
-        const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd });
+        // diff compares with dbt, so a missing project says where dbt_project.yml was looked for.
+        const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd, mentionDbt: true });
         const { result, exitCode } = runDiff(ctx, { domains: opts.domains, all: opts.all, strict: opts.strict, cwd: io.cwd });
         out(result, () => formatDiff(result, paint));
         return exitCode;

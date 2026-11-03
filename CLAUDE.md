@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**ERD Studio** (package `erd-studio`, publisher `liamwynne`) is a VS Code extension for logical data modelling in Git: entity-relationship diagrams stored as **DBML, an open format**, that the user's own AI assistant can read and write (projects from before 2.0 keep their YAML/JSON, still read and edited, and **Convert Project to DBML** moves one over), with DBML import and export. A **logical** stage is the editable design and works in any folder; when the open folder is a dbt project, a **physical** stage is derived at runtime from it and is read-only (without `dbt_project.yml` the editor is logical-only and the Physical tab is hidden). The repo ships three things: the extension, a read-only `erd-studio` CLI (`dist/cli.js`), and two npm packages (`@erd-studio/core`, `@erd-studio/renderer`) consumed by the paid **ERD Studio for Confluence** app.
+**ERD Studio** (package `erd-studio`, publisher `liamwynne`) is a VS Code extension for logical data modelling in Git: entity-relationship diagrams stored as **DBML, an open format**, that the user's own AI assistant can read and write (projects from before 2.0 keep their YAML/JSON, still read and edited, and **Convert Project to DBML** moves one over), with DBML import and export. A **logical** stage is the editable design and works in any folder; when the open folder is a dbt project, a **physical** stage is derived at runtime from it and is read-only (without `dbt_project.yml` the editor is logical-only and the Physical tab is hidden). **dbt is an add-on and shows up only in dbt projects:** a folder without `dbt_project.yml`, or an empty window, shows no dbt control and no dbt wording (`test/unit/dbtAddonSurfaces.test.tsx` sweeps every surface); gate a dbt variant on `erdStudio.hasDbtProject` / `logicalOnly` rather than deleting it. The repo ships three things: the extension, a read-only `erd-studio` CLI (`dist/cli.js`), and two npm packages (`@erd-studio/core`, `@erd-studio/renderer`) consumed by the paid **ERD Studio for Confluence** app.
 
 ## Read before touching
 
@@ -77,7 +77,7 @@ npm run build:packages # publishable dist/ of both packages
 - Single test: `npx vitest run test/unit/domainService.test.ts`
 - CLI against a fixture (after a build): `node dist/cli.js doctor --project test/fixtures/dbt-project --no-dbt` (also `diff --all`, `inventory --summary`, `export`, `--json`)
 - Dev host: `npm run build && code --extensionDevelopmentPath=/Users/liamwynne/GIT/LIAM/erd-studio /Users/liamwynne/GIT/LIAM/erd-studio/test/fixtures/dbt-project` — open the **showcase** domain for the richest data. (F5 also works; it runs the `npm: watch` task.)
-- Tests alias `vscode` to the stateful mock `test/__mocks__/vscode.ts`. Fixture dbt projects live in `test/fixtures/` (`dbt-project` is the main one).
+- Tests alias `vscode` to the stateful mock `test/__mocks__/vscode.ts`. Fixture dbt projects live in `test/fixtures/` (`dbt-project` is the main one; `dbt-project-dbml` is the same project after Convert, regenerated with `npm run regen:dbt-dbml-fixture`; `logical-only` and `dbml-native` have no dbt).
 - CI (`.github/workflows/ci.yml`) also runs a CLI smoke test, `npm pack --dry-run`, the `mcp-server/` build and the telemetry Worker checks, and fails if the VSIX exceeds 60 files.
 
 ## Architecture map

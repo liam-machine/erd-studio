@@ -1672,6 +1672,13 @@ describe('describeSkippedDbtModels', () => {
     ])).toBe('Left out: x (not found in dbt), y (disabled in dbt).');
   });
 
+  it('words a missing pick without dbt in a folder without dbt (logical only)', () => {
+    expect(describeSkippedDbtModels([{ name: 'x', reason: 'not-found' }], { logicalOnly: true }))
+      .toBe('Left out: x (not in the Table Library).');
+    expect(describeSkippedDbtModels([{ name: 'x', reason: 'not-found' }], { logicalOnly: false }))
+      .toBe('Left out: x (not found in dbt).');
+  });
+
   it('caps the list at five names', () => {
     const many = Array.from({ length: 7 }, (_, i) => ({ name: `m${i}`, reason: 'over-limit' as const }));
     expect(describeSkippedDbtModels(many)).toMatch(/and 2 more\.$/);

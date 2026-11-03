@@ -2,7 +2,7 @@
   "schemaVersion": 6,
   "subjectArea": "sales",
   "layer": "gold",
-  "description": "A diagram in a folder with no dbt project (logical-only mode)",
+  "description": "A diagram in a plain folder (logical-only mode)",
   "logical": {
     "tables": [
       "customer"

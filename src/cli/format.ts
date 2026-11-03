@@ -107,14 +107,23 @@ export function formatDiff(r: DiffResult, p: Paint): string {
   return r.domains.map((d) => subjectAreaBlock(d, p).join('\n')).join('\n\n') + '\n';
 }
 
-export function formatDoctor(r: DoctorResult, p: Paint): string {
+/**
+ * `doctor`'s human report. `mentionDbt` (a dbt flag was passed): a missing
+ * project names dbt too; otherwise it names only the `.erd-studio/` folder,
+ * since a folder with neither is most often a plain folder before its first diagram.
+ */
+export function formatDoctor(r: DoctorResult, p: Paint, options: { mentionDbt?: boolean } = {}): string {
   const ok = (b: boolean) => (b ? p.green('✓') : p.yellow('–'));
   const lines: string[] = [];
-  if (r.skippedChecks) {
+  // Logical first: a folder without dbt_project.yml is an ERD Studio project and nothing more, so
+  // its report names no dbt check (the --json output still lists them under skippedChecks).
+  const logicalOnly = r.skippedChecks !== undefined;
+  if (logicalOnly) {
     lines.push(`${ok(true)} ERD Studio project at ${r.projectRoot}`);
-    lines.push(`${p.dim('–')} dbt, profiles.yml, manifest and catalog: skipped — not a dbt project`);
   } else if (!r.project.found) {
-    lines.push(`${ok(false)} No dbt project or ${r.semanticDir}/ folder found (looked near ${r.projectRoot})`);
+    lines.push(options.mentionDbt
+      ? `${ok(false)} No dbt project or ${r.semanticDir}/ folder found (looked near ${r.projectRoot})`
+      : `${ok(false)} No ${r.semanticDir}/ folder found (looked near ${r.projectRoot}). Run this from your project folder, or draw a first diagram with ERD Studio's New Diagram….`);
     return lines.join('\n') + '\n';
   } else {
     lines.push(`${ok(true)} dbt project ${r.project.name ?? '(unnamed)'} at ${r.projectRoot}`);
@@ -184,9 +193,10 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
       lines.push(`${severity === 'error' ? p.red('✗') : p.yellow('!')} ${where}: ${text}`);
     }
   }
+  const dataTypeKey = logicalOnly ? 'data_type' : "dbt's data_type";
   for (const a of r.erd.dataTypeAliasFiles) {
     if (a.columns.length > 0) {
-      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.columns, 'uses', 'use', "dbt's data_type")}`
+      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.columns, 'uses', 'use', dataTypeKey)}`
         + ` — read as dataType; the next edit of this table on the canvas writes ${a.columns.length === 1 ? 'it' : 'them'} back as dataType`);
     }
     if (a.ignored.length > 0) {
@@ -194,7 +204,7 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
         + (a.ignored.length === 1 ? ' — data_type is ignored; delete it' : ' — each data_type is ignored; delete them'));
     }
     if (a.anchored.length > 0) {
-      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.anchored, 'uses', 'use', "dbt's data_type")}`
+      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.anchored, 'uses', 'use', dataTypeKey)}`
         + ' — read as dataType, but kept as written: a YAML anchor sits on the empty dataType or the data_type key,'
         + ' and renaming would break what refers to it');
     }
@@ -215,9 +225,9 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   return lines.join('\n') + '\n';
 }
 
-/** inventory in a logical-only folder: the designed tables, by name. */
+/** inventory in a logical-only folder: the designed tables, by name — and no word of dbt. */
 function formatLogicalInventory(r: InventoryResult, p: Paint): string {
-  const lines = [`Not a dbt project: ${plural(r.logicalTables.length, 'table')} in ${plural(r.domains.length, 'diagram')} (your ERD Studio files)`];
+  const lines = [`${plural(r.logicalTables.length, 'table')} in ${plural(r.domains.length, 'diagram')} (your ERD Studio files)`];
   for (const t of r.logicalTables) {
     const where = t.domains.length > 0 ? p.dim(` — in ${t.domains.join(', ')}`) : p.dim(' — in no diagram');
     lines.push(`    ${t.name}  ${t.unreadable ? p.red('does not parse') : plural(t.columnCount, 'column')}${where}`);

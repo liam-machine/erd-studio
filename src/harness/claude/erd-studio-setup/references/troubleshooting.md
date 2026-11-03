@@ -19,8 +19,9 @@ or the harness was installed another way. Say:
 Then run doctor again. There is no need to restart your AI assistant for the helper — only for
 the skill itself.
 
-If they cannot or do not want to (no VS Code on this machine, a locked-down laptop), continue in
-**canvas-fallback mode** (below) and tell them the checks will be less exact.
+If they cannot or do not want to (no VS Code on this machine, a locked-down laptop), <!-- dbt-only -->continue in
+**canvas-fallback mode** (below)<!-- /dbt-only --><!-- no-dbt -->carry on
+without it, as the walkthrough's step 1 says,<!-- /no-dbt --> and tell them the checks will be less exact.
 
 ## Launcher stale
 
@@ -44,7 +45,7 @@ problem comes back.
 This is expected, once per session. ERD Studio's hook pauses the very first change to an ERD
 Studio file in each Claude Code session, so the format rules are always loaded before anything is
 written. Make sure `/erd-studio` has been invoked, then retry the same write. You told the user
-about this in Stage 4, so one short line is enough: "That was the one-time safety check —
+about this <!-- dbt-only -->in Stage 4<!-- /dbt-only --><!-- no-dbt -->before your first write<!-- /no-dbt -->, so one short line is enough: "That was the one-time safety check —
 carrying on."
 
 If it denies **again** on the retry, the hook could not record that it had already paused this
@@ -52,7 +53,7 @@ session (it writes a small marker file in `/tmp`). Tell the user and suggest res
 Code; if it persists, they can remove the ERD Studio entry from `hooks.PreToolUse` in
 `.claude/settings.local.json`. Do not edit that file yourself without asking.
 
-Other assistants have no such check; the walkthrough's own Stage 4 step 1 does the same job.
+Other assistants have no such check; <!-- dbt-only -->the walkthrough's own Stage 4 step 1<!-- /dbt-only --><!-- no-dbt -->loading the format rules before the first write<!-- /no-dbt --> does the same job.
 
 ## Format rules missing
 
@@ -71,7 +72,7 @@ different assistant. Say:
 
 Then look for the file again. If they cannot install it, carry on using the formats and worked
 example in `references/building-the-model.md`, tell them the files should be checked on the
-canvas, and rely on the Stage 5 diff to catch mistakes.
+canvas, and rely on <!-- dbt-only -->the Stage 5 diff<!-- /dbt-only --><!-- no-dbt -->the walkthrough's step 5 checks<!-- /no-dbt --> to catch mistakes.
 
 ## The skill does not show up
 
@@ -83,9 +84,11 @@ was opened in: Claude Code reads `.claude/skills/`; GitHub Copilot, Codex, Gemin
 read `.agents/skills/` (Copilot and Cursor also read `.claude/skills/`). Usual causes:
 1. The assistant was already running when the skill was installed → start a new chat, or quit
    and start it again.
-2. It was started in a different folder than the dbt project (for example the repo root, when
+<!-- dbt-only -->2. It was started in a different folder than the dbt project (for example the repo root, when
    the dbt project is in `analytics/`) → quit, `cd` into the folder that holds
-   `dbt_project.yml`, and start it there (for an assistant inside VS Code, open that folder).
+   `dbt_project.yml`, and start it there (for an assistant inside VS Code, open that folder).<!-- /dbt-only --><!-- no-dbt -->2. It was started in a different folder than the project (for example a parent folder) → quit,
+   `cd` into the folder that holds `.erd-studio/` (or the one VS Code has open), and start it
+   there (for an assistant inside VS Code, open that folder).<!-- /no-dbt -->
 3. The skill was installed for a different assistant (only `.claude/skills/` exists, but they use
    Codex or Gemini CLI) → run **ERD Studio: Set Up My AI Helper** again; it installs for every
    assistant it detects. If it still does not detect theirs (an assistant installed where VS Code
@@ -103,11 +106,11 @@ read `.agents/skills/` (Copilot and Cursor also read `.claude/skills/`). Usual c
   PowerShell is `& "$HOME\.erd-studio-cli\bin\erd-studio.cmd" doctor --json`. Tell the user
   you are using the Windows route.
 - Claude Code's safety-check hook is a bash script. Without Git Bash it cannot run and simply
-  does nothing — harmless, you just will not see the Stage 4 pause.
-- A virtual environment's dbt is at `.venv\Scripts\dbt.exe`. When *you* run it through the
+  does nothing — harmless, you just will not see the <!-- dbt-only -->Stage 4<!-- /dbt-only --><!-- no-dbt -->one-time<!-- /no-dbt --> pause.
+<!-- dbt-only -->- A virtual environment's dbt is at `.venv\Scripts\dbt.exe`. When *you* run it through the
   shell, write it with forward slashes — `.venv/Scripts/dbt.exe parse` — because Git Bash treats
   a backslash as an escape and would look for `.venvScriptsdbt.exe` (PowerShell accepts forward
-  slashes too).
+  slashes too).<!-- /dbt-only -->
 
 ## Remote-SSH, WSL and dev containers
 
@@ -119,13 +122,13 @@ the helper will be missing: ask them to start it from VS Code's integrated termi
 
 ## Merge conflicts
 
-**Seen as:** any of these, from doctor or the diff, at any stage:
+**Seen as:** any of these, from doctor<!-- dbt-only --> or the diff<!-- /dbt-only -->, at any stage:
 - doctor's `resolve-merge-conflicts` step — `erd.conflictedDomainFiles` lists each diagram file
   (`file`, `line`);
 - a `fix-model-yaml` step or fix whose model file's entry in doctor's `erd.unreadableModelFiles`
-  or the diff's `unreadableModelFiles` has `mergeConflict: true` (the step and the fix themselves
+  <!-- dbt-only -->or the diff's `unreadableModelFiles` <!-- /dbt-only -->has `mergeConflict: true` (the step and the fix themselves
   carry no such field);
-- a diff `error` with code `merge-conflict` (a diagram file the diff could not load);
+<!-- dbt-only -->- a diff `error` with code `merge-conflict` (a diagram file the diff could not load);<!-- /dbt-only -->
 - in a DBML project, doctor's `resolve-merge-conflicts` step naming a `.dbml` file — its entry
   in `erd.dbmlProblems` has `mergeConflict: true` (a table file, a relationships file or a
   diagram; `layoutMergeConflict` when the markers are inside a diagram's `erd_layout`; never a
@@ -136,7 +139,7 @@ changed the same lines, git kept both versions, and ERD Studio cannot read the f
 chosen. Only the user knows which version is right — it is often a teammate's work. This is
 **not** a YAML slip: do not quote, delete or tidy anything in it.
 
-1. Stop and raise it before anything else — no dbt command, no other file edit.
+1. Stop and raise it before anything else — no <!-- dbt-only -->dbt command, no <!-- /dbt-only -->other file edit.
 2. Tell the user the file and line in plain words:
 
    > "`.erd-studio/gold/orders.json` still has two versions of the same lines from line 42 — git
@@ -163,9 +166,9 @@ chosen. Only the user knows which version is right — it is often a teammate's 
    merge is the user's job, in their own git tool.
 5. If the user names a side, Edit the file: keep that version's lines, delete the other version
    and the three marker lines, change nothing else. Your edit saves the file, so re-run doctor
-   (or the diff) straight away — "Checking again now the conflict is resolved." — and remind
+   <!-- dbt-only -->(or the diff) <!-- /dbt-only -->straight away — "Checking again now the conflict is resolved." — and remind
    them to finish the merge in git.
-6. If the user resolves it themselves instead, re-run doctor (or the diff) once they say the file
+6. If the user resolves it themselves instead, re-run doctor <!-- dbt-only -->(or the diff) <!-- /dbt-only -->once they say the file
    is saved, then carry on from where you stopped.
 
 ## DBML files
@@ -203,11 +206,11 @@ Other warnings are information.
 - **`import-dbml-file`** — a `.dbml` in a `diagrams/` folder declares its own Tables and imports none:
   it is a single-file DBML (a dbdiagram.io download or an export), not an ERD Studio diagram. Ask
   the user to run **ERD Studio: Import DBML…** on it.
-- **diff / export error codes**: `dbml-invalid` — a `.dbml` diagram does not parse (the message
+- **<!-- dbt-only -->diff / <!-- /dbt-only -->export error codes**: `dbml-invalid` — a `.dbml` diagram does not parse (the message
   names the file and line; fix it as above); `not-a-diagram` — the `--domain` you passed is a
   table or relationships file: pass the diagram (`.erd-studio/<layer>/diagrams/<name>.dbml`).
 
-## Manifest stale or unreadable
+<!-- dbt-only -->## Manifest stale or unreadable
 
 - **`stale`** — the dbt files changed after `manifest.json` was written, so dbt's map is out of
   date. Offer `dbt parse` (seconds, no warehouse). Without dbt, carry on: ERD Studio also reads
@@ -223,7 +226,7 @@ Other warnings are information.
 
 The column types were read from the warehouse before the latest project changes. It is still
 useful; offer to re-run the catalog command (it connects to the warehouse) or carry on.
-
+<!-- /dbt-only -->
 ## Relationships drawn backwards
 
 **Seen as:** doctor's `turn-round-relationships` step; `erd.backwardsRelationships` lists each one
@@ -237,7 +240,7 @@ user at the ⚠ → **Turn round** on the canvas (one undo step), or edit the fi
 it as a `many-to-one` from the column that is not a key to the key, in that column's model file,
 and remove the old entry. Leave any the user says were drawn that way on purpose.
 
-## The helper found the wrong project
+<!-- dbt-only -->## The helper found the wrong project
 
 **Seen as:** doctor reports `project.found: false`, or a project name the user does not
 recognise.
@@ -250,7 +253,14 @@ every helper command from then on.
 With no dbt project anywhere, it uses the nearest folder holding `.erd-studio/` (this one or
 above) and reports `dbtProject: false` with `skippedChecks`: that is a folder without dbt, not a
 wrong project — follow `references/without-dbt.md`.
+<!-- /dbt-only --><!-- no-dbt -->## The helper found the wrong project
 
+**Seen as:** doctor's `projectRoot` is not the folder you are working in.
+
+The helper looks for the project in the current folder and its parents — the first folder that
+holds `.erd-studio/` — and a few levels down. Pass `--project <folder>` (this folder: `--project .`)
+on every helper command from then on.
+<!-- /no-dbt --><!-- dbt-only -->
 ## The project is very large
 
 If `inventory --summary` lists hundreds of models, do not read them all out. Summarise by folder,
@@ -273,4 +283,4 @@ When no route to the helper works, follow SKILL.md's stages with these changes:
   you then read), and if that is not possible, "Fallback B" (a best-effort manual comparison,
   labelled as such).
 
-Tell the user once that checks in this mode are less exact than with the helper.
+Tell the user once that checks in this mode are less exact than with the helper.<!-- /dbt-only -->

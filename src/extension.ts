@@ -52,7 +52,7 @@ import {
 import { TableLibraryTreeProvider, tableOwnerOf, type TableLibraryNode, type TableLibraryTableNode } from './providers/ModelLibraryTreeProvider';
 import { TableLibraryDragController } from './providers/tableLibraryDrag';
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
-import { describeDuplicateFix, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
+import { describeDuplicateFix, duplicateNamePrompt, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
 import { AUTO_DETECT_COLORS, RELATIONSHIPS_DIR, SubjectAreaFileError, dbmlTablePath, diagramFilePath, isDbmlLayerName, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
 import { parseTableDbml } from '@erd-studio/core/dbml';
@@ -525,11 +525,14 @@ function recordHarnessInstalls(results: HarnessInstallResult[]): void {
  * dbt), so the only "no project" left is no folder at all.
  */
 export const NO_PROJECT_MESSAGE =
-  'ERD Studio: Open a folder first. Any folder works; a dbt project also gets the Physical view.';
+  'ERD Studio: Open a folder first. Any folder works.';
 
 /** A dbt-only command run in a folder without dbt_project.yml (logical-only mode). */
 export const NEEDS_DBT_PROJECT_MESSAGE =
   'ERD Studio: this folder is not a dbt project. Open the folder that holds dbt_project.yml to compare your design with what dbt built.';
+
+/** Regenerate dbt selectors.yml in a folder without dbt_project.yml. */
+const NOT_DBT_SELECTORS_MESSAGE = 'This folder is not a dbt project, so there is no selectors.yml to generate.';
 
 /** "Open a folder first", with a button for each way out (#205). */
 export async function showNoProjectWarning(): Promise<void> {
@@ -1130,8 +1133,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // More than one dbt project in the workspace (multi-root or monorepo, #82):
   // reveal the sidebar's Select dbt Project button. Re-checked when folders
-  // are added or removed (see the domain tree view below).
-  let hasMultipleProjects = projectResolution.candidates.length > 1;
+  // are added or removed (see the domain tree view below). Only in a dbt
+  // project: `erdStudio.projectPath` can name a plain folder in a workspace
+  // that holds several dbt projects, and a plain folder shows no dbt control
+  // (the button, or the tree's project row).
+  let hasMultipleProjects = hasDbt && projectResolution.candidates.length > 1;
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
 
   if (projectResolution.invalidSetting !== undefined) {
@@ -1337,6 +1343,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     codeOwners,
     diagramMembers,
   );
+  tableLibraryProvider.setHasDbtProject(hasDbt);
   // Held while Convert Project to DBML writes: one refresh of each view after, not one per file.
   const viewRefreshes = new RefreshGate();
   viewRefreshes.gateMethod(treeProvider, 'refresh', 'subjectAreas');
@@ -1854,6 +1861,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // removed: no selectors prompt for it.
     const removed = removedSubjectAreaPaths(uris.map((u) => u.fsPath), fs.existsSync);
     if (removed.length === 0) return;
+    // selectors.yml is a dbt file: a plain folder has none to regenerate, and
+    // the views above already show the diagram gone.
+    if (!hasDbt) return;
     const subject = removed.length === 1
       ? 'Diagram file deleted.'
       : `${removed.length} diagram files deleted.`;
@@ -2037,6 +2047,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     holdViewRefreshes: () => viewRefreshes.hold(),
     workspaceState: context.workspaceState,
     closeCanvasesOf: (paths) => editorProvider.closeCanvasesOf(paths),
+    hasDbt,
     onConverted: async (paths) => {
       for (const p of paths) {
         if (p.endsWith('.yml') || p.endsWith('.json')) convertedSourcesHere.add(path.resolve(p));
@@ -2271,7 +2282,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       };
       showProjectName();
       const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        hasMultipleProjects = resolveWorkspaceProject(context).candidates.length > 1;
+        hasMultipleProjects = hasDbt && resolveWorkspaceProject(context).candidates.length > 1;
         void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
         showProjectName();
       });
@@ -2676,7 +2687,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const taken = new Set(entries.map((e) => e.name.toLowerCase()));
         const newName = (await vscode.window.showInputBox({
           title: `Give ${libPath(dup.filePath)} its own name`,
-          prompt: `Table names are unique, as dbt model names are. The warehouse table name stays "${copyReading.table.alias || copyName}" (set as the table's alias).`,
+          prompt: duplicateNamePrompt(copyReading.table.alias || copyName, hasDbt),
           value: suggestDuplicateName(copyName, dup.layer ?? dup.folder, new Set(entries.map((e) => e.name))),
           ignoreFocusOut: true,
           validateInput: (value) => validateNewDbmlTableName(value) ?? validateTableName(value)
@@ -2768,7 +2779,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const taken = new Set(entries.map((e) => e.name));
       const newName = (await vscode.window.showInputBox({
         title: `Give ${libPath(dup.filePath)} its own name`,
-        prompt: `Table names are unique, as dbt model names are. The warehouse table name stays "${model.alias || dup.name}" (set as the table's alias).`,
+        prompt: duplicateNamePrompt(model.alias || dup.name, hasDbt),
         value: suggestDuplicateName(dup.name, dup.folder, taken),
         ignoreFocusOut: true,
         validateInput: (value) => validateTableName(value)
@@ -2792,7 +2803,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const newPath = path.join(path.dirname(dup.filePath), `${newName}.yml`);
       const choice = await vscode.window.showInformationMessage(
         `Rename the duplicate "${dup.name}" to "${newName}"?`,
-        { modal: true, detail: describeDuplicateFix(plan, libPath(dup.filePath), libPath(newPath)) },
+        { modal: true, detail: describeDuplicateFix(plan, libPath(dup.filePath), libPath(newPath), hasDbt) },
         'Rename',
       );
       if (choice !== 'Rename') return;
@@ -3308,6 +3319,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Regenerate the root selectors.yml from current domain files.
     // Run a domain refresh in dbt with: dbt build --selector domain_{layer}_{domain}
     vscode.commands.registerCommand('erdStudio.syncDomainTags', async () => {
+      // Hidden from the palette without dbt; a keybinding or another caller
+      // gets the one sentence, with no "Regenerating dbt selectors.yml" progress first.
+      if (!hasDbt) {
+        void vscode.window.showInformationMessage(NOT_DBT_SELECTORS_MESSAGE);
+        return;
+      }
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -3327,9 +3344,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 'No diagrams with tables found — selectors.yml was not created.',
               );
             } else if (result.status === 'not-dbt-project') {
-              void vscode.window.showInformationMessage(
-                'This folder is not a dbt project, so there is no selectors.yml to generate.',
-              );
+              void vscode.window.showInformationMessage(NOT_DBT_SELECTORS_MESSAGE);
             }
             // For 'skipped': the onSkipped hook has already shown the
             // out-of-sync notification + status bar. No success toast.
@@ -3972,9 +3987,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ...buttons,
       );
       if (choice === OPEN_CLAUDE) {
-        await openClaudeCode({ dbtRoot: workspaceRoot, clipboardText: setupClipboardText('claude') });
+        await openClaudeCode({ dbtRoot: workspaceRoot, clipboardText: setupClipboardText('claude'), logicalOnly: !hasDbt });
       } else if (choice === OPEN_COPILOT) {
-        await openCopilotChat({ dbtRoot: workspaceRoot, workspaceFolder: projectWorkspaceFolder });
+        await openCopilotChat({ dbtRoot: workspaceRoot, workspaceFolder: projectWorkspaceFolder, logicalOnly: !hasDbt });
       } else if (choice === COPY) {
         await vscode.env.clipboard.writeText(setupClipboardText(assistants[0] ?? 'claude'));
       }

@@ -3,7 +3,7 @@
 Use these definitions the first time a term comes up. Each is short on purpose: say the one
 line, then get back to the task. If the user wants more, expand in your own words.
 
-## dbt
+<!-- dbt-only -->## dbt
 
 | Term | Say this |
 |---|---|
@@ -24,7 +24,7 @@ line, then get back to the task. If the user wants more, expand in your own word
 | **dbt Core** | The free, open-source dbt you install on your own computer (version 1.x). |
 | **dbt Fusion** | dbt's newer, faster engine (version 2.x). It reads the same projects. |
 | **dbt Cloud CLI** | A command-line tool that runs your project on dbt's hosted platform instead of your own computer. |
-
+<!-- /dbt-only -->
 ## ERD Studio
 
 | Term | Say this |
@@ -32,7 +32,7 @@ line, then get back to the task. If the user wants more, expand in your own word
 | **ERD** | Entity-relationship diagram: boxes for tables, lines for how they connect. |
 | **logical data model** | The design of your data — the tables, their columns and keys, and how they connect — kept as plain files you can review like code, whether or not anything has been built yet. |
 | **subject area** | An older name for a diagram, left only in the file format and two commands for older projects (this guide also says *domain*). |
-| **logical vs physical** | *Physical* is what really exists in the dbt project, worked out by ERD Studio and read-only. *Logical* is your design — the tables, keys and connections you mean to have. |
+<!-- dbt-only -->| **logical vs physical** | *Physical* is what really exists in the dbt project, worked out by ERD Studio and read-only. *Logical* is your design — the tables, keys and connections you mean to have. |<!-- /dbt-only -->
 | **domain** | One focused diagram of related tables for one business area, like "orders". Saved as `.erd-studio/<layer>/diagrams/<domain>.dbml` (a `.json` in the layer folder, in a project from before ERD Studio 2.0). |
 | **layer** | A folder for organising diagrams and tables, usually a stage of the warehouse such as silver (cleaned) or gold (ready for reporting). |
 | **logical model file** | One `.erd-studio/<layer>/tables/<schema>/<name>.dbml` per table, holding its columns and keys; its relationships are in the layer's `relationships/` files. Shared by every domain that uses the table. A project from before ERD Studio 2.0 has `logical-models/<name>.yml` (or `tables/<name>.yml`) instead. |
@@ -42,10 +42,10 @@ line, then get back to the task. If the user wants more, expand in your own word
 | **grain** | What one row means: "one row per order", "one row per customer per day". |
 | **cardinality** | How many rows on each side of a link can match: *many-to-one* means many orders belong to one customer. |
 | **fact / dimension** | A *fact* table records events or measurements (orders, payments); a *dimension* describes things (customers, products). |
-| **drift** | Any difference between the logical design and what dbt actually has — a missing column, a different type, a missing link. |
-| **diff** | ERD Studio's comparison of logical against physical. The same check as the **Compare with dbt** button in the canvas toolbar. |
+<!-- dbt-only -->| **drift** | Any difference between the logical design and what dbt actually has — a missing column, a different type, a missing link. |<!-- /dbt-only -->
+<!-- dbt-only -->| **diff** | ERD Studio's comparison of logical against physical. The same check as the **Compare with dbt** button in the canvas toolbar. |<!-- /dbt-only -->
 | **canvas** | The diagram view inside VS Code where ERD Studio draws a domain. |
-| **ghost / phantom** | A table in the diagram that the dbt project does not have — usually a typo or something not built yet. |
+<!-- dbt-only -->| **ghost / phantom** | A table in the diagram that the dbt project does not have — usually a typo or something not built yet. |<!-- /dbt-only -->
 
 ## Modelling styles
 
@@ -61,4 +61,4 @@ line, then get back to the task. If the user wants more, expand in your own word
 | **Data Vault** | A style built from *hubs* (one row per business key, like each customer number), *links* (connections between hubs) and *satellites* (descriptive details, with full history). |
 | **Inmon / 3NF** | A style that keeps a central, fully normalised warehouse — each fact stored once — and builds reporting marts from it. |
 | **One Big Table** | A style that pre-joins everything into one wide table per analysis, so reports need no joins. |
-| **target design** | A logical model that shows where you *want* the dbt project to get to. Its differences from dbt are intentional — a to-do list, not errors. |
+<!-- dbt-only -->| **target design** | A logical model that shows where you *want* the dbt project to get to. Its differences from dbt are intentional — a to-do list, not errors. |<!-- /dbt-only -->

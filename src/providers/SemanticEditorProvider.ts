@@ -73,7 +73,7 @@ import {
   unimportedRelationshipsMessage,
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
-import { buildSyncPlan, countSyncPlanActions } from '../services/syncPlanBuilder';
+import { buildSyncPlan, countSyncPlanActions, syncPlanLibraryLookups } from '../services/syncPlanBuilder';
 import { findVenvActivate } from '../services/dbtEnv';
 import { runDbtParse } from '../commands/runDbtParse';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
@@ -91,7 +91,6 @@ import {
   classifySemanticFile,
   computeMissingPositions,
   diagramPathOf,
-  isDbmlLayerName,
   isErdLayoutName,
   subjectAreaStorageOf,
   SubjectAreaValidationError,
@@ -344,14 +343,26 @@ const DRAFT_SKIP_WORDS: Partial<Record<DraftSkipped['reason'], string>> = {
 };
 
 /**
- * One sentence naming the chosen models a batch "Add models from dbt" left
- * out, or `''` when nothing worth mentioning was. Duplicates and models
- * already in the domain are the expected case and are not listed.
+ * {@link DRAFT_SKIP_WORDS} in a folder without dbt (logical only), where a
+ * pick from the Table Library that has no table file is simply not there.
  */
-export function describeSkippedDbtModels(skipped: readonly DraftSkipped[]): string {
+const LOGICAL_DRAFT_SKIP_WORDS: Partial<Record<DraftSkipped['reason'], string>> = {
+  ...DRAFT_SKIP_WORDS,
+  'not-found': 'not in the Table Library',
+};
+
+/**
+ * One sentence naming the chosen models a batch "Add models from dbt" (or
+ * a batch pick from the Table Library) left out, or `''` when nothing worth
+ * mentioning was. Duplicates and models already in the domain are the
+ * expected case and are not listed. `logicalOnly` (no dbt project): the
+ * reasons are worded without dbt.
+ */
+export function describeSkippedDbtModels(skipped: readonly DraftSkipped[], options: { logicalOnly?: boolean } = {}): string {
+  const words = options.logicalOnly ? LOGICAL_DRAFT_SKIP_WORDS : DRAFT_SKIP_WORDS;
   const parts = skipped
-    .filter((s) => DRAFT_SKIP_WORDS[s.reason])
-    .map((s) => `${s.name} (${DRAFT_SKIP_WORDS[s.reason]})`);
+    .filter((s) => words[s.reason])
+    .map((s) => `${s.name} (${words[s.reason]})`);
   if (parts.length === 0) return '';
   const shown = parts.slice(0, 5).join(', ');
   return `Left out: ${shown}${parts.length > 5 ? ` and ${parts.length - 5} more` : ''}.`;
@@ -1407,7 +1418,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const current = path.basename(this.workspaceRoot);
     const webview = webviewPanel.webview;
     const nonce = crypto.randomBytes(16).toString('base64');
-    webview.options = { enableScripts: Boolean(owner), localResourceRoots: [] };
+    // A plain (logical-only) window: nothing about dbt applies, even when the
+    // file sits in a dbt project elsewhere, so the page and the toast say only
+    // that it is in another folder or project, and offer no Switch (selecting a
+    // dbt project needs a dbt project in this window's folders).
+    const plainWindow = this.logicalOnly;
+    const outsideFolder = plainWindow && !owner;
+    const switchable = owner !== undefined && !plainWindow;
+    webview.options = { enableScripts: switchable, localResourceRoots: [] };
     webview.html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1416,10 +1434,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
 </head>
 <body style="font-family: var(--vscode-font-family, sans-serif); padding: 24px; color: var(--vscode-foreground); max-width: 44em; line-height: 1.5;">
-  <h2 style="margin-top: 0;">This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>
+  ${outsideFolder ? `<h2 style="margin-top: 0;">This diagram is outside <code>${esc(current)}</code></h2>
+  <p>ERD Studio has <code>${esc(current)}</code> open in this window and draws only the diagrams in that folder.
+  Open this file\u2019s folder to edit it here.</p>` : plainWindow && owner ? `<h2 style="margin-top: 0;">This diagram is in <code>${esc(path.basename(owner))}</code>, another project</h2>
+  <p>ERD Studio has <code>${esc(current)}</code> open in this window and draws only that project\u2019s diagrams.
+  Open <code>${esc(path.basename(owner))}</code> to edit it here.</p>` : `<h2 style="margin-top: 0;">This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>
   <p>ERD Studio has <code>${esc(current)}</code> open in this window, and a window shows one dbt project at a time.
-  Drawing this file here would mix its tables with the wrong project\u2019s dbt data.</p>
-  ${owner ? `<p><button id="switch" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
+  Drawing this file here would mix its tables with the wrong project\u2019s dbt data.</p>`}
+  ${switchable && owner ? `<p><button id="switch" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
     background: var(--vscode-button-background); color: var(--vscode-button-foreground);">Switch ERD Studio to ${esc(path.basename(owner))}</button></p>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -1429,13 +1451,31 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 </html>`;
 
     const name = path.basename(filePath);
-    if (!owner) {
-      // Not a dead end (#205): the file still opens as text, and another project can be picked.
+    if (plainWindow && owner) {
       void vscode.window.showWarningMessage(
-        `ERD Studio: ${name} isn't inside a dbt project, so ERD Studio can't draw it with ${current}'s dbt data.`,
+        `ERD Studio: ${name} is in ${path.basename(owner)}, another project, so ERD Studio can't draw it in ${current}.`,
         OPEN_AS_TEXT_BUTTON,
-        SELECT_DBT_PROJECT_BUTTON,
       ).then(choice => {
+        if (choice === OPEN_AS_TEXT_BUTTON) {
+          void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), 'default');
+        }
+      });
+      return;
+    }
+    if (!owner) {
+      // Not a dead end (#205): the file still opens as text, and (in a dbt
+      // project) another project can be picked.
+      const shown = outsideFolder
+        ? vscode.window.showWarningMessage(
+          `ERD Studio: ${name} is outside ${current}, the folder open in this window, so ERD Studio can't draw it here.`,
+          OPEN_AS_TEXT_BUTTON,
+        )
+        : vscode.window.showWarningMessage(
+          `ERD Studio: ${name} isn't inside a dbt project, so ERD Studio can't draw it with ${current}'s dbt data.`,
+          OPEN_AS_TEXT_BUTTON,
+          SELECT_DBT_PROJECT_BUTTON,
+        );
+      void shown.then(choice => {
         if (choice === OPEN_AS_TEXT_BUTTON) {
           void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), 'default');
         } else if (choice === SELECT_DBT_PROJECT_BUTTON) {
@@ -2389,23 +2429,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * opted into layer folders (see `groupsByFolder`).
    */
   private newTableFolder(domainFilePath: string): string | DbmlTableHome | undefined {
-    const diagram = diagramPathOf(domainFilePath);
-    if (diagram !== undefined && subjectAreaStorageOf(domainFilePath) === 'dbml') {
-      return { layer: diagram.layer, schema: this.tableLibraryService.schemaAsListed(diagram.layer, diagram.layer) };
-    }
-    const layer = tableFolderForSubjectArea(domainFilePath);
-    if (this.tableLibraryService.writesDbml() && isDbmlLayerName(layer)
-      && this.layerService.getAllLayers().some((l) => l.id === layer)) {
-      return { layer, schema: this.tableLibraryService.schemaAsListed(layer, layer) };
-    }
-    return this.newYamlTableFolder(domainFilePath);
+    // One rule with the sync plan's new-table paths (syncPlanLibraryLookups).
+    return this.tableLibraryService.newTableHomeFor(domainFilePath, new Set(this.layerService.getAllLayers().map((l) => l.id)));
   }
 
-  /** {@link newTableFolder} for a JSON diagram's YAML table: the layer folder, or undefined for the top level. */
+  /** {@link newTableFolder} for a JSON diagram's YAML table: the layer folder, or undefined for the top level (the same rule, `yamlTableFolderFor`). */
   private newYamlTableFolder(domainFilePath: string): string | undefined {
-    const layer = tableFolderForSubjectArea(domainFilePath);
-    const layerIds = new Set(this.layerService.getAllLayers().map((l) => l.id));
-    return layerIds.has(layer) && this.tableLibraryService.groupsByFolder(layerIds) ? layer : undefined;
+    return this.tableLibraryService.yamlTableFolderFor(domainFilePath, new Set(this.layerService.getAllLayers().map((l) => l.id)));
   }
 
   /**
@@ -6468,7 +6498,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (!this.tableLibraryService.tableExists(payload.modelName)) {
           const seed = seedTableFromDbt(payload.modelName, ymlData, manifest, await this.loadCatalog());
           if (!seed) {
-            webview.postMessage({ type: 'error', payload: { message: `Table "${payload.modelName}" not found in your dbt .yml files, the manifest or the table library.` } });
+            webview.postMessage({ type: 'error', payload: { message: this.logicalOnly
+              ? `Table "${payload.modelName}" is not in the Table Library.`
+              : `Table "${payload.modelName}" not found in your dbt .yml files, the manifest or the table library.` } });
             return;
           }
           seededModel = { ...seed, name: payload.modelName };
@@ -6536,7 +6568,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (!ymlModel && !manifestModel) {
         webview.postMessage({
           type: 'error',
-          payload: { message: `Table "${payload.modelName}" not found in your dbt .yml files or the manifest.` },
+          payload: { message: this.logicalOnly
+            ? `Table "${payload.modelName}" is not in the Table Library.`
+            : `Table "${payload.modelName}" not found in your dbt .yml files or the manifest.` },
         });
         return;
       }
@@ -6765,7 +6799,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // without a word. The dbt picker leaves those out up front.
       const alreadyIn = fromDbt ? [] : draft.skipped.filter((s) => s.reason === 'already-in-domain').map((s) => s.name);
       const skippedNote = [
-        describeSkippedDbtModels(draft.skipped),
+        describeSkippedDbtModels(draft.skipped, { logicalOnly: this.logicalOnly }),
         alreadyIn.length > 0 ? `Already in this diagram: ${alreadyIn.slice(0, 5).join(', ')}${alreadyIn.length > 5 ? ` and ${alreadyIn.length - 5} more` : ''}.` : '',
       ].filter(Boolean).join(' ');
       if (draft.modelNames.length === 0) {
@@ -7301,20 +7335,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         semanticDir,
         domain: (parsed.domain as string | undefined) ?? '',
         layer: (parsed.layer as string | undefined) ?? '',
-        modelFolder: (name) => this.tableLibraryService.tableFolder(name),
-        tableLibraryFile: (name) => this.tableLibraryService.tableLibraryFile(name),
-        newTableLibraryDir: this.tableLibraryService.newTableLibraryDirName(),
-        newTableFilePath: (name) => {
-          try { return this.tableLibraryService.libraryRelativePath(this.tableLibraryService.pathForNewTable(name)); } catch { return undefined; }
-        },
-        relationshipsFile: (name) => {
-          const file = this.tableLibraryService.relationshipsFileForNewRef(name);
-          return file === undefined ? undefined : this.tableLibraryService.libraryRelativePath(file);
-        },
-        relationshipStoredIn: (rel) => {
-          const file = this.tableLibraryService.relationshipsFileHolding(rel);
-          return file === undefined ? undefined : this.tableLibraryService.libraryRelativePath(file);
-        },
+        // The CLI's lookups (diff): a new table goes where one created from this diagram goes.
+        ...syncPlanLibraryLookups(this.tableLibraryService, {
+          diagramFile: document.uri.fsPath,
+          layerIds: new Set(this.layerService.getAllLayers().map((l) => l.id)),
+          manifest,
+          ymlData,
+        }),
       });
 
       const totalActions = countSyncPlanActions(syncPlan);

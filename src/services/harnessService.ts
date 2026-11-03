@@ -18,7 +18,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { FileState, HarnessStatus, RecommendedInstallResult } from '../types/harness';
 import { recommendedSkillTargets, type AiAssistantId, type SkillHarnessTarget } from '../types/aiAssistants';
-import { SETUP_SKILL_DIRS, SETUP_SKILL_FILES, skillForTarget } from './harnessAssets';
+import { DBT_SCOPE_SETUP_PATHS, SETUP_SKILL_DIRS, applyDbtScope, setupSkillAssets, skillForTarget } from './harnessAssets';
+import { isShippedSetupReference } from './harnessShippedReferences';
+import { hasDbtProjectFile } from './projectDiscovery';
 
 export type { FileState, HarnessStatus, RecommendedInstallResult } from '../types/harness';
 
@@ -27,7 +29,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '41';
+export const HARNESS_VERSION = '42';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -46,6 +48,28 @@ const CODEX_SECTION_HEADING = '## ERD Studio Domain Files';
 
 function buildVersionMarker(): string {
   return `${VERSION_MARKER_PREFIX} ${HARNESS_VERSION}${VERSION_MARKER_SUFFIX}`;
+}
+
+/**
+ * Logical first, dbt as an add-on: a root without `dbt_project.yml` gets
+ * harness text with no dbt instruction in it (`applyDbtScope()`, and no
+ * dbt-only file), and every version-marked file written there carries this
+ * second marker after the version one. A dbt project's files carry none, so
+ * they stay byte for byte what they were. A current file whose scope does
+ * not match its root — a folder that gained (or lost) `dbt_project.yml`
+ * after the install — reads as `outdated`, so the usual refresh rewrites it
+ * for the folder it is in now.
+ */
+export const LOGICAL_SCOPE_MARKER = '<!-- erd-studio-harness-scope: logical -->';
+
+/** The version marker, plus the logical scope marker in a root without dbt. */
+function versionFooter(dbt: boolean): string {
+  return dbt ? buildVersionMarker() : `${buildVersionMarker()}\n${LOGICAL_SCOPE_MARKER}`;
+}
+
+/** Whether harness text was written for a root with (`dbt` true) or without `dbt_project.yml`, as asked. */
+function scopeMatches(content: string, dbt: boolean): boolean {
+  return content.includes(LOGICAL_SCOPE_MARKER) !== dbt;
 }
 
 /**
@@ -96,6 +120,12 @@ export interface HarnessInstallResult {
   error?: string;
   /** Workspace-relative (POSIX) paths this install wrote, set on success. */
   filesWritten?: string[];
+  /**
+   * Workspace-relative (POSIX) paths this install removed: in a root without
+   * `dbt_project.yml`, the dbt-only files an earlier install left there
+   * (`dbtLeftovers()`). Set on success.
+   */
+  filesRemoved?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +198,7 @@ ERD Studio keeps a project's logical data model in \`.erd-studio/\` as plain tex
 
 ## What to write: read \`erd.storage\` first
 
-**Before writing any \`.erd-studio\` file, run \`erd-studio doctor --json\` and read \`erd.storage\`** (doctor works in a folder without dbt too, reporting \`dbtProject: false\`):
+**Before writing any \`.erd-studio\` file, run \`erd-studio doctor --json\` and read \`erd.storage\`**<!-- dbt-only --> (doctor works in a folder without dbt too, reporting \`dbtProject: false\`)<!-- /dbt-only -->:
 
 - **\`dbml\`, or no \`.erd-studio/\` folder yet** (a new project) → write DBML: follow {DBML}.
 - **\`yaml\`** → write YAML tables and JSON diagrams: follow {LEGACY}, in the file naming doctor's \`erd.naming\` reports.
@@ -213,7 +243,7 @@ A new project also needs \`.erd-studio/layers.json\`, which lists the layer fold
 - **Schema folders.** Each table file is \`<layer>/tables/<schema>/<name>.dbml\` and declares \`Table <schema>.<name>\`, the qualifier spelled exactly as its folder (case included). The schema is free: a source system, a domain or the warehouse schema.
 - A table's **name is its identity everywhere** and is unique across the whole project, every layer and schema, ignoring case: never create a second file with a name that exists in another folder. Tables that share a warehouse name get unique names (\`silver_customer\`, \`gold_customer\`), with the warehouse name in \`alias\`.
 - **To find a table**, look for \`*/tables/*/{name}.dbml\`.
-- **Where a new table goes.** In the layer of the diagram you are adding it to. Its schema folder, the rule the canvas's **New Table** follows: the schema the user names; else, for a dbt model with a custom schema, dbt's configured schema (\`+schema\` / \`config.schema\`; for a source, its \`schema:\`), never the built schema in \`manifest.json\`; else the schema folder most of the diagram's tables in that layer already use; else the layer's name. So adding \`fct_sale\` to \`gold/diagrams/reporting.dbml\`, whose gold tables are mostly in \`gold/tables/sales/\`, creates \`gold/tables/sales/fct_sale.dbml\` holding \`Table sales.fct_sale\`; with no gold table in the diagram yet, \`gold/tables/gold/fct_sale.dbml\` holding \`Table gold.fct_sale\`. When the layer already has a schema folder spelled differently in case, use its spelling. Keep an existing table's file where it is.
+- **Where a new table goes.** In the layer of the diagram you are adding it to. Its schema folder, the rule the canvas's **New Table** follows: the schema the user names; <!-- dbt-only -->else, for a dbt model with a custom schema, dbt's configured schema (\`+schema\` / \`config.schema\`; for a source, its \`schema:\`), never the built schema in \`manifest.json\`; <!-- /dbt-only -->else the schema folder most of the diagram's tables in that layer already use; else the layer's name. So adding \`fct_sale\` to \`gold/diagrams/reporting.dbml\`, whose gold tables are mostly in \`gold/tables/sales/\`, creates \`gold/tables/sales/fct_sale.dbml\` holding \`Table sales.fct_sale\`; with no gold table in the diagram yet, \`gold/tables/gold/fct_sale.dbml\` holding \`Table gold.fct_sale\`. When the layer already has a schema folder spelled differently in case, use its spelling. Keep an existing table's file where it is.
 - \`tables\`, \`templates\` and \`logical-models\` are never layer names; \`layers.json\` ids are lower-case, and the display name is the layer's \`label\`.
 
 ## Edit rules
@@ -230,20 +260,20 @@ A new project also needs \`.erd-studio/layers.json\`, which lists the layer fold
 
 ## Team Modelling Approach
 
-If \`.erd-studio/modelling-approach.md\` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (the table's role, grain, SCD and additive types, natural keys and rationale, whatever the file format). The \`/erd-studio-setup\` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise. If it has a **Metadata** section, that is the team's metadata list — follow it as "The team's metadata list" below says. A file holding only a title and a Metadata section is valid: no modelling technique has been agreed yet.
+If \`.erd-studio/modelling-approach.md\` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (the table's role, grain, SCD and additive types, natural keys and rationale, whatever the file format). The \`/erd-studio-setup\` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. <!-- dbt-only -->If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise. <!-- /dbt-only -->If it has a **Metadata** section, that is the team's metadata list — follow it as "The team's metadata list" below says. A file holding only a title and a Metadata section is valid: no modelling technique has been agreed yet.
 
 ### The team's metadata list
 
-If \`.erd-studio/modelling-approach.md\` has a \`## Metadata\` section, it lists the \`meta\` keys this team records, as a table: **Key**, **On** (models, columns or both), **Values**, and **Source** (\`dbt\` or \`the team\`). Read it before creating or editing a model, and follow it:
+If \`.erd-studio/modelling-approach.md\` has a \`## Metadata\` section, it lists the \`meta\` keys this team records, as a table: **Key**, **On** (models, columns or both), **Values**, and **Source** (<!-- dbt-only -->\`dbt\` or <!-- /dbt-only -->\`the team\`). Read it before creating or editing a model, and follow it:
 
 - **Use its key names exactly.** When the user describes a key in other words ("data owner", "does it hold personal data?"), use the listed key (\`owner\`, \`pii\`), never a new spelling, and put it where **On** says. When **Values** names a fixed set, use one of those values; an example in **Values** is never a default. Keep the kind of value (text, \`true\` / \`false\`, a list).
-- **Source \`dbt\`: copy it; never make it up.** The value comes from the dbt model's own \`meta:\` — best from \`~/.erd-studio-cli/bin/erd-studio inventory --models <name> --json\` (\`models[].meta\`, \`columns[].meta\`, already merged as dbt merges them, including project-wide \`+meta\` from \`dbt_project.yml\`) when that helper is installed, else from the model's schema \`.yml\` (\`meta:\` and \`config: meta:\`, the \`config\` one winning per key; a column's are under that column) and the \`+meta\` entries in \`dbt_project.yml\`. Copy it whenever you create a logical model or add a column from dbt, including from a sync plan. Keep the kind of value: in a DBML table a text value is one \`meta_<key>: '<text>'\` setting and anything else (\`true\` / \`false\`, a number, a list) goes into the one \`meta_json\` setting as JSON (a text value ERD Studio put inside \`meta_json\` to keep the key order stays there; {DBML}); in YAML, \`true\` / \`false\` stay unquoted and a list stays a list, and numbers may be written quoted or not (ERD Studio reads \`24\` and \`"24"\` the same), but keep the quotes when leaving them off would change the digits (\`"1.10"\`, \`"007"\`). When dbt has no value (or \`null\`), leave the key out: never guess and never write a placeholder.
+<!-- dbt-only -->- **Source \`dbt\`: copy it; never make it up.** The value comes from the dbt model's own \`meta:\` — best from \`~/.erd-studio-cli/bin/erd-studio inventory --models <name> --json\` (\`models[].meta\`, \`columns[].meta\`, already merged as dbt merges them, including project-wide \`+meta\` from \`dbt_project.yml\`) when that helper is installed, else from the model's schema \`.yml\` (\`meta:\` and \`config: meta:\`, the \`config\` one winning per key; a column's are under that column) and the \`+meta\` entries in \`dbt_project.yml\`. Copy it whenever you create a logical model or add a column from dbt, including from a sync plan. Keep the kind of value: in a DBML table a text value is one \`meta_<key>: '<text>'\` setting and anything else (\`true\` / \`false\`, a number, a list) goes into the one \`meta_json\` setting as JSON (a text value ERD Studio put inside \`meta_json\` to keep the key order stays there; {DBML}); in YAML, \`true\` / \`false\` stay unquoted and a list stays a list, and numbers may be written quoted or not (ERD Studio reads \`24\` and \`"24"\` the same), but keep the quotes when leaving them off would change the digits (\`"1.10"\`, \`"007"\`). When dbt has no value (or \`null\`), leave the key out: never guess and never write a placeholder.
   - When you are already reading that dbt model and the model file's value for a listed \`dbt\` key differs from dbt's, say so in one line and ask before changing it — the difference may be deliberate.
-  - When the user gives a value for a \`dbt\` key ("its owner is finance-team"), write it, say that dbt does not record it, and offer to add it to the dbt model's \`meta:\` too so the two agree — never edit dbt files unasked. When they ask for a \`dbt\` key that dbt has no value for and give none, say so and ask for the value.
-- **Source \`the team\`: leave it to people.** Never fill it in yourself unless the user gives you the value. After creating models, say in one line which of them still lack these keys (one line for a whole batch or sync plan).
-- **A key that is not on the list:** add it when the user asks, then offer once to add it to the list (Source \`the team\`, or \`dbt\` when dbt records it). Keys the list names under **Left out** (another tool's settings) are never copied from dbt.
+  - When the user gives a value for a \`dbt\` key ("its owner is finance-team"), write it, say that dbt does not record it, and offer to add it to the dbt model's \`meta:\` too so the two agree — never edit dbt files unasked. When they ask for a \`dbt\` key that dbt has no value for and give none, say so and ask for the value.<!-- /dbt-only -->
+- **Source \`the team\`: leave it to people.** Never fill it in yourself unless the user gives you the value. After creating models, say in one line which of them still lack these keys (one line for a whole batch<!-- dbt-only --> or sync plan<!-- /dbt-only -->).
+- **A key that is not on the list:** add it when the user asks, then offer once to add it to the list (Source \`the team\`<!-- dbt-only -->, or \`dbt\` when dbt records it<!-- /dbt-only -->).<!-- dbt-only --> Keys the list names under **Left out** (another tool's settings) are never copied from dbt.<!-- /dbt-only -->
 
-Without that section, add or change only the keys the user asks for, and never copy dbt's \`meta:\` unasked. Ask for a value you were not given; never make one up.
+Without that section, add or change only the keys the user asks for<!-- dbt-only -->, and never copy dbt's \`meta:\` unasked<!-- /dbt-only -->. Ask for a value you were not given; never make one up.
 
 ## Table roles
 
@@ -281,7 +311,7 @@ Optional, and every field is optional text: in DBML each is a table setting \`ra
 
 When the user asks you to create a new model — or materially add columns to an existing one — from an external source (planning doc, DDL, staging SQL, CSV, notebook, or another YAML), follow this protocol. It exists to prevent silent column truncation.
 
-**Does NOT apply to:** renaming a column, changing a single flag, or executing an \`.erd-studio/.sync-plan.json\` (see SYNC.md for that workflow). A **DBML file** (\`.dbml\`) from another tool has its own command — see "DBML: import and export" in {DBML}.
+**Does NOT apply to:** renaming a column<!-- dbt-only -->, changing a single flag, or executing an \`.erd-studio/.sync-plan.json\` (see SYNC.md for that workflow)<!-- /dbt-only --><!-- no-dbt --> or changing a single flag<!-- /no-dbt -->. A **DBML file** (\`.dbml\`) from another tool has its own command — see "DBML: import and export" in {DBML}.
 
 ### Step 1 — Read the source fully, then enumerate
 Before listing anything, confirm you have read the source **in full**. For files longer than 2000 lines, page through with \`Read\` using \`offset\`/\`limit\` until you reach the end of the file. A partial read is a silent-truncation trap before you even start — the columns you never saw cannot appear in your output.
@@ -307,7 +337,7 @@ State which of those columns you intend to build, in plain English.
 Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
 
 ### Step 3 — Build
-Write the table's file — the existing file if the table already exists (in whichever folder it is in), otherwise a new file: in a DBML project \`.erd-studio/{layer}/tables/{schema}/{name}.dbml\` for the layer of the target diagram (see "Where a new table goes" above); in a YAML project the \`.yml\` path {LEGACY} gives. When the source is a dbt model and the team's metadata list has \`dbt\` keys, copy those too (see "The team's metadata list").
+Write the table's file — the existing file if the table already exists (in whichever folder it is in), otherwise a new file: in a DBML project \`.erd-studio/{layer}/tables/{schema}/{name}.dbml\` for the layer of the target diagram (see "Where a new table goes" above); in a YAML project the \`.yml\` path {LEGACY} gives. <!-- dbt-only -->When the source is a dbt model and the team's metadata list has \`dbt\` keys, copy those too (see "The team's metadata list").<!-- /dbt-only -->
 
 ### Step 4 — Reconcile via set-difference
 Re-read the table file you just wrote. Compute the set-difference between source columns and the file's columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
@@ -316,7 +346,7 @@ Report in this exact form:
 
 > Reconcile: \`dim_customer.dbml\` has **M** columns; source has **N**.
 >
-> **In source but not in the file** (K): \`created_at\` (audit — not modelled), \`updated_at\` (audit), \`_dbt_source_relation\` (dbt internal).
+> **In source but not in the file** (K): \`created_at\` (audit — not modelled), \`updated_at\` (audit)<!-- dbt-only -->, \`_dbt_source_relation\` (dbt internal)<!-- /dbt-only -->.
 >
 > **In the file but not in source** (J): \`customer_sk\` (synthesised surrogate key), \`loaded_at\` (added for SCD2 tracking).
 
@@ -337,7 +367,7 @@ Every entry in "in source but not in the file" must have a specific reason. A cl
 
 ---
 
-## Physical Stage (Read-Only)
+<!-- dbt-only -->## Physical Stage (Read-Only)
 
 **A folder without \`dbt_project.yml\` is logical-only.** ERD Studio works there as a logical data modelling tool: the canvas shows no Physical tab and no Compare with dbt button, there is no sync plan, and \`erd-studio diff\` exits with \`not-dbt-project\` (\`doctor\` and \`export\` still work). The \`.erd-studio\` files are the whole model. Never tell the user they need dbt, and never run dbt there; if they use dbt elsewhere, opening that folder adds the Physical view.
 
@@ -393,7 +423,9 @@ When asked to execute a sync plan, or when \`.erd-studio/.sync-plan.json\` exist
 1. Read \`SYNC.md\` in the same directory as this skill file for the full action reference and execution guide
 2. Read \`.erd-studio/.sync-plan.json\` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
-4. Write each logical-side change in the project's format: SYNC.md gives the DBML lines (a column line in the Table block, a new Ref line in \`relationshipsPath\`, a change to an existing Ref in \`storedIn\`) and the YAML ones (legacy)`;
+4. Write each logical-side change in the project's format: SYNC.md gives the DBML lines (a column line in the Table block, a new Ref line in \`relationshipsPath\`, a change to an existing Ref in \`storedIn\`) and the YAML ones (legacy)<!-- /dbt-only --><!-- no-dbt -->## The files are the whole model
+
+The \`.erd-studio\` files are the whole design: the canvas draws exactly what they say, and nothing is derived from anything else or compared with it. \`erd-studio doctor\` and \`erd-studio export\` check them.<!-- /no-dbt -->`;
 
 const DBML_PART = `# ERD Studio — the DBML format
 
@@ -445,7 +477,7 @@ Table sales.fct_order [
 | description | the body's \`Note\` (first line) | \`Note: 'Customer master data'\` |
 | role (see "Table roles" in {SKILL}) | \`role\` | \`role: 'conformed-dim'\` |
 | grain | \`grain\` | \`grain: 'One row per customer'\` |
-| warehouse table name (dbt \`alias\`) | \`alias\` (never DBML's own \`as\`) | \`alias: 'customer'\` |
+| warehouse table name<!-- dbt-only --> (dbt \`alias\`)<!-- /dbt-only --> | \`alias\` (never DBML's own \`as\`) | \`alias: 'customer'\` |
 | design rationale | \`rationale_<field>\` | \`rationale_grain_choice: '…'\` |
 | metadata, text values | \`meta_<key>\` (key matching \`[a-z_][a-z0-9_]*\`) | \`meta_owner: 'crm-team'\` |
 | metadata, anything else | one \`meta_json\` with those entries as JSON, where its first entry is (ERD Studio also keeps a text value inside it when it sits between two of its entries, so the metadata reads back in key order: leave such a \`meta_json\` as it is) | \`meta_json: '{"pii":true}'\` |
@@ -458,7 +490,7 @@ Table sales.fct_order [
 | additive type | \`additive_type\` | \`[additive_type: 'semi-additive']\` |
 | column metadata | \`meta_<key>\` / \`meta_json\` on the column | \`[meta_pii: 'yes']\` |
 
-Every custom value is a quoted string. \`foreign_key\` records the intent only: a Ref never sets it, so set it on a foreign-key column yourself. ERD Studio never compares \`meta_*\` with dbt (see "The team's metadata list" in {SKILL}); an imported table may carry a \`meta_json\` with a \`dbml\` entry (what an imported DBML file said that ERD Studio has no field for): keep it as it is.
+Every custom value is a quoted string. \`foreign_key\` records the intent only: a Ref never sets it, so set it on a foreign-key column yourself. <!-- dbt-only -->ERD Studio never compares \`meta_*\` with dbt (see "The team's metadata list" in {SKILL}); an<!-- /dbt-only --><!-- no-dbt -->An<!-- /no-dbt --> imported table may carry a \`meta_json\` with a \`dbml\` entry (what an imported DBML file said that ERD Studio has no field for): keep it as it is.
 
 ## Relationships file: \`<layer>/relationships/<file>.dbml\`
 
@@ -496,7 +528,7 @@ Ref: sales.fct_order.(region_code, country_code) >? sales.dim_region.(region_cod
 - **Composite foreign keys** are one Ref with both column lists in the same order: \`Ref: dv.pit.(customer_hk, as_of_date) >? dv.sat.(customer_hk, load_date)\`.
 - **One Ref per pair of column sets, in one file only.** The same two column sets joined twice — in two files, twice in one, or once each way round — fails every DBML tool (\`[5001]\`), and doctor reports it as \`duplicateRef\`. ERD Studio refuses to add a relationship any relationships file already holds.
 - **Spell every end exactly** as its table and column are named; a Ref whose other table has no file is not drawn. A self-reference (\`hr.employee.manager_id >? hr.employee.employee_id\`) is fine; a column never points at itself.
-- **Pending relationships** are whole-line comments, \`// erd-studio pending: Ref: gold.fct_order.risk_key >? gld_fct_risk.risk_key\`, after the Refs: a relationship ERD Studio keeps and draws, but cannot write as a live Ref yet, because an end has no \`.dbml\` table file (or no such column), or is a table still in YAML. A live Ref there would break the whole file in every DBML tool. **Keep these lines exactly as they are**, never write a new one by hand, and never turn one into a live Ref yourself: ERD Studio does that, with its \`use\` line, once both ends have table files (Add from dbt, or Convert Project to DBML). To delete such a relationship, delete its line. Doctor reports each as \`pendingRelationship\`.
+- **Pending relationships** are whole-line comments, \`// erd-studio pending: Ref: gold.fct_order.risk_key >? gld_fct_risk.risk_key\`, after the Refs: a relationship ERD Studio keeps and draws, but cannot write as a live Ref yet, because an end has no \`.dbml\` table file (or no such column), or is a table still in YAML. A live Ref there would break the whole file in every DBML tool. **Keep these lines exactly as they are**, never write a new one by hand, and never turn one into a live Ref yourself: ERD Studio does that, with its \`use\` line, once both ends have table files (<!-- dbt-only -->Add from dbt, or <!-- /dbt-only -->Convert Project to DBML). To delete such a relationship, delete its line. Doctor reports each as \`pendingRelationship\`.
 - Keep the Refs sorted (by from table, to table, then columns), with one blank line between the Refs of each foreign-key table. Settings on a Ref (\`[delete: cascade]\`, \`[color: …]\`) are kept as written.
 - ERD Studio never deletes a relationships file, even an empty one.
 - **Mark the keys.** Direction comes from keys: mark the referenced column \`pk\` (or \`natural_key: 'true'\`) on the table it points at, and \`foreign_key: 'true'\` on the foreign-key column. Keys win: the many side is never its table's whole primary or natural key while the other end is a column of a table with a different key — such a Ref is drawn backwards, flagged with a ⚠ and reported by doctor as \`turn-round-relationships\`; offer to rewrite it as \`>?\` from the column that is not a key to the key, in the file that holds it.
@@ -530,7 +562,7 @@ Project sales {
 - **Then one \`use * from '…'\` for each relationships file that holds a Ref between two of the diagram's tables** (or a pending line between two tables it draws), and no other, sorted by path. Without it no DBML tool draws the Refs from that file, ERD Studio included (doctor: \`missingRelationshipsUse\`; the canvas warns); ERD Studio adds the line on its next edit to the diagram other than a move. An import that holds nothing between the diagram's tables is \`extraRelationshipsUse\`. Keep any other \`use *\` line the user wrote as it is.
 - **The diagram's own pending relationships** are \`// erd-studio pending: Ref: …\` lines after the \`use\` lines: relationships the diagram held whose foreign-key table has no table file. Keep them as they are; Convert Project to DBML moves each to the library once that table has a file.
 - **Sticky notes** are \`Note "<id>" [color: <hex>, linked_table: '<table>'] { '<text>' }\` after the \`use\` lines, each with its own id (a UUID; two Notes with one name fail every DBML tool). Colours: \`#f59e0b\` yellow, \`#3b82f6\` blue, \`#22c55e\` green, \`#ec4899\` pink, \`#f97316\` orange. \`linked_table\` is optional and draws a dashed line to that table.
-- **\`Project <name>\` comes last** in a new diagram (an existing file keeps its Project where it is): the diagram's name, its file stem for a new one; double-quote it when it is not a plain identifier or is a DBML keyword, as \`Project "customer-360"\`, or every DBML tool rejects the file. Its description is \`Note\`, and \`erd_schema_version: '7'\` is always there. Optional quoted keys, in this order: \`erd_model_folder\` (the dbt \`models/\` path filter), \`erd_show_fk_edges\` (\`'true'\` / \`'false'\`), \`erd_layout_options\` (JSON text), \`erd_stub_columns\` (a JSON array of table names whose physical-only columns are not compared — for conformed dimensions included only to anchor relationships), \`erd_unlinked_tables\` (below), then \`erd_layout\` last. Keep any other Project key as it is.
+- **\`Project <name>\` comes last** in a new diagram (an existing file keeps its Project where it is): the diagram's name, its file stem for a new one; double-quote it when it is not a plain identifier or is a DBML keyword, as \`Project "customer-360"\`, or every DBML tool rejects the file. Its description is \`Note\`, and \`erd_schema_version: '7'\` is always there. Optional quoted keys, in this order: <!-- dbt-only -->\`erd_model_folder\` (the dbt \`models/\` path filter), <!-- /dbt-only -->\`erd_show_fk_edges\` (\`'true'\` / \`'false'\`), \`erd_layout_options\` (JSON text), <!-- dbt-only -->\`erd_stub_columns\` (a JSON array of table names whose physical-only columns are not compared — for conformed dimensions included only to anchor relationships), <!-- /dbt-only -->\`erd_unlinked_tables\` (below), then \`erd_layout\` last. Keep any other Project key as it is.
 - **\`erd_unlinked_tables\`** (\`erd_unlinked_tables: 'gld_fct_risk_child, gld_fct_risk_parent'\`, one quoted, comma-separated string) lists tables that are on the diagram but have no \`.dbml\` file to \`use\` (none yet, or one still in YAML). ERD Studio draws each one as missing, at its position in \`erd_layout\`; other DBML tools do not show them. **Keep the key as it is**: never add a \`use\` line for a name in it (a \`use\` line to a file that does not exist breaks the diagram for every DBML tool), and never write it empty. When the table gets its file, ERD Studio moves the name to a \`use\` line itself. To take a table off the diagram, remove its name (and drop the key when it is the last). Doctor reports each as \`unlinkedTable\`.
 - **No Tables, Refs or TableGroups in a diagram**: they belong in the library. A file that declares its own Tables and imports none is a single-file DBML (a dbdiagram.io download): run **ERD Studio: Import DBML…** on it (doctor: \`import-dbml-file\`).
 
@@ -561,7 +593,7 @@ ERD Studio writes every \`.dbml\` in one layout and tidies a file into it each t
 
 The project's own files are DBML; these commands bring other DBML in and send diagrams out.
 
-- **A DBML file in** — from dbdiagram.io, dbdocs, another tool, or an ERD Studio export: point the user at **ERD Studio: Import DBML…** (Command Palette, or the **ERD Studio** view's **…** menu). It needs no dbt and no AI. It reads one self-contained file (no \`use\` lines), creates a **new** diagram, splits the tables into the library (a \`Table s.x\` goes into schema folder \`s\`; tables the library already has are used as they are, never overwritten), places them from the file's own \`erd_layout\` when it has one, and shows what it will create before writing anything. Prefer it to converting the file yourself; if the user asks you to do it by hand anyway, follow "Building Models from External Sources" in {SKILL}.
+- **A DBML file in** — from dbdiagram.io, dbdocs, another tool, or an ERD Studio export: point the user at **ERD Studio: Import DBML…** (Command Palette, or the **ERD Studio** view's **…** menu). It needs no<!-- dbt-only --> dbt and no<!-- /dbt-only --> AI. It reads one self-contained file (no \`use\` lines), creates a **new** diagram, splits the tables into the library (a \`Table s.x\` goes into schema folder \`s\`; tables the library already has are used as they are, never overwritten), places them from the file's own \`erd_layout\` when it has one, and shows what it will create before writing anything. Prefer it to converting the file yourself; if the user asks you to do it by hand anyway, follow "Building Models from External Sources" in {SKILL}.
 - **Diagrams out** — **ERD Studio: Export Diagram…** (one diagram) or **ERD Studio: Export All Diagrams…** (every one, into a folder outside \`.erd-studio\`), with the choice **Rich DBML**: one self-contained \`<name>.dbml\` with ERD Studio's fields as DBML custom properties (\`role\`, \`grain\`, \`scd_type\`, \`natural_key\`, \`meta_*\`, …) and the positions in its Project's \`erd_layout\`. That single file is the route to dbdiagram.io. The plain **DBML** choice is the portable, notes-only form any DBML tool opens.
 - **From the CLI** (stdout only; it never writes a file): \`erd-studio export --domain <path> --format dbml-rich\` prints the single-file \`.dbml\`, and \`--all\` in place of \`--domain\` prints every diagram as a JSON list of \`{ fileName, content }\`. When the user asks you to save them, write each \`content\` to its \`fileName\` (outside \`.erd-studio\`) with your own file tools, so the writes stay visible.
 - **dbdiagram.io** — \`dbdiagram push <name>.dbml --name "<Name>"\` (dbdiagram's own CLI: \`npm install -g dbdiagram\`, then \`dbdiagram auth login\`) uploads an exported diagram's tables and Refs; dbdiagram.io lays them out itself and ignores \`erd_layout\`. It sends the data model to dbdiagram.io under the user's account: run it only when the user asks, and show the command first. ERD Studio itself never contacts dbdiagram.io.
@@ -571,11 +603,11 @@ const LEGACY_PART = `# ERD Studio — YAML and JSON files (projects before 2.0)
 
 **Read this file only when \`erd-studio doctor --json\` reports \`erd.storage: yaml\`** (or, in a \`mixed\` project, to edit an existing \`.yml\` table or \`.json\` diagram in place). A new project, and every new file in a \`dbml\` or \`mixed\` project, is DBML: follow {DBML}. **Never convert by hand: run ERD Studio: Convert Project to DBML** (the user runs it in VS Code: one undoable step that doctor's \`erd.dbmlConversion\` previews).
 
-In a YAML project, model (table) definitions are YAML files in \`.erd-studio/logical-models/\` (at the top level, or one folder down in a per-layer folder). Domain (subject area) JSON files reference models by name and hold the layout. Relationships are defined once, in the YAML of the model holding the foreign key (the "many" side), and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see \`Where relationships live\`). The rules every format shares — the team's modelling approach and metadata list, table roles, rationale fields, building from a source, naming, the physical stage and sync plans — are in {SKILL}.
+In a YAML project, model (table) definitions are YAML files in \`.erd-studio/logical-models/\` (at the top level, or one folder down in a per-layer folder). Domain (subject area) JSON files reference models by name and hold the layout. Relationships are defined once, in the YAML of the model holding the foreign key (the "many" side), and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see \`Where relationships live\`). The rules every format shares — the team's modelling approach and metadata list, table roles, rationale fields, building from a source, naming<!-- dbt-only -->, the physical stage and sync plans<!-- /dbt-only --> — are in {SKILL}.
 
 ## File naming: v5 or v6 — use the one \`erd-studio doctor\` reports
 
-A project's files use one of two namings for the same format. **Before writing any \`.erd-studio\` file, run \`erd-studio doctor --json\` and read \`erd.naming\`**, then write every file in that naming (doctor works in a folder without dbt too, reporting \`dbtProject: false\`; when it finds no project at all — no \`dbt_project.yml\` and no \`.erd-studio/\` yet — the project is new, so it is DBML: follow {DBML}):
+A project's files use one of two namings for the same format. **Before writing any \`.erd-studio\` file, run \`erd-studio doctor --json\` and read \`erd.naming\`**, then write every file in that naming (<!-- dbt-only -->doctor works in a folder without dbt too, reporting \`dbtProject: false\`; <!-- /dbt-only -->when it finds no project at all — no <!-- dbt-only -->\`dbt_project.yml\` and no <!-- /dbt-only -->\`.erd-studio/\` yet — the project is new, so it is DBML: follow {DBML}):
 
 | What | v5 naming (\`naming: v5\`) | v6 naming (\`naming: v6\` or \`mixed\`, and a new project) |
 |------|------|------|
@@ -588,7 +620,7 @@ A project's files use one of two namings for the same format. **Before writing a
 | A table's role (table YAML) | \`modelRole\` | \`tableRole\` |
 | An annotation's linked table | \`linkedModel\` | \`linkedTable\` |
 
-Everything else — \`layer\`, \`modelFolder\` (the dbt \`models/\` path filter), \`viewConfig\`, \`positions\`, columns, keys, the subject area file's path \`.erd-studio/{layer}/{name}.json\` — is the same in both. **The examples below use the v5 names; in a v6 project write the v6 name from this table instead.**
+Everything else — \`layer\`, <!-- dbt-only -->\`modelFolder\` (the dbt \`models/\` path filter), <!-- /dbt-only -->\`viewConfig\`, \`positions\`, columns, keys, the subject area file's path \`.erd-studio/{layer}/{name}.json\` — is the same in both. **The examples below use the v5 names; in a v6 project write the v6 name from this table instead.**
 
 - \`naming: v5\` → write the v5 names, and create new table files in \`logical-models/\`.
 - \`naming: v6\` or \`mixed\` (a project half-way through the move) → write the v6 names, and create new table files in \`tables/\`. In a mixed project, edit an existing file in the naming it already uses.
@@ -618,8 +650,8 @@ Everything else — \`layer\`, \`modelFolder\` (the dbt \`models/\` path filter)
 ### Model file location (layer folders)
 
 - A model file lives at \`logical-models/{name}.yml\` **or** exactly one folder down at \`logical-models/{folder}/{name}.yml\`. By convention the folder is a layer id (\`bronze\`, \`silver\`, \`gold\`). Deeper nesting and dot-folders are ignored.
-- The folder is organisational only. Domain files reference models **by name**, never by path, and model names are **unique across all folders** (as dbt model names are across a project). Never create a second file with a name that already exists in another folder.
-- **The same table name in two layers** (a silver \`date\` and a gold \`date\`) is two models with different names and the same \`alias\`: \`logical-models/silver/silver_date.yml\` (\`alias: date\`) and \`logical-models/gold/gold_date.yml\` (\`alias: date\`), exactly as a dbt project gets two \`date\` tables. Name the model \`{layer}_{name}\` and set \`alias\` to the table name; never reuse the bare name.
+- The folder is organisational only. Domain files reference models **by name**, never by path, and model names are **unique across all folders**<!-- dbt-only --> (as dbt model names are across a project)<!-- /dbt-only -->. Never create a second file with a name that already exists in another folder.
+- **The same table name in two layers** (a silver \`date\` and a gold \`date\`) is two models with different names and the same \`alias\`: \`logical-models/silver/silver_date.yml\` (\`alias: date\`) and \`logical-models/gold/gold_date.yml\` (\`alias: date\`)<!-- dbt-only -->, exactly as a dbt project gets two \`date\` tables<!-- /dbt-only -->. Name the model \`{layer}_{name}\` and set \`alias\` to the table name; never reuse the bare name.
 - **To find a model**, look at \`logical-models/{name}.yml\` first, then in each folder (\`logical-models/*/{name}.yml\`). If the same name exists twice, the top-level file wins, then folders in alphabetical order; the others are ignored.
 - **Folders are opt-in per project.** Check first: if a folder named after a layer in \`layers.json\` (\`logical-models/{layer}/\`) already holds a \`.yml\` file (or \`logical-models/\` is empty), the project uses layer folders — create a new model in the folder of the layer of the domain you are adding it to (adding \`fct_sale\` to \`gold/reporting.json\` creates \`logical-models/gold/fct_sale.yml\`). If every model file is at the top level, the project is **flat** — create the new file at the top level too, and never start the folder layout on your own (the user opts in with **ERD Studio: Organise Table Library by Layer**). When editing or renaming an existing model, keep its file in the folder it is already in.
 
@@ -659,7 +691,7 @@ The **Table Library** panel in the ERD Studio sidebar shows all YAML files in \`
 | \`layer\` | Yes | Layer name matching parent directory (e.g. \`silver\`, \`gold\`) |
 | \`description\` | No | Human-readable domain description |
 | \`modelFolder\` | No | Filter for "Add Existing Model" dialog (e.g. \`models/silver\`) |
-| \`stubColumns\` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
+<!-- dbt-only -->| \`stubColumns\` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |<!-- /dbt-only -->
 | \`logical.models\` | Yes | Array of model name strings (references to \`logical-models/*.yml\` or \`logical-models/{folder}/*.yml\`) |
 | \`logical.relationships\` | Yes | Array of relationship objects — \`[]\` when the project keeps relationships in the model YAML (see "Where relationships live") |
 | \`viewConfig\` | Yes | Root-level view settings. The extension auto-assigns positions for new models; a new domain written with \`viewConfig: {}\` (no positions at all) is auto-arranged with the canvas's auto layout the first time it opens |
@@ -736,13 +768,13 @@ columns:
     scdType: 2
 \`\`\`
 
-**YAML quoting — the file must parse, or ERD Studio shows the model as empty.** Wrap every \`description\`, \`grain\`, \`rationale\` and \`dataType\` value in double quotes (escape an inner \`"\` as \`\\"\`), or use a \`|\` block for multi-line text. Always quote a value that contains \`: \` or \` #\`, or starts with any of \`\` \` @ * & ! % [ { - | > ' " \`\`. Indent with spaces, never tabs. Write each key once per block: before adding a \`description\` (or any key) to a model or column, check it is not already there, and edit the existing line instead — a key written twice makes ERD Studio refuse every change to that file until one copy is removed. One YAML document per file: no \`---\` separators, no markdown code fences, no \`{{ doc() }}\` — paste the text itself. \`erd-studio doctor\` and \`erd-studio diff\` report a file that does not parse as \`fix-model-yaml\` with its line — fix that before anything else, unless that file's entry in their \`unreadableModelFiles\` list has \`mergeConflict: true\` (the fix itself carries no such field): git left two versions in that file after a merge, so show the user the file and line and ask which side to keep — never pick a side yourself or run git commands. A diagram file with conflict markers gets doctor's \`resolve-merge-conflicts\` step instead; handle it the same way.
+**YAML quoting — the file must parse, or ERD Studio shows the model as empty.** Wrap every \`description\`, \`grain\`, \`rationale\` and \`dataType\` value in double quotes (escape an inner \`"\` as \`\\"\`), or use a \`|\` block for multi-line text. Always quote a value that contains \`: \` or \` #\`, or starts with any of \`\` \` @ * & ! % [ { - | > ' " \`\`. Indent with spaces, never tabs. Write each key once per block: before adding a \`description\` (or any key) to a model or column, check it is not already there, and edit the existing line instead — a key written twice makes ERD Studio refuse every change to that file until one copy is removed. One YAML document per file: no \`---\` separators, no markdown code fences<!-- dbt-only -->, no \`{{ doc() }}\`<!-- /dbt-only --> — paste the text itself. \`erd-studio doctor\`<!-- dbt-only --> and \`erd-studio diff\`<!-- /dbt-only --> report<!-- no-dbt -->s<!-- /no-dbt --> a file that does not parse as \`fix-model-yaml\` with its line — fix that before anything else, unless that file's entry in <!-- dbt-only -->their<!-- /dbt-only --><!-- no-dbt -->its<!-- /no-dbt --> \`unreadableModelFiles\` list has \`mergeConflict: true\` (the fix itself carries no such field): git left two versions in that file after a merge, so show the user the file and line and ask which side to keep — never pick a side yourself or run git commands. A diagram file with conflict markers gets doctor's \`resolve-merge-conflicts\` step instead; handle it the same way.
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | \`name\` | Yes | Model name (see "Naming Conventions" in {SKILL}) |
 | \`schema\` | No | Target schema for materialization |
-| \`alias\` | No | Warehouse table name when it differs from \`name\` — dbt's \`alias\` config. \`name\` stays the identity (domain files and relationships use it); the canvas shows the alias. Use it for the same table name in two layers (\`silver_date\` and \`gold_date\`, both \`alias: date\`). A plain identifier: letters, digits, underscores |
+| \`alias\` | No | Warehouse table name when it differs from \`name\`<!-- dbt-only --> — dbt's \`alias\` config<!-- /dbt-only -->. \`name\` stays the identity (domain files and relationships use it); the canvas shows the alias. Use it for the same table name in two layers (\`silver_date\` and \`gold_date\`, both \`alias: date\`). A plain identifier: letters, digits, underscores |
 | \`description\` | No | Human-readable model description |
 | \`grain\` | No | Grain statement — "One row per ___" |
 | \`modelRole\` | No | Architecture role (see "Table roles" in {SKILL}) |
@@ -753,7 +785,7 @@ columns:
 
 ### Metadata (\`meta\`)
 
-Optional \`meta\` map on a model **and** on any column — free-form key/value metadata named after, and shaped like, dbt's \`meta:\` (owner, source system, lineage, classification…). Keys are strings; values may be text, numbers, booleans, \`null\`, lists or nested maps. Omit \`meta\` entirely when there is nothing to record (an empty map is removed).
+Optional \`meta\` map on a model **and** on any column — free-form key/value metadata<!-- dbt-only --> named after, and shaped like, dbt's \`meta:\`<!-- /dbt-only --> (owner, source system, lineage, classification…). Keys are strings; values may be text, numbers, booleans, \`null\`, lists or nested maps. Omit \`meta\` entirely when there is nothing to record (an empty map is removed).
 
 \`\`\`yaml
 meta:
@@ -770,9 +802,9 @@ columns:
       classification: confidential
 \`\`\`
 
-- ERD Studio **never compares, diffs or syncs \`meta\` with dbt** — it is not part of the physical stage, discrepancy reports or sync plans, and does not need to match the dbt model's \`meta:\`. (Assistants may copy it from dbt by hand, only as the team's metadata list in {SKILL} says.)
+<!-- dbt-only -->- ERD Studio **never compares, diffs or syncs \`meta\` with dbt** — it is not part of the physical stage, discrepancy reports or sync plans, and does not need to match the dbt model's \`meta:\`. (Assistants may copy it from dbt by hand, only as the team's metadata list in {SKILL} says.)<!-- /dbt-only -->
 - The canvas shows it in the Detail panel and when the user hovers a model's name or a column; top-level text values can be edited in the panel, nested maps, lists, booleans and \`null\` are shown read-only.
-- **Keep every existing entry** when you edit a model file — including keys that are not on the team's list, values the user typed in, and values dbt no longer records — and never move keys between the model and its columns. Never invent metadata.
+- **Keep every existing entry** when you edit a model file — including keys that are not on the team's list, <!-- dbt-only -->values the user typed in, and values dbt no longer records<!-- /dbt-only --><!-- no-dbt -->and values the user typed in<!-- /no-dbt --> — and never move keys between the model and its columns. Never invent metadata.
 
 ## Columns
 
@@ -786,7 +818,7 @@ columns:
 | \`isNaturalKey\` | No | Business identifier (email, SKU, etc.). Only include when \`true\`. |
 | \`scdType\` | No | SCD type for dimensions: \`0\` = fixed/never changes, \`1\` = overwrite, \`2\` = track history |
 | \`additiveType\` | No | Fact measures: \`"additive"\`, \`"semi-additive"\`, \`"non-additive"\` |
-| \`meta\` | No | Free-form dbt-style metadata map for this column (see "Metadata" above) |
+| \`meta\` | No | Free-form <!-- dbt-only -->dbt-style <!-- /dbt-only -->metadata map for this column (see "Metadata" above) |
 
 **Boolean flags** (\`isPrimaryKey\`, \`isForeignKey\`, \`isNaturalKey\`): omit rather than setting to \`false\`.
 
@@ -840,7 +872,7 @@ relationships:
 
 So adding a new fact only ever changes the fact's own file; its dimensions never list who points at them.
 
-**Mark the keys.** Direction comes from keys: when you add a relationship, mark the referenced column with \`isPrimaryKey: true\` (or \`isNaturalKey\`) on the model it points at, unless that model already marks a key. Without a key marked, ERD Studio falls back to dbt's \`unique\` tests, and with neither the user has to say which side holds the foreign key.
+**Mark the keys.** Direction comes from keys: when you add a relationship, mark the referenced column with \`isPrimaryKey: true\` (or \`isNaturalKey\`) on the model it points at, unless that model already marks a key.<!-- dbt-only --> Without a key marked, ERD Studio falls back to dbt's \`unique\` tests, and with neither the user has to say which side holds the foreign key.<!-- /dbt-only --><!-- no-dbt --> Without one, the user has to say which side holds the foreign key.<!-- /no-dbt -->
 
 **Self-references** (\`employee.manager_id → employee.employee_id\`) are stored in the model's own file with \`toModel\` set to the model itself. A column never points at itself.
 
@@ -1069,27 +1101,27 @@ models:
  * (\`.claude/skills/erd-studio/\`) and for the Agent Skills tools
  * (\`.agents/skills/erd-studio/\`).
  */
-function generateClaudeSkill(): string {
-  return `---
+function generateClaudeSkill(dbt: boolean): string {
+  return applyDbtScope(`---
 name: erd-studio
 description: >-
   Schema rules for ERD Studio data model files — the .erd-studio/ directory
   holds DBML tables, relationships and diagrams (YAML/JSON for older
   projects) with strict format rules you must read before editing. Use this
   skill whenever the task touches files in .erd-studio/ (.dbml tables,
-  relationships .dbml files, .dbml diagrams, older .yml tables and .json diagrams,
-  or .sync-plan.json), asks to add/edit/remove tables, columns,
+  relationships .dbml files, .dbml diagrams, older .yml tables and .json diagrams<!-- dbt-only -->,
+  or .sync-plan.json<!-- /dbt-only -->), asks to add/edit/remove tables, columns,
   relationships, or cardinality in a data model or ERD diagram, mentions
-  dim_/fct_/ref_/brg_ prefixed tables in an erd-studio context, or involves
-  writing dbt schema YAML tests to match an ERD physical stage. The skill
+  dim_/fct_/ref_/brg_ prefixed tables in an erd-studio context<!-- dbt-only -->, or involves
+  writing dbt schema YAML tests to match an ERD physical stage<!-- /dbt-only -->. The skill
   tells you which format and which file to edit for each operation —
   without it you will put data in the wrong file.
 ---
 
 ${SKILL_CONTENT}
 
-${buildVersionMarker()}
-`;
+${versionFooter(dbt)}
+`, dbt);
 }
 
 function generateEnforceSkillHook(): string {
@@ -1136,51 +1168,61 @@ function generateEnforceSkillHook(): string {
   ].join('\n') + '\n';
 }
 
-function generateSyncGuide(): string {
-  return `${SYNC_CONTENT}
+function generateSyncGuide(dbt: boolean): string {
+  return applyDbtScope(`${SYNC_CONTENT}
 
-${buildVersionMarker()}
-`;
+${versionFooter(dbt)}
+`, dbt);
 }
 
 /** `DBML.md`, the schema skill's companion: the DBML format in full. */
-function generateDbmlGuide(): string {
-  return `${DBML_CONTENT}
+function generateDbmlGuide(dbt: boolean): string {
+  return applyDbtScope(`${DBML_CONTENT}
 
-${buildVersionMarker()}
-`;
+${versionFooter(dbt)}
+`, dbt);
 }
 
 /** `LEGACY.md`, the schema skill's companion: the YAML/JSON rules of projects from before 2.0, complete. */
-function generateLegacyGuide(): string {
-  return `${LEGACY_CONTENT}
+function generateLegacyGuide(dbt: boolean): string {
+  return applyDbtScope(`${LEGACY_CONTENT}
 
-${buildVersionMarker()}
-`;
+${versionFooter(dbt)}
+`, dbt);
 }
 
+type CompanionGenerator = (dbt: boolean) => string;
+
 /** The schema skill's version-marked companions, beside its SKILL.md: `[file name, generator]`. */
-const SKILL_COMPANIONS: ReadonlyArray<readonly [string, () => string]> = [
+const SKILL_COMPANIONS: ReadonlyArray<readonly [string, CompanionGenerator]> = [
   ['SYNC.md', generateSyncGuide],
   ['DBML.md', generateDbmlGuide],
   ['LEGACY.md', generateLegacyGuide],
 ];
 
-function generateCopilotInstructions(): string {
-  return `---
+/** Companions that are dbt instructions throughout, installed only where `dbt_project.yml` is: the sync-plan guide. */
+const DBT_ONLY_COMPANIONS: ReadonlySet<string> = new Set(['SYNC.md']);
+
+/** The companions a root with (`dbt` true) or without `dbt_project.yml` installs. */
+function skillCompanions(dbt: boolean): ReadonlyArray<readonly [string, CompanionGenerator]> {
+  return dbt ? SKILL_COMPANIONS : SKILL_COMPANIONS.filter(([name]) => !DBT_ONLY_COMPANIONS.has(name));
+}
+
+function generateCopilotInstructions(dbt: boolean): string {
+  return applyDbtScope(`---
 name: 'ERD Studio'
-description: 'Data modeling guide for ERD Studio — DBML tables, relationships and diagrams (YAML/JSON for older projects), dbt YAML tests for physical model, naming conventions'
+description: 'Data modeling guide for ERD Studio — DBML tables, relationships and diagrams (YAML/JSON for older projects), <!-- dbt-only -->dbt YAML tests for physical model, <!-- /dbt-only -->naming conventions'
 applyTo: '**/.erd-studio/**'
 ---
 
 ${SCHEMA_CONTENT}
 
-${buildVersionMarker()}
-`;
+${versionFooter(dbt)}
+`, dbt);
 }
 
-function generateGeminiStyleguide(): string {
-  return `${SCHEMA_CONTENT}
+function generateGeminiStyleguide(dbt: boolean): string {
+  return applyDbtScope(`${SCHEMA_CONTENT}
 
 ## Code Review Rules
 
@@ -1199,27 +1241,27 @@ function generateGeminiStyleguide(): string {
 8. **Relationships**: \`fromModel\` is always the many (FK) side, \`toModel\` is the PK side, and \`one-to-many\` is never written (swap the ends to \`many-to-one\`); each relationship is defined in exactly one place — the FK model's YAML \`relationships:\` or a domain's \`logical.relationships\`
 9. **Logical columns** must have \`dataType\` and \`description\`
 10. **Boolean key flags** (\`isPrimaryKey\`, \`isForeignKey\`, \`isNaturalKey\`) should only be present when \`true\`
-
+<!-- dbt-only -->
 ### dbt YAML Schema Files
 
 11. **PK columns** in logical model should have \`unique\` + \`not_null\` tests in dbt YAML
 12. **FK columns** in logical model should have a \`relationships\` test pointing to the PK model/column
-13. **Composite keys** should use \`dbt_utils.unique_combination_of_columns\` model-level test
+13. **Composite keys** should use \`dbt_utils.unique_combination_of_columns\` model-level test<!-- /dbt-only -->
 
-${buildVersionMarker()}
-`;
+${versionFooter(dbt)}
+`, dbt);
 }
 
-function generateCodexAgents(): string {
-  return `
+function generateCodexAgents(dbt: boolean): string {
+  return applyDbtScope(`
 ${CODEX_REGION_BEGIN}
 ${CODEX_SECTION_HEADING}
 
 ${CODEX_CONTENT}
 
-${buildVersionMarker()}
+${versionFooter(dbt)}
 ${CODEX_REGION_END}
-`;
+`, dbt);
 }
 
 /**
@@ -1299,7 +1341,7 @@ const HOOK_COMMAND = '[ -n "$CLAUDE_PROJECT_DIR" ] && bash "$CLAUDE_PROJECT_DIR/
 interface SkillTargetPaths {
   schemaSkill: string;
   syncGuide: string;
-  /** Every version-marked companion beside the schema skill (SYNC.md, DBML.md, LEGACY.md). */
+  /** Every version-marked companion beside the schema skill (SYNC.md — in a dbt project only —, DBML.md, LEGACY.md). */
   companions: string[];
   setupDir: string;
   setupSkill: string;
@@ -1307,13 +1349,14 @@ interface SkillTargetPaths {
   setupIgnore: string;
 }
 
-function skillTargetPaths(target: SkillHarnessTarget): SkillTargetPaths {
+/** `dbt`: whether the root holds `dbt_project.yml` — without it, the dbt-only companions are not part of the install. */
+function skillTargetPaths(target: SkillHarnessTarget, dbt: boolean = true): SkillTargetPaths {
   const base = target === 'claude' ? '.claude/skills' : '.agents/skills';
   const setupDir = SETUP_SKILL_DIRS[target];
   return {
     schemaSkill: `${base}/erd-studio/SKILL.md`,
     syncGuide: `${base}/erd-studio/SYNC.md`,
-    companions: SKILL_COMPANIONS.map(([name]) => `${base}/erd-studio/${name}`),
+    companions: skillCompanions(dbt).map(([name]) => `${base}/erd-studio/${name}`),
     setupDir,
     setupSkill: `${setupDir}/SKILL.md`,
     setupIgnore: `${setupDir}/`,
@@ -1324,7 +1367,7 @@ function skillTargetPaths(target: SkillHarnessTarget): SkillTargetPaths {
  * The companions Codex's `AGENTS.md` region points at (`CODEX_REFS`), in the
  * Agent Skills folder: `[workspace-relative path, generator]`.
  */
-const CODEX_COMPANIONS: ReadonlyArray<readonly [string, () => string]> = SKILL_COMPANIONS
+const CODEX_COMPANIONS: ReadonlyArray<readonly [string, CompanionGenerator]> = SKILL_COMPANIONS
   .filter(([name]) => name === 'DBML.md' || name === 'LEGACY.md')
   .map(([name, generate]) => [`.agents/skills/erd-studio/${name}`, generate] as const);
 
@@ -1340,21 +1383,27 @@ function isSkillTarget(id: HarnessTarget['id']): id is SkillHarnessTarget {
 /**
  * The Claude target's version-marked files, workspace-relative: the schema
  * skill, its companions (SYNC.md, DBML.md, LEGACY.md) and the setup skill's
- * SKILL.md. Staleness is judged per file (see `detectStale`).
+ * SKILL.md. Staleness is judged per file (see `detectStale`). Pass `dbt`
+ * false for a root without `dbt_project.yml`, which has no SYNC.md.
  */
-export function claudeManagedFiles(): string[] {
-  const p = skillTargetPaths('claude');
+export function claudeManagedFiles(dbt: boolean = true): string[] {
+  const p = skillTargetPaths('claude', dbt);
   return [p.schemaSkill, ...p.companions, p.setupSkill];
 }
 
 /** The `agents` target's version-marked files: the same, under `.agents/skills/`. */
-export function agentsManagedFiles(): string[] {
-  const p = skillTargetPaths('agents');
+export function agentsManagedFiles(dbt: boolean = true): string[] {
+  const p = skillTargetPaths('agents', dbt);
   return [p.schemaSkill, ...p.companions, p.setupSkill];
 }
 
-/** Classify one harness file by its version marker. An unreadable file counts as unmanaged — never ours to replace. */
-function fileState(filePath: string): FileState {
+/**
+ * Classify one harness file by its version marker. An unreadable file counts
+ * as unmanaged — never ours to replace. With `dbt` (whether the root holds
+ * `dbt_project.yml`), a current file written for the other kind of root
+ * (`LOGICAL_SCOPE_MARKER`) is `outdated`.
+ */
+function fileState(filePath: string, dbt?: boolean): FileState {
   if (!fs.existsSync(filePath)) { return 'missing'; }
   let content: string;
   try {
@@ -1364,7 +1413,8 @@ function fileState(filePath: string): FileState {
   }
   const version = extractHarnessVersion(content);
   if (version === null) { return 'unmanaged'; }
-  return stateOfVersion(version);
+  const state = stateOfVersion(version);
+  return state === 'current' && dbt !== undefined && !scopeMatches(content, dbt) ? 'outdated' : state;
 }
 
 /** Whether `.gitignore` already lists `pattern` (tolerating a leading `/` and a missing trailing `/`). */
@@ -1390,21 +1440,25 @@ export class HarnessService {
   /**
    * Generate the config file content for a given harness target.
    */
-  generateContent(targetId: HarnessTarget['id']): string {
-    return applySemanticDir(this.generateDefaultContent(targetId), this.semanticDir);
+  /**
+   * `dbt`: whether the root holds `dbt_project.yml` (default true, the full
+   * text). Without it the content carries no dbt instruction.
+   */
+  generateContent(targetId: HarnessTarget['id'], options: { dbt?: boolean } = {}): string {
+    return applySemanticDir(this.generateDefaultContent(targetId, options.dbt ?? true), this.semanticDir);
   }
 
-  private generateDefaultContent(targetId: HarnessTarget['id']): string {
+  private generateDefaultContent(targetId: HarnessTarget['id'], dbt: boolean): string {
     switch (targetId) {
       case 'claude':
       case 'agents':
-        return generateClaudeSkill();
+        return generateClaudeSkill(dbt);
       case 'copilot':
-        return generateCopilotInstructions();
+        return generateCopilotInstructions(dbt);
       case 'gemini':
-        return generateGeminiStyleguide();
+        return generateGeminiStyleguide(dbt);
       case 'codex':
-        return generateCodexAgents();
+        return generateCodexAgents(dbt);
     }
   }
 
@@ -1431,6 +1485,18 @@ export class HarnessService {
    * A hand-written SKILL.md companion (SYNC.md, DBML.md, LEGACY.md with no
    * marker) is replaced only with `replaceUnmanagedCompanions`, the same
    * confirmed Replace; every other caller (Update All) leaves it alone.
+   *
+   * Logical first: in a root without `dbt_project.yml` every file is
+   * written without its dbt instructions (`applyDbtScope()`) and the
+   * dbt-only files (SYNC.md, the setup skill's dbt references) are not
+   * written. Copies of those an earlier install left there (every v41 or
+   * older install wrote them, and so does one made while the folder held
+   * `dbt_project.yml`) are removed — only ones ERD Studio wrote: a SYNC.md
+   * carrying a marker that is not newer, a reference whose text is one ERD
+   * Studio shipped (`dbtLeftovers()`); a hand-written or edited file is left
+   * alone. Nothing else is ever deleted. Once the folder gains
+   * `dbt_project.yml`, its files read as `outdated` and the next install
+   * writes the dbt ones.
    */
   install(
     workspaceRoot: string,
@@ -1442,6 +1508,7 @@ export class HarnessService {
     const dir = path.dirname(filePath);
     const alreadyExisted = fs.existsSync(filePath);
     const skillTarget = isSkillTarget(target.id) ? target.id : null;
+    const dbt = hasDbtProjectFile(workspaceRoot);
     const keepPrimary = options.keepUnmanagedPrimary === true && skillTarget !== null
       && alreadyExisted && fileState(filePath) === 'unmanaged';
     // A file from a newer ERD Studio (a teammate's) is never replaced with older text.
@@ -1453,7 +1520,7 @@ export class HarnessService {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      const content = this.generateContent(target.id);
+      const content = this.generateContent(target.id, { dbt });
 
       if (target.id === 'codex' && alreadyExisted) {
         // AGENTS.md is a shared file: never replace it wholesale. Without
@@ -1471,7 +1538,7 @@ export class HarnessService {
             success: true,
             filePath,
             alreadyExisted: true,
-            filesWritten: this.writeCodexCompanions(workspaceRoot, { repairOnly: true, replaceUnmanaged: false }),
+            filesWritten: this.writeCodexCompanions(workspaceRoot, { repairOnly: true, replaceUnmanaged: false, dbt }),
           };
         }
         fs.writeFileSync(filePath, mergeCodexContent(existing, content), 'utf-8');
@@ -1494,23 +1561,26 @@ export class HarnessService {
 
       // Codex's region points at the DBML and YAML/JSON parts: they come with it (§7.3).
       if (target.id === 'codex') {
-        filesWritten.push(...this.writeCodexCompanions(workspaceRoot, { repairOnly: false, replaceUnmanaged: options.replaceUnmanagedCompanions === true }));
+        filesWritten.push(...this.writeCodexCompanions(workspaceRoot, { repairOnly: false, replaceUnmanaged: options.replaceUnmanagedCompanions === true, dbt }));
       }
 
       // Companion files for the two skill targets
       let setupDirExisted = true;
+      const filesRemoved: string[] = [];
       if (skillTarget) {
-        const paths = skillTargetPaths(skillTarget);
-        // SYNC.md, DBML.md, LEGACY.md — loaded on demand beside SKILL.md.
-        // A hand-written companion (no marker) is kept unless the user
-        // confirmed Replace, and a newer one (a teammate's) is never replaced.
-        for (const [name, generate] of SKILL_COMPANIONS) {
+        const paths = skillTargetPaths(skillTarget, dbt);
+        // SYNC.md (dbt projects only), DBML.md, LEGACY.md — loaded on demand
+        // beside SKILL.md. A hand-written companion (no marker) is kept unless
+        // the user confirmed Replace, and a newer one (a teammate's) is never
+        // replaced. Without dbt a SYNC.md ERD Studio wrote is removed.
+        for (const [name, generate] of skillCompanions(dbt)) {
           const companionPath = path.join(dir, name);
           const state = fileState(companionPath);
           if ((state === 'unmanaged' && (keepPrimary || options.replaceUnmanagedCompanions !== true)) || state === 'newer') continue;
-          fs.writeFileSync(companionPath, applySemanticDir(generate(), this.semanticDir), 'utf-8');
+          fs.writeFileSync(companionPath, applySemanticDir(generate(dbt), this.semanticDir), 'utf-8');
           filesWritten.push(rel(companionPath));
         }
+        if (!dbt) { filesRemoved.push(...this.removeFiles(workspaceRoot, this.dbtLeftovers(workspaceRoot, skillTarget).schema)); }
 
         if (skillTarget === 'claude') {
           // enforce-skill.sh — PreToolUse hook that blocks first .erd-studio edit
@@ -1532,7 +1602,7 @@ export class HarnessService {
         // Checked before writing so the ignore step below knows whether
         // this is the directory's first appearance (upgraders included).
         setupDirExisted = fs.existsSync(path.join(workspaceRoot, paths.setupDir));
-        filesWritten.push(...this.writeSetupSkill(workspaceRoot, skillTarget, options.replaceUnmanagedSetupSkill === true));
+        filesWritten.push(...this.writeSetupSkill(workspaceRoot, skillTarget, options.replaceUnmanagedSetupSkill === true, dbt, filesRemoved));
       }
 
       // Add to .gitignore on first install only — subsequent updates and
@@ -1570,6 +1640,7 @@ export class HarnessService {
         filePath,
         alreadyExisted,
         filesWritten,
+        filesRemoved,
       };
     } catch (err) {
       return {
@@ -1589,17 +1660,18 @@ export class HarnessService {
    * without the format rules. A hand-written one (no marker) is kept unless
    * the user confirmed Replace (`replaceUnmanaged`), and a newer one (a
    * teammate's) is never replaced. `repairOnly` writes only a missing or
-   * outdated one. Returns the workspace-relative paths written.
+   * outdated one (one written for the other kind of root counts as
+   * outdated). Returns the workspace-relative paths written.
    */
-  private writeCodexCompanions(workspaceRoot: string, options: { repairOnly: boolean; replaceUnmanaged: boolean }): string[] {
+  private writeCodexCompanions(workspaceRoot: string, options: { repairOnly: boolean; replaceUnmanaged: boolean; dbt: boolean }): string[] {
     const written: string[] = [];
     for (const [relativePath, generate] of CODEX_COMPANIONS) {
       const filePath = path.join(workspaceRoot, ...relativePath.split('/'));
-      const state = fileState(filePath);
+      const state = fileState(filePath, options.dbt);
       if (state === 'newer' || (state === 'unmanaged' && !options.replaceUnmanaged)) continue;
       if (options.repairOnly && state !== 'missing' && state !== 'outdated') continue;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, applySemanticDir(generate(), this.semanticDir), 'utf-8');
+      fs.writeFileSync(filePath, applySemanticDir(generate(options.dbt), this.semanticDir), 'utf-8');
       written.push(relativePath);
     }
     return written;
@@ -1612,36 +1684,103 @@ export class HarnessService {
    * version marker is appended to SKILL.md only, and SKILL.md's frontmatter
    * is cut to the portable fields for `.agents/` (`skillForTarget`). An
    * existing SKILL.md with no marker is the user's: unless `replaceUnmanaged`
-   * is set, none of the skill's files are touched. Returns the
-   * workspace-relative paths written.
+   * is set, none of the skill's files are touched. Without dbt (`dbt`
+   * false) the dbt-only references are not written, and a copy of one (or
+   * of a renamed one under its dbt name) whose text ERD Studio shipped is
+   * removed, its path pushed onto `removed`; any other file there is left
+   * alone. Returns the workspace-relative paths written.
    */
-  private writeSetupSkill(workspaceRoot: string, target: SkillHarnessTarget, replaceUnmanaged: boolean): string[] {
-    const paths = skillTargetPaths(target);
+  private writeSetupSkill(workspaceRoot: string, target: SkillHarnessTarget, replaceUnmanaged: boolean, dbt: boolean, removed: string[]): string[] {
+    const paths = skillTargetPaths(target, dbt);
     const state = fileState(path.join(workspaceRoot, paths.setupSkill));
     if ((!replaceUnmanaged && state === 'unmanaged') || state === 'newer') {
       return [];
     }
     const written: string[] = [];
-    for (const [relativePath, content] of this.setupSkillFiles(target)) {
+    for (const [relativePath, content] of this.setupSkillFiles(target, { dbt })) {
       const filePath = path.join(workspaceRoot, ...paths.setupDir.split('/'), ...relativePath.split('/'));
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, content, 'utf-8');
       written.push(`${paths.setupDir}/${relativePath}`);
     }
+    if (!dbt) { removed.push(...this.removeFiles(workspaceRoot, this.dbtLeftovers(workspaceRoot, target).setup)); }
     return written;
+  }
+
+  /**
+   * Logical first: the dbt-only files an earlier install left in one skill
+   * folder of a root without `dbt_project.yml` — every v41 or older install
+   * wrote them into any folder, and so does one made while the folder held
+   * `dbt_project.yml`. Workspace-relative paths, only of files ERD Studio wrote:
+   * - `schema`: a dbt-only companion (SYNC.md) carrying a marker that is not
+   *   newer (a hand-written one, or a teammate's newer one, is not listed);
+   * - `setup`: a setup reference at a dbt-scope path (`DBT_SCOPE_SETUP_PATHS`)
+   *   whose text is one ERD Studio shipped (`isShippedSetupReference()`) —
+   *   these carry no marker, so a file the user wrote or edited is never listed.
+   * The caller decides whether the folder is dbt-free.
+   */
+  private dbtLeftovers(workspaceRoot: string, target: SkillHarnessTarget): { schema: string[]; setup: string[] } {
+    const paths = skillTargetPaths(target);
+    const schemaDir = path.posix.dirname(paths.schemaSkill);
+    const schema = [...DBT_ONLY_COMPANIONS]
+      .map((name) => `${schemaDir}/${name}`)
+      .filter((p) => {
+        const state = fileState(path.join(workspaceRoot, ...p.split('/')));
+        return state === 'current' || state === 'outdated';
+      });
+    const setup = DBT_SCOPE_SETUP_PATHS.filter((relativePath) => {
+      let content: string;
+      try {
+        content = fs.readFileSync(path.join(workspaceRoot, ...paths.setupDir.split('/'), ...relativePath.split('/')), 'utf-8');
+      } catch {
+        return false;
+      }
+      return this.isShippedReference(relativePath, content);
+    }).map((relativePath) => `${paths.setupDir}/${relativePath}`);
+    return { schema, setup };
+  }
+
+  /**
+   * Whether a setup reference's text is one ERD Studio shipped, as installed
+   * for this service's data folder (`applySemanticDir()` undone, and checked
+   * to give the same text back when redone).
+   */
+  private isShippedReference(relativePath: string, content: string): boolean {
+    if (isShippedSetupReference(relativePath, content)) { return true; }
+    const dir = this.semanticDir.replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '');
+    if (!dir || dir === DEFAULT_SEMANTIC_DIR || !content.includes(dir)) { return false; }
+    const restored = content.split(dir).join(DEFAULT_SEMANTIC_DIR);
+    return applySemanticDir(restored, this.semanticDir) === content && isShippedSetupReference(relativePath, restored);
+  }
+
+  /** Delete each workspace-relative file; returns the ones removed. */
+  private removeFiles(workspaceRoot: string, relativePaths: readonly string[]): string[] {
+    const removed: string[] = [];
+    for (const p of relativePaths) {
+      try {
+        fs.unlinkSync(path.join(workspaceRoot, ...p.split('/')));
+        removed.push(p);
+      } catch {
+        // Best-effort — a file that cannot be removed stays, and still reads as outdated.
+      }
+    }
+    return removed;
   }
 
   /**
    * The setup skill's files exactly as `install()` writes them for `target`:
    * `[path relative to the skill directory, content]`. Exposed for tests and
    * for anything that needs to show the installed text without writing it.
+   * `dbt` (default true): whether the root holds `dbt_project.yml`; without
+   * it the dbt-only references are left out and the rest is scoped.
    */
-  setupSkillFiles(target: SkillHarnessTarget): Array<[string, string]> {
-    return SETUP_SKILL_FILES.map((asset) => {
+  setupSkillFiles(target: SkillHarnessTarget, options: { dbt?: boolean } = {}): Array<[string, string]> {
+    const dbt = options.dbt ?? true;
+    return setupSkillAssets(dbt).map((asset) => {
       let content = applySemanticDir(asset.content, this.semanticDir);
       if (asset.relativePath === 'SKILL.md') { content = skillForTarget(content, target); }
       if (asset.versioned) {
-        content = content.replace(/\s*$/, '') + '\n\n' + buildVersionMarker() + '\n';
+        content = content.replace(/\s*$/, '') + '\n\n' + versionFooter(dbt) + '\n';
       }
       return [asset.relativePath, content];
     });
@@ -1651,12 +1790,14 @@ export class HarnessService {
    * The schema skill's files exactly as `install()` writes them for a skill
    * target: `[file name, content]` for `SKILL.md`, `SYNC.md`, `DBML.md` and
    * `LEGACY.md`. Exposed for tests and for anything that needs the installed
-   * text without writing it.
+   * text without writing it. `dbt` (default true): whether the root holds
+   * `dbt_project.yml`; without it there is no `SYNC.md`.
    */
-  schemaSkillFiles(): Array<[string, string]> {
+  schemaSkillFiles(options: { dbt?: boolean } = {}): Array<[string, string]> {
+    const dbt = options.dbt ?? true;
     return [
-      ['SKILL.md', this.generateContent('claude')],
-      ...SKILL_COMPANIONS.map(([name, generate]): [string, string] => [name, applySemanticDir(generate(), this.semanticDir)]),
+      ['SKILL.md', this.generateContent('claude', { dbt })],
+      ...skillCompanions(dbt).map(([name, generate]): [string, string] => [name, applySemanticDir(generate(dbt), this.semanticDir)]),
     ];
   }
 
@@ -1729,6 +1870,7 @@ export class HarnessService {
    * never reported (so they are never offered for overwrite at activation).
    */
   detectStale(workspaceRoot: string): HarnessTarget[] {
+    const dbt = hasDbtProjectFile(workspaceRoot);
     const stale: HarnessTarget[] = [];
     for (const target of HARNESS_TARGETS) {
       const filePath = path.join(workspaceRoot, target.relativePath);
@@ -1742,9 +1884,11 @@ export class HarnessService {
       }
 
       // For Codex, only consider it an ERD Studio harness if our section exists
-      if (target.id === 'codex' && findCodexRegion(content) === null) {
+      const region = target.id === 'codex' ? findCodexRegion(content) : null;
+      if (target.id === 'codex' && region === null) {
         continue;
       }
+      const ours = region ? content.slice(region.start, region.end) : content;
 
       const version = extractHarnessVersion(content);
       if (version === null) {
@@ -1752,11 +1896,12 @@ export class HarnessService {
         continue;
       }
       // Only an older marker is stale: a newer one is a teammate's, never replaced.
-      if (stateOfVersion(version) === 'outdated') {
+      // A current one written for the other kind of root (dbt_project.yml added or removed since) is stale too.
+      if (stateOfVersion(version) === 'outdated' || (version === HARNESS_VERSION && !scopeMatches(ours, dbt))) {
         stale.push(target);
-      } else if (version === HARNESS_VERSION && isSkillTarget(target.id) && this.skillCompanionsStale(workspaceRoot, target.id)) {
+      } else if (version === HARNESS_VERSION && isSkillTarget(target.id) && this.skillCompanionsStale(workspaceRoot, target.id, dbt)) {
         stale.push(target);
-      } else if (version === HARNESS_VERSION && target.id === 'codex' && this.codexCompanionsStale(workspaceRoot)) {
+      } else if (version === HARNESS_VERSION && target.id === 'codex' && this.codexCompanionsStale(workspaceRoot, dbt)) {
         stale.push(target);
       }
     }
@@ -1771,32 +1916,44 @@ export class HarnessService {
    * `harnessStatus()` instead (the v18 "Update All" writes it anyway), an
    * unmarked one is the user's, and a newer one a teammate's.
    */
-  private skillCompanionsStale(workspaceRoot: string, target: SkillHarnessTarget): boolean {
-    const paths = skillTargetPaths(target);
+  private skillCompanionsStale(workspaceRoot: string, target: SkillHarnessTarget, dbt: boolean): boolean {
+    const paths = skillTargetPaths(target, dbt);
     for (const companion of paths.companions) {
-      const state = fileState(path.join(workspaceRoot, companion));
+      const state = fileState(path.join(workspaceRoot, companion), dbt);
       if (state === 'missing' || state === 'outdated') { return true; }
     }
-    return fileState(path.join(workspaceRoot, paths.setupSkill)) === 'outdated';
+    const setupSkill = fileState(path.join(workspaceRoot, paths.setupSkill), dbt);
+    if (setupSkill === 'outdated') { return true; }
+    // Without dbt, a dbt-only file an earlier install left behind is stale too, so the refresh removes it.
+    if (dbt) { return false; }
+    const leftovers = this.dbtLeftovers(workspaceRoot, target);
+    return leftovers.schema.length > 0 || (setupSkill === 'current' && leftovers.setup.length > 0);
   }
 
-  /** A Codex companion (`CODEX_COMPANIONS`) missing or carrying an older marker. */
-  private codexCompanionsStale(workspaceRoot: string): boolean {
+  /** A Codex companion (`CODEX_COMPANIONS`) missing or carrying an older marker (or the other root kind's scope). */
+  private codexCompanionsStale(workspaceRoot: string, dbt: boolean): boolean {
     return codexManagedFiles().some((p) => {
-      const state = fileState(path.join(workspaceRoot, ...p.split('/')));
+      const state = fileState(path.join(workspaceRoot, ...p.split('/')), dbt);
       return state === 'missing' || state === 'outdated';
     });
   }
 
-  /** Schema skill (folding in SYNC.md) and setup skill state for one skill folder. */
-  private skillFolderStatus(workspaceRoot: string, target: SkillHarnessTarget): { schemaSkill: FileState; setupSkill: FileState } {
-    const paths = skillTargetPaths(target);
-    let schemaSkill = fileState(path.join(workspaceRoot, paths.schemaSkill));
+  /**
+   * Schema skill (folding in its companions — SYNC.md only in a dbt
+   * project) and setup skill state for one skill folder.
+   */
+  private skillFolderStatus(workspaceRoot: string, target: SkillHarnessTarget, dbt: boolean): { schemaSkill: FileState; setupSkill: FileState } {
+    const paths = skillTargetPaths(target, dbt);
+    let schemaSkill = fileState(path.join(workspaceRoot, paths.schemaSkill), dbt);
+    let setupSkill = fileState(path.join(workspaceRoot, paths.setupSkill), dbt);
+    // Without dbt, a dbt-only file an earlier install left behind (dbtLeftovers()) makes its skill outdated, so the refresh removes it.
+    const leftovers = dbt ? { schema: [], setup: [] } : this.dbtLeftovers(workspaceRoot, target);
     if (schemaSkill === 'current') {
-      const companions = paths.companions.map((c) => fileState(path.join(workspaceRoot, c)));
-      if (companions.some((c) => c === 'missing' || c === 'outdated')) { schemaSkill = 'outdated'; }
+      const companions = paths.companions.map((c) => fileState(path.join(workspaceRoot, c), dbt));
+      if (companions.some((c) => c === 'missing' || c === 'outdated') || leftovers.schema.length > 0) { schemaSkill = 'outdated'; }
     }
-    return { schemaSkill, setupSkill: fileState(path.join(workspaceRoot, paths.setupSkill)) };
+    if (setupSkill === 'current' && leftovers.setup.length > 0) { setupSkill = 'outdated'; }
+    return { schemaSkill, setupSkill };
   }
 
   /**
@@ -1807,15 +1964,19 @@ export class HarnessService {
    * (appending one is always safe there), so it is never `unmanaged`.
    */
   harnessStatus(workspaceRoot: string): HarnessStatus {
+    const dbt = hasDbtProjectFile(workspaceRoot);
     let codex: FileState = 'missing';
     try {
       const agents = fs.readFileSync(path.join(workspaceRoot, 'AGENTS.md'), 'utf-8');
       const region = findCodexRegion(agents);
       if (region !== null) {
-        const version = extractHarnessVersion(agents.slice(region.start, region.end));
+        const ours = agents.slice(region.start, region.end);
+        const version = extractHarnessVersion(ours);
         codex = version === null ? 'outdated' : stateOfVersion(version);
+        // Written for the other kind of root (dbt_project.yml added or removed since): outdated.
+        if (codex === 'current' && !scopeMatches(ours, dbt)) codex = 'outdated';
         // A current region whose companions are missing or older reads as outdated, as a skill folder's does.
-        if (codex === 'current' && this.codexCompanionsStale(workspaceRoot)) codex = 'outdated';
+        if (codex === 'current' && this.codexCompanionsStale(workspaceRoot, dbt)) codex = 'outdated';
       }
     } catch {
       // No AGENTS.md (or unreadable) — nothing of ours there.
@@ -1826,13 +1987,13 @@ export class HarnessService {
 
     return {
       claude: {
-        ...this.skillFolderStatus(workspaceRoot, 'claude'),
+        ...this.skillFolderStatus(workspaceRoot, 'claude', dbt),
         hookRegistered: fs.existsSync(path.join(workspaceRoot, CLAUDE_HOOK_SCRIPT))
           && this.isHookRegistered(workspaceRoot),
       },
-      agents: this.skillFolderStatus(workspaceRoot, 'agents'),
-      copilot: fileState(targetPath('copilot')),
-      gemini: fileState(targetPath('gemini')),
+      agents: this.skillFolderStatus(workspaceRoot, 'agents', dbt),
+      copilot: fileState(targetPath('copilot'), dbt),
+      gemini: fileState(targetPath('gemini'), dbt),
       codex,
     };
   }
@@ -1842,8 +2003,8 @@ export class HarnessService {
    * assistants) picks the skill folders via `recommendedSkillTargets()`:
    * `.claude/skills/` for Claude Code, `.agents/skills/` for any other, both
    * when none is detected (or `assistants` is omitted). Each folder gets its
-   * schema skill, SYNC.md and setup skill; the Claude one also gets the hook
-   * and settings merge.
+   * schema skill, its companions (SYNC.md only in a dbt project) and setup
+   * skill; the Claude one also gets the hook and settings merge.
    *
    * Writes nothing and returns `needs-confirmation` when any selected
    * SKILL.md exists without a marker and neither `replaceUnmanaged` nor
@@ -1864,9 +2025,10 @@ export class HarnessService {
       return { status: 'failed', unmanaged: [], filesWritten: [], targets, error: err instanceof Error ? err.message : String(err) };
     }
 
+    const dbt = hasDbtProjectFile(workspaceRoot);
     const unmanaged: string[] = [];
     for (const t of targets) {
-      const paths = skillTargetPaths(t);
+      const paths = skillTargetPaths(t, dbt);
       if (status[t].schemaSkill === 'unmanaged') { unmanaged.push(paths.schemaSkill); }
       if (status[t].setupSkill === 'unmanaged') { unmanaged.push(paths.setupSkill); }
       // A hand-written SYNC.md / DBML.md / LEGACY.md is the user's too: asked about, never silently replaced.
@@ -1883,7 +2045,7 @@ export class HarnessService {
     const fine = (state: FileState): boolean => state === 'current' || state === 'newer';
     // A hand-written companion the user chose to replace is not up to date either.
     const replacing = (t: SkillHarnessTarget): boolean => options.replaceUnmanaged
-      && skillTargetPaths(t).companions.some((c) => unmanaged.includes(c));
+      && skillTargetPaths(t, dbt).companions.some((c) => unmanaged.includes(c));
     const upToDate = (t: SkillHarnessTarget) => fine(status[t].schemaSkill) && fine(status[t].setupSkill)
       && (t !== 'claude' || status.claude.hookRegistered) && !replacing(t);
     if (targets.every(upToDate)) {

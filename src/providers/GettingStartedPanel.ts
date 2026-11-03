@@ -10,9 +10,10 @@
  * The page has three states (`GettingStartedPageMode`): no folder open
  * (`workspaceRoot: null`: "Open the folder your data model lives in"), a
  * folder without dbt (`logicalOnly`: New diagram, Open Example Diagram,
- * Import DBML, the AI cards with the guided setup's no-dbt wording, and
- * "Using dbt? Open its folder to compare"), and a dbt project (Draw from dbt
- * and the guided setup). The video autoplays only in the dbt state.
+ * Import DBML and the AI cards with the guided setup's no-dbt wording — no
+ * dbt text at all), and a dbt project (Draw from dbt and the guided setup).
+ * The dbt page plays the dbt tour; the other two play the logical-first cut
+ * (`GETTING_STARTED_MEDIA`). It autoplays in an open folder.
  *
  * Also home to the host-side pieces the panel and `erdStudio.setupAiHelper`
  * share: AI assistant detection (installed extensions, a PATH scan and the
@@ -48,6 +49,7 @@ import {
   type SetupOutcome,
 } from '../types/gettingStarted';
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedTranscript';
+import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedLogicalTranscript';
 import type { RecommendedInstallResult } from '../types/harness';
 import {
   AI_ASSISTANTS,
@@ -63,6 +65,7 @@ import type { ManifestData } from '../types/manifest';
 import { normaliseName } from '../services/nameUtils';
 import { detectConventions, type ConventionModel } from '../cli/conventions';
 import { log } from '../services/logger';
+import { hasDbtProjectFile } from '../services/projectDiscovery';
 
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
 /** The no-AI first diagram (`extension.ts`): the Welcome panel's lead button runs it. */
@@ -75,12 +78,35 @@ export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
 export const OPEN_EXAMPLE_DIAGRAM_COMMAND = 'erdStudio.openExampleDiagram';
 export const GETTING_STARTED_TITLE = 'Welcome to ERD Studio';
 
-/** Shipped media, relative to the extension root (spec addendum V4/V5). */
+/**
+ * Shipped media, relative to the extension root (spec addendum V4/V5): the
+ * dbt tour (`video`, `poster`) for the dbt page, and the logical-first cut
+ * (`logicalVideo`, `logicalPoster`) for the no-folder and logical pages.
+ */
 export const GETTING_STARTED_MEDIA = {
   dir: ['media', 'onboarding'],
   video: 'getting-started.mp4',
   poster: 'getting-started-poster.jpg',
+  logicalVideo: 'getting-started-logical.mp4',
+  logicalPoster: 'getting-started-logical-poster.jpg',
 } as const;
+
+/** The cut, poster, captions and transcript a page plays: the dbt tour only on the dbt page. */
+export function gettingStartedCut(mode: GettingStartedPageMode): {
+  video: string;
+  poster: string;
+  cues: ReadonlyArray<{ start: number; end: number; text: string }>;
+  transcript: string;
+} {
+  return mode === 'dbt'
+    ? { video: GETTING_STARTED_MEDIA.video, poster: GETTING_STARTED_MEDIA.poster, cues: GETTING_STARTED_CUES, transcript: GETTING_STARTED_TRANSCRIPT }
+    : {
+      video: GETTING_STARTED_MEDIA.logicalVideo,
+      poster: GETTING_STARTED_MEDIA.logicalPoster,
+      cues: LOGICAL_GETTING_STARTED_CUES,
+      transcript: LOGICAL_GETTING_STARTED_TRANSCRIPT,
+    };
+}
 
 /** Marketplace id of the Claude Code VS Code extension. */
 export const CLAUDE_CODE_EXTENSION_ID = 'anthropic.claude-code';
@@ -352,14 +378,24 @@ export function claudeLaunchLine(command: string, platform: NodeJS.Platform): st
 // Open Claude Code
 // ---------------------------------------------------------------------------
 
+/** "dbt project" in a dbt project, "project" in a folder without one: dbt is named only where it is. */
+function projectNoun(root: string, logicalOnly: boolean | undefined): string {
+  const hasDbt = logicalOnly === undefined ? hasDbtProjectFile(root) : !logicalOnly;
+  return hasDbt ? 'dbt project' : 'project';
+}
+
 /**
  * "Open Claude Code". With the CLI: a modal naming the exact command (the
  * "Execute with Claude" rule), then a terminal in the dbt project folder —
  * `claude` takes the first prompt as an argument, so nothing is typed into
  * its TUI later. With only the VS Code extension: open its panel and put the
  * prompt on the clipboard. With neither: the install page.
+ *
+ * `logicalOnly`: the root has no dbt_project.yml, so the nested-folder note
+ * says "your project" rather than "your dbt project". Omitted, it is read
+ * from disk (`hasDbtProjectFile`, the check `erdStudio.hasDbtProject` and the harness use).
  */
-export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: string }): Promise<void> {
+export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: string; logicalOnly?: boolean }): Promise<void> {
   const { availability, command } = detectClaude();
   if (availability === 'cli' && command) {
     const launch = claudeTerminalLaunch(command, process.platform);
@@ -418,10 +454,10 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
     }
     // Nested project: the extension's panel starts in the open workspace
     // folder and cannot be pointed elsewhere, so the only route is to open
-    // the dbt folder itself as the workspace.
+    // the project folder itself as the workspace.
     const OPEN_FOLDER = `Open ${folder}`;
     const pick = await vscode.window.showInformationMessage(
-      `${lead}Your dbt project, ${folder}, is a subfolder here, and Claude Code's panel starts in the folder VS Code has open. ` +
+      `${lead}Your ${projectNoun(opts.dbtRoot, opts.logicalOnly)}, ${folder}, is a subfolder here, and Claude Code's panel starts in the folder VS Code has open. ` +
         `If the skill isn't listed, open ${folder} itself (File > Open Folder…) and start Claude Code again.`,
       OPEN_FOLDER,
     );
@@ -458,7 +494,7 @@ export const COPILOT_CHAT_OPENED_MESSAGE =
  * still says how to switch. Editors whose chat command takes no argument get
  * a bare open; with no chat command at all, the Copilot setup page.
  */
-export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceFolder: string | null }): Promise<void> {
+export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceFolder: string | null; logicalOnly?: boolean }): Promise<void> {
   await vscode.env.clipboard.writeText(SETUP_PROMPT);
   const available = new Set(await vscode.commands.getCommands(true));
   if (!available.has(COPILOT_CHAT_OPEN_COMMAND)) {
@@ -480,7 +516,7 @@ export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceF
   const nested = opts.dbtRoot && opts.workspaceFolder
     && path.resolve(opts.dbtRoot) !== path.resolve(opts.workspaceFolder);
   void vscode.window.showInformationMessage(nested
-    ? `${COPILOT_CHAT_OPENED_MESSAGE} Your dbt project, ${path.basename(opts.dbtRoot!)}, is a subfolder here and ` +
+    ? `${COPILOT_CHAT_OPENED_MESSAGE} Your ${projectNoun(opts.dbtRoot!, opts.logicalOnly)}, ${path.basename(opts.dbtRoot!)}, is a subfolder here and ` +
       `Copilot looks for skills in the folder VS Code has open — if the guide isn't found, open ` +
       `${path.basename(opts.dbtRoot!)} itself (File > Open Folder…).`
     : COPILOT_CHAT_OPENED_MESSAGE);
@@ -706,13 +742,15 @@ export class GettingStartedPanel {
       const uri = vscode.Uri.joinPath(extensionUri, ...GETTING_STARTED_MEDIA.dir, file);
       return fs.existsSync(uri.fsPath) ? webview.asWebviewUri(uri).toString() : null;
     };
+    // The mode is fixed for the window (dbt or not is decided at activation), so the cut is picked once.
+    const cut = gettingStartedCut(mode);
     return buildGettingStartedHtml({
       cspSource: webview.cspSource,
       nonce: crypto.randomBytes(16).toString('base64'),
-      videoUri: media(GETTING_STARTED_MEDIA.video),
-      posterUri: media(GETTING_STARTED_MEDIA.poster),
-      cues: GETTING_STARTED_CUES,
-      transcript: GETTING_STARTED_TRANSCRIPT,
+      videoUri: media(cut.video),
+      posterUri: media(cut.poster),
+      cues: cut.cues,
+      transcript: cut.transcript,
       mode,
     });
   }
@@ -773,7 +811,8 @@ export class GettingStartedPanel {
 
   /** Show a setup outcome (from the panel's button or the palette command) and refresh the cards. */
   async postSetupResult(outcome: SetupOutcome): Promise<void> {
-    this.post({ type: 'setupResult', payload: { ...outcome, groups: describeWrittenFiles(outcome.filesWritten) } });
+    const groups = describeWrittenFiles(outcome.filesWritten, { logicalOnly: this.deps.logicalOnly === true });
+    this.post({ type: 'setupResult', payload: { ...outcome, groups } });
     await this.postStatus();
   }
 
@@ -820,13 +859,21 @@ export class GettingStartedPanel {
       case 'openClaude':
         telemetry.feature('openClaude');
         if (this.deps.workspaceRoot && await this.helperInstalledOrOffer()) {
-          await openClaudeCode({ dbtRoot: this.deps.workspaceRoot, clipboardText: this.deps.clipboardText('claude') });
+          await openClaudeCode({
+            dbtRoot: this.deps.workspaceRoot,
+            clipboardText: this.deps.clipboardText('claude'),
+            logicalOnly: this.deps.logicalOnly === true,
+          });
         }
         break;
       case 'openCopilotChat':
         telemetry.feature('openCopilotChat');
         if (await this.helperInstalledOrOffer()) {
-          await openCopilotChat({ dbtRoot: this.deps.workspaceRoot, workspaceFolder: this.deps.workspaceFolder ?? null });
+          await openCopilotChat({
+            dbtRoot: this.deps.workspaceRoot,
+            workspaceFolder: this.deps.workspaceFolder ?? null,
+            logicalOnly: this.deps.logicalOnly === true,
+          });
         }
         break;
       case 'openDomain':

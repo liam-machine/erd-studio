@@ -15,6 +15,7 @@ import {
   codexManagedFiles,
   extractHarnessVersion,
   findCodexRegion,
+  LOGICAL_SCOPE_MARKER,
   mergeCodexContent,
 } from '../../src/services/harnessService';
 import { parse as parseYaml, parseDocument } from 'yaml';
@@ -23,6 +24,8 @@ import {
   AGENTS_SETUP_SKILL_DIR,
   CLAUDE_SETUP_SKILL_DIR,
   CLAUDE_SETUP_SKILL_FILES,
+  DBT_SCOPE_MARKER,
+  setupSkillAssets,
   splitFrontmatter,
 } from '../../src/services/harnessAssets';
 
@@ -95,6 +98,9 @@ describe('HarnessService', () => {
   beforeEach(() => {
     service = new HarnessService();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-test-'));
+    // These tests install into a dbt project, which gets every file; a root
+    // without dbt_project.yml has its own describe block (logical first).
+    fs.writeFileSync(path.join(tmpDir, 'dbt_project.yml'), "name: 'harness_test'\n");
   });
 
   afterEach(() => {
@@ -879,8 +885,8 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 41 (a table with no Refs yet goes to an existing <layer>/relationships/<schema>.dbml before the layer\'s file; 40 "diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
-      expect(HARNESS_VERSION).toBe('41');
+    it('is 42 (logical first: a root without dbt_project.yml gets no dbt instructions and no dbt-only file; 41 a table with no Refs yet goes to an existing <layer>/relationships/<schema>.dbml before the layer\'s file; 40 "diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
+      expect(HARNESS_VERSION).toBe('42');
     });
 
     it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {
@@ -1875,5 +1881,309 @@ describe('HarnessService', () => {
       expect(result.status).toBe('unchanged');
       expect(snapshot(tmpDir)[SCHEMA_SKILL]).toBe(before[SCHEMA_SKILL]);
     });
+  });
+});
+
+describe('logical first: a root without dbt_project.yml', () => {
+  let service: HarnessService;
+  let root: string;
+  const DBT_TEXT = /\bdbt\b|dbt_|getdbt|Physical tab|Compare with dbt|sync plan/i;
+  const DBT_ONLY_FILES = [
+    '.claude/skills/erd-studio/SYNC.md',
+    '.agents/skills/erd-studio/SYNC.md',
+    '.claude/skills/erd-studio-setup/references/dbt-explained.md',
+    '.claude/skills/erd-studio-setup/references/dbt-setup.md',
+    '.claude/skills/erd-studio-setup/references/metadata.md',
+    '.claude/skills/erd-studio-setup/references/verify-and-fix.md',
+    '.claude/skills/erd-studio-setup/references/without-dbt.md',
+    '.agents/skills/erd-studio-setup/references/dbt-explained.md',
+    '.agents/skills/erd-studio-setup/references/dbt-setup.md',
+    '.agents/skills/erd-studio-setup/references/metadata.md',
+    '.agents/skills/erd-studio-setup/references/verify-and-fix.md',
+    '.agents/skills/erd-studio-setup/references/without-dbt.md',
+  ];
+  const installAll = (): void => {
+    for (const target of HARNESS_TARGETS) {
+      expect(service.install(root, target, true).success, target.id).toBe(true);
+    }
+  };
+  /** Every harness file written under root (not the project's own files). */
+  const harnessFiles = (): Record<string, string> => {
+    const all = snapshot(root);
+    for (const k of Object.keys(all)) {
+      if (k === 'dbt_project.yml' || k === '.gitignore' || k.endsWith('settings.local.json')) delete all[k];
+    }
+    return all;
+  };
+
+  beforeEach(() => {
+    service = new HarnessService();
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-logical-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('installs no dbt-only file: no SYNC.md, no dbt references, the walkthrough and glossary under plain names', () => {
+    installAll();
+    const files = harnessFiles();
+    for (const f of DBT_ONLY_FILES) {
+      expect(f in files, f).toBe(false);
+    }
+    for (const f of ['SKILL.md', 'DBML.md', 'LEGACY.md']) {
+      expect(`.claude/skills/erd-studio/${f}` in files, f).toBe(true);
+      expect(`.agents/skills/erd-studio/${f}` in files, f).toBe(true);
+    }
+    for (const asset of setupSkillAssets(false)) {
+      expect(`.claude/skills/erd-studio-setup/${asset.relativePath}` in files, asset.relativePath).toBe(true);
+      expect(`.agents/skills/erd-studio-setup/${asset.relativePath}` in files, asset.relativePath).toBe(true);
+    }
+    expect(files['.claude/skills/erd-studio-setup/references/walkthrough.md']).toBeDefined();
+    expect(files['.claude/skills/erd-studio-setup/references/glossary.md']).toBeDefined();
+  });
+
+  it('writes no dbt instruction or wording into any file, for every target', () => {
+    installAll();
+    for (const [rel, content] of Object.entries(harnessFiles())) {
+      expect(content, rel).not.toMatch(DBT_TEXT);
+      expect(content, rel).not.toMatch(DBT_SCOPE_MARKER);
+    }
+    // The skill description, Copilot's description and the Gemini review rules lose their dbt clauses.
+    expect(read(root, '.github/instructions/erd-studio.instructions.md')).toContain("description: 'Data modeling guide for ERD Studio — DBML tables, relationships and diagrams (YAML/JSON for older projects), naming conventions'");
+    expect(read(root, '.gemini/styleguide.md')).not.toContain('### dbt YAML Schema Files');
+    expect(parseSkill(read(root, SCHEMA_SKILL)).fm.description).not.toMatch(/dbt/i);
+  });
+
+  it('marks every version-marked file as written for a folder without dbt, and nothing else carries the mark', () => {
+    installAll();
+    const files = harnessFiles();
+    for (const [rel, content] of Object.entries(files)) {
+      const versioned = extractHarnessVersion(content) !== null;
+      expect(content.includes(LOGICAL_SCOPE_MARKER), rel).toBe(versioned);
+    }
+    // A dbt project's files never carry it: they stay what they were.
+    for (const [name, content] of service.schemaSkillFiles()) {
+      expect(content, name).not.toContain(LOGICAL_SCOPE_MARKER);
+    }
+    for (const [name, content] of service.setupSkillFiles('claude')) {
+      expect(content, name).not.toContain(LOGICAL_SCOPE_MARKER);
+    }
+  });
+
+  it('writes exactly what schemaSkillFiles / setupSkillFiles return for no dbt', () => {
+    service.install(root, CLAUDE, true);
+    for (const [name, content] of service.schemaSkillFiles({ dbt: false })) {
+      expect(read(root, `.claude/skills/erd-studio/${name}`), name).toBe(content);
+    }
+    expect(service.schemaSkillFiles({ dbt: false }).map(([n]) => n)).toEqual(['SKILL.md', 'DBML.md', 'LEGACY.md']);
+    for (const [rel, content] of service.setupSkillFiles('claude', { dbt: false })) {
+      expect(read(root, `.claude/skills/erd-studio-setup/${rel}`), rel).toBe(content);
+    }
+    expect(read(root, SCHEMA_SKILL)).toBe(service.generateContent('claude', { dbt: false }));
+  });
+
+  it('reads as current, and nothing is stale, after a logical-only install', () => {
+    installAll();
+    const status = service.harnessStatus(root);
+    expect(status.claude).toEqual({ schemaSkill: 'current', setupSkill: 'current', hookRegistered: true });
+    expect(status.agents).toEqual({ schemaSkill: 'current', setupSkill: 'current' });
+    expect([status.copilot, status.gemini, status.codex]).toEqual(['current', 'current', 'current']);
+    expect(service.detectStale(root)).toEqual([]);
+    expect(service.installRecommended(root, { replaceUnmanaged: false }).status).toBe('unchanged');
+    expect(claudeManagedFiles(false)).toEqual([SCHEMA_SKILL, DBML_GUIDE, LEGACY_GUIDE, SETUP_SKILL]);
+    expect(agentsManagedFiles(false)).not.toContain(AGENTS_SYNC_GUIDE);
+  });
+
+  it('a folder that gains dbt_project.yml later reads as outdated, and the next install writes the dbt files', () => {
+    installAll();
+    const logicalWalkthrough = read(root, '.claude/skills/erd-studio-setup/references/walkthrough.md');
+    fs.writeFileSync(path.join(root, 'dbt_project.yml'), "name: 'gained'\n");
+
+    const status = service.harnessStatus(root);
+    expect(status.claude.schemaSkill).toBe('outdated');
+    expect(status.claude.setupSkill).toBe('outdated');
+    expect(status.agents).toEqual({ schemaSkill: 'outdated', setupSkill: 'outdated' });
+    expect([status.copilot, status.gemini, status.codex]).toEqual(['outdated', 'outdated', 'outdated']);
+    expect(service.detectStale(root).map((t) => t.id).sort()).toEqual(['agents', 'claude', 'codex', 'copilot', 'gemini']);
+
+    // Set Up My AI Helper.
+    expect(service.installRecommended(root, { replaceUnmanaged: false }).status).toBe('updated');
+    expect(read(root, SYNC_GUIDE)).toBe(service.schemaSkillFiles().find(([n]) => n === 'SYNC.md')![1]);
+    expect(read(root, SCHEMA_SKILL)).toBe(service.generateContent('claude'));
+    for (const [rel, content] of service.setupSkillFiles('claude')) {
+      expect(read(root, `.claude/skills/erd-studio-setup/${rel}`), rel).toBe(content);
+    }
+    // The single-file targets refresh through the usual path (Update All → install with overwrite).
+    for (const target of service.detectStale(root)) {
+      service.install(root, target, true);
+    }
+    expect(read(root, '.gemini/styleguide.md')).toBe(service.generateContent('gemini'));
+    expect(service.detectStale(root)).toEqual([]);
+    expect(service.harnessStatus(root).claude).toEqual({ schemaSkill: 'current', setupSkill: 'current', hookRegistered: true });
+    // Gaining dbt deletes nothing: the plain-named walkthrough stays as it was.
+    expect(read(root, '.claude/skills/erd-studio-setup/references/walkthrough.md')).toBe(logicalWalkthrough);
+  });
+
+  it('a dbt project that loses dbt_project.yml is rewritten without dbt on the next install, removing the dbt-only files it wrote', () => {
+    fs.writeFileSync(path.join(root, 'dbt_project.yml'), "name: 'was_dbt'\n");
+    service.install(root, CLAUDE, true);
+    fs.rmSync(path.join(root, 'dbt_project.yml'));
+
+    expect(service.harnessStatus(root).claude.schemaSkill).toBe('outdated');
+    expect(service.detectStale(root).map((t) => t.id)).toEqual(['claude']);
+    const result = service.install(root, CLAUDE, true);
+    expect(read(root, SCHEMA_SKILL)).toBe(service.generateContent('claude', { dbt: false }));
+    const claudeDbtOnly = DBT_ONLY_FILES.filter((f) => f.startsWith('.claude/'));
+    for (const f of claudeDbtOnly) {
+      expect(fs.existsSync(path.join(root, f)), f).toBe(false);
+    }
+    expect([...(result.filesRemoved ?? [])].sort()).toEqual([...claudeDbtOnly].sort());
+    for (const [rel, content] of Object.entries(harnessFiles())) {
+      expect(content, rel).not.toMatch(DBT_TEXT);
+    }
+    expect(service.harnessStatus(root).claude).toEqual({ schemaSkill: 'current', setupSkill: 'current', hookRegistered: true });
+  });
+
+  /** A v41 (pre-logical-first) install: every dbt file written whatever the folder, under the old marker. */
+  const seedV41Install = (svc: HarnessService = service): void => {
+    fs.writeFileSync(path.join(root, 'dbt_project.yml'), "name: 'seed'\n");
+    for (const target of HARNESS_TARGETS) {
+      expect(svc.install(root, target, true).success, target.id).toBe(true);
+    }
+    fs.rmSync(path.join(root, 'dbt_project.yml'));
+    for (const [rel, content] of Object.entries(snapshot(root))) {
+      if (content.includes(CURRENT_MARKER)) writeFile(root, rel, content.split(CURRENT_MARKER).join('<!-- erd-studio-harness: 41 -->'));
+    }
+  };
+
+  it('upgrading a v41 install in a plain folder removes every dbt-only file, so nothing on disk is dbt instruction', () => {
+    seedV41Install();
+    for (const f of DBT_ONLY_FILES) {
+      expect(fs.existsSync(path.join(root, f)), f).toBe(true);
+    }
+    expect(service.detectStale(root).map((t) => t.id).sort()).toEqual(['agents', 'claude', 'codex', 'copilot', 'gemini']);
+
+    for (const target of service.detectStale(root)) {
+      expect(service.install(root, target, true).success, target.id).toBe(true);
+    }
+    const files = harnessFiles();
+    for (const f of DBT_ONLY_FILES) {
+      expect(f in files, f).toBe(false);
+    }
+    for (const [rel, content] of Object.entries(files)) {
+      expect(content, rel).not.toMatch(DBT_TEXT);
+    }
+    expect(files['.claude/skills/erd-studio-setup/references/walkthrough.md']).toBeDefined();
+    expect(files['.agents/skills/erd-studio-setup/references/glossary.md']).toBeDefined();
+    expect(service.detectStale(root)).toEqual([]);
+    expect(service.installRecommended(root, { replaceUnmanaged: false }).status).toBe('unchanged');
+  });
+
+  it('Set Up My AI Helper over a v41 plain-folder install removes the dbt-only files too', () => {
+    seedV41Install();
+    expect(service.installRecommended(root, { replaceUnmanaged: false }).status).toBe('updated');
+    for (const f of DBT_ONLY_FILES) {
+      expect(fs.existsSync(path.join(root, f)), f).toBe(false);
+    }
+  });
+
+  it('a current install with a dbt-only file left beside it reads as outdated until the refresh removes it', () => {
+    installAll();
+    const dbtService = new HarnessService();
+    writeFile(root, SYNC_GUIDE, dbtService.schemaSkillFiles().find(([n]) => n === 'SYNC.md')![1]);
+    const metadata = dbtService.setupSkillFiles('agents').find(([rel]) => rel === 'references/metadata.md')![1];
+    writeFile(root, '.agents/skills/erd-studio-setup/references/metadata.md', metadata);
+
+    const status = service.harnessStatus(root);
+    expect(status.claude).toEqual({ schemaSkill: 'outdated', setupSkill: 'current', hookRegistered: true });
+    expect(status.agents).toEqual({ schemaSkill: 'current', setupSkill: 'outdated' });
+    expect(service.detectStale(root).map((t) => t.id).sort()).toEqual(['agents', 'claude']);
+
+    expect(service.installRecommended(root, { replaceUnmanaged: false }).status).toBe('updated');
+    expect(fs.existsSync(path.join(root, SYNC_GUIDE))).toBe(false);
+    expect(fs.existsSync(path.join(root, '.agents/skills/erd-studio-setup/references/metadata.md'))).toBe(false);
+    expect(service.detectStale(root)).toEqual([]);
+  });
+
+  it('never removes a dbt-only path the user wrote or edited, a newer SYNC.md, or anything in a hand-written setup skill', () => {
+    seedV41Install();
+    const shipped = read(root, '.claude/skills/erd-studio-setup/references/verify-and-fix.md');
+    writeFile(root, '.claude/skills/erd-studio-setup/references/verify-and-fix.md', `${shipped}\nOur team's extra check.\n`);
+    writeFile(root, AGENTS_SYNC_GUIDE, '# Teammate\n\n<!-- erd-studio-harness: 999 -->\n');
+    // A hand-written setup skill in .agents/: its references are the user's whatever they hold.
+    writeFile(root, AGENTS_SETUP_SKILL, '# my setup skill\n');
+
+    for (const target of HARNESS_TARGETS) {
+      service.install(root, target, true);
+    }
+    expect(read(root, '.claude/skills/erd-studio-setup/references/verify-and-fix.md')).toBe(`${shipped}\nOur team's extra check.\n`);
+    expect(fs.existsSync(path.join(root, '.claude/skills/erd-studio-setup/references/dbt-setup.md'))).toBe(false);
+    expect(fs.existsSync(path.join(root, SYNC_GUIDE))).toBe(false);
+    expect(read(root, AGENTS_SYNC_GUIDE)).toBe('# Teammate\n\n<!-- erd-studio-harness: 999 -->\n');
+    expect(read(root, AGENTS_SETUP_SKILL)).toBe('# my setup skill\n');
+    expect(fs.existsSync(path.join(root, '.agents/skills/erd-studio-setup/references/dbt-setup.md'))).toBe(true);
+    // The edited reference is the user's now: it does not keep the install outdated.
+    expect(service.harnessStatus(root).claude).toEqual({ schemaSkill: 'current', setupSkill: 'current', hookRegistered: true });
+  });
+
+  it('recognises the shipped references written for a custom data folder', () => {
+    const custom = new HarnessService('docs/erd');
+    seedV41Install(custom);
+    expect(read(root, '.claude/skills/erd-studio-setup/references/verify-and-fix.md')).toContain('docs/erd');
+    for (const target of HARNESS_TARGETS) {
+      custom.install(root, target, true);
+    }
+    for (const f of DBT_ONLY_FILES) {
+      expect(fs.existsSync(path.join(root, f)), f).toBe(false);
+    }
+  });
+
+  it('a logical-only re-run leaves files it did not write alone', () => {
+    writeFile(root, SYNC_GUIDE, '# my own sync notes\n');
+    writeFile(root, '.claude/skills/erd-studio-setup/references/dbt-setup.md', '# my dbt notes\n');
+    service.install(root, CLAUDE, true);
+    service.install(root, CLAUDE, true);
+    expect(service.installRecommended(root, { replaceUnmanaged: true, assistants: ['claude'] }).status).toBe('unchanged');
+    expect(read(root, SYNC_GUIDE)).toBe('# my own sync notes\n');
+    expect(read(root, '.claude/skills/erd-studio-setup/references/dbt-setup.md')).toBe('# my dbt notes\n');
+  });
+
+  it('a hand-written SYNC.md does not ask for confirmation in a folder without dbt (it is not ours to install there)', () => {
+    writeFile(root, AGENTS_SYNC_GUIDE, '# mine\n');
+    const result = service.installRecommended(root, { replaceUnmanaged: false, assistants: ['codex'] });
+    expect(result.status).toBe('installed');
+    expect(read(root, AGENTS_SYNC_GUIDE)).toBe('# mine\n');
+  });
+
+  it('caps every generated logical skill file at 500 lines and 48 KB', () => {
+    for (const svc of [service, new HarnessService('docs/erd')]) {
+      for (const [name, content] of [...svc.schemaSkillFiles({ dbt: false }), ...svc.setupSkillFiles('claude', { dbt: false })]) {
+        expect(content.split('\n').length, name).toBeLessThanOrEqual(500);
+        expect(Buffer.byteLength(content, 'utf-8'), name).toBeLessThanOrEqual(48 * 1024);
+      }
+    }
+  });
+});
+
+describe('a dbt project gets the files as before', () => {
+  it('installs SYNC.md and every setup reference, with no scope mark and no scope marker left', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-dbt-'));
+    try {
+      fs.writeFileSync(path.join(root, 'dbt_project.yml'), "name: 'd'\n");
+      const service = new HarnessService();
+      service.install(root, CLAUDE, true);
+      expect(read(root, SYNC_GUIDE)).toContain('# ERD Studio — Sync Reconciliation Guide');
+      for (const asset of CLAUDE_SETUP_SKILL_FILES) {
+        const installed = read(root, `.claude/skills/erd-studio-setup/${asset.relativePath}`);
+        expect(installed.startsWith(asset.content.replace(/\s*$/, '')), asset.relativePath).toBe(true);
+        expect(installed, asset.relativePath).not.toMatch(DBT_SCOPE_MARKER);
+        expect(installed, asset.relativePath).not.toContain(LOGICAL_SCOPE_MARKER);
+      }
+      expect(read(root, SCHEMA_SKILL)).toContain('or involves\n  writing dbt schema YAML tests to match an ERD physical stage');
+      expect(read(root, SCHEMA_SKILL)).toContain('## Physical Stage (Read-Only)');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

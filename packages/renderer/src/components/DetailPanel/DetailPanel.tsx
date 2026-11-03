@@ -136,6 +136,8 @@ export function DetailPanel() {
   const pendingDeleteConfirmation = useEditorStore((s) => s.pendingDeleteConfirmation);
   const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
+  // No dbt project: the warehouse name (dbt's alias) shows only when set.
+  const logicalOnly = useEditorStore((s) => s.logicalOnly) === true;
   // The editing host's context (never set in the viewer).
   const canvasContext = useEditorStore((s) => s.canvasContext);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -697,7 +699,14 @@ export function DetailPanel() {
             <span className="detail-panel__label detail-panel__label--wide">Schema</span>
             <span className="detail-panel__value">{model.schema || '—'}</span>
           </div>
-          <AliasEditor modelName={model.name} alias={model.alias} readOnly={isReadOnly || viewer} />
+          {/* Without a dbt project the row shows only for a table that already
+              has a warehouse name, so it can be seen and cleared. The viewer
+              keeps the row it always had. */}
+          {viewer ? (
+            <AliasEditor modelName={model.name} alias={model.alias} readOnly />
+          ) : (!logicalOnly || model.alias?.trim()) ? (
+            <AliasEditor modelName={model.name} alias={model.alias} readOnly={isReadOnly} dbtWording={!logicalOnly} />
+          ) : null}
           {/* Physical stage only — logical models never carry provenance, so the
               logical panel does not sprout an empty row. */}
           {model.provenance && (

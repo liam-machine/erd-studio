@@ -470,7 +470,7 @@
     "viewsWelcome": [
       {
         "view": "erdStudio.domainTree",
-        "contents": "Design your data model as DBML files in a Git repo: an open format, no lock-in.\n\n[Open Folder](command:workbench.action.files.openFolder)\n\nAny folder works. If it holds a dbt project, ERD Studio also shows what dbt built.",
+        "contents": "Design your data model as DBML files in a Git repo: an open format, no lock-in.\n\n[Open Folder](command:workbench.action.files.openFolder)\n\nAny folder works: ERD Studio keeps your design in .erd-studio/ next to your code.",
         "when": "workspaceFolderCount == 0"
       },
       {
@@ -480,7 +480,7 @@
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nNew to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)\n\nUsing dbt? Open its folder to compare your design with what dbt built.\n\n[Get started](command:erdStudio.showGettingStarted)",
+        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nNew to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)\n\n[Get started](command:erdStudio.showGettingStarted)",
         "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading"
       },
       {
@@ -512,7 +512,7 @@
       {
         "id": "erdStudio.getStarted",
         "title": "Get started with ERD Studio",
-        "description": "Design your data model in Git — from scratch, from DBML or from dbt — then let your AI assistant fill in the detail.",
+        "description": "Design your data model in Git, from scratch or from DBML, then let your AI assistant fill in the detail.",
         "steps": [
           {
             "id": "watch",
@@ -528,13 +528,26 @@
             ]
           },
           {
+            "id": "watchLogical",
+            "title": "Watch the one-minute tour",
+            "description": "A one-minute video: start a diagram in any folder, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the video](command:erdStudio.showGettingStarted)",
+            "when": "!erdStudio.hasDbtProject",
+            "media": {
+              "svg": "media/walkthrough/watch.svg",
+              "altText": "A video player showing a small diagram of three related tables."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.showGettingStarted"
+            ]
+          },
+          {
             "id": "openProject",
             "title": "Open the folder your data model lives in",
-            "description": "Any folder works: ERD Studio keeps your design in .erd-studio/ next to your code. If the folder holds a dbt project, ERD Studio finds it by itself and also shows what dbt built.\n[Open Folder](command:workbench.action.files.openFolder)",
+            "description": "Any folder works: ERD Studio keeps your design in .erd-studio/ next to your code.\n[Open Folder](command:workbench.action.files.openFolder)",
             "when": "workspaceFolderCount == 0",
             "media": {
               "svg": "media/walkthrough/open-project.svg",
-              "altText": "A project file list with dbt_project.yml highlighted."
+              "altText": "A project file list with the .erd-studio folder highlighted."
             },
             "completionEvents": [
               "onContext:erdStudio.hasProject"
@@ -555,7 +568,7 @@
           },
           {
             "id": "newDiagram",
-            "title": "Draw your first data model — no dbt needed",
+            "title": "Draw your first data model",
             "description": "Start a blank diagram and add tables on the canvas. Each table is a file in .erd-studio/ you can commit and review like code.\n[New Diagram](command:erdStudio.createDomain)\nNew to data modelling? Start from a small coffee-shop star schema instead.\n[Open Example Diagram](command:erdStudio.openExampleDiagram)",
             "when": "!erdStudio.hasDbtProject && !erdStudio.hasDiagrams",
             "media": {
@@ -602,19 +615,6 @@
             },
             "completionEvents": [
               "onCommand:erdStudio.setupAiHelper"
-            ]
-          },
-          {
-            "id": "sample",
-            "title": "Using dbt? Try the sample project",
-            "description": "A small dbt project to compare a design with what dbt built.\n[Try the sample project](command:erdStudio.trySampleProject)",
-            "when": "!erdStudio.hasDbtProject",
-            "media": {
-              "svg": "media/walkthrough/sample.svg",
-              "altText": "A sample dbt project folder and the star schema diagram drawn from it."
-            },
-            "completionEvents": [
-              "onCommand:erdStudio.trySampleProject"
             ]
           }
         ]
@@ -869,7 +869,7 @@
         },
         {
           "command": "erdStudio.selectDbtProject",
-          "when": "view == erdStudio.domainTree && erdStudio.hasMultipleDbtProjects",
+          "when": "view == erdStudio.domainTree && erdStudio.hasDbtProject && erdStudio.hasMultipleDbtProjects",
           "group": "1_project@1"
         },
         {
@@ -1024,6 +1024,10 @@
         },
         {
           "command": "erdStudio.stripLegacyDomainTags",
+          "when": "erdStudio.hasDbtProject"
+        },
+        {
+          "command": "erdStudio.trySampleProject",
           "when": "erdStudio.hasDbtProject"
         },
         {
@@ -1289,6 +1293,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "regen-fixtures": "tsx scripts/regen-fixtures.ts",
+    "regen:dbt-dbml-fixture": "esbuild scripts/regen-dbt-dbml-fixture.ts --bundle --platform=node --format=cjs --loader:.md=text --log-level=warning --outfile=scripts/.regen-dbt-dbml-fixture.cjs && node scripts/.regen-dbt-dbml-fixture.cjs",
     "test:e2e:dbml": "node scripts/e2e-dbml.mjs"
   },
   "devDependencies": {
