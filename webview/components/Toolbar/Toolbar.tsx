@@ -35,6 +35,7 @@ import {
   type LayoutDirection,
 } from '../../lib/elkLayout';
 import { StageTabs } from './StageTabs';
+import { fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
 import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
 import type { Stage } from '../../../src/types/semantic';
@@ -215,8 +216,10 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     zoomOut({ duration: 200 });
   }, [zoomOut]);
 
+  // Top padding = the toolbar's own bottom edge, so Fit never leaves the top
+  // row of cards under it (Logical and Physical alike).
   const handleFitView = useCallback(() => {
-    fitView({ padding: 0.1, duration: 200 });
+    fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)), duration: 200 });
   }, [fitView]);
 
   // --- Layout options click-outside handler --------------------------------
@@ -510,7 +513,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
       // Wait one frame for React to flush, then fit viewport
       requestAnimationFrame(() => {
-        fitView({ padding: 0.1 });
+        fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)) });
       });
 
       // Persist to extension host

@@ -22,6 +22,13 @@
   flex-direction: column;
 }
 
+/* While the Detail Panel is open (top-right, 340px wide), sit left of it
+   instead of underneath it: its width + its 15px panel margin + a 12px gap.
+   Keep in step with DETAIL_PANEL_WIDTH_PX / DISC_PANEL_GAP_PX. */
+.react-flow__panel.disc-panel--beside-detail {
+  margin-right: calc(340px + 15px + 12px);
+}
+
 /* ---------------------------------------------------------------------------
    Header
    --------------------------------------------------------------------------- */

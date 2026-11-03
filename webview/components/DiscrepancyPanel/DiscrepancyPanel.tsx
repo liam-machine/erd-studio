@@ -12,13 +12,19 @@
  * When sync mode is active, this panel hides and SyncMergeModal takes over.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { Panel, useReactFlow } from '@xyflow/react';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { STAGE_HEX } from '@erd-studio/renderer/editor';
 import { stageName } from '../../lib/stageUtils';
 import { StalenessWarning } from './SyncControls';
+import {
+  DETAIL_PANEL_WIDTH_PX,
+  PANEL_MARGIN_PX,
+  fitViewPadding,
+  measureTopInsetFrom,
+} from '../../lib/fitViewPadding';
 import type { TableDiscrepancy, RelationshipDiscrepancy } from '../../../src/types/discrepancy';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
 import './DiscrepancyPanel.css';
@@ -175,11 +181,23 @@ function RelationshipEntry({ rel, sourceStage, targetStage, onNavigate }: Relati
 // Main component
 // ---------------------------------------------------------------------------
 
+/** Space between this panel and the Detail Panel when they sit side by side (matches `.disc-panel--beside-detail`). */
+const DISC_PANEL_GAP_PX = 12;
+/** `.disc-panel`'s max-width, used when the panel cannot be measured. */
+const DISC_PANEL_FALLBACK_WIDTH_PX = 320;
+
 export function DiscrepancyPanel() {
   const discrepancyVisible = useEditorStore((s) => s.discrepancyVisible);
   const discrepancyReport = useEditorStore((s) => s.discrepancyReport);
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
+  // The Detail Panel shows (top-right) exactly when it is open on a table of
+  // this diagram — the same test DetailPanel itself makes. While it shows,
+  // this panel moves left of it instead of sitting underneath it.
+  const detailPanelShown = useEditorStore(
+    (s) => s.detailPanelOpen && !!s.selectedNode && !!s.domain?.models.some((m) => m.name === s.selectedNode),
+  );
+  const panelRef = useRef<HTMLDivElement>(null);
   const setDiscrepancyVisible = useEditorStore((s) => s.setDiscrepancyVisible);
   const setDiscrepancyCompareStage = useEditorStore((s) => s.setDiscrepancyCompareStage);
   const setDiscrepancyReport = useEditorStore((s) => s.setDiscrepancyReport);
@@ -209,7 +227,16 @@ export function DiscrepancyPanel() {
     (modelName: string) => {
       selectNode(modelName);
       setDetailPanelOpen(true);
-      fitView({ nodes: [{ id: modelName }], duration: 300, padding: 0.3 });
+      // Zoom the table into the part of the canvas left uncovered: below the
+      // toolbar, and left of the Detail Panel and this panel beside it.
+      const panel = panelRef.current?.closest('.disc-panel') ?? null;
+      const panelWidth = panel?.getBoundingClientRect().width || DISC_PANEL_FALLBACK_WIDTH_PX;
+      const rightInset = DETAIL_PANEL_WIDTH_PX + PANEL_MARGIN_PX + DISC_PANEL_GAP_PX + panelWidth + PANEL_MARGIN_PX;
+      fitView({
+        nodes: [{ id: modelName }],
+        duration: 300,
+        padding: fitViewPadding(measureTopInsetFrom(panel), rightInset),
+      });
     },
     [selectNode, setDetailPanelOpen, fitView],
   );
@@ -243,8 +270,11 @@ export function DiscrepancyPanel() {
     + summary.undeclaredColumns + relIssueCount;
 
   return (
-    <Panel position="bottom-right" className="disc-panel">
-      <div className="disc-panel__header">
+    <Panel
+      position="bottom-right"
+      className={`disc-panel${detailPanelShown ? ' disc-panel--beside-detail' : ''}`}
+    >
+      <div className="disc-panel__header" ref={panelRef}>
         <span className="disc-panel__title">
           <span className="disc-panel__stage-label" style={{ color: STAGE_HEX[sourceStage] ?? 'inherit' }}>
             {stageName(sourceStage)}

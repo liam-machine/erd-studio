@@ -22,6 +22,7 @@ import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
 import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useStatePersistence } from './hooks/useStatePersistence';
 import { useVsCodeApi } from './hooks/useVsCodeApi';
+import { INITIAL_FIT_VIEW_OPTIONS } from './lib/fitViewPadding';
 import {
   useColumnExpansion,
   NODE_THRESHOLD,
@@ -718,6 +719,8 @@ function EditorCanvas() {
         onEdgeContextMenu={onEdgeContextMenu}
         {...hoverHandlers}
         fitView={!shouldSkipFitView}
+        // Leave room for the floating toolbar above the top row of cards.
+        fitViewOptions={INITIAL_FIT_VIEW_OPTIONS}
         minZoom={0.05}
         selectionMode={SelectionMode.Partial}
         zoomOnDoubleClick={domain.readOnly}

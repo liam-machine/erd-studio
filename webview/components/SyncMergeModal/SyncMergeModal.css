@@ -137,16 +137,15 @@
   white-space: nowrap;
 }
 
-.sync-modal__toolbar-toggle:hover {
+.sync-modal__toolbar-toggle:hover:not(:disabled) {
   opacity: 1;
   background: var(--selection-bg);
 }
 
-.sync-modal__toolbar-toggle--active {
-  opacity: 1;
-  background: var(--button-bg);
-  color: var(--button-fg);
-  border-color: var(--button-bg);
+/* Reset with nothing decided yet */
+.sync-modal__toolbar-toggle:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 .sync-modal__bulk-btn {
@@ -801,57 +800,6 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 
 .sync-modal__footer .disc-panel__sync-footer {
   padding: 10px 16px;
-}
-
-/* ---------------------------------------------------------------------------
-   Resolved section — collapsed summary at bottom of table
-   --------------------------------------------------------------------------- */
-
-.sync-modal__resolved-section-header {
-  cursor: pointer;
-  border-top: 2px solid var(--panel-border);
-  transition: background 0.15s ease;
-}
-
-.sync-modal__resolved-section-header:hover {
-  background: var(--selection-bg);
-}
-
-.sync-modal__resolved-section-cell {
-  padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.sync-modal__resolved-section-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border: none;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 10px;
-  cursor: pointer;
-  opacity: 0.6;
-  padding: 0;
-  flex-shrink: 0;
-}
-
-.sync-modal__resolved-section-badge {
-  font-size: 13px;
-  color: var(--stage-physical, #22c55e);
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.sync-modal__resolved-section-text {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--editor-fg);
-  opacity: 0.6;
 }
 
 /* ---------------------------------------------------------------------------

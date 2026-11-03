@@ -10,10 +10,15 @@
  * - Status badges: readable pills instead of tiny dots
  * - Action tooltips: each accept button explains what will happen
  * - Completion feedback: banner + green footer when all resolved
+ * - Rows never move: a decided row stays where it is with its chosen side
+ *   highlighted, and clicking that side again clears the decision. (Decided
+ *   rows used to jump into a collapsed "resolved" section, shifting the rows
+ *   under the pointer.) Reset clears every decision.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
+import { reconcileInferredTableKey } from '../../lib/syncSelections';
 import { STAGE_HEX } from '@erd-studio/renderer/editor';
 import { stageName } from '../../lib/stageUtils';
 import { SyncFooter, StalenessWarning } from '../DiscrepancyPanel/SyncControls';
@@ -94,19 +99,6 @@ function isConflictRelStatus(s: string): s is ConflictRelStatus {
 }
 
 // ---------------------------------------------------------------------------
-// splitByResolved — partitions an array into unresolved/resolved items
-// ---------------------------------------------------------------------------
-
-function splitByResolved<T>(items: T[], isResolved: (item: T) => boolean): { unresolved: T[]; resolved: T[] } {
-  const unresolved: T[] = [];
-  const resolved: T[] = [];
-  for (const item of items) {
-    (isResolved(item) ? resolved : unresolved).push(item);
-  }
-  return { unresolved, resolved };
-}
-
-// ---------------------------------------------------------------------------
 // AcceptCell — used only for column and relationship rows
 // ---------------------------------------------------------------------------
 
@@ -120,7 +112,7 @@ interface AcceptCellProps {
 
 function AcceptCell({ side, selectionKey, children, valueColor, hint }: AcceptCellProps) {
   const choice = useEditorStore((s) => s.syncSelections[selectionKey] ?? null);
-  const setSyncSelection = useEditorStore((s) => s.setSyncSelection);
+  const toggleSyncSelection = useEditorStore((s) => s.toggleSyncSelection);
 
   const isSelected = choice === side;
   const isOtherSelected = choice !== null && choice !== side;
@@ -136,9 +128,11 @@ function AcceptCell({ side, selectionKey, children, valueColor, hint }: AcceptCe
           {children}
         </span>
         <button
+          type="button"
           className={`sync-modal__accept-btn sync-modal__accept-btn--${side}${isSelected ? ' sync-modal__accept-btn--selected' : ''}`}
-          onClick={() => setSyncSelection(selectionKey, side)}
-          title={hint}
+          onClick={() => toggleSyncSelection(selectionKey, side)}
+          aria-pressed={isSelected}
+          title={isSelected ? `${hint ? `${hint}. ` : ''}Click again to clear this choice` : hint}
         >
           {label}
         </button>
@@ -408,6 +402,7 @@ interface TableRowGroupProps {
 function TableRowGroup({ model, conflictCols, sourceStage, targetStage, isCollapsed, onToggle }: TableRowGroupProps) {
   const syncSelections = useEditorStore((s) => s.syncSelections);
   const setSyncSelection = useEditorStore((s) => s.setSyncSelection);
+  const clearSyncSelection = useEditorStore((s) => s.clearSyncSelection);
   const hasFoldableContent = conflictCols.length > 0;
 
   const mKey = model.status !== 'matched' ? tableKey(model.name) : null;
@@ -440,46 +435,24 @@ function TableRowGroup({ model, conflictCols, sourceStage, targetStage, isCollap
     return { logical, physical, total: modelSyncKeys.length };
   }, [modelSyncKeys, syncSelections]);
 
-  // Auto-resolve the model key when all column keys are resolved.
-  // When a model is extra/missing, it has both a model key and column keys.
-  // Users resolve columns individually but never explicitly resolve the model key,
-  // so we infer it: use the majority column selection direction, or default to the
-  // side the model exists on.
-  const setSyncSelectionRef = useRef(setSyncSelection);
-  useEffect(() => { setSyncSelectionRef.current = setSyncSelection; });
+  // The table key of a table that exists on one side only is inferred from
+  // its columns (see lib/syncSelections): set when every column is decided,
+  // cleared again when one is cleared, re-inferred when they change. A table
+  // decision the user made with "Keep all" is left alone.
+  const actionsRef = useRef({ setSyncSelection, clearSyncSelection });
+  useEffect(() => { actionsRef.current = { setSyncSelection, clearSyncSelection }; });
+  const inferredRef = useRef<GroundTruth | null>(null);
 
   useEffect(() => {
     if (!mKey || columnKeys.length === 0) return;
-    // Skip if model key is already set, or if not all columns are resolved yet
-    if (syncSelections[mKey]) return;
-    const allColsResolved = columnKeys.every((k) => syncSelections[k]);
-    if (!allColsResolved) return;
-
-    // Infer direction from column selections — majority wins, logical on tie
-    let logCount = 0;
-    let physCount = 0;
-    for (const k of columnKeys) {
-      if (syncSelections[k] === 'logical') logCount++;
-      else if (syncSelections[k] === 'physical') physCount++;
-    }
-    const inferred: GroundTruth = logCount >= physCount ? 'logical' : 'physical';
-    setSyncSelectionRef.current(mKey, inferred);
+    const { change, inferred } = reconcileInferredTableKey(syncSelections, mKey, columnKeys, inferredRef.current);
+    inferredRef.current = inferred;
+    if (change?.kind === 'set') actionsRef.current.setSyncSelection(mKey, change.choice);
+    else if (change?.kind === 'clear') actionsRef.current.clearSyncSelection(mKey);
   }, [mKey, columnKeys, syncSelections]);
 
-  // Auto-collapse after a short delay when all items in this model are resolved
-  const prevAllResolvedRef = useRef(false);
-  const onToggleRef = useRef(onToggle);
-  useEffect(() => { onToggleRef.current = onToggle; });
-
-  useEffect(() => {
-    const wasResolved = prevAllResolvedRef.current;
-    prevAllResolvedRef.current = allResolved;
-    if (allResolved && !wasResolved && !isCollapsed && hasFoldableContent) {
-      const timer = setTimeout(() => onToggleRef.current(), 500);
-      return () => clearTimeout(timer);
-    }
-    return undefined;
-  }, [allResolved, isCollapsed, hasFoldableContent]);
+  // No auto-collapse when every item is decided: collapsing would pull the
+  // rows below up under the pointer. The chevron still folds a table by hand.
 
   return (
     <>
@@ -517,10 +490,9 @@ export function SyncMergeModal() {
   const discrepancyReport = useEditorStore((s) => s.discrepancyReport);
   const syncSelections = useEditorStore((s) => s.syncSelections);
   const setSyncSelectionBulk = useEditorStore((s) => s.setSyncSelectionBulk);
+  const clearSyncSelections = useEditorStore((s) => s.clearSyncSelections);
 
   const [collapsedModels, setCollapsedModels] = useState<Set<string>>(new Set());
-  const [hideResolved, setHideResolved] = useState(true);
-  const [resolvedSectionOpen, setResolvedSectionOpen] = useState(false);
   const [relsCollapsed, setRelsCollapsed] = useState(false);
   const [modalSize, setModalSize] = useState<{ width: number; height: number } | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -580,47 +552,6 @@ export function SyncMergeModal() {
     return { resolvedCount: total, logicalResolvedCount: log, physicalResolvedCount: phys };
   }, [allSyncKeys, syncSelections]);
 
-  // Determine which models are fully resolved (all their sync keys have selections)
-  const modelResolutionStatus = useMemo(() => {
-    const status = new Map<string, boolean>();
-    for (const m of models) {
-      const keys: string[] = [];
-      if (m.status !== 'matched') keys.push(tableKey(m.name));
-      for (const c of m.columns) {
-        if (c.status !== 'matched') keys.push(columnKey(m.name, c.name));
-      }
-      // A model is "resolved" if it has sync keys and all are selected
-      status.set(m.name, keys.length > 0 && keys.every((k) => syncSelections[k]));
-    }
-    return status;
-  }, [models, syncSelections]);
-
-  // Determine which relationships are resolved
-  const relResolutionStatus = useMemo(() => {
-    const status = new Map<string, boolean>();
-    for (const r of relsWithIssues) {
-      const k = relationshipKey(r.fromModel, r.fromColumn, r.toModel, r.toColumn);
-      status.set(k, !!syncSelections[k]);
-    }
-    return status;
-  }, [relsWithIssues, syncSelections]);
-
-  // Split models and relationships into unresolved / resolved when hiding
-  const { unresolved: unresolvedModels, resolved: resolvedModels } = useMemo(() => {
-    if (!hideResolved) return { unresolved: models, resolved: [] as TableDiscrepancy[] };
-    return splitByResolved(models, (m) => !!modelResolutionStatus.get(m.name));
-  }, [models, hideResolved, modelResolutionStatus]);
-
-  const { unresolved: unresolvedRels, resolved: resolvedRels } = useMemo(() => {
-    if (!hideResolved) return { unresolved: relsWithIssues, resolved: [] as RelationshipDiscrepancy[] };
-    return splitByResolved(relsWithIssues, (r) => {
-      const k = relationshipKey(r.fromModel, r.fromColumn, r.toModel, r.toColumn);
-      return !!relResolutionStatus.get(k);
-    });
-  }, [relsWithIssues, hideResolved, relResolutionStatus]);
-
-  const totalHiddenCount = resolvedModels.length + resolvedRels.length;
-
   const allDone = resolvedCount === allSyncKeys.length && allSyncKeys.length > 0;
 
   const handleClose = useCallback(() => setSyncMode(false), [setSyncMode]);
@@ -629,12 +560,7 @@ export function SyncMergeModal() {
     [allSyncKeys, setSyncSelectionBulk],
   );
 
-  const handleToggleHideResolved = useCallback(() => {
-    setHideResolved((prev) => {
-      if (!prev) setResolvedSectionOpen(false); // collapse the section when enabling hide
-      return !prev;
-    });
-  }, []);
+  const handleReset = useCallback(() => clearSyncSelections(), [clearSyncSelections]);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -699,11 +625,13 @@ export function SyncMergeModal() {
             </button>
             <div className="sync-modal__toolbar-center">
               <button
-                className={`sync-modal__toolbar-toggle${hideResolved ? ' sync-modal__toolbar-toggle--active' : ''}`}
-                onClick={handleToggleHideResolved}
-                title={hideResolved ? 'Show all items including resolved' : 'Move resolved items to the bottom and collapse them'}
+                type="button"
+                className="sync-modal__toolbar-toggle"
+                onClick={handleReset}
+                disabled={resolvedCount === 0}
+                title="Clear every decision and start again"
               >
-                {hideResolved ? 'Show all' : 'Hide resolved'}
+                Reset
               </button>
               <span className="sync-modal__toolbar-count">
                 {resolvedCount}/{allSyncKeys.length}
@@ -753,8 +681,8 @@ export function SyncMergeModal() {
               </tr>
             </thead>
             <tbody>
-              {/* Unresolved models — always shown at top */}
-              {unresolvedModels.map((model) => {
+              {/* Every table and relationship stays in place once decided */}
+              {models.map((model) => {
                 const conflictCols = model.columns.filter((c) => c.status !== 'matched');
                 return (
                   <TableRowGroup
@@ -770,7 +698,7 @@ export function SyncMergeModal() {
               })}
 
               {/* Relationships — collapsible section */}
-              {unresolvedRels.length > 0 && (
+              {relsWithIssues.length > 0 && (
                 <>
                   <tr
                     className="sync-modal__section-header-row"
@@ -781,10 +709,10 @@ export function SyncMergeModal() {
                         {relsCollapsed ? '▶' : '▼'}
                       </button>
                       <span>Relationships</span>
-                      <span className="sync-modal__section-count">{unresolvedRels.length}</span>
+                      <span className="sync-modal__section-count">{relsWithIssues.length}</span>
                     </td>
                   </tr>
-                  {!relsCollapsed && unresolvedRels.map((r) => (
+                  {!relsCollapsed && relsWithIssues.map((r) => (
                     <RelationshipRow
                       key={`${r.fromModel}.${r.fromColumn}-${r.toModel}.${r.toColumn}`}
                       rel={r}
@@ -795,64 +723,13 @@ export function SyncMergeModal() {
                 </>
               )}
 
-              {/* Resolved section — collapsed summary at bottom when hideResolved is on */}
-              {hideResolved && totalHiddenCount > 0 && (
-                <>
-                  <tr
-                    className="sync-modal__resolved-section-header"
-                    onClick={() => setResolvedSectionOpen((prev) => !prev)}
-                  >
-                    <td colSpan={4} className="sync-modal__resolved-section-cell">
-                      <button className="sync-modal__resolved-section-toggle" aria-label={resolvedSectionOpen ? 'Collapse resolved items' : 'Expand resolved items'}>
-                        {resolvedSectionOpen ? '▼' : '▶'}
-                      </button>
-                      <span className="sync-modal__resolved-section-badge">✓</span>
-                      <span className="sync-modal__resolved-section-text">
-                        {totalHiddenCount} resolved item{totalHiddenCount !== 1 ? 's' : ''}
-                      </span>
-                    </td>
-                  </tr>
-                  {resolvedSectionOpen && resolvedModels.map((model) => {
-                    const conflictCols = model.columns.filter((c) => c.status !== 'matched');
-                    return (
-                      <TableRowGroup
-                        key={model.name}
-                        model={model}
-                        conflictCols={conflictCols}
-                        sourceStage={sourceStage}
-                        targetStage={targetStage}
-                        isCollapsed={collapsedModels.has(model.name)}
-                        onToggle={() => toggleCollapsed(model.name)}
-                      />
-                    );
-                  })}
-                  {resolvedSectionOpen && resolvedRels.length > 0 && (
-                    <>
-                      <tr className="sync-modal__section-header-row sync-modal__section-header-row--static">
-                        <td colSpan={4} className="sync-modal__section-label">
-                          <span>Relationships</span>
-                          <span className="sync-modal__section-count">{resolvedRels.length}</span>
-                        </td>
-                      </tr>
-                      {resolvedRels.map((r) => (
-                        <RelationshipRow
-                          key={`resolved-${r.fromModel}.${r.fromColumn}-${r.toModel}.${r.toColumn}`}
-                          rel={r}
-                          sourceStage={sourceStage}
-                          targetStage={targetStage}
-                        />
-                      ))}
-                    </>
-                  )}
-                </>
-              )}
             </tbody>
           </table>
         </div>
 
         {/* Footer */}
         <div className={`sync-modal__footer${allDone ? ' sync-modal__footer--ready' : ''}`}>
-          <SyncFooter totalKeys={allSyncKeys.length} />
+          <SyncFooter totalKeys={allSyncKeys.length} keys={allSyncKeys} />
         </div>
 
         <div

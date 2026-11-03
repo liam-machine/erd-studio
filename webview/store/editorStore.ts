@@ -280,6 +280,13 @@ export interface EditorActions extends CanvasActions {
   setSyncMode: (active: boolean) => void;
   /** Set ground truth for a single discrepancy item. */
   setSyncSelection: (key: string, choice: GroundTruth) => void;
+  /**
+   * Pick a side for one item, or clear the decision when that side is
+   * already the chosen one (the Sync modal's click-again-to-undo).
+   */
+  toggleSyncSelection: (key: string, choice: GroundTruth) => void;
+  /** Drop the decision for one item, leaving it undecided. */
+  clearSyncSelection: (key: string) => void;
   /** Set ground truth for multiple items at once (bulk). */
   setSyncSelectionBulk: (keys: string[], choice: GroundTruth) => void;
   /** Clear all sync selections. */
@@ -453,13 +460,29 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setDiscrepancyCompareStage: (stage) => set({ discrepancyCompareStage: stage }),
   setDiscrepancyReport: (report) => set({ discrepancyReport: report }),
   setSyncMode: (active) => set({ syncMode: active, syncPlanGenerated: null }),
+  // Every change to the decisions discards a prepared plan: it was built
+  // from the old ones, so "N actions ready" would no longer be true.
   setSyncSelection: (key, choice) =>
-    set((state) => ({ syncSelections: { ...state.syncSelections, [key]: choice } })),
+    set((state) => ({ syncSelections: { ...state.syncSelections, [key]: choice }, syncPlanGenerated: null })),
+  toggleSyncSelection: (key, choice) =>
+    set((state) => {
+      const next = { ...state.syncSelections };
+      if (next[key] === choice) delete next[key];
+      else next[key] = choice;
+      return { syncSelections: next, syncPlanGenerated: null };
+    }),
+  clearSyncSelection: (key) =>
+    set((state) => {
+      if (!(key in state.syncSelections)) return {};
+      const next = { ...state.syncSelections };
+      delete next[key];
+      return { syncSelections: next, syncPlanGenerated: null };
+    }),
   setSyncSelectionBulk: (keys, choice) =>
     set((state) => {
       const next = { ...state.syncSelections };
       for (const key of keys) next[key] = choice;
-      return { syncSelections: next };
+      return { syncSelections: next, syncPlanGenerated: null };
     }),
   clearSyncSelections: () => set({ syncSelections: {}, syncPlanGenerated: null }),
   setManifestStale: (stale) => set({ manifestStale: stale }),
