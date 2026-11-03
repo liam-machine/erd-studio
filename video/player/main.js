@@ -5,14 +5,18 @@
 // for its own content: `render(localT, ctx) -> string`, ctx = { beats, dur, t }.
 import { clamp, seg, easeOut, lerp, mix, ACCENT } from './lib.js';
 
-const MODULES = ['hook', 'install', 'draw', 'canvas', 'design', 'physical', 'enrich', 'sample', 'endCard'];
+const params = new URLSearchParams(location.search);
+// ?variant=logical renders build-logical/ (script.logical.yaml); the default is the dbt cut in build/.
+const VARIANT = params.get('variant') ?? '';
+const BUILD = `/video/${VARIANT ? `build-${VARIANT}` : 'build'}`;
+const timeline = await (await fetch(`${BUILD}/timeline.json`, { cache: 'no-store' })).json();
+window.TIMELINE = timeline;
+
+// Scene modules come from the timeline itself (a cut's own scenes live in a sub-folder, e.g. logical/hook).
+const MODULES = [...new Set(timeline.scenes.map((s) => s.module))];
 const scenesByName = Object.fromEntries(
   await Promise.all(MODULES.map(async (m) => [m, (await import(`./scenes/${m}.js`)).default])),
 );
-
-const params = new URLSearchParams(location.search);
-const timeline = await (await fetch('/video/build/timeline.json', { cache: 'no-store' })).json();
-window.TIMELINE = timeline;
 
 const $ = (id) => document.getElementById(id);
 const els = { kicker: $('kicker'), headline: $('headline'), stage: $('stage'), chapters: $('chapters'), hud: $('hud') };
@@ -56,7 +60,7 @@ window.render = function render(t) {
     accent = mix(accent, ACCENT[sc.accentAfter.accent], seg(lt, at, at + 0.4));
   }
 
-  const isEnd = sc.module === 'endCard';
+  const isEnd = sc.module === 'endCard' || sc.module.endsWith('/endCard');
   const chromeOp = isEnd ? 1 - seg(lt, 0, 0.5) : 1;
   const kick = `ERD STUDIO${sc.chapter ? ` · <b>${sc.chapter} / ${timeline.chapters.length}</b>` : ''}`;
   put('kicker', els.kicker, kick);
@@ -91,12 +95,13 @@ window.render = function render(t) {
 //   (default)      capture: capture.mjs calls window.render(t) per frame
 //   ?t=12.5        freeze on one frame (QA screenshots)
 //   ?preview=1     play the narration and drive t from audio.currentTime (click to start)
+//   ?variant=logical   any of the above for the logical cut (build-logical/)
 if (params.has('t')) window.render(parseFloat(params.get('t')));
 else window.render(0);
 
 if (params.has('preview')) {
   els.hud.hidden = false;
-  const audio = new Audio('/video/build/narration.wav');
+  const audio = new Audio(`${BUILD}/narration.wav`);
   const loop = () => { window.render(audio.currentTime); requestAnimationFrame(loop); };
   document.body.addEventListener('click', () => (audio.paused ? audio.play() : audio.pause()));
   document.addEventListener('keydown', (e) => {

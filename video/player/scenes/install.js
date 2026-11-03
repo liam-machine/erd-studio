@@ -5,21 +5,31 @@
 // the Welcome editor slides in with the real walkthrough as a dbt project shows it (watch, draw,
 // importDbml, enrich) and "Draw your dbt project — no AI needed" open. The draw scene continues from
 // this exact frame.
+//
+// props (script.logical.yaml): `window: plain` is the logical cut's folder without dbt: the
+// Explorer of a plain folder (PLAIN_EXPLORER, nothing lit), the listing's description without its
+// dbt sentence, and the walkthrough as that folder shows it (watchLogical, newDiagram, importDbml,
+// enrich) with `open` (newDiagram) expanded, wide and dense, over the side bar (newDiagram's two
+// paragraphs do not fit beside it). `offsets` moves the click / open / glow beats to the words.
 import { appear, appIcon, easeOut, ICON, path, pointer, seg, spinner } from '../lib.js';
-import { ACT, BODY, EXTENSION, SIDE, activityBar, editorWindow, explorerSide, walkthrough } from '../editor.js';
+import { ACT, BODY, EXTENSION, PLAIN_EXPLORER, SIDE, WINDOWS, activityBar, descriptionWithoutDbt, editorWindow, explorerSide, walkthrough } from '../editor.js';
 
 const ED = ACT + SIDE;
 
 export default {
-  render(t, { beats }) {
+  render(t, { beats, scene }) {
+    const P = scene?.props ?? {};
+    const plain = P.window === 'plain';
+    const off = { click: 0.95, open: 2.0, glow: 1.1, ...(P.offsets ?? {}) };
+    const description = plain ? descriptionWithoutDbt() : EXTENSION.description;
     const I = beats.install.t, G = beats.guide.t;
     // i_install: "Install ERD Studio,"(+0.0–1.5) "and open your dbt project."(+1.8–3.8)
-    const click = I + 0.95;               // the pointer clicks Install on "…ERD Studio"
+    const click = I + off.click;          // the pointer clicks Install on "…ERD Studio"
     const installed = click + 0.55;       // "Installing" spinner, then "Installed"
-    const openAt = I + 2.0;               // "…and open your dbt project"
+    const openAt = I + off.open;          // "…and open your dbt project"
     const ymlAt = openAt + 0.7;           // dbt_project.yml lights on "…dbt project"
     // i_guide: "The Get started guide"(+0.0–1.1) "opens by itself."(+1.1–1.96)
-    const glowAt = G + 1.1;
+    const glowAt = G + off.glow;
 
     let body = '';
     // ---- editor: the extension's page ----
@@ -33,7 +43,7 @@ export default {
       <div class="abs" style="left:40px;top:36px">${appIcon(112, 'box-shadow:none')}</div>
       <div class="abs" style="left:176px;top:42px;font-size:42px;font-weight:800;letter-spacing:-.01em;white-space:nowrap">${EXTENSION.name}</div>
       <div class="abs" style="left:176px;top:100px;font-size:24px;color:#3794ff;white-space:nowrap">${EXTENSION.publisher}</div>
-      <div class="abs" style="left:40px;top:180px;width:1000px;font-size:25px;line-height:36px;color:var(--text-2)">${EXTENSION.description}</div>
+      <div class="abs" style="left:40px;top:180px;width:1000px;font-size:25px;line-height:36px;color:var(--text-2)">${description}</div>
       <div class="abs" style="left:40px;top:400px;right:40px;height:48px;display:flex;gap:30px;border-bottom:1px solid var(--card-border);font-size:22px;font-weight:600;white-space:nowrap">
         <span style="color:var(--text);box-shadow:inset 0 -3px 0 #3794ff;padding-top:6px">Details</span><span style="color:var(--text-3);padding-top:6px">Features</span><span style="color:var(--text-3);padding-top:6px">Changelog</span></div>
     </div>`;
@@ -50,24 +60,25 @@ export default {
         <div class="abs" style="left:0;top:128px;width:${SIDE}px;height:112px;background:#04395e88"></div>
         <div class="abs" style="left:18px;top:146px">${appIcon(58, 'box-shadow:none')}</div>
         <div class="abs" style="left:92px;top:138px;font-size:24px;font-weight:700;white-space:nowrap">${EXTENSION.name}</div>
-        <div class="abs" style="left:92px;top:172px;width:290px;font-size:20px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${EXTENSION.description}</div>
+        <div class="abs" style="left:92px;top:172px;width:290px;font-size:20px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${description}</div>
         <div class="abs" style="left:92px;top:204px;font-size:20px;color:var(--text-2);white-space:nowrap">${EXTENSION.publisher}</div>
       </div>`;
     }
-    if (sw > 0) body += explorerSide({ hot: easeOut(seg(t, ymlAt, ymlAt + 0.35)), op: sw });
+    if (sw > 0) body += explorerSide({ hot: easeOut(seg(t, ymlAt, ymlAt + 0.35)), op: sw, ...(plain ? { tree: PLAIN_EXPLORER } : {}) });
 
     // ---- the Welcome editor: the walkthrough slides in over the editor area ----
     if (t >= G) {
       const p = easeOut(seg(t, G, G + 0.45));
       const glow = easeOut(seg(t, glowAt, glowAt + 0.4));
-      body += `<div class="abs" style="left:${ED}px;top:0;right:0;bottom:0;opacity:${p.toFixed(3)};transform:translateX(${(80 * (1 - p)).toFixed(1)}px)">${walkthrough({ glow })}</div>`;
+      const wt = plain ? walkthrough({ glow, open: P.open, ctx: WINDOWS.plain, wide: true, dense: true }) : walkthrough({ glow });
+      body += `<div class="abs" style="left:${plain ? ACT : ED}px;top:0;right:0;bottom:0;opacity:${p.toFixed(3)};transform:translateX(${(80 * (1 - p)).toFixed(1)}px)">${wt}</div>`;
     }
 
     body += activityBar(t < openAt ? 'ext' : 'files', { erd: t >= installed, erdOp: easeOut(seg(t, installed, installed + 0.4)) });
 
     const tabs = [{ label: 'Extension: ERD Studio', on: t < G }];
     if (t >= G) tabs.push({ label: 'Welcome', on: true });
-    let html = editorWindow({ tabs, body, style: appear(t, 0, { dy: 16 }) });
+    let html = editorWindow({ tabs, body, style: appear(t, 0, { dy: 16 }), ...(plain ? { crumb: PLAIN_EXPLORER.root.toLowerCase() } : {}) });
 
     // ---- pointer: in, clicks Install, fades on the swap ----
     const bcx = BODY.x + btn.x + btn.w / 2, bcy = BODY.y + btn.y + btn.h / 2;

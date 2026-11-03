@@ -1,0 +1,2 @@
+# Per-cut build folders (VARIANT=<cut>: build-<cut>/), like the root .gitignore's video/build/.
+/build-*/
