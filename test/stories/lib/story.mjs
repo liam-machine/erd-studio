@@ -46,8 +46,9 @@ export class StepFailure extends Error {
 /** How long things take on screen, per run mode. */
 export const PACES = {
   fast: { glide: 120, settle: 150, afterCaption: 250, intro: 300, tail: 300 },
-  record: { glide: 650, settle: 450, afterCaption: 1400, intro: 3500, tail: 2500 },
-  slow: { glide: 900, settle: 700, afterCaption: 2500, intro: 4500, tail: 3500 },
+  // Record: about 2.5 s to read each caption before its actions start.
+  record: { glide: 650, settle: 450, afterCaption: 2500, intro: 4000, tail: 2500 },
+  slow: { glide: 900, settle: 700, afterCaption: 3500, intro: 5000, tail: 3500 },
 };
 
 /**
@@ -73,7 +74,7 @@ export class StoryContext {
     this.pace = pace;
     this.log = log;
     this.outDir = outDir;
-    this.wb = new Workbench({ port, pace, log });
+    this.wb = new Workbench({ port, pace, log, home });
     this.ui = new VSCodeUI(this.wb);
     this.sel = sel;
     this.assert = assert;

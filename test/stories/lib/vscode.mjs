@@ -16,6 +16,15 @@ export const sel = {
   sidebarTitle: `document.querySelector('.part.sidebar .composite.title h2, .part.sidebar .title-label h2')`,
   /** A link or button in a view's welcome content, by its text. */
   welcomeLink: (text) => `[...document.querySelectorAll('.part.sidebar .welcome-view-content a, .part.sidebar .welcome-view-content .monaco-button')].find(a => a.textContent.trim() === ${q(text)})`,
+  /**
+   * The welcome view's buttons, visible ones, by text: VS Code draws a link
+   * alone on its line as a full-width button, every other link inline.
+   */
+  welcomeButtons: `[...document.querySelectorAll('.part.sidebar .welcome-view-content .monaco-button')].filter(b => b.offsetParent).map(b => b.textContent.trim())`,
+  /** A view's title-bar action (an icon), by its command title. */
+  viewAction: (title) => `[...document.querySelectorAll('.part.sidebar .actions .action-label, .part.sidebar .title-actions .action-label')].find(a => (a.getAttribute('aria-label') ?? '').startsWith(${q(title)}))`,
+  /** The buttons (not inline links) of the open walkthrough step, by text. */
+  walkthroughButtons: `[...document.querySelectorAll('.gettingStartedContainer .getting-started-step.expanded .monaco-button')].filter(b => b.offsetParent).map(b => b.textContent.trim())`,
   quickInput: `[...document.querySelectorAll('.quick-input-widget')].find(w => w.style.display !== 'none' && w.offsetParent !== null)`,
   quickInputBox: `document.querySelector('.quick-input-widget .quick-input-box input')`,
   /** A quick pick row whose label starts with `label`. */
@@ -23,6 +32,15 @@ export const sel = {
   quickInputButton: (text) => `[...document.querySelectorAll('.quick-input-widget .monaco-button')].find(b => b.textContent.trim() === ${q(text)})`,
   tab: (label) => `[...document.querySelectorAll('.tabs-container .tab')].find(t => (t.getAttribute('aria-label') ?? '').split(',')[0].trim() === ${q(label)})`,
   commandCenter: `document.querySelector('.command-center .command-center-center, .command-center-center')`,
+  /** A row of a tree in the side bar (the Diagrams view, the Table Library, the Explorer), by its label. */
+  sidebarRow: (label) => `[...document.querySelectorAll('.part.sidebar .monaco-list-row')].find(r => (r.querySelector('.label-name')?.textContent ?? '').trim() === ${q(label)})`,
+  /** A modal dialog (window.dialogStyle: custom draws it in the page). */
+  dialog: `[...document.querySelectorAll('.monaco-dialog-box')].find(d => d.offsetParent !== null)`,
+  dialogButton: (text) => `[...document.querySelectorAll('.monaco-dialog-box .monaco-button')].find(b => b.textContent.trim() === ${q(text)})`,
+  /** A notification toast whose message contains `text`. */
+  notification: (text) => `[...document.querySelectorAll('.notification-toast-container .notification-list-item')].find(n => (n.querySelector('.notification-list-item-message')?.textContent ?? '').includes(${q(text)}))`,
+  /** The active editor group's editor area (to highlight what opened). */
+  activeEditor: `document.querySelector('.editor-group-container.active .editor-container')`,
   /** Text on the Get Started (walkthrough) page. */
   walkthroughStep: (title) => `[...document.querySelectorAll('.gettingStartedContainer .getting-started-step')].find(s => s.querySelector('.step-title')?.textContent.trim() === ${q(title)})`,
   /** A link or button in the open (expanded) walkthrough step, by its text. */
@@ -103,6 +121,29 @@ export class VSCodeUI {
     await this.wb.type(`>${text}`);
     await this.wb.waitFor(sel.quickPickRow(label), { what: `"${label}" in the Command Palette` });
     await this.wb.click(sel.quickPickRow(label));
+  }
+
+  /** Wait for a modal dialog: `{ message, detail, buttons }`. */
+  async waitForDialog({ timeout = 20000 } = {}) {
+    await this.wb.waitFor(sel.dialog, { timeout, what: 'a dialog' });
+    await sleep(150);
+    return this.wb.ev(`(() => { const d=${sel.dialog}; return { message: d.querySelector('.dialog-message-text')?.textContent.trim() ?? '',
+      detail: d.querySelector('.dialog-message-detail')?.innerText.trim() ?? '',
+      buttons: [...d.querySelectorAll('.monaco-button')].map(b => b.textContent.trim()).filter(Boolean) }; })()`);
+  }
+
+  /** Press a dialog's button. */
+  async dialogButton(text) {
+    await this.wb.waitFor(sel.dialogButton(text), { what: `the dialog's "${text}" button` });
+    await this.wb.click(sel.dialogButton(text));
+  }
+
+  /** In VS Code's own file dialog: type `rel` after the folder it shows, then press its `button`. */
+  async chooseInFileDialog(rel, button) {
+    if (rel) await this.appendQuickInput(rel);
+    await this.wb.waitFor(`${sel.quickInputBox}?.value.endsWith(${q(rel ?? '')})`, { what: `the file dialog to hold ${rel}` });
+    await sleep(300);
+    await this.quickInputButton(button);
   }
 
   /** Editor tabs: `[{ label, active }]`. */

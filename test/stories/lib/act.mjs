@@ -31,6 +31,40 @@ const overlay = (glideMs) => `(() => {
   for (const id of ['__ripple', '__hl']) { const d = document.createElement('div'); d.id = id; document.body.appendChild(d); }
   return true; })()`;
 
+/**
+ * Film the story's temp HOME as `~`: VS Code's own file dialog (a quick input)
+ * shows the full path it is in (`/tmp/erds-…/home/shop-database/`), a path
+ * from the recording machine that a published clip must not show. While the
+ * box holds a path under `home`, its text is drawn over it as `~/…` and the
+ * real text is made transparent; the DOM (what stories assert) is unchanged.
+ */
+const maskHome = (home) => `(() => {
+  if (window.__maskHome) return true;
+  const homes = ${JSON.stringify(home ? [home, `/private${home}`] : [])};
+  if (!homes.length) return true;
+  window.__maskHome = setInterval(() => {
+    const w = [...document.querySelectorAll('.quick-input-widget')].find((x) => x.style.display !== 'none' && x.offsetParent !== null);
+    const box = w?.querySelector('.quick-input-box input');
+    const v = box?.value ?? '';
+    const h = homes.find((x) => v === x || v.startsWith(x + '/'));
+    let m = document.getElementById('__mask');
+    const prev = window.__maskedBox;
+    if (prev && prev !== box) { prev.style.color = ''; prev.style.caretColor = ''; window.__maskedBox = null; }
+    if (!box || !h) {
+      if (m) m.style.display = 'none';
+      if (window.__maskedBox) { window.__maskedBox.style.color = ''; window.__maskedBox.style.caretColor = ''; window.__maskedBox = null; }
+      return;
+    }
+    if (!m) { m = document.createElement('div'); m.id = '__mask'; document.body.appendChild(m); }
+    if (window.__maskedBox !== box) { window.__maskColor = getComputedStyle(box).color; box.style.color = 'transparent'; box.style.caretColor = 'transparent'; window.__maskedBox = box; }
+    const cs = getComputedStyle(box); const r = box.getBoundingClientRect();
+    Object.assign(m.style, { display: 'flex', alignItems: 'center', position: 'fixed', zIndex: 2147483640, pointerEvents: 'none', overflow: 'hidden', whiteSpace: 'pre',
+      left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', boxSizing: 'border-box',
+      paddingLeft: cs.paddingLeft, font: cs.font, letterSpacing: cs.letterSpacing, color: window.__maskColor });
+    m.textContent = '~' + v.slice(h.length);
+  }, 40);
+  return true; })()`;
+
 /** CDP modifier bits. */
 export const MOD = { alt: 1, ctrl: 2, meta: 4, shift: 8 };
 /** Cmd on macOS, Ctrl elsewhere. */
@@ -55,11 +89,19 @@ const RETRYABLE = /closed|CLOSED|not open|Cannot find context|Execution context|
  * takes to reach its target and how long to wait after an action.
  */
 export class Workbench {
-  constructor({ port, pace = { glide: 150, settle: 150 }, log = () => {} }) {
+  constructor({ port, pace = { glide: 150, settle: 150 }, log = () => {}, home }) {
     this.port = port;
     this.pace = pace;
     this.log = log;
+    /** The story's temp HOME: shown as `~` in file dialogs (`maskHome`). */
+    this.home = home;
     this.c = null;
+  }
+
+  /** The cursor, ripple and highlight elements, and the HOME mask (again after a reload). */
+  async overlay(glideMs) {
+    await this.ev(overlay(glideMs));
+    await this.ev(maskHome(this.home));
   }
 
   async client() {
@@ -106,7 +148,7 @@ export class Workbench {
   }
 
   async moveToPoint(p) {
-    await this.ev(overlay(Math.max(1, this.pace.glide)));
+    await this.overlay(Math.max(1, this.pace.glide));
     await this.ev(`document.getElementById('__cur').style.transform='translate(${p.x - 4}px,${p.y - 2}px)'`);
     await sleep(this.pace.glide + 50);
     await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y });
@@ -170,10 +212,17 @@ export class Workbench {
   }
 
   async highlight(expr, pad = 4) {
-    await this.ev(overlay(this.pace.glide));
+    await this.overlay(this.pace.glide);
     return this.ev(`(() => { const h=document.getElementById('__hl'); const el=${expr}; if(!el){h.style.opacity=0;return false;}
       const r=el.getBoundingClientRect(); Object.assign(h.style,{left:(r.left-${pad})+'px',top:(r.top-${pad})+'px',
       width:(r.width+2*${pad})+'px',height:(r.height+2*${pad})+'px',opacity:1}); return true; })()`);
+  }
+
+  /** The highlight box around a rectangle in workbench coordinates. */
+  async highlightRect(r, pad = 4) {
+    await this.overlay(this.pace.glide);
+    return this.ev(`(() => { const h=document.getElementById('__hl');
+      Object.assign(h.style,{left:'${r.x - pad}px',top:'${r.y - pad}px',width:'${r.width + 2 * pad}px',height:'${r.height + 2 * pad}px',opacity:1}); return true; })()`);
   }
 
   async unhighlight() {
@@ -270,21 +319,44 @@ export class Webview {
     }
   }
 
-  /** The element's centre in workbench coordinates. */
-  async center(expr) {
-    const inner = await this.ev(`(() => { const el=${expr}; if(!el) return null; const r=el.getBoundingClientRect();
-      const f=document.querySelector('iframe#active-frame').getBoundingClientRect(); return {x:f.left+r.left+r.width/2, y:f.top+r.top+r.height/2}; })()`);
+  /**
+   * The element's box in workbench coordinates (`{ x, y, width, height }`),
+   * scrolled into view first (a page such as the Welcome panel scrolls).
+   */
+  async rect(expr) {
+    const inner = await this.ev(`(() => { const el=${expr}; if(!el) return null; el.scrollIntoView?.({block:'nearest'}); const r=el.getBoundingClientRect();
+      if(!r.width&&!r.height) return null;
+      const f=document.querySelector('iframe#active-frame').getBoundingClientRect(); return {x:f.left+r.left, y:f.top+r.top, width:r.width, height:r.height}; })()`);
     if (!inner) return null;
     const outer = await this.wb.ev(`(() => { const f=[...document.querySelectorAll('iframe')].find(f => (f.src||'').includes('${this.id}'));
       if(!f) return null; const r=f.getBoundingClientRect(); return {x:r.left, y:r.top}; })()`);
     if (!outer) return null;
-    return { x: outer.x + inner.x, y: outer.y + inner.y };
+    return { x: outer.x + inner.x, y: outer.y + inner.y, width: inner.width, height: inner.height };
+  }
+
+  /** The element's centre in workbench coordinates. */
+  async center(expr) {
+    const r = await this.rect(expr);
+    return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
   }
 
   async click(expr) {
     const p = await this.center(expr);
     if (!p) throw new Error(`not found in the webview: ${expr}`);
     await this.wb.clickAt(p);
+  }
+
+  /** Click the element, then type `text` into it (trusted input, as a person types). */
+  async fill(expr, text) {
+    await this.click(expr);
+    await this.wb.type(text);
+  }
+
+  /** Draw the workbench's highlight box around an element of the webview. */
+  async highlight(expr, pad = 4) {
+    const r = await this.rect(expr);
+    if (!r) return false;
+    return this.wb.highlightRect(r, pad);
   }
 
   close() { try { this.c?.close(); } catch { /* gone */ } }

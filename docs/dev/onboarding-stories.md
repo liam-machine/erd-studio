@@ -19,20 +19,46 @@ test/stories/
 │   ├── cdp.mjs             ← a dependency-free Chrome DevTools Protocol client
 │   ├── recorder.mjs        ← films the window over CDP (screenshots, ~15 fps)
 │   ├── video.mjs           ← frames + step captions → MP4 (ffmpeg, libass)
+│   ├── publish.mjs         ← --publish: recorded stories → media/onboarding/stories/<clip>.mp4
 │   └── workspaces.mjs      ← the folder a story opens, copied fresh each run
 ├── workspaces/plain/       ← a folder with only a README
-├── stories/NN-<id>.story.mjs
+├── stories/NN-<id>.story.mjs ← one per new-starter journey (below)
 └── out/                    ← gitignored: <id>.mp4/.srt/.log, failures, summary.json
 ```
 
 Plain `.mjs`, Node 22 or later, no npm dependencies. `test/**` is outside the
 VSIX (`.vscodeignore`) and outside vitest (`include` is `test/unit/**`).
 
+## The stories
+
+One file per typical new-starter journey, numbered in the order a newcomer
+meets them. Each is a user story (*As …, I want …, so that …*) whose video
+doubles as "watch how" help for that start.
+
+| # | id | Journey |
+|---|---|---|
+| 01 | `empty-window-opens-an-example` | No folder open → sidebar **Open an example** → Medallion lakehouse opens |
+| 02 | `walkthrough-starts-a-blank-diagram` | Walkthrough **New Diagram** → name it → empty canvas |
+| 03 | `plain-folder-new-diagram-add-table` | Empty folder → sidebar **New Diagram** → "Orders" → canvas **New Table** → `customer` on the canvas and in `.erd-studio/main/tables/` (shown in the Explorer) |
+| 04 | `sql-scripts-import` | CREATE TABLE scripts (`test/fixtures/sql-ddl/postgres`) → the empty Diagrams view's one button, **Import your SQL scripts** ("This folder has CREATE TABLE scripts.") → straight to the folder dialog, no Import… picker (asserted) → `database/` → PostgreSQL ("detected") → name "Sales" (suggested `sales`) → dry run → 4 tables, 3 relationships |
+| 05 | `power-bi-model-import` | A PBIP project (`test/fixtures/semantic-model/pbip-tmdl`) → the one button, **Import your Power BI semantic model** → the folder dialog, starting in the project → Import → dry run (snake_case names, what was left out) → sales, customer, product, date_table and 4 relationships |
+| 06 | `dbml-file-import` | A dbdiagram.io file (`test/fixtures/dbml/foreign/ecommerce.dbml`) → the one button, **Import your DBML file** → the file dialog, `ecommerce.dbml` already chosen → Import → name → dry run in plain words → 6 tables, one file each by schema |
+| 07 | `dbt-project-draw` | The dbt fixture without `.erd-studio/` → sidebar leads with **Draw from dbt** → silver models → laid out, Logical / Physical switch |
+| 08 | `yaml-project-convert` | A pre-2.0 YAML/JSON project (`test/fixtures/logical-only`) → the opening notice offers **Convert to DBML…** then **Open sales** → the Diagrams view's first row, **Convert to DBML…** → Convert panel → DBML files, the YAML and JSON removed, the diagram reopens |
+| 09 | `welcome-tab-example` | No folder open → the **Welcome to ERD Studio** tab → **Open an example…** → Kimball bus matrix opens on retail sales |
+| 10 | `welcome-tab-watch-how` | CREATE TABLE scripts → the empty Diagrams view's **Get started** link → the Welcome tab leads with **Import your SQL scripts** and its reason → its "Watch how" slot holds the SQL clip (published from 04), silent, waiting → play: it plays in VS Code (H.264 decodes) and pauses the tour, which was playing |
+
+A story that finds a product bug asserts the intended behaviour, says so in
+its header comment ("currently failing"), and the bug is reported; it is not
+bent to pass.
+
 ## Run
 
 ```bash
 npm run stories                                  # every story, fast, no video
 npm run stories:record                           # every story, filmed: test/stories/out/<id>.mp4
+node test/stories/run.mjs --record --publish     # film them, then publish the Welcome tab's "Watch how" clips
+node test/stories/run.mjs --publish              # publish the clips from the recordings already in out/
 node test/stories/run.mjs --only empty-window    # stories whose id or file name contains this
 node test/stories/run.mjs --record --keep        # keep /tmp/erds-…: profile, workspace, frames
 node test/stories/run.mjs --headed-slow          # slow pacing, to watch it run
@@ -45,7 +71,10 @@ The runner builds once (`npm run build`), copies `dist/`, `package.json`,
 never films a half-written bundle), then runs the stories one after another.
 Each gets its own profile, workspace copy and CDP port, and prints `PASS` or
 `FAIL` with the failing step. It exits 1 when any story fails, and always kills
-the VS Code it started (by `--user-data-dir`), even on Ctrl+C.
+the VS Code it started (by `--user-data-dir`) and removes its `/tmp/erds-…`
+folders (unless `--keep`), even on Ctrl+C. `--record --publish` publishes only
+the clips of the stories that ran; a run of stories without a clip publishes
+nothing and exits on the stories alone.
 
 A window opens on your screen while it runs (Extension Development Host,
 1440×900). It is a separate instance with its own profile: your own VS Code
@@ -104,8 +133,11 @@ What `s` gives a story:
 | `s.wb.click(expr)`, `s.wb.press('Enter')`, `s.wb.press('a', PRIMARY)`, `s.wb.type(text)` | trusted input (CDP), with a visible cursor and ripple |
 | `s.wb.waitFor(expr)`, `s.wb.ev(expr)`, `s.wb.highlight(expr)` / `unhighlight()` | |
 | `s.wb.tagPage()` then `s.wb.waitForReload(tag)` | around an action that reloads the window |
-| `s.webview()` → `.waitFor(expr)`, `.ev(expr)`, `.click(expr)` | the ERD canvas in the active editor; expressions see its document as `doc` |
-| `s.sel.*` | selector expressions: `activity`, `welcomeLink`, `quickPickRow`, `tab`, `walkthroughStep`, `walkthroughLink`, … |
+| `s.webview()` → `.waitFor(expr)`, `.ev(expr)`, `.click(expr)`, `.fill(expr, text)`, `.highlight(expr)`, `.rect(expr)` | the ERD Studio webview in the active editor (the canvas, the Welcome tab, the Convert panel); expressions see its document as `doc`; elements are scrolled into view before a click |
+| `s.ui.waitForDialog()` → `{ message, detail, buttons }`, `s.ui.dialogButton(text)` | a modal dialog (an import's dry run) |
+| `s.ui.chooseInFileDialog(rel, button)` | VS Code's own file dialog: type `rel` after the folder it shows, press `button` |
+| `s.wb.highlightRect({ x, y, width, height })` | the highlight box around any rectangle |
+| `s.sel.*` | selector expressions: `activity`, `welcomeLink`, `welcomeButtons` (the empty view's buttons, by text: a link alone on its line is one), `viewAction` (a view's title-bar icon), `walkthroughButtons`, `quickPickRow`, `tab`, `walkthroughStep`, `walkthroughLink`, `sidebarRow`, `dialog`, `dialogButton`, `notification`, `activeEditor`, … |
 | `s.expect(cond, msg)`, `s.assert.*` (node:assert/strict), `s.eventually(fn)` | |
 | `s.expectVisible(expr)`, `s.expectText(expr, text)` | wait for the workbench DOM |
 | `s.expectFile(rel, { contains })`, `s.expectNoFile(rel)` | the workspace's files (an empty window: the temp HOME); `rel` may be absolute |
@@ -126,9 +158,20 @@ model'), "the link's argument did not reach erdStudio.start …")`.
 `dbt` copies `test/fixtures/dbt-project` and `yaml-project` copies
 `test/fixtures/logical-only` (a pre-2.0 YAML/JSON project), so fixtures are not
 duplicated in git. Any other name is `test/stories/workspaces/<name>` or
-`test/fixtures/<name>`; a function `(dir) => …` fills an empty folder. The copy
-goes inside the story's temp HOME (`/tmp/erds-…/home/<name>`), so dialogs
-start in a clean folder, never your home.
+`test/fixtures/<name>`; a function `(dir) => …` fills an empty folder. An
+object builds a named folder from repo files at run time (the window title
+shows the name):
+
+```js
+workspace: { name: 'shop-database', add: { database: 'test/fixtures/sql-ddl/postgres' } },
+workspace: { name: 'analytics', from: 'test/fixtures/dbt-project', skip: ['.erd-studio', '.claude'] },
+```
+
+`from` is copied as the folder (minus the top-level names in `skip`), `add`
+maps a path in the folder to a repo file or folder, and an optional `fill(dir)`
+runs last. The copy goes inside the story's temp HOME
+(`/tmp/erds-…/home/<name>`), so dialogs start in a clean folder, never your
+home.
 
 ## Record
 
@@ -144,9 +187,54 @@ Captions use ffmpeg's `ass` filter (libass), present in Homebrew's and Ubuntu's
 ffmpeg. An ffmpeg without libass still writes the video, with the captions as a
 subtitle track and the `.srt`, and warns.
 
-Recording slows the steps down (the cursor glides, each caption is held before
-its actions) so a person can follow; without `--record` the same story runs in
-a few seconds.
+Recording slows the steps down (the cursor glides, each caption is held about
+2.5 s before its actions) so a person can follow; without `--record` the same
+story runs in a few seconds. Keep a recorded story between 25 and 60 seconds:
+a caption per step, `s.pause()` after showing the user something, and waits
+on real conditions (`waitFor`, `eventually`), never long fixed sleeps.
+
+**Assert the one obvious start.** Each story checks that the start its
+workspace should suggest is the surface's one button: `s.wb.ev(s.sel.welcomeButtons)`
+is `['Import your SQL scripts']` in a folder of SQL scripts (04),
+`['New Diagram']` in a plain folder (03), `['Draw from dbt']` in a dbt project
+(07), `['Open Folder']` in an empty window (01); the walkthrough's step (02),
+the Convert row and notice of a project from before 2.0 (08) and the Welcome
+tab's start card (10) likewise.
+
+## Publish the "Watch how" clips
+
+The Welcome tab shows a short clip of the start it suggests
+(`HOW_TO_CLIPS` in `src/types/startActions.ts`). They are stories:
+
+| Clip (`media/onboarding/stories/`) | Shown for | Story |
+|---|---|---|
+| `open-an-example.mp4` | no folder open | 01 `empty-window-opens-an-example` |
+| `start-a-blank-diagram.mp4` | `blank` | 03 `plain-folder-new-diagram-add-table` |
+| `import-sql-scripts.mp4` | `importSqlDdl` | 04 `sql-scripts-import` |
+| `import-power-bi-model.mp4` | `importSemanticModel` | 05 `power-bi-model-import` |
+| `import-a-dbml-file.mp4` | `importDbmlFile` | 06 `dbml-file-import` |
+| `draw-from-dbt.mp4` | `drawFromDbt` | 07 `dbt-project-draw` |
+
+`--publish` (`lib/publish.mjs`) re-encodes each story's recording: silent,
+H.264 High yuv420p, `+faststart`, 1280 px wide, captions as burned in by the
+recording, sped up evenly to at most 45 s, and the quality stepped down until
+it is at most 2 MB; it refuses a story whose captions name a path, and checks
+the result with ffprobe. With `--record` it publishes the clips whose story
+passed in that run; alone, those whose last recording passed (`out/<id>.log`).
+It starts the clip on the story's title card (the empty window before the
+first caption is cut, `leadIn`) and crops the window's title bar off
+(`[Extension Development Host] <folder>`, `cropTitleBarFilter`). No poster
+files: the panel loads the clip's metadata, so its first frame (the title card)
+is the poster, and every file counts toward the VSIX's 60-file cap. `test/unit/gettingStartedMedia.test.ts` and
+`storiesPublish.test.ts` hold the clips to all of this; story 10
+(`welcome-tab-watch-how`) proves the SQL clip shows on the Welcome tab and
+plays in VS Code. Re-publish after a change to a start a clip shows.
+
+**No path from the recording machine.** VS Code's own file dialog shows the
+folder it is in (`/tmp/erds-…/home/shop-database/`). The actor films the
+story's HOME as `~` (`maskHome` in `lib/act.mjs`: an overlay drawn over the
+quick input's text while it holds a path under HOME; the DOM, which the
+stories assert, is unchanged), and step captions never name a path.
 
 ## Debug a failing story
 
@@ -181,7 +269,10 @@ as the `onboarding-stories` artifact (videos, logs, screenshots, `summary.json`)
   exits. The runner uses `/tmp/erds-XXXXXX/ud`, never the long `$TMPDIR`.
 - **Its own CDP port.** 9333 is used by other tools, and a second VS Code on a
   taken port fails silently, so a script ends up driving someone else's window.
-  The runner takes the first free port from 9400.
+  A port picked in advance races another run started at the same moment, so
+  the runner launches with `--remote-debugging-port=0` and reads the port this
+  window bound back from `<profile>/DevToolsActivePort` (or the "DevTools
+  listening on" line in its output): `boundPort` in `lib/launch.mjs`.
 - **Open a folder with `--folder-uri`.** A plain path argument next to
   `--extensionDevelopmentPath` was ignored on macOS (the window opened empty).
 - **Window size** cannot be set over CDP in Electron (no `Browser.setWindowBounds`):
@@ -210,6 +301,13 @@ as the `onboarding-stories` artifact (videos, logs, screenshots, `summary.json`)
   a person's). A synthetic DOM click (`domClick`) misses controls that check
   for trusted events. F1 does not reach the palette while a webview has focus:
   `runCommand` opens it from the Command Center.
+- **Notifications sit over the bottom-right of the editor**, where a webview's
+  own buttons often are (the Convert panel's **Convert**): a trusted click
+  lands on the toast. Close a toast the story does not care about first.
+- **A file dialog's placeholder is "Folder path"** even when it picks a file;
+  `chooseInFileDialog` waits for the typed path before pressing the button.
+- **A `<video>`'s middle does not start it** in VS Code's webview: press its
+  controls' play button (bottom left, above the timeline), as story 10 does.
 - **Run from a terminal that stays open.** The runner kills its VS Code when it
   exits; a tool that kills a command's process group when the command ends
   (some agent shells) kills the window with it.

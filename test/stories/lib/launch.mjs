@@ -3,18 +3,19 @@
 // Each story gets: a fresh profile (--user-data-dir / --extensions-dir) under a
 // SHORT /tmp path (VS Code puts its IPC socket in the profile, and macOS caps a
 // Unix socket path at 104 characters, past which the window silently exits),
-// its own CDP port from 9400 up (9333 is shared with other tools), a fixed
+// its own CDP port (port 0: the OS picks a free one when VS Code binds it, and
+// the runner reads it back from the profile, so two runs at once can never
+// drive each other's window; 9333 is shared with other tools), a fixed
 // window size and a HOME of its own (so dialogs start in a clean temp folder,
 // never the real home). Every process is killed by its --user-data-dir.
 
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { WORKBENCH, attach, cdpAlive, findTarget } from './cdp.mjs';
+import { WORKBENCH, attach, findTarget } from './cdp.mjs';
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -69,20 +70,28 @@ export function shortTempDir(prefix = 'erds-') {
   return fs.mkdtempSync(path.join(base, prefix));
 }
 
-function portFree(port) {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.once('error', () => resolve(false));
-    srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(true)));
-  });
-}
-
-/** The first port from `start` that nothing listens on (and no CDP answers). */
-export async function freePort(start = 9400) {
-  for (let p = start; p < start + 200; p++) {
-    if ((await portFree(p)) && !(await cdpAlive(p))) return p;
+/**
+ * The CDP port this profile's VS Code bound (launched with
+ * `--remote-debugging-port=0`): Chromium writes it to `<ud>/DevToolsActivePort`
+ * and prints "DevTools listening on ws://127.0.0.1:<port>/…" to its output.
+ * Either way the port belongs to this process, never to another window that
+ * happened to take a port picked in advance.
+ */
+export async function boundPort({ ud, logFile, proc, timeoutMs = 90000 }) {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    try {
+      const first = fs.readFileSync(path.join(ud, 'DevToolsActivePort'), 'utf8').split('\n')[0].trim();
+      if (/^\d+$/.test(first) && Number(first) > 0) return Number(first);
+    } catch { /* not written yet */ }
+    try {
+      const m = /DevTools listening on ws:\/\/[^:/\s]+:(\d+)\//.exec(fs.readFileSync(logFile, 'utf8'));
+      if (m) return Number(m[1]);
+    } catch { /* no output yet */ }
+    if (proc.exitCode !== null) throw new Error(`VS Code exited (code ${proc.exitCode}) before it opened a CDP port`);
+    await sleep(200);
   }
-  throw new Error(`no free port in ${start}–${start + 199}`);
+  throw new Error('VS Code never opened a CDP port');
 }
 
 /** The settings every story starts from: a quiet, deterministic window. */
@@ -116,9 +125,10 @@ export const STORY_SETTINGS = {
 
 /**
  * Launch VS Code for one story. `folder` is undefined for an empty window.
- * Resolves `{ port, root, ud, home, proc, kill, logFile }` once the workbench is up.
+ * Resolves `{ port, root, ud, home, proc, kill, logFile }` once the workbench
+ * is up; `port` is the CDP port this window bound (see {@link boundPort}).
  */
-export async function launchVSCode({ extDir, folder, root, port, settings = {}, logFile }) {
+export async function launchVSCode({ extDir, folder, root, settings = {}, logFile }) {
   const ud = path.join(root, 'ud');
   const exts = path.join(root, 'ex');
   const home = path.join(root, 'home');
@@ -136,7 +146,8 @@ export async function launchVSCode({ extDir, folder, root, port, settings = {}, 
     `--user-data-dir=${ud}`,
     `--extensions-dir=${exts}`,
     `--extensionDevelopmentPath=${extDir}`,
-    `--remote-debugging-port=${port}`,
+    // 0: the OS picks a free port as VS Code binds it (read back by boundPort).
+    '--remote-debugging-port=0',
     '--skip-welcome',
     '--skip-release-notes',
     '--disable-workspace-trust',
@@ -160,10 +171,11 @@ export async function launchVSCode({ extDir, folder, root, port, settings = {}, 
   const out = fs.openSync(logFile, 'a');
   const proc = spawn(findCode(), args, { env, stdio: ['ignore', out, out], detached: process.platform !== 'win32' });
   proc.unref();
-  const handle = { port, root, ud, home, proc, logFile, kill: () => killByProfile(ud) };
+  const handle = { port: undefined, root, ud, home, proc, logFile, kill: () => killByProfile(ud) };
 
   try {
-    const target = await findTarget(port, { match: WORKBENCH, timeoutMs: 90000 });
+    handle.port = await boundPort({ ud, logFile, proc });
+    const target = await findTarget(handle.port, { match: WORKBENCH, timeoutMs: 90000 });
     const wb = await attach(target);
     const until = Date.now() + 60000;
     while (!(await wb.evaluate(`!!document.querySelector('.monaco-workbench .part.activitybar, .monaco-workbench .activitybar')`).catch(() => false))) {
@@ -173,7 +185,7 @@ export async function launchVSCode({ extDir, folder, root, port, settings = {}, 
     wb.close();
   } catch (err) {
     handle.kill();
-    throw new Error(`VS Code did not start on :${port} (${err.message}). Its output is in ${logFile}`);
+    throw new Error(`VS Code did not start${handle.port ? ` on :${handle.port}` : ''} (${err.message}). Its output is in ${logFile}`);
   }
   return handle;
 }

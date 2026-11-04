@@ -32,6 +32,8 @@ export default story({
       const expanded = await s.wb.ev(`${step}.classList.contains('expanded')`);
       if (!expanded) await s.wb.click(`${step}.querySelector('.step-title')`);
       await s.expectVisible(s.sel.walkthroughLink('New Diagram'), { what: 'the New Diagram button' });
+      // A folder with nothing to import: New Diagram is the step's one button.
+      s.assert.deepEqual(await s.wb.ev(s.sel.walkthroughButtons), ['New Diagram'], 'New Diagram should be the walkthrough step\'s one button');
       await s.wb.highlight(step);
       await s.pause(1500);
       await s.wb.unhighlight();

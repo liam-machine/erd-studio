@@ -37,6 +37,8 @@ export default story({
     await s.step('Then I see "Open an example" in the empty Diagrams view', async () => {
       const link = s.sel.welcomeLink('Open an example');
       await s.expectVisible(link, { what: 'the "Open an example" link' });
+      // No folder, no suggestion: Open Folder is the one button, the example a link beside it.
+      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Open Folder'], 'Open Folder should be the one button in an empty window');
       const href = await s.wb.ev(`${link}.getAttribute('href') ?? ''`);
       s.assert.deepEqual(
         JSON.parse(decodeURIComponent(href.replace(/^command:erdStudio\.start\?/, ''))),
