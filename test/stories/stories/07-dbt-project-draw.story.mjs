@@ -1,16 +1,18 @@
 // A dbt project (dbt_project.yml, models/ with schema yml, target/manifest.json
 // and catalog.json) that has never had ERD Studio: no .erd-studio/ folder.
 // What every new dbt user now sees first: the start suggestion, "ERD Studio
-// found a dbt project in this folder. Create a diagram from its models?"
-// (Create Diagram / More Options… / Don't Ask Again for This Folder), while
-// the empty Diagrams view leads with "Draw from dbt" (its one button, the
-// same start). Create Diagram is Draw from dbt: it asks which models to start
-// from, offering each models/ folder (there is no one obvious answer), then a
-// name, and draws them. Proves the drawn tables become DBML files in the
-// layer of their folder, the dbt relationship tests become Refs in a
-// relationships file, the diagram file keeps a laid-out position for every
-// table, and the canvas shows the Logical / Physical switch dbt brings.
+// found a dbt project in this folder. Show its models as a diagram? Nothing
+// is saved until you keep it." (Show Me / Don't Ask Again for This Folder),
+// while the empty Diagrams view leads with "Draw from dbt" (its one button).
+// Show Me is Draft-first: no picker, no name box, a read-only draft of the
+// top-ranked models folder (gold) with a Folder switcher over the others.
+// Switching to silver redraws it ("Draft: silver"), still nothing on disk.
+// Keep as Diagram runs Draw from dbt's writer: the drawn tables become DBML
+// files in the layer of their folder, the dbt relationship tests become Refs,
+// the diagram file keeps a laid-out position for every table, and the canvas
+// shows the Logical / Physical switch dbt brings.
 
+import { DRAFT, chooseScope, draftState, waitForDraft } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
 const MODELS = ['dim_customer', 'dim_project', 'dim_task', 'fct_order', 'fct_sale'];
@@ -32,10 +34,10 @@ export default story({
     });
 
     const FOUND = 'ERD Studio found a dbt project in this folder';
-    await s.step('ERD Studio offers to create a diagram from its models', async () => {
+    await s.step('ERD Studio offers to show its models as a diagram', async () => {
       const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      s.assert.equal(toast.message, `${FOUND}. Create a diagram from its models?`);
-      s.assert.deepEqual(toast.buttons, ['Create Diagram', 'More Options…', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
+      s.assert.equal(toast.message, `${FOUND}. Show its models as a diagram? Nothing is saved until you keep it.`);
+      s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
       // The same start in the sidebar: Draw from dbt is the empty Diagrams view's one button.
       await s.ui.openSidebar('ERD Studio');
       await s.expectVisible(s.sel.welcomeLink('Draw from dbt'), { what: 'the Draw from dbt button in the empty Diagrams view' });
@@ -45,28 +47,41 @@ export default story({
       await s.wb.unhighlight();
     }, { at: 'left' });
 
-    await s.step('I click "Create Diagram": it asks which models to start from', async () => {
-      await s.ui.notificationButton(FOUND, 'Create Diagram');
-      const pick = await s.ui.waitForQuickPick({ title: 'Draw from dbt' });
-      s.expect(/Which dbt models/.test(pick.placeholder), `expected "Which dbt models…", got "${pick.placeholder}"`);
-      for (const folder of ['gold', 'silver', 'staging']) s.expect(pick.items.includes(folder), `the models/${folder} folder should be offered: ${pick.items.join(', ')}`);
-      await s.wb.highlight(s.sel.quickPickRow('silver'));
-      await s.pause(1500);
+    let draft;
+    await s.step('I click "Show Me": a draft of my top models folder, and a switcher for the others', async () => {
+      await s.ui.notificationButton(FOUND, 'Show Me');
+      draft = await waitForDraft(s, 'Draft: gold');
+      s.assert.equal(await draft.page.ev(DRAFT.scopeLabel), 'Folder');
+      for (const folder of ['gold', 'silver']) s.expect(draft.scopes.some((o) => o.startsWith(folder)), `the switcher should offer models/${folder}: ${draft.scopes.join(' | ')}`);
+      s.expect(draft.scope.startsWith('gold'), `the draft should start on gold, the top-ranked folder: ${draft.scope}`);
+      s.expect(/^Draft from your dbt models in gold · /.test(draft.headline), `the headline: ${draft.headline}`);
+      s.expectNoFile('.erd-studio');
+      await draft.page.highlight(DRAFT.banner);
+      await s.pause(2000);
+      await s.wb.unhighlight();
+    }, { say: 'I click Show Me. A draft of my gold models opens, with a switcher for my other model folders.', at: 'left' });
+
+    await s.step('I switch it to my silver models', async () => {
+      await chooseScope(s, draft.page, 'silver');
+      await draft.page.waitFor(`(${DRAFT.headline} ?? '').startsWith('Draft from your dbt models in silver') && !${DRAFT.busy} && doc.querySelectorAll('.react-flow__node').length === ${MODELS.length}`, { timeout: 45000, what: 'the silver draft' });
+      await s.ui.waitForActiveTab('Draft: silver');
+      const state = await draftState(draft.page);
+      s.assert.deepEqual([...state.tables].sort(), MODELS, `the draft should draw the silver models, but draws ${state.tables.join(', ')}`);
+      s.expect(/Keep saves it as silver in the Silver layer/.test(state.detail), `the detail: ${state.detail}`);
+      s.expectNoFile('.erd-studio');
+      await s.wb.highlight(s.sel.activeEditor);
+      await s.pause(2000);
       await s.wb.unhighlight();
     });
 
-    await s.step('I pick my silver models and keep the name "silver"', async () => {
-      await s.ui.pick('silver');
-      const box = await s.ui.waitForQuickPick({ title: 'Draw from dbt' });
-      s.expect(/Name the diagram/.test(box.message), `expected the name box, but it says "${box.message}"`);
-      s.assert.equal(box.value, 'silver');
-      await s.pause(900);
-      await s.wb.press('Enter');
+    await s.step('I press "Keep as Diagram"', async () => {
+      await draft.page.click(DRAFT.button('Keep as Diagram'));
+      draft.page.close();
     });
 
     let canvas;
     await s.step('Then the diagram opens, laid out, with the relationships from my dbt tests', async () => {
-      await s.ui.waitForActiveTab('silver.dbml');
+      await s.ui.waitForActiveTab('silver.dbml', { timeout: 45000 });
       canvas = await s.webview();
       const names = await canvas.waitFor(`(() => { const n=[...doc.querySelectorAll('.react-flow__node')].map(n => n.innerText.split('\\n')[0]); return n.length === ${MODELS.length} && n; })()`, { what: `${MODELS.length} tables on the canvas` });
       s.assert.deepEqual([...names].sort(), MODELS, `the canvas should show the silver models, but shows ${names.join(', ')}`);

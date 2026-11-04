@@ -64,6 +64,17 @@ export function stageExtension(dir) {
   return dir;
 }
 
+/**
+ * Package the extension as the Marketplace would (`vsce package`, which runs
+ * `vscode:prepublish`, the production build) into `out`; resolves `out`.
+ * The realistic stories install it in the window. Throws when vsce fails.
+ */
+export function packageVsix(out) {
+  const r = spawnSync('npx', ['--yes', '@vscode/vsce', 'package', '--no-dependencies', '--out', out], { cwd: REPO, encoding: 'utf8', shell: process.platform === 'win32' });
+  if (r.status !== 0 || !fs.existsSync(out)) throw new Error(`vsce package failed:\n${r.stdout}\n${r.stderr}`);
+  return out;
+}
+
 /** A short temp dir: /tmp/erds-XXXXXX (never the long $TMPDIR on macOS). */
 export function shortTempDir(prefix = 'erds-') {
   const base = process.platform === 'win32' ? os.tmpdir() : '/tmp';
@@ -124,16 +135,48 @@ export const STORY_SETTINGS = {
 };
 
 /**
+ * The settings a **realistic** story starts from (`realistic: true`, the
+ * first-60-seconds stories): VS Code as a new user has it, every prompt left
+ * on — the startup Welcome page, the walkthrough an extension opens on install
+ * (`workbench.welcomePage.walkthroughs.openOnInstall`), tips, extension
+ * recommendations, the Chat view, Git. Only what the harness itself needs
+ * stays set, each for a reason that is not about first-run behaviour:
+ */
+export const REALISTIC_SETTINGS = {
+  // Drivable over CDP: modal and file dialogs drawn in the page (the native ones are not).
+  'window.dialogStyle': 'custom',
+  'files.simpleDialog.enable': true,
+  // The title bar the clips crop (macOS's default already), at the filmed size.
+  'window.titleBarStyle': 'custom',
+  'window.zoomLevel': 0,
+  'window.restoreWindows': 'none',
+  // Never update the machine's own VS Code, or the ERD Studio under test to the Marketplace's.
+  'update.mode': 'none',
+  'update.showReleaseNotes': false,
+  'extensions.autoUpdate': false,
+  'extensions.autoCheckUpdates': false,
+  // Nothing from a test run leaves the machine.
+  'telemetry.telemetryLevel': 'off',
+  'erdStudio.telemetry.enabled': false,
+  // The folder is a copy made a moment ago in a temp HOME; a person's own folder
+  // is one they trusted long before they installed ERD Studio.
+  'security.workspace.trust.enabled': false,
+};
+
+/**
  * Launch VS Code for one story. `folder` is undefined for an empty window.
+ * `extDir` is the staged extension (`--extensionDevelopmentPath`); a
+ * realistic story passes none (it installs the VSIX in the window, as from
+ * the Marketplace) and `realistic: true` (no `--skip-welcome`, {@link REALISTIC_SETTINGS}).
  * Resolves `{ port, root, ud, home, proc, kill, logFile }` once the workbench
  * is up; `port` is the CDP port this window bound (see {@link boundPort}).
  */
-export async function launchVSCode({ extDir, folder, root, settings = {}, logFile }) {
+export async function launchVSCode({ extDir, folder, root, settings = {}, logFile, realistic = false }) {
   const ud = path.join(root, 'ud');
   const exts = path.join(root, 'ex');
   const home = path.join(root, 'home');
   for (const d of [path.join(ud, 'User'), exts, home]) fs.mkdirSync(d, { recursive: true });
-  fs.writeFileSync(path.join(ud, 'User/settings.json'), JSON.stringify({ ...STORY_SETTINGS, ...settings }, null, 2));
+  fs.writeFileSync(path.join(ud, 'User/settings.json'), JSON.stringify({ ...(realistic ? REALISTIC_SETTINGS : STORY_SETTINGS), ...settings }, null, 2));
   // The window size: VS Code opens the first Extension Development Host window
   // at the last one's size (Electron has no CDP Browser.setWindowBounds).
   const uiState = { mode: 1, x: 40, y: 40, width: WINDOW.width, height: WINDOW.height };
@@ -145,10 +188,11 @@ export async function launchVSCode({ extDir, folder, root, settings = {}, logFil
   const args = [
     `--user-data-dir=${ud}`,
     `--extensions-dir=${exts}`,
-    `--extensionDevelopmentPath=${extDir}`,
+    ...(extDir ? [`--extensionDevelopmentPath=${extDir}`] : []),
     // 0: the OS picks a free port as VS Code binds it (read back by boundPort).
     '--remote-debugging-port=0',
-    '--skip-welcome',
+    // A realistic window keeps VS Code's own Welcome page; the release notes are about VS Code updating itself.
+    ...(realistic ? [] : ['--skip-welcome']),
     '--skip-release-notes',
     '--disable-workspace-trust',
     // Keep painting while the window is hidden behind others or minimised.

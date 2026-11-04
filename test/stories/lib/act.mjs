@@ -95,6 +95,9 @@ export class Workbench {
     this.log = log;
     /** The story's temp HOME: shown as `~` in file dialogs (`maskHome`). */
     this.home = home;
+    /** Trusted clicks so far, and when the story last clicked, pressed or typed (noise.mjs tells its own input apart). */
+    this.clicks = 0;
+    this.lastInputAt = 0;
     this.c = null;
   }
 
@@ -174,11 +177,19 @@ export class Workbench {
 
   /** A trusted click at a point (CDP Input), as a person's click. */
   async clickAt(p, { clickCount = 1 } = {}) {
+    this.clicks = (this.clicks ?? 0) + 1;
+    this.lastInputAt = Date.now();
     await this.moveToPoint(p);
     await this.ripple(p);
-    for (const type of ['mousePressed', 'mouseReleased']) {
-      await this.send('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount });
-    }
+    const press = async () => {
+      // Hover first, so the target (a webview's button) has the pointer when it is pressed.
+      await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y });
+      for (const type of ['mousePressed', 'mouseReleased']) {
+        await this.send('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount });
+      }
+    };
+    // Never while the recorder captures a frame (recorder.mjs `quiet`).
+    await (this.recorder ? this.recorder.quiet(press) : press());
     await sleep(this.pace.settle);
   }
 
@@ -203,6 +214,7 @@ export class Workbench {
   /** Press a key: `press('Enter')`, `press('a', MOD.meta)`. */
   async press(name, modifiers = 0) {
     const k = KEYS[name] ?? { key: name, code: name.length === 1 ? `Key${name.toUpperCase()}` : name, keyCode: name.length === 1 ? name.toUpperCase().charCodeAt(0) : 0 };
+    this.lastInputAt = Date.now();
     const base = { key: k.key, code: k.code, windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode, modifiers };
     await this.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, ...(k.text && !modifiers ? { text: k.text } : {}) });
     await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
@@ -212,6 +224,7 @@ export class Workbench {
   /** Type text into whatever has focus, one character at a time. */
   async type(text, perChar = this.pace.glide > 300 ? 45 : 8) {
     for (const ch of text) {
+      this.lastInputAt = Date.now();
       await this.send('Input.insertText', { text: ch });
       if (perChar) await sleep(perChar);
     }
@@ -346,10 +359,32 @@ export class Webview {
     return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
   }
 
+  /**
+   * A trusted click on the element, through the workbench. A click into an
+   * out-of-process webview is sometimes dropped by Chromium (recorded runs
+   * lost one in a few: a draft's Show details, a schema row, a guide's
+   * button), so the element is watched for the click and, if none arrived
+   * within a second and a half, clicked once more (logged). The element's own
+   * listeners are untouched.
+   */
   async click(expr) {
-    const p = await this.center(expr);
-    if (!p) throw new Error(`not found in the webview: ${expr}`);
-    await this.wb.clickAt(p);
+    const token = `c${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+    const watch = `(() => { const el=${expr}; if(!el) return false; el.addEventListener('click', () => { win.__storyClicked = ${JSON.stringify(token)}; }, { once: true, capture: true }); return true; })()`;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const p = await this.center(expr);
+      if (!p) throw new Error(`not found in the webview: ${expr}`);
+      const watching = await this.ev(watch).catch(() => false);
+      await this.wb.clickAt(p);
+      if (!watching) return;
+      const until = Date.now() + 1500;
+      while (Date.now() < until) {
+        // The click landed, or the element is gone (the page moved on, a tab closed).
+        const ok = await this.ev(`win.__storyClicked === ${JSON.stringify(token)} || !(${expr})`).catch(() => true);
+        if (ok) return;
+        await sleep(100);
+      }
+      this.wb.log?.(`  (the click on ${expr.slice(0, 80)} did not reach the webview; clicking again)`);
+    }
   }
 
   /** Click the element, then type `text` into it (trusted input, as a person types). */

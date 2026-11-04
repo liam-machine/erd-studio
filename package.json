@@ -584,6 +584,7 @@
       {
         "id": "erdStudio.getStarted",
         "title": "Get started with ERD Studio",
+        "when": "workspaceFolderCount == 0 || erdStudio.activated",
         "description": "Design your data model in Git. Let your AI build from it.",
         "steps": [
           {

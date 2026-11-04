@@ -2,16 +2,16 @@
 // Studio's quick look at the folder finds the model, so the empty Diagrams
 // view leads with "Import your Power BI semantic model" (its one button, with
 // the reason "This folder has a Power BI or Fabric semantic model."). That
-// button is the quick import: no folder dialog, layer pick or name box
-// (asserted: no quick input shows before the confirm); it takes the folder's
-// one model, the Main layer and the name adventure-sales (not adventuresales),
-// and asks once. Proves the four model tables (Sales, Customer, Product and
-// the 'Date Table') become DBML tables in snake_case, the measures,
-// calculation group and auto date table are left out (and the confirm says
-// so), and the diagram opens with the four tables and the four
-// relationships, the inactive one included. The start suggestion (the popup)
-// is off here: this story is the sidebar's path (04 and 06 are the popup's).
+// button is the quick path, ending in Draft-first's preview: no folder
+// dialog, layer pick or name box, a read-only "Draft: adventure-sales" of the
+// four model tables (Sales, Customer, Product and the 'Date Table', in
+// snake_case) and the four relationships, the inactive one included, and
+// nothing on disk. Its details drawer says what is left out (the measures,
+// calculation group and auto date table). Keep as Diagram writes the DBML
+// files and opens the diagram. The start suggestion (the popup) is off here:
+// this story is the sidebar's path (04 and 06 are the popup's).
 
+import { DRAFT, waitForDraft } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
 const TABLES = ['sales', 'customer', 'product', 'date_table'];
@@ -45,25 +45,35 @@ export default story({
       await s.wb.unhighlight();
     });
 
-    let dialog;
-    await s.step('When I click it, it asks me nothing: it shows what it will import', async () => {
+    let draft;
+    await s.step('When I click it, it asks me nothing: a draft of my model opens', async () => {
       await s.wb.click(s.sel.welcomeLink(START));
-      // No folder dialog, layer or name question: the confirm is the first thing it shows.
-      dialog = await s.ui.waitForDialogAskingNothingFirst();
-    }, { say: "When I click it, I don't have to answer anything: it finds the model, and picks the layer and the name for me." });
-
-    await s.step('4 tables and 4 relationships into "adventure-sales", and what it leaves out', async () => {
-      s.assert.equal(dialog.message, 'Import 4 tables and 4 relationships from the semantic model AdventureSales into a new diagram "adventure-sales" in the Main layer.', 'the confirm\'s headline');
-      s.assert.deepEqual([...dialog.buttons].sort(), ['Cancel', 'Change Options…', 'Import', 'Review All…'], 'the confirm\'s buttons (VS Code orders them by platform)');
-      s.expect(/3 measures/.test(dialog.detail), `the confirm should say the measures are not imported: ${dialog.detail}`);
-      s.expectNoFile('.erd-studio/main/diagrams/adventure-sales.dbml');
-      await s.wb.highlight(s.sel.dialog);
-      await s.pause(3500);
+      // No folder dialog, layer or name question: the draft is the first thing it shows.
+      draft = await waitForDraft(s, 'Draft: adventure-sales', { tables: 4 });
+      s.assert.deepEqual([...draft.tables].sort(), [...TABLES].sort(), `the draft should draw ${TABLES.join(', ')}, but draws ${draft.tables.join(', ')}`);
+      await draft.page.waitFor(`${DRAFT.edges} === 4`, { what: 'four relationship lines in the draft' });
+      s.assert.equal(draft.headline, 'Draft from the semantic model AdventureSales · 4 tables, 4 relationships · not saved');
+      s.assert.equal(draft.detail, 'Keep saves it as adventure-sales in the Main layer (.erd-studio/main/diagrams/adventure-sales.dbml).');
+      s.assert.deepEqual(draft.primary, ['Keep as Diagram']);
+      s.expectNoFile('.erd-studio');
+      await draft.page.highlight(DRAFT.banner);
+      await s.pause(2500);
       await s.wb.unhighlight();
-    }, { say: 'Four tables and four relationships, into a new diagram called adventure sales. And it says what it leaves out, like the measures.' });
+    }, { say: "When I click it, I don't have to answer anything: a draft of my model opens, with its four tables and four relationships." });
 
-    await s.step('When I press Import, the diagram opens: Sales, Customer, Product and Date', async () => {
-      await s.ui.dialogButton('Import');
+    await s.step('"Show details" says what it leaves out, like the measures', async () => {
+      await draft.page.click(DRAFT.link('Show details'));
+      await draft.page.waitFor(DRAFT.drawer, { what: 'the details drawer' });
+      const text = await draft.page.ev(`${DRAFT.drawer}.innerText`);
+      s.expect(/measure/i.test(text), `the details should say the measures are left out: ${text.slice(0, 600)}`);
+      await draft.page.highlight(DRAFT.drawer);
+      await s.pause(3000);
+      await s.wb.unhighlight();
+    }, { say: 'Show details says what it leaves out, like the measures, which stay in Power BI.' });
+
+    await s.step('When I press "Keep as Diagram", it opens: Sales, Customer, Product and Date', async () => {
+      await draft.page.click(DRAFT.button('Keep as Diagram'));
+      draft.page.close();
       await s.ui.waitForActiveTab('adventure-sales.dbml');
       const canvas = await s.webview();
       const names = await canvas.waitFor(`(() => { const n=[...doc.querySelectorAll('.react-flow__node')].map(n => n.innerText.split('\\n')[0]); return n.length === 4 && n; })()`, { what: 'four tables on the canvas' });

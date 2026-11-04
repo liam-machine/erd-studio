@@ -30,6 +30,7 @@ import {
   NO_LEGACY_ALIAS,
   PRE_REGISTERED_COMMANDS,
   WALKTHROUGH_ID,
+  WALKTHROUGH_READY_CONTEXT_KEY,
   _resetFirstRunGuardForTests,
 } from '../../src/extension';
 import { GETTING_STARTED_VIEW_TYPE, GettingStartedPanel } from '../../src/providers/GettingStartedPanel';
@@ -418,6 +419,20 @@ describe('activate() with a dbt project', () => {
     expect(registerDecorations).toHaveBeenCalledTimes(1);
     // Every contributed command once, plus a dbtSemantic.* alias for each pre-rename one, plus the rest.
     expect(context.subscriptions.length).toBeGreaterThan(CONTRIBUTED.length + CONTRIBUTED.filter((c) => !NO_LEGACY_ALIAS.has(c)).length);
+  });
+
+  it('lists the walkthrough once activated, so VS Code never opens it on install in a folder', async () => {
+    // VS Code opens an extension's walkthrough on a Marketplace install only when its `when`
+    // holds (workbench.welcomePage.walkthroughs.openOnInstall). In a folder that was a second
+    // interruption beside the start suggestion; the first-60-seconds stories count them.
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
+    expect(pkg.contributes.walkthroughs[0].when).toBe(`workspaceFolderCount == 0 || ${WALKTHROUGH_READY_CONTEXT_KEY}`);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    await activate(context);
+    expect(exec).toHaveBeenCalledWith('setContext', WALKTHROUGH_READY_CONTEXT_KEY, true);
+    // Before anything else asks for the window.
+    const first = exec.mock.calls.findIndex((c) => c[0] === 'setContext');
+    expect(exec.mock.calls[first]).toEqual(['setContext', WALKTHROUGH_READY_CONTEXT_KEY, true]);
   });
 
   it('groups the Relationships view by table by default, or by file from its title toggle, remembered for the workspace', async () => {

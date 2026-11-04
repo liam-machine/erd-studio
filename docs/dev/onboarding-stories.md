@@ -3,12 +3,15 @@
 User stories as code: each one drives a **real VS Code** with the extension the
 way a new user would (clicks, typing, the Command Palette, dialogs), asserts
 what they should see and what lands on disk, and can film itself as a
-captioned MP4. Re-run them after any change to the start screen, the
-walkthrough, the sidebar's welcome text, the start suggestion, an import (its
-quick path, its confirm, Review All…), Open an Example or the first canvas:
-they catch what unit tests cannot, such as a `command:` link whose arguments
-VS Code drops, or a command that drops its own (story 05 guards against
-`erdStudio.start` passing no `{ quick: true }` to the import it runs).
+captioned MP4. Re-run them after any change to the start surfaces (the
+walkthrough, the sidebar's welcome text, the start suggestion, More ways to
+start…), a draft (Draft-first: `docs/dev/draft-first.md`), an import's quick
+path, Open an Example…, the first canvas or anything that can pop up in a
+new user's first minute: they catch what unit tests cannot, such as a
+`command:` link whose arguments VS Code drops, a command that drops its own
+(story 05 guards against `erdStudio.start` passing no `{ quick: true }` to the
+import it runs), or a second prompt sneaking into the first minute (stories
+15–22).
 
 ```
 test/stories/
@@ -24,6 +27,9 @@ test/stories/
 │   ├── narrate.mjs         ← --narrate: a spoken line per caption, placed on the video's timeline
 │   ├── tts.py              ← --narrate's voice (Kokoro, a uv script; the only Python here)
 │   ├── publish.mjs         ← --publish: recorded stories → media/onboarding/stories/<clip>.mp4
+│   ├── draft.mjs           ← the draft preview's selectors and helpers (waitForDraft, chooseScope, …)
+│   ├── noise.mjs           ← interruptions nobody asked for (the first-60-seconds stories)
+│   ├── firstMinute.mjs     ← the steps stories 15–22 share (install, the one interruption, the quiet minute)
 │   └── workspaces.mjs      ← the folder a story opens, copied fresh each run
 ├── workspaces/plain/       ← a folder with only a README
 ├── stories/NN-<id>.story.mjs ← one per new-starter journey (below)
@@ -44,39 +50,58 @@ doubles as "watch how" help for that start.
 
 | # | id | Journey |
 |---|---|---|
-| 01 | `empty-window-opens-an-example` | No folder open → sidebar **Open an example** → Medallion lakehouse opens |
-| 02 | `walkthrough-starts-a-blank-diagram` | Walkthrough **New Diagram** → name it → empty canvas |
-| 03 | `plain-folder-new-diagram-add-table` | Empty folder → sidebar **New Diagram** → "Orders" → canvas **New Table** → `customer` on the canvas and in `.erd-studio/main/tables/` (shown in the Explorer) |
-| 04 | `sql-scripts-import` | CREATE TABLE scripts (`test/fixtures/sql-ddl/postgres`) → the start suggestion ("ERD Studio found CREATE TABLE scripts in this folder (4 tables). Create a diagram from them?") → **Create Diagram** → no question before the one confirm (asserted: no quick input shows) → "Import 4 tables and 3 relationships from 2 SQL files (PostgreSQL) into a new diagram "sales" in the Main layer." → Import → 4 tables, 3 relationships on the canvas and on disk |
-| 05 | `power-bi-model-import` | A PBIP project (`test/fixtures/semantic-model/pbip-tmdl`), popup off → the empty Diagrams view's one button, **Import your Power BI semantic model** → no question before the one confirm (asserted) → "Import 4 tables and 4 relationships from the semantic model AdventureSales into a new diagram "adventure-sales" …" (and the measures left out) → sales, customer, product, date_table and 4 relationships |
-| 06 | `dbml-file-import` | A dbdiagram.io file (`test/fixtures/dbml/foreign/ecommerce.dbml`) → the start suggestion ("…found a DBML file in this folder. Create a diagram from it?") → **Create Diagram** → no question (asserted) → the one confirm in plain words ("Import 6 tables and 6 relationships into a new diagram "ecommerce" …") → 6 tables, one file each by schema |
-| 07 | `dbt-project-draw` | The dbt fixture without `.erd-studio/` → the start suggestion ("…found a dbt project in this folder. Create a diagram from its models?"), the sidebar's one button **Draw from dbt** beside it → **Create Diagram** → which models (silver) → name → laid out, Logical / Physical switch |
+| 01 | `empty-window-opens-an-example` | No folder open → sidebar: **Open Folder…** the one button → **More ways to start…** (`erdStudio.start` `[{ from: 'sidebar' }]`, asserted) → **Open an Example…** → the **Example: Coffee shop** draft (primary **Open Folder…**, the Example switcher) → switch to Medallion lakehouse → **Save This Example…** → Projects/ → the window opens it on the gold sales canvas |
+| 02 | `walkthrough-starts-a-blank-diagram` | Plain folder, popup off → the ERD Studio sidebar (the walkthrough is listed once ERD Studio has started in a folder) → Welcome: Open Walkthrough → its **New Diagram** step, **New Diagram…** its one button → name it → empty canvas |
+| 03 | `plain-folder-new-diagram-add-table` | Empty folder, popup off → sidebar **New Diagram…** (the one button, **More ways to start…** the one link) → "Orders" → canvas **New Table** → `customer` on the canvas and in `.erd-studio/main/tables/` (shown in the Explorer) |
+| 04 | `sql-scripts-import` | CREATE TABLE scripts (`test/fixtures/sql-ddl/postgres`) → the start suggestion ("ERD Studio found CREATE TABLE scripts in this folder (4 tables). Show them as a diagram? Nothing is saved until you keep it.", **Show Me** / **Don't Ask Again for This Folder**) → **Show Me** → **Draft: sales** with nothing asked first ("Draft from 2 SQL files (PostgreSQL) · 4 tables, 3 relationships · not saved", "Keep saves it as sales in the Main layer (…)", nothing on disk) → **Keep as Diagram** → 4 tables, 3 relationships on the canvas and on disk |
+| 05 | `power-bi-model-import` | A PBIP project (`test/fixtures/semantic-model/pbip-tmdl`), popup off → the empty Diagrams view's one button, **Import your Power BI semantic model** → **Draft: adventure-sales** (4 tables, 4 relationships, nothing asked first) → **Show details**: the measures left out → **Keep as Diagram** → sales, customer, product, date_table and 4 relationships |
+| 06 | `dbml-file-import` | A dbdiagram.io file (`test/fixtures/dbml/foreign/ecommerce.dbml`) → the start suggestion ("…found a DBML file in this folder. Show it as a diagram? …") → **Show Me** → **Draft: ecommerce** (6 tables, 6 relationships; the banner counts what is left out) → **Show details** in plain words → **Keep as Diagram** → one file per table, by schema |
+| 07 | `dbt-project-draw` | The dbt fixture without `.erd-studio/` → the start suggestion ("…found a dbt project in this folder. Show its models as a diagram? …"), the sidebar's one button **Draw from dbt** beside it → **Show Me** → **Draft: gold** (the top-ranked folder) with a **Folder** switcher → silver → **Draft: silver** → **Keep as Diagram** → laid out, Logical / Physical switch, files in the Silver layer |
 | 08 | `yaml-project-convert` | A pre-2.0 YAML/JSON project (`test/fixtures/logical-only`) → the opening notice offers **Convert to DBML…** then **Open sales** → the Diagrams view's first row, **Convert to DBML…** → Convert panel → DBML files, the YAML and JSON removed, the diagram reopens |
-| 09 | `welcome-tab-example` | No folder open → the **ERD Studio Tour** tab → **Open an Example…** → Kimball bus matrix opens on retail sales |
-| 10 | `welcome-tab-watch-how` | CREATE TABLE scripts, popup off → the empty Diagrams view's **Get started** link → the Welcome tab leads with **Import your SQL scripts** and its reason → its "Watch how" slot holds the SQL clip (published from 04), not muted, waiting → play: it plays in VS Code with its narration (H.264 decodes, and the MP3 audio: `webkitAudioDecodedByteCount` > 0) and pauses the tour, which was playing |
-| 11 | `start-suggestion-turn-off` | CREATE TABLE scripts → the start suggestion → **Don't Ask Again for This Folder** → "ERD Studio won't suggest a start for this folder again. To turn suggestions back on, run ERD Studio: Turn On Start Suggestions for This Folder." → reload: no popup (the sidebar still offers the import) → the palette offers **Turn On Start Suggestions for This Folder**, not Turn Off → run it → reload: the popup is back |
-| 12 | `large-import-review` | 257 tables in 8 scripts (`test/fixtures/sql-ddl/large`, copied without `generate.mjs`) → the start suggestion ("… (257 tables) …") → **Create Diagram** → the confirm stays short (the headline and at most 10 lines, the schemas counted, no table listed) → **Review All…** → the **Review Import** tab (its own webview): 8 schema sections holding all 257 tables, scrolled, one folded, every relationship, what was left out → the page's **Import** → the diagram opens, 257 table files on disk, no second confirm |
-| 13 | `nothing-found-import-from-databricks` | A folder with nothing to import (README only), visited once before (step 1: the first run's walkthrough takes the window's one prompt; closed, reload) → open the empty Diagrams view → "No data model found in this folder yet. Start a new diagram, or bring in your data model from Databricks, Snowflake, Power BI, Fabric and more as DBML, an open format. ERD Studio is free to use." (New Diagram / Show Me How / Don't Ask Again for This Folder) → **Show Me How** → the **Bring In Your Data Model** tab (no Found or dbt card) → the Databricks card → **Copy** the notebook cell (the clipboard holds it, read by `s.ui.clipboardText()`) → `schema.sql` (`test/fixtures/sql-ddl/databricks-notebook`) lands in the folder only now (before, its CREATE TABLEs would make the folder "found" and no notification) → **Import Databricks DDL…** → the file dialog → no dialect question (the name box kept) → "Import 2 tables and 1 relationship from 1 SQL file (Databricks / Spark SQL) …" → customers and orders, joined |
-| 14 | `import-guide-from-picker-fabric` | A folder with nothing to import, popup off → the empty view's **import a data model** → Import…'s last item **How do I export from Databricks, Snowflake, Power BI…?** → the guide → the Microsoft Fabric card (Semantic model / Warehouse or SQL analytics endpoint) → `warehouse.sql` (`test/fixtures/sql-ddl/fabric-warehouse`, as SSMS scripts it) lands in the folder → **Import SQL Server DDL…** → no dialect question → "Import 2 tables and 1 relationship from 1 SQL file (SQL Server / Azure SQL) …" → dim_customer and fct_order, joined |
+| 09 | `welcome-tab-example` | No folder open → the Diagrams view's ▶ (**Watch the One-Minute Tour**) → the **ERD Studio Tour** tab (the example's short video waiting) → **Open an Example…** → the example draft → switch to Kimball bus matrix → **Save This Example…** → retail sales opens |
+| 10 | `welcome-tab-watch-how` | CREATE TABLE scripts, popup off → Help & Feedback's **Watch the One-Minute Tour** → the tour's "Ways to start, in short videos" (no dbt video without dbt) → the SQL clip (published from 04), not muted, waiting → play: it plays in VS Code with its narration (H.264 decodes, and the MP3 audio: `webkitAudioDecodedByteCount` > 0) and pauses the tour |
+| 11 | `start-suggestion-turn-off` | CREATE TABLE scripts → the start suggestion → **Don't Ask Again for This Folder** → "Start suggestions are off for this folder." (**Undo**) → reload: no popup (the sidebar still offers the import) → the palette offers **Turn On Start Suggestions for This Folder**, not Turn Off → run it → reload: the popup is back |
+| 12 | `large-import-review` | 257 tables in 8 scripts (`test/fixtures/sql-ddl/large`, copied without `generate.mjs`) → the start suggestion ("… (257 tables) …") → **Show Me** → a large draft: the schema panel open (All tables (257), then 8 schemas), the canvas on sales ("Showing sales: 80 of 257 tables") → finance → **Show details**: every table by schema, every relationship, the views left out → **Keep as Diagram** keeps all 257 → the diagram opens laid out, no second confirm |
+| 13 | `nothing-found-import-from-databricks` | A folder with nothing to bring in (README only) → the ERD Studio icon → the automatic **Example: Coffee shop** draft (primary **New Diagram…**) → **Bring In Your Data Model…** → the guide (no Found or dbt card) → the Databricks card → **Copy** the notebook cell (the clipboard holds it, read by `s.ui.clipboardText()`) → `schema.sql` (`test/fixtures/sql-ddl/databricks-notebook`) lands in the folder only now → **Import Databricks DDL…** → the file dialog → no dialect question (the name box kept) → "Draft from 1 SQL file (Databricks / Spark SQL) · 2 tables, 1 relationship · not saved" → **Keep as Diagram** → customers and orders, joined |
+| 14 | `import-guide-from-picker-fabric` | A folder with nothing to bring in, popup off → **More ways to start…** → **Import…** → its last item **Bring In Your Data Model…** → the guide → the Microsoft Fabric card (Semantic model / Warehouse or SQL analytics endpoint) → `warehouse.sql` (`test/fixtures/sql-ddl/fabric-warehouse`, as SSMS scripts it) lands in the folder → **Import SQL Server DDL…** → no dialect question → "Draft from 1 SQL file (SQL Server / Azure SQL) · …" → **Keep as Diagram** → dim_customer and fct_order, joined |
+| 15 | `first-minute-no-folder` | *Realistic.* No folder → install → VS Code opens the ERD Studio walkthrough (the one interruption) → one click on its **Open Folder…**: VS Code's folder dialog → nothing else in the first minute |
+| 16 | `first-minute-empty-folder` | *Realistic.* A folder with a README → install → nothing pops up → one click on the ERD Studio icon: **Example: Coffee shop**, nothing written → no interruption at all in the first minute |
+| 17 | `first-minute-sql-scripts` | *Realistic.* CREATE TABLE scripts → install → the start suggestion (the one interruption; no walkthrough beside it) → one click on **Show Me**: **Draft: sales** → nothing else |
+| 18 | `first-minute-power-bi` | *Realistic.* A PBIP project → install → the start suggestion → one click on **Show Me**: **Draft: adventure-sales** → nothing else |
+| 19 | `first-minute-dbt-project` | *Realistic.* The dbt fixture without `.erd-studio/` → install → the start suggestion → one click on **Show Me**: **Draft: gold** → nothing else |
+| 20 | `first-minute-pre-2-0-project` | *Realistic.* A pre-2.0 project → install → the opening notice, **Convert to DBML…** first (the one interruption) → one click: the Convert panel, nothing written → nothing else |
+| 21 | `first-minute-existing-diagrams` | *Realistic.* A clone of `docs/examples/kimball-bus-matrix` → install → "This project has 4 ERD Studio diagrams." (the one interruption) → one click on its **Open …**: the canvas → nothing else |
+| 22 | `first-minute-query-only-sql` | *Realistic.* SQL queries only (SELECTs, a CTE, an INSERT … SELECT; no CREATE TABLE) → install → nothing pops up (no "found CREATE TABLE scripts") → one click on the ERD Studio icon: the example draft → no interruption at all |
 
 **The start suggestion (the popup).** A folder ERD Studio can model (SQL
 scripts, a semantic model, a DBML file, a dbt project) gets one notification
-as its window's activation prompt; a folder with nothing to import gets the
-nothing-found one, once its empty Diagrams view is opened. Stories about the
-popup (04, 06, 07, 11, 12) and the nothing-found notification (13) wait for
-it with `s.ui.waitForNotification(text)` and press its buttons with
-`s.ui.notificationButton(text, label)`; every other story with a folder
-turns it off with the story's `settings` (written into the profile's user
-settings, over `STORY_SETTINGS`), so it keeps testing what it tests:
+as its window's activation prompt, once per folder: "… Show them as a
+diagram? Nothing is saved until you keep it." with **Show Me** (the draft)
+and **Don't Ask Again for This Folder**. A folder with nothing found gets no
+notification: the ERD Studio icon opens the example draft, once per machine.
+Stories about the popup (04, 06, 07, 11, 12, 17–19) wait for it with
+`s.ui.waitForNotification(text)` and press its buttons with
+`s.ui.notificationButton(text, label)`; every other story with a folder turns
+suggestions off with the story's `settings` (written into the profile's user
+settings, over `STORY_SETTINGS`), which also turns off the automatic draft,
+so it keeps testing what it tests:
 
 ```js
 settings: { 'erdStudio.startSuggestions': false },
 ```
 
-A quick import asks nothing before its one confirm:
-`s.ui.waitForDialogAskingNothingFirst()` fails if a quick pick, input box or
-file dialog shows before the modal. VS Code orders a modal's buttons by
-platform, so compare them sorted.
+**The draft.** Every import and Draw from dbt ends in the read-only draft
+preview (`Draft: <name>`, `Example: <title>`), never a confirm modal.
+`lib/draft.mjs` holds its selectors (`DRAFT.headline`, `DRAFT.button(label)`,
+`DRAFT.tables`, …) and helpers: `waitForDraft(s, tab, { tables })` waits for
+the tab and its laid-out diagram and resolves what the banner says and what
+it draws; `chooseScope(s, page, label)` uses the switcher (a native
+`<select>`'s popup cannot be driven over CDP, so the value is set and React's
+change event dispatched); `waitForDraftKeepingName(s, { never })` follows a
+step-by-step import (the name box kept, a question matching `never` fails, a
+modal fails) until its draft opens. A quick path asks nothing first: the
+draft is the first thing it shows (asserted by waiting for it with no quick
+input answered). Assert nothing is on disk before **Keep as Diagram**.
 
 A story that finds a product bug asserts the intended behaviour, says so in
 its header comment ("currently failing"), and the bug is reported; it is not
@@ -88,7 +113,7 @@ bent to pass.
 npm run stories                                  # every story, fast, no video
 npm run stories:record                           # every story, filmed: test/stories/out/<id>.mp4
 node test/stories/run.mjs --record --narrate     # filmed and narrated (needs uv)
-node test/stories/run.mjs --record --publish     # film them narrated, then publish the Welcome tab's "Watch how" clips
+node test/stories/run.mjs --record --publish     # film them narrated, then publish the tour tab's short videos
 node test/stories/run.mjs --publish              # publish the clips from the narrated recordings already in out/
 node test/stories/run.mjs --only empty-window    # stories whose id or file name contains this
 node test/stories/run.mjs --record --keep        # keep /tmp/erds-…: profile, workspace, frames
@@ -164,15 +189,18 @@ What `s` gives a story:
 | `s.wb.click(expr)`, `s.wb.press('Enter')`, `s.wb.press('a', PRIMARY)`, `s.wb.type(text)` | trusted input (CDP), with a visible cursor and ripple |
 | `s.wb.waitFor(expr)`, `s.wb.ev(expr)`, `s.wb.highlight(expr)` / `unhighlight()` | |
 | `s.wb.tagPage()` then `s.wb.waitForReload(tag)` | around an action that reloads the window |
-| `s.webview()` → `.waitFor(expr)`, `.ev(expr)`, `.click(expr)`, `.fill(expr, text)`, `.highlight(expr)`, `.rect(expr)` | the ERD Studio webview in the active editor (the canvas, the Welcome tab, the Convert panel); expressions see its document as `doc`; elements are scrolled into view before a click |
-| `s.ui.waitForDialog()` → `{ message, detail, buttons }`, `s.ui.dialogButton(text)` | a modal dialog (an import's dry run) |
-| `s.ui.waitForDialogAskingNothingFirst()` | the same, failing if any quick input shows first (the quick import) |
+| `s.webview()` → `.waitFor(expr)`, `.ev(expr)`, `.click(expr)`, `.fill(expr, text)`, `.highlight(expr)`, `.rect(expr)` | the ERD Studio webview in the active editor (the canvas, a draft, the tour tab, the Convert panel); expressions see its document as `doc`; elements are scrolled into view before a click |
+| `s.ui.waitForDialog()` → `{ message, detail, buttons }`, `s.ui.dialogButton(text)` | a modal dialog (an import's no-preview fallback, a sample download) |
+| `s.ui.waitForDialogAskingNothingFirst()` | the same, failing if any quick input shows first |
 | `s.ui.waitForNotification(text)` → `{ message, buttons }`, `s.ui.notificationButton(text, label)` | a notification toast (the start suggestion) |
 | `s.ui.paletteItems(text, { expect })` → labels, `s.ui.reloadWindow()` | the Command Palette's rows, left open; Developer: Reload Window |
 | `s.ui.chooseInFileDialog(rel, button)` | VS Code's own file dialog: type `rel` after the folder it shows, press `button` |
-| `s.ui.waitForDialogKeepingName({ never })` → `{ dialog, named }` | a step-by-step import's confirm: the name box is answered with its suggestion, a quick input matching `never` (`/dialect/i`) fails |
+| `s.ui.waitForDialogKeepingName({ never })` → `{ dialog, named }` | a modal reached through a step-by-step flow: the name box is answered with its suggestion, a quick input matching `never` (`/dialect/i`) fails (an import ending in a draft: `waitForDraftKeepingName`) |
+| `s.ui.dismissVSCodeFirstLaunch()`, `s.sel.viewHeader(title)` | VS Code's own first-launch modal closed (realistic stories); a side bar view's header (expand Help & Feedback) |
 | `s.ui.clipboardText()` | the clipboard's text, as a paste gets it (the page may not read the clipboard: it pastes into an off-screen textarea) |
 | `s.wb.highlightRect({ x, y, width, height })` | the highlight box around any rectangle |
+| `s.installErdStudio()`, `s.oneClick(fn)`, `s.expectQuietFirstMinute({ max })`, `s.noise` | a realistic story's install, the one-click check, the first minute's interruptions (below) |
+| `waitForDraft`, `draftState`, `chooseScope`, `waitForDraftKeepingName`, `DRAFT.*` (`lib/draft.mjs`) | the draft preview |
 | `s.sel.*` | selector expressions: `activity`, `welcomeLink`, `welcomeButtons` (the empty view's buttons, by text: a link alone on its line is one), `viewAction` (a view's title-bar icon), `walkthroughButtons`, `quickPickRow`, `tab`, `walkthroughStep`, `walkthroughLink`, `sidebarRow`, `dialog`, `dialogButton`, `notification`, `activeEditor`, … |
 | `s.expect(cond, msg)`, `s.assert.*` (node:assert/strict), `s.eventually(fn)` | |
 | `s.expectVisible(expr)`, `s.expectText(expr, text)` | wait for the workbench DOM |
@@ -267,15 +295,72 @@ on real conditions (`waitFor`, `eventually`), never long fixed sleeps.
 **Assert the one obvious start.** Each story checks that the start its
 workspace should suggest is the surface's one button: `s.wb.ev(s.sel.welcomeButtons)`
 is `['Import your Power BI semantic model']` in a PBIP project (05),
-`['New Diagram']` in a plain folder (03), `['Draw from dbt']` in a dbt project
-(07, beside the popup), `['Open Folder']` in an empty window (01); the walkthrough's step (02),
-the Convert row and notice of a project from before 2.0 (08) and the Welcome
-tab's start card (10) likewise.
+`['New Diagram…']` in a plain folder (03), `['Draw from dbt']` in a dbt project
+(07, beside the popup), `['Open Folder…']` in an empty window (01); the
+walkthrough's step (02), a draft's one primary button (`DRAFT.primary`: Keep
+as Diagram for a find, New Diagram… for the example in a folder, Open
+Folder… with no folder, Save This Example… for a bundled project) and the
+Convert row and notice of a project from before 2.0 (08) likewise.
+
+## The first 60 seconds (realistic stories)
+
+Stories 15–22 are one per kind of workspace a new user opens (no folder, an
+empty folder, SQL scripts, a Power BI / Fabric model, a dbt project, a
+project from before 2.0, a project with diagrams, a repository of SQL
+queries). Each proves two things about the first minute after ERD Studio is
+installed: **ERD Studio interrupts at most once** (its own notifications,
+tabs, modals and quick picks, and VS Code's on its behalf: the walkthrough it
+opens on install), and **the draft, or the right next step, is one click
+away** (`s.oneClick(fn)` fails unless `fn` took exactly one click). A story
+fails if noise creeps back: with the walkthrough's `when` removed, story 17
+fails on "0.5s walkthrough: Get started with ERD Studio | 0.8s notification:
+ERD Studio found CREATE TABLE scripts …".
+
+`realistic: true` makes a story as close to a Marketplace install as the
+harness allows:
+
+- **No `--extensionDevelopmentPath`.** The runner packages the extension once
+  (`packageVsix`: `npx @vscode/vsce package --no-dependencies`, which runs the
+  production build) and puts it in the story's `~/Downloads`; the story
+  installs it in the running window (`s.installErdStudio()`: **Extensions:
+  Install from VSIX…**, the file, Install). VS Code then does what it does
+  for a Marketplace install: activates ERD Studio where its activation
+  events match, and opens its walkthrough when the walkthrough's `when` holds
+  (`workbench.welcomePage.walkthroughs.openOnInstall`). The window title has
+  no "[Extension Development Host]".
+- **Every prompt left on** (`REALISTIC_SETTINGS` in `lib/launch.mjs`, no
+  `--skip-welcome`): VS Code's Welcome page, walkthroughs on install, tips,
+  extension recommendations, the Chat view, Git. Only what the harness needs
+  stays set: dialogs drawn in the page (`window.dialogStyle`,
+  `files.simpleDialog.enable`), the title bar and zoom, no updates (the
+  machine's VS Code, and the ERD Studio under test, must not update
+  themselves), telemetry off, and workspace trust off (the folder is a copy
+  made a moment ago; a person's own folder was trusted long before).
+- **VS Code's own first launch** of a brand-new profile (the "Welcome to VS
+  Code" sign-in modal) is closed before the story starts
+  (`s.ui.dismissVSCodeFirstLaunch()`): someone installing ERD Studio answered
+  it long ago.
+
+`lib/noise.mjs` polls the workbench from the moment Install is pressed and
+records each new notification (with its source), editor tab, walkthrough,
+modal and quick pick as `{ t, kind, text, origin, asked }`. A story declares
+what its click is expected to open just before it (`s.noise.expect(/^Draft: /,
+{ kind: 'tab' })`); a quick pick right after the story's own input is its
+own; VS Code's "Completed installing extension." is the install's answer.
+Everything else is unasked. `s.expectQuietFirstMinute({ max })` (the shared
+step `quietFirstMinute` in `lib/firstMinute.mjs`) watches to 60 s after the
+install and fails if ERD Studio's unasked events exceed `max` (1; 0 where
+nothing should pop up at all); VS Code's own unasked ones are logged
+(`NOISE:` lines in `out/<id>.log`) and kept in `summary.json`
+(`interruptions`), never failing a story. A recorded one runs about 90 s
+(the minute is watched to its end); none is a clip.
 
 ## Publish the "Watch how" clips
 
-The Welcome tab shows a short clip of the start it suggests
-(`HOW_TO_CLIPS` in `src/types/startActions.ts`). They are stories:
+The tour tab (**ERD Studio Tour**) shows a short clip of each start
+("Ways to start, in short videos", `HOW_TO_CLIPS` in
+`src/types/startActions.ts`; the dbt one on the dbt page only). They are
+stories:
 
 | Clip (`media/onboarding/stories/`) | Shown for | Story |
 |---|---|---|
@@ -303,7 +388,7 @@ first caption is cut, `leadIn`) and crops the window's title bar off
 files: the panel loads the clip's metadata, so its first frame (the title card)
 is the poster, and every file counts toward the VSIX's 60-file cap. `test/unit/gettingStartedMedia.test.ts` and
 `storiesPublish.test.ts` hold the clips to all of this; story 10
-(`welcome-tab-watch-how`) proves the SQL clip shows on the Welcome tab and
+(`welcome-tab-watch-how`) proves the SQL clip shows on the tour tab and
 plays in VS Code. Re-publish after a change to a start a clip shows.
 
 **No path from the recording machine.** VS Code's own file dialog shows the
@@ -387,11 +472,27 @@ as the `onboarding-stories` artifact (videos, logs, screenshots, `summary.json`)
 - **The recording has no sound of its own.** It is screenshots over CDP; a
   clip or the tour playing in the window is not heard. `--narrate` adds the
   voice afterwards, from the marks.
-- **A fresh profile is a first run.** In a folder ERD Studio activates as
-  its sidebar opens, and the first-run walkthrough then takes the window's one
-  prompt: a story about a prompt that waits for a later window (the
-  nothing-found notification) opens the sidebar once, closes the walkthrough
-  and reloads (13).
+- **A fresh profile is a first run.** With no folder open ERD Studio's
+  first activation opens its walkthrough (the window's one prompt); in a
+  folder it never does (Draft-first §3.4): the ERD Studio icon opens a draft
+  instead (the folder's find, or the example once per machine) unless the
+  story turns start suggestions off.
+- **The walkthrough is listed once ERD Studio has started** in a folder (its
+  `when`: `workspaceFolderCount == 0 || erdStudio.activated`). A story that
+  opens it from Welcome: Open Walkthrough in a plain folder opens the ERD
+  Studio sidebar first (02).
+- **The Command Center is an agents pill** in a profile with chat on (the
+  realistic stories): `s.sel.commandCenter` takes whichever is visible, and
+  its label opens the same Quick Open.
+- **A notification's source** is in its footer ("Source: ERD Studio"); a
+  progress notification has none, and `lib/noise.mjs` counts it as the
+  extension's. A click's progress toast is part of the answer: expect it.
+- **Clicks into a webview get lost while filming.** A recorded run dropped
+  one trusted click in a few on a draft, the tour or the canvas (an
+  out-of-process iframe), never a fast one. Two guards: no screenshot is in
+  flight while the actor clicks (`Recorder.quiet`, the click waits for the
+  capture to finish), and `Webview.click` watches the element for the click
+  and, when none arrived within 1.5 s, clicks once more (the log says so).
 - **A link that wraps** onto two lines has its box's centre on plain text
   between them: `click` aims at its widest line (`center` in `lib/act.mjs`).
 - **The page may not read the clipboard** (`navigator.clipboard.readText()`

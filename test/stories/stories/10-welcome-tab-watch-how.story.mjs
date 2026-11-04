@@ -1,16 +1,16 @@
-// A folder of CREATE TABLE scripts, and ERD Studio's Welcome tab. The quick
-// look at the folder makes "Import your SQL scripts" the start card's one
-// primary button, with its reason line, and the card's "Watch how" slot
-// holds the clip for that start (media/onboarding/stories/import-sql-scripts.mp4,
-// published from story 04 by `run.mjs --publish`). Proves the tab is reached
-// from the empty Diagrams view's "Get started" link, the clip shown is the
-// suggestion's, it waits for a click, and that it really plays in VS Code's
-// webview with its narration (H.264 decodes: its time moves on; the MP3 audio
-// decodes: Chromium counts the audio bytes it decoded), pausing the tour.
+// A folder of CREATE TABLE scripts, and ERD Studio's tour tab ("ERD Studio
+// Tour"), opened from the Help & Feedback view's "Watch the One-Minute Tour"
+// row. Its "Ways to start, in short videos" section holds a clip per start
+// the extension ships (no dbt clip outside a dbt project), the SQL one
+// (media/onboarding/stories/import-sql-scripts.mp4, published from story 04
+// by `run.mjs --publish`) among them. Proves the clip waits for a click, and
+// that it really plays in VS Code's webview with its narration (H.264
+// decodes: its time moves on; the MP3 audio decodes: Chromium counts the
+// audio bytes it decoded), pausing the tour.
 
 import { story } from '../lib/story.mjs';
 
-const CLIP = `doc.querySelector('[data-step="begin"] .gs-howto [data-clip="importSqlDdl"]')`;
+const CLIP = `doc.querySelector('.gs-howto [data-clip="importSqlDdl"]')`;
 const START = 'Import your SQL scripts';
 
 export default story({
@@ -28,42 +28,42 @@ export default story({
       await s.eventually(async () => (await s.ui.windowTitle()).includes('shop-database'), { message: 'the shop-database folder did not open' });
     }, { say: 'Given my project folder, with SQL scripts in a database folder.' });
 
-    await s.step('When I open the ERD Studio sidebar and click "Get started"', async () => {
+    const TOUR_ROW = s.sel.sidebarRow('Watch the One-Minute Tour');
+    await s.step('When I open the ERD Studio sidebar, Help & Feedback has the tour', async () => {
       await s.ui.openSidebar('ERD Studio');
       await s.expectVisible(s.sel.welcomeLink(START), { what: `the "${START}" button (the suggestion has been published)` });
-      const link = s.sel.welcomeLink('Get started');
-      await s.expectVisible(link, { what: 'the "Get started" link' });
-      // A link in a sentence, not a second button beside the start.
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), [START], '"Get started" should be a link, the start the one button');
-      await s.wb.highlight(link);
+      // The tour is a row of the Help & Feedback view (expanded here if it is collapsed), never a second button beside the start.
+      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), [START], 'the start should be the empty Diagrams view\'s one button');
+      if (!(await s.wb.ev(`!!${TOUR_ROW}`))) await s.wb.click(s.sel.viewHeader('Help & Feedback'));
+      await s.expectVisible(TOUR_ROW, { what: 'the "Watch the One-Minute Tour" row of Help & Feedback' });
+      await s.wb.highlight(TOUR_ROW);
       await s.pause(1000);
       await s.wb.unhighlight();
-      await s.wb.click(link);
-      await s.ui.waitForActiveTab('Welcome to ERD Studio');
+      await s.wb.click(TOUR_ROW);
+      await s.ui.waitForActiveTab('ERD Studio Tour');
     });
 
     let welcome;
-    await s.step(`Then the Welcome tab leads with "${START}", and says why`, async () => {
+    await s.step('Its short videos show each way to start, mine among them', async () => {
       welcome = await s.webview();
-      const primary = await welcome.waitFor(`(() => { const b=[...doc.querySelectorAll('[data-step="begin"] .gs-btn--primary')].filter(b => b.offsetParent); return b.length === 1 && b[0].textContent.trim(); })()`, { what: 'the start card\'s one primary button' });
-      s.assert.equal(primary, START, `the start card's primary button should be the suggestion, but it is "${primary}"`);
-      const reason = await welcome.ev(`[...doc.querySelectorAll('[data-step="begin"] .gs-step__reason')].filter(r => !r.hidden).map(r => r.textContent.trim())`);
-      s.assert.deepEqual(reason, ['This folder has CREATE TABLE scripts.']);
-      await welcome.ev(`(${CLIP}.closest('[data-step="begin"]').scrollIntoView({ block: 'start' }), true)`);
-      await welcome.highlight(`doc.querySelector('[data-step="begin"]')`);
+      await welcome.waitFor(`doc.body.innerText.includes('The one-minute tour') && ${CLIP}`, { what: 'the tour tab with its short videos' });
+      const captions = await welcome.ev(`[...doc.querySelectorAll('.gs-howto__item')].filter(f => !f.hidden).map(f => f.querySelector('.gs-howto__caption').textContent.trim())`);
+      s.expect(captions.includes(START), `the short videos should include "${START}": ${captions.join(' | ')}`);
+      // No dbt video in a folder without dbt_project.yml.
+      s.expect(!captions.some((c) => /\bdbt\b/i.test(c)), `no dbt video outside a dbt project: ${captions.join(' | ')}`);
+      const title = await welcome.ev(`doc.querySelector('.gs-howto-section .gs-section-title').textContent.trim()`);
+      s.assert.equal(title, 'Ways to start, in short videos');
+      await welcome.ev(`(${CLIP}.closest('.gs-howto-section').scrollIntoView({ block: 'start' }), true)`);
+      await welcome.highlight(`${CLIP}.closest('.gs-howto-section')`);
       await s.pause(2000);
       await s.wb.unhighlight();
     });
 
-    await s.step('And "Watch how" shows a short clip of that start, waiting for me', async () => {
-      const clip = await welcome.waitFor(`(() => { const v=${CLIP}; return v && !v.closest('[hidden]') && { src: v.currentSrc || v.querySelector('source')?.src || '', muted: v.muted, paused: v.paused, autoplay: v.autoplay }; })()`, { what: 'the SQL clip in the start card' });
+    await s.step(`"${START}" is a short clip, waiting for me`, async () => {
+      const clip = await welcome.waitFor(`(() => { const v=${CLIP}; return v && !v.closest('[hidden]') && { src: v.currentSrc || v.querySelector('source')?.src || '', muted: v.muted, paused: v.paused, autoplay: v.autoplay }; })()`, { what: 'the SQL clip' });
       s.expect(clip.src.includes('import-sql-scripts.mp4'), `the clip should be the SQL one, but is ${clip.src}`);
       s.expect(clip.paused && !clip.autoplay, `the clip should wait for a click: ${JSON.stringify(clip)}`);
       s.expect(!clip.muted, `the clip is narrated: it should play with sound, but is muted: ${JSON.stringify(clip)}`);
-      const title = await welcome.ev(`${CLIP}.closest('.gs-howto').querySelector('.gs-howto__title').textContent.trim()`);
-      s.assert.equal(title, 'Watch how (a short clip with narration)');
-      // Only the suggestion's clip shows.
-      s.assert.equal(await welcome.ev(`[...doc.querySelectorAll('.gs-howto__clip')].filter(v => !v.hidden).length`), 1);
       await welcome.highlight(CLIP);
       await s.pause(1500);
       await s.wb.unhighlight();

@@ -229,6 +229,18 @@ export const GETTING_STARTED_SHOWN_KEY = 'erdStudio.gettingStartedShown';
 export const GETTING_STARTED_PENDING_KEY = 'erdStudio.gettingStartedPending';
 
 /**
+ * Set as activation starts. The walkthrough's `when` is
+ * `workspaceFolderCount == 0 || erdStudio.activated`: VS Code opens an
+ * extension's walkthrough the moment it is installed from the Marketplace
+ * (`workbench.welcomePage.walkthroughs.openOnInstall`) only when its `when`
+ * holds, so in a folder it no longer opens on install beside the start
+ * suggestion (two interruptions in the first minute; Draft-first §3.4: the
+ * walkthrough opens by itself only with no folder open). It is listed (the
+ * Welcome page, Welcome: Open Walkthrough…) once ERD Studio has activated.
+ */
+export const WALKTHROUGH_READY_CONTEXT_KEY = 'erdStudio.activated';
+
+/**
  * globalState: the Welcome panel has already opened once in a window with no
  * dbt project. It does not clear the pending flag — the panel still opens
  * once more in the first dbt project, where its setup steps can actually run
@@ -1069,6 +1081,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // The ERD Studio output channel (a LogOutputChannel: the user picks its
   // level). Plugged in first so every later line reaches it.
   const activationStart = Date.now();
+  // The walkthrough is listed from now on (its `when`, WALKTHROUGH_READY_CONTEXT_KEY).
+  void vscode.commands.executeCommand('setContext', WALKTHROUGH_READY_CONTEXT_KEY, true);
   const outputChannel = vscode.window.createOutputChannel(LOG_CHANNEL_NAME, { log: true });
   setLogSink(outputChannel);
   context.subscriptions.push(outputChannel, { dispose: () => { setLogSink(undefined); } });

@@ -31,7 +31,13 @@ export const sel = {
   quickPickRow: (label) => `[...document.querySelectorAll('.quick-input-widget .monaco-list-row')].find(r => ((r.querySelector('.label-name')?.textContent ?? r.getAttribute('aria-label') ?? '').trim()).startsWith(${q(label)}))`,
   quickInputButton: (text) => `[...document.querySelectorAll('.quick-input-widget .monaco-button')].find(b => b.textContent.trim() === ${q(text)})`,
   tab: (label) => `[...document.querySelectorAll('.tabs-container .tab')].find(t => (t.getAttribute('aria-label') ?? '').split(',')[0].trim() === ${q(label)})`,
-  commandCenter: `document.querySelector('.command-center .command-center-center, .command-center-center')`,
+  /**
+   * The Command Center's search box, the visible one: with chat on (a realistic
+   * profile) VS Code draws the agents bar's pill in its place, whose label opens the same Quick Open.
+   */
+  commandCenter: `[...document.querySelectorAll('.command-center .command-center-center, .command-center-center, .agent-status-label')].find(e => { const r=e.getBoundingClientRect(); return r.width > 0 && r.height > 0; })`,
+  /** A view's collapsible header in the side bar (e.g. 'Help & Feedback'), by its title. */
+  viewHeader: (title) => `[...document.querySelectorAll('.part.sidebar .pane-header')].find(h => (h.querySelector('h3.title')?.textContent ?? '').trim().toUpperCase() === ${q(title)}.toUpperCase())`,
   /** A row of a tree in the side bar (the Diagrams view, the Table Library, the Explorer), by its label. */
   sidebarRow: (label) => `[...document.querySelectorAll('.part.sidebar .monaco-list-row')].find(r => (r.querySelector('.label-name')?.textContent ?? '').trim() === ${q(label)})`,
   /** A modal dialog (window.dialogStyle: custom draws it in the page). */
@@ -52,6 +58,30 @@ export const sel = {
 export class VSCodeUI {
   constructor(wb) {
     this.wb = wb;
+  }
+
+  /**
+   * A brand-new VS Code profile opens on VS Code's own first-launch welcome
+   * (a modal: sign in to Copilot, pick a theme). Someone installing ERD Studio
+   * answered it long ago, so a realistic story closes it before its clock
+   * starts. Resolves how many it closed.
+   */
+  async dismissVSCodeFirstLaunch({ waitMs = 4000 } = {}) {
+    const OVERLAY = `document.querySelector('.onboarding-a-overlay.visible')`;
+    const until = Date.now() + waitMs;
+    let closed = 0;
+    while (Date.now() < until && closed < 5) {
+      if (await this.wb.ev(`!!${OVERLAY}`).catch(() => false)) {
+        await this.wb.ev(`(${OVERLAY}.querySelector('.onboarding-a-close-btn')?.click(), true)`);
+        closed++;
+        await sleep(400);
+        if (!(await this.wb.ev(`!!${OVERLAY}`).catch(() => false))) return closed;
+      } else if (closed > 0) {
+        return closed;
+      }
+      await sleep(250);
+    }
+    return closed;
   }
 
   /** Open a view container from the activity bar (e.g. 'ERD Studio'). */

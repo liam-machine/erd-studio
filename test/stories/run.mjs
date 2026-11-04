@@ -30,7 +30,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { sleep } from './lib/act.mjs';
-import { REPO, buildExtension, killByProfile, launchVSCode, shortTempDir, stageExtension } from './lib/launch.mjs';
+import { REPO, buildExtension, killByProfile, launchVSCode, packageVsix, shortTempDir, stageExtension } from './lib/launch.mjs';
 import { Recorder } from './lib/recorder.mjs';
 import { PACES, StepFailure, StoryContext, failureScreenshot } from './lib/story.mjs';
 import { CLIPS, CLIP_DIR, publishClip, titleCard } from './lib/publish.mjs';
@@ -109,7 +109,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 }
 process.on('exit', () => { killAll(); removeTemps(); });
 
-async function runOne({ def, file }, { extDir, opts }) {
+async function runOne({ def, file }, { extDir, vsix, opts }) {
   const pace = opts.slow ? PACES.slow : opts.record && opts.narrate ? PACES.narrate : opts.record ? PACES.record : PACES.fast;
   const logFile = path.join(OUT, `${def.id}.log`);
   for (const f of fs.readdirSync(OUT)) if (f === `${def.id}.mp4` || f.startsWith(`${def.id}.`) || f.startsWith(`${def.id}-`)) fs.rmSync(path.join(OUT, f), { recursive: true, force: true });
@@ -128,14 +128,27 @@ async function runOne({ def, file }, { extDir, opts }) {
   const marks = [];
   try {
     const workspace = await prepareWorkspace(def.workspace, home);
+    if (def.realistic) {
+      // As from the Marketplace: the packaged VSIX, downloaded, installed in the window by the story.
+      if (!vsix) throw new Error('no VSIX to install (packaging failed: see the runner\'s output)');
+      fs.mkdirSync(path.join(home, 'Downloads'), { recursive: true });
+      fs.copyFileSync(vsix, path.join(home, 'Downloads/erd-studio.vsix'));
+    }
     live.add(path.join(root, 'ud'));
-    handle = await launchVSCode({ extDir, folder: workspace, root, settings: def.settings, logFile: path.join(root, 'code.log') });
+    handle = await launchVSCode({ extDir: def.realistic ? undefined : extDir, folder: workspace, root, settings: def.settings, logFile: path.join(root, 'code.log'), realistic: def.realistic });
     const port = handle.port;
-    log(`profile ${root}, port ${port}, workspace ${workspace ?? '(empty window)'}`);
+    log(`profile ${root}, port ${port}, workspace ${workspace ?? '(empty window)'}${def.realistic ? ', realistic (no ERD Studio until the story installs it)' : ''}`);
     ctx = new StoryContext({ def, port, home, workspace, marks, pace, log, outDir: OUT });
+    if (def.realistic) {
+      // VS Code's own first launch of a brand-new profile (sign in, theme) was answered long
+      // before anyone installs ERD Studio: closed before the story, and its clock, start.
+      const closed = await ctx.ui.dismissVSCodeFirstLaunch({ waitMs: 8000 });
+      log(`closed VS Code's first-launch welcome (${closed})`);
+    }
     if (opts.record) {
       recorder = new Recorder({ port, dir: path.join(root, 'frames') });
       recorder.start();
+      ctx.wb.recorder = recorder;
       await ctx.eventually(() => recorder.frames.length > 0, { timeout: 15000, message: 'the recorder took no frames' });
     }
     // A clip recorded to publish opens on words for the viewer, never the persona (publish.mjs titleCard).
@@ -159,6 +172,8 @@ async function runOne({ def, file }, { extDir, opts }) {
     }
   } finally {
     result.steps = ctx?.steps ?? [];
+    ctx?.noise.stop();
+    if (ctx?.noise.events.length) result.interruptions = ctx.noise.events;
     if (recorder) {
       const frames = await recorder.stop(pace.tail);
       try {
@@ -266,12 +281,22 @@ async function main() {
   buildExtension({ skip: !opts.build });
   const extRoot = tempDir('erds-ext-', false);
   const extDir = stageExtension(path.join(extRoot, 'ext'));
+  // The first-60-seconds stories install the extension as from the Marketplace: package it once.
+  let vsix;
+  if (stories.some((s) => s.def.realistic)) {
+    try {
+      vsix = packageVsix(path.join(extRoot, 'erd-studio.vsix'));
+      console.log(`[stories] packaged ${path.relative(extRoot, vsix)} for the realistic stories`);
+    } catch (e) {
+      console.log(`[stories] could not package the VSIX: ${e.message}`);
+    }
+  }
 
   const results = [];
   try {
     for (const s of stories) {
       process.stdout.write(`[stories] ${s.def.id} … `);
-      const r = await runOne(s, { extDir, opts });
+      const r = await runOne(s, { extDir, vsix, opts });
       results.push(r);
       const secs = (r.durationMs / 1000).toFixed(1);
       if (r.status === 'passed') console.log(`PASS (${secs} s)${r.video ? `  ${r.video} (${r.seconds} s${r.narration ? ', narrated' : ''})` : ''}`);

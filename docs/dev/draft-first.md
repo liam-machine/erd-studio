@@ -136,7 +136,7 @@ The **nothing-found notification** (`runNothingFoundPrompt`) is removed: a folde
 
 ### 3.4 The rest of the prompt drip
 
-- **The walkthrough auto-opens only in an empty window** (no folder). In a folder the draft takes its place: a find's draft, or the example draft. It is never opened in a folder whose start was offered or declined. It stays reachable (Help & Feedback, VS Code's Welcome page, the palette).
+- **The walkthrough auto-opens only in an empty window** (no folder). In a folder the draft takes its place: a find's draft, or the example draft. It is never opened in a folder whose start was offered or declined. It stays reachable (Help & Feedback, VS Code's Welcome page, the palette). This includes VS Code's own open-on-install: the walkthrough's `when` (`workspaceFolderCount == 0 || erdStudio.activated`) keeps a Marketplace install in a folder from opening it beside the start suggestion; the first-60-seconds stories hold every workspace to one interruption.
 - **Keep marks the folder as started**: `DIAGRAMS_NUDGE_SHOWN_KEY` is set (no "This project has 1 ERD Studio diagram" about the diagram just made) and the suggestion is `answered`.
 - **An example project's new window** (`takePendingExample`) claims the gate (kind `exampleOpen`), so the AI helper offer never covers its first canvas.
 - A draft open in the window holds the gate: nothing else pops over it.
