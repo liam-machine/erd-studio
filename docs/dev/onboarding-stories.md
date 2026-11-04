@@ -29,7 +29,7 @@ test/stories/
 │   ├── publish.mjs         ← --publish: recorded stories → media/onboarding/stories/<clip>.mp4
 │   ├── draft.mjs           ← the draft preview's selectors and helpers (waitForDraft, chooseScope, …)
 │   ├── noise.mjs           ← interruptions nobody asked for (the first-60-seconds stories)
-│   ├── firstMinute.mjs     ← the steps stories 15–22 share (install, the one interruption, the quiet minute)
+│   ├── firstMinute.mjs     ← the steps stories 15–22 and 27 share (install, the one interruption, the quiet minute)
 │   └── workspaces.mjs      ← the folder a story opens, copied fresh each run
 ├── workspaces/plain/       ← a folder with only a README
 ├── stories/NN-<id>.story.mjs ← one per new-starter journey (below)
@@ -72,6 +72,11 @@ doubles as "watch how" help for that start.
 | 20 | `first-minute-pre-2-0-project` | *Realistic.* A pre-2.0 project → install → the opening notice, **Convert to DBML…** first (the one interruption) → one click: the Convert panel, nothing written → nothing else |
 | 21 | `first-minute-existing-diagrams` | *Realistic.* A clone of `docs/examples/kimball-bus-matrix` → install → "This project has 4 ERD Studio diagrams." (the one interruption) → one click on its **Open …**: the canvas → nothing else |
 | 22 | `first-minute-query-only-sql` | *Realistic.* SQL queries only (SELECTs, a CTE, an INSERT … SELECT; no CREATE TABLE) → install → nothing pops up (no "found CREATE TABLE scripts") → one click on the ERD Studio icon: the example draft → no interruption at all |
+| 23 | `draft-change-options` | CREATE TABLE scripts in a project with two layers (Main, Reporting) → **Show Me** → **Draft: sales** in Reporting → the banner's **Change options…** → the scripts (both picked), the dialect (PostgreSQL first), the layer (Reporting first; Main picked), the name ("Shop Orders") → **Draft: shop-orders** saving to `main/diagrams/shop-orders.dbml`, nothing on disk → **Keep as Diagram** → saved there, nothing under Reporting |
+| 24 | `draft-redraws-when-files-change` | **Draft: sales** open → an outside write (an assistant, a git pull) adds `dim_customer` with a `loyalty_tier` column to `.erd-studio/` → **Keep as Diagram** saves nothing: the draft is redrawn with "Your files changed, so the draft was redrawn. Check it and keep it again." and draws the project's `dim_customer` ("1 table is already in your Table Library…") → **Keep as Diagram** → saved; the table file keeps `loyalty_tier`. (Staleness watches `.erd-studio/`, not the source scripts: an edited `.sql` is not picked up while the draft is open.) |
+| 25 | `migrations-applied` | Flyway migrations (`test/fixtures/sql-ddl/flyway`: V1 creates three tables, V2 renames a column, adds two and a foreign key to an added one) → the start suggestion (3 tables) → **Draft: orders-service**: the final columns (`email_address`, no `email`; `loyalty_tier`; `product_id`) and both relationships → **Keep as Diagram** → the same on disk |
+| 26 | `dbt-found-from-models-folder` | Only `models/` of the dbt fixture opened (`dbt_project.yml` one folder up, outside the window) → "…found a dbt project in this folder…" anyway (upward discovery), **Draw from dbt** the one button → **Show Me** → **Draft: gold** → **Keep as Diagram** → written to the dbt project's own `.erd-studio/`, not `models/` |
+| 27 | `not-fooled-by-lookalikes` | *Realistic.* dbt macros with no dbt project (one with a `create table … (` column list), a CTAS in `analyses/`, an ERD Studio DBML export; no real DDL → install → nothing pops up → one click on the ERD Studio icon: the example draft → **Bring In Your Data Model…**: the guide, no "Found in this folder" or dbt card → no interruption at all |
 
 **The start suggestion (the popup).** A folder ERD Studio can model (SQL
 scripts, a semantic model, a DBML file, a dbt project) gets one notification
@@ -79,7 +84,7 @@ as its window's activation prompt, once per folder: "… Show them as a
 diagram? Nothing is saved until you keep it." with **Show Me** (the draft)
 and **Don't Ask Again for This Folder**. A folder with nothing found gets no
 notification: the ERD Studio icon opens the example draft, once per machine.
-Stories about the popup (04, 06, 07, 11, 12, 17–19) wait for it with
+Stories about the popup (04, 06, 07, 11, 12, 17–19, 23–26) wait for it with
 `s.ui.waitForNotification(text)` and press its buttons with
 `s.ui.notificationButton(text, label)`; every other story with a folder turns
 suggestions off with the story's `settings` (written into the profile's user
@@ -233,7 +238,7 @@ workspace: { name: 'analytics', from: 'test/fixtures/dbt-project', skip: ['.erd-
 
 `from` is copied as the folder (minus the top-level names in `skip`), `add`
 maps a path in the folder to a repo file or folder, and an optional `fill(dir)`
-runs last. The copy goes inside the story's temp HOME
+runs last. `open: 'models'` opens that sub-folder instead (`s.workspace` is it; story 26). The copy goes inside the story's temp HOME
 (`/tmp/erds-…/home/<name>`), so dialogs start in a clean folder, never your
 home.
 
@@ -307,7 +312,7 @@ Convert row and notice of a project from before 2.0 (08) likewise.
 Stories 15–22 are one per kind of workspace a new user opens (no folder, an
 empty folder, SQL scripts, a Power BI / Fabric model, a dbt project, a
 project from before 2.0, a project with diagrams, a repository of SQL
-queries). Each proves two things about the first minute after ERD Studio is
+queries; 27: SQL lookalikes). Each proves two things about the first minute after ERD Studio is
 installed: **ERD Studio interrupts at most once** (its own notifications,
 tabs, modals and quick picks, and VS Code's on its behalf: the walkthrough it
 opens on install), and **the draft, or the right next step, is one click
