@@ -473,6 +473,20 @@ const FEATURES = [
   'guideSkippedOnCanvas',
   'guideStarClicked',
   'guideAiHelperClicked',
+  // Each step the first time it shows in a run (a step-by-step funnel), Back,
+  // and a draft left (Discard or its tab closed) while the guide ran on it.
+  'guideStepDraftBanner',
+  'guideStepDraftMoreWays',
+  'guideStepDraftKeep',
+  'guideStepCanvasTable',
+  'guideStepCanvasRelationship',
+  'guideStepCanvasToolbar',
+  'guideStepCanvasStages',
+  'guideStepCanvasSidebar',
+  'guideStepCanvasFiles',
+  'guideStepCanvasFinish',
+  'guideBack',
+  'guideLeftDraft',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

@@ -633,6 +633,10 @@ describe('allowlists agree with the Worker', () => {
     expect(FEATURES.slice(at)).toEqual([
       'guideStarted', 'guideStartedFromCommand', 'guideDraftDone', 'guideCanvasStarted', 'guideCompleted',
       'guideSkippedOnDraft', 'guideSkippedOnCanvas', 'guideStarClicked', 'guideAiHelperClicked',
+      'guideStepDraftBanner', 'guideStepDraftMoreWays', 'guideStepDraftKeep',
+      'guideStepCanvasTable', 'guideStepCanvasRelationship', 'guideStepCanvasToolbar', 'guideStepCanvasStages',
+      'guideStepCanvasSidebar', 'guideStepCanvasFiles', 'guideStepCanvasFinish',
+      'guideBack', 'guideLeftDraft',
     ]);
     // The no-longer-sent clip key stays listed (append-only).
     expect(FEATURES).toContain('howToClipPlayed');

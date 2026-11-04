@@ -16,6 +16,7 @@ import {
   GUIDE_DEFERRED_PROMPTS,
   GUIDE_REVEAL_SIDEBAR_COMMAND,
   GUIDE_STAR_URL,
+  GUIDE_STEP_FEATURES,
   OnboardingGuide,
   guideDefersPrompt,
   type OnboardingGuideDeps,
@@ -26,7 +27,8 @@ import { validateGuidePayload } from '../../src/providers/payloadValidation';
 import { ACTIVATION_PROMPT_PRIORITY, SessionPromptGate } from '../../src/services/activationPrompts';
 import { GITHUB_REPO } from '../../src/services/feedbackService';
 import { draftAllowance, isDraftToWebview, parseDraftToHost, type Draft, type DraftSource, type DraftTrigger, type DraftView } from '../../src/types/draft';
-import type { GuideStatus } from '../../src/types/onboardingGuide';
+import { GUIDE_STEP_IDS, type GuideStatus } from '../../src/types/onboardingGuide';
+import { FEATURES } from '../../src/services/telemetryPayload';
 import { fakeDraftPreview, type ScriptedAnswer } from './helpers/draftDriver';
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -96,14 +98,73 @@ describe('the fixed effects of each action id', () => {
     expect(pkg.contributes.commands.map((c) => c.command)).toContain('erdStudio.showMeAround');
   });
 
-  it('Done finishes once; a step is only logged', () => {
+  it('Done finishes once; a step only counts its own key', () => {
     const h = host('draft');
     h.guide.takeCanvas();
     h.guide.onCanvasAction({ action: 'step', step: 'canvasTable' });
     h.guide.onCanvasAction({ action: 'complete' });
     h.guide.onCanvasAction({ action: 'complete' });
     expect(h.features.filter((f) => f === 'guideCompleted')).toHaveLength(1);
+    expect(h.features).toEqual(['guideCanvasStarted', 'guideStepCanvasTable', 'guideCompleted']);
     expect(h.status()).toBe('done');
+  });
+});
+
+describe('where people stop: a step-by-step funnel', () => {
+  it('every step has its own allowlisted key, in the steps\' order', () => {
+    expect(Object.keys(GUIDE_STEP_FEATURES)).toEqual([...GUIDE_STEP_IDS]);
+    for (const key of Object.values(GUIDE_STEP_FEATURES)) expect(FEATURES).toContain(key);
+    expect(new Set(Object.values(GUIDE_STEP_FEATURES)).size).toBe(GUIDE_STEP_IDS.length);
+  });
+
+  it('each step counts once a run, however often Back and Next show it; Back counts guideBack', () => {
+    const h = host();
+    h.guide.takeDraft(sqlDraft());
+    for (const step of ['draftBanner', 'draftMoreWays', 'draftBanner', 'draftMoreWays', 'draftKeep'] as const) h.guide.onDraftAction({ action: 'step', step });
+    expect(h.features).toEqual(['guideStarted', 'guideStepDraftBanner', 'guideStepDraftMoreWays', 'guideBack', 'guideStepDraftKeep']);
+  });
+
+  it('a run that stops part-way leaves the steps it reached: the next step\'s key is missing', () => {
+    const h = host('draft');
+    h.guide.takeCanvas();
+    for (const step of ['canvasTable', 'canvasRelationship', 'canvasToolbar'] as const) h.guide.onCanvasAction({ action: 'step', step });
+    h.guide.onCanvasAction({ action: 'skip' });
+    expect(h.features).toEqual(['guideCanvasStarted', 'guideStepCanvasTable', 'guideStepCanvasRelationship', 'guideStepCanvasToolbar', 'guideSkippedOnCanvas']);
+  });
+
+  it('the draft part then the canvas part in one window: Keep is not Back', () => {
+    const h = host();
+    const draft = sqlDraft();
+    h.guide.takeDraft(draft);
+    h.guide.onDraftAction({ action: 'step', step: 'draftKeep' });
+    h.guide.draftKept(draft);
+    h.guide.takeCanvas();
+    h.guide.onCanvasAction({ action: 'step', step: 'canvasTable' });
+    expect(h.features).not.toContain('guideBack');
+    expect(h.features).toContain('guideStepCanvasTable');
+  });
+
+  it('Show Me Around starts a new run: its steps count again', () => {
+    const h = host('done');
+    h.guide.startOnCanvas();
+    h.guide.onCanvasAction({ action: 'step', step: 'canvasTable' });
+    h.guide.onCanvasAction({ action: 'complete' });
+    h.guide.startOnCanvas();
+    h.guide.onCanvasAction({ action: 'step', step: 'canvasTable' });
+    expect(h.features.filter((f) => f === 'guideStepCanvasTable')).toHaveLength(2);
+    expect(h.features).not.toContain('guideBack');
+  });
+
+  it('Discard or a closed tab while the guide runs on the draft counts guideLeftDraft; without the guide it does not', () => {
+    const h = host();
+    const draft = sqlDraft();
+    h.guide.takeDraft(draft);
+    h.guide.draftLeft(draft);
+    h.guide.draftLeft(draft);
+    expect(h.features.filter((f) => f === 'guideLeftDraft')).toHaveLength(1);
+    const later = host('skipped');
+    later.guide.draftLeft(sqlDraft());
+    expect(later.features).toEqual([]);
   });
 });
 
@@ -283,7 +344,8 @@ describe('in the shared draft preview', () => {
     await w.preview.ask(sqlDraft());
     await w.preview.ask(sqlDraft('changeOptions'));
     expect(w.startGuide).toHaveBeenCalledTimes(2);
-    expect(w.h.features).toEqual(['guideStarted']);
+    // One run (started once); its second draft was closed while the guide ran on it.
+    expect(w.h.features).toEqual(['guideStarted', 'guideLeftDraft']);
   });
 
   it('a later draft on a machine that has had the guide gets none', async () => {

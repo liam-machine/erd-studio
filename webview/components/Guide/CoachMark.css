@@ -128,6 +128,73 @@
   background: var(--button-hover-bg);
 }
 
+/* Star on GitHub: GitHub's gold, with its star, so it reads as the thing to press. */
+.guide-mark__button--star {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  padding: 5px 14px;
+  border: 1px solid var(--star-gold-dark);
+  border-radius: 6px;
+  background: linear-gradient(180deg, var(--star-gold-light), var(--star-gold));
+  color: var(--star-gold-fg);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 1px 6px var(--star-gold-glow);
+}
+
+.guide-mark__button--star:hover {
+  background: linear-gradient(180deg, var(--star-gold-light), var(--star-gold-dark));
+  box-shadow: 0 2px 12px var(--star-gold-glow);
+}
+
+.guide-mark__button.guide-mark__button--star:focus-visible {
+  outline: 2px solid var(--star-gold);
+  outline-offset: 2px;
+}
+
+.guide-mark__star-icon {
+  flex: none;
+  fill: currentColor;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .guide-mark__button--star {
+    transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+  }
+
+  .guide-mark__button--star:hover {
+    transform: translateY(-1px);
+  }
+
+  /* One shine across the button when the step shows, and the star's small pop. */
+  .guide-mark__button--star::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(110deg, transparent 30%, var(--star-gold-shine) 50%, transparent 70%);
+    transform: translateX(-120%);
+    animation: guide-star-shine 1.1s ease-out 0.5s 1 forwards;
+    pointer-events: none;
+  }
+
+  .guide-mark__star-icon {
+    animation: guide-star-pop 0.5s ease-out 0.4s 1 both;
+  }
+}
+
+@keyframes guide-star-shine {
+  to { transform: translateX(120%); }
+}
+
+@keyframes guide-star-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.35) rotate(-12deg); }
+  100% { transform: scale(1); }
+}
+
 .guide-mark__button:focus-visible,
 .guide-mark__skip:focus-visible {
   outline: 1px solid var(--focus-border);

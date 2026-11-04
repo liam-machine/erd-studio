@@ -136,6 +136,27 @@ describe('the callout', () => {
     expect(labels).toEqual(['Back', 'Next', 'Skip guide']);
   });
 
+  it('draws Star on GitHub in GitHub\'s gold, with its star icon; other buttons keep the plain look', () => {
+    renderMark({ buttons: [{ label: 'Star on GitHub', primary: true, star: true, onClick: vi.fn() }, { label: 'Other', onClick: vi.fn() }] });
+    const star = screen.getByRole('button', { name: 'Star on GitHub' });
+    expect(star.className).toContain('guide-mark__button--star');
+    expect(star.className).not.toContain('guide-mark__button--primary');
+    expect(star.querySelector('svg.guide-mark__star-icon[aria-hidden="true"]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Other' }).querySelector('svg')).toBeNull();
+  });
+
+  it('the gold comes only from theme variables, and the shine and pop only move without reduced motion', () => {
+    const css = fs.readFileSync(path.join(__dirname, '../../webview/components/Guide/CoachMark.css'), 'utf8');
+    const star = css.slice(css.indexOf('.guide-mark__button--star {'), css.indexOf('.guide-mark__button:focus-visible,'));
+    expect(star).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
+    expect(star).toContain('var(--star-gold');
+    const theme = fs.readFileSync(path.join(__dirname, '../../packages/renderer/src/styles/theme.css'), 'utf8');
+    for (const v of ['--star-gold:', '--star-gold-light:', '--star-gold-dark:', '--star-gold-fg:', '--star-gold-glow:', '--star-gold-shine:']) expect(theme).toContain(v);
+    const motion = css.slice(css.indexOf('@media (prefers-reduced-motion: no-preference) {\n  .guide-mark__button--star'));
+    expect(motion).toContain('animation: guide-star-shine');
+    expect(css.slice(0, css.indexOf('@media (prefers-reduced-motion: no-preference) {\n  .guide-mark__button--star'))).not.toMatch(/animation:/);
+  });
+
   it('puts the focus on the step\'s primary button when it has one (Star on GitHub)', () => {
     renderMark({ buttons: [{ label: 'Star on GitHub', primary: true, onClick: vi.fn() }], next: { label: 'Done', onClick: vi.fn(), quiet: true } });
     expect(document.activeElement?.textContent).toBe('Star on GitHub');
@@ -340,6 +361,7 @@ describe('phase B on the canvas', () => {
     expect(guideMessages()).toContainEqual({ action: 'revealSidebar' });
     expect(guideMessages().filter((m) => m.action === 'revealSidebar')).toHaveLength(1);
     expect(screen.getByRole('dialog').textContent).toContain("You're set up. If ERD Studio helps you, a star on GitHub helps other modellers find it.");
+    expect(screen.getByRole('button', { name: 'Star on GitHub' }).className).toContain('guide-mark__button--star');
   });
 
   it('in a dbt project, the Logical / Physical step is there', () => {

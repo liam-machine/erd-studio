@@ -26,12 +26,14 @@
 
 import { GITHUB_REPO } from '../types/feedback';
 import {
+  GUIDE_STEP_IDS,
   guideCanvasDue,
   guideCanvasOwed,
   guideDraftDue,
   type CanvasGuideStart,
   type GuideActionPayload,
   type GuideStatus,
+  type GuideStepId,
 } from '../types/onboardingGuide';
 import type { Draft, DraftGuideStart } from '../types/draft';
 import type { SessionPromptKind } from '../services/activationPrompts';
@@ -43,6 +45,25 @@ export const GUIDE_STAR_URL = `https://github.com/${GITHUB_REPO}`;
 export const GUIDE_AI_HELPER_COMMAND = 'erdStudio.setupAiHelper';
 /** The sidebar step: VS Code's own command that shows the ERD Studio view container (`erd-studio` in package.json). */
 export const GUIDE_REVEAL_SIDEBAR_COMMAND = 'workbench.view.extension.erd-studio';
+
+/**
+ * The key each step counts the first time it shows in a run, so the counts
+ * read as a step-by-step funnel: the fall from one step's installs to the
+ * next is where people stop (Skip guide, or the tab or window closed).
+ * Fixed ids only, never a table name or a count.
+ */
+export const GUIDE_STEP_FEATURES: Readonly<Record<GuideStepId, TelemetryFeature>> = {
+  draftBanner: 'guideStepDraftBanner',
+  draftMoreWays: 'guideStepDraftMoreWays',
+  draftKeep: 'guideStepDraftKeep',
+  canvasTable: 'guideStepCanvasTable',
+  canvasRelationship: 'guideStepCanvasRelationship',
+  canvasToolbar: 'guideStepCanvasToolbar',
+  canvasStages: 'guideStepCanvasStages',
+  canvasSidebar: 'guideStepCanvasSidebar',
+  canvasFiles: 'guideStepCanvasFiles',
+  canvasFinish: 'guideStepCanvasFinish',
+};
 
 /**
  * Activation prompts held back while phase B is owed (they keep their own
@@ -83,6 +104,10 @@ export class OnboardingGuide {
   private draftActive = false;
   /** Phase B is running in this window. */
   private canvasActive = false;
+  /** The steps already counted in this run (each counts once, however often Back and Next show it). */
+  private stepsSeen = new Set<GuideStepId>();
+  /** The step on show, to tell Back (an earlier step next) from Next. */
+  private lastStep: GuideStepId | undefined;
 
   constructor(private readonly deps: OnboardingGuideDeps) {}
 
@@ -111,6 +136,8 @@ export class OnboardingGuide {
 
   /** Counted once per run: the guide began (`guideStarted`, and `guideStartedFromCommand` when the command asked). */
   private started(fromCommand: boolean): void {
+    this.stepsSeen = new Set();
+    this.lastStep = undefined;
     this.deps.feature('guideStarted');
     if (fromCommand) this.deps.feature('guideStartedFromCommand');
   }
@@ -153,13 +180,28 @@ export class OnboardingGuide {
 
   /** Discard, or the tab closed: phase A stops (phase B is still owed). */
   draftLeft(_draft: Draft): void {
+    if (this.draftActive) this.deps.feature('guideLeftDraft');
     this.draftActive = false;
+  }
+
+  /**
+   * A step showed: its key the first time in this run, and `guideBack` when
+   * it comes before the step that was on show (Back was pressed).
+   */
+  private stepShown(step: GuideStepId): void {
+    this.deps.log?.(`Onboarding guide: step ${step}`);
+    const previous = this.lastStep;
+    this.lastStep = step;
+    if (previous !== undefined && GUIDE_STEP_IDS.indexOf(step) < GUIDE_STEP_IDS.indexOf(previous)) this.deps.feature('guideBack');
+    if (this.stepsSeen.has(step)) return;
+    this.stepsSeen.add(step);
+    this.deps.feature(GUIDE_STEP_FEATURES[step]);
   }
 
   /** A guide message from the draft page (`step` or `skip`). */
   onDraftAction(action: GuideActionPayload): void {
     if (action.action === 'step') {
-      this.deps.log?.(`Onboarding guide: step ${action.step}`);
+      if (action.step) this.stepShown(action.step);
       return;
     }
     if (action.action === 'skip') {
@@ -204,7 +246,7 @@ export class OnboardingGuide {
   onCanvasAction(action: GuideActionPayload): void {
     switch (action.action) {
       case 'step':
-        this.deps.log?.(`Onboarding guide: step ${action.step}`);
+        if (action.step) this.stepShown(action.step);
         return;
       case 'revealSidebar':
         this.run(GUIDE_REVEAL_SIDEBAR_COMMAND);

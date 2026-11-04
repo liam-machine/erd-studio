@@ -176,7 +176,7 @@ export function CanvasGuide({ start, onEnd }: CanvasGuideProps) {
   if (!steps || !step) return null;
   const at = steps.indexOf(step);
   const buttons = (step.buttons ?? []).map((b) => (b.action === 'star'
-    ? { label: b.label, primary: true, onClick: () => end('star') }
+    ? { label: b.label, primary: true, star: true, onClick: () => end('star') }
     : { label: b.label, onClick: () => post('aiHelper') }));
 
   return (
