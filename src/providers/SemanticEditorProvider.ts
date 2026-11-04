@@ -2409,9 +2409,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey);
     });
 
+    // The onboarding trail: the canvas went behind another tab and came back, or closed.
+    const viewStateSubscription = webviewPanel.onDidChangeViewState((e) => telemetry.canvasVisible(panelKey, e.webviewPanel.visible));
     webviewPanel.onDidDispose(() => {
       messageSubscription.dispose();
       changeSubscription.dispose();
+      viewStateSubscription.dispose();
+      telemetry.canvasClosed(panelKey);
       this.forgetPanel(panelKey, webviewPanel.webview);
       this.backwardsDrawn.delete(document.uri.toString());
     });

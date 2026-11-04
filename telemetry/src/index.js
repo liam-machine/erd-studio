@@ -146,6 +146,27 @@ const PLATFORMS = [
   'duckdb', 'spark', 'trino', 'athena', 'mysql', 'oracle', 'clickhouse', 'other',
 ];
 
+/**
+ * The onboarding trail's own events (the extension's `TRAIL_MARKERS`), beside
+ * every FEATURES key and ERROR_CODES code. Append-only, in the same order.
+ */
+const TRAIL_MARKERS = [
+  'windowOpened',
+  'windowClosed',
+  'windowAway',
+  'windowBack',
+  'canvasOpened',
+  'canvasClosed',
+  'canvasHidden',
+  'canvasShown',
+];
+/** The trail's limits (the extension's MAX_TRAIL, MAX_TRAIL_GAP_S, MAX_TRAIL_WINDOWS, MAX_COUNTER, MAX_TRAIL_DROPPED). */
+const MAX_TRAIL = 100;
+const MAX_TRAIL_GAP_S = 3600;
+const MAX_TRAIL_WINDOWS = 20;
+const MAX_TRAIL_REPEAT = 100;
+const MAX_TRAIL_DROPPED = 10000;
+
 /** Array fields keep this order when stored, whatever order the client sent. */
 const STAGES = ['logical', 'physical'];
 const SCHEMA_FORMATS = ['v5', 'v4'];
@@ -587,6 +608,9 @@ const ERROR_CODES = [
   'draftLayoutFailed',
 ];
 
+/** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */
+const TRAIL_EVENTS = new Set([...TRAIL_MARKERS, ...FEATURES, ...ERROR_CODES.map((code) => `!${code}`)]);
+
 /**
  * Last write wins for a given install and day. The extension sends once per
  * day, so a conflict means a retry after a lost response or a second window
@@ -597,9 +621,9 @@ const UPSERT_SQL = `INSERT INTO heartbeats (
   has_semantic_dir, domain_count, activations, canvas_opens, stages, schema_formats,
   model_count, manifest, catalog, features, errors,
   host, remote, dev, assistants, harnesses, active_days_28, canvas_days_28, first_canvas,
-  physical_tools, platforms
+  physical_tools, platforms, trail, trail_dropped
 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)
+  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)
 ON CONFLICT(install_id, day) DO UPDATE SET
   received_day = excluded.received_day,
   ext_version = excluded.ext_version,
@@ -627,7 +651,9 @@ ON CONFLICT(install_id, day) DO UPDATE SET
   canvas_days_28 = excluded.canvas_days_28,
   first_canvas = excluded.first_canvas,
   physical_tools = excluded.physical_tools,
-  platforms = excluded.platforms`;
+  platforms = excluded.platforms,
+  trail = excluded.trail,
+  trail_dropped = excluded.trail_dropped`;
 
 const RETENTION_SQL = `DELETE FROM heartbeats WHERE received_day < date('now', '-${RETENTION_DAYS} days')`;
 
@@ -762,6 +788,8 @@ async function handleHeartbeat(request, env) {
       heartbeat.firstCanvas,
       heartbeat.physicalTools === null ? null : JSON.stringify(heartbeat.physicalTools),
       heartbeat.platforms === null ? null : JSON.stringify(heartbeat.platforms),
+      heartbeat.trail === null ? null : JSON.stringify(heartbeat.trail),
+      heartbeat.trailDropped,
     )
     .run();
 
@@ -824,6 +852,9 @@ function validateHeartbeat(raw, now) {
   const assistants = b.assistants === undefined ? null : subsetOf(b.assistants, ASSISTANTS);
   const harnesses = b.harnesses === undefined ? null : subsetOf(b.harnesses, HARNESSES);
   if ((b.assistants !== undefined && !assistants) || (b.harnesses !== undefined && !harnesses)) return null;
+  const trail = b.trail === undefined ? null : trailOf(b.trail);
+  if (trail === INVALID) return null;
+  if (b.trailDropped !== undefined && (b.trail === undefined || !isIntIn(b.trailDropped, 0, MAX_TRAIL_DROPPED))) return null;
   const physicalTools = b.physicalTools === undefined ? null : subsetOf(b.physicalTools, PHYSICAL_TOOLS);
   const platforms = b.platforms === undefined ? null : subsetOf(b.platforms, PLATFORMS);
   if ((b.physicalTools !== undefined && !physicalTools) || (b.platforms !== undefined && !platforms)) return null;
@@ -858,7 +889,32 @@ function validateHeartbeat(raw, now) {
     firstCanvas: /** @type {string | null} */ (firstCanvas),
     physicalTools,
     platforms,
+    trail: /** @type {Array<[string, number, number, number]> | null} */ (trail),
+    trailDropped: trail === null ? null : typeof b.trailDropped === 'number' ? b.trailDropped : 0,
   };
+}
+
+/**
+ * The onboarding trail: an array of at most {@link MAX_TRAIL} entries
+ * `[event, gap, window, repeat]`, every value checked. An event this Worker
+ * does not list (from a newer extension) is dropped and the rest keep their
+ * order; anything else malformed refuses the heartbeat ({@link INVALID}).
+ *
+ * @param {unknown} value
+ * @returns {Array<[string, number, number, number]> | typeof INVALID}
+ */
+function trailOf(value) {
+  if (!Array.isArray(value) || value.length > MAX_TRAIL) return INVALID;
+  /** @type {Array<[string, number, number, number]>} */
+  const out = [];
+  for (const entry of value) {
+    if (!Array.isArray(entry) || entry.length !== 4) return INVALID;
+    const [event, gap, window, repeat] = entry;
+    if (typeof event !== 'string' || !/^!?[A-Za-z0-9]{1,64}$/.test(event)) return INVALID;
+    if (!isIntIn(gap, 0, MAX_TRAIL_GAP_S) || !isIntIn(window, 1, MAX_TRAIL_WINDOWS) || !isIntIn(repeat, 1, MAX_TRAIL_REPEAT)) return INVALID;
+    if (TRAIL_EVENTS.has(event)) out.push([event, gap, window, repeat]);
+  }
+  return out;
 }
 
 /** Marks an optional field that is present but invalid. */
@@ -1136,6 +1192,8 @@ function errorName(err) {
  * @property {string | null} firstCanvas
  * @property {string[] | null} physicalTools
  * @property {string[] | null} platforms
+ * @property {Array<[string, number, number, number]> | null} trail
+ * @property {number | null} trailDropped
  */
 
 /**

@@ -198,7 +198,17 @@ export const workspace = {
 /** Every output channel created, oldest first (tests read `_lines` and `_shown`). */
 export const _outputChannels: Array<{ name?: string; _lines: string[]; _shown: number }> = [];
 
+const _windowStateListeners: Array<(e: { focused: boolean }) => void> = [];
+/** Fire `window.onDidChangeWindowState` (the window gained or lost the focus). */
+export function _fireDidChangeWindowState(focused: boolean): void {
+  for (const listener of [..._windowStateListeners]) listener({ focused });
+}
+
 export const window = {
+  onDidChangeWindowState: (listener: (e: { focused: boolean }) => void) => {
+    _windowStateListeners.push(listener);
+    return { dispose: () => { const i = _windowStateListeners.indexOf(listener); if (i >= 0) _windowStateListeners.splice(i, 1); } };
+  },
   showInformationMessage: async () => undefined,
   showWarningMessage: async () => undefined,
   showErrorMessage: async () => undefined,

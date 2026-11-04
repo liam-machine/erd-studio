@@ -561,6 +561,66 @@ export const ERROR_CODES = [
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
+/**
+ * The onboarding trail's own events, beside every {@link FEATURES} key and
+ * {@link ERROR_CODES} code: a window opened (activation) or closed (best
+ * effort: VS Code may not wait for it), the window lost and regained the focus
+ * (another app or VS Code window, only when away 5 s or more), a canvas opened,
+ * closed, or went behind another tab and came back (5 s or more). Append-only;
+ * the Worker keeps the same list in the same order.
+ */
+export const TRAIL_MARKERS = [
+  'windowOpened',
+  'windowClosed',
+  'windowAway',
+  'windowBack',
+  'canvasOpened',
+  'canvasClosed',
+  'canvasHidden',
+  'canvasShown',
+] as const;
+export type TrailMarker = (typeof TRAIL_MARKERS)[number];
+/**
+ * A trail event: a {@link FEATURES} key, an {@link ERROR_CODES} code written
+ * `!code` (a few codes share a feature's name, `layoutFailed`), or a marker.
+ */
+export type TrailEvent = TelemetryFeature | `!${TelemetryErrorCode}` | TrailMarker;
+
+/** The trail's id for an error code. */
+export function trailError(code: TelemetryErrorCode): `!${TelemetryErrorCode}` {
+  return `!${code}`;
+}
+
+/**
+ * One entry of the onboarding trail: `[event, gap, window, repeat]`.
+ * - `event`: a fixed id ({@link TrailEvent}), never a name, path or message;
+ * - `gap`: whole seconds since the trail's previous entry (any window), 0 for
+ *   the day's first, capped at {@link MAX_TRAIL_GAP_S} ("an hour or more");
+ * - `window`: which window it came from, numbered 1, 2, … in the order each
+ *   first added to the day's trail (capped at {@link MAX_TRAIL_WINDOWS});
+ * - `repeat`: the same event again from the same window straight after,
+ *   folded into one entry (a run of `editLayout` while dragging), capped at
+ *   {@link MAX_COUNTER}.
+ * The time spent on a step is the next entry's `gap`.
+ */
+export type TrailEntry = [event: TrailEvent, gap: number, window: number, repeat: number];
+
+/** The trail is kept for an install's first days (and any day the guide runs). */
+export const TRAIL_DAYS = 7;
+/** At most this many entries a day; later ones are only counted (`trailDropped`). */
+export const MAX_TRAIL = 100;
+export const MAX_TRAIL_GAP_S = 3600;
+export const MAX_TRAIL_WINDOWS = 20;
+export const MAX_TRAIL_DROPPED = 10000;
+/** A focus or tab change shorter than this is not news (alt-tab and back). */
+export const TRAIL_AWAY_MIN_MS = 5000;
+
+const TRAIL_EVENT_SET: ReadonlySet<string> = new Set<string>([...TRAIL_MARKERS, ...FEATURES, ...ERROR_CODES.map(trailError)]);
+
+export function isTrailEvent(value: unknown): value is TrailEvent {
+  return typeof value === 'string' && TRAIL_EVENT_SET.has(value);
+}
+
 export type ActivationOutcome = 'project_found' | 'no_project';
 export type TenureBucket = '0' | '1-7' | '8-30' | '31-90' | '90+';
 export type SubjectAreaCountBucket = '0' | '1-3' | '4-10' | '10+';
@@ -697,6 +757,17 @@ export interface DailyCounters {
   physicalTools?: TelemetryPhysicalTool[];
   /** The data platforms found by the same detection (union), on the same terms. */
   platforms?: TelemetryPlatform[];
+  /**
+   * The onboarding trail ({@link recordTrail}): the day's events in order, with
+   * the seconds between them. Absent on a day it was not kept ({@link trailKept}).
+   */
+  trail?: TrailEntry[];
+  /** Entries past {@link MAX_TRAIL}, counted only. */
+  trailDropped?: number;
+  /** Epoch ms of the trail's last entry, for the next gap. Kept on the device; never sent. */
+  trailAt?: number;
+  /** `trailAt` before the last entry, so {@link retractTrail} can put it back. Never sent. */
+  trailPrevAt?: number;
 }
 
 /** The per-day environment facts, as stamped by {@link stampEnv}. */
@@ -764,6 +835,10 @@ export interface HeartbeatBody {
   physicalTools?: TelemetryPhysicalTool[];
   /** Omitted when no detection ran that day. */
   platforms?: TelemetryPlatform[];
+  /** The onboarding trail; omitted on a day it was not kept. */
+  trail?: TrailEntry[];
+  /** With `trail`: entries past its cap, counted only. */
+  trailDropped?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -1097,6 +1172,73 @@ export function recordError(state: DailyCounters, code: TelemetryErrorCode): Dai
   return { ...state, errors: bump(state.errors, code) };
 }
 
+/**
+ * Whether the trail is kept today: an install's first {@link TRAIL_DAYS} days,
+ * a day whose trail has already begun, or the event that begins it anyway
+ * (the guide starting, also on a later day through Show Me Around).
+ */
+export function trailKept(state: DailyCounters, firstSeenDay: string, event: TrailEvent): boolean {
+  if (Array.isArray(state.trail)) return true;
+  if (event === 'guideStarted') return true;
+  const age = daysBetween(firstSeenDay, state.day);
+  return Number.isFinite(age) && age >= 0 && age < TRAIL_DAYS;
+}
+
+/** The window number this window takes in today's trail: one past the highest so far. */
+export function nextTrailWindow(state: DailyCounters): number {
+  const highest = (state.trail ?? []).reduce((m, e) => Math.max(m, e[2]), 0);
+  return Math.min(highest + 1, MAX_TRAIL_WINDOWS);
+}
+
+/**
+ * Add `event` to the day's trail at `now` (epoch ms) from `window`. The same
+ * event from the same window straight after the last entry folds into it
+ * (`repeat`); past {@link MAX_TRAIL} entries it is only counted.
+ */
+export function recordTrail(state: DailyCounters, event: TrailEvent, now: number, window: number): DailyCounters {
+  if (!isTrailEvent(event)) return state;
+  const trail = Array.isArray(state.trail) ? state.trail : [];
+  const w = Math.min(Math.max(1, Math.trunc(window) || 1), MAX_TRAIL_WINDOWS);
+  const last = trail[trail.length - 1];
+  // Fold only straight after: once entries are being dropped, the last kept one is not the previous event.
+  if (last && last[0] === event && last[2] === w && !state.trailDropped) {
+    const folded: TrailEntry = [last[0], last[1], last[2], Math.min(last[3] + 1, MAX_COUNTER)];
+    return { ...state, trail: [...trail.slice(0, -1), folded], trailAt: now };
+  }
+  if (trail.length >= MAX_TRAIL) {
+    return { ...state, trail, trailDropped: Math.min((state.trailDropped ?? 0) + 1, MAX_TRAIL_DROPPED), trailAt: now };
+  }
+  const gap = trail.length === 0 || typeof state.trailAt !== 'number'
+    ? 0
+    : Math.min(Math.max(0, Math.round((now - state.trailAt) / 1000)), MAX_TRAIL_GAP_S);
+  return { ...state, trail: [...trail, [event, gap, w, 1]], trailAt: now, trailPrevAt: state.trailAt };
+}
+
+/**
+ * Take back the trail's last entry when it is `event` from `window` (an away
+ * marker whose return came within {@link TRAIL_AWAY_MIN_MS}): a quick alt-tab
+ * is not news. Anything recorded since leaves the entry where it is.
+ */
+export function retractTrail(state: DailyCounters, event: TrailEvent, window: number): DailyCounters {
+  const trail = state.trail;
+  const last = trail?.[trail.length - 1];
+  if (!trail || !last || last[0] !== event || last[2] !== window) return state;
+  if (last[3] > 1) return { ...state, trail: [...trail.slice(0, -1), [last[0], last[1], last[2], last[3] - 1]] };
+  // The next gap counts from the entry before, as if the marker had never been added.
+  return { ...state, trail: trail.slice(0, -1), trailAt: state.trailPrevAt, trailPrevAt: undefined };
+}
+
+/** The trail as sent: well-formed entries only, rebuilt value by value. */
+function sentTrail(trail: unknown): TrailEntry[] {
+  if (!Array.isArray(trail)) return [];
+  const out: TrailEntry[] = [];
+  for (const e of trail.slice(0, MAX_TRAIL)) {
+    if (!Array.isArray(e) || e.length !== 4 || !isTrailEvent(e[0])) continue;
+    out.push([e[0], clampCount(e[1], MAX_TRAIL_GAP_S), Math.max(1, clampCount(e[2], MAX_TRAIL_WINDOWS)), Math.max(1, clampCount(e[3], MAX_COUNTER))]);
+  }
+  return out;
+}
+
 function addOnce<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list : [...list, value];
 }
@@ -1166,6 +1308,9 @@ export function buildHeartbeat(state: DailyCounters, env: HeartbeatEnv): Heartbe
       ? { physicalTools: PHYSICAL_TOOLS.filter(t => state.physicalTools?.includes(t)) }
       : {}),
     ...(Array.isArray(state.platforms) ? { platforms: PLATFORMS.filter(p => state.platforms?.includes(p)) } : {}),
+    ...(Array.isArray(state.trail)
+      ? { trail: sentTrail(state.trail), trailDropped: clampCount(state.trailDropped ?? 0, MAX_TRAIL_DROPPED) }
+      : {}),
   };
 }
 

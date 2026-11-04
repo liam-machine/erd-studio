@@ -4931,5 +4931,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
-  // Cleanup will be added when services are implemented
+  // The onboarding trail's last entry: best effort, as VS Code may not wait for the write.
+  telemetry.marker('windowClosed');
 }
