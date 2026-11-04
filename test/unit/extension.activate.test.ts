@@ -2662,7 +2662,7 @@ describe('existing-diagrams notice', () => {
     const calls = nudgeCalls(info);
     expect(calls).toHaveLength(1);
     expect(String(calls[0][0])).toMatch(/^This project has \d+ ERD Studio diagrams\.$/);
-    expect(calls[0].slice(1)).toEqual(['Open finance', 'Not now']);
+    expect(calls[0].slice(1)).toEqual(['Open finance', 'Show Me Around', 'Not now']);
     expect(workspaceState.get(DIAGRAMS_NUDGE_SHOWN_KEY)).toBe(true);
     // Choosing it opens that domain in the canvas.
     await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.openDomain', path.join(root, '.erd-studio', 'gold', 'finance.json')));
@@ -2694,12 +2694,55 @@ describe('existing-diagrams notice', () => {
     const diagrams = Number(/has (\d+)/.exec(String(calls[0][0]))![1]);
     expect(String(calls[0][0])).toBe(convertNoticeMessage(diagrams));
     expect(String(calls[0][0])).toContain('DBML, an open format');
-    expect(calls[0].slice(1)).toEqual([CONVERT_NOTICE_BUTTON, 'Open finance']);
+    // Three buttons, no Not now (closing it is not now): Convert first, the diagram, the diagram with the guide.
+    expect(calls[0].slice(1)).toEqual([CONVERT_NOTICE_BUTTON, 'Open finance', 'Show Me Around']);
     await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.convertProjectToDbml'));
     const counted = feature.mock.calls.map((c) => c[0]);
     expect(counted).toContain('diagramsNudgeShown');
     expect(counted).toContain('convertToDbmlOffered');
   });
+
+  for (const variant of ['plain', 'pre-2.0'] as const) {
+    it(`its Show Me Around (${variant}) opens the same diagram and asks for the guide's canvas part there`, async () => {
+      const future = new Date(Date.now() + 60_000);
+      fs.utimesSync(path.join(root, '.erd-studio', 'gold', 'finance.json'), future, future);
+      const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+      if (variant === 'plain') workspaceState.set(DBML_CONVERSION_DECLINED_KEY, true);
+      const globalState = new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]);
+      context = makeContext(root, { workspaceState, globalState });
+      const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
+        (message.startsWith('This project has') ? 'Show Me Around' : undefined)) as never);
+      const feature = vi.spyOn(telemetry, 'feature');
+      const { OnboardingGuide } = await import('../../src/providers/guideWiring');
+      const { SemanticEditorProvider: Provider } = await import('../../src/providers/SemanticEditorProvider');
+      const requestCanvas = vi.spyOn(OnboardingGuide.prototype, 'requestCanvas');
+      const startOnActive = vi.spyOn(Provider.prototype, 'startGuideOnActiveCanvas').mockReturnValue(false);
+      const run = vscode.commands.executeCommand.bind(vscode.commands);
+      const exec = vi.spyOn(vscode.commands, 'executeCommand').mockImplementation(((command: string, ...args: unknown[]) =>
+        (command === 'erdStudio.openDomain' ? Promise.resolve(undefined) : run(command, ...args))) as never);
+
+      await activate(context);
+
+      const calls = nudgeCalls(info);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toContain('Show Me Around');
+      if (variant === 'plain') expect(String(calls[0][0])).toMatch(/^This project has \d+ ERD Studio diagrams\.$/);
+      else expect(String(calls[0][0])).toContain('from an older ERD Studio');
+      const finance = path.join(root, '.erd-studio', 'gold', 'finance.json');
+      await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.openDomain', finance));
+      // The request comes before the diagram opens, so its load takes it…
+      expect(requestCanvas.mock.invocationCallOrder[0]).toBeLessThan(exec.mock.invocationCallOrder[exec.mock.calls.findIndex((c) => c[0] === 'erdStudio.openDomain')]);
+      // …and a diagram that was already open and loaded gets it at once.
+      await vi.waitFor(() => expect(startOnActive).toHaveBeenCalled());
+      const counted = feature.mock.calls.map((c) => c[0]);
+      expect(counted).toContain('diagramsNudgeShowMeAround');
+      expect(counted).not.toContain('diagramsNudgeOpened');
+      expect(counted).not.toContain('convertToDbmlNotNow');
+      expect(exec.mock.calls.some((c) => c[0] === 'erdStudio.convertProjectToDbml')).toBe(false);
+      // The guide's flag is the canvas load's to write, not the notice's.
+      expect(globalState.get('erdStudio.onboardingGuide')).toBeUndefined();
+    });
+  }
 
   it('with the Convert offer turned off (erdStudio.dbml.offerConvert), is the plain notice', async () => {
     const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);

@@ -155,7 +155,7 @@ import { START_COMMAND, START_INTENT_CONTEXT_KEY, START_PICK_PLACEHOLDER, START_
 import { createDraftPreview } from './providers/DraftPreviewPanel';
 import { DraftGeneration, draftPreviewEvents, trackedDraftPreview } from './providers/draftWiring';
 import { OnboardingGuide, guideDefersPrompt } from './providers/guideWiring';
-import { GUIDE_STATE_KEY, SHOW_ME_AROUND_COMMAND, isGuideStatus } from './types/onboardingGuide';
+import { GUIDE_STATE_KEY, SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL, isGuideStatus } from './types/onboardingGuide';
 import { EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, draftSourceForIntent, walkthroughAutoOpens, type AutoDraft } from './services/draftTriggers';
 import type { Draft, DraftPreview, DraftTrigger } from './types/draft';
 import { StartIntentTracker } from './commands/startIntent';
@@ -2705,6 +2705,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Show Me Around here: phase B on the open diagram (or the folder's latest one),
   // else phase A on the folder's draft — the find it suggests, or the example when
   // there is nothing to draw. Explicit: it asks what an explicit start asks.
+  // Show Me Around on a diagram of this folder: it opens, and phase B runs on it once it
+  // has loaded (the command in a folder with diagrams, and the diagrams notice's button).
+  const showMeAroundOnDiagram = async (filePath: string): Promise<void> => {
+    onboardingGuide.requestCanvas();
+    await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
+    // Already open and loaded: no new load takes the request, so start it there.
+    if (onboardingGuide.canvasRequested()) editorProvider.startGuideOnActiveCanvas();
+  };
   showMeAroundInProject = async () => {
     if (editorProvider.startGuideOnActiveCanvas()) return true;
     if (draftPreview.isOpen()) {
@@ -2713,10 +2721,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     const latest = mostRecentlyModified(subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir));
     if (latest) {
-      onboardingGuide.requestCanvas();
-      await vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath);
-      // Already open and loaded: no new load takes the request, so start it there.
-      if (onboardingGuide.canvasRequested()) editorProvider.startGuideOnActiveCanvas();
+      await showMeAroundOnDiagram(latest.filePath);
       return true;
     }
     const intent = await startIntent.refresh();
@@ -4667,6 +4672,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         telemetry.feature('diagramsNudgeOpened');
         void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath);
       };
+      // Show Me Around (the onboarding guide's canvas part): a project with diagrams shows
+      // no draft, so the guide would not start by itself here. It opens the same diagram.
+      const showMeAround = (): void => {
+        telemetry.feature('diagramsNudgeShowMeAround');
+        showMeAroundOnDiagram(latest.filePath).then(undefined, (err: unknown) => log.warn('[ERD Studio] Could not show the guide on the diagram:', err));
+      };
       // A project from before 2.0: the one next step is Convert (the start screen's
       // own suggestion), with its diagram second. This prompt holds the window's one
       // prompt, so the canvas's Convert offer would not come until the next window.
@@ -4677,9 +4688,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       if (offerConvert) {
         telemetry.feature('convertToDbmlOffered');
-        void vscode.window.showInformationMessage(convertNoticeMessage(domains.length), CONVERT_NOTICE_BUTTON, open).then((choice) => {
+        // Three buttons and no Not now (closing it is not now): Convert first, then the
+        // diagram, then the same diagram with the guide.
+        void vscode.window.showInformationMessage(convertNoticeMessage(domains.length), CONVERT_NOTICE_BUTTON, open, SHOW_ME_AROUND_LABEL).then((choice) => {
           if (choice === CONVERT_NOTICE_BUTTON) void vscode.commands.executeCommand('erdStudio.convertProjectToDbml');
           else if (choice === open) openLatest();
+          else if (choice === SHOW_ME_AROUND_LABEL) showMeAround();
           else telemetry.feature('convertToDbmlNotNow');
         });
         return;
@@ -4687,9 +4701,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void vscode.window.showInformationMessage(
         `This project has ${domains.length} ERD Studio diagram${domains.length === 1 ? '' : 's'}.`,
         open,
+        SHOW_ME_AROUND_LABEL,
         'Not now',
       ).then((choice) => {
         if (choice === open) openLatest();
+        else if (choice === SHOW_ME_AROUND_LABEL) showMeAround();
       });
     });
   }
