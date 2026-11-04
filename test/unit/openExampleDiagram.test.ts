@@ -167,11 +167,11 @@ describe('the example DBML', () => {
 });
 
 describe('Open Example Diagram', () => {
-  it('is a post-rename command with no legacy alias, registered after project resolution', () => {
+  it('is a post-rename command with no legacy alias, pre-registered: it opens the example draft in an empty window too', () => {
     expect(OPEN_EXAMPLE_DIAGRAM_COMMAND).toBe('erdStudio.openExampleDiagram');
     expect(NO_LEGACY_ALIAS.has(OPEN_EXAMPLE_DIAGRAM_COMMAND)).toBe(true);
-    // An empty window gets the fallback "Open a folder first" with Open Folder….
-    expect(PRE_REGISTERED_COMMANDS.has(OPEN_EXAMPLE_DIAGRAM_COMMAND)).toBe(false);
+    // Draft-first §9: the same draft as Open an Example…, so it works before a folder is open.
+    expect(PRE_REGISTERED_COMMANDS.has(OPEN_EXAMPLE_DIAGRAM_COMMAND)).toBe(true);
   });
 
   it('is contributed in the ERD Studio category; the start surfaces offer the example projects instead', () => {

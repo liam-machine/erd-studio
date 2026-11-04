@@ -1,7 +1,8 @@
 // esbuild.js — Build for ERD Studio VS Code extension
 // Targets: Extension host (Node.js, CJS), Webview (Browser, IIFE with React),
-// manifest worker (Node.js worker thread), the standalone `erd-studio` CLI and
-// the lazily loaded SQL importer (dist/sqlImport.js).
+// manifest worker (Node.js worker thread), the standalone `erd-studio` CLI,
+// the lazily loaded SQL importer (dist/sqlImport.js) and the draft preview
+// page (dist/draft.js).
 
 const esbuild = require('esbuild');
 const path = require('path');
@@ -169,6 +170,21 @@ const webviewConfig = {
   plugins: [problemMatcherPlugin],
 };
 
+// Draft preview page — `dist/draft.js` + `dist/draft.css`, shown by
+// src/providers/DraftPreviewPanel.ts (docs/dev/draft-first.md). Its own
+// bundle, so the editor webview's protocol stays untouched: React, React
+// Flow, the renderer and the ELK worker (the page lays a draft out with the
+// canvas's own options) are repeated here.
+const draftConfig = {
+  ...webviewConfig,
+  entryPoints: ['./webview-draft/index.tsx'],
+  outfile: './dist/draft.js',
+  define: {
+    'process.env.NODE_ENV': isProduction ? '"production"' : '"development"',
+    '__ELK_WORKER_CODE__': JSON.stringify(elkWorkerCode),
+  },
+};
+
 async function build() {
   console.log(`Building [${isProduction ? 'production' : 'development'}]...`);
 
@@ -179,6 +195,7 @@ async function build() {
       esbuild.context(workerConfig),
       esbuild.context(cliConfig),
       esbuild.context(sqlImportConfig),
+      esbuild.context(draftConfig),
     ]);
     await Promise.all(contexts.map((ctx) => ctx.watch()));
     console.log('Watching for changes...');
@@ -189,6 +206,7 @@ async function build() {
       esbuild.build(workerConfig),
       esbuild.build(cliConfig),
       esbuild.build(sqlImportConfig),
+      esbuild.build(draftConfig),
     ]);
     console.log('Build complete.');
   }

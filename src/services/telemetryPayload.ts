@@ -311,8 +311,9 @@ export const FEATURES = [
   'howToClipPlayed',
   // The start suggestion (src/services/startSuggestion.ts): the one
   // notification a folder with no diagram gets when its start is obvious —
-  // shown, and the user's answer: Create Diagram, More Options…, Don't Ask
-  // Again, or closed; start suggestions turned off by the command (or, once
+  // shown, and the user's answer: Convert to DBML… (suggestPromptAccepted;
+  // Show Me is suggestPromptShowMe), More Options… (no longer sent), Don't
+  // Ask Again, or closed; start suggestions turned off by the command (or, once
   // a day, a due suggestion kept back by the erdStudio.startSuggestions setting).
   'suggestPromptShown',
   'suggestPromptAccepted',
@@ -323,7 +324,8 @@ export const FEATURES = [
   // The quick import (defaults chosen, one confirm): one finished, its
   // Change Options… chosen, it fell back to the step-by-step flow (nothing
   // found to take, or more files than it reads); the dry run's Review All…
-  // was opened (every import source).
+  // was opened (every import source; no longer sent: the draft's details
+  // drawer replaced it, draftDetailsOpened).
   'quickImport',
   'quickImportChangeOptions',
   'quickImportFellBack',
@@ -359,6 +361,25 @@ export const FEATURES = [
   'suggestPromptNothingNewDiagram',
   'suggestPromptNothingGuide',
   'suggestPromptNothingOff',
+  // Draft-first (docs/dev/draft-first.md §11): the read-only draft preview and what was chosen on it.
+  'draftShown',
+  'draftShownAuto',
+  'draftExampleShown',
+  'draftSourceSqlDdl',
+  'draftSourceSemanticModel',
+  'draftSourceDbml',
+  'draftSourceDbt',
+  'draftKept',
+  'draftChangeOptions',
+  'draftDiscarded',
+  'draftClosed',
+  'draftOtherStart',
+  'draftScopeChanged',
+  'draftDetailsOpened',
+  'draftRefreshed',
+  'draftUnavailable',
+  'suggestPromptShowMe',
+  'importGuideFromDraft',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -496,6 +517,9 @@ export const ERROR_CODES = [
   // importer, converting, or writing the new diagram) — not the user's files.
   'importSqlDdlFailed',
   'importSemanticModelFailed',
+  // Draft-first: building a draft threw (ours), and the preview's layout (ELK) failed.
+  'draftBuildFailed',
+  'draftLayoutFailed',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 

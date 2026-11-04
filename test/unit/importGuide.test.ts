@@ -88,9 +88,9 @@ describe('the cards', () => {
 
   it('leads with what the folder holds: a "Found in this folder" card running that import\'s quick path', () => {
     const cases: Array<[StartIntent, string, string, unknown[]]> = [
-      ['importSqlDdl', 'This folder has CREATE TABLE scripts.', 'Import your SQL scripts', ['erdStudio.importSqlDdl', { quick: true }]],
-      ['importSemanticModel', 'This folder has a Power BI or Fabric semantic model.', 'Import your Power BI semantic model', ['erdStudio.importSemanticModel', { quick: true }]],
-      ['importDbmlFile', 'This folder has a DBML file.', 'Import your DBML file', ['erdStudio.importDbml', { quick: true }]],
+      ['importSqlDdl', 'This folder has CREATE TABLE scripts.', 'Import your SQL scripts', ['erdStudio.importSqlDdl', { quick: true, draft: 'start' }]],
+      ['importSemanticModel', 'This folder has a Power BI or Fabric semantic model.', 'Import your Power BI semantic model', ['erdStudio.importSemanticModel', { quick: true, draft: 'start' }]],
+      ['importDbmlFile', 'This folder has a DBML file.', 'Import your DBML file', ['erdStudio.importDbml', { quick: true, draft: 'start' }]],
     ];
     for (const [intent, reason, label, run] of cases) {
       const ctx: ImportGuideContext = { hasProject: true, hasDbt: false, intent };
@@ -371,7 +371,7 @@ describe('the panel host', () => {
     await panels()[0]._simulateMessage({ type: 'run', action: 'found' });
     ctx = BLANK;
     await panels()[0]._simulateMessage({ type: 'run', action: 'found' });
-    expect(deps.ran).toEqual([['erdStudio.importDbml', { quick: true }]]);
+    expect(deps.ran).toEqual([['erdStudio.importDbml', { quick: true, draft: 'start' }]]);
   });
 });
 

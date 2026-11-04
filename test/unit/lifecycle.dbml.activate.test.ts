@@ -20,6 +20,7 @@ import * as v10 from 'dbml-parse-v10';
 import { formatWrittenDbml } from '../../src/services/dbmlWriters';
 import { semanticReadmeText } from '../../src/services/semanticReadme';
 import { parseLayersText } from '@erd-studio/core';
+import { answerDraft, nextDraft } from './helpers/draftDriver';
 
 /** The expected text in the canonical layout ERD Studio writes every .dbml in (every write is formatted). */
 function canonical(text: string): string {
@@ -147,8 +148,18 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     }) as never);
     vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ id?: string }>) => items.find((i) => i.id === 'gold')) as never);
     vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o?: { value?: string }) => o?.value) as never);
-    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
-      (typeof args[1] === 'object' && (args[1] as { modal?: boolean }).modal ? 'Import' : undefined)) as never);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+  }
+
+  /** Run Import DBML to its draft (Draft-first: nothing written yet), Keep it, and return the draft shown. */
+  async function importAndKeep(...args: unknown[]) {
+    const before = files();
+    const run = vscode.commands.executeCommand('erdStudio.importDbml', ...args);
+    const draft = await nextDraft();
+    expect(files()).toEqual(before);
+    answerDraft({ type: 'keep' });
+    await run;
+    return draft;
   }
 
   const IMPORTED = ['README.md', 'layers.json', 'main/diagrams/shop.dbml', 'main/relationships/main.dbml', 'main/tables/main/customers.dbml', 'main/tables/main/orders.dbml'];
@@ -160,7 +171,7 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
       + "Project shop {\n  erd_layout: '''\n    customers 40 60\n    orders 400 60\n  '''\n}\n");
     await activate(context);
     importFrom(path.join(inbox, 'shop.dbml'));
-    await vscode.commands.executeCommand('erdStudio.importDbml');
+    await importAndKeep();
     expect(files()).toEqual(IMPORTED);
     const shopText = fs.readFileSync(erd('main', 'diagrams', 'shop.dbml'), 'utf-8');
     const shop = parseSubjectAreaDbml(shopText, 'main/diagrams/shop.dbml').obj as { viewConfig: { positions: unknown } };
@@ -177,13 +188,11 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     fs.writeFileSync(path.join(inbox, 'shop.dbml'), 'Table customers {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n  customer_id int [ref: > customers.id]\n}\n');
     await activate(context);
     importFrom(path.join(inbox, 'shop.dbml'));
-    await vscode.commands.executeCommand('erdStudio.importDbml');
-    const modal = (vscode.window.showInformationMessage as unknown as { mock: { calls: unknown[][] } }).mock.calls
-      .find((c) => typeof c[1] === 'object' && (c[1] as { modal?: boolean }).modal)!;
-    const detail = (modal[1] as { detail: string }).detail;
-    expect(detail).toContain('• 1 relationship saved in main/relationships/main.dbml.');
-    expect(detail).not.toContain('the tables\' files');
-    expect(detail).toContain('• Layout: The diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
+    const draft = await importAndKeep();
+    // The draft names the diagram file Keep writes, and (no source layout) is laid out as the canvas's first open lays it out.
+    expect(draft.banner.detail).toContain('(.erd-studio/main/diagrams/shop.dbml)');
+    expect(draft.autoLayout).toBe(true);
+    expect(draft.summary).toMatchObject({ tables: 2, relationships: 1, newTables: 2 });
     // The import itself writes no positions: the first open's auto layout does, as a JSON diagram's first open writes its positions.
     expect(fs.readFileSync(erd('main', 'diagrams', 'shop.dbml'), 'utf-8')).not.toContain('erd_layout');
     expect(files()).toEqual(IMPORTED);
@@ -206,7 +215,7 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     fs.writeFileSync(dropped, 'Project pulled {\n  database_type: \'PostgreSQL\'\n}\nTable customers {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n  customer_id int [ref: > customers.id]\n}\n');
     await activate(context);
     importFrom(dropped);
-    await vscode.commands.executeCommand('erdStudio.importDbml', vscode.Uri.file(dropped));
+    await importAndKeep(vscode.Uri.file(dropped));
     expect(errors).not.toHaveBeenCalled();
     // The dropped file is left as it is; the import is a new DBML diagram beside it, with its tables in the library.
     const created = files().filter((f) => f.startsWith('gold/diagrams/') && f !== 'gold/diagrams/pulled.dbml');

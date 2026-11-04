@@ -52,10 +52,11 @@ export const IMPORT_GUIDE_TITLE = 'Bring In Your Data Model';
 /**
  * The surfaces that link the guide: the Welcome panel's start card, the
  * walkthrough's blank start step, the empty Diagrams view's blank variant,
- * Import…'s picker, the start quick pick (More Options…), and the
- * nothing-found notification. The palette passes nothing.
+ * Import…'s picker, the start quick pick, the nothing-found notification
+ * (no longer shown: kept so an old link still counts) and a draft's Other
+ * Ways to Start (`draft`). The palette passes nothing.
  */
-export const IMPORT_GUIDE_SURFACES = ['welcome', 'walkthrough', 'sidebar', 'picker', 'startPick', 'prompt'] as const;
+export const IMPORT_GUIDE_SURFACES = ['welcome', 'walkthrough', 'sidebar', 'picker', 'startPick', 'prompt', 'draft'] as const;
 export type ImportGuideSurface = (typeof IMPORT_GUIDE_SURFACES)[number];
 
 /** The command's argument: `{ from }`, or undefined for anything else (the palette, a stray value). */
@@ -400,6 +401,7 @@ export const IMPORT_GUIDE_SURFACE_FEATURES: Readonly<Record<ImportGuideSurface, 
   picker: 'importGuideFromPicker',
   startPick: 'importGuideFromStartPick',
   prompt: 'importGuideFromPrompt',
+  draft: 'importGuideFromDraft',
 };
 
 /** Which card's button was pressed. */

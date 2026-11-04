@@ -2,7 +2,8 @@
  * One prompt per window session.
  *
  * Opening a window can owe the user several things at once: the start
- * suggestion ("ERD Studio found CREATE TABLE scripts… Create a diagram?"),
+ * suggestion ("ERD Studio found CREATE TABLE scripts… Show them as a
+ * diagram?"),
  * the Get Started walkthrough, the "This project has N ERD Studio diagrams" notice, the AI
  * helper offer, an update for old AI helper files, the v4 migration, a
  * `layers.json` to save, the upgrade notice, and on a canvas's first open
@@ -24,21 +25,30 @@ export type SessionPromptKind =
   /**
    * A folder with no diagram whose start is obvious (CREATE TABLE scripts, a
    * semantic model, a DBML file, a dbt project, a project from before 2.0):
-   * "Create a diagram from them?" (`src/services/startSuggestion.ts`). It
+   * "Show them as a diagram?" (`src/services/startSuggestion.ts`). It
    * decides only after the bounded look, and hands the window to the next
    * prompt when the look finds nothing concrete.
    */
   | 'startSuggestion'
   /**
-   * A folder with no diagram and nothing concrete to start from, whose empty
-   * Diagrams view the user opened: "No data model found in this folder yet…"
-   * with New Diagram / Show Me How (`runNothingFoundPrompt`). Not an
-   * activation prompt (activation never shows it): it claims the window only
-   * once activation's own prompt has been decided, so a first run's
-   * walkthrough keeps the window.
+   * The automatic draft (Draft-first, `docs/dev/draft-first.md` §3): the
+   * empty Diagrams view was drawn in a folder with no diagram and no table,
+   * and the folder's draft (or, once per machine, the example's) was due. Not
+   * an activation prompt (activation never shows it): it claims the window
+   * only once activation's own prompt has been decided. An explicit start's
+   * draft claims it too when it is free, so nothing pops over an open draft.
    */
-  | 'nothingFound'
-  /** The Get Started walkthrough a fresh install owes (once per machine). */
+  | 'draft'
+  /**
+   * An example project's new window (`takePendingExample`): its first
+   * diagram opens, and nothing else (the AI helper offer) covers it.
+   */
+  | 'exampleOpen'
+  /**
+   * The Get Started walkthrough a fresh install owes (once per machine),
+   * offered only in an empty window (`walkthroughAutoOpens`): in a folder the
+   * draft takes its place.
+   */
   | 'walkthrough'
   /** AI helper files from an older ERD Studio: Update All / Choose… */
   | 'harnessUpdate'
@@ -57,9 +67,9 @@ export type SessionPromptKind =
 
 /**
  * Most useful first. A project that already has diagrams opens one; a
- * folder with none whose start is obvious is offered that start (on a
- * first run it takes the walkthrough's place; the walkthrough stays owed);
- * an empty folder gets the walkthrough; then whatever keeps the project's own
+ * folder with none whose start is obvious is offered that start; an empty
+ * window gets the walkthrough (a folder gets the draft instead, which is not
+ * an activation prompt); then whatever keeps the project's own
  * files working (old AI helper files, the v4 format) before news and
  * set-up offers.
  */

@@ -29,11 +29,11 @@ import {
   runElkLayout,
   detectLayerBound,
   detectStrategy,
-  SPACING_PRESETS,
   type PartitionStrategy,
   type SpacingPreset,
   type LayoutDirection,
 } from '../../lib/elkLayout';
+import { FIRST_OPEN_LAYOUT, buildLayoutOptions } from '../../lib/firstOpenLayout';
 import { StageTabs } from './StageTabs';
 import { fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
 import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
@@ -131,10 +131,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const [isLayouting, setIsLayouting] = useState(false);
   const [layoutOptionsOpen, setLayoutOptionsOpen] = useState(false);
   const [layoutDirty, setLayoutDirty] = useState(false);
-  const [partitionStrategy, setPartitionStrategy] = useState<PartitionStrategy>('auto');
-  const [layerBound, setLayerBound] = useState(5);
-  const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>('RIGHT');
-  const [spacingPreset, setSpacingPreset] = useState<SpacingPreset>('M');
+  // The popover starts on the first-open layout's choices (lib/firstOpenLayout.ts,
+  // shared with the draft preview so a draft is laid out as its diagram will be).
+  const [partitionStrategy, setPartitionStrategy] = useState<PartitionStrategy>(FIRST_OPEN_LAYOUT.partitionStrategy);
+  const [layerBound, setLayerBound] = useState(FIRST_OPEN_LAYOUT.layerBound);
+  const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>(FIRST_OPEN_LAYOUT.direction);
+  const [spacingPreset, setSpacingPreset] = useState<SpacingPreset>(FIRST_OPEN_LAYOUT.spacing);
   const layoutGroupRef = useRef<HTMLDivElement>(null);
 
   // Refresh manifest state
@@ -482,22 +484,17 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     };
 
     try {
-      const sp = SPACING_PRESETS[spacingPreset];
       // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
       const modelNodes = nodes.filter((n): n is import('@erd-studio/renderer/editor').TableFlowNode => n.type === 'model');
       const fkEdges = edges.filter((e): e is import('@erd-studio/renderer/editor').FkFlowEdge => e.type === 'fk');
-      const effectiveBound = partitionStrategy === 'auto'
-        ? detectLayerBound(modelNodes.length)
-        : layerBound;
       const positions = await runElkLayout(
         modelNodes,
         fkEdges,
-        {
-          ...domain.viewConfig.layoutOptions,
-          'elk.direction': layoutDirection,
-          ...sp,
-          'elk.layered.layering.coffmanGraham.layerBound': String(effectiveBound),
-        },
+        buildLayoutOptions(
+          { partitionStrategy, layerBound, direction: layoutDirection, spacing: spacingPreset },
+          modelNodes.length,
+          domain.viewConfig.layoutOptions,
+        ),
         partitionStrategy,
       );
 

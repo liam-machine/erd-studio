@@ -1,19 +1,19 @@
 /**
  * GettingStartedPanel — the "Welcome to ERD Studio" webview panel: the
- * getting-started video, a one-line project summary, then a diagram first
- * (Open your diagrams, or Draw from dbt — no AI needed) and the optional AI
- * cards (your AI assistant, set up the AI helper, start the guided setup).
+ * getting-started video (the tour), a one-line project summary, the optional
+ * AI cards (your AI assistant, set up the AI helper, start the guided setup)
+ * and a small **How-to clips** section. Draft-first (`docs/dev/draft-first.md`
+ * §10): it holds no start, Convert or "Open your diagrams" card — the draft,
+ * the sidebar and the Convert offer are the starts.
  *
  * A singleton, independent of the domain canvas: it has its own protocol
  * (`src/types/gettingStarted.ts`) and its own self-contained HTML — no React
  * bundle. Project-specific behaviour is injected through `GettingStartedDeps`.
  * The page has three states (`GettingStartedPageMode`): no folder open
  * (`workspaceRoot: null`: "Open the folder your data model lives in", or an
- * example), a folder without dbt (`logicalOnly`: the start card and the AI
- * cards with the guided setup's no-dbt wording — no dbt text at all), and a
- * dbt project (the start card led by Draw from dbt, and the guided setup).
- * Which starts a page offers comes from `startActionsFor()`
- * (`src/types/startActions.ts`), the list every start surface shares.
+ * example), a folder without dbt (`logicalOnly`: the AI cards with the guided
+ * setup's no-dbt wording — no dbt text at all), and a dbt project (the
+ * guided setup, the sample project, and the Draw from dbt clip).
  * The dbt page plays the dbt tour; the other two play the logical-first cut
  * (`GETTING_STARTED_MEDIA`). It autoplays in an open folder.
  *
@@ -55,7 +55,6 @@ import {
   HOW_TO_CLIPS,
   HOW_TO_CLIP_DIR,
   HOW_TO_CLIP_KEYS,
-  IMPORT_GUIDE_COMMAND,
   type HowToClipKey,
   START_ACTION_COMMANDS,
   startActionArgs,
@@ -63,7 +62,7 @@ import {
   startIntentFor,
   type StartIntent,
 } from '../types/startActions';
-import { recordStart, recordStartSuggested } from '../commands/start';
+import { recordStart } from '../commands/start';
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedTranscript';
 import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedLogicalTranscript';
 import type { RecommendedInstallResult } from '../types/harness';
@@ -739,8 +738,6 @@ export interface GettingStartedDeps {
   clipboardText(assistant?: AiAssistantId): string;
   /** The first workspace folder, for the nested-project hint in "Open Copilot Chat". */
   workspaceFolder?: string | null;
-  /** Open a domain canvas, or start the first one. */
-  openCanvas(): Promise<void>;
   /**
    * The one-line project summary (`computeProjectSummary`). Optional: without
    * it, or when it throws, the line is simply not shown. Never asked for in
@@ -885,13 +882,9 @@ export class GettingStartedPanel {
       // `status` would be stale.
       const status = withIntent(intentNow);
       this.post({ type: 'status', payload: { ...status, summary: null } });
-      // Counted when the suggestion leads the page: Convert's card, or the start card of a project with no diagram yet.
-      const counted = (intent: StartIntent | undefined): void => {
-        if (intent && (intent === 'convert' || fetched.domainCount === 0)) { recordStartSuggested(intent); }
-      };
+      // No suggestion is shown here any more (no start card): nothing is counted as suggested.
       const wantsSummary = gettingStartedPageMode(status) === 'dbt';
       if (!tracker) {
-        counted(intentNow);
         if (!wantsSummary) { return; }
         const summaryOnly = await this.projectSummary();
         if (summaryOnly && current()) { this.post({ type: 'status', payload: { ...status, summary: summaryOnly } }); }
@@ -902,7 +895,6 @@ export class GettingStartedPanel {
         wantsSummary ? this.projectSummary() : Promise.resolve(null),
       ]);
       if (!current()) { return; }
-      counted(intent);
       if (intent !== intentNow || summary) { this.post({ type: 'status', payload: { ...withIntent(intent), summary } }); }
     } catch (err) {
       telemetry.error('welcomePanelFailed');
@@ -1001,10 +993,6 @@ export class GettingStartedPanel {
           });
         }
         break;
-      case 'openDomain':
-        telemetry.feature('welcomeOpenDiagram');
-        await this.deps.openCanvas();
-        break;
       case 'start':
         recordStart(msg.action, 'welcome');
         // A fixed command per start (never an id from the webview), with a fixed argument:
@@ -1012,10 +1000,6 @@ export class GettingStartedPanel {
         await vscode.commands.executeCommand(START_ACTION_COMMANDS[msg.action], ...startActionArgs(msg.action));
         // A new diagram opens in its own tab; this one should now lead with "Open your diagrams".
         await this.postStatus();
-        break;
-      case 'showImportGuide':
-        // A fixed command and argument (the guide counts importGuideFromWelcome); never an id from the webview.
-        await vscode.commands.executeCommand(IMPORT_GUIDE_COMMAND, { from: 'welcome' });
         break;
       case 'openExternal':
         await vscode.env.openExternal(vscode.Uri.parse(GETTING_STARTED_EXTERNAL_URLS[msg.target]));

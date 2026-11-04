@@ -1502,7 +1502,7 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
 // The dry run's modal: a headline and a short detail, whatever the size
 // ---------------------------------------------------------------------------
 
-/** The modal's detail never runs longer than this many lines, however many tables (Review All… lists everything). */
+/** The modal's detail never runs longer than this many lines, however many tables (the draft's details drawer lists everything). */
 export const IMPORT_MODAL_MAX_DETAIL_LINES = 10;
 /** Schemas the modal names by count; the rest are summed. */
 export const IMPORT_MODAL_SCHEMAS_SHOWN = 5;
@@ -1598,7 +1598,8 @@ export function importLeftOut(plan: DbmlImportPlan, options: DescribeDbmlImportO
  * summed), what the Table Library already has or gains, where the
  * relationships go, renames and what is left out as counts with one example,
  * the first {@link IMPORT_MODAL_NOTES_SHOWN} notes and how many more, and the
- * layout. Never a list of tables: Review All… shows every one.
+ * layout. Never a list of tables: the draft's details drawer shows every one.
+ * Since Draft-first this modal is only the fallback for a host with no draft preview.
  */
 export function summariseDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): { headline: string; detail: string[] } {
   const { report } = plan;

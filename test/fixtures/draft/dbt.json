@@ -1,0 +1,146 @@
+{
+  "id": "draft-dbt-1",
+  "source": "dbt",
+  "title": "Draft: finance",
+  "banner": {
+    "headline": "Draft from your dbt models in marts/finance · 2 tables, 1 relationship · not saved",
+    "detail": "Keep saves it as finance in the Gold layer (.erd-studio/gold/diagrams/finance.dbml). Drew the 15 best-connected of 40 models; add the rest from the canvas.",
+    "keepLabel": "Keep as Diagram",
+    "primary": "keep",
+    "changeOptions": true,
+    "shownStarts": []
+  },
+  "otherStarts": [
+    {
+      "id": "blank",
+      "label": "Start Blank"
+    },
+    {
+      "id": "import",
+      "label": "Import…"
+    },
+    {
+      "id": "example",
+      "label": "See an Example"
+    }
+  ],
+  "scopes": {
+    "label": "Folder",
+    "current": "folder:marts/finance",
+    "options": [
+      {
+        "id": "folder:marts/finance",
+        "label": "marts/finance",
+        "description": "12 models"
+      },
+      {
+        "id": "folder:marts/core",
+        "label": "marts/core",
+        "description": "8 models"
+      },
+      {
+        "id": "folder:staging",
+        "label": "staging",
+        "description": "20 models"
+      }
+    ]
+  },
+  "summary": {
+    "tables": 2,
+    "relationships": 1,
+    "newTables": 2,
+    "reusedTables": 0,
+    "changedTables": 0,
+    "schemas": [
+      {
+        "schema": "marts",
+        "tables": 2
+      }
+    ],
+    "notes": 0,
+    "leftOut": 0,
+    "available": 40
+  },
+  "display": {
+    "schemaVersion": 5,
+    "domain": "finance",
+    "layer": "main",
+    "stage": "logical",
+    "description": "",
+    "models": [
+      {
+        "name": "fct_order",
+        "schema": "marts",
+        "description": "",
+        "columns": [
+          {
+            "name": "order_id",
+            "dataType": "bigint",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "customer_id",
+            "dataType": "bigint",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          }
+        ]
+      },
+      {
+        "name": "dim_customer",
+        "schema": "marts",
+        "description": "",
+        "columns": [
+          {
+            "name": "customer_id",
+            "dataType": "bigint",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "fct_order",
+        "fromColumn": "customer_id",
+        "toModel": "dim_customer",
+        "toColumn": "customer_id",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "positions": {}
+    },
+    "readOnly": true,
+    "positionDraggable": false
+  },
+  "autoLayout": true,
+  "logicalOnly": false,
+  "panelOpen": false,
+  "details": [
+    {
+      "id": "tables",
+      "title": "Tables",
+      "items": [
+        {
+          "text": "2 columns",
+          "path": "fct_order",
+          "tag": "new"
+        },
+        {
+          "text": "1 columns",
+          "path": "dim_customer",
+          "tag": "new"
+        }
+      ]
+    }
+  ]
+}

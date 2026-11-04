@@ -229,8 +229,8 @@ describe('erdStudio.start', () => {
     const ran = vi.fn(async () => undefined);
     await runStart(undefined, { context: () => ({ hasProject: true, hasDbt: false, found: ['sqlDdl'] }), executeCommand: ran, pick: suggested });
     expect(suggested.mock.calls[0][0].map((i: { action?: StartAction }) => i.action)).toEqual(['importSqlDdl', 'blank', 'import', 'example', undefined]);
-    // A direct import runs its quick path (defaults chosen, one confirm).
-    expect(ran).toHaveBeenCalledWith('erdStudio.importSqlDdl', { quick: true });
+    // A direct import runs its quick path (defaults chosen), ending in its draft (trigger `start`).
+    expect(ran).toHaveBeenCalledWith('erdStudio.importSqlDdl', { quick: true, draft: 'start' });
 
     const closed = vi.fn(async () => undefined);
     await runStart({ action: 'nope' }, { context: () => ({ hasProject: true, hasDbt: false }), executeCommand: closed, pick: closed });

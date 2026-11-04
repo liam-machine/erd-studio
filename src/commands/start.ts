@@ -109,11 +109,13 @@ export function recordStart(action: StartAction, from: StartSurface): void {
 
 /**
  * Run `erdStudio.start`. A valid `{ action, from }` is counted and run; anything
- * else (the start suggestion's More Options…) shows the starts that apply
- * here, then the import guide's "How do I export from Databricks, Snowflake,
+ * else (a stray link, an old keybinding) shows the starts that apply here,
+ * then the import guide's "How do I export from Databricks, Snowflake,
  * Power BI…?", and runs the one picked (a start is not counted: it came from
  * no start surface; the guide counts `importGuideFromStartPick`).
- * A direct import runs its quick path either way (`startActionArgs`).
+ * A direct import runs its quick path and Draw from dbt its folder draft
+ * either way, each ending in the draft preview (`startActionArgs`, trigger
+ * `start`): nothing is written until Keep.
  */
 export async function runStart(arg: unknown, deps: StartDeps): Promise<void> {
   const args = parseStartArgs(arg);

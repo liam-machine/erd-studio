@@ -926,8 +926,6 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     const text = all('gettingStarted').replace(/\s+/g, ' ');
     for (const line of [
       'Turn the dbt project you already have into a data model you can see.',
-      'Draw your dbt project',
-      'Draw from dbt',
       'Your assistant checks your dbt setup',
       'New to dbt? How to install it',
     ]) {
@@ -935,8 +933,8 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     }
     expect(got.text.gettingStarted.some((s) => s.where === 'panel video' && /getting-started\.mp4/.test(s.text))).toBe(true);
     expect(got.text.gettingStarted.some((s) => s.where === 'panel captions' && DBT_WORD.test(s.text))).toBe(true);
-    // The start card's Draw from dbt button (`data-start="drawFromDbt"`) is reachable on the dbt page itself.
-    expect((got.controls.get('Draw from dbt') ?? []).some((where) => where.startsWith('panel '))).toBe(true);
+    // Draft-first: the tab holds no start card; Draw from dbt is the dbt project's draft (the sidebar, the
+    // popup's Show Me) and its own How-to clip, shown on the dbt page only (when the clips ship).
   });
 
   it('the import guide: the dbt card leads, with Draw from dbt', () => {

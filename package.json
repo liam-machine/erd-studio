@@ -146,7 +146,7 @@
       },
       {
         "command": "erdStudio.openExampleProject",
-        "title": "Open an Example Project…",
+        "title": "Open an Example…",
         "icon": "$(book)",
         "category": "ERD Studio"
       },
@@ -1128,6 +1128,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "erdStudio.openExampleDiagram",
+          "when": "false"
+        },
         {
           "command": "erdStudio.moveRelationshipsToLibrary",
           "when": "erdStudio.storage != dbml"

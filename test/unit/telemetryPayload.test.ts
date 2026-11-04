@@ -561,7 +561,7 @@ describe('allowlists agree with the Worker', () => {
       'importSemanticModel', 'importSemanticModelCancelled', 'importSemanticModelInvalid',
       'firstRun', 'firstRunHasDiagrams', 'diagramsNudgeShown', 'diagramsNudgeOpened', 'walkthroughWaited',
     ]);
-    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('exampleWriteFailed'))).toEqual([
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('exampleWriteFailed'), ERROR_CODES.indexOf('importSemanticModelFailed') + 1)).toEqual([
       'exampleWriteFailed', 'importSqlDdlFailed', 'importSemanticModelFailed',
     ]);
   });
@@ -585,7 +585,7 @@ describe('allowlists agree with the Worker', () => {
   it('appends the import guide and nothing-found keys at the very end, after the start-suggestion ones', () => {
     const at = FEATURES.indexOf('importGuideOpened');
     expect(at).toBe(FEATURES.indexOf('importReviewOpened') + 1);
-    expect(FEATURES.slice(at)).toEqual([
+    expect(FEATURES.slice(at, FEATURES.indexOf('suggestPromptNothingOff') + 1)).toEqual([
       'importGuideOpened',
       'importGuideFromWelcome', 'importGuideFromWalkthrough', 'importGuideFromSidebar',
       'importGuideFromPicker', 'importGuideFromStartPick', 'importGuideFromPrompt',
@@ -596,6 +596,29 @@ describe('allowlists agree with the Worker', () => {
       'importGuideCopied',
       'suggestPromptNothingShown', 'suggestPromptNothingNewDiagram', 'suggestPromptNothingGuide', 'suggestPromptNothingOff',
     ]);
+  });
+
+  it('appends the Draft-first keys at the very end, after the nothing-found ones (which stay listed)', () => {
+    const at = FEATURES.indexOf('draftShown');
+    expect(at).toBe(FEATURES.indexOf('suggestPromptNothingOff') + 1);
+    expect(FEATURES.slice(at)).toEqual([
+      'draftShown', 'draftShownAuto', 'draftExampleShown',
+      'draftSourceSqlDdl', 'draftSourceSemanticModel', 'draftSourceDbml', 'draftSourceDbt',
+      'draftKept', 'draftChangeOptions', 'draftDiscarded', 'draftClosed', 'draftOtherStart',
+      'draftScopeChanged', 'draftDetailsOpened', 'draftRefreshed', 'draftUnavailable',
+      'suggestPromptShowMe', 'importGuideFromDraft',
+    ]);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('importSemanticModelFailed') + 1)).toEqual(['draftBuildFailed', 'draftLayoutFailed']);
+  });
+
+  it('the Worker README documents the Draft-first keys: a Draft funnel row, and chose_start counts draftKept', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    for (const key of FEATURES.slice(FEATURES.indexOf('draftShown'))) expect(readme, key).toContain(`\`${key}\``);
+    for (const code of ['draftBuildFailed', 'draftLayoutFailed']) expect(readme, code).toContain(`\`${code}\``);
+    expect(readme).toMatch(/^\| Draft \|/m);
+    const choseStart = readme.split('\n').find((l) => l.includes('AS chose_start'))!;
+    expect(choseStart).toContain("'draftKept'");
+    expect(choseStart).toContain("'suggestPromptShowMe'");
   });
 
   it('telemetry.json documents every feature key', () => {

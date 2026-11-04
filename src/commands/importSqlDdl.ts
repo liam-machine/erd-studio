@@ -20,8 +20,11 @@
  * the open folder, the dialect is the detected one (undetected or tied: the
  * most likely dialects in turn, the first that reads every file; the pick
  * only when none does), the layer and name are Import DBML's quick defaults,
- * and the dry run is the one question. Its **Change Options…** is the
- * step-by-step flow with those answers preselected.
+ * and the draft (the read-only preview, `docs/dev/draft-first.md` §5.1) is
+ * the one question. Its **Change options…** is the step-by-step flow with
+ * those answers preselected, ending in a draft too. On the automatic draft
+ * (`draft.quiet`) it asks and shows nothing: no script found, or none that
+ * reads, ends it silently.
  *
  * Every vscode call goes through `ImportSqlDdlUi` (and Import DBML's
  * `ImportDbmlUi`), so the flow is unit-tested with plain fakes.
@@ -63,6 +66,7 @@ import type { TelemetryFeature } from '../services/telemetryPayload';
 import { telemetry } from '../services/telemetryService';
 import {
   IMPORT_TITLES,
+  changeOptionsDraft,
   importDbml,
   suppliedDbmlUi,
   vscodeImportDbmlUi,
@@ -167,10 +171,36 @@ export interface SqlPreset {
   name?: string;
 }
 
-/** The run's shared reporting: a cancel, an error with its buttons, a failure of ours. */
-function sqlRun(ui: ImportSqlDdlUi) {
+/** The SQL UI of the automatic draft: it asks nothing and shows nothing (each message goes to the log). */
+export function quietImportSqlDdlUi(base: ImportSqlDdlUi): ImportSqlDdlUi {
+  const logged = async (message: string): Promise<undefined> => {
+    log.info(`[ERD Studio] ${TITLE} (automatic draft, not shown): ${message}`);
+    return undefined;
+  };
+  return {
+    ...base,
+    pickSources: async () => undefined,
+    pickDialect: async () => undefined,
+    pickFiles: async () => undefined,
+    showInformationMessage: (message) => logged(message),
+    showErrorMessage: (message) => logged(message),
+  };
+}
+
+/** The SQL UI a run uses: the automatic draft's quiet one, else `deps.sqlUi` or the real one. */
+function sqlUiOf(deps: ImportSqlDdlDeps): ImportSqlDdlUi {
+  const ui = deps.sqlUi ?? vscodeImportSqlDdlUi();
+  return deps.draft?.quiet ? quietImportSqlDdlUi(ui) : ui;
+}
+
+/**
+ * The run's shared reporting: a cancel, an error with its buttons, a failure
+ * of ours. `quiet` (the automatic draft): an early end is neither the user's
+ * cancel nor their file, so neither is counted.
+ */
+function sqlRun(ui: ImportSqlDdlUi, quiet = false) {
   const cancelled = (): undefined => {
-    telemetry.feature('importSqlDdlCancelled');
+    if (!quiet) telemetry.feature('importSqlDdlCancelled');
     return undefined;
   };
   const showError = (message: string, actions: ErrorActions = {}): void => {
@@ -190,12 +220,15 @@ function sqlRun(ui: ImportSqlDdlUi) {
   };
   /** A gather that gave a message: say it (an error or a plain note). */
   const gatherMessage = (gathered: { message: string; error: boolean; invalid?: boolean }): undefined => {
-    if (gathered.invalid) telemetry.feature('importSqlDdlInvalid');
+    if (gathered.invalid && !quiet) telemetry.feature('importSqlDdlInvalid');
     if (gathered.error) showError(gathered.message);
     else void ui.showInformationMessage(gathered.message);
     return undefined;
   };
-  return { cancelled, showError, ours, gatherMessage };
+  const invalid = (): void => {
+    if (!quiet) telemetry.feature('importSqlDdlInvalid');
+  };
+  return { cancelled, showError, ours, gatherMessage, invalid };
 }
 
 /** The SQL importer, loaded on first use; undefined after saying it failed. */
@@ -214,8 +247,8 @@ function loadEngine(deps: ImportSqlDdlDeps, ours: (doing: string, err: unknown) 
  * answers, offered first at each step.
  */
 export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, preset: SqlPreset = {}): Promise<ImportDbmlResult | undefined> {
-  const ui = deps.sqlUi ?? vscodeImportSqlDdlUi();
-  const { cancelled, showError, ours, gatherMessage } = sqlRun(ui);
+  const ui = sqlUiOf(deps);
+  const { cancelled, showError, ours, gatherMessage, invalid } = sqlRun(ui, deps.draft?.quiet === true);
 
   // 1. The scripts.
   let read = resume;
@@ -260,7 +293,7 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
     return ours('while converting the SQL', err);
   }
   if (!result.ok) {
-    telemetry.feature('importSqlDdlInvalid');
+    invalid();
     const firstProblem = result.problems.find((p) => p.file && fullPaths.has(p.file));
     const actions: Record<string, () => unknown> = {};
     if (firstProblem) actions[OPEN_FILE_BUTTON] = () => ui.openFileAt(fullPaths.get(firstProblem.file)!, firstProblem.line);
@@ -344,10 +377,16 @@ export async function findSqlDdlScripts(
  * script, or more `.sql` files than the walk lists): the step-by-step flow.
  */
 export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportDbmlResult | undefined> {
-  const ui = deps.sqlUi ?? vscodeImportSqlDdlUi();
-  const { ours, gatherMessage } = sqlRun(ui);
+  const ui = sqlUiOf(deps);
+  const quiet = deps.draft?.quiet === true;
+  const { ours, gatherMessage } = sqlRun(ui, quiet);
   const found = await findSqlDdlScripts(deps.workspaceRoot, deps.semanticDir, ui).catch(() => ({ files: [] as string[], truncated: false }));
   if (found.files.length === 0) {
+    // The automatic draft never asks: nothing to take is the end of it.
+    if (quiet) {
+      log.info(`[ERD Studio] ${TITLE}: no CREATE TABLE script to draft (automatic draft dropped).`);
+      return undefined;
+    }
     log.info(`[ERD Studio] ${TITLE}: ${found.truncated ? `more than ${MAX_SQL_FILES} .sql files in the folder` : 'no CREATE TABLE script found'}; asking which files.`);
     telemetry.feature('quickImportFellBack');
     return importSqlDdl(deps);
@@ -372,7 +411,13 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     if (result.ok) { converted = { dialect, result }; break; }
   }
   // No dialect reads every file: ask which (the step-by-step flow's dialect step, which reports the problems).
-  if (!converted) return importSqlDdl(deps, gathered);
+  if (!converted) {
+    if (quiet) {
+      log.info(`[ERD Studio] ${TITLE}: the scripts read as no one dialect (automatic draft dropped).`);
+      return undefined;
+    }
+    return importSqlDdl(deps, gathered);
+  }
   telemetry.feature(SQL_DIALECT_FEATURES[converted.dialect]);
   const chosenDialect = converted.dialect;
   return importConvertedSql(deps, gathered, chosenDialect, converted.result, { quick: true },
@@ -385,8 +430,10 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
  * opens the dialog), the dialect it read them as first, then the layer and
  * name it chose first.
  */
-export async function changeSqlOptions(deps: ImportSqlDdlDeps, found: readonly string[], preset: SqlPreset): Promise<ImportDbmlResult | undefined> {
-  const ui = deps.sqlUi ?? vscodeImportSqlDdlUi();
+export async function changeSqlOptions(quickDeps: ImportSqlDdlDeps, found: readonly string[], preset: SqlPreset): Promise<ImportDbmlResult | undefined> {
+  // The step-by-step flow the user asked for: never quiet, ending in a draft (`changeOptions`).
+  const deps: ImportSqlDdlDeps = { ...quickDeps, ...changeOptionsDraft(quickDeps.draft) };
+  const ui = sqlUiOf(deps);
   const { cancelled, gatherMessage } = sqlRun(ui);
   if (!ui.pickFiles) return importSqlDdl(deps, undefined, preset);
   const rel = (file: string): string => path.relative(deps.workspaceRoot, file).split(path.sep).join('/');

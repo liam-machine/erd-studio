@@ -1,28 +1,18 @@
 /**
- * The import's **Review All…** page: the dry run of any import (Import
+ * Everything an import brings in, as data: the dry run of any import (Import
  * DBML…, Import SQL DDL…, Import Semantic Model…, the coffee-shop example) in
- * full, for when the modal's ten lines are not enough — every table grouped
- * by schema (with its column count and keys), every relationship, what the
- * Table Library already has or gains, what was renamed, what was left out
- * and why, and every note. Import, Cancel (and Change Options… on a quick
- * import) sit on the page, so the user never hunts for the modal again;
- * closing the tab shows the modal once more.
+ * full — every table grouped by schema (with its column count and keys),
+ * every relationship, what the Table Library already has or gains, what was
+ * renamed, what was left out and why, and every note.
  *
- * A webview panel rather than a Markdown preview: a preview cannot carry
- * buttons that answer the waiting import (its command links are off for
- * untrusted content), and a modal re-shown over it would block the very
- * scrolling the review is for. It is the Convert to DBML review's pattern
- * and stylesheet (`dbmlConversionReview.ts`): nonce-only CSP, no remote
- * resource, `--vscode-*` colours, its own tiny protocol validated here.
+ * Draft-first (`docs/dev/draft-first.md` §10): the Review All… page this
+ * once fed is gone; the draft preview's details drawer is built from
+ * {@link buildImportReview}'s sections (`draftFromImportPlan`).
  *
- * Pure and vscode-free; the host half is `src/providers/ImportReviewPanel.ts`.
- * The page writes nothing: the import's own flow writes, after Import.
+ * Pure and vscode-free.
  */
 
 import {
-  REVIEW_PANEL_STYLE,
-  escapeHtml,
-  renderReviewItem,
   thousands,
   type ConvertReviewItem,
   type ConvertReviewSection,
@@ -39,13 +29,6 @@ import {
   type DescribeDbmlImportOptions,
 } from './dbmlImport';
 import type { Relationship, SemanticTable } from '../types/semantic';
-
-export const IMPORT_REVIEW_VIEW_TYPE = 'erdStudio.importReview';
-export const IMPORT_REVIEW_TITLE = 'Review Import';
-
-/** The dry run's buttons. */
-export const REVIEW_ALL_BUTTON = 'Review All…';
-export const CHANGE_OPTIONS_BUTTON = 'Change Options…';
 
 export interface ImportReviewView {
   heading: string;
@@ -168,79 +151,4 @@ export function buildImportReview(plan: DbmlImportPlan, options: ImportReviewOpt
     changeOptions: options.changeOptions === true,
     importLabel: options.importLabel ?? 'Import',
   };
-}
-
-// ---------------------------------------------------------------------------
-// The protocol: the page's choices (webview → host). The host posts nothing.
-// ---------------------------------------------------------------------------
-
-export type ImportReviewToHost = { type: 'import' } | { type: 'cancel' } | { type: 'changeOptions' };
-
-/** Every message from the page is checked here before the host acts on it; anything else is ignored. */
-export function isImportReviewToHost(value: unknown): value is ImportReviewToHost {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const type = (value as { type?: unknown }).type;
-  return type === 'import' || type === 'cancel' || type === 'changeOptions';
-}
-
-// ---------------------------------------------------------------------------
-// The HTML
-// ---------------------------------------------------------------------------
-
-export function buildImportReviewCsp(nonce: string): string {
-  return ["default-src 'none'", `style-src 'nonce-${nonce}'`, `script-src 'nonce-${nonce}'`].join('; ') + ';';
-}
-
-const SCRIPT = `
-(function () {
-  var vscode = acquireVsCodeApi();
-  var buttons = Array.prototype.slice.call(document.querySelectorAll('.cdb__button'));
-  document.addEventListener('click', function (event) {
-    var target = event.target instanceof Element ? event.target.closest('[data-action]') : null;
-    if (!target || target.disabled) { return; }
-    var action = target.getAttribute('data-action');
-    if (action !== 'import' && action !== 'cancel' && action !== 'changeOptions') { return; }
-    buttons.forEach(function (b) { b.disabled = true; });
-    if (action === 'import') { target.textContent = 'Importing\\u2026'; }
-    vscode.postMessage({ type: action });
-  });
-})();
-`;
-
-/** The page: the headline, counts, the scrollable sectioned list, and the sticky buttons (bottom-left, clear of notifications). */
-export function buildImportReviewHtml(view: ImportReviewView, nonce: string): string {
-  const n = escapeHtml(nonce);
-  const sections = view.sections.map((section) => `
-    <details class="cdb-section" data-section="${escapeHtml(section.id)}" open>
-      <summary class="cdb-section__title">${escapeHtml(section.title)}<span class="cdb-section__count">${thousands(section.count ?? section.items.length)}</span></summary>
-      <ul class="cdb-section__items">${section.items.map((item) => renderReviewItem(item, false)).join('')}</ul>${section.hint !== undefined ? `
-      <p class="cdb-section__hint">${escapeHtml(section.hint)}</p>` : ''}
-    </details>`).join('');
-  const actions =
-    '<button type="button" class="cdb__button cdb__button--secondary" data-action="cancel">Cancel</button>' +
-    (view.changeOptions ? `<button type="button" class="cdb__button cdb__button--secondary" data-action="changeOptions">${escapeHtml(CHANGE_OPTIONS_BUTTON)}</button>` : '') +
-    `<button type="button" class="cdb__button" data-action="import">${escapeHtml(view.importLabel)}</button>`;
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="${escapeHtml(buildImportReviewCsp(nonce))}">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtml(IMPORT_REVIEW_TITLE)}</title>
-<style nonce="${n}">${REVIEW_PANEL_STYLE}</style>
-</head>
-<body>
-<main class="cdb" data-mode="review">
-  <header class="cdb__header">
-    <h1 class="cdb__heading">${escapeHtml(view.heading)}</h1>
-    ${view.intro.map((line) => `<p class="cdb__intro">${escapeHtml(line)}</p>`).join('\n    ')}
-    <ul class="cdb__counts">${view.counts.map((c) => `<li class="cdb__count"><span class="cdb__count-value">${thousands(c.value)}</span> ${escapeHtml(c.label)}</li>`).join('')}</ul>
-  </header>
-  <section class="cdb__list" tabindex="0" aria-label="Everything the import does">${sections}
-  </section>
-  <footer class="cdb__actions"><p class="cdb__status" role="status" aria-live="polite"></p>${actions}</footer>
-</main>
-<script nonce="${n}">${SCRIPT}</script>
-</body>
-</html>`;
 }

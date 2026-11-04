@@ -435,6 +435,25 @@ const FEATURES = [
   'suggestPromptNothingNewDiagram',
   'suggestPromptNothingGuide',
   'suggestPromptNothingOff',
+  // Draft-first (docs/dev/draft-first.md §11).
+  'draftShown',
+  'draftShownAuto',
+  'draftExampleShown',
+  'draftSourceSqlDdl',
+  'draftSourceSemanticModel',
+  'draftSourceDbml',
+  'draftSourceDbt',
+  'draftKept',
+  'draftChangeOptions',
+  'draftDiscarded',
+  'draftClosed',
+  'draftOtherStart',
+  'draftScopeChanged',
+  'draftDetailsOpened',
+  'draftRefreshed',
+  'draftUnavailable',
+  'suggestPromptShowMe',
+  'importGuideFromDraft',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -530,6 +549,9 @@ const ERROR_CODES = [
   // importer, converting, or writing the new diagram) — not the user's files.
   'importSqlDdlFailed',
   'importSemanticModelFailed',
+  // Draft-first: a draft could not be built (ours); the preview's layout failed.
+  'draftBuildFailed',
+  'draftLayoutFailed',
 ];
 
 /**

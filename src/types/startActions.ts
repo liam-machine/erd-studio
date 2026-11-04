@@ -12,6 +12,8 @@
  * came from (the onboarding funnel) and then runs the real command.
  */
 
+import type { DraftTrigger } from './draft';
+
 /**
  * Every start, in the order the Welcome panel renders its buttons (the page
  * reorders them by {@link startActionsFor}). The three `import*` starts go
@@ -44,15 +46,26 @@ export const START_ACTION_COMMANDS: Readonly<Record<StartAction, string>> = {
 };
 
 /**
+ * What opened a start's draft (`DraftTrigger`, `src/types/draft.ts`), as a
+ * command argument may carry it: a start surface or the start quick pick
+ * (`start`), the start suggestion's Show Me (`prompt`). The automatic draft
+ * (`sidebar`) is started by the host itself, never through an argument.
+ */
+export type StartDraftTrigger = Extract<DraftTrigger, 'start' | 'prompt'>;
+const START_DRAFT_TRIGGERS: readonly StartDraftTrigger[] = ['start', 'prompt'];
+
+/**
  * The argument a direct import gets from a start surface, the start
  * suggestion or the start quick pick: its **quick path** — every answer with
  * an obvious default is chosen (the files the folder holds, the dialect, the
- * layer, the name), and the dry run is the one question, with Change
- * Options… for the step-by-step flow. The palette and Import…'s picker run
- * the commands without it: step by step.
+ * layer, the name) — ending in the draft preview (Draft-first: nothing is
+ * written until Keep), with Change options… for the step-by-step flow.
+ * `draft` says what opened it (default `start`). The palette and Import…'s
+ * picker run the commands without it: step by step, ending in a draft too.
  */
 export interface QuickImportArg {
   quick: true;
+  draft?: StartDraftTrigger;
 }
 export const QUICK_IMPORT_ARG: QuickImportArg = { quick: true };
 
@@ -61,12 +74,29 @@ export function isQuickImportArg(arg: unknown): arg is QuickImportArg {
   return typeof arg === 'object' && arg !== null && !Array.isArray(arg) && (arg as { quick?: unknown }).quick === true;
 }
 
+/**
+ * The draft trigger a command's argument names (`{ draft: 'start' }`,
+ * `{ quick: true, draft: 'prompt' }`), or undefined for anything else (the
+ * palette, a file URI, a stray value).
+ */
+export function startDraftTriggerOf(arg: unknown): StartDraftTrigger | undefined {
+  if (typeof arg !== 'object' || arg === null || Array.isArray(arg)) return undefined;
+  const draft = (arg as { draft?: unknown }).draft;
+  return (START_DRAFT_TRIGGERS as readonly unknown[]).includes(draft) ? draft as StartDraftTrigger : undefined;
+}
+
 /** The starts whose command takes {@link QUICK_IMPORT_ARG}: the three direct imports. */
 const QUICK_STARTS: ReadonlySet<StartAction> = new Set<StartAction>(['importSemanticModel', 'importSqlDdl', 'importDbmlFile']);
 
-/** The arguments {@link START_ACTION_COMMANDS}[action] runs with from a start: the quick path for a direct import, else none. */
-export function startActionArgs(action: StartAction): unknown[] {
-  return QUICK_STARTS.has(action) ? [QUICK_IMPORT_ARG] : [];
+/**
+ * The arguments {@link START_ACTION_COMMANDS}[action] runs with from a start:
+ * a direct import's quick path, and for it and Draw from dbt the draft's
+ * trigger (`start` by default, `prompt` for Show Me); none for the others.
+ */
+export function startActionArgs(action: StartAction, trigger: StartDraftTrigger = 'start'): unknown[] {
+  if (QUICK_STARTS.has(action)) return [{ ...QUICK_IMPORT_ARG, draft: trigger }];
+  if (action === 'drawFromDbt') return [{ draft: trigger }];
+  return [];
 }
 
 /**

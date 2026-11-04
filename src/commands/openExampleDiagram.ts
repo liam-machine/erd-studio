@@ -6,10 +6,14 @@
  * keys and measures filled in.
  *
  * It is Import DBML… with the file supplied: the DBML below is fed through
- * the very same flow (`importDbml`), so the user still names the diagram and
- * sees the dry-run summary with Import / Cancel before anything is written,
- * and the files land exactly as an import writes them (a plain folder gets
- * `.erd-studio/` and its `layers.json` on that confirm, never before).
+ * the very same flow (`importDbml`), so the files land exactly as an import
+ * writes them (a plain folder gets `.erd-studio/` and its `layers.json` on
+ * Keep, never before). With the draft preview (Draft-first, the **Open an
+ * Example…** draft in a folder, `docs/dev/draft-first.md` §9) it runs the
+ * quick path: nothing is asked, the draft is shown and **Keep This Example**
+ * writes it. Without one, the user names it and confirms the dry run.
+ * The command stays registered (the setup skill names it) but is hidden from
+ * the palette: it opens the same draft as Open an Example….
  * No dbt needed, and nothing new ships in the VSIX: the DBML is inline.
  *
  * Only the file-reading half of the import UI is replaced (`exampleDbmlUi`):
@@ -157,6 +161,7 @@ export async function openExampleDiagram(deps: ImportDbmlDeps): Promise<ImportDb
   const hasExampleLayer = deps.layerService.getCreatableLayers().some((l) => l.id === EXAMPLE_LAYER);
   return importDbml(
     { ...deps, ui, source: 'example' },
-    { filePath: examplePath, ...(hasExampleLayer ? { layer: EXAMPLE_LAYER } : {}) },
+    // The draft asks nothing: the layer and name are the quick path's.
+    { filePath: examplePath, ...(hasExampleLayer ? { layer: EXAMPLE_LAYER } : {}), ...(deps.draft ? { quick: true } : {}) },
   );
 }
