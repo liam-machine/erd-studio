@@ -38,6 +38,7 @@ import {
 import {
   GETTING_STARTED_VIEW_TYPE,
   GettingStartedPanel,
+  howToClipUris,
   SETUP_CANCELLED_MESSAGE,
   SETUP_READY_MESSAGE,
   COPILOT_CHAT_OPEN_COMMAND,
@@ -70,8 +71,22 @@ import {
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../../src/types/gettingStartedTranscript';
 import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../../src/types/gettingStartedLogicalTranscript';
 import { HELP_ACTIONS } from '../../src/providers/HelpTreeProvider';
-import { START_ACTIONS, START_ACTION_COMMANDS, startActionsFor, type StartAction } from '../../src/types/startActions';
-import { START_FEATURES } from '../../src/commands/start';
+import {
+  HOW_TO_CLIPS,
+  HOW_TO_CLIP_KEYS,
+  howToClipFor,
+  type HowToClipKey,
+  START_ACTIONS,
+  START_ACTION_COMMANDS,
+  START_INTENTS,
+  START_INTENT_REASONS,
+  startActionsFor,
+  startActionsForIntent,
+  startIntentFor,
+  type StartAction,
+  type StartIntent,
+} from '../../src/types/startActions';
+import { START_FEATURES, START_INTENT_FEATURES } from '../../src/commands/start';
 import { HARNESS_VERSION, HarnessService, extractHarnessVersion } from '../../src/services/harnessService';
 import type { RecommendedInstallResult } from '../../src/types/harness';
 import { telemetry } from '../../src/services/telemetryService';
@@ -236,13 +251,14 @@ describe('buildGettingStartedHtml', () => {
 // Panel script (jsdom)
 // ---------------------------------------------------------------------------
 
-/** A status as the host posts it: `starts` from `startActionsFor()` unless the test set its own. */
+/** A status as the host posts it: `intent` and `starts` from the start rule unless the test set its own. */
 function withStarts(data: unknown): unknown {
   const m = data as { type?: string; payload?: GettingStartedStatus };
   if (m?.type !== 'status' || !m.payload || m.payload.starts !== undefined) { return data; }
   const s = m.payload;
   const hasDbt = s.hasProject && !s.logicalOnly;
-  return { ...m, payload: { ...s, starts: startActionsFor({ hasProject: s.hasProject, hasDbt, storage: s.storage }) } };
+  const intent = s.intent ?? startIntentFor({ hasProject: s.hasProject, hasDbt, storage: s.storage, hasDiagrams: s.domainCount > 0 });
+  return { ...m, payload: { ...s, ...(intent ? { intent } : {}), starts: startActionsForIntent(intent, hasDbt) } };
 }
 
 function runPanelScript(html: string) {
@@ -466,9 +482,10 @@ describe('panel script', () => {
       expect(visible('[data-step="begin"] .gs-step__text')).toEqual([
         'Add tables on a blank canvas, import one from DBML, SQL DDL or a Power BI semantic model, or open a finished example.',
       ]);
-      // One button per start, in startActionsFor order, the first one primary.
-      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Import\u2026', 'Open an example\u2026']);
+      // One button per start, in startActionsFor order, the first one primary; with nothing to import, the example second.
+      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Open an example\u2026', 'Import\u2026']);
       expect(visible('[data-step="begin"] .gs-btn--primary')).toEqual(['New diagram']);
+      expect(visible('[data-step="begin"] .gs-step__reason')).toEqual([]);
       // Native DBML storage (2.0): format-neutral, since a YAML project from before 2.0 shows it too.
       expect(visible('[data-step="begin"] .gs-step__text').join()).not.toMatch(/YAML|JSON|\bdbt\b/i);
       // No dbt wording where it no longer applies; the summary describes dbt models, so it stays off.
@@ -517,7 +534,7 @@ describe('panel script', () => {
       expect(withDiagrams).toEqual(['open', 'assistant', 'helper', 'start']);
       expect(visible('[data-step="open"] .gs-step__text span')).toEqual(['You have 2 diagrams.', 'Open one to keep designing.']);
       expect(shownText('[data-step="open"] .gs-start-more')[0]).toMatch(/^Start another: /);
-      expect(visible('[data-step="open"] .gs-start-more .gs-link')).toEqual(['New diagram', 'Import\u2026', 'Open an example\u2026']);
+      expect(visible('[data-step="open"] .gs-start-more .gs-link')).toEqual(['New diagram', 'Open an example\u2026', 'Import\u2026']);
       posted.length = 0;
       click('[data-step="open"] .gs-start-more [data-start="import"]');
       expect(posted).toEqual([{ type: 'start', action: 'import' }]);
@@ -547,7 +564,7 @@ describe('panel script', () => {
         ]);
         expect(visible('[data-step="convert"] .gs-btn--primary')).toEqual(['Convert to DBML']);
         // Convert is the page's primary start, so the start card's buttons are all plain.
-        expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Import\u2026', 'Open an example\u2026']);
+        expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Open an example\u2026', 'Import\u2026']);
         expect(visible('[data-step="begin"] .gs-btn--primary')).toEqual([]);
       }
       // With diagrams the card stays, above "Open your diagrams".
@@ -582,7 +599,9 @@ describe('panel script', () => {
       expect(visible('[data-start]').filter((t) => t !== 'Open an example\u2026' && t !== 'Convert to DBML')).toEqual([]);
       // A status listing an unknown start, or every start (even Draw from dbt), still shows only buttons that exist here.
       send({ type: 'status', payload: { ...STATUS, logicalOnly: true, starts: ['nope', '<b>x</b>', ...START_ACTIONS] as unknown as StartAction[] } });
-      expect(visible('[data-step="begin"] .gs-btn')).toEqual(['New diagram', 'Import\u2026', 'Open an example\u2026']);
+      expect(visible('[data-step="begin"] .gs-btn')).toEqual([
+        'Import your Power BI semantic model', 'Import your SQL scripts', 'Import your DBML file', 'New diagram', 'Import\u2026', 'Open an example\u2026',
+      ]);
       expect(doc.querySelector('[data-step="begin"] b')).toBeNull();
       expect(visible('[data-start="drawFromDbt"]')).toEqual([]);
       // The order follows the status.
@@ -1526,8 +1545,9 @@ describe('GettingStartedPanel', () => {
     expect(panel._column).toBe(vscode.ViewColumn.One);
     expect(panel.webview.options.enableScripts).toBe(true);
     expect(panel.webview.options.retainContextWhenHidden).toBe(false);
+    // The media folder, and the "Watch how" clips' folder (inside it) named too.
     expect((panel.webview.options.localResourceRoots as Array<{ path: string }>).map((u) => u.path))
-      .toEqual([`${REPO_ROOT}/media/onboarding`]);
+      .toEqual([`${REPO_ROOT}/media/onboarding`, `${REPO_ROOT}/media/onboarding/stories`]);
     expect(panel.webview.html).toContain("media-src https://mock-csp-source");
     // Shipped media are referenced when present (WP6 output).
     if (fs.existsSync(path.join(REPO_ROOT, 'media/onboarding/getting-started.mp4'))) {
@@ -1599,6 +1619,9 @@ describe('GettingStartedPanel', () => {
     expect(START_ACTION_COMMANDS).toEqual({
       convert: 'erdStudio.convertProjectToDbml',
       drawFromDbt: 'erdStudio.drawFromDbt',
+      importSemanticModel: 'erdStudio.importSemanticModel',
+      importSqlDdl: 'erdStudio.importSqlDdl',
+      importDbmlFile: 'erdStudio.importDbml',
       blank: 'erdStudio.createDomain',
       import: 'erdStudio.importModel',
       example: 'erdStudio.openExampleProject',
@@ -1615,7 +1638,10 @@ describe('GettingStartedPanel', () => {
       expect(ran.at(-1), action).toEqual({ command: START_ACTION_COMMANDS[action], args: [] });
       expect((deps.getStatus as ReturnType<typeof vi.fn>).mock.calls.length, action).toBe(statusCalls + 1);
     }
-    expect(Object.values(START_FEATURES.welcome)).toEqual(['welcomeConvert', 'welcomeDrawFromDbt', 'welcomeBlank', 'welcomeImport', 'welcomeExample']);
+    expect(Object.values(START_FEATURES.welcome)).toEqual([
+      'welcomeConvert', 'welcomeDrawFromDbt', 'welcomeImportSemanticModel', 'welcomeImportSqlDdl', 'welcomeImportDbmlFile',
+      'welcomeBlank', 'welcomeImport', 'welcomeExample',
+    ]);
     expect(ran).toHaveLength(START_ACTIONS.length);
 
     // A start the validator does not know runs nothing and counts nothing.
@@ -1627,23 +1653,25 @@ describe('GettingStartedPanel', () => {
     expect(feature).not.toHaveBeenCalled();
   });
 
-  it('every status carries the starts startActionsFor gives: Convert for a YAML or mixed project, Draw from dbt with dbt, only the example with no folder', async () => {
+  it('every status carries the suggestion and the starts the start rule gives: Convert alone for a YAML or mixed project, Draw from dbt with dbt, only the example with no folder', async () => {
     const deps = makeDeps();
     GettingStartedPanel.createOrShow(makeContext(), deps);
     const panel = vscode.window._webviewPanels[0];
     const lastStarts = () => (panel._postedMessages.filter((m) => (m as { type: string }).type === 'status').at(-1) as { payload: GettingStartedStatus }).payload.starts;
-    const cases: Array<[Partial<GettingStartedStatus>, StartAction[]]> = [
-      [{}, ['drawFromDbt', 'blank', 'import', 'example']], // no storage reads as DBML
-      [{ storage: 'dbml' }, ['drawFromDbt', 'blank', 'import', 'example']],
-      [{ storage: 'yaml' }, ['convert', 'drawFromDbt', 'blank', 'import', 'example']],
-      [{ logicalOnly: true }, ['blank', 'import', 'example']],
-      [{ logicalOnly: true, storage: 'mixed' }, ['convert', 'blank', 'import', 'example']],
-      [{ hasProject: false, project: null }, ['example']],
-      [{ hasProject: false, project: null, storage: 'yaml' }, ['example']],
+    const lastIntent = () => (panel._postedMessages.filter((m) => (m as { type: string }).type === 'status').at(-1) as { payload: GettingStartedStatus }).payload.intent;
+    const cases: Array<[Partial<GettingStartedStatus>, StartIntent | undefined, StartAction[]]> = [
+      [{}, 'drawFromDbt', ['drawFromDbt', 'blank', 'import', 'example']], // no storage reads as DBML
+      [{ storage: 'dbml' }, 'drawFromDbt', ['drawFromDbt', 'blank', 'import', 'example']],
+      [{ storage: 'yaml' }, 'convert', ['convert', 'drawFromDbt', 'blank', 'import']],
+      [{ logicalOnly: true }, 'blank', ['blank', 'example', 'import']],
+      [{ logicalOnly: true, storage: 'mixed' }, 'convert', ['convert', 'blank', 'example', 'import']],
+      [{ hasProject: false, project: null }, undefined, ['example']],
+      [{ hasProject: false, project: null, storage: 'yaml' }, undefined, ['example']],
     ];
-    for (const [over, starts] of cases) {
+    for (const [over, intent, starts] of cases) {
       (deps.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ...STATUS, ...over });
       await panel._simulateMessage({ type: 'refreshStatus' });
+      expect(lastIntent(), JSON.stringify(over)).toBe(intent);
       expect(lastStarts(), JSON.stringify(over)).toEqual(starts);
     }
     // The deps' logicalOnly counts when the status leaves it out.
@@ -1652,7 +1680,7 @@ describe('GettingStartedPanel', () => {
     const logical = vscode.window._webviewPanels.at(-1)!;
     await logical._simulateMessage({ type: 'ready' });
     const status = logical._postedMessages.filter((m) => (m as { type: string }).type === 'status').at(-1) as { payload: GettingStartedStatus };
-    expect(status.payload.starts).toEqual(['blank', 'import', 'example']);
+    expect(status.payload.starts).toEqual(['blank', 'example', 'import']);
   });
 
   it('closing the panel without choosing anything records welcomeLeftNoChoice, once; any choice clears it', async () => {
@@ -2152,5 +2180,166 @@ describe('getting-started telemetry', () => {
     info.mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never).mockResolvedValueOnce(undefined);
     await trySampleProject();
     expect(keys(error)).toEqual(['sampleCloneFailed']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The suggested start: primary button, reason line and the "Watch how" clip
+// ---------------------------------------------------------------------------
+
+describe('the start card follows the suggestion', () => {
+  const CLIPS = Object.fromEntries(HOW_TO_CLIP_KEYS.map((k) => [k, {
+    videoUri: `https://mock-csp-source/media/onboarding/stories/${HOW_TO_CLIPS[k]}`,
+  }])) as Record<HowToClipKey, { videoUri: string }>;
+  const IMPORT_LABELS: Record<string, string> = {
+    importSemanticModel: 'Import your Power BI semantic model',
+    importSqlDdl: 'Import your SQL scripts',
+    importDbmlFile: 'Import your DBML file',
+  };
+
+  it.each(['importSemanticModel', 'importSqlDdl', 'importDbmlFile'] as const)('%s: its import is the one primary button, with its reason line, the generic Import… kept as a secondary', (intent) => {
+    const { dom, send, visible, posted, doc } = runPanelScript(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical' }));
+    try {
+      send({ type: 'status', payload: { ...STATUS, logicalOnly: true, intent } });
+      expect(visible('[data-step="begin"] .gs-btn--primary')).toEqual([IMPORT_LABELS[intent]]);
+      expect(visible('[data-step="begin"] .gs-btn')).toEqual([IMPORT_LABELS[intent], 'New diagram', 'Import…', 'Open an example…']);
+      expect(visible('[data-step="begin"] .gs-step__reason')).toEqual([START_INTENT_REASONS[intent]]);
+      (doc.querySelector(`[data-step="begin"] [data-start="${intent}"]`) as HTMLElement).click();
+      expect(posted.at(-1)).toEqual({ type: 'start', action: intent });
+      // No clip shipped: no "Watch how" slot at all.
+      expect(doc.querySelector('.gs-howto')).toBeNull();
+      // Back to nothing found: New diagram leads, no reason line.
+      send({ type: 'status', payload: { ...STATUS, logicalOnly: true, intent: 'blank' } });
+      expect(visible('[data-step="begin"] .gs-btn--primary')).toEqual(['New diagram']);
+      expect(visible('[data-step="begin"] .gs-step__reason')).toEqual([]);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('reason lines name the kind of file only (no names), say "diagram", and never "open standard"', () => {
+    for (const reason of Object.values(START_INTENT_REASONS)) {
+      expect(reason).toMatch(/^This folder has /);
+      expect(reason).not.toMatch(/\.(sql|dbml|bim|pbip|tmdl)\b|open standard|\bdbt\b/i);
+    }
+    expect(Object.keys(START_INTENT_REASONS).sort()).toEqual(['importDbmlFile', 'importSemanticModel', 'importSqlDdl']);
+  });
+
+  it('renders no "Watch how" slot when the extension ships no clip, and only the clips it is given', () => {
+    expect(buildGettingStartedHtml(HTML_INPUT)).not.toContain('class="gs-howto');
+    const html = buildGettingStartedHtml({ ...HTML_INPUT, howToClips: { importSqlDdl: { videoUri: CLIPS.importSqlDdl.videoUri } } });
+    expect(html.match(/<video class="gs-howto__clip"/g)).toHaveLength(1);
+    expect(html).toContain('data-clip="importSqlDdl"');
+    // No poster file: its first frame is the poster (fewer files in the VSIX).
+    expect(html).not.toContain('poster="https://mock-csp-source/media/onboarding/stories');
+  });
+
+  it('the clip is silent, plays on a click (no autoplay; only its header and first frame load) and keeps the CSP: no inline style or handler', () => {
+    const html = buildGettingStartedHtml({ ...HTML_INPUT, howToClips: CLIPS });
+    const clips = html.match(/<video class="gs-howto__clip"[^>]*>/g) ?? [];
+    expect(clips).toHaveLength(HOW_TO_CLIP_KEYS.length);
+    for (const tag of clips) {
+      expect(tag).toMatch(/ muted /);
+      expect(tag).toMatch(/ controls /);
+      expect(tag).toMatch(/preload="metadata"/);
+      expect(tag).not.toMatch(/poster=/);
+      expect(tag).not.toMatch(/autoplay/);
+    }
+    expect(html).toContain(`media-src ${HTML_INPUT.cspSource};`);
+    expect(html).not.toMatch(/\sstyle="|\son[a-z]+="/i);
+  });
+
+  it('shows the suggestion\'s clip in the card that leads (the start card, or Convert\'s own) and counts a play once per clip', () => {
+    const { dom, send, visible, posted, doc } = runPanelScript(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical', howToClips: CLIPS }));
+    try {
+      const shownClips = () => [...doc.querySelectorAll<HTMLElement>('.gs-howto__clip')].filter((el) => el.closest('[hidden]') === null).map((el) => el.dataset.clip);
+      send({ type: 'status', payload: { ...STATUS, logicalOnly: true, intent: 'importSqlDdl' } });
+      expect(shownClips()).toEqual(['importSqlDdl']);
+      expect(visible('[data-step="begin"] .gs-howto__title')).toEqual(['Watch how (a short clip, no sound)']);
+      const clip = doc.querySelector('[data-clip="importSqlDdl"]')!;
+      clip.dispatchEvent(new dom.window.Event('play'));
+      clip.dispatchEvent(new dom.window.Event('play'));
+      expect(posted.filter((m) => (m as { type: string }).type === 'howToClipPlayed')).toHaveLength(1);
+
+      // A project from before 2.0: no clip (Convert's panel lists every change first).
+      send({ type: 'status', payload: { ...STATUS, logicalOnly: true, storage: 'yaml', intent: 'convert' } });
+      expect(shownClips()).toEqual([]);
+
+      // Diagrams already: the start card is gone, and so is the clip.
+      send({ type: 'status', payload: { ...STATUS, logicalOnly: true, domainCount: 2, intent: 'blank' } });
+      expect(shownClips()).toEqual([]);
+      // No folder: the example's clip, in the open-a-folder card, beside "Open an example…".
+      send({ type: 'status', payload: { ...STATUS, hasProject: false, project: null } });
+      expect(shownClips()).toEqual(['example']);
+      expect(doc.querySelector('.gs-noproject .gs-howto [data-clip="example"]')).not.toBeNull();
+      // Each page shows the clip the rule names.
+      expect(howToClipFor(false, undefined)).toBe('example');
+      expect(howToClipFor(true, 'importSqlDdl')).toBe('importSqlDdl');
+      expect(howToClipFor(true, 'convert')).toBeUndefined();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('howToClipUris: a clip whose file is not in the extension is left out', () => {
+    const root = vscode.Uri.file('/ext');
+    const present = new Set([`/ext/media/onboarding/stories/${HOW_TO_CLIPS.importSqlDdl}`, `/ext/media/onboarding/stories/${HOW_TO_CLIPS.example}`]);
+    const got = howToClipUris(root, (u) => `webview:${u.fsPath}`, (p) => present.has(p));
+    expect(got).toEqual({
+      example: { videoUri: `webview:/ext/media/onboarding/stories/${HOW_TO_CLIPS.example}` },
+      importSqlDdl: { videoUri: `webview:/ext/media/onboarding/stories/${HOW_TO_CLIPS.importSqlDdl}` },
+    });
+  });
+
+  it('howToClipPlayed is validated, counted, and passive (watching how is not choosing a start)', async () => {
+    expect(isGettingStartedToHost({ type: 'howToClipPlayed' })).toBe(true);
+    const feature = vi.spyOn(telemetry, 'feature');
+    GettingStartedPanel.createOrShow(makeContext(), makeDeps());
+    const panel = vscode.window._webviewPanels.at(-1)!;
+    await panel._simulateMessage({ type: 'ready' });
+    await panel._simulateMessage({ type: 'howToClipPlayed' });
+    expect(feature).toHaveBeenCalledWith('howToClipPlayed');
+    panel.dispose();
+    expect(feature.mock.calls.filter((c) => c[0] === 'welcomeLeftNoChoice')).toHaveLength(1);
+  });
+
+  it('with the host\'s tracker: the first status carries the known suggestion, a second the one after the look; each counted once a day', async () => {
+    const once = vi.spyOn(telemetry, 'featureOnce');
+    let resolveLook!: (i: StartIntent) => void;
+    const tracker = {
+      known: vi.fn((): StartIntent => 'blank'),
+      refresh: vi.fn(() => new Promise<StartIntent>((r) => { resolveLook = r; })),
+    };
+    const deps = makeDeps({ logicalOnly: true, startIntent: tracker });
+    (deps.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ...STATUS, logicalOnly: true });
+    GettingStartedPanel.createOrShow(makeContext(), deps);
+    const panel = vscode.window._webviewPanels[0];
+    const statuses = () => panel._postedMessages.filter((m) => (m as { type: string }).type === 'status') as Array<{ payload: GettingStartedStatus }>;
+    const ready = panel._simulateMessage({ type: 'ready' });
+    await vi.waitFor(() => expect(statuses().length).toBe(1));
+    expect(statuses()[0].payload).toMatchObject({ intent: 'blank', starts: ['blank', 'example', 'import'] });
+    resolveLook('importSqlDdl');
+    await ready;
+    await vi.waitFor(() => expect(statuses().length).toBe(2));
+    expect(statuses()[1].payload).toMatchObject({ intent: 'importSqlDdl', starts: ['importSqlDdl', 'blank', 'import', 'example'] });
+    expect(once).toHaveBeenCalledWith(START_INTENT_FEATURES.importSqlDdl);
+
+    // The same suggestion again: no second status, and the start card's suggestion is not counted with diagrams.
+    once.mockClear();
+    tracker.known.mockReturnValue('importSqlDdl');
+    tracker.refresh.mockResolvedValue('importSqlDdl');
+    (deps.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ...STATUS, logicalOnly: true, domainCount: 1 });
+    await panel._simulateMessage({ type: 'refreshStatus' });
+    await vi.waitFor(() => expect(tracker.refresh).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(statuses().length).toBe(3);
+    expect(once).not.toHaveBeenCalled();
+
+    // No folder: the tracker is not asked.
+    (deps.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ...STATUS, hasProject: false, project: null });
+    await panel._simulateMessage({ type: 'refreshStatus' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(tracker.refresh).toHaveBeenCalledTimes(2);
+    expect(statuses().at(-1)!.payload.intent).toBeUndefined();
   });
 });

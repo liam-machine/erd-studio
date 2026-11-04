@@ -183,7 +183,7 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     const detail = (modal[1] as { detail: string }).detail;
     expect(detail).toContain('• 1 relationship saved in main/relationships/main.dbml.');
     expect(detail).not.toContain('the tables\' files');
-    expect(detail).toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
+    expect(detail).toContain('• Layout: The diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
     // The import itself writes no positions: the first open's auto layout does, as a JSON diagram's first open writes its positions.
     expect(fs.readFileSync(erd('main', 'diagrams', 'shop.dbml'), 'utf-8')).not.toContain('erd_layout');
     expect(files()).toEqual(IMPORTED);

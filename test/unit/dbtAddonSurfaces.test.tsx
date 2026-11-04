@@ -96,6 +96,7 @@ import { App } from '../../webview/App';
 import { useEditorStore } from '../../webview/store/editorStore';
 import { orientDraggedRelationship } from '../../webview/lib/relationshipDirection';
 import { evalWhen, type WhenContext } from './helpers/whenClause';
+import { START_INTENTS, START_INTENT_CONTEXT_KEY } from '../../src/types/startActions';
 
 // ---------------------------------------------------------------------------
 // The matcher
@@ -214,8 +215,11 @@ function contributesShown(base: WhenContext, out: Collected): void {
   /** The view a menu entry or welcome content belongs to, from `view == x` in its clause. */
   const viewOf = (when: string | undefined) => /\bview == ([\w.]+)/.exec(when ?? '')?.[1];
 
-  for (let mask = 0; mask < 1 << TOGGLES.length; mask++) {
-    const ctx: WhenContext = { ...base };
+  // The start screen's suggestion (`erdStudio.startIntent`) is swept too: unset (not looked yet) and every value.
+  const intents: Array<string | undefined> = [undefined, ...START_INTENTS];
+  for (let combo = 0; combo < (1 << TOGGLES.length) * intents.length; combo++) {
+    const mask = combo % (1 << TOGGLES.length);
+    const ctx: WhenContext = { ...base, [START_INTENT_CONTEXT_KEY]: intents[Math.floor(combo / (1 << TOGGLES.length))] };
     TOGGLES.forEach((key, i) => { ctx[key] = (mask & (1 << i)) !== 0; });
     const holds = (when: string | undefined) => evalWhen(when, ctx, WILDCARDS);
     const viewShown = (id: string | undefined) => id === undefined || (viewWhen.has(id) ? holds(viewWhen.get(id)) : true);
@@ -871,9 +875,11 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
 
   it('package.json: the dbt walkthrough steps, welcome views and commands', () => {
     const shown = got.text['package.json'];
-    for (const step of ['watch', 'draw']) {
+    // The fixture is a project from before 2.0: its start step is Convert, with Draw from dbt under it.
+    for (const step of ['watch', 'convertDbt']) {
       expect(shown.some((s) => s.where === `walkthrough step ${step} title`), step).toBe(true);
     }
+    expect(shown.some((s) => s.where === 'walkthrough step convertDbt description' && s.text.includes('[draw from dbt]'))).toBe(true);
     expect(shown.some((s) => s.where.startsWith('walkthrough step watchLogical'))).toBe(false);
     expect(all('package.json')).toContain('draw your dbt project with Draw from dbt');
     expect(all('package.json')).toContain('ERD Studio: Draw from dbt…');

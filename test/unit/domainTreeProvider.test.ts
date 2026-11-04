@@ -195,6 +195,37 @@ describe('SubjectAreaTreeProvider', () => {
     });
   });
 
+  describe('Convert to DBML… row (a project from before 2.0, onboarding story 08)', () => {
+    it('leads the layers while the rule says so, and runs the start screen\'s Convert from the sidebar', () => {
+      let shows = true;
+      provider.setConvertRow(() => shows);
+      const children = provider.getChildren(undefined)!;
+      expect(children.map((c) => c.type)).toEqual(['convert', 'layer', 'layer', 'layer', 'newLayer']);
+      const item = provider.getTreeItem(children[0]);
+      expect([item.label, item.description, item.contextValue, (item.iconPath as { id: string }).id])
+        .toEqual(['Convert to DBML…', 'from an older ERD Studio', 'convertProject', 'arrow-swap']);
+      expect(String(item.tooltip)).toContain('DBML, an open format');
+      expect(item.command).toEqual({ command: 'erdStudio.start', title: 'Convert to DBML…', arguments: [{ action: 'convert', from: 'sidebar' }] });
+      // Converted, declined or turned off: gone on the next listing.
+      shows = false;
+      expect(provider.getChildren(undefined)!.map((c) => c.type)).toEqual(['layer', 'layer', 'layer', 'newLayer']);
+    });
+
+    it('is not a row of an empty tree (the welcome view\'s Convert entry shows there), and a failing rule hides it', () => {
+      const empty = fullRows(new SubjectAreaTreeProvider(createMockSubjectAreaService([], new Map()), layerService, PROJECT_PATH));
+      empty.setConvertRow(() => true);
+      expect(empty.getChildren(undefined)).toEqual([]);
+      provider.setConvertRow(() => { throw new Error('boom'); });
+      expect(provider.getChildren(undefined)!.map((c) => c.type)).not.toContain('convert');
+    });
+
+    it('comes after the project row', () => {
+      provider.setConvertRow(() => true);
+      provider.setProjectRow({ name: 'jaffle', location: 'here' });
+      expect(provider.getChildren(undefined)!.slice(0, 2).map((c) => c.type)).toEqual(['project', 'convert']);
+    });
+  });
+
   describe('project row (#82)', () => {
     it('leads the tree with a clickable project row when there is more than one project', () => {
       const fired = vi.fn();

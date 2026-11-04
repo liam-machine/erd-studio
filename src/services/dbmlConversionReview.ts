@@ -404,10 +404,13 @@ body {
 }
 .cdb-item__open:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
 .cdb-item__open:focus { outline: 1px solid var(--vscode-focusBorder); }
-.cdb__status { flex: 1; align-self: center; margin: 0; color: var(--vscode-descriptionForeground); }
+.cdb__status { order: 1; flex: 1; align-self: center; margin: 0; color: var(--vscode-descriptionForeground); }
 .cdb__status:empty { display: none; }
+/* The buttons sit bottom-left, the status after them: VS Code's notifications
+   stack at the bottom right of the window, over a right-aligned Convert
+   (onboarding story 08 pressed a toast's button instead). */
 .cdb__actions {
-  position: sticky; bottom: 0; flex: none; display: flex; gap: 8px; justify-content: flex-end;
+  position: sticky; bottom: 0; flex: none; display: flex; gap: 8px; justify-content: flex-start;
   padding: 12px 24px; background: var(--vscode-editor-background);
   border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
 }

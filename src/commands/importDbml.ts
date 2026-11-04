@@ -26,6 +26,7 @@
  * with plain fakes; `vscodeImportDbmlUi()` is the real one `activate()` uses.
  */
 
+import { slugFromName, validateTypedDiagramName } from './diagramName';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -146,8 +147,12 @@ const SEVERAL_FIELDS_ON_ONE_LINE = /These fields must be some inline settings/i;
 
 /** Every vscode call the flow makes, injectable for tests. */
 export interface ImportDbmlUi {
-  /** The DBML file to import (an Open dialog filtered to `.dbml`); undefined when cancelled. */
-  pickFile(defaultFolder: string | undefined): Promise<string | undefined>;
+  /**
+   * The DBML file to import (an Open dialog filtered to `.dbml`); undefined
+   * when cancelled. It opens on `defaultPath`: a folder, or a file to have
+   * that file chosen already.
+   */
+  pickFile(defaultPath: string | undefined): Promise<string | undefined>;
   /** A file's text (`workspace.fs`). Throws when it cannot be read. */
   readFile(filePath: string): Promise<string>;
   showQuickPick<T extends vscode.QuickPickItem>(items: readonly T[], options: vscode.QuickPickOptions): Promise<T | undefined>;
@@ -201,6 +206,13 @@ export interface ImportDbmlDeps {
   source?: ImportDbmlSource;
   /** With `'sql'` / `'semanticModel'`: what the dry run says about the conversion. */
   origin?: ImportDbmlOrigin;
+  /**
+   * A DBML file in the open folder (the start screen's look at it found one),
+   * which the Open dialog then starts on, chosen, so Import takes it in one
+   * press. Bounded and quiet: undefined (or a rejection) opens the dialog on
+   * the folder, as before. Absent: never looked up.
+   */
+  findDefaultFile?: () => Promise<string | undefined>;
 }
 
 /**
@@ -277,7 +289,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   const sendFeedback = (doing: string, err: unknown) => (): unknown => ui.sendFeedback(feedbackPrefill(title, doing, err));
 
   // 1. The file.
-  const filePath = resume?.filePath ?? await ui.pickFile(workspaceRoot || undefined);
+  const filePath = resume?.filePath
+    ?? await ui.pickFile((await deps.findDefaultFile?.().catch(() => undefined)) ?? (workspaceRoot || undefined));
   if (!filePath) return cancelled();
   const fileName = path.basename(filePath);
   const again = (more: Omit<ImportDbmlResume, 'filePath'> = {}): (() => unknown) =>
@@ -360,10 +373,11 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     prompt: `Name the diagram. It is saved in the ${layerLabel} layer.`,
     value: resume?.name ?? suggestDbmlSubjectAreaName(model, fileName, taken),
     ignoreFocusOut: true,
-    validateInput: (value: string) => deps.validateDomainName(value, chosenLayer),
+    // As New Diagram takes it: "Sales" is saved as sales.
+    validateInput: (value: string) => validateTypedDiagramName(value, (slug) => deps.validateDomainName(slug, chosenLayer)),
   });
   if (!name) return cancelled();
-  const slug = name.trim();
+  const slug = slugFromName(name);
 
   // A project that writes DBML (§3.2) gets a `.dbml` diagram whose relationships all live in the library (D5).
   const dbml = tableLibraryService.writesDbml?.() ?? false;
@@ -610,7 +624,7 @@ function stripBom(text: string): string {
 /** The real UI. */
 export function vscodeImportDbmlUi(): ImportDbmlUi {
   return {
-    pickFile: async (defaultFolder) => {
+    pickFile: async (defaultPath) => {
       const picked = await vscode.window.showOpenDialog({
         title: TITLE,
         openLabel: IMPORT_BUTTON,
@@ -618,7 +632,7 @@ export function vscodeImportDbmlUi(): ImportDbmlUi {
         canSelectFolders: false,
         canSelectMany: false,
         filters: { DBML: ['dbml'] },
-        ...(defaultFolder ? { defaultUri: vscode.Uri.file(defaultFolder) } : {}),
+        ...(defaultPath ? { defaultUri: vscode.Uri.file(defaultPath) } : {}),
       });
       return picked?.[0]?.fsPath;
     },

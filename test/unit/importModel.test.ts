@@ -13,9 +13,11 @@ import {
   IMPORT_MODEL_COMMAND,
   IMPORT_PICK_FEATURES,
   IMPORT_SOURCE_COMMANDS,
+  SEMANTIC_MODEL_GLOB,
   detectExcludeGlob,
   detectImportSources,
   importSourceItems,
+  readFileStart,
   runImportModel,
   type DetectImportIo,
   type ImportSourceItem,
@@ -23,6 +25,7 @@ import {
 import { NO_LEGACY_ALIAS, PRE_REGISTERED_COMMANDS } from '../../src/extension';
 import {
   convertedFileName,
+  sqlImportFileName,
   describeImportProblems,
   looksLikeSqlDdl,
   orderImportSources,
@@ -120,7 +123,7 @@ describe('detectImportSources', () => {
 
   it('finds a semantic model, a .dbml file and a .sql file holding CREATE TABLE, skipping the ERD Studio folder', async () => {
     const lookups = io({
-      '**/{*.pbip,*.bim,definition.pbism,model.tmdl,database.tmdl}': ['/w/Sales.pbip'],
+      [SEMANTIC_MODEL_GLOB]: ['/w/Sales.SemanticModel/definition.pbism'],
       '**/*.dbml': ['/w/schema.dbml'],
       '**/*.sql': ['/w/models/stg.sql', '/w/ddl/tables.sql'],
     }, {
@@ -139,6 +142,32 @@ describe('detectImportSources', () => {
     expect([...await detectImportSources(lookups, '.erd-studio')]).toEqual([]);
     const broken: DetectImportIo = { findFiles: () => Promise.reject(new Error('gone')), readStart: () => Promise.reject(new Error('gone')) };
     expect([...await detectImportSources(broken, '.erd-studio')]).toEqual([]);
+  });
+
+  it('a bare .pbip (a report-only project, live-connected to a published model) is not a semantic model', () => {
+    // Every shape findSemanticModels reads holds one of these; a thin report has only X.pbip + X.Report/.
+    expect(SEMANTIC_MODEL_GLOB).toBe('**/{*.bim,definition.pbism,model.tmdl,database.tmdl}');
+    expect(SEMANTIC_MODEL_GLOB).not.toMatch(/pbip/);
+  });
+
+  it('reads only the start of a file, however big it is', async () => {
+    const fs = await import('fs');
+    const os = await import('os');
+    const path = await import('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-detect-'));
+    try {
+      const file = path.join(dir, 'dump.sql');
+      fs.writeFileSync(file, 'CREATE TABLE t (id int);\n' + 'x'.repeat(200_000));
+      const start = await readFileStart(file, 1024);
+      expect(start.length).toBe(1024);
+      expect(Buffer.from(start).toString('utf-8')).toMatch(/^CREATE TABLE t \(id int\);/);
+      const small = path.join(dir, 'small.sql');
+      fs.writeFileSync(small, 'select 1');
+      expect(Buffer.from(await readFileStart(small, 1024)).toString('utf-8')).toBe('select 1');
+      await expect(readFileStart(path.join(dir, 'gone.sql'), 10)).rejects.toThrow();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -191,6 +220,19 @@ describe('importSources helpers', () => {
     expect(convertedFileName(['/x/ddl/a.sql', '/x/ddl/b.sql'])).toBe('ddl.dbml');
     expect(convertedFileName(['/x/ddl/a.sql'], '/x/ddl')).toBe('ddl.dbml');
     expect(convertedFileName(['C:\\db\\shop\\orders.sql'])).toBe('orders.dbml');
+  });
+
+  it('names converted SQL from a generic folder after the schema its tables share, else the project folder (onboarding story 04)', () => {
+    const sales = 'Table sales.dim_customer {\n}\nTable sales.fct_order_line {\n}\nTable public.audit {\n}\n';
+    expect(sqlImportFileName('database.dbml', sales, '/home/me/shop-database')).toBe('sales.dbml');
+    // Only default schemas, or a tie: the project folder.
+    expect(sqlImportFileName('ddl.dbml', 'Table public.a {\n}\nTable dbo.b {\n}\n', '/home/me/shop')).toBe('shop.dbml');
+    expect(sqlImportFileName('scripts.dbml', 'Table x.a {\n}\nTable y.b {\n}\n', 'C:\\work\\billing')).toBe('billing.dbml');
+    expect(sqlImportFileName('ddl.dbml', 'Table "Sales Ops".a {\n}\n', '/w')).toBe('sales ops.dbml');
+    // A name that already says something is kept.
+    expect(sqlImportFileName('warehouse.dbml', sales, '/home/me/shop')).toBe('warehouse.dbml');
+    // Nothing better: as it was.
+    expect(sqlImportFileName('database.dbml', 'Table a {\n}\n', '/home/me/src')).toBe('database.dbml');
   });
 
   it('summarises a semantic model\'s skips by kind, leaving out kinds with none', () => {

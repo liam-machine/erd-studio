@@ -7,7 +7,7 @@
  * - **Power BI or Fabric semantic model** → `erdStudio.importSemanticModel`
  *
  * The source the open folder most likely holds comes first, when a quick,
- * bounded look finds one (a `.pbip` / `.bim` / TMDL file, a `.sql` file with
+ * bounded look finds one (a `.bim` / `definition.pbism` / TMDL file, a `.sql` file with
  * a CREATE TABLE, a `.dbml` file outside the ERD Studio folder); otherwise
  * DBML leads. The look never delays the picker by more than
  * {@link DETECT_TIMEOUT_MS}. The source runs as a command, so the
@@ -16,6 +16,7 @@
  * Not pre-registered: an empty window gets the usual open-a-folder stub.
  */
 
+import { promises as fsp } from 'fs';
 import * as vscode from 'vscode';
 
 import {
@@ -119,6 +120,26 @@ export interface DetectImportIo {
   findFiles(include: string, exclude: string, max: number): Promise<string[]>;
   /** The start of a file's text. */
   readStart(filePath: string, chars: number): Promise<string>;
+  /** The look was cancelled: stop opening files. Absent: never. */
+  cancelled?(): boolean;
+}
+
+/** A file every semantic model Import Semantic Model… can read holds (`findSemanticModels`). */
+export const SEMANTIC_MODEL_GLOB = '**/{*.bim,definition.pbism,model.tmdl,database.tmdl}';
+
+/**
+ * The first `bytes` bytes of a file, never more: the look runs unasked (the
+ * start screen), and a folder of database dumps holds files of gigabytes.
+ */
+export async function readFileStart(filePath: string, bytes: number): Promise<Uint8Array> {
+  const handle = await fsp.open(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(bytes);
+    const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }
 
 /** Folders the look skips: tools', a dbt project's build output and ERD Studio's own. */
@@ -138,28 +159,76 @@ export async function detectImportSources(io: DetectImportIo, semanticDir: strin
   const found = new Set<ImportModelSource>();
   const any = async (glob: string): Promise<boolean> => (await io.findFiles(glob, exclude, 1).catch(() => [])).length > 0;
   const [semanticModel, dbml, sqlFiles] = await Promise.all([
-    any('**/{*.pbip,*.bim,definition.pbism,model.tmdl,database.tmdl}'),
+    // No `*.pbip`: a report-only (thin) Power BI Project has one and no model,
+    // and every model Import Semantic Model… reads has one of these files.
+    any(SEMANTIC_MODEL_GLOB),
     any('**/*.dbml'),
     io.findFiles('**/*.sql', exclude, DETECT_SQL_FILES).catch(() => [] as string[]),
   ]);
   if (semanticModel) found.add('semanticModel');
   if (dbml) found.add('dbml');
   for (const file of sqlFiles) {
+    if (io.cancelled?.()) break;
     const text = await io.readStart(file, DETECT_SQL_CHARS).catch(() => '');
     if (looksLikeSqlDdl(text)) { found.add('sqlDdl'); break; }
   }
   return found;
 }
 
-/** The real lookups, under `root`. */
-export function vscodeDetectImportIo(root: string): DetectImportIo {
+/** The real lookups, under `root`; `token` cancels the searches and stops the reads. */
+export function vscodeDetectImportIo(root: string, token?: vscode.CancellationToken): DetectImportIo {
   return {
     findFiles: async (include, exclude, max) =>
-      (await vscode.workspace.findFiles(new vscode.RelativePattern(vscode.Uri.file(root), include), exclude, max)).map((u) => u.fsPath),
+      (await vscode.workspace.findFiles(new vscode.RelativePattern(vscode.Uri.file(root), include), exclude, max, token)).map((u) => u.fsPath),
     readStart: async (filePath, chars) => {
-      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-      return new TextDecoder('utf-8').decode(bytes.subarray(0, chars * 4)).slice(0, chars);
+      const bytes = await readFileStart(filePath, chars * 4);
+      return new TextDecoder('utf-8').decode(bytes).slice(0, chars);
     },
+    cancelled: () => token?.isCancellationRequested === true,
+  };
+}
+
+/**
+ * The first file matching `glob` in the open folder, by the look's own rules
+ * (never under a tool's folder or the ERD Studio folder), or undefined after
+ * `timeoutMs`: Import DBML…'s Open dialog starts on the DBML file the start
+ * screen found (`ImportDbmlDeps.findDefaultFile`).
+ */
+export async function vscodeFindFirstFile(root: string, semanticDir: string, glob: string, timeoutMs = DETECT_TIMEOUT_MS): Promise<string | undefined> {
+  const source = new vscode.CancellationTokenSource();
+  try {
+    const io = vscodeDetectImportIo(root, source.token);
+    const found = io.findFiles(glob, detectExcludeGlob(semanticDir), 1).then((files) => files[0]);
+    return await withTimeout(found, timeoutMs, undefined);
+  } catch (err) {
+    log.warn('[ERD Studio] Import: could not look for a file to suggest:', err);
+    return undefined;
+  } finally {
+    source.cancel();
+    source.dispose();
+  }
+}
+
+/**
+ * The start screen's look at the folder (`StartIntentTracker`): the same
+ * detector as Import…'s picker, cancelled when `signal` aborts. Reads only;
+ * what it finds never leaves the machine.
+ */
+export function vscodeStartLook(root: string, semanticDir: string): (signal: AbortSignal) => Promise<ReadonlySet<ImportModelSource>> {
+  return async (signal) => {
+    const source = new vscode.CancellationTokenSource();
+    const abort = (): void => source.cancel();
+    signal.addEventListener('abort', abort);
+    try {
+      if (signal.aborted) return new Set();
+      return await detectImportSources(vscodeDetectImportIo(root, source.token), semanticDir);
+    } catch (err) {
+      log.warn('[ERD Studio] Start screen: could not look for import sources:', err);
+      return new Set();
+    } finally {
+      signal.removeEventListener('abort', abort);
+      source.dispose();
+    }
   };
 }
 

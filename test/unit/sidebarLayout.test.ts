@@ -44,7 +44,9 @@ describe('sidebar views', () => {
   it('give each view at most one title-bar icon (plus the filter toggle); everything else is in the + menu or under …', () => {
     // The filter is a toggle of its own: Filter…, or (while filtered) Clear Filter — see the next test.
     const isFilter = (m: MenuEntry): boolean => /^erdStudio\.(filter|clear)\w*(Diagrams|TableLibrary|Relationships)(Filter)?$/.test(m.command ?? '');
-    const titles = contributes.menus['view/title'].filter((m) => !isFilter(m));
+    // An empty window's own title bar (no + menu there): its one icon is ▶, the Welcome tab (checked below).
+    const emptyWindowOnly = (m: MenuEntry): boolean => (m.when ?? '').includes('!erdStudio.hasProject');
+    const titles = contributes.menus['view/title'].filter((m) => !isFilter(m) && !emptyWindowOnly(m));
     for (const view of contributes.views['erd-studio']) {
       // A toggle is one icon: only one of its two states shows at a time.
       const icons = titles.filter((m) => m.when?.startsWith(`view == ${view.id}`) && m.group?.startsWith('navigation')
@@ -58,6 +60,11 @@ describe('sidebar views', () => {
     ]);
     expect(titles.filter((m) => m.when?.startsWith('view == erdStudio.domainTree') && m.group?.startsWith('navigation')))
       .toEqual([{ submenu: 'erdStudio.newMenu', when: 'view == erdStudio.domainTree && erdStudio.hasProject', group: 'navigation@0' }]);
+    // With no folder open, the + menu is gone and the one icon is ▶ (Watch Getting Started Video): the
+    // Welcome tab one click away (onboarding story 09). In a project, Help & Feedback has that row.
+    expect(contributes.menus['view/title'].filter(emptyWindowOnly)).toEqual([
+      { command: 'erdStudio.showGettingStarted', when: 'view == erdStudio.domainTree && !erdStudio.hasProject', group: 'navigation@0' },
+    ]);
   });
 
   it('give Diagrams, the Table Library and Relationships one filter icon: Filter…, or Clear Filter while filtered (Filter… then under …)', () => {

@@ -17,6 +17,7 @@ import type { ImportDbmlUi } from '../../src/commands/importDbml';
 import {
   CHOOSE_ANOTHER_FOLDER_BUTTON,
   IMPORT_SEMANTIC_MODEL_COMMAND,
+  MAX_SEMANTIC_MODEL_FILES,
   importSemanticModel,
   type ImportSemanticModelDeps,
   type ImportSemanticModelUi,
@@ -138,7 +139,9 @@ describe('Import Semantic Model…', () => {
     expect(detail).toContain('Not imported:');
     expect(detail).toMatch(/• \d+ measures?: DAX calculations, not columns\./);
     expect(detail).toMatch(/• 1 auto date\/time table: Power BI makes one per date column\./);
-    expect(detail).toMatch(/snake_case; each Power BI name is kept in its meta, as power_bi_name\./);
+    expect(detail).toMatch(/snake_case; the original Power BI names are kept in the table files\./);
+    // Plain words: no storage key a Power BI developer has never seen.
+    expect(detail).not.toMatch(/\bmeta\b|power_bi_name|erd_layout/);
     // Counts by kind: no measure's name or DAX in the dialog.
     expect(detail).not.toMatch(/LocalDateTable_|\bSUM\(|CALCULATE/);
     expect(detail).not.toContain('Left out');
@@ -184,6 +187,31 @@ describe('Import Semantic Model…', () => {
     expect(model.errors[0].message).toContain('no semantic model found in reports');
     expect(model.errors[0].items).toEqual([CHOOSE_ANOTHER_FOLDER_BUTTON]);
     expect(features()).toEqual(['importSemanticModelInvalid']);
+  });
+
+  it('a big repo with one model in it still imports from its root: only model files count toward the bound', async () => {
+    const repo = path.join(tmp, 'repo');
+    fs.cpSync(path.join(FIXTURES, 'pbip-tmdl'), path.join(repo, 'reports'), { recursive: true });
+    fs.mkdirSync(path.join(repo, 'assets'));
+    for (let i = 0; i <= MAX_SEMANTIC_MODEL_FILES; i++) fs.writeFileSync(path.join(repo, 'assets', `img${i}.png`), '');
+    const model = modelUi(repo);
+    const result = await importSemanticModel(deps(model, importUi()));
+    expect(model.errors).toEqual([]);
+    expect(result?.plan.newTables.map((t) => t.name)).toContain('date_table');
+  });
+
+  it('a folder with too many model files says what to pick and offers another folder', async () => {
+    const model = modelUi('/big', undefined, CHOOSE_ANOTHER_FOLDER_BUTTON);
+    model.readDirectory = async () => Array.from({ length: MAX_SEMANTIC_MODEL_FILES + 1 }, (_, i) => [`t${i}.tmdl`, false] as const);
+    let again = 0;
+    const pickFolder = model.pickFolder;
+    model.pickFolder = async (f) => { again++; return again === 1 ? pickFolder(f) : undefined; };
+    await importSemanticModel(deps(model, importUi()));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(model.errors[0].message).toMatch(new RegExp(`big holds more than ${MAX_SEMANTIC_MODEL_FILES} model files\\. Pick the <Name>\\.SemanticModel folder itself`));
+    expect(model.errors[0].items).toEqual([CHOOSE_ANOTHER_FOLDER_BUTTON]);
+    // The button runs the import again, from the folder dialog.
+    expect(again).toBe(2);
   });
 
   it('closing the folder dialog, or the dry run, writes nothing and counts a cancel', async () => {

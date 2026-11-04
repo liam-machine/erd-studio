@@ -12,6 +12,7 @@ import {
   startActionsFor,
   type StartAction,
   type StartContext,
+  type StartIntent,
   type StartSurface,
 } from '../types/startActions';
 import type { TelemetryFeature } from '../services/telemetryPayload';
@@ -22,6 +23,9 @@ export const START_FEATURES: Readonly<Record<StartSurface, Readonly<Record<Start
   welcome: {
     convert: 'welcomeConvert',
     drawFromDbt: 'welcomeDrawFromDbt',
+    importSemanticModel: 'welcomeImportSemanticModel',
+    importSqlDdl: 'welcomeImportSqlDdl',
+    importDbmlFile: 'welcomeImportDbmlFile',
     blank: 'welcomeBlank',
     import: 'welcomeImport',
     example: 'welcomeExample',
@@ -29,6 +33,9 @@ export const START_FEATURES: Readonly<Record<StartSurface, Readonly<Record<Start
   walkthrough: {
     convert: 'walkthroughConvert',
     drawFromDbt: 'walkthroughDrawFromDbt',
+    importSemanticModel: 'walkthroughImportSemanticModel',
+    importSqlDdl: 'walkthroughImportSqlDdl',
+    importDbmlFile: 'walkthroughImportDbmlFile',
     blank: 'walkthroughBlank',
     import: 'walkthroughImport',
     example: 'walkthroughExample',
@@ -36,6 +43,9 @@ export const START_FEATURES: Readonly<Record<StartSurface, Readonly<Record<Start
   sidebar: {
     convert: 'sidebarConvert',
     drawFromDbt: 'sidebarDrawFromDbt',
+    importSemanticModel: 'sidebarImportSemanticModel',
+    importSqlDdl: 'sidebarImportSqlDdl',
+    importDbmlFile: 'sidebarImportDbmlFile',
     blank: 'sidebarBlank',
     import: 'sidebarImport',
     example: 'sidebarExample',
@@ -46,10 +56,33 @@ export const START_FEATURES: Readonly<Record<StartSurface, Readonly<Record<Start
 export const START_PICK_ITEMS: Readonly<Record<StartAction, { label: string; detail: string }>> = {
   convert: { label: '$(arrow-swap) Convert to DBML', detail: 'Move this project from its YAML and JSON files to DBML, an open format' },
   drawFromDbt: { label: '$(wand) Draw from dbt', detail: 'Copy your dbt models and their relationships into a diagram' },
+  importSemanticModel: { label: '$(graph) Import your Power BI semantic model', detail: 'Start from a Power BI or Fabric semantic model in this folder' },
+  importSqlDdl: { label: '$(database) Import your SQL scripts', detail: 'Start from CREATE TABLE scripts in this folder' },
+  importDbmlFile: { label: '$(file-code) Import your DBML file', detail: 'Start from a DBML file (an open format) in this folder' },
   blank: { label: '$(add) New Diagram', detail: 'Start with an empty canvas and add your own tables' },
   import: { label: '$(cloud-download) Import…', detail: 'Start from a DBML file, SQL DDL scripts or a Power BI semantic model' },
   example: { label: '$(book) Open an Example…', detail: 'See a finished data model first: eight common warehouse patterns' },
 };
+
+/**
+ * What each suggestion is counted as when a surface the host can see shows it
+ * (the Welcome panel's start card, the empty Diagrams view): at most once a
+ * day, whichever surface showed it (`gettingStartedOpened` / `sidebarStartShown`
+ * say which surfaces were seen).
+ */
+export const START_INTENT_FEATURES: Readonly<Record<StartIntent, TelemetryFeature>> = {
+  convert: 'startSuggestedConvert',
+  drawFromDbt: 'startSuggestedDrawFromDbt',
+  importSemanticModel: 'startSuggestedImportSemanticModel',
+  importSqlDdl: 'startSuggestedImportSqlDdl',
+  importDbmlFile: 'startSuggestedImportDbmlFile',
+  blank: 'startSuggestedBlank',
+};
+
+/** Record that a surface showed this suggestion (once a day per suggestion). */
+export function recordStartSuggested(intent: StartIntent): void {
+  telemetry.featureOnce(START_INTENT_FEATURES[intent]);
+}
 
 export interface StartDeps {
   /** Where the folder stands now: which starts apply. */

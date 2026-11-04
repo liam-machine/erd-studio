@@ -364,6 +364,26 @@ const FEATURES = [
   'diagramsNudgeShown',
   'diagramsNudgeOpened',
   'walkthroughWaited',
+  // The start screen's suggestion (src/types/startActions.ts): the three
+  // direct imports clicked on each surface (one click less than Import…'s
+  // picker); which start a surface the host can see suggested (at most once
+  // a day each); the Welcome panel's "Watch how" clip was played.
+  'welcomeImportSemanticModel',
+  'welcomeImportSqlDdl',
+  'welcomeImportDbmlFile',
+  'walkthroughImportSemanticModel',
+  'walkthroughImportSqlDdl',
+  'walkthroughImportDbmlFile',
+  'sidebarImportSemanticModel',
+  'sidebarImportSqlDdl',
+  'sidebarImportDbmlFile',
+  'startSuggestedConvert',
+  'startSuggestedDrawFromDbt',
+  'startSuggestedImportSemanticModel',
+  'startSuggestedImportSqlDdl',
+  'startSuggestedImportDbmlFile',
+  'startSuggestedBlank',
+  'howToClipPlayed',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

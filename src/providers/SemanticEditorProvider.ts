@@ -201,6 +201,7 @@ import type { RelationshipWriteInput, RelationshipWriteOp } from '../services/li
 import { auditRelationshipWrite, surveyLibrary } from '../services/relationshipHealth';
 import { namingMigrationIsEmpty } from '../services/namingMigration';
 import type { DbmlConversionCandidates } from '../services/dbmlConversionFiles';
+import { convertOfferApplies } from '../services/convertOffer';
 import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
@@ -2724,13 +2725,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (!hooks || this.dbmlConversionOffered) return false;
     this.dbmlConversionOffered = true;
     try {
-      if (this.context.workspaceState?.get<boolean>(DBML_CONVERSION_DECLINED_KEY)) return false;
-      if (!getErdStudioSetting<boolean>(DBML_OFFER_CONVERT_SETTING, true)) return false;
+      const declined = this.context.workspaceState?.get<boolean>(DBML_CONVERSION_DECLINED_KEY) === true;
+      const offerSetting = getErdStudioSetting<boolean>(DBML_OFFER_CONVERT_SETTING, true) !== false;
+      // Checked before the storage is worked out: a turned-down offer costs nothing.
+      if (declined || !offerSetting) return false;
       const storage = this.tableLibraryService.projectStorage();
       if (storage === 'dbml') return false;
-      const candidates = hooks.candidates();
-      if (candidates.tablesDirIsLayer || candidates.files === 0) return false;
-      if (hooks.goesNowhere?.()) return false;
+      let candidates: DbmlConversionCandidates = { files: 0, tablesDirIsLayer: false };
+      // The rule activation's opening notice uses too (src/services/convertOffer.ts).
+      if (!convertOfferApplies({
+        storage, declined, offerSetting,
+        candidates: () => (candidates = hooks.candidates()),
+        goesNowhere: () => hooks.goesNowhere?.() === true,
+      })) return false;
       this.dbmlConversionEligible = true;
       // Another prompt already showed in this window: ask in the next one.
       if (this.sessionPrompts && !this.sessionPrompts.claim('dbmlConversion')) return false;

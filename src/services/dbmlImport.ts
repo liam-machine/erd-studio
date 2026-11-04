@@ -239,13 +239,20 @@ export interface DbmlImportReport {
   notes: string[];
   /** Tables and columns that keep DBML-only settings in `meta.dbml`. */
   keptInMeta: number;
+  /**
+   * Relationships, as the canvas counts them: a composite reference (one
+   * entry per column pair sharing a `compositeKey`) is one, so the dry run
+   * and the canvas footer agree (onboarding story 06).
+   */
   relationships: number;
-  /** Relationships stored in table files (library mode), the rest in the subject area file. */
+  /** Relationships stored in table files (library mode), the rest in the subject area file. Composites once. */
   relationshipsInLibrary: number;
-  /** Links the Table Library already stores: left as the library has them. */
+  /** Links the Table Library already stores: left as the library has them. Composites once. */
   relationshipsAlreadyInLibrary: number;
-  /** Refs that were optional (`?`): ERD Studio does not record optionality. */
+  /** Refs that were optional (`?`): a YAML relationship does not record optionality. */
   optionalRefs: number;
+  /** Refs with no `?` on either end: a DBML project saves every relationship as optional (`>?`, D18). */
+  requiredRefs: number;
   /** The file is ERD Studio's own rich export (whose `?`s are its own, so not worth a word). */
   erdStudioExport: boolean;
   /** Tables placed from the layout; the rest are placed by the canvas when it opens. */
@@ -342,10 +349,19 @@ export function suggestDbmlLayer(model: DbmlModel, layerIds: readonly string[]):
  * `-3`… suffix keeps it free.
  */
 export function suggestDbmlSubjectAreaName(model: DbmlModel, fileName?: string, taken: Iterable<string> = []): string {
-  const base = toSubjectAreaSlug(model.project?.name ?? '')
-    || toSubjectAreaSlug(baseNameOf(fileName ?? ''))
+  const base = toSubjectAreaSlug(splitWords(model.project?.name ?? ''))
+    || toSubjectAreaSlug(splitWords(baseNameOf(fileName ?? '')))
     || DBML_IMPORT_DEFAULT_NAME;
   return freeSubjectAreaSlug(base, taken);
+}
+
+/**
+ * The words of a name written in camel case, for a readable file name:
+ * `AdventureSales` → `Adventure Sales` (`adventure-sales`, not
+ * `adventuresales`), `DBMLProject` → `DBML Project`.
+ */
+export function splitWords(name: string): string {
+  return name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
 }
 
 /** `a/b/silver.dbml` → `silver`. */
@@ -439,6 +455,7 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
     relationshipsInLibrary: 0,
     relationshipsAlreadyInLibrary: 0,
     optionalRefs: 0,
+    requiredRefs: 0,
     erdStudioExport: model.erdStudioExport,
     positioned: 0,
     unpositioned: 0,
@@ -519,8 +536,8 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
     }
     domainRelationships = relationships.filter((r) => kept.has(r));
     changedLibraryTables = routed.changed.filter((m) => !newTables.includes(m));
-    report.relationshipsAlreadyInLibrary = relationships.filter((r) => !kept.has(r) && stored.has(r)).length;
-    report.relationshipsInLibrary = relationships.filter((r) => !kept.has(r) && !stored.has(r)).length;
+    report.relationshipsAlreadyInLibrary = countLinks(relationships.filter((r) => !kept.has(r) && stored.has(r)));
+    report.relationshipsInLibrary = countLinks(relationships.filter((r) => !kept.has(r) && !stored.has(r)));
   }
 
   // An exported one-to-one marks its FK column `unique` (a composite one with a
@@ -528,7 +545,7 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
   dropOneToOneUniques(planned, relationships);
   report.keptInMeta = newTables.reduce((n, t) => n + (hasDbmlMeta(t.meta) ? 1 : 0)
     + (t.columns ?? []).filter((c) => hasDbmlMeta(c.meta)).length, 0);
-  report.relationships = relationships.length;
+  report.relationships = countLinks(relationships);
 
   const viewConfig = planViewConfig(model, planned, input.layout, ctx);
   const description = input.description
@@ -1096,6 +1113,7 @@ function planRelationships(model: DbmlModel, lookup: TableLookup, ctx: Context):
     }
     if (repeated > 0) dropReference(what, `another reference already joins ${repeated} of its column pairs; the rest were imported.`);
     if (isOptional(ref.ends[0].relation) || isOptional(ref.ends[1].relation)) ctx.report.optionalRefs++;
+    else ctx.report.requiredRefs++;
     const settings = [
       ref.onDelete ? `delete: ${ref.onDelete}` : '',
       ref.onUpdate ? `update: ${ref.onUpdate}` : '',
@@ -1105,6 +1123,17 @@ function planRelationships(model: DbmlModel, lookup: TableLookup, ctx: Context):
     if (settings) ctx.report.dropped.push({ kind: 'reference-settings', what: `${what} (${settings})`, item: settings, why: REF_SETTINGS_WHY });
   }
   return out;
+}
+
+/** Relationships as the canvas draws them: each composite (its column pairs share a `compositeKey`) once. */
+export function countLinks(relationships: readonly Relationship[]): number {
+  const composites = new Set<string>();
+  let single = 0;
+  for (const rel of relationships) {
+    if (rel.compositeKey) composites.add(`${normaliseName(rel.fromModel)}\u0000${normaliseName(rel.compositeKey)}`);
+    else single++;
+  }
+  return single + composites.size;
 }
 
 /** Each composite's members, by from-table and `compositeKey`. */
@@ -1408,17 +1437,23 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
     const why = newFolder ? 'as another table in this file spells it (one folder per schema)' : `as the layer's existing ${to}/ folder spells it`;
     lines.push(`• Schema ${key.split('\u0000')[0]} is written ${to}, ${why}: ${someOf(tables)}.`);
   }
-  if (report.optionalRefs > 0 && !report.erdStudioExport) {
+  if (options.dbml) {
+    // A DBML project writes every Ref as `>?` (D18): say so when the file had required ones
+    // (not for a conversion: there was no DBML file to compare with).
+    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin) {
+      lines.push(`• Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, ${plural(report.requiredRefs, 'reference was', 'references were')} not optional.`);
+    }
+  } else if (report.optionalRefs > 0 && !report.erdStudioExport) {
     lines.push(`• ${plural(report.optionalRefs, 'reference is', 'references are')} optional (?). ERD Studio doesn't record that, so they are imported as plain relationships.`);
   }
   // Opening it lays it out and saves that layout, as for any new diagram: in a DBML project, in the diagram file's erd_layout.
   const laidOut = options.dbml
     ? 'the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.'
     : 'the diagram is laid out automatically when it opens.';
-  if (!report.layoutRead && options.origin) {
+  // erd_layout is named only when the file has one: a file from dbdiagram.io or a
+  // conversion never does, and its author has never seen the key.
+  if (!report.layoutRead) {
     lines.push(`• Layout: ${laidOut.replace(/^the /, 'The ')}`);
-  } else if (!report.layoutRead) {
-    lines.push(`• No erd_layout in the file: ${laidOut}`);
   } else if (report.positioned === 0) {
     lines.push(`• The file's erd_layout has no positions for these tables: ${laidOut}`);
   } else if (report.unpositioned > 0) {
@@ -1429,7 +1464,9 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   for (const problem of report.layoutProblems) lines.push(`• ${problem}.`);
   if (report.stickyNotes > 0) lines.push(`• ${plural(report.stickyNotes, 'sticky note')}.`);
   if (report.keptInMeta > 0) {
-    lines.push(`• DBML settings ERD Studio has no field for (not null, defaults, indexes, …) are kept in the meta of ${plural(report.keptInMeta, 'table or column', 'tables and columns')}, under "${DBML_META_KEY}".`);
+    // Plain words (onboarding story 06): where they are kept (`meta.dbml`) is the reference doc's
+    // business, and no count (it mixes tables and columns, and read like a wrong table count).
+    lines.push('• Not null, defaults, indexes and other details ERD Studio has no field for are kept in the table files, so they are not lost.');
   }
   if (report.renamed.length > 0) {
     const renames = renameEntries(report.renamed);

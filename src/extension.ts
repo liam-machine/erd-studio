@@ -11,7 +11,7 @@ import { ManifestService, type ManifestLoadFailure } from './services/manifestSe
 import { TemplateService } from './services/templateService';
 import { LAYER_DRAG_MIME_TYPE, SubjectAreaTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { DeferredTreeDataProvider } from './providers/deferredTreeDataProvider';
-import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
+import { DBML_CONVERSION_DECLINED_KEY, DBML_OFFER_CONVERT_SETTING, SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { DiagramMembers } from './services/diagramMembers';
 import { CodeOwnersReader } from './services/codeOwners';
@@ -59,7 +59,9 @@ import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
 import { convertProjectToDbml, dbmlConversionGoesNowhere } from './commands/convertProjectToDbml';
+import { slugFromName, validateTypedDiagramName } from './commands/diagramName';
 import { countDbmlConversionCandidates } from './services/dbmlConversionFiles';
+import { CONVERT_NOTICE_BUTTON, convertNoticeMessage, convertOfferApplies, convertRowShows, type ConvertOfferState } from './services/convertOffer';
 import { RefreshGate } from './services/refreshGate';
 import { projectNamingOf } from './services/projectNaming';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE, hasOpenSubjectAreaCanvas, saveAllAndReload } from './services/recoveryService';
@@ -133,13 +135,14 @@ import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND, importDbml } from './commands/importDbml';
 import { OPEN_EXAMPLE_DIAGRAM_COMMAND, openExampleDiagram } from './commands/openExampleDiagram';
-import { IMPORT_MODEL_COMMAND, runImportModel, vscodeImportModelDeps } from './commands/importModel';
+import { IMPORT_MODEL_COMMAND, runImportModel, vscodeFindFirstFile, vscodeImportModelDeps, vscodeStartLook } from './commands/importModel';
 import { IMPORT_SQL_DDL_COMMAND, importSqlDdl } from './commands/importSqlDdl';
 import { IMPORT_SEMANTIC_MODEL_COMMAND, importSemanticModel } from './commands/importSemanticModel';
-import { runStart } from './commands/start';
+import { recordStartSuggested, runStart } from './commands/start';
 import { OPEN_EXAMPLE_PROJECT_COMMAND, openExampleProject } from './commands/openExampleProject';
 import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/exampleProjects';
-import { START_COMMAND, type StartContext } from './types/startActions';
+import { START_COMMAND, START_INTENT_CONTEXT_KEY, type StartContext } from './types/startActions';
+import { StartIntentTracker } from './commands/startIntent';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
 import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
 import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
@@ -815,15 +818,8 @@ async function handleUnsavedChanges(
   return true;
 }
 
-/**
- * The file name a typed name becomes, for a diagram or a layer folder: lower
- * case, every run of other characters one `-` ("Customer 360" →
- * `customer-360`), no `-` at either end. It may still start with a digit,
- * which the name checks refuse.
- */
-export function slugFromName(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-}
+/** The file name a typed name becomes (`src/commands/diagramName.ts`); re-exported for its tests. */
+export { slugFromName };
 
 /** A layer's id (its folder) from the name the user typed for it. */
 const layerIdFromName = slugFromName;
@@ -1228,8 +1224,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
   const subjectAreaService = new SubjectAreaService(layerService);
   const tableLibraryService = new TableLibraryService(workspaceRoot, semanticDir);
-  // Which starts the start screen offers here (Convert only for a project from before 2.0).
-  startContext = () => ({ hasProject: true, hasDbt, storage: projectStorageOf(tableLibraryService) });
+  // What the start screen suggests here (src/types/startActions.ts): Convert
+  // for a project from before 2.0, Draw from dbt in a dbt project, else what a
+  // bounded look at the folder finds (a Power BI semantic model, CREATE TABLE scripts,
+  // a DBML file) or a blank diagram. Looked up only when a start surface asks
+  // (the empty Diagrams view, the Welcome panel, the walkthrough), never here.
+  const startIntent = new StartIntentTracker({
+    context: () => ({
+      hasProject: true,
+      hasDbt,
+      storage: projectStorageOf(tableLibraryService),
+      hasDiagrams: subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
+    }),
+    look: vscodeStartLook(workspaceRoot, semanticDir),
+    publish: (intent) => { void vscode.commands.executeCommand('setContext', START_INTENT_CONTEXT_KEY, intent); },
+  });
+  context.subscriptions.push({ dispose: () => startIntent.dispose() });
+  startContext = () => startIntent.startContext();
   tableLibraryService.onParseFailure = (error) => {
     // Fixed keys only — `error.message` may quote the file and never leaves the machine.
     telemetry.error('modelFileParse');
@@ -1366,11 +1377,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', loading);
       // VS Code lists a view only to draw it: a listing with no rows means the
       // empty view, with its start buttons, is on screen (the funnel's sidebar step).
-      if (!loading) telemetry.featureOnce('sidebarStartShown');
+      // Its start variants follow the suggestion, so look now (deferred: this
+      // can be the first listing, still inside activation) and count what it shows.
+      if (!loading) {
+        telemetry.featureOnce('sidebarStartShown');
+        setTimeout(() => { void startIntent.refresh().then((intent) => { if (intent) recordStartSuggested(intent); }); }, 0);
+      }
     },
     (kind) => dbmlFileIcon(context.extensionUri, kind),
     tableHomes,
   );
+  /** Where Convert Project to DBML stands in this project (src/services/convertOffer.ts). */
+  const convertOfferState = (): ConvertOfferState => ({
+    storage: projectStorageOf(tableLibraryService),
+    declined: context.workspaceState.get<boolean>(DBML_CONVERSION_DECLINED_KEY) === true,
+    offerSetting: getErdStudioSetting<boolean>(DBML_OFFER_CONVERT_SETTING, true) !== false,
+  });
+  // A pre-2.0 project with diagrams: Convert to DBML… above the layers (the empty view's Convert entry is gone once there are rows).
+  treeProvider.setConvertRow(() => convertRowShows(convertOfferState()));
   // `erdStudio.tablesLoading` (set above, before the views) holds until a
   // Table Library listing finds no rows, and while a full rebuild of the
   // library runs, so its view shows "Loading tables…" rather than the
@@ -3043,6 +3067,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         tableLibraryService,
         validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
         onWritten: refreshAfterNewSubjectArea,
+        // "This folder has a DBML file": the Open dialog starts on it, chosen.
+        findDefaultFile: () => vscodeFindFirstFile(workspaceRoot, semanticDir, '**/*.dbml'),
       }, filePath !== undefined ? { filePath } : undefined);
     }),
     // Import… (the start screen's Import): DBML, SQL DDL or a Power BI /
@@ -3152,13 +3178,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             : `Name the diagram. It is saved in the ${layerLabel} layer.`,
           placeHolder: 'e.g. Customer 360, Sales, Orders',
           ignoreFocusOut: true,
-          validateInput: (value: string) => {
-            if (!value.trim()) { return 'Give the diagram a name'; }
-            const asSlug = slugFromName(value);
-            const problem = validateSubjectAreaSlug(asSlug, chosenLayer, existingDomains);
-            if (problem) { return problem; }
-            return asSlug === value.trim() ? undefined : { message: `Saved as ${asSlug}`, severity: vscode.InputBoxValidationSeverity.Info };
-          },
+          validateInput: (value: string) => validateTypedDiagramName(value, (slug) => validateSubjectAreaSlug(slug, chosenLayer, existingDomains)),
         });
         if (!typed?.trim()) { telemetry.feature('blankDiagramCancelled'); return; }
         const slug = slugFromName(typed);
@@ -4024,6 +4044,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     getStatus: getGettingStartedStatus,
     clipboardText: setupClipboardText,
     workspaceFolder: projectWorkspaceFolder,
+    // The start card's primary button, reason line and clip follow the folder's suggestion.
+    startIntent,
     openCanvas,
     // One text line above the Welcome panel's cards ("12 dbt models · medallion
     // layout · manifest 2 days old"). Reads what the canvas already caches;
@@ -4106,6 +4128,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
         await context.globalState.update(GETTING_STARTED_PENDING_KEY, undefined);
         const deps = gettingStartedDeps;
+        // The walkthrough's start step follows the suggestion (erdStudio.startIntent).
+        startIntent.scheduleRefresh();
         await openWalkthrough(() => GettingStartedPanel.createOrShow(context, deps));
       });
     } else if (pending && shown) {
@@ -4157,15 +4181,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
       const open = `Open ${latest.domain}`;
       telemetry.feature('diagramsNudgeShown');
+      const openLatest = (): void => {
+        telemetry.feature('diagramsNudgeOpened');
+        void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath);
+      };
+      // A project from before 2.0: the one next step is Convert (the start screen's
+      // own suggestion), with its diagram second. This prompt holds the window's one
+      // prompt, so the canvas's Convert offer would not come until the next window.
+      const offerConvert = convertOfferApplies({
+        ...convertOfferState(),
+        candidates: () => countDbmlConversionCandidates(workspaceRoot, semanticDir),
+        goesNowhere: () => dbmlConversionGoesNowhere(context.workspaceState, workspaceRoot, semanticDir),
+      });
+      if (offerConvert) {
+        telemetry.feature('convertToDbmlOffered');
+        void vscode.window.showInformationMessage(convertNoticeMessage(domains.length), CONVERT_NOTICE_BUTTON, open).then((choice) => {
+          if (choice === CONVERT_NOTICE_BUTTON) void vscode.commands.executeCommand('erdStudio.convertProjectToDbml');
+          else if (choice === open) openLatest();
+          else telemetry.feature('convertToDbmlNotNow');
+        });
+        return;
+      }
       void vscode.window.showInformationMessage(
         `This project has ${domains.length} ERD Studio diagram${domains.length === 1 ? '' : 's'}.`,
         open,
         'Not now',
       ).then((choice) => {
-        if (choice === open) {
-          telemetry.feature('diagramsNudgeOpened');
-          void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath);
-        }
+        if (choice === open) openLatest();
       });
     });
   }

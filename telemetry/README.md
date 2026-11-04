@@ -317,7 +317,11 @@ name, path or message:
 - **`features`**: `dbmlProject` (at most once a day: a DBML project was
   open), `convertToDbml` (Convert Project to DBML finished),
   `convertToDbmlOffered`, `convertToDbmlDeclined`, `convertToDbmlNotNow`
-  (the offer and its answers), `convertToDbmlCancelled`,
+  (the offer and its answers: a diagram's offer, or the opening notice of a
+  project from before 2.0, whose dismissal is `convertToDbmlNotNow`; the two
+  share these keys, and while the notice holds a window's one prompt the
+  diagram's offer does not come in that window; `diagramsNudgeShown` on the
+  same day marks a notice), `convertToDbmlCancelled`,
   `convertToDbmlRefused` (the command refused the project: a project state,
   not a failure) and `dbmlForeignFormatWarned` (an older helper wrote a `.yml`
   table or `.json` diagram into a DBML project, and the user was told).
@@ -335,23 +339,29 @@ older one, so deploy the Worker before the release.
 
 Why installs stop using ERD Studio, step by step. The start screen
 (`src/types/startActions.ts`) offers the same one-click starts on the Welcome
-panel, the Get Started walkthrough and the empty Diagrams view: Convert to
-DBML (projects from before 2.0 only), Draw from dbt (dbt projects only), New
-Diagram, Import… and Open an Example. Every click goes through
-`erdStudio.start`, which counts **which start, on which surface**. Import…
+panel, the Get Started walkthrough and the empty Diagrams view, led by the one
+the folder **suggests**: Convert to DBML (projects from before 2.0), Draw from
+dbt (dbt projects), one of three direct imports when a quick local look at
+the folder finds that kind of file (a Power BI / Fabric semantic model,
+CREATE TABLE scripts, a DBML file), else New Diagram; Import… and Open an
+Example stay as quieter choices. Every click goes through `erdStudio.start`,
+which counts **which start, on which surface**. Import…
 (`erdStudio.importModel`) then asks which source: a DBML file, SQL DDL
 scripts or a Power BI / Fabric semantic model, each its own command with its
 own keys. All keys are `features` or `errors`, so no D1 migration was needed;
 none holds a name, path or message (the conversions' skipped lists name
-tables and measures, so only their outcome is counted). They are appended
-after the native DBML keys:
+tables and measures, so only their outcome is counted; the folder look's
+findings never leave the machine, only the suggestion's fixed key). They are
+appended after the native DBML keys:
 
 | Step | Keys |
 |---|---|
 | A true first run | `firstRun` (at most 1: the first activation on this machine, the one that owes the walkthrough; from the 2.0 release on). `tenure = '0'` alone is **not** a new install: see below |
-| Saw a start screen | `walkthroughOpened` (opened by ERD Studio on first run), `gettingStartedOpened`, `sidebarStartShown` (once a day: the empty Diagrams view, with its starts, was drawn), `diagramsNudgeShown` (a project that already had diagrams got "This project has N ERD Studio diagrams" instead: a teammate's clone's start screen; `firstRunHasDiagrams` marks such a first run) |
+| Saw a start screen | `walkthroughOpened` (opened by ERD Studio on first run), `gettingStartedOpened`, `sidebarStartShown` (once a day: the empty Diagrams view, with its starts, was drawn), `diagramsNudgeShown` (a project that already had diagrams got "This project has N ERD Studio diagrams" instead: a teammate's clone's start screen; `firstRunHasDiagrams` marks such a first run; in a project from before 2.0 the notice leads with **Convert to DBML** and also counts `convertToDbmlOffered`, and closing it `convertToDbmlNotNow`) |
 | Owed but waited | `walkthroughWaited` (at most 1: the walkthrough was owed, but another prompt had this window; expected near 0) |
-| Chose a start | `welcomeBlank` `welcomeImport` `welcomeExample` `welcomeConvert` `welcomeDrawFromDbt`; `walkthroughBlank` … `walkthroughDrawFromDbt`; `sidebarBlank` … `sidebarDrawFromDbt` (`welcomeOpenDiagram` is a returning user's "Open your diagrams"); `diagramsNudgeOpened` (its Open button) |
+| What it suggested | `startSuggestedConvert`, `startSuggestedDrawFromDbt`, `startSuggestedImportSemanticModel`, `startSuggestedImportSqlDdl`, `startSuggestedImportDbmlFile`, `startSuggestedBlank` (each at most 1 a day: the empty Diagrams view, or the Welcome panel's leading card, showed that suggestion; which surface is `sidebarStartShown` / `gettingStartedOpened`. One key per suggestion rather than per surface: the walkthrough's display cannot be observed, and the click keys already name the surface) |
+| Chose a start | `welcomeBlank` `welcomeImport` `welcomeExample` `welcomeConvert` `welcomeDrawFromDbt`; `walkthroughBlank` … `walkthroughDrawFromDbt`; `sidebarBlank` … `sidebarDrawFromDbt` (`welcomeOpenDiagram` is a returning user's "Open your diagrams"); the direct imports, a click less than Import…'s picker: `welcomeImportSemanticModel` `welcomeImportSqlDdl` `welcomeImportDbmlFile`, `walkthroughImportSemanticModel` `walkthroughImportSqlDdl` `walkthroughImportDbmlFile`, `sidebarImportSemanticModel` `sidebarImportSqlDdl` `sidebarImportDbmlFile`; `diagramsNudgeOpened` (its Open button) |
+| Watched how | `howToClipPlayed` (the Welcome panel's short "Watch how" clip for the suggestion was played; which clip follows from that day's `startSuggested*`, or, with none that day, the example's (no folder open). Passive: a viewer who watched and closed the panel still counts `welcomeLeftNoChoice`) |
 | Picked an import source | `importPickDbml`, `importPickSqlDdl`, `importPickSemanticModel`; `importPickCancelled` (the source picker was closed) |
 | Gave up inside a start | `blankDiagramCancelled`, `importDbmlCancelled`, `importSqlDdlCancelled`, `importSemanticModelCancelled`, `exampleCancelled`, `drawCancelScope` / `drawCancelLayer` / `drawCancelName`, `convertToDbmlCancelled` |
 | The user's files did not read | `importDbmlInvalid`, `importSqlDdlInvalid` (+ the dialect it ran as: `importSqlDialectPostgres`, `importSqlDialectMysql`, `importSqlDialectSqlserver`, `importSqlDialectSnowflake`, `importSqlDialectDatabricks`, counted when the conversion runs), `importSemanticModelInvalid` |
@@ -416,11 +426,12 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
      SUM(came_back) AS s7_came_back, SUM(canvas_later) AS s8_canvas_another_day, SUM(week_later) AS s9_week_later
    FROM per"
 
-# Which start, on which surface, and which import source (28 days, installs): what to keep, what to drop.
+# Which start was suggested, which was clicked on which surface, and which import source (28 days, installs): what to keep, what to drop.
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS clicks FROM heartbeats h, json_each(h.features) j
    WHERE h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0
      AND (j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough*' OR j.key GLOB 'sidebar*' OR j.key GLOB 'example*' OR j.key GLOB 'import*'
+       OR j.key GLOB 'startSuggested*' OR j.key = 'howToClipPlayed'
        OR j.key GLOB 'firstRun*' OR j.key GLOB 'diagramsNudge*' OR j.key GLOB '*Cancel*')
    GROUP BY j.key ORDER BY installs DESC"
 ```
@@ -429,6 +440,13 @@ Read `s2_saw_start / s1_installed` per weekly cohort (from 2026-10-05 it is
 about 64%; about 73% of fresh-looking installs). Once 2.0 ships, read
 `s2_first_run_saw_start / s1_first_run` instead (expected above 90%): a
 first run that saw no start is a real miss.
+
+Read the suggestion against the click: for each `startSuggested<X>`, the
+installs that clicked the matching start (`*Import<X>` for the imports,
+`*Blank`, `*DrawFromDbt`, `*Convert`) versus those that clicked another one or
+none. A suggestion whose matching click is rare is a bad guess (or a bad
+label); a direct import whose `import<X>Cancelled` / `*Invalid` is high next
+to its clicks found files that are not what the user wanted to start from.
 
 Investigate when: `s2_first_run_saw_start` is well below `s1_first_run`
 (a true first run missed the walkthrough: look at `walkthroughWaited` and

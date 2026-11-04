@@ -554,7 +554,7 @@ describe('allowlists agree with the Worker', () => {
   it('appends the import-source and first-run keys at the very end, after the start-screen ones: features and errors', () => {
     const at = FEATURES.indexOf('importPickDbml');
     expect(at).toBe(FEATURES.indexOf('exampleDiagramShown') + 1);
-    expect(FEATURES.slice(at)).toEqual([
+    expect(FEATURES.slice(at, FEATURES.indexOf('walkthroughWaited') + 1)).toEqual([
       'importPickDbml', 'importPickSqlDdl', 'importPickSemanticModel', 'importPickCancelled',
       'importSqlDdl', 'importSqlDdlCancelled', 'importSqlDdlInvalid',
       'importSqlDialectPostgres', 'importSqlDialectMysql', 'importSqlDialectSqlserver', 'importSqlDialectSnowflake', 'importSqlDialectDatabricks',
@@ -563,6 +563,19 @@ describe('allowlists agree with the Worker', () => {
     ]);
     expect(ERROR_CODES.slice(ERROR_CODES.indexOf('exampleWriteFailed'))).toEqual([
       'exampleWriteFailed', 'importSqlDdlFailed', 'importSemanticModelFailed',
+    ]);
+  });
+
+  it('appends the start-suggestion keys at the very end, after the first-run ones', () => {
+    const at = FEATURES.indexOf('welcomeImportSemanticModel');
+    expect(at).toBe(FEATURES.indexOf('walkthroughWaited') + 1);
+    expect(FEATURES.slice(at)).toEqual([
+      'welcomeImportSemanticModel', 'welcomeImportSqlDdl', 'welcomeImportDbmlFile',
+      'walkthroughImportSemanticModel', 'walkthroughImportSqlDdl', 'walkthroughImportDbmlFile',
+      'sidebarImportSemanticModel', 'sidebarImportSqlDdl', 'sidebarImportDbmlFile',
+      'startSuggestedConvert', 'startSuggestedDrawFromDbt', 'startSuggestedImportSemanticModel',
+      'startSuggestedImportSqlDdl', 'startSuggestedImportDbmlFile', 'startSuggestedBlank',
+      'howToClipPlayed',
     ]);
   });
 

@@ -33,6 +33,7 @@ import {
 import {
   convertedFileName,
   describeImportProblems,
+  sqlImportFileName,
   sqlOriginPhrase,
   walkFiles,
   type DirEntries,
@@ -204,7 +205,8 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume): 
 
   // 4. Import DBML's flow, with the converted DBML as its file.
   const dialectLabel = SQL_DIALECT_LABELS[dialect];
-  const filePath = path.join(deps.workspaceRoot, read.fileName);
+  // The name Import DBML suggests for the diagram: not `database` for a database/ folder.
+  const filePath = path.join(deps.workspaceRoot, sqlImportFileName(read.fileName, result.dbml, deps.workspaceRoot));
   const { extensionPath: _extensionPath, sqlUi: _sqlUi, loadSqlImport: _load, ui: importUi, ...rest } = deps;
   return importDbml({
     ...rest,

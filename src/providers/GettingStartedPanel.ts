@@ -51,8 +51,17 @@ import {
   type ProjectSummary,
   type SetupOutcome,
 } from '../types/gettingStarted';
-import { START_ACTION_COMMANDS, startActionsFor } from '../types/startActions';
-import { recordStart } from '../commands/start';
+import {
+  HOW_TO_CLIPS,
+  HOW_TO_CLIP_DIR,
+  HOW_TO_CLIP_KEYS,
+  type HowToClipKey,
+  START_ACTION_COMMANDS,
+  startActionsForIntent,
+  startIntentFor,
+  type StartIntent,
+} from '../types/startActions';
+import { recordStart, recordStartSuggested } from '../commands/start';
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedTranscript';
 import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedLogicalTranscript';
 import type { RecommendedInstallResult } from '../types/harness';
@@ -104,6 +113,25 @@ export function gettingStartedCut(mode: GettingStartedPageMode): {
       cues: LOGICAL_GETTING_STARTED_CUES,
       transcript: LOGICAL_GETTING_STARTED_TRANSCRIPT,
     };
+}
+
+/**
+ * The "Watch how" clips this extension ships (`HOW_TO_CLIPS` under
+ * `HOW_TO_CLIP_DIR`), as webview URIs by suggestion: a clip whose file is not
+ * in the extension is left out, so its slot never renders. The paths are fixed constants, never anything from the webview.
+ */
+export function howToClipUris(
+  extensionUri: vscode.Uri,
+  toWebviewUri: (uri: vscode.Uri) => string,
+  exists: (fsPath: string) => boolean = (p) => fs.existsSync(p),
+): Partial<Record<HowToClipKey, { videoUri: string }>> {
+  const out: Partial<Record<HowToClipKey, { videoUri: string }>> = {};
+  for (const key of HOW_TO_CLIP_KEYS) {
+    const clipUri = vscode.Uri.joinPath(extensionUri, ...HOW_TO_CLIP_DIR, HOW_TO_CLIPS[key]);
+    if (!exists(clipUri.fsPath)) { continue; }
+    out[key] = { videoUri: toWebviewUri(clipUri) };
+  }
+  return out;
 }
 
 /** Marketplace id of the Claude Code VS Code extension. */
@@ -718,6 +746,17 @@ export interface GettingStartedDeps {
    */
   getProjectSummary?(): Promise<ProjectSummary | null>;
   /**
+   * The start the folder suggests, from the host's `StartIntentTracker`:
+   * `known()` at once (the first status), `refresh()` after the bounded look
+   * at the folder (a second status when it changed the suggestion).
+   * Optional: without it, the suggestion comes from the status alone
+   * (Convert, Draw from dbt or a blank diagram; no look).
+   */
+  startIntent?: {
+    known(): StartIntent | undefined;
+    refresh(): Promise<StartIntent | undefined>;
+  };
+  /**
    * The open folder has no `dbt_project.yml` (contract 9): the page shows its
    * logical-only state. Used as the status's `logicalOnly` when `getStatus()`
    * does not set it, and to pick the first page before any status arrives.
@@ -755,11 +794,13 @@ export class GettingStartedPanel {
       return existing;
     }
     const mediaRoot = vscode.Uri.joinPath(context.extensionUri, ...GETTING_STARTED_MEDIA.dir);
+    // The "Watch how" clips (inside the media folder; named too, so moving either keeps them loadable).
+    const clipRoot = vscode.Uri.joinPath(context.extensionUri, ...HOW_TO_CLIP_DIR);
     const panel = vscode.window.createWebviewPanel(
       GETTING_STARTED_VIEW_TYPE,
       GETTING_STARTED_TITLE,
       vscode.ViewColumn.One,
-      { enableScripts: true, localResourceRoots: [mediaRoot], retainContextWhenHidden: false },
+      { enableScripts: true, localResourceRoots: [mediaRoot, clipRoot], retainContextWhenHidden: false },
     );
     panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.png');
     telemetry.feature('gettingStartedOpened');
@@ -805,6 +846,7 @@ export class GettingStartedPanel {
       cues: cut.cues,
       transcript: cut.transcript,
       mode,
+      howToClips: howToClipUris(extensionUri, (uri) => webview.asWebviewUri(uri).toString()),
     });
   }
 
@@ -821,21 +863,45 @@ export class GettingStartedPanel {
       const fetched = await this.deps.getStatus();
       if (!current()) { return; }
       const logicalOnly = fetched.hasProject && (fetched.logicalOnly ?? this.deps.logicalOnly === true);
-      const status: GettingStartedStatus = {
-        ...fetched,
-        logicalOnly,
-        // The same list the walkthrough and the sidebar offer; no storage reads as dbml.
-        starts: startActionsFor({ hasProject: fetched.hasProject, hasDbt: !logicalOnly, storage: fetched.storage }),
+      const tracker = fetched.hasProject ? this.deps.startIntent : undefined;
+      // What the folder suggests (the same rule the walkthrough and the sidebar follow); no storage reads as dbml.
+      const intentNow: StartIntent | undefined = !fetched.hasProject
+        ? undefined
+        : tracker?.known() ?? startIntentFor({
+          hasProject: true, hasDbt: !logicalOnly, storage: fetched.storage, hasDiagrams: fetched.domainCount > 0,
+        });
+      const withIntent = (intent: StartIntent | undefined): GettingStartedStatus => {
+        const s: GettingStartedStatus = { ...fetched, logicalOnly, starts: startActionsForIntent(intent, fetched.hasProject && !logicalOnly) };
+        if (intent) { s.intent = intent; }
+        return s;
       };
-      // The cards go out at once; the summary line can need a manifest parse
-      // (seconds on a large project), so it follows in a second status when
-      // there is one, rather than holding the whole panel back. That second
-      // message is dropped if a newer postStatus (or a setup) started while
-      // the summary was being worked out — its `status` would be stale.
+      // The cards go out at once. Two things can follow in a second status
+      // rather than hold the whole panel back: the bounded look at the folder
+      // (it can change the suggestion), and the summary line, which can need
+      // a manifest parse (seconds on a large project). That second message is
+      // dropped if a newer postStatus (or a setup) started meanwhile — its
+      // `status` would be stale.
+      const status = withIntent(intentNow);
       this.post({ type: 'status', payload: { ...status, summary: null } });
-      if (gettingStartedPageMode(status) !== 'dbt') { return; }
-      const summary = await this.projectSummary();
-      if (summary && current()) { this.post({ type: 'status', payload: { ...status, summary } }); }
+      // Counted when the suggestion leads the page: Convert's card, or the start card of a project with no diagram yet.
+      const counted = (intent: StartIntent | undefined): void => {
+        if (intent && (intent === 'convert' || fetched.domainCount === 0)) { recordStartSuggested(intent); }
+      };
+      const wantsSummary = gettingStartedPageMode(status) === 'dbt';
+      if (!tracker) {
+        counted(intentNow);
+        if (!wantsSummary) { return; }
+        const summaryOnly = await this.projectSummary();
+        if (summaryOnly && current()) { this.post({ type: 'status', payload: { ...status, summary: summaryOnly } }); }
+        return;
+      }
+      const [intent, summary] = await Promise.all([
+        tracker.refresh().catch(() => intentNow),
+        wantsSummary ? this.projectSummary() : Promise.resolve(null),
+      ]);
+      if (!current()) { return; }
+      counted(intent);
+      if (intent !== intentNow || summary) { this.post({ type: 'status', payload: { ...withIntent(intent), summary } }); }
     } catch (err) {
       telemetry.error('welcomePanelFailed');
       log.error('[GettingStarted] Status check failed:', err);
@@ -959,6 +1025,9 @@ export class GettingStartedPanel {
         break;
       case 'videoProgress':
         telemetry.feature(msg.milestone === 'half' ? 'videoHalf' : 'videoEnded');
+        break;
+      case 'howToClipPlayed':
+        telemetry.feature('howToClipPlayed');
         break;
       default: {
         const unhandled: never = msg;

@@ -38,6 +38,8 @@ import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorP
 import { telemetry } from '../../src/services/telemetryService';
 import { clearLogBuffer, hasLogSink, recentLogLines } from '../../src/services/logger';
 import { START_COMMAND, parseStartArgs, startCommandLink } from '../../src/types/startActions';
+import { CONVERT_NOTICE_BUTTON, convertNoticeMessage } from '../../src/services/convertOffer';
+import { DBML_CONVERSION_DECLINED_KEY } from '../../src/providers/SemanticEditorProvider';
 
 import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 
@@ -2065,17 +2067,25 @@ describe('Welcome panel: first run', () => {
       contributes: { walkthroughs: Array<{ id: string; description: string; steps: Array<{ id: string; title: string; when?: string; description: string; media: { svg: string }; completionEvents: string[] }> }> };
     };
     const walkthrough = pkg.contributes.walkthroughs.find((w) => WALKTHROUGH_ID.endsWith(`#${w.id}`))!;
-    // The start step comes first (openProject, convert, newDiagram or draw, by window), then the
-    // project's diagrams, the tour and the AI helper. Import DBML is a start, not a step of its own;
-    // the dbt-only "sample" step is gone: dbt shows up only in dbt projects.
-    expect(walkthrough.steps.map((s) => s.id)).toEqual(['openProject', 'convert', 'newDiagram', 'draw', 'openDiagram', 'watch', 'watchLogical', 'enrich']);
+    // The start step comes first (openProject, convert, newDiagram, one of the three direct imports
+    // the folder suggests, or draw, by window), then the project's diagrams, the tour and the AI
+    // helper. Import… is a start, not a step of its own; the dbt-only "sample" step is gone: dbt
+    // shows up only in dbt projects.
+    expect(walkthrough.steps.map((s) => s.id)).toEqual([
+      'openProject', 'convert', 'convertDbt', 'newDiagram', 'importSemanticModel', 'importSqlDdl', 'importDbmlFile', 'draw',
+      'openDiagram', 'watch', 'watchLogical', 'enrich',
+    ]);
     const step = (id: string) => walkthrough.steps.find((s) => s.id === id)!;
     // Which window each step shows in: dbt, no folder, a folder without dbt, a project with or without diagrams, or always.
     expect(Object.fromEntries(walkthrough.steps.map((s) => [s.id, s.when ?? null]))).toEqual({
       openProject: 'workspaceFolderCount == 0',
-      convert: 'erdStudio.hasProject && (erdStudio.storage == yaml || erdStudio.storage == mixed)',
-      newDiagram: '!erdStudio.hasDbtProject && !erdStudio.hasDiagrams',
-      draw: 'erdStudio.hasDbtProject && !erdStudio.hasDiagrams',
+      convert: 'erdStudio.hasProject && !erdStudio.hasDbtProject && (erdStudio.storage == yaml || erdStudio.storage == mixed)',
+      convertDbt: 'erdStudio.hasDbtProject && (erdStudio.storage == yaml || erdStudio.storage == mixed)',
+      newDiagram: 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent != importSemanticModel && erdStudio.startIntent != importSqlDdl && erdStudio.startIntent != importDbmlFile',
+      importSemanticModel: 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importSemanticModel',
+      importSqlDdl: 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importSqlDdl',
+      importDbmlFile: 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importDbmlFile',
+      draw: 'erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed',
       openDiagram: 'erdStudio.hasDiagrams',
       watch: 'erdStudio.hasDbtProject',
       watchLogical: '!erdStudio.hasDbtProject',
@@ -2094,7 +2104,9 @@ describe('Welcome panel: first run', () => {
     // Import… offers DBML, SQL DDL and a Power BI semantic model; DBML stays "an open format".
     expect(step('newDiagram').description).toContain(`[import a data model](${startCommandLink('import', 'walkthrough')}): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in), SQL DDL scripts or a Power BI semantic model.`);
     expect(step('draw').description).toContain(`[from an import](${startCommandLink('import', 'walkthrough')}) (DBML, an open format, no lock-in; SQL DDL scripts; or a Power BI semantic model)`);
-    expect(step('newDiagram').description).toContain(`[open an example](${startCommandLink('example', 'walkthrough')})`);
+    expect(step('newDiagram').description).toContain(`[Open an example](${startCommandLink('example', 'walkthrough')})`);
+    // The direct imports reuse the import picture: no new file in the VSIX.
+    for (const id of ['importSemanticModel', 'importSqlDdl', 'importDbmlFile']) expect(step(id).media.svg).toBe('media/walkthrough/import-dbml.svg');
     expect(step('draw').description).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'walkthrough')})`);
     expect(step('draw').description).toContain(`[blank](${startCommandLink('blank', 'walkthrough')})`);
     expect(step('convert').description).toContain(`[Convert to DBML](${startCommandLink('convert', 'walkthrough')})`);
@@ -2434,6 +2446,9 @@ describe('existing-diagrams notice', () => {
     const before = snapshot();
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
 
+    // A DBML project's notice (here: Convert turned down for good, so this one is not offered it).
+    workspaceState.set(DBML_CONVERSION_DECLINED_KEY, true);
+
     await activate(context);
 
     const calls = nudgeCalls(info);
@@ -2450,6 +2465,49 @@ describe('existing-diagrams notice', () => {
     info.mockClear();
     await activate(context);
     expect(nudgeCalls(info)).toHaveLength(0);
+  });
+
+  it('in a project from before 2.0, leads with Convert to DBML…, its newest diagram second (onboarding story 08)', async () => {
+    const future = new Date(Date.now() + 60_000);
+    fs.utimesSync(path.join(root, '.erd-studio', 'gold', 'finance.json'), future, future);
+    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+    context = makeContext(root, { workspaceState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
+      (message.startsWith('This project has') ? CONVERT_NOTICE_BUTTON : undefined)) as never);
+    const feature = vi.spyOn(telemetry, 'feature');
+    const run = vscode.commands.executeCommand.bind(vscode.commands);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockImplementation(((command: string, ...args: unknown[]) =>
+      (command === 'erdStudio.convertProjectToDbml' ? Promise.resolve(undefined) : run(command, ...args))) as never);
+
+    await activate(context);
+
+    const calls = nudgeCalls(info);
+    expect(calls).toHaveLength(1);
+    const diagrams = Number(/has (\d+)/.exec(String(calls[0][0]))![1]);
+    expect(String(calls[0][0])).toBe(convertNoticeMessage(diagrams));
+    expect(String(calls[0][0])).toContain('DBML, an open format');
+    expect(calls[0].slice(1)).toEqual([CONVERT_NOTICE_BUTTON, 'Open finance']);
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.convertProjectToDbml'));
+    const counted = feature.mock.calls.map((c) => c[0]);
+    expect(counted).toContain('diagramsNudgeShown');
+    expect(counted).toContain('convertToDbmlOffered');
+  });
+
+  it('with the Convert offer turned off (erdStudio.dbml.offerConvert), is the plain notice', async () => {
+    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+    context = makeContext(root, { workspaceState });
+    vscode._setMockConfiguration('erdStudio', 'dbml.offerConvert', { globalValue: false });
+    try {
+      const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+      await activate(context);
+
+      const calls = nudgeCalls(info);
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0][0])).toMatch(/^This project has \d+ ERD Studio diagrams\.$/);
+    } finally {
+      vscode._resetMockConfiguration();
+    }
   });
 
   it('comes before the AI helper offer, which waits for the next window and is a notification, not a picker', async () => {
@@ -2680,8 +2738,9 @@ describe('a cloned project opens its own diagrams (onboarding)', () => {
     context = makeContext(root, { globalState, workspaceState });
     const feature = vi.spyOn(telemetry, 'feature');
     const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    // The fixture is a project from before 2.0: its notice leads with Convert, Open <diagram> second.
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string, ...items: string[]) =>
-      (message.startsWith('This project has') ? items[0] : undefined)) as never);
+      (message.startsWith('This project has') ? items.find((i) => i.startsWith('Open ')) : undefined)) as never);
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
 
     await activate(context);

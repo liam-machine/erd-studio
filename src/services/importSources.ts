@@ -10,9 +10,17 @@
  * diagram, shows the dry run and writes the same way.
  */
 
-/** The sources Import… offers, in the order shown when the folder suggests none. */
-export const IMPORT_MODEL_SOURCES = ['dbml', 'sqlDdl', 'semanticModel'] as const;
+import type { DetectedImportSource } from '../types/startActions';
+
+/**
+ * The sources Import… offers, in the order shown when the folder suggests none.
+ * The same ids the start screen's suggestion reads (`DetectedImportSource`).
+ */
+export const IMPORT_MODEL_SOURCES = ['dbml', 'sqlDdl', 'semanticModel'] as const satisfies readonly DetectedImportSource[];
 export type ImportModelSource = (typeof IMPORT_MODEL_SOURCES)[number];
+/** Both lists name every source (a compile-time check). */
+const SAME_SOURCES: DetectedImportSource extends ImportModelSource ? true : never = true;
+void SAME_SOURCES;
 
 /**
  * The picker's order: the sources the open folder seems to hold first (a
@@ -142,6 +150,36 @@ export function convertedFileName(paths: readonly string[], folder?: string): st
   return `${stem || 'import'}.dbml`;
 }
 
+/** Folder and file names that say nothing about the model (`database/`, `ddl/`, `schema.sql`): not worth a diagram's name. */
+const GENERIC_SQL_STEMS = new Set([
+  'database', 'databases', 'db', 'sql', 'ddl', 'schema', 'schemas', 'script', 'scripts', 'migration', 'migrations',
+  'table', 'tables', 'create', 'create_tables', 'init', 'setup', 'src', 'source', 'import', 'dump', 'export', 'model', 'models',
+]);
+/** Schemas every database has: they name nobody's model either. */
+const DEFAULT_SQL_SCHEMAS = new Set(['public', 'dbo', 'main']);
+
+/**
+ * A better name for converted SQL than a generic folder or file name
+ * (onboarding story 04 was offered `database`): the schema most of the
+ * tables share, when it is not a default one (`sales`), else the project
+ * folder's name; a name that already says something is kept. `dbml` is the
+ * converted text (`Table sales.x {` lines), `projectFolder` the open folder.
+ */
+export function sqlImportFileName(fileName: string, dbml: string, projectFolder?: string): string {
+  const stem = fileName.replace(/\.dbml$/i, '');
+  if (!GENERIC_SQL_STEMS.has(stem.toLowerCase())) return fileName;
+  const counts = new Map<string, number>();
+  for (const m of dbml.matchAll(/^Table\s+(?:"([^"]+)"|([A-Za-z_][\w$]*))\./gm)) {
+    const schema = (m[1] ?? m[2]).toLowerCase();
+    counts.set(schema, (counts.get(schema) ?? 0) + 1);
+  }
+  const ranked = [...counts].filter(([schema]) => !DEFAULT_SQL_SCHEMAS.has(schema)).sort((a, b) => b[1] - a[1]);
+  if (ranked.length > 0 && (ranked.length === 1 || ranked[0][1] > ranked[1][1])) return `${ranked[0][0]}.dbml`;
+  const folder = projectFolder?.split(/[\\/]/).filter(Boolean).pop();
+  if (folder && !GENERIC_SQL_STEMS.has(folder.toLowerCase())) return `${folder}.dbml`;
+  return fileName;
+}
+
 /** `from 2 SQL files (PostgreSQL)`: what the dry run's headline says a SQL import came from. */
 export function sqlOriginPhrase(fileCount: number, dialectLabel: string): string {
   return `from ${plural(fileCount, 'SQL file')} (${dialectLabel})`;
@@ -164,11 +202,15 @@ export function semanticModelSkippedSummary(counts: {
   return out;
 }
 
-/** The dry run's note on renamed names: Power BI names become snake_case, the originals kept in meta. */
-export function semanticModelRenameNote(renamed: ReadonlyArray<{ kind: 'table' | 'column' }>, metaKey: string): string | undefined {
+/**
+ * The dry run's note on renamed names: Power BI names become snake_case, the
+ * originals kept in the table files (`meta.power_bi_name`; plain words, where
+ * they are kept is the reference doc's business).
+ */
+export function semanticModelRenameNote(renamed: ReadonlyArray<{ kind: 'table' | 'column' }>): string | undefined {
   if (renamed.length === 0) return undefined;
   const tables = renamed.filter((r) => r.kind === 'table').length;
   const columns = renamed.length - tables;
   const what = [tables ? plural(tables, 'table name') : '', columns ? plural(columns, 'column name') : ''].filter(Boolean).join(' and ');
-  return `${what} written in snake_case; each Power BI name is kept in its meta, as ${metaKey}.`;
+  return `${what} written in snake_case; the original Power BI names are kept in the table files.`;
 }

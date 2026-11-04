@@ -15,6 +15,7 @@
  * so `activate()` wires the real ones and the refreshes stay in extension.ts.
  */
 
+import { slugFromName, validateTypedDiagramName } from './diagramName';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -215,10 +216,11 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     prompt: `Name the diagram. It is saved in the ${layerLabel} layer.`,
     value: resume?.name ?? suggested,
     ignoreFocusOut: true,
-    validateInput: (value: string) => deps.validateDomainName(value, chosenLayer),
+    // As New Diagram takes it: "Sales" is saved as sales.
+    validateInput: (value: string) => validateTypedDiagramName(value, (slug) => deps.validateDomainName(slug, chosenLayer)),
   });
   if (!name) { telemetry.feature('drawCancelName'); return undefined; }
-  const slug = name.trim();
+  const slug = slugFromName(name);
 
   // A project that writes DBML (§3.2) gets a `.dbml` diagram, whose members are DBML tables (D20).
   const dbml = tableLibraryService.writesDbml?.() ?? false;

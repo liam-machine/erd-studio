@@ -23,7 +23,16 @@ import {
   type AiAssistantId,
   type SkillHarnessTarget,
 } from './aiAssistants';
-import { START_ACTIONS, type StartAction, type StartStorage } from './startActions';
+import {
+  HOW_TO_CLIP_KEYS,
+  START_ACTIONS,
+  START_INTENTS,
+  START_INTENT_REASONS,
+  type HowToClipKey,
+  type StartAction,
+  type StartIntent,
+  type StartStorage,
+} from './startActions';
 
 // ---------------------------------------------------------------------------
 // Protocol
@@ -114,7 +123,13 @@ export type GettingStartedToHost =
   /** Logged only; the webview has already switched to the poster fallback. */
   | { type: 'videoError'; code: number }
   /** The video reached its half-way point or its end, once each per panel. Counted by usage telemetry only. */
-  | { type: 'videoProgress'; milestone: VideoMilestone };
+  | { type: 'videoProgress'; milestone: VideoMilestone }
+  /**
+   * The start card's "Watch how" clip started playing (once per clip per
+   * page). No payload: the host knows which clip it rendered for which
+   * suggestion. Counted by usage telemetry only (`howToClipPlayed`).
+   */
+  | { type: 'howToClipPlayed' };
 
 export type VideoMilestone = 'half' | 'end';
 
@@ -123,7 +138,7 @@ export type GettingStartedToHostType = GettingStartedToHost['type'];
 /** Every host-bound type, for the validator and the "every type is handled" test. */
 export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] = [
   'ready', 'refreshStatus', 'setupAiHelper', 'copyPrompt', 'openClaude', 'openCopilotChat', 'openDomain', 'start',
-  'openExternal', 'trySample', 'openFolder', 'videoError',
+  'openExternal', 'trySample', 'openFolder', 'videoError', 'howToClipPlayed',
 ];
 
 /**
@@ -131,7 +146,11 @@ export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] 
  * none of them is the viewer choosing something, so a panel closed after only
  * these counts as `welcomeLeftNoChoice`.
  */
-export const GETTING_STARTED_PASSIVE_TYPES: readonly GettingStartedToHostType[] = ['ready', 'refreshStatus', 'videoError', 'videoProgress'];
+export const GETTING_STARTED_PASSIVE_TYPES: readonly GettingStartedToHostType[] = [
+  'ready', 'refreshStatus', 'videoError', 'videoProgress',
+  // Watching how is not choosing a start: a viewer who watched and left still bounced.
+  'howToClipPlayed',
+];
 
 /** How Claude Code was found. `cli` wins when both are present (it can take the prompt as an argument). */
 export type ClaudeAvailability = 'missing' | 'extension' | 'cli';
@@ -180,9 +199,17 @@ export interface GettingStartedStatus {
    */
   storage?: StartStorage;
   /**
-   * The starts the page offers, primary first: `startActionsFor()` over
-   * `hasProject`, `!logicalOnly` and `storage`. Filled by the panel host on
-   * every status it posts; the page shows exactly these, in this order.
+   * The start the folder suggests (`startIntentFor()`: Convert, Draw from
+   * dbt, one of the three direct imports when the folder's quick look found
+   * that kind of file, else a blank diagram); absent with no folder open.
+   * Filled by the panel host. The start card's primary button, its reason
+   * line and its "Watch how" clip follow it.
+   */
+  intent?: StartIntent;
+  /**
+   * The starts the page offers, primary first: `startActionsForIntent(intent)`.
+   * Filled by the panel host on every status it posts; the page shows
+   * exactly these, in this order.
    */
   starts?: StartAction[];
   /**
@@ -251,6 +278,7 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
     case 'openDomain':
     case 'trySample':
     case 'openFolder':
+    case 'howToClipPlayed':
       return true;
     case 'start': {
       const action = (value as { action?: unknown }).action;
@@ -503,6 +531,14 @@ export interface GettingStartedHtmlInput {
    * wins.
    */
   mode?: GettingStartedPageMode;
+  /**
+   * The "Watch how" clips the extension ships, by what they show (a
+   * suggestion, or the example with no folder open): webview URIs of
+   * `media/onboarding/stories/<clip>.mp4` for each `HOW_TO_CLIPS` entry whose
+   * file exists. The host checks the files; a page without one shows no
+   * slot. Never a URL from the webview.
+   */
+  howToClips?: Partial<Record<HowToClipKey, { videoUri: string }>>;
 }
 
 export function buildGettingStartedCsp(cspSource: string, nonce: string): string {
@@ -705,6 +741,13 @@ body {
 .gs-sample-link { margin: 0 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .gs-sample__note { font-size: 12px; color: var(--vscode-descriptionForeground); }
 .gs-summary { margin: 26px 0 0; font-size: 13px; color: var(--vscode-foreground); }
+.gs-step__reason { margin: -4px 0 12px; max-width: 72ch; font-weight: 600; color: var(--vscode-foreground); }
+.gs-howto { margin: 16px 0 0; }
+.gs-howto__title { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--vscode-descriptionForeground); }
+.gs-howto__clip {
+  display: block; width: 100%; max-width: 480px; aspect-ratio: 16 / 10; border-radius: 6px; background: #0f1114;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent));
+}
 .gs-section-intro { margin: -6px 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
 .gs-steps + .gs-section-title { margin-top: 26px; }
 .gs-footer {
@@ -888,6 +931,46 @@ const SCRIPT = `
 
   // The starts the last status listed, primary first (startActionsFor on the host).
   var starts = [];
+  // The "Watch how" slot: one clip per suggestion the extension ships (rendered up
+  // front by the host, never built here). It plays only when clicked (the tour
+  // above already autoplays); a play pauses the tour and is counted once per clip.
+  var howto = $('.gs-howto');
+  var clips = document.querySelectorAll('.gs-howto__clip');
+  var clipsPlayed = {};
+  for (var ci = 0; ci < clips.length; ci++) {
+    (function (clip) {
+      clip.addEventListener('play', function () {
+        if (video && !video.paused) { try { video.pause(); } catch (e) { /* ignore */ } }
+        var key = clip.getAttribute('data-clip');
+        if (clipsPlayed[key]) { return; }
+        clipsPlayed[key] = true;
+        post({ type: 'howToClipPlayed' });
+      });
+    })(clips[ci]);
+  }
+
+  // The start card follows the suggestion: its reason line, and its clip (moved into
+  // the start card while it leads; with no folder open, the example's clip in the
+  // open-a-folder card). Convert has no clip: its panel shows every change first.
+  function renderIntent(intent, leadShown, hasProject) {
+    var reasons = document.querySelectorAll('[data-intent-reason]');
+    for (var r = 0; r < reasons.length; r++) {
+      reasons[r].hidden = reasons[r].getAttribute('data-intent-reason') !== intent;
+    }
+    if (!howto) { return; }
+    var key = !hasProject ? 'example' : intent === 'convert' ? '' : intent;
+    var match = null;
+    for (var k = 0; k < clips.length; k++) {
+      var mine = key !== '' && clips[k].getAttribute('data-clip') === key;
+      if (!mine && !clips[k].hidden) { try { clips[k].pause(); } catch (e) { /* ignore */ } }
+      clips[k].hidden = !mine;
+      if (mine) { match = clips[k]; }
+    }
+    var card = !hasProject ? $('.gs-noproject') : $('[data-step="begin"] .gs-step__body');
+    var show = !!(match && card && (leadShown || !hasProject));
+    if (show) { card.appendChild(howto); }
+    howto.hidden = !show;
+  }
 
   // Each start group shows the starts listed, in that order, by moving the
   // buttons rendered up front (never building any). A button whose data-modes
@@ -965,7 +1048,12 @@ const SCRIPT = `
     // in one line under it), else the start card holds a button per start.
     showStep('convert', starts.indexOf('convert') >= 0);
     showStep('open', s.domainCount > 0);
-    showStep('begin', s.domainCount === 0);
+    // With nothing but Convert to start, no start card under it.
+    var others = 0;
+    for (var o = 0; o < starts.length; o++) { if (starts[o] !== 'convert') { others += 1; } }
+    showStep('begin', s.domainCount === 0 && (others > 0 || !s.hasProject));
+    var intent = typeof s.intent === 'string' ? s.intent : '';
+    renderIntent(intent, intent !== 'convert' && s.domainCount === 0, !!s.hasProject);
     var summary = $('.gs-summary');
     var line = mode === 'dbt' && s.summary && s.summary.line ? s.summary.line : '';
     if (summary) { summary.textContent = line; summary.hidden = line === ''; }
@@ -1036,6 +1124,9 @@ const SCRIPT = `
 export const START_LABELS: Readonly<Record<StartAction, string>> = {
   convert: 'Convert to DBML',
   drawFromDbt: 'Draw from dbt',
+  importSemanticModel: 'Import your Power BI semantic model',
+  importSqlDdl: 'Import your SQL scripts',
+  importDbmlFile: 'Import your DBML file',
   blank: 'New diagram',
   import: 'Import&hellip;',
   example: 'Open an example&hellip;',
@@ -1110,6 +1201,27 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     `<button class="gs-link" type="button" data-action="openExternal" data-target="${ASSISTANT_INSTALL_TARGETS[a.id]}">${escapeHtml(a.name)}</button>`,
   ).join('\n              ');
   const launchRows = AI_ASSISTANTS.map((a) => launchRow(a.id)).join('\n            ');
+  // The start card's reason line per suggestion (fixed text), hidden until a status names it.
+  const reasons = START_INTENTS.filter((i) => START_INTENT_REASONS[i])
+    .map((i) => `<p class="gs-step__reason" data-intent-reason="${i}" hidden>${escapeHtml(START_INTENT_REASONS[i]!)}</p>`)
+    .join('\n          ');
+  // One clip per start the extension ships (the host checked the files): silent, captions
+  // burned in, played by a click (no autoplay). No poster file: preload="metadata" loads its
+  // header and first frame, the story's title card (publishing cuts the empty window before
+  // it, test/stories/lib/publish.mjs); a local file, and only the clip the page shows is unhidden.
+  const clipEls = HOW_TO_CLIP_KEYS.flatMap((key) => {
+    const clip = input.howToClips?.[key];
+    if (!clip) { return []; }
+    return [`<video class="gs-howto__clip" data-clip="${key}" controls muted playsinline preload="metadata" hidden>
+          <source src="${escapeHtml(clip.videoUri)}" type="video/mp4">
+        </video>`];
+  });
+  const howToSlot = clipEls.length > 0
+    ? `<div class="gs-howto" hidden>
+        <p class="gs-howto__title">Watch how (a short clip, no sound)</p>
+        ${clipEls.join('\n        ')}
+      </div>`
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1186,9 +1298,11 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
           <h3 class="gs-step__title" ${only('dbt')}>Draw your dbt project &mdash; no AI needed</h3>
           <p class="gs-step__text" ${only('unknown', 'nofolder', 'logical')}>Add tables on a blank canvas, import one from DBML, SQL DDL or a Power BI semantic model, or open a finished example.</p>
           <p class="gs-step__text" ${only('dbt')}>Copies your dbt models and tests into a diagram you can edit. Or start blank, import from DBML, SQL DDL or a Power BI semantic model, or open a finished example.</p>
+          ${reasons}
           <div class="gs-step__actions" data-start-group="first">
             ${startButtons('gs-btn')}
           </div>
+          ${howToSlot}
         </div>
       </section>
     </div>

@@ -259,7 +259,7 @@ describe('Import DBML — a file from another tool', () => {
     expect(ui.confirms[0].message).toBe('Import 2 tables into a new diagram "shop" in the Gold layer.');
     expect(ui.confirms[0].button).toBe(IMPORT_BUTTON);
     expect(ui.confirms[0].detail).toContain('• New: customers, orders.');
-    expect(ui.confirms[0].detail).toContain('No erd_layout in the file');
+    expect(ui.confirms[0].detail).toContain('• Layout: The diagram is laid out automatically');
 
     expect(lms.getTable('customers')?.columns?.map((c) => c.name)).toEqual(['id', 'name']);
     expect(lms.getTable('customers')?.columns?.[0].isPrimaryKey).toBe(true);
@@ -272,6 +272,27 @@ describe('Import DBML — a file from another tool', () => {
     expect(written).toEqual([{ domainPath, modelNames: ['customers', 'orders'], changedModelNames: [] }]);
     expect(features()).toEqual(['importDbml']);
     expect(errorNames()).toEqual([]);
+  });
+
+  it('the Open dialog starts on the DBML file the folder holds, chosen; a failed or empty look opens it on the folder', async () => {
+    makeProject('v5');
+    const file = dbmlFile('shop.dbml', SHOP_DBML);
+    const found = fakeUi({ file, layer: 'gold' });
+    await importDbml(deps(found, { findDefaultFile: async () => file }));
+    expect(found.dialogs).toEqual([file]);
+
+    const none = fakeUi({});
+    await importDbml(deps(none, { findDefaultFile: async () => undefined }));
+    const broken = fakeUi({});
+    await importDbml(deps(broken, { findDefaultFile: () => Promise.reject(new Error('search failed')) }));
+    expect([...none.dialogs, ...broken.dialogs]).toEqual([tmp, tmp]);
+
+    // Try Again / a file given by the caller never looks.
+    const look = vi.fn(async () => file);
+    const given = fakeUi({ layer: 'gold', names: ['shop-2'] });
+    await importDbml(deps(given, { findDefaultFile: look }), { filePath: file });
+    expect(look).not.toHaveBeenCalled();
+    expect(given.dialogs).toEqual([]);
   });
 
   it('imports the dbdiagram.io-style sample (partials, enums, composite and optional refs, schemas)', async () => {
@@ -443,7 +464,7 @@ describe('Import DBML — ERD Studio\'s own rich export', () => {
     expect(result).toBeDefined();
     expect(ui.reads).toEqual([file]);
     expect(readJson(result!.domainPath).viewConfig.positions).toBeUndefined();
-    expect(ui.confirms[0].detail).toContain('No erd_layout in the file');
+    expect(ui.confirms[0].detail).toContain('• Layout: The diagram is laid out automatically');
     expect(features()).toEqual(['importDbml']);
   });
 });
@@ -523,12 +544,27 @@ describe('Import DBML — the name', () => {
     makeProject('v5');
     const file = dbmlFile('shop.dbml', SHOP_DBML);
     const ui = fakeUi({ file, layer: 'gold' });
-    const validate = vi.fn((value: string, _layer: string) => (value === 'Bad' ? 'Not that one' : undefined));
+    const validate = vi.fn((value: string, _layer: string) => (value === 'bad' ? 'Not that one' : undefined));
 
     await importDbml(deps(ui, { validateDomainName: validate }));
 
+    // The rule judges the file name the typed name becomes, as New Diagram does.
     expect(ui.inputs[0].validateInput!('Bad')).toBe('Not that one');
-    expect(validate).toHaveBeenLastCalledWith('Bad', 'gold');
+    expect(validate).toHaveBeenLastCalledWith('bad', 'gold');
+  });
+
+  it('takes a name as people type it, as New Diagram does: "Sales Report" is saved as sales-report', async () => {
+    // Onboarding story 04: "Sales" was refused here ("Use lowercase letters…") but accepted by New Diagram.
+    makeProject('v5');
+    const file = dbmlFile('shop.dbml', SHOP_DBML);
+    const ui = fakeUi({ file, layer: 'silver', names: ['Sales Report'] });
+
+    await importDbml(deps(ui));
+
+    expect(ui.inputs[0].validateInput!('Sales Report')).toEqual({ message: 'Saved as sales-report', severity: vscode.InputBoxValidationSeverity.Info });
+    expect(ui.inputs[0].validateInput!('sales-report')).toBeUndefined();
+    expect(ui.inputs[0].validateInput!('  ')).toBe('Give the diagram a name');
+    expect(fs.existsSync(erd('silver', 'sales-report.json'))).toBe(true);
   });
 
   it('suggests a name not already used in the layer', async () => {
@@ -1058,14 +1094,14 @@ describe('Import DBML — contributed', () => {
     expect(pkg.contributes.menus['erdStudio.newMenu']).toContainEqual({
       command: IMPORT_DBML_COMMAND, when: 'erdStudio.hasProject', group: '1_diagram@3',
     });
-    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
+    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed')!;
     expect(dbt.contents.startsWith('No diagrams yet.')).toBe(true);
     // Each start goes through erdStudio.start, which counts the sidebar click (src/types/startActions.ts).
     expect(dbt.contents).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
     expect(dbt.contents).toContain(`[blank](${startCommandLink('blank', 'sidebar')})`);
     // The import start is Import… (DBML, SQL DDL or a semantic model), whose first source is this command.
     expect(dbt.contents).toContain(`[from an import](${startCommandLink('import', 'sidebar')}) (DBML, an open format, no lock-in;`);
-    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
+    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when?.startsWith('erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading') && v.when.includes('erdStudio.startIntent == blank'))!;
     expect(plain.contents.startsWith(`No diagrams yet.\n\n[New Diagram](${startCommandLink('blank', 'sidebar')})`)).toBe(true);
     expect(plain.contents).toContain(`[import a data model](${startCommandLink('import', 'sidebar')}): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in)`);
     expect(plain.contents).not.toContain('drawFromDbt');

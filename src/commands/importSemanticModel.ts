@@ -40,7 +40,6 @@ import {
 } from '../services/importSources';
 import { log } from '../services/logger';
 import {
-  SEMANTIC_MODEL_META,
   findSemanticModels,
   readSemanticModel,
   semanticModelToDbml,
@@ -124,9 +123,14 @@ export async function importSemanticModel(deps: ImportSemanticModelDeps): Promis
   const folder = await ui.pickFolder(deps.workspaceRoot || undefined);
   if (!folder) return cancelled();
   const folderName = path.basename(folder);
-  const walk = await walkFiles(folder, (f) => ui.readDirectory(f), { include: () => true, limit: MAX_SEMANTIC_MODEL_FILES });
+  // Only model files count toward the bound: findSemanticModels reads nothing
+  // else, and a big repo holding one model somewhere must still import from its root.
+  const walk = await walkFiles(folder, (f) => ui.readDirectory(f), { include: isSemanticModelFile, limit: MAX_SEMANTIC_MODEL_FILES });
   if (walk.truncated) {
-    showError(`${TITLE}: ${folderName} holds more than ${MAX_SEMANTIC_MODEL_FILES} files. Pick the <Name>.SemanticModel folder itself, or the folder just above it.`);
+    showError(
+      `${TITLE}: ${folderName} holds more than ${MAX_SEMANTIC_MODEL_FILES} model files. Pick the <Name>.SemanticModel folder itself, or the folder just above it.`,
+      { [CHOOSE_ANOTHER_FOLDER_BUTTON]: () => importSemanticModel(deps) },
+    );
     return undefined;
   }
   // Paths under the picked folder (its own name included, so a picked X.SemanticModel is still found).
@@ -193,7 +197,7 @@ export async function importSemanticModel(deps: ImportSemanticModelDeps): Promis
   for (const line of [...converted.skipped, ...warnings]) log.info(`[ERD Studio] ${TITLE}: ${line}`);
 
   // 3. Import DBML's flow, with the converted DBML as its file.
-  const renameNote = semanticModelRenameNote(converted.renamed, `${SEMANTIC_MODEL_META.name}`);
+  const renameNote = semanticModelRenameNote(converted.renamed);
   const filePath = path.join(deps.workspaceRoot, `${entry.name}.dbml`);
   const { modelUi: _modelUi, ui: importUi, ...rest } = deps;
   return importDbml({
@@ -206,6 +210,11 @@ export async function importSemanticModel(deps: ImportSemanticModelDeps): Promis
       skipped: semanticModelSkippedSummary(converted.skippedCounts),
     },
   }, { filePath });
+}
+
+/** A file {@link findSemanticModels} can build a model from (`.tmdl` or `.bim`). */
+export function isSemanticModelFile(name: string): boolean {
+  return /\.(tmdl|bim)$/i.test(name);
 }
 
 /** The real UI. */

@@ -129,6 +129,12 @@ describe('analyseDbml', () => {
     });
   });
 
+  it('splits a camel-case name into words: AdventureSales is adventure-sales, not adventuresales (onboarding story 05)', () => {
+    expect(suggestDbmlSubjectAreaName(model('Project AdventureSales {\n}\nTable a {\n  id int\n}\n'))).toBe('adventure-sales');
+    expect(suggestDbmlSubjectAreaName(model('Table a {\n  id int\n}\n'), '/x/DBMLProject.dbml')).toBe('dbml-project');
+    expect(suggestDbmlSubjectAreaName(model('Project ecommerce {\n}\nTable a {\n  id int\n}\n'))).toBe('ecommerce');
+  });
+
   it('falls back to the file name, then dbml-import, and avoids names in use', () => {
     const noProject = model('Table a {\n  id int\n}\n');
     expect(suggestDbmlSubjectAreaName(noProject, 'C:\\exports\\Customer 360.dbml')).toBe('customer-360');
@@ -376,7 +382,9 @@ describe('an ERD Studio rich export, row by row', () => {
 
   it('nothing is renamed, dropped or kept in meta.dbml', () => {
     const { report } = salesPlan();
-    expect(report).toMatchObject({ renamed: [], dropped: [], notes: [], keptInMeta: 0, relationships: 7, stickyNotes: 2, erdStudioExport: true });
+    expect(report).toMatchObject({ renamed: [], dropped: [], notes: [], keptInMeta: 0, relationships: 6, stickyNotes: 2, erdStudioExport: true });
+    // Seven column pairs: the composite fk_fct_order is one relationship, as the canvas draws it.
+    expect(salesPlan().relationships).toHaveLength(7);
     expect(report.newTables).toHaveLength(7);
   });
 
@@ -911,7 +919,7 @@ describe('where relationships are stored', () => {
     ]);
     expect(tableOf(p, 'dim_date').relationships).toBeUndefined();
     expect(p.changedLibraryTables).toEqual([]);
-    expect(p.report).toMatchObject({ relationships: 7, relationshipsInLibrary: 7, relationshipsAlreadyInLibrary: 0 });
+    expect(p.report).toMatchObject({ relationships: 6, relationshipsInLibrary: 6, relationshipsAlreadyInLibrary: 0 });
   });
 
   it('library storage: an existing FK table gains its relationships on a copy; a compositeKey it uses is not reused', () => {
@@ -948,12 +956,12 @@ describe('where relationships are stored', () => {
     };
     const p = salesPlan({ libraryRelationships: true, library: library([customer]) });
     expect(p.changedLibraryTables).toEqual([]);
-    expect(p.report).toMatchObject({ relationships: 7, relationshipsAlreadyInLibrary: 1, relationshipsInLibrary: 6 });
+    expect(p.report).toMatchObject({ relationships: 6, relationshipsAlreadyInLibrary: 1, relationshipsInLibrary: 5 });
     // bridge_tag <> dim_customer is stored on the new bridge_tag; dim_customer is untouched.
     expect(tableOf(p, 'bridge_tag').relationships).toHaveLength(1);
     expect(describeDbmlImportPlan(p)).toContain('1 is already in your Table Library and kept as it has them.');
     // Only 6 of the 7 are written; the summary must not say all 7 are.
-    expect(describeDbmlImportPlan(p)).toContain("7 relationships (6 saved in the tables' files).");
+    expect(describeDbmlImportPlan(p)).toContain("6 relationships (5 saved in the tables' files).");
   });
 
   it('library storage: a composite the library already stores part of is left out whole', () => {
@@ -987,7 +995,7 @@ describe('where relationships are stored', () => {
       ['a.y -> b.v many-to-one', 'fk_b'],
     ]);
     expect(tableOf(p, 'a').relationships).toBeUndefined();
-    expect(p.report).toMatchObject({ relationships: 2, relationshipsInLibrary: 0 });
+    expect(p.report).toMatchObject({ relationships: 1, relationshipsInLibrary: 0 }); // one composite, two column pairs
   });
 
   it('library storage: a link another diagram draws from its own copy stays in this subject area', () => {
@@ -995,7 +1003,7 @@ describe('where relationships are stored', () => {
     const p = salesPlan({ libraryRelationships: true, diagramCopies: [copy] });
     expect(p.document.logical.relationships.map(ends)).toEqual(['fct_order.customer_key -> dim_customer.customer_key many-to-one']);
     expect(tableOf(p, 'fct_order').relationships).toHaveLength(2);
-    expect(p.report.relationshipsInLibrary).toBe(6);
+    expect(p.report.relationshipsInLibrary).toBe(5);
   });
 });
 
@@ -1072,7 +1080,7 @@ describe('describeDbmlImportPlan', () => {
     expect(describeDbmlImportPlan(salesPlan(), { layerLabel: 'Gold' })).toBe([
       'Import 7 tables into a new diagram "imported" in the Gold layer.',
       '• New: fct_order, dim_customer, dim_passport, dim_date and 3 more.',
-      '• 7 relationships.',
+      '• 6 relationships.',
       '• Layout: 6 of 7 tables placed from the file\'s erd_layout; the rest are placed when it opens.',
       '• 2 sticky notes.',
     ].join('\n'));
@@ -1099,7 +1107,7 @@ describe('describeDbmlImportPlan', () => {
     // No layout: where the first open's layout is saved.
     const foreign = plan(fixture('foreign/ecommerce.dbml'), { layer: 'silver' });
     expect(describeDbmlImportPlan(foreign, { dbml: { relationshipsFiles: []} }))
-      .toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
+      .toContain('• Layout: The diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
     expect(describeDbmlImportPlan(salesPlan({ layout: { positions: {}, stickies: [] } }), { dbml: { relationshipsFiles: []} }))
       .toContain('• The file\'s erd_layout has no positions for these tables: the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.');
   });
@@ -1124,17 +1132,35 @@ describe('describeDbmlImportPlan', () => {
     ]);
   });
 
+  it('in a DBML project, says every relationship is saved as optional (?), as the Refs it writes are (onboarding story 06)', () => {
+    const p = plan(fixture('foreign/ecommerce.dbml'), { layer: 'main' });
+    expect(p.report).toMatchObject({ optionalRefs: 1, requiredRefs: 5 });
+    const text = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['main/relationships/main.dbml'] } });
+    // Not "imported as plain relationships": a DBML project writes every Ref as >?.
+    expect(text).not.toContain('plain relationships');
+    expect(text).toContain('• Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, 5 references were not optional.');
+    expect(text).toContain('• 6 relationships.');
+    // A conversion (SQL, a semantic model) had no DBML file to compare with: nothing to say.
+    expect(describeDbmlImportPlan(p, { dbml: { relationshipsFiles: [] }, origin: { from: 'from 1 SQL file (PostgreSQL)' } })).not.toContain('optional');
+  });
+
   it('summarises a foreign file: optional refs, meta, renames and what is left out', () => {
     const text = describeDbmlImportPlan(plan(fixture('foreign/ecommerce.dbml'), { layer: 'silver' }));
     expect(text).toContain('• 1 reference is optional (?). ERD Studio doesn\'t record that, so they are imported as plain relationships.');
-    expect(text).toContain('• No erd_layout in the file: the diagram is laid out automatically when it opens.');
-    expect(text).toMatch(/• DBML settings ERD Studio has no field for \(not null, defaults, indexes, …\) are kept in the meta of \d+ tables and columns, under "dbml"\./);
+    expect(text).toContain('• Layout: The diagram is laid out automatically when it opens.');
+    // Plain words: no "meta", no key name (onboarding story 06).
+    expect(text).toContain('• Not null, defaults, indexes and other details ERD Studio has no field for are kept in the table files, so they are not lost.');
+    // Plain words for a file from another tool: no ERD Studio key, no count that reads like a table count.
+    expect(text).not.toMatch(/erd_layout|\bmeta\b|tables and columns/);
+    expect(text).not.toMatch(/\bmeta\b|under "dbml"/);
     expect(text).toContain([
       'Left out:',
       '• The database type (PostgreSQL): ERD Studio does not record the database type.',
       '• Records for countries (2 rows): ERD Studio does not keep sample data.',
       '• Settings on 2 references (delete: cascade, update: no action, color: #79AD51, inactive): ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationships were imported.',
     ].join('\n'));
+    // Six relationships, as the canvas draws them: the composite fk_merchant (two column pairs) once.
+    expect(text).toContain('• 6 relationships.');
     const odd = describeDbmlImportPlan(plan(fixture('foreign/odd-names.dbml'), { layer: 'silver' }));
     expect(odd).toContain('• Renamed to names ERD Studio can use: Order Items → Order_Items, silver.date → silver_date, gold.date → gold_date, users → users_2 and 5 more.');
   });

@@ -208,6 +208,9 @@ describe('buildConvertPanelHtml', () => {
     expect(html).toMatch(/\.cdb__list \{[^}]*overflow-y: auto/);
     expect(html).toContain('<details class="cdb-section" data-section="tables" open>');
     expect(html.indexOf('class="cdb__actions"')).toBeGreaterThan(html.indexOf('</section>'));
+    // Bottom-left, away from the notifications VS Code stacks at the bottom right (onboarding story 08).
+    expect(html).toMatch(/\.cdb__actions \{[^}]*justify-content: flex-start/);
+    expect(html).toMatch(/\.cdb__status \{[^}]*order: 1/);
     expect(html).toContain('data-action="cancel">Cancel</button><button type="button" class="cdb__button" data-action="convert">Convert</button>');
     expect(html).toContain(`<title>${CONVERT_PANEL_TITLE}</title>`);
   });
