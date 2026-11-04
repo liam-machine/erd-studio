@@ -508,6 +508,7 @@ const FEATURES = [
   'guideStepCanvasFinish',
   'guideBack',
   'guideLeftDraft',
+  'diagramsNudgeShowMeAround',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
