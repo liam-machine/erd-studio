@@ -42,6 +42,7 @@ import { getErdStudioSetting } from './services/configService';
 import { LAYER_DEFINITION, WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from './services/layerWording';
 import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type DbtProjectConfig } from './services/dbtProjectConfig';
 import { detectPhysicalTooling, toolingExclude, type ToolingProbe } from './services/physicalTooling';
+import { DBT_SEARCH_EXCLUDE_GLOB, sortDbtCandidates } from './services/dbtProjectSearch';
 import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
 import {
   manifestAppearanceFeature,
@@ -281,6 +282,7 @@ const sessionPrompts = new SessionPromptGate();
 /** Tests run activate() many times in one module instance. */
 export function _resetFirstRunGuardForTests(): void {
   gettingStartedAutoOpened = false;
+  unusedDbtProjectNoted = false;
   sessionPrompts.reset();
 }
 
@@ -306,13 +308,69 @@ function workspaceFolderPaths(): string[] {
  * Resolve the project for this window: `erdStudio.projectPath`, then the
  * picked project, then dbt auto-detection, then (logical-only) the first
  * folder holding ERD data, then the first folder. See `resolveDbtProject`.
+ * `hostCandidates`: the host's own search for dbt_project.yml
+ * ({@link findHostDbtProjects}), merged with the bounded walk.
  */
-function resolveWorkspaceProject(context: vscode.ExtensionContext): DbtProjectResolution {
+function resolveWorkspaceProject(context: vscode.ExtensionContext, hostCandidates?: readonly string[]): DbtProjectResolution {
   return resolveDbtProject(workspaceFolderPaths(), {
     projectPath: getErdStudioSetting('projectPath', ''),
     picked: context.workspaceState.get<string>(SELECTED_PROJECT_KEY),
     semanticDir: getErdStudioSetting('semanticDir', '.erd-studio'),
+    hostCandidates,
   });
+}
+
+/** How long activation waits for the host's dbt_project.yml search before the walk alone decides. */
+export const ACTIVATION_DBT_SEARCH_MS = 1000;
+/** At most this many dbt projects are listed by the host's search. */
+const HOST_DBT_SEARCH_MAX = 50;
+
+/**
+ * The folders holding dbt_project.yml by the host's own search
+ * (`workspace.findFiles`: every depth, hidden folders, symbolic links, as
+ * the `workspaceContains` activation event looks), skipping the folders the
+ * walk skips (`DBT_SEARCH_EXCLUDE_GLOB`), shallowest first. Undefined when
+ * it does not answer within `timeoutMs` or fails (the walk alone decides).
+ */
+async function findHostDbtProjects(timeoutMs: number): Promise<string[] | undefined> {
+  const folders = workspaceFolderPaths();
+  if (folders.length === 0) return [];
+  const source = new vscode.CancellationTokenSource();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const search = Promise.resolve(vscode.workspace.findFiles('**/dbt_project.yml', DBT_SEARCH_EXCLUDE_GLOB, HOST_DBT_SEARCH_MAX, source.token))
+      .then((uris) => sortDbtCandidates((uris ?? []).map((u) => u.fsPath), folders), () => undefined);
+    const timedOut = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), timeoutMs); });
+    return await Promise.race([search, timedOut]);
+  } catch {
+    return undefined;
+  } finally {
+    if (timer) clearTimeout(timer);
+    source.cancel();
+    source.dispose();
+  }
+}
+
+/** The one log line (per window) for a dbt project this window does not use. */
+let unusedDbtProjectNoted = false;
+
+/**
+ * Never miss a dbt project silently: the window opened `root` without dbt,
+ * yet a dbt_project.yml exists (`found`, from `seenBy`). One log line saying
+ * where and why, and the `dbtProjectUnused` presence flag; no prompt (the
+ * window's one prompt belongs to the start screen).
+ */
+function noteUnusedDbtProject(root: string, found: string | undefined, seenBy: 'discovery' | 'setting' | 'search' | 'look' | 'tooling'): void {
+  telemetry.featureOnce('dbtProjectUnused');
+  if (unusedDbtProjectNoted) return;
+  unusedDbtProjectNoted = true;
+  const why = seenBy === 'setting'
+    ? 'erdStudio.projectPath names a folder without dbt_project.yml'
+    : 'it was found after this window had opened';
+  log.info(
+    `ERD Studio: a dbt project${found ? ` at ${found}` : ''} is not used by this window, which opened ${root} without dbt (${why}). ` +
+    'Run Select dbt Project… or set erdStudio.projectPath to open it.',
+  );
 }
 
 /** Where a project sits in the workspace, for picker rows and messages. */
@@ -346,7 +404,8 @@ async function selectDbtProject(
   semanticDir: string,
   target?: string,
 ): Promise<void> {
-  const resolution = resolveWorkspaceProject(context);
+  // The host's whole search, so a project deeper than the walk is listed too.
+  const resolution = resolveWorkspaceProject(context, await findHostDbtProjects(5000));
   if (resolution.candidates.length === 0) {
     // A window always has a root here (the command is registered only then),
     // so no candidates means a plain folder: there is no dbt project to pick.
@@ -516,7 +575,7 @@ const PHYSICAL_TOOLING_DELAY_MS = 15_000;
  * reads the start of a few small files; it runs nothing and sends no path,
  * name or content.
  */
-function recordPhysicalTooling(context: vscode.ExtensionContext): void {
+function recordPhysicalTooling(context: vscode.ExtensionContext, session?: { root: string; hasDbt: boolean }): void {
   try {
     if (!telemetry.enabled() || !vscode.workspace.workspaceFolders?.length) return;
     const today = new Date().toISOString().slice(0, 10);
@@ -524,6 +583,9 @@ function recordPhysicalTooling(context: vscode.ExtensionContext): void {
     setTimeout(() => {
       void detectPhysicalTooling(hostToolingProbe()).then(found => {
         telemetry.physicalTooling(found);
+        if (session && !session.hasDbt && found.tools.includes('dbt')) {
+          noteUnusedDbtProject(session.root, undefined, 'tooling');
+        }
         void context.workspaceState.update(PHYSICAL_TOOLING_DAY_KEY, today);
       }, () => { /* telemetry must never break activation */ });
     }, PHYSICAL_TOOLING_DELAY_MS);
@@ -1176,7 +1238,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  const projectResolution = resolveWorkspaceProject(context);
+  // The host's own search for dbt_project.yml (every depth), bounded so it
+  // never holds activation up; the walk alone decides when it is late.
+  const hostDbtProjects = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
+  const projectResolution = resolveWorkspaceProject(context, hostDbtProjects);
   const workspaceRoot = projectResolution.root;
   // Logical-only mode: a root without dbt_project.yml (any folder now opens).
   // No Physical stage, no dbt services or watchers, nothing written unasked.
@@ -1214,6 +1279,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', hasDbt);
   if (!workspaceRoot) {
     telemetry.activation('no_project', false, 0);
+    // Every window's outcome, not only the day's last (`activation`).
+    telemetry.feature('activatedNoFolder');
     recordDetectedAssistants();
     recordPhysicalTooling(context);
     // Register stub commands / editor so palette entries and the sidebar
@@ -1334,6 +1401,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     look: vscodeStartLook(workspaceRoot, semanticDir),
     publish: (intent) => { void vscode.commands.executeCommand('setContext', START_INTENT_CONTEXT_KEY, intent); },
+    onDbtProjectSeen: () => noteUnusedDbtProject(workspaceRoot, undefined, 'look'),
   });
   context.subscriptions.push({ dispose: () => startIntent.dispose() });
   startContext = () => startIntent.startContext();
@@ -1740,10 +1808,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await vscode.commands.executeCommand('erdStudio.openDomain', target);
   };
   telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length);
+  // Every window's outcome, not only the day's last (`activation`).
+  telemetry.feature(hasDbt ? 'activatedDbt' : 'activatedLogical');
   // A presence flag, once a day: activation resolved a root without dbt_project.yml.
   if (!hasDbt) { telemetry.featureOnce('logicalOnlyProject'); }
+  if (!hasDbt) {
+    // A dbt project this window does not use is never missed silently.
+    const unused = projectResolution.candidates[0];
+    if (unused) {
+      noteUnusedDbtProject(workspaceRoot, unused, projectResolution.source === 'setting' ? 'setting' : 'discovery');
+    } else if (hostDbtProjects === undefined) {
+      // The host's search was late: let it finish, off activation's path.
+      void findHostDbtProjects(60_000).then((late) => {
+        const found = late?.find((dir) => !samePath(dir, workspaceRoot));
+        if (found) noteUnusedDbtProject(workspaceRoot, found, 'search');
+      });
+    }
+  }
   recordDetectedAssistants();
-  recordPhysicalTooling(context);
+  recordPhysicalTooling(context, { root: workspaceRoot, hasDbt });
 
   // Surface a broken layers.json once per distinct error. LayerService falls
   // back to default layers in memory but refuses to overwrite the file, so the
@@ -2465,7 +2548,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     validateDomainName: validateNewSlug,
     onWritten: refreshAfterNewSubjectArea,
     // "This folder has a DBML file": the Open dialog starts on it, chosen.
-    findDefaultFile: () => vscodeFindFirstFile(workspaceRoot, semanticDir, '**/*.dbml'),
+    findDefaultFile: () => vscodeFindFirstFile(workspaceRoot, semanticDir, '**/*.[dD][bB][mM][lL]'),
     ...(draft ? { draft } : {}),
   });
   const sqlDeps = (draft?: ImportDraftOptions): ImportSqlDdlDeps => ({

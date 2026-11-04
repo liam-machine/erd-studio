@@ -194,7 +194,7 @@ The quick path's step-by-step flow, preselected, exactly as today's dry-run butt
 
 ## 8. Large and slow drafts
 
-Building is bounded by what the quick paths already bound (500 `.sql` files, 20 MB, the semantic model's limits). The page lays out in the webview, off the host. Over `DRAFT_LARGE_TABLES` see §2.3. The details drawer renders sections lazily (first 200 items per section, `Show all`).
+Building is bounded by what the quick paths already bound (the start look's shared listing, `listImportFiles`: 16 folders deep, at most 5,000 names; at most 500 `.sql` files opened; 20 MB of SQL once a dump's data is stripped, `withoutSqlData`; no file over `MAX_SQL_FILE_BYTES`, 200 MB; the semantic model's limits). The automatic and quick drafts take what the look offers: the same listing and the same test (`isSqlScriptTaken`), so never a CTAS, a dbt macro, a Databricks notebook or Oracle DDL (a file picked by hand in Change options… is still read). The page lays out in the webview, off the host. Over `DRAFT_LARGE_TABLES` see §2.3. The details drawer renders sections lazily (first 200 items per section, `Show all`).
 
 ## 9. Examples: one command
 

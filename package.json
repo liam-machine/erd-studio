@@ -57,9 +57,9 @@
   "activationEvents": [
     "workspaceContains:**/dbt_project.yml",
     "workspaceContains:.erd-studio",
-    "workspaceContains:**/*.sql",
-    "workspaceContains:**/*.dbml",
-    "workspaceContains:**/*.bim",
+    "workspaceContains:**/*.[sS][qQ][lL]",
+    "workspaceContains:**/*.[dD][bB][mM][lL]",
+    "workspaceContains:**/*.[bB][iI][mM]",
     "workspaceContains:**/definition.pbism",
     "workspaceContains:**/model.tmdl",
     "workspaceContains:**/database.tmdl"

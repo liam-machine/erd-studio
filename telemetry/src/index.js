@@ -454,6 +454,11 @@ const FEATURES = [
   'draftUnavailable',
   'suggestPromptShowMe',
   'importGuideFromDraft',
+  // Each window's activation outcome, and an unused dbt project (presence).
+  'activatedDbt',
+  'activatedLogical',
+  'activatedNoFolder',
+  'dbtProjectUnused',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

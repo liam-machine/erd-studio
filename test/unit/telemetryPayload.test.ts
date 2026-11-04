@@ -582,7 +582,7 @@ describe('allowlists agree with the Worker', () => {
     ]);
   });
 
-  it('appends the import guide and nothing-found keys at the very end, after the start-suggestion ones', () => {
+  it('appends the import guide and nothing-found keys after the start-suggestion ones', () => {
     const at = FEATURES.indexOf('importGuideOpened');
     expect(at).toBe(FEATURES.indexOf('importReviewOpened') + 1);
     expect(FEATURES.slice(at, FEATURES.indexOf('suggestPromptNothingOff') + 1)).toEqual([
@@ -598,10 +598,10 @@ describe('allowlists agree with the Worker', () => {
     ]);
   });
 
-  it('appends the Draft-first keys at the very end, after the nothing-found ones (which stay listed)', () => {
+  it('appends the Draft-first keys after the nothing-found ones (which stay listed)', () => {
     const at = FEATURES.indexOf('draftShown');
     expect(at).toBe(FEATURES.indexOf('suggestPromptNothingOff') + 1);
-    expect(FEATURES.slice(at)).toEqual([
+    expect(FEATURES.slice(at, FEATURES.indexOf('activatedDbt'))).toEqual([
       'draftShown', 'draftShownAuto', 'draftExampleShown',
       'draftSourceSqlDdl', 'draftSourceSemanticModel', 'draftSourceDbml', 'draftSourceDbt',
       'draftKept', 'draftChangeOptions', 'draftDiscarded', 'draftClosed', 'draftOtherStart',
@@ -619,6 +619,12 @@ describe('allowlists agree with the Worker', () => {
     const choseStart = readme.split('\n').find((l) => l.includes('AS chose_start'))!;
     expect(choseStart).toContain("'draftKept'");
     expect(choseStart).toContain("'suggestPromptShowMe'");
+  });
+
+  it('appends the per-window activation and unused-dbt keys at the very end, after the Draft-first ones', () => {
+    const at = FEATURES.indexOf('activatedDbt');
+    expect(at).toBe(FEATURES.indexOf('importGuideFromDraft') + 1);
+    expect(FEATURES.slice(at)).toEqual(['activatedDbt', 'activatedLogical', 'activatedNoFolder', 'dbtProjectUnused']);
   });
 
   it('telemetry.json documents every feature key', () => {

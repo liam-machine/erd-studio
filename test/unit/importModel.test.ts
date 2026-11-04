@@ -5,6 +5,9 @@
  * the pure helpers the converting imports share (src/services/importSources.ts).
  */
 
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -16,7 +19,9 @@ import {
   IMPORT_SOURCE_COMMANDS,
   SEMANTIC_MODEL_GLOB,
   detectExcludeGlob,
+  detectImportFindings,
   detectImportSources,
+  vscodeDetectImportIo,
   importSourceItems,
   readFileStart,
   runImportModel,
@@ -26,11 +31,14 @@ import {
 } from '../../src/commands/importModel';
 import { NO_LEGACY_ALIAS, PRE_REGISTERED_COMMANDS } from '../../src/extension';
 import {
+  MAX_SQL_FILE_BYTES,
   convertedFileName,
   sqlImportFileName,
   describeImportProblems,
+  listImportFiles,
   looksLikeSqlDdl,
   orderImportSources,
+  rankSqlFiles,
   semanticModelSkippedSummary,
   walkFiles,
   type ImportModelSource,
@@ -138,37 +146,110 @@ describe('runImportModel', () => {
   });
 });
 
-describe('detectImportSources', () => {
-  const io = (files: Record<string, string[]>, texts: Record<string, string> = {}): DetectImportIo & { calls: Array<[string, string, number]> } => {
-    const calls: Array<[string, string, number]> = [];
-    return {
-      calls,
-      findFiles: async (include, exclude, max) => { calls.push([include, exclude, max]); return (files[include] ?? []).slice(0, max); },
-      readStart: async (file) => texts[file] ?? '',
-    };
+/** An in-memory folder: `files` maps paths under `root` to their text. */
+function memIo(files: Record<string, string>, root = '/w', more: Partial<DetectImportIo> = {}): DetectImportIo & { opened: string[]; listed: string[] } {
+  const opened: string[] = [];
+  const listed: string[] = [];
+  const dirs = new Map<string, Map<string, boolean>>();
+  const add = (dir: string, name: string, isDir: boolean): void => {
+    if (!dirs.has(dir)) dirs.set(dir, new Map());
+    dirs.get(dir)!.set(name, isDir || (dirs.get(dir)!.get(name) ?? false));
   };
+  dirs.set(root, new Map());
+  for (const rel of Object.keys(files)) {
+    const parts = rel.split('/');
+    let dir = root;
+    parts.forEach((part, i) => {
+      add(dir, part, i < parts.length - 1);
+      dir = `${dir}/${part}`;
+    });
+  }
+  return {
+    root,
+    opened,
+    listed,
+    readDirectory: async (folder) => {
+      listed.push(folder);
+      const entries = dirs.get(folder);
+      if (!entries) throw new Error('ENOENT');
+      return [...entries];
+    },
+    readStart: async (file, chars) => {
+      opened.push(file);
+      const text = files[file.slice(root.length + 1)];
+      if (text === undefined) throw new Error('ENOENT');
+      return text.slice(0, chars);
+    },
+    size: async (file) => files[file.slice(root.length + 1)]?.length,
+    ...more,
+  };
+}
 
+describe('detectImportSources', () => {
   it('finds a semantic model, a .dbml file and a .sql file holding CREATE TABLE, skipping the ERD Studio folder', async () => {
-    const lookups = io({
-      [SEMANTIC_MODEL_GLOB]: ['/w/Sales.SemanticModel/definition.pbism'],
-      '**/*.dbml': ['/w/schema.dbml'],
-      '**/*.sql': ['/w/models/stg.sql', '/w/ddl/tables.sql'],
-    }, {
-      '/w/models/stg.sql': 'select * from {{ ref("raw") }}',
-      '/w/ddl/tables.sql': '-- the warehouse\nCREATE TABLE IF NOT EXISTS sales.orders (\n  id int\n);',
+    const lookups = memIo({
+      'Sales.SemanticModel/definition.pbism': '{}',
+      'schema.dbml': 'Table a {\n  id int\n}\n',
+      'models/stg.sql': 'select * from {{ ref("raw") }}',
+      'ddl/tables.sql': '-- the warehouse\nCREATE TABLE IF NOT EXISTS sales.orders (\n  id int\n);',
+      '.erd-studio/silver/x.dbml': 'Table x {\n  id int\n}\n',
+      '.erd-studio/old.sql': 'CREATE TABLE x (id int);',
     });
     expect([...await detectImportSources(lookups, '.erd-studio')].sort()).toEqual(['dbml', 'semanticModel', 'sqlDdl']);
-    // Bounded: one file for each existence check, at most DETECT_SQL_FILES .sql files, none from tool or ERD Studio folders.
-    expect(lookups.calls.map(([, , max]) => max).sort((a, b) => a - b)).toEqual([1, 1, DETECT_SQL_FILES]);
-    for (const [, exclude] of lookups.calls) expect(exclude).toBe(detectExcludeGlob('.erd-studio'));
+    // The ERD Studio folder is never listed, nor read.
+    expect(lookups.listed.some((f) => f.includes('.erd-studio'))).toBe(false);
+    expect(lookups.opened.some((f) => f.includes('.erd-studio'))).toBe(false);
     expect(detectExcludeGlob('.erd-studio')).toBe('**/{node_modules,.git,.venv,venv,target,dbt_packages,.erd-studio}/**');
   });
 
   it('a dbt project\'s SELECT models are not SQL DDL; a failed lookup is nothing found', async () => {
-    const lookups = io({ '**/*.sql': ['/w/a.sql'] }, { '/w/a.sql': 'with x as (select 1) select * from x' });
-    expect([...await detectImportSources(lookups, '.erd-studio')]).toEqual([]);
-    const broken: DetectImportIo = { findFiles: () => Promise.reject(new Error('gone')), readStart: () => Promise.reject(new Error('gone')) };
+    expect([...await detectImportSources(memIo({ 'a.sql': 'with x as (select 1) select * from x' }), '.erd-studio')]).toEqual([]);
+    const broken: DetectImportIo = { root: '/w', readDirectory: () => Promise.reject(new Error('gone')), readStart: () => Promise.reject(new Error('gone')) };
     expect([...await detectImportSources(broken, '.erd-studio')]).toEqual([]);
+  });
+
+  it('never offers what the import refuses or cannot read: a dbt macro, a CTAS, a Databricks notebook, Oracle DDL, ERD Studio\'s own DBML export, a file too big to read', async () => {
+    const notOffered = {
+      'macros/materializations.sql': '{% macro create_table_as(temporary, relation, sql) -%}\n  create or replace table {{ relation }}\n  as (\n    {{ sql }}\n  );\n{%- endmacro %}\n',
+      'analyses/backfill.sql': 'create table tmp_backfill as (\n  select * from {{ ref(\'dim_customer\') }}\n);\n',
+      'src/gold.sql': '-- Databricks notebook source\n-- COMMAND ----------\nCREATE TABLE gold.x (id INT);\n',
+      'oracle/hr.sql': 'CREATE TABLE HR.EMPLOYEES (\n  ID NUMBER(6) NOT NULL,\n  EMAIL VARCHAR2(25 BYTE)\n);\n',
+      'docs/sales.dbml': '// erd-studio dbml-export v2 (DBML 9.1+)\nTable a {\n  id int\n}\n',
+    };
+    expect([...await detectImportSources(memIo(notOffered), '.erd-studio')]).toEqual([]);
+    const huge = memIo({ 'dump.sql': 'CREATE TABLE a (id int);' }, '/w', { size: async () => MAX_SQL_FILE_BYTES + 1 });
+    expect([...await detectImportSources(huge, '.erd-studio')]).toEqual([]);
+  });
+
+  it('finds what a case-sensitive glob missed: .SQL and .DBML, a UTF-16 script (decoded by its byte order mark), a hidden folder that is not a tool\'s', async () => {
+    expect([...await detectImportSources(memIo({ 'DDL/TABLES.SQL': 'CREATE TABLE a (id int);' }), '.erd-studio')]).toEqual(['sqlDdl']);
+    expect([...await detectImportSources(memIo({ 'MODEL.DBML': 'Table a {\n  id int\n}\n' }), '.erd-studio')]).toEqual(['dbml']);
+    expect([...await detectImportSources(memIo({ '.devcontainer/initdb/01.sql': 'CREATE TABLE a (id int);' }), '.erd-studio')]).toEqual(['sqlDdl']);
+    expect([...await detectImportSources(memIo({ '.git/x.sql': 'CREATE TABLE a (id int);', '.venv/y.sql': 'CREATE TABLE b (id int);' }), '.erd-studio')]).toEqual([]);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-utf16-'));
+    try {
+      const file = path.join(dir, 'Sales_schema.sql');
+      fs.writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('CREATE TABLE [dbo].[Customer](\r\n\t[Id] [int] NOT NULL\r\n)\r\nGO\r\n', 'utf16le')]));
+      const io = vscodeDetectImportIo(dir);
+      expect(await io.readStart(file, 100)).toMatch(/^CREATE TABLE \[dbo\]/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the .sql files whose names usually hold table definitions first, so hundreds of queries do not hide the one schema script', async () => {
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 300; i++) files[`reports/q${String(i).padStart(3, '0')}.sql`] = `select ${i};`;
+    files['zz_admin/schema/ddl/create_tables.sql'] = 'CREATE TABLE a (id int);';
+    const lookups = memIo(files);
+    expect([...await detectImportSources(lookups, '.erd-studio')]).toEqual(['sqlDdl']);
+    expect(lookups.opened[0]).toBe('/w/zz_admin/schema/ddl/create_tables.sql');
+    expect(lookups.opened.length).toBeLessThanOrEqual(DETECT_SQL_FILES);
+  });
+
+  it('notes a dbt_project.yml it saw', async () => {
+    expect((await detectImportFindings(memIo({ 'transform/dbt_project.yml': 'name: x\n' }), '.erd-studio')).dbtProject).toBe(true);
+    expect((await detectImportFindings(memIo({ 'a.sql': 'select 1' }), '.erd-studio')).dbtProject).toBeUndefined();
   });
 
   it('a bare .pbip (a report-only project, live-connected to a published model) is not a semantic model', () => {
@@ -212,21 +293,56 @@ describe('importSources helpers', () => {
       'CREATE TABLE [dbo].[Orders] ([Id] INT)',
       'CREATE EXTERNAL TABLE x (a int) LOCATION \'s3://b\'',
     ]) expect(looksLikeSqlDdl(yes), yes).toBe(true);
-    for (const no of ['CREATE VIEW v AS SELECT 1', 'select * from t', '-- CREATE TABLE t (id int)\nselect 1', '/* CREATE TABLE t (id int) */']) {
+    for (const no of [
+      'CREATE VIEW v AS SELECT 1', 'select * from t', '-- CREATE TABLE t (id int)\nselect 1', '/* CREATE TABLE t (id int) */',
+      // A CTAS whose SELECT has parentheses later on, and one in parentheses.
+      'CREATE OR REPLACE TABLE gold.x AS SELECT id, count(*) n FROM s GROUP BY id',
+      'create table tmp_backfill as (\n  select * from {{ ref(\'dim_customer\') }}\n);',
+      'CREATE TABLE t (a, b) AS SELECT 1, 2',
+      // A dbt macro: Jinja where the name goes.
+      'create or replace table {{ relation }}\n as (\n {{ sql }} );',
+      'CREATE TABLE t2 LIKE t1;', 'CREATE TABLE t2 CLONE t1;',
+      "SELECT 'create table foo (' AS s",
+    ]) {
       expect(looksLikeSqlDdl(no), no).toBe(false);
     }
   });
 
-  it('walks a folder in reading order, bounded, skipping tool and dot folders and unreadable ones', async () => {
+  it('lists the open folder once for every look: .sql and .dbml in any case, semantic model files, dbt_project.yml; never the ERD Studio folder', async () => {
+    const io = memIo({
+      'a/X.SQL': '', 'b/y.Dbml': '', 'M.SemanticModel/definition/model.tmdl': '', 'dbt/dbt_project.yml': '',
+      '.erd-studio/t.dbml': '', 'erd-studio/u.dbml': '', 'node_modules/p/q.sql': '', '.github/sql/r.sql': '',
+    });
+    const listing = await listImportFiles('/w', io.readDirectory, { semanticDir: '.erd-studio' });
+    expect(listing).toEqual({
+      sql: ['/w/.github/sql/r.sql', '/w/a/X.SQL'],
+      dbml: ['/w/b/y.Dbml'],
+      semanticModel: ['/w/M.SemanticModel/definition/model.tmdl'],
+      dbtProject: true,
+      truncated: false,
+    });
+    expect((await listImportFiles('/w', io.readDirectory, { semanticDir: '.erd-studio', limit: 2 })).truncated).toBe(true);
+  });
+
+  it('ranks .sql names that usually hold table definitions first, by the path under the open folder only', () => {
+    expect(rankSqlFiles(['/w/q1.sql', '/w/db/migration/V2__add.sql', '/w/q2.sql', '/w/sql/schema.sql', '/w/x/create_tables.sql'], '/w'))
+      .toEqual(['/w/db/migration/V2__add.sql', '/w/sql/schema.sql', '/w/x/create_tables.sql', '/w/q1.sql', '/w/q2.sql']);
+    // The open folder's own name ("schema-tools") says nothing.
+    expect(rankSqlFiles(['/home/schema-tools/b.sql', '/home/schema-tools/ddl/a.sql'], '/home/schema-tools'))
+      .toEqual(['/home/schema-tools/ddl/a.sql', '/home/schema-tools/b.sql']);
+  });
+
+  it('walks a folder in reading order, bounded, skipping tool folders (not other hidden ones) and unreadable ones', async () => {
     const tree: Record<string, Array<[string, boolean]>> = {
-      '/r': [['10_b.sql', false], ['2_a.sql', false], ['sub', true], ['node_modules', true], ['.git', true], ['locked', true], ['x.txt', false]],
+      '/r': [['10_b.sql', false], ['2_a.sql', false], ['sub', true], ['node_modules', true], ['.git', true], ['locked', true], ['x.txt', false], ['.devcontainer', true]],
       '/r/sub': [['c.sql', false]],
+      '/r/.devcontainer': [['init.sql', false]],
       '/r/node_modules': [['d.sql', false]],
       '/r/.git': [['e.sql', false]],
     };
     const readDir = async (f: string) => { if (!tree[f]) throw new Error('EACCES'); return tree[f]; };
     const all = await walkFiles('/r', readDir, { include: (n) => n.endsWith('.sql'), limit: 10 });
-    expect(all).toEqual({ files: ['/r/2_a.sql', '/r/10_b.sql', '/r/sub/c.sql'], truncated: false });
+    expect(all).toEqual({ files: ['/r/.devcontainer/init.sql', '/r/2_a.sql', '/r/10_b.sql', '/r/sub/c.sql'], truncated: false });
     expect(await walkFiles('/r', readDir, { include: (n) => n.endsWith('.sql'), limit: 2 })).toMatchObject({ truncated: true });
   });
 

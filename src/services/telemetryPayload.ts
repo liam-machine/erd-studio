@@ -380,6 +380,16 @@ export const FEATURES = [
   'draftUnavailable',
   'suggestPromptShowMe',
   'importGuideFromDraft',
+  // Each window's activation outcome, counted per activation (the `activation`
+  // field keeps only the day's last): a dbt project, a folder without dbt
+  // (logical-only), no folder. Then a presence flag, once a day: a
+  // dbt_project.yml exists in the workspace (seen by project discovery, the
+  // host's search, the start screen's look or the tooling scan) that this
+  // window does not use.
+  'activatedDbt',
+  'activatedLogical',
+  'activatedNoFolder',
+  'dbtProjectUnused',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

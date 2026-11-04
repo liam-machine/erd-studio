@@ -1,6 +1,6 @@
 # Using ERD Studio with dbt
 
-ERD Studio is a logical modelling tool first: your design lives in `.erd-studio/` whether or not you use dbt. When the folder you open has a `dbt_project.yml` (or a dbt project up to three folders below it), ERD Studio also reads the dbt project and adds three things:
+ERD Studio is a logical modelling tool first: your design lives in `.erd-studio/` whether or not you use dbt. When the folder you open has a `dbt_project.yml` (or a dbt project below it, or sits inside one, such as its `models/` folder), ERD Studio also reads the dbt project and adds three things:
 
 - **Draw from dbt**, which turns your existing dbt models into a first diagram;
 - a read-only **Physical** stage, drawn in green, showing what your dbt project has. The canvas then has two tabs, **Logical** (your design) · **Physical** (read from dbt);

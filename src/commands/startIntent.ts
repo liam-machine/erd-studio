@@ -11,7 +11,9 @@
  * status, or the walkthrough being opened. Never on activation's own path
  * (a refresh is always deferred), never writing anything, and the look is
  * cancelled after {@link START_LOOK_TIMEOUT_MS}. What it found stays on this
- * machine: telemetry gets the suggestion's fixed key only.
+ * machine: telemetry gets the suggestion's fixed key only. A look that runs
+ * out of time is tried once more, on the next refresh
+ * ({@link START_LOOK_ATTEMPTS}).
  *
  * The empty Diagrams view of a folder without dbt shows "Loading diagrams…"
  * until the first suggestion is published (so New Diagram never shows first
@@ -31,8 +33,15 @@ import {
 
 /** How long the look may take before it is cancelled and the folder counts as holding nothing to import. */
 export const START_LOOK_TIMEOUT_MS = 1500;
-/** A finished look is reused for this long; a look that ran out of time is not repeated this session. */
+/** A finished look is reused for this long. */
 export const START_LOOK_FRESH_MS = 60_000;
+/**
+ * Looks that ran out of time before the session stops looking: the first is
+ * tried once more on the next refresh (with twice the time, the folder's
+ * listing now warm in the file system's cache); after that the folder counts
+ * as holding nothing to import for the rest of the session.
+ */
+export const START_LOOK_ATTEMPTS = 2;
 
 export interface StartIntentDeps {
   /** Where the folder stands now (cheap: no file walk). */
@@ -45,6 +54,8 @@ export interface StartIntentDeps {
   look(signal: AbortSignal): Promise<ReadonlySet<DetectedImportSource> | StartLookFindings>;
   /** Publish a changed suggestion (the context key). */
   publish(intent: StartIntent): void;
+  /** The look saw a `dbt_project.yml` while the window runs without dbt (the host notes it; never a prompt). */
+  onDbtProjectSeen?(): void;
   timeoutMs?: number;
   now?(): number;
 }
@@ -53,13 +64,17 @@ export interface StartIntentDeps {
 export interface StartLookFindings {
   sources: ReadonlySet<DetectedImportSource>;
   sqlTables?: number;
+  /** The folder holds a `dbt_project.yml`. */
+  dbtProject?: boolean;
 }
 
 export class StartIntentTracker {
   private found: ReadonlySet<DetectedImportSource> | undefined;
   private sqlTables: number | undefined;
-  /** When `found` was looked up; Infinity once a look ran out of time. */
+  /** When `found` was looked up; Infinity once {@link START_LOOK_ATTEMPTS} looks ran out of time. */
   private lookedAt = Number.NEGATIVE_INFINITY;
+  /** Looks that ran out of time so far. */
+  private timeouts = 0;
   private inFlight: Promise<void> | undefined;
   private controller: AbortController | undefined;
   private published: StartIntent | undefined;
@@ -125,11 +140,19 @@ export class StartIntentTracker {
     this.controller?.abort();
   }
 
+  /** A dbt_project.yml the look saw, in a window without dbt: the host's to note (once). */
+  private noteDbtProject(): void {
+    try {
+      if (!this.deps.context().hasDbt) this.deps.onDbtProjectSeen?.();
+    } catch { /* the suggestion never depends on it */ }
+  }
+
   private now(): number {
     return this.deps.now ? this.deps.now() : Date.now();
   }
 
   private isFresh(): boolean {
+    if (this.lookedAt === Number.POSITIVE_INFINITY) return true;
     return this.found !== undefined && this.now() - this.lookedAt < START_LOOK_FRESH_MS;
   }
 
@@ -138,7 +161,8 @@ export class StartIntentTracker {
     if (this.inFlight) return this.inFlight;
     const controller = new AbortController();
     this.controller = controller;
-    const timeoutMs = this.deps.timeoutMs ?? START_LOOK_TIMEOUT_MS;
+    // A retry after a timed-out look gets more time (the listing is warm now).
+    const timeoutMs = (this.deps.timeoutMs ?? START_LOOK_TIMEOUT_MS) * (1 + this.timeouts);
     const run = async (): Promise<void> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timedOut = new Promise<'timeout'>((resolve) => {
@@ -153,12 +177,15 @@ export class StartIntentTracker {
           controller.abort();
           this.found = new Set();
           this.sqlTables = undefined;
-          this.lookedAt = Number.POSITIVE_INFINITY;
+          this.timeouts++;
+          // Stale (looked at again on the next refresh) until the attempts run out.
+          this.lookedAt = this.timeouts >= START_LOOK_ATTEMPTS ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
         } else {
           const findings: StartLookFindings = isFindings(result) ? result : { sources: result };
           this.found = findings.sources;
           this.sqlTables = findings.sqlTables;
           this.lookedAt = this.now();
+          if (findings.dbtProject) this.noteDbtProject();
         }
       } finally {
         if (timer) clearTimeout(timer);
