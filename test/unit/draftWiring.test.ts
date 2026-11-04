@@ -80,6 +80,8 @@ describe('DRAFT_OTHER_START_COMMANDS: the fixed host table', () => {
     const w = wired([{ otherStart: start }]);
     const answer = await w.preview.ask(draft('example', 'example'));
     expect(answer).toEqual({ kind: 'otherStart', start });
+    // Open Folder… first waits for its mark (the next window shows that folder's draft).
+    await new Promise((r) => setTimeout(r, 0));
     const { command, args } = DRAFT_OTHER_START_COMMANDS[start];
     expect(w.commands).toEqual([[command, ...args]]);
     expect(w.features).toContain('draftOtherStart');

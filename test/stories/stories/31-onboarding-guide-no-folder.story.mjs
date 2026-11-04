@@ -5,10 +5,10 @@
 // the guide starts on it: "No folder is open, so this is an example", then
 // Open your folder, which waits for Open Folder…. VS Code's own folder
 // dialog opens my shop database folder (CREATE TABLE scripts) in this
-// window, which reloads. There the guide does not start by itself: the
-// folder gets its start suggestion, Show Me draws my scripts as a draft (no
-// guide on it: the guide's draft part is done) and Keep as Diagram opens the
-// diagram, the first one opened since, so the guide's canvas part runs on it
+// window, which reloads. There the draft of my scripts shows at once (no
+// start suggestion: I already asked to see what is here), and the guide
+// carries on on it, without More ways to start (already shown): my draft, then
+// Keep as Diagram, which opens the diagram, and the guide's canvas part runs on it
 // with my own tables (its progress is per machine, globalState), through to
 // Star on GitHub, proved by the host's log line (ERD_STUDIO_STORIES_NO_BROWSER
 // keeps the machine's browser shut). Every callout is checked to sit on the
@@ -88,28 +88,26 @@ export default story({
       await s.wb.press('Enter');
     }, { say: 'I press Open Folder. VS Code asks which folder, and I choose my shop database folder of SQL scripts.' });
 
-    await s.step('The window opens my folder, and ERD Studio finds my CREATE TABLE scripts', async () => {
+    await s.step('The window opens my folder, and the draft of my scripts shows at once: the guide carries on (1 of 2)', async () => {
       // An empty window opens the folder in itself: VS Code reloads the window.
       await s.wb.waitForReload(page);
       await s.eventually(async () => (await s.ui.windowTitle()).includes('shop-database'), { message: 'the window never opened shop-database' });
-      const toast = await s.ui.waitForNotification(FOUND, { timeout: 45000 });
-      s.assert.equal(toast.message, `${FOUND} (4 tables). Show them as a diagram? Nothing is saved until you keep it.`);
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1500);
-      await s.wb.unhighlight();
-    }, { at: 'left', say: 'The window opens my folder. ERD Studio finds my create table scripts, and asks if I want to see them as a diagram.' });
-
-    await s.step('Show Me: the draft of my scripts (the guide already showed me a draft)', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
       draft = await waitForDraft(s, 'Draft: sales', { tables: 4 });
       s.assert.equal(draft.headline, 'Draft from 2 SQL files (PostgreSQL) · 4 tables, 3 relationships · not saved');
-      await s.pause(1500);
-      s.expect(!(await draft.page.ev(`!!doc.querySelector('.guide-mark')`)), 'no guide on this draft: its draft part is done');
+      const mark = await waitForMark(s, draft.page, 'Your draft', { progress: '1 of 2' });
+      s.assert.equal(mark.text, 'This is a draft of your model, drawn from 2 SQL files (PostgreSQL): 4 tables, 3 relationships. Nothing is saved yet.');
+      s.expect(!(await s.wb.ev(`!!${s.sel.notification(FOUND)}`)), 'no start suggestion: I already asked to see what is in my folder');
+      s.expect(s.erdLog().includes("Session prompt: draft (the folder opened from a draft's Open Folder…, the guide carries on)"), 'the draft took the window because of the Open Folder');
       s.expect(!fs.existsSync(path.join(folder, '.erd-studio')), 'nothing written');
-      await draft.page.highlight(DRAFT.button('Keep as Diagram'));
-      await s.pause(1500);
-      await s.wb.unhighlight();
-    }, { say: 'I press Show Me. A draft of my own model opens: 4 tables and 3 relationships. I keep it.' });
+      await s.pause(2000);
+    }, { at: 'left', say: 'The window opens my folder, and a draft of my own model shows straight away: 4 tables and 3 relationships, from my create table scripts. The guide carries on. Nothing is saved yet.' });
+
+    await s.step('2 of 2, Keep it: More ways to start is not shown again', async () => {
+      const mark = await nextMark(s, draft.page, 'Keep it', { progress: '2 of 2' });
+      s.assert.equal(mark.text, 'Keep as Diagram makes it your first logical model: one DBML file per table in .erd-studio/, ready to commit. Press it to continue.');
+      s.expect(!mark.buttons.includes('Next'), `no Next on the Keep step: ${mark.buttons.join(', ')}`);
+      await s.pause(2000);
+    }, { say: 'Next. Keep as Diagram makes it my first logical model: one DBML file per table, ready to commit. The guide waits for me to press it.' });
 
     let canvas;
     await s.step('Keep as Diagram: my diagram opens, and the guide carries on: fct_order_line, one of my 4 tables', async () => {

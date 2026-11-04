@@ -11,6 +11,46 @@ import type { StartIntent } from '../types/startActions';
 /** globalState key: this machine has had the automatic example draft (once per machine, §3.2). */
 export const EXAMPLE_DRAFT_SHOWN_KEY = 'erdStudio.exampleDraftShown';
 
+/**
+ * globalState key: a draft's **Open Folder…** (the no-folder example's primary,
+ * the guide's "Open your folder" step) is about to reload the window into a
+ * folder. Written, and awaited, before VS Code's Open Folder runs; the window
+ * that opens takes it ({@link draftAfterOpenFolderDue}) and shows that
+ * folder's draft at once, rather than its start suggestion. `guide`: the
+ * onboarding guide was running on the draft, so it carries on.
+ */
+export const DRAFT_AFTER_OPEN_FOLDER_KEY = 'erdStudio.draftAfterOpenFolder';
+/** How long the mark stands: a picker left open and a slow reload, not a folder opened tomorrow. */
+export const DRAFT_AFTER_OPEN_FOLDER_MS = 10 * 60 * 1000;
+
+export interface DraftAfterOpenFolder {
+  /** Epoch ms it was written. */
+  at: number;
+  /** The guide was running on the draft. */
+  guide: boolean;
+}
+
+/** The stored mark, when it is well-formed and fresh at `now`; undefined otherwise (also a clock gone backwards). */
+export function draftAfterOpenFolderDue(stored: unknown, now: number): DraftAfterOpenFolder | undefined {
+  if (typeof stored !== 'object' || stored === null) return undefined;
+  const { at, guide } = stored as Record<string, unknown>;
+  if (typeof at !== 'number' || !Number.isFinite(at)) return undefined;
+  const age = now - at;
+  if (age < 0 || age > DRAFT_AFTER_OPEN_FOLDER_MS) return undefined;
+  return { at, guide: guide === true };
+}
+
+/**
+ * What the window that opened shows (`find`: the folder's find; `example`:
+ * nothing to draw, so the example, "Nothing here to draw from yet";
+ * `diagram`: the folder has diagrams, and the guide carries on on the newest;
+ * undefined: it has diagrams and no guide is running, so the usual notice).
+ */
+export function draftAfterOpenFolderShows(input: { hasDiagrams: boolean; guide: boolean; intent: StartIntent | undefined }): 'find' | 'example' | 'diagram' | undefined {
+  if (input.hasDiagrams) return input.guide ? 'diagram' : undefined;
+  return input.intent !== undefined && FIND_INTENTS.has(input.intent) ? 'find' : 'example';
+}
+
 /** What the automatic (`sidebar`) draft shows: the folder's find, or the example. */
 export type AutoDraft = 'find' | 'example';
 

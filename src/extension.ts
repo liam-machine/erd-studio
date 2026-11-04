@@ -156,7 +156,7 @@ import { createDraftPreview } from './providers/DraftPreviewPanel';
 import { DraftGeneration, draftPreviewEvents, trackedDraftPreview } from './providers/draftWiring';
 import { OnboardingGuide, guideDefersPrompt } from './providers/guideWiring';
 import { GUIDE_RERUN_STATUS_MS, GUIDE_STATE_KEY, SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL, isGuideStatus } from './types/onboardingGuide';
-import { EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, draftSourceForIntent, walkthroughAutoOpens, type AutoDraft } from './services/draftTriggers';
+import { DRAFT_AFTER_OPEN_FOLDER_KEY, EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, draftAfterOpenFolderDue, draftAfterOpenFolderShows, draftSourceForIntent, walkthroughAutoOpens, type AutoDraft, type DraftAfterOpenFolder } from './services/draftTriggers';
 import type { Draft, DraftPreview, DraftTrigger } from './types/draft';
 import { StartIntentTracker } from './commands/startIntent';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
@@ -1241,6 +1241,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       onKept: (draft) => onDraftKept(draft),
       onAsk: (draft) => onDraftAsk(draft),
       warn: (message, err) => log.warn(`[ERD Studio] ${message}`, err),
+      // The window Open Folder… reloads into shows that folder's draft at once (and the guide carries on).
+      beforeOpenFolder: () => context.globalState.update(DRAFT_AFTER_OPEN_FOLDER_KEY, { at: Date.now(), guide: onboardingGuide.draftRunning() } satisfies DraftAfterOpenFolder),
     },
   );
   // Open an Example… (§9): the example draft (the coffee shop, with the Example
@@ -4712,13 +4714,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
 
+  // A draft's Open Folder… (the no-folder example's primary, the guide's "Open your
+  // folder") reloaded this window into this folder: the folder's draft shows now, in
+  // place of the start suggestion (the user already asked to see what is here), with
+  // the guide carrying on when it was running. With diagrams here, the guide (if any)
+  // carries on on the newest one. The mark is taken once, and only while fresh.
+  const afterOpenFolder = draftAfterOpenFolderDue(context.globalState.get<unknown>(DRAFT_AFTER_OPEN_FOLDER_KEY), Date.now());
+  if (context.globalState.get<unknown>(DRAFT_AFTER_OPEN_FOLDER_KEY) !== undefined) void context.globalState.update(DRAFT_AFTER_OPEN_FOLDER_KEY, undefined);
+  const afterOpenFolderShows = afterOpenFolder && existingDiagrams.length > 0
+    ? draftAfterOpenFolderShows({ hasDiagrams: true, guide: afterOpenFolder.guide, intent: undefined })
+    : undefined;
+  if (afterOpenFolder && existingDiagrams.length === 0) {
+    // It holds the window: the start suggestion and the other activation prompts wait.
+    if (!sessionPrompts.claim('draft')) sessionPrompts.reserve('draft');
+    if (afterOpenFolder.guide) onboardingGuide.resumeDraft();
+    log.info(`Session prompt: draft (the folder opened from a draft's Open Folder…${afterOpenFolder.guide ? ', the guide carries on' : ''})`);
+    void (async () => {
+      const intent = await startIntent.refresh();
+      const shows = draftAfterOpenFolderShows({ hasDiagrams: false, guide: afterOpenFolder.guide, intent });
+      await saveStartSuggestionState({ ...startSuggestionState(), draftShown: true });
+      telemetry.feature('draftAfterOpenFolder');
+      if (shows === 'find' && intent) await runFindDraft(intent, 'sidebar');
+      else await runExampleDraft('sidebar', true);
+    })().catch((err: unknown) => {
+      telemetry.error('draftBuildFailed');
+      log.warn('[ERD Studio] The draft after Open Folder failed:', err);
+    });
+  } else if (afterOpenFolderShows === 'diagram') {
+    const newest = mostRecentlyModified(existingDiagrams);
+    if (newest) {
+      log.info('The folder opened from the guide\'s Open your folder has diagrams: the guide carries on on the newest');
+      void vscode.commands.executeCommand('erdStudio.openDomain', newest.filePath);
+    }
+  }
+
   // The start suggestion: a folder with no diagram, where it is still due.
+  // (Not after a draft's Open Folder…: that folder's draft shows instead, above.)
   // It decides only after the start screen's bounded look (deferred, never on
   // activation's path): a concrete start shows the notification; nothing
   // concrete hands the window to the next prompt (the walkthrough on a first
   // run). On a first run with a concrete start it takes the walkthrough's
   // place, and the walkthrough stays owed.
-  if (existingDiagrams.length === 0 && !hasOpenSubjectAreaCanvas()) {
+  if (!afterOpenFolder && existingDiagrams.length === 0 && !hasOpenSubjectAreaCanvas()) {
     const settingOn = startSuggestionsSettingOn();
     if (startSuggestionDue({ settingOn, state: startSuggestionState(), hasDiagrams: false })) {
       const walkthroughOwed = (): boolean => activationPrompts.has('walkthrough');

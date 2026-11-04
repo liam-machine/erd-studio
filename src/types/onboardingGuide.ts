@@ -198,6 +198,12 @@ export interface DraftGuideInput {
   nothingFound?: boolean;
   /** The semantic dir (`.erd-studio`). */
   semanticDir?: string;
+  /**
+   * The guide carries on here from the no-folder example's Open your folder,
+   * in the window that opened: More ways to start was just shown, so it is
+   * left out.
+   */
+  resumed?: boolean;
 }
 
 const DIR = (semanticDir: string | undefined): string => `${(semanticDir ?? '.erd-studio').replace(/\/+$/, '')}/`;
@@ -240,7 +246,7 @@ export function draftGuideSteps(input: DraftGuideInput): GuideStep[] {
 
   // 2. More ways to start: where to import their data from.
   const offered = new Set(view.otherStarts.map((s) => s.id));
-  const more = moreWaysText(offered);
+  const more = input.resumed ? undefined : moreWaysText(offered);
   if (more) {
     steps.push({
       id: 'draftMoreWays',

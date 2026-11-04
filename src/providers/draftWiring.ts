@@ -68,6 +68,11 @@ export interface TrackedDraftPreviewDeps {
   /** Logs a command that failed to start. */
   warn?(message: string, err: unknown): void;
   /**
+   * A draft's Open Folder… is about to reload the window: mark it (awaited
+   * first) so the window that opens shows that folder's draft at once.
+   */
+  beforeOpenFolder?(): PromiseLike<unknown>;
+  /**
    * The onboarding guide (`src/providers/guideWiring.ts`): whether phase A runs
    * on a draft about to show (it marks itself started first), and the Keep
    * that ends phase A.
@@ -117,7 +122,9 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
       if (answer.kind === 'discard' || answer.kind === 'closed') deps.guide?.draftLeft(draft);
       if (answer.kind === 'otherStart') {
         const { command, args } = DRAFT_OTHER_START_COMMANDS[answer.start];
-        Promise.resolve(deps.executeCommand(command, ...args)).then(undefined, (err: unknown) => deps.warn?.(`Could not run ${command} from a draft:`, err));
+        // Open Folder… reloads this window: the mark must land before it does.
+        const before = answer.start === 'openFolder' ? Promise.resolve(deps.beforeOpenFolder?.()).then(undefined, (err: unknown) => deps.warn?.('Could not note the Open Folder from a draft:', err)) : Promise.resolve();
+        before.then(() => deps.executeCommand(command, ...args)).then(undefined, (err: unknown) => deps.warn?.(`Could not run ${command} from a draft:`, err));
         return answer;
       }
       if (answer.kind !== 'keep') return answer;

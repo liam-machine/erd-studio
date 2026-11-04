@@ -107,6 +107,8 @@ export class OnboardingGuide {
   private draftActive = false;
   /** Phase B is running in this window. */
   private canvasActive = false;
+  /** The next draft carries phase A on from another window ({@link resumeDraft}). */
+  private resuming = false;
   /** The steps already counted in this run (each counts once, however often Back and Next show it). */
   private stepsSeen = new Set<GuideStepId>();
   /** The step on show, to tell Back (an earlier step next) from Next. */
@@ -125,6 +127,22 @@ export class OnboardingGuide {
   /** Show Me Around: the next draft runs phase A (`nothingFound`: an example, because the folder held nothing). */
   requestDraft(options: { nothingFound?: boolean } = {}): void {
     this.requested = { phase: 'draft', nothingFound: options.nothingFound === true };
+  }
+
+  /** Phase A is running on a draft in this window (the Open Folder mark carries it to the next). */
+  draftRunning(): boolean {
+    return this.draftActive;
+  }
+
+  /**
+   * The window that a draft's Open Folder… opened, while phase A was running
+   * there: phase A carries on on this folder's draft (the same run: nothing is
+   * counted again), without More ways to start, already shown.
+   */
+  resumeDraft(): void {
+    if (this.deps.getStatus() !== 'draft') return;
+    this.draftActive = true;
+    this.resuming = true;
   }
 
   /** Show Me Around in a folder with diagrams: the diagram it opens runs phase B. */
@@ -161,7 +179,9 @@ export class OnboardingGuide {
     this.draftActive = true;
     const example = draft.source === 'example' || draft.source === 'exampleProject';
     const nothingFound = example && (draft.trigger === 'sidebar' || requested?.nothingFound === true);
-    return { ...(nothingFound ? { nothingFound: true } : {}), semanticDir: this.deps.semanticDir() };
+    const resumed = this.resuming && !requested;
+    this.resuming = false;
+    return { ...(nothingFound ? { nothingFound: true } : {}), ...(resumed ? { resumed: true } : {}), semanticDir: this.deps.semanticDir() };
   }
 
   /** Show Me Around while a draft is on show: phase A on it, from the start. */

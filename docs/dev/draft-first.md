@@ -157,6 +157,8 @@ The **nothing-found notification** (`runNothingFoundPrompt`) is removed: a folde
 | **Existing diagrams** | Unchanged: the diagrams nudge opens one. No automatic draft; a palette import ends in the draft preview (its dry run) | The import's writer |
 | **Query-only SQL repo** | Detection (§13.2) finds no DDL there, so nothing is found: no popup ever; the icon shows the example draft once per machine | as empty folder |
 
+**Open Folder… from a draft** (the no-folder example's primary, and the guide's *Open your folder* step) reloads the window into the chosen folder. Before VS Code's Open Folder runs, the host writes `DRAFT_AFTER_OPEN_FOLDER_KEY` in globalState, `{ at, guide }`, and waits for the write (`beforeOpenFolder` in `draftWiring.ts`). The window that opens takes the mark once, while it is fresh (`draftAfterOpenFolderDue`, 10 minutes). If the folder has no diagram, that folder's draft shows at once (`draftAfterOpenFolderShows`: the find, else the example), in place of the start suggestion, which is not shown: the user already asked to see what is there. The draft holds the window's prompt, and the folder's suggestion is marked `draftShown`. With `guide`, phase A carries on on that draft as the same run (`OnboardingGuide.resumeDraft`; nothing counted again; `resumed` leaves out More ways to start). If the folder has diagrams and the guide was running, the newest diagram opens and phase B runs on it. Counted `draftAfterOpenFolder`.
+
 ## 5. Keep: the existing writers
 
 ### 5.1 Imports (`importDbml`)

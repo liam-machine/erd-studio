@@ -644,7 +644,8 @@ describe('allowlists agree with the Worker', () => {
 
   it('appends the existing-diagrams notice\'s Show Me Around key at the very end, after the guide ones', () => {
     expect(FEATURES.indexOf('diagramsNudgeShowMeAround')).toBe(FEATURES.indexOf('guideLeftDraft') + 1);
-    expect(FEATURES.at(-1)).toBe('diagramsNudgeShowMeAround');
+    expect(FEATURES.at(-1)).toBe('draftAfterOpenFolder');
+    expect(FEATURES.indexOf('draftAfterOpenFolder')).toBe(FEATURES.indexOf('diagramsNudgeShowMeAround') + 1);
   });
 
   it('the Worker README documents the onboarding guide keys in a Guide funnel row', () => {

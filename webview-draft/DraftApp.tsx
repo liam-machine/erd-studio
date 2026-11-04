@@ -48,7 +48,7 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   /** The onboarding guide's phase A runs here (the host's `guide`); undefined: not running. */
-  const [guide, setGuide] = useState<{ nothingFound?: boolean; semanticDir?: string } | undefined>();
+  const [guide, setGuide] = useState<{ nothingFound?: boolean; semanticDir?: string; resumed?: boolean } | undefined>();
   /** Laid-out positions per `<view id>\u0000<schema>`; `null`: ELK failed. */
   const [layouts, setLayouts] = useState<ReadonlyMap<string, Record<string, NodePosition> | null>>(new Map());
   const layoutFailedFor = useRef<string | undefined>();
@@ -81,6 +81,7 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
           setGuide({
             ...(message.nothingFound ? { nothingFound: true } : {}),
             ...(message.semanticDir !== undefined ? { semanticDir: message.semanticDir } : {}),
+            ...(message.resumed ? { resumed: true } : {}),
           });
           break;
       }

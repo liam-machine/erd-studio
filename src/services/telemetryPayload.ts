@@ -419,6 +419,9 @@ export const FEATURES = [
   'guideBack',
   'guideLeftDraft',
   'diagramsNudgeShowMeAround',
+  // A draft's Open Folder… reloaded the window into a folder, and that folder's
+  // draft showed at once (the no-folder example's route; the guide carries on).
+  'draftAfterOpenFolder',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

@@ -24,6 +24,8 @@ export interface DraftGuideProps {
   view: DraftView;
   nothingFound?: boolean;
   semanticDir?: string;
+  /** Carried on after Open your folder: More ways to start is left out. */
+  resumed?: boolean;
   /** The host is working on an answer: the guide steps aside until it is back. */
   hidden: boolean;
   post(message: DraftToHost): void;
@@ -50,10 +52,10 @@ function bannerRects(): GuideRect[] {
   return r.width > 0 || r.height > 0 ? [{ left: r.left, top: r.top, width: r.width, height: r.height }] : [];
 }
 
-export function DraftGuide({ view, nothingFound, semanticDir, hidden, post, onEnd }: DraftGuideProps) {
+export function DraftGuide({ view, nothingFound, semanticDir, resumed, hidden, post, onEnd }: DraftGuideProps) {
   const steps = useMemo(
-    () => draftGuideSteps({ view, ...(nothingFound ? { nothingFound } : {}), ...(semanticDir !== undefined ? { semanticDir } : {}) }),
-    [view, nothingFound, semanticDir],
+    () => draftGuideSteps({ view, ...(nothingFound ? { nothingFound } : {}), ...(semanticDir !== undefined ? { semanticDir } : {}), ...(resumed ? { resumed } : {}) }),
+    [view, nothingFound, semanticDir, resumed],
   );
   const [index, setIndex] = useState(0);
   const at = Math.min(index, steps.length - 1);

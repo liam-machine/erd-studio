@@ -256,9 +256,11 @@ export type DraftToWebview =
   /**
    * Run the onboarding guide's phase A on the draft on show (Show Me Around,
    * `src/types/onboardingGuide.ts`). `nothingFound`: an example shown because
-   * the folder held nothing to draw. The page keeps it running across redraws.
+   * the folder held nothing to draw. `resumed`: the guide carries on here from
+   * the no-folder example's Open your folder (it leaves out More ways to
+   * start, already shown). The page keeps it running across redraws.
    */
-  | { type: 'guide'; nothingFound?: boolean; semanticDir?: string };
+  | { type: 'guide'; nothingFound?: boolean; semanticDir?: string; resumed?: boolean };
 
 /** Page → host. Every one is validated by {@link parseDraftToHost} against the draft on show. */
 export type DraftToHost =
@@ -356,7 +358,8 @@ export function isDraftToWebview(raw: unknown): raw is DraftToWebview {
       return raw.notice === undefined || typeof raw.notice === 'string';
     case 'guide':
       return (raw.nothingFound === undefined || typeof raw.nothingFound === 'boolean')
-        && (raw.semanticDir === undefined || typeof raw.semanticDir === 'string');
+        && (raw.semanticDir === undefined || typeof raw.semanticDir === 'string')
+        && (raw.resumed === undefined || typeof raw.resumed === 'boolean');
     default:
       return false;
   }
@@ -437,6 +440,8 @@ export interface DraftGuideStart {
   /** An example shown because the folder held nothing to draw. */
   nothingFound?: boolean;
   semanticDir?: string;
+  /** Carried on from the no-folder example's Open your folder, in the window that opened. */
+  resumed?: boolean;
 }
 
 /** Passive events the preview reports to the host (the wiring counts them; the preview counts nothing itself). */

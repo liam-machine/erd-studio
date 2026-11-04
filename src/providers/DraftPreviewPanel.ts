@@ -186,6 +186,7 @@ export class DraftPreviewPanel {
       type: 'guide',
       ...(start.nothingFound ? { nothingFound: true } : {}),
       ...(start.semanticDir !== undefined ? { semanticDir: start.semanticDir } : {}),
+      ...(start.resumed ? { resumed: true } : {}),
     });
   }
 
