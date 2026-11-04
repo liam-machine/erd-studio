@@ -18,17 +18,25 @@ import {
   DONT_ASK_AGAIN_FOLDER_BUTTON,
   MAX_START_SUGGESTION_SHOWS,
   MORE_OPTIONS_BUTTON,
+  NEW_DIAGRAM_BUTTON,
+  NOTHING_FOUND_FEATURES,
+  NOTHING_FOUND_MESSAGE,
+  SHOW_ME_HOW_BUTTON,
+  SHOW_ME_HOW_COMMAND,
   START_SUGGESTIONS_OFF_MESSAGE,
   TURN_ON_START_SUGGESTIONS_TITLE,
+  nothingFoundDue,
   readStartSuggestionState,
+  runNothingFoundPrompt,
   runStartSuggestion,
   startSuggestionDue,
   startSuggestionMessage,
   startSuggestionsOff,
+  type NothingFoundDeps,
   type StartSuggestionDeps,
   type StartSuggestionState,
 } from '../../src/services/startSuggestion';
-import type { StartIntent } from '../../src/types/startActions';
+import { IMPORT_GUIDE_COMMAND, type StartIntent } from '../../src/types/startActions';
 import packageJson from '../../package.json';
 
 describe('the notification text', () => {
@@ -229,5 +237,117 @@ describe('what it rests on', () => {
     });
     expect(await plain.refresh()).toBe('importDbmlFile');
     expect(plain.sqlTableCount()).toBeUndefined();
+  });
+});
+
+describe('nothing found: a folder with no diagram and nothing concrete, whose empty Diagrams view was opened', () => {
+  const state = (s: Partial<StartSuggestionState> = {}): StartSuggestionState => ({ shown: 0, ...s });
+
+  function nothingDeps(over: Partial<NothingFoundDeps> & { stored?: StartSuggestionState; answer?: string } = {}) {
+    let stored = over.stored ?? state();
+    const calls = {
+      shown: [] as unknown[][], info: [] as string[], ran: [] as unknown[][], features: [] as string[], off: [] as boolean[], claims: 0,
+    };
+    const deps: NothingFoundDeps = {
+      intent: async () => 'blank',
+      hasDiagrams: () => false,
+      hasTables: () => false,
+      settingOn: () => true,
+      state: () => stored,
+      saveState: async (s) => { stored = s; },
+      claim: () => { calls.claims += 1; return true; },
+      show: async (message, ...buttons) => { calls.shown.push([message, ...buttons]); return over.answer; },
+      info: (m) => { calls.info.push(m); },
+      executeCommand: async (...args) => { calls.ran.push(args); },
+      feature: (k) => { calls.features.push(k); },
+      setOffContext: (off) => { calls.off.push(off); },
+      ...over,
+    };
+    return { deps, calls, stored: () => stored };
+  }
+
+  it('says what ERD Studio is for in the wording rules\' words, with New Diagram, Show Me How and Don\'t Ask Again', async () => {
+    expect(NOTHING_FOUND_MESSAGE).toBe(
+      'No data model found in this folder yet. Start a new diagram, or bring in your data model from Databricks, Snowflake, Power BI, Fabric and more as DBML, an open format. ERD Studio is free to use.',
+    );
+    expect(NOTHING_FOUND_MESSAGE).not.toMatch(/open standard|open source|\bdbt\b/i);
+    const { deps, calls, stored } = nothingDeps();
+    const run = await runNothingFoundPrompt(deps);
+    expect(run.shown).toBe(true);
+    expect(calls.shown).toEqual([[NOTHING_FOUND_MESSAGE, NEW_DIAGRAM_BUTTON, SHOW_ME_HOW_BUTTON, DONT_ASK_AGAIN_FOLDER_BUTTON]]);
+    expect([NEW_DIAGRAM_BUTTON, SHOW_ME_HOW_BUTTON]).toEqual(['New Diagram', 'Show Me How']);
+    // The count is saved before it shows, its own: the concrete suggestion's count is untouched.
+    expect(stored()).toEqual({ shown: 0, nothingShown: 1 });
+    expect(calls.features).toEqual([NOTHING_FOUND_FEATURES.shown]);
+  });
+
+  it('New Diagram runs New Diagram…; Show Me How opens the import guide from the prompt; both answer it for good', async () => {
+    const blank = nothingDeps({ answer: NEW_DIAGRAM_BUTTON });
+    await (await runNothingFoundPrompt(blank.deps)).done;
+    expect(blank.calls.ran).toEqual([['erdStudio.createDomain']]);
+    expect(blank.stored()).toEqual({ shown: 0, nothingShown: 1, nothingAnswered: true });
+    expect(blank.calls.features).toEqual(['suggestPromptNothingShown', 'suggestPromptNothingNewDiagram']);
+
+    const guide = nothingDeps({ answer: SHOW_ME_HOW_BUTTON });
+    await (await runNothingFoundPrompt(guide.deps)).done;
+    expect(guide.calls.ran).toEqual([[IMPORT_GUIDE_COMMAND, { from: 'prompt' }]]);
+    expect(SHOW_ME_HOW_COMMAND).toBe('erdStudio.showImportGuide');
+    expect(guide.calls.features).toEqual(['suggestPromptNothingShown', 'suggestPromptNothingGuide']);
+    expect(nothingFoundDue({ settingOn: true, state: guide.stored(), hasDiagrams: false })).toBe(false);
+  });
+
+  it("Don't Ask Again turns start suggestions off for the folder (both notifications) and says how to turn them back on", async () => {
+    const { deps, calls, stored } = nothingDeps({ answer: DONT_ASK_AGAIN_FOLDER_BUTTON });
+    await (await runNothingFoundPrompt(deps)).done;
+    expect(stored()).toEqual({ shown: 0, nothingShown: 1, off: true });
+    expect(calls.off).toEqual([true]);
+    expect(calls.info).toEqual([START_SUGGESTIONS_OFF_MESSAGE]);
+    expect(calls.features).toEqual(['suggestPromptNothingShown', 'suggestPromptNothingOff']);
+    expect(startSuggestionDue({ settingOn: true, state: stored(), hasDiagrams: false })).toBe(false);
+  });
+
+  it('closed: asked again later, at most three times per folder; never once off, answered, with a diagram or a table, or with the setting off', () => {
+    expect(nothingFoundDue({ settingOn: true, state: state({ nothingShown: 2 }), hasDiagrams: false })).toBe(true);
+    expect(nothingFoundDue({ settingOn: true, state: state({ nothingShown: 3 }), hasDiagrams: false })).toBe(false);
+    expect(nothingFoundDue({ settingOn: true, state: state({ off: true }), hasDiagrams: false })).toBe(false);
+    expect(nothingFoundDue({ settingOn: true, state: state({ nothingAnswered: true }), hasDiagrams: false })).toBe(false);
+    expect(nothingFoundDue({ settingOn: true, state: state(), hasDiagrams: true })).toBe(false);
+    expect(nothingFoundDue({ settingOn: true, state: state(), hasDiagrams: false, hasTables: true })).toBe(false);
+    expect(nothingFoundDue({ settingOn: false, state: state(), hasDiagrams: false })).toBe(false);
+    // The concrete suggestion's own answer or count does not decide this one.
+    expect(nothingFoundDue({ settingOn: true, state: state({ shown: 3, answered: true }), hasDiagrams: false })).toBe(true);
+    expect(readStartSuggestionState({ shown: 1, nothingShown: 2.5, nothingAnswered: true })).toEqual({ shown: 1, nothingShown: 2, nothingAnswered: true });
+    expect(readStartSuggestionState({ nothingShown: 'x', nothingAnswered: 1 })).toEqual({ shown: 0 });
+  });
+
+  it('only for a blank suggestion: a concrete start has its own notification, and an unknown one shows nothing', async () => {
+    for (const intent of ['convert', 'drawFromDbt', 'importSemanticModel', 'importSqlDdl', 'importDbmlFile', undefined] as const) {
+      const { deps, calls } = nothingDeps({ intent: async () => intent });
+      expect((await runNothingFoundPrompt(deps)).shown).toBe(false);
+      expect(calls.shown).toEqual([]);
+      expect(calls.claims).toBe(0);
+    }
+    const failing = nothingDeps({ intent: async () => { throw new Error('look failed'); } });
+    expect((await runNothingFoundPrompt(failing.deps)).shown).toBe(false);
+  });
+
+  it('never takes a window another prompt has (the session gate), and writes nothing then', async () => {
+    const gate = new SessionPromptGate();
+    expect(gate.claim('walkthrough')).toBe(true);
+    const { deps, calls, stored } = nothingDeps({ claim: () => gate.claim('nothingFound') });
+    expect((await runNothingFoundPrompt(deps)).shown).toBe(false);
+    expect(calls.shown).toEqual([]);
+    expect(stored()).toEqual({ shown: 0 });
+    // It is not an activation prompt: activation never picks it.
+    expect(ACTIVATION_PROMPT_PRIORITY).not.toContain('nothingFound');
+  });
+
+  it('checks again after the look: a diagram made, or the setting turned off, meanwhile', async () => {
+    let diagrams = false;
+    const made = nothingDeps({ intent: async () => { diagrams = true; return 'blank'; }, hasDiagrams: () => diagrams });
+    expect((await runNothingFoundPrompt(made.deps)).shown).toBe(false);
+    let on = true;
+    const off = nothingDeps({ intent: async () => { on = false; return 'blank'; }, settingOn: () => on });
+    expect((await runNothingFoundPrompt(off.deps)).shown).toBe(false);
   });
 });

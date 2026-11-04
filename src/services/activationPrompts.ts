@@ -29,6 +29,15 @@ export type SessionPromptKind =
    * prompt when the look finds nothing concrete.
    */
   | 'startSuggestion'
+  /**
+   * A folder with no diagram and nothing concrete to start from, whose empty
+   * Diagrams view the user opened: "No data model found in this folder yet…"
+   * with New Diagram / Show Me How (`runNothingFoundPrompt`). Not an
+   * activation prompt (activation never shows it): it claims the window only
+   * once activation's own prompt has been decided, so a first run's
+   * walkthrough keeps the window.
+   */
+  | 'nothingFound'
   /** The Get Started walkthrough a fresh install owes (once per machine). */
   | 'walkthrough'
   /** AI helper files from an older ERD Studio: Update All / Choose… */

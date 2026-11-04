@@ -31,6 +31,7 @@ import { telemetry } from '../services/telemetryService';
 import { IMPORT_DBML_COMMAND } from './importDbml';
 import { IMPORT_SEMANTIC_MODEL_COMMAND } from './importSemanticModel';
 import { IMPORT_SQL_DDL_COMMAND } from './importSqlDdl';
+import { IMPORT_GUIDE_COMMAND, IMPORT_GUIDE_PICK_ITEM } from '../services/importGuide';
 
 export const IMPORT_MODEL_COMMAND = 'erdStudio.importModel';
 
@@ -69,11 +70,17 @@ export interface ImportSourceItem extends vscode.QuickPickItem {
   source: ImportModelSource;
 }
 
+/** The picker's last item: the import guide, for a model that is not a file yet (`importGuideFromPicker`). */
+export interface ImportGuideItem extends vscode.QuickPickItem {
+  guide: true;
+}
+export const IMPORT_GUIDE_ITEM: ImportGuideItem = { ...IMPORT_GUIDE_PICK_ITEM, guide: true };
+
 export interface ImportModelDeps {
   /** Which sources the open folder seems to hold. */
   detect(): Promise<ReadonlySet<ImportModelSource>>;
-  pick(items: readonly ImportSourceItem[], options: vscode.QuickPickOptions): Thenable<ImportSourceItem | undefined>;
-  executeCommand(command: string): Thenable<unknown>;
+  pick(items: ReadonlyArray<ImportSourceItem | ImportGuideItem>, options: vscode.QuickPickOptions): Thenable<ImportSourceItem | ImportGuideItem | undefined>;
+  executeCommand(command: string, ...args: unknown[]): Thenable<unknown>;
   /** Default {@link DETECT_TIMEOUT_MS}. */
   detectTimeoutMs?: number;
 }
@@ -87,15 +94,23 @@ export function importSourceItems(found: ReadonlySet<ImportModelSource>): Import
   }));
 }
 
-/** Run Import…: show the sources, count the pick (or the close) and run the picked one. */
+/**
+ * Run Import…: show the sources (then the import guide, last), count the
+ * pick (or the close) and run the picked one. The guide counts itself
+ * (`importGuideFromPicker`), not as an import source.
+ */
 export async function runImportModel(deps: ImportModelDeps): Promise<void> {
   const found = await withTimeout(deps.detect(), deps.detectTimeoutMs ?? DETECT_TIMEOUT_MS, new Set<ImportModelSource>());
-  const choice = await deps.pick(importSourceItems(found), {
+  const choice = await deps.pick([...importSourceItems(found), IMPORT_GUIDE_ITEM], {
     title: 'Import',
     placeHolder: 'What would you like to start your data model from?',
   });
   if (!choice) {
     telemetry.feature('importPickCancelled');
+    return;
+  }
+  if ('guide' in choice) {
+    await deps.executeCommand(IMPORT_GUIDE_COMMAND, { from: 'picker' });
     return;
   }
   telemetry.feature(IMPORT_PICK_FEATURES[choice.source]);
@@ -260,6 +275,6 @@ export function vscodeImportModelDeps(root: string, semanticDir: string): Import
       return new Set<ImportModelSource>();
     }),
     pick: (items, options) => vscode.window.showQuickPick([...items], options),
-    executeCommand: (command) => vscode.commands.executeCommand(command),
+    executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
   };
 }

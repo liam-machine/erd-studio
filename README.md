@@ -45,6 +45,8 @@
    - **From an example:** run **ERD Studio: Open Example Diagram** for a coffee-shop model.
 3. Commit the `.erd-studio/` folder. That's your data model.
 
+**Bring in your existing model.** Have a data model in Databricks, Snowflake, Power BI, Fabric, SQL Server, PostgreSQL, MySQL or another modelling tool? [Bring in the data model you already have](docs/import-existing-models.md) shows the exact export step for each, and **ERD Studio: Bring In an Existing Data Model…** has the same steps with the import one click away.
+
 To export, click **⤓** on the canvas toolbar or run **ERD Studio: Export All Diagrams…** ([what each format carries](docs/leaving-erd-studio.md)).
 
 ## What's in your repo
@@ -129,6 +131,7 @@ No dbt project to hand? Run **ERD Studio: Try the Sample Project** ([on GitHub](
 
 - [Using ERD Studio with dbt](docs/dbt.md)
 - [AI assistants](docs/ai-assistants.md)
+- [Bring in the data model you already have](docs/import-existing-models.md): Databricks, Snowflake, Power BI, Fabric and more
 - [DBML import and export](docs/leaving-erd-studio.md)
 - [Choosing the project folder](docs/project-folder.md)
 - [Modelling patterns](docs/modelling-patterns.md), with eight [example projects](docs/examples/)

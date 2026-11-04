@@ -1931,7 +1931,10 @@ describe('Welcome panel: commands', () => {
     expect(count('erdStudio.showGettingStarted')).toBe(1);
     expect(registered().indexOf('erdStudio.showGettingStarted')).toBe(1);
     expect(PRE_REGISTERED_COMMANDS).toEqual(
-      new Set(['erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject', 'erdStudio.showLogs', 'erdStudio.start', 'erdStudio.openExampleProject']),
+      new Set([
+        'erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject', 'erdStudio.showLogs', 'erdStudio.start',
+        'erdStudio.openExampleProject', 'erdStudio.showImportGuide',
+      ]),
     );
     // setupAiHelper needs a project: it gets the standard no-project stub instead.
     expect(count('erdStudio.setupAiHelper')).toBe(1);
@@ -2868,8 +2871,12 @@ describe('Import…, Import SQL DDL… and Import Semantic Model…', () => {
 
     expect(ran).toContain('erdStudio.importModel');
     expect(ran).toContain('erdStudio.importSqlDdl');
-    const sources = (pick.mock.calls[0][0] as Array<{ source: string }>).map((i) => i.source);
+    const items = pick.mock.calls[0][0] as Array<{ source?: string; guide?: boolean; label: string }>;
+    const sources = items.filter((i) => i.source !== undefined).map((i) => i.source);
     expect([...sources].sort()).toEqual(['dbml', 'semanticModel', 'sqlDdl']);
+    // The three sources, then the import guide, last.
+    expect(items).toHaveLength(4);
+    expect(items[3]).toMatchObject({ guide: true, label: '$(question) How do I export from Databricks, Snowflake, Power BI…?' });
     expect(feature.mock.calls.map((c) => c[0])).toEqual(['sidebarImport', 'importPickSqlDdl']);
   });
 });
@@ -3239,5 +3246,155 @@ describe('the start suggestion (a folder with no diagram whose start is obvious)
     const setting = blocks.map((b) => b.properties['erdStudio.startSuggestions']).find(Boolean)!;
     // Resource scope: a checked-in .vscode/settings.json may turn it off.
     expect(setting).toMatchObject({ type: 'boolean', default: true, scope: 'resource' });
+  });
+});
+
+describe('the import guide and the nothing-found notification', () => {
+  const STATE_KEY = 'erdStudio.startSuggestion';
+  const NOTHING = 'No data model found in this folder yet. Start a new diagram, or bring in your data model from Databricks, Snowflake, Power BI, Fabric and more as DBML, an open format. ERD Studio is free to use.';
+  let info: ReturnType<typeof vi.spyOn>;
+  let answer: string | undefined;
+  let tree: { getChildren(element?: unknown): unknown } | undefined;
+  const nothingShown = () => info.mock.calls.filter((c) => c[0] === NOTHING);
+  const guidePanels = () => vscode.window._webviewPanels.filter((p) => p.viewType === 'erdStudio.importGuide');
+
+  /** A plain folder holding `files`; the mock's findFiles answers the look's globs from them. */
+  function folderWith(files: Record<string, string>): string {
+    const ws = path.join(root, 'repo');
+    fs.mkdirSync(ws, { recursive: true });
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(ws, rel)), { recursive: true });
+      fs.writeFileSync(path.join(ws, rel), text);
+    }
+    openWorkspace(ws);
+    vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((async (include: { pattern?: string } | string) => {
+      const glob = typeof include === 'string' ? include : include.pattern ?? '';
+      const ext = glob === '**/*.sql' ? '.sql' : glob === '**/*.dbml' ? '.dbml' : undefined;
+      return Object.keys(files).filter((f) => ext !== undefined && f.endsWith(ext)).map((f) => vscode.Uri.file(path.join(ws, f)));
+    }) as never);
+    return ws;
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
+  /** VS Code draws the Diagrams view: it lists the root (the deferred provider answers a turn later). */
+  async function openDiagramsView(): Promise<void> {
+    expect(tree).toBeDefined();
+    tree!.getChildren();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    tree!.getChildren();
+    await settle();
+  }
+
+  beforeEach(() => {
+    vi.useRealTimers();
+    answer = undefined;
+    tree = undefined;
+    vscode._resetMockWebviewPanels();
+    info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async () => answer) as never);
+    const real = vscode.window.createTreeView;
+    vi.spyOn(vscode.window, 'createTreeView').mockImplementation(((id: string, options: { treeDataProvider: typeof tree }) => {
+      if (id === 'erdStudio.domainTree') tree = options.treeDataProvider;
+      return real(id, options);
+    }) as never);
+  });
+
+  it('erdStudio.showImportGuide opens the guide in an empty window too, counted with where it came from', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    await activate(context);
+    expect(count('erdStudio.showImportGuide')).toBe(1);
+    expect(NO_LEGACY_ALIAS.has('erdStudio.showImportGuide')).toBe(true);
+    await vscode.commands.executeCommand('erdStudio.showImportGuide', { from: 'walkthrough' });
+    await vscode.commands.executeCommand('erdStudio.showImportGuide');
+    expect(guidePanels()).toHaveLength(1);
+    expect(guidePanels()[0].webview.html).toContain('Open the folder you keep your data model in first');
+    expect(feature.mock.calls.map((c) => c[0])).toEqual(['importGuideOpened', 'importGuideFromWalkthrough', 'importGuideOpened']);
+    guidePanels()[0].dispose();
+  });
+
+  it('a start link runs a direct import on its quick path ({ quick: true } reaches the import)', async () => {
+    folderWith({ 'notes.md': '# notes\n' });
+    await activate(context);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    await vscode.commands.executeCommand(START_COMMAND, { action: 'importSqlDdl', from: 'sidebar' }).then(undefined, () => undefined);
+    expect(exec).toHaveBeenCalledWith('erdStudio.importSqlDdl', { quick: true });
+  });
+
+  it('a plain folder: nothing on activation (a repository of query .sql files activates ERD Studio), the notification once the Diagrams view is opened', async () => {
+    const ws = folderWith({ 'queries/report.sql': 'SELECT 1;\n', 'README.md': '# notes\n' });
+    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+    context = makeContext(root, { workspaceState });
+    const feature = vi.spyOn(telemetry, 'feature');
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    answer = 'Show Me How';
+
+    await activate(context);
+    await settle();
+    expect(nothingShown()).toEqual([]);
+
+    await openDiagramsView();
+    expect(nothingShown()).toEqual([[NOTHING, 'New Diagram', 'Show Me How', "Don't Ask Again for This Folder"]]);
+    await settle();
+    expect(exec).toHaveBeenCalledWith('erdStudio.showImportGuide', { from: 'prompt' });
+    expect(guidePanels()).toHaveLength(1);
+    expect(workspaceState.get(STATE_KEY)).toMatchObject({ nothingShown: 1, nothingAnswered: true });
+    expect(feature.mock.calls.map((c) => c[0])).toEqual(expect.arrayContaining([
+      'suggestPromptNothingShown', 'suggestPromptNothingGuide', 'importGuideOpened', 'importGuideFromPrompt',
+    ]));
+    // Nothing was written into the folder.
+    expect(fs.existsSync(path.join(ws, '.erd-studio'))).toBe(false);
+    guidePanels()[0].dispose();
+  });
+
+  it('a first run: the walkthrough keeps the window (its blank step links the guide); the notification waits', async () => {
+    folderWith({ 'query.sql': 'SELECT 1;\n' });
+    const globalState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState: new Map<string, unknown>() });
+    const opens = spyWalkthrough();
+    await activate(context);
+    await openDiagramsView();
+    expect(opens()).toHaveLength(1);
+    expect(nothingShown()).toEqual([]);
+
+    // A later window, the view opened again: now it asks.
+    tearDownActivation();
+    await activate(context);
+    await settle();
+    expect(nothingShown()).toEqual([]);
+    await openDiagramsView();
+    expect(nothingShown()).toHaveLength(1);
+  });
+
+  it("Don't Ask Again: off for the folder, never again; and never with the setting off, or in a folder with something to import", async () => {
+    folderWith({ 'notes.md': '# notes\n' });
+    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+    context = makeContext(root, { workspaceState });
+    answer = "Don't Ask Again for This Folder";
+    await activate(context);
+    await openDiagramsView();
+    expect(nothingShown()).toHaveLength(1);
+    expect(workspaceState.get(STATE_KEY)).toMatchObject({ off: true });
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('Turn On Start Suggestions for This Folder'));
+
+    tearDownActivation();
+    info.mockClear();
+    await activate(context);
+    await openDiagramsView();
+    expect(nothingShown()).toEqual([]);
+
+    // The setting, committed by a team.
+    tearDownActivation();
+    info.mockClear();
+    vscode._setMockConfiguration('erdStudio', 'startSuggestions', { workspaceValue: false });
+    context = makeContext(root, { workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]) });
+    await activate(context);
+    await openDiagramsView();
+    expect(nothingShown()).toEqual([]);
+  });
+
+  it('a folder with CREATE TABLE scripts gets its own suggestion, never "No data model found"', async () => {
+    folderWith({ 'db/schema.sql': 'CREATE TABLE a (\n  id INT PRIMARY KEY\n);\n' });
+    context = makeContext(root, { workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], SUGGESTIONS_ANSWERED]) });
+    await activate(context);
+    await openDiagramsView();
+    expect(nothingShown()).toEqual([]);
   });
 });

@@ -157,6 +157,12 @@ export interface SqlResume {
 /** Change Options…: the answers the quick path chose, preselected in the step-by-step flow. */
 export interface SqlPreset {
   dialect?: SqlDialect;
+  /**
+   * The user already chose `dialect` (the import guide's card for that
+   * source: `erdStudio.importSqlDdl` with `{ dialect }`), so it is not asked
+   * again. Scripts that do not read as it still offer Try Another Dialect.
+   */
+  dialectChosen?: boolean;
   layer?: string;
   name?: string;
 }
@@ -222,20 +228,26 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
   }
   const { files, fullPaths } = read;
 
-  // 2. The dialect: the one chosen before (Change Options…), else the one the scripts look like, first.
-  const detected = detectSqlDialect(files.map((f) => f.text).join('\n'));
-  const first = preset.dialect ?? detected;
-  const ordered = first ? [first, ...SQL_DIALECTS.filter((d) => d !== first)] : [...SQL_DIALECTS];
-  const choice = await ui.pickDialect(
-    ordered.map((dialect) => ({
-      label: SQL_DIALECT_LABELS[dialect],
-      ...(dialect === detected ? { description: 'detected' } : dialect === preset.dialect ? { description: 'read as this before' } : {}),
-      dialect,
-    })),
-    { title: TITLE, placeHolder: `Which SQL dialect ${files.length === 1 ? 'is the script' : 'are the scripts'} written in?`, ignoreFocusOut: true },
-  );
-  if (!choice) return cancelled();
-  const dialect = choice.dialect;
+  // 2. The dialect: the one the user chose already (the import guide's card), else a pick
+  //    with the one chosen before (Change Options…), else the one the scripts look like, first.
+  let dialect: SqlDialect;
+  if (preset.dialect && preset.dialectChosen) {
+    dialect = preset.dialect;
+  } else {
+    const detected = detectSqlDialect(files.map((f) => f.text).join('\n'));
+    const first = preset.dialect ?? detected;
+    const ordered = first ? [first, ...SQL_DIALECTS.filter((d) => d !== first)] : [...SQL_DIALECTS];
+    const choice = await ui.pickDialect(
+      ordered.map((d) => ({
+        label: SQL_DIALECT_LABELS[d],
+        ...(d === detected ? { description: 'detected' } : d === preset.dialect ? { description: 'read as this before' } : {}),
+        dialect: d,
+      })),
+      { title: TITLE, placeHolder: `Which SQL dialect ${files.length === 1 ? 'is the script' : 'are the scripts'} written in?`, ignoreFocusOut: true },
+    );
+    if (!choice) return cancelled();
+    dialect = choice.dialect;
+  }
   telemetry.feature(SQL_DIALECT_FEATURES[dialect]);
 
   // 3. Convert, with the importer loaded only now.

@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Send Feedback (dialog, AI analysis tiers, consent, redaction, My Reports) | `docs/dev/feedback.md` |
 | Usage telemetry (extension side and the Worker) | `telemetry/README.md` |
 | Getting Started panel, CLI launcher, the `erd-studio` CLI | `docs/dev/onboarding-and-cli.md` |
-| The README or a user guide (`docs/dbt.md`, `docs/ai-assistants.md`, `docs/project-folder.md`, `docs/modelling-patterns.md`), Marketplace copy, walkthrough or welcome-view text | the wording rules in `docs/dev/onboarding-and-cli.md` |
+| The README or a user guide (`docs/dbt.md`, `docs/ai-assistants.md`, `docs/project-folder.md`, `docs/modelling-patterns.md`, `docs/import-existing-models.md`), Marketplace copy, walkthrough or welcome-view text | the wording rules in `docs/dev/onboarding-and-cli.md` |
 | DBML storage, import and export: `packages/core/src/dbml/`, the subject-area codec, `planDbmlLibraryWrites`, `applyFileWrites`, Convert Project to DBML, the `erd_layout` codec, Ref placement and diagram imports, the rich export, Export All Diagrams, Import DBML (parser pin, property names, `meta.dbml`) | `docs/dev/dbml.md` |
 | Native DBML storage: the decisions (D1–D33), the normative format, the stages and their review log | `docs/plans/native-dbml-storage.md` |
 | `SCHEMA_CONTENT`, harness generators, the `/erd-studio-setup` skill | `src/harness/CLAUDE.md` |

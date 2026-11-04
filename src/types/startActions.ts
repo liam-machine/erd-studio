@@ -205,6 +205,27 @@ export function startCommandLink(action: StartAction, from: Exclude<StartSurface
 }
 
 // ---------------------------------------------------------------------------
+// The import guide: one quiet link on every start surface
+// ---------------------------------------------------------------------------
+
+/** **Bring In an Existing Data Model…** (`src/services/importGuide.ts`). */
+export const IMPORT_GUIDE_COMMAND = 'erdStudio.showImportGuide';
+
+/**
+ * The line the start surfaces carry (the Welcome panel's start card, the
+ * walkthrough's blank step, the empty Diagrams view's blank variant): the
+ * question, then the link. A link inside a sentence, never a button of its
+ * own: each surface keeps one primary button, the start.
+ */
+export const IMPORT_GUIDE_LINK_QUESTION = 'Have a data model in Databricks, Snowflake, Power BI or Fabric?';
+export const IMPORT_GUIDE_LINK_TEXT = 'See how to bring it in';
+
+/** A `command:` link to the guide for a walkthrough step or welcome view, saying where it was opened from. */
+export function importGuideCommandLink(from: 'walkthrough' | 'sidebar'): string {
+  return `command:${IMPORT_GUIDE_COMMAND}?${encodeURIComponent(JSON.stringify([{ from }]))}`;
+}
+
+// ---------------------------------------------------------------------------
 // "Watch how": one short clip per suggestion on the Welcome panel's start card
 // ---------------------------------------------------------------------------
 

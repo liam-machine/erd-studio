@@ -22,10 +22,16 @@
  * scope: a team can commit `false` in `.vscode/settings.json`). What the look
  * found never leaves the machine: telemetry gets fixed keys only.
  *
+ * Nothing concrete (a `blank` suggestion) is the other notification here,
+ * {@link runNothingFoundPrompt}: "No data model found in this folder yet…",
+ * shown only once the user opened the empty Diagrams view, never because
+ * ERD Studio activated.
+ *
  * vscode-free: the look, the state, the notification and the commands are injected.
  */
 
 import {
+  IMPORT_GUIDE_COMMAND,
   START_ACTION_COMMANDS,
   START_COMMAND,
   startActionArgs,
@@ -76,18 +82,32 @@ export function isConcreteSuggestion(intent: StartIntent | undefined): intent is
 export interface StartSuggestionState {
   /** How many times it was shown in this folder. */
   shown: number;
-  /** Don't Ask Again, or Turn Off Start Suggestions for This Folder. */
+  /** Don't Ask Again, or Turn Off Start Suggestions for This Folder (both notifications). */
   off?: boolean;
   /** Create Diagram or More Options… was chosen: the user has the start. */
   answered?: boolean;
+  /** How many times the nothing-found notification was shown in this folder (its own count). */
+  nothingShown?: number;
+  /** New Diagram or Show Me How was chosen on the nothing-found notification. */
+  nothingAnswered?: boolean;
+}
+
+function count(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
 /** The state as stored, or a fresh one for anything else (a hand-edited or older value). */
 export function readStartSuggestionState(raw: unknown): StartSuggestionState {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { shown: 0 };
   const r = raw as Record<string, unknown>;
-  const shown = typeof r.shown === 'number' && Number.isFinite(r.shown) && r.shown > 0 ? Math.floor(r.shown) : 0;
-  return { shown, ...(r.off === true ? { off: true } : {}), ...(r.answered === true ? { answered: true } : {}) };
+  const nothingShown = count(r.nothingShown);
+  return {
+    shown: count(r.shown),
+    ...(r.off === true ? { off: true } : {}),
+    ...(r.answered === true ? { answered: true } : {}),
+    ...(nothingShown > 0 ? { nothingShown } : {}),
+    ...(r.nothingAnswered === true ? { nothingAnswered: true } : {}),
+  };
 }
 
 /** Whether start suggestions are off here: the folder's flag, or the setting. */
@@ -211,6 +231,98 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
         deps.info(START_SUGGESTIONS_OFF_MESSAGE);
       } else {
         deps.feature(START_SUGGESTION_FEATURES.dismissed);
+      }
+    })
+    .catch(() => { /* a start that fails reports itself */ });
+  return { shown: true, done };
+}
+
+// ---------------------------------------------------------------------------
+// Nothing found: a folder with no diagram and nothing concrete to start from
+// ---------------------------------------------------------------------------
+
+/**
+ * The nothing-found notification: shown only when the user clearly came to
+ * ERD Studio — the empty Diagrams view was drawn in this folder — and the
+ * look found nothing concrete (the suggestion is `blank`). Never merely
+ * because ERD Studio activated: a repository of query `.sql` files activates
+ * it too, and would be nagged every time. On a first run the walkthrough
+ * keeps the window (its blank start step links the import guide), so this
+ * waits for a later window. Same rules as the concrete suggestion: the
+ * window's one prompt (`SessionPromptGate`), at most
+ * {@link MAX_START_SUGGESTION_SHOWS} times per folder (its own count), Don't
+ * Ask Again for This Folder, and the `erdStudio.startSuggestions` setting.
+ */
+export const NOTHING_FOUND_MESSAGE =
+  'No data model found in this folder yet. Start a new diagram, or bring in your data model from Databricks, Snowflake, Power BI, Fabric and more as DBML, an open format. ERD Studio is free to use.';
+export const NEW_DIAGRAM_BUTTON = 'New Diagram';
+export const SHOW_ME_HOW_BUTTON = 'Show Me How';
+
+/** The command Show Me How runs, and its argument (the guide counts where it was opened from). */
+export const SHOW_ME_HOW_COMMAND = IMPORT_GUIDE_COMMAND;
+export const SHOW_ME_HOW_ARGS = [{ from: 'prompt' }] as const;
+
+/** Its keys (`telemetry/README.md` → Onboarding funnel). Closed without a choice is shown minus the three answers. */
+export const NOTHING_FOUND_FEATURES = {
+  shown: 'suggestPromptNothingShown',
+  newDiagram: 'suggestPromptNothingNewDiagram',
+  guide: 'suggestPromptNothingGuide',
+  off: 'suggestPromptNothingOff',
+} as const satisfies Record<string, TelemetryFeature>;
+
+/** Whether the nothing-found notification may still be shown in this folder (cheap: no look at the files). */
+export function nothingFoundDue(input: { settingOn: boolean; state: StartSuggestionState; hasDiagrams: boolean; hasTables?: boolean }): boolean {
+  const { settingOn, state, hasDiagrams, hasTables } = input;
+  return settingOn && !state.off && !state.nothingAnswered && !hasDiagrams && hasTables !== true
+    && (state.nothingShown ?? 0) < MAX_START_SUGGESTION_SHOWS;
+}
+
+export interface NothingFoundDeps extends Omit<StartSuggestionDeps, 'sqlTables' | 'convertApplies' | 'recordSuggested'> {
+  /** Whether the Table Library holds a table (a model with no diagram yet is not "no data model"). */
+  hasTables(): boolean;
+  /** Take the window's one prompt (`SessionPromptGate.claim`); false when another prompt has it. */
+  claim(): boolean;
+}
+
+/**
+ * Offer the nothing-found notification, when it is due, the suggestion is
+ * `blank` and the window's prompt is free. Never throws.
+ */
+export async function runNothingFoundPrompt(deps: NothingFoundDeps): Promise<StartSuggestionRun> {
+  const nothing: StartSuggestionRun = { shown: false, done: Promise.resolve() };
+  const due = (state: StartSuggestionState): boolean =>
+    nothingFoundDue({ settingOn: deps.settingOn(), state, hasDiagrams: deps.hasDiagrams(), hasTables: deps.hasTables() });
+  if (!due(deps.state())) return nothing;
+  let intent: StartIntent | undefined;
+  try {
+    intent = await deps.intent();
+  } catch {
+    return nothing;
+  }
+  if (intent !== 'blank') return nothing;
+  const state = deps.state();
+  // Checked again after the look: a diagram made meanwhile, a setting or a command since.
+  if (!due(state)) return nothing;
+  if (!deps.claim()) return nothing;
+
+  await deps.saveState({ ...state, nothingShown: (state.nothingShown ?? 0) + 1 });
+  deps.feature(NOTHING_FOUND_FEATURES.shown);
+  const done = Promise.resolve(deps.show(NOTHING_FOUND_MESSAGE, NEW_DIAGRAM_BUTTON, SHOW_ME_HOW_BUTTON, DONT_ASK_AGAIN_FOLDER_BUTTON))
+    .then(async (choice) => {
+      const latest = deps.state();
+      if (choice === NEW_DIAGRAM_BUTTON) {
+        deps.feature(NOTHING_FOUND_FEATURES.newDiagram);
+        await deps.saveState({ ...latest, nothingAnswered: true });
+        await deps.executeCommand(START_ACTION_COMMANDS.blank);
+      } else if (choice === SHOW_ME_HOW_BUTTON) {
+        deps.feature(NOTHING_FOUND_FEATURES.guide);
+        await deps.saveState({ ...latest, nothingAnswered: true });
+        await deps.executeCommand(SHOW_ME_HOW_COMMAND, ...SHOW_ME_HOW_ARGS);
+      } else if (choice === DONT_ASK_AGAIN_FOLDER_BUTTON) {
+        deps.feature(NOTHING_FOUND_FEATURES.off);
+        await deps.saveState({ ...latest, off: true });
+        deps.setOffContext(true);
+        deps.info(START_SUGGESTIONS_OFF_MESSAGE);
       }
     })
     .catch(() => { /* a start that fails reports itself */ });

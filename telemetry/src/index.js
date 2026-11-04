@@ -89,10 +89,11 @@ const KNOWN_FIXES_BODY = JSON.stringify(KNOWN_FIXES);
 
 /**
  * Largest body accepted. A real heartbeat is under a kilobyte; every feature
- * and error key at once, each at its cap, is about 4.5 KB (the extension's
- * telemetryPayload test holds that under this limit).
+ * and error key at once, each at its cap, passed 8 KB with the import guide's
+ * keys (2.0), so the cap is 16 KB (the extension's telemetryPayload test holds
+ * that worst case under this limit).
  */
-const MAX_BODY_BYTES = 8192;
+const MAX_BODY_BYTES = 16384;
 
 /** A heartbeat may describe a day at most this many days before it is received. */
 const MAX_DAY_AGE_DAYS = 7;
@@ -403,6 +404,37 @@ const FEATURES = [
   'quickImportChangeOptions',
   'quickImportFellBack',
   'importReviewOpened',
+  // The import guide (src/services/importGuide.ts, Bring In an Existing Data
+  // Model…): opened (every open), and from where (the palette has none); which
+  // card's button was pressed; a Copy button. Then the nothing-found
+  // notification (src/services/startSuggestion.ts): a folder with no diagram and
+  // nothing concrete, whose empty Diagrams view was opened — shown, and the
+  // answer (closed = shown minus the three).
+  'importGuideOpened',
+  'importGuideFromWelcome',
+  'importGuideFromWalkthrough',
+  'importGuideFromSidebar',
+  'importGuideFromPicker',
+  'importGuideFromStartPick',
+  'importGuideFromPrompt',
+  'importGuideActionFound',
+  'importGuideActionDbt',
+  'importGuideActionDatabricks',
+  'importGuideActionSnowflake',
+  'importGuideActionPowerBi',
+  'importGuideActionFabric',
+  'importGuideActionFabricWarehouse',
+  'importGuideActionSqlServer',
+  'importGuideActionPostgres',
+  'importGuideActionMysql',
+  'importGuideActionDbml',
+  'importGuideActionOtherTools',
+  'importGuideActionFeedback',
+  'importGuideCopied',
+  'suggestPromptNothingShown',
+  'suggestPromptNothingNewDiagram',
+  'suggestPromptNothingGuide',
+  'suggestPromptNothingOff',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

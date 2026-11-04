@@ -25,6 +25,8 @@ import {
 } from './aiAssistants';
 import {
   HOW_TO_CLIP_KEYS,
+  IMPORT_GUIDE_LINK_QUESTION,
+  IMPORT_GUIDE_LINK_TEXT,
   START_ACTIONS,
   START_INTENTS,
   START_INTENT_REASONS,
@@ -115,6 +117,12 @@ export type GettingStartedToHost =
    * never taken from the webview.
    */
   | { type: 'start'; action: StartAction }
+  /**
+   * The start card's "Have a model in Databricks, Snowflake, Power BI or
+   * Fabric? See how to bring it in" link. No payload: the host runs the fixed
+   * `erdStudio.showImportGuide` with `{ from: 'welcome' }`.
+   */
+  | { type: 'showImportGuide' }
   | { type: 'openExternal'; target: GettingStartedExternalTarget }
   /** Runs `erdStudio.trySampleProject` (confirm, then clone the fixed sample repo). No payload. */
   | { type: 'trySample' }
@@ -138,7 +146,7 @@ export type GettingStartedToHostType = GettingStartedToHost['type'];
 /** Every host-bound type, for the validator and the "every type is handled" test. */
 export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] = [
   'ready', 'refreshStatus', 'setupAiHelper', 'copyPrompt', 'openClaude', 'openCopilotChat', 'openDomain', 'start',
-  'openExternal', 'trySample', 'openFolder', 'videoError', 'howToClipPlayed',
+  'showImportGuide', 'openExternal', 'trySample', 'openFolder', 'videoError', 'howToClipPlayed',
 ];
 
 /**
@@ -279,6 +287,7 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
     case 'trySample':
     case 'openFolder':
     case 'howToClipPlayed':
+    case 'showImportGuide':
       return true;
     case 'start': {
       const action = (value as { action?: unknown }).action;
@@ -1311,6 +1320,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
           <div class="gs-step__actions" data-start-group="first">
             ${startButtons('gs-btn')}
           </div>
+          <p class="gs-step__hint gs-import-guide">${escapeHtml(IMPORT_GUIDE_LINK_QUESTION)} <button class="gs-link" type="button" data-action="showImportGuide">${escapeHtml(IMPORT_GUIDE_LINK_TEXT)}</button></p>
           ${howToSlot}
         </div>
       </section>

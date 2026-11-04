@@ -142,8 +142,13 @@ const PANEL_START_CONTROLS: Record<string, DbtControl> = {
   drawFromDbt: 'Draw from dbt',
 };
 
-type Surface = 'package.json' | 'gettingStarted' | 'trees' | 'canvas' | 'toasts' | 'harness' | 'cli';
-const SURFACES: Surface[] = ['package.json', 'gettingStarted', 'trees', 'canvas', 'toasts', 'harness', 'cli'];
+type Surface = 'package.json' | 'gettingStarted' | 'importGuide' | 'trees' | 'canvas' | 'toasts' | 'harness' | 'cli';
+const SURFACES: Surface[] = ['package.json', 'gettingStarted', 'importGuide', 'trees', 'canvas', 'toasts', 'harness', 'cli'];
+
+/** Import guide buttons (`data-guide-action="…"`) → the dbt control they are. */
+const GUIDE_CONTROLS: Record<string, DbtControl> = {
+  dbt: 'Draw from dbt',
+};
 
 interface Shown { where: string; text: string }
 interface Collected {
@@ -639,6 +644,34 @@ async function cliText(ws: string, out: Collected): Promise<void> {
   }
 }
 
+/** Bring In an Existing Data Model…: the page the host really builds for this window, its text and its buttons, in JSDOM. */
+async function importGuideText(out: Collected): Promise<void> {
+  const shown = vscode.commands.executeCommand('erdStudio.showImportGuide');
+  await vi.advanceTimersByTimeAsync(2_000);
+  await shown;
+  const panel = vscode.window._webviewPanels.find((p) => p.viewType === 'erdStudio.importGuide');
+  if (!panel) { throw new Error('the import guide did not open'); }
+  const dom = new JSDOM(panel.webview.html, {
+    runScripts: 'dangerously',
+    virtualConsole: new VirtualConsole(),
+    beforeParse(window) {
+      (window as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({ postMessage: () => undefined });
+    },
+  });
+  try {
+    const win = dom.window as unknown as Window & typeof globalThis;
+    const doc = dom.window.document;
+    for (const t of domText(doc, win)) { out.text.importGuide.push({ where: 'import guide', text: t }); }
+    out.text.importGuide.push({ where: 'import guide title', text: doc.title });
+    for (const el of doc.querySelectorAll<HTMLElement>('[data-guide-action]')) {
+      const control = GUIDE_CONTROLS[el.dataset.guideAction ?? ''];
+      if (control) { out.controls.set(control, [...(out.controls.get(control) ?? []), 'import guide']); }
+    }
+  } finally {
+    dom.window.close();
+  }
+}
+
 async function collect(c: Case): Promise<Collected> {
   const out: Collected = {
     text: Object.fromEntries(SURFACES.map((s) => [s, []])) as unknown as Record<Surface, Shown[]>,
@@ -720,6 +753,7 @@ async function collect(c: Case): Promise<Collected> {
     }
 
     const welcome = await openGettingStarted();
+    await importGuideText(out);
 
     if (c.fixture && c.diagram) {
       const editorCall = registerEditor.mock.calls.find((call) => call[0] === SUBJECT_AREA_EDITOR_VIEW_TYPE);
@@ -816,6 +850,7 @@ describe.each([LOGICAL_YAML, LOGICAL_DBML, PLAIN_FOLDER, EMPTY_WINDOW])('$name: 
   it('read every surface it has (the sweep is not empty)', () => {
     expect(got.text['package.json'].length).toBeGreaterThan(20);
     expect(got.text.gettingStarted.length).toBeGreaterThan(10);
+    expect(got.text.importGuide.length).toBeGreaterThan(20);
     expect(got.text['package.json'].some((s) => s.where.startsWith('walkthrough step'))).toBe(true);
     if (c.fixture) {
       expect(got.text.trees.length).toBeGreaterThan(3);
@@ -902,6 +937,11 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     expect(got.text.gettingStarted.some((s) => s.where === 'panel captions' && DBT_WORD.test(s.text))).toBe(true);
     // The start card's Draw from dbt button (`data-start="drawFromDbt"`) is reachable on the dbt page itself.
     expect((got.controls.get('Draw from dbt') ?? []).some((where) => where.startsWith('panel '))).toBe(true);
+  });
+
+  it('the import guide: the dbt card leads, with Draw from dbt', () => {
+    expect(all('importGuide')).toContain('Draw from dbt copies your dbt models');
+    expect(got.controls.get('Draw from dbt') ?? []).toContain('import guide');
   });
 
   it('the canvas: the dbt wording on the alias row and the New Relationship hint', () => {

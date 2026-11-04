@@ -65,9 +65,11 @@ the local archive together.
   path). No CORS headers: the caller is the VS Code extension host, not a
   browser.
 - `KILL_SWITCH` truthy → every request `503` before any D1 access.
-- Body over **8,192 bytes** → `413`, counted while streaming, so a missing or
-  lying `Content-Length` does not help. (A heartbeat with every feature and
-  error key at its cap is about 4.5 KB; the extension's `telemetryPayload`
+- Body over **16,384 bytes** → `413`, counted while streaming, so a missing or
+  lying `Content-Length` does not help. (A real heartbeat is under a kilobyte;
+  one with every feature and error key at its cap passed 8 KB with the import
+  guide's keys, so the cap went from 8,192 to 16,384 bytes in the same change:
+  deploy the Worker before that release. The extension's `telemetryPayload`
   test reads this limit and fails if that ever stops fitting.)
 - A known field with a wrong type or out-of-range value → `400`, nothing
   written. `day` must be a real calendar date, not in the future and at most 7
@@ -364,6 +366,8 @@ appended after the native DBML keys:
 | Chose a start | `welcomeBlank` `welcomeImport` `welcomeExample` `welcomeConvert` `welcomeDrawFromDbt`; `walkthroughBlank` … `walkthroughDrawFromDbt`; `sidebarBlank` … `sidebarDrawFromDbt` (`welcomeOpenDiagram` is a returning user's "Open your diagrams"); the direct imports, a click less than Import…'s picker: `welcomeImportSemanticModel` `welcomeImportSqlDdl` `welcomeImportDbmlFile`, `walkthroughImportSemanticModel` `walkthroughImportSqlDdl` `walkthroughImportDbmlFile`, `sidebarImportSemanticModel` `sidebarImportSqlDdl` `sidebarImportDbmlFile`; `diagramsNudgeOpened` (its Open button) |
 | Watched how | `howToClipPlayed` (the Welcome panel's short "Watch how" clip for the suggestion was played; which clip follows from that day's `startSuggested*`, or, with none that day, the example's (no folder open). Passive: a viewer who watched and closed the panel still counts `welcomeLeftNoChoice`) |
 | Picked an import source | `importPickDbml`, `importPickSqlDdl`, `importPickSemanticModel`; `importPickCancelled` (the source picker was closed) |
+| Nothing to start from | `suggestPromptNothingShown` (the **nothing-found** notification, `runNothingFoundPrompt` in `src/services/startSuggestion.ts`: a folder with no diagram, no table and nothing obvious to import, shown only once its empty Diagrams view was opened — never on activation alone — at most three times per folder, never on a first run, whose walkthrough keeps the window). Its answer: `suggestPromptNothingNewDiagram` (New Diagram; counts as having chosen a start), `suggestPromptNothingGuide` (Show Me How: the import guide), `suggestPromptNothingOff` (Don't Ask Again for This Folder). Closed without a choice is shown minus the three: no key of its own |
+| Import guide | `importGuideOpened` (**Bring In an Existing Data Model…** opened, from anywhere), and where from: `importGuideFromWelcome`, `importGuideFromWalkthrough`, `importGuideFromSidebar` (the quiet "See how to bring it in" link on each start surface), `importGuideFromPicker` (Import…'s last item), `importGuideFromStartPick` (the start quick pick's last item), `importGuideFromPrompt` (Show Me How); the palette is opened minus the six. One feature key per surface rather than a surface field: the heartbeat's `features` is a flat allowlisted key → count map, and a new field would need a schema change. Which card's button: `importGuideActionDatabricks`, `importGuideActionSnowflake`, `importGuideActionPowerBi`, `importGuideActionFabric` (a Fabric semantic model), `importGuideActionFabricWarehouse` (a Warehouse / SQL analytics endpoint), `importGuideActionSqlServer`, `importGuideActionPostgres`, `importGuideActionMysql`, `importGuideActionDbml`, `importGuideActionOtherTools`, `importGuideActionDbt`, `importGuideActionFound` (the import of what the folder holds), `importGuideActionFeedback` (Not yet → Send Feedback: someone wants a source ERD Studio lacks); `importGuideCopied` (a Copy button; never what was copied). Read a card's action against its import's own key (`importSqlDialectDatabricks`, `importSqlDdl`, `importSqlDdlInvalid`…): many presses with few finished imports means its export step is wrong |
 | Quick import | the start suggestion's Create Diagram and a surface's primary import run the **quick path** (defaults chosen, one confirm): `quickImport` (it created a diagram, beside the source's own `importSqlDdl` / `importSemanticModel` / `importDbml`), `quickImportChangeOptions` (its Change Options… was chosen: a default was wrong), `quickImportFellBack` (it found nothing to take, so it asked step by step); `importReviewOpened` (any import's dry run: Review All… was opened) |
 | Gave up inside a start | `blankDiagramCancelled`, `importDbmlCancelled`, `importSqlDdlCancelled`, `importSemanticModelCancelled`, `exampleCancelled`, `drawCancelScope` / `drawCancelLayer` / `drawCancelName`, `convertToDbmlCancelled` |
 | The user's files did not read | `importDbmlInvalid`, `importSqlDdlInvalid` (+ the dialect it ran as: `importSqlDialectPostgres`, `importSqlDialectMysql`, `importSqlDialectSqlserver`, `importSqlDialectSnowflake`, `importSqlDialectDatabricks`, counted when the conversion runs), `importSemanticModelInvalid` |
@@ -412,7 +416,7 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
        MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('walkthroughOpened', 'gettingStartedOpened', 'sidebarStartShown', 'diagramsNudgeShown', 'suggestPromptShown'))) AS saw_start,
        MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE ((j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough[A-Z]*' OR j.key GLOB 'sidebar[A-Z]*')
          AND j.key NOT IN ('walkthroughOpened', 'walkthroughWaited', 'sidebarStartShown', 'welcomeLeftNoChoice', 'welcomeOpenDiagram'))
-         OR j.key IN ('drawStarted', 'diagramsNudgeOpened', 'suggestPromptAccepted'))) AS chose_start,
+         OR j.key IN ('drawStarted', 'diagramsNudgeOpened', 'suggestPromptAccepted', 'suggestPromptNothingNewDiagram') OR j.key GLOB 'importGuideAction*')) AS chose_start,
        MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('domainCreated', 'blankDiagram', 'importDbml', 'importSqlDdl', 'importSemanticModel', 'exampleDiagram', 'exampleOpened', 'exampleReopened', 'drawFromDbt', 'convertToDbml', 'domainCreatedExternal'))) AS got_diagram,
        MAX(h.canvas_opens > 0) AS opened_canvas,
        MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('editModel', 'editColumn', 'editKey', 'editDetails', 'editRelationship', 'addModel', 'addRelationship', 'addFromDbt'))) AS edited,
@@ -434,6 +438,7 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
    WHERE h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0
      AND (j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough*' OR j.key GLOB 'sidebar*' OR j.key GLOB 'example*' OR j.key GLOB 'import*'
        OR j.key GLOB 'startSuggested*' OR j.key = 'howToClipPlayed' OR j.key GLOB 'suggestPrompt*' OR j.key GLOB 'quickImport*' OR j.key = 'startSuggestionsOff'
+       OR j.key GLOB 'importGuide*'
        OR j.key GLOB 'firstRun*' OR j.key GLOB 'diagramsNudge*' OR j.key GLOB '*Cancel*')
    GROUP BY j.key ORDER BY installs DESC"
 ```

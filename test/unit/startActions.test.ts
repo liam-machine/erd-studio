@@ -29,7 +29,10 @@ import {
   type StartIntent,
   type StartStorage,
 } from '../../src/types/startActions';
-import { START_FEATURES, START_INTENT_FEATURES, START_PICK_ITEMS, recordStart, recordStartSuggested, runStart } from '../../src/commands/start';
+import {
+  START_FEATURES, START_INTENT_FEATURES, START_PICK_GUIDE_ITEM, START_PICK_ITEMS, recordStart, recordStartSuggested, runStart,
+  type StartPickGuideItem, type StartPickItem,
+} from '../../src/commands/start';
 import { START_LABELS } from '../../src/types/gettingStarted';
 import { IMPORT_MODEL_SOURCES } from '../../src/services/importSources';
 import { FEATURES } from '../../src/services/telemetryPayload';
@@ -213,23 +216,37 @@ describe('erdStudio.start', () => {
   it('without a valid argument, asks which start (from the same rule) and counts nothing', async () => {
     const feature = vi.spyOn(telemetry, 'feature');
     const executeCommand = vi.fn(async () => undefined);
-    const pick = vi.fn(async (items: Array<{ action: StartAction }>) => items[1]);
+    const pick = vi.fn(async (items: Array<{ action?: StartAction }>) => items[1] as { action: StartAction });
     await runStart(undefined, { context: () => ({ hasProject: true, hasDbt: true }), executeCommand, pick });
-    expect(pick.mock.calls[0][0].map((i: { action: StartAction }) => i.action)).toEqual(['drawFromDbt', 'blank', 'import', 'example']);
+    // The starts, then the import guide last.
+    expect(pick.mock.calls[0][0].map((i: { action?: StartAction }) => i.action)).toEqual(['drawFromDbt', 'blank', 'import', 'example', undefined]);
+    expect(pick.mock.calls[0][0].at(-1)).toEqual(START_PICK_GUIDE_ITEM);
     expect(executeCommand).toHaveBeenCalledWith('erdStudio.createDomain');
     expect(feature).not.toHaveBeenCalled();
 
     // The pick follows the folder's suggestion too.
-    const suggested = vi.fn(async (items: Array<{ action: StartAction }>) => items[0]);
+    const suggested = vi.fn(async (items: Array<{ action?: StartAction }>) => items[0] as { action: StartAction });
     const ran = vi.fn(async () => undefined);
     await runStart(undefined, { context: () => ({ hasProject: true, hasDbt: false, found: ['sqlDdl'] }), executeCommand: ran, pick: suggested });
-    expect(suggested.mock.calls[0][0].map((i: { action: StartAction }) => i.action)).toEqual(['importSqlDdl', 'blank', 'import', 'example']);
+    expect(suggested.mock.calls[0][0].map((i: { action?: StartAction }) => i.action)).toEqual(['importSqlDdl', 'blank', 'import', 'example', undefined]);
     // A direct import runs its quick path (defaults chosen, one confirm).
     expect(ran).toHaveBeenCalledWith('erdStudio.importSqlDdl', { quick: true });
 
     const closed = vi.fn(async () => undefined);
     await runStart({ action: 'nope' }, { context: () => ({ hasProject: true, hasDbt: false }), executeCommand: closed, pick: closed });
     expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it('the quick pick ends with the import guide, which opens it from the start pick and counts no start', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    const executeCommand = vi.fn(async (..._args: unknown[]) => undefined);
+    const pick = vi.fn(async (items: Array<StartPickItem | StartPickGuideItem>) => items[items.length - 1]);
+    await runStart(undefined, { context: () => ({ hasProject: false, hasDbt: false }), executeCommand, pick });
+    expect(pick.mock.calls[0][0].map((i) => i.label)).toEqual([
+      '$(book) Open an Example…', '$(question) How do I export from Databricks, Snowflake, Power BI…?',
+    ]);
+    expect(executeCommand.mock.calls).toEqual([['erdStudio.showImportGuide', { from: 'startPick' }]]);
+    expect(feature).not.toHaveBeenCalled();
   });
 
   it('records one key for recordStart', () => {
