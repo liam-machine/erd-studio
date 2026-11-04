@@ -189,6 +189,33 @@ export class VSCodeUI {
     }
   }
 
+  /**
+   * Wait for a modal dialog through a step-by-step import: a name box
+   * ("Name the diagram…") is answered with its suggestion (Enter, after
+   * `beat` ms for the viewer); any quick input whose title, placeholder or
+   * message matches `never` fails (the question it must not ask).
+   * Resolves `{ dialog, named }`: the dialog, and the name box's value if it asked.
+   */
+  async waitForDialogKeepingName({ never, beat = 800, timeout = 30000 } = {}) {
+    const until = Date.now() + timeout;
+    let named;
+    for (;;) {
+      if (await this.wb.ev(`!!${sel.dialog}`).catch(() => false)) return { dialog: await this.waitForDialog(), named };
+      const box = await this.quickPick().catch(() => null);
+      if (box) {
+        const text = `${box.title} ${box.placeholder} ${box.message}`;
+        if (never && never.test(text)) throw new Error(`it asked what it should not: ${text.trim()}`);
+        if (/Name the diagram/.test(box.message) && named === undefined) {
+          named = box.value;
+          await sleep(beat);
+          await this.wb.press('Enter');
+        }
+      }
+      if (Date.now() > until) throw new Error(`timed out after ${timeout} ms waiting for the import's confirm`);
+      await sleep(150);
+    }
+  }
+
   /** Press a dialog's button. */
   async dialogButton(text) {
     await this.wb.waitFor(sel.dialogButton(text), { what: `the dialog's "${text}" button` });
@@ -201,6 +228,23 @@ export class VSCodeUI {
     await this.wb.waitFor(`${sel.quickInputBox}?.value.endsWith(${q(rel ?? '')})`, { what: `the file dialog to hold ${rel}` });
     await sleep(300);
     await this.quickInputButton(button);
+  }
+
+  /**
+   * The clipboard's text, as a paste gets it: proves a Copy button copied
+   * what it says. The page may not read the clipboard (navigator.clipboard
+   * is denied), so this pastes (the browser's own paste command, sent over
+   * CDP) into an off-screen textarea of the workbench and takes it out again.
+   */
+  async clipboardText() {
+    const id = '__clipboardProbe';
+    await this.wb.ev(`(() => { document.getElementById('${id}')?.remove(); const t=document.createElement('textarea'); t.id='${id}';
+      t.style.cssText='position:fixed;left:-9999px;top:0;width:10px;height:10px;opacity:0'; document.body.appendChild(t); t.focus(); return document.activeElement === t; })()`);
+    for (const type of ['keyDown', 'keyUp']) {
+      await this.wb.send('Input.dispatchKeyEvent', { type, key: 'v', code: 'KeyV', modifiers: PRIMARY, ...(type === 'keyDown' ? { commands: ['paste'] } : {}) });
+    }
+    await sleep(100);
+    return this.wb.ev(`(() => { const t=document.getElementById('${id}'); const v=t?.value ?? ''; t?.remove(); return v; })()`);
   }
 
   /** Editor tabs: `[{ label, active }]`. */

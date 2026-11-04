@@ -56,12 +56,16 @@ doubles as "watch how" help for that start.
 | 10 | `welcome-tab-watch-how` | CREATE TABLE scripts, popup off → the empty Diagrams view's **Get started** link → the Welcome tab leads with **Import your SQL scripts** and its reason → its "Watch how" slot holds the SQL clip (published from 04), not muted, waiting → play: it plays in VS Code with its narration (H.264 decodes, and the MP3 audio: `webkitAudioDecodedByteCount` > 0) and pauses the tour, which was playing |
 | 11 | `start-suggestion-turn-off` | CREATE TABLE scripts → the start suggestion → **Don't Ask Again for This Folder** → "ERD Studio won't suggest a start for this folder again. To turn suggestions back on, run ERD Studio: Turn On Start Suggestions for This Folder." → reload: no popup (the sidebar still offers the import) → the palette offers **Turn On Start Suggestions for This Folder**, not Turn Off → run it → reload: the popup is back |
 | 12 | `large-import-review` | 257 tables in 8 scripts (`test/fixtures/sql-ddl/large`, copied without `generate.mjs`) → the start suggestion ("… (257 tables) …") → **Create Diagram** → the confirm stays short (the headline and at most 10 lines, the schemas counted, no table listed) → **Review All…** → the **Review Import** tab (its own webview): 8 schema sections holding all 257 tables, scrolled, one folded, every relationship, what was left out → the page's **Import** → the diagram opens, 257 table files on disk, no second confirm |
+| 13 | `nothing-found-import-from-databricks` | A folder with nothing to import (README only), visited once before (step 1: the first run's walkthrough takes the window's one prompt; closed, reload) → open the empty Diagrams view → "No data model found in this folder yet. Start a new diagram, or bring in your data model from Databricks, Snowflake, Power BI, Fabric and more as DBML, an open format. ERD Studio is free to use." (New Diagram / Show Me How / Don't Ask Again for This Folder) → **Show Me How** → the **Bring In Your Data Model** tab (no Found or dbt card) → the Databricks card → **Copy** the notebook cell (the clipboard holds it, read by `s.ui.clipboardText()`) → `schema.sql` (`test/fixtures/sql-ddl/databricks-notebook`) lands in the folder only now (before, its CREATE TABLEs would make the folder "found" and no notification) → **Import Databricks DDL…** → the file dialog → no dialect question (the name box kept) → "Import 2 tables and 1 relationship from 1 SQL file (Databricks / Spark SQL) …" → customers and orders, joined |
+| 14 | `import-guide-from-picker-fabric` | A folder with nothing to import, popup off → the empty view's **import a data model** → Import…'s last item **How do I export from Databricks, Snowflake, Power BI…?** → the guide → the Microsoft Fabric card (Semantic model / Warehouse or SQL analytics endpoint) → `warehouse.sql` (`test/fixtures/sql-ddl/fabric-warehouse`, as SSMS scripts it) lands in the folder → **Import SQL Server DDL…** → no dialect question → "Import 2 tables and 1 relationship from 1 SQL file (SQL Server / Azure SQL) …" → dim_customer and fct_order, joined |
 
 **The start suggestion (the popup).** A folder ERD Studio can model (SQL
 scripts, a semantic model, a DBML file, a dbt project) gets one notification
-as its window's activation prompt. Stories about the popup (04, 06, 07, 11,
-12) wait for it with `s.ui.waitForNotification(text)` and press its buttons
-with `s.ui.notificationButton(text, label)`; every other story with a folder
+as its window's activation prompt; a folder with nothing to import gets the
+nothing-found one, once its empty Diagrams view is opened. Stories about the
+popup (04, 06, 07, 11, 12) and the nothing-found notification (13) wait for
+it with `s.ui.waitForNotification(text)` and press its buttons with
+`s.ui.notificationButton(text, label)`; every other story with a folder
 turns it off with the story's `settings` (written into the profile's user
 settings, over `STORY_SETTINGS`), so it keeps testing what it tests:
 
@@ -166,6 +170,8 @@ What `s` gives a story:
 | `s.ui.waitForNotification(text)` → `{ message, buttons }`, `s.ui.notificationButton(text, label)` | a notification toast (the start suggestion) |
 | `s.ui.paletteItems(text, { expect })` → labels, `s.ui.reloadWindow()` | the Command Palette's rows, left open; Developer: Reload Window |
 | `s.ui.chooseInFileDialog(rel, button)` | VS Code's own file dialog: type `rel` after the folder it shows, press `button` |
+| `s.ui.waitForDialogKeepingName({ never })` → `{ dialog, named }` | a step-by-step import's confirm: the name box is answered with its suggestion, a quick input matching `never` (`/dialect/i`) fails |
+| `s.ui.clipboardText()` | the clipboard's text, as a paste gets it (the page may not read the clipboard: it pastes into an off-screen textarea) |
 | `s.wb.highlightRect({ x, y, width, height })` | the highlight box around any rectangle |
 | `s.sel.*` | selector expressions: `activity`, `welcomeLink`, `welcomeButtons` (the empty view's buttons, by text: a link alone on its line is one), `viewAction` (a view's title-bar icon), `walkthroughButtons`, `quickPickRow`, `tab`, `walkthroughStep`, `walkthroughLink`, `sidebarRow`, `dialog`, `dialogButton`, `notification`, `activeEditor`, … |
 | `s.expect(cond, msg)`, `s.assert.*` (node:assert/strict), `s.eventually(fn)` | |
@@ -381,6 +387,16 @@ as the `onboarding-stories` artifact (videos, logs, screenshots, `summary.json`)
 - **The recording has no sound of its own.** It is screenshots over CDP; a
   clip or the tour playing in the window is not heard. `--narrate` adds the
   voice afterwards, from the marks.
+- **A fresh profile is a first run.** In a folder ERD Studio activates as
+  its sidebar opens, and the first-run walkthrough then takes the window's one
+  prompt: a story about a prompt that waits for a later window (the
+  nothing-found notification) opens the sidebar once, closes the walkthrough
+  and reloads (13).
+- **A link that wraps** onto two lines has its box's centre on plain text
+  between them: `click` aims at its widest line (`center` in `lib/act.mjs`).
+- **The page may not read the clipboard** (`navigator.clipboard.readText()`
+  is denied): `s.ui.clipboardText()` pastes over CDP into an off-screen
+  textarea. A Copy button writes the machine's real clipboard.
 - **Run from a terminal that stays open.** The runner kills its VS Code when it
   exits; a tool that kills a command's process group when the command ends
   (some agent shells) kills the window with it.

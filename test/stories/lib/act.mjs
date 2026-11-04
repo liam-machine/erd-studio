@@ -143,8 +143,14 @@ export class Workbench {
     }
   }
 
+  /**
+   * The element's centre; a link that wraps onto two lines (its box's centre
+   * is between them, on plain text) is aimed at its widest line instead.
+   */
   async center(expr) {
-    return this.ev(`(() => { const el=${expr}; if(!el) return null; el.scrollIntoView?.({block:'nearest'}); const r=el.getBoundingClientRect(); if(!r.width&&!r.height) return null; return {x:r.left+r.width/2, y:r.top+r.height/2}; })()`);
+    return this.ev(`(() => { const el=${expr}; if(!el) return null; el.scrollIntoView?.({block:'nearest'});
+      const lines=[...el.getClientRects()]; const r=lines.length > 1 ? lines.reduce((a, b) => (b.width > a.width ? b : a)) : el.getBoundingClientRect();
+      if(!r.width&&!r.height) return null; return {x:r.left+r.width/2, y:r.top+r.height/2}; })()`);
   }
 
   async moveToPoint(p) {
