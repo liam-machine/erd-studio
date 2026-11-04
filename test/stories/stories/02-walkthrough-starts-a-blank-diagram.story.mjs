@@ -14,6 +14,8 @@ export default story({
   want: 'I want the Get Started walkthrough to start my first diagram',
   soThat: 'so that I can begin modelling without reading the docs',
   workspace: 'plain',
+  // Not about the start-suggestion popup (a plain folder has none to offer; off, so it never could).
+  settings: { 'erdStudio.startSuggestions': false },
   steps: async (s) => {
     await s.step('Given my project folder with no data model yet', async () => {
       s.expectNoFile('.erd-studio');

@@ -1,11 +1,15 @@
 // A dbt project (dbt_project.yml, models/ with schema yml, target/manifest.json
 // and catalog.json) that has never had ERD Studio: no .erd-studio/ folder.
-// The empty Diagrams view should lead with "Draw from dbt" (the one primary
-// start in a dbt project); it asks which models to start from, offering each
-// models/ folder, then a name, and draws them. Proves the drawn tables become
-// DBML files in the layer of their folder, the dbt relationship tests become
-// Refs in a relationships file, the diagram file keeps a laid-out position for
-// every table, and the canvas shows the Logical / Physical switch dbt brings.
+// What every new dbt user now sees first: the start suggestion, "ERD Studio
+// found a dbt project in this folder. Create a diagram from its models?"
+// (Create Diagram / More Options… / Don't Ask Again for This Folder), while
+// the empty Diagrams view leads with "Draw from dbt" (its one button, the
+// same start). Create Diagram is Draw from dbt: it asks which models to start
+// from, offering each models/ folder (there is no one obvious answer), then a
+// name, and draws them. Proves the drawn tables become DBML files in the
+// layer of their folder, the dbt relationship tests become Refs in a
+// relationships file, the diagram file keeps a laid-out position for every
+// table, and the canvas shows the Logical / Physical switch dbt brings.
 
 import { story } from '../lib/story.mjs';
 
@@ -20,27 +24,29 @@ export default story({
   // The dbt fixture as a project that has never met ERD Studio.
   workspace: { name: 'analytics', from: 'test/fixtures/dbt-project', skip: ['.erd-studio', '.claude'] },
   steps: async (s) => {
-    await s.step('Given my dbt project, never opened with ERD Studio', async () => {
+    await s.step('Given I open my dbt project, never opened with ERD Studio', async () => {
       s.expectNoFile('.erd-studio');
       await s.expectFile('dbt_project.yml');
       await s.expectFile('target/manifest.json');
       await s.eventually(async () => (await s.ui.windowTitle()).includes('analytics'), { message: 'the analytics folder did not open' });
     });
 
-    await s.step('When I open the ERD Studio sidebar, it leads with "Draw from dbt"', async () => {
+    const FOUND = 'ERD Studio found a dbt project in this folder';
+    await s.step('ERD Studio offers to create a diagram from its models', async () => {
+      const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
+      s.assert.equal(toast.message, `${FOUND}. Create a diagram from its models?`);
+      s.assert.deepEqual(toast.buttons, ['Create Diagram', 'More Options…', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
+      // The same start in the sidebar: Draw from dbt is the empty Diagrams view's one button.
       await s.ui.openSidebar('ERD Studio');
-      const button = s.sel.welcomeLink('Draw from dbt');
-      await s.expectVisible(button, { what: 'the Draw from dbt button in the empty Diagrams view' });
-      const first = await s.wb.ev(`[...document.querySelectorAll('.part.sidebar .welcome-view-content a, .part.sidebar .welcome-view-content .monaco-button')].find(a => a.offsetParent)?.textContent.trim()`);
-      s.assert.equal(first, 'Draw from dbt', `a dbt project's first start should be Draw from dbt, but the first is "${first}"`);
+      await s.expectVisible(s.sel.welcomeLink('Draw from dbt'), { what: 'the Draw from dbt button in the empty Diagrams view' });
       s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Draw from dbt'], 'Draw from dbt should be the one button in the empty Diagrams view');
-      await s.wb.highlight(button);
-      await s.pause(1500);
+      await s.wb.highlight(s.sel.notification(FOUND));
+      await s.pause(1800);
       await s.wb.unhighlight();
-    }, { say: 'When I open the ERD Studio sidebar, it leads with: Draw from dbt.' });
+    }, { at: 'left' });
 
-    await s.step('When I click it, it asks which models to start from', async () => {
-      await s.wb.click(s.sel.welcomeLink('Draw from dbt'));
+    await s.step('I click "Create Diagram": it asks which models to start from', async () => {
+      await s.ui.notificationButton(FOUND, 'Create Diagram');
       const pick = await s.ui.waitForQuickPick({ title: 'Draw from dbt' });
       s.expect(/Which dbt models/.test(pick.placeholder), `expected "Which dbt models…", got "${pick.placeholder}"`);
       for (const folder of ['gold', 'silver', 'staging']) s.expect(pick.items.includes(folder), `the models/${folder} folder should be offered: ${pick.items.join(', ')}`);

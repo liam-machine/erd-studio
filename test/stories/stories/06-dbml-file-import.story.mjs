@@ -1,15 +1,17 @@
 // A folder holding a single-file DBML export from dbdiagram.io (written from
 // its public syntax docs: inline and block refs, a composite ref, a table
-// partial, an enum, records, a second schema). ERD Studio's quick look finds
-// the file, so the empty Diagrams view leads with "Import your DBML file" (its
-// one button, with the reason "This folder has a DBML file."), which goes
-// straight to the file dialog with that file already chosen, so Import takes
-// it in one press. Proves the file is
-// split into one DBML file per table (by schema), its references land in one
-// relationships file, the dry run counts six relationships as the canvas does
-// (the composite once), says they are saved as optional (?) as the file then
-// shows, names what ERD Studio leaves out (records, the database type) in
-// plain words, and the diagram opens with all six tables.
+// partial, an enum, records, a second schema), opened for the first time.
+// ERD Studio's quick look finds the file, and the window's one prompt is the
+// start suggestion: "ERD Studio found a DBML file in this folder. Create a
+// diagram from it?". Create Diagram is the quick import: no file dialog,
+// layer pick or name box (asserted: no quick input shows before the
+// confirm); the file, the Main layer and the name from its Project
+// ("ecommerce") are chosen, and it asks once. Proves the file is split into
+// one DBML file per table (by schema), its references land in one
+// relationships file, the confirm counts six relationships as the canvas
+// does (the composite once), says they are saved as optional (?) as the file
+// then shows, says what ERD Studio leaves out (the first thing and a count)
+// in plain words, and the diagram opens with all six tables.
 
 import { story } from '../lib/story.mjs';
 
@@ -24,58 +26,41 @@ export default story({
   soThat: 'so that the diagram lives in Git next to my code',
   workspace: { name: 'online-shop', add: { 'ecommerce.dbml': 'test/fixtures/dbml/foreign/ecommerce.dbml' } },
   steps: async (s) => {
-    await s.step('Given my project folder with ecommerce.dbml from dbdiagram.io', async () => {
+    await s.step('Given I open my project folder, with ecommerce.dbml from dbdiagram.io', async () => {
       s.expectNoFile('.erd-studio');
       await s.expectFile('ecommerce.dbml', { contains: 'Project ecommerce' });
       await s.eventually(async () => (await s.ui.windowTitle()).includes('online-shop'), { message: 'the online-shop folder did not open' });
-    }, { say: 'Given my project folder, with an e-commerce DBML file from dbdiagram dot io.' });
+    }, { say: 'Given I open my project folder, with an e-commerce DBML file from dbdiagram dot io.' });
 
-    const START = 'Import your DBML file';
-    await s.step('When I open the ERD Studio sidebar, it leads with "Import your DBML file"', async () => {
-      await s.ui.openSidebar('ERD Studio');
-      const button = s.sel.welcomeLink(START);
-      await s.expectVisible(button, { what: `the "${START}" button in the empty Diagrams view (the folder's suggested start)` });
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), [START], 'the suggested start should be the one button in the empty Diagrams view');
-      const text = await s.ui.sidebarText();
-      s.expect(text.includes('This folder has a DBML file.'), `the view should say why it suggests this: ${text}`);
-      await s.wb.highlight(button);
-      await s.pause(1500);
+    const FOUND = 'ERD Studio found a DBML file in this folder';
+    await s.step('ERD Studio finds the file and offers to create a diagram from it', async () => {
+      const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
+      s.assert.equal(toast.message, `${FOUND}. Create a diagram from it?`);
+      s.assert.deepEqual(toast.buttons, ['Create Diagram', 'More Options…', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
+      await s.wb.highlight(s.sel.notification(FOUND));
+      await s.pause(1800);
       await s.wb.unhighlight();
-    });
+    }, { at: 'left' });
 
-    await s.step('When I click it, ecommerce.dbml is already chosen: I press Import', async () => {
-      await s.wb.click(s.sel.welcomeLink(START));
-      const dialog = await s.ui.waitForQuickPick({ title: 'Import DBML' });
-      s.assert.equal(dialog.value, `${s.workspace}/ecommerce.dbml`, 'the file dialog should start on the DBML file the folder holds');
-      await s.wb.highlight(s.sel.quickInputBox);
-      await s.pause(1200);
-      await s.wb.unhighlight();
-      await s.ui.chooseInFileDialog(undefined, 'Import');
-    }, { say: 'When I click it, the file is already chosen, so I press Import.' });
-
-    await s.step('I keep the suggested name, "ecommerce"', async () => {
-      const box = await s.ui.waitForQuickPick({ title: 'Import DBML' });
-      s.expect(/Name the diagram/.test(box.message), `expected the name box, but it says "${box.message}"`);
-      s.assert.equal(box.value, 'ecommerce', "the name should be suggested from the file's Project");
-      await s.wb.highlight(s.sel.quickInputBox);
-      await s.pause(1000);
-      await s.wb.unhighlight();
-      await s.wb.press('Enter');
-    }, { say: 'I keep the suggested name, e-commerce.' });
+    let dialog;
+    await s.step('I click "Create Diagram": no file to pick, no name to type', async () => {
+      await s.ui.notificationButton(FOUND, 'Create Diagram');
+      // No file dialog, layer or name question: the confirm is the first thing it shows.
+      dialog = await s.ui.waitForDialogAskingNothingFirst();
+    }, { say: "I click Create Diagram. There's no file to pick and no name to type: it asks me nothing.", at: 'left' });
 
     await s.step('It shows what it will import, and what it leaves out', async () => {
-      const dialog = await s.ui.waitForDialog();
-      s.expect(/^Import 6 tables into a new diagram "ecommerce"/.test(dialog.message), `the dry run's headline is "${dialog.message}"`);
-      s.expect(/Records for countries/.test(dialog.detail), `the dry run should say the sample rows are left out: ${dialog.detail}`);
-      // As the canvas counts them (the composite fk_merchant once), and as the files will say (>?).
-      s.expect(/• 6 relationships\b/.test(dialog.detail), `the dry run should count 6 relationships, as the canvas does: ${dialog.detail}`);
-      s.expect(dialog.detail.includes('Every relationship is saved as optional (?'), `the dry run should say the relationships are saved as optional: ${dialog.detail}`);
-      s.expect(!/plain relationships|\bmeta\b|under "dbml"/.test(dialog.detail), `the dry run should use plain words: ${dialog.detail}`);
+      s.assert.equal(dialog.message, 'Import 6 tables and 6 relationships into a new diagram "ecommerce" in the Main layer.', 'the confirm\'s headline');
+      s.assert.deepEqual([...dialog.buttons].sort(), ['Cancel', 'Change Options…', 'Import', 'Review All…'], 'the confirm\'s buttons (VS Code orders them by platform)');
+      // What is left out, the first thing and a count (the database type, the sample rows, …); Review All… lists them all.
+      s.expect(/^• Not imported: .+; and \d+ more\.$/m.test(dialog.detail), `the confirm should say what is left out: ${dialog.detail}`);
+      s.expect(dialog.detail.includes('saved as optional (?'), `the confirm should say the relationships are saved as optional: ${dialog.detail}`);
+      s.expect(!/plain relationships|\bmeta\b|under "dbml"/.test(dialog.detail), `the confirm should use plain words: ${dialog.detail}`);
       s.expectNoFile('.erd-studio/main/diagrams/ecommerce.dbml');
       await s.wb.highlight(s.sel.dialog);
       await s.pause(3500);
       await s.wb.unhighlight();
-    });
+    }, { say: 'It shows what it will import, six tables and six relationships, and what it leaves out.' });
 
     await s.step('When I press Import, the diagram opens with all six tables', async () => {
       await s.ui.dialogButton('Import');

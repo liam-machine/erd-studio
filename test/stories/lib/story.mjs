@@ -59,7 +59,8 @@ export const PACES = {
 /**
  * The `s` every story's steps receive.
  *
- *   s.step(caption, fn, { say }) one step: caption + actions + assertions (`say`: what --narrate speaks instead of the caption)
+ *   s.step(caption, fn, { say, at }) one step: caption + actions + assertions (`say`: what --narrate speaks instead of
+ *                                the caption; `at: 'left'`: the caption bottom-left, clear of a notification)
  *   s.wb                         the workbench actor (click, press, type, waitFor, highlight, ev…)
  *   s.ui                         VS Code helpers (openSidebar, waitForQuickPick, pick, runCommand, tabs…)
  *   s.sel                        selector expressions (vscode.mjs)
@@ -87,9 +88,13 @@ export class StoryContext {
     this.steps = [];
   }
 
-  /** A caption from now on; `say` is what --narrate speaks instead of `text` ('' or null: nothing). */
-  mark(text, kind = 'step', say) {
-    this.marks.push({ t: Date.now(), text, kind, ...(say !== undefined ? { say } : {}) });
+  /**
+   * A caption from now on; `say` is what --narrate speaks instead of `text`
+   * ('' or null: nothing); `at: 'left'` films it bottom-left, clear of the
+   * notification toasts (bottom-right).
+   */
+  mark(text, kind = 'step', say, at) {
+    this.marks.push({ t: Date.now(), text, kind, ...(say !== undefined ? { say } : {}), ...(at ? { at } : {}) });
   }
 
   async pause(ms = 1000) {
@@ -98,10 +103,10 @@ export class StoryContext {
     await sleep(Math.round(ms * (base / PACES.record.afterCaption)));
   }
 
-  async step(name, fn, { say } = {}) {
+  async step(name, fn, { say, at } = {}) {
     if (this.failed) return;
     const t = Date.now();
-    this.mark(name, 'step', say);
+    this.mark(name, 'step', say, at);
     this.log(`STEP ${this.steps.length + 1}: ${name}`);
     await sleep(this.pace.afterCaption);
     try {

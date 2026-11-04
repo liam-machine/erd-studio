@@ -34,7 +34,9 @@ const assText = (s) => s.replace(/\\/g, '/').replace(/[{}]/g, (c) => (c === '{' 
 
 /**
  * The caption cues: each mark shows from its time to the next mark's (the last
- * one to the end). `marks` = [{ t, text, kind: 'intro'|'step'|'fail'|'pass' }].
+ * one to the end). `marks` = [{ t, text, kind: 'intro'|'step'|'fail'|'pass', at? }];
+ * `at: 'left'` puts a step's caption bottom-left, clear of the notification
+ * toasts VS Code stacks bottom-right (a step about a notification).
  */
 export function cues(marks, t0, tEnd, toVideoMs = (t) => t - t0) {
   const sorted = [...marks].sort((a, b) => a.t - b.t);
@@ -43,6 +45,7 @@ export function cues(marks, t0, tEnd, toVideoMs = (t) => t - t0) {
     end: Math.max(0, toVideoMs(i + 1 < sorted.length ? sorted[i + 1].t : tEnd)),
     text: m.text,
     kind: m.kind ?? 'step',
+    ...(m.at === 'left' ? { at: 'left' } : {}),
   })).filter((c) => c.end > c.start);
 }
 
@@ -59,6 +62,7 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: step,${font},30,&H00FFFFFF,&H00FFFFFF,&H30201810,&H00000000,1,0,0,0,100,100,0,0,3,14,0,2,120,120,56,1
+Style: stepLeft,${font},30,&H00FFFFFF,&H00FFFFFF,&H30201810,&H00000000,1,0,0,0,100,100,0,0,3,14,0,1,120,${Math.round(width * 0.36)},56,1
 Style: intro,${font},34,&H00FFFFFF,&H00FFFFFF,&H18402010,&H00000000,1,0,0,0,100,100,0,0,3,22,0,5,160,160,40,1
 Style: fail,${font},30,&H00FFFFFF,&H00FFFFFF,&H202020B0,&H00000000,1,0,0,0,100,100,0,0,3,14,0,2,120,120,56,1
 Style: pass,${font},30,&H00FFFFFF,&H00FFFFFF,&H20286018,&H00000000,1,0,0,0,100,100,0,0,3,14,0,2,120,120,56,1
@@ -66,7 +70,7 @@ Style: pass,${font},30,&H00FFFFFF,&H00FFFFFF,&H20286018,&H00000000,1,0,0,0,100,1
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
-  return head + list.map((c) => `Dialogue: 0,${assTime(c.start)},${assTime(c.end)},${c.kind},,0,0,0,,${assText(c.text)}`).join('\n') + '\n';
+  return head + list.map((c) => `Dialogue: 0,${assTime(c.start)},${assTime(c.end)},${c.kind === 'step' && c.at === 'left' ? 'stepLeft' : c.kind},,0,0,0,,${assText(c.text)}`).join('\n') + '\n';
 }
 
 export function srtFile(list) {

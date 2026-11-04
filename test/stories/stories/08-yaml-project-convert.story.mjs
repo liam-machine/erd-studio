@@ -19,6 +19,8 @@ export default story({
   want: 'I want to convert its YAML and JSON files to DBML',
   soThat: 'so that my model is in an open format and my diagrams keep working',
   workspace: 'yaml-project',
+  // Not about the start-suggestion popup (a project with diagrams gets none; off, so it never could).
+  settings: { 'erdStudio.startSuggestions': false },
   steps: async (s) => {
     const NOTICE = 'from an older ERD Studio';
     await s.step('Given my project from an older ERD Studio: it offers to convert it to DBML', async () => {

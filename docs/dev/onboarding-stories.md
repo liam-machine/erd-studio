@@ -4,9 +4,11 @@ User stories as code: each one drives a **real VS Code** with the extension the
 way a new user would (clicks, typing, the Command Palette, dialogs), asserts
 what they should see and what lands on disk, and can film itself as a
 captioned MP4. Re-run them after any change to the start screen, the
-walkthrough, the sidebar's welcome text, Open an Example, Import DBML or the
-first canvas: they catch what unit tests cannot, such as a `command:` link
-whose arguments VS Code drops.
+walkthrough, the sidebar's welcome text, the start suggestion, an import (its
+quick path, its confirm, Review All…), Open an Example or the first canvas:
+they catch what unit tests cannot, such as a `command:` link whose arguments
+VS Code drops, or a command that drops its own (story 05 guards against
+`erdStudio.start` passing no `{ quick: true }` to the import it runs).
 
 ```
 test/stories/
@@ -45,13 +47,32 @@ doubles as "watch how" help for that start.
 | 01 | `empty-window-opens-an-example` | No folder open → sidebar **Open an example** → Medallion lakehouse opens |
 | 02 | `walkthrough-starts-a-blank-diagram` | Walkthrough **New Diagram** → name it → empty canvas |
 | 03 | `plain-folder-new-diagram-add-table` | Empty folder → sidebar **New Diagram** → "Orders" → canvas **New Table** → `customer` on the canvas and in `.erd-studio/main/tables/` (shown in the Explorer) |
-| 04 | `sql-scripts-import` | CREATE TABLE scripts (`test/fixtures/sql-ddl/postgres`) → the empty Diagrams view's one button, **Import your SQL scripts** ("This folder has CREATE TABLE scripts.") → straight to the folder dialog, no Import… picker (asserted) → `database/` → PostgreSQL ("detected") → name "Sales" (suggested `sales`) → dry run → 4 tables, 3 relationships |
-| 05 | `power-bi-model-import` | A PBIP project (`test/fixtures/semantic-model/pbip-tmdl`) → the one button, **Import your Power BI semantic model** → the folder dialog, starting in the project → Import → dry run (snake_case names, what was left out) → sales, customer, product, date_table and 4 relationships |
-| 06 | `dbml-file-import` | A dbdiagram.io file (`test/fixtures/dbml/foreign/ecommerce.dbml`) → the one button, **Import your DBML file** → the file dialog, `ecommerce.dbml` already chosen → Import → name → dry run in plain words → 6 tables, one file each by schema |
-| 07 | `dbt-project-draw` | The dbt fixture without `.erd-studio/` → sidebar leads with **Draw from dbt** → silver models → laid out, Logical / Physical switch |
+| 04 | `sql-scripts-import` | CREATE TABLE scripts (`test/fixtures/sql-ddl/postgres`) → the start suggestion ("ERD Studio found CREATE TABLE scripts in this folder (4 tables). Create a diagram from them?") → **Create Diagram** → no question before the one confirm (asserted: no quick input shows) → "Import 4 tables and 3 relationships from 2 SQL files (PostgreSQL) into a new diagram "sales" in the Main layer." → Import → 4 tables, 3 relationships on the canvas and on disk |
+| 05 | `power-bi-model-import` | A PBIP project (`test/fixtures/semantic-model/pbip-tmdl`), popup off → the empty Diagrams view's one button, **Import your Power BI semantic model** → no question before the one confirm (asserted) → "Import 4 tables and 4 relationships from the semantic model AdventureSales into a new diagram "adventure-sales" …" (and the measures left out) → sales, customer, product, date_table and 4 relationships |
+| 06 | `dbml-file-import` | A dbdiagram.io file (`test/fixtures/dbml/foreign/ecommerce.dbml`) → the start suggestion ("…found a DBML file in this folder. Create a diagram from it?") → **Create Diagram** → no question (asserted) → the one confirm in plain words ("Import 6 tables and 6 relationships into a new diagram "ecommerce" …") → 6 tables, one file each by schema |
+| 07 | `dbt-project-draw` | The dbt fixture without `.erd-studio/` → the start suggestion ("…found a dbt project in this folder. Create a diagram from its models?"), the sidebar's one button **Draw from dbt** beside it → **Create Diagram** → which models (silver) → name → laid out, Logical / Physical switch |
 | 08 | `yaml-project-convert` | A pre-2.0 YAML/JSON project (`test/fixtures/logical-only`) → the opening notice offers **Convert to DBML…** then **Open sales** → the Diagrams view's first row, **Convert to DBML…** → Convert panel → DBML files, the YAML and JSON removed, the diagram reopens |
 | 09 | `welcome-tab-example` | No folder open → the **Welcome to ERD Studio** tab → **Open an example…** → Kimball bus matrix opens on retail sales |
-| 10 | `welcome-tab-watch-how` | CREATE TABLE scripts → the empty Diagrams view's **Get started** link → the Welcome tab leads with **Import your SQL scripts** and its reason → its "Watch how" slot holds the SQL clip (published from 04), not muted, waiting → play: it plays in VS Code with its narration (H.264 decodes, and the MP3 audio: `webkitAudioDecodedByteCount` > 0) and pauses the tour, which was playing |
+| 10 | `welcome-tab-watch-how` | CREATE TABLE scripts, popup off → the empty Diagrams view's **Get started** link → the Welcome tab leads with **Import your SQL scripts** and its reason → its "Watch how" slot holds the SQL clip (published from 04), not muted, waiting → play: it plays in VS Code with its narration (H.264 decodes, and the MP3 audio: `webkitAudioDecodedByteCount` > 0) and pauses the tour, which was playing |
+| 11 | `start-suggestion-turn-off` | CREATE TABLE scripts → the start suggestion → **Don't Ask Again for This Folder** → "ERD Studio won't suggest a start for this folder again. To turn suggestions back on, run ERD Studio: Turn On Start Suggestions for This Folder." → reload: no popup (the sidebar still offers the import) → the palette offers **Turn On Start Suggestions for This Folder**, not Turn Off → run it → reload: the popup is back |
+| 12 | `large-import-review` | 257 tables in 8 scripts (`test/fixtures/sql-ddl/large`, copied without `generate.mjs`) → the start suggestion ("… (257 tables) …") → **Create Diagram** → the confirm stays short (the headline and at most 10 lines, the schemas counted, no table listed) → **Review All…** → the **Review Import** tab (its own webview): 8 schema sections holding all 257 tables, scrolled, one folded, every relationship, what was left out → the page's **Import** → the diagram opens, 257 table files on disk, no second confirm |
+
+**The start suggestion (the popup).** A folder ERD Studio can model (SQL
+scripts, a semantic model, a DBML file, a dbt project) gets one notification
+as its window's activation prompt. Stories about the popup (04, 06, 07, 11,
+12) wait for it with `s.ui.waitForNotification(text)` and press its buttons
+with `s.ui.notificationButton(text, label)`; every other story with a folder
+turns it off with the story's `settings` (written into the profile's user
+settings, over `STORY_SETTINGS`), so it keeps testing what it tests:
+
+```js
+settings: { 'erdStudio.startSuggestions': false },
+```
+
+A quick import asks nothing before its one confirm:
+`s.ui.waitForDialogAskingNothingFirst()` fails if a quick pick, input box or
+file dialog shows before the modal. VS Code orders a modal's buttons by
+platform, so compare them sorted.
 
 A story that finds a product bug asserts the intended behaviour, says so in
 its header comment ("currently failing"), and the bug is reported; it is not
@@ -141,6 +162,9 @@ What `s` gives a story:
 | `s.wb.tagPage()` then `s.wb.waitForReload(tag)` | around an action that reloads the window |
 | `s.webview()` → `.waitFor(expr)`, `.ev(expr)`, `.click(expr)`, `.fill(expr, text)`, `.highlight(expr)`, `.rect(expr)` | the ERD Studio webview in the active editor (the canvas, the Welcome tab, the Convert panel); expressions see its document as `doc`; elements are scrolled into view before a click |
 | `s.ui.waitForDialog()` → `{ message, detail, buttons }`, `s.ui.dialogButton(text)` | a modal dialog (an import's dry run) |
+| `s.ui.waitForDialogAskingNothingFirst()` | the same, failing if any quick input shows first (the quick import) |
+| `s.ui.waitForNotification(text)` → `{ message, buttons }`, `s.ui.notificationButton(text, label)` | a notification toast (the start suggestion) |
+| `s.ui.paletteItems(text, { expect })` → labels, `s.ui.reloadWindow()` | the Command Palette's rows, left open; Developer: Reload Window |
 | `s.ui.chooseInFileDialog(rel, button)` | VS Code's own file dialog: type `rel` after the folder it shows, press `button` |
 | `s.wb.highlightRect({ x, y, width, height })` | the highlight box around any rectangle |
 | `s.sel.*` | selector expressions: `activity`, `welcomeLink`, `welcomeButtons` (the empty view's buttons, by text: a link alone on its line is one), `viewAction` (a view's title-bar icon), `walkthroughButtons`, `quickPickRow`, `tab`, `walkthroughStep`, `walkthroughLink`, `sidebarRow`, `dialog`, `dialogButton`, `notification`, `activeEditor`, … |
@@ -236,9 +260,9 @@ on real conditions (`waitFor`, `eventually`), never long fixed sleeps.
 
 **Assert the one obvious start.** Each story checks that the start its
 workspace should suggest is the surface's one button: `s.wb.ev(s.sel.welcomeButtons)`
-is `['Import your SQL scripts']` in a folder of SQL scripts (04),
+is `['Import your Power BI semantic model']` in a PBIP project (05),
 `['New Diagram']` in a plain folder (03), `['Draw from dbt']` in a dbt project
-(07), `['Open Folder']` in an empty window (01); the walkthrough's step (02),
+(07, beside the popup), `['Open Folder']` in an empty window (01); the walkthrough's step (02),
 the Convert row and notice of a project from before 2.0 (08) and the Welcome
 tab's start card (10) likewise.
 

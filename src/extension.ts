@@ -1100,7 +1100,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand(START_COMMAND, (arg?: unknown) => runStart(arg, {
       context: () => startContext(),
-      executeCommand: (command) => vscode.commands.executeCommand(command),
+      // With its arguments: a direct import's { quick: true } (startActionArgs) is its quick path.
+      executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
       pick: (items) => vscode.window.showQuickPick(items, { title: 'Start your data model', placeHolder: 'How would you like to start?' }),
     })),
   );

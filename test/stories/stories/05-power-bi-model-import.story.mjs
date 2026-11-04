@@ -1,14 +1,16 @@
 // A Power BI project saved as PBIP (the semantic model as TMDL files). ERD
 // Studio's quick look at the folder finds the model, so the empty Diagrams
 // view leads with "Import your Power BI semantic model" (its one button, with
-// the reason "This folder has a Power BI or Fabric semantic model."), which
-// goes straight to the folder dialog; it starts in the project, which holds
-// AdventureSales.SemanticModel, so one press of Import reads it, and the name
-// is suggested as adventure-sales (not adventuresales). Proves the four model tables (Sales,
-// Customer, Product and the 'Date Table') become DBML tables in snake_case,
-// the measures, calculation group and auto date table are left out (and the
-// dry run says so), and the diagram opens with the four tables and the four
-// relationships, the inactive one included.
+// the reason "This folder has a Power BI or Fabric semantic model."). That
+// button is the quick import: no folder dialog, layer pick or name box
+// (asserted: no quick input shows before the confirm); it takes the folder's
+// one model, the Main layer and the name adventure-sales (not adventuresales),
+// and asks once. Proves the four model tables (Sales, Customer, Product and
+// the 'Date Table') become DBML tables in snake_case, the measures,
+// calculation group and auto date table are left out (and the confirm says
+// so), and the diagram opens with the four tables and the four
+// relationships, the inactive one included. The start suggestion (the popup)
+// is off here: this story is the sidebar's path (04 and 06 are the popup's).
 
 import { story } from '../lib/story.mjs';
 
@@ -21,6 +23,8 @@ export default story({
   want: 'I want to see my semantic model as a diagram',
   soThat: 'so that I can design the model behind the report in Git',
   workspace: { name: 'adventure-sales', from: 'test/fixtures/semantic-model/pbip-tmdl' },
+  // The sidebar's path: no start-suggestion popup.
+  settings: { 'erdStudio.startSuggestions': false },
   steps: async (s) => {
     await s.step('Given my Power BI project folder (AdventureSales.pbip)', async () => {
       s.expectNoFile('.erd-studio');
@@ -41,37 +45,22 @@ export default story({
       await s.wb.unhighlight();
     });
 
-    await s.step('When I click it, I import straight from my project folder', async () => {
+    let dialog;
+    await s.step('When I click it, it asks me nothing: it shows what it will import', async () => {
       await s.wb.click(s.sel.welcomeLink(START));
-      const dialog = await s.ui.waitForQuickPick({ title: 'Import Semantic Model' });
-      s.assert.equal(dialog.value, `${s.workspace}/`, 'the folder dialog should start in my project folder');
-      s.expect(dialog.items.includes('AdventureSales.SemanticModel'), `the folder should list AdventureSales.SemanticModel: ${dialog.items.join(', ')}`);
-      await s.wb.highlight(s.sel.quickPickRow('AdventureSales.SemanticModel'));
-      await s.pause(1200);
-      await s.wb.unhighlight();
-      await s.ui.quickInputButton('Import');
-    });
+      // No folder dialog, layer or name question: the confirm is the first thing it shows.
+      dialog = await s.ui.waitForDialogAskingNothingFirst();
+    }, { say: "When I click it, I don't have to answer anything: it finds the model, and picks the layer and the name for me." });
 
-    await s.step('I keep the suggested name, "adventure-sales"', async () => {
-      const box = await s.ui.waitForQuickPick({ title: 'Import Semantic Model' });
-      s.expect(/Name the diagram/.test(box.message), `expected the name box, but it says "${box.message}"`);
-      s.assert.equal(box.value, 'adventure-sales', 'the model AdventureSales should suggest adventure-sales');
-      await s.wb.highlight(s.sel.quickInputBox);
-      await s.pause(1000);
-      await s.wb.unhighlight();
-      await s.wb.press('Enter');
-    }, { say: 'I keep the suggested name, adventure sales.' });
-
-    await s.step('It shows what it will import, and what it leaves out', async () => {
-      const dialog = await s.ui.waitForDialog();
-      s.expect(/^Import 4 tables from the semantic model AdventureSales/.test(dialog.message), `the dry run's headline is "${dialog.message}"`);
-      s.expect(dialog.detail.includes('4 relationships'), `the dry run should name 4 relationships: ${dialog.detail}`);
-      s.expect(/3 measures/.test(dialog.detail), `the dry run should say the measures are not imported: ${dialog.detail}`);
+    await s.step('4 tables and 4 relationships into "adventure-sales", and what it leaves out', async () => {
+      s.assert.equal(dialog.message, 'Import 4 tables and 4 relationships from the semantic model AdventureSales into a new diagram "adventure-sales" in the Main layer.', 'the confirm\'s headline');
+      s.assert.deepEqual([...dialog.buttons].sort(), ['Cancel', 'Change Options…', 'Import', 'Review All…'], 'the confirm\'s buttons (VS Code orders them by platform)');
+      s.expect(/3 measures/.test(dialog.detail), `the confirm should say the measures are not imported: ${dialog.detail}`);
       s.expectNoFile('.erd-studio/main/diagrams/adventure-sales.dbml');
       await s.wb.highlight(s.sel.dialog);
       await s.pause(3500);
       await s.wb.unhighlight();
-    });
+    }, { say: 'Four tables and four relationships, into a new diagram called adventure sales. And it says what it leaves out, like the measures.' });
 
     await s.step('When I press Import, the diagram opens: Sales, Customer, Product and Date', async () => {
       await s.ui.dialogButton('Import');

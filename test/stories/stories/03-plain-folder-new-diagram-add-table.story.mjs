@@ -17,6 +17,8 @@ export default story({
   want: 'I want to start a diagram and add my first table by hand',
   soThat: 'so that my design lives as files next to my code',
   workspace: { name: 'orders-app', add: { 'README.md': 'test/stories/workspaces/plain/README.md' } },
+  // Not about the start-suggestion popup (a plain folder has none to offer; off, so it never could).
+  settings: { 'erdStudio.startSuggestions': false },
   steps: async (s) => {
     await s.step('Given my project folder with no data model yet', async () => {
       s.expectNoFile('.erd-studio');

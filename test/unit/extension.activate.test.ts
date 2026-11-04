@@ -3002,6 +3002,21 @@ describe('the start screen (first five minutes)', () => {
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Open a folder first'), expect.anything(), expect.anything());
   });
 
+  // The empty Diagrams view's, the walkthrough's and the Welcome tab's primary import is
+  // a start link: erdStudio.start must hand the import its { quick: true }, or the user
+  // gets the step-by-step flow (folder dialog, dialect, name) instead of the one confirm.
+  it('a direct import\'s start link runs the import on its quick path ({ quick: true } reaches the command)', async () => {
+    await activate(context);
+    const real = vscode.commands.executeCommand;
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) =>
+      (command.startsWith('erdStudio.import') ? undefined : real(command, ...args))) as never);
+
+    for (const [action, command] of [['importSqlDdl', 'erdStudio.importSqlDdl'], ['importSemanticModel', 'erdStudio.importSemanticModel'], ['importDbmlFile', 'erdStudio.importDbml']] as const) {
+      await vscode.commands.executeCommand(START_COMMAND, { action, from: 'sidebar' });
+      expect(exec).toHaveBeenCalledWith(command, { quick: true });
+    }
+  });
+
   it('an example project\'s new window opens its first diagram on activation, once, with no diagrams toast', async () => {
     const ws = path.join(root, 'medallion');
     fs.mkdirSync(path.join(ws, '.erd-studio'), { recursive: true });

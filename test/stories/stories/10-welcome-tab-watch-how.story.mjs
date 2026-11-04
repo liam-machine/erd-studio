@@ -20,6 +20,8 @@ export default story({
   want: 'I want to see how the suggested start works before I try it',
   soThat: 'so that I know what will happen to my files',
   workspace: { name: 'shop-database', add: { database: 'test/fixtures/sql-ddl/postgres' } },
+  // The Welcome tab's path: no start-suggestion popup over it.
+  settings: { 'erdStudio.startSuggestions': false },
   steps: async (s) => {
     await s.step('Given my project folder with SQL scripts in database/', async () => {
       s.expectNoFile('.erd-studio');

@@ -39,6 +39,8 @@ export const sel = {
   dialogButton: (text) => `[...document.querySelectorAll('.monaco-dialog-box .monaco-button')].find(b => b.textContent.trim() === ${q(text)})`,
   /** A notification toast whose message contains `text`. */
   notification: (text) => `[...document.querySelectorAll('.notification-toast-container .notification-list-item')].find(n => (n.querySelector('.notification-list-item-message')?.textContent ?? '').includes(${q(text)}))`,
+  /** A button of the notification toast whose message contains `text`, by its label. */
+  notificationButton: (text, label) => `[...document.querySelectorAll('.notification-toast-container .notification-list-item')].filter(n => (n.querySelector('.notification-list-item-message')?.textContent ?? '').includes(${q(text)})).flatMap(n => [...n.querySelectorAll('.monaco-button')]).find(b => b.textContent.trim() === ${q(label)})`,
   /** The active editor group's editor area (to highlight what opened). */
   activeEditor: `document.querySelector('.editor-group-container.active .editor-container')`,
   /** Text on the Get Started (walkthrough) page. */
@@ -123,6 +125,45 @@ export class VSCodeUI {
     await this.wb.click(sel.quickPickRow(label));
   }
 
+  /**
+   * Wait for the notification toast whose message contains `text`:
+   * `{ message, buttons }` (the message in full, the button labels).
+   */
+  async waitForNotification(text, { timeout = 20000 } = {}) {
+    await this.wb.waitFor(sel.notification(text), { timeout, what: `a notification saying "${text}"` });
+    await sleep(150);
+    return this.wb.ev(`(() => { const n=${sel.notification(text)}; return { message: n.querySelector('.notification-list-item-message')?.textContent.trim() ?? '',
+      buttons: [...n.querySelectorAll('.monaco-button')].map(b => b.textContent.trim()).filter(Boolean) }; })()`);
+  }
+
+  /** Press a button of the notification toast whose message contains `text`. */
+  async notificationButton(text, label) {
+    await this.wb.waitFor(sel.notificationButton(text, label), { what: `the "${label}" button of the notification "${text}"` });
+    await this.wb.click(sel.notificationButton(text, label));
+  }
+
+  /**
+   * The Command Palette's rows for `text` (opened from the Command Center and
+   * left open, so the viewer sees them): resolves the labels once a row
+   * starting with `expect` shows (or after `settleMs` without one).
+   */
+  async paletteItems(text, { expect, settleMs = 1500 } = {}) {
+    await this.wb.click(sel.commandCenter);
+    await this.waitForQuickPick();
+    await this.wb.type(`>${text}`);
+    if (expect) await this.wb.waitFor(sel.quickPickRow(expect), { what: `"${expect}" in the Command Palette` });
+    else await sleep(settleMs);
+    await sleep(300);
+    return (await this.quickPick())?.items ?? [];
+  }
+
+  /** Reload the window from the Command Palette and wait for the new page. */
+  async reloadWindow() {
+    const tag = await this.wb.tagPage();
+    await this.runCommand('Developer: Reload Window');
+    await this.wb.waitForReload(tag);
+  }
+
   /** Wait for a modal dialog: `{ message, detail, buttons }`. */
   async waitForDialog({ timeout = 20000 } = {}) {
     await this.wb.waitFor(sel.dialog, { timeout, what: 'a dialog' });
@@ -130,6 +171,22 @@ export class VSCodeUI {
     return this.wb.ev(`(() => { const d=${sel.dialog}; return { message: d.querySelector('.dialog-message-text')?.textContent.trim() ?? '',
       detail: d.querySelector('.dialog-message-detail')?.innerText.trim() ?? '',
       buttons: [...d.querySelectorAll('.monaco-button')].map(b => b.textContent.trim()).filter(Boolean) }; })()`);
+  }
+
+  /**
+   * Wait for a modal dialog, failing if a quick pick, input box or file
+   * dialog shows first: the quick path asks nothing before its one confirm.
+   */
+  async waitForDialogAskingNothingFirst({ timeout = 30000 } = {}) {
+    const until = Date.now() + timeout;
+    for (;;) {
+      const state = await this.wb.ev(`(() => { if (${sel.dialog}) return 'dialog'; const w=${sel.quickInput};
+        return w ? 'asked: ' + ((w.querySelector('.quick-input-title')?.textContent ?? '') + ' ' + (w.querySelector('.quick-input-box input')?.placeholder ?? '') + ' ' + (w.querySelector('.quick-input-message')?.textContent ?? '')).trim() : ''; })()`).catch(() => '');
+      if (state === 'dialog') return this.waitForDialog();
+      if (state.startsWith('asked: ')) throw new Error(`the quick path asked a question before its one confirm (${state.slice(7)})`);
+      if (Date.now() > until) throw new Error(`timed out after ${timeout} ms waiting for the import's confirm`);
+      await sleep(100);
+    }
   }
 
   /** Press a dialog's button. */

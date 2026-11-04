@@ -1,18 +1,21 @@
 // A folder that already holds CREATE TABLE scripts (a pg_dump --schema-only
-// split in two files, the foreign keys in the second). ERD Studio's quick look
-// at the folder finds them, so the empty Diagrams view leads with "Import your
-// SQL scripts" (its one button, with the reason "This folder has CREATE TABLE
-// scripts."), which goes straight to the folder dialog (no Import… picker);
-// then the dialect (PostgreSQL, marked "detected"), the name (suggested from
-// the schema the tables share, "sales", not the folder's name "database"; typed
-// "Sales" is taken and saved as sales) and the dry run. Proves
-// the scripts become one DBML file per table, the relationships from both
-// files land in one relationships file, and the diagram opens with all four
-// tables and three relationships drawn.
+// split in two files, the foreign keys in the second), opened for the first
+// time. ERD Studio's quick look at the folder finds them, and its one
+// activation prompt is the start suggestion: "ERD Studio found CREATE TABLE
+// scripts in this folder (4 tables). Create a diagram from them?" with Create
+// Diagram / More Options… / Don't Ask Again for This Folder. Create Diagram
+// is the quick import: no folder dialog, no dialect pick, no layer pick, no
+// name box (asserted: no quick input shows before the confirm). It took every
+// script, read them as PostgreSQL, put the diagram in the Main layer and
+// named it after the tables' schema ("sales"), and asks once: Import, Review
+// All…, Change Options…, Cancel. Proves the scripts become one DBML file per
+// table, the relationships from both files land in one relationships file,
+// and the diagram opens with all four tables and three relationships drawn.
 
 import { story } from '../lib/story.mjs';
 
 const TABLES = ['dim_customer', 'dim_product', 'dim_date', 'fct_order_line'];
+const FOUND = 'ERD Studio found CREATE TABLE scripts in this folder';
 
 export default story({
   id: 'sql-scripts-import',
@@ -22,68 +25,36 @@ export default story({
   soThat: 'so that I can see and design the model without drawing it again',
   workspace: { name: 'shop-database', add: { database: 'test/fixtures/sql-ddl/postgres' } },
   steps: async (s) => {
-    await s.step('Given my project folder with SQL scripts in database/', async () => {
+    await s.step('Given I open my project folder, with SQL scripts in database/', async () => {
       s.expectNoFile('.erd-studio');
       await s.expectFile('database/01_tables.sql', { contains: 'CREATE TABLE sales.fct_order_line' });
       await s.eventually(async () => (await s.ui.windowTitle()).includes('shop-database'), { message: 'the shop-database folder did not open' });
-    }, { say: 'Given my project folder, with SQL scripts in a database folder.' });
+    }, { say: 'Given I open my project folder, with SQL scripts in a database folder.' });
 
-    const START = 'Import your SQL scripts';
-    await s.step('When I open the ERD Studio sidebar, it leads with "Import your SQL scripts"', async () => {
-      await s.ui.openSidebar('ERD Studio');
-      const button = s.sel.welcomeLink(START);
-      await s.expectVisible(button, { what: `the "${START}" button in the empty Diagrams view (the folder's suggested start)` });
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), [START], 'the suggested start should be the one button in the empty Diagrams view');
-      const text = await s.ui.sidebarText();
-      s.expect(text.includes('This folder has CREATE TABLE scripts.'), `the view should say why it suggests this: ${text}`);
-      await s.wb.highlight(button);
-      await s.pause(1500);
+    await s.step('ERD Studio finds the scripts and offers to create a diagram', async () => {
+      const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
+      s.assert.equal(toast.message, `${FOUND} (4 tables). Create a diagram from them?`);
+      s.assert.deepEqual(toast.buttons, ['Create Diagram', 'More Options…', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
+      await s.wb.highlight(s.sel.notification(FOUND));
+      await s.pause(1800);
       await s.wb.unhighlight();
-    });
+    }, { at: 'left' });
 
-    await s.step('When I click it, it asks for the scripts\' folder straight away', async () => {
-      await s.wb.click(s.sel.welcomeLink(START));
-      const dialog = await s.ui.waitForQuickPick({ title: 'Import SQL DDL' });
-      s.expect(!dialog.items.includes('SQL DDL scripts'), 'the suggested start should skip the Import… picker');
-      s.assert.equal(dialog.value, `${s.workspace}/`, 'the folder dialog should start in my project folder');
-      s.expect(dialog.items.includes('database'), `the folder dialog should list database/, but lists ${dialog.items.join(', ')}`);
-      await s.pause(600);
-      await s.ui.chooseInFileDialog('database/', 'Import');
-    });
+    let dialog;
+    await s.step('I click "Create Diagram": it asks me nothing, it just shows what it will do', async () => {
+      await s.ui.notificationButton(FOUND, 'Create Diagram');
+      // No folder dialog, dialect, layer or name question: the confirm is the first thing it shows.
+      dialog = await s.ui.waitForDialogAskingNothingFirst();
+    }, { say: "I click Create Diagram. I don't have to answer anything: it picks the scripts, the dialect, the layer and the name for me.", at: 'left' });
 
-    await s.step('It asks for the SQL dialect, with PostgreSQL detected', async () => {
-      const pick = await s.ui.waitForQuickPick({ title: 'Import SQL DDL' });
-      s.expect(/dialect/.test(pick.placeholder), `expected the dialect question, but got "${pick.placeholder}"`);
-      s.assert.equal(pick.items[0], 'PostgreSQL', `the detected dialect should come first, but the order is ${pick.items.join(', ')}`);
-      const first = await s.wb.ev(`${s.sel.quickPickRow('PostgreSQL')}.getAttribute('aria-label')`);
-      s.expect(first.includes('detected'), `PostgreSQL should be marked "detected", but reads "${first}"`);
-      await s.wb.highlight(s.sel.quickPickRow('PostgreSQL'));
-      await s.pause(1200);
-      await s.wb.unhighlight();
-      await s.ui.pick('PostgreSQL');
-    });
-
-    await s.step('It suggests "sales", the tables\' schema; I type "Sales"', async () => {
-      const box = await s.ui.waitForQuickPick({ title: 'Import SQL DDL' });
-      s.expect(/Name the diagram/.test(box.message), `expected the name box, but it says "${box.message}"`);
-      s.assert.equal(box.value, 'sales', 'the name should be suggested from the schema the tables share, not the database/ folder');
-      await s.ui.setQuickInput('Sales');
-      // Taken as typed, as New Diagram takes it: no "Use lowercase letters" refusal.
-      const typed = await s.eventually(async () => { const q = await s.ui.quickPick(); return q?.message.includes('Saved as sales') && q; }, { message: 'the name box never said "Saved as sales"' });
-      s.expect(!/lowercase/i.test(typed.message), `"Sales" should be accepted, but the box says "${typed.message}"`);
-      await s.pause(900);
-      await s.wb.press('Enter');
-    }, { say: 'It suggests sales, from the tables\' schema. I call it Sales.' });
-
-    await s.step('It shows what it will import before writing anything', async () => {
-      const dialog = await s.ui.waitForDialog();
-      s.expect(/^Import 4 tables from 2 SQL files \(PostgreSQL\)/.test(dialog.message), `the dry run's headline is "${dialog.message}"`);
-      s.expect(dialog.detail.includes('3 relationships'), `the dry run should name 3 relationships: ${dialog.detail}`);
+    await s.step('One short message: 4 tables and 3 relationships, PostgreSQL, a new diagram "sales"', async () => {
+      s.assert.equal(dialog.message, 'Import 4 tables and 3 relationships from 2 SQL files (PostgreSQL) into a new diagram "sales" in the Main layer.', 'the confirm\'s headline');
+      s.assert.deepEqual([...dialog.buttons].sort(), ['Cancel', 'Change Options…', 'Import', 'Review All…'], 'the confirm\'s buttons (VS Code orders them by platform)');
       s.expectNoFile('.erd-studio/main/diagrams/sales.dbml');
       await s.wb.highlight(s.sel.dialog);
       await s.pause(3000);
       await s.wb.unhighlight();
-    });
+    }, { say: 'One short message: four tables and three relationships, read as PostgreSQL, into a new diagram called sales.' });
 
     await s.step('When I press Import, the diagram opens with the four tables', async () => {
       await s.ui.dialogButton('Import');
