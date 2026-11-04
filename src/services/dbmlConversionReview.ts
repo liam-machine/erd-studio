@@ -350,7 +350,8 @@ export function buildConvertPanelCsp(nonce: string): string {
   return ["default-src 'none'", `style-src 'nonce-${nonce}'`, `script-src 'nonce-${nonce}'`].join('; ') + ';';
 }
 
-function escapeHtml(value: string): string {
+/** Text as HTML (the review pages build no markup from data). Shared with the import review (`importReview.ts`). */
+export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -359,7 +360,8 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-const STYLE = `
+/** The review pages' stylesheet (this panel and the import review, `importReview.ts`): `--vscode-*` colours only. */
+export const REVIEW_PANEL_STYLE = `
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; padding: 0; }
@@ -462,7 +464,8 @@ const SCRIPT = `
 })();
 `;
 
-function renderItem(item: ConvertReviewItem, problem: boolean): string {
+/** One row of a review section (shared with the import review). */
+export function renderReviewItem(item: ConvertReviewItem, problem: boolean): string {
   const where = item.path !== undefined
     ? `<code class="cdb-item__path">${escapeHtml(item.path)}${item.line !== undefined ? `:${item.line}` : ''}</code>`
     : '';
@@ -483,7 +486,7 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
   const sections = view.sections.map((section) => `
     <details class="cdb-section" data-section="${escapeHtml(section.id)}" open>
       <summary class="cdb-section__title">${escapeHtml(section.title)}<span class="cdb-section__count">${thousands(section.count ?? section.items.length)}</span></summary>
-      <ul class="cdb-section__items">${section.items.map((item) => renderItem(item, section.id === 'problems' || (section.id === 'left' && item.path !== undefined))).join('')}</ul>${section.hint !== undefined ? `
+      <ul class="cdb-section__items">${section.items.map((item) => renderReviewItem(item, section.id === 'problems' || (section.id === 'left' && item.path !== undefined))).join('')}</ul>${section.hint !== undefined ? `
       <p class="cdb-section__hint">${escapeHtml(section.hint)}</p>` : ''}
     </details>`).join('');
   const actions = view.mode === 'review'
@@ -501,7 +504,7 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
 <meta http-equiv="Content-Security-Policy" content="${escapeHtml(buildConvertPanelCsp(nonce))}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(CONVERT_PANEL_TITLE)}</title>
-<style nonce="${n}">${STYLE}</style>
+<style nonce="${n}">${REVIEW_PANEL_STYLE}</style>
 </head>
 <body>
 <main class="cdb" data-mode="${view.mode}">

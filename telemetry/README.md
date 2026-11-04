@@ -358,11 +358,13 @@ appended after the native DBML keys:
 |---|---|
 | A true first run | `firstRun` (at most 1: the first activation on this machine, the one that owes the walkthrough; from the 2.0 release on). `tenure = '0'` alone is **not** a new install: see below |
 | Saw a start screen | `walkthroughOpened` (opened by ERD Studio on first run), `gettingStartedOpened`, `sidebarStartShown` (once a day: the empty Diagrams view, with its starts, was drawn), `diagramsNudgeShown` (a project that already had diagrams got "This project has N ERD Studio diagrams" instead: a teammate's clone's start screen; `firstRunHasDiagrams` marks such a first run; in a project from before 2.0 the notice leads with **Convert to DBML** and also counts `convertToDbmlOffered`, and closing it `convertToDbmlNotNow`) |
-| Owed but waited | `walkthroughWaited` (at most 1: the walkthrough was owed, but another prompt had this window; expected near 0) |
+| Owed but waited | `walkthroughWaited` (at most 1: the walkthrough was owed, but another prompt had this window. Since 2.0 that includes the start suggestion taking the walkthrough's place on a first run with an obvious start, so read it beside `suggestPromptShown`; without one it is expected near 0) |
+| Offered its start | `suggestPromptShown` (the **start suggestion**, `src/services/startSuggestion.ts`: one notification in a folder with no diagram whose start is obvious, "ERD Studio found CREATE TABLE scripts in this folder (24 tables). Create a diagram from them?", at most three times per folder; counts as having seen a start). Its answer: `suggestPromptAccepted` (Create Diagram, or Convert to DBML…; counts as having chosen a start), `suggestPromptMore` (More Options…, the start quick pick, whose pick is not counted), `suggestPromptOff` (Don't Ask Again for This Folder), `suggestPromptDismissed` (closed: asked again in a later window). `startSuggestionsOff`: **Turn Off Start Suggestions for This Folder** was run, or (once a day) a folder with no diagram opened with `erdStudio.startSuggestions` false. What the look found, and the count it shows, never leave the machine: `startSuggested<Intent>` says which start it was |
 | What it suggested | `startSuggestedConvert`, `startSuggestedDrawFromDbt`, `startSuggestedImportSemanticModel`, `startSuggestedImportSqlDdl`, `startSuggestedImportDbmlFile`, `startSuggestedBlank` (each at most 1 a day: the empty Diagrams view, or the Welcome panel's leading card, showed that suggestion; which surface is `sidebarStartShown` / `gettingStartedOpened`. One key per suggestion rather than per surface: the walkthrough's display cannot be observed, and the click keys already name the surface) |
 | Chose a start | `welcomeBlank` `welcomeImport` `welcomeExample` `welcomeConvert` `welcomeDrawFromDbt`; `walkthroughBlank` … `walkthroughDrawFromDbt`; `sidebarBlank` … `sidebarDrawFromDbt` (`welcomeOpenDiagram` is a returning user's "Open your diagrams"); the direct imports, a click less than Import…'s picker: `welcomeImportSemanticModel` `welcomeImportSqlDdl` `welcomeImportDbmlFile`, `walkthroughImportSemanticModel` `walkthroughImportSqlDdl` `walkthroughImportDbmlFile`, `sidebarImportSemanticModel` `sidebarImportSqlDdl` `sidebarImportDbmlFile`; `diagramsNudgeOpened` (its Open button) |
 | Watched how | `howToClipPlayed` (the Welcome panel's short "Watch how" clip for the suggestion was played; which clip follows from that day's `startSuggested*`, or, with none that day, the example's (no folder open). Passive: a viewer who watched and closed the panel still counts `welcomeLeftNoChoice`) |
 | Picked an import source | `importPickDbml`, `importPickSqlDdl`, `importPickSemanticModel`; `importPickCancelled` (the source picker was closed) |
+| Quick import | the start suggestion's Create Diagram and a surface's primary import run the **quick path** (defaults chosen, one confirm): `quickImport` (it created a diagram, beside the source's own `importSqlDdl` / `importSemanticModel` / `importDbml`), `quickImportChangeOptions` (its Change Options… was chosen: a default was wrong), `quickImportFellBack` (it found nothing to take, so it asked step by step); `importReviewOpened` (any import's dry run: Review All… was opened) |
 | Gave up inside a start | `blankDiagramCancelled`, `importDbmlCancelled`, `importSqlDdlCancelled`, `importSemanticModelCancelled`, `exampleCancelled`, `drawCancelScope` / `drawCancelLayer` / `drawCancelName`, `convertToDbmlCancelled` |
 | The user's files did not read | `importDbmlInvalid`, `importSqlDdlInvalid` (+ the dialect it ran as: `importSqlDialectPostgres`, `importSqlDialectMysql`, `importSqlDialectSqlserver`, `importSqlDialectSnowflake`, `importSqlDialectDatabricks`, counted when the conversion runs), `importSemanticModelInvalid` |
 | Got a diagram | `domainCreated` / `blankDiagram`, `importDbml`, `importSqlDdl`, `importSemanticModel`, `exampleOpened` / `exampleReopened` (+ which: `exampleEnterpriseWarehouse`, `exampleMedallion`, `exampleDbtProjectLayers`, `exampleKimballBusMatrix`, `exampleDataVault`, `exampleGitlabStyle`, `exampleBigqueryVersioned`, `exampleDataMesh`), `drawFromDbt`, `convertToDbml` |
@@ -407,10 +409,10 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
    per AS (
      SELECT f.install_id, MAX(f.fresh) AS fresh,
        MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key = 'firstRun')) AS first_run,
-       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('walkthroughOpened', 'gettingStartedOpened', 'sidebarStartShown', 'diagramsNudgeShown'))) AS saw_start,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('walkthroughOpened', 'gettingStartedOpened', 'sidebarStartShown', 'diagramsNudgeShown', 'suggestPromptShown'))) AS saw_start,
        MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE ((j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough[A-Z]*' OR j.key GLOB 'sidebar[A-Z]*')
          AND j.key NOT IN ('walkthroughOpened', 'walkthroughWaited', 'sidebarStartShown', 'welcomeLeftNoChoice', 'welcomeOpenDiagram'))
-         OR j.key IN ('drawStarted', 'diagramsNudgeOpened'))) AS chose_start,
+         OR j.key IN ('drawStarted', 'diagramsNudgeOpened', 'suggestPromptAccepted'))) AS chose_start,
        MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('domainCreated', 'blankDiagram', 'importDbml', 'importSqlDdl', 'importSemanticModel', 'exampleDiagram', 'exampleOpened', 'exampleReopened', 'drawFromDbt', 'convertToDbml', 'domainCreatedExternal'))) AS got_diagram,
        MAX(h.canvas_opens > 0) AS opened_canvas,
        MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('editModel', 'editColumn', 'editKey', 'editDetails', 'editRelationship', 'addModel', 'addRelationship', 'addFromDbt'))) AS edited,
@@ -431,7 +433,7 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS clicks FROM heartbeats h, json_each(h.features) j
    WHERE h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0
      AND (j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough*' OR j.key GLOB 'sidebar*' OR j.key GLOB 'example*' OR j.key GLOB 'import*'
-       OR j.key GLOB 'startSuggested*' OR j.key = 'howToClipPlayed'
+       OR j.key GLOB 'startSuggested*' OR j.key = 'howToClipPlayed' OR j.key GLOB 'suggestPrompt*' OR j.key GLOB 'quickImport*' OR j.key = 'startSuggestionsOff'
        OR j.key GLOB 'firstRun*' OR j.key GLOB 'diagramsNudge*' OR j.key GLOB '*Cancel*')
    GROUP BY j.key ORDER BY installs DESC"
 ```
@@ -440,6 +442,11 @@ Read `s2_saw_start / s1_installed` per weekly cohort (from 2026-10-05 it is
 about 64%; about 73% of fresh-looking installs). Once 2.0 ships, read
 `s2_first_run_saw_start / s1_first_run` instead (expected above 90%): a
 first run that saw no start is a real miss.
+
+Read the start suggestion on its own: `suggestPromptAccepted / suggestPromptShown`
+is how often an obvious start was taken at once; a high `suggestPromptOff` or
+`quickImportChangeOptions` next to it says the folder look or the quick
+defaults guess wrong.
 
 Read the suggestion against the click: for each `startSuggested<X>`, the
 installs that clicked the matching start (`*Import<X>` for the imports,

@@ -309,6 +309,25 @@ export const FEATURES = [
   'startSuggestedImportDbmlFile',
   'startSuggestedBlank',
   'howToClipPlayed',
+  // The start suggestion (src/services/startSuggestion.ts): the one
+  // notification a folder with no diagram gets when its start is obvious —
+  // shown, and the user's answer: Create Diagram, More Options…, Don't Ask
+  // Again, or closed; start suggestions turned off by the command (or, once
+  // a day, a due suggestion kept back by the erdStudio.startSuggestions setting).
+  'suggestPromptShown',
+  'suggestPromptAccepted',
+  'suggestPromptMore',
+  'suggestPromptOff',
+  'suggestPromptDismissed',
+  'startSuggestionsOff',
+  // The quick import (defaults chosen, one confirm): one finished, its
+  // Change Options… chosen, it fell back to the step-by-step flow (nothing
+  // found to take, or more files than it reads); the dry run's Review All…
+  // was opened (every import source).
+  'quickImport',
+  'quickImportChangeOptions',
+  'quickImportFellBack',
+  'importReviewOpened',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

@@ -208,16 +208,22 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number]> = [
   ['postgres', /\bTEXT\b|\bCOMMENT\s+ON\b/i, 1],
 ];
 
-/**
- * A cheap guess at the dialect from the text (comments ignored), for the
- * picker's default; undefined when nothing points anywhere. Never parses.
- */
-export function detectSqlDialect(text: string): SqlDialect | undefined {
+/** Each dialect's score from the text's signals (comments ignored). Never parses. */
+function dialectScores(text: string): Map<SqlDialect, number> {
   const code = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
   const scores = new Map<SqlDialect, number>();
   for (const [dialect, pattern, weight] of DIALECT_SIGNALS) {
     if (pattern.test(code)) scores.set(dialect, (scores.get(dialect) ?? 0) + weight);
   }
+  return scores;
+}
+
+/**
+ * A cheap guess at the dialect from the text (comments ignored), for the
+ * picker's default; undefined when nothing points anywhere. Never parses.
+ */
+export function detectSqlDialect(text: string): SqlDialect | undefined {
+  const scores = dialectScores(text);
   let best: SqlDialect | undefined;
   let bestScore = 0;
   let tie = false;
@@ -227,6 +233,21 @@ export function detectSqlDialect(text: string): SqlDialect | undefined {
     else if (score > 0 && score === bestScore) tie = true;
   }
   return tie ? undefined : best;
+}
+
+/**
+ * The order to try dialects in when the text does not decide one (the quick
+ * import reads the scripts as each in turn and keeps the first that reads
+ * every file): the most widely used first. Plain ANSI CREATE TABLEs read the
+ * same in most of them.
+ */
+export const SQL_DIALECT_LIKELIHOOD: readonly SqlDialect[] = Object.freeze(['postgres', 'sqlserver', 'mysql', 'snowflake', 'databricks']);
+
+/** Every dialect, most likely first: the text's signals, highest first, then {@link SQL_DIALECT_LIKELIHOOD}. Never parses. */
+export function rankSqlDialects(text: string): SqlDialect[] {
+  const scores = dialectScores(text);
+  const rank = (d: SqlDialect): number => SQL_DIALECT_LIKELIHOOD.indexOf(d);
+  return [...SQL_DIALECTS].sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0) || rank(a) - rank(b));
 }
 
 // ---------------------------------------------------------------------------

@@ -36,12 +36,19 @@ import { DBML_CONVERT_FIRST_MESSAGE } from '@erd-studio/core/dbml';
 
 import {
   analyseDbml,
-  describeDbmlImportPlan,
   planDbmlImport,
   serializeDbmlImportDocument,
   suggestDbmlSubjectAreaName,
+  summariseDbmlImportPlan,
   type DbmlImportPlan,
+  type DescribeDbmlImportOptions,
 } from '../services/dbmlImport';
+import {
+  CHANGE_OPTIONS_BUTTON,
+  REVIEW_ALL_BUTTON,
+  buildImportReview,
+  type ImportReviewView,
+} from '../services/importReview';
 import type { DbmlDiagnostic } from '../services/dbmlImportParse';
 import {
   ADD_LAYER_BUTTON,
@@ -80,7 +87,8 @@ import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
 import { log } from '../services/logger';
-import { WHICH_LAYER_FOR_DIAGRAM } from '../services/layerWording';
+import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
+import { ImportReviewPanel, type ImportReviewChoice } from '../providers/ImportReviewPanel';
 
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
 
@@ -137,6 +145,7 @@ export interface ImportDbmlOrigin {
 }
 
 export { ADD_LAYER_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON, NO_LAYERS_MESSAGE, OPEN_IT_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
+export { CHANGE_OPTIONS_BUTTON, REVIEW_ALL_BUTTON };
 export const IMPORT_BUTTON = 'Import';
 export { OPEN_FILE_BUTTON };
 
@@ -159,6 +168,14 @@ export interface ImportDbmlUi {
   showInputBox(options: vscode.InputBoxOptions): Promise<string | undefined>;
   /** A modal: `message`, the `detail` under it, `button` and Cancel. True when `button` was picked. */
   confirm(message: string, detail: string, button: string): Promise<boolean>;
+  /**
+   * The dry run's modal with several buttons (Import, Review All…, Change
+   * Options…) and Cancel: the button picked, undefined for Cancel. Absent
+   * (a test's fake): {@link confirm} with Import alone.
+   */
+  choose?(message: string, detail: string, buttons: readonly string[]): Promise<string | undefined>;
+  /** Review All…: the full review page; resolves with what the user chose on it. */
+  review?(view: ImportReviewView): Promise<ImportReviewChoice>;
   showInformationMessage(message: string, ...items: string[]): Promise<string | undefined>;
   /** Resolves the button picked; the flow never awaits it. */
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
@@ -213,6 +230,11 @@ export interface ImportDbmlDeps {
    * the folder, as before. Absent: never looked up.
    */
   findDefaultFile?: () => Promise<string | undefined>;
+  /**
+   * A quick import's **Change Options…** on the dry run: the step-by-step
+   * flow, preselected with what the quick path chose. Absent: no such button.
+   */
+  changeOptions?: (chosen: { layer: string; name: string }) => unknown;
 }
 
 /**
@@ -221,10 +243,21 @@ export interface ImportDbmlDeps {
  * meanwhile is picked up).
  */
 export interface ImportDbmlResume {
-  filePath: string;
+  /** The file; absent: the Open dialog asks (starting on `findDefaultFile`'s). */
+  filePath?: string;
   layer?: string;
   /** The name to offer again (Try Again); the suggested one when absent. */
   name?: string;
+  /**
+   * The quick path: no layer or name question. The layer is `layer`, else
+   * the one the file names (a TableGroup or schema called like a layer),
+   * else New Diagram's default for a project's first diagram
+   * (`defaultDiagramLayer`); the name is `name`, else the suggestion, made
+   * unique. The dry run is the only question.
+   */
+  quick?: boolean;
+  /** The layer the layer pick starts on (Change Options…), ahead of the file's suggestion. */
+  preferredLayer?: string;
 }
 
 export interface ImportDbmlResult {
@@ -293,8 +326,9 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     ?? await ui.pickFile((await deps.findDefaultFile?.().catch(() => undefined)) ?? (workspaceRoot || undefined));
   if (!filePath) return cancelled();
   const fileName = path.basename(filePath);
+  const quick = resume?.quick === true;
   const again = (more: Omit<ImportDbmlResume, 'filePath'> = {}): (() => unknown) =>
-    () => importDbml(deps, { filePath, ...more });
+    () => importDbml(deps, { filePath, ...(quick ? { quick } : {}), ...more });
 
   let text: string;
   try {
@@ -346,11 +380,21 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     return undefined;
   }
   const analysis = analyseDbml(model, { layerIds: layerService.getValidLayerIds(), fileName });
+  const diagramCount = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length;
   let layer = creatable.find((l) => l.id === resume?.layer)?.id;
   if (!layer && creatable.length === 1) layer = creatable[0].id;
+  // The quick path: the layer the file names, else New Diagram's default (the last creatable layer).
+  if (!layer && quick) {
+    layer = creatable.find((l) => l.id === analysis.suggestedLayer)?.id
+      ?? defaultDiagramLayer(creatable.map((l) => l.id), 0);
+  }
   if (!layer) {
     const suggested = creatable.find((l) => l.id === analysis.suggestedLayer);
-    const ordered = suggested ? [suggested, ...creatable.filter((l) => l !== suggested)] : creatable;
+    // Enter takes the first: the layer chosen before (Change Options…), else the file's, else New Diagram's default.
+    const preferred = creatable.find((l) => l.id === resume?.preferredLayer)
+      ?? suggested
+      ?? creatable.find((l) => l.id === defaultDiagramLayer(creatable.map((c) => c.id), diagramCount));
+    const ordered = preferred ? [preferred, ...creatable.filter((l) => l !== preferred)] : creatable;
     const choice = await ui.showQuickPick(
       ordered.map((l) => ({
         label: l.label,
@@ -368,10 +412,13 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   // 3. The name: the Project name or the file name, free in that layer.
   const taken = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)
     .filter((d) => d.layer === chosenLayer).map((d) => d.domain);
-  const name = await ui.showInputBox({
+  const suggestedName = resume?.name ?? suggestDbmlSubjectAreaName(model, fileName, taken);
+  // The quick path takes the suggestion when it is a valid, free name; otherwise it asks, as the step-by-step flow does.
+  const quickName = quick && deps.validateDomainName(slugFromName(suggestedName), chosenLayer) === undefined ? suggestedName : undefined;
+  const name = quickName ?? await ui.showInputBox({
     title: title,
     prompt: `Name the diagram. It is saved in the ${layerLabel} layer.`,
-    value: resume?.name ?? suggestDbmlSubjectAreaName(model, fileName, taken),
+    value: suggestedName,
     ignoreFocusOut: true,
     // As New Diagram takes it: "Sales" is saved as sales.
     validateInput: (value: string) => validateTypedDiagramName(value, (slug) => deps.validateDomainName(slug, chosenLayer)),
@@ -490,8 +537,9 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   }
 
   // 5. The dry run: what it creates, reuses and leaves out, before any write.
+  // A modal of at most ten lines whatever the size; Review All… shows everything.
   const semanticRoot = path.join(workspaceRoot, semanticDir);
-  const [headline, ...details] = describeDbmlImportPlan(plan, {
+  const describeOptions: DescribeDbmlImportOptions = {
     layerLabel,
     ...(dbml ? {
       dbml: {
@@ -503,8 +551,24 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
       },
     } : {}),
     ...(deps.origin ? { origin: deps.origin } : {}),
-  }).split('\n');
-  if (!await ui.confirm(headline, details.join('\n'), IMPORT_BUTTON)) return cancelled();
+  };
+  const { headline, detail } = summariseDbmlImportPlan(plan, describeOptions);
+  const changeOptions = deps.changeOptions;
+  const chosen = { layer: chosenLayer, name: slug };
+  const answer = await dryRun(ui, headline, detail.join('\n'), {
+    changeOptions: changeOptions !== undefined,
+    review: () => buildImportReview(plan, {
+      ...describeOptions,
+      diagramFile: path.relative(workspaceRoot, domainPath).split(path.sep).join('/'),
+      changeOptions: changeOptions !== undefined,
+    }),
+  });
+  if (answer === 'changeOptions' && changeOptions) {
+    telemetry.feature('quickImportChangeOptions');
+    void Promise.resolve().then(() => changeOptions(chosen));
+    return undefined;
+  }
+  if (answer !== 'import') return cancelled();
 
   // 6. Every file, or none.
   const outcome = await writeNewSubjectArea({
@@ -553,6 +617,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
 
   deps.onWritten({ domainPath, modelNames: outcome.written, changedModelNames: outcome.changed });
   telemetry.feature(counts.done);
+  if (quick) telemetry.feature('quickImport');
   if (source === 'file' && layout) telemetry.feature('importDbmlLayout');
 
   await ui.openDiagram(domainPath);
@@ -565,6 +630,53 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
       ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(location.filePath, location.line) }
       : {});
   }
+}
+
+/**
+ * The dry run: the modal (Import, Review All…, Change Options… on a quick
+ * import, Cancel), and Review All…'s page, whose own buttons answer it; a
+ * page closed without an answer shows the modal again. With a UI that has no
+ * `choose` (a test's fake), the modal is `confirm` with Import alone.
+ */
+async function dryRun(
+  ui: ImportDbmlUi,
+  headline: string,
+  detail: string,
+  options: { changeOptions: boolean; review: () => ImportReviewView },
+): Promise<'import' | 'changeOptions' | 'cancel'> {
+  if (!ui.choose) return (await ui.confirm(headline, detail, IMPORT_BUTTON)) ? 'import' : 'cancel';
+  const buttons = [IMPORT_BUTTON, ...(ui.review ? [REVIEW_ALL_BUTTON] : []), ...(options.changeOptions ? [CHANGE_OPTIONS_BUTTON] : [])];
+  for (;;) {
+    const choice = await ui.choose(headline, detail, buttons);
+    if (choice === IMPORT_BUTTON) return 'import';
+    if (choice === CHANGE_OPTIONS_BUTTON && options.changeOptions) return 'changeOptions';
+    if (choice !== REVIEW_ALL_BUTTON || !ui.review) return 'cancel';
+    telemetry.feature('importReviewOpened');
+    const reviewed = await ui.review(options.review());
+    if (reviewed === 'import') return 'import';
+    if (reviewed === 'cancel') return 'cancel';
+    if (reviewed === 'changeOptions' && options.changeOptions) return 'changeOptions';
+    // Closed without an answer: the modal again.
+  }
+}
+
+/**
+ * Import DBML's quick path (the start screen's **Import your DBML file**, the
+ * start suggestion): the DBML file the folder holds (`findDefaultFile`), the
+ * layer and name chosen, the dry run the one question; Change Options… is
+ * the step-by-step flow with that file chosen in its Open dialog and the
+ * same layer and name offered first. No DBML file found: the step-by-step flow.
+ */
+export async function quickImportDbml(deps: ImportDbmlDeps): Promise<ImportDbmlResult | undefined> {
+  const filePath = await deps.findDefaultFile?.().catch(() => undefined);
+  if (!filePath) {
+    telemetry.feature('quickImportFellBack');
+    return importDbml(deps);
+  }
+  return importDbml({
+    ...deps,
+    changeOptions: ({ layer, name }) => importDbml({ ...deps, findDefaultFile: async () => filePath }, { preferredLayer: layer, name }),
+  }, { filePath, quick: true });
 }
 
 /**
@@ -641,6 +753,8 @@ export function vscodeImportDbmlUi(): ImportDbmlUi {
     showInputBox: async (options) => vscode.window.showInputBox(options),
     confirm: async (message, detail, button) =>
       (await vscode.window.showInformationMessage(message, { modal: true, detail }, button)) === button,
+    choose: async (message, detail, buttons) => vscode.window.showInformationMessage(message, { modal: true, detail }, ...buttons),
+    review: (view) => ImportReviewPanel.show(view),
     showInformationMessage: async (message, ...items) => vscode.window.showInformationMessage(message, ...items),
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     openFileAt: (filePath, line, column) => openTableFileAt(filePath, line, column),

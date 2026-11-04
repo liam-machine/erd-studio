@@ -44,6 +44,32 @@ export const START_ACTION_COMMANDS: Readonly<Record<StartAction, string>> = {
 };
 
 /**
+ * The argument a direct import gets from a start surface, the start
+ * suggestion or the start quick pick: its **quick path** — every answer with
+ * an obvious default is chosen (the files the folder holds, the dialect, the
+ * layer, the name), and the dry run is the one question, with Change
+ * Options… for the step-by-step flow. The palette and Import…'s picker run
+ * the commands without it: step by step.
+ */
+export interface QuickImportArg {
+  quick: true;
+}
+export const QUICK_IMPORT_ARG: QuickImportArg = { quick: true };
+
+/** Whether a command's argument asks for the quick path. */
+export function isQuickImportArg(arg: unknown): arg is QuickImportArg {
+  return typeof arg === 'object' && arg !== null && !Array.isArray(arg) && (arg as { quick?: unknown }).quick === true;
+}
+
+/** The starts whose command takes {@link QUICK_IMPORT_ARG}: the three direct imports. */
+const QUICK_STARTS: ReadonlySet<StartAction> = new Set<StartAction>(['importSemanticModel', 'importSqlDdl', 'importDbmlFile']);
+
+/** The arguments {@link START_ACTION_COMMANDS}[action] runs with from a start: the quick path for a direct import, else none. */
+export function startActionArgs(action: StartAction): unknown[] {
+  return QUICK_STARTS.has(action) ? [QUICK_IMPORT_ARG] : [];
+}
+
+/**
  * What the open folder suggests as its first start, strongest first: a project
  * from before 2.0 converts, a dbt project draws from dbt, then the files the
  * bounded look found (a Power BI / Fabric semantic model, CREATE TABLE

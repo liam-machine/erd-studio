@@ -26,7 +26,7 @@ describe('pickActivationPrompt', () => {
     expect(pickActivationPrompt([])).toBeUndefined();
     expect(pickActivationPrompt(['dbmlConversion', 'namingMigration'])).toBeUndefined();
     expect(ACTIVATION_PROMPT_PRIORITY).toEqual([
-      'diagramsNudge', 'walkthrough', 'harnessUpdate', 'migrateToV5', 'upgradeNotice', 'harnessInstall', 'saveLayers',
+      'diagramsNudge', 'startSuggestion', 'walkthrough', 'harnessUpdate', 'migrateToV5', 'upgradeNotice', 'harnessInstall', 'saveLayers',
     ]);
   });
 });

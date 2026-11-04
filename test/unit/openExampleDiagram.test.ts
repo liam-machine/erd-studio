@@ -206,7 +206,7 @@ describe('Open Example Diagram', () => {
     expect(ui.reads).toEqual([]);
     expect(ui.inputs).toEqual(['coffee-shop']);
     expect(ui.confirms).toHaveLength(1);
-    expect(ui.confirms[0].message).toBe('Import 6 tables into a new diagram "coffee-shop" in the Gold layer.');
+    expect(ui.confirms[0].message).toBe('Import 6 tables and 8 relationships into a new diagram "coffee-shop" in the Gold layer.');
     expect(ui.confirms[0].detail).toContain('8 relationships');
     expect(ui.confirms[0].detail).toContain('laid out automatically');
     expect(ui.confirms[0].detail).not.toContain('Left out');
@@ -234,7 +234,7 @@ describe('Open Example Diagram', () => {
     const result = await openExampleDiagram(deps(ui));
     expect(ui.inputs).toEqual(['coffee-shop-2']);
     expect(result?.plan.reusedTables).toEqual(SAMPLE_TABLES);
-    expect(ui.confirms[0].detail).toContain('Already in your Table Library');
+    expect(ui.confirms[0].detail).toContain('6 tables already in your Table Library, used as they are');
   });
 
   it('cancelled at the dry run: nothing written, not counted as an example', async () => {
@@ -278,7 +278,8 @@ describe('Open Example Diagram', () => {
     services();
     const ui = recorder({ layer: 'marts' });
     const result = await openExampleDiagram(deps(ui));
-    expect(ui.picks).toEqual([['staging', 'marts']]);
+    // New Diagram's default for a first diagram (the last creatable layer) first: Enter takes it.
+    expect(ui.picks).toEqual([['marts', 'staging']]);
     // A project with no tables yet writes DBML (§3.2).
     expect(result?.domainPath).toBe(erd('marts', 'diagrams', 'coffee-shop.dbml'));
     expect(fs.existsSync(erd('marts', 'tables', 'marts', 'fct_orders.dbml'))).toBe(true);

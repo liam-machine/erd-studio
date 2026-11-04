@@ -57,6 +57,7 @@ import {
   HOW_TO_CLIP_KEYS,
   type HowToClipKey,
   START_ACTION_COMMANDS,
+  startActionArgs,
   startActionsForIntent,
   startIntentFor,
   type StartIntent,
@@ -1005,8 +1006,9 @@ export class GettingStartedPanel {
         break;
       case 'start':
         recordStart(msg.action, 'welcome');
-        // A fixed command per start (never an id from the webview), run with no argument.
-        await vscode.commands.executeCommand(START_ACTION_COMMANDS[msg.action]);
+        // A fixed command per start (never an id from the webview), with a fixed argument:
+        // a direct import's quick path, nothing for the others.
+        await vscode.commands.executeCommand(START_ACTION_COMMANDS[msg.action], ...startActionArgs(msg.action));
         // A new diagram opens in its own tab; this one should now lead with "Open your diagrams".
         await this.postStatus();
         break;

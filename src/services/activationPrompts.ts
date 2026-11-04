@@ -1,8 +1,9 @@
 /**
  * One prompt per window session.
  *
- * Opening a window can owe the user several things at once: the Get Started
- * walkthrough, the "This project has N ERD Studio diagrams" notice, the AI
+ * Opening a window can owe the user several things at once: the start
+ * suggestion ("ERD Studio found CREATE TABLE scripts… Create a diagram?"),
+ * the Get Started walkthrough, the "This project has N ERD Studio diagrams" notice, the AI
  * helper offer, an update for old AI helper files, the v4 migration, a
  * `layers.json` to save, the upgrade notice, and on a canvas's first open
  * the Convert Project to DBML and file-naming offers. Showing them together
@@ -20,6 +21,14 @@
 export type SessionPromptKind =
   /** "This project has N ERD Studio diagrams. Open X" (once per workspace). */
   | 'diagramsNudge'
+  /**
+   * A folder with no diagram whose start is obvious (CREATE TABLE scripts, a
+   * semantic model, a DBML file, a dbt project, a project from before 2.0):
+   * "Create a diagram from them?" (`src/services/startSuggestion.ts`). It
+   * decides only after the bounded look, and hands the window to the next
+   * prompt when the look finds nothing concrete.
+   */
+  | 'startSuggestion'
   /** The Get Started walkthrough a fresh install owes (once per machine). */
   | 'walkthrough'
   /** AI helper files from an older ERD Studio: Update All / Choose… */
@@ -38,13 +47,16 @@ export type SessionPromptKind =
   | 'namingMigration';
 
 /**
- * Most useful first. A project that already has diagrams opens one; an
- * empty folder gets the walkthrough; then whatever keeps the project's own
+ * Most useful first. A project that already has diagrams opens one; a
+ * folder with none whose start is obvious is offered that start (on a
+ * first run it takes the walkthrough's place; the walkthrough stays owed);
+ * an empty folder gets the walkthrough; then whatever keeps the project's own
  * files working (old AI helper files, the v4 format) before news and
  * set-up offers.
  */
 export const ACTIVATION_PROMPT_PRIORITY: readonly SessionPromptKind[] = [
   'diagramsNudge',
+  'startSuggestion',
   'walkthrough',
   'harnessUpdate',
   'migrateToV5',
@@ -71,6 +83,15 @@ export class SessionPromptGate {
     if (this.claimedBy !== undefined) return false;
     this.claimedBy = kind;
     return true;
+  }
+
+  /**
+   * Give the session back: `kind` held it but showed nothing (the start
+   * suggestion's look found nothing concrete), so the next prompt may have
+   * it. A no-op when another prompt holds it.
+   */
+  release(kind: SessionPromptKind): void {
+    if (this.claimedBy === kind) this.claimedBy = undefined;
   }
 
   /** The prompt this session showed, if any. */

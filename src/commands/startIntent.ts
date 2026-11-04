@@ -37,16 +37,27 @@ export const START_LOOK_FRESH_MS = 60_000;
 export interface StartIntentDeps {
   /** Where the folder stands now (cheap: no file walk). */
   context(): Omit<StartContext, 'found'>;
-  /** The bounded look at the folder; it stops when `signal` aborts. */
-  look(signal: AbortSignal): Promise<ReadonlySet<DetectedImportSource>>;
+  /**
+   * The bounded look at the folder; it stops when `signal` aborts. The
+   * sources found, or those with the CREATE TABLE count the start
+   * suggestion names (`sqlTables`, only when exact).
+   */
+  look(signal: AbortSignal): Promise<ReadonlySet<DetectedImportSource> | StartLookFindings>;
   /** Publish a changed suggestion (the context key). */
   publish(intent: StartIntent): void;
   timeoutMs?: number;
   now?(): number;
 }
 
+/** What a look found: the sources, and how many CREATE TABLEs the `.sql` files hold when it could tell exactly. */
+export interface StartLookFindings {
+  sources: ReadonlySet<DetectedImportSource>;
+  sqlTables?: number;
+}
+
 export class StartIntentTracker {
   private found: ReadonlySet<DetectedImportSource> | undefined;
+  private sqlTables: number | undefined;
   /** When `found` was looked up; Infinity once a look ran out of time. */
   private lookedAt = Number.NEGATIVE_INFINITY;
   private inFlight: Promise<void> | undefined;
@@ -60,6 +71,11 @@ export class StartIntentTracker {
   /** Where the folder stands now, with the last look's findings (none before the first look). */
   startContext(): StartContext {
     return { ...this.deps.context(), found: this.found };
+  }
+
+  /** How many CREATE TABLEs the last look counted, when it could tell exactly (stays on this machine). */
+  sqlTableCount(): number | undefined {
+    return this.sqlTables;
   }
 
   /** The suggestion from what is known now, without a look (the last look's findings, if any). */
@@ -136,9 +152,12 @@ export class StartIntentTracker {
         if (result === 'timeout') {
           controller.abort();
           this.found = new Set();
+          this.sqlTables = undefined;
           this.lookedAt = Number.POSITIVE_INFINITY;
         } else {
-          this.found = result;
+          const findings: StartLookFindings = isFindings(result) ? result : { sources: result };
+          this.found = findings.sources;
+          this.sqlTables = findings.sqlTables;
           this.lookedAt = this.now();
         }
       } finally {
@@ -150,4 +169,8 @@ export class StartIntentTracker {
     this.inFlight = run();
     return this.inFlight;
   }
+}
+
+function isFindings(value: ReadonlySet<DetectedImportSource> | StartLookFindings): value is StartLookFindings {
+  return !(value instanceof Set) && typeof value === 'object' && value !== null && 'sources' in value;
 }

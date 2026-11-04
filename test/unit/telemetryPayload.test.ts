@@ -576,6 +576,9 @@ describe('allowlists agree with the Worker', () => {
       'startSuggestedConvert', 'startSuggestedDrawFromDbt', 'startSuggestedImportSemanticModel',
       'startSuggestedImportSqlDdl', 'startSuggestedImportDbmlFile', 'startSuggestedBlank',
       'howToClipPlayed',
+      // The start suggestion and the quick import, appended after them.
+      'suggestPromptShown', 'suggestPromptAccepted', 'suggestPromptMore', 'suggestPromptOff', 'suggestPromptDismissed',
+      'startSuggestionsOff', 'quickImport', 'quickImportChangeOptions', 'quickImportFellBack', 'importReviewOpened',
     ]);
   });
 

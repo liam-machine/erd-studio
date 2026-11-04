@@ -58,6 +58,9 @@ const legacyAlias = (command: string) => command.replace(/^erdStudio\./, 'dbtSem
 
 type Context = import('vscode').ExtensionContext;
 
+/** The start suggestion was answered in this folder: it no longer takes the window's one prompt. */
+const SUGGESTIONS_ANSWERED: [string, unknown] = ['erdStudio.startSuggestion', { shown: 1, answered: true }];
+
 function makeContext(
   root: string,
   opts: { globalState?: Map<string, unknown>; workspaceState?: Map<string, unknown> } = {},
@@ -65,11 +68,12 @@ function makeContext(
   // The Welcome panel was already shown on this "machine", so the first-run
   // trigger stays out of the way of the tests that are not about it.
   const globalState = opts.globalState ?? new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]);
-  // Pretend the harness-install QuickPick and the existing-diagrams notice
-  // were already offered for this workspace.
+  // Pretend the harness-install QuickPick, the existing-diagrams notice and
+  // the start suggestion were already offered for this workspace.
   const workspaceState = opts.workspaceState ?? new Map<string, unknown>([
     ['erdStudio.harnessInstallPrompted', true],
     ['erdStudio.diagramsNudgeShown', true],
+    SUGGESTIONS_ANSWERED,
   ]);
   return {
     subscriptions: [],
@@ -824,7 +828,9 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(input).toHaveBeenCalledTimes(1);
     expect(pick).not.toHaveBeenCalled(); // a new project without dbt has one layer, Main
     const confirm = info.mock.calls.find((c) => c.includes('Import'))!;
-    expect(confirm[0]).toBe('Import 6 tables into a new diagram "coffee-shop" in the Main layer.');
+    expect(confirm[0]).toBe('Import 6 tables and 8 relationships into a new diagram "coffee-shop" in the Main layer.');
+    // The real modal: Import, Review All… (no Change Options…: this is not a quick import).
+    expect(confirm.slice(2)).toEqual(['Import', 'Review All…']);
     // A new project stores the example as DBML (native DBML storage, §3.2).
     const domainPath = path.join(ws, '.erd-studio', 'main', 'diagrams', 'coffee-shop.dbml');
     expect(fs.existsSync(domainPath)).toBe(true);
@@ -2016,7 +2022,8 @@ describe('Welcome panel: first run', () => {
     fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true }); // no diagrams yet: the walkthrough's project
     openWorkspace(root);
     const globalState = new Map<string, unknown>();
-    const workspaceState = new Map<string, unknown>();
+    // The start suggestion already answered here (it would take the walkthrough's place: see "the start suggestion").
+    const workspaceState = new Map<string, unknown>([SUGGESTIONS_ANSWERED]);
     context = makeContext(root, { globalState, workspaceState });
     let shownWhenOpened: unknown = 'not opened';
     const real = vscode.commands.executeCommand;
@@ -2791,7 +2798,7 @@ describe('first run, measured (onboarding funnel)', () => {
     const featureOnce = vi.spyOn(telemetry, 'featureOnce');
     const once = () => featureOnce.mock.calls.map((c) => c[0]);
     const opens = spyWalkthrough();
-    context = makeContext(root, { globalState: new Map<string, unknown>(), workspaceState: new Map<string, unknown>() });
+    context = makeContext(root, { globalState: new Map<string, unknown>(), workspaceState: new Map<string, unknown>([SUGGESTIONS_ANSWERED]) });
 
     await activate(context);
     expect(once().filter((k) => k === 'firstRun')).toHaveLength(1);
@@ -3033,5 +3040,204 @@ describe('the start screen (first five minutes)', () => {
 
     expect(exec.mock.calls.filter((c) => c[0] === 'vscode.openWith')).toEqual([]);
     expect(globalState.get('erdStudio.pendingExampleOpen')).toEqual(pending);
+  });
+});
+
+describe('the start suggestion (a folder with no diagram whose start is obvious)', () => {
+  const STATE_KEY = 'erdStudio.startSuggestion';
+  const SQL = 'CREATE TABLE sales.customers (\n  id INT PRIMARY KEY,\n  name TEXT\n);\n\nCREATE TABLE sales.orders (\n  id INT PRIMARY KEY,\n  customer_id INT REFERENCES sales.customers (id)\n);\n';
+  let ws: string;
+  let info: ReturnType<typeof vi.spyOn>;
+  let answer: string | undefined;
+  /** The notification's calls (the message has "found" or "older ERD Studio" in it). */
+  const shown = () => info.mock.calls.filter((c) => /^ERD Studio found|from an older ERD Studio/.test(String(c[0])));
+
+  /** A plain folder holding `files`; the mock's findFiles answers the look's globs from them. */
+  function folderWith(files: Record<string, string>): void {
+    ws = path.join(root, 'repo');
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(ws, rel)), { recursive: true });
+      fs.writeFileSync(path.join(ws, rel), text);
+    }
+    fs.mkdirSync(ws, { recursive: true });
+    openWorkspace(ws);
+    vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((async (include: { pattern?: string } | string) => {
+      const glob = typeof include === 'string' ? include : include.pattern ?? '';
+      const ext = glob === '**/*.sql' ? '.sql' : glob === '**/*.dbml' ? '.dbml' : undefined;
+      return Object.keys(files).filter((f) => ext !== undefined && f.endsWith(ext)).map((f) => vscode.Uri.file(path.join(ws, f)));
+    }) as never);
+  }
+
+  /** Activation, then past the deferred look and the notification's answer (the look reads real files: real time). */
+  async function activateAndLook(): Promise<void> {
+    await activate(context);
+    await settle();
+  }
+  /** Until the deferred look and whatever it showed have run. */
+  async function settle(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+
+  /** A spy on executeCommand that still runs every command. */
+  function passThroughExec() {
+    const real = vscode.commands.executeCommand;
+    return vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) => real(command, ...args)) as never);
+  }
+
+  beforeEach(() => {
+    // The look reads files with real I/O, which fake timers would time out before it answers.
+    vi.useRealTimers();
+    answer = undefined;
+    info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async () => answer) as never);
+  });
+
+  it('activates on the sources it can start from: dbt, the ERD Studio folder, .sql, .dbml and a semantic model\'s files', () => {
+    expect((packageJson as unknown as { activationEvents: string[] }).activationEvents).toEqual([
+      'workspaceContains:**/dbt_project.yml',
+      'workspaceContains:.erd-studio',
+      'workspaceContains:**/*.sql',
+      'workspaceContains:**/*.dbml',
+      'workspaceContains:**/*.bim',
+      'workspaceContains:**/definition.pbism',
+      'workspaceContains:**/model.tmdl',
+      'workspaceContains:**/database.tmdl',
+    ]);
+  });
+
+  it('a fresh SQL repo: after the look, one notification with the table count, in the walkthrough\'s place; Create Diagram runs the quick SQL import', async () => {
+    folderWith({ 'db/schema.sql': SQL });
+    const globalState = new Map<string, unknown>();
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState });
+    const opens = spyWalkthrough();
+    const feature = vi.spyOn(telemetry, 'feature');
+    const exec = vscode.commands.executeCommand as unknown as ReturnType<typeof vi.spyOn>;
+    answer = 'Create Diagram';
+
+    await activate(context);
+    // Never on activation's own path: nothing shown until the deferred look has run.
+    expect(shown()).toEqual([]);
+    await settle();
+
+    expect(shown()).toEqual([[
+      'ERD Studio found CREATE TABLE scripts in this folder (2 tables). Create a diagram from them?',
+      'Create Diagram', 'More Options…', "Don't Ask Again for This Folder",
+    ]]);
+    expect(exec).toHaveBeenCalledWith('erdStudio.importSqlDdl', { quick: true });
+    // The walkthrough waits (still owed), and the window had one prompt.
+    expect(opens()).toEqual([]);
+    expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBe(true);
+    expect(workspaceState.get(STATE_KEY)).toEqual({ shown: 1, answered: true });
+    const keys = feature.mock.calls.map((c) => c[0]);
+    expect(keys).toEqual(expect.arrayContaining(['suggestPromptShown', 'suggestPromptAccepted']));
+    // Nothing was written into the folder by activation or the notification.
+    expect(fs.existsSync(path.join(ws, '.erd-studio'))).toBe(false);
+  });
+
+  it("Don't Ask Again: off for this folder (workspace state only), says how to turn it back on; Turn On brings it back", async () => {
+    folderWith({ 'schema.sql': SQL });
+    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+    context = makeContext(root, { workspaceState });
+    const exec = passThroughExec();
+    const before = listTree(ws);
+    answer = "Don't Ask Again for This Folder";
+
+    await activateAndLook();
+    expect(shown()).toHaveLength(1);
+    expect(workspaceState.get(STATE_KEY)).toEqual({ shown: 1, off: true });
+    expect(info).toHaveBeenCalledWith(
+      "ERD Studio won't suggest a start for this folder again. To turn suggestions back on, run ERD Studio: Turn On Start Suggestions for This Folder.",
+    );
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.startSuggestionsOff', true);
+    expect(listTree(ws)).toEqual(before);
+
+    // The next window: no suggestion.
+    tearDownActivation();
+    info.mockClear();
+    await activateAndLook();
+    expect(shown()).toEqual([]);
+
+    // Turn On…: the count and the answer forgotten, the key cleared; the next window asks again.
+    exec.mockClear();
+    await vscode.commands.executeCommand('erdStudio.turnOnStartSuggestions');
+    expect(workspaceState.get(STATE_KEY)).toEqual({ shown: 0 });
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.startSuggestionsOff', false);
+    tearDownActivation();
+    info.mockClear();
+    answer = undefined;
+    await activateAndLook();
+    expect(shown()).toHaveLength(1);
+
+    // Turn Off… from the palette does what the button does.
+    await vscode.commands.executeCommand('erdStudio.turnOffStartSuggestions');
+    expect(workspaceState.get(STATE_KEY)).toMatchObject({ off: true });
+  });
+
+  it('closed without a choice: asked again in a later window, at most three times in all, never twice in one window', async () => {
+    folderWith({ 'model.dbml': 'Table a {\n  id int [pk]\n}\n' });
+    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+    context = makeContext(root, { workspaceState });
+    for (let window = 0; window < 4; window++) {
+      if (window > 0) tearDownActivation();
+      await activateAndLook();
+    }
+    expect(shown().map((c) => c[0])).toEqual(Array(3).fill('ERD Studio found a DBML file in this folder. Create a diagram from it?'));
+    expect(workspaceState.get(STATE_KEY)).toEqual({ shown: 3 });
+  });
+
+  it('erdStudio.startSuggestions false (a team can commit it): no notification, the palette offers Turn On', async () => {
+    folderWith({ 'schema.sql': SQL });
+    vscode._setMockConfiguration('erdStudio', 'startSuggestions', { workspaceValue: false });
+    context = makeContext(root, { workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]) });
+    const exec = passThroughExec();
+    await activateAndLook();
+    expect(shown()).toEqual([]);
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.startSuggestionsOff', true);
+    // Turn On cannot override the setting: it says so.
+    answer = undefined;
+    await vscode.commands.executeCommand('erdStudio.turnOnStartSuggestions');
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('erdStudio.startSuggestions setting'), 'Open Settings');
+  });
+
+  it('nothing concrete in the folder: no notification, and on a first run the walkthrough opens after the look', async () => {
+    folderWith({ 'README.md': '# notes\n', 'query.sql': 'SELECT 1;\n' });
+    const globalState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState: new Map<string, unknown>() });
+    const opens = spyWalkthrough();
+    await activateAndLook();
+    expect(shown()).toEqual([]);
+    expect(opens()).toHaveLength(1);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBe(true);
+  });
+
+  it('a folder that already has a diagram gets its own notice, never the suggestion', async () => {
+    fs.cpSync(LOGICAL_ONLY_FIXTURE, path.join(root, 'repo'), { recursive: true });
+    folderWith({ 'schema.sql': SQL });
+    context = makeContext(root, { workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]) });
+    await activateAndLook();
+    expect(shown().filter((c) => String(c[0]).startsWith('ERD Studio found'))).toEqual([]);
+  });
+
+  it('the commands: contributed with their real titles, palette by the context key, no legacy alias', () => {
+    const pkg = packageJson as unknown as {
+      contributes: {
+        commands: Array<{ command: string; title: string; category?: string }>;
+        menus: { commandPalette: Array<{ command: string; when?: string }> };
+        configuration: { properties: Record<string, { type: string; default: unknown; scope?: string }> } | Array<{ properties: Record<string, { type: string; default: unknown; scope?: string }> }>;
+      };
+    };
+    for (const [id, title, when] of [
+      ['erdStudio.turnOffStartSuggestions', 'Turn Off Start Suggestions for This Folder', 'erdStudio.hasProject && !erdStudio.startSuggestionsOff'],
+      ['erdStudio.turnOnStartSuggestions', 'Turn On Start Suggestions for This Folder', 'erdStudio.hasProject && erdStudio.startSuggestionsOff'],
+    ]) {
+      expect(pkg.contributes.commands.find((c) => c.command === id)).toEqual({ command: id, title, category: 'ERD Studio' });
+      expect(pkg.contributes.menus.commandPalette.filter((m) => m.command === id)).toEqual([{ command: id, when }]);
+      expect(NO_LEGACY_ALIAS.has(id)).toBe(true);
+      expect(PRE_REGISTERED_COMMANDS.has(id)).toBe(false);
+    }
+    const blocks = Array.isArray(pkg.contributes.configuration) ? pkg.contributes.configuration : [pkg.contributes.configuration];
+    const setting = blocks.map((b) => b.properties['erdStudio.startSuggestions']).find(Boolean)!;
+    // Resource scope: a checked-in .vscode/settings.json may turn it off.
+    expect(setting).toMatchObject({ type: 'boolean', default: true, scope: 'resource' });
   });
 });

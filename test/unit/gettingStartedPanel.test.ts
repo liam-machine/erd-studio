@@ -80,6 +80,7 @@ import {
   START_ACTION_COMMANDS,
   START_INTENTS,
   START_INTENT_REASONS,
+  startActionArgs,
   startActionsFor,
   startActionsForIntent,
   startIntentFor,
@@ -1611,7 +1612,7 @@ describe('GettingStartedPanel', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Ignoring unknown'), expect.anything());
   });
 
-  it('start: records the welcome key, runs the start\'s fixed command with no argument, then posts a fresh status', async () => {
+  it('start: records the welcome key, runs the start\'s fixed command with its fixed argument, then posts a fresh status', async () => {
     const deps = makeDeps();
     GettingStartedPanel.createOrShow(makeContext(), deps);
     const panel = vscode.window._webviewPanels[0];
@@ -1635,7 +1636,8 @@ describe('GettingStartedPanel', () => {
       const statusCalls = (deps.getStatus as ReturnType<typeof vi.fn>).mock.calls.length;
       await panel._simulateMessage({ type: 'start', action });
       expect(feature.mock.calls.map((c) => c[0]), action).toEqual([START_FEATURES.welcome[action]]);
-      expect(ran.at(-1), action).toEqual({ command: START_ACTION_COMMANDS[action], args: [] });
+      // A fixed argument, never one from the webview: a direct import's quick path, nothing for the others.
+      expect(ran.at(-1), action).toEqual({ command: START_ACTION_COMMANDS[action], args: startActionArgs(action) });
       expect((deps.getStatus as ReturnType<typeof vi.fn>).mock.calls.length, action).toBe(statusCalls + 1);
     }
     expect(Object.values(START_FEATURES.welcome)).toEqual([

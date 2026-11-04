@@ -249,16 +249,19 @@ describe('Import DBML — a file from another tool', () => {
     const domainPath = erd('gold', 'shop.json');
     expect(result?.domainPath).toBe(domainPath);
     expect(ui.dialogs).toEqual([tmp]);
-    // Layer, then the name, suggested from the file's name.
-    expect(ui.picks[0].items.map((i) => i.id)).toEqual(['silver', 'gold']);
+    // Layer, then the name, suggested from the file's name. Enter takes New
+    // Diagram's default for a first diagram: the last creatable layer, first.
+    expect(ui.picks[0].items.map((i) => i.id)).toEqual(['gold', 'silver']);
     expect(ui.picks[0].options.placeHolder).toBe(WHICH_LAYER_FOR_DIAGRAM);
     expect(ui.inputs[0].value).toBe('shop');
     expect(ui.inputs[0].prompt).toBe('Name the diagram. It is saved in the Gold layer.');
     // The dry run, before anything is written.
     expect(ui.confirms).toHaveLength(1);
-    expect(ui.confirms[0].message).toBe('Import 2 tables into a new diagram "shop" in the Gold layer.');
+    expect(ui.confirms[0].message).toBe('Import 2 tables and 1 relationship into a new diagram "shop" in the Gold layer.');
     expect(ui.confirms[0].button).toBe(IMPORT_BUTTON);
-    expect(ui.confirms[0].detail).toContain('• New: customers, orders.');
+    // Counts, never a list of tables (Review All… lists them).
+    expect(ui.confirms[0].detail).toContain('• 2 new tables.');
+    expect(ui.confirms[0].detail).not.toContain('customers');
     expect(ui.confirms[0].detail).toContain('• Layout: The diagram is laid out automatically');
 
     expect(lms.getTable('customers')?.columns?.map((c) => c.name)).toEqual(['id', 'name']);
@@ -362,7 +365,8 @@ describe('Import DBML — a file from another tool', () => {
     ]);
     expect(lms.getTable('orders')?.relationships ?? []).toEqual([]);
     expect(written[0].modelNames).toEqual(['orders']);
-    expect(ui.confirms[0].detail).toContain('Already in your Table Library, used as they are: Customers.');
+    expect(ui.confirms[0].detail).toContain('• 1 new table.');
+    expect(ui.confirms[0].detail).toContain('• 1 table already in your Table Library, used as it is');
   });
 });
 

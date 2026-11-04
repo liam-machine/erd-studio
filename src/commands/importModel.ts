@@ -16,15 +16,16 @@
  * Not pre-registered: an empty window gets the usual open-a-folder stub.
  */
 
-import { promises as fsp } from 'fs';
 import * as vscode from 'vscode';
 
 import {
+  countSqlCreateTables,
   looksLikeSqlDdl,
   orderImportSources,
   type ImportModelSource,
 } from '../services/importSources';
 import { log } from '../services/logger';
+import { readFileStart } from '../services/readFileStart';
 import type { TelemetryFeature } from '../services/telemetryPayload';
 import { telemetry } from '../services/telemetryService';
 import { IMPORT_DBML_COMMAND } from './importDbml';
@@ -127,20 +128,7 @@ export interface DetectImportIo {
 /** A file every semantic model Import Semantic Model… can read holds (`findSemanticModels`). */
 export const SEMANTIC_MODEL_GLOB = '**/{*.bim,definition.pbism,model.tmdl,database.tmdl}';
 
-/**
- * The first `bytes` bytes of a file, never more: the look runs unasked (the
- * start screen), and a folder of database dumps holds files of gigabytes.
- */
-export async function readFileStart(filePath: string, bytes: number): Promise<Uint8Array> {
-  const handle = await fsp.open(filePath, 'r');
-  try {
-    const buffer = Buffer.alloc(bytes);
-    const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
-    return buffer.subarray(0, bytesRead);
-  } finally {
-    await handle.close();
-  }
-}
+export { readFileStart };
 
 /** Folders the look skips: tools', a dbt project's build output and ERD Studio's own. */
 export function detectExcludeGlob(semanticDir: string): string {
@@ -148,13 +136,31 @@ export function detectExcludeGlob(semanticDir: string): string {
   return `**/{node_modules,.git,.venv,venv,target,dbt_packages,${own}}/**`;
 }
 
+/** What the look at the folder found, and, when it could tell exactly, how many CREATE TABLEs its `.sql` files hold. */
+export interface ImportFindings {
+  sources: Set<ImportModelSource>;
+  /**
+   * The CREATE TABLE statements (with a column list) in the `.sql` files,
+   * only when every `.sql` file in the folder was read whole: fewer than
+   * {@link DETECT_SQL_FILES} files, each shorter than {@link DETECT_SQL_CHARS}.
+   * Otherwise absent (never a guess). It stays on this machine.
+   */
+  sqlTables?: number;
+}
+
 /**
  * Which sources the open folder seems to hold, with bounded lookups: one
  * semantic-model file, one `.dbml` file, and up to {@link DETECT_SQL_FILES}
  * `.sql` files whose start holds a CREATE TABLE. A lookup that fails counts
- * as nothing found.
+ * as nothing found. With `countTables` (the start screen's look, which the
+ * start suggestion names a count from) every one of those `.sql` files is
+ * read, not only up to the first with a CREATE TABLE.
  */
-export async function detectImportSources(io: DetectImportIo, semanticDir: string): Promise<Set<ImportModelSource>> {
+export async function detectImportFindings(
+  io: DetectImportIo,
+  semanticDir: string,
+  options: { countTables?: boolean } = {},
+): Promise<ImportFindings> {
   const exclude = detectExcludeGlob(semanticDir);
   const found = new Set<ImportModelSource>();
   const any = async (glob: string): Promise<boolean> => (await io.findFiles(glob, exclude, 1).catch(() => [])).length > 0;
@@ -167,12 +173,25 @@ export async function detectImportSources(io: DetectImportIo, semanticDir: strin
   ]);
   if (semanticModel) found.add('semanticModel');
   if (dbml) found.add('dbml');
+  // The count is exact only when every .sql file was listed and read whole.
+  let exact = options.countTables === true && sqlFiles.length < DETECT_SQL_FILES;
+  let tables = 0;
   for (const file of sqlFiles) {
-    if (io.cancelled?.()) break;
-    const text = await io.readStart(file, DETECT_SQL_CHARS).catch(() => '');
-    if (looksLikeSqlDdl(text)) { found.add('sqlDdl'); break; }
+    if (io.cancelled?.()) { exact = false; break; }
+    const text = await io.readStart(file, DETECT_SQL_CHARS).catch(() => undefined);
+    if (text === undefined || text.length >= DETECT_SQL_CHARS) exact = false;
+    if (text !== undefined && looksLikeSqlDdl(text)) {
+      found.add('sqlDdl');
+      if (!options.countTables) break;
+      tables += countSqlCreateTables(text);
+    }
   }
-  return found;
+  return { sources: found, ...(exact && found.has('sqlDdl') && tables > 0 ? { sqlTables: tables } : {}) };
+}
+
+/** {@link detectImportFindings}' sources: Import…'s picker order. */
+export async function detectImportSources(io: DetectImportIo, semanticDir: string): Promise<Set<ImportModelSource>> {
+  return (await detectImportFindings(io, semanticDir)).sources;
 }
 
 /** The real lookups, under `root`; `token` cancels the searches and stops the reads. */
@@ -211,20 +230,21 @@ export async function vscodeFindFirstFile(root: string, semanticDir: string, glo
 
 /**
  * The start screen's look at the folder (`StartIntentTracker`): the same
- * detector as Import…'s picker, cancelled when `signal` aborts. Reads only;
- * what it finds never leaves the machine.
+ * detector as Import…'s picker, counting CREATE TABLEs for the start
+ * suggestion, cancelled when `signal` aborts. Reads only; what it finds
+ * never leaves the machine.
  */
-export function vscodeStartLook(root: string, semanticDir: string): (signal: AbortSignal) => Promise<ReadonlySet<ImportModelSource>> {
+export function vscodeStartLook(root: string, semanticDir: string): (signal: AbortSignal) => Promise<ImportFindings> {
   return async (signal) => {
     const source = new vscode.CancellationTokenSource();
     const abort = (): void => source.cancel();
     signal.addEventListener('abort', abort);
     try {
-      if (signal.aborted) return new Set();
-      return await detectImportSources(vscodeDetectImportIo(root, source.token), semanticDir);
+      if (signal.aborted) return { sources: new Set() };
+      return await detectImportFindings(vscodeDetectImportIo(root, source.token), semanticDir, { countTables: true });
     } catch (err) {
       log.warn('[ERD Studio] Start screen: could not look for import sources:', err);
-      return new Set();
+      return { sources: new Set() };
     } finally {
       signal.removeEventListener('abort', abort);
       source.dispose();

@@ -159,7 +159,7 @@ describe('erdStudio.importDbml in activate()', () => {
     expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'shop_customer.yml'))).toBe(true);
     // The dry run was a modal whose detail lists the layout.
     const modal = info.mock.calls.find((c) => typeof c[1] === 'object')!;
-    expect(String(modal[0])).toBe('Import 2 tables into a new diagram "shop" in the Gold layer.');
+    expect(String(modal[0])).toBe('Import 2 tables and 1 relationship into a new diagram "shop" in the Gold layer.');
     expect((modal[1] as { detail: string }).detail).toContain("1 of 2 tables placed from the file's erd_layout");
     expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: domainPath }), SUBJECT_AREA_EDITOR_VIEW_TYPE);
   });

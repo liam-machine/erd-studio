@@ -9,6 +9,7 @@
 import {
   START_ACTION_COMMANDS,
   parseStartArgs,
+  startActionArgs,
   startActionsFor,
   type StartAction,
   type StartContext,
@@ -87,7 +88,7 @@ export function recordStartSuggested(intent: StartIntent): void {
 export interface StartDeps {
   /** Where the folder stands now: which starts apply. */
   context(): StartContext;
-  executeCommand(command: string): Thenable<unknown>;
+  executeCommand(command: string, ...args: unknown[]): Thenable<unknown>;
   /** Show the starts to choose from; undefined when closed. */
   pick(items: Array<{ label: string; detail: string; action: StartAction }>): Thenable<{ action: StartAction } | undefined>;
 }
@@ -99,17 +100,18 @@ export function recordStart(action: StartAction, from: StartSurface): void {
 
 /**
  * Run `erdStudio.start`. A valid `{ action, from }` is counted and run; anything
- * else shows the starts that apply here, and runs the one picked (not counted:
- * it came from no start surface).
+ * else (the start suggestion's More Options…) shows the starts that apply
+ * here, and runs the one picked (not counted: it came from no start surface).
+ * A direct import runs its quick path either way (`startActionArgs`).
  */
 export async function runStart(arg: unknown, deps: StartDeps): Promise<void> {
   const args = parseStartArgs(arg);
   if (args) {
     recordStart(args.action, args.from);
-    await deps.executeCommand(START_ACTION_COMMANDS[args.action]);
+    await deps.executeCommand(START_ACTION_COMMANDS[args.action], ...startActionArgs(args.action));
     return;
   }
   const actions = startActionsFor(deps.context());
   const choice = await deps.pick(actions.map((action) => ({ ...START_PICK_ITEMS[action], action })));
-  if (choice) await deps.executeCommand(START_ACTION_COMMANDS[choice.action]);
+  if (choice) await deps.executeCommand(START_ACTION_COMMANDS[choice.action], ...startActionArgs(choice.action));
 }

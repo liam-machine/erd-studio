@@ -39,7 +39,7 @@ import { YmlParserService } from './services/ymlParserService';
 import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
-import { LAYER_DEFINITION, WHICH_LAYER_FOR_DIAGRAM } from './services/layerWording';
+import { LAYER_DEFINITION, WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from './services/layerWording';
 import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type DbtProjectConfig } from './services/dbtProjectConfig';
 import { detectPhysicalTooling, toolingExclude, type ToolingProbe } from './services/physicalTooling';
 import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
@@ -133,15 +133,15 @@ import { readManifestMtime } from './services/manifestStaleness';
 import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
 import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
-import { IMPORT_DBML_COMMAND, importDbml } from './commands/importDbml';
+import { IMPORT_DBML_COMMAND, importDbml, quickImportDbml } from './commands/importDbml';
 import { OPEN_EXAMPLE_DIAGRAM_COMMAND, openExampleDiagram } from './commands/openExampleDiagram';
 import { IMPORT_MODEL_COMMAND, runImportModel, vscodeFindFirstFile, vscodeImportModelDeps, vscodeStartLook } from './commands/importModel';
-import { IMPORT_SQL_DDL_COMMAND, importSqlDdl } from './commands/importSqlDdl';
-import { IMPORT_SEMANTIC_MODEL_COMMAND, importSemanticModel } from './commands/importSemanticModel';
+import { IMPORT_SQL_DDL_COMMAND, importSqlDdl, quickImportSqlDdl } from './commands/importSqlDdl';
+import { IMPORT_SEMANTIC_MODEL_COMMAND, importSemanticModel, quickImportSemanticModel } from './commands/importSemanticModel';
 import { recordStartSuggested, runStart } from './commands/start';
 import { OPEN_EXAMPLE_PROJECT_COMMAND, openExampleProject } from './commands/openExampleProject';
 import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/exampleProjects';
-import { START_COMMAND, START_INTENT_CONTEXT_KEY, type StartContext } from './types/startActions';
+import { START_COMMAND, START_INTENT_CONTEXT_KEY, isQuickImportArg, type StartContext } from './types/startActions';
 import { StartIntentTracker } from './commands/startIntent';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
 import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
@@ -160,6 +160,22 @@ import { registerDbmlFormatting } from './providers/dbmlFormattingProvider';
 import { dbmlFileIcon } from './providers/dbmlFileKinds';
 import { LOG_CHANNEL_NAME, SHOW_LOGS_COMMAND } from './services/showLogs';
 import { pickActivationPrompt, SessionPromptGate, type SessionPromptKind } from './services/activationPrompts';
+import {
+  OPEN_SETTINGS_BUTTON,
+  START_SUGGESTIONS_OFF_CONTEXT_KEY,
+  START_SUGGESTIONS_OFF_MESSAGE,
+  START_SUGGESTIONS_ON_MESSAGE,
+  START_SUGGESTIONS_SETTING,
+  START_SUGGESTIONS_SETTING_OFF_MESSAGE,
+  START_SUGGESTION_STATE_KEY,
+  TURN_OFF_START_SUGGESTIONS_COMMAND,
+  TURN_ON_START_SUGGESTIONS_COMMAND,
+  readStartSuggestionState,
+  runStartSuggestion,
+  startSuggestionDue,
+  startSuggestionsOff,
+  type StartSuggestionState,
+} from './services/startSuggestion';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -606,6 +622,8 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.importModel',
   'erdStudio.importSqlDdl',
   'erdStudio.importSemanticModel',
+  'erdStudio.turnOffStartSuggestions',
+  'erdStudio.turnOnStartSuggestions',
 ]);
 
 /**
@@ -3057,28 +3075,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // without one the user picks a file.
     vscode.commands.registerCommand(IMPORT_DBML_COMMAND, async (file?: unknown) => {
       const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
-      const uri = file as { scheme?: unknown; fsPath?: unknown } | undefined;
-      const filePath = uri && typeof uri === 'object' && uri.scheme === 'file' && typeof uri.fsPath === 'string' ? uri.fsPath : undefined;
-      await importDbml({
+      const deps = {
         workspaceRoot,
         semanticDir,
         layerService,
         subjectAreaService,
         tableLibraryService,
-        validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
+        validateDomainName: (value: string, layer: string) => validateSubjectAreaSlug(value, layer, existingDomains()),
         onWritten: refreshAfterNewSubjectArea,
         // "This folder has a DBML file": the Open dialog starts on it, chosen.
         findDefaultFile: () => vscodeFindFirstFile(workspaceRoot, semanticDir, '**/*.dbml'),
-      }, filePath !== undefined ? { filePath } : undefined);
+      };
+      // A start (Import your DBML file, the start suggestion): the quick path, that file taken.
+      if (isQuickImportArg(file)) {
+        await quickImportDbml(deps);
+        return;
+      }
+      const uri = file as { scheme?: unknown; fsPath?: unknown } | undefined;
+      const filePath = uri && typeof uri === 'object' && uri.scheme === 'file' && typeof uri.fsPath === 'string' ? uri.fsPath : undefined;
+      await importDbml(deps, filePath !== undefined ? { filePath } : undefined);
     }),
     // Import… (the start screen's Import): DBML, SQL DDL or a Power BI /
     // Fabric semantic model, the source the folder seems to hold first.
     vscode.commands.registerCommand(IMPORT_MODEL_COMMAND, () => runImportModel(vscodeImportModelDeps(workspaceRoot, semanticDir))),
     // CREATE TABLE scripts and semantic models are converted to DBML, then go
     // through Import DBML's own flow (layer, name, dry run, Import).
-    vscode.commands.registerCommand(IMPORT_SQL_DDL_COMMAND, async () => {
+    // A start (the start screen's primary import, the start suggestion) passes
+    // { quick: true }: the quick path, defaults chosen and one confirm.
+    vscode.commands.registerCommand(IMPORT_SQL_DDL_COMMAND, async (arg?: unknown) => {
       const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
-      await importSqlDdl({
+      await (isQuickImportArg(arg) ? quickImportSqlDdl : importSqlDdl)({
         workspaceRoot,
         semanticDir,
         layerService,
@@ -3089,9 +3115,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         onWritten: refreshAfterNewSubjectArea,
       });
     }),
-    vscode.commands.registerCommand(IMPORT_SEMANTIC_MODEL_COMMAND, async () => {
+    vscode.commands.registerCommand(IMPORT_SEMANTIC_MODEL_COMMAND, async (arg?: unknown) => {
       const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
-      await importSemanticModel({
+      await (isQuickImportArg(arg) ? quickImportSemanticModel : importSemanticModel)({
         workspaceRoot,
         semanticDir,
         layerService,
@@ -3131,15 +3157,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             showCommandFailure({ title: NEW_DIAGRAM_TITLE, message: NO_LAYERS_MESSAGE, buttons: [ADD_LAYER_BUTTON] }, undefined);
             return;
           }
-          if (creatableLayers.length === 1) {
-            layer = creatableLayers[0].id;
-          } else if (subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length === 0) {
-            // No diagrams yet, so nothing to tell the layers apart by: the
-            // first diagram goes in the last creatable layer in layers.json
-            // order (gold, of silver and gold). The question comes once
-            // there are diagrams to count.
-            layer = creatableLayers[creatableLayers.length - 1].id;
-            layerDefaulted = true;
+          // No diagrams yet, so nothing to tell the layers apart by: the first
+          // diagram goes in the last creatable layer in layers.json order (gold,
+          // of silver and gold; defaultDiagramLayer, the import's quick path
+          // shares it). The question comes once there are diagrams to count.
+          const defaulted = defaultDiagramLayer(
+            creatableLayers.map((l) => l.id),
+            subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length,
+          );
+          if (defaulted !== undefined) {
+            layer = defaulted;
+            layerDefaulted = creatableLayers.length > 1;
           } else {
             // Each layer with how many diagrams it holds, then a way to make another.
             const counts = new Map<string, number>();
@@ -4100,6 +4128,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // The start suggestion (src/services/startSuggestion.ts): a folder with no
+  // diagram whose start is obvious gets one notification offering it. Its
+  // state is workspace state (machine-local: nothing goes into the repo);
+  // erdStudio.startSuggestions can be committed to turn it off for a team.
+  const startSuggestionState = (): StartSuggestionState =>
+    readStartSuggestionState(context.workspaceState.get(START_SUGGESTION_STATE_KEY));
+  const saveStartSuggestionState = (state: StartSuggestionState): Thenable<void> =>
+    context.workspaceState.update(START_SUGGESTION_STATE_KEY, state);
+  const startSuggestionsSettingOn = (): boolean => getErdStudioSetting<boolean>(START_SUGGESTIONS_SETTING, true) !== false;
+  // The palette shows Turn Off… or Turn On… (package.json gates them on this key).
+  const publishStartSuggestionsOff = (): void => {
+    void vscode.commands.executeCommand('setContext', START_SUGGESTIONS_OFF_CONTEXT_KEY,
+      startSuggestionsOff(startSuggestionState(), startSuggestionsSettingOn()));
+  };
+  publishStartSuggestionsOff();
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration(`erdStudio.${START_SUGGESTIONS_SETTING}`)) publishStartSuggestionsOff();
+    }),
+    vscode.commands.registerCommand(TURN_OFF_START_SUGGESTIONS_COMMAND, async () => {
+      await saveStartSuggestionState({ ...startSuggestionState(), off: true });
+      telemetry.feature('startSuggestionsOff');
+      publishStartSuggestionsOff();
+      void vscode.window.showInformationMessage(START_SUGGESTIONS_OFF_MESSAGE);
+    }),
+    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async () => {
+      // A fresh start: the count and an earlier answer are forgotten too.
+      await saveStartSuggestionState({ shown: 0 });
+      publishStartSuggestionsOff();
+      if (!startSuggestionsSettingOn()) {
+        const choice = await vscode.window.showInformationMessage(START_SUGGESTIONS_SETTING_OFF_MESSAGE, OPEN_SETTINGS_BUTTON);
+        if (choice === OPEN_SETTINGS_BUTTON) {
+          void vscode.commands.executeCommand('workbench.action.openSettings', `erdStudio.${START_SUGGESTIONS_SETTING}`);
+        }
+        return;
+      }
+      void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
+    }),
+  );
+  /** Set by the end of activate(): show the next offered prompt when `from` held the window but showed nothing. */
+  let handOverActivationPrompt: (from: SessionPromptKind) => Promise<void> = async () => {};
+
   // First run (spec C.5, addendum P4). A fresh install opens the Get Started
   // walkthrough once per machine (the Welcome panel where the host has no
   // walkthrough command), but not in a project that already has diagrams (a
@@ -4213,6 +4283,53 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
 
+  // The start suggestion: a folder with no diagram, where it is still due.
+  // It decides only after the start screen's bounded look (deferred, never on
+  // activation's path): a concrete start shows the notification; nothing
+  // concrete hands the window to the next prompt (the walkthrough on a first
+  // run). On a first run with a concrete start it takes the walkthrough's
+  // place, and the walkthrough stays owed.
+  if (existingDiagrams.length === 0 && !hasOpenSubjectAreaCanvas()) {
+    const settingOn = startSuggestionsSettingOn();
+    if (startSuggestionDue({ settingOn, state: startSuggestionState(), hasDiagrams: false })) {
+      const walkthroughOwed = (): boolean => activationPrompts.has('walkthrough');
+      activationPrompts.set('startSuggestion', () => {
+        setTimeout(() => {
+          void runStartSuggestion({
+            intent: () => startIntent.refresh(),
+            sqlTables: () => startIntent.sqlTableCount(),
+            hasDiagrams: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
+            settingOn: startSuggestionsSettingOn,
+            // No second Convert prompt: the Convert offer's own checks decide.
+            convertApplies: () => convertOfferApplies({
+              ...convertOfferState(),
+              candidates: () => countDbmlConversionCandidates(workspaceRoot, semanticDir),
+              goesNowhere: () => dbmlConversionGoesNowhere(context.workspaceState, workspaceRoot, semanticDir),
+            }),
+            state: startSuggestionState,
+            saveState: saveStartSuggestionState,
+            show: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
+            info: (message) => { void vscode.window.showInformationMessage(message); },
+            executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+            recordSuggested: recordStartSuggested,
+            feature: (key) => telemetry.feature(key),
+            setOffContext: (off) => { void vscode.commands.executeCommand('setContext', START_SUGGESTIONS_OFF_CONTEXT_KEY, off); },
+          }).then(async (run) => {
+            if (run.shown) {
+              log.info('Activation prompt: startSuggestion shown');
+              if (walkthroughOwed()) telemetry.featureOnce('walkthroughWaited');
+              return;
+            }
+            sessionPrompts.release('startSuggestion');
+            await handOverActivationPrompt('startSuggestion');
+          }).catch((err: unknown) => log.warn('[ERD Studio] The start suggestion failed:', err));
+        }, 0);
+      });
+    } else if (!settingOn) {
+      telemetry.featureOnce('startSuggestionsOff');
+    }
+  }
+
   // AI coding harness — prompt to update stale files; offer install once per
   // workspace when none are present. Never overwrite anything silently:
   // harness files (AGENTS.md in particular) can hold user content.
@@ -4316,19 +4433,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // One prompt per window session: the most useful one offered above (the
   // existing diagrams, else the walkthrough, …), unless a canvas already
   // made its own offer. The others keep their flags and ask in a later window.
+  // The start suggestion holds the window while it looks, and hands it to the
+  // next prompt offered here when it has nothing concrete to offer.
   {
     const offered = [...activationPrompts.keys()];
-    const picked = pickActivationPrompt(offered);
-    const claimed = picked !== undefined && sessionPrompts.claim(picked);
-    // The walkthrough was owed and offered, but another prompt has this window.
-    if (offered.includes('walkthrough') && !(claimed && picked === 'walkthrough')) telemetry.featureOnce('walkthroughWaited');
-    if (picked && claimed) {
-      const waiting = offered.filter((kind) => kind !== picked);
-      log.info(`Activation prompt: ${picked}${waiting.length > 0 ? ` (next window: ${waiting.join(', ')})` : ''}`);
-      await activationPrompts.get(picked)?.();
-    } else if (offered.length > 0) {
-      log.info(`Activation prompts wait for the next window (${sessionPrompts.claimed ?? 'one'} already shown): ${offered.join(', ')}`);
-    }
+    const showFrom = async (candidates: readonly SessionPromptKind[]): Promise<void> => {
+      const picked = pickActivationPrompt(candidates);
+      const claimed = picked !== undefined && sessionPrompts.claim(picked);
+      // The walkthrough was owed and offered, but another prompt has this window
+      // (the start suggestion counts it once it has really shown).
+      if (candidates.includes('walkthrough') && !(claimed && (picked === 'walkthrough' || picked === 'startSuggestion'))) {
+        telemetry.featureOnce('walkthroughWaited');
+      }
+      if (picked && claimed) {
+        const waiting = candidates.filter((kind) => kind !== picked);
+        log.info(`Activation prompt: ${picked}${waiting.length > 0 ? ` (next window: ${waiting.join(', ')})` : ''}`);
+        await activationPrompts.get(picked)?.();
+      } else if (candidates.length > 0) {
+        log.info(`Activation prompts wait for the next window (${sessionPrompts.claimed ?? 'one'} already shown): ${candidates.join(', ')}`);
+      }
+    };
+    handOverActivationPrompt = (from) => showFrom(offered.filter((kind) => kind !== from));
+    await showFrom(offered);
   }
 
   // Keep ~/.erd-studio-cli in step with this extension — only if the user

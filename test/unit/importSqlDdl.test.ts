@@ -169,7 +169,7 @@ describe('Import SQL DDL…', () => {
     // The name comes from the folder; the headline says what the tables came from.
     expect(ui.inputs).toEqual(['postgres']);
     expect(ui.confirms).toHaveLength(1);
-    expect(ui.confirms[0].message).toBe('Import 4 tables from 2 SQL files (PostgreSQL) into a new diagram "postgres" in the Gold layer.');
+    expect(ui.confirms[0].message).toBe('Import 4 tables and 3 relationships from 2 SQL files (PostgreSQL) into a new diagram "postgres" in the Gold layer.');
     const detail = ui.confirms[0].detail;
     expect(detail).toContain('3 relationships');
     expect(detail).toMatch(/Layout: The diagram is laid out automatically/);

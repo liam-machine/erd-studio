@@ -15,6 +15,13 @@
  * (measures, calculation groups, auto date/time tables…, counted by kind; the
  * full list goes to the log). Cancelling any step writes nothing.
  *
+ * **The quick path** (`quickImportSemanticModel`: the start screen's
+ * **Import your Power BI semantic model** and the start suggestion) looks in
+ * the open folder itself: one model is taken (several: the pick), Import
+ * DBML's quick layer and name, and the dry run is the one question; its
+ * Change Options… asks the layer and name, those offered first. No model
+ * found: the step-by-step flow.
+ *
  * Pure parts in `src/services/semanticModelImport.ts`; every vscode call goes
  * through `ImportSemanticModelUi` (and Import DBML's `ImportDbmlUi`).
  */
@@ -100,7 +107,10 @@ export interface ImportSemanticModelDeps extends Omit<ImportDbmlDeps, 'ui' | 'so
  * undefined when the user cancels, no model reads, or something failed (each
  * case has already said so).
  */
-export async function importSemanticModel(deps: ImportSemanticModelDeps): Promise<ImportDbmlResult | undefined> {
+export async function importSemanticModel(
+  deps: ImportSemanticModelDeps,
+  quick?: { folder: string },
+): Promise<ImportDbmlResult | undefined> {
   const ui = deps.modelUi ?? vscodeImportSemanticModelUi();
   const cancelled = (): undefined => {
     telemetry.feature('importSemanticModelCancelled');
@@ -120,12 +130,17 @@ export async function importSemanticModel(deps: ImportSemanticModelDeps): Promis
   };
 
   // 1. The folder, and the models in it.
-  const folder = await ui.pickFolder(deps.workspaceRoot || undefined);
+  const folder = quick?.folder ?? await ui.pickFolder(deps.workspaceRoot || undefined);
   if (!folder) return cancelled();
   const folderName = path.basename(folder);
   // Only model files count toward the bound: findSemanticModels reads nothing
   // else, and a big repo holding one model somewhere must still import from its root.
   const walk = await walkFiles(folder, (f) => ui.readDirectory(f), { include: isSemanticModelFile, limit: MAX_SEMANTIC_MODEL_FILES });
+  // The quick path cannot take "the" model from a folder it could not list, or one with none: the step-by-step flow asks.
+  if (quick && (walk.truncated || walk.files.length === 0)) {
+    telemetry.feature('quickImportFellBack');
+    return importSemanticModel(deps);
+  }
   if (walk.truncated) {
     showError(
       `${TITLE}: ${folderName} holds more than ${MAX_SEMANTIC_MODEL_FILES} model files. Pick the <Name>.SemanticModel folder itself, or the folder just above it.`,
@@ -137,6 +152,10 @@ export async function importSemanticModel(deps: ImportSemanticModelDeps): Promis
   const relative = (full: string): string => path.join(folderName, path.relative(folder, full)).split(path.sep).join('/');
   const fullOf = new Map(walk.files.map((full) => [relative(full), full]));
   const entries = findSemanticModels([...fullOf.keys()]);
+  if (entries.length === 0 && quick) {
+    telemetry.feature('quickImportFellBack');
+    return importSemanticModel(deps);
+  }
   if (entries.length === 0) {
     return invalid(
       `${TITLE}: no semantic model found in ${folderName}. Pick the folder that holds <Name>.SemanticModel (saved as TMDL or as model.bim), or that folder itself.`,
@@ -200,16 +219,27 @@ export async function importSemanticModel(deps: ImportSemanticModelDeps): Promis
   const renameNote = semanticModelRenameNote(converted.renamed);
   const filePath = path.join(deps.workspaceRoot, `${entry.name}.dbml`);
   const { modelUi: _modelUi, ui: importUi, ...rest } = deps;
-  return importDbml({
+  const importDeps = {
     ...rest,
     ui: suppliedDbmlUi(importUi ?? vscodeImportDbmlUi(), filePath, converted.dbml),
-    source: 'semanticModel',
+    source: 'semanticModel' as const,
     origin: {
       from: `from the semantic model ${entry.name}`,
       notes: [...(renameNote ? [renameNote] : []), ...warnings],
       skipped: semanticModelSkippedSummary(converted.skippedCounts),
     },
-  }, { filePath });
+  };
+  if (!quick) return importDbml(importDeps, { filePath });
+  // Change Options…: the same model, the layer and name asked, the quick path's offered first.
+  return importDbml({
+    ...importDeps,
+    changeOptions: ({ layer, name }) => importDbml(importDeps, { filePath, preferredLayer: layer, name }),
+  }, { filePath, quick: true });
+}
+
+/** The quick path: the semantic model in the open folder itself (the pick only when it holds several). */
+export function quickImportSemanticModel(deps: ImportSemanticModelDeps): Promise<ImportDbmlResult | undefined> {
+  return importSemanticModel(deps, { folder: deps.workspaceRoot });
 }
 
 /** A file {@link findSemanticModels} can build a model from (`.tmdl` or `.bim`). */

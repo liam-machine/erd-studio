@@ -1080,8 +1080,9 @@ workspace.createFileSystemWatcher = ((pattern?: unknown) => {
 export class RelativePattern {
   base: string;
   pattern: string;
-  constructor(base: string | { uri: { fsPath: string } }, pattern: string) {
-    this.base = typeof base === 'string' ? base : base.uri.fsPath;
+  constructor(base: string | { uri: { fsPath: string } } | { fsPath: string }, pattern: string) {
+    // A folder path, a WorkspaceFolder or a Uri, as VS Code takes them.
+    this.base = typeof base === 'string' ? base : 'uri' in base ? base.uri.fsPath : base.fsPath;
     this.pattern = pattern;
   }
 }

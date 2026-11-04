@@ -39,8 +39,24 @@ const CREATE_TABLE = /\bcreate\s+(?:or\s+replace\s+)?(?:(?:global|local)\s+)?(?:
 
 /** Whether a `.sql` file's text holds a CREATE TABLE with columns (a dbt model's SELECT does not). */
 export function looksLikeSqlDdl(text: string): boolean {
-  const withoutComments = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
-  return CREATE_TABLE.test(withoutComments);
+  return CREATE_TABLE.test(withoutSqlComments(text));
+}
+
+/** ALTER TABLE … that adds a key (FOREIGN KEY, PRIMARY KEY, REFERENCES): a pg_dump-style constraints file beside the tables. */
+const ALTER_TABLE_KEY = /\balter\s+table\b[^;]{0,600}?\b(?:foreign\s+key|primary\s+key|references)\b/i;
+
+/** Whether a `.sql` file's text adds keys to tables (comments ignored): the quick import takes it with the CREATE TABLE scripts. */
+export function looksLikeSqlKeys(text: string): boolean {
+  return ALTER_TABLE_KEY.test(withoutSqlComments(text));
+}
+
+/** How many CREATE TABLEs with a column list a `.sql` file's text holds, comments ignored (the start suggestion's count). */
+export function countSqlCreateTables(text: string): number {
+  return [...withoutSqlComments(text).matchAll(new RegExp(CREATE_TABLE.source, 'gi'))].length;
+}
+
+function withoutSqlComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
 }
 
 /** Folders a walk never enters: tools' and VCS's own, a dbt project's build output. */

@@ -1498,8 +1498,167 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// The dry run's modal: a headline and a short detail, whatever the size
+// ---------------------------------------------------------------------------
+
+/** The modal's detail never runs longer than this many lines, however many tables (Review All… lists everything). */
+export const IMPORT_MODAL_MAX_DETAIL_LINES = 10;
+/** Schemas the modal names by count; the rest are summed. */
+export const IMPORT_MODAL_SCHEMAS_SHOWN = 5;
+/** Notes the modal quotes; the rest are counted. */
+export const IMPORT_MODAL_NOTES_SHOWN = 2;
+
+/** A table's schema as the review groups it: its qualifier, or none. */
+export function importSchemaOf(table: Pick<SemanticTable, 'schema'>): string {
+  return table.schema ?? '';
+}
+
+/** The new tables counted by schema, most first, then by name (`''`: no schema). */
+export function importSchemaCounts(plan: DbmlImportPlan): Array<{ schema: string; tables: number }> {
+  const counts = new Map<string, number>();
+  for (const t of plan.newTables) counts.set(importSchemaOf(t), (counts.get(importSchemaOf(t)) ?? 0) + 1);
+  return [...counts].map(([schema, tables]) => ({ schema, tables }))
+    .sort((a, b) => b.tables - a.tables || a.schema.localeCompare(b.schema, 'en', { numeric: true }));
+}
+
+/** What the import says about the layout, as one sentence (no bullet). */
+export function importLayoutSentence(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): string {
+  const { report } = plan;
+  const laidOut = options.dbml
+    ? 'the diagram is laid out automatically when it opens, and that layout is saved in the diagram file.'
+    : 'the diagram is laid out automatically when it opens.';
+  if (!report.layoutRead) return `Layout: ${laidOut.replace(/^the /, 'The ')}`;
+  if (report.positioned === 0) return `The file's erd_layout has no positions for these tables: ${laidOut}`;
+  if (report.unpositioned > 0) {
+    return `Layout: ${report.positioned} of ${plan.modelNames.length} tables placed from the file's erd_layout; the rest are placed when it opens.`;
+  }
+  return 'Layout: every table placed from the file\'s erd_layout.';
+}
+
+/**
+ * Everything the import has to say beyond the counts, most important first,
+ * one sentence each: the file's layout lines that could not be read, values
+ * ERD Studio keeps but does not recognise, the conversion's own notes,
+ * schemas written in the layer's spelling, optional references, and that
+ * details without a field are kept.
+ */
+export function importPlanNotes(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): string[] {
+  const { report } = plan;
+  const notes: string[] = [];
+  for (const problem of report.layoutProblems) notes.push(`${problem}.`);
+  notes.push(...report.notes);
+  notes.push(...(options.origin?.notes ?? []));
+  const respelled = new Map<string, { to: string; tables: string[]; newFolder: boolean }>();
+  for (const r of options.dbml?.respelledSchemas ?? []) {
+    const key = `${r.from}\u0000${r.to}`;
+    respelled.set(key, { to: r.to, tables: [...(respelled.get(key)?.tables ?? []), r.table], newFolder: r.newFolder === true });
+  }
+  for (const [key, { to, tables, newFolder }] of respelled) {
+    const why = newFolder ? 'as another table in this file spells it (one folder per schema)' : `as the layer's existing ${to}/ folder spells it`;
+    notes.push(`Schema ${key.split('\u0000')[0]} is written ${to}, ${why}: ${someOf(tables)}.`);
+  }
+  if (options.dbml) {
+    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin) {
+      notes.push(`Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, ${plural(report.requiredRefs, 'reference was', 'references were')} not optional.`);
+    }
+  } else if (report.optionalRefs > 0 && !report.erdStudioExport) {
+    notes.push(`${plural(report.optionalRefs, 'reference is', 'references are')} optional (?). ERD Studio doesn't record that, so they are imported as plain relationships.`);
+  }
+  if (report.stickyNotes > 0) notes.push(`${plural(report.stickyNotes, 'sticky note')}.`);
+  if (report.keptInMeta > 0) {
+    notes.push('Not null, defaults, indexes and other details ERD Studio has no field for are kept in the table files, so they are not lost.');
+  }
+  return notes;
+}
+
+/** Where the relationships are saved, as the dry run says it (`saved in gold/relationships/gold.dbml`), or ''. */
+function relationshipsHome(plan: DbmlImportPlan, options: DescribeDbmlImportOptions): string {
+  const { report } = plan;
+  const home = options.dbml
+    ? (options.dbml.relationshipsFiles.length > 0 ? someOf(options.dbml.relationshipsFiles, 3) : 'the Table Library\'s relationships files')
+    : 'the tables\' files';
+  if (report.relationshipsInLibrary === 0) return '';
+  return report.relationshipsInLibrary === report.relationships ? ` saved in ${home}` : ` (${report.relationshipsInLibrary} saved in ${home})`;
+}
+
+/** Everything the import leaves out, one line each: the conversion's skipped lines, then the DBML features it does not keep. */
+export function importLeftOut(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): string[] {
+  const skipped = (options.origin?.skipped ?? []).map((line) => line.replace(/[.]$/, ''));
+  const dropped = droppedGroups(plan.report.dropped).map((items) =>
+    items.length === 1 ? `${items[0].what}: ${items[0].why}` : `${droppedGroupLabel(items)}: ${items[0].why}`);
+  return [...skipped, ...dropped.map((line) => line.replace(/[.]$/, ''))];
+}
+
+/**
+ * The dry run's modal, for any size of import: a headline (what, how many
+ * tables and relationships, from what, as which diagram in which layer) and
+ * at most {@link IMPORT_MODAL_MAX_DETAIL_LINES} short lines — the new tables
+ * counted by schema (the first {@link IMPORT_MODAL_SCHEMAS_SHOWN}, the rest
+ * summed), what the Table Library already has or gains, where the
+ * relationships go, renames and what is left out as counts with one example,
+ * the first {@link IMPORT_MODAL_NOTES_SHOWN} notes and how many more, and the
+ * layout. Never a list of tables: Review All… shows every one.
+ */
+export function summariseDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): { headline: string; detail: string[] } {
+  const { report } = plan;
+  const layer = options.layerLabel ?? plan.layer;
+  const from = options.origin ? ` ${options.origin.from}` : '';
+  const relationships = report.relationships > 0 ? ` and ${plural(report.relationships, 'relationship')}` : '';
+  const headline = `Import ${plural(plan.modelNames.length, 'table')}${relationships}${from} into a new diagram "${plan.subjectAreaName}" in the ${layer} layer.`;
+  const detail: string[] = [];
+
+  // The new tables, counted by schema.
+  const schemas = importSchemaCounts(plan);
+  if (schemas.length === 1) {
+    const only = schemas[0];
+    detail.push(`• ${plural(only.tables, 'new table')}${only.schema ? ` in schema ${only.schema}` : ''}.`);
+  } else if (schemas.length > 1) {
+    const shown = schemas.slice(0, IMPORT_MODAL_SCHEMAS_SHOWN).map((s) => `${s.schema || 'no schema'} ${s.tables}`);
+    const rest = schemas.slice(IMPORT_MODAL_SCHEMAS_SHOWN);
+    const restTables = rest.reduce((n, s) => n + s.tables, 0);
+    const tail = rest.length > 0 ? `, and ${plural(rest.length, 'more schema')} (${plural(restTables, 'table')})` : '';
+    detail.push(`• ${plural(plan.newTables.length, 'new table')} by schema: ${shown.join(', ')}${tail}.`);
+  }
+
+  // The Table Library: reused as they are, and those that gain relationships.
+  const library: string[] = [];
+  if (report.reusedTables.length > 0) {
+    const differ = report.reusedTables.filter((r) => r.missingColumns.length > 0).length;
+    library.push(`${plural(report.reusedTables.length, 'table')} already in your Table Library, used as ${report.reusedTables.length === 1 ? 'it is' : 'they are'}`
+      + (differ > 0 ? ` (${plural(differ, 'has', 'have')} columns the import does not add)` : ''));
+  }
+  const changed = plan.changedLibraryTables.length;
+  if (changed > 0) library.push(`${plural(changed, 'library table gains', 'library tables gain')} relationships`);
+  if (library.length > 0) detail.push(`• ${library.join('; ')}.`);
+
+  if (report.relationships > 0) {
+    const already = report.relationshipsAlreadyInLibrary > 0
+      ? ` ${plural(report.relationshipsAlreadyInLibrary, 'is', 'are')} already in your Table Library and kept as it has them.`
+      : '';
+    detail.push(`• ${plural(report.relationships, 'relationship')}${relationshipsHome(plan, options)}.${already}`);
+  }
+
+  if (report.renamed.length > 0) {
+    const renames = renameEntries(report.renamed);
+    detail.push(`• Renamed to names ERD Studio can use: ${renames[0]}${renames.length > 1 ? ` and ${renames.length - 1} more` : ''}.`);
+  }
+
+  const leftOut = importLeftOut(plan, options);
+  if (leftOut.length > 0) {
+    detail.push(`• Not imported: ${leftOut[0]}${leftOut.length > 1 ? `; and ${leftOut.length - 1} more` : ''}.`);
+  }
+
+  const notes = importPlanNotes(plan, options);
+  for (const note of notes.slice(0, IMPORT_MODAL_NOTES_SHOWN)) detail.push(`• ${note}`);
+  if (notes.length > IMPORT_MODAL_NOTES_SHOWN) detail.push(`• And ${plural(notes.length - IMPORT_MODAL_NOTES_SHOWN, 'more note')}.`);
+
+  detail.push(`• ${importLayoutSentence(plan, options)}`);
+  return { headline, detail: detail.slice(0, IMPORT_MODAL_MAX_DETAIL_LINES) };
+}
+
 /** Renames as the summary names them: a column renamed the same way in several tables once. */
-function renameEntries(renamed: readonly DbmlImportRename[]): string[] {
+export function renameEntries(renamed: readonly DbmlImportRename[]): string[] {
   const columns = new Map<string, DbmlImportRename[]>();
   for (const r of renamed) {
     if (r.kind !== 'column') continue;
@@ -1532,7 +1691,7 @@ const DROPPED_ORDER: readonly DbmlImportDroppedKind[] = [
 ];
 
 /** What was left out, one group per kind and reason, in {@link DROPPED_ORDER} and then file order. */
-function droppedGroups(dropped: readonly DbmlImportDropped[]): DbmlImportDropped[][] {
+export function droppedGroups(dropped: readonly DbmlImportDropped[]): DbmlImportDropped[][] {
   const groups = new Map<string, DbmlImportDropped[]>();
   const rank = (d: DbmlImportDropped): number => {
     const at = DROPPED_ORDER.indexOf(d.kind);
@@ -1546,7 +1705,7 @@ function droppedGroups(dropped: readonly DbmlImportDropped[]): DbmlImportDropped
 }
 
 /** One line's name for several things of one kind: `2 table groups (a, b)`. */
-function droppedGroupLabel(items: readonly DbmlImportDropped[]): string {
+export function droppedGroupLabel(items: readonly DbmlImportDropped[]): string {
   const n = items.length;
   const examples = someOf([...new Set(items.map((d) => d.item))], 3);
   switch (items[0].kind) {
