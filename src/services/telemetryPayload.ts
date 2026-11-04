@@ -328,6 +328,37 @@ export const FEATURES = [
   'quickImportChangeOptions',
   'quickImportFellBack',
   'importReviewOpened',
+  // The import guide (src/services/importGuide.ts, Bring In an Existing Data
+  // Model…): opened (every open), and from where (the palette has none); which
+  // card's button was pressed; a Copy button. Then the nothing-found
+  // notification (src/services/startSuggestion.ts): a folder with no diagram and
+  // nothing concrete, whose empty Diagrams view was opened — shown, and the
+  // answer (closed = shown minus the three).
+  'importGuideOpened',
+  'importGuideFromWelcome',
+  'importGuideFromWalkthrough',
+  'importGuideFromSidebar',
+  'importGuideFromPicker',
+  'importGuideFromStartPick',
+  'importGuideFromPrompt',
+  'importGuideActionFound',
+  'importGuideActionDbt',
+  'importGuideActionDatabricks',
+  'importGuideActionSnowflake',
+  'importGuideActionPowerBi',
+  'importGuideActionFabric',
+  'importGuideActionFabricWarehouse',
+  'importGuideActionSqlServer',
+  'importGuideActionPostgres',
+  'importGuideActionMysql',
+  'importGuideActionDbml',
+  'importGuideActionOtherTools',
+  'importGuideActionFeedback',
+  'importGuideCopied',
+  'suggestPromptNothingShown',
+  'suggestPromptNothingNewDiagram',
+  'suggestPromptNothingGuide',
+  'suggestPromptNothingOff',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

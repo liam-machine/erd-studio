@@ -569,7 +569,7 @@ describe('allowlists agree with the Worker', () => {
   it('appends the start-suggestion keys at the very end, after the first-run ones', () => {
     const at = FEATURES.indexOf('welcomeImportSemanticModel');
     expect(at).toBe(FEATURES.indexOf('walkthroughWaited') + 1);
-    expect(FEATURES.slice(at)).toEqual([
+    expect(FEATURES.slice(at, FEATURES.indexOf('importReviewOpened') + 1)).toEqual([
       'welcomeImportSemanticModel', 'welcomeImportSqlDdl', 'welcomeImportDbmlFile',
       'walkthroughImportSemanticModel', 'walkthroughImportSqlDdl', 'walkthroughImportDbmlFile',
       'sidebarImportSemanticModel', 'sidebarImportSqlDdl', 'sidebarImportDbmlFile',
@@ -579,6 +579,22 @@ describe('allowlists agree with the Worker', () => {
       // The start suggestion and the quick import, appended after them.
       'suggestPromptShown', 'suggestPromptAccepted', 'suggestPromptMore', 'suggestPromptOff', 'suggestPromptDismissed',
       'startSuggestionsOff', 'quickImport', 'quickImportChangeOptions', 'quickImportFellBack', 'importReviewOpened',
+    ]);
+  });
+
+  it('appends the import guide and nothing-found keys at the very end, after the start-suggestion ones', () => {
+    const at = FEATURES.indexOf('importGuideOpened');
+    expect(at).toBe(FEATURES.indexOf('importReviewOpened') + 1);
+    expect(FEATURES.slice(at)).toEqual([
+      'importGuideOpened',
+      'importGuideFromWelcome', 'importGuideFromWalkthrough', 'importGuideFromSidebar',
+      'importGuideFromPicker', 'importGuideFromStartPick', 'importGuideFromPrompt',
+      'importGuideActionFound', 'importGuideActionDbt', 'importGuideActionDatabricks', 'importGuideActionSnowflake',
+      'importGuideActionPowerBi', 'importGuideActionFabric', 'importGuideActionFabricWarehouse', 'importGuideActionSqlServer',
+      'importGuideActionPostgres', 'importGuideActionMysql', 'importGuideActionDbml', 'importGuideActionOtherTools',
+      'importGuideActionFeedback',
+      'importGuideCopied',
+      'suggestPromptNothingShown', 'suggestPromptNothingNewDiagram', 'suggestPromptNothingGuide', 'suggestPromptNothingOff',
     ]);
   });
 

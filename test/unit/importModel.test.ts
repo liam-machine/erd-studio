@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DETECT_SQL_FILES,
   FOUND_HERE,
+  IMPORT_GUIDE_ITEM,
   IMPORT_MODEL_COMMAND,
   IMPORT_PICK_FEATURES,
   IMPORT_SOURCE_COMMANDS,
@@ -20,6 +21,7 @@ import {
   readFileStart,
   runImportModel,
   type DetectImportIo,
+  type ImportGuideItem,
   type ImportSourceItem,
 } from '../../src/commands/importModel';
 import { NO_LEGACY_ALIAS, PRE_REGISTERED_COMMANDS } from '../../src/extension';
@@ -63,13 +65,20 @@ describe('runImportModel', () => {
   const run = async (found: ImportModelSource[], answer?: ImportModelSource, detect?: () => Promise<ReadonlySet<ImportModelSource>>) => {
     const feature = vi.spyOn(telemetry, 'feature');
     const shown: ImportSourceItem[][] = [];
+    const lastItems: Array<ImportSourceItem | ImportGuideItem> = [];
     const ran: string[] = [];
     await runImportModel({
       detect: detect ?? (async () => new Set(found)),
-      pick: async (items) => { shown.push([...items]); return items.find((i) => i.source === answer); },
+      pick: async (items) => {
+        // The sources, then the import guide, always last.
+        shown.push(items.filter((i): i is ImportSourceItem => 'source' in i));
+        lastItems.push(items[items.length - 1]);
+        return items.find((i) => 'source' in i && i.source === answer);
+      },
       executeCommand: async (command) => { ran.push(command); },
       detectTimeoutMs: 50,
     });
+    expect(lastItems[0]).toEqual(IMPORT_GUIDE_ITEM);
     return { shown: shown[0], ran, features: feature.mock.calls.map((c) => c[0]) };
   };
 
@@ -89,6 +98,24 @@ describe('runImportModel', () => {
     expect(shown.map((i) => i.source)).toEqual(['semanticModel', 'dbml', 'sqlDdl']);
     expect(shown[0].description).toBe(FOUND_HERE);
     expect((await run(['sqlDdl', 'semanticModel'])).shown.map((i) => i.source)).toEqual(['sqlDdl', 'semanticModel', 'dbml']);
+  });
+
+  it('ends with the import guide: it opens the guide from the picker, counted by the guide, not as a source', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    const ran: unknown[][] = [];
+    let items: ReadonlyArray<ImportSourceItem | ImportGuideItem> = [];
+    await runImportModel({
+      detect: async () => new Set(['sqlDdl']),
+      pick: async (shown) => { items = shown; return shown[shown.length - 1]; },
+      executeCommand: async (...args) => { ran.push(args); },
+      detectTimeoutMs: 50,
+    });
+    expect(items.map((i) => i.label)).toEqual([
+      '$(database) SQL DDL scripts', '$(file-code) DBML file', '$(graph) Power BI or Fabric semantic model',
+      '$(question) How do I export from Databricks, Snowflake, Power BI…?',
+    ]);
+    expect(ran).toEqual([['erdStudio.showImportGuide', { from: 'picker' }]]);
+    expect(feature).not.toHaveBeenCalled();
   });
 
   it('closing the picker runs nothing and counts importPickCancelled', async () => {

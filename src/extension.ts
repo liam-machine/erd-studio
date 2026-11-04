@@ -137,6 +137,15 @@ import { IMPORT_DBML_COMMAND, importDbml, quickImportDbml } from './commands/imp
 import { OPEN_EXAMPLE_DIAGRAM_COMMAND, openExampleDiagram } from './commands/openExampleDiagram';
 import { IMPORT_MODEL_COMMAND, runImportModel, vscodeFindFirstFile, vscodeImportModelDeps, vscodeStartLook } from './commands/importModel';
 import { IMPORT_SQL_DDL_COMMAND, importSqlDdl, quickImportSqlDdl } from './commands/importSqlDdl';
+import { sqlDialectOfImportArg } from './services/sqlDdlImport';
+import {
+  IMPORT_GUIDE_COMMAND,
+  IMPORT_GUIDE_OPENED_FEATURE,
+  IMPORT_GUIDE_SURFACE_FEATURES,
+  parseImportGuideArgs,
+  type ImportGuideContext,
+} from './services/importGuide';
+import { ImportGuidePanel } from './providers/ImportGuidePanel';
 import { IMPORT_SEMANTIC_MODEL_COMMAND, importSemanticModel, quickImportSemanticModel } from './commands/importSemanticModel';
 import { recordStartSuggested, runStart } from './commands/start';
 import { OPEN_EXAMPLE_PROJECT_COMMAND, openExampleProject } from './commands/openExampleProject';
@@ -171,6 +180,7 @@ import {
   TURN_OFF_START_SUGGESTIONS_COMMAND,
   TURN_ON_START_SUGGESTIONS_COMMAND,
   readStartSuggestionState,
+  runNothingFoundPrompt,
   runStartSuggestion,
   startSuggestionDue,
   startSuggestionsOff,
@@ -624,6 +634,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.importSemanticModel',
   'erdStudio.turnOffStartSuggestions',
   'erdStudio.turnOnStartSuggestions',
+  'erdStudio.showImportGuide',
 ]);
 
 /**
@@ -638,6 +649,7 @@ export const PRE_REGISTERED_COMMANDS = new Set([
   'erdStudio.showLogs',
   'erdStudio.start',
   'erdStudio.openExampleProject',
+  'erdStudio.showImportGuide',
 ]);
 
 /**
@@ -1105,6 +1117,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       pick: (items) => vscode.window.showQuickPick(items, { title: 'Start your data model', placeHolder: 'How would you like to start?' }),
     })),
   );
+  // Bring In an Existing Data Model… (src/services/importGuide.ts): how to export from
+  // Databricks, Snowflake, Power BI, Fabric and more, each card's import one click away.
+  // Pre-registered, so it opens in an empty window too (its imports then say "Open a
+  // folder first"). The project path fills in the folder's context and suggestion.
+  let importGuideContext: () => ImportGuideContext = () => ({ hasProject: false, hasDbt: false });
+  let refreshImportGuideIntent: () => Promise<unknown> = async () => undefined;
+  context.subscriptions.push(
+    vscode.commands.registerCommand(IMPORT_GUIDE_COMMAND, async (arg?: unknown) => {
+      const from = parseImportGuideArgs(arg);
+      telemetry.feature(IMPORT_GUIDE_OPENED_FEATURE);
+      if (from) telemetry.feature(IMPORT_GUIDE_SURFACE_FEATURES[from]);
+      const panel = ImportGuidePanel.createOrShow({
+        context: () => importGuideContext(),
+        executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+        writeClipboard: (text) => vscode.env.clipboard.writeText(text),
+        noFolder: () => { void showNoProjectWarning(); },
+        feature: (key) => telemetry.feature(key),
+      });
+      // The suggestion may not be known yet (no look so far): look (bounded), then lead with it.
+      const before = importGuideContext().intent;
+      try {
+        await refreshImportGuideIntent();
+      } catch { /* the guide still shows every source */ }
+      if (importGuideContext().intent !== before) panel.render();
+    }),
+  );
 
   const projectResolution = resolveWorkspaceProject(context);
   const workspaceRoot = projectResolution.root;
@@ -1260,6 +1298,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push({ dispose: () => startIntent.dispose() });
   startContext = () => startIntent.startContext();
+  importGuideContext = () => ({ hasProject: true, hasDbt, intent: startIntent.known() });
+  refreshImportGuideIntent = () => startIntent.refresh();
   tableLibraryService.onParseFailure = (error) => {
     // Fixed keys only — `error.message` may quote the file and never leaves the machine.
     telemetry.error('modelFileParse');
@@ -1387,6 +1427,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   // Each DBML table's layer and schema, which every view groups and labels by.
   const tableHomes = (): Map<string, TableHome> => tableHomesOf(tableLibraryService.listTableFiles());
+  // The empty Diagrams view was drawn in this window: the user came to ERD Studio here
+  // (the nothing-found notification's one trigger, set up with the start suggestion below).
+  let emptyDiagramsViewShown = false;
+  let onEmptyDiagramsViewShown: () => void = () => {};
   const treeProvider = new SubjectAreaTreeProvider(
     subjectAreaService,
     layerService,
@@ -1400,7 +1444,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // can be the first listing, still inside activation) and count what it shows.
       if (!loading) {
         telemetry.featureOnce('sidebarStartShown');
-        setTimeout(() => { void startIntent.refresh().then((intent) => { if (intent) recordStartSuggested(intent); }); }, 0);
+        emptyDiagramsViewShown = true;
+        setTimeout(() => {
+          void startIntent.refresh().then((intent) => {
+            if (intent) recordStartSuggested(intent);
+            onEmptyDiagramsViewShown();
+          });
+        }, 0);
       }
     },
     (kind) => dbmlFileIcon(context.extensionUri, kind),
@@ -3103,18 +3153,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // through Import DBML's own flow (layer, name, dry run, Import).
     // A start (the start screen's primary import, the start suggestion) passes
     // { quick: true }: the quick path, defaults chosen and one confirm.
+    // The import guide's SQL cards pass { dialect }: the scripts are read as that dialect, not asked.
     vscode.commands.registerCommand(IMPORT_SQL_DDL_COMMAND, async (arg?: unknown) => {
       const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
-      await (isQuickImportArg(arg) ? quickImportSqlDdl : importSqlDdl)({
+      const deps = {
         workspaceRoot,
         semanticDir,
         layerService,
         subjectAreaService,
         tableLibraryService,
         extensionPath: context.extensionPath,
-        validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
+        validateDomainName: (value: string, layer: string) => validateSubjectAreaSlug(value, layer, existingDomains()),
         onWritten: refreshAfterNewSubjectArea,
-      });
+      };
+      if (isQuickImportArg(arg)) {
+        await quickImportSqlDdl(deps);
+        return;
+      }
+      const dialect = sqlDialectOfImportArg(arg);
+      await importSqlDdl(deps, undefined, dialect ? { dialect, dialectChosen: true } : {});
     }),
     vscode.commands.registerCommand(IMPORT_SEMANTIC_MODEL_COMMAND, async (arg?: unknown) => {
       const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
@@ -4170,6 +4227,40 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   /** Set by the end of activate(): show the next offered prompt when `from` held the window but showed nothing. */
   let handOverActivationPrompt: (from: SessionPromptKind) => Promise<void> = async () => {};
+  // Activation's own prompt is decided: shown, or handed on by the start suggestion
+  // after its look. Until then the nothing-found notification does not ask for the
+  // window, so a first run's walkthrough (or any prompt activation offers) keeps it.
+  let settleActivationPrompts: () => void = () => {};
+  const activationPromptsSettled = new Promise<void>((resolve) => { settleActivationPrompts = resolve; });
+  // Nothing found (src/services/startSuggestion.ts → runNothingFoundPrompt): only once the
+  // user opened the empty Diagrams view in this folder — never because activation ran (a
+  // repository of query .sql files activates ERD Studio too). The window's one prompt, at
+  // most three times per folder, off with Don't Ask Again or erdStudio.startSuggestions.
+  let nothingFoundAsked = false;
+  onEmptyDiagramsViewShown = () => {
+    if (!emptyDiagramsViewShown || nothingFoundAsked) return;
+    void activationPromptsSettled.then(async () => {
+      if (nothingFoundAsked || hasOpenSubjectAreaCanvas()) return;
+      nothingFoundAsked = true;
+      const run = await runNothingFoundPrompt({
+        intent: () => startIntent.refresh(),
+        hasDiagrams: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
+        hasTables: () => tableLibraryService.listTableFiles().length > 0,
+        settingOn: startSuggestionsSettingOn,
+        state: startSuggestionState,
+        saveState: saveStartSuggestionState,
+        claim: () => sessionPrompts.claim('nothingFound'),
+        show: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
+        info: (message) => { void vscode.window.showInformationMessage(message); },
+        executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+        feature: (key) => telemetry.feature(key),
+        setOffContext: (off) => { void vscode.commands.executeCommand('setContext', START_SUGGESTIONS_OFF_CONTEXT_KEY, off); },
+      });
+      if (run.shown) log.info('Session prompt: nothingFound shown (the empty Diagrams view was opened)');
+      // Not shown (another prompt had the window, a canvas opened, nothing due): a later window may ask.
+      else nothingFoundAsked = false;
+    }).catch((err: unknown) => log.warn('[ERD Studio] The nothing-found notification failed:', err));
+  };
 
   // First run (spec C.5, addendum P4). A fresh install opens the Get Started
   // walkthrough once per machine (the Welcome panel where the host has no
@@ -4323,7 +4414,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
             sessionPrompts.release('startSuggestion');
             await handOverActivationPrompt('startSuggestion');
-          }).catch((err: unknown) => log.warn('[ERD Studio] The start suggestion failed:', err));
+          }).catch((err: unknown) => log.warn('[ERD Studio] The start suggestion failed:', err))
+            .finally(() => settleActivationPrompts());
         }, 0);
       });
     } else if (!settingOn) {
@@ -4456,6 +4548,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     };
     handOverActivationPrompt = (from) => showFrom(offered.filter((kind) => kind !== from));
     await showFrom(offered);
+    // The start suggestion, when it holds the window, settles once its look has decided.
+    if (sessionPrompts.claimed !== 'startSuggestion') settleActivationPrompts();
   }
 
   // Keep ~/.erd-studio-cli in step with this extension — only if the user

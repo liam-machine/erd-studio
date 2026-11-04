@@ -140,6 +140,11 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.showImportGuide",
+        "title": "Bring In an Existing Data Model…",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.openExampleProject",
         "title": "Open an Example Project…",
         "icon": "$(book)",
@@ -532,7 +537,7 @@
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\nNew to data modelling? [Open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22sidebar%22%7D%5D) to see a finished one first. Or [import a data model](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22sidebar%22%7D%5D): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in), SQL DDL scripts or a Power BI semantic model.\n\nNew here? [Get started](command:erdStudio.showGettingStarted) with the one-minute tour.",
+        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nEach table is a file in .erd-studio/ you can commit, reviewed like code.\n\nNew to data modelling? [Open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22sidebar%22%7D%5D) to see a finished one first. Or [import a data model](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22sidebar%22%7D%5D): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in), SQL DDL scripts or a Power BI semantic model.\n\nHave a data model in Databricks, Snowflake, Power BI or Fabric? [See how to bring it in](command:erdStudio.showImportGuide?%5B%7B%22from%22%3A%22sidebar%22%7D%5D).\n\nNew here? [Get started](command:erdStudio.showGettingStarted) with the one-minute tour.",
         "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == blank"
       },
       {
@@ -628,7 +633,7 @@
           {
             "id": "newDiagram",
             "title": "Start your data model",
-            "description": "Add tables on a blank canvas. Each table is a file in .erd-studio/ you can commit and review like code.\n[New Diagram](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nNew to data modelling? [Open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22walkthrough%22%7D%5D) to see a finished data model first. Or [import a data model](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22walkthrough%22%7D%5D): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in), SQL DDL scripts or a Power BI semantic model.",
+            "description": "Add tables on a blank canvas. Each table is a file in .erd-studio/ you can commit and review like code.\n[New Diagram](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nNew to data modelling? [Open an example](command:erdStudio.start?%5B%7B%22action%22%3A%22example%22%2C%22from%22%3A%22walkthrough%22%7D%5D) to see a finished data model first. Or [import a data model](command:erdStudio.start?%5B%7B%22action%22%3A%22import%22%2C%22from%22%3A%22walkthrough%22%7D%5D): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in), SQL DDL scripts or a Power BI semantic model.\nHave a data model in Databricks, Snowflake, Power BI or Fabric? [See how to bring it in](command:erdStudio.showImportGuide?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D).",
             "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent != importSemanticModel && erdStudio.startIntent != importSqlDdl && erdStudio.startIntent != importDbmlFile",
             "media": {
               "svg": "media/walkthrough/new-diagram.svg",
@@ -1425,7 +1430,7 @@
           "type": "boolean",
           "default": true,
           "scope": "resource",
-          "markdownDescription": "When a folder with no diagram opens and ERD Studio finds an obvious start in it (CREATE TABLE scripts, a Power BI or Fabric semantic model, a DBML file), offer once to create the diagram from it. Closing the offer asks again in a later window, at most three times per folder. Set this to `false` in a repository's `.vscode/settings.json` to turn it off for everyone who opens it, or in your user settings to turn it off everywhere. **ERD Studio: Turn Off Start Suggestions for This Folder** turns it off for one folder on this machine only."
+          "markdownDescription": "When a folder with no diagram opens and ERD Studio finds an obvious start in it (CREATE TABLE scripts, a Power BI or Fabric semantic model, a DBML file), offer once to create the diagram from it; when you open the Diagrams view of a folder with nothing to start from, say so and show how to bring in a data model from Databricks, Snowflake, Power BI or Fabric. Closing either asks again in a later window, at most three times per folder. Set this to `false` in a repository's `.vscode/settings.json` to turn it off for everyone who opens it, or in your user settings to turn it off everywhere. **ERD Studio: Turn Off Start Suggestions for This Folder** turns it off for one folder on this machine only."
         },
         "erdStudio.dbml.offerConvert": {
           "type": "boolean",

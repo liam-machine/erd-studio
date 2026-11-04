@@ -31,7 +31,7 @@ import { NO_LEGACY_ALIAS, PRE_REGISTERED_COMMANDS } from '../../src/extension';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
-import type { SqlDialect } from '../../src/services/sqlDdlImport';
+import { sqlDialectOfImportArg, type SqlDialect } from '../../src/services/sqlDdlImport';
 import * as engine from '../../src/services/sqlImportEngine';
 import { telemetry } from '../../src/services/telemetryService';
 import packageJson from '../../package.json';
@@ -319,5 +319,57 @@ describe('gatherSqlFiles', () => {
   it('a file it cannot read is named', async () => {
     const read = await gatherSqlFiles({ files: [path.join(tmp, 'gone.sql')] }, ui);
     expect(read).toMatchObject({ error: true, message: expect.stringContaining("couldn't read gone.sql") });
+  });
+});
+
+describe('Import SQL DDL… with a dialect chosen ({ dialect }: the import guide\'s SQL cards)', () => {
+  it('accepts exactly { dialect: <a dialect it reads> }; anything else is the step-by-step flow, and { quick } wins', () => {
+    for (const dialect of ['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks'] as const) {
+      expect(sqlDialectOfImportArg({ dialect })).toBe(dialect);
+    }
+    for (const arg of [
+      undefined, null, 'databricks', ['databricks'], [{ dialect: 'databricks' }], {}, { dialect: 'oracle' }, { dialect: 'bigquery' },
+      { dialect: 'Databricks' }, { dialect: 1 }, { dialect: { toString: () => 'mysql' } }, { quick: true }, { quick: true, dialect: 'mysql' },
+    ]) {
+      expect(sqlDialectOfImportArg(arg), JSON.stringify(arg)).toBeUndefined();
+    }
+  });
+
+  it('reads the scripts as that dialect without asking: Databricks notebook output (the guide\'s snippet) becomes a diagram', async () => {
+    const sql = sqlUi({ files: [path.join(FIXTURES, 'databricks-notebook/schema.sql')] }, 'postgres');
+    const ui = importUi();
+    const result = await importSqlDdl(deps(sql, ui), undefined, { dialect: 'databricks', dialectChosen: true });
+    expect(sql.dialectPicks).toEqual([]);
+    expect(result).toBeDefined();
+    expect(features()).toContain(SQL_DIALECT_FEATURES.databricks);
+    expect(ui.confirms[0].message).toContain('(Databricks / Spark SQL)');
+    expect(erdFiles()).toEqual(expect.arrayContaining(['gold/tables/sales/customers.dbml', 'gold/tables/sales/orders.dbml']));
+    expect(fs.readFileSync(erd('gold/tables/sales/orders.dbml'), 'utf-8')).toContain('order_id');
+  });
+
+  it('a Fabric Warehouse script (SSMS, GO batches, NOT ENFORCED keys) reads as SQL Server, keys and the foreign key kept', async () => {
+    const sql = sqlUi({ files: [path.join(FIXTURES, 'fabric-warehouse/warehouse.sql')] });
+    const ui = importUi();
+    await importSqlDdl(deps(sql, ui), undefined, { dialect: 'sqlserver', dialectChosen: true });
+    expect(sql.dialectPicks).toEqual([]);
+    expect(ui.confirms[0].message).toMatch(/^Import 2 tables and 1 relationship from 1 SQL file \(SQL Server \/ Azure SQL\)/);
+    expect(fs.readFileSync(erd('gold/tables/dbo/dim_customer.dbml'), 'utf-8')).toMatch(/customer_id.*\[pk\]/);
+  });
+
+  it('scripts that do not read as the chosen dialect: the problem, and Try Another Dialect asks which', async () => {
+    const files = [path.join(FIXTURES, 'fabric-warehouse/warehouse.sql')];
+    const sql = sqlUi({ files }, 'sqlserver', TRY_ANOTHER_DIALECT_BUTTON);
+    const ui = importUi();
+    await importSqlDdl(deps(sql, ui), undefined, { dialect: 'postgres', dialectChosen: true });
+    await vi.waitFor(() => expect(sql.dialectPicks).toHaveLength(1));
+    expect(sql.errors[0].message).toContain('They were read as PostgreSQL.');
+    expect(sql.errors[0].items).toContain(TRY_ANOTHER_DIALECT_BUTTON);
+  });
+
+  it('without dialectChosen, a preset dialect is only offered first (Change Options…), still asked', async () => {
+    const sql = sqlUi({ files: [path.join(FIXTURES, 'fabric-warehouse/warehouse.sql')] }, 'sqlserver');
+    await importSqlDdl(deps(sql, importUi()), undefined, { dialect: 'mysql' });
+    expect(sql.dialectPicks).toHaveLength(1);
+    expect(sql.dialectPicks[0][0].dialect).toBe('mysql');
   });
 });

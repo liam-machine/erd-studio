@@ -55,6 +55,7 @@ import {
   HOW_TO_CLIPS,
   HOW_TO_CLIP_DIR,
   HOW_TO_CLIP_KEYS,
+  IMPORT_GUIDE_COMMAND,
   type HowToClipKey,
   START_ACTION_COMMANDS,
   startActionArgs,
@@ -1011,6 +1012,10 @@ export class GettingStartedPanel {
         await vscode.commands.executeCommand(START_ACTION_COMMANDS[msg.action], ...startActionArgs(msg.action));
         // A new diagram opens in its own tab; this one should now lead with "Open your diagrams".
         await this.postStatus();
+        break;
+      case 'showImportGuide':
+        // A fixed command and argument (the guide counts importGuideFromWelcome); never an id from the webview.
+        await vscode.commands.executeCommand(IMPORT_GUIDE_COMMAND, { from: 'welcome' });
         break;
       case 'openExternal':
         await vscode.env.openExternal(vscode.Uri.parse(GETTING_STARTED_EXTERNAL_URLS[msg.target]));

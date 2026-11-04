@@ -305,7 +305,10 @@ describe('panel script', () => {
       expect(visible('[data-step="begin"] .gs-step__title')).toEqual(['Draw your dbt project \u2014 no AI needed']);
       expect(visible('[data-step="begin"] .gs-btn--primary')).toEqual(['Draw from dbt']);
       expect(visible('[data-step="begin"] .gs-btn')).toEqual(['Draw from dbt', 'New diagram', 'Import\u2026', 'Open an example\u2026']);
-      expect(visible('[data-step="begin"] .gs-link')).toEqual([]);
+      // Every start is a button; the one quiet link is the import guide's.
+      expect(visible('[data-step="begin"] [data-action="start"].gs-link')).toEqual([]);
+      expect(visible('[data-step="begin"] .gs-link')).toEqual(['See how to bring it in']);
+      expect(visible('[data-step="begin"] .gs-import-guide')).toEqual(['Have a data model in Databricks, Snowflake, Power BI or Fabric? See how to bring it in']);
       expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4']);
       expect(doc.querySelector('.gs-project-path')?.textContent).toBe('jaffle_shop');
 

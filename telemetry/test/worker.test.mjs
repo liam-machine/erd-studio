@@ -249,18 +249,18 @@ describe('routing', () => {
 // ---------------------------------------------------------------------------
 
 describe('body size', () => {
-  it('accepts a body of exactly 8192 bytes', async () => {
+  it('accepts a body of exactly 16384 bytes', async () => {
     const base = JSON.stringify(heartbeat());
     // Pad with an unknown key (dropped) to hit the cap exactly.
-    const padding = 8192 - base.length - ',"pad":""'.length;
+    const padding = 16384 - base.length - ',"pad":""'.length;
     const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(padding)}"}`;
-    assert.equal(new TextEncoder().encode(body).byteLength, 8192);
+    assert.equal(new TextEncoder().encode(body).byteLength, 16384);
     assert.equal((await post(body)).status, 204);
   });
 
-  it('413s a body of 8193 bytes', async () => {
+  it('413s a body of 16385 bytes', async () => {
     const base = JSON.stringify(heartbeat());
-    const padding = 8193 - base.length - ',"pad":""'.length;
+    const padding = 16385 - base.length - ',"pad":""'.length;
     const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(padding)}"}`;
     const { status, env } = await post(body);
     assert.equal(status, 413);
@@ -274,7 +274,7 @@ describe('body size', () => {
 
   it('counts the stream rather than trusting a missing Content-Length', async () => {
     const env = makeEnv();
-    const response = await call(streamingRequest(['{"v":1,"pad":"', 'x'.repeat(9000), '"}']), env);
+    const response = await call(streamingRequest(['{"v":1,"pad":"', 'x'.repeat(17000), '"}']), env);
     assert.equal(response.status, 413);
     assert.equal(env.DB.statements.length, 0);
   });

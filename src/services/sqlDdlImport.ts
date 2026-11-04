@@ -77,6 +77,20 @@ export function isSqlDialect(value: unknown): value is SqlDialect {
   return typeof value === 'string' && (SQL_DIALECTS as readonly string[]).includes(value);
 }
 
+/**
+ * The dialect `erdStudio.importSqlDdl`'s argument chooses (`{ dialect }`, the
+ * import guide's SQL cards): the flow then reads the scripts as that dialect
+ * without asking. Anything else — no argument, a `{ quick: true }` (the quick
+ * path, which works the dialect out itself), an unknown dialect, an array, a
+ * string — is undefined: the ordinary step-by-step flow.
+ */
+export function sqlDialectOfImportArg(arg: unknown): SqlDialect | undefined {
+  if (typeof arg !== 'object' || arg === null || Array.isArray(arg)) return undefined;
+  const { dialect, quick } = arg as { dialect?: unknown; quick?: unknown };
+  if (quick === true) return undefined;
+  return isSqlDialect(dialect) ? dialect : undefined;
+}
+
 export interface SqlDdlFile {
   /** How messages name the file (a base name or a workspace-relative path). */
   name: string;
