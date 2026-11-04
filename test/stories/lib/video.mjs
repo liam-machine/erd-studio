@@ -9,6 +9,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { frameDurations, lineFor, mixNarration, planNarration, voiceLines } from './narrate.mjs';
+
 export function findFfmpeg() {
   if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
   for (const p of ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']) if (fs.existsSync(p)) return p;
@@ -34,11 +36,11 @@ const assText = (s) => s.replace(/\\/g, '/').replace(/[{}]/g, (c) => (c === '{' 
  * The caption cues: each mark shows from its time to the next mark's (the last
  * one to the end). `marks` = [{ t, text, kind: 'intro'|'step'|'fail'|'pass' }].
  */
-export function cues(marks, t0, tEnd) {
+export function cues(marks, t0, tEnd, toVideoMs = (t) => t - t0) {
   const sorted = [...marks].sort((a, b) => a.t - b.t);
   return sorted.map((m, i) => ({
-    start: Math.max(0, m.t - t0),
-    end: Math.max(0, (i + 1 < sorted.length ? sorted[i + 1].t : tEnd) - t0),
+    start: Math.max(0, toVideoMs(m.t)),
+    end: Math.max(0, toVideoMs(i + 1 < sorted.length ? sorted[i + 1].t : tEnd)),
     text: m.text,
     kind: m.kind ?? 'step',
   })).filter((c) => c.end > c.start);
@@ -72,21 +74,34 @@ export function srtFile(list) {
 }
 
 /**
- * Encode `frames` ([{ file, t }]) with `marks` into `outFile` (.mp4). Returns
- * `{ file, seconds, burned }`. Throws when ffmpeg fails.
+ * Encode `frames` ([{ file, t }]) with `marks` into `outFile` (.mp4); with
+ * `narrate`, spoken too. Returns `{ file, seconds, burned, srt, narration? }`
+ * (`narration`: `{ lines, speechSeconds, heldSeconds, holds }`). Throws when
+ * ffmpeg (or, narrating, the voice) fails.
  */
-export function encode({ frames, marks, outFile, workDir, tailMs = 1500 }) {
+export function encode({ frames, marks, outFile, workDir, tailMs = 1500, narrate = false, log = () => {} }) {
   if (frames.length === 0) throw new Error('no frames were recorded');
   const ffmpeg = findFfmpeg();
   fs.mkdirSync(workDir, { recursive: true });
   const t0 = frames[0].t;
   const tEnd = frames[frames.length - 1].t + tailMs;
 
-  // Real time, constant frame rate: each frame lasts until the next one was taken.
+  let plan = null;
+  let narration;
+  if (narrate) {
+    const voiced = voiceLines(marks.map(lineFor), { log });
+    plan = planNarration({ marks, frames, tEnd, voiced });
+    const mixed = mixNarration(plan.lines, plan.seconds, path.join(workDir, 'narration.wav'));
+    const heldSeconds = plan.holds.reduce((sum, h) => sum + h.seconds, 0);
+    narration = { lines: plan.lines.length, speechSeconds: mixed.speechSeconds, heldSeconds, holds: plan.holds.length, wav: mixed.file };
+  }
+
+  // Constant frame rate: each frame lasts until the next one was taken (real
+  // time), plus, narrating, any hold before the next caption.
+  const durations = frameDurations(frames, tEnd, plan?.holds);
   const lines = ['ffconcat version 1.0'];
   frames.forEach((f, i) => {
-    const next = i + 1 < frames.length ? frames[i + 1].t : tEnd;
-    lines.push(`file '${f.file.replace(/'/g, "'\\''")}'`, `duration ${((next - f.t) / 1000).toFixed(3)}`);
+    lines.push(`file '${f.file.replace(/'/g, "'\\''")}'`, `duration ${durations[i].toFixed(3)}`);
   });
   lines.push(`file '${frames[frames.length - 1].file.replace(/'/g, "'\\''")}'`);
   const list = path.join(workDir, 'frames.ffconcat');
@@ -95,7 +110,7 @@ export function encode({ frames, marks, outFile, workDir, tailMs = 1500 }) {
   const probe = spawnSync(findFfprobe(ffmpeg), ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', frames[0].file], { encoding: 'utf8' });
   const [width, height] = (probe.stdout.trim() || '1440,900').split(',').map(Number);
 
-  const captions = cues(marks, t0, tEnd);
+  const captions = cues(marks, t0, tEnd, plan ? (t) => plan.toVideo(t) * 1000 : undefined);
   fs.writeFileSync(path.join(workDir, 'captions.ass'), assFile(captions, { width, height }));
   const srt = outFile.replace(/\.mp4$/, '.srt');
   fs.writeFileSync(srt, srtFile(captions));
@@ -103,15 +118,19 @@ export function encode({ frames, marks, outFile, workDir, tailMs = 1500 }) {
   const burn = hasFilter(ffmpeg, 'ass');
   const vf = ['scale=trunc(iw/2)*2:trunc(ih/2)*2', ...(burn ? ['ass=captions.ass'] : [])].join(',');
   const args = ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', list];
+  if (narration) args.push('-i', narration.wav);
   if (!burn) args.push('-i', srt);
   args.push('-vf', vf, '-fps_mode', 'cfr', '-r', '25', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart');
-  if (!burn) args.push('-c:s', 'mov_text', '-map', '0:v', '-map', '1:s');
+  if (narration) args.push('-c:a', 'aac', '-b:a', '128k', '-ac', '1', '-ar', '48000');
+  args.push('-map', '0:v');
+  if (narration) args.push('-map', '1:a');
+  if (!burn) args.push('-c:s', 'mov_text', '-map', `${narration ? 2 : 1}:s`);
   args.push(outFile);
   // cwd = workDir, so the ass filter's path needs no escaping.
   const r = spawnSync(ffmpeg, args, { cwd: workDir, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`ffmpeg failed: ${r.stderr || r.error}`);
   if (!burn) console.warn(`[stories] this ffmpeg has no libass: captions are a subtitle track and ${path.basename(srt)}, not burned in`);
-  return { file: outFile, seconds: (tEnd - t0) / 1000, burned: burn, srt };
+  return { file: outFile, seconds: plan ? plan.seconds : (tEnd - t0) / 1000, burned: burn, srt, narration };
 }
 
 function findFfprobe(ffmpeg) {

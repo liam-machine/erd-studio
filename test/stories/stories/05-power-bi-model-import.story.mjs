@@ -26,7 +26,7 @@ export default story({
       s.expectNoFile('.erd-studio');
       await s.expectFile('AdventureSales.pbip');
       await s.eventually(async () => (await s.ui.windowTitle()).includes('adventure-sales'), { message: 'the adventure-sales folder did not open' });
-    });
+    }, { say: 'Given my Power BI project folder, Adventure Sales.' });
 
     const START = 'Import your Power BI semantic model';
     await s.step('When I open the ERD Studio sidebar, it leads with "Import your Power BI semantic model"', async () => {
@@ -60,7 +60,7 @@ export default story({
       await s.pause(1000);
       await s.wb.unhighlight();
       await s.wb.press('Enter');
-    });
+    }, { say: 'I keep the suggested name, adventure sales.' });
 
     await s.step('It shows what it will import, and what it leaves out', async () => {
       const dialog = await s.ui.waitForDialog();
@@ -100,6 +100,6 @@ export default story({
       await s.wb.highlight(s.sel.sidebarRow('date_table'));
       await s.pause(2000);
       await s.wb.unhighlight();
-    });
+    }, { say: 'And each table, and the relationships, are DBML files in my project.' });
   },
 });

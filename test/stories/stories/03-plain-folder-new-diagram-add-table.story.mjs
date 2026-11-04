@@ -79,7 +79,7 @@ export default story({
       await canvas.fill(`doc.querySelector('.new-model-dialog__col-input--name')`, 'customer_id');
       await s.pause(800);
       await canvas.click(`[...doc.querySelectorAll('.new-model-dialog button')].find(b => b.textContent.trim() === 'Create Table')`);
-    });
+    }, { say: 'And give it a first column: customer ID.' });
 
     await s.step('Then the customer table is on the canvas', async () => {
       const node = await canvas.waitFor(`[...doc.querySelectorAll('.react-flow__node')].map(n => n.innerText).find(t => t.startsWith('customer'))`, { what: 'the customer table on the canvas' });
@@ -113,6 +113,6 @@ export default story({
       await s.wb.highlight(file);
       await s.pause(2500);
       await s.wb.unhighlight();
-    });
+    }, { say: 'And it is saved as its own file in my project.' });
   },
 });

@@ -37,7 +37,7 @@ export default story({
       await s.wb.highlight(button);
       await s.pause(1500);
       await s.wb.unhighlight();
-    });
+    }, { say: 'When I open the ERD Studio sidebar, it leads with: Draw from dbt.' });
 
     await s.step('When I click it, it asks which models to start from', async () => {
       await s.wb.click(s.sel.welcomeLink('Draw from dbt'));

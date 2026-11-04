@@ -38,3 +38,5 @@ scripts/.regen-*.cjs
 
 # Onboarding stories: videos, logs and screenshots of each run (test/stories/run.mjs)
 test/stories/out/
+# ...and the narration voice cache (run.mjs --narrate) and its espeak data copy
+test/stories/.cache/

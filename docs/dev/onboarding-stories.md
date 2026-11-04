@@ -19,15 +19,20 @@ test/stories/
 │   ├── cdp.mjs             ← a dependency-free Chrome DevTools Protocol client
 │   ├── recorder.mjs        ← films the window over CDP (screenshots, ~15 fps)
 │   ├── video.mjs           ← frames + step captions → MP4 (ffmpeg, libass)
+│   ├── narrate.mjs         ← --narrate: a spoken line per caption, placed on the video's timeline
+│   ├── tts.py              ← --narrate's voice (Kokoro, a uv script; the only Python here)
 │   ├── publish.mjs         ← --publish: recorded stories → media/onboarding/stories/<clip>.mp4
 │   └── workspaces.mjs      ← the folder a story opens, copied fresh each run
 ├── workspaces/plain/       ← a folder with only a README
 ├── stories/NN-<id>.story.mjs ← one per new-starter journey (below)
-└── out/                    ← gitignored: <id>.mp4/.srt/.log, failures, summary.json
+├── out/                    ← gitignored: <id>.mp4/.srt/.log, failures, summary.json
+└── .cache/                 ← gitignored: --narrate's voiced lines (voice/<hash>.wav) and espeak data
 ```
 
-Plain `.mjs`, Node 22 or later, no npm dependencies. `test/**` is outside the
-VSIX (`.vscodeignore`) and outside vitest (`include` is `test/unit/**`).
+Plain `.mjs`, Node 22 or later, no npm dependencies; `--narrate` alone also
+needs [uv](https://docs.astral.sh/uv/) (it runs `lib/tts.py`), and nothing else
+loads it. `test/**` is outside the VSIX (`.vscodeignore`) and outside vitest
+(`include` is `test/unit/**`).
 
 ## The stories
 
@@ -46,7 +51,7 @@ doubles as "watch how" help for that start.
 | 07 | `dbt-project-draw` | The dbt fixture without `.erd-studio/` → sidebar leads with **Draw from dbt** → silver models → laid out, Logical / Physical switch |
 | 08 | `yaml-project-convert` | A pre-2.0 YAML/JSON project (`test/fixtures/logical-only`) → the opening notice offers **Convert to DBML…** then **Open sales** → the Diagrams view's first row, **Convert to DBML…** → Convert panel → DBML files, the YAML and JSON removed, the diagram reopens |
 | 09 | `welcome-tab-example` | No folder open → the **Welcome to ERD Studio** tab → **Open an example…** → Kimball bus matrix opens on retail sales |
-| 10 | `welcome-tab-watch-how` | CREATE TABLE scripts → the empty Diagrams view's **Get started** link → the Welcome tab leads with **Import your SQL scripts** and its reason → its "Watch how" slot holds the SQL clip (published from 04), silent, waiting → play: it plays in VS Code (H.264 decodes) and pauses the tour, which was playing |
+| 10 | `welcome-tab-watch-how` | CREATE TABLE scripts → the empty Diagrams view's **Get started** link → the Welcome tab leads with **Import your SQL scripts** and its reason → its "Watch how" slot holds the SQL clip (published from 04), not muted, waiting → play: it plays in VS Code with its narration (H.264 decodes, and the MP3 audio: `webkitAudioDecodedByteCount` > 0) and pauses the tour, which was playing |
 
 A story that finds a product bug asserts the intended behaviour, says so in
 its header comment ("currently failing"), and the bug is reported; it is not
@@ -57,8 +62,9 @@ bent to pass.
 ```bash
 npm run stories                                  # every story, fast, no video
 npm run stories:record                           # every story, filmed: test/stories/out/<id>.mp4
-node test/stories/run.mjs --record --publish     # film them, then publish the Welcome tab's "Watch how" clips
-node test/stories/run.mjs --publish              # publish the clips from the recordings already in out/
+node test/stories/run.mjs --record --narrate     # filmed and narrated (needs uv)
+node test/stories/run.mjs --record --publish     # film them narrated, then publish the Welcome tab's "Watch how" clips
+node test/stories/run.mjs --publish              # publish the clips from the narrated recordings already in out/
 node test/stories/run.mjs --only empty-window    # stories whose id or file name contains this
 node test/stories/run.mjs --record --keep        # keep /tmp/erds-…: profile, workspace, frames
 node test/stories/run.mjs --headed-slow          # slow pacing, to watch it run
@@ -124,7 +130,7 @@ What `s` gives a story:
 
 | | |
 |---|---|
-| `s.step(caption, fn)` | one step |
+| `s.step(caption, fn, { say })` | one step; `say` is what `--narrate` speaks instead of the caption (below) |
 | `s.ui.openSidebar('ERD Studio')` | open a view container from the activity bar |
 | `s.ui.waitForQuickPick({ title })` → `{ title, placeholder, value, message, items }` | a quick pick or input box (`items` are the row labels) |
 | `s.ui.pick(label)`, `s.ui.setQuickInput(text)`, `s.ui.quickInputButton(text)` | choose a row, type into the box, press its button |
@@ -193,6 +199,41 @@ story runs in a few seconds. Keep a recorded story between 25 and 60 seconds:
 a caption per step, `s.pause()` after showing the user something, and waits
 on real conditions (`waitFor`, `eventually`), never long fixed sleeps.
 
+## Narrate
+
+`--record --narrate` speaks each caption in the getting-started tour's voice
+(Kokoro `af_heart` at 1.04, `VOICE` in `lib/narrate.mjs`, the same as
+`video/script.yaml`), so the story videos sound like the rest of ERD Studio.
+
+- **What is said.** A step's caption, made speakable (`spoken`: no quotes,
+  ellipses or arrows, a bracket read as a pause, ▶ as "play"); the title card
+  says the story's title (or the story's own `say`), and a passing run ends on
+  "Done.". A caption that reads badly aloud — a path (`.erd-studio/main/tables/`,
+  `database/`), a file name (`ecommerce.dbml`, `AdventureSales.pbip`), an
+  identifier (`customer_id`), a site (`dbdiagram.io`) — gets a `say`:
+  `s.step('And it is its own file under .erd-studio/main/tables/', fn, { say: 'And it is saved as its own file in my project.' })`.
+  Keep spoken lines short and natural; `say: ''` keeps a step silent.
+- **Voicing.** `lib/tts.py` (a uv script: kokoro-onnx 0.6.1, phonemizer-fork,
+  espeak's data copied to a short folder, the same workarounds as
+  `video/tts.py`) voices only the lines the cache does not hold
+  (`test/stories/.cache/voice/<sha1 of voice|speed|text>.wav`), so a re-run voices
+  nothing new. The model is the one `~/.cache/issue-to-pr/kokoro` holds for the
+  issue videos (`kokoro-v1.0.int8.onnx`, `voices-v1.0.bin`; the full
+  `kokoro-v1.0.onnx` when present; `$KOKORO_MODEL_DIR` overrides), downloaded
+  once if missing.
+- **Timing.** Each line starts 0.35 s after its caption appears and leaves
+  0.3 s before the next (`TIMING`). Where a line is longer than the time to the
+  next caption, the last frame before that caption is **held** for the
+  difference (`planNarration`, `frameDurations`): the voice is never overlapped,
+  cut or sped up, the caption stays on screen until its line ends, and every
+  later caption and line moves with it. The run uses the `narrate` pace (a 0.9 s
+  beat before a step's actions instead of 2.5 s of reading time, a shorter
+  title card), as the voice does the reading.
+- **Output.** `out/<id>.mp4` gets the voice as AAC (128 kbps mono): these copies
+  are for review on GitHub, and Safari plays no MP3 in an MP4. The log's video
+  line says how many lines, how long the speech and how long the holds.
+- A plain `npm run stories` (or `--record` alone) never needs uv or Python.
+
 **Assert the one obvious start.** Each story checks that the start its
 workspace should suggest is the surface's one button: `s.wb.ev(s.sel.welcomeButtons)`
 is `['Import your SQL scripts']` in a folder of SQL scripts (04),
@@ -215,12 +256,17 @@ The Welcome tab shows a short clip of the start it suggests
 | `import-a-dbml-file.mp4` | `importDbmlFile` | 06 `dbml-file-import` |
 | `draw-from-dbt.mp4` | `drawFromDbt` | 07 `dbt-project-draw` |
 
-`--publish` (`lib/publish.mjs`) re-encodes each story's recording: silent,
-H.264 High yuv420p, `+faststart`, 1280 px wide, captions as burned in by the
-recording, sped up evenly to at most 45 s, and the quality stepped down until
-it is at most 2 MB; it refuses a story whose captions name a path, and checks
-the result with ffprobe. With `--record` it publishes the clips whose story
-passed in that run; alone, those whose last recording passed (`out/<id>.log`).
+`--publish` (`lib/publish.mjs`) re-encodes each story's **narrated** recording
+(`--record --publish` implies `--narrate`): H.264 High yuv420p, `+faststart`,
+1280 px wide, captions as burned in by the recording, the narration as **MP3**
+(64 kbps mono 44.1 kHz, `AUDIO`; never AAC, which VS Code cannot decode:
+`docs/dev/onboarding-and-cli.md` → Codec decision), at most 60 s and 2 MB (the
+video quality steps down until it fits). It is **never sped up** (the voice would
+be): a recording over 60 s from its title card is refused, and the story is
+re-paced instead (fewer or shorter steps, shorter spoken lines). It refuses a
+silent recording and a story whose captions name a path, and checks the result
+with ffprobe. With `--record` it publishes the clips whose story passed in that
+run; alone, those whose last recording passed (`out/<id>.log`).
 It starts the clip on the story's title card (the empty window before the
 first caption is cut, `leadIn`) and crops the window's title bar off
 (`[Extension Development Host] <folder>`, `cropTitleBarFilter`). No poster
@@ -308,6 +354,9 @@ as the `onboarding-stories` artifact (videos, logs, screenshots, `summary.json`)
   `chooseInFileDialog` waits for the typed path before pressing the button.
 - **A `<video>`'s middle does not start it** in VS Code's webview: press its
   controls' play button (bottom left, above the timeline), as story 10 does.
+- **The recording has no sound of its own.** It is screenshots over CDP; a
+  clip or the tour playing in the window is not heard. `--narrate` adds the
+  voice afterwards, from the marks.
 - **Run from a terminal that stays open.** The runner kills its VS Code when it
   exits; a tool that kills a command's process group when the command ends
   (some agent shells) kills the window with it.

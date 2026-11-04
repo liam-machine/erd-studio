@@ -2,11 +2,15 @@
 // Onboarding stories: user stories as code, run against a real VS Code with
 // the extension, each optionally filmed as a captioned MP4.
 //
-//   node test/stories/run.mjs [--record] [--publish] [--only <id|substring>] [--keep] [--headed-slow] [--no-build] [--list]
+//   node test/stories/run.mjs [--record] [--narrate] [--publish] [--only <id|substring>] [--keep] [--headed-slow] [--no-build] [--list]
 //
 //   --record       film each story: test/stories/out/<id>.mp4 (+ .srt)
-//   --publish      re-encode the clip stories into media/onboarding/stories/ (the Welcome panel's "Watch how");
-//                  with --record, those that pass in this run; alone, from the recordings in out/
+//   --narrate      with --record: speak each caption (or the step's `say`) in the getting-started tour's voice
+//                  (Kokoro via uv: test/stories/lib/tts.py, lines cached in test/stories/.cache/); a frame is held
+//                  wherever a line runs past the next caption. Needs uv; nothing else does
+//   --publish      re-encode the clip stories into media/onboarding/stories/ (the Welcome panel's "Watch how", narrated);
+//                  with --record, those that pass in this run (--record --publish implies --narrate); alone, from the
+//                  narrated recordings in out/
 //   --only X       run the stories whose id or file name contains X (repeatable, or comma-separated)
 //   --keep         keep each story's temp folder (/tmp/erds-…: profile, workspace, frames) and print it
 //   --headed-slow  slow pacing, to watch a story run (implies the record pacing, slower)
@@ -30,6 +34,7 @@ import { REPO, buildExtension, killByProfile, launchVSCode, shortTempDir, stageE
 import { Recorder } from './lib/recorder.mjs';
 import { PACES, StepFailure, StoryContext, failureScreenshot } from './lib/story.mjs';
 import { CLIPS, CLIP_DIR, publishClip } from './lib/publish.mjs';
+import { narratorProblem } from './lib/narrate.mjs';
 import { encode } from './lib/video.mjs';
 import { prepareWorkspace } from './lib/workspaces.mjs';
 
@@ -38,10 +43,11 @@ const OUT = path.join(HERE, 'out');
 const STORIES = path.join(HERE, 'stories');
 
 function parseArgs(argv) {
-  const opts = { record: false, publish: false, only: [], keep: false, slow: false, build: true, list: false };
+  const opts = { record: false, narrate: false, publish: false, only: [], keep: false, slow: false, build: true, list: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--record') opts.record = true;
+    else if (a === '--narrate') opts.narrate = true;
     else if (a === '--publish') opts.publish = true;
     else if (a === '--keep') opts.keep = true;
     else if (a === '--headed-slow') opts.slow = true;
@@ -49,7 +55,7 @@ function parseArgs(argv) {
     else if (a === '--list') opts.list = true;
     else if (a === '--only') opts.only.push(...String(argv[++i] ?? '').split(',').filter(Boolean));
     else if (a.startsWith('--only=')) opts.only.push(...a.slice(7).split(',').filter(Boolean));
-    else if (a === '--help' || a === '-h') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 21).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(0); }
+    else if (a === '--help' || a === '-h') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 25).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(0); }
     else { console.error(`unknown option ${a} (see --help)`); process.exit(2); }
   }
   return opts;
@@ -104,7 +110,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 process.on('exit', () => { killAll(); removeTemps(); });
 
 async function runOne({ def, file }, { extDir, opts }) {
-  const pace = opts.slow ? PACES.slow : opts.record ? PACES.record : PACES.fast;
+  const pace = opts.slow ? PACES.slow : opts.record && opts.narrate ? PACES.narrate : opts.record ? PACES.record : PACES.fast;
   const logFile = path.join(OUT, `${def.id}.log`);
   for (const f of fs.readdirSync(OUT)) if (f === `${def.id}.mp4` || f.startsWith(`${def.id}.`) || f.startsWith(`${def.id}-`)) fs.rmSync(path.join(OUT, f), { recursive: true, force: true });
   const t0 = Date.now();
@@ -132,7 +138,7 @@ async function runOne({ def, file }, { extDir, opts }) {
       recorder.start();
       await ctx.eventually(() => recorder.frames.length > 0, { timeout: 15000, message: 'the recorder took no frames' });
     }
-    ctx.mark(`${def.title}\n${def.persona},\n${def.want},\n${def.soThat}.`, 'intro');
+    ctx.mark(`${def.title}\n${def.persona},\n${def.want},\n${def.soThat}.`, 'intro', def.say);
     await sleep(pace.intro);
     await def.steps(ctx);
     result.status = 'passed';
@@ -154,9 +160,12 @@ async function runOne({ def, file }, { extDir, opts }) {
     if (recorder) {
       const frames = await recorder.stop(pace.tail);
       try {
-        const v = encode({ frames, marks, outFile: path.join(OUT, `${def.id}.mp4`), workDir: path.join(root, 'video') });
+        const v = encode({ frames, marks, outFile: path.join(OUT, `${def.id}.mp4`), workDir: path.join(root, 'video'), narrate: opts.narrate, log });
         result.video = path.relative(REPO, v.file);
-        log(`video ${result.video}: ${frames.length} frames, ${v.seconds.toFixed(1)} s, captions ${v.burned ? 'burned in' : 'as a subtitle track'}`);
+        result.seconds = Number(v.seconds.toFixed(2));
+        const n = v.narration;
+        if (n) result.narration = { lines: n.lines, speechSeconds: Number(n.speechSeconds.toFixed(2)), heldSeconds: Number(n.heldSeconds.toFixed(2)) };
+        log(`video ${result.video}: ${frames.length} frames, ${v.seconds.toFixed(1)} s, captions ${v.burned ? 'burned in' : 'as a subtitle track'}${n ? `, narrated: ${n.lines} lines, ${n.speechSeconds.toFixed(1)} s of speech, frames held ${n.heldSeconds.toFixed(1)} s at ${n.holds} caption(s)` : ''}`);
       } catch (e) {
         log(`video not written: ${e.message}`);
       }
@@ -198,7 +207,7 @@ function publish(passed, chosen) {
       }
       try {
         const r = publishClip({ source, srt: path.join(OUT, `${c.story}.srt`), out, workDir: work });
-        console.log(`${(r.bytes / 1024).toFixed(0)} KB, ${r.seconds.toFixed(1)} s${r.speed > 1 ? ` (×${r.speed.toFixed(2)} of ${r.sourceSeconds.toFixed(1)} s)` : ''}, ${r.width}×${r.height}`);
+        console.log(`${(r.bytes / 1024).toFixed(0)} KB, ${r.seconds.toFixed(1)} s, ${r.width}×${r.height}, ${r.codec} + ${r.audioCodec} ${r.sampleRate / 1000} kHz ${r.channels === 1 ? 'mono' : `${r.channels} ch`}`);
       } catch (e) {
         console.log(`FAILED: ${e.message}`);
         failed++;
@@ -223,6 +232,19 @@ function passedRecordings() {
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   keepTemps = opts.keep;
+  // The "Watch how" clips are narrated: filming them for --publish speaks them.
+  if (opts.record && opts.publish) opts.narrate = true;
+  if (opts.narrate && !opts.record && !opts.list) {
+    console.error('--narrate narrates a recording: add --record');
+    return 2;
+  }
+  if (opts.narrate && !opts.list) {
+    const problem = narratorProblem();
+    if (problem) {
+      console.error(`[stories] ${problem}`);
+      return 2;
+    }
+  }
   if (opts.publish && !opts.record) {
     fs.mkdirSync(OUT, { recursive: true });
     const chosen = CLIPS.filter((c) => !opts.only.length || opts.only.some((o) => c.story.includes(o) || c.clip.includes(o) || c.key.includes(o)));
@@ -250,7 +272,7 @@ async function main() {
       const r = await runOne(s, { extDir, opts });
       results.push(r);
       const secs = (r.durationMs / 1000).toFixed(1);
-      if (r.status === 'passed') console.log(`PASS (${secs} s)${r.video ? `  ${r.video}` : ''}`);
+      if (r.status === 'passed') console.log(`PASS (${secs} s)${r.video ? `  ${r.video} (${r.seconds} s${r.narration ? ', narrated' : ''})` : ''}`);
       else {
         console.log(`FAIL (${secs} s)`);
         console.log(`    step:  ${r.failedStep}`);
@@ -264,7 +286,7 @@ async function main() {
     dropTemp(extRoot);
   }
   const failed = results.filter((r) => r.status !== 'passed');
-  fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify({ at: new Date().toISOString(), record: opts.record, passed: results.length - failed.length, failed: failed.length, stories: results }, null, 2) + '\n');
+  fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify({ at: new Date().toISOString(), record: opts.record, narrate: opts.narrate, passed: results.length - failed.length, failed: failed.length, stories: results }, null, 2) + '\n');
   console.log(`[stories] ${results.length - failed.length} passed, ${failed.length} failed — test/stories/out/summary.json`);
   let unpublished = 0;
   if (opts.publish) {

@@ -54,9 +54,9 @@ export default story({
       const text = await welcome.ev('doc.body.innerText');
       s.expect(text.includes('Or see a finished data model first:'), 'the Welcome tab should say "Or see a finished data model first:"');
       s.expect(!/\bdbt\b/i.test(text), 'with no folder open the Welcome tab must show no dbt word');
-      // "Watch how": the example's clip, in the open-a-folder card, silent and not playing.
+      // "Watch how": the example's clip, in the open-a-folder card, not playing (it has sound: a click plays it).
       const clip = await welcome.waitFor(`(() => { const v=doc.querySelector('.gs-noproject .gs-howto [data-clip="example"]'); return v && !v.closest('[hidden]') && { muted: v.muted, paused: v.paused }; })()`, { what: 'the example\'s "Watch how" clip in the open-a-folder card' });
-      s.expect(clip.muted && clip.paused, `the clip should wait, silent, for a click: ${JSON.stringify(clip)}`);
+      s.expect(!clip.muted && clip.paused, `the clip should wait, with its sound on, for a click: ${JSON.stringify(clip)}`);
       // Into the middle of the page: the bottom of the window is where the captions go.
       // The button is the last thing on the page, so (filming aid only) the page gets
       // room below it to scroll up into.

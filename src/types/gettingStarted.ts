@@ -932,11 +932,19 @@ const SCRIPT = `
   // The starts the last status listed, primary first (startActionsFor on the host).
   var starts = [];
   // The "Watch how" slot: one clip per suggestion the extension ships (rendered up
-  // front by the host, never built here). It plays only when clicked (the tour
-  // above already autoplays); a play pauses the tour and is counted once per clip.
+  // front by the host, never built here). It plays, with its narration, only when
+  // clicked (the tour above already autoplays). One voice at a time: a clip's play
+  // pauses the tour, the tour's pauses any clip; a clip's play is counted once per clip.
   var howto = $('.gs-howto');
   var clips = document.querySelectorAll('.gs-howto__clip');
   var clipsPlayed = {};
+  if (video && clips.length > 0) {
+    video.addEventListener('play', function () {
+      for (var pi = 0; pi < clips.length; pi++) {
+        if (!clips[pi].paused) { try { clips[pi].pause(); } catch (e) { /* ignore */ } }
+      }
+    });
+  }
   for (var ci = 0; ci < clips.length; ci++) {
     (function (clip) {
       clip.addEventListener('play', function () {
@@ -1205,20 +1213,21 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
   const reasons = START_INTENTS.filter((i) => START_INTENT_REASONS[i])
     .map((i) => `<p class="gs-step__reason" data-intent-reason="${i}" hidden>${escapeHtml(START_INTENT_REASONS[i]!)}</p>`)
     .join('\n          ');
-  // One clip per start the extension ships (the host checked the files): silent, captions
-  // burned in, played by a click (no autoplay). No poster file: preload="metadata" loads its
+  // One clip per start the extension ships (the host checked the files): narrated (MP3,
+  // as the tour), captions burned in, played with sound by a click (no autoplay, so the
+  // editor's autoplay policy never mutes it). No poster file: preload="metadata" loads its
   // header and first frame, the story's title card (publishing cuts the empty window before
   // it, test/stories/lib/publish.mjs); a local file, and only the clip the page shows is unhidden.
   const clipEls = HOW_TO_CLIP_KEYS.flatMap((key) => {
     const clip = input.howToClips?.[key];
     if (!clip) { return []; }
-    return [`<video class="gs-howto__clip" data-clip="${key}" controls muted playsinline preload="metadata" hidden>
+    return [`<video class="gs-howto__clip" data-clip="${key}" controls playsinline preload="metadata" hidden>
           <source src="${escapeHtml(clip.videoUri)}" type="video/mp4">
         </video>`];
   });
   const howToSlot = clipEls.length > 0
     ? `<div class="gs-howto" hidden>
-        <p class="gs-howto__title">Watch how (a short clip, no sound)</p>
+        <p class="gs-howto__title">Watch how (a short clip with narration)</p>
         ${clipEls.join('\n        ')}
       </div>`
     : '';

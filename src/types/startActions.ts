@@ -194,8 +194,8 @@ export type HowToClipKey = Exclude<StartIntent, 'convert'> | 'example';
 export const HOW_TO_CLIP_KEYS: readonly HowToClipKey[] = ['example', 'blank', 'importSqlDdl', 'importSemanticModel', 'importDbmlFile', 'drawFromDbt'];
 
 /**
- * The clip for each: a short, silent onboarding story video with its captions
- * burned in, published by `node test/stories/run.mjs --publish`
+ * The clip for each: a short onboarding story video, narrated (MP3) with its
+ * captions burned in, published by `node test/stories/run.mjs --record --publish`
  * (`test/stories/lib/publish.mjs` names the story behind each). No poster
  * file: the clip loads its metadata, so its first frame shows (fewer files in
  * the VSIX). The panel shows the slot only when the clip is in the extension.

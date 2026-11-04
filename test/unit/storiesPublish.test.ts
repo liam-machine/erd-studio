@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { HOW_TO_CLIPS, HOW_TO_CLIP_DIR, HOW_TO_CLIP_KEYS } from '../../src/types/startActions';
 // @ts-expect-error: a plain .mjs module of the story harness (no types).
-import { CLIPS, CLIP_DIR, LIMITS, clipProblems, cropTitleBarFilter, leadIn, pathInCaption } from '../stories/lib/publish.mjs';
+import { AUDIO, CLIPS, CLIP_DIR, LIMITS, clipProblems, cropTitleBarFilter, leadIn, pathInCaption } from '../stories/lib/publish.mjs';
 
 type Clip = { key: string; story: string; clip: string };
 const STORIES = path.join(__dirname, '../stories/stories');
@@ -29,11 +29,14 @@ describe('publishing the "Watch how" clips', () => {
     for (const c of CLIPS as Clip[]) expect(ids, c.story).toContain(c.story);
   });
 
-  it('keeps to the limits: 1280 px, 45 s, 2 MB', () => {
-    expect(LIMITS).toMatchObject({ width: 1280, maxSeconds: 45, maxBytes: 2 * 1024 * 1024 });
-    const good = { codec: 'h264', profile: 'High', pixFmt: 'yuv420p', width: 1280, audio: false, faststart: true, seconds: 44.5, bytes: 1_200_000 };
+  it('keeps to the limits: 1280 px, 60 s, 2 MB, narrated in MP3 mono 44.1 kHz (never AAC)', () => {
+    expect(LIMITS).toMatchObject({ width: 1280, maxSeconds: 60, maxBytes: 2 * 1024 * 1024 });
+    expect(AUDIO).toEqual({ codec: 'mp3', bitrate: '64k', channels: 1, sampleRate: 44100 });
+    const good = { codec: 'h264', profile: 'High', pixFmt: 'yuv420p', width: 1280, audio: true, audioCodec: 'mp3', sampleRate: 44100, channels: 1, streams: 2, faststart: true, seconds: 58.5, bytes: 1_800_000 };
     expect(clipProblems(good)).toEqual([]);
-    expect(clipProblems({ ...good, pixFmt: 'yuvj420p', audio: true, seconds: 50, bytes: 3 * 1024 * 1024, faststart: false, profile: 'Main' })).toHaveLength(6);
+    expect(clipProblems({ ...good, pixFmt: 'yuvj420p', seconds: 61, bytes: 3 * 1024 * 1024, faststart: false, profile: 'Main' })).toHaveLength(5);
+    expect(clipProblems({ ...good, audio: false, audioCodec: undefined, streams: 1 })).toEqual(['has no narration (record it with --narrate)', '1 tracks, not a video and its narration']);
+    expect(clipProblems({ ...good, audioCodec: 'aac' })).toEqual(['audio is aac 44100 Hz 1 ch, not MP3 44.1 kHz mono']);
   });
 
   it('starts on the story\'s title card (the poster) and crops the dev-host title bar off', () => {

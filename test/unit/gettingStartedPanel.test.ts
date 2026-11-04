@@ -2234,12 +2234,12 @@ describe('the start card follows the suggestion', () => {
     expect(html).not.toContain('poster="https://mock-csp-source/media/onboarding/stories');
   });
 
-  it('the clip is silent, plays on a click (no autoplay; only its header and first frame load) and keeps the CSP: no inline style or handler', () => {
+  it('the clip plays with its narration on a click (not muted, no autoplay; only its header and first frame load) and keeps the CSP: no inline style or handler', () => {
     const html = buildGettingStartedHtml({ ...HTML_INPUT, howToClips: CLIPS });
     const clips = html.match(/<video class="gs-howto__clip"[^>]*>/g) ?? [];
     expect(clips).toHaveLength(HOW_TO_CLIP_KEYS.length);
     for (const tag of clips) {
-      expect(tag).toMatch(/ muted /);
+      expect(tag).not.toMatch(/\bmuted\b/);
       expect(tag).toMatch(/ controls /);
       expect(tag).toMatch(/preload="metadata"/);
       expect(tag).not.toMatch(/poster=/);
@@ -2255,7 +2255,7 @@ describe('the start card follows the suggestion', () => {
       const shownClips = () => [...doc.querySelectorAll<HTMLElement>('.gs-howto__clip')].filter((el) => el.closest('[hidden]') === null).map((el) => el.dataset.clip);
       send({ type: 'status', payload: { ...STATUS, logicalOnly: true, intent: 'importSqlDdl' } });
       expect(shownClips()).toEqual(['importSqlDdl']);
-      expect(visible('[data-step="begin"] .gs-howto__title')).toEqual(['Watch how (a short clip, no sound)']);
+      expect(visible('[data-step="begin"] .gs-howto__title')).toEqual(['Watch how (a short clip with narration)']);
       const clip = doc.querySelector('[data-clip="importSqlDdl"]')!;
       clip.dispatchEvent(new dom.window.Event('play'));
       clip.dispatchEvent(new dom.window.Event('play'));
@@ -2276,6 +2276,35 @@ describe('the start card follows the suggestion', () => {
       expect(howToClipFor(false, undefined)).toBe('example');
       expect(howToClipFor(true, 'importSqlDdl')).toBe('importSqlDdl');
       expect(howToClipFor(true, 'convert')).toBeUndefined();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('one voice at a time: a clip playing pauses the tour, and the tour playing pauses the clip', () => {
+    const paused: string[] = [];
+    const dom = new JSDOM(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical', howToClips: CLIPS }), {
+      runScripts: 'dangerously',
+      virtualConsole: new VirtualConsole(),
+      beforeParse(window) {
+        (window as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({ postMessage: () => {} });
+        window.HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
+        window.HTMLMediaElement.prototype.pause = function (this: HTMLMediaElement) { paused.push(this.dataset.clip ?? 'tour'); };
+      },
+    });
+    try {
+      const doc = dom.window.document;
+      const tour = doc.querySelector<HTMLVideoElement>('.gs-video__player')!;
+      const clip = doc.querySelector<HTMLVideoElement>('[data-clip="importSqlDdl"]')!;
+      const playing = (el: HTMLVideoElement, on: boolean) => Object.defineProperty(el, 'paused', { configurable: true, get: () => !on });
+      playing(tour, true);
+      clip.dispatchEvent(new dom.window.Event('play'));
+      expect(paused).toEqual(['tour']);
+      paused.length = 0;
+      playing(tour, false);
+      playing(clip, true);
+      tour.dispatchEvent(new dom.window.Event('play'));
+      expect(paused).toEqual(['importSqlDdl']);
     } finally {
       dom.window.close();
     }

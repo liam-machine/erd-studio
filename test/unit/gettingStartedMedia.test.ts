@@ -16,9 +16,23 @@ import { HOW_TO_CLIPS, HOW_TO_CLIP_DIR, HOW_TO_CLIP_KEYS } from '../../src/types
 
 const ROOT = path.join(__dirname, '..', '..');
 
+/**
+ * MP3 and AAC share the `mp4a` sample entry; the esds DecoderConfigDescriptor's
+ * objectTypeIndication tells them apart (0x6B = MPEG-1 audio / MP3, 0x40 = AAC).
+ */
+function audioObjectType(head: Buffer): number | undefined {
+  const esds = head.indexOf(Buffer.from('esds'));
+  if (esds < 0) return undefined;
+  const dcd = head.indexOf(0x04, esds + 4 + 4 + 2); // after box type, version/flags, ES_Descriptor tag+len
+  let i = dcd + 1;
+  while (head[i] & 0x80) { i++; } // variable-length size field
+  return head[i + 1];
+}
+
 /** The boxes of an MP4 a test needs, read from its `moov` (no ffprobe in CI). */
 function readMp4(buf: Buffer): {
   faststart: boolean; codec: string; profile: number; chromaFormat: number; width: number; seconds: number; handlers: string[];
+  tracks: { handler: string; seconds: number }[]; audio?: { objectType?: number; channels: number; sampleRate: number };
 } {
   const moov = buf.indexOf('moov');
   const mdat = buf.indexOf('mdat');
@@ -33,6 +47,19 @@ function readMp4(buf: Buffer): {
     const handler = buf.toString('latin1', at + 12, at + 16);
     if (handler !== 'mdir') handlers.push(handler); // 'mdir' is udta metadata, not a track
   }
+  // Each track's own length: its mdia's mdhd (timescale, duration), then its hdlr.
+  const tracks: { handler: string; seconds: number }[] = [];
+  for (let at = buf.indexOf('mdhd', moov); at > 0 && at < mdat; at = buf.indexOf('mdhd', at + 4)) {
+    const v1 = buf[at + 4] === 1;
+    const scale = v1 ? buf.readUInt32BE(at + 24) : buf.readUInt32BE(at + 16);
+    const length = v1 ? Number(buf.readBigUInt64BE(at + 28)) : buf.readUInt32BE(at + 20);
+    const hdlr = buf.indexOf('hdlr', at);
+    tracks.push({ handler: buf.toString('latin1', hdlr + 12, hdlr + 16), seconds: length / scale });
+  }
+  const mp4a = buf.indexOf('mp4a', moov);
+  const audio = mp4a > 0 && mp4a < mdat
+    ? { objectType: audioObjectType(buf.subarray(mp4a, mdat)), channels: buf.readUInt16BE(mp4a - 4 + 24), sampleRate: buf.readUInt16BE(mp4a - 4 + 32) }
+    : undefined;
   const avc1 = box('avc1');
   const avcC = box('avcC') + 8; // its body
   let at = avcC + 5;
@@ -48,6 +75,8 @@ function readMp4(buf: Buffer): {
     width: buf.readUInt16BE(avc1 + 8 + 24),
     seconds: duration / timescale,
     handlers,
+    tracks,
+    audio,
   };
 }
 const MEDIA = path.join(ROOT, 'media', 'onboarding');
@@ -123,7 +152,7 @@ describe('getting-started media', () => {
     expect([...HOW_TO_CLIP_KEYS].sort()).toEqual(['blank', 'drawFromDbt', 'example', 'importDbmlFile', 'importSemanticModel', 'importSqlDdl']);
     expect(clipFiles.sort()).toEqual(HOW_TO_CLIP_KEYS.map((k) => HOW_TO_CLIPS[k]).sort());
   });
-  it.each(HOW_TO_CLIP_KEYS.map((k) => [k, HOW_TO_CLIPS[k]]))('%s (%s): H.264 High yuv420p, 1280 px wide, fast-start, silent, at most 45 s and 2 MB', (_key, file) => {
+  it.each(HOW_TO_CLIP_KEYS.map((k) => [k, HOW_TO_CLIPS[k]]))('%s (%s): H.264 High yuv420p, 1280 px wide, fast-start, narrated in MP3 (never AAC), at most 60 s and 2 MB', (_key, file) => {
     const buf = fs.readFileSync(path.join(STORIES, file));
     const clip = readMp4(buf);
     expect(buf.length).toBeLessThanOrEqual(2 * 1024 * 1024);
@@ -133,8 +162,15 @@ describe('getting-started media', () => {
     expect(clip.chromaFormat).toBe(1); // 4:2:0
     expect(clip.width).toBe(1280);
     expect(clip.seconds).toBeGreaterThan(10);
-    expect(clip.seconds).toBeLessThanOrEqual(45.05);
-    expect(clip.handlers).toEqual(['vide']); // no sound track, no subtitle track
+    expect(clip.seconds).toBeLessThanOrEqual(60.05);
+    expect([...clip.handlers].sort()).toEqual(['soun', 'vide']); // the video and its narration, no subtitle track
+    // The narration: MP3 (VS Code's ffmpeg has no AAC decoder), mono, 44.1 kHz, as long as the video.
+    expect(clip.audio?.objectType).toBe(0x6b);
+    expect(clip.audio?.channels).toBe(1);
+    expect(clip.audio?.sampleRate).toBe(44100);
+    const video = clip.tracks.find((t) => t.handler === 'vide')!;
+    const sound = clip.tracks.find((t) => t.handler === 'soun')!;
+    expect(Math.abs(sound.seconds - video.seconds)).toBeLessThan(0.5);
   });
 
   // Each check runs on whichever of the agreed files exist; the listing above requires all four.
@@ -153,15 +189,10 @@ describe('getting-started media', () => {
     it.runIf(present(cut.video))('uses MP3 audio, never AAC (VS Code documents MP3 and has no AAC decoder)', () => {
       const head = fs.readFileSync(path.join(MEDIA, cut.video)).subarray(0, 64 * 1024);
       expect(head.includes(Buffer.from('avc1'))).toBe(true);
-      // MP3 and AAC share the `mp4a` sample entry; the esds DecoderConfigDescriptor's
-      // objectTypeIndication tells them apart (0x6B = MPEG-1 audio / MP3, 0x40 = AAC).
+      // MP3 and AAC share the `mp4a` sample entry: audioObjectType reads which (0x6B = MP3).
       expect(head.includes(Buffer.from('mp4a'))).toBe(true);
-      const esds = head.indexOf(Buffer.from('esds'));
-      expect(esds).toBeGreaterThan(0);
-      const dcd = head.indexOf(0x04, esds + 4 + 4 + 2); // after box type, version/flags, ES_Descriptor tag+len
-      let i = dcd + 1;
-      while (head[i] & 0x80) { i++; } // variable-length size field
-      expect(head[i + 1]).toBe(0x6b);
+      expect(head.indexOf(Buffer.from('esds'))).toBeGreaterThan(0);
+      expect(audioObjectType(head)).toBe(0x6b);
     });
 
     it.runIf(present(cut.poster))('poster is a JPEG', () => {

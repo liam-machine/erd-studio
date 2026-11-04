@@ -14,6 +14,8 @@
 //       await s.step('Given VS Code with no folder open', async () => { … });
 //       await s.step('When I open the ERD Studio sidebar', async () => { await s.ui.openSidebar('ERD Studio'); });
 //       await s.step('Then I see "Open an example"', async () => { await s.expectVisible(sel.welcomeLink('Open an example')); });
+//       // With --narrate a step's caption is also spoken; `say` replaces it when it reads badly aloud.
+//       await s.step('And it is its own file under .erd-studio/main/tables/', async () => { … }, { say: 'And it is saved as its own file.' });
 //     },
 //   });
 
@@ -49,12 +51,15 @@ export const PACES = {
   // Record: about 2.5 s to read each caption before its actions start.
   record: { glide: 650, settle: 450, afterCaption: 2500, intro: 4000, tail: 2500 },
   slow: { glide: 900, settle: 700, afterCaption: 3500, intro: 5000, tail: 3500 },
+  // Record with --narrate: the voice reads each caption, so only a beat before
+  // its actions; the encoder holds a frame wherever a line needs longer.
+  narrate: { glide: 650, settle: 450, afterCaption: 900, intro: 1500, tail: 1500 },
 };
 
 /**
  * The `s` every story's steps receive.
  *
- *   s.step(caption, fn)          one step: caption + actions + assertions
+ *   s.step(caption, fn, { say }) one step: caption + actions + assertions (`say`: what --narrate speaks instead of the caption)
  *   s.wb                         the workbench actor (click, press, type, waitFor, highlight, ev…)
  *   s.ui                         VS Code helpers (openSidebar, waitForQuickPick, pick, runCommand, tabs…)
  *   s.sel                        selector expressions (vscode.mjs)
@@ -82,18 +87,21 @@ export class StoryContext {
     this.steps = [];
   }
 
-  mark(text, kind = 'step') {
-    this.marks.push({ t: Date.now(), text, kind });
+  /** A caption from now on; `say` is what --narrate speaks instead of `text` ('' or null: nothing). */
+  mark(text, kind = 'step', say) {
+    this.marks.push({ t: Date.now(), text, kind, ...(say !== undefined ? { say } : {}) });
   }
 
   async pause(ms = 1000) {
-    await sleep(Math.round(ms * (this.pace.afterCaption / PACES.record.afterCaption)));
+    // The record pace's beats, kept when narrating (they show the viewer the result).
+    const base = this.pace === PACES.narrate ? PACES.record.afterCaption : this.pace.afterCaption;
+    await sleep(Math.round(ms * (base / PACES.record.afterCaption)));
   }
 
-  async step(name, fn) {
+  async step(name, fn, { say } = {}) {
     if (this.failed) return;
     const t = Date.now();
-    this.mark(name);
+    this.mark(name, 'step', say);
     this.log(`STEP ${this.steps.length + 1}: ${name}`);
     await sleep(this.pace.afterCaption);
     try {

@@ -26,7 +26,7 @@ export default story({
       s.expectNoFile('.erd-studio');
       await s.expectFile('database/01_tables.sql', { contains: 'CREATE TABLE sales.fct_order_line' });
       await s.eventually(async () => (await s.ui.windowTitle()).includes('shop-database'), { message: 'the shop-database folder did not open' });
-    });
+    }, { say: 'Given my project folder, with SQL scripts in a database folder.' });
 
     const START = 'Import your SQL scripts';
     await s.step('When I open the ERD Studio sidebar, it leads with "Import your SQL scripts"', async () => {
@@ -73,7 +73,7 @@ export default story({
       s.expect(!/lowercase/i.test(typed.message), `"Sales" should be accepted, but the box says "${typed.message}"`);
       await s.pause(900);
       await s.wb.press('Enter');
-    });
+    }, { say: 'It suggests sales, from the tables\' schema. I call it Sales.' });
 
     await s.step('It shows what it will import before writing anything', async () => {
       const dialog = await s.ui.waitForDialog();
@@ -111,6 +111,6 @@ export default story({
       await s.wb.highlight(s.sel.sidebarRow('fct_order_line'));
       await s.pause(2000);
       await s.wb.unhighlight();
-    });
+    }, { say: 'And each table, and the relationships, are DBML files in my project.' });
   },
 });

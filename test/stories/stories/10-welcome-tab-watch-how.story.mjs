@@ -4,8 +4,9 @@
 // holds the clip for that start (media/onboarding/stories/import-sql-scripts.mp4,
 // published from story 04 by `run.mjs --publish`). Proves the tab is reached
 // from the empty Diagrams view's "Get started" link, the clip shown is the
-// suggestion's, it is silent and waits for a click, and that it really plays
-// in VS Code's webview (H.264 decodes: its time moves on), pausing the tour.
+// suggestion's, it waits for a click, and that it really plays in VS Code's
+// webview with its narration (H.264 decodes: its time moves on; the MP3 audio
+// decodes: Chromium counts the audio bytes it decoded), pausing the tour.
 
 import { story } from '../lib/story.mjs';
 
@@ -23,7 +24,7 @@ export default story({
     await s.step('Given my project folder with SQL scripts in database/', async () => {
       s.expectNoFile('.erd-studio');
       await s.eventually(async () => (await s.ui.windowTitle()).includes('shop-database'), { message: 'the shop-database folder did not open' });
-    });
+    }, { say: 'Given my project folder, with SQL scripts in a database folder.' });
 
     await s.step('When I open the ERD Studio sidebar and click "Get started"', async () => {
       await s.ui.openSidebar('ERD Studio');
@@ -52,12 +53,13 @@ export default story({
       await s.wb.unhighlight();
     });
 
-    await s.step('And "Watch how" shows a short clip of that start, silent, waiting for me', async () => {
+    await s.step('And "Watch how" shows a short clip of that start, waiting for me', async () => {
       const clip = await welcome.waitFor(`(() => { const v=${CLIP}; return v && !v.closest('[hidden]') && { src: v.currentSrc || v.querySelector('source')?.src || '', muted: v.muted, paused: v.paused, autoplay: v.autoplay }; })()`, { what: 'the SQL clip in the start card' });
       s.expect(clip.src.includes('import-sql-scripts.mp4'), `the clip should be the SQL one, but is ${clip.src}`);
-      s.expect(clip.muted && clip.paused && !clip.autoplay, `the clip should wait, silent, for a click: ${JSON.stringify(clip)}`);
+      s.expect(clip.paused && !clip.autoplay, `the clip should wait for a click: ${JSON.stringify(clip)}`);
+      s.expect(!clip.muted, `the clip is narrated: it should play with sound, but is muted: ${JSON.stringify(clip)}`);
       const title = await welcome.ev(`${CLIP}.closest('.gs-howto').querySelector('.gs-howto__title').textContent.trim()`);
-      s.assert.equal(title, 'Watch how (a short clip, no sound)');
+      s.assert.equal(title, 'Watch how (a short clip with narration)');
       // Only the suggestion's clip shows.
       s.assert.equal(await welcome.ev(`[...doc.querySelectorAll('.gs-howto__clip')].filter(v => !v.hidden).length`), 1);
       await welcome.highlight(CLIP);
@@ -74,8 +76,11 @@ export default story({
       // The controls' play button: bottom left of the clip, above its timeline.
       const r = await welcome.rect(CLIP);
       await s.wb.clickAt({ x: r.x + 24, y: r.y + r.height - 48 });
-      const playing = await welcome.waitFor(`(() => { const v=${CLIP}; return !v.paused && v.currentTime > 1.5 && v.readyState >= 2 && { t: v.currentTime, w: v.videoWidth, h: v.videoHeight }; })()`, { timeout: 20000, what: 'the clip to play (its time to move on)' });
+      const playing = await welcome.waitFor(`(() => { const v=${CLIP}; return !v.paused && v.currentTime > 1.5 && v.readyState >= 2 && { t: v.currentTime, w: v.videoWidth, h: v.videoHeight, muted: v.muted, volume: v.volume, audioBytes: v.webkitAudioDecodedByteCount }; })()`, { timeout: 20000, what: 'the clip to play (its time to move on)' });
       s.expect(playing.w === 1280, `the clip should be 1280 px wide, but is ${playing.w}`);
+      s.expect(!playing.muted && playing.volume > 0, `the clip should play with sound: ${JSON.stringify(playing)}`);
+      // Chromium's count of decoded audio bytes (Electron has it): 0 would mean VS Code could not decode the narration (AAC).
+      if (playing.audioBytes !== undefined) s.expect(playing.audioBytes > 0, `the clip's narration should decode in VS Code (MP3), but no audio was decoded: ${JSON.stringify(playing)}`);
       const tourPaused = await welcome.ev(`(() => { const v=${TOUR}; return !!v && v.paused; })()`);
       s.expect(tourPaused, 'playing the clip should pause the tour');
       await s.pause(4000);

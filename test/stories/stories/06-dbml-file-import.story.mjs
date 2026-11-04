@@ -18,6 +18,7 @@ const TABLES = ['users', 'countries', 'ecommerce.merchants', 'ecommerce.products
 export default story({
   id: 'dbml-file-import',
   title: 'Import a dbdiagram.io DBML file',
+  say: 'Import a DBML file from dbdiagram dot io.', // --narrate's line for the title card
   persona: 'As someone who drew my schema on dbdiagram.io',
   want: 'I want to bring its DBML export into ERD Studio',
   soThat: 'so that the diagram lives in Git next to my code',
@@ -27,7 +28,7 @@ export default story({
       s.expectNoFile('.erd-studio');
       await s.expectFile('ecommerce.dbml', { contains: 'Project ecommerce' });
       await s.eventually(async () => (await s.ui.windowTitle()).includes('online-shop'), { message: 'the online-shop folder did not open' });
-    });
+    }, { say: 'Given my project folder, with an e-commerce DBML file from dbdiagram dot io.' });
 
     const START = 'Import your DBML file';
     await s.step('When I open the ERD Studio sidebar, it leads with "Import your DBML file"', async () => {
@@ -50,7 +51,7 @@ export default story({
       await s.pause(1200);
       await s.wb.unhighlight();
       await s.ui.chooseInFileDialog(undefined, 'Import');
-    });
+    }, { say: 'When I click it, the file is already chosen, so I press Import.' });
 
     await s.step('I keep the suggested name, "ecommerce"', async () => {
       const box = await s.ui.waitForQuickPick({ title: 'Import DBML' });
@@ -60,7 +61,7 @@ export default story({
       await s.pause(1000);
       await s.wb.unhighlight();
       await s.wb.press('Enter');
-    });
+    }, { say: 'I keep the suggested name, e-commerce.' });
 
     await s.step('It shows what it will import, and what it leaves out', async () => {
       const dialog = await s.ui.waitForDialog();
