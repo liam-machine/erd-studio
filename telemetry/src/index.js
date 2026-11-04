@@ -459,6 +459,20 @@ const FEATURES = [
   'activatedLogical',
   'activatedNoFolder',
   'dbtProjectUnused',
+  // The onboarding guide, Show Me Around (src/types/onboardingGuide.ts): it
+  // began (and whether the command asked), phase A ended by Keep on the
+  // draft, phase B began on the canvas, it finished, it was skipped on the
+  // draft or on the canvas, and its finish's Star on GitHub and its Set Up My
+  // AI Helper button. Fixed keys only: never a table, a path or a count.
+  'guideStarted',
+  'guideStartedFromCommand',
+  'guideDraftDone',
+  'guideCanvasStarted',
+  'guideCompleted',
+  'guideSkippedOnDraft',
+  'guideSkippedOnCanvas',
+  'guideStarClicked',
+  'guideAiHelperClicked',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

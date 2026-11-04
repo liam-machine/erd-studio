@@ -624,7 +624,24 @@ describe('allowlists agree with the Worker', () => {
   it('appends the per-window activation and unused-dbt keys at the very end, after the Draft-first ones', () => {
     const at = FEATURES.indexOf('activatedDbt');
     expect(at).toBe(FEATURES.indexOf('importGuideFromDraft') + 1);
-    expect(FEATURES.slice(at)).toEqual(['activatedDbt', 'activatedLogical', 'activatedNoFolder', 'dbtProjectUnused']);
+    expect(FEATURES.slice(at, FEATURES.indexOf('dbtProjectUnused') + 1)).toEqual(['activatedDbt', 'activatedLogical', 'activatedNoFolder', 'dbtProjectUnused']);
+  });
+
+  it('appends the onboarding guide keys at the very end, after the activation ones, in their fixed order', () => {
+    const at = FEATURES.indexOf('guideStarted');
+    expect(at).toBe(FEATURES.indexOf('dbtProjectUnused') + 1);
+    expect(FEATURES.slice(at)).toEqual([
+      'guideStarted', 'guideStartedFromCommand', 'guideDraftDone', 'guideCanvasStarted', 'guideCompleted',
+      'guideSkippedOnDraft', 'guideSkippedOnCanvas', 'guideStarClicked', 'guideAiHelperClicked',
+    ]);
+    // The no-longer-sent clip key stays listed (append-only).
+    expect(FEATURES).toContain('howToClipPlayed');
+  });
+
+  it('the Worker README documents the onboarding guide keys in a Guide funnel row', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    expect(readme).toMatch(/^\| Guide \|/m);
+    for (const key of FEATURES.slice(FEATURES.indexOf('guideStarted'))) expect(readme, key).toContain(`\`${key}\``);
   });
 
   it('telemetry.json documents every feature key', () => {

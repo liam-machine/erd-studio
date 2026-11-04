@@ -16,7 +16,12 @@ import * as vscode from 'vscode';
 
 import {
   GETTING_STARTED_EXTERNAL_URLS,
+  GETTING_STARTED_PASSIVE_TYPES,
   GETTING_STARTED_TO_HOST_TYPES,
+  SHOW_ME_AROUND_COMMAND,
+  SHOW_ME_AROUND_LABEL,
+  SHOW_ME_AROUND_SECTION_INTRO,
+  SHOW_ME_AROUND_SECTION_TITLE,
   SAMPLE_CODESPACES_LIVE,
   SAMPLE_CODESPACES_URL,
   SAMPLE_REPO_CLONE_URL,
@@ -38,7 +43,6 @@ import {
 import {
   GETTING_STARTED_VIEW_TYPE,
   GettingStartedPanel,
-  howToClipUris,
   SETUP_CANCELLED_MESSAGE,
   SETUP_READY_MESSAGE,
   COPILOT_CHAT_OPEN_COMMAND,
@@ -72,10 +76,6 @@ import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../../src/type
 import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../../src/types/gettingStartedLogicalTranscript';
 import { HELP_ACTIONS } from '../../src/providers/HelpTreeProvider';
 import {
-  HOW_TO_CLIPS,
-  HOW_TO_CLIP_KEYS,
-  howToClipFor,
-  type HowToClipKey,
   START_ACTIONS,
   START_ACTION_COMMANDS,
   START_INTENTS,
@@ -1456,9 +1456,9 @@ describe('GettingStartedPanel', () => {
     expect(panel._column).toBe(vscode.ViewColumn.One);
     expect(panel.webview.options.enableScripts).toBe(true);
     expect(panel.webview.options.retainContextWhenHidden).toBe(false);
-    // The media folder, and the "Watch how" clips' folder (inside it) named too.
+    // The media folder only (the per-start clips' folder went with the clips).
     expect((panel.webview.options.localResourceRoots as Array<{ path: string }>).map((u) => u.path))
-      .toEqual([`${REPO_ROOT}/media/onboarding`, `${REPO_ROOT}/media/onboarding/stories`]);
+      .toEqual([`${REPO_ROOT}/media/onboarding`]);
     expect(panel.webview.html).toContain("media-src https://mock-csp-source");
     // Shipped media are referenced when present (WP6 output).
     if (fs.existsSync(path.join(REPO_ROOT, 'media/onboarding/getting-started.mp4'))) {
@@ -1482,6 +1482,8 @@ describe('GettingStartedPanel', () => {
     vscode.commands.registerCommand('vscode.openFolder', openFolder);
     const createDomain = vi.fn();
     vscode.commands.registerCommand(START_ACTION_COMMANDS.blank, createDomain);
+    const showMeAround = vi.fn();
+    vscode.commands.registerCommand(SHOW_ME_AROUND_COMMAND, showMeAround);
 
     const messages: Record<string, unknown> = {
       openExternal: { type: 'openExternal', target: 'dbtInstallDocs' },
@@ -1497,6 +1499,8 @@ describe('GettingStartedPanel', () => {
     expect(openFolder).toHaveBeenCalledWith(); // no URI: VS Code's own folder picker
     expect(createDomain).toHaveBeenCalledTimes(1);
     expect(createDomain).toHaveBeenCalledWith(); // no argument from the webview
+    expect(showMeAround).toHaveBeenCalledTimes(1);
+    expect(showMeAround).toHaveBeenCalledWith();
 
     // ready, refreshStatus, after setupAiHelper, before openClaude / openCopilotChat, after start
     expect(deps.getStatus).toHaveBeenCalledTimes(6);
@@ -2098,19 +2102,10 @@ describe('getting-started telemetry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The suggested start: primary button, reason line and the "Watch how" clip
+// The suggested start's reason line, and Show Me Around (in place of the per-start clips)
 // ---------------------------------------------------------------------------
 
-describe('the How-to clips (Draft-first: none on the start path)', () => {
-  const CLIPS = Object.fromEntries(HOW_TO_CLIP_KEYS.map((k) => [k, {
-    videoUri: `https://mock-csp-source/media/onboarding/stories/${HOW_TO_CLIPS[k]}`,
-  }])) as Record<HowToClipKey, { videoUri: string }>;
-  const IMPORT_LABELS: Record<string, string> = {
-    importSemanticModel: 'Import your Power BI semantic model',
-    importSqlDdl: 'Import your SQL scripts',
-    importDbmlFile: 'Import your DBML file',
-  };
-
+describe('Show Me Around, and the suggested start (Draft-first: no clip, no start card)', () => {
   it('reason lines name the kind of file only (no names), say "diagram", and never "open standard"', () => {
     for (const reason of Object.values(START_INTENT_REASONS)) {
       expect(reason).toMatch(/^This folder has /);
@@ -2119,110 +2114,82 @@ describe('the How-to clips (Draft-first: none on the start path)', () => {
     expect(Object.keys(START_INTENT_REASONS).sort()).toEqual(['importDbmlFile', 'importSemanticModel', 'importSqlDdl']);
   });
 
-  it('renders no How-to clips section when the extension ships no clip, and only the clips it is given', () => {
-    expect(buildGettingStartedHtml(HTML_INPUT)).not.toContain('class="gs-howto');
-    const html = buildGettingStartedHtml({ ...HTML_INPUT, howToClips: { importSqlDdl: { videoUri: CLIPS.importSqlDdl.videoUri } } });
-    expect(html.match(/<video class="gs-howto__clip"/g)).toHaveLength(1);
-    expect(html).toContain('data-clip="importSqlDdl"');
-    expect(html).toContain('<h2 class="gs-section-title">Ways to start, in short videos</h2>');
-    expect(html).toContain('<p class="gs-section-intro">Each one shows a start from the first click, in under a minute.</p>');
-    expect(html).not.toContain('How-to clips');
-    // No poster file: its first frame is the poster (fewer files in the VSIX).
-    expect(html).not.toContain('poster="https://mock-csp-source/media/onboarding/stories');
-  });
-
-  it('the clip plays with its narration on a click (not muted, no autoplay; only its header and first frame load) and keeps the CSP: no inline style or handler', () => {
-    const html = buildGettingStartedHtml({ ...HTML_INPUT, howToClips: CLIPS });
-    const clips = html.match(/<video class="gs-howto__clip"[^>]*>/g) ?? [];
-    expect(clips).toHaveLength(HOW_TO_CLIP_KEYS.length);
-    for (const tag of clips) {
-      expect(tag).not.toMatch(/\bmuted\b/);
-      expect(tag).toMatch(/ controls /);
-      expect(tag).toMatch(/preload="metadata"/);
-      expect(tag).not.toMatch(/poster=/);
-      expect(tag).not.toMatch(/autoplay/);
+  it('the strings: a heading, one line and the button, with no dbt word, "diagram" in prose and no question', () => {
+    expect(SHOW_ME_AROUND_COMMAND).toBe('erdStudio.showMeAround');
+    expect(SHOW_ME_AROUND_LABEL).toBe('Show Me Around');
+    expect(SHOW_ME_AROUND_SECTION_TITLE).toBe('Find your way around');
+    expect(SHOW_ME_AROUND_SECTION_INTRO).toMatch(/^Show Me Around /);
+    for (const text of [SHOW_ME_AROUND_LABEL, SHOW_ME_AROUND_SECTION_TITLE, SHOW_ME_AROUND_SECTION_INTRO]) {
+      expect(text).not.toMatch(/\bdbt\b|\?/i);
     }
-    expect(html).toContain(`media-src ${HTML_INPUT.cspSource};`);
-    expect(html).not.toMatch(/\sstyle="|\son[a-z]+="/i);
   });
 
-  it('shows the six clips, each captioned, after the AI section on every page — the dbt clip on the dbt page only — and counts a play once per clip', () => {
-    const shownClips = (doc: Document) => [...doc.querySelectorAll<HTMLElement>('.gs-howto__clip')]
-      .filter((el) => el.closest('[hidden]') === null).map((el) => el.dataset.clip);
-    const html = buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical', howToClips: CLIPS });
-    // After the AI cards, never inside a start card.
-    expect(html.indexOf('class="gs-howto-section"')).toBeGreaterThan(html.indexOf('data-step="start"'));
-    const { dom, send, visible, posted, doc } = runPanelScript(html);
+  it('every page shows the section and its button, after the AI cards, outside the steps (shown with no folder too); no clip, no video but the tour', () => {
+    for (const mode of [undefined, 'nofolder', 'logical', 'dbt'] as const) {
+      const html = buildGettingStartedHtml({ ...HTML_INPUT, ...(mode ? { mode } : {}) });
+      const label = mode ?? 'unknown';
+      expect(html.match(/data-action="showMeAround"/g), label).toHaveLength(1);
+      expect(html, label).toContain(`<section class="gs-around" aria-label="${SHOW_ME_AROUND_SECTION_TITLE}">`);
+      expect(html, label).toContain(`<h2 class="gs-section-title">${SHOW_ME_AROUND_SECTION_TITLE}</h2>`);
+      expect(html, label).toContain(`<p class="gs-section-intro">${SHOW_ME_AROUND_SECTION_INTRO}</p>`);
+      expect(html, label).toContain(`<button class="gs-btn" type="button" data-action="showMeAround">${SHOW_ME_AROUND_LABEL}</button>`);
+      expect(html.indexOf('class="gs-around"'), label).toBeGreaterThan(html.indexOf('data-step="start"'));
+      // The per-start clips are gone: no section, no clip, no second <video>.
+      expect(html, label).not.toMatch(/gs-howto|data-clip|Ways to start, in short videos|onboarding\/stories/);
+      expect(html.match(/<video /g) ?? [], label).toHaveLength(1);
+    }
+  });
+
+  it.each(['nofolder', 'logical', 'dbt'] as const)('%s page: the button is visible once the status lands, and a click posts showMeAround', (mode) => {
+    const status: GettingStartedStatus = mode === 'nofolder'
+      ? { ...STATUS, hasProject: false, project: null }
+      : mode === 'logical' ? { ...STATUS, logicalOnly: true } : STATUS;
+    const { dom, posted, send, visible, doc } = runPanelScript(buildGettingStartedHtml({ ...HTML_INPUT, mode }));
     try {
-      send({ type: 'status', payload: { ...STATUS, logicalOnly: true, intent: 'importSqlDdl' } });
-      expect(shownClips(doc)).toEqual(HOW_TO_CLIP_KEYS.filter((k) => k !== 'drawFromDbt'));
-      // Each caption is its start's one label.
-      expect(visible('.gs-howto__caption')).toEqual(['Open an Example', 'New Diagram', 'Import your SQL scripts', 'Import your Power BI semantic model', 'Import your DBML file']);
-      const clip = doc.querySelector('[data-clip="importSqlDdl"]')!;
-      clip.dispatchEvent(new dom.window.Event('play'));
-      clip.dispatchEvent(new dom.window.Event('play'));
-      expect(posted.filter((m) => (m as { type: string }).type === 'howToClipPlayed')).toHaveLength(1);
-      // Diagrams or a project from before 2.0: the same clips (none of them is a start).
-      send({ type: 'status', payload: { ...STATUS, logicalOnly: true, domainCount: 2, storage: 'yaml', intent: 'convert' } });
-      expect(shownClips(doc)).toEqual(HOW_TO_CLIP_KEYS.filter((k) => k !== 'drawFromDbt'));
-      // The dbt page adds the dbt clip.
-      send({ type: 'status', payload: STATUS });
-      expect(shownClips(doc)).toEqual([...HOW_TO_CLIP_KEYS]);
-      expect(visible('.gs-howto__caption')).toContain('Draw from dbt');
+      send({ type: 'status', payload: status });
+      const button = doc.querySelector<HTMLElement>('[data-action="showMeAround"]')!;
+      expect(button.closest('[hidden]')).toBeNull();
+      expect(dom.window.getComputedStyle(button.closest('.gs-around')!).display).not.toBe('none');
+      expect(visible('.gs-around .gs-section-title')).toEqual([SHOW_ME_AROUND_SECTION_TITLE]);
+      expect(visible('[data-action="showMeAround"]')).toEqual([SHOW_ME_AROUND_LABEL]);
+      posted.length = 0;
+      button.click();
+      expect(posted).toEqual([{ type: 'showMeAround' }]);
     } finally {
       dom.window.close();
     }
   });
 
-  it('one voice at a time: a clip playing pauses the tour, and the tour playing pauses the clip', () => {
-    const paused: string[] = [];
-    const dom = new JSDOM(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical', howToClips: CLIPS }), {
-      runScripts: 'dangerously',
-      virtualConsole: new VirtualConsole(),
-      beforeParse(window) {
-        (window as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({ postMessage: () => {} });
-        window.HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
-        window.HTMLMediaElement.prototype.pause = function (this: HTMLMediaElement) { paused.push(this.dataset.clip ?? 'tour'); };
-      },
-    });
-    try {
-      const doc = dom.window.document;
-      const tour = doc.querySelector<HTMLVideoElement>('.gs-video__player')!;
-      const clip = doc.querySelector<HTMLVideoElement>('[data-clip="importSqlDdl"]')!;
-      const playing = (el: HTMLVideoElement, on: boolean) => Object.defineProperty(el, 'paused', { configurable: true, get: () => !on });
-      playing(tour, true);
-      clip.dispatchEvent(new dom.window.Event('play'));
-      expect(paused).toEqual(['tour']);
-      paused.length = 0;
-      playing(tour, false);
-      playing(clip, true);
-      tour.dispatchEvent(new dom.window.Event('play'));
-      expect(paused).toEqual(['importSqlDdl']);
-    } finally {
-      dom.window.close();
-    }
-  });
-
-  it('howToClipUris: a clip whose file is not in the extension is left out', () => {
-    const root = vscode.Uri.file('/ext');
-    const present = new Set([`/ext/media/onboarding/stories/${HOW_TO_CLIPS.importSqlDdl}`, `/ext/media/onboarding/stories/${HOW_TO_CLIPS.example}`]);
-    const got = howToClipUris(root, (u) => `webview:${u.fsPath}`, (p) => present.has(p));
-    expect(got).toEqual({
-      example: { videoUri: `webview:/ext/media/onboarding/stories/${HOW_TO_CLIPS.example}` },
-      importSqlDdl: { videoUri: `webview:/ext/media/onboarding/stories/${HOW_TO_CLIPS.importSqlDdl}` },
-    });
-  });
-
-  it('howToClipPlayed is validated, counted, and passive (watching how is not choosing a start)', async () => {
-    expect(isGettingStartedToHost({ type: 'howToClipPlayed' })).toBe(true);
+  it('showMeAround is validated and runs exactly the fixed command, with no argument; it is a choice, not passive', async () => {
+    expect(isGettingStartedToHost({ type: 'showMeAround' })).toBe(true);
+    expect(GETTING_STARTED_TO_HOST_TYPES).toContain('showMeAround');
+    expect(GETTING_STARTED_PASSIVE_TYPES).not.toContain('showMeAround');
     const feature = vi.spyOn(telemetry, 'feature');
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
     GettingStartedPanel.createOrShow(makeContext(), makeDeps());
     const panel = vscode.window._webviewPanels.at(-1)!;
     await panel._simulateMessage({ type: 'ready' });
-    await panel._simulateMessage({ type: 'howToClipPlayed' });
-    expect(feature).toHaveBeenCalledWith('howToClipPlayed');
+    exec.mockClear();
+    // Whatever else the page sends rides along, never a command id.
+    await panel._simulateMessage({ type: 'showMeAround', command: 'workbench.action.terminal.new' });
+    expect(exec.mock.calls).toEqual([['erdStudio.showMeAround']]);
     panel.dispose();
-    expect(feature.mock.calls.filter((c) => c[0] === 'welcomeLeftNoChoice')).toHaveLength(1);
+    expect(feature.mock.calls.filter((c) => c[0] === 'welcomeLeftNoChoice')).toHaveLength(0);
+  });
+
+  it('howToClipPlayed is gone: rejected, not a type, never sent, never counted', async () => {
+    expect(isGettingStartedToHost({ type: 'howToClipPlayed' })).toBe(false);
+    expect(GETTING_STARTED_TO_HOST_TYPES as readonly string[]).not.toContain('howToClipPlayed');
+    expect(GETTING_STARTED_PASSIVE_TYPES as readonly string[]).not.toContain('howToClipPlayed');
+    expect(buildGettingStartedHtml(HTML_INPUT)).not.toContain('howToClipPlayed');
+    const feature = vi.spyOn(telemetry, 'feature');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    GettingStartedPanel.createOrShow(makeContext(), makeDeps());
+    const panel = vscode.window._webviewPanels.at(-1)!;
+    await panel._simulateMessage({ type: 'howToClipPlayed' });
+    expect(feature).not.toHaveBeenCalledWith('howToClipPlayed');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Ignoring unknown'), expect.anything());
+    panel.dispose();
   });
 
   it('with the host\'s tracker: the first status carries the known suggestion, a second the one after the look; nothing is counted as suggested (the tab shows no suggestion)', async () => {

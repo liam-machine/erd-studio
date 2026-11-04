@@ -35,6 +35,7 @@ import type { DiscrepancyReport } from './discrepancy';
 import type { AnnotationColor, Cardinality, DesignTable, Stage } from './semantic';
 import type { ColumnPair } from '@erd-studio/core';
 import type { GroundTruth } from './syncPlan';
+import type { CanvasGuideStart, GuideActionPayload } from './onboardingGuide';
 import type {
   FeedbackAiProviderChoice,
   FeedbackAnalysis,
@@ -417,7 +418,20 @@ export interface LibraryDragStartedMessage {
   };
 }
 
+/**
+ * Start the onboarding guide's phase B on this canvas (**Show Me Around**,
+ * `src/types/onboardingGuide.ts`): the first diagram opened after the guide's
+ * draft part, or the open diagram when the command asks. The webview builds
+ * the steps from the diagram it shows; the payload says only how the project
+ * stores its files.
+ */
+export interface GuideStartMessage {
+  type: 'guideStart';
+  payload: CanvasGuideStart;
+}
+
 export type ExtensionMessage =
+  | GuideStartMessage
   | LoadingMessage
   | ExistingTablesMessage
   | NewRelationshipFilesMessage
@@ -1002,9 +1016,22 @@ export interface RemoveAnnotationsMessage {
   };
 }
 
+/**
+ * The onboarding guide on the canvas: a fixed action id (`GUIDE_ACTIONS`:
+ * a step showed, Skip guide, Done, Star on GitHub, Set Up My AI Helper, the
+ * sidebar step showed). The host maps each to its fixed effect
+ * (`src/providers/guideWiring.ts`): never a command or URL from the page.
+ * Writes no project file, so it is on the physical-stage allowlist.
+ */
+export interface GuideMessage {
+  type: 'guide';
+  payload: GuideActionPayload;
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
+  | GuideMessage
   | RequestExistingTablesMessage
   | RequestNewRelationshipFilesMessage
   | DismissManifestHintMessage

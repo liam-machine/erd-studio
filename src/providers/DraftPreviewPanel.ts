@@ -28,6 +28,7 @@ import {
   toDraftView,
   type Draft,
   type DraftAnswer,
+  type DraftGuideStart,
   type DraftKeepOutcome,
   type DraftPreview,
   type DraftPreviewEvents,
@@ -128,6 +129,8 @@ export class DraftPreviewPanel {
   /** Bumped by every `ask`; a `settle` from an earlier one is ignored. */
   private generation = 0;
   private queued: QueuedChoice | undefined;
+  /** The onboarding guide runs on this page (posted after the draft, once the page is ready). */
+  private guide: DraftGuideStart | undefined;
   private disposed = false;
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -168,6 +171,22 @@ export class DraftPreviewPanel {
       DraftPreviewPanel.current = page;
     }
     return page.wait();
+  }
+
+  /** Run the onboarding guide's phase A on the open tab (Show Me Around). */
+  startGuide(start: DraftGuideStart): void {
+    this.guide = start;
+    if (this.ready) this.postGuide();
+  }
+
+  private postGuide(): void {
+    const start = this.guide;
+    if (!start) return;
+    this.post({
+      type: 'guide',
+      ...(start.nothingFound ? { nothingFound: true } : {}),
+      ...(start.semanticDir !== undefined ? { semanticDir: start.semanticDir } : {}),
+    });
   }
 
   /** Close the open tab, if any (a pending `ask` resolves `closed`). */
@@ -267,7 +286,13 @@ export class DraftPreviewPanel {
       case 'ready':
         this.ready = true;
         this.post({ type: 'draft', view: this.view });
+        this.postGuide();
         return;
+      case 'guide': {
+        const { type: _type, ...action } = message;
+        this.events.guide?.(action, this.view);
+        return;
+      }
       case 'detailsOpened':
         this.events.detailsOpened?.(this.view.source);
         return;
@@ -343,5 +368,6 @@ export function createDraftPreview(extensionUri: vscode.Uri, events: Partial<Dra
     isOpen: () => DraftPreviewPanel.currentPanel !== undefined,
     showing: () => DraftPreviewPanel.currentPanel?.shownDraft.id,
     close: () => DraftPreviewPanel.close(),
+    startGuide: (start) => DraftPreviewPanel.currentPanel?.startGuide(start),
   };
 }

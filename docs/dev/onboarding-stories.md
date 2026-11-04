@@ -26,7 +26,6 @@ test/stories/
 │   ├── video.mjs           ← frames + step captions → MP4 (ffmpeg, libass)
 │   ├── narrate.mjs         ← --narrate: a spoken line per caption, placed on the video's timeline
 │   ├── tts.py              ← --narrate's voice (Kokoro, a uv script; the only Python here)
-│   ├── publish.mjs         ← --publish: recorded stories → media/onboarding/stories/<clip>.mp4
 │   ├── draft.mjs           ← the draft preview's selectors and helpers (waitForDraft, chooseScope, …)
 │   ├── noise.mjs           ← interruptions nobody asked for (the first-60-seconds stories)
 │   ├── firstMinute.mjs     ← the steps stories 15–22 and 27 share (install, the one interruption, the quiet minute)
@@ -58,8 +57,7 @@ doubles as "watch how" help for that start.
 | 06 | `dbml-file-import` | A dbdiagram.io file (`test/fixtures/dbml/foreign/ecommerce.dbml`) → the start suggestion ("…found a DBML file in this folder. Show it as a diagram? …") → **Show Me** → **Draft: ecommerce** (6 tables, 6 relationships; the banner counts what is left out) → **Show details** in plain words → **Keep as Diagram** → one file per table, by schema |
 | 07 | `dbt-project-draw` | The dbt fixture without `.erd-studio/` → the start suggestion ("…found a dbt project in this folder. Show its models as a diagram? …"), the sidebar's one button **Draw from dbt** beside it → **Show Me** → **Draft: gold** (the top-ranked folder) with a **Folder** switcher → silver → **Draft: silver** → **Keep as Diagram** → laid out, Logical / Physical switch, files in the Silver layer |
 | 08 | `yaml-project-convert` | A pre-2.0 YAML/JSON project (`test/fixtures/logical-only`) → the opening notice offers **Convert to DBML…** then **Open sales** → the Diagrams view's first row, **Convert to DBML…** → Convert panel → DBML files, the YAML and JSON removed, the diagram reopens |
-| 09 | `welcome-tab-example` | No folder open → the Diagrams view's ▶ (**Watch the One-Minute Tour**) → the **ERD Studio Tour** tab (the example's short video waiting) → **Open an Example…** → the example draft → switch to Kimball bus matrix → **Save This Example…** → retail sales opens |
-| 10 | `welcome-tab-watch-how` | CREATE TABLE scripts, popup off → Help & Feedback's **Watch the One-Minute Tour** → the tour's "Ways to start, in short videos" (no dbt video without dbt) → the SQL clip (published from 04), not muted, waiting → play: it plays in VS Code with its narration (H.264 decodes, and the MP3 audio: `webkitAudioDecodedByteCount` > 0) and pauses the tour |
+| 09 | `welcome-tab-example` | No folder open → the Diagrams view's ▶ (**Watch the One-Minute Tour**) → the **ERD Studio Tour** tab (its **Show Me Around** button showing) → **Open an Example…** → the example draft → switch to Kimball bus matrix → **Save This Example…** → retail sales opens |
 | 11 | `start-suggestion-turn-off` | CREATE TABLE scripts → the start suggestion → **Don't Ask Again for This Folder** → "Start suggestions are off for this folder." (**Undo**) → reload: no popup (the sidebar still offers the import) → the palette offers **Turn On Start Suggestions for This Folder**, not Turn Off → run it → reload: the popup is back |
 | 12 | `large-import-review` | 257 tables in 8 scripts (`test/fixtures/sql-ddl/large`, copied without `generate.mjs`) → the start suggestion ("… (257 tables) …") → **Show Me** → a large draft: the schema panel open (All tables (257), then 8 schemas), the canvas on sales ("Showing sales: 80 of 257 tables") → finance → **Show details**: every table by schema, every relationship, the views left out → **Keep as Diagram** keeps all 257 → the diagram opens laid out, no second confirm |
 | 13 | `nothing-found-import-from-databricks` | A folder with nothing to bring in (README only) → the ERD Studio icon → the automatic **Example: Coffee shop** draft (primary **New Diagram…**) → **Bring In Your Data Model…** → the guide (no Found or dbt card) → the Databricks card → **Copy** the notebook cell (the clipboard holds it, read by `s.ui.clipboardText()`) → `schema.sql` (`test/fixtures/sql-ddl/databricks-notebook`) lands in the folder only now → **Import Databricks DDL…** → the file dialog → no dialect question (the name box kept) → "Draft from 1 SQL file (Databricks / Spark SQL) · 2 tables, 1 relationship · not saved" → **Keep as Diagram** → customers and orders, joined |
@@ -77,6 +75,7 @@ doubles as "watch how" help for that start.
 | 25 | `migrations-applied` | Flyway migrations (`test/fixtures/sql-ddl/flyway`: V1 creates three tables, V2 renames a column, adds two and a foreign key to an added one) → the start suggestion (3 tables) → **Draft: orders-service**: the final columns (`email_address`, no `email`; `loyalty_tier`; `product_id`) and both relationships → **Keep as Diagram** → the same on disk |
 | 26 | `dbt-found-from-models-folder` | Only `models/` of the dbt fixture opened (`dbt_project.yml` one folder up, outside the window) → "…found a dbt project in a folder above this one…" (upward discovery), **Draw from dbt** the one button → **Show Me** → **Draft: gold** → **Keep as Diagram** → written to the dbt project's own `.erd-studio/`, not `models/` |
 | 27 | `not-fooled-by-lookalikes` | *Realistic.* dbt macros with no dbt project (one with a `create table … (` column list), a CTAS in `analyses/`, an ERD Studio DBML export; no real DDL → install → nothing pops up → one click on the ERD Studio icon: the example draft → **Bring In Your Data Model…**: the guide, no "Found in this folder" or dbt card → no interruption at all |
+| 28 | `onboarding-guide-sql` | The onboarding guide, **Show Me Around**, in a folder of SQL scripts (as 04; `ERD_STUDIO_STORIES_NO_BROWSER=1`) → **Show Me** → **Draft: sales**, and the first draft on the machine runs the guide: "This is a draft of your model, drawn from 2 SQL files (PostgreSQL): 4 tables, 3 relationships…" (1 of 3) → **Next**: More ways to start (Import…, Bring In Your Data Model…) → **Next**: Keep as Diagram, no Next (it waits) → **Keep as Diagram** → the diagram opens and the guide carries on with a real table ("… is one of your 4 tables"), a real relationship, + Add and Layout (no dbt step), the sidebar (revealed: Table Library on screen), the files and Set Up My AI Helper, the finish → **Star on GitHub**: the host's log says it opens `https://github.com/liam-machine/erd-studio` (the browser stays shut) and the guide finished |
 
 **The start suggestion (the popup).** A folder ERD Studio can model (SQL
 scripts, a semantic model, a DBML file, a dbt project) gets one notification
@@ -118,8 +117,6 @@ bent to pass.
 npm run stories                                  # every story, fast, no video
 npm run stories:record                           # every story, filmed: test/stories/out/<id>.mp4
 node test/stories/run.mjs --record --narrate     # filmed and narrated (needs uv)
-node test/stories/run.mjs --record --publish     # film them narrated, then publish the tour tab's short videos
-node test/stories/run.mjs --publish              # publish the clips from the narrated recordings already in out/
 node test/stories/run.mjs --only empty-window    # stories whose id or file name contains this
 node test/stories/run.mjs --record --keep        # keep /tmp/erds-…: profile, workspace, frames
 node test/stories/run.mjs --headed-slow          # slow pacing, to watch it run
@@ -133,9 +130,7 @@ never films a half-written bundle), then runs the stories one after another.
 Each gets its own profile, workspace copy and CDP port, and prints `PASS` or
 `FAIL` with the failing step. It exits 1 when any story fails, and always kills
 the VS Code it started (by `--user-data-dir`) and removes its `/tmp/erds-…`
-folders (unless `--keep`), even on Ctrl+C. `--record --publish` publishes only
-the clips of the stories that ran; a run of stories without a clip publishes
-nothing and exits on the stories alone.
+folders (unless `--keep`), even on Ctrl+C.
 
 A window opens on your screen while it runs (Extension Development Host,
 1440×900). It is a separate instance with its own profile: your own VS Code
@@ -210,6 +205,7 @@ What `s` gives a story:
 | `s.expect(cond, msg)`, `s.assert.*` (node:assert/strict), `s.eventually(fn)` | |
 | `s.expectVisible(expr)`, `s.expectText(expr, text)` | wait for the workbench DOM |
 | `s.expectFile(rel, { contains })`, `s.expectNoFile(rel)` | the workspace's files (an empty window: the temp HOME); `rel` may be absolute |
+| `s.erdLog()` | the ERD Studio output channel so far (VS Code writes it under the profile's `logs/`): what the host did, e.g. the onboarding guide's `Star on GitHub opens …` line. A story's `env` (beside `settings`) reaches the extension host: `ERD_STUDIO_STORIES_NO_BROWSER: '1'` makes Star on GitHub log its URL without opening the browser |
 | `s.home`, `s.workspace`, `s.path(...)` | the story's temp HOME, the folder it opened |
 | `s.pause(ms)` | a beat for the viewer (scaled down when not recording) |
 
@@ -358,43 +354,16 @@ install and fails if ERD Studio's unasked events exceed `max` (1; 0 where
 nothing should pop up at all); VS Code's own unasked ones are logged
 (`NOISE:` lines in `out/<id>.log`) and kept in `summary.json`
 (`interruptions`), never failing a story. A recorded one runs about 90 s
-(the minute is watched to its end); none is a clip.
+(the minute is watched to its end).
 
-## Publish the "Watch how" clips
+## No "Watch how" clips
 
-The tour tab (**ERD Studio Tour**) shows a short clip of each start
-("Ways to start, in short videos", `HOW_TO_CLIPS` in
-`src/types/startActions.ts`; the dbt one on the dbt page only). They are
-stories:
-
-| Clip (`media/onboarding/stories/`) | Shown for | Story |
-|---|---|---|
-| `open-an-example.mp4` | no folder open | 01 `empty-window-opens-an-example` |
-| `start-a-blank-diagram.mp4` | `blank` | 03 `plain-folder-new-diagram-add-table` |
-| `import-sql-scripts.mp4` | `importSqlDdl` | 04 `sql-scripts-import` |
-| `import-power-bi-model.mp4` | `importSemanticModel` | 05 `power-bi-model-import` |
-| `import-a-dbml-file.mp4` | `importDbmlFile` | 06 `dbml-file-import` |
-| `draw-from-dbt.mp4` | `drawFromDbt` | 07 `dbt-project-draw` |
-
-`--publish` (`lib/publish.mjs`) re-encodes each story's **narrated** recording
-(`--record --publish` implies `--narrate`): H.264 High yuv420p, `+faststart`,
-1280 px wide, captions as burned in by the recording, the narration as **MP3**
-(64 kbps mono 44.1 kHz, `AUDIO`; never AAC, which VS Code cannot decode:
-`docs/dev/onboarding-and-cli.md` → Codec decision), at most 60 s and 2 MB (the
-video quality steps down until it fits). It is **never sped up** (the voice would
-be): a recording over 60 s from its title card is refused, and the story is
-re-paced instead (fewer or shorter steps, shorter spoken lines). It refuses a
-silent recording and a story whose captions name a path, and checks the result
-with ffprobe. With `--record` it publishes the clips whose story passed in that
-run; alone, those whose last recording passed (`out/<id>.log`).
-It starts the clip on the story's title card (the empty window before the
-first caption is cut, `leadIn`) and crops the window's title bar off
-(`[Extension Development Host] <folder>`, `cropTitleBarFilter`). No poster
-files: the panel loads the clip's metadata, so its first frame (the title card)
-is the poster, and every file counts toward the VSIX's 60-file cap. `test/unit/gettingStartedMedia.test.ts` and
-`storiesPublish.test.ts` hold the clips to all of this; story 10
-(`welcome-tab-watch-how`) proves the SQL clip shows on the tour tab and
-plays in VS Code. Re-publish after a change to a start a clip shows.
+The tour tab used to show six short per-start clips (`media/onboarding/stories/`,
+published from stories 01 and 03–07 by `--publish`). They were removed in
+favour of **Show Me Around** (`erdStudio.showMeAround`, the interactive guide),
+and with them `--publish`, `lib/publish.mjs`, `storiesPublish.test.ts` and
+story 10 (`welcome-tab-watch-how`). The stories' recordings stay test
+evidence only; nothing in `out/` ships.
 
 **No path from the recording machine.** VS Code's own file dialog shows the
 folder it is in (`/tmp/erds-…/home/shop-database/`). The actor films the
@@ -473,9 +442,9 @@ as the `onboarding-stories` artifact (videos, logs, screenshots, `summary.json`)
 - **A file dialog's placeholder is "Folder path"** even when it picks a file;
   `chooseInFileDialog` waits for the typed path before pressing the button.
 - **A `<video>`'s middle does not start it** in VS Code's webview: press its
-  controls' play button (bottom left, above the timeline), as story 10 does.
-- **The recording has no sound of its own.** It is screenshots over CDP; a
-  clip or the tour playing in the window is not heard. `--narrate` adds the
+  controls' play button (bottom left, above the timeline).
+- **The recording has no sound of its own.** It is screenshots over CDP; the
+  tour playing in the window is not heard. `--narrate` adds the
   voice afterwards, from the marks.
 - **A fresh profile is a first run.** With no folder open ERD Studio's
   first activation opens its walkthrough (the window's one prompt); in a

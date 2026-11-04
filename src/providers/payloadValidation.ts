@@ -15,6 +15,7 @@ import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN, TABLE_NAME_RULE, findDuplicate
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
 import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, GO_TO_TABLE_QUERY_MAX } from '../types/messages';
 import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
+import { parseGuideAction } from '../types/onboardingGuide';
 import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, classifySemanticFile, isValidTableAlias, normalisePosix } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
@@ -807,6 +808,15 @@ export function validateOpenModelFilePayload(value: unknown): string | null {
     return 'Open table file needs a table name.';
   }
   return validateTableNameSafety((value as { modelName?: unknown }).modelName);
+}
+
+/**
+ * Validate a `guide` payload (the onboarding guide on the canvas): one of the
+ * fixed action ids, `step` with a known step id. The host acts on the
+ * rebuilt payload only (`parseGuideAction`), never on a field it did not check.
+ */
+export function validateGuidePayload(value: unknown): string | null {
+  return parseGuideAction(value) ? null : 'The guide sent an action it does not have.';
 }
 
 /** `viewFile`: no payload, or a positive integer `line` and an optional positive integer `column` (#186). */

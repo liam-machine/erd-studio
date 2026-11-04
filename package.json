@@ -145,6 +145,12 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.showMeAround",
+        "title": "Show Me Around",
+        "category": "ERD Studio",
+        "icon": "$(compass)"
+      },
+      {
         "command": "erdStudio.openExampleProject",
         "title": "Open an Example…",
         "icon": "$(book)",
@@ -732,7 +738,7 @@
           {
             "id": "watch",
             "title": "Watch the One-Minute Tour",
-            "description": "Draw your dbt project, explore the diagram, and compare it with what dbt built. No AI needed.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)",
+            "description": "Draw your dbt project, explore the diagram, and compare it with what dbt built. No AI needed.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
             "when": "erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/watch.svg",
@@ -745,7 +751,7 @@
           {
             "id": "watchLogical",
             "title": "Watch the One-Minute Tour",
-            "description": "Start a diagram, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)",
+            "description": "Start a diagram, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
             "when": "!erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/watch.svg",

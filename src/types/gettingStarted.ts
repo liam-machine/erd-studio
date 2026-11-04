@@ -24,17 +24,15 @@ import {
   type SkillHarnessTarget,
 } from './aiAssistants';
 import {
-  HOW_TO_CLIP_KEYS,
   OPEN_FOLDER_LABEL,
   START_ACTIONS,
   START_ACTION_LABELS,
   TOUR_LABEL,
-  stepTitleOf,
-  type HowToClipKey,
   type StartAction,
   type StartIntent,
   type StartStorage,
 } from './startActions';
+import { SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL } from './onboardingGuide';
 
 // ---------------------------------------------------------------------------
 // Protocol
@@ -127,10 +125,10 @@ export type GettingStartedToHost =
   /** The video reached its half-way point or its end, once each per panel. Counted by usage telemetry only. */
   | { type: 'videoProgress'; milestone: VideoMilestone }
   /**
-   * A How-to clip started playing (once per clip per page). No payload.
-   * Counted by usage telemetry only (`howToClipPlayed`).
+   * **Show Me Around**: the host runs the fixed command `SHOW_ME_AROUND_COMMAND`
+   * (the interactive guide, which counts itself). No payload; a choice, so not passive.
    */
-  | { type: 'howToClipPlayed' };
+  | { type: 'showMeAround' };
 
 export type VideoMilestone = 'half' | 'end';
 
@@ -139,7 +137,7 @@ export type GettingStartedToHostType = GettingStartedToHost['type'];
 /** Every host-bound type, for the validator and the "every type is handled" test. */
 export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] = [
   'ready', 'refreshStatus', 'setupAiHelper', 'copyPrompt', 'openClaude', 'openCopilotChat', 'start',
-  'openExternal', 'trySample', 'openFolder', 'videoError', 'howToClipPlayed',
+  'openExternal', 'trySample', 'openFolder', 'videoError', 'showMeAround',
 ];
 
 /**
@@ -149,8 +147,6 @@ export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] 
  */
 export const GETTING_STARTED_PASSIVE_TYPES: readonly GettingStartedToHostType[] = [
   'ready', 'refreshStatus', 'videoError', 'videoProgress',
-  // Watching how is not choosing a start: a viewer who watched and left still bounced.
-  'howToClipPlayed',
 ];
 
 /** How Claude Code was found. `cli` wins when both are present (it can take the prompt as an argument). */
@@ -203,8 +199,8 @@ export interface GettingStartedStatus {
    * The start the folder suggests (`startIntentFor()`: Convert, Draw from
    * dbt, one of the three direct imports when the folder's quick look found
    * that kind of file, else a blank diagram); absent with no folder open.
-   * Filled by the panel host. The start card's primary button, its reason
-   * line and its "Watch how" clip follow it.
+   * Filled by the panel host. The start card's primary button and its reason
+   * line follow it.
    */
   intent?: StartIntent;
   /**
@@ -278,7 +274,7 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
     case 'openCopilotChat':
     case 'trySample':
     case 'openFolder':
-    case 'howToClipPlayed':
+    case 'showMeAround':
       return true;
     case 'start': {
       const action = (value as { action?: unknown }).action;
@@ -531,14 +527,6 @@ export interface GettingStartedHtmlInput {
    * wins.
    */
   mode?: GettingStartedPageMode;
-  /**
-   * The "Watch how" clips the extension ships, by what they show (a
-   * suggestion, or the example with no folder open): webview URIs of
-   * `media/onboarding/stories/<clip>.mp4` for each `HOW_TO_CLIPS` entry whose
-   * file exists. The host checks the files; a page without one shows no
-   * slot. Never a URL from the webview.
-   */
-  howToClips?: Partial<Record<HowToClipKey, { videoUri: string }>>;
 }
 
 export function buildGettingStartedCsp(cspSource: string, nonce: string): string {
@@ -742,13 +730,7 @@ body {
 .gs-sample__note { font-size: 12px; color: var(--vscode-descriptionForeground); }
 .gs-summary { margin: 26px 0 0; font-size: 13px; color: var(--vscode-foreground); }
 .gs-step__reason { margin: -4px 0 12px; max-width: 72ch; font-weight: 600; color: var(--vscode-foreground); }
-.gs-howto { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px 16px; margin: 0; }
-.gs-howto__item { margin: 0; }
-.gs-howto__caption { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--vscode-descriptionForeground); }
-.gs-howto__clip {
-  display: block; width: 100%; aspect-ratio: 16 / 10; border-radius: 6px; background: #0f1114;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent));
-}
+.gs-around { margin: 26px 0 0; }
 .gs-section-intro { margin: -6px 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
 .gs-steps + .gs-section-title { margin-top: 26px; }
 .gs-footer {
@@ -929,31 +911,6 @@ const SCRIPT = `
     return out.slice(0, -1).join(', ') + ' and ' + out[out.length - 1];
   }
 
-  // The short videos: one per start the extension ships (rendered up front by
-  // the host, never built here). Each plays, with its narration, only when
-  // clicked, as the tour above does. One voice at a time: a clip's play
-  // pauses the tour, the tour's pauses any clip; a clip's play is counted once per clip.
-  var clips = document.querySelectorAll('.gs-howto__clip');
-  var clipsPlayed = {};
-  if (video && clips.length > 0) {
-    video.addEventListener('play', function () {
-      for (var pi = 0; pi < clips.length; pi++) {
-        if (!clips[pi].paused) { try { clips[pi].pause(); } catch (e) { /* ignore */ } }
-      }
-    });
-  }
-  for (var ci = 0; ci < clips.length; ci++) {
-    (function (clip) {
-      clip.addEventListener('play', function () {
-        if (video && !video.paused) { try { video.pause(); } catch (e) { /* ignore */ } }
-        var key = clip.getAttribute('data-clip');
-        if (clipsPlayed[key]) { return; }
-        clipsPlayed[key] = true;
-        post({ type: 'howToClipPlayed' });
-      });
-    })(clips[ci]);
-  }
-
   // The page's three states. Elements naming modes in data-modes show only in those.
   function applyMode(mode) {
     root.setAttribute('data-mode', mode);
@@ -991,7 +948,7 @@ const SCRIPT = `
     setState('start', found === 'none' ? 'none' : s.helper === 'missing' ? 'notready' : 'some');
     // The guided setup has a dbt route and a no-dbt one: it shows in both.
     // Draft-first: no start, Convert or "Open your diagrams" card here (the draft,
-    // the sidebar and the Convert offer are the starts); the tour, the AI helper and the clips.
+    // the sidebar and the Convert offer are the starts); the tour, the AI helper and Show Me Around.
     var start = showStep('start', true);
     var summary = $('.gs-summary');
     var line = mode === 'dbt' && s.summary && s.summary.line ? s.summary.line : '';
@@ -1058,20 +1015,6 @@ const SCRIPT = `
 })();
 `;
 
-/**
- * Each short video's caption: the label of the start it shows, without its
- * ellipsis (one label per action; no dbt word but on the dbt clip, shown on
- * the dbt page only).
- */
-export const HOW_TO_CLIP_CAPTIONS: Readonly<Record<HowToClipKey, string>> = {
-  example: stepTitleOf(START_ACTION_LABELS.example),
-  blank: stepTitleOf(START_ACTION_LABELS.blank),
-  importSqlDdl: START_ACTION_LABELS.importSqlDdl,
-  importSemanticModel: START_ACTION_LABELS.importSemanticModel,
-  importDbmlFile: START_ACTION_LABELS.importDbmlFile,
-  drawFromDbt: START_ACTION_LABELS.drawFromDbt,
-};
-
 /** What each start's button says on the tab (HTML, fixed text): the one label per action. */
 export const START_LABELS: Readonly<Record<StartAction, string>> = Object.fromEntries(
   START_ACTIONS.map((action) => [action, escapeHtml(START_ACTION_LABELS[action])]),
@@ -1083,9 +1026,15 @@ export const GETTING_STARTED_TAB_TITLE = 'ERD Studio Tour';
 /** The tab's heading. */
 export const GETTING_STARTED_HEADING = 'The one-minute tour';
 
-/** The short videos' section: one per way to start (none on the start path). */
-export const HOW_TO_SECTION_TITLE = 'Ways to start, in short videos';
-export const HOW_TO_SECTION_INTRO = 'Each one shows a start from the first click, in under a minute.';
+/**
+ * The Show Me Around section, on every page: the interactive guide (the
+ * `erdStudio.showMeAround` command) in place of the short per-start videos.
+ * No dbt word: it shows on every page.
+ */
+// One command id and one label (src/types/onboardingGuide.ts, the guide's own module).
+export { SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL };
+export const SHOW_ME_AROUND_SECTION_TITLE = 'Find your way around';
+export const SHOW_ME_AROUND_SECTION_INTRO = 'Show Me Around points at each part of ERD Studio, using your own tables: where to bring in your data model, how to edit a table, and where your files go.';
 
 /** The upgrader's one notice (once per machine): what is new, in one line, and the tour. */
 export const UPGRADE_NOTICE_MESSAGE = 'ERD Studio has a one-minute tour, and can set up your AI assistant to work on the same files.';
@@ -1154,32 +1103,12 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     `<button class="gs-link" type="button" data-action="openExternal" data-target="${ASSISTANT_INSTALL_TARGETS[a.id]}">${escapeHtml(a.name)}</button>`,
   ).join('\n              ');
   const launchRows = AI_ASSISTANTS.map((a) => launchRow(a.id)).join('\n            ');
-  // Short videos (§10 of docs/dev/draft-first.md): one per start the extension ships
-  // (the host checked the files), the dbt one on the dbt page only. Narrated (MP3, as
-  // the tour), captions burned in, played with sound by a click (no autoplay, so the
-  // editor's autoplay policy never mutes it). No poster file: preload="metadata" loads
-  // its header and first frame, the story's title card (publishing cuts the empty window
-  // before it, test/stories/lib/publish.mjs). None of them is on the start path.
-  const clipEls = HOW_TO_CLIP_KEYS.flatMap((key) => {
-    const clip = input.howToClips?.[key];
-    if (!clip) { return []; }
-    const modes = key === 'drawFromDbt' ? ` ${only('unknown', 'dbt')}` : '';
-    return [`<figure class="gs-howto__item" data-clip-item="${key}"${modes}>
-          <figcaption class="gs-howto__caption">${escapeHtml(HOW_TO_CLIP_CAPTIONS[key])}</figcaption>
-          <video class="gs-howto__clip" data-clip="${key}" controls playsinline preload="metadata">
-            <source src="${escapeHtml(clip.videoUri)}" type="video/mp4">
-          </video>
-        </figure>`];
-  });
-  const howToSection = clipEls.length > 0
-    ? `<section class="gs-howto-section" aria-label="${escapeHtml(HOW_TO_SECTION_TITLE)}">
-    <h2 class="gs-section-title">${escapeHtml(HOW_TO_SECTION_TITLE)}</h2>
-    <p class="gs-section-intro">${escapeHtml(HOW_TO_SECTION_INTRO)}</p>
-    <div class="gs-howto">
-        ${clipEls.join('\n        ')}
-    </div>
-  </section>`
-    : '';
+  // Show Me Around (every page): the interactive guide replaces the short per-start videos.
+  const aroundSection = `<section class="gs-around" aria-label="${escapeHtml(SHOW_ME_AROUND_SECTION_TITLE)}">
+    <h2 class="gs-section-title">${escapeHtml(SHOW_ME_AROUND_SECTION_TITLE)}</h2>
+    <p class="gs-section-intro">${escapeHtml(SHOW_ME_AROUND_SECTION_INTRO)}</p>
+    <button class="gs-btn" type="button" data-action="showMeAround">${escapeHtml(SHOW_ME_AROUND_LABEL)}</button>
+  </section>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1279,7 +1208,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     </div>
   </div>
 
-  ${howToSection}
+  ${aroundSection}
 
   <footer class="gs-footer">
     <span>Rewatch any time: ERD Studio sidebar &#9654; button, or Command Palette &rarr; <em>ERD Studio: ${escapeHtml(TOUR_LABEL)}</em>.</span>

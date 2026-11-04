@@ -18,9 +18,11 @@
  */
 
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
+import type { GuideActionPayload } from '../types/onboardingGuide';
 import type {
   Draft,
   DraftAnswer,
+  DraftGuideStart,
   DraftOtherStart,
   DraftPreview,
   DraftPreviewEvents,
@@ -65,6 +67,17 @@ export interface TrackedDraftPreviewDeps {
   onAsk?(draft: Draft): void;
   /** Logs a command that failed to start. */
   warn?(message: string, err: unknown): void;
+  /**
+   * The onboarding guide (`src/providers/guideWiring.ts`): whether phase A runs
+   * on a draft about to show (it marks itself started first), and the Keep
+   * that ends phase A.
+   */
+  guide?: {
+    takeDraft(draft: Draft): DraftGuideStart | undefined;
+    draftKept(draft: Draft): void;
+    /** The draft was discarded or its tab closed: phase A stops here (Change options… and the other starts carry it on to their draft). */
+    draftLeft(draft: Draft): void;
+  };
 }
 
 /**
@@ -80,6 +93,7 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
     isOpen: () => inner.isOpen(),
     showing: () => inner.showing?.(),
     close: () => inner.close(),
+    startGuide: (start) => inner.startGuide?.(start),
     async ask(draft) {
       deps.claim();
       deps.onAsk?.(draft);
@@ -92,10 +106,15 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
         if (source) deps.feature(source);
       }
       lastAnswer = undefined;
-      const answer = await inner.ask(draft);
+      // Phase A of the onboarding guide: decided (and its flag written) before the page shows.
+      const guideStart = redraw ? undefined : deps.guide?.takeDraft(draft);
+      const asked = inner.ask(draft);
+      if (guideStart) inner.startGuide?.(guideStart);
+      const answer = await asked;
       lastAnswer = answer.kind;
       const counted = ANSWER_FEATURES[answer.kind];
       if (counted) deps.feature(counted);
+      if (answer.kind === 'discard' || answer.kind === 'closed') deps.guide?.draftLeft(draft);
       if (answer.kind === 'otherStart') {
         const { command, args } = DRAFT_OTHER_START_COMMANDS[answer.start];
         Promise.resolve(deps.executeCommand(command, ...args)).then(undefined, (err: unknown) => deps.warn?.(`Could not run ${command} from a draft:`, err));
@@ -110,6 +129,7 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
           settled = true;
           if (outcome.kept) {
             deps.feature('draftKept');
+            deps.guide?.draftKept(draft);
             if (draft.keep.writer === 'importDbml' || draft.keep.writer === 'drawFromDbt') {
               Promise.resolve(deps.onKept(draft)).then(undefined, (err: unknown) => deps.warn?.('Could not mark the folder as started:', err));
             }
@@ -125,10 +145,12 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
 export function draftPreviewEvents(
   feature: (key: TelemetryFeature) => void,
   error: (code: TelemetryErrorCode) => void,
+  guide?: (action: GuideActionPayload) => void,
 ): DraftPreviewEvents {
   return {
     detailsOpened: () => feature('draftDetailsOpened'),
     layoutFailed: () => error('draftLayoutFailed'),
+    ...(guide ? { guide: (action: GuideActionPayload) => guide(action) } : {}),
   };
 }
 

@@ -8,6 +8,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { DraftOtherStart, DraftOtherStartItem } from '../../src/types/draft';
 import { OTHER_WAYS_TO_START } from '../lib/wording';
+import { GUIDE_TARGETS } from '../../src/types/onboardingGuide';
 
 export interface OtherStartsMenuProps {
   items: readonly DraftOtherStartItem[];
@@ -76,6 +77,7 @@ export function OtherStartsMenu({ items, disabled, onStart }: OtherStartsMenuPro
         ref={buttonRef}
         type="button"
         className="draft-button draft-button--secondary draft-menu__button"
+        data-guide={GUIDE_TARGETS.draftMore}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}

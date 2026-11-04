@@ -24,6 +24,7 @@ import { BUSY_LABELS, layingOutLabel } from './lib/wording';
 import { DraftBanner } from './components/DraftBanner';
 import { SchemaPanel } from './components/SchemaPanel';
 import { DetailsDrawer } from './components/DetailsDrawer';
+import { DraftGuide } from './components/DraftGuide';
 
 export interface DraftAppProps {
   host: DraftHost;
@@ -46,6 +47,8 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
   const [schema, setSchema] = useState<string | undefined>();
   const [panelOpen, setPanelOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /** The onboarding guide's phase A runs here (the host's `guide`); undefined: not running. */
+  const [guide, setGuide] = useState<{ nothingFound?: boolean; semanticDir?: string } | undefined>();
   /** Laid-out positions per `<view id>\u0000<schema>`; `null`: ELK failed. */
   const [layouts, setLayouts] = useState<ReadonlyMap<string, Record<string, NodePosition> | null>>(new Map());
   const layoutFailedFor = useRef<string | undefined>();
@@ -73,6 +76,12 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
         case 'idle':
           setHostBusy(undefined);
           setNotice(message.notice);
+          break;
+        case 'guide':
+          setGuide({
+            ...(message.nothingFound ? { nothingFound: true } : {}),
+            ...(message.semanticDir !== undefined ? { semanticDir: message.semanticDir } : {}),
+          });
           break;
       }
     };
@@ -123,6 +132,8 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
     setDrawerOpen(true);
     hostRef.current.post({ type: 'detailsOpened' });
   }, []);
+  const postToHost = useCallback((message: Parameters<DraftHost['post']>[0]) => hostRef.current.post(message), []);
+  const endGuide = useCallback(() => setGuide(undefined), []);
   const onTogglePanel = useCallback(() => {
     if (!panelOpen) hostRef.current.post({ type: 'detailsOpened' });
     setPanelOpen(!panelOpen);
@@ -182,6 +193,15 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
         </main>
         {drawerOpen && <DetailsDrawer sections={view.details} onClose={() => setDrawerOpen(false)} />}
       </div>
+      {guide && (
+        <DraftGuide
+          view={view}
+          {...guide}
+          hidden={busy || layingOut}
+          post={postToHost}
+          onEnd={endGuide}
+        />
+      )}
     </div>
   );
 }

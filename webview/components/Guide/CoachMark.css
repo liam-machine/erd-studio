@@ -1,0 +1,174 @@
+/*
+ * The onboarding guide's coach mark (Show Me Around). Positioned through
+ * custom properties the component sets with style.setProperty (no inline
+ * style attribute); colours only from the theme's variables.
+ */
+
+.guide-mark {
+  position: fixed;
+  left: var(--guide-x, 50%);
+  top: var(--guide-y, 50%);
+  z-index: 1000;
+  box-sizing: border-box;
+  width: min(340px, calc(100vw - 16px));
+  padding: 12px 14px 10px;
+  border: 1px solid var(--focus-border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--editor-fg);
+  box-shadow: 0 6px 24px var(--canvas-selection-glow);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.guide-mark:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 2px;
+}
+
+/* The arrow: a small square turned 45°, on the edge facing the anchor. */
+.guide-mark::before {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--panel-bg);
+  border: 1px solid var(--focus-border);
+  transform: rotate(45deg);
+}
+
+.guide-mark[data-side='centre']::before {
+  display: none;
+}
+
+.guide-mark[data-side='below']::before {
+  top: -6px;
+  left: calc(var(--guide-arrow, 24px) - 5px);
+  border-right: none;
+  border-bottom: none;
+}
+
+.guide-mark[data-side='above']::before {
+  bottom: -6px;
+  left: calc(var(--guide-arrow, 24px) - 5px);
+  border-left: none;
+  border-top: none;
+}
+
+.guide-mark[data-side='right']::before {
+  left: -6px;
+  top: calc(var(--guide-arrow, 24px) - 5px);
+  border-right: none;
+  border-top: none;
+}
+
+.guide-mark[data-side='left']::before {
+  right: -6px;
+  top: calc(var(--guide-arrow, 24px) - 5px);
+  border-left: none;
+  border-bottom: none;
+}
+
+.guide-mark__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.guide-mark__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.guide-mark__progress {
+  flex: none;
+  font-size: 11px;
+  color: var(--dim-fg);
+}
+
+.guide-mark__text {
+  margin: 6px 0 10px;
+}
+
+.guide-mark__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.guide-mark__spacer {
+  flex: 1 1 auto;
+}
+
+.guide-mark__button {
+  padding: 3px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, var(--input-bg));
+  color: var(--vscode-button-secondaryForeground, var(--editor-fg));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.guide-mark__button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--selection-bg));
+}
+
+.guide-mark__button--primary {
+  border-color: transparent;
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.guide-mark__button--primary:hover {
+  background: var(--button-hover-bg);
+}
+
+.guide-mark__button:focus-visible,
+.guide-mark__skip:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+.guide-mark__skip {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground, var(--dim-fg));
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.guide-mark__skip:hover {
+  text-decoration: underline;
+}
+
+/* The ring around what the step points at: it never takes a click. */
+.guide-ring {
+  position: fixed;
+  left: var(--guide-ring-x, 0);
+  top: var(--guide-ring-y, 0);
+  width: var(--guide-ring-w, 0);
+  height: var(--guide-ring-h, 0);
+  z-index: 999;
+  box-sizing: border-box;
+  border: 2px solid var(--focus-border);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.guide-ring[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .guide-ring {
+    transition: left 120ms ease-out, top 120ms ease-out, width 120ms ease-out, height 120ms ease-out;
+  }
+}

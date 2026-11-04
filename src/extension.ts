@@ -154,7 +154,9 @@ import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/example
 import { START_COMMAND, START_INTENT_CONTEXT_KEY, START_PICK_PLACEHOLDER, START_PICK_TITLE, TOUR_LABEL, isQuickImportArg, startDraftTriggerOf, type StartContext, type StartIntent } from './types/startActions';
 import { createDraftPreview } from './providers/DraftPreviewPanel';
 import { DraftGeneration, draftPreviewEvents, trackedDraftPreview } from './providers/draftWiring';
-import { EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, walkthroughAutoOpens, type AutoDraft } from './services/draftTriggers';
+import { OnboardingGuide, guideDefersPrompt } from './providers/guideWiring';
+import { GUIDE_STATE_KEY, SHOW_ME_AROUND_COMMAND, isGuideStatus } from './types/onboardingGuide';
+import { EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, draftSourceForIntent, walkthroughAutoOpens, type AutoDraft } from './services/draftTriggers';
 import type { Draft, DraftPreview, DraftTrigger } from './types/draft';
 import { StartIntentTracker } from './commands/startIntent';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
@@ -714,6 +716,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.turnOffStartSuggestions',
   'erdStudio.turnOnStartSuggestions',
   'erdStudio.showImportGuide',
+  'erdStudio.showMeAround',
 ]);
 
 /**
@@ -731,6 +734,8 @@ export const PRE_REGISTERED_COMMANDS = new Set([
   // Hidden from the palette (the setup skill names it): the same example draft as Open an Example….
   'erdStudio.openExampleDiagram',
   'erdStudio.showImportGuide',
+  // Show Me Around: the onboarding guide (an empty window gets the example's draft).
+  'erdStudio.showMeAround',
 ]);
 
 /**
@@ -1191,9 +1196,42 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // fixed command and, on Keep, marks the folder as started.
   let onDraftKept: (draft: Draft) => unknown = () => undefined;
   let onDraftAsk: (draft: Draft) => void = () => {};
+  // The onboarding guide, Show Me Around (src/providers/guideWiring.ts): phase A on the
+  // first draft, phase B on the first diagram opened after it. Its progress is per
+  // machine; the project path fills in the folder's semantic dir and storage.
+  let guideSemanticDir: () => string = () => '.erd-studio';
+  let guideDbml: () => boolean = () => true;
+  const onboardingGuide = new OnboardingGuide({
+    getStatus: () => {
+      const status = context.globalState.get<unknown>(GUIDE_STATE_KEY);
+      return isGuideStatus(status) ? status : undefined;
+    },
+    setStatus: (status) => context.globalState.update(GUIDE_STATE_KEY, status),
+    feature: (key) => telemetry.feature(key),
+    executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+    // The onboarding stories (test/stories) prove Star on GitHub by its log line without
+    // opening the machine's browser; nothing else sets this variable.
+    openExternal: (url) => (process.env.ERD_STUDIO_STORIES_NO_BROWSER === '1'
+      ? Promise.resolve(false)
+      : vscode.env.openExternal(vscode.Uri.parse(url))),
+    semanticDir: () => guideSemanticDir(),
+    dbml: () => guideDbml(),
+    holdPrompts: () => { sessionPrompts.reserve('guide'); },
+    log: (message) => log.info(message),
+    warn: (message, err) => log.warn(`[ERD Studio] ${message}`, err),
+  });
   const draftPreview: DraftPreview = trackedDraftPreview(
-    createDraftPreview(context.extensionUri, draftPreviewEvents((key) => telemetry.feature(key), (code) => telemetry.error(code))),
+    createDraftPreview(context.extensionUri, draftPreviewEvents(
+      (key) => telemetry.feature(key),
+      (code) => telemetry.error(code),
+      (action) => onboardingGuide.onDraftAction(action),
+    )),
     {
+      guide: {
+        takeDraft: (draft) => onboardingGuide.takeDraft(draft),
+        draftKept: (draft) => onboardingGuide.draftKept(draft),
+        draftLeft: (draft) => onboardingGuide.draftLeft(draft),
+      },
       // Held at once, or as soon as the start suggestion's look hands the window on:
       // nothing that was waiting (the AI helper offer, the upgrade notice) pops over a draft.
       claim: () => { sessionPrompts.reserve('draft'); },
@@ -1216,6 +1254,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     importDeps: () => exampleImportDeps(),
     project: { globalState: context.globalState },
   });
+  // Show Me Around (the onboarding guide): on an open diagram, phase B there; else the
+  // folder's draft (or, with nothing to draw or no folder, the example's) and phase A.
+  // The project path fills in the folder's part; an empty window gets the example.
+  let showMeAroundInProject: () => Promise<boolean> = async () => false;
+  context.subscriptions.push(
+    vscode.commands.registerCommand(SHOW_ME_AROUND_COMMAND, async () => {
+      if (await showMeAroundInProject()) return;
+      if (draftPreview.isOpen()) {
+        draftPreview.startGuide?.(onboardingGuide.startOnOpenDraft());
+        return;
+      }
+      onboardingGuide.requestDraft();
+      await runExampleDraft('example');
+    }),
+  );
   context.subscriptions.push(
     vscode.commands.registerCommand(OPEN_EXAMPLE_PROJECT_COMMAND, () => runExampleDraft('example')),
     // Open Example Diagram stays registered (hidden from the palette) as an alias of the
@@ -2629,14 +2682,52 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
    * The automatic draft of the folder's find (§3.1), quiet: each flow's quick
    * path with nothing asked or shown before the draft.
    */
-  const runFindDraft = async (intent: StartIntent): Promise<unknown> => {
+  const runFindDraft = async (intent: StartIntent, trigger: DraftTrigger = 'sidebar', quiet = true): Promise<unknown> => {
     switch (intent) {
-      case 'importSqlDdl': return quickImportSqlDdl(sqlDeps(importDraftFor('sidebar', true)));
-      case 'importSemanticModel': return quickImportSemanticModel(semanticModelDeps(importDraftFor('sidebar', true)));
-      case 'importDbmlFile': return quickImportDbml(importDbmlDeps(importDraftFor('sidebar', true)));
-      case 'drawFromDbt': return hasDbt ? drawFromDbt(dbtDeps(dbtDraftFor('sidebar', true))) : undefined;
+      case 'importSqlDdl': return quickImportSqlDdl(sqlDeps(importDraftFor(trigger, quiet)));
+      case 'importSemanticModel': return quickImportSemanticModel(semanticModelDeps(importDraftFor(trigger, quiet)));
+      case 'importDbmlFile': return quickImportDbml(importDbmlDeps(importDraftFor(trigger, quiet)));
+      case 'drawFromDbt': return hasDbt ? drawFromDbt(dbtDeps(dbtDraftFor(trigger, quiet))) : undefined;
       default: return undefined;
     }
+  };
+
+  // The onboarding guide in this folder (src/providers/guideWiring.ts): its text names
+  // the semantic dir and the storage; phase B runs on a canvas (taken when a diagram
+  // has loaded, before the canvas's own offers).
+  guideSemanticDir = () => semanticDir;
+  guideDbml = () => projectStorageOf(tableLibraryService) === 'dbml';
+  editorProvider.setOnboardingGuide({
+    takeCanvas: () => onboardingGuide.takeCanvas(),
+    startOnCanvas: () => onboardingGuide.startOnCanvas(),
+    onCanvasAction: (action) => onboardingGuide.onCanvasAction(action),
+  });
+  // Show Me Around here: phase B on the open diagram (or the folder's latest one),
+  // else phase A on the folder's draft — the find it suggests, or the example when
+  // there is nothing to draw. Explicit: it asks what an explicit start asks.
+  showMeAroundInProject = async () => {
+    if (editorProvider.startGuideOnActiveCanvas()) return true;
+    if (draftPreview.isOpen()) {
+      draftPreview.startGuide?.(onboardingGuide.startOnOpenDraft());
+      return true;
+    }
+    const latest = mostRecentlyModified(subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir));
+    if (latest) {
+      onboardingGuide.requestCanvas();
+      await vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath);
+      // Already open and loaded: no new load takes the request, so start it there.
+      if (onboardingGuide.canvasRequested()) editorProvider.startGuideOnActiveCanvas();
+      return true;
+    }
+    const intent = await startIntent.refresh();
+    if (intent && draftSourceForIntent(intent) !== undefined && (intent !== 'drawFromDbt' || hasDbt)) {
+      onboardingGuide.requestDraft();
+      await runFindDraft(intent, 'start', false);
+      return true;
+    }
+    onboardingGuide.requestDraft({ nothingFound: true });
+    await runExampleDraft('example');
+    return true;
   };
 
   context.subscriptions.push(
@@ -4763,10 +4854,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   {
     // A first run left for the draft: only a start (the start suggestion, or a
     // clone's diagrams) may have the window; the rest wait for a later one.
-    const offered = [...activationPrompts.keys()].filter((kind) =>
+    const leftForDraft = [...activationPrompts.keys()].filter((kind) =>
       !firstRunLeftForDraft || kind === 'startSuggestion' || kind === 'diagramsNudge');
-    if (firstRunLeftForDraft && offered.length < activationPrompts.size) {
-      log.info(`Activation prompts wait for the next window (a first run: the draft has this one): ${[...activationPrompts.keys()].filter((k) => !offered.includes(k)).join(', ')}`);
+    if (firstRunLeftForDraft && leftForDraft.length < activationPrompts.size) {
+      log.info(`Activation prompts wait for the next window (a first run: the draft has this one): ${[...activationPrompts.keys()].filter((k) => !leftForDraft.includes(k)).join(', ')}`);
+    }
+    // The onboarding guide's canvas part is owed (its draft part ran): nothing that
+    // would pop over that canvas shows in this window; each keeps its own flag.
+    const guideStatus = context.globalState.get<unknown>(GUIDE_STATE_KEY);
+    const offered = leftForDraft.filter((kind) => !guideDefersPrompt(kind, isGuideStatus(guideStatus) ? guideStatus : undefined));
+    if (offered.length < leftForDraft.length) {
+      log.info(`Activation prompts wait for the next window (the onboarding guide's canvas part is owed): ${leftForDraft.filter((k) => !offered.includes(k)).join(', ')}`);
     }
     const showFrom = async (candidates: readonly SessionPromptKind[]): Promise<void> => {
       const picked = pickActivationPrompt(candidates);

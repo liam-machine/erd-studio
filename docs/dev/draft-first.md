@@ -208,7 +208,7 @@ Building is bounded by what the quick paths already bound (the start look's shar
 | **Review All…** and the Review Import page (`ImportReviewPanel`, `isImportReviewToHost`, `buildImportReviewHtml`) | The details drawer and schema panel. `ImportReviewPanel.ts` deleted; `importReview.ts` keeps `buildImportReview`, `describeImportTable`, `relationshipLines` (P1 uses them) |
 | Start suggestion's **Create Diagram** / **More Options…** | **Show Me** / the draft's More ways to start |
 | Nothing-found notification | The example draft on the icon (once per machine) |
-| Welcome tab's start card, Convert card and "Open your diagrams" card | Gone: the Welcome tab is the tour, the AI helper section and a small **How-to clips** section with the six narrated clips (the dbt clip on the dbt page only), none on the start path. The no-folder page keeps **Open Folder…** |
+| Welcome tab's start card, Convert card and "Open your diagrams" card | Gone: the Welcome tab is the tour, the AI helper section and a **Show Me Around** section (the interactive guide), none on the start path. The no-folder page keeps **Open Folder…** |
 | Open Example Diagram / Open an Example Project… / the example quick pick | **Open an Example…** and its switcher |
 | Walkthrough auto-open on a folder's first run | The draft. Walkthrough auto-opens only with no folder |
 | Name and layer questions on the quick paths | Answered (asked only when the default is not valid); Change options… asks them |
@@ -305,9 +305,13 @@ Words and visuals, after P1–P3 merge: every label of one action unified (`STAR
 ### 13.2 Not in P1–P3
 
 - **Detection** (its own stage; files P3 must not edit beyond imports): `src/services/importSources.ts` (`CREATE_TABLE`: `table\s+(?:if\s+not\s+exists\s+)?ID(?:\s*\.\s*ID){0,2}\s*\(` with `ID = [\p{L}_][\p{L}\p{N}_$#@]*|"…"|` + "`…`" + `|\[…\]` and the `u` flag, or `sqlDdlImport`'s statement splitter; skip `-- Databricks notebook source` files and `/macros/`; pg_dump `COPY … \.` and `INSERT` lines stripped before the size check; no Oracle suggestion; ERD Studio's own exports (`ERD_STUDIO_DBML_HEADER_PREFIX`); UTF-16 by BOM; `**/*.[sS][qQ][lL]`-style globs in the look and in `activationEvents`; ~200 `.sql` listed and ranked `ddl|schema|tables?|create|V\d+__|migration` first; one shared listing for the look and the quick import), `src/commands/startIntent.ts` (one retry of a timed-out look), dbt discovery (deeper, dot-folders, symlinks, upward like the CLI, not silent), `sqlDdlImport.ts` (ALTER TABLE ADD / RENAME / DROP COLUMN in file order, or a warning), and its telemetry (per-window activation; tooling found `dbt_project.yml` but the session has no dbt).
-- **Stories** (`test/stories/**`): the first-60-seconds stories for each row of §4, and re-recording the six How-to clips on the new UI (`--record --publish`).
+- **Stories** (`test/stories/**`): the first-60-seconds stories for each row of §4 (the six How-to clips and `--publish` were removed in favour of Show Me Around).
 
-## 14. Risks
+## 14. The onboarding guide on the draft
+
+**Show Me Around** (`docs/dev/onboarding-and-cli.md` → Show Me Around; `src/types/onboardingGuide.ts`) runs its phase A on the first draft shown on a machine: coach marks on the banner (the draft's own source phrase, `DraftBanner.from`, and its counts), on More ways to start (Import… and Bring In Your Data Model…, where the user's data model can come from) and on the control that keeps the draft, which the guide waits for. The contract carries it as `DraftToWebview` `guide`, a passive `DraftToHost` `guide` (`step` / `skip` only), `DraftPreview.startGuide` and `DraftPreviewEvents.guide`; the page's guide never writes, runs or opens anything, and a draft without it is unchanged. Keep then opens the diagram, where phase B continues on the canvas.
+
+## 15. Risks
 
 - **React Flow without `style-src 'unsafe-inline'`.** The canvas webview allows it; the draft page must not. If React Flow injects a `<style>` element, P2 nonces it (React Flow reads `nonce` from the `ReactFlow` prop in newer versions; else the injected sheet is replaced by the bundled `dist/draft.css`) and says so.
 - **Bundle size.** `dist/draft.js` repeats React, React Flow, the renderer and the ELK worker (several MB). Accepted for isolation (the editor webview's protocol and allowlist stay untouched); revisit with a shared chunk if the VSIX size matters.

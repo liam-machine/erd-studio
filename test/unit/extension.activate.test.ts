@@ -2033,6 +2033,7 @@ describe('Welcome panel: commands', () => {
       new Set([
         'erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject', 'erdStudio.showLogs', 'erdStudio.start',
         'erdStudio.openExampleProject', 'erdStudio.openExampleDiagram', 'erdStudio.showImportGuide',
+        'erdStudio.showMeAround',
       ]),
     );
     // setupAiHelper needs a project: it gets the standard no-project stub instead.
@@ -2200,7 +2201,9 @@ describe('Welcome panel: first run', () => {
     // The dbt tour is unchanged in a dbt project; a folder without dbt gets the same video under neutral words.
     expect(step('watch').description).toContain('Draw your dbt project, explore the diagram');
     expect(step('watchLogical').title).toBe('Watch the One-Minute Tour');
-    expect(step('watchLogical').description).toBe('Start a diagram, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)');
+    // Show Me Around (the onboarding guide) is the tour steps' one quiet link: it replaced the short per-start videos.
+    expect(step('watchLogical').description).toBe('Start a diagram, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)');
+    expect(step('watch').description).toContain('\nOr: [Show Me Around](command:erdStudio.showMeAround)');
     expect(step('watchLogical').media.svg).toBe('media/walkthrough/watch.svg');
     expect(step('watchLogical').completionEvents).toEqual(['onCommand:erdStudio.showGettingStarted']);
     // Every start is one click through erdStudio.start, which counts where it came from: one button,
@@ -3997,5 +4000,74 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
     await settle();
     expect(pick).not.toHaveBeenCalled();
     expect(recentLogLines().some((l) => l.includes('exampleOpen already shown'))).toBe(true);
+  });
+
+  describe('the onboarding guide (Show Me Around)', () => {
+    const GUIDE_KEY = 'erdStudio.onboardingGuide';
+    const draftPosts = () => (draftPanels()[0] as unknown as { _postedMessages: Array<{ type: string }> })._postedMessages;
+
+    it('runs phase A on the first draft on this machine: its flag written before the tab opens, the page told after the draft', async () => {
+      folderWith({ 'design/shop.dbml': DBML });
+      const globalState = new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]);
+      context = makeContext(root, { globalState, workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], SUGGESTION_USED]) });
+      let flagWhenShown: unknown = 'not shown';
+      const createPanel = vscode.window.createWebviewPanel;
+      vi.spyOn(vscode.window, 'createWebviewPanel').mockImplementation(((...args: Parameters<typeof createPanel>) => {
+        if (args[0] === 'erdStudio.draftPreview') flagWhenShown = globalState.get(GUIDE_KEY);
+        return createPanel(...args);
+      }) as never);
+      await activate(context);
+      await settle();
+      await openDiagramsView();
+      await nextDraft();
+      await flush();
+      expect(flagWhenShown).toBe('draft');
+      expect(draftPosts().map((m) => m.type)).toEqual(['draft', 'guide']);
+      expect(keys()).toContain('guideStarted');
+      // Skip on the page ends it for good.
+      answerDraft({ type: 'guide', action: 'skip' });
+      expect(globalState.get(GUIDE_KEY)).toBe('skipped');
+      expect(keys()).toContain('guideSkippedOnDraft');
+    });
+
+    it('a machine that has had the guide gets no guide on its drafts', async () => {
+      folderWith({ 'design/shop.dbml': DBML });
+      const globalState = new Map<string, unknown>([['erdStudio.gettingStartedShown', true], [GUIDE_KEY, 'done']]);
+      context = makeContext(root, { globalState, workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], SUGGESTION_USED]) });
+      await activate(context);
+      await settle();
+      await openDiagramsView();
+      await nextDraft();
+      await flush();
+      expect(draftPosts().map((m) => m.type)).toEqual(['draft']);
+      expect(keys()).not.toContain('guideStarted');
+    });
+
+    it('Show Me Around runs it again: in a folder with nothing to draw, the example draft with "nothing here", from the command', async () => {
+      folderWith({ 'notes.md': '# notes\n' });
+      const globalState = new Map<string, unknown>([['erdStudio.gettingStartedShown', true], ['erdStudio.exampleDraftShown', true], [GUIDE_KEY, 'skipped']]);
+      context = makeContext(root, { globalState, workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]) });
+      await activate(context);
+      await settle();
+      void vscode.commands.executeCommand('erdStudio.showMeAround');
+      const draft = await nextDraft();
+      await flush();
+      expect(draft.source).toBe('example');
+      expect(draftPosts().at(-1)).toEqual({ type: 'guide', nothingFound: true, semanticDir: '.erd-studio' });
+      expect(globalState.get(GUIDE_KEY)).toBe('draft');
+      expect(keys()).toEqual(expect.arrayContaining(['guideStarted', 'guideStartedFromCommand']));
+    });
+
+    it('while its canvas part is owed, activation holds back the diagrams notice (it keeps its flag)', async () => {
+      fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+      openWorkspace(root);
+      const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+      context = makeContext(root, { globalState: new Map<string, unknown>([['erdStudio.gettingStartedShown', true], [GUIDE_KEY, 'draft']]), workspaceState });
+      await activate(context);
+      await settle();
+      expect(info.mock.calls.filter((c) => String(c[0]).startsWith('This project has'))).toEqual([]);
+      expect(workspaceState.get(DIAGRAMS_NUDGE_SHOWN_KEY)).toBeUndefined();
+      expect(recentLogLines().some((l) => l.includes("the onboarding guide's canvas part is owed") && l.includes('diagramsNudge'))).toBe(true);
+    });
   });
 });

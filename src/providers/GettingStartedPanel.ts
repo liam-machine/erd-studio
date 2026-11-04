@@ -2,7 +2,7 @@
  * GettingStartedPanel — the "ERD Studio Tour" webview panel (the Welcome tab): the
  * getting-started video (the tour), a one-line project summary, the optional
  * AI cards (your AI assistant, set up the AI helper, start the guided setup)
- * and a small **How-to clips** section. Draft-first (`docs/dev/draft-first.md`
+ * and a **Show Me Around** button (the interactive guide). Draft-first (`docs/dev/draft-first.md`
  * §10): it holds no start, Convert or "Open your diagrams" card — the draft,
  * the sidebar and the Convert offer are the starts.
  *
@@ -13,7 +13,7 @@
  * (`workspaceRoot: null`: "Open the folder your data model lives in", or an
  * example), a folder without dbt (`logicalOnly`: the AI cards with the guided
  * setup's no-dbt wording — no dbt text at all), and a dbt project (the
- * guided setup, the sample project, and the Draw from dbt clip).
+ * guided setup and the sample project).
  * The dbt page plays the dbt tour; the other two play the logical-first cut
  * (`GETTING_STARTED_MEDIA`). It autoplays in an open folder.
  *
@@ -51,12 +51,9 @@ import {
   type ProjectSummary,
   type SetupOutcome,
   GETTING_STARTED_TAB_TITLE,
+  SHOW_ME_AROUND_COMMAND,
 } from '../types/gettingStarted';
 import {
-  HOW_TO_CLIPS,
-  HOW_TO_CLIP_DIR,
-  HOW_TO_CLIP_KEYS,
-  type HowToClipKey,
   START_ACTION_COMMANDS,
   startActionArgs,
   startActionsForIntent,
@@ -115,25 +112,6 @@ export function gettingStartedCut(mode: GettingStartedPageMode): {
       cues: LOGICAL_GETTING_STARTED_CUES,
       transcript: LOGICAL_GETTING_STARTED_TRANSCRIPT,
     };
-}
-
-/**
- * The "Watch how" clips this extension ships (`HOW_TO_CLIPS` under
- * `HOW_TO_CLIP_DIR`), as webview URIs by suggestion: a clip whose file is not
- * in the extension is left out, so its slot never renders. The paths are fixed constants, never anything from the webview.
- */
-export function howToClipUris(
-  extensionUri: vscode.Uri,
-  toWebviewUri: (uri: vscode.Uri) => string,
-  exists: (fsPath: string) => boolean = (p) => fs.existsSync(p),
-): Partial<Record<HowToClipKey, { videoUri: string }>> {
-  const out: Partial<Record<HowToClipKey, { videoUri: string }>> = {};
-  for (const key of HOW_TO_CLIP_KEYS) {
-    const clipUri = vscode.Uri.joinPath(extensionUri, ...HOW_TO_CLIP_DIR, HOW_TO_CLIPS[key]);
-    if (!exists(clipUri.fsPath)) { continue; }
-    out[key] = { videoUri: toWebviewUri(clipUri) };
-  }
-  return out;
 }
 
 /** Marketplace id of the Claude Code VS Code extension. */
@@ -794,13 +772,11 @@ export class GettingStartedPanel {
       return existing;
     }
     const mediaRoot = vscode.Uri.joinPath(context.extensionUri, ...GETTING_STARTED_MEDIA.dir);
-    // The "Watch how" clips (inside the media folder; named too, so moving either keeps them loadable).
-    const clipRoot = vscode.Uri.joinPath(context.extensionUri, ...HOW_TO_CLIP_DIR);
     const panel = vscode.window.createWebviewPanel(
       GETTING_STARTED_VIEW_TYPE,
       GETTING_STARTED_TITLE,
       vscode.ViewColumn.One,
-      { enableScripts: true, localResourceRoots: [mediaRoot, clipRoot], retainContextWhenHidden: false },
+      { enableScripts: true, localResourceRoots: [mediaRoot], retainContextWhenHidden: false },
     );
     panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.png');
     telemetry.feature('gettingStartedOpened');
@@ -846,7 +822,6 @@ export class GettingStartedPanel {
       cues: cut.cues,
       transcript: cut.transcript,
       mode,
-      howToClips: howToClipUris(extensionUri, (uri) => webview.asWebviewUri(uri).toString()),
     });
   }
 
@@ -1018,8 +993,9 @@ export class GettingStartedPanel {
       case 'videoProgress':
         telemetry.feature(msg.milestone === 'half' ? 'videoHalf' : 'videoEnded');
         break;
-      case 'howToClipPlayed':
-        telemetry.feature('howToClipPlayed');
+      case 'showMeAround':
+        // The fixed command (never one from the webview); it counts its own use.
+        await vscode.commands.executeCommand(SHOW_ME_AROUND_COMMAND);
         break;
       default: {
         const unhandled: never = msg;

@@ -11,6 +11,7 @@ import type { DraftOtherStart, DraftView } from '../../src/types/draft';
 import { ScopeSwitcher } from './ScopeSwitcher';
 import { OtherStartsMenu } from './OtherStartsMenu';
 import { CHANGE_OPTIONS, DISCARD, SHOW_DETAILS, notesLine } from '../lib/wording';
+import { GUIDE_TARGETS } from '../../src/types/onboardingGuide';
 
 export interface DraftBannerProps {
   view: DraftView;
@@ -47,7 +48,7 @@ export function DraftBanner({
 
   return (
     <header className="draft-banner">
-      <div className="draft-banner__text">
+      <div className="draft-banner__text" data-guide={GUIDE_TARGETS.draftBanner}>
         <h1 className="draft-banner__headline">{banner.headline}</h1>
         <p className="draft-banner__detail">{banner.detail}</p>
         {showSecondLine && (
@@ -78,6 +79,7 @@ export function DraftBanner({
             <button
               type="button"
               className="draft-button draft-button--primary"
+              data-guide={primaryIsKeep ? GUIDE_TARGETS.draftKeep : GUIDE_TARGETS.draftPrimary}
               disabled={busy}
               onClick={() => (primaryIsKeep ? onKeep() : onOtherStart(primaryStart as DraftOtherStart))}
             >
@@ -85,12 +87,19 @@ export function DraftBanner({
             </button>
           )}
           {shown.map((id) => (
-            <button key={id} type="button" className="draft-button draft-button--secondary" disabled={busy} onClick={() => onOtherStart(id)}>
+            <button
+              key={id}
+              type="button"
+              className="draft-button draft-button--secondary"
+              data-guide={id === 'guide' ? GUIDE_TARGETS.draftGuideStart : undefined}
+              disabled={busy}
+              onClick={() => onOtherStart(id)}
+            >
               {labelOf(id)}
             </button>
           ))}
           {keepable && !primaryIsKeep && (
-            <button type="button" className="draft-button draft-button--quiet" disabled={busy} onClick={onKeep}>
+            <button type="button" className="draft-button draft-button--quiet" data-guide={GUIDE_TARGETS.draftKeep} disabled={busy} onClick={onKeep}>
               {banner.keepLabel}
             </button>
           )}

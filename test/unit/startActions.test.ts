@@ -42,7 +42,7 @@ import {
   START_FEATURES, START_INTENT_FEATURES, START_PICK_GUIDE_ITEM, START_PICK_ITEMS, recordStart, recordStartSuggested, runStart,
   type StartPickGuideItem, type StartPickItem,
 } from '../../src/commands/start';
-import { HOW_TO_CLIP_CAPTIONS, START_LABELS } from '../../src/types/gettingStarted';
+import { START_LABELS } from '../../src/types/gettingStarted';
 import { DRAFT_OTHER_START_LABELS } from '../../src/services/draftModel';
 import { HELP_ACTIONS } from '../../src/providers/HelpTreeProvider';
 import { IMPORT_MODEL_SOURCES } from '../../src/services/importSources';
@@ -467,10 +467,6 @@ describe('one label per action, on every surface', () => {
       example: START_ACTION_LABELS.example, openFolder: OPEN_FOLDER_LABEL,
     });
     expect(START_PICK_GUIDE_ITEM.label).toBe(`$(question) ${IMPORT_GUIDE_LABEL}`);
-    expect(HOW_TO_CLIP_CAPTIONS).toEqual({
-      example: 'Open an Example', blank: 'New Diagram', importSqlDdl: 'Import your SQL scripts',
-      importSemanticModel: 'Import your Power BI semantic model', importDbmlFile: 'Import your DBML file', drawFromDbt: 'Draw from dbt',
-    });
   });
 
   it('the palette says the same words', () => {

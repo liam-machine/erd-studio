@@ -27,6 +27,7 @@
  */
 
 import type { DisplaySubjectArea } from './display';
+import { DRAFT_GUIDE_ACTIONS, parseGuideAction, type GuideActionPayload } from './onboardingGuide';
 
 // ---------------------------------------------------------------------------
 // Where a draft comes from, and what opened it
@@ -160,6 +161,12 @@ export interface DraftDetailSection {
 export interface DraftBanner {
   /** `Draft from 4 SQL files (PostgreSQL) · 24 tables, 31 relationships · not saved`. */
   headline: string;
+  /**
+   * The source phrase alone, `from 4 SQL files (PostgreSQL)` (the onboarding
+   * guide names it). Absent for an example, and from a draft built before it
+   * (the guide then reads the headline's first part).
+   */
+  from?: string;
   /** `Keep saves it as sales in the Main layer (.erd-studio/main/diagrams/sales.dbml).` */
   detail: string;
   /** Keep's label (`Keep as Diagram`, `Keep This Example`, `Save This Example…`); absent: nothing can be kept here. */
@@ -245,7 +252,13 @@ export type DraftToWebview =
   /** A button was answered and the host is working: `keep` (Saving…) or `scope` (Drawing…). Buttons disabled. */
   | { type: 'busy'; action: 'keep' | 'scope' }
   /** The work stopped without a new draft (a Keep that did not save, a scope that drew nothing): buttons back, with an optional line. */
-  | { type: 'idle'; notice?: string };
+  | { type: 'idle'; notice?: string }
+  /**
+   * Run the onboarding guide's phase A on the draft on show (Show Me Around,
+   * `src/types/onboardingGuide.ts`). `nothingFound`: an example shown because
+   * the folder held nothing to draw. The page keeps it running across redraws.
+   */
+  | { type: 'guide'; nothingFound?: boolean; semanticDir?: string };
 
 /** Page → host. Every one is validated by {@link parseDraftToHost} against the draft on show. */
 export type DraftToHost =
@@ -258,14 +271,16 @@ export type DraftToHost =
   /** Passive: the schema panel or details drawer was opened (telemetry only). */
   | { type: 'detailsOpened' }
   /** Passive: ELK failed, the fallback placement is drawn (telemetry only). */
-  | { type: 'layoutFailed' };
+  | { type: 'layoutFailed' }
+  /** Passive: the onboarding guide showed a step or was skipped (`DRAFT_GUIDE_ACTIONS` only). */
+  | ({ type: 'guide' } & GuideActionPayload);
 
 export const DRAFT_TO_HOST_TYPES = [
-  'ready', 'keep', 'changeOptions', 'discard', 'otherStart', 'scope', 'detailsOpened', 'layoutFailed',
+  'ready', 'keep', 'changeOptions', 'discard', 'otherStart', 'scope', 'detailsOpened', 'layoutFailed', 'guide',
 ] as const satisfies readonly DraftToHost['type'][];
 
 /** Messages that are not a choice: they never close the page or answer the flow. */
-export const DRAFT_PASSIVE_TYPES: ReadonlySet<DraftToHost['type']> = new Set(['ready', 'detailsOpened', 'layoutFailed']);
+export const DRAFT_PASSIVE_TYPES: ReadonlySet<DraftToHost['type']> = new Set(['ready', 'detailsOpened', 'layoutFailed', 'guide']);
 
 /** What the draft on show allows: a message for anything else is dropped. */
 export interface DraftMessageAllowance {
@@ -319,6 +334,11 @@ export function parseDraftToHost(raw: unknown, allowed: DraftMessageAllowance, c
         ? { type: 'scope', scopeId }
         : undefined;
     }
+    case 'guide': {
+      const { type: _type, ...rest } = raw;
+      const action = parseGuideAction(rest, DRAFT_GUIDE_ACTIONS);
+      return action ? { type: 'guide', ...action } : undefined;
+    }
     default:
       return undefined;
   }
@@ -334,6 +354,9 @@ export function isDraftToWebview(raw: unknown): raw is DraftToWebview {
       return raw.action === 'keep' || raw.action === 'scope';
     case 'idle':
       return raw.notice === undefined || typeof raw.notice === 'string';
+    case 'guide':
+      return (raw.nothingFound === undefined || typeof raw.nothingFound === 'boolean')
+        && (raw.semanticDir === undefined || typeof raw.semanticDir === 'string');
     default:
       return false;
   }
@@ -402,10 +425,24 @@ export interface DraftPreview {
   showing?(): string | undefined;
   /** Close the tab; a pending `ask` resolves `closed`. */
   close(): void;
+  /**
+   * Run the onboarding guide's phase A on the draft on show (after `ask`
+   * opened it; posted once the page is ready). Optional: a fake has none.
+   */
+  startGuide?(start: DraftGuideStart): void;
+}
+
+/** What phase A of the onboarding guide needs from the host. */
+export interface DraftGuideStart {
+  /** An example shown because the folder held nothing to draw. */
+  nothingFound?: boolean;
+  semanticDir?: string;
 }
 
 /** Passive events the preview reports to the host (the wiring counts them; the preview counts nothing itself). */
 export interface DraftPreviewEvents {
   detailsOpened(source: DraftSource): void;
   layoutFailed(source: DraftSource): void;
+  /** The onboarding guide showed a step or was skipped on the page (optional: older wiring has none). */
+  guide?(action: GuideActionPayload, view: DraftView): void;
 }

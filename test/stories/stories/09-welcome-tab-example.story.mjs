@@ -8,7 +8,7 @@
 // that the switcher offers the Kimball bus matrix, that Save This Example…
 // writes it to a folder of its own, and that the window opens it on its
 // first diagram, retail sales, with the star's tables on the canvas. The
-// tab's short videos include the example's clip, waiting for a click.
+// tab also offers Show Me Around (the interactive guide).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -53,9 +53,8 @@ export default story({
       const text = await tour.ev('doc.body.innerText');
       s.expect(text.includes('Or see a finished data model first:'), 'the tour tab should say "Or see a finished data model first:"');
       s.expect(!/\bdbt\b/i.test(text), 'with no folder open the tour tab must show no dbt word');
-      // The short videos: the example's clip among them, not playing (it has sound: a click plays it).
-      const clip = await tour.waitFor(`(() => { const v=doc.querySelector('.gs-howto [data-clip="example"]'); return v && !v.closest('[hidden]') && { muted: v.muted, paused: v.paused }; })()`, { what: 'the example\'s short video' });
-      s.expect(!clip.muted && clip.paused, `the clip should wait, with its sound on, for a click: ${JSON.stringify(clip)}`);
+      // Show Me Around (the interactive guide) is offered here too, in place of the old short videos.
+      await tour.waitFor(`(() => { const b=doc.querySelector('[data-action="showMeAround"]'); return !!b && !b.closest('[hidden]') && b.textContent.trim() === 'Show Me Around'; })()`, { what: 'the Show Me Around button' });
       await tour.ev(`(${OPEN_EXAMPLE}.scrollIntoView({ block: 'center' }), true)`);
       await tour.highlight(`${OPEN_EXAMPLE}.closest('section') ?? ${OPEN_EXAMPLE}`);
       await s.pause(2000);

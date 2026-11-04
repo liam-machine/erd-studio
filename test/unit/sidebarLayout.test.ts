@@ -159,7 +159,7 @@ describe('HelpTreeProvider', () => {
     const provider = new HelpTreeProvider(tracking([]));
     const rows = provider.getChildren();
     expect(rows.map((r) => provider.getTreeItem(r).label)).toEqual([
-      'Set Up My AI Helper', 'Watch the One-Minute Tour', 'Send Feedback', 'Show Logs',
+      'Set Up My AI Helper', 'Watch the One-Minute Tour', 'Show Me Around', 'Send Feedback', 'Show Logs',
     ]);
     const contributed = new Set(contributes.commands.map((c) => c.command));
     for (const action of HELP_ACTIONS) expect(contributed.has(action.command), action.command).toBe(true);
@@ -169,10 +169,10 @@ describe('HelpTreeProvider', () => {
   it('adds My Reports after Send Feedback once there is a report, with the open count', () => {
     const provider = new HelpTreeProvider(tracking([report(2), report(1, 'closed')]));
     const rows = provider.getChildren();
-    expect(rows[3]).toEqual({ type: 'reports' });
-    const item = provider.getTreeItem(rows[3]);
+    expect(rows[4]).toEqual({ type: 'reports' });
+    const item = provider.getTreeItem(rows[4]);
     expect([item.label, item.description, item.contextValue]).toEqual(['My Reports', '1 open', 'myReports']);
-    expect(provider.getChildren(rows[3]).map((r) => provider.getTreeItem(r).label)).toEqual(['#2 Issue 2', '#1 Issue 1']);
+    expect(provider.getChildren(rows[4]).map((r) => provider.getTreeItem(r).label)).toEqual(['#2 Issue 2', '#1 Issue 1']);
     provider.dispose();
   });
 });

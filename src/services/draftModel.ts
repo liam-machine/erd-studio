@@ -148,6 +148,12 @@ function draftWhat(input: DraftHeadlineInput): string {
   }
 }
 
+/** The source phrase alone (`from 4 SQL files (PostgreSQL)`), for a find; undefined for an example. */
+export function draftFrom(input: DraftHeadlineInput): string | undefined {
+  const what = draftWhat(input);
+  return what.startsWith('Draft from ') ? what.slice('Draft '.length) : undefined;
+}
+
 /** `<what> · <n> tables, <m> relationships · not saved` (§2.1). */
 export function draftHeadline(input: DraftHeadlineInput): string {
   const counts = `${countOrNo(input.tables, 'table')}, ${countOrNo(input.relationships, 'relationship')}`;
@@ -457,13 +463,15 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
     notes: importPlanNotes(plan, describe).length,
     leftOut: importLeftOut(plan, describe).length,
   };
-  const headline = draftHeadline({
+  const headlineInput: DraftHeadlineInput = {
     source,
     tables: summary.tables,
     relationships: summary.relationships,
     ...(describe.origin ? { origin: describe.origin.from } : {}),
     fileName: input.fileName,
-  });
+  };
+  const headline = draftHeadline(headlineInput);
+  const from = draftFrom(headlineInput);
   const detail = draftDetail({ keep: target, reusedTables: summary.reusedTables, changedTables: summary.changedTables });
   const notice = input.notice;
   const { banner, otherStarts } = source === 'example'
@@ -471,6 +479,7 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
     : {
       banner: {
         headline,
+        ...(from ? { from } : {}),
         detail,
         keepLabel: KEEP_AS_DIAGRAM,
         primary: 'keep' as const,
@@ -594,7 +603,9 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
   };
   const switcher = dbtDraftScopes(input.scopes).scopes;
   const scopes = switcher && switcher.options.some((o) => o.id === scope.id) ? { ...switcher, current: scope.id } : undefined;
-  const headline = draftHeadline({ source: 'dbt', tables: summary.tables, relationships: summary.relationships, folder: scope.kind === 'folder' ? scope.folder : undefined });
+  const headlineInput: DraftHeadlineInput = { source: 'dbt', tables: summary.tables, relationships: summary.relationships, folder: scope.kind === 'folder' ? scope.folder : undefined };
+  const headline = draftHeadline(headlineInput);
+  const from = draftFrom(headlineInput);
   const detail = draftDetail({
     keep: target,
     reusedTables: summary.reusedTables,
@@ -618,6 +629,7 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
     title: `Draft: ${target.name}`,
     banner: {
       headline,
+      ...(from ? { from } : {}),
       detail,
       keepLabel: KEEP_AS_DIAGRAM,
       primary: 'keep',

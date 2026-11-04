@@ -20,6 +20,7 @@ import { Panel, useReactFlow, useStore } from '@xyflow/react';
 
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
+import { GUIDE_TARGETS } from '../../../src/types/onboardingGuide';
 import { useFirstOpenAutoLayout } from '../../hooks/useFirstOpenAutoLayout';
 import { useRevealRelationship } from '../../hooks/useRevealRelationship';
 import { useRevealTable } from '../../hooks/useRevealTable';
@@ -716,7 +717,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
         {/* Auto Layout + options + Refresh Manifest */}
         <div className="toolbar__section">
-          <div className="toolbar__split-group" ref={layoutGroupRef}>
+          <div className="toolbar__split-group" ref={layoutGroupRef} data-guide={GUIDE_TARGETS.canvasLayout}>
             <button
               className={`toolbar__split-main${layoutDirty ? ' toolbar__split-main--dirty' : ''}`}
               onClick={handleAutoLayout}
@@ -991,6 +992,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               <div className="toolbar__dropdown" ref={modelDropdownRef}>
                 <button
                   className="toolbar__dropdown-trigger"
+                  data-guide={GUIDE_TARGETS.canvasAdd}
                   onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
                   title="Add table or relationship"
                   aria-label="Add table or relationship"
@@ -1057,6 +1059,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
             <div className="toolbar__corner-menu" ref={cornerMenuRef}>
               <button
                 className={`toolbar__corner-trigger${cornerMenuOpen ? ' toolbar__corner-trigger--active' : ''}`}
+                data-guide={GUIDE_TARGETS.canvasFile}
                 onClick={() => setCornerMenuOpen((open) => !open)}
                 title="More actions"
                 aria-label="More actions"
@@ -1113,6 +1116,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               </button>
               <button
                 className="toolbar__corner-button"
+                data-guide={GUIDE_TARGETS.canvasFile}
                 onClick={handleViewFile}
                 title="Open file"
                 aria-label="Open the diagram's file in a text editor"

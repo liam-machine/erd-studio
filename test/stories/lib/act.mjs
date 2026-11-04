@@ -34,7 +34,7 @@ const overlay = (glideMs) => `(() => {
 /**
  * Film the story's temp HOME as `~`: VS Code's own file dialog (a quick input)
  * shows the full path it is in (`/tmp/erds-…/home/shop-database/`), a path
- * from the recording machine that a published clip must not show. While the
+ * from the recording machine that a video must not show. While the
  * box holds a path under `home`, its text is drawn over it as `~/…` and the
  * real text is made transparent; the DOM (what stories assert) is unchanged.
  */

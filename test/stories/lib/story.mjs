@@ -72,7 +72,9 @@ export const PACES = {
  *   s.pause(ms)                  a beat for the viewer (scaled by the run mode)
  */
 export class StoryContext {
-  constructor({ def, port, home, workspace, marks, pace, log, outDir }) {
+  constructor({ def, port, home, workspace, marks, pace, log, outDir, ud }) {
+    /** The window's --user-data-dir (its logs: `erdLog()`). */
+    this.ud = ud;
     this.def = def;
     this.port = port;
     this.home = home;
@@ -176,6 +178,26 @@ export class StoryContext {
 
   path(...parts) {
     return path.join(this.workspace ?? this.home, ...parts);
+  }
+
+  /**
+   * The ERD Studio output channel's text so far (a LogOutputChannel, which VS
+   * Code writes under the profile's logs/ folder), or '' before it exists.
+   */
+  erdLog() {
+    if (!this.ud) return '';
+    const found = [];
+    const walk = (dir) => {
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name === 'ERD Studio.log' || /^\d+-ERD Studio\.log$/.test(e.name)) found.push(full);
+      }
+    };
+    walk(path.join(this.ud, 'logs'));
+    return found.map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
   }
 
   async webview(opts) {

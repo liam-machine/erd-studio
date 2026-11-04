@@ -65,6 +65,8 @@ import { LOADING_STALL_MS, RECONNECT_GRACE_MS, useReconnectWatchdog } from './ho
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import { useLibraryDrop } from './hooks/useLibraryDrop';
 import { LibraryDropOverlay } from './components/Canvas/LibraryDropOverlay';
+import { CanvasGuide } from './components/Guide/CanvasGuide';
+import { isCanvasGuideStart, type CanvasGuideStart } from '../src/types/onboardingGuide';
 import type { DisplaySubjectArea } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
 import { orientDraggedRelationship } from './lib/relationshipDirection';
@@ -221,6 +223,10 @@ function EditorCanvas() {
   // diagram or an error arrives: proof the host is connected.
   const [hostLoading, setHostLoading] = useState<{ tables?: number } | null>(null);
 
+  // The onboarding guide's phase B (Show Me Around), when the host starts it on this canvas.
+  const [guide, setGuide] = useState<CanvasGuideStart | null>(null);
+  const endGuide = useCallback(() => setGuide(null), []);
+
   // Drops of tables on the canvas (a Shift-drag from the Table Library or the
   // Explorer): the drop handlers, the highlight and the "Hold Shift" hint.
   const { dropHandlers, dropActive, hintTables, libraryDragStarted } = useLibraryDrop();
@@ -315,6 +321,9 @@ function EditorCanvas() {
           useEditorStore
             .getState()
             .setFeedbackContext(msg.payload.diagnostics, msg.payload.capabilities);
+          break;
+        case 'guideStart':
+          if (isCanvasGuideStart(msg.payload)) setGuide({ dbml: msg.payload.dbml, semanticDir: msg.payload.semanticDir });
           break;
       }
     },
@@ -786,6 +795,9 @@ function EditorCanvas() {
 
       {/* Feedback dialog (bug reports and feature requests) */}
       <FeedbackDialog />
+
+      {/* The onboarding guide's coach marks (Show Me Around), over the canvas. */}
+      {guide && <CanvasGuide start={guide} onEnd={endGuide} />}
     </div>
   );
 }

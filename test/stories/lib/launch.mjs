@@ -164,14 +164,15 @@ export const REALISTIC_SETTINGS = {
 };
 
 /**
- * Launch VS Code for one story. `folder` is undefined for an empty window.
+ * Launch VS Code for one story. `folder` is undefined for an empty window;
+ * `env` adds environment variables (the extension host inherits them).
  * `extDir` is the staged extension (`--extensionDevelopmentPath`); a
  * realistic story passes none (it installs the VSIX in the window, as from
  * the Marketplace) and `realistic: true` (no `--skip-welcome`, {@link REALISTIC_SETTINGS}).
  * Resolves `{ port, root, ud, home, proc, kill, logFile }` once the workbench
  * is up; `port` is the CDP port this window bound (see {@link boundPort}).
  */
-export async function launchVSCode({ extDir, folder, root, settings = {}, logFile, realistic = false }) {
+export async function launchVSCode({ extDir, folder, root, settings = {}, env: storyEnv = {}, logFile, realistic = false }) {
   const ud = path.join(root, 'ud');
   const exts = path.join(root, 'ex');
   const home = path.join(root, 'home');
@@ -207,7 +208,8 @@ export async function launchVSCode({ extDir, folder, root, settings = {}, logFil
   if (process.platform === 'darwin') args.push('--use-mock-keychain');
   if (folder) args.push(`--folder-uri=${pathToFileURL(folder).href}`);
 
-  const env = { ...process.env, HOME: home };
+  // A story's own variables (`env` in its definition, e.g. ERD_STUDIO_STORIES_NO_BROWSER) reach the extension host.
+  const env = { ...process.env, ...storyEnv, HOME: home };
   if (process.platform === 'win32') env.USERPROFILE = home;
   // Running from inside VS Code's terminal leaks these; they would make Code act as node or as a CLI.
   for (const k of Object.keys(env)) if (k === 'ELECTRON_RUN_AS_NODE' || k.startsWith('VSCODE_') && k !== 'VSCODE_PATH') delete env[k];

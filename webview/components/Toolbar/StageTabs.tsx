@@ -15,6 +15,7 @@ import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { nextStageRequestId } from '../../lib/stageRequest';
 import type { Stage } from '../../../src/types/semantic';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
+import { GUIDE_TARGETS } from '../../../src/types/onboardingGuide';
 import './StageTabs.css';
 
 // ---------------------------------------------------------------------------
@@ -59,7 +60,7 @@ export function StageTabs({ activeStage, readOnly }: StageTabsProps) {
   );
 
   return (
-    <div className="stage-tabs" role="tablist" aria-label="Design stage">
+    <div className="stage-tabs" role="tablist" aria-label="Design stage" data-guide={GUIDE_TARGETS.canvasStages}>
       {STAGE_LABELS.map(({ stage, label, hint, shortcut, tooltip }) => {
         const isActive = stage === activeStage;
         const showLock = isActive && readOnly;

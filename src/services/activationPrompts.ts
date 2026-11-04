@@ -51,6 +51,13 @@ export type SessionPromptKind =
    */
   | 'firstDiagram'
   /**
+   * The onboarding guide's canvas part (Show Me Around, phase B) is on
+   * screen: nothing pops over the coach marks (`src/providers/guideWiring.ts`).
+   * While it is owed, activation also holds back the prompts that would
+   * (`guideDefersPrompt`).
+   */
+  | 'guide'
+  /**
    * The Get Started walkthrough a fresh install owes (once per machine),
    * offered only in an empty window (`walkthroughAutoOpens`): in a folder the
    * draft takes its place.
