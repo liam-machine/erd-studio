@@ -92,6 +92,12 @@
   margin: 6px 0 10px;
 }
 
+.guide-mark__note {
+  margin: -4px 0 10px;
+  font-size: 11px;
+  color: var(--dim-fg);
+}
+
 .guide-mark__actions {
   display: flex;
   flex-wrap: wrap;

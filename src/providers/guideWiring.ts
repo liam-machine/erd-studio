@@ -26,6 +26,7 @@
 
 import { GITHUB_REPO } from '../types/feedback';
 import {
+  GUIDE_RERUN_STATUS,
   GUIDE_STEP_IDS,
   guideCanvasDue,
   guideCanvasOwed,
@@ -93,6 +94,8 @@ export interface OnboardingGuideDeps {
   dbml(): boolean;
   /** Phase B is on screen: hold the window's one prompt (`SessionPromptGate.reserve('guide')`). */
   holdPrompts(): void;
+  /** A few seconds in the status bar (`window.setStatusBarMessage`): where to run the guide again, after a skip. */
+  statusMessage?(text: string): void;
   log?(message: string): void;
   warn?(message: string, err: unknown): void;
 }
@@ -209,6 +212,7 @@ export class OnboardingGuide {
       this.requested = undefined;
       this.deps.feature('guideSkippedOnDraft');
       this.setStatus('skipped');
+      this.deps.statusMessage?.(GUIDE_RERUN_STATUS);
       this.deps.log?.('Onboarding guide: skipped on the draft');
     }
   }
@@ -268,6 +272,7 @@ export class OnboardingGuide {
         this.canvasActive = false;
         this.deps.feature('guideSkippedOnCanvas');
         this.setStatus('skipped');
+        this.deps.statusMessage?.(GUIDE_RERUN_STATUS);
         this.deps.log?.('Onboarding guide: skipped on the canvas');
         return;
     }

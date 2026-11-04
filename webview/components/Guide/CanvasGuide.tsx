@@ -184,6 +184,7 @@ export function CanvasGuide({ start, onEnd }: CanvasGuideProps) {
       stepKey={step.id}
       title={step.title}
       text={step.text}
+      {...(step.note ? { note: step.note } : {})}
       progress={progress}
       resolveAnchor={() => canvasAnchorRect(step)}
       avoid={toolbarRects}

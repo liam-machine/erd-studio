@@ -33,6 +33,16 @@ export const SHOW_ME_AROUND_COMMAND = 'erdStudio.showMeAround';
 /** The command's title without the category, and every button that runs it. */
 export const SHOW_ME_AROUND_LABEL = 'Show Me Around';
 
+/**
+ * Where to run the guide again: a small note on its last card, and the
+ * status bar's few seconds after Skip guide or Esc.
+ */
+export const GUIDE_RERUN_NOTE = 'Show Me Around in Help & Feedback runs this guide again.';
+/** The status bar's version, with VS Code's compass icon (the Help & Feedback row's). */
+export const GUIDE_RERUN_STATUS = '$(compass) Show Me Around in Help & Feedback runs the guide again';
+/** How long the status bar shows it. */
+export const GUIDE_RERUN_STATUS_MS = 8000;
+
 /** The guide's progress on this machine (`globalState`): {@link GuideStatus}. */
 export const GUIDE_STATE_KEY = 'erdStudio.onboardingGuide';
 
@@ -128,6 +138,8 @@ export interface GuideStep {
   title: string;
   /** Final text (plain, never HTML). */
   text: string;
+  /** A quieter line under the text (plain): the last card's {@link GUIDE_RERUN_NOTE}. */
+  note?: string;
   anchor: GuideAnchor;
   /**
    * The step ends when the user presses the control it points at (Keep):
@@ -400,6 +412,7 @@ export function canvasGuideSteps(input: CanvasGuideInput): GuideStep[] {
     id: 'canvasFinish',
     title: 'One last thing',
     text: "You're set up. If ERD Studio helps you, a star on GitHub helps other modellers find it.",
+    note: GUIDE_RERUN_NOTE,
     anchor: { kind: 'none' },
     buttons: [{ action: 'star', label: GUIDE_LABELS.star }],
     finish: true,

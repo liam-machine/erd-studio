@@ -27,7 +27,8 @@ import { validateGuidePayload } from '../../src/providers/payloadValidation';
 import { ACTIVATION_PROMPT_PRIORITY, SessionPromptGate } from '../../src/services/activationPrompts';
 import { GITHUB_REPO } from '../../src/services/feedbackService';
 import { draftAllowance, isDraftToWebview, parseDraftToHost, type Draft, type DraftSource, type DraftTrigger, type DraftView } from '../../src/types/draft';
-import { GUIDE_STEP_IDS, type GuideStatus } from '../../src/types/onboardingGuide';
+import { GUIDE_RERUN_NOTE, GUIDE_RERUN_STATUS, GUIDE_STEP_IDS, SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL, type GuideStatus } from '../../src/types/onboardingGuide';
+import { HELP_ACTIONS } from '../../src/providers/HelpTreeProvider';
 import { FEATURES } from '../../src/services/telemetryPayload';
 import { fakeDraftPreview, type ScriptedAnswer } from './helpers/draftDriver';
 
@@ -107,6 +108,45 @@ describe('the fixed effects of each action id', () => {
     expect(h.features.filter((f) => f === 'guideCompleted')).toHaveLength(1);
     expect(h.features).toEqual(['guideCanvasStarted', 'guideStepCanvasTable', 'guideCompleted']);
     expect(h.status()).toBe('done');
+  });
+});
+
+describe('how to run it again', () => {
+  function withStatus(initial?: GuideStatus) {
+    const h = host(initial);
+    const shown: string[] = [];
+    const guide = new OnboardingGuide({
+      getStatus: () => h.status(), setStatus: () => {}, feature: () => {}, executeCommand: async () => {}, openExternal: async () => {},
+      semanticDir: () => '.erd-studio', dbml: () => true, holdPrompts: () => {}, statusMessage: (t) => { shown.push(t); },
+    });
+    return { guide, shown };
+  }
+
+  it('Skip guide or Esc, on the draft or the canvas, says in the status bar where Show Me Around is', () => {
+    const a = withStatus();
+    a.guide.takeDraft(sqlDraft());
+    a.guide.onDraftAction({ action: 'skip' });
+    expect(a.shown).toEqual([GUIDE_RERUN_STATUS]);
+    const b = withStatus('draft');
+    b.guide.takeCanvas();
+    b.guide.onCanvasAction({ action: 'skip' });
+    expect(b.shown).toEqual([GUIDE_RERUN_STATUS]);
+  });
+
+  it('finishing says nothing in the status bar (the last card already says it)', () => {
+    const c = withStatus('draft');
+    c.guide.takeCanvas();
+    c.guide.onCanvasAction({ action: 'complete' });
+    expect(c.shown).toEqual([]);
+  });
+
+  it('the place both name exists: a Help & Feedback row called Show Me Around that runs the command', () => {
+    expect(GUIDE_RERUN_NOTE).toContain(`${SHOW_ME_AROUND_LABEL} in Help & Feedback`);
+    expect(GUIDE_RERUN_STATUS).toContain(`${SHOW_ME_AROUND_LABEL} in Help & Feedback`);
+    const row = HELP_ACTIONS.find((a) => a.command === SHOW_ME_AROUND_COMMAND);
+    expect(row?.label).toBe(SHOW_ME_AROUND_LABEL);
+    expect(row?.icon).toBe('compass');
+    expect(GUIDE_RERUN_STATUS.startsWith('$(compass) ')).toBe(true);
   });
 });
 

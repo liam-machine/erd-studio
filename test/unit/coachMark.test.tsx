@@ -362,6 +362,12 @@ describe('phase B on the canvas', () => {
     expect(guideMessages().filter((m) => m.action === 'revealSidebar')).toHaveLength(1);
     expect(screen.getByRole('dialog').textContent).toContain("You're set up. If ERD Studio helps you, a star on GitHub helps other modellers find it.");
     expect(screen.getByRole('button', { name: 'Star on GitHub' }).className).toContain('guide-mark__button--star');
+    expect(screen.getByRole('dialog').querySelector('.guide-mark__note')?.textContent).toBe('Show Me Around in Help & Feedback runs this guide again.');
+  });
+
+  it('shows a note only on the step that has one', () => {
+    renderMark({});
+    expect(screen.getByRole('dialog').querySelector('.guide-mark__note')).toBeNull();
   });
 
   it('in a dbt project, the Logical / Physical step is there', () => {

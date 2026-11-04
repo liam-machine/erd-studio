@@ -45,6 +45,8 @@ export interface CoachMarkProps {
   stepKey: string;
   title: string;
   text: string;
+  /** A quieter line under the text (where to run the guide again, on the last card). */
+  note?: string;
   /** "2 of 5". */
   progress: string;
   /** The anchor's rect now, or null (a centred card). Called every frame. */
@@ -85,7 +87,7 @@ function escapeBelongsElsewhere(target: EventTarget | null, mark: HTMLElement | 
 }
 
 export function CoachMark({
-  stepKey, title, text, progress, resolveAnchor, prefer, avoid, ring: showRing = true, onBack, next, buttons = [], skipLabel, onSkip, onEscape, backLabel,
+  stepKey, title, text, note, progress, resolveAnchor, prefer, avoid, ring: showRing = true, onBack, next, buttons = [], skipLabel, onSkip, onEscape, backLabel,
 }: CoachMarkProps) {
   const markRef = useRef<HTMLDivElement>(null);
   const ringRef = useRef<HTMLDivElement>(null);
@@ -183,6 +185,7 @@ export function CoachMark({
           <span className="guide-mark__progress">{progress}</span>
         </div>
         <p className="guide-mark__text" id={textId}>{text}</p>
+        {note && <p className="guide-mark__note">{note}</p>}
         <div className="guide-mark__actions">
           {buttons.map((b, i) => (
             <button

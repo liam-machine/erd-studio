@@ -121,6 +121,7 @@ export default story({
       s.assert.deepEqual(mark.buttons, ['Star on GitHub', 'Back', 'Done', 'Skip guide']);
       const star = await canvas.ev(`(() => { const b = [...doc.querySelectorAll('.guide-mark button')].find(x => x.textContent.trim() === 'Star on GitHub'); return b && { gold: b.classList.contains('guide-mark__button--star'), icon: !!b.querySelector('svg.guide-mark__star-icon')}; })()`);
       s.assert.deepEqual(star, { gold: true, icon: true }, 'Star on GitHub is the gold button with the star');
+      s.assert.equal(await canvas.ev(`doc.querySelector('.guide-mark__note')?.textContent.trim()`), 'Show Me Around in Help & Feedback runs this guide again.', 'the last card says where to run the guide again');
       await s.pause(2000);
       if (process.env.ERD_STUDIO_STORIES_SHOT) await s.wb.screenshot(process.env.ERD_STUDIO_STORIES_SHOT);
     }, { say: "One last thing. I'm set up. If ERD Studio helps me, a star on GitHub helps other modellers find it." });

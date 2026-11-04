@@ -155,7 +155,7 @@ import { START_COMMAND, START_INTENT_CONTEXT_KEY, START_PICK_PLACEHOLDER, START_
 import { createDraftPreview } from './providers/DraftPreviewPanel';
 import { DraftGeneration, draftPreviewEvents, trackedDraftPreview } from './providers/draftWiring';
 import { OnboardingGuide, guideDefersPrompt } from './providers/guideWiring';
-import { GUIDE_STATE_KEY, SHOW_ME_AROUND_COMMAND, isGuideStatus } from './types/onboardingGuide';
+import { GUIDE_RERUN_STATUS_MS, GUIDE_STATE_KEY, SHOW_ME_AROUND_COMMAND, isGuideStatus } from './types/onboardingGuide';
 import { EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, draftSourceForIntent, walkthroughAutoOpens, type AutoDraft } from './services/draftTriggers';
 import type { Draft, DraftPreview, DraftTrigger } from './types/draft';
 import { StartIntentTracker } from './commands/startIntent';
@@ -1217,6 +1217,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     semanticDir: () => guideSemanticDir(),
     dbml: () => guideDbml(),
     holdPrompts: () => { sessionPrompts.reserve('guide'); },
+    statusMessage: (text) => { vscode.window.setStatusBarMessage(text, GUIDE_RERUN_STATUS_MS); },
     log: (message) => log.info(message),
     warn: (message, err) => log.warn(`[ERD Studio] ${message}`, err),
   });

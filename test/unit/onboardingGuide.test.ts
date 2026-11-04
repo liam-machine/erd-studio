@@ -171,6 +171,7 @@ describe('phase B: the steps on the canvas', () => {
   it('names a real table (the best-connected), a real relationship, and ends with the star', () => {
     const steps = canvasGuideSteps({ display: shop, hasDbt: false, dbml: true });
     expect(steps.map((s) => s.id)).toEqual(['canvasTable', 'canvasRelationship', 'canvasToolbar', 'canvasSidebar', 'canvasFiles', 'canvasFinish']);
+    expect(steps.filter((s) => s.note).map((s) => [s.id, s.note])).toEqual([['canvasFinish', 'Show Me Around in Help & Feedback runs this guide again.']]);
     expect(steps[0].text).toMatch(/^fct_order_line is one of your 3 tables\. Click a table to change its columns, types and keys/);
     expect(steps[0].anchor).toEqual({ kind: 'table', table: 'fct_order_line' });
     expect(steps[1].text).toBe('fct_order_line → dim_customer (many-to-one). Press and hold a column, then drag it onto a column of another table to add a relationship.');
