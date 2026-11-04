@@ -8,7 +8,8 @@
  *
  * The source the open folder most likely holds comes first, when a quick,
  * bounded look finds one (a `.bim` / `definition.pbism` / TMDL file, a `.sql` file with
- * a CREATE TABLE, a `.dbml` file outside the ERD Studio folder); otherwise
+ * a CREATE TABLE, a `.dbml` file outside the ERD Studio folder that is not its
+ * own export); otherwise
  * DBML leads. The look never delays the picker by more than
  * {@link DETECT_TIMEOUT_MS}. The source runs as a command, so the
  * walkthrough's `onCommand:` completion events see it.
@@ -19,13 +20,17 @@
 import * as vscode from 'vscode';
 
 import {
-  countSqlCreateTables,
-  looksLikeSqlDdl,
+  MAX_SQL_FILE_BYTES,
+  isOwnDbmlExport,
+  listImportFiles,
   orderImportSources,
+  rankSqlFiles,
+  sqlScriptTableCount,
+  type DirEntries,
   type ImportModelSource,
 } from '../services/importSources';
 import { log } from '../services/logger';
-import { readFileStart } from '../services/readFileStart';
+import { fileSize, readFileStart, readTextStart } from '../services/readFileStart';
 import type { TelemetryFeature } from '../services/telemetryPayload';
 import { telemetry } from '../services/telemetryService';
 import { IMPORT_DBML_COMMAND } from './importDbml';
@@ -132,11 +137,15 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
 
 /** The file lookups {@link detectImportSources} makes, injectable for tests. */
 export interface DetectImportIo {
-  /** Up to `max` files matching `include` (a glob under the folder), none under `exclude`. */
-  findFiles(include: string, exclude: string, max: number): Promise<string[]>;
-  /** The start of a file's text. */
+  /** The open folder the look lists. */
+  root: string;
+  /** One folder's entries (`workspace.fs.readDirectory`): a name and whether it is a folder. */
+  readDirectory(folder: string): Promise<DirEntries>;
+  /** The start of a file's text (decoded by its byte order mark). */
   readStart(filePath: string, chars: number): Promise<string>;
-  /** The look was cancelled: stop opening files. Absent: never. */
+  /** A file's size in bytes; absent or undefined: unknown. */
+  size?(filePath: string): Promise<number | undefined>;
+  /** The look was cancelled: stop listing and opening files. Absent: never. */
   cancelled?(): boolean;
 }
 
@@ -145,7 +154,7 @@ export const SEMANTIC_MODEL_GLOB = '**/{*.bim,definition.pbism,model.tmdl,databa
 
 export { readFileStart };
 
-/** Folders the look skips: tools', a dbt project's build output and ERD Studio's own. */
+/** Folders the DBML file search skips: tools', a dbt project's build output and ERD Studio's own. */
 export function detectExcludeGlob(semanticDir: string): string {
   const own = semanticDir.replace(/[\\/]+$/, '');
   return `**/{node_modules,.git,.venv,venv,target,dbt_packages,${own}}/**`;
@@ -156,52 +165,70 @@ export interface ImportFindings {
   sources: Set<ImportModelSource>;
   /**
    * The CREATE TABLE statements (with a column list) in the `.sql` files,
-   * only when every `.sql` file in the folder was read whole: fewer than
+   * only when every `.sql` file in the folder was read whole: at most
    * {@link DETECT_SQL_FILES} files, each shorter than {@link DETECT_SQL_CHARS}.
    * Otherwise absent (never a guess). It stays on this machine.
    */
   sqlTables?: number;
+  /** The folder holds a `dbt_project.yml` (the host notes it when the window runs without dbt). */
+  dbtProject?: boolean;
 }
 
+/** How many `.dbml` files the look opens to find one that is not ERD Studio's own export. */
+const DETECT_DBML_FILES = 5;
+
 /**
- * Which sources the open folder seems to hold, with bounded lookups: one
- * semantic-model file, one `.dbml` file, and up to {@link DETECT_SQL_FILES}
- * `.sql` files whose start holds a CREATE TABLE. A lookup that fails counts
- * as nothing found. With `countTables` (the start screen's look, which the
- * start suggestion names a count from) every one of those `.sql` files is
- * read, not only up to the first with a CREATE TABLE.
+ * Which sources the open folder seems to hold, from one listing of it
+ * (`listImportFiles`, the quick imports' own) and bounded reads: a semantic
+ * model file; a `.dbml` file that is not ERD Studio's own export (a copy of
+ * a diagram, not a model to bring in); and the first
+ * {@link DETECT_SQL_FILES} `.sql` files, names that usually hold table
+ * definitions first (`rankSqlFiles`), whose start holds a CREATE TABLE with a
+ * column list by the converter's own reading (`sqlScriptTableCount`: never a
+ * dbt macro, a Databricks notebook, Oracle DDL or a file larger than the
+ * import reads). A lookup that fails counts as nothing found. With
+ * `countTables` (the start screen's look, which the start suggestion names a
+ * count from) every one of those `.sql` files is read, not only up to the
+ * first with a CREATE TABLE.
  */
 export async function detectImportFindings(
   io: DetectImportIo,
   semanticDir: string,
   options: { countTables?: boolean } = {},
 ): Promise<ImportFindings> {
-  const exclude = detectExcludeGlob(semanticDir);
   const found = new Set<ImportModelSource>();
-  const any = async (glob: string): Promise<boolean> => (await io.findFiles(glob, exclude, 1).catch(() => [])).length > 0;
-  const [semanticModel, dbml, sqlFiles] = await Promise.all([
-    // No `*.pbip`: a report-only (thin) Power BI Project has one and no model,
-    // and every model Import Semantic Model… reads has one of these files.
-    any(SEMANTIC_MODEL_GLOB),
-    any('**/*.dbml'),
-    io.findFiles('**/*.sql', exclude, DETECT_SQL_FILES).catch(() => [] as string[]),
-  ]);
-  if (semanticModel) found.add('semanticModel');
-  if (dbml) found.add('dbml');
+  const listing = await listImportFiles(io.root, (f) => io.readDirectory(f), { semanticDir, cancelled: io.cancelled })
+    .catch(() => ({ sql: [], dbml: [], semanticModel: [], dbtProject: false, truncated: false }));
+  // No `*.pbip`: a report-only (thin) Power BI Project has one and no model,
+  // and every model Import Semantic Model… reads has one of these files.
+  if (listing.semanticModel.length > 0) found.add('semanticModel');
+  for (const file of listing.dbml.slice(0, DETECT_DBML_FILES)) {
+    if (io.cancelled?.()) break;
+    const head = await io.readStart(file, 512).catch(() => undefined);
+    if (head !== undefined && !isOwnDbmlExport(head)) { found.add('dbml'); break; }
+  }
+  const sqlFiles = rankSqlFiles(listing.sql, io.root).slice(0, DETECT_SQL_FILES);
   // The count is exact only when every .sql file was listed and read whole.
-  let exact = options.countTables === true && sqlFiles.length < DETECT_SQL_FILES;
+  let exact = options.countTables === true && !listing.truncated && listing.sql.length <= DETECT_SQL_FILES;
   let tables = 0;
   for (const file of sqlFiles) {
     if (io.cancelled?.()) { exact = false; break; }
+    const size = await io.size?.(file).catch(() => undefined);
+    if (size !== undefined && size > MAX_SQL_FILE_BYTES) { exact = false; continue; }
     const text = await io.readStart(file, DETECT_SQL_CHARS).catch(() => undefined);
     if (text === undefined || text.length >= DETECT_SQL_CHARS) exact = false;
-    if (text !== undefined && looksLikeSqlDdl(text)) {
+    const count = text === undefined ? 0 : sqlScriptTableCount(file, text);
+    if (count > 0) {
       found.add('sqlDdl');
       if (!options.countTables) break;
-      tables += countSqlCreateTables(text);
+      tables += count;
     }
   }
-  return { sources: found, ...(exact && found.has('sqlDdl') && tables > 0 ? { sqlTables: tables } : {}) };
+  return {
+    sources: found,
+    ...(exact && found.has('sqlDdl') && tables > 0 ? { sqlTables: tables } : {}),
+    ...(listing.dbtProject ? { dbtProject: true } : {}),
+  };
 }
 
 /** {@link detectImportFindings}' sources: Import…'s picker order. */
@@ -209,15 +236,15 @@ export async function detectImportSources(io: DetectImportIo, semanticDir: strin
   return (await detectImportFindings(io, semanticDir)).sources;
 }
 
-/** The real lookups, under `root`; `token` cancels the searches and stops the reads. */
+/** The real lookups, under `root`; `token` stops the listing and the reads. */
 export function vscodeDetectImportIo(root: string, token?: vscode.CancellationToken): DetectImportIo {
   return {
-    findFiles: async (include, exclude, max) =>
-      (await vscode.workspace.findFiles(new vscode.RelativePattern(vscode.Uri.file(root), include), exclude, max, token)).map((u) => u.fsPath),
-    readStart: async (filePath, chars) => {
-      const bytes = await readFileStart(filePath, chars * 4);
-      return new TextDecoder('utf-8').decode(bytes).slice(0, chars);
-    },
+    root,
+    readDirectory: async (folder) =>
+      (await vscode.workspace.fs.readDirectory(vscode.Uri.file(folder)))
+        .map(([name, type]) => [name, (type & vscode.FileType.Directory) !== 0] as const),
+    readStart: (filePath, chars) => readTextStart(filePath, chars),
+    size: (filePath) => fileSize(filePath),
     cancelled: () => token?.isCancellationRequested === true,
   };
 }
@@ -231,8 +258,9 @@ export function vscodeDetectImportIo(root: string, token?: vscode.CancellationTo
 export async function vscodeFindFirstFile(root: string, semanticDir: string, glob: string, timeoutMs = DETECT_TIMEOUT_MS): Promise<string | undefined> {
   const source = new vscode.CancellationTokenSource();
   try {
-    const io = vscodeDetectImportIo(root, source.token);
-    const found = io.findFiles(glob, detectExcludeGlob(semanticDir), 1).then((files) => files[0]);
+    const found = Promise.resolve(vscode.workspace.findFiles(
+      new vscode.RelativePattern(vscode.Uri.file(root), glob), detectExcludeGlob(semanticDir), 1, source.token,
+    )).then((files) => files[0]?.fsPath);
     return await withTimeout(found, timeoutMs, undefined);
   } catch (err) {
     log.warn('[ERD Studio] Import: could not look for a file to suggest:', err);

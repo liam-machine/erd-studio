@@ -435,6 +435,10 @@ const FEATURES = [
   'suggestPromptNothingNewDiagram',
   'suggestPromptNothingGuide',
   'suggestPromptNothingOff',
+  'activatedDbt',
+  'activatedLogical',
+  'activatedNoFolder',
+  'dbtProjectUnused',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

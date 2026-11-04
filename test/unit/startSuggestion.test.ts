@@ -204,8 +204,9 @@ describe('what it rests on', () => {
   });
 
   const io = (files: Record<string, string>, more: Partial<DetectImportIo> = {}): DetectImportIo => ({
-    findFiles: async (glob, _exclude, max) => (glob === '**/*.sql' ? Object.keys(files).slice(0, max) : []),
-    readStart: async (file, chars) => files[file].slice(0, chars),
+    root: '/w',
+    readDirectory: async (folder) => (folder === '/w' ? Object.keys(files).map((f) => [f, false] as const) : []),
+    readStart: async (file, chars) => files[file.slice('/w/'.length)].slice(0, chars),
     ...more,
   });
 
@@ -217,8 +218,11 @@ describe('what it rests on', () => {
     // A file longer than the look reads: no number.
     const big = `CREATE TABLE a (id int);\n${' '.repeat(DETECT_SQL_CHARS)}`;
     expect((await detectImportFindings(io({ 'a.sql': big }), '.erd-studio', { countTables: true })).sqlTables).toBeUndefined();
-    // As many files as the look lists (maybe more exist): no number.
-    const many = Object.fromEntries(Array.from({ length: DETECT_SQL_FILES }, (_, i) => [`${i}.sql`, 'CREATE TABLE a (id int);']));
+    // As many files as the look reads, all of them: the number.
+    const all = Object.fromEntries(Array.from({ length: DETECT_SQL_FILES }, (_, i) => [`${i}.sql`, 'CREATE TABLE a (id int);']));
+    expect((await detectImportFindings(io(all), '.erd-studio', { countTables: true })).sqlTables).toBe(DETECT_SQL_FILES);
+    // More files than the look reads: no number.
+    const many = Object.fromEntries(Array.from({ length: DETECT_SQL_FILES + 1 }, (_, i) => [`${i}.sql`, 'CREATE TABLE a (id int);']));
     expect((await detectImportFindings(io(many), '.erd-studio', { countTables: true })).sqlTables).toBeUndefined();
   });
 

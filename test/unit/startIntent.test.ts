@@ -1,14 +1,14 @@
 /**
  * StartIntentTracker (src/commands/startIntent.ts): the host's suggestion for
  * the open folder — when it looks at the folder (only when the files can
- * decide, never twice within a minute, never again after running out of
- * time), that a look is bounded and cancelled, that concurrent asks share one
+ * decide, never twice within a minute, once more after running out of
+ * time, then not again), that a look is bounded and cancelled, that concurrent asks share one
  * look, that the context key is published only on a change, and that a
  * refresh asked for on activation's path is deferred.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { START_LOOK_FRESH_MS, START_LOOK_TIMEOUT_MS, StartIntentTracker, type StartIntentDeps } from '../../src/commands/startIntent';
+import { START_LOOK_ATTEMPTS, START_LOOK_FRESH_MS, START_LOOK_TIMEOUT_MS, StartIntentTracker, type StartIntentDeps } from '../../src/commands/startIntent';
 import { detectImportSources, type DetectImportIo } from '../../src/commands/importModel';
 import type { DetectedImportSource, StartContext } from '../../src/types/startActions';
 
@@ -82,19 +82,45 @@ describe('StartIntentTracker', () => {
     expect(published).toEqual(['importSemanticModel']);
   });
 
-  it('cancels a look that runs out of time, suggests a blank diagram, and does not look again this session', async () => {
+  it('cancels a look that runs out of time and suggests a blank diagram; tries once more (with twice the time) on the next refresh, then not again this session', async () => {
     vi.useFakeTimers();
-    let signal: AbortSignal | undefined;
-    const look = vi.fn((s: AbortSignal) => { signal = s; return new Promise<ReadonlySet<DetectedImportSource>>(() => {}); });
+    const signals: AbortSignal[] = [];
+    const look = vi.fn((s: AbortSignal) => { signals.push(s); return new Promise<ReadonlySet<DetectedImportSource>>(() => {}); });
     const { t, published, advance } = tracker({ look });
     const pending = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
     expect(await pending).toBe('blank');
-    expect(signal?.aborted).toBe(true);
+    expect(signals[0]?.aborted).toBe(true);
     expect(published).toEqual(['blank']);
+    // The retry: twice the time.
+    const retry = t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
+    expect(signals[1]?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
+    expect(await retry).toBe('blank');
+    expect(signals[1]?.aborted).toBe(true);
+    expect(look).toHaveBeenCalledTimes(START_LOOK_ATTEMPTS);
     advance(10 * START_LOOK_FRESH_MS);
     await t.refresh();
-    expect(look).toHaveBeenCalledTimes(1);
+    expect(look).toHaveBeenCalledTimes(START_LOOK_ATTEMPTS);
+  });
+
+  it('a retried look that answers counts', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const look = vi.fn(() => (++calls === 1 ? new Promise<ReadonlySet<DetectedImportSource>>(() => {}) : Promise.resolve(new Set<DetectedImportSource>(['sqlDdl']))));
+    const { t } = tracker({ look });
+    const first = t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
+    expect(await first).toBe('blank');
+    expect(await t.refresh()).toBe('importSqlDdl');
+  });
+
+  it('tells the host when the look saw a dbt_project.yml in a window without dbt (never in one with dbt)', async () => {
+    const onDbtProjectSeen = vi.fn();
+    const { t } = tracker({ look: vi.fn(async () => ({ sources: new Set<DetectedImportSource>(), dbtProject: true })), onDbtProjectSeen });
+    expect(await t.refresh()).toBe('blank');
+    expect(onDbtProjectSeen).toHaveBeenCalledTimes(1);
   });
 
   it('a look that fails counts as nothing found', async () => {
@@ -140,11 +166,19 @@ describe('the look is Import…\'s own detector, stopping when cancelled', () =>
     let cancelled = false;
     const readStart = vi.fn(async () => { cancelled = true; return 'select 1'; });
     const io: DetectImportIo = {
-      findFiles: async (include) => (include.includes('*.sql') ? ['a.sql', 'b.sql', 'c.sql'] : []),
+      root: '/w',
+      readDirectory: async (folder) => (folder === '/w' ? [['a.sql', false], ['b.sql', false], ['c.sql', false]] as const : []),
       readStart,
       cancelled: () => cancelled,
     };
     expect(await detectImportSources(io, '.erd-studio')).toEqual(new Set());
     expect(readStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists nothing once cancelled', async () => {
+    const readDirectory = vi.fn(async () => [['sub', true], ['a.sql', false]] as const);
+    const io: DetectImportIo = { root: '/w', readDirectory, readStart: vi.fn(async () => ''), cancelled: () => true };
+    expect(await detectImportSources(io, '.erd-studio')).toEqual(new Set());
+    expect(readDirectory).not.toHaveBeenCalled();
   });
 });

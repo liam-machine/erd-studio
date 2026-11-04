@@ -252,6 +252,56 @@ describe('Import SQL DDL… — the quick path', () => {
     expect((await findSqlDdlScripts(tmp, '.erd-studio', sql)).files).toEqual([]);
   });
 
+  it('takes exactly what the start screen\'s look offers: the same listing (hidden folders, .SQL, deeper than before) and the same test (never a dbt macro, a CTAS, a notebook or Oracle DDL)', async () => {
+    const write = (rel: string, text: string | Buffer): string => {
+      const file = path.join(tmp, rel);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+      return file;
+    };
+    const taken = [
+      write('.devcontainer/initdb/01_schema.sql', 'CREATE TABLE a (id int);\n'),
+      write('DDL/TABLES.SQL', 'CREATE TABLE b (id int);\n'),
+      write('a/b/c/d/e/f/g/h/i/j/k/l/m/tables.sql', 'CREATE TABLE c (id int);\n'),
+    ];
+    write('macros/m.sql', '{% macro m() %}create or replace table {{ relation }} as ({{ sql }});{% endmacro %}\n');
+    write('analyses/backfill.sql', 'create table tmp as (\n  select 1\n);\n');
+    write('src/nb.sql', '-- Databricks notebook source\nCREATE TABLE gold.x (id INT);\n');
+    write('oracle/hr.sql', 'CREATE TABLE HR.E (ID NUMBER(6), EMAIL VARCHAR2(25 BYTE));\n');
+    const found = await findSqlDdlScripts(tmp, '.erd-studio', sqlUi());
+    expect(found).toEqual({ files: [...taken].sort((x, y) => x.localeCompare(y, 'en', { numeric: true, sensitivity: 'base' })), truncated: false });
+  });
+
+  it('a folder of more .sql files than it opens: the names that usually hold tables are opened first, and what it found is taken', async () => {
+    for (let i = 0; i < 520; i++) {
+      const file = path.join(tmp, 'reports', `q${String(i).padStart(3, '0')}.sql`);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `select ${i};\n`);
+    }
+    const ddl = path.join(tmp, 'zz', 'schema', 'create_tables.sql');
+    fs.mkdirSync(path.dirname(ddl), { recursive: true });
+    fs.writeFileSync(ddl, 'CREATE TABLE a (id int);\n');
+    expect(await findSqlDdlScripts(tmp, '.erd-studio', sqlUi())).toEqual({ files: [ddl], truncated: true });
+  });
+
+  it('a migrations folder: the later scripts that only change columns are taken too (applied in order), a teardown of DROP TABLEs is not', async () => {
+    const dir = path.join(tmp, 'db', 'migration');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'V1__init.sql'), 'CREATE TABLE customer (id int PRIMARY KEY, email text);\n');
+    fs.writeFileSync(path.join(dir, 'V2__rename.sql'), 'ALTER TABLE customer RENAME COLUMN email TO email_address;\n');
+    fs.writeFileSync(path.join(dir, 'V10__add.sql'), 'ALTER TABLE customer ADD COLUMN phone text;\n');
+    fs.writeFileSync(path.join(tmp, 'teardown.sql'), 'DROP TABLE customer;\n');
+    const found = await findSqlDdlScripts(tmp, '.erd-studio', sqlUi());
+    expect(found.files.map((f) => path.basename(f))).toEqual(['V1__init.sql', 'V2__rename.sql', 'V10__add.sql']);
+  });
+
+  it('a file larger than the import reads is never taken', async () => {
+    const file = path.join(tmp, 'dump.sql');
+    fs.writeFileSync(file, 'CREATE TABLE a (id int);\n');
+    const sql = { ...sqlUi(), fileSize: async () => 300 * 1024 * 1024 };
+    expect((await findSqlDdlScripts(tmp, '.erd-studio', sql)).files).toEqual([]);
+  });
+
   it('Change Options…: the found scripts (all picked), the dialect it used first, then the layer and name it chose first', async () => {
     copy('sql-ddl/postgres', 'database');
     fs.writeFileSync(path.join(tmp, 'extra.sql'), 'CREATE TABLE extra (id INT PRIMARY KEY);\n');

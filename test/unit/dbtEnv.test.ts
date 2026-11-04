@@ -282,11 +282,20 @@ describe('findDbtProjectDir', () => {
     expect(findDbtProjectDir(path.join(tmp, 'mono'))).toBe(path.join(tmp, 'mono', 'b'));
   });
 
-  it('stops at depth 3 and returns null', () => {
-    write('mono/a/b/c/d/dbt_project.yml');
+  it('stops at depth 6 and returns null', () => {
+    write('mono/a/b/c/d/e/f/g/dbt_project.yml');
     expect(findDbtProjectDir(path.join(tmp, 'mono'))).toBeNull();
-    write('mono2/a/b/c/dbt_project.yml');
-    expect(findDbtProjectDir(path.join(tmp, 'mono2'))).toBe(path.join(tmp, 'mono2', 'a', 'b', 'c'));
+    write('mono2/a/b/c/d/e/f/dbt_project.yml');
+    expect(findDbtProjectDir(path.join(tmp, 'mono2'))).toBe(path.join(tmp, 'mono2', 'a', 'b', 'c', 'd', 'e', 'f'));
+  });
+
+  it('enters a hidden folder that is not a tool\'s (after the visible ones) and follows a symbolic link', () => {
+    write('h/.dbt-project/dbt_project.yml');
+    expect(findDbtProjectDir(path.join(tmp, 'h'))).toBe(path.join(tmp, 'h', '.dbt-project'));
+    write('real/transform/dbt_project.yml');
+    fs.mkdirSync(path.join(tmp, 'links'));
+    fs.symlinkSync(path.join(tmp, 'real', 'transform'), path.join(tmp, 'links', 'transform'));
+    expect(findDbtProjectDir(path.join(tmp, 'links'))).toBe(path.join(tmp, 'links', 'transform'));
   });
 });
 

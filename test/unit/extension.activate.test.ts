@@ -1914,6 +1914,60 @@ describe('Select dbt Project… (#82)', () => {
   });
 });
 
+describe('dbt discovery at activation (never missed silently)', () => {
+  const dbtAt = (rel: string): string => {
+    const dir = path.join(root, rel);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'dbt_project.yml'), "name: 'x'\nversion: '1.0.0'\nconfig-version: 2\nprofile: 'x'\n");
+    fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
+    return dir;
+  };
+  const hasDbtKey = (exec: ReturnType<typeof vi.spyOn>): unknown =>
+    exec.mock.calls.filter((c) => c[0] === 'setContext' && c[1] === 'erdStudio.hasDbtProject').at(-1)?.[2];
+
+  it('a dbt project\'s models/ opened on its own opens the project it sits in', async () => {
+    const project = dbtAt('repo/analytics');
+    openWorkspace(path.join(project, 'models'));
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    const feature = vi.spyOn(telemetry, 'feature');
+    await activate(context);
+    expect(hasDbtKey(exec)).toBe(true);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${project}`);
+    expect(feature.mock.calls.map((c) => c[0])).toContain('activatedDbt');
+  });
+
+  it('a project deeper than the walk goes is found by the host\'s own search (workspace.findFiles)', async () => {
+    const deep = dbtAt('a/b/c/d/e/f/g/transform');
+    openWorkspace(root);
+    vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((async (include: unknown) =>
+      (include === '**/dbt_project.yml' ? [vscode.Uri.file(path.join(deep, 'dbt_project.yml'))] : [])) as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    await activate(context);
+    expect(hasDbtKey(exec)).toBe(true);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${deep}`);
+  });
+
+  it('a dbt project the window does not use (erdStudio.projectPath names a plain folder) gets one log line and the dbtProjectUnused flag, no prompt', async () => {
+    const project = dbtAt('analytics');
+    const plain = path.join(root, 'design');
+    fs.mkdirSync(plain, { recursive: true });
+    openWorkspace(root);
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: plain });
+    const feature = vi.spyOn(telemetry, 'feature');
+    const once = vi.spyOn(telemetry, 'featureOnce');
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    clearLogBuffer();
+    await activate(context);
+    expect(feature.mock.calls.map((c) => c[0])).toContain('activatedLogical');
+    expect(once.mock.calls.map((c) => c[0])).toContain('dbtProjectUnused');
+    const lines = recentLogLines().filter((l) => l.includes('is not used by this window'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(project);
+    expect(lines[0]).toContain('erdStudio.projectPath');
+    expect(info.mock.calls.filter((c) => /dbt/.test(String(c[0])))).toEqual([]);
+  });
+});
+
 /** Dispose everything the last activate() registered, as a window reload would. */
 function tearDownActivation(): void {
   for (const sub of [...context.subscriptions].reverse()) { (sub as { dispose(): void }).dispose(); }
@@ -3088,6 +3142,9 @@ describe('the start suggestion (a folder with no diagram whose start is obvious)
       const ext = glob === '**/*.sql' ? '.sql' : glob === '**/*.dbml' ? '.dbml' : undefined;
       return Object.keys(files).filter((f) => ext !== undefined && f.endsWith(ext)).map((f) => vscode.Uri.file(path.join(ws, f)));
     }) as never);
+    // The look lists the folder itself (workspace.fs.readDirectory): the real one.
+    vi.spyOn(vscode.workspace.fs, 'readDirectory').mockImplementation((async (uri: { fsPath: string }) =>
+      fs.readdirSync(uri.fsPath, { withFileTypes: true }).map((e) => [e.name, e.isDirectory() ? vscode.FileType.Directory : vscode.FileType.File])) as never);
   }
 
   /** Activation, then past the deferred look and the notification's answer (the look reads real files: real time). */
@@ -3113,13 +3170,13 @@ describe('the start suggestion (a folder with no diagram whose start is obvious)
     info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async () => answer) as never);
   });
 
-  it('activates on the sources it can start from: dbt, the ERD Studio folder, .sql, .dbml and a semantic model\'s files', () => {
+  it('activates on the sources it can start from: dbt, the ERD Studio folder, .sql, .dbml and a semantic model\'s files (extensions in any letter case)', () => {
     expect((packageJson as unknown as { activationEvents: string[] }).activationEvents).toEqual([
       'workspaceContains:**/dbt_project.yml',
       'workspaceContains:.erd-studio',
-      'workspaceContains:**/*.sql',
-      'workspaceContains:**/*.dbml',
-      'workspaceContains:**/*.bim',
+      'workspaceContains:**/*.[sS][qQ][lL]',
+      'workspaceContains:**/*.[dD][bB][mM][lL]',
+      'workspaceContains:**/*.[bB][iI][mM]',
       'workspaceContains:**/definition.pbism',
       'workspaceContains:**/model.tmdl',
       'workspaceContains:**/database.tmdl',
@@ -3287,6 +3344,9 @@ describe('the import guide and the nothing-found notification', () => {
       const ext = glob === '**/*.sql' ? '.sql' : glob === '**/*.dbml' ? '.dbml' : undefined;
       return Object.keys(files).filter((f) => ext !== undefined && f.endsWith(ext)).map((f) => vscode.Uri.file(path.join(ws, f)));
     }) as never);
+    // The look lists the folder itself (workspace.fs.readDirectory): the real one.
+    vi.spyOn(vscode.workspace.fs, 'readDirectory').mockImplementation((async (uri: { fsPath: string }) =>
+      fs.readdirSync(uri.fsPath, { withFileTypes: true }).map((e) => [e.name, e.isDirectory() ? vscode.FileType.Directory : vscode.FileType.File])) as never);
     return ws;
   }
   const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
@@ -3321,7 +3381,8 @@ describe('the import guide and the nothing-found notification', () => {
     await vscode.commands.executeCommand('erdStudio.showImportGuide');
     expect(guidePanels()).toHaveLength(1);
     expect(guidePanels()[0].webview.html).toContain('Open the folder you keep your data model in first');
-    expect(feature.mock.calls.map((c) => c[0])).toEqual(['importGuideOpened', 'importGuideFromWalkthrough', 'importGuideOpened']);
+    // Activation's own key (each window's outcome) first.
+    expect(feature.mock.calls.map((c) => c[0])).toEqual(['activatedNoFolder', 'importGuideOpened', 'importGuideFromWalkthrough', 'importGuideOpened']);
     guidePanels()[0].dispose();
   });
 

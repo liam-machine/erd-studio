@@ -20,6 +20,7 @@ import {
   MAX_SQL_FILES,
   SQL_DIALECT_FEATURES,
   TRY_ANOTHER_DIALECT_BUTTON,
+  MAX_SQL_CHARS,
   gatherSqlFiles,
   importSqlDdl,
   type ImportSqlDdlDeps,
@@ -35,6 +36,7 @@ import { sqlDialectOfImportArg, type SqlDialect } from '../../src/services/sqlDd
 import * as engine from '../../src/services/sqlImportEngine';
 import { telemetry } from '../../src/services/telemetryService';
 import packageJson from '../../package.json';
+import { decodeText } from '../../src/services/readFileStart';
 
 const FIXTURES = path.join(__dirname, '../fixtures/sql-ddl');
 
@@ -314,6 +316,38 @@ describe('gatherSqlFiles', () => {
     const read = await gatherSqlFiles({ folder: root }, ui);
     expect(read).toMatchObject({ error: true });
     expect('message' in read && read.message).toContain(`more than ${MAX_SQL_FILES} .sql files`);
+  });
+
+  it('a dump\'s data does not count toward the SQL limit, nor is it read: a 25 MB pg_dump with COPY rows imports', async () => {
+    const file = path.join(tmp, 'prod.sql');
+    const row = '1\tuser@example.com\t2026-01-01 00:00:00+00\n';
+    const head = 'CREATE TABLE public.customer (\n  customer_id integer NOT NULL,\n  email text\n);\nCOPY public.customer (customer_id, email, created_at) FROM stdin;\n';
+    fs.writeFileSync(file, head + row.repeat(Math.ceil((25 * 1024 * 1024) / row.length)) + '\\.\n\nALTER TABLE ONLY public.customer ADD CONSTRAINT customer_pkey PRIMARY KEY (customer_id);\n');
+    const read = await gatherSqlFiles({ files: [file] }, ui);
+    if ('message' in read) throw new Error(read.message);
+    expect(read.files[0].text.length).toBeLessThan(MAX_SQL_CHARS);
+    expect(read.files[0].text).toContain('ADD CONSTRAINT customer_pkey');
+    expect(read.files[0].text).not.toContain('user@example.com');
+  });
+
+  it('a file larger than it reads at all is refused before reading, with how to export the schema alone', async () => {
+    const file = path.join(tmp, 'huge.sql');
+    fs.writeFileSync(file, 'CREATE TABLE a (id int);');
+    const read = await gatherSqlFiles({ files: [file] }, { ...ui, fileSize: async () => 300 * 1024 * 1024, readFile: async () => { throw new Error('never read'); } });
+    expect(read).toMatchObject({ error: true, message: expect.stringContaining('huge.sql is larger than 200 MB') });
+    expect('message' in read && read.message).toContain('pg_dump --schema-only');
+  });
+
+  it('reads a UTF-16 script (SQL Server Management Studio\'s Generate Scripts) by its byte order mark, little or big endian', () => {
+    const sql = 'CREATE TABLE [dbo].[Customer](\r\n\t[Id] [int] NOT NULL\r\n)\r\nGO\r\n';
+    const le = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(sql, 'utf16le')]);
+    const be = Buffer.from(le.subarray(2)).swap16();
+    expect(decodeText(le)).toBe(sql);
+    expect(decodeText(Buffer.concat([Buffer.from([0xfe, 0xff]), be]))).toBe(sql);
+    // No mark, but every other byte zero: UTF-16 all the same.
+    expect(decodeText(Buffer.from(sql, 'utf16le'))).toBe(sql);
+    expect(decodeText(Buffer.from(`\ufeff${sql}`, 'utf8'))).toBe(sql);
+    expect(decodeText(Buffer.from('CREATE TABLE café (id int);', 'utf8'))).toBe('CREATE TABLE café (id int);');
   });
 
   it('a file it cannot read is named', async () => {
