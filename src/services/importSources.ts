@@ -11,6 +11,9 @@
  */
 
 import type { DetectedImportSource } from '../types/startActions';
+import { ERD_STUDIO_DBML_HEADER_PREFIX } from '@erd-studio/core';
+
+import { countCreateTablesWithColumns, looksLikeOracleSql } from './sqlDdlImport';
 
 /**
  * The sources Import… offers, in the order shown when the folder suggests none.
@@ -34,12 +37,14 @@ export function orderImportSources(found: ReadonlySet<ImportModelSource>): Impor
   ];
 }
 
-/** SQL text that declares a table with a column list (CREATE [OR REPLACE] [TEMP…] TABLE x (…)), comments ignored. */
-const CREATE_TABLE = /\bcreate\s+(?:or\s+replace\s+)?(?:(?:global|local)\s+)?(?:(?:temp|temporary|transient|external|unlogged)\s+)?table\s+(?:if\s+not\s+exists\s+)?[^;(]{1,300}\(/i;
-
-/** Whether a `.sql` file's text holds a CREATE TABLE with columns (a dbt model's SELECT does not). */
+/**
+ * Whether a `.sql` file's text holds a CREATE TABLE with a column list, by
+ * the converter's own reading (`countCreateTablesWithColumns`): a dbt
+ * model's SELECT, a CTAS (`CREATE TABLE x AS SELECT …`) or a dbt macro
+ * (`create table {{ relation }} as (…)`) does not.
+ */
 export function looksLikeSqlDdl(text: string): boolean {
-  return CREATE_TABLE.test(withoutSqlComments(text));
+  return countSqlCreateTables(text) > 0;
 }
 
 /** ALTER TABLE … that adds a key (FOREIGN KEY, PRIMARY KEY, REFERENCES): a pg_dump-style constraints file beside the tables. */
@@ -52,17 +57,72 @@ export function looksLikeSqlKeys(text: string): boolean {
 
 /** How many CREATE TABLEs with a column list a `.sql` file's text holds, comments ignored (the start suggestion's count). */
 export function countSqlCreateTables(text: string): number {
-  return [...withoutSqlComments(text).matchAll(new RegExp(CREATE_TABLE.source, 'gi'))].length;
+  return countCreateTablesWithColumns(text);
 }
 
 function withoutSqlComments(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
 }
 
-/** Folders a walk never enters: tools' and VCS's own, a dbt project's build output. */
+/** A Databricks notebook saved as `.sql` (its first line). */
+const DATABRICKS_NOTEBOOK = /^\s*--\s*Databricks notebook source/;
+
+/**
+ * Whether a `.sql` file is one no folder look offers, whatever it holds: a
+ * dbt macro (under `macros/`: Jinja, not DDL), a Databricks notebook, or
+ * Oracle DDL (Import SQL DDL… reads none of them). Pick such a file in
+ * Import SQL DDL… to read it anyway.
+ */
+export function isUnofferedSqlFile(filePath: string, text: string): boolean {
+  return /(^|[\\/])macros[\\/]/i.test(filePath) || DATABRICKS_NOTEBOOK.test(text) || looksLikeOracleSql(text);
+}
+
+/**
+ * The CREATE TABLEs with a column list that a folder look counts in a `.sql`
+ * file (0 for a file it does not offer, {@link isUnofferedSqlFile}). The
+ * start screen's look and the quick import share it, so whatever one offers
+ * the other takes.
+ */
+export function sqlScriptTableCount(filePath: string, text: string): number {
+  return isUnofferedSqlFile(filePath, text) ? 0 : countSqlCreateTables(text);
+}
+
+/**
+ * ALTER TABLE … that changes columns or the table's name (ADD / DROP / RENAME
+ * COLUMN, ALTER / MODIFY / CHANGE a column, RENAME TO), or SQL Server's
+ * `sp_rename`: a later migration of the same tables.
+ */
+const ALTER_TABLE_CHANGE = /\balter\s+table\b[^;]{0,600}?\b(?:add|drop|rename|alter|modify|change)\b|\bsp_rename\b|\brename\s+table\b/i;
+
+/** Whether a `.sql` file's text changes tables' columns or names (comments ignored): a migration the quick import applies in order. */
+export function looksLikeSqlSchemaChange(text: string): boolean {
+  return ALTER_TABLE_CHANGE.test(withoutSqlComments(text));
+}
+
+/**
+ * Whether the quick import takes a `.sql` file: CREATE TABLEs, keys added to
+ * tables, or later changes to their columns (a migrations folder imports as
+ * its final schema). A file of DROP TABLEs alone (a teardown script) is not
+ * taken.
+ */
+export function isSqlScriptTaken(filePath: string, text: string): boolean {
+  return !isUnofferedSqlFile(filePath, text) && (countSqlCreateTables(text) > 0 || looksLikeSqlKeys(text) || looksLikeSqlSchemaChange(text));
+}
+
+/**
+ * Folders a walk never enters: tools' and VCS's own, dependencies, a dbt
+ * project's build output and Power BI's local cache. Any other hidden folder
+ * is entered (a `.devcontainer/initdb/` of CREATE TABLE scripts counts).
+ */
 export const IGNORED_IMPORT_FOLDERS: ReadonlySet<string> = new Set([
-  'node_modules', '.git', '.hg', '.svn', '.venv', 'venv', '__pycache__', 'target', 'dbt_packages', '.pbi',
+  'node_modules', 'bower_components', '.git', '.hg', '.svn', '.venv', 'venv', '__pycache__', 'target', 'dbt_packages',
+  'dbt_modules', 'site-packages', '.pbi', '.tox', '.nox', '.cache', '.idea', '.vscode', '.vscode-test', '.terraform',
+  '.mypy_cache', '.pytest_cache', '.ruff_cache', '.next', '.nuxt', '.yarn', '.pnpm-store', '.gradle', '.npm',
+  '.direnv', '.eggs', '.ipynb_checkpoints', '.history', '.Trash',
 ]);
+
+/** How deep a walk goes below the folder it starts in. */
+export const IMPORT_WALK_MAX_DEPTH = 16;
 
 /** One directory's entries: a name and whether it is a folder. */
 export type DirEntries = ReadonlyArray<readonly [name: string, isDirectory: boolean]>;
@@ -75,48 +135,153 @@ export interface WalkResult {
 }
 
 /**
- * Every file under `root` that `include` accepts, depth first, skipping
- * {@link IGNORED_IMPORT_FOLDERS} and dot-folders (apart from `root` itself),
- * at most `limit` of them (`truncated` says there were more) and at most
- * `maxDepth` folders deep. `readDir` lists one folder; a folder that cannot
- * be listed is skipped. Sorted with numbers in order (`2_x` before `10_x`).
+ * Every file under `root` that `include` accepts, breadth first (so a bound
+ * keeps the shallowest), skipping {@link IGNORED_IMPORT_FOLDERS} and any
+ * folder `skipFolder` names, at most `limit` of them (`truncated` says there
+ * were more) and at most `maxDepth` folders deep
+ * ({@link IMPORT_WALK_MAX_DEPTH}). `readDir` lists one folder (a symbolic
+ * link to a folder counts as a folder); a folder that cannot be listed is
+ * skipped; `cancelled` stops the walk (what was found so far is returned).
+ * Sorted with numbers in order (`2_x` before `10_x`).
  */
 export async function walkFiles(
   root: string,
   readDir: (folder: string) => Promise<DirEntries>,
-  options: { include: (name: string) => boolean; limit: number; maxDepth?: number },
+  options: {
+    include: (name: string) => boolean;
+    limit: number;
+    maxDepth?: number;
+    skipFolder?: (folderPath: string) => boolean;
+    cancelled?: () => boolean;
+  },
 ): Promise<WalkResult> {
-  const maxDepth = options.maxDepth ?? 12;
+  const maxDepth = options.maxDepth ?? IMPORT_WALK_MAX_DEPTH;
   const files: string[] = [];
   let truncated = false;
   const join = (a: string, b: string): string => (a.endsWith('/') || a.endsWith('\\') ? `${a}${b}` : `${a}/${b}`);
-  const visit = async (folder: string, depth: number): Promise<void> => {
-    if (truncated) return;
-    let entries: DirEntries;
-    try {
-      entries = await readDir(folder);
-    } catch {
-      return;
-    }
-    const sorted = [...entries].sort((a, b) => compareNames(a[0], b[0]));
-    for (const [name, isDirectory] of sorted) {
-      if (truncated) return;
-      if (isDirectory) {
-        if (depth >= maxDepth || IGNORED_IMPORT_FOLDERS.has(name) || name.startsWith('.')) continue;
-        await visit(join(folder, name), depth + 1);
-      } else if (options.include(name)) {
-        if (files.length >= options.limit) { truncated = true; return; }
-        files.push(join(folder, name));
+  let level = [root];
+  for (let depth = 0; level.length > 0 && !truncated; depth++) {
+    const next: string[] = [];
+    for (const folder of level) {
+      if (truncated || options.cancelled?.()) return { files: files.sort(compareNames), truncated };
+      let entries: DirEntries;
+      try {
+        entries = await readDir(folder);
+      } catch {
+        continue;
+      }
+      const sorted = [...entries].sort((a, b) => compareNames(a[0], b[0]));
+      for (const [name, isDirectory] of sorted) {
+        if (isDirectory) {
+          if (depth >= maxDepth || IGNORED_IMPORT_FOLDERS.has(name)) continue;
+          const child = join(folder, name);
+          if (options.skipFolder?.(child)) continue;
+          next.push(child);
+        } else if (options.include(name)) {
+          if (files.length >= options.limit) { truncated = true; break; }
+          files.push(join(folder, name));
+        }
       }
     }
-  };
-  await visit(root, 0);
+    level = next;
+  }
   return { files: files.sort(compareNames), truncated };
 }
 
+/**
+ * The largest `.sql` file the import reads (bytes): bigger is a dump with its
+ * data, or more than a model. The looks never offer one, and Import SQL DDL…
+ * says so when one is picked. A dump's data (pg_dump's COPY blocks, INSERT
+ * statements) does not count toward the import's own SQL limit, so a dump
+ * under this size with its data still imports.
+ */
+export const MAX_SQL_FILE_BYTES = 200 * 1024 * 1024;
+
+/** Whether a `.dbml` file's text is ERD Studio's own export (its first non-blank line is the export header). */
+export function isOwnDbmlExport(text: string): boolean {
+  const first = text.replace(/^\ufeff/, '').split(/\r?\n/).find((l) => l.trim() !== '');
+  return first?.trim().startsWith(ERD_STUDIO_DBML_HEADER_PREFIX) === true;
+}
+
+/** How many file names one listing of the open folder holds at most (names only; nothing is read). */
+export const IMPORT_LIST_LIMIT = 5000;
+
+/** A file every semantic model Import Semantic Model… can read holds (`findSemanticModels`). */
+export function isSemanticModelMarker(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.bim') || lower === 'definition.pbism' || lower === 'model.tmdl' || lower === 'database.tmdl';
+}
+
+/** What one listing of the open folder found, by kind (paths joined with `/` under the root, sorted). */
+export interface ImportListing {
+  sql: string[];
+  dbml: string[];
+  semanticModel: string[];
+  /** A `dbt_project.yml` is in the folder. */
+  dbtProject: boolean;
+  /** More files than {@link IMPORT_LIST_LIMIT}: the listing holds the shallowest. */
+  truncated: boolean;
+}
+
+/**
+ * The one listing of the open folder that the start screen's look and the
+ * quick imports share: `.sql` and `.dbml` files (any letter case), semantic
+ * model files and `dbt_project.yml`, by {@link walkFiles}' rules, never
+ * inside the ERD Studio folder (`semanticDir`, or the legacy `erd-studio/`).
+ */
+export async function listImportFiles(
+  root: string,
+  readDir: (folder: string) => Promise<DirEntries>,
+  options: { semanticDir: string; cancelled?: () => boolean; limit?: number },
+): Promise<ImportListing> {
+  const own = new Set([options.semanticDir.replace(/[\\/]+$/, ''), 'erd-studio'].map((d) => normaliseSlashes(`${root}/${d}`)));
+  const walk = await walkFiles(root, readDir, {
+    include: (name) => /\.(sql|dbml)$/i.test(name) || isSemanticModelMarker(name) || name === 'dbt_project.yml',
+    limit: options.limit ?? IMPORT_LIST_LIMIT,
+    skipFolder: (folder) => own.has(normaliseSlashes(folder)),
+    cancelled: options.cancelled,
+  });
+  const base = (p: string): string => p.slice(Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) + 1);
+  return {
+    sql: walk.files.filter((f) => /\.sql$/i.test(f)),
+    dbml: walk.files.filter((f) => /\.dbml$/i.test(f)),
+    semanticModel: walk.files.filter((f) => isSemanticModelMarker(base(f))),
+    dbtProject: walk.files.some((f) => base(f) === 'dbt_project.yml'),
+    truncated: walk.truncated,
+  };
+}
+
+function normaliseSlashes(p: string): string {
+  return p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+}
+
+/** File and folder names that usually hold table definitions (`ddl/`, `schema.sql`, `V1__init.sql`, `migrations/`). */
+const DDL_LIKE_NAME = /(^|[\\/_.-])(ddl|schemas?|tables?|create|create_tables|structure|init|initdb|migrations?|changelog|dump)([\\/_.-]|$)|(^|[\\/])V\d+(?:_\d+)*__/i;
+
+/**
+ * `.sql` files in the order the looks read them: names that usually hold
+ * table definitions first ({@link DDL_LIKE_NAME}), each group in its listed
+ * order. A look reads the start of only the first few, so a folder of
+ * hundreds of queries does not hide its one `schema/tables.sql`.
+ */
+export function rankSqlFiles(files: readonly string[], root = ''): string[] {
+  const likely: string[] = [];
+  const rest: string[] = [];
+  const prefix = root.replace(/[\\/]+$/, '');
+  for (const file of files) {
+    // Only the part under the open folder: the folder's own path says nothing.
+    const rel = prefix && file.startsWith(prefix) ? file.slice(prefix.length) : file;
+    (DDL_LIKE_NAME.test(rel) ? likely : rest).push(file);
+  }
+  return [...likely, ...rest];
+}
+
+/** One collator for every comparison: `localeCompare` with options builds a new one per call, too slow for a folder of 100,000 files. */
+const NAME_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+
 /** Names compared as people read them: case-insensitive, numbers by value. */
 export function compareNames(a: string, b: string): number {
-  return a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' }) || (a < b ? -1 : a > b ? 1 : 0);
+  return NAME_COLLATOR.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0);
 }
 
 /** A problem a conversion found in the user's files. */

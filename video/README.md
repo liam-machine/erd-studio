@@ -112,7 +112,7 @@ To check a new word, run `from kokoro_onnx.tokenizer import Tokenizer` and `Toke
 - **Ceiling: 8 MB** (8 MiB) for the mp4, and 65 s for the timeline. `encode.sh` tries CRF 20, then 22, 24 and 26, and fails if the file is still over. The GOP is 150 frames (5 s). The content is mostly static UI, and the longer GOP roughly halves the size at the same CRF compared with 2 s keyframes. The current render is about 4.4 MiB (4.64 MB, 60.2 s) at CRF 20, well under the ceiling.
 - `encode.sh` asserts: `h264` / `High` / `yuv420p`, `mp3` / 44100 / mono, size ≤ 8 MB, duration within 0.25 s of the timeline, the moov atom before mdat, and a 1280×720 JPEG poster.
 - `test/unit/gettingStartedMedia.test.ts` (root vitest) re-checks the shipped files: the two cuts' videos and posters in `media/onboarding/`, ≤ 8 MB, cues ending by 65 s, faststart, an MP3 track (esds object type 0x6B, not AAC), a JPEG poster, and well-formed cues.
-- The poster is the end card 1.5 s in, once every element has landed.
+- The poster is the opening (hook) scene's last frame, once every element has landed: never the end card, whose "Install ERD Studio" chip reads wrong in an editor that already has it.
 
 ## README thumbnail
 

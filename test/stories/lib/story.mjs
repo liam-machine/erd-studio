@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { Webview, Workbench, sleep } from './act.mjs';
+import { Noise } from './noise.mjs';
 import { VSCodeUI, sel } from './vscode.mjs';
 
 const REQUIRED = ['id', 'title', 'persona', 'want', 'soThat', 'steps'];
@@ -33,7 +34,7 @@ export function story(def) {
   for (const k of REQUIRED) if (!def[k]) throw new Error(`story ${def.id ?? '(no id)'}: "${k}" is required`);
   if (!/^[a-z0-9][a-z0-9-]*$/.test(def.id)) throw new Error(`story id "${def.id}": lower-case letters, digits and dashes only`);
   if (typeof def.steps !== 'function') throw new Error(`story ${def.id}: steps must be an async function (s) => { … }`);
-  return { workspace: 'empty', settings: {}, ...def };
+  return { workspace: 'empty', settings: {}, realistic: false, ...def };
 }
 
 /** Raised by a failing step; carries the step's name. */
@@ -71,7 +72,9 @@ export const PACES = {
  *   s.pause(ms)                  a beat for the viewer (scaled by the run mode)
  */
 export class StoryContext {
-  constructor({ def, port, home, workspace, marks, pace, log, outDir }) {
+  constructor({ def, port, home, workspace, marks, pace, log, outDir, ud }) {
+    /** The window's --user-data-dir (its logs: `erdLog()`). */
+    this.ud = ud;
     this.def = def;
     this.port = port;
     this.home = home;
@@ -82,6 +85,8 @@ export class StoryContext {
     this.outDir = outDir;
     this.wb = new Workbench({ port, pace, log, home });
     this.ui = new VSCodeUI(this.wb);
+    /** Interruptions since ERD Studio was installed (a realistic story: `installErdStudio()` starts it). */
+    this.noise = new Noise({ wb: this.wb, log });
     this.sel = sel;
     this.assert = assert;
     /** `[{ name, status: 'passed'|'failed', ms, error? }]` */
@@ -121,8 +126,78 @@ export class StoryContext {
     }
   }
 
+  /**
+   * A realistic story's install, as from the Marketplace: Extensions: Install
+   * from VSIX… in the Command Palette, the VSIX the runner put in
+   * ~/Downloads, Install. Starts the interruption clock as Install is pressed
+   * (VS Code's "Completed installing" notice is the install's own answer) and
+   * resolves once ERD Studio's icon is in the activity bar.
+   */
+  async installErdStudio() {
+    if (!this.def.realistic) throw new Error('installErdStudio() is for realistic stories (realistic: true)');
+    await this.ui.runCommand('Extensions: Install from VSIX', 'Extensions: Install from VSIX');
+    const dialog = await this.ui.waitForQuickPick({ title: 'Install from VSIX' });
+    const want = path.join(this.home, 'Downloads/erd-studio.vsix');
+    if (dialog.value === `${this.home}/`) await this.ui.appendQuickInput('Downloads/erd-studio.vsix');
+    else await this.ui.setQuickInput(want);
+    await this.wb.waitFor(`${sel.quickInputBox}?.value === ${JSON.stringify(want)}`, { what: 'the VSIX in the file dialog' });
+    await this.pause(600);
+    this.noise.expect(/^Completed installing/, { kind: 'notification', within: 60000, why: 'the install' });
+    await this.noise.start();
+    await this.ui.quickInputButton('Install');
+    await this.wb.waitFor(sel.activity('ERD Studio'), { timeout: 60000, what: 'the ERD Studio icon in the activity bar (installed)' });
+  }
+
+  /**
+   * Run `fn` (the story's actions), asserting it took exactly one click: "the
+   * draft (or the right next step) is reachable in one click".
+   */
+  async oneClick(fn) {
+    const before = this.wb.clicks;
+    const out = await fn();
+    const clicks = this.wb.clicks - before;
+    this.expect(clicks === 1, `it should take one click, but took ${clicks}`);
+    return out;
+  }
+
+  /**
+   * The first minute after the install, watched to its end: at most `max`
+   * (default 1) interruptions nobody asked for from ERD Studio (its own, and
+   * VS Code's on its behalf). VS Code's own unasked ones are logged, and
+   * returned, but do not fail the story. Resolves `{ erd, vscode }`.
+   */
+  async expectQuietFirstMinute({ max = 1 } = {}) {
+    await this.noise.until(60000);
+    this.noise.stop();
+    const erd = this.noise.unasked({ origin: 'erd' });
+    const vscode = this.noise.unasked({ origin: 'vscode' });
+    this.log(`NOISE: first minute: ${erd.length} from ERD Studio (${Noise.describe(erd)}); VS Code's own: ${Noise.describe(vscode)}`);
+    this.expect(erd.length <= max, `ERD Studio interrupted ${erd.length} times in its first minute (at most ${max}): ${Noise.describe(erd)}`);
+    return { erd, vscode };
+  }
+
   path(...parts) {
     return path.join(this.workspace ?? this.home, ...parts);
+  }
+
+  /**
+   * The ERD Studio output channel's text so far (a LogOutputChannel, which VS
+   * Code writes under the profile's logs/ folder), or '' before it exists.
+   */
+  erdLog() {
+    if (!this.ud) return '';
+    const found = [];
+    const walk = (dir) => {
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name === 'ERD Studio.log' || /^\d+-ERD Studio\.log$/.test(e.name)) found.push(full);
+      }
+    };
+    walk(path.join(this.ud, 'logs'));
+    return found.map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
   }
 
   async webview(opts) {

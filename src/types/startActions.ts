@@ -12,6 +12,8 @@
  * came from (the onboarding funnel) and then runs the real command.
  */
 
+import type { DraftTrigger } from './draft';
+
 /**
  * Every start, in the order the Welcome panel renders its buttons (the page
  * reorders them by {@link startActionsFor}). The three `import*` starts go
@@ -44,15 +46,62 @@ export const START_ACTION_COMMANDS: Readonly<Record<StartAction, string>> = {
 };
 
 /**
+ * One label per action, on every surface (the walkthrough, the empty
+ * Diagrams view, the start quick pick, a draft's buttons, the Welcome tab,
+ * `package.json`'s command titles): `docs/dev/onboarding-and-cli.md` →
+ * "One label per action" lists them, and `test/unit/startActions.test.ts`
+ * holds every surface to them. A walkthrough step's title is its action's
+ * label without the ellipsis.
+ */
+export const START_ACTION_LABELS: Readonly<Record<StartAction, string>> = {
+  convert: 'Convert to DBML…',
+  drawFromDbt: 'Draw from dbt',
+  importSemanticModel: 'Import your Power BI semantic model',
+  importSqlDdl: 'Import your SQL scripts',
+  importDbmlFile: 'Import your DBML file',
+  blank: 'New Diagram…',
+  import: 'Import…',
+  example: 'Open an Example…',
+};
+
+/** The import guide (`erdStudio.showImportGuide`): its command title, its tab and every link to it. */
+export const IMPORT_GUIDE_LABEL = 'Bring In Your Data Model…';
+/** The one link under a start surface's button: the other starts, in a quick pick (`erdStudio.start` with `{ from }` alone). */
+export const MORE_STARTS_LABEL = 'More ways to start…';
+/** The start quick pick's title (the same words as the link that opens it). */
+export const START_PICK_TITLE = 'More ways to start';
+export const START_PICK_PLACEHOLDER = 'Choose how to start your data model';
+/** The one name of the getting-started video, `erdStudio.showGettingStarted`'s title. */
+export const TOUR_LABEL = 'Watch the One-Minute Tour';
+/** Opening a folder, wherever ERD Studio offers it (VS Code's own command). */
+export const OPEN_FOLDER_LABEL = 'Open Folder…';
+
+/** A label as a walkthrough step's title: without its ellipsis. */
+export function stepTitleOf(label: string): string {
+  return label.replace(/…$/, '');
+}
+
+/**
+ * What opened a start's draft (`DraftTrigger`, `src/types/draft.ts`), as a
+ * command argument may carry it: a start surface or the start quick pick
+ * (`start`), the start suggestion's Show Me (`prompt`). The automatic draft
+ * (`sidebar`) is started by the host itself, never through an argument.
+ */
+export type StartDraftTrigger = Extract<DraftTrigger, 'start' | 'prompt'>;
+const START_DRAFT_TRIGGERS: readonly StartDraftTrigger[] = ['start', 'prompt'];
+
+/**
  * The argument a direct import gets from a start surface, the start
  * suggestion or the start quick pick: its **quick path** — every answer with
  * an obvious default is chosen (the files the folder holds, the dialect, the
- * layer, the name), and the dry run is the one question, with Change
- * Options… for the step-by-step flow. The palette and Import…'s picker run
- * the commands without it: step by step.
+ * layer, the name) — ending in the draft preview (Draft-first: nothing is
+ * written until Keep), with Change options… for the step-by-step flow.
+ * `draft` says what opened it (default `start`). The palette and Import…'s
+ * picker run the commands without it: step by step, ending in a draft too.
  */
 export interface QuickImportArg {
   quick: true;
+  draft?: StartDraftTrigger;
 }
 export const QUICK_IMPORT_ARG: QuickImportArg = { quick: true };
 
@@ -61,12 +110,29 @@ export function isQuickImportArg(arg: unknown): arg is QuickImportArg {
   return typeof arg === 'object' && arg !== null && !Array.isArray(arg) && (arg as { quick?: unknown }).quick === true;
 }
 
+/**
+ * The draft trigger a command's argument names (`{ draft: 'start' }`,
+ * `{ quick: true, draft: 'prompt' }`), or undefined for anything else (the
+ * palette, a file URI, a stray value).
+ */
+export function startDraftTriggerOf(arg: unknown): StartDraftTrigger | undefined {
+  if (typeof arg !== 'object' || arg === null || Array.isArray(arg)) return undefined;
+  const draft = (arg as { draft?: unknown }).draft;
+  return (START_DRAFT_TRIGGERS as readonly unknown[]).includes(draft) ? draft as StartDraftTrigger : undefined;
+}
+
 /** The starts whose command takes {@link QUICK_IMPORT_ARG}: the three direct imports. */
 const QUICK_STARTS: ReadonlySet<StartAction> = new Set<StartAction>(['importSemanticModel', 'importSqlDdl', 'importDbmlFile']);
 
-/** The arguments {@link START_ACTION_COMMANDS}[action] runs with from a start: the quick path for a direct import, else none. */
-export function startActionArgs(action: StartAction): unknown[] {
-  return QUICK_STARTS.has(action) ? [QUICK_IMPORT_ARG] : [];
+/**
+ * The arguments {@link START_ACTION_COMMANDS}[action] runs with from a start:
+ * a direct import's quick path, and for it and Draw from dbt the draft's
+ * trigger (`start` by default, `prompt` for Show Me); none for the others.
+ */
+export function startActionArgs(action: StartAction, trigger: StartDraftTrigger = 'start'): unknown[] {
+  if (QUICK_STARTS.has(action)) return [{ ...QUICK_IMPORT_ARG, draft: trigger }];
+  if (action === 'drawFromDbt') return [{ draft: trigger }];
+  return [];
 }
 
 /**
@@ -162,6 +228,17 @@ export function startActionsForIntent(intent: StartIntent | undefined, hasDbt = 
 }
 
 /**
+ * What the {@link MORE_STARTS_LABEL} link offers: in a folder, every start but
+ * the surface's button (the suggestion); in an empty window, whose button is
+ * Open Folder…, every start there is (the example). The quick pick adds the
+ * import guide last.
+ */
+export function moreStartsFor(ctx: StartContext): StartAction[] {
+  const all = startActionsFor(ctx);
+  return ctx.hasProject ? all.slice(1) : all;
+}
+
+/**
  * The starts to offer, primary first: {@link INTENT_STARTS} of the folder's
  * {@link startIntentFor}. An empty window offers only the example (it opens in
  * a folder of its own; everything else needs a folder first).
@@ -199,65 +276,40 @@ export function parseStartArgs(arg: unknown): StartArgs | undefined {
   return { action: action as StartAction, from: from as StartSurface };
 }
 
+/**
+ * The surface a {@link MORE_STARTS_LABEL} link came from (`{ from }` with no
+ * action), or undefined for anything else: the quick pick it opens counts
+ * the start picked as that surface's (`START_FEATURES[from][action]`).
+ */
+export function parseStartPickArgs(arg: unknown): Exclude<StartSurface, 'welcome'> | undefined {
+  if (typeof arg !== 'object' || arg === null || Array.isArray(arg)) return undefined;
+  const { action, from } = arg as Record<string, unknown>;
+  if (action !== undefined) return undefined;
+  return from === 'walkthrough' || from === 'sidebar' ? from : undefined;
+}
+
 /** A `command:` link for a walkthrough step or welcome view: runs {@link START_COMMAND} with `{ action, from }`. */
 export function startCommandLink(action: StartAction, from: Exclude<StartSurface, 'welcome'>): string {
   return `command:${START_COMMAND}?${encodeURIComponent(JSON.stringify([{ action, from }]))}`;
+}
+
+/** The {@link MORE_STARTS_LABEL} link: {@link START_COMMAND} with `{ from }` alone opens the other starts in a quick pick. */
+export function moreStartsCommandLink(from: Exclude<StartSurface, 'welcome'>): string {
+  return `command:${START_COMMAND}?${encodeURIComponent(JSON.stringify([{ from }]))}`;
 }
 
 // ---------------------------------------------------------------------------
 // The import guide: one quiet link on every start surface
 // ---------------------------------------------------------------------------
 
-/** **Bring In an Existing Data Model…** (`src/services/importGuide.ts`). */
+/** **Bring In Your Data Model…** (`src/services/importGuide.ts`). */
 export const IMPORT_GUIDE_COMMAND = 'erdStudio.showImportGuide';
 
 /**
- * The line the start surfaces carry (the Welcome panel's start card, the
- * walkthrough's blank step, the empty Diagrams view's blank variant): the
- * question, then the link. A link inside a sentence, never a button of its
- * own: each surface keeps one primary button, the start.
+ * A `command:` link to the guide, saying where it was opened from. The start
+ * surfaces no longer carry one: the guide is the last item of the
+ * {@link MORE_STARTS_LABEL} quick pick (and of Import…'s picker).
  */
-export const IMPORT_GUIDE_LINK_QUESTION = 'Have a data model in Databricks, Snowflake, Power BI or Fabric?';
-export const IMPORT_GUIDE_LINK_TEXT = 'See how to bring it in';
-
-/** A `command:` link to the guide for a walkthrough step or welcome view, saying where it was opened from. */
 export function importGuideCommandLink(from: 'walkthrough' | 'sidebar'): string {
   return `command:${IMPORT_GUIDE_COMMAND}?${encodeURIComponent(JSON.stringify([{ from }]))}`;
-}
-
-// ---------------------------------------------------------------------------
-// "Watch how": one short clip per suggestion on the Welcome panel's start card
-// ---------------------------------------------------------------------------
-
-/** Where the clips live, relative to the extension root (under the Welcome panel's media folder). */
-export const HOW_TO_CLIP_DIR = ['media', 'onboarding', 'stories'] as const;
-
-/**
- * What a "Watch how" clip shows: the start each suggestion leads with (Convert
- * has none: its panel lists every change before anything is written), and
- * the example the page offers with no folder open (no suggestion there).
- */
-export type HowToClipKey = Exclude<StartIntent, 'convert'> | 'example';
-export const HOW_TO_CLIP_KEYS: readonly HowToClipKey[] = ['example', 'blank', 'importSqlDdl', 'importSemanticModel', 'importDbmlFile', 'drawFromDbt'];
-
-/**
- * The clip for each: a short onboarding story video, narrated (MP3) with its
- * captions burned in, published by `node test/stories/run.mjs --record --publish`
- * (`test/stories/lib/publish.mjs` names the story behind each). No poster
- * file: the clip loads its metadata, so its first frame shows (fewer files in
- * the VSIX). The panel shows the slot only when the clip is in the extension.
- */
-export const HOW_TO_CLIPS: Readonly<Record<HowToClipKey, string>> = {
-  example: 'open-an-example.mp4',
-  blank: 'start-a-blank-diagram.mp4',
-  importSqlDdl: 'import-sql-scripts.mp4',
-  importSemanticModel: 'import-power-bi-model.mp4',
-  importDbmlFile: 'import-a-dbml-file.mp4',
-  drawFromDbt: 'draw-from-dbt.mp4',
-};
-
-/** The clip a Welcome page shows: the example with no folder open, else its suggestion's (none for Convert). */
-export function howToClipFor(hasProject: boolean, intent: StartIntent | undefined): HowToClipKey | undefined {
-  if (!hasProject) return 'example';
-  return intent && intent !== 'convert' ? intent : undefined;
 }

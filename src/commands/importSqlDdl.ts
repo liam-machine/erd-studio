@@ -20,8 +20,11 @@
  * the open folder, the dialect is the detected one (undetected or tied: the
  * most likely dialects in turn, the first that reads every file; the pick
  * only when none does), the layer and name are Import DBML's quick defaults,
- * and the dry run is the one question. Its **Change Options…** is the
- * step-by-step flow with those answers preselected.
+ * and the draft (the read-only preview, `docs/dev/draft-first.md` §5.1) is
+ * the one question. Its **Change options…** is the step-by-step flow with
+ * those answers preselected, ending in a draft too. On the automatic draft
+ * (`draft.quiet`) it asks and shows nothing: no script found, or none that
+ * reads, ends it silently.
  *
  * Every vscode call goes through `ImportSqlDdlUi` (and Import DBML's
  * `ImportDbmlUi`), so the flow is unit-tested with plain fakes.
@@ -40,12 +43,16 @@ import {
   type FeedbackPrefill,
 } from '../services/commandErrors';
 import {
+  MAX_SQL_FILE_BYTES,
+  compareNames,
   convertedFileName,
   describeImportProblems,
-  looksLikeSqlDdl,
-  looksLikeSqlKeys,
+  isSqlScriptTaken,
+  listImportFiles,
+  rankSqlFiles,
   sqlImportFileName,
   sqlOriginPhrase,
+  sqlScriptTableCount,
   walkFiles,
   type DirEntries,
 } from '../services/importSources';
@@ -55,6 +62,7 @@ import {
   SQL_DIALECT_LABELS,
   detectSqlDialect,
   rankSqlDialects,
+  withoutSqlData,
   type SqlDdlFile,
   type SqlDialect,
 } from '../services/sqlDdlImport';
@@ -63,6 +71,7 @@ import type { TelemetryFeature } from '../services/telemetryPayload';
 import { telemetry } from '../services/telemetryService';
 import {
   IMPORT_TITLES,
+  changeOptionsDraft,
   importDbml,
   suppliedDbmlUi,
   vscodeImportDbmlUi,
@@ -71,7 +80,7 @@ import {
   type ImportDbmlUi,
 } from './importDbml';
 import { openTableFileAt } from './openModelFile';
-import { readFileStart } from '../services/readFileStart';
+import { decodeText, fileSize, readTextStart } from '../services/readFileStart';
 
 export const IMPORT_SQL_DDL_COMMAND = 'erdStudio.importSqlDdl';
 
@@ -121,13 +130,15 @@ export interface ImportSqlDdlUi {
   pickSources(defaultFolder: string | undefined): Promise<SqlSources | undefined>;
   /** One folder's entries (`workspace.fs.readDirectory`). */
   readDirectory(folder: string): Promise<DirEntries>;
-  /** A file's text (`workspace.fs`). Throws when it cannot be read. */
+  /** A file's text (`workspace.fs`), decoded by its byte order mark (UTF-16 from SQL Server Management Studio). Throws when it cannot be read. */
   readFile(filePath: string): Promise<string>;
   pickDialect(items: readonly SqlDialectItem[], options: vscode.QuickPickOptions): Promise<SqlDialectItem | undefined>;
   /** Change Options…: which of the found scripts (several may be picked; the found ones start picked). */
   pickFiles?(items: readonly SqlFileItem[], options: vscode.QuickPickOptions): Promise<readonly SqlFileItem[] | undefined>;
   /** The start of a file's text, at most `chars` (the quick path's look at each `.sql`). Absent: `readFile`. */
   readFileStart?(filePath: string, chars: number): Promise<string>;
+  /** A file's size in bytes (undefined: unknown). Absent: never checked before reading. */
+  fileSize?(filePath: string): Promise<number | undefined>;
   showInformationMessage(message: string): Promise<unknown>;
   /** Resolves the button picked; the flow never awaits it. */
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
@@ -167,10 +178,36 @@ export interface SqlPreset {
   name?: string;
 }
 
-/** The run's shared reporting: a cancel, an error with its buttons, a failure of ours. */
-function sqlRun(ui: ImportSqlDdlUi) {
+/** The SQL UI of the automatic draft: it asks nothing and shows nothing (each message goes to the log). */
+export function quietImportSqlDdlUi(base: ImportSqlDdlUi): ImportSqlDdlUi {
+  const logged = async (message: string): Promise<undefined> => {
+    log.info(`[ERD Studio] ${TITLE} (automatic draft, not shown): ${message}`);
+    return undefined;
+  };
+  return {
+    ...base,
+    pickSources: async () => undefined,
+    pickDialect: async () => undefined,
+    pickFiles: async () => undefined,
+    showInformationMessage: (message) => logged(message),
+    showErrorMessage: (message) => logged(message),
+  };
+}
+
+/** The SQL UI a run uses: the automatic draft's quiet one, else `deps.sqlUi` or the real one. */
+function sqlUiOf(deps: ImportSqlDdlDeps): ImportSqlDdlUi {
+  const ui = deps.sqlUi ?? vscodeImportSqlDdlUi();
+  return deps.draft?.quiet ? quietImportSqlDdlUi(ui) : ui;
+}
+
+/**
+ * The run's shared reporting: a cancel, an error with its buttons, a failure
+ * of ours. `quiet` (the automatic draft): an early end is neither the user's
+ * cancel nor their file, so neither is counted.
+ */
+function sqlRun(ui: ImportSqlDdlUi, quiet = false) {
   const cancelled = (): undefined => {
-    telemetry.feature('importSqlDdlCancelled');
+    if (!quiet) telemetry.feature('importSqlDdlCancelled');
     return undefined;
   };
   const showError = (message: string, actions: ErrorActions = {}): void => {
@@ -190,12 +227,15 @@ function sqlRun(ui: ImportSqlDdlUi) {
   };
   /** A gather that gave a message: say it (an error or a plain note). */
   const gatherMessage = (gathered: { message: string; error: boolean; invalid?: boolean }): undefined => {
-    if (gathered.invalid) telemetry.feature('importSqlDdlInvalid');
+    if (gathered.invalid && !quiet) telemetry.feature('importSqlDdlInvalid');
     if (gathered.error) showError(gathered.message);
     else void ui.showInformationMessage(gathered.message);
     return undefined;
   };
-  return { cancelled, showError, ours, gatherMessage };
+  const invalid = (): void => {
+    if (!quiet) telemetry.feature('importSqlDdlInvalid');
+  };
+  return { cancelled, showError, ours, gatherMessage, invalid };
 }
 
 /** The SQL importer, loaded on first use; undefined after saying it failed. */
@@ -214,8 +254,8 @@ function loadEngine(deps: ImportSqlDdlDeps, ours: (doing: string, err: unknown) 
  * answers, offered first at each step.
  */
 export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, preset: SqlPreset = {}): Promise<ImportDbmlResult | undefined> {
-  const ui = deps.sqlUi ?? vscodeImportSqlDdlUi();
-  const { cancelled, showError, ours, gatherMessage } = sqlRun(ui);
+  const ui = sqlUiOf(deps);
+  const { cancelled, showError, ours, gatherMessage, invalid } = sqlRun(ui, deps.draft?.quiet === true);
 
   // 1. The scripts.
   let read = resume;
@@ -260,7 +300,7 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
     return ours('while converting the SQL', err);
   }
   if (!result.ok) {
-    telemetry.feature('importSqlDdlInvalid');
+    invalid();
     const firstProblem = result.problems.find((p) => p.file && fullPaths.has(p.file));
     const actions: Record<string, () => unknown> = {};
     if (firstProblem) actions[OPEN_FILE_BUTTON] = () => ui.openFileAt(fullPaths.get(firstProblem.file)!, firstProblem.line);
@@ -307,35 +347,41 @@ function importConvertedSql(
 }
 
 /**
- * Every `.sql` file under `root` whose start holds a CREATE TABLE with a
- * column list — and, when there is one, every file that adds keys to tables
- * (ALTER TABLE … FOREIGN KEY, a pg_dump-style constraints file: its
- * relationships belong to the same tables) — by Import…'s own bounded walk
- * (its ignored folders and dot-folders, the ERD Studio folder, at most
- * {@link MAX_SQL_FILES} `.sql` files listed). Queries, seeds and the like
- * are not taken. `truncated`: more `.sql` files than that, so "every one"
- * cannot be promised.
+ * Every `.sql` file in the open folder that the quick import takes — whose
+ * start holds a CREATE TABLE with a column list, and, when there is one,
+ * every file that adds keys to tables (ALTER TABLE … FOREIGN KEY, a
+ * pg_dump-style constraints file: its relationships belong to the same
+ * tables) or changes their columns (a later migration, applied in file
+ * order) — from the start screen's own listing (`listImportFiles`: the same
+ * folders skipped, the ERD Studio folder never read) and by its own test
+ * (`isSqlScriptTaken`: never a dbt macro, a Databricks notebook or Oracle
+ * DDL), so whatever the start screen offers is taken here. At most
+ * {@link MAX_SQL_FILES} files are opened, names that usually hold table
+ * definitions first (`rankSqlFiles`, the look's order); a file larger than
+ * the import reads is left out. `truncated`: not every `.sql` file in the
+ * folder was looked at, so "every one" cannot be promised.
  */
 export async function findSqlDdlScripts(
   root: string,
   semanticDir: string,
-  ui: Pick<ImportSqlDdlUi, 'readDirectory' | 'readFile' | 'readFileStart'>,
+  ui: Pick<ImportSqlDdlUi, 'readDirectory' | 'readFile' | 'readFileStart' | 'fileSize'>,
 ): Promise<{ files: string[]; truncated: boolean }> {
-  const walk = await walkFiles(root, (f) => ui.readDirectory(f), { include: (n) => /\.sql$/i.test(n), limit: MAX_SQL_FILES });
-  if (walk.truncated) return { files: [], truncated: true };
-  const own = path.join(root, semanticDir) + path.sep;
+  const listing = await listImportFiles(root, (f) => ui.readDirectory(f), { semanticDir });
+  const ranked = rankSqlFiles(listing.sql, root);
+  const opened = ranked.slice(0, MAX_SQL_FILES);
   const files: string[] = [];
   let tables = false;
-  for (const file of walk.files) {
-    if (path.normalize(file).startsWith(own)) continue;
+  for (const file of opened) {
+    const size = await ui.fileSize?.(file).catch(() => undefined);
+    if (size !== undefined && size > MAX_SQL_FILE_BYTES) continue;
     const start = await (ui.readFileStart
       ? ui.readFileStart(file, QUICK_SQL_SNIFF_CHARS)
       : ui.readFile(file).then((t) => t.slice(0, QUICK_SQL_SNIFF_CHARS))).catch(() => '');
-    const ddl = looksLikeSqlDdl(start);
-    tables ||= ddl;
-    if (ddl || looksLikeSqlKeys(start)) files.push(file);
+    if (!isSqlScriptTaken(file, start)) continue;
+    tables ||= sqlScriptTableCount(file, start) > 0;
+    files.push(file);
   }
-  return { files: tables ? files : [], truncated: false };
+  return { files: tables ? files.sort(compareNames) : [], truncated: listing.truncated || ranked.length > opened.length };
 }
 
 /**
@@ -344,10 +390,19 @@ export async function findSqlDdlScripts(
  * script, or more `.sql` files than the walk lists): the step-by-step flow.
  */
 export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportDbmlResult | undefined> {
-  const ui = deps.sqlUi ?? vscodeImportSqlDdlUi();
-  const { ours, gatherMessage } = sqlRun(ui);
+  const ui = sqlUiOf(deps);
+  const quiet = deps.draft?.quiet === true;
+  const { ours, gatherMessage } = sqlRun(ui, quiet);
   const found = await findSqlDdlScripts(deps.workspaceRoot, deps.semanticDir, ui).catch(() => ({ files: [] as string[], truncated: false }));
+  if (found.truncated && found.files.length > 0) {
+    log.info(`[ERD Studio] ${TITLE}: the folder holds more .sql files than are looked at; importing the ${found.files.length} CREATE TABLE scripts found first.`);
+  }
   if (found.files.length === 0) {
+    // The automatic draft never asks: nothing to take is the end of it.
+    if (quiet) {
+      log.info(`[ERD Studio] ${TITLE}: no CREATE TABLE script to draft (automatic draft dropped).`);
+      return undefined;
+    }
     log.info(`[ERD Studio] ${TITLE}: ${found.truncated ? `more than ${MAX_SQL_FILES} .sql files in the folder` : 'no CREATE TABLE script found'}; asking which files.`);
     telemetry.feature('quickImportFellBack');
     return importSqlDdl(deps);
@@ -372,7 +427,13 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     if (result.ok) { converted = { dialect, result }; break; }
   }
   // No dialect reads every file: ask which (the step-by-step flow's dialect step, which reports the problems).
-  if (!converted) return importSqlDdl(deps, gathered);
+  if (!converted) {
+    if (quiet) {
+      log.info(`[ERD Studio] ${TITLE}: the scripts read as no one dialect (automatic draft dropped).`);
+      return undefined;
+    }
+    return importSqlDdl(deps, gathered);
+  }
   telemetry.feature(SQL_DIALECT_FEATURES[converted.dialect]);
   const chosenDialect = converted.dialect;
   return importConvertedSql(deps, gathered, chosenDialect, converted.result, { quick: true },
@@ -385,8 +446,10 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
  * opens the dialog), the dialect it read them as first, then the layer and
  * name it chose first.
  */
-export async function changeSqlOptions(deps: ImportSqlDdlDeps, found: readonly string[], preset: SqlPreset): Promise<ImportDbmlResult | undefined> {
-  const ui = deps.sqlUi ?? vscodeImportSqlDdlUi();
+export async function changeSqlOptions(quickDeps: ImportSqlDdlDeps, found: readonly string[], preset: SqlPreset): Promise<ImportDbmlResult | undefined> {
+  // The step-by-step flow the user asked for: never quiet, ending in a draft (`changeOptions`).
+  const deps: ImportSqlDdlDeps = { ...quickDeps, ...changeOptionsDraft(quickDeps.draft) };
+  const ui = sqlUiOf(deps);
   const { cancelled, gatherMessage } = sqlRun(ui);
   if (!ui.pickFiles) return importSqlDdl(deps, undefined, preset);
   const rel = (file: string): string => path.relative(deps.workspaceRoot, file).split(path.sep).join('/');
@@ -415,7 +478,7 @@ export const TRY_ANOTHER_DIALECT_BUTTON = 'Try Another Dialect';
  */
 export async function gatherSqlFiles(
   sources: SqlSources,
-  ui: Pick<ImportSqlDdlUi, 'readDirectory' | 'readFile'>,
+  ui: Pick<ImportSqlDdlUi, 'readDirectory' | 'readFile' | 'fileSize'>,
 ): Promise<SqlResume | { message: string; error: boolean; invalid?: boolean }> {
   let entries: Array<{ name: string; fullPath: string }>;
   let fileName: string;
@@ -462,21 +525,33 @@ export async function gatherSqlFiles(
   const fullPaths = new Map<string, string>();
   let chars = 0;
   for (const entry of entries) {
-    let text: string;
+    const size = await ui.fileSize?.(entry.fullPath).catch(() => undefined);
+    if (size !== undefined && size > MAX_SQL_FILE_BYTES) {
+      return { message: tooBigMessage(entry.name), error: true };
+    }
+    let raw: string;
     try {
-      text = await ui.readFile(entry.fullPath);
+      raw = await ui.readFile(entry.fullPath);
     } catch (err) {
       log.error(`[ERD Studio] ${TITLE}: could not read a file:`, err);
       return { message: `${TITLE} couldn't read ${entry.name}. Check that the file still exists and that you can open it, then try again.`, error: true };
     }
-    chars += text.length;
+    // A dump's data (COPY blocks, INSERT statements) is not SQL to import: it neither counts nor is read.
+    const { text, sqlChars } = withoutSqlData(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
+    chars += sqlChars;
     if (chars > MAX_SQL_CHARS) {
-      return { message: `${TITLE}: the scripts hold more than ${Math.round(MAX_SQL_CHARS / 1024 / 1024)} MB of SQL. Import the table definitions on their own.`, error: true };
+      return { message: `${TITLE}: the scripts hold more than ${Math.round(MAX_SQL_CHARS / 1024 / 1024)} MB of SQL, not counting data. Import the table definitions on their own.`, error: true };
     }
-    files.push({ name: entry.name, text: text.charCodeAt(0) === 0xfeff ? text.slice(1) : text });
+    files.push({ name: entry.name, text });
     fullPaths.set(entry.name, entry.fullPath);
   }
   return { files, fullPaths, fileName, sourceLabel };
+}
+
+/** A script larger than the import reads. */
+function tooBigMessage(name: string): string {
+  return `${TITLE}: ${name} is larger than ${Math.round(MAX_SQL_FILE_BYTES / 1024 / 1024)} MB, too big to read. ` +
+    'Export the schema without its data (pg_dump --schema-only, mysqldump --no-data, or SQL Server\'s Generate Scripts with schema only) and import that.';
 }
 
 /** The real UI. */
@@ -522,13 +597,11 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
     readDirectory: async (folder) =>
       (await vscode.workspace.fs.readDirectory(vscode.Uri.file(folder)))
         .map(([name, type]) => [name, (type & vscode.FileType.Directory) !== 0] as const),
-    readFile: async (filePath) => new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
+    readFile: async (filePath) => decodeText(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
     pickDialect: async (items, options) => vscode.window.showQuickPick([...items], options),
     pickFiles: async (items, options) => vscode.window.showQuickPick([...items], { ...options, canPickMany: true }),
-    readFileStart: async (filePath, chars) => {
-      const bytes = await readFileStart(filePath, chars * 4);
-      return new TextDecoder('utf-8').decode(bytes).slice(0, chars);
-    },
+    readFileStart: (filePath, chars) => readTextStart(filePath, chars),
+    fileSize: (filePath) => fileSize(filePath),
     showInformationMessage: async (message) => vscode.window.showInformationMessage(message),
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     openFileAt: (filePath, line) => openTableFileAt(filePath, line),

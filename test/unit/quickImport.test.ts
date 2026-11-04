@@ -1,10 +1,13 @@
 /**
  * The quick import (B): a detected source started from the start suggestion
  * or a surface's primary start asks nothing it can answer — the files the
- * folder holds, the dialect, the layer, the name — and the dry run is the one
- * question, with Import, Review All…, Change Options… and Cancel. Change
- * Options… is the step-by-step flow with those answers preselected. The
- * explicit commands stay step by step, each prompt's first item the default.
+ * folder holds, the dialect, the layer, the name — and the draft (Draft-first,
+ * `docs/dev/draft-first.md` §5.1: the read-only preview, nothing written
+ * until Keep) is the one question; with no preview the fallback modal is,
+ * with Import, Change Options… and Cancel. Change options… is the
+ * step-by-step flow with those answers preselected, ending in a draft again.
+ * The explicit commands stay step by step, each prompt's first item the
+ * default. The automatic draft (`quiet`) asks and shows nothing.
  */
 
 import * as fs from 'fs';
@@ -17,7 +20,6 @@ import { _resetMockWorkspace } from '../__mocks__/vscode';
 import {
   CHANGE_OPTIONS_BUTTON,
   IMPORT_BUTTON,
-  REVIEW_ALL_BUTTON,
   importDbml,
   quickImportDbml,
   type ImportDbmlDeps,
@@ -40,7 +42,9 @@ import { defaultDiagramLayer } from '../../src/services/layerWording';
 import { SQL_DIALECT_LIKELIHOOD, rankSqlDialects } from '../../src/services/sqlDdlImport';
 import * as engine from '../../src/services/sqlImportEngine';
 import { telemetry } from '../../src/services/telemetryService';
-import { QUICK_IMPORT_ARG, isQuickImportArg, startActionArgs } from '../../src/types/startActions';
+import { QUICK_IMPORT_ARG, isQuickImportArg, startActionArgs, startDraftTriggerOf } from '../../src/types/startActions';
+import { DRAFT_REDRAWN_NOTICE } from '../../src/services/draftModel';
+import { fakeDraftPreview, type ScriptedAnswer } from './helpers/draftDriver';
 
 const FIXTURES = path.join(__dirname, '../fixtures');
 
@@ -77,7 +81,6 @@ function dbmlUi(answers: { choose?: Array<string | undefined>; file?: string; la
       ui.chooses.push({ message, detail, buttons });
       return chooses.length > 0 ? chooses.shift() : IMPORT_BUTTON;
     },
-    review: async () => 'import',
     showInformationMessage: async () => undefined,
     showErrorMessage: async (message) => { ui.errors.push(message); return undefined; },
     openFileAt: async () => {},
@@ -155,12 +158,20 @@ afterEach(() => {
 });
 
 describe('the quick-path argument', () => {
-  it('only the three direct imports take it, from a start', () => {
-    expect(startActionArgs('importSqlDdl')).toEqual([QUICK_IMPORT_ARG]);
-    expect(startActionArgs('importSemanticModel')).toEqual([QUICK_IMPORT_ARG]);
-    expect(startActionArgs('importDbmlFile')).toEqual([QUICK_IMPORT_ARG]);
-    for (const action of ['convert', 'drawFromDbt', 'blank', 'import', 'example'] as const) expect(startActionArgs(action)).toEqual([]);
+  it('only the three direct imports take it, from a start, with the draft\'s trigger (Draw from dbt: the trigger alone)', () => {
+    expect(startActionArgs('importSqlDdl')).toEqual([{ ...QUICK_IMPORT_ARG, draft: 'start' }]);
+    expect(startActionArgs('importSemanticModel')).toEqual([{ ...QUICK_IMPORT_ARG, draft: 'start' }]);
+    expect(startActionArgs('importDbmlFile', 'prompt')).toEqual([{ ...QUICK_IMPORT_ARG, draft: 'prompt' }]);
+    expect(startActionArgs('drawFromDbt')).toEqual([{ draft: 'start' }]);
+    for (const action of ['convert', 'blank', 'import', 'example'] as const) expect(startActionArgs(action)).toEqual([]);
     expect(isQuickImportArg({ quick: true })).toBe(true);
+    expect(isQuickImportArg({ quick: true, draft: 'start' })).toBe(true);
+    // Only the triggers a command argument may carry: the automatic draft is the host's own.
+    expect(startDraftTriggerOf({ quick: true, draft: 'prompt' })).toBe('prompt');
+    expect(startDraftTriggerOf({ draft: 'start' })).toBe('start');
+    for (const other of [undefined, {}, { draft: 'sidebar' }, { draft: 'palette' }, [{ draft: 'start' }], 'start']) {
+      expect(startDraftTriggerOf(other)).toBeUndefined();
+    }
     // A file URI (the canvas's "Import these tables…") or nothing is the step-by-step flow.
     for (const other of [undefined, null, {}, { quick: 'yes' }, [{ quick: true }], { scheme: 'file', fsPath: '/x.dbml' }]) {
       expect(isQuickImportArg(other)).toBe(false);
@@ -201,7 +212,7 @@ describe('Import SQL DDL… — the quick path', () => {
     expect(ui.inputs).toEqual([]);
     expect(ui.chooses).toHaveLength(1);
     expect(ui.chooses[0].message).toBe('Import 4 tables and 3 relationships from 2 SQL files (PostgreSQL) into a new diagram "sales" in the Main layer.');
-    expect(ui.chooses[0].buttons).toEqual([IMPORT_BUTTON, REVIEW_ALL_BUTTON, CHANGE_OPTIONS_BUTTON]);
+    expect(ui.chooses[0].buttons).toEqual([IMPORT_BUTTON, CHANGE_OPTIONS_BUTTON]);
     expect(result?.domainPath).toBe(erd('main', 'diagrams', 'sales.dbml'));
     expect(result?.plan.modelNames).toHaveLength(4);
     expect(ui.opened).toEqual([result!.domainPath]);
@@ -252,6 +263,56 @@ describe('Import SQL DDL… — the quick path', () => {
     expect((await findSqlDdlScripts(tmp, '.erd-studio', sql)).files).toEqual([]);
   });
 
+  it('takes exactly what the start screen\'s look offers: the same listing (hidden folders, .SQL, deeper than before) and the same test (never a dbt macro, a CTAS, a notebook or Oracle DDL)', async () => {
+    const write = (rel: string, text: string | Buffer): string => {
+      const file = path.join(tmp, rel);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+      return file;
+    };
+    const taken = [
+      write('.devcontainer/initdb/01_schema.sql', 'CREATE TABLE a (id int);\n'),
+      write('DDL/TABLES.SQL', 'CREATE TABLE b (id int);\n'),
+      write('a/b/c/d/e/f/g/h/i/j/k/l/m/tables.sql', 'CREATE TABLE c (id int);\n'),
+    ];
+    write('macros/m.sql', '{% macro m() %}create or replace table {{ relation }} as ({{ sql }});{% endmacro %}\n');
+    write('analyses/backfill.sql', 'create table tmp as (\n  select 1\n);\n');
+    write('src/nb.sql', '-- Databricks notebook source\nCREATE TABLE gold.x (id INT);\n');
+    write('oracle/hr.sql', 'CREATE TABLE HR.E (ID NUMBER(6), EMAIL VARCHAR2(25 BYTE));\n');
+    const found = await findSqlDdlScripts(tmp, '.erd-studio', sqlUi());
+    expect(found).toEqual({ files: [...taken].sort((x, y) => x.localeCompare(y, 'en', { numeric: true, sensitivity: 'base' })), truncated: false });
+  });
+
+  it('a folder of more .sql files than it opens: the names that usually hold tables are opened first, and what it found is taken', async () => {
+    for (let i = 0; i < 520; i++) {
+      const file = path.join(tmp, 'reports', `q${String(i).padStart(3, '0')}.sql`);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `select ${i};\n`);
+    }
+    const ddl = path.join(tmp, 'zz', 'schema', 'create_tables.sql');
+    fs.mkdirSync(path.dirname(ddl), { recursive: true });
+    fs.writeFileSync(ddl, 'CREATE TABLE a (id int);\n');
+    expect(await findSqlDdlScripts(tmp, '.erd-studio', sqlUi())).toEqual({ files: [ddl], truncated: true });
+  });
+
+  it('a migrations folder: the later scripts that only change columns are taken too (applied in order), a teardown of DROP TABLEs is not', async () => {
+    const dir = path.join(tmp, 'db', 'migration');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'V1__init.sql'), 'CREATE TABLE customer (id int PRIMARY KEY, email text);\n');
+    fs.writeFileSync(path.join(dir, 'V2__rename.sql'), 'ALTER TABLE customer RENAME COLUMN email TO email_address;\n');
+    fs.writeFileSync(path.join(dir, 'V10__add.sql'), 'ALTER TABLE customer ADD COLUMN phone text;\n');
+    fs.writeFileSync(path.join(tmp, 'teardown.sql'), 'DROP TABLE customer;\n');
+    const found = await findSqlDdlScripts(tmp, '.erd-studio', sqlUi());
+    expect(found.files.map((f) => path.basename(f))).toEqual(['V1__init.sql', 'V2__rename.sql', 'V10__add.sql']);
+  });
+
+  it('a file larger than the import reads is never taken', async () => {
+    const file = path.join(tmp, 'dump.sql');
+    fs.writeFileSync(file, 'CREATE TABLE a (id int);\n');
+    const sql = { ...sqlUi(), fileSize: async () => 300 * 1024 * 1024 };
+    expect((await findSqlDdlScripts(tmp, '.erd-studio', sql)).files).toEqual([]);
+  });
+
   it('Change Options…: the found scripts (all picked), the dialect it used first, then the layer and name it chose first', async () => {
     copy('sql-ddl/postgres', 'database');
     fs.writeFileSync(path.join(tmp, 'extra.sql'), 'CREATE TABLE extra (id INT PRIMARY KEY);\n');
@@ -272,7 +333,7 @@ describe('Import SQL DDL… — the quick path', () => {
     expect(ui.picks[0][0]).toBe('gold');
     expect(ui.inputs).toEqual([ui.chooses[0].message.match(/diagram "([^"]+)"/)![1]]);
     // The step-by-step dry run has no Change Options… of its own.
-    expect(ui.chooses[1].buttons).toEqual([IMPORT_BUTTON, REVIEW_ALL_BUTTON]);
+    expect(ui.chooses[1].buttons).toEqual([IMPORT_BUTTON]);
   });
 
   it('Change Options… with "Other files or a folder…" opens the file dialog instead', async () => {
@@ -308,7 +369,7 @@ describe('Import Semantic Model… and Import DBML… — the quick path', () =>
     expect(model.picks).toBe(0);
     expect(ui.picks).toEqual([]);
     expect(ui.inputs).toEqual([]);
-    expect(ui.chooses[0].buttons).toEqual([IMPORT_BUTTON, REVIEW_ALL_BUTTON, CHANGE_OPTIONS_BUTTON]);
+    expect(ui.chooses[0].buttons).toEqual([IMPORT_BUTTON, CHANGE_OPTIONS_BUTTON]);
     expect(result?.domainPath.startsWith(erd('main', 'diagrams'))).toBe(true);
     expect(features()).toContain('quickImport');
   });
@@ -356,6 +417,214 @@ describe('Import Semantic Model… and Import DBML… — the quick path', () =>
     expect(ui.dialogs).toHaveLength(1);
     expect(ui.picks).toEqual([['gold', 'silver']]);
     expect(ui.inputs).toEqual(['sales']);
-    expect(ui.chooses[0].buttons).toEqual([IMPORT_BUTTON, REVIEW_ALL_BUTTON]);
+    expect(ui.chooses[0].buttons).toEqual([IMPORT_BUTTON]);
   });
 });
+
+/** Every file under `.erd-studio/`, project-relative, with its bytes. */
+function snapshot(root: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (dir: string): void => {
+    if (!fs.existsSync(dir)) return;
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else out[path.relative(root, full).split(path.sep).join('/')] = fs.readFileSync(full, 'utf-8');
+    }
+  };
+  walk(path.join(root, '.erd-studio'));
+  return out;
+}
+
+describe('Draft-first: the quick path ends in the draft (docs/dev/draft-first.md §5.1)', () => {
+  const draft = (answers: ScriptedAnswer[], extra: { quiet?: boolean; generation?: () => number } = {}) => {
+    const preview = fakeDraftPreview(answers);
+    return { preview, options: { preview, trigger: 'start' as const, ...extra } };
+  };
+
+  it('Keep writes exactly the files the modal\'s Import writes, byte for byte, and settles kept', async () => {
+    copy('sql-ddl/postgres', 'database');
+    const modal = await quickImportSqlDdl(sqlDeps(sqlUi(), dbmlUi(), { plain: true }));
+    const viaModal = snapshot(tmp);
+    expect(Object.keys(viaModal).length).toBeGreaterThan(3);
+    fs.rmSync(erd(), { recursive: true });
+
+    const { preview, options } = draft(['keep']);
+    const ui = dbmlUi();
+    const kept = await quickImportSqlDdl({ ...sqlDeps(sqlUi(), ui, { plain: true }), draft: options });
+    expect(ui.chooses).toEqual([]);
+    expect(kept?.domainPath).toBe(modal?.domainPath);
+    expect(snapshot(tmp)).toEqual(viaModal);
+    expect(preview.settled).toEqual([{ kept: true }]);
+    expect(ui.opened).toEqual([kept!.domainPath]);
+    const shown = preview.drafts[0];
+    expect(shown.keep).toMatchObject({ writer: 'importDbml', importSource: 'sql', target: { layer: 'main', name: 'sales', diagramFile: '.erd-studio/main/diagrams/sales.dbml' } });
+    expect(shown.trigger).toBe('start');
+    expect(shown.banner.changeOptions).toBe(true);
+  });
+
+  it('nothing is written before Keep: Discard and closing the tab write nothing and count the import\'s cancel', async () => {
+    copy('sql-ddl/postgres', 'database');
+    for (const answer of ['discard', 'closed'] as const) {
+      feature.mockClear();
+      const { options } = draft([answer]);
+      expect(await quickImportSqlDdl({ ...sqlDeps(sqlUi(), dbmlUi(), { plain: true }), draft: options })).toBeUndefined();
+      expect(fs.existsSync(erd())).toBe(false);
+      expect(features()).toEqual(['importSqlDialectPostgres', 'importSqlDdlCancelled']);
+    }
+  });
+
+  it('Change options… runs the preselected step-by-step flow, which ends in a draft of its own (trigger changeOptions)', async () => {
+    copy('sql-ddl/postgres', 'database');
+    const { preview, options } = draft(['changeOptions', 'keep']);
+    const sql = sqlUi();
+    const ui = dbmlUi();
+    expect(await quickImportSqlDdl({ ...sqlDeps(sql, ui), draft: options })).toBeUndefined();
+    expect(features()).toContain('quickImportChangeOptions');
+    await vi.waitFor(() => expect(preview.drafts).toHaveLength(2));
+    expect(sql.filePicks).toHaveLength(1);
+    expect(ui.picks[0][0]).toBe('gold');
+    expect(preview.drafts[1].trigger).toBe('changeOptions');
+    // The step-by-step draft has no Change options… of its own.
+    expect(preview.drafts[1].banner.changeOptions).toBe(false);
+    await vi.waitFor(() => expect(preview.settled).toEqual([{ kept: true }]));
+    expect(ui.chooses).toEqual([]);
+  });
+
+  it('staleness: files changed since the draft but the plan is the same → written at once; another plan → redrawn with the notice', async () => {
+    copy('sql-ddl/postgres', 'database');
+    let generation = 0;
+    // Same plan: a change elsewhere in the folder, between the draft (the plan) and Keep.
+    const same = draft(['keep'], { generation: () => generation });
+    const sameAsk = same.preview.ask.bind(same.preview);
+    same.preview.ask = async (d) => {
+      const answer = await sameAsk(d);
+      generation += 1;
+      return answer;
+    };
+    const written = await quickImportSqlDdl({ ...sqlDeps(sqlUi(), dbmlUi(), { plain: true }), draft: same.options });
+    expect(written).toBeDefined();
+    // Planned again, the same plan: written at once, the one Keep settled kept, no second draft.
+    expect(same.preview.drafts).toHaveLength(1);
+    expect(same.preview.settled).toEqual([{ kept: true }]);
+    expect(fs.existsSync(written!.domainPath)).toBe(true);
+    expect(features()).not.toContain('draftRefreshed');
+
+    // Another plan: a table of the same name appeared in the library since.
+    fs.rmSync(erd(), { recursive: true });
+    feature.mockClear();
+    let gen = 0;
+    const answers: ScriptedAnswer[] = ['keep', 'discard'];
+    const preview = fakeDraftPreview(answers);
+    const origAsk = preview.ask.bind(preview);
+    preview.ask = async (d) => {
+      const answer = await origAsk(d);
+      if (preview.drafts.length === 1) {
+        // Between the draft and Keep: an assistant adds a library table.
+        fs.mkdirSync(erd('main', 'tables', 'sales'), { recursive: true });
+        fs.writeFileSync(erd('main', 'tables', 'sales', 'dim_customer.dbml'), 'Table sales.dim_customer {\n  id int [pk]\n}\n');
+        gen += 1;
+      }
+      return answer;
+    };
+    const stale = await quickImportSqlDdl({ ...sqlDeps(sqlUi(), dbmlUi(), { plain: true }), draft: { preview, trigger: 'start', generation: () => gen } });
+    expect(stale).toBeUndefined();
+    expect(preview.drafts).toHaveLength(2);
+    expect(preview.settled[0]).toEqual({ kept: false });
+    expect(preview.drafts[1].banner.notice).toBe(DRAFT_REDRAWN_NOTICE);
+    expect(features()).toContain('draftRefreshed');
+  });
+
+  it('a Keep that does not save (the name was taken since) says why, even on the automatic draft, then asks the same draft again', async () => {
+    copy('sql-ddl/postgres', 'database');
+    const ui = dbmlUi();
+    const { preview, options } = draft(['keep', 'discard'], { quiet: true });
+    const ask = preview.ask.bind(preview);
+    preview.ask = async (d) => {
+      if (preview.drafts.length === 0) {
+        // Between the draft and Keep: another window saves a diagram of the same name.
+        fs.mkdirSync(erd('main', 'diagrams'), { recursive: true });
+        fs.writeFileSync(erd('main', 'diagrams', 'sales.dbml'), 'Project sales {\n}\n');
+      }
+      return ask(d);
+    };
+    expect(await quickImportSqlDdl({ ...sqlDeps(sqlUi(), ui, { plain: true }), draft: options })).toBeUndefined();
+    expect(preview.settled).toEqual([{ kept: false }]);
+    // The same Draft object again, so the page's buttons keep answering (Discard here).
+    expect(preview.drafts).toHaveLength(2);
+    expect(preview.drafts[1]).toBe(preview.drafts[0]);
+    // Shown, not only logged: the user pressed Keep and is waiting on it.
+    expect(ui.errors.some((e) => /sales/.test(e) && /already/i.test(e))).toBe(true);
+  });
+
+  it('quiet (the automatic draft): nothing asked or shown, and an early end counts no cancel and no invalid', async () => {
+    // No dialect reads every file: the explicit path asks; the quiet one ends.
+    fs.writeFileSync(path.join(tmp, 'broken.sql'), 'CREATE TABLE t (id int,, x);\n');
+    const sql = sqlUi({ dialect: 'postgres' });
+    const ui = dbmlUi();
+    const { preview, options } = draft([], { quiet: true });
+    expect(await quickImportSqlDdl({ ...sqlDeps(sql, ui), draft: options })).toBeUndefined();
+    expect(sql.dialectPicks).toEqual([]);
+    expect(sql.errors).toEqual([]);
+    expect(preview.drafts).toEqual([]);
+    expect(features().filter((f) => /Cancelled|Invalid|FellBack/.test(f))).toEqual([]);
+
+    // No script at all: no file dialog.
+    fs.rmSync(path.join(tmp, 'broken.sql'));
+    expect(await quickImportSqlDdl({ ...sqlDeps(sql, ui), draft: options })).toBeUndefined();
+    expect(sql.sourcePicks).toBe(0);
+    expect(features().filter((f) => /Cancelled|Invalid|FellBack/.test(f))).toEqual([]);
+
+    // A semantic model folder with none, and a DBML file that is not there: nothing asked either.
+    expect(await quickImportDbml({ ...baseDeps(), ui, findDefaultFile: async () => undefined, draft: options })).toBeUndefined();
+    expect(ui.dialogs).toEqual([]);
+  });
+
+  it('quiet with a buildable find: the draft is shown, nothing asked; the user\'s Discard counts the cancel', async () => {
+    copy('sql-ddl/postgres', 'database');
+    const ui = dbmlUi();
+    const { preview, options } = draft(['discard'], { quiet: true });
+    await quickImportSqlDdl({ ...sqlDeps(sqlUi(), ui), draft: { ...options, trigger: 'sidebar' } });
+    expect(preview.drafts).toHaveLength(1);
+    expect(preview.drafts[0].trigger).toBe('sidebar');
+    expect(ui.picks).toEqual([]);
+    expect(ui.inputs).toEqual([]);
+    expect(fs.existsSync(erd())).toBe(false);
+  });
+
+  it('several semantic models: the first is drawn, with the Model switcher; a switch re-enters with that model and the same preview', async () => {
+    copy('semantic-model/pbip-tmdl', 'models/a');
+    copy('semantic-model/pbip-tmsl', 'models/b');
+    const model = modelUiForDraft();
+    const { preview, options } = draft([]);
+    let scoped: string | undefined;
+    await quickImportSemanticModel({ ...baseDeps(), modelUi: model, ui: dbmlUi(), draft: { ...options, onScope: (id) => { scoped = id; } } });
+    expect(model.picks).toBe(0);
+    const scopes = preview.drafts[0].scopes!;
+    expect(scopes.label).toBe('Model');
+    expect(scopes.options.length).toBeGreaterThan(1);
+    expect(scopes.current).toBe(scopes.options[0].id);
+    // Its own onScope is the semantic model's re-entry, not the caller's.
+    expect(scoped).toBeUndefined();
+
+    const switched = draft([{ scope: scopes.options[1].id }]);
+    await quickImportSemanticModel({ ...baseDeps(), modelUi: model, ui: dbmlUi(), draft: switched.options });
+    await vi.waitFor(() => expect(switched.preview.drafts).toHaveLength(2));
+    expect(switched.preview.drafts[1].scopes!.current).toBe(scopes.options[1].id);
+    expect(fs.existsSync(erd())).toBe(false);
+  });
+});
+
+function modelUiForDraft(): ImportSemanticModelUi & { folders: number; picks: number } {
+  const ui = {
+    folders: 0, picks: 0,
+    pickFolder: async () => { ui.folders++; return undefined; },
+    readDirectory: async (folder: string) => fs.readdirSync(folder, { withFileTypes: true }).map((d) => [d.name, d.isDirectory()] as const),
+    readFile: async (filePath: string) => fs.readFileSync(filePath, 'utf-8'),
+    pickModel: async (items: readonly { entry: unknown }[]) => { ui.picks++; return items[0] as never; },
+    showErrorMessage: async () => undefined,
+    openFileAt: async () => {},
+    sendFeedback: async () => {},
+  };
+  return ui;
+}

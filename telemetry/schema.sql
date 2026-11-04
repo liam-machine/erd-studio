@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS heartbeats (
   -- look that day, or predates the fields.
   physical_tools TEXT,           -- JSON array
   platforms TEXT,                -- JSON array
+  -- Added by migrations/0004_onboarding_trail.sql. NULL on a day without a trail.
+  trail TEXT,                    -- JSON array of [event, gap, window, repeat]
+  trail_dropped INTEGER,
   PRIMARY KEY (install_id, day)
 );
 CREATE INDEX IF NOT EXISTS idx_heartbeats_day ON heartbeats(day);

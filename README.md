@@ -42,7 +42,7 @@
    - **From DBML:** click **import a data model** in the sidebar, choose **DBML file** (or run **ERD Studio: Import DBML…**) and pick a `.dbml` file. You see what it will create before anything is written. Positions an ERD Studio export saved in the file keep your tables in place.
    - **From SQL:** choose **SQL DDL scripts** there (or run **ERD Studio: Import SQL DDL…**) and pick your `CREATE TABLE` scripts, or a folder of them, from PostgreSQL, MySQL, SQL Server, Snowflake or Databricks. Keys, foreign keys and comments come across; views, indexes and grants are listed as not imported.
    - **From Power BI or Fabric:** choose **Power BI or Fabric semantic model** (or run **ERD Studio: Import Power BI or Fabric Semantic Model…**) and pick the folder that holds your `<Name>.SemanticModel`, saved as TMDL or `model.bim` (a Power BI Project). Tables, columns and relationships come across; DAX measures do not.
-   - **From an example:** run **ERD Studio: Open Example Diagram** for a coffee-shop model.
+   - **From an example:** run **ERD Studio: Open an Example…** for a coffee-shop model.
 3. Commit the `.erd-studio/` folder. That's your data model.
 
 **Bring in your existing model.** Have a data model in Databricks, Snowflake, Power BI, Fabric, SQL Server, PostgreSQL, MySQL or another modelling tool? [Bring in the data model you already have](docs/import-existing-models.md) shows the exact export step for each, and **ERD Studio: Bring In an Existing Data Model…** has the same steps with the import one click away.
@@ -107,7 +107,7 @@ Each folder answers one question: the **layer** is the stage of your warehouse, 
 
 ## Work with your AI assistant
 
-Run **ERD Studio: Set Up My AI Helper** (also on the Welcome tab). It finds the assistants on your computer and teaches them ERD Studio's files. Then ask:
+Run **ERD Studio: Set Up My AI Helper** (also on the ERD Studio Tour tab). It finds the assistants on your computer and teaches them ERD Studio's files. Then ask:
 
 > Propose a star schema for orders in ERD Studio, with grain, keys and design rationale. Let me review the diagram before we write any SQL.
 

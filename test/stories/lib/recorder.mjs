@@ -19,6 +19,25 @@ export class Recorder {
     this.frames = [];
     this.running = false;
     this.loop = null;
+    /** Captures held off while the actor clicks (see `quiet`), and the capture in flight. */
+    this.holds = 0;
+    this.inFlight = Promise.resolve();
+  }
+
+  /**
+   * Run `fn` (a trusted click) with no screenshot in flight. A capture of a
+   * HiDPI window (a clip with `scale`) briefly re-lays out the page, and a
+   * click dispatched meanwhile can miss a webview (an out-of-process iframe):
+   * the recorded stories lost clicks on drafts, the tour and the canvas.
+   */
+  async quiet(fn) {
+    this.holds++;
+    try {
+      await this.inFlight;
+      return await fn();
+    } finally {
+      this.holds--;
+    }
   }
 
   start() {
@@ -41,7 +60,18 @@ export class Recorder {
           const m = await c.evaluate('({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio })');
           clip = m.dpr === 1 ? null : { x: 0, y: 0, width: m.w, height: m.h, scale: 1 / m.dpr };
         }
-        const r = await c.send('Page.captureScreenshot', { format: 'jpeg', quality: 85, ...(clip ? { clip } : {}) }, 4000);
+        if (this.holds > 0) {
+          await sleep(20);
+          continue;
+        }
+        let done;
+        this.inFlight = new Promise((resolve) => { done = resolve; });
+        let r;
+        try {
+          r = await c.send('Page.captureScreenshot', { format: 'jpeg', quality: 85, ...(clip ? { clip } : {}) }, 4000);
+        } finally {
+          done();
+        }
         const file = path.join(this.dir, `f${String(this.frames.length).padStart(5, '0')}.jpg`);
         fs.writeFileSync(file, Buffer.from(r.data, 'base64'));
         this.frames.push({ file, t: Date.now() });

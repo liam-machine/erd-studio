@@ -1,6 +1,6 @@
 /**
  * UI wording in the code users read: every string literal, template and JSX
- * text under webview/, packages/renderer/src/ and src/cli/ says "diagram",
+ * text under webview/, webview-draft/, packages/renderer/src/ and src/cli/ says "diagram",
  * never "subject area" (docs/dev/onboarding-and-cli.md, "User-facing wording").
  *
  * Identifiers (`subjectArea`, `SubjectAreaFileError`), comments and message
@@ -15,7 +15,7 @@ import * as path from 'path';
 import ts from 'typescript';
 
 const ROOT = path.resolve(__dirname, '../..');
-const SCANNED = ['webview', 'packages/renderer/src', 'src/cli'];
+const SCANNED = ['webview', 'webview-draft', 'packages/renderer/src', 'src/cli'];
 
 /** The two commands that keep "Subject Area" in their titles (`uiWording.test.ts`). */
 const COMMAND_TITLES = [/Migrate Subject Areas to the Central Table Library/g, /Set Up Subject Areas Directory/g];

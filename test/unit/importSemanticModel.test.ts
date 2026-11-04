@@ -13,8 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
 
 import { _resetMockWorkspace } from '../__mocks__/vscode';
-import { REVIEW_ALL_BUTTON, type ImportDbmlUi } from '../../src/commands/importDbml';
-import type { ImportReviewView } from '../../src/services/importReview';
+import type { ImportDbmlUi } from '../../src/commands/importDbml';
+import { fakeDraftPreview } from './helpers/draftDriver';
 import {
   CHOOSE_ANOTHER_FOLDER_BUTTON,
   IMPORT_SEMANTIC_MODEL_COMMAND,
@@ -64,20 +64,12 @@ interface ImportRecorder extends ImportDbmlUi {
   confirms: Array<{ message: string; detail: string }>;
   inputs: Array<string | undefined>;
   opened: string[];
-  reviews: ImportReviewView[];
 }
 
-/** `review`: the dry run's Review All… first, then Import on the page. */
-function importUi(answers: { confirm?: boolean; review?: boolean } = {}): ImportRecorder {
+/** Import DBML's half: the fallback modal answered by `confirm` (default Import). */
+function importUi(answers: { confirm?: boolean } = {}): ImportRecorder {
   const ui: ImportRecorder = {
-    confirms: [], inputs: [], opened: [], reviews: [],
-    ...(answers.review ? {
-      choose: async (message: string, detail: string, buttons: readonly string[]) => {
-        ui.confirms.push({ message, detail });
-        return ui.reviews.length === 0 && buttons.includes(REVIEW_ALL_BUTTON) ? REVIEW_ALL_BUTTON : 'Import';
-      },
-      review: async (view: ImportReviewView) => { ui.reviews.push(view); return 'import' as const; },
-    } : {}),
+    confirms: [], inputs: [], opened: [],
     pickFile: async () => { throw new Error('no Open dialog for converted DBML'); },
     readFile: async () => { throw new Error('converted DBML is never read from disk'); },
     showQuickPick: async <T extends vscode.QuickPickItem>(items: readonly T[]) =>
@@ -135,29 +127,41 @@ describe('Import Semantic Model… — contributed', () => {
 
 describe('Import Semantic Model…', () => {
   it.each(['pbip-tmdl', 'pbip-tmsl'])('a Power BI Project (%s): found, converted and imported as a DBML diagram, the skips counted', async (fixture) => {
-    const model = modelUi(path.join(FIXTURES, fixture));
-    const ui = importUi({ review: true });
-
-    const result = await importSemanticModel(deps(model, ui));
-
-    // One model in the folder: no pick.
-    expect(model.modelPicks).toEqual([]);
-    expect(model.errors).toEqual([]);
-    expect(ui.confirms).toHaveLength(1);
-    expect(ui.confirms[0].message).toMatch(/^Import \d+ tables and \d+ relationships from the semantic model AdventureSales into a new diagram "[a-z0-9-]+" in the Gold layer\.$/);
-    const detail = ui.confirms[0].detail;
-    // The modal counts what was left out, with the first; Review All… lists every one.
+    // The fallback modal (no preview): what it counts and says. Cancelled: nothing written.
+    const fallback = modelUi(path.join(FIXTURES, fixture));
+    const modal = importUi({ confirm: false });
+    expect(await importSemanticModel(deps(fallback, modal))).toBeUndefined();
+    expect(modal.confirms).toHaveLength(1);
+    expect(modal.confirms[0].message).toMatch(/^Import \d+ tables and \d+ relationships from the semantic model AdventureSales into a new diagram "[a-z0-9-]+" in the Gold layer\.$/);
+    const detail = modal.confirms[0].detail;
+    // The modal counts what was left out, with the first; the draft's details list every one.
     expect(detail).toMatch(/• Not imported: \d+ measures?: DAX calculations, not columns; and \d+ more\./);
     expect(detail).toMatch(/snake_case; the original Power BI names are kept in the table files\./);
-    expect(ui.reviews).toHaveLength(1);
-    const left = ui.reviews[0].sections.find((section) => section.id === 'left')!.items.map((i) => i.text);
+    expect(fs.existsSync(erd())).toBe(false);
+
+    // The draft (Draft-first): Keep writes it.
+    const model = modelUi(path.join(FIXTURES, fixture));
+    const ui = importUi();
+    const preview = fakeDraftPreview(['keep']);
+    const result = await importSemanticModel({ ...deps(model, ui), draft: { preview, trigger: 'palette' } });
+
+    // One model in the folder: no pick, and no switcher.
+    expect(model.modelPicks).toEqual([]);
+    expect(model.errors).toEqual([]);
+    expect(ui.confirms).toEqual([]);
+    const draft = preview.drafts[0];
+    expect(draft.source).toBe('semanticModel');
+    expect(draft.scopes).toBeUndefined();
+    expect(draft.banner.headline).toMatch(/^Draft from the semantic model AdventureSales · \d+ tables, \d+ relationships · not saved$/);
+    const left = draft.details.find((section) => section.id === 'leftOut')!.items.map((i) => i.text);
     expect(left[0]).toMatch(/^\d+ measures?: DAX calculations, not columns$/);
     expect(left).toContain('1 auto date/time table: Power BI makes one per date column');
-    const page = JSON.stringify(ui.reviews[0]);
+    // What the page shows as text: the banner and the details (the diagram's own meta is the table files').
+    const page = JSON.stringify({ banner: draft.banner, details: draft.details });
     for (const text of [detail, page]) {
       // Plain words: no storage key a Power BI developer has never seen.
       expect(text).not.toMatch(/\bmeta\b|power_bi_name|erd_layout/);
-      // Counts by kind: no measure's name or DAX in the dialog or the review.
+      // Counts by kind: no measure's name or DAX in the dialog or the draft.
       expect(text).not.toMatch(/LocalDateTable_|\bSUM\(|CALCULATE/);
       expect(text).not.toContain('Left out');
     }
@@ -165,10 +169,11 @@ describe('Import Semantic Model…', () => {
     expect(result?.plan.report.renamed).toEqual([]);
     expect(result?.plan.newTables.map((t) => t.name)).toContain('date_table');
     expect(ui.opened).toEqual([result!.domainPath]);
+    expect(preview.settled).toEqual([{ kept: true }]);
     expect(result!.domainPath.startsWith(erd('gold', 'diagrams'))).toBe(true);
     // The Project note becomes the description.
     expect(fs.readFileSync(result!.domainPath, 'utf-8')).toContain('Converted from the Power BI semantic model AdventureSales.');
-    expect(features()).toEqual(['importReviewOpened', 'importSemanticModel']);
+    expect(features()).toEqual(['importSemanticModelCancelled', 'importSemanticModel']);
     expect(errors()).toEqual([]);
   });
 

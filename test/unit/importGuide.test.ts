@@ -88,9 +88,9 @@ describe('the cards', () => {
 
   it('leads with what the folder holds: a "Found in this folder" card running that import\'s quick path', () => {
     const cases: Array<[StartIntent, string, string, unknown[]]> = [
-      ['importSqlDdl', 'This folder has CREATE TABLE scripts.', 'Import your SQL scripts', ['erdStudio.importSqlDdl', { quick: true }]],
-      ['importSemanticModel', 'This folder has a Power BI or Fabric semantic model.', 'Import your Power BI semantic model', ['erdStudio.importSemanticModel', { quick: true }]],
-      ['importDbmlFile', 'This folder has a DBML file.', 'Import your DBML file', ['erdStudio.importDbml', { quick: true }]],
+      ['importSqlDdl', 'This folder has CREATE TABLE scripts.', 'Import your SQL scripts', ['erdStudio.importSqlDdl', { quick: true, draft: 'start' }]],
+      ['importSemanticModel', 'This folder has a Power BI or Fabric semantic model.', 'Import your Power BI semantic model', ['erdStudio.importSemanticModel', { quick: true, draft: 'start' }]],
+      ['importDbmlFile', 'This folder has a DBML file.', 'Import your DBML file', ['erdStudio.importDbml', { quick: true, draft: 'start' }]],
     ];
     for (const [intent, reason, label, run] of cases) {
       const ctx: ImportGuideContext = { hasProject: true, hasDbt: false, intent };
@@ -110,11 +110,11 @@ describe('the cards', () => {
     expect(importGuideActionCommand('found', undefined)).toBeUndefined();
   });
 
-  it('has one primary button at most: the suggestion\'s, or Open a folder… in an empty window; none otherwise', () => {
+  it('has one primary button at most: the suggestion\'s, or Open Folder… in an empty window; none otherwise', () => {
     const primaries = (ctx: ImportGuideContext) => [...page(ctx).doc.querySelectorAll('.ig-btn:not(.ig-btn--secondary)')].map((b) => b.textContent);
     expect(primaries(BLANK)).toEqual([]);
     expect(primaries(DBT)).toEqual(['Draw from dbt']);
-    expect(primaries(NOFOLDER)).toEqual(['Open a folder…']);
+    expect(primaries(NOFOLDER)).toEqual(['Open Folder…']);
   });
 
   it('every card says what to export and has a button; every SQL card names its dialect and runs Import SQL DDL… with it', () => {
@@ -215,10 +215,9 @@ describe('the page', () => {
     expect(html).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
   });
 
-  it('says DBML is an open format and ERD Studio is free to use; never "open standard", and "open-source" only for DBML\'s language', () => {
-    expect(IMPORT_GUIDE_INTRO).toBe(
-      'Turn the data model you already have into DBML, an open format your team can read, review and diff in Git, and that other DBML tools open. ERD Studio is free to use.',
-    );
+  it('says DBML is an open format, in a short intro with no sales line; never "open standard", and "open-source" only for DBML\'s language', () => {
+    expect(IMPORT_GUIDE_INTRO).toBe('Turn the data model you already have into DBML, an open format your team can read, review and diff in Git.');
+    expect(IMPORT_GUIDE_INTRO).not.toContain('free to use');
     for (const ctx of [NOFOLDER, BLANK, DBT]) {
       const { text } = page(ctx);
       expect(text).toContain('DBML, an open format');
@@ -293,7 +292,8 @@ describe('the protocol', () => {
     expect(pkg.contributes.commands.find((c) => c.command === IMPORT_GUIDE_COMMAND)).toEqual({
       command: 'erdStudio.showImportGuide', title: IMPORT_GUIDE_COMMAND_TITLE, category: 'ERD Studio',
     });
-    expect(IMPORT_GUIDE_COMMAND_TITLE).toBe('Bring In an Existing Data Model…');
+    // One label everywhere: the palette, the tab (without its ellipsis), the quick picks and a draft's button.
+    expect(IMPORT_GUIDE_COMMAND_TITLE).toBe('Bring In Your Data Model…');
     const palette = (packageJson as unknown as { contributes: { menus: { commandPalette: Array<{ command: string }> } } }).contributes.menus.commandPalette;
     expect(palette.filter((m) => m.command === IMPORT_GUIDE_COMMAND)).toEqual([]);
   });
@@ -371,7 +371,7 @@ describe('the panel host', () => {
     await panels()[0]._simulateMessage({ type: 'run', action: 'found' });
     ctx = BLANK;
     await panels()[0]._simulateMessage({ type: 'run', action: 'found' });
-    expect(deps.ran).toEqual([['erdStudio.importDbml', { quick: true }]]);
+    expect(deps.ran).toEqual([['erdStudio.importDbml', { quick: true, draft: 'start' }]]);
   });
 });
 

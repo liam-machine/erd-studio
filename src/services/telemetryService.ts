@@ -40,6 +40,12 @@ import {
   recordFeatureOnce,
   recordManifest,
   recordStage,
+  recordTrail,
+  retractTrail,
+  trailKept,
+  nextTrailWindow,
+  TRAIL_AWAY_MIN_MS,
+  trailError,
   utcDay,
   type ActivationOutcome,
   type CounterEnv,
@@ -54,6 +60,8 @@ import {
   type TelemetryHarness,
   type TelemetryPhysicalTool,
   type TelemetryPlatform,
+  type TrailEvent,
+  type TrailMarker,
 } from './telemetryPayload';
 import { invariantErrorCodes, surveyFeatures } from './relationshipHealth';
 import type { RelationshipInvariant, RelationshipSurvey } from './relationshipHealth';
@@ -108,6 +116,10 @@ export class TelemetryService implements vscode.Disposable {
   private outgoing: HeartbeatBody | null = null;
   /** The running environment, stamped onto the day's counters on every update. */
   private readonly env: CounterEnv;
+  /** This window's number in today's onboarding trail, once it has added to it. */
+  private trailWindow: { day: string; n: number } | undefined;
+  /** When each away marker was added (`window`, or a canvas by key), for a quick return to take it back. */
+  private readonly awaySince = new Map<string, number>();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.env = {
@@ -141,6 +153,10 @@ export class TelemetryService implements vscode.Disposable {
         if (e.affectsConfiguration(`erdStudio.${TELEMETRY_ENABLED_SETTING}`) && !this.enabled()) this.discard();
       }),
     );
+    // The trail's window markers: away while another app or VS Code window has the focus.
+    if (typeof vscode.window.onDidChangeWindowState === 'function') {
+      this.disposables.push(vscode.window.onDidChangeWindowState((e) => this.away('window', !e.focused, 'windowAway', 'windowBack')));
+    }
     this.timer = setInterval(() => this.rollover(), ROLLOVER_INTERVAL_MS);
     this.timer.unref?.();
     active = this;
@@ -173,7 +189,58 @@ export class TelemetryService implements vscode.Disposable {
     if (!this.enabled()) return;
     this.rollover();
     const state = this.context.globalState.get<DailyCounters>(COUNTERS_KEY) ?? emptyCounters(utcDay(new Date()));
-    void this.context.globalState.update(COUNTERS_KEY, stampEnv(reducer(state), this.env));
+    const next = stampEnv(reducer(state), this.env);
+    // Nothing changed (a trail marker on a day without a trail): no write.
+    if (next !== state) void this.context.globalState.update(COUNTERS_KEY, next);
+  }
+
+  /**
+   * Run `reducer`, then add `event` to the onboarding trail when it is kept
+   * today ({@link trailKept}); with `onlyIfChanged`, only when the reducer
+   * changed something (a once-a-day flag already set is not a new event).
+   */
+  record(reducer: (state: DailyCounters) => DailyCounters, event?: TrailEvent, onlyIfChanged = false): void {
+    this.update((s) => {
+      const next = reducer(s);
+      if (event === undefined || (onlyIfChanged && next === s)) return next;
+      return this.withTrail(next, event, Date.now());
+    });
+  }
+
+  /** `state` with `event` on its trail at `now`, if the trail is kept today. */
+  withTrail(state: DailyCounters, event: TrailEvent, now: number): DailyCounters {
+    if (!trailKept(state, this.firstSeenDay(state.day), event)) return state;
+    if (this.trailWindow?.day !== state.day) this.trailWindow = { day: state.day, n: nextTrailWindow(state) };
+    return recordTrail(state, event, now, this.trailWindow.n);
+  }
+
+  /**
+   * An away / back change for `key` (the window, or one canvas): the away
+   * marker now, and on return either the back marker or, within
+   * {@link TRAIL_AWAY_MIN_MS} and with nothing recorded since, neither.
+   */
+  away(key: string, isAway: boolean, awayEvent: TrailMarker, backEvent: TrailMarker): void {
+    const now = Date.now();
+    if (isAway) {
+      if (this.awaySince.has(key)) return;
+      this.awaySince.set(key, now);
+      this.record((s) => s, awayEvent);
+      return;
+    }
+    const since = this.awaySince.get(key);
+    if (since === undefined) return;
+    this.awaySince.delete(key);
+    if (now - since < TRAIL_AWAY_MIN_MS) {
+      const n = this.trailWindow?.n;
+      if (n !== undefined) this.update((s) => retractTrail(s, awayEvent, n));
+      return;
+    }
+    this.record((s) => s, backEvent);
+  }
+
+  /** A canvas closed: no back marker will follow its away one. */
+  forgetAway(key: string): void {
+    this.awaySince.delete(key);
   }
 
   /** Remember that today had an activation (`active`) or a canvas open (`canvas`). */
@@ -291,11 +358,11 @@ function errorRecorded(code: TelemetryErrorCode): void {
  */
 export const telemetry = {
   activation(outcome: ActivationOutcome, hasSemanticDir: boolean, domainCount: number): void {
-    active?.update(s => recordActivation(s, { outcome, hasSemanticDir, domainCount }));
+    active?.record(s => recordActivation(s, { outcome, hasSemanticDir, domainCount }), 'windowOpened');
     active?.markDay('active');
   },
   canvasOpened(stage: TelemetryStage, format: TelemetrySchemaFormat, modelCount: number): void {
-    active?.update(s => recordCanvasOpen(s, { stage, format, modelCount }));
+    active?.record(s => recordCanvasOpen(s, { stage, format, modelCount }), 'canvasOpened');
     active?.markDay('canvas');
   },
   /** AI assistants detected on this machine (`detectAssistants()` ids). */
@@ -324,29 +391,53 @@ export const telemetry = {
     active?.update(s => recordCatalog(s, present));
   },
   feature(feature: TelemetryFeature): void {
-    active?.update(s => recordFeature(s, feature));
+    active?.record(s => recordFeature(s, feature), feature);
   },
   /** Count `feature` at most once per day (a presence flag). */
   featureOnce(feature: TelemetryFeature): void {
-    active?.update(s => recordFeatureOnce(s, feature));
+    active?.record(s => recordFeatureOnce(s, feature), feature, true);
   },
   error(code: TelemetryErrorCode): void {
     errorRecorded(code);
-    active?.update(s => recordError(s, code));
+    active?.record(s => recordError(s, code), trailError(code));
   },
   /** Canvas open: each relationship state found (`surveyLibrary`), at most once a day — counts only, never which links. */
   relationshipState(survey: RelationshipSurvey): void {
     const found = surveyFeatures(survey);
-    if (found.length > 0) active?.update(s => found.reduce(recordFeatureOnce, s));
+    const service = active;
+    if (found.length > 0 && service) {
+      service.update(s => found.reduce((acc, f) => {
+        const next = recordFeatureOnce(acc, f);
+        return next === acc ? acc : service.withTrail(next, f, Date.now());
+      }, s));
+    }
   },
   /** A relationship write or Move that succeeded: each new behaviour it used (`relationshipWriteUsage`, `moveUsage`). */
   relationshipUsage(used: readonly TelemetryFeature[]): void {
-    if (used.length > 0) active?.update(s => used.reduce(recordFeature, s));
+    const service = active;
+    if (used.length > 0 && service) service.update(s => used.reduce((acc, f) => service.withTrail(recordFeature(acc, f), f, Date.now()), s));
   },
   /** After a relationship write: one error per invariant it broke (`checkRelationshipWrite`). */
   relationshipInvariants(broken: readonly RelationshipInvariant[]): void {
     const codes = invariantErrorCodes(broken);
     codes.forEach(errorRecorded);
-    if (codes.length > 0) active?.update(s => codes.reduce(recordError, s));
+    const service = active;
+    if (codes.length > 0 && service) service.update(s => codes.reduce((acc, c) => service.withTrail(recordError(acc, c), trailError(c), Date.now()), s));
+  },
+  /**
+   * A trail-only event ({@link TrailMarker}): it counts nothing, and is kept
+   * only on a day the onboarding trail is.
+   */
+  marker(marker: TrailMarker): void {
+    active?.record(s => s, marker);
+  },
+  /** A canvas went behind another tab (`visible` false) or came back. */
+  canvasVisible(key: string, visible: boolean): void {
+    active?.away(`canvas:${key}`, !visible, 'canvasHidden', 'canvasShown');
+  },
+  /** A canvas closed. */
+  canvasClosed(key: string): void {
+    active?.forgetAway(`canvas:${key}`);
+    active?.record(s => s, 'canvasClosed');
   },
 };

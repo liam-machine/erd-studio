@@ -96,7 +96,7 @@ import { App } from '../../webview/App';
 import { useEditorStore } from '../../webview/store/editorStore';
 import { orientDraggedRelationship } from '../../webview/lib/relationshipDirection';
 import { evalWhen, type WhenContext } from './helpers/whenClause';
-import { START_INTENTS, START_INTENT_CONTEXT_KEY } from '../../src/types/startActions';
+import { START_INTENTS, START_INTENT_CONTEXT_KEY, moreStartsFor } from '../../src/types/startActions';
 
 // ---------------------------------------------------------------------------
 // The matcher
@@ -914,9 +914,11 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     for (const step of ['watch', 'convertDbt']) {
       expect(shown.some((s) => s.where === `walkthrough step ${step} title`), step).toBe(true);
     }
-    expect(shown.some((s) => s.where === 'walkthrough step convertDbt description' && s.text.includes('[draw from dbt]'))).toBe(true);
+    // Draw from dbt is one of its "More ways to start…" (the quick pick: moreStartsFor).
+    expect(shown.some((s) => s.where === 'walkthrough step convertDbt description' && s.text.includes('[More ways to start…]'))).toBe(true);
+    expect(moreStartsFor({ hasProject: true, hasDbt: true, storage: 'yaml' })).toContain('drawFromDbt');
     expect(shown.some((s) => s.where.startsWith('walkthrough step watchLogical'))).toBe(false);
-    expect(all('package.json')).toContain('draw your dbt project with Draw from dbt');
+    expect(all('package.json')).toContain('Draw your dbt project, explore the diagram');
     expect(all('package.json')).toContain('ERD Studio: Draw from dbt…');
     expect(all('package.json')).toContain('ERD Studio: Regenerate dbt selectors.yml');
     expect(shown.some((s) => s.where.startsWith('viewsWelcome') && DBT_WORD.test(s.text))).toBe(true);
@@ -926,8 +928,6 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     const text = all('gettingStarted').replace(/\s+/g, ' ');
     for (const line of [
       'Turn the dbt project you already have into a data model you can see.',
-      'Draw your dbt project',
-      'Draw from dbt',
       'Your assistant checks your dbt setup',
       'New to dbt? How to install it',
     ]) {
@@ -935,8 +935,8 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     }
     expect(got.text.gettingStarted.some((s) => s.where === 'panel video' && /getting-started\.mp4/.test(s.text))).toBe(true);
     expect(got.text.gettingStarted.some((s) => s.where === 'panel captions' && DBT_WORD.test(s.text))).toBe(true);
-    // The start card's Draw from dbt button (`data-start="drawFromDbt"`) is reachable on the dbt page itself.
-    expect((got.controls.get('Draw from dbt') ?? []).some((where) => where.startsWith('panel '))).toBe(true);
+    // Draft-first: the tab holds no start card; Draw from dbt is the dbt project's draft (the sidebar, the
+    // popup's Show Me) and its own How-to clip, shown on the dbt page only (when the clips ship).
   });
 
   it('the import guide: the dbt card leads, with Draw from dbt', () => {

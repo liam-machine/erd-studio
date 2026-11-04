@@ -1,59 +1,62 @@
 /**
  * The start suggestion (A), its pure half: the wording per start (counts and
- * kinds only, never a file name), when it is due (at most three times per
+ * kinds only, never a file name), when it is due (once per
  * folder, never once answered or turned off), what each button does, and the
  * pieces it rests on — the look's exact CREATE TABLE count, the tracker that
  * keeps it, and the session gate it hands on when there is nothing concrete.
+ * Draft-first (`docs/dev/draft-first.md` §3.3): Show Me opens the start's
+ * draft (nothing written until Keep); More Options… and the nothing-found
+ * notification are gone.
  */
 
+import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { StartIntentTracker } from '../../src/commands/startIntent';
 import { detectImportFindings, DETECT_SQL_CHARS, DETECT_SQL_FILES, type DetectImportIo } from '../../src/commands/importModel';
 import { ACTIVATION_PROMPT_PRIORITY, SessionPromptGate, pickActivationPrompt } from '../../src/services/activationPrompts';
 import { countSqlCreateTables, looksLikeSqlKeys } from '../../src/services/importSources';
+import * as startSuggestion from '../../src/services/startSuggestion';
 import {
   CONVERT_BUTTON,
-  CREATE_DIAGRAM_BUTTON,
   DONT_ASK_AGAIN_FOLDER_BUTTON,
   MAX_START_SUGGESTION_SHOWS,
-  MORE_OPTIONS_BUTTON,
-  NEW_DIAGRAM_BUTTON,
-  NOTHING_FOUND_FEATURES,
-  NOTHING_FOUND_MESSAGE,
-  SHOW_ME_HOW_BUTTON,
-  SHOW_ME_HOW_COMMAND,
+  SHOW_ME_BUTTON,
   START_SUGGESTIONS_OFF_MESSAGE,
   TURN_ON_START_SUGGESTIONS_TITLE,
-  nothingFoundDue,
   readStartSuggestionState,
-  runNothingFoundPrompt,
   runStartSuggestion,
   startSuggestionDue,
+  dbtProjectAboveOpenFolders,
   startSuggestionMessage,
   startSuggestionsOff,
-  type NothingFoundDeps,
   type StartSuggestionDeps,
   type StartSuggestionState,
 } from '../../src/services/startSuggestion';
-import { IMPORT_GUIDE_COMMAND, type StartIntent } from '../../src/types/startActions';
+import { autoDraftDue } from '../../src/services/draftTriggers';
+import type { StartIntent } from '../../src/types/startActions';
 import packageJson from '../../package.json';
 
 describe('the notification text', () => {
   it('names the kind of file and, for SQL, an exact table count only — never a file name', () => {
     expect(startSuggestionMessage('importSqlDdl', { sqlTables: 24 }))
-      .toBe('ERD Studio found CREATE TABLE scripts in this folder (24 tables). Create a diagram from them?');
+      .toBe('ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.');
     expect(startSuggestionMessage('importSqlDdl', { sqlTables: 1 })).toContain('(1 table)');
-    expect(startSuggestionMessage('importSqlDdl')).toBe('ERD Studio found CREATE TABLE scripts in this folder. Create a diagram from them?');
-    expect(startSuggestionMessage('importSemanticModel')).toBe('ERD Studio found a Power BI or Fabric semantic model in this folder. Create a diagram from it?');
-    expect(startSuggestionMessage('importDbmlFile')).toBe('ERD Studio found a DBML file in this folder. Create a diagram from it?');
-    expect(startSuggestionMessage('drawFromDbt')).toBe('ERD Studio found a dbt project in this folder. Create a diagram from its models?');
-    expect(startSuggestionMessage('convert')).toContain('DBML, an open format');
+    expect(startSuggestionMessage('importSqlDdl')).toBe('ERD Studio found CREATE TABLE scripts in this folder. Show them as a diagram? Nothing is saved until you keep it.');
+    expect(startSuggestionMessage('importSemanticModel')).toBe('ERD Studio found a Power BI or Fabric semantic model in this folder. Show it as a diagram? Nothing is saved until you keep it.');
+    expect(startSuggestionMessage('importDbmlFile')).toBe('ERD Studio found a DBML file in this folder. Show it as a diagram? Nothing is saved until you keep it.');
+    expect(startSuggestionMessage('drawFromDbt')).toBe('ERD Studio found a dbt project in this folder. Show its models as a diagram? Nothing is saved until you keep it.');
+    // Opened from one of its subfolders (models/): the project is not in this folder.
+    expect(startSuggestionMessage('drawFromDbt', { dbtAbove: true })).toBe('ERD Studio found a dbt project in a folder above this one. Show its models as a diagram? Nothing is saved until you keep it.');
+    expect(startSuggestionMessage('drawFromDbt', { dbtAbove: false })).toBe(startSuggestionMessage('drawFromDbt'));
+    expect(startSuggestionMessage('convert')).toBe('This project is from an older ERD Studio. Convert it once to DBML, an open format: your tables stay as they are.');
     // dbt is named only for a dbt project.
     for (const intent of ['importSqlDdl', 'importSemanticModel', 'importDbmlFile', 'convert'] as const) {
       expect(startSuggestionMessage(intent)).not.toMatch(/\bdbt\b/i);
     }
-    expect(START_SUGGESTIONS_OFF_MESSAGE).toContain(TURN_ON_START_SUGGESTIONS_TITLE);
+    // Turning it off is answered in one short line, with Undo (Turn On is in the palette too).
+    expect(START_SUGGESTIONS_OFF_MESSAGE).toBe('Start suggestions are off for this folder.');
+    expect(START_SUGGESTIONS_OFF_MESSAGE.split(/\s+/).length).toBeLessThanOrEqual(8);
   });
 
   it('every command a message names exists as written', () => {
@@ -65,10 +68,10 @@ describe('the notification text', () => {
 
 describe('when it is due', () => {
   const state = (s: Partial<StartSuggestionState> = {}): StartSuggestionState => ({ shown: 0, ...s });
-  it('at most three times per folder, never with a diagram, once answered, turned off or with the setting off', () => {
-    expect(MAX_START_SUGGESTION_SHOWS).toBe(3);
+  it('once per folder (no drip across windows), never with a diagram, once answered, turned off or with the setting off', () => {
+    expect(MAX_START_SUGGESTION_SHOWS).toBe(1);
     expect(startSuggestionDue({ settingOn: true, state: state(), hasDiagrams: false })).toBe(true);
-    expect(startSuggestionDue({ settingOn: true, state: state({ shown: 2 }), hasDiagrams: false })).toBe(true);
+    expect(startSuggestionDue({ settingOn: true, state: state({ shown: 1 }), hasDiagrams: false })).toBe(false);
     expect(startSuggestionDue({ settingOn: true, state: state({ shown: 3 }), hasDiagrams: false })).toBe(false);
     expect(startSuggestionDue({ settingOn: true, state: state(), hasDiagrams: true })).toBe(false);
     expect(startSuggestionDue({ settingOn: true, state: state({ answered: true }), hasDiagrams: false })).toBe(false);
@@ -84,10 +87,13 @@ describe('when it is due', () => {
     expect(readStartSuggestionState('x')).toEqual({ shown: 0 });
     expect(readStartSuggestionState({ shown: -1, off: 'yes' })).toEqual({ shown: 0 });
     expect(readStartSuggestionState({ shown: 2.7, off: true, answered: true })).toEqual({ shown: 2, off: true, answered: true });
+    // The automatic draft's flag; the nothing-found counts of an older release are dropped.
+    expect(readStartSuggestionState({ shown: 1, draftShown: true })).toEqual({ shown: 1, draftShown: true });
+    expect(readStartSuggestionState({ shown: 1, draftShown: 'yes', nothingShown: 2, nothingAnswered: true })).toEqual({ shown: 1 });
   });
 });
 
-function harness(options: { intent?: StartIntent; choice?: string; state?: StartSuggestionState; convertApplies?: boolean; sqlTables?: number } = {}) {
+function harness(options: { intent?: StartIntent; choice?: string; state?: StartSuggestionState; convertApplies?: boolean; sqlTables?: number; undo?: boolean } = {}) {
   let stored: StartSuggestionState = options.state ?? { shown: 0 };
   const calls = {
     shows: [] as Array<{ message: string; buttons: string[] }>,
@@ -95,6 +101,7 @@ function harness(options: { intent?: StartIntent; choice?: string; state?: Start
     features: [] as string[],
     suggested: [] as StartIntent[],
     infos: [] as string[],
+    infoButtons: [] as string[][],
     offContext: [] as boolean[],
     savedBeforeShow: undefined as StartSuggestionState | undefined,
   };
@@ -107,7 +114,7 @@ function harness(options: { intent?: StartIntent; choice?: string; state?: Start
     state: () => stored,
     saveState: async (s) => { stored = s; },
     show: async (message, ...buttons) => { calls.savedBeforeShow = stored; calls.shows.push({ message, buttons }); return options.choice; },
-    info: (m) => { calls.infos.push(m); },
+    info: async (m, ...buttons) => { calls.infos.push(m); calls.infoButtons.push(buttons); return options.undo ? buttons[0] : undefined; },
     executeCommand: async (...args) => { calls.commands.push(args); },
     recordSuggested: (i) => { calls.suggested.push(i); },
     feature: (k) => { calls.features.push(k); },
@@ -126,31 +133,34 @@ describe('runStartSuggestion', () => {
     }
   });
 
-  it('Create Diagram runs the start on its quick path; counted, answered, the count saved before it showed', async () => {
-    const h = harness({ intent: 'importSqlDdl', choice: CREATE_DIAGRAM_BUTTON, sqlTables: 24 });
+  it('Show Me opens the start\'s draft (its quick path, trigger prompt); counted, answered, the count saved before it showed', async () => {
+    const h = harness({ intent: 'importSqlDdl', choice: SHOW_ME_BUTTON, sqlTables: 24 });
     const run = await runStartSuggestion(h.deps);
     expect(run.shown).toBe(true);
     await run.done;
     expect(h.calls.shows).toEqual([{
-      message: 'ERD Studio found CREATE TABLE scripts in this folder (24 tables). Create a diagram from them?',
-      buttons: [CREATE_DIAGRAM_BUTTON, MORE_OPTIONS_BUTTON, DONT_ASK_AGAIN_FOLDER_BUTTON],
+      message: 'ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.',
+      buttons: [SHOW_ME_BUTTON, DONT_ASK_AGAIN_FOLDER_BUTTON],
     }]);
+    expect(SHOW_ME_BUTTON).toBe('Show Me');
     expect(h.calls.savedBeforeShow).toEqual({ shown: 1 });
-    expect(h.calls.commands).toEqual([['erdStudio.importSqlDdl', { quick: true }]]);
-    expect(h.calls.features).toEqual(['suggestPromptShown', 'suggestPromptAccepted']);
+    expect(h.calls.commands).toEqual([['erdStudio.importSqlDdl', { quick: true, draft: 'prompt' }]]);
+    expect(h.calls.features).toEqual(['suggestPromptShown', 'suggestPromptShowMe']);
     expect(h.calls.suggested).toEqual(['importSqlDdl']);
     expect(h.stored()).toEqual({ shown: 1, answered: true });
   });
 
-  it('Create Diagram for dbt draws from dbt; for a project from before 2.0 the button is Convert and runs it', async () => {
-    const dbt = harness({ intent: 'drawFromDbt', choice: CREATE_DIAGRAM_BUTTON });
+  it('Show Me for dbt opens its folder draft; for a project from before 2.0 the button is Convert and runs it', async () => {
+    const dbt = harness({ intent: 'drawFromDbt', choice: SHOW_ME_BUTTON });
     await (await runStartSuggestion(dbt.deps)).done;
-    expect(dbt.calls.commands).toEqual([['erdStudio.drawFromDbt']]);
+    expect(dbt.calls.commands).toEqual([['erdStudio.drawFromDbt', { draft: 'prompt' }]]);
 
     const convert = harness({ intent: 'convert', choice: CONVERT_BUTTON });
     await (await runStartSuggestion(convert.deps)).done;
-    expect(convert.calls.shows[0].buttons[0]).toBe(CONVERT_BUTTON);
+    expect(convert.calls.shows[0].buttons).toEqual([CONVERT_BUTTON, DONT_ASK_AGAIN_FOLDER_BUTTON]);
     expect(convert.calls.commands).toEqual([['erdStudio.convertProjectToDbml']]);
+    // Convert keeps its own key: suggestPromptAccepted.
+    expect(convert.calls.features).toEqual(['suggestPromptShown', 'suggestPromptAccepted']);
   });
 
   it('no second Convert prompt: when the Convert offer would not be made, nothing shows', async () => {
@@ -158,14 +168,23 @@ describe('runStartSuggestion', () => {
     expect((await runStartSuggestion(h.deps)).shown).toBe(false);
   });
 
-  it('More Options… opens the start quick pick', async () => {
-    const h = harness({ intent: 'importDbmlFile', choice: MORE_OPTIONS_BUTTON });
-    await (await runStartSuggestion(h.deps)).done;
-    expect(h.calls.commands).toEqual([['erdStudio.start']]);
-    expect(h.calls.features).toEqual(['suggestPromptShown', 'suggestPromptMore']);
+  it('More Options… is gone: two buttons only, whatever the start', async () => {
+    for (const intent of ['importDbmlFile', 'importSemanticModel', 'drawFromDbt', 'importSqlDdl'] as const) {
+      const h = harness({ intent });
+      await (await runStartSuggestion(h.deps)).done;
+      expect(h.calls.shows[0].buttons).toEqual([SHOW_ME_BUTTON, DONT_ASK_AGAIN_FOLDER_BUTTON]);
+    }
+    expect('MORE_OPTIONS_BUTTON' in startSuggestion).toBe(false);
   });
 
-  it("Don't Ask Again turns it off for this folder and says how to turn it back on", async () => {
+  it("Don't Ask Again's Undo turns suggestions back on with the palette's own command", async () => {
+    const h = harness({ intent: 'importSqlDdl', choice: DONT_ASK_AGAIN_FOLDER_BUTTON, undo: true });
+    await (await runStartSuggestion(h.deps)).done;
+    expect(h.calls.infoButtons).toEqual([['Undo']]);
+    expect(h.calls.commands).toEqual([['erdStudio.turnOnStartSuggestions']]);
+  });
+
+  it("Don't Ask Again turns it off for this folder and says so in one line, with Undo", async () => {
     const h = harness({ intent: 'importSemanticModel', choice: DONT_ASK_AGAIN_FOLDER_BUTTON });
     await (await runStartSuggestion(h.deps)).done;
     expect(h.stored()).toEqual({ shown: 1, off: true });
@@ -173,20 +192,33 @@ describe('runStartSuggestion', () => {
     expect(h.calls.infos).toEqual([START_SUGGESTIONS_OFF_MESSAGE]);
     expect(h.calls.features).toEqual(['suggestPromptShown', 'suggestPromptOff']);
     expect(h.calls.commands).toEqual([]);
+    // The folder then gets no automatic draft either (§3.3).
+    expect(autoDraftDue({
+      settingOn: true, state: h.stored(), hasDiagrams: false, hasTables: false, canvasOpen: false,
+      intent: 'importSemanticModel', exampleShownOnMachine: false,
+    })).toBeUndefined();
   });
 
-  it('closed without a choice: counted as dismissed, asked again later (the count only grows)', async () => {
-    const h = harness({ intent: 'importSqlDdl', state: { shown: 2 } });
+  it('closed without a choice: counted as dismissed, and never asked again (the sidebar and the icon\'s draft remain)', async () => {
+    const h = harness({ intent: 'importSqlDdl' });
     await (await runStartSuggestion(h.deps)).done;
-    expect(h.stored()).toEqual({ shown: 3 });
+    expect(h.stored()).toEqual({ shown: 1 });
     expect(h.calls.features).toEqual(['suggestPromptShown', 'suggestPromptDismissed']);
-    // The third time was the last.
     expect((await runStartSuggestion(h.deps)).shown).toBe(false);
+    // The folder's automatic draft is still due: closing the notification is not an answer.
+    expect(autoDraftDue({
+      settingOn: true, state: h.stored(), hasDiagrams: false, hasTables: false, canvasOpen: false,
+      intent: 'importSqlDdl', exampleShownOnMachine: false,
+    })).toBe('find');
   });
 });
 
 describe('what it rests on', () => {
   it('the session gate: the suggestion comes after an existing project\'s notice and before the walkthrough, and gives the window back', () => {
+    // The draft and an example's window are kinds too; nothingFound is gone.
+    const kinds: Array<import('../../src/services/activationPrompts').SessionPromptKind> = ['draft', 'exampleOpen'];
+    expect(kinds).toHaveLength(2);
+    expect(ACTIVATION_PROMPT_PRIORITY).not.toContain('draft');
     expect(ACTIVATION_PROMPT_PRIORITY.slice(0, 3)).toEqual(['diagramsNudge', 'startSuggestion', 'walkthrough']);
     expect(pickActivationPrompt(['walkthrough', 'startSuggestion', 'harnessInstall'])).toBe('startSuggestion');
     const gate = new SessionPromptGate();
@@ -204,8 +236,9 @@ describe('what it rests on', () => {
   });
 
   const io = (files: Record<string, string>, more: Partial<DetectImportIo> = {}): DetectImportIo => ({
-    findFiles: async (glob, _exclude, max) => (glob === '**/*.sql' ? Object.keys(files).slice(0, max) : []),
-    readStart: async (file, chars) => files[file].slice(0, chars),
+    root: '/w',
+    readDirectory: async (folder) => (folder === '/w' ? Object.keys(files).map((f) => [f, false] as const) : []),
+    readStart: async (file, chars) => files[file.slice('/w/'.length)].slice(0, chars),
     ...more,
   });
 
@@ -217,8 +250,11 @@ describe('what it rests on', () => {
     // A file longer than the look reads: no number.
     const big = `CREATE TABLE a (id int);\n${' '.repeat(DETECT_SQL_CHARS)}`;
     expect((await detectImportFindings(io({ 'a.sql': big }), '.erd-studio', { countTables: true })).sqlTables).toBeUndefined();
-    // As many files as the look lists (maybe more exist): no number.
-    const many = Object.fromEntries(Array.from({ length: DETECT_SQL_FILES }, (_, i) => [`${i}.sql`, 'CREATE TABLE a (id int);']));
+    // As many files as the look reads, all of them: the number.
+    const all = Object.fromEntries(Array.from({ length: DETECT_SQL_FILES }, (_, i) => [`${i}.sql`, 'CREATE TABLE a (id int);']));
+    expect((await detectImportFindings(io(all), '.erd-studio', { countTables: true })).sqlTables).toBe(DETECT_SQL_FILES);
+    // More files than the look reads: no number.
+    const many = Object.fromEntries(Array.from({ length: DETECT_SQL_FILES + 1 }, (_, i) => [`${i}.sql`, 'CREATE TABLE a (id int);']));
     expect((await detectImportFindings(io(many), '.erd-studio', { countTables: true })).sqlTables).toBeUndefined();
   });
 
@@ -240,114 +276,56 @@ describe('what it rests on', () => {
   });
 });
 
-describe('nothing found: a folder with no diagram and nothing concrete, whose empty Diagrams view was opened', () => {
-  const state = (s: Partial<StartSuggestionState> = {}): StartSuggestionState => ({ shown: 0, ...s });
-
-  function nothingDeps(over: Partial<NothingFoundDeps> & { stored?: StartSuggestionState; answer?: string } = {}) {
-    let stored = over.stored ?? state();
-    const calls = {
-      shown: [] as unknown[][], info: [] as string[], ran: [] as unknown[][], features: [] as string[], off: [] as boolean[], claims: 0,
-    };
-    const deps: NothingFoundDeps = {
-      intent: async () => 'blank',
-      hasDiagrams: () => false,
-      hasTables: () => false,
-      settingOn: () => true,
-      state: () => stored,
-      saveState: async (s) => { stored = s; },
-      claim: () => { calls.claims += 1; return true; },
-      show: async (message, ...buttons) => { calls.shown.push([message, ...buttons]); return over.answer; },
-      info: (m) => { calls.info.push(m); },
-      executeCommand: async (...args) => { calls.ran.push(args); },
-      feature: (k) => { calls.features.push(k); },
-      setOffContext: (off) => { calls.off.push(off); },
-      ...over,
-    };
-    return { deps, calls, stored: () => stored };
-  }
-
-  it('says what ERD Studio is for in the wording rules\' words, with New Diagram, Show Me How and Don\'t Ask Again', async () => {
-    expect(NOTHING_FOUND_MESSAGE).toBe(
-      'No data model found in this folder yet. Start a new diagram, or bring in your data model from Databricks, Snowflake, Power BI, Fabric and more as DBML, an open format. ERD Studio is free to use.',
-    );
-    expect(NOTHING_FOUND_MESSAGE).not.toMatch(/open standard|open source|\bdbt\b/i);
-    const { deps, calls, stored } = nothingDeps();
-    const run = await runNothingFoundPrompt(deps);
-    expect(run.shown).toBe(true);
-    expect(calls.shown).toEqual([[NOTHING_FOUND_MESSAGE, NEW_DIAGRAM_BUTTON, SHOW_ME_HOW_BUTTON, DONT_ASK_AGAIN_FOLDER_BUTTON]]);
-    expect([NEW_DIAGRAM_BUTTON, SHOW_ME_HOW_BUTTON]).toEqual(['New Diagram', 'Show Me How']);
-    // The count is saved before it shows, its own: the concrete suggestion's count is untouched.
-    expect(stored()).toEqual({ shown: 0, nothingShown: 1 });
-    expect(calls.features).toEqual([NOTHING_FOUND_FEATURES.shown]);
-  });
-
-  it('New Diagram runs New Diagram…; Show Me How opens the import guide from the prompt; both answer it for good', async () => {
-    const blank = nothingDeps({ answer: NEW_DIAGRAM_BUTTON });
-    await (await runNothingFoundPrompt(blank.deps)).done;
-    expect(blank.calls.ran).toEqual([['erdStudio.createDomain']]);
-    expect(blank.stored()).toEqual({ shown: 0, nothingShown: 1, nothingAnswered: true });
-    expect(blank.calls.features).toEqual(['suggestPromptNothingShown', 'suggestPromptNothingNewDiagram']);
-
-    const guide = nothingDeps({ answer: SHOW_ME_HOW_BUTTON });
-    await (await runNothingFoundPrompt(guide.deps)).done;
-    expect(guide.calls.ran).toEqual([[IMPORT_GUIDE_COMMAND, { from: 'prompt' }]]);
-    expect(SHOW_ME_HOW_COMMAND).toBe('erdStudio.showImportGuide');
-    expect(guide.calls.features).toEqual(['suggestPromptNothingShown', 'suggestPromptNothingGuide']);
-    expect(nothingFoundDue({ settingOn: true, state: guide.stored(), hasDiagrams: false })).toBe(false);
-  });
-
-  it("Don't Ask Again turns start suggestions off for the folder (both notifications) and says how to turn them back on", async () => {
-    const { deps, calls, stored } = nothingDeps({ answer: DONT_ASK_AGAIN_FOLDER_BUTTON });
-    await (await runNothingFoundPrompt(deps)).done;
-    expect(stored()).toEqual({ shown: 0, nothingShown: 1, off: true });
-    expect(calls.off).toEqual([true]);
-    expect(calls.info).toEqual([START_SUGGESTIONS_OFF_MESSAGE]);
-    expect(calls.features).toEqual(['suggestPromptNothingShown', 'suggestPromptNothingOff']);
-    expect(startSuggestionDue({ settingOn: true, state: stored(), hasDiagrams: false })).toBe(false);
-  });
-
-  it('closed: asked again later, at most three times per folder; never once off, answered, with a diagram or a table, or with the setting off', () => {
-    expect(nothingFoundDue({ settingOn: true, state: state({ nothingShown: 2 }), hasDiagrams: false })).toBe(true);
-    expect(nothingFoundDue({ settingOn: true, state: state({ nothingShown: 3 }), hasDiagrams: false })).toBe(false);
-    expect(nothingFoundDue({ settingOn: true, state: state({ off: true }), hasDiagrams: false })).toBe(false);
-    expect(nothingFoundDue({ settingOn: true, state: state({ nothingAnswered: true }), hasDiagrams: false })).toBe(false);
-    expect(nothingFoundDue({ settingOn: true, state: state(), hasDiagrams: true })).toBe(false);
-    expect(nothingFoundDue({ settingOn: true, state: state(), hasDiagrams: false, hasTables: true })).toBe(false);
-    expect(nothingFoundDue({ settingOn: false, state: state(), hasDiagrams: false })).toBe(false);
-    // The concrete suggestion's own answer or count does not decide this one.
-    expect(nothingFoundDue({ settingOn: true, state: state({ shown: 3, answered: true }), hasDiagrams: false })).toBe(true);
-    expect(readStartSuggestionState({ shown: 1, nothingShown: 2.5, nothingAnswered: true })).toEqual({ shown: 1, nothingShown: 2, nothingAnswered: true });
-    expect(readStartSuggestionState({ nothingShown: 'x', nothingAnswered: 1 })).toEqual({ shown: 0 });
-  });
-
-  it('only for a blank suggestion: a concrete start has its own notification, and an unknown one shows nothing', async () => {
-    for (const intent of ['convert', 'drawFromDbt', 'importSemanticModel', 'importSqlDdl', 'importDbmlFile', undefined] as const) {
-      const { deps, calls } = nothingDeps({ intent: async () => intent });
-      expect((await runNothingFoundPrompt(deps)).shown).toBe(false);
-      expect(calls.shown).toEqual([]);
-      expect(calls.claims).toBe(0);
+describe('nothing found: no notification any more (the example draft on the ERD Studio icon takes its place)', () => {
+  it('runNothingFoundPrompt and its strings are removed', () => {
+    for (const name of ['runNothingFoundPrompt', 'nothingFoundDue', 'NOTHING_FOUND_MESSAGE', 'NOTHING_FOUND_FEATURES', 'NEW_DIAGRAM_BUTTON', 'SHOW_ME_HOW_BUTTON', 'CREATE_DIAGRAM_BUTTON']) {
+      expect(name in startSuggestion).toBe(false);
     }
-    const failing = nothingDeps({ intent: async () => { throw new Error('look failed'); } });
-    expect((await runNothingFoundPrompt(failing.deps)).shown).toBe(false);
   });
 
-  it('never takes a window another prompt has (the session gate), and writes nothing then', async () => {
-    const gate = new SessionPromptGate();
-    expect(gate.claim('walkthrough')).toBe(true);
-    const { deps, calls, stored } = nothingDeps({ claim: () => gate.claim('nothingFound') });
-    expect((await runNothingFoundPrompt(deps)).shown).toBe(false);
-    expect(calls.shown).toEqual([]);
-    expect(stored()).toEqual({ shown: 0 });
-    // It is not an activation prompt: activation never picks it.
-    expect(ACTIVATION_PROMPT_PRIORITY).not.toContain('nothingFound');
+  it('a blank folder is offered the example draft once per machine, never a notification', async () => {
+    const h = harness({ intent: 'blank' });
+    expect((await runStartSuggestion(h.deps)).shown).toBe(false);
+    const due = (exampleShownOnMachine: boolean) => autoDraftDue({
+      settingOn: true, state: { shown: 0 }, hasDiagrams: false, hasTables: false, canvasOpen: false, intent: 'blank', exampleShownOnMachine,
+    });
+    expect(due(false)).toBe('example');
+    expect(due(true)).toBeUndefined();
+  });
+});
+
+describe('dbtProjectAboveOpenFolders', () => {
+  const root = path.join(path.sep, 'repo', 'analytics');
+  it('is true only when every open folder is strictly inside the dbt project', () => {
+    expect(dbtProjectAboveOpenFolders(root, [path.join(root, 'models')])).toBe(true);
+    expect(dbtProjectAboveOpenFolders(root, [path.join(root, 'models'), path.join(root, 'seeds')])).toBe(true);
+    // The project root itself, a folder holding it, or any folder outside it: the project is "in this folder".
+    expect(dbtProjectAboveOpenFolders(root, [root])).toBe(false);
+    expect(dbtProjectAboveOpenFolders(root, [path.dirname(root)])).toBe(false);
+    expect(dbtProjectAboveOpenFolders(root, [path.join(root, 'models'), path.join(path.sep, 'elsewhere')])).toBe(false);
+    expect(dbtProjectAboveOpenFolders(root, [path.join(path.dirname(root), 'analytics-docs')])).toBe(false);
+    expect(dbtProjectAboveOpenFolders(root, [])).toBe(false);
   });
 
-  it('checks again after the look: a diagram made, or the setting turned off, meanwhile', async () => {
-    let diagrams = false;
-    const made = nothingDeps({ intent: async () => { diagrams = true; return 'blank'; }, hasDiagrams: () => diagrams });
-    expect((await runNothingFoundPrompt(made.deps)).shown).toBe(false);
-    let on = true;
-    const off = nothingDeps({ intent: async () => { on = false; return 'blank'; }, settingOn: () => on });
-    expect((await runNothingFoundPrompt(off.deps)).shown).toBe(false);
+  it('goes into the message through the run\'s dbtAbove dependency', async () => {
+    const show = vi.fn(async () => undefined);
+    const run = await startSuggestion.runStartSuggestion({
+      intent: async () => 'drawFromDbt',
+      sqlTables: () => undefined,
+      dbtAbove: () => true,
+      hasDiagrams: () => false,
+      settingOn: () => true,
+      convertApplies: () => false,
+      state: () => ({ shown: 0 }),
+      saveState: async () => undefined,
+      show,
+      info: async () => undefined,
+      executeCommand: async () => undefined,
+      recordSuggested: () => undefined,
+      feature: () => undefined,
+      setOffContext: () => undefined,
+    });
+    await run.done;
+    expect(show.mock.calls[0][0]).toBe('ERD Studio found a dbt project in a folder above this one. Show its models as a diagram? Nothing is saved until you keep it.');
   });
 });

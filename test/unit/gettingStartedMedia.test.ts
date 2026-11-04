@@ -12,7 +12,6 @@ import {
   LOGICAL_GETTING_STARTED_CUES,
   LOGICAL_GETTING_STARTED_TRANSCRIPT,
 } from '../../src/types/gettingStartedLogicalTranscript';
-import { HOW_TO_CLIPS, HOW_TO_CLIP_DIR, HOW_TO_CLIP_KEYS } from '../../src/types/startActions';
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -29,56 +28,6 @@ function audioObjectType(head: Buffer): number | undefined {
   return head[i + 1];
 }
 
-/** The boxes of an MP4 a test needs, read from its `moov` (no ffprobe in CI). */
-function readMp4(buf: Buffer): {
-  faststart: boolean; codec: string; profile: number; chromaFormat: number; width: number; seconds: number; handlers: string[];
-  tracks: { handler: string; seconds: number }[]; audio?: { objectType?: number; channels: number; sampleRate: number };
-} {
-  const moov = buf.indexOf('moov');
-  const mdat = buf.indexOf('mdat');
-  // Every lookup below is inside moov, which a fast-start file puts before mdat.
-  const box = (type: string, from = moov): number => buf.indexOf(type, from) - 4; // the box's size field
-  const mvhd = box('mvhd');
-  const version = buf[mvhd + 8];
-  const timescale = version === 1 ? buf.readUInt32BE(mvhd + 28) : buf.readUInt32BE(mvhd + 20);
-  const duration = version === 1 ? Number(buf.readBigUInt64BE(mvhd + 32)) : buf.readUInt32BE(mvhd + 24);
-  const handlers: string[] = [];
-  for (let at = buf.indexOf('hdlr', moov); at > 0 && at < mdat; at = buf.indexOf('hdlr', at + 4)) {
-    const handler = buf.toString('latin1', at + 12, at + 16);
-    if (handler !== 'mdir') handlers.push(handler); // 'mdir' is udta metadata, not a track
-  }
-  // Each track's own length: its mdia's mdhd (timescale, duration), then its hdlr.
-  const tracks: { handler: string; seconds: number }[] = [];
-  for (let at = buf.indexOf('mdhd', moov); at > 0 && at < mdat; at = buf.indexOf('mdhd', at + 4)) {
-    const v1 = buf[at + 4] === 1;
-    const scale = v1 ? buf.readUInt32BE(at + 24) : buf.readUInt32BE(at + 16);
-    const length = v1 ? Number(buf.readBigUInt64BE(at + 28)) : buf.readUInt32BE(at + 20);
-    const hdlr = buf.indexOf('hdlr', at);
-    tracks.push({ handler: buf.toString('latin1', hdlr + 12, hdlr + 16), seconds: length / scale });
-  }
-  const mp4a = buf.indexOf('mp4a', moov);
-  const audio = mp4a > 0 && mp4a < mdat
-    ? { objectType: audioObjectType(buf.subarray(mp4a, mdat)), channels: buf.readUInt16BE(mp4a - 4 + 24), sampleRate: buf.readUInt16BE(mp4a - 4 + 32) }
-    : undefined;
-  const avc1 = box('avc1');
-  const avcC = box('avcC') + 8; // its body
-  let at = avcC + 5;
-  const sps = buf[at] & 0x1f; at += 1;
-  for (let i = 0; i < sps; i++) at += 2 + buf.readUInt16BE(at);
-  const pps = buf[at]; at += 1;
-  for (let i = 0; i < pps; i++) at += 2 + buf.readUInt16BE(at);
-  return {
-    faststart: moov > 0 && moov < mdat,
-    codec: avc1 > 0 && avc1 < mdat ? 'avc1' : 'none',
-    profile: buf[avcC + 1],
-    chromaFormat: buf[at] & 0x03,
-    width: buf.readUInt16BE(avc1 + 8 + 24),
-    seconds: duration / timescale,
-    handlers,
-    tracks,
-    audio,
-  };
-}
 const MEDIA = path.join(ROOT, 'media', 'onboarding');
 
 const CUTS = [
@@ -132,45 +81,14 @@ describe.each(CUTS)('getting-started captions: $name', (cut) => {
 });
 
 describe('getting-started media', () => {
-  it('ships exactly the two cuts, each an mp4 and a jpeg poster (and, optionally, the "Watch how" clips folder)', () => {
-    expect(fs.readdirSync(MEDIA).filter((f) => f !== 'stories').sort()).toEqual([
+  it('ships exactly the two cuts, each an mp4 and a jpeg poster: no other file or folder (the per-start clips are gone)', () => {
+    expect(fs.readdirSync(MEDIA).filter((f) => f !== '.DS_Store').sort()).toEqual([
       'getting-started-logical-poster.jpg',
       'getting-started-logical.mp4',
       'getting-started-poster.jpg',
       'getting-started.mp4',
     ]);
-  });
-
-  // The Welcome panel's "Watch how" clips (HOW_TO_CLIPS): onboarding stories published by
-  // `node test/stories/run.mjs --record --publish` (test/stories/lib/publish.mjs). Every one
-  // ships: the panel shows a clip only when its file is here, and each counts toward the VSIX's
-  // 60-file cap (so no poster files: the clip's first frame is its poster).
-  const STORIES = path.join(MEDIA, ...HOW_TO_CLIP_DIR.slice(2));
-  const clipFiles = fs.existsSync(STORIES) ? fs.readdirSync(STORIES).filter((f) => f !== '.DS_Store') : [];
-  it('the clips folder holds exactly the clips HOW_TO_CLIPS names: one per start a page leads with (Convert has none)', () => {
-    expect(HOW_TO_CLIP_DIR.slice(0, 2)).toEqual(['media', 'onboarding']);
-    expect([...HOW_TO_CLIP_KEYS].sort()).toEqual(['blank', 'drawFromDbt', 'example', 'importDbmlFile', 'importSemanticModel', 'importSqlDdl']);
-    expect(clipFiles.sort()).toEqual(HOW_TO_CLIP_KEYS.map((k) => HOW_TO_CLIPS[k]).sort());
-  });
-  it.each(HOW_TO_CLIP_KEYS.map((k) => [k, HOW_TO_CLIPS[k]]))('%s (%s): H.264 High yuv420p, 1280 px wide, fast-start, narrated in MP3 (never AAC), at most 60 s and 2 MB', (_key, file) => {
-    const buf = fs.readFileSync(path.join(STORIES, file));
-    const clip = readMp4(buf);
-    expect(buf.length).toBeLessThanOrEqual(2 * 1024 * 1024);
-    expect(clip.faststart).toBe(true);
-    expect(clip.codec).toBe('avc1');
-    expect(clip.profile).toBe(100); // High
-    expect(clip.chromaFormat).toBe(1); // 4:2:0
-    expect(clip.width).toBe(1280);
-    expect(clip.seconds).toBeGreaterThan(10);
-    expect(clip.seconds).toBeLessThanOrEqual(60.05);
-    expect([...clip.handlers].sort()).toEqual(['soun', 'vide']); // the video and its narration, no subtitle track
-    // The narration: MP3 (VS Code's ffmpeg has no AAC decoder), mono, 44.1 kHz, as long as the video.
-    expect(clip.audio?.objectType).toBe(0x6b);
-    expect(clip.audio?.channels).toBe(1);
-    expect(clip.audio?.sampleRate).toBe(44100);
-    const video = clip.tracks.find((t) => t.handler === 'vide')!;
-    const sound = clip.tracks.find((t) => t.handler === 'soun')!;
-    expect(Math.abs(sound.seconds - video.seconds)).toBeLessThan(0.5);
+    expect(fs.existsSync(path.join(MEDIA, 'stories'))).toBe(false);
   });
 
   // Each check runs on whichever of the agreed files exist; the listing above requires all four.

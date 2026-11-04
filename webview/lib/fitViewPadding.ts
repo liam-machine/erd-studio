@@ -102,5 +102,64 @@ export function compareFocusRightInset(flowWidth: number, panelWidth: number): n
   return Math.max(0, Math.min(covered, room));
 }
 
+/**
+ * The closest a whole-diagram fit zooms in: 100%. React Flow's own ceiling
+ * (200%) made a diagram's first table jump to twice its size the moment it
+ * was added to an empty canvas (the queued first-open fit runs then), and a
+ * small diagram open at 200% after Convert.
+ */
+export const FIT_MAX_ZOOM = 1;
+
 /** Initial-load fit, before the toolbar has been measured. */
-export const INITIAL_FIT_VIEW_OPTIONS: FitViewOptions = { padding: fitViewPadding(FALLBACK_TOP_INSET_PX) };
+export const INITIAL_FIT_VIEW_OPTIONS: FitViewOptions = { padding: fitViewPadding(FALLBACK_TOP_INSET_PX), maxZoom: FIT_MAX_ZOOM };
+
+/** At or above this many tables, the first open fits the biggest cluster at a readable zoom, not the whole diagram. */
+export const LARGE_DIAGRAM_TABLES = 60;
+/** The least zoom a large diagram first opens at: table names and columns stay readable. */
+export const READABLE_ZOOM = 0.5;
+
+/**
+ * The tables that are connected to each other, biggest group first (ties:
+ * the group whose first table comes first). Isolated tables are groups of one.
+ */
+export function clustersOf(nodeIds: readonly string[], edges: ReadonlyArray<{ source: string; target: string }>): string[][] {
+  const parent = new Map<string, string>(nodeIds.map((id) => [id, id]));
+  const find = (id: string): string => {
+    let root = id;
+    while (parent.get(root) !== root) root = parent.get(root)!;
+    let at = id;
+    while (parent.get(at) !== root) { const next = parent.get(at)!; parent.set(at, root); at = next; }
+    return root;
+  };
+  for (const { source, target } of edges) {
+    if (!parent.has(source) || !parent.has(target)) continue;
+    const a = find(source);
+    const b = find(target);
+    if (a !== b) parent.set(b, a);
+  }
+  const groups = new Map<string, string[]>();
+  for (const id of nodeIds) {
+    const root = find(id);
+    const group = groups.get(root);
+    if (group) group.push(id); else groups.set(root, [id]);
+  }
+  return [...groups.values()].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * The first-open fit for this diagram. A small diagram fits whole (never
+ * past {@link FIT_MAX_ZOOM}). A large one (a 257-table import) would fit as
+ * an unreadable strip, so it opens on its biggest cluster of related tables
+ * at no less than {@link READABLE_ZOOM}; with no relationships at all, on the
+ * whole diagram's centre at that zoom. Everything stays a pan or a Fit away.
+ */
+export function initialFitViewOptions(
+  nodes: ReadonlyArray<{ id: string; type?: string }>,
+  edges: ReadonlyArray<{ source: string; target: string }>,
+): FitViewOptions {
+  const tables = nodes.filter((n) => n.type === undefined || n.type === 'model' || n.type === 'table').map((n) => n.id);
+  if (tables.length < LARGE_DIAGRAM_TABLES) return INITIAL_FIT_VIEW_OPTIONS;
+  const [biggest] = clustersOf(tables, edges);
+  const readable: FitViewOptions = { ...INITIAL_FIT_VIEW_OPTIONS, minZoom: READABLE_ZOOM };
+  return biggest && biggest.length > 1 ? { ...readable, nodes: biggest.map((id) => ({ id })) } : readable;
+}

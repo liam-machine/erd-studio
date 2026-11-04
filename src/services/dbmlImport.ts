@@ -1387,6 +1387,8 @@ export interface DescribeDbmlImportOptions {
    * `skipped` lines (counts by kind) are listed, the first few of each.
    */
   origin?: { from: string; notes?: readonly string[]; skipped?: readonly string[] };
+  /** The bundled example (Open an Example… in a folder): no note that its references are saved optional. */
+  example?: boolean;
 }
 
 /** How many of a conversion's notes, and of its skipped lines, the dry run lists. */
@@ -1440,7 +1442,7 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   if (options.dbml) {
     // A DBML project writes every Ref as `>?` (D18): say so when the file had required ones
     // (not for a conversion: there was no DBML file to compare with).
-    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin) {
+    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin && !options.example) {
       lines.push(`• Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, ${plural(report.requiredRefs, 'reference was', 'references were')} not optional.`);
     }
   } else if (report.optionalRefs > 0 && !report.erdStudioExport) {
@@ -1466,7 +1468,7 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   if (report.keptInMeta > 0) {
     // Plain words (onboarding story 06): where they are kept (`meta.dbml`) is the reference doc's
     // business, and no count (it mixes tables and columns, and read like a wrong table count).
-    lines.push('• Not null, defaults, indexes and other details ERD Studio has no field for are kept in the table files, so they are not lost.');
+    lines.push(`• ${keptInMetaNote(options)}`);
   }
   if (report.renamed.length > 0) {
     const renames = renameEntries(report.renamed);
@@ -1502,7 +1504,7 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
 // The dry run's modal: a headline and a short detail, whatever the size
 // ---------------------------------------------------------------------------
 
-/** The modal's detail never runs longer than this many lines, however many tables (Review All… lists everything). */
+/** The modal's detail never runs longer than this many lines, however many tables (the draft's details drawer lists everything). */
 export const IMPORT_MODAL_MAX_DETAIL_LINES = 10;
 /** Schemas the modal names by count; the rest are summed. */
 export const IMPORT_MODAL_SCHEMAS_SHOWN = 5;
@@ -1537,6 +1539,16 @@ export function importLayoutSentence(plan: DbmlImportPlan, options: DescribeDbml
 }
 
 /**
+ * Where the details ERD Studio has no field for go. A DBML file keeps its
+ * indexes; a conversion (SQL scripts, a semantic model) leaves plain indexes
+ * out (its own note says so), so this note does not claim them too.
+ */
+function keptInMetaNote(options: DescribeDbmlImportOptions): string {
+  const what = options.origin ? 'Not null, defaults' : 'Not null, defaults, indexes';
+  return `${what} and other details ERD Studio has no field for are kept in the table files, so they are not lost.`;
+}
+
+/**
  * Everything the import has to say beyond the counts, most important first,
  * one sentence each: the file's layout lines that could not be read, values
  * ERD Studio keeps but does not recognise, the conversion's own notes,
@@ -1559,7 +1571,7 @@ export function importPlanNotes(plan: DbmlImportPlan, options: DescribeDbmlImpor
     notes.push(`Schema ${key.split('\u0000')[0]} is written ${to}, ${why}: ${someOf(tables)}.`);
   }
   if (options.dbml) {
-    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin) {
+    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin && !options.example) {
       notes.push(`Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, ${plural(report.requiredRefs, 'reference was', 'references were')} not optional.`);
     }
   } else if (report.optionalRefs > 0 && !report.erdStudioExport) {
@@ -1567,7 +1579,7 @@ export function importPlanNotes(plan: DbmlImportPlan, options: DescribeDbmlImpor
   }
   if (report.stickyNotes > 0) notes.push(`${plural(report.stickyNotes, 'sticky note')}.`);
   if (report.keptInMeta > 0) {
-    notes.push('Not null, defaults, indexes and other details ERD Studio has no field for are kept in the table files, so they are not lost.');
+    notes.push(keptInMetaNote(options));
   }
   return notes;
 }
@@ -1598,7 +1610,8 @@ export function importLeftOut(plan: DbmlImportPlan, options: DescribeDbmlImportO
  * summed), what the Table Library already has or gains, where the
  * relationships go, renames and what is left out as counts with one example,
  * the first {@link IMPORT_MODAL_NOTES_SHOWN} notes and how many more, and the
- * layout. Never a list of tables: Review All… shows every one.
+ * layout. Never a list of tables: the draft's details drawer shows every one.
+ * Since Draft-first this modal is only the fallback for a host with no draft preview.
  */
 export function summariseDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): { headline: string; detail: string[] } {
   const { report } = plan;

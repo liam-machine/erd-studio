@@ -4,6 +4,7 @@
 .vscode-test/**
 src/**
 webview/**
+webview-draft/**
 out/**
 out-webview/**
 test/**

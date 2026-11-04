@@ -21,7 +21,7 @@ import { redactPaths } from '../types/feedback';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import { CatalogService } from '../services/catalogService';
-import { findDbtProjectCandidates, hasDbtProjectFile } from '../services/projectDiscovery';
+import { findDbtProjectsBelow, hasDbtProjectFile } from '../services/dbtProjectSearch';
 import { readDbtProjectConfig, resolveCatalogPath, resolveManifestPath, type DbtProjectConfig } from '../services/dbtProjectConfig';
 import { SubjectAreaService } from '../services/domainService';
 import { LayerService } from '../services/layerService';
@@ -117,11 +117,12 @@ function holdsSemanticDir(dir: string, semanticDir: string): boolean {
  * ERD Studio folder, whichever comes first, so a design folder nested in a
  * dbt repo is its own (logical-only) root, as the extension opens it, and
  * never the dbt project above it. A design folder that is the current
- * directory still gives way to a dbt project up to three levels below it
+ * directory still gives way to a dbt project up to six levels below it
  * (any dbt project beats a plain folder, as in the extension's search).
  * With no such folder at or above it — or only one above it — a dbt
- * project up to three levels below the current directory comes next
- * (`findDbtProjectCandidates`, the extension's own search), then that
+ * project up to six levels below the current directory comes next
+ * (`findDbtProjectsBelow`, the extension's own walk: hidden folders other
+ * than tools' own, symbolic links followed), then that
  * design folder above. Null when there is none.
  */
 export function resolveProjectRoot(
@@ -141,7 +142,7 @@ export function resolveProjectRoot(
     if (path.dirname(dir) === dir) { break; }
   }
   // Below the current directory (it holds no dbt_project.yml, or the walk would have returned it).
-  const below = findDbtProjectCandidates([origin])[0];
+  const below = findDbtProjectsBelow([origin], { first: true })[0];
   return below ?? designRoot;
 }
 
@@ -166,7 +167,7 @@ export function requireProjectRoot(
       options.mentionDbt
         ? project
           ? `No dbt_project.yml or ${semanticDir}/ folder found in ${where} (--project must be the folder that holds one).`
-          : `No dbt project or ${semanticDir}/ folder found here: looked for dbt_project.yml in this folder, above it and up to three `
+          : `No dbt project or ${semanticDir}/ folder found here: looked for dbt_project.yml in this folder, above it and up to six `
             + `folders below it, and for ${semanticDir}/ in this folder and above it. Run this from your project folder, or pass --project <dir>.`
         : project
           ? `No ${semanticDir}/ folder found in ${where} (--project must be the folder that holds it).`

@@ -19,68 +19,35 @@ import * as os from 'os';
 import * as path from 'path';
 import { parse as parseYaml } from 'yaml';
 
+import {
+  DBT_SEARCH_MAX_DEPTH,
+  DBT_SEARCH_SKIP_DIRS,
+  findDbtProjectAbove,
+  findDbtProjectsBelow,
+  hasDbtProjectFile,
+} from './dbtProjectSearch';
+
 // ---------------------------------------------------------------------------
 // Project discovery
 // ---------------------------------------------------------------------------
 
 /**
- * Directories never descended into when searching down for a dbt project.
- * Same list as `DBT_SEARCH_SKIP_DIRS` in `extension.ts`; dot-directories are
- * skipped as well.
+ * The search rules (skipped folders, depth) are `dbtProjectSearch.ts`'s, shared
+ * with the extension's discovery and the CLI; re-exported for older importers.
  */
-export const DBT_SEARCH_SKIP_DIRS: ReadonlySet<string> = new Set([
-  'node_modules', 'dbt_packages', '.git', 'target', '.venv', 'venv',
-]);
-
-/** Maximum depth below the start directory searched for `dbt_project.yml`. */
-export const DBT_SEARCH_MAX_DEPTH = 3;
-
-function hasDbtProjectFile(dir: string): boolean {
-  try {
-    return fs.statSync(path.join(dir, 'dbt_project.yml')).isFile();
-  } catch {
-    return false;
-  }
-}
+export { DBT_SEARCH_MAX_DEPTH, DBT_SEARCH_SKIP_DIRS };
 
 /**
  * Find the dbt project a command run from `start` belongs to: `start` itself,
- * then each ancestor up to the filesystem root, then a breadth-first search
- * up to `DBT_SEARCH_MAX_DEPTH` levels below `start` (shallowest match wins,
- * siblings in name order). Null when there is none.
+ * then the nearest ancestor holding one (`findDbtProjectAbove`), then the
+ * shallowest one below `start` (`findDbtProjectsBelow`: up to `maxDepth`
+ * folders deep, siblings in name order, hidden folders other than tools' own
+ * after the rest, symbolic links followed). Null when there is none.
  */
 export function findDbtProjectDir(start: string, maxDepth = DBT_SEARCH_MAX_DEPTH): string | null {
   const origin = path.resolve(start);
-
-  for (let dir = origin; ; dir = path.dirname(dir)) {
-    if (hasDbtProjectFile(dir)) { return dir; }
-    if (path.dirname(dir) === dir) { break; }
-  }
-
-  let frontier = [origin];
-  for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
-    const next: string[] = [];
-    for (const dir of frontier) {
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      entries.sort((a, b) => a.name.localeCompare(b.name));
-      for (const entry of entries) {
-        if (!entry.isDirectory() || DBT_SEARCH_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) {
-          continue;
-        }
-        const child = path.join(dir, entry.name);
-        if (hasDbtProjectFile(child)) { return child; }
-        next.push(child);
-      }
-    }
-    frontier = next;
-  }
-
-  return null;
+  if (hasDbtProjectFile(origin)) { return origin; }
+  return findDbtProjectAbove(origin) ?? findDbtProjectsBelow([origin], { maxDepth, first: true })[0] ?? null;
 }
 
 export interface DbtProjectIdentity {

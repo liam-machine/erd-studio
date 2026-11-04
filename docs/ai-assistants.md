@@ -4,7 +4,7 @@ ERD Studio's data model is plain files in DBML, an open format, so any AI coding
 
 ## Set Up My AI Helper
 
-Click **Set Up My AI Helper** on the Welcome tab, or run **ERD Studio: Set Up My AI Helper**. It installs instructions for the AI assistants it finds on your computer (Claude Code, GitHub Copilot, Codex, Gemini CLI, Cursor) that teach them ERD Studio's files.
+Click **Set Up My AI Helper** on the ERD Studio Tour tab, or run **ERD Studio: Set Up My AI Helper**. It installs instructions for the AI assistants it finds on your computer (Claude Code, GitHub Copilot, Codex, Gemini CLI, Cursor) that teach them ERD Studio's files.
 
 Then ask for what you want, for example:
 
@@ -16,7 +16,7 @@ Then ask for what you want, for example:
 
 ## The guided setup
 
-The helper also installs a guided setup, and the Welcome tab shows exactly what to type in each assistant. Start your assistant in your project folder and type:
+The helper also installs a guided setup, and the ERD Studio Tour tab shows exactly what to type in each assistant. Start your assistant in your project folder and type:
 
 | Assistant | Type |
 |---|---|
@@ -36,7 +36,7 @@ In a folder with no dbt project, the guide designs a first diagram with you and 
 - **From a DBML file:** it asks you to run **ERD Studio: Import DBML…** (no AI involved; you see what it will create before anything is written), then fills in the detail.
 - **From the tables you already have:** it adds keys, grain, roles and rationale to the diagrams in `.erd-studio/` instead of rebuilding them.
 
-It then writes the files, checks them with the `erd-studio` helper, and tells you how to open the diagram. Want to see a finished one first? Run **ERD Studio: Open Example Diagram** for a small coffee-shop model.
+It then writes the files, checks them with the `erd-studio` helper, and tells you how to open the diagram. Want to see a finished one first? Run **ERD Studio: Open an Example…** for a small coffee-shop model.
 
 ### With a dbt project
 

@@ -1,5 +1,5 @@
 // A folder of my own with nothing in it yet: the Diagrams view's own
-// "New Diagram" button, the name box, then the empty canvas's "New Table"
+// "New Diagram…" button, the name box, then the empty canvas's "New Table"
 // card. Proves the whole first-five-minutes path of a logical-only user ends
 // with a table on the canvas and its own .dbml file under
 // .erd-studio/main/tables/ (the file the user commits), and that the diagram
@@ -25,13 +25,13 @@ export default story({
       await s.eventually(async () => (await s.ui.windowTitle()).includes('orders-app'), { message: 'the orders-app folder did not open' });
     });
 
-    await s.step('When I open the ERD Studio sidebar, it offers "New Diagram"', async () => {
+    await s.step('When I open the ERD Studio sidebar, it offers "New Diagram…"', async () => {
       await s.ui.openSidebar('ERD Studio');
-      const button = s.sel.welcomeLink('New Diagram');
-      await s.expectVisible(button, { what: 'the New Diagram button in the empty Diagrams view' });
-      // One obvious start: New Diagram is the one button; Get started, the example and Import… are links.
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['New Diagram'], 'New Diagram should be the one button in the empty Diagrams view');
-      await s.expectVisible(s.sel.welcomeLink('Get started'), { what: 'the "Get started" link' });
+      const button = s.sel.welcomeLink('New Diagram…');
+      await s.expectVisible(button, { what: 'the New Diagram… button in the empty Diagrams view' });
+      // One obvious start: New Diagram… is the one button; the other starts are one link, More ways to start….
+      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['New Diagram…'], 'New Diagram… should be the one button in the empty Diagrams view');
+      await s.expectVisible(s.sel.welcomeLink('More ways to start…'), { what: 'the "More ways to start…" link' });
       const text = await s.ui.sidebarText();
       s.expect(!/\bdbt\b/i.test(text), `a folder without dbt_project.yml must show no dbt word, but the sidebar says: ${text}`);
       await s.wb.highlight(button);
@@ -39,8 +39,8 @@ export default story({
       await s.wb.unhighlight();
     });
 
-    await s.step('When I click "New Diagram", I am asked to name it', async () => {
-      await s.wb.click(s.sel.welcomeLink('New Diagram'));
+    await s.step('When I click "New Diagram…", I am asked to name it', async () => {
+      await s.wb.click(s.sel.welcomeLink('New Diagram…'));
       const box = await s.ui.waitForQuickPick({ title: 'New Diagram' });
       s.expect(/Name the diagram/.test(box.message), `the name box should ask for a name, but says "${box.message}"`);
     });

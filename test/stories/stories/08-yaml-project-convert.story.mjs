@@ -27,13 +27,13 @@ export default story({
       await s.expectFile('.erd-studio/tables/customer.yml');
       await s.expectFile('.erd-studio/gold/sales.json');
       s.expectNoFile('.erd-studio/gold/diagrams');
-      // The window's one prompt leads with Convert, the diagram second.
+      // The window's one prompt leads with Convert, the diagram second, the diagram with the guide third.
       const notice = s.sel.notification(NOTICE);
       await s.expectVisible(notice, { what: 'the opening notice offering Convert', timeout: 30000 });
       const text = await s.wb.ev(`${notice}.querySelector('.notification-list-item-message').textContent`);
       s.expect(text.startsWith('This project has 1 ERD Studio diagram, from an older ERD Studio.') && text.includes('DBML, an open format'), `the notice says: ${text}`);
       const buttons = await s.wb.ev(`[...${notice}.querySelectorAll('.monaco-button')].map(b => b.textContent.trim()).filter(Boolean)`);
-      s.assert.deepEqual(buttons, ['Convert to DBML…', 'Open sales'], 'the notice should lead with Convert');
+      s.assert.deepEqual(buttons, ['Convert to DBML…', 'Open sales', 'Show Me Around'], 'the notice should lead with Convert');
       await s.wb.highlight(notice);
       await s.pause(1800);
       await s.wb.unhighlight();

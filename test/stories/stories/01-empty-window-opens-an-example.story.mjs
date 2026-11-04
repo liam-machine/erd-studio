@@ -1,13 +1,17 @@
 // The first five minutes, from nothing: ERD Studio installed, no folder open.
-// The empty Diagrams view's "Open an example" is a command link with JSON
-// arguments (command:erdStudio.start?[{"action":"example","from":"sidebar"}]):
-// this story proves the argument reaches erdStudio.start in a real VS Code.
-// Without it, erdStudio.start shows its fallback quick pick ("Start your data
-// model") instead of the example list, and step 5 fails.
+// The empty Diagrams view's one button is Open Folder…; "More ways to start…"
+// is a command link with JSON arguments (command:erdStudio.start?[{"from":"sidebar"}])
+// that opens the other starts in a quick pick: this story proves the argument
+// reaches erdStudio.start in a real VS Code. Open an Example… shows a finished
+// example as a read-only draft (the coffee shop first, an Example switcher
+// over the bundled projects); switching to the Medallion lakehouse offers
+// Save This Example…, which copies it to a folder of its own and opens it
+// there, on its gold sales diagram.
 
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { DRAFT, chooseScope, waitForDraft } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
 export default story({
@@ -34,43 +38,61 @@ export default story({
       await s.ui.openSidebar('ERD Studio');
     });
 
-    await s.step('Then I see "Open an example" in the empty Diagrams view', async () => {
-      const link = s.sel.welcomeLink('Open an example');
-      await s.expectVisible(link, { what: 'the "Open an example" link' });
-      // No folder, no suggestion: Open Folder is the one button, the example a link beside it.
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Open Folder'], 'Open Folder should be the one button in an empty window');
-      const href = await s.wb.ev(`${link}.getAttribute('href') ?? ''`);
+    const MORE = s.sel.welcomeLink('More ways to start…');
+    await s.step('It offers "Open Folder…", and "More ways to start…"', async () => {
+      await s.expectVisible(MORE, { what: 'the "More ways to start…" link' });
+      // No folder, no suggestion: Open Folder… is the one button, the other starts a link beside it.
+      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Open Folder…'], 'Open Folder… should be the one button in an empty window');
+      const href = await s.wb.ev(`${MORE}.getAttribute('href') ?? ''`);
       s.assert.deepEqual(
         JSON.parse(decodeURIComponent(href.replace(/^command:erdStudio\.start\?/, ''))),
-        [{ action: 'example', from: 'sidebar' }],
-        `the link should run erdStudio.start with the example action, but its href is ${href}`,
+        [{ from: 'sidebar' }],
+        `the link should run erdStudio.start from the sidebar, but its href is ${href}`,
       );
-      await s.wb.highlight(link);
+      await s.wb.highlight(MORE);
       await s.pause(1200);
       await s.wb.unhighlight();
     });
 
-    await s.step('When I click it', async () => {
-      await s.wb.click(s.sel.welcomeLink('Open an example'));
+    await s.step('I click it, and choose "Open an Example…"', async () => {
+      await s.wb.click(MORE);
+      const pick = await s.ui.waitForQuickPick({ title: 'More ways to start' });
+      s.expect(pick.items.includes('Open an Example…'), `the quick pick should offer Open an Example…: ${pick.items.join(' | ')}`);
+      await s.wb.highlight(s.sel.quickPickRow('Open an Example…'));
+      await s.pause(1000);
+      await s.wb.unhighlight();
+      await s.ui.pick('Open an Example…');
     });
 
-    await s.step('Then the example picker opens, with "Enterprise warehouse" first', async () => {
-      const pick = await s.ui.waitForQuickPick();
-      s.expect(
-        !pick.title.includes('Start your data model'),
-        'the command link\'s argument did not reach erdStudio.start: it showed its fallback quick pick ("Start your data model") instead of the examples',
-      );
-      s.assert.equal(pick.title, 'Open an Example Project');
-      s.assert.equal(pick.items[0], 'Enterprise warehouse');
-      s.expect(pick.items.includes('Medallion lakehouse'), `Medallion lakehouse is not offered: ${pick.items.join(', ')}`);
-      await s.wb.highlight(s.sel.quickPickRow('Enterprise warehouse'));
+    let draft;
+    await s.step('A finished example opens, and I can switch to others', async () => {
+      draft = await waitForDraft(s, 'Example: Coffee shop');
+      s.assert.equal(await draft.page.ev(DRAFT.scopeLabel), 'Example');
+      s.expect(draft.scopes.some((o) => o.startsWith('Medallion lakehouse')), `the switcher should offer Medallion lakehouse: ${draft.scopes.join(' | ')}`);
+      s.assert.deepEqual(draft.primary, ['Open Folder…'], 'with no folder open, Open Folder… is the draft\'s primary');
+      await s.wb.highlight(s.sel.activeEditor);
       await s.pause(1500);
+      await s.wb.unhighlight();
+    }, { say: 'A finished example opens, a coffee shop. And I can switch to others.' });
+
+    await s.step('I switch to "Medallion lakehouse"', async () => {
+      await chooseScope(s, draft.page, 'Medallion lakehouse');
+      await s.ui.waitForActiveTab('Example: Medallion lakehouse', { timeout: 45000 });
+      draft.page.close();
+      draft = await waitForDraft(s, 'Example: Medallion lakehouse');
+      s.assert.deepEqual(draft.primary, ['Save This Example…']);
+      for (const name of ['fct_order_line', 'dim_customer', 'dim_date', 'dim_product']) {
+        s.expect(draft.tables.some((t) => t.endsWith(name)), `the example should draw ${name}: ${draft.tables.join(', ')}`);
+      }
+      await s.wb.highlight(s.sel.activeEditor);
+      await s.pause(1800);
       await s.wb.unhighlight();
     });
 
     let page;
-    await s.step('When I pick "Medallion lakehouse" and save it in my Projects folder', async () => {
-      await s.ui.pick('Medallion lakehouse');
+    await s.step('I press "Save This Example…" and save it in my Projects folder', async () => {
+      await draft.page.click(DRAFT.button('Save This Example…'));
+      draft.page.close();
       const dialog = await s.ui.waitForQuickPick({ title: 'choose where to save it' });
       // VS Code's own folder dialog opens in my home folder: I go into Projects.
       s.assert.equal(dialog.value, `${s.home}/`, 'the folder dialog should start in my home folder');
@@ -80,7 +102,7 @@ export default story({
       await s.pause(800);
       page = await s.wb.tagPage();
       await s.ui.quickInputButton('Save Example Here');
-    });
+    }, { say: 'I press Save This Example, and save it in my Projects folder.' });
 
     await s.step('Then the window opens the medallion folder', async () => {
       // An empty window opens the folder in itself: VS Code reloads the window.

@@ -454,12 +454,180 @@ function isLineStart(text: string, offset: number): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// What the folder looks count, and what a dump's data is
+// ---------------------------------------------------------------------------
+
+/** A cheap first test: no CREATE … TABLE at all means no statement to split. */
+const MAY_CREATE_TABLE = /\bcreate\b[^;]*?\btable\b/i;
+
+/**
+ * How many `CREATE TABLE` statements with a column list the text holds, by
+ * the converter's own reading (its statement splitter and its test for a
+ * column list: the name, then `(`, and no `AS SELECT` after it), so a CTAS,
+ * `CREATE TABLE … LIKE` or a dbt macro's `create table {{ relation }} as (…)`
+ * never counts, while a commented-out one or one inside a string never does
+ * either. `dialect` decides how comments and strings read (default: the
+ * detected one, else Postgres). Never parses a column.
+ */
+export function countCreateTablesWithColumns(text: string, dialect?: SqlDialect): number {
+  if (!MAY_CREATE_TABLE.test(text)) return 0;
+  const d = dialect ?? detectSqlDialect(text) ?? 'postgres';
+  let count = 0;
+  for (const st of splitStatements(text.replace(/^\ufeff/, ''), d)) {
+    const t = st.tokens;
+    if (upper(t[0]) !== 'CREATE') continue;
+    let i = 1;
+    while (i < t.length && t[i].kind === 'word' && !CREATE_OBJECT_WORDS.has(upper(t[i]))) i++;
+    if (upper(t[i]) !== 'TABLE') continue;
+    i++;
+    if (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'NOT' && upper(t[i + 2]) === 'EXISTS') i += 3;
+    const name = readName(t, i);
+    if (!name || !isPunct(t[name.next], '(')) continue;
+    const close = matchParen(t, name.next);
+    if (close < 0 || close === name.next + 1) continue;
+    let ctas = false;
+    for (let k = close + 1; k < t.length && !ctas; k++) {
+      ctas = upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH');
+    }
+    if (!ctas) count++;
+  }
+  return count;
+}
+
+/** Oracle's own DDL words, which no dialect the import reads has (`VARCHAR2`, `VARCHAR2(25 BYTE)`, storage clauses). */
+const ORACLE_DDL = /\bN?VARCHAR2\b|\(\s*\d+\s+(?:BYTE|CHAR)\s*\)|\bSEGMENT\s+CREATION\b|\bPCTFREE\b|\bNOCOMPRESS\s+(?:NO)?LOGGING\b/i;
+
+/** Whether the text is Oracle DDL, which Import SQL DDL… does not read (comments ignored). */
+export function looksLikeOracleSql(text: string): boolean {
+  return ORACLE_DDL.test(text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' '));
+}
+
+/** Above this many characters a script's INSERT statements are taken out before it is read (a dump with its data). */
+export const STRIP_INSERTS_ABOVE_CHARS = 1024 * 1024;
+
+/** `COPY … FROM stdin;` alone on its line: pg_dump's data block starts on the next line. */
+const COPY_FROM_STDIN = /^[ \t]*COPY\b[^\n;]*\bFROM\s+stdin\b[^\n]*;[ \t]*\r?$/gim;
+/** `INSERT INTO` at the start of a line. */
+const INSERT_INTO = /^[ \t]*INSERT\s+(?:IGNORE\s+)?INTO\b/gim;
+
+/**
+ * A script without a dump's data, as the import reads it: pg_dump's
+ * `COPY … FROM stdin;` blocks lose their rows (up to the `\.` line), and in a
+ * script of more than {@link STRIP_INSERTS_ABOVE_CHARS} characters
+ * (`mysqldump`, `pg_dump --inserts`) each `INSERT INTO … ;` becomes `INSERT;`.
+ * Every line break is kept, so a line number still points into the user's
+ * file, and the statements still count as skipped data. `sqlChars`: how
+ * much SQL is left, not counting what stands in for the data taken out (its
+ * line breaks, the `INSERT;`s): what the import's size limit is about.
+ */
+export function withoutSqlData(text: string): { text: string; sqlChars: number } {
+  // [start, end, characters of SQL the placeholder keeps that are not SQL to count]
+  const removed: Array<[number, number, number]> = [];
+  COPY_FROM_STDIN.lastIndex = 0;
+  for (let m = COPY_FROM_STDIN.exec(text); m; m = COPY_FROM_STDIN.exec(text)) {
+    const dataStart = text.indexOf('\n', m.index + m[0].length - 1);
+    if (dataStart < 0) break;
+    const end = findCopyEnd(text, dataStart + 1);
+    removed.push([dataStart + 1, end, 0]);
+    COPY_FROM_STDIN.lastIndex = end;
+  }
+  if (text.length > STRIP_INSERTS_ABOVE_CHARS) {
+    const escapes = BACKSLASH_ESCAPES.has(detectSqlDialect(text.slice(0, 256 * 1024)) ?? 'postgres') || /^-- (?:MySQL|MariaDB) dump/m.test(text.slice(0, 4096));
+    INSERT_INTO.lastIndex = 0;
+    let r = 0;
+    for (let m = INSERT_INTO.exec(text); m; m = INSERT_INTO.exec(text)) {
+      while (r < removed.length && removed[r][1] <= m.index) r++;
+      if (r < removed.length && removed[r][0] <= m.index) { INSERT_INTO.lastIndex = removed[r][1]; continue; }
+      const word = m.index + m[0].search(/INSERT/i);
+      const end = findStatementEnd(text, word, escapes);
+      // `INSERT` and its `;` stay (the statement is still counted as skipped data), but are not SQL to import.
+      const lineEnd = text.startsWith('\r\n', end + 1) ? 2 : text.startsWith('\n', end + 1) ? 1 : 0;
+      removed.splice(r, 0, [word + 'INSERT'.length, end, 'INSERT;'.length + lineEnd]);
+      r++;
+      INSERT_INTO.lastIndex = end;
+    }
+  }
+  if (removed.length === 0) return { text, sqlChars: text.length };
+  removed.sort((a, b) => a[0] - b[0]);
+  const parts: string[] = [];
+  let at = 0;
+  let padding = 0;
+  for (const [start, end, kept] of removed) {
+    parts.push(text.slice(at, start));
+    const breaks = countLineBreaks(text, start, end);
+    parts.push('\n'.repeat(breaks));
+    padding += breaks + kept;
+    at = end;
+  }
+  parts.push(text.slice(at));
+  const out = parts.join('');
+  return { text: out, sqlChars: out.length - padding };
+}
+
+/** Where a COPY data block that starts at `from` ends: after its `\.` line (or the end of the text). */
+function findCopyEnd(text: string, from: number): number {
+  let at = from;
+  for (;;) {
+    const eol = text.indexOf('\n', at);
+    const line = text.slice(at, eol < 0 ? text.length : eol).replace(/\r$/, '');
+    if (line === '\\.') return eol < 0 ? text.length : eol;
+    if (eol < 0) return text.length;
+    at = eol + 1;
+  }
+}
+
+/** The index of the `;` ending the statement at `from` (outside strings and quoted names), or the end of the text. */
+function findStatementEnd(text: string, from: number, escapes: boolean): number {
+  const n = text.length;
+  for (let i = from; i < n; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 59 /* ; */) return i;
+    if (c === 39 /* ' */ || c === 34 /* " */ || c === 96 /* ` */) {
+      for (i++; i < n; i++) {
+        const d = text.charCodeAt(i);
+        if (escapes && d === 92 /* \ */) { i++; continue; }
+        if (d === c) {
+          if (text.charCodeAt(i + 1) === c) { i++; continue; }
+          break;
+        }
+      }
+    }
+  }
+  return n;
+}
+
+function countLineBreaks(text: string, from: number, to: number): number {
+  let count = 0;
+  for (let i = text.indexOf('\n', from); i >= 0 && i < to; i = text.indexOf('\n', i + 1)) count++;
+  return count;
+}
+
+// ---------------------------------------------------------------------------
 // Token helpers
 // ---------------------------------------------------------------------------
 
 const upper = (t: Token | undefined): string => (t && t.kind === 'word' ? t.value.toUpperCase() : '');
 const isPunct = (t: Token | undefined, p: string): boolean => !!t && t.kind === 'punct' && t.value === p;
 const isName = (t: Token | undefined): boolean => !!t && (t.kind === 'word' || t.kind === 'ident');
+
+/**
+ * Whether a statement defines or changes tables: CREATE … TABLE, ALTER TABLE,
+ * RENAME TABLE, or SQL Server's `sp_rename`. A file with none (only DROPs) is
+ * a teardown, not a migration.
+ */
+function definesOrChangesTables(t: Token[]): boolean {
+  const w0 = upper(t[0]);
+  if (w0 === 'CREATE') return t.slice(1, 8).some((tok) => upper(tok) === 'TABLE');
+  if (w0 === 'ALTER' || w0 === 'RENAME') return upper(t[1]) === 'TABLE';
+  if (w0 === 'EXEC' || w0 === 'EXECUTE') return t.slice(1, 6).some((tok) => /(^|\.)sp_rename$/i.test(tok.value));
+  return false;
+}
+
+/** A file named like an ordered migration (Flyway `V3__…`, a numbered `003_…`, or one under a `migrations/` folder): its DROPs apply. */
+export function looksLikeMigrationFile(name: string): boolean {
+  return /(^|[\\/])(migrations?|flyway|changelogs?)[\\/]/i.test(name)
+    || /(^|[\\/])(V\d+(?:[._]\d+)*__|\d{3,}[_-])[^\\/]*$/i.test(name);
+}
 
 /** A dotted name from `i` (`a`, `a.b`, `[a].[b].[c]`); its parts, and the index after it. */
 function readName(tokens: Token[], i: number): { parts: string[]; next: number; first: number } | undefined {
@@ -598,7 +766,8 @@ const SKIP_LABELS = {
   drop: ['DROP statement', 'DROP statements'],
   query: ['query', 'queries'],
   ctas: ['CREATE TABLE without a column list (AS SELECT, LIKE, CLONE)', 'CREATE TABLEs without a column list (AS SELECT, LIKE, CLONE)'],
-  alter: ['ALTER TABLE other than adding a key', 'ALTER TABLEs other than adding a key'],
+  existing: ['CREATE TABLE IF NOT EXISTS of a table already defined', 'CREATE TABLE IF NOT EXISTS statements of tables already defined'],
+  alter: ['ALTER TABLE other than a key or a column change', 'ALTER TABLEs other than a key or a column change'],
   comment: ['comment on something other than a table or column', 'comments on something other than a table or column'],
   type: ['type other than an enum', 'types other than enums'],
   other: ['other statement', 'other statements'],
@@ -624,6 +793,10 @@ class Converter {
   readonly notes: string[] = [];
   private readonly skippedByFile = new Map<string, Map<SkipKind, number>>();
   private placeholderCount = 0;
+  /** Schema changes applied in file order (ALTER TABLE column changes, renames, DROP TABLE). */
+  appliedChanges = 0;
+  /** Whether the file being read applies its DROP TABLEs (a migration, not a teardown script). */
+  private dropsApply = true;
 
   constructor(private readonly dialect: SqlDialect, private readonly engine: SqlParseEngine) {}
 
@@ -646,15 +819,25 @@ class Converter {
 
   // -- files ---------------------------------------------------------------
 
-  /** Reads one file; how many tables, enums, foreign keys, keys and comments it gave. */
+  /** Reads one file; how many tables, enums, foreign keys, keys, comments and schema changes it gave (0: nothing). */
   readFile(file: SqlDdlFile): number {
     const count = (): number => this.tables.length + this.enums.length + this.refs.length + this.keys.length + this.comments.length;
     const before = count();
+    const appliedBefore = this.appliedChanges;
     const text = file.text.replace(/^\ufeff/, '');
-    for (const statement of splitStatements(text, this.dialect)) {
+    const statements = splitStatements(text, this.dialect);
+    // DROP TABLE is applied only in a migration: a file that also defines or
+    // changes tables, or one named like a migration. A file of DROPs alone (a
+    // teardown or reset script, read after the CREATEs it undoes) is skipped
+    // DROP statements, as the quick path never takes it (`isSqlScriptTaken`).
+    this.dropsApply = looksLikeMigrationFile(file.name) || statements.some((st) => definesOrChangesTables(st.tokens));
+    for (const statement of statements) {
       this.readStatement(file.name, text, statement);
     }
-    return count() - before;
+    const applied = this.appliedChanges - appliedBefore;
+    const added = count() - before;
+    // A migration that only drops or renames still did something.
+    return applied > 0 ? Math.max(1, added + applied) : Math.max(0, added);
   }
 
   private readStatement(file: string, text: string, st: Statement): void {
@@ -663,7 +846,8 @@ class Converter {
     const w0 = upper(t[0]);
     switch (w0) {
       case 'CREATE': return this.readCreate(file, text, st);
-      case 'ALTER': return upper(t[1]) === 'TABLE' ? this.readAlterTable(st, origin) : this.skip(file, 'other');
+      case 'ALTER': return upper(t[1]) === 'TABLE' ? this.readAlterTable(text, st, origin) : this.skip(file, 'other');
+      case 'RENAME': return upper(t[1]) === 'TABLE' ? this.readRenameTable(st, origin) : this.skip(file, 'other');
       case 'COMMENT': return upper(t[1]) === 'ON' ? this.readCommentOn(st, origin) : this.skip(file, 'other');
       case 'EXEC': case 'EXECUTE': return this.readExec(st, origin);
       case 'INSERT': case 'UPDATE': case 'DELETE': case 'MERGE': case 'COPY': case 'TRUNCATE': case 'UPSERT':
@@ -672,7 +856,7 @@ class Converter {
       case 'SET': case 'USE': case 'BEGIN': case 'COMMIT': case 'START': case 'END': case 'ROLLBACK': case 'PRINT':
       case 'DECLARE': case 'PRAGMA': case 'LOCK': case 'UNLOCK':
         return this.skip(file, 'session');
-      case 'DROP': return this.skip(file, 'drop');
+      case 'DROP': return upper(t[1]) === 'TABLE' ? this.readDropTable(st, origin) : this.skip(file, 'drop');
       case 'SELECT': case 'WITH': case 'SHOW': case 'DESCRIBE': case 'EXPLAIN': return this.skip(file, 'query');
       default: return this.skip(file, 'other');
     }
@@ -701,9 +885,12 @@ class Converter {
   private readCreateTable(file: string, text: string, st: Statement, at: number): void {
     const t = st.tokens;
     let i = at;
-    if (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'NOT' && upper(t[i + 2]) === 'EXISTS') i += 3;
+    const ifNotExists = upper(t[i]) === 'IF' && upper(t[i + 1]) === 'NOT' && upper(t[i + 2]) === 'EXISTS';
+    if (ifNotExists) i += 3;
     const name = readName(t, i);
     if (!name || !isPunct(t[name.next], '(')) { this.skip(file, 'ctas'); return; }
+    // A later migration's CREATE TABLE IF NOT EXISTS of a table already defined does nothing.
+    if (ifNotExists && this.findTable(name.parts)) { this.skip(file, 'existing'); return; }
     const open = name.next;
     const close = matchParen(t, open);
     if (close < 0) {
@@ -980,48 +1167,309 @@ class Converter {
 
   // -- ALTER TABLE, COMMENT ON, sp_addextendedproperty ----------------------
 
-  private readAlterTable(st: Statement, origin: Origin): void {
+  private readAlterTable(text: string, st: Statement, origin: Origin): void {
     const t = st.tokens;
     let i = 2;
     while (upper(t[i]) === 'ONLY' || (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'EXISTS')) i += upper(t[i]) === 'IF' ? 2 : 1;
     const name = readName(t, i);
     if (!name) { this.skip(origin.file, 'alter'); return; }
-    let added = 0;
+    let handled = 0;
     let checkOnly = false;
+    let unhandled = false;
+    // SQL Server lists more columns after one ADD / DROP COLUMN: `ADD a int, b int`.
+    let continues: 'addColumn' | 'dropColumn' | undefined;
     for (const [from, to] of splitTopLevel(t, name.next, t.length)) {
       let k = from;
+      const where: Origin = { file: origin.file, line: t[from]?.line ?? origin.line };
       if (upper(t[k]) === 'WITH' && (upper(t[k + 1]) === 'CHECK' || upper(t[k + 1]) === 'NOCHECK')) k += 2;
       if ((upper(t[k]) === 'CHECK' || upper(t[k]) === 'NOCHECK') && upper(t[k + 1]) === 'CONSTRAINT') { checkOnly = true; continue; }
-      if (upper(t[k]) !== 'ADD') continue;
-      k++;
-      if (upper(t[k]) === 'CONSTRAINT') k += 2;
-      const kind = upper(t[k]);
-      if (kind === 'FOREIGN' && upper(t[k + 1]) === 'KEY') {
-        const fkCols = readColumnList(t, k + 2);
-        if (!fkCols || upper(t[fkCols.next]) !== 'REFERENCES') continue;
-        const target = readName(t, fkCols.next + 1);
-        if (!target) continue;
-        const pkCols = isPunct(t[target.next], '(') ? readColumnList(t, target.next) : undefined;
-        this.refs.push({
-          from: { parts: name.parts, columns: fkCols.columns },
-          to: { parts: target.parts, columns: pkCols?.columns ?? [] },
-          origin: { file: origin.file, line: t[from].line },
-        });
-        added++;
-      } else if (kind === 'PRIMARY' && upper(t[k + 1]) === 'KEY') {
-        let open = k + 2;
-        while (t[open] && !isPunct(t[open], '(') && open < to) open++;
-        const cols = readColumnList(t, open);
-        if (cols) { this.keys.push({ table: name.parts, kind: 'pk', columns: cols.columns, origin }); added++; }
-      } else if (kind === 'UNIQUE') {
-        let open = k + 1;
-        while (t[open] && !isPunct(t[open], '(') && open < to) open++;
-        const cols = readColumnList(t, open);
-        if (cols) { this.keys.push({ table: name.parts, kind: 'unique', columns: cols.columns, origin }); added++; }
+      const action = upper(t[k]);
+      if (continues && isName(t[k]) && !ALTER_ACTION_WORDS.has(action)) {
+        if (continues === 'addColumn') this.alterAddColumns(text, name.parts, t, k, to, where);
+        else this.alterDropColumn(name.parts, t[k].value, where);
+        handled++;
+        continue;
+      }
+      continues = undefined;
+      if (action === 'ADD') {
+        k++;
+        const columnWord = upper(t[k]) === 'COLUMN' || upper(t[k]) === 'COLUMNS';
+        if (columnWord) k++;
+        if (upper(t[k]) === 'IF' && upper(t[k + 1]) === 'NOT' && upper(t[k + 2]) === 'EXISTS') k += 3;
+        if (upper(t[k]) === 'CONSTRAINT') k += 2;
+        const kind = upper(t[k]);
+        if (kind === 'FOREIGN' && upper(t[k + 1]) === 'KEY') {
+          const fkCols = readColumnList(t, k + 2);
+          if (!fkCols || upper(t[fkCols.next]) !== 'REFERENCES') { unhandled = true; continue; }
+          const target = readName(t, fkCols.next + 1);
+          if (!target) { unhandled = true; continue; }
+          const pkCols = isPunct(t[target.next], '(') ? readColumnList(t, target.next) : undefined;
+          this.refs.push({
+            from: { parts: name.parts, columns: fkCols.columns },
+            to: { parts: target.parts, columns: pkCols?.columns ?? [] },
+            origin: where,
+          });
+          handled++;
+        } else if (kind === 'PRIMARY' && upper(t[k + 1]) === 'KEY') {
+          let open = k + 2;
+          while (t[open] && !isPunct(t[open], '(') && open < to) open++;
+          const cols = readColumnList(t, open);
+          if (cols) { this.keys.push({ table: name.parts, kind: 'pk', columns: cols.columns, origin }); handled++; } else unhandled = true;
+        } else if (kind === 'UNIQUE') {
+          let open = k + 1;
+          while (t[open] && !isPunct(t[open], '(') && open < to) open++;
+          const cols = readColumnList(t, open);
+          if (cols) { this.keys.push({ table: name.parts, kind: 'unique', columns: cols.columns, origin }); handled++; } else unhandled = true;
+        } else if (isPunct(t[k], '(') && (columnWord || this.dialect !== 'sqlserver')) {
+          // ADD [COLUMNS] (a INT, b STRING): MySQL, Databricks.
+          const close = matchParen(t, k);
+          if (close < 0) { unhandled = true; continue; }
+          for (const [cf, ct] of splitTopLevel(t, k + 1, close, this.dialect === 'databricks')) this.alterAddColumns(text, name.parts, t, cf, ct, where);
+          handled++;
+        } else if (isName(t[k]) && !ADD_NOT_COLUMN_WORDS.has(kind)) {
+          this.alterAddColumns(text, name.parts, t, k, to, where);
+          continues = 'addColumn';
+          handled++;
+        } else {
+          unhandled = true;
+        }
+      } else if (action === 'DROP') {
+        k++;
+        const columnWord = upper(t[k]) === 'COLUMN';
+        if (columnWord) k++;
+        if (upper(t[k]) === 'IF' && upper(t[k + 1]) === 'EXISTS') k += 2;
+        if (isName(t[k]) && (columnWord || !DROP_NOT_COLUMN_WORDS.has(upper(t[k])))) {
+          this.alterDropColumn(name.parts, t[k].value, where);
+          continues = 'dropColumn';
+          handled++;
+        } else {
+          unhandled = true;
+        }
+      } else if (action === 'RENAME') {
+        k++;
+        if (upper(t[k]) === 'TO' || upper(t[k]) === 'AS') {
+          const target = readName(t, k + 1);
+          if (target) { this.renameTable(name.parts, target.parts, where); handled++; } else unhandled = true;
+        } else if (upper(t[k]) === 'CONSTRAINT' || upper(t[k]) === 'INDEX' || upper(t[k]) === 'KEY') {
+          unhandled = true;
+        } else {
+          if (upper(t[k]) === 'COLUMN') k++;
+          if (isName(t[k]) && upper(t[k + 1]) === 'TO' && isName(t[k + 2])) {
+            this.renameColumn(name.parts, t[k].value, t[k + 2].value, where);
+            handled++;
+          } else unhandled = true;
+        }
+      } else if (action === 'CHANGE' || action === 'MODIFY') {
+        // MySQL: CHANGE [COLUMN] old new <definition>; MODIFY [COLUMN] name <definition>.
+        k++;
+        if (upper(t[k]) === 'COLUMN') k++;
+        if (!isName(t[k])) { unhandled = true; continue; }
+        const old = t[k].value;
+        const defStart = action === 'CHANGE' ? k + 1 : k;
+        if (!isName(t[defStart])) { unhandled = true; continue; }
+        this.replaceColumn(text, name.parts, old, t, defStart, to, where);
+        handled++;
+      } else if (action === 'ALTER') {
+        // ALTER [COLUMN] x [SET DATA] TYPE t | SET NOT NULL | DROP NOT NULL (others are not design).
+        k++;
+        if (upper(t[k]) === 'COLUMN') k++;
+        if (!isName(t[k])) { unhandled = true; continue; }
+        const column = t[k].value;
+        k++;
+        if (upper(t[k]) === 'SET' && upper(t[k + 1]) === 'DATA' && upper(t[k + 2]) === 'TYPE') k += 2;
+        if (upper(t[k]) === 'TYPE') {
+          let end = k + 1;
+          while (end < to && !['USING', 'COLLATE'].includes(upper(t[end]))) end++;
+          if (end > k + 1) { this.alterColumn(name.parts, column, { type: text.slice(t[k + 1].start, t[end - 1].end) }, where); handled++; } else unhandled = true;
+        } else if ((upper(t[k]) === 'SET' || upper(t[k]) === 'DROP') && upper(t[k + 1]) === 'NOT' && upper(t[k + 2]) === 'NULL') {
+          this.alterColumn(name.parts, column, { notNull: upper(t[k]) === 'SET' }, where);
+          handled++;
+        } else {
+          unhandled = true;
+        }
+      } else {
+        unhandled = true;
       }
     }
     // `ALTER TABLE x CHECK CONSTRAINT fk` only re-enables a key SQL Server just added: nothing to say.
-    if (!added && !checkOnly) this.skip(origin.file, 'alter');
+    if ((unhandled || !handled) && !checkOnly) this.skip(origin.file, 'alter');
+  }
+
+  /** MySQL's `RENAME TABLE a TO b [, c TO d]`. */
+  private readRenameTable(st: Statement, origin: Origin): void {
+    const t = st.tokens;
+    let renamed = 0;
+    for (const [from] of splitTopLevel(t, 2, t.length)) {
+      const source = readName(t, from);
+      if (!source || upper(t[source.next]) !== 'TO') continue;
+      const target = readName(t, source.next + 1);
+      if (!target) continue;
+      this.renameTable(source.parts, target.parts, { file: origin.file, line: t[from].line });
+      renamed++;
+    }
+    if (!renamed) this.skip(origin.file, 'other');
+  }
+
+  /**
+   * `DROP TABLE [IF EXISTS] a [, b]` in a migration: a table the files defined
+   * earlier is gone; one they never defined is a skipped DROP. In a file of
+   * DROPs alone (`dropsApply` false) every one is a skipped DROP.
+   */
+  private readDropTable(st: Statement, origin: Origin): void {
+    if (!this.dropsApply) {
+      this.skip(origin.file, 'drop');
+      return;
+    }
+    const t = st.tokens;
+    let i = 2;
+    if (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'EXISTS') i += 2;
+    let dropped = 0;
+    for (const [from] of splitTopLevel(t, i, t.length)) {
+      const name = readName(t, from);
+      const table = name ? this.findTable(name.parts) : undefined;
+      if (!table) continue;
+      this.removeTable(table);
+      this.appliedChanges++;
+      dropped++;
+    }
+    if (!dropped) this.skip(origin.file, 'drop');
+  }
+
+  // -- schema changes, applied in file order ---------------------------------
+
+  /** A change the files make to something they do not define (yet): said, with its file and line. */
+  private notApplied(where: Origin, what: string): void {
+    this.skippedLines.push(`${where.file} line ${where.line}: ${what}`);
+  }
+
+  /** The table an ALTER names, or undefined (said) when the files have not defined it. */
+  private alterTarget(parts: readonly string[], where: Origin, what: string): ModelTable | undefined {
+    const table = this.findTable(parts);
+    if (!table) this.notApplied(where, `${what} on ${parts.slice(-2).join('.')}, which is not in the files (not applied)`);
+    return table;
+  }
+
+  /** Column definitions `t[from, to)`, read by this dialect's grammar as a table of their own; undefined when they do not read. */
+  private readColumnDefinitions(text: string, tokens: Token[], from: number, to: number, file: string): { table: ModelTable; refs: PendingRef[] } | undefined {
+    if (from >= to) return undefined;
+    const definition = text.slice(tokens[from].start, tokens[to - 1].end);
+    const synthetic = `CREATE TABLE ${ALTER_COLUMNS_TABLE} (\n${definition}\n)`;
+    const statement = splitStatements(synthetic, this.dialect)[0];
+    if (!statement) return undefined;
+    const before = { tables: this.tables.length, refs: this.refs.length, problems: this.problems.length, enums: this.enums.length };
+    this.readCreateTable(file, synthetic, statement, 2);
+    const table = this.tables.length > before.tables ? this.tables[before.tables] : undefined;
+    const refs = this.refs.splice(before.refs);
+    const failed = this.problems.length > before.problems;
+    this.tables.splice(before.tables);
+    this.problems.splice(before.problems);
+    this.enums.splice(before.enums);
+    if (failed || !table) return undefined;
+    return { table, refs: refs.filter((r) => r.fromTable === table) };
+  }
+
+  private alterAddColumns(text: string, parts: readonly string[], tokens: Token[], from: number, end: number, where: Origin): void {
+    const table = this.alterTarget(parts, where, 'a column added');
+    if (!table) return;
+    const to = withoutColumnPosition(tokens, from, end);
+    const read = this.readColumnDefinitions(text, tokens, from, to, where.file);
+    if (!read) { this.notApplied(where, `a column added to ${tableLabel(table)} could not be read (not applied)`); return; }
+    for (const field of read.table.fields) {
+      if (table.fields.some((f) => sameIdent(f.name, field.name))) continue; // ADD COLUMN IF NOT EXISTS, or added twice.
+      table.fields.push(field);
+      this.appliedChanges++;
+    }
+    for (const ref of read.refs) this.refs.push({ ...ref, from: { parts: [...parts], columns: ref.from.columns }, fromTable: table, origin: where });
+    if (read.table.primaryKey) this.setPrimaryKey(table, read.table.primaryKey);
+    for (const unique of read.table.uniques) this.addUnique(table, unique);
+  }
+
+  private replaceColumn(text: string, parts: readonly string[], oldName: string, tokens: Token[], from: number, to: number, where: Origin): void {
+    const table = this.alterTarget(parts, where, `a change to column ${oldName}`);
+    if (!table) return;
+    const index = table.fields.findIndex((f) => sameIdent(f.name, oldName));
+    if (index < 0) { this.notApplied(where, `a change to ${tableLabel(table)}.${oldName}, which it does not have (not applied)`); return; }
+    const read = this.readColumnDefinitions(text, tokens, from, withoutColumnPosition(tokens, from, to), where.file);
+    const field = read?.table.fields[0];
+    if (!field) { this.notApplied(where, `a change to ${tableLabel(table)}.${oldName} could not be read (not applied)`); return; }
+    const before = table.fields[index];
+    if (!sameIdent(before.name, field.name)) this.renameColumn(parts, before.name, field.name, where);
+    table.fields[index] = { ...field, pk: field.pk || before.pk, note: field.note ?? before.note };
+    this.appliedChanges++;
+  }
+
+  private alterColumn(parts: readonly string[], column: string, change: { type?: string; notNull?: boolean }, where: Origin): void {
+    const table = this.alterTarget(parts, where, `a change to column ${column}`);
+    if (!table) return;
+    const field = table.fields.find((f) => sameIdent(f.name, column));
+    if (!field) { this.notApplied(where, `a change to ${tableLabel(table)}.${column}, which it does not have (not applied)`); return; }
+    if (change.type !== undefined) field.type = change.type.replace(/\s+/g, ' ').trim() || field.type;
+    if (change.notNull !== undefined) field.notNull = change.notNull;
+    this.appliedChanges++;
+  }
+
+  private renameColumn(parts: readonly string[], oldName: string, newName: string, where: Origin): void {
+    const table = this.alterTarget(parts, where, `a column renamed (${oldName} to ${newName})`);
+    if (!table) return;
+    const field = table.fields.find((f) => sameIdent(f.name, oldName));
+    if (!field) { this.notApplied(where, `${tableLabel(table)}.${oldName} renamed, but it has no such column (not applied)`); return; }
+    field.name = newName;
+    const rename = (columns: string[]): string[] => columns.map((c) => (sameIdent(c, oldName) ? newName : c));
+    if (table.primaryKey) table.primaryKey = rename(table.primaryKey);
+    table.uniques = table.uniques.map(rename);
+    for (const ref of this.refs) {
+      if ((ref.fromTable ?? this.findTable(ref.from.parts)) === table) ref.from.columns = rename(ref.from.columns);
+      if (this.findTable(ref.to.parts) === table) ref.to.columns = rename(ref.to.columns);
+    }
+    for (const key of this.keys) if (this.findTable(key.table) === table) key.columns = rename(key.columns);
+    for (const comment of this.comments) {
+      if (comment.column && sameIdent(comment.column, oldName) && this.findTable(comment.table) === table) comment.column = newName;
+    }
+    this.appliedChanges++;
+  }
+
+  private alterDropColumn(parts: readonly string[], column: string, where: Origin): void {
+    const table = this.alterTarget(parts, where, `a column dropped (${column})`);
+    if (!table) return;
+    const index = table.fields.findIndex((f) => sameIdent(f.name, column));
+    if (index < 0) { this.notApplied(where, `${tableLabel(table)}.${column} dropped, but it has no such column (not applied)`); return; }
+    table.fields.splice(index, 1);
+    const uses = (columns: readonly string[]): boolean => columns.some((c) => sameIdent(c, column));
+    if (table.primaryKey && uses(table.primaryKey)) table.primaryKey = undefined;
+    table.uniques = table.uniques.filter((u) => !uses(u));
+    // Its keys go with it.
+    removeWhere(this.refs, (ref) =>
+      ((ref.fromTable ?? this.findTable(ref.from.parts)) === table && uses(ref.from.columns)) ||
+      (this.findTable(ref.to.parts) === table && uses(ref.to.columns)));
+    removeWhere(this.keys, (key) => this.findTable(key.table) === table && uses(key.columns));
+    removeWhere(this.comments, (c) => c.column !== undefined && sameIdent(c.column, column) && this.findTable(c.table) === table);
+    this.appliedChanges++;
+  }
+
+  private renameTable(parts: readonly string[], target: readonly string[], where: Origin): void {
+    const table = this.alterTarget(parts, where, `a table renamed to ${target.join('.')}`);
+    if (!table) return;
+    const newName = target[target.length - 1];
+    const newSchema = target.length >= 2 ? target[target.length - 2] : table.schema;
+    const newParts = [...(newSchema !== null ? [newSchema] : []), newName];
+    // What still names it by its old name follows it.
+    for (const ref of this.refs) {
+      if (!ref.fromTable && this.findTable(ref.from.parts) === table) ref.from.parts = [...newParts];
+      if (this.findTable(ref.to.parts) === table) ref.to.parts = [...newParts];
+    }
+    for (const key of this.keys) if (this.findTable(key.table) === table) key.table = [...newParts];
+    for (const comment of this.comments) if (this.findTable(comment.table) === table) comment.table = [...newParts];
+    table.name = newName;
+    table.schema = newSchema;
+    this.appliedChanges++;
+  }
+
+  /** A dropped table, and everything still pending that names it. */
+  private removeTable(table: ModelTable): void {
+    removeWhere(this.refs, (ref) => (ref.fromTable ?? this.findTable(ref.from.parts)) === table || this.findTable(ref.to.parts) === table);
+    removeWhere(this.keys, (key) => this.findTable(key.table) === table);
+    removeWhere(this.comments, (c) => this.findTable(c.table) === table);
+    this.tables.splice(this.tables.indexOf(table), 1);
   }
 
   private readCommentOn(st: Statement, origin: Origin): void {
@@ -1039,6 +1487,7 @@ class Converter {
   private readExec(st: Statement, origin: Origin): void {
     const t = st.tokens;
     const proc = readName(t, 1);
+    if (proc && proc.parts[proc.parts.length - 1].toLowerCase() === 'sp_rename') { this.readSpRename(st, proc.next, origin); return; }
     if (!proc || proc.parts[proc.parts.length - 1].toLowerCase() !== 'sp_addextendedproperty') { this.skip(origin.file, 'routine'); return; }
     // Named (@name = N'…') or positional arguments.
     const positional = ['@name', '@value', '@level0type', '@level0name', '@level1type', '@level1name', '@level2type', '@level2name'];
@@ -1061,6 +1510,34 @@ class Converter {
     if (level2 === 'COLUMN' && args.get('@level2name')) this.comments.push({ table, column: args.get('@level2name'), text, origin });
     else if (!level2) this.comments.push({ table, text, origin });
     else this.skip(origin.file, 'comment');
+  }
+
+  /** SQL Server's `EXEC sp_rename 'dbo.t.col', 'new', 'COLUMN'` (a column) or `sp_rename 'dbo.t', 'new'` (a table). */
+  private readSpRename(st: Statement, from: number, origin: Origin): void {
+    const t = st.tokens;
+    const positional = ['@objname', '@newname', '@objtype'];
+    const args = new Map<string, string>();
+    let position = 0;
+    for (const [start, end] of splitTopLevel(t, from, t.length)) {
+      let k = start;
+      let key = positional[position];
+      if (t[k]?.kind === 'word' && t[k].value.startsWith('@') && isPunct(t[k + 1], '=')) { key = t[k].value.toLowerCase(); k += 2; }
+      if (upper(t[k]) === 'N' && t[k + 1]?.kind === 'string') k++;
+      if (t[k]?.kind === 'string' && k < end && key) args.set(key, t[k].value);
+      position++;
+    }
+    const objectParts = (args.get('@objname') ?? '').split('.').map((p) => p.trim().replace(/^[[\]"`]+|[[\]"`]+$/g, '')).filter(Boolean);
+    const newName = (args.get('@newname') ?? '').trim().replace(/^[[\]"`]+|[[\]"`]+$/g, '');
+    const type = (args.get('@objtype') ?? '').toUpperCase();
+    if (!newName || objectParts.length === 0) { this.skip(origin.file, 'routine'); return; }
+    if (type === 'COLUMN' && objectParts.length >= 2) {
+      this.renameColumn(objectParts.slice(0, -1), objectParts[objectParts.length - 1], newName, origin);
+    } else if (!type || type === 'OBJECT') {
+      if (this.findTable(objectParts)) this.renameTable(objectParts, [newName], origin);
+      else this.skip(origin.file, 'routine');
+    } else {
+      this.skip(origin.file, 'routine');
+    }
   }
 
   // -- merging ---------------------------------------------------------------
@@ -1179,6 +1656,44 @@ interface PreparedSql {
   comments: Map<string, string>;
   /** Lower-cased names of identity columns whose clause was removed. */
   identity: Set<string>;
+}
+
+/** The name an ALTER TABLE's added columns are read under (as a table of their own). */
+const ALTER_COLUMNS_TABLE = 'erd_studio_added_columns';
+
+/** Words that start an ALTER TABLE action: a list item starting with one is not another column. */
+const ALTER_ACTION_WORDS = new Set([
+  'ADD', 'DROP', 'ALTER', 'MODIFY', 'CHANGE', 'RENAME', 'SET', 'RESET', 'OWNER', 'ENABLE', 'DISABLE', 'VALIDATE', 'CLUSTER',
+  'INHERIT', 'NO', 'OF', 'NOT', 'REPLICA', 'FORCE', 'ATTACH', 'DETACH', 'WITH', 'CHECK', 'NOCHECK', 'ALGORITHM', 'LOCK',
+  'ENGINE', 'AUTO_INCREMENT', 'CONVERT', 'DEFAULT', 'CHARACTER', 'COMMENT', 'ORDER', 'PARTITION', 'REMOVE', 'TRUNCATE',
+  'COALESCE', 'REORGANIZE', 'EXCHANGE', 'ANALYZE', 'OPTIMIZE', 'REBUILD', 'REPAIR', 'SWAP', 'UNSET', 'SUSPEND', 'RESUME',
+  'RECLUSTER', 'CLUSTERING', 'SWITCH', 'TRIGGER',
+]);
+
+/** After ADD: what is added when it is not a column. */
+const ADD_NOT_COLUMN_WORDS = new Set([
+  'CONSTRAINT', 'PRIMARY', 'FOREIGN', 'UNIQUE', 'CHECK', 'INDEX', 'KEY', 'FULLTEXT', 'SPATIAL', 'PARTITION', 'PERIOD',
+  'DEFAULT', 'ROW', 'ROWS', 'EXCLUDE', 'TABLE', 'CLUSTERING', 'SEARCH', 'TAG', 'MASKING',
+]);
+
+/** After DROP: what is dropped when it is not a column. */
+const DROP_NOT_COLUMN_WORDS = new Set([
+  'CONSTRAINT', 'PRIMARY', 'FOREIGN', 'UNIQUE', 'CHECK', 'INDEX', 'KEY', 'DEFAULT', 'PARTITION', 'PERIOD', 'SYSTEM',
+  'NOT', 'IDENTITY', 'EXPRESSION', 'CLUSTERING', 'ROW', 'ROWS', 'SEARCH', 'TAG', 'MASKING', 'FULLTEXT', 'SPATIAL',
+]);
+
+/** `[from, to)` without MySQL's trailing `FIRST` / `AFTER col` (where a column goes, not what it is). */
+function withoutColumnPosition(tokens: Token[], from: number, to: number): number {
+  if (to - 2 > from && upper(tokens[to - 2]) === 'AFTER' && isName(tokens[to - 1])) return to - 2;
+  if (to - 1 > from && upper(tokens[to - 1]) === 'FIRST') return to - 1;
+  return to;
+}
+
+/** Removes, in place, every item `drop` accepts. */
+function removeWhere<T>(items: T[], drop: (item: T) => boolean): void {
+  let kept = 0;
+  for (const item of items) if (!drop(item)) items[kept++] = item;
+  items.length = kept;
 }
 
 /** Words after CREATE [modifiers] that name what is created. */
@@ -1444,6 +1959,9 @@ export function convertSqlDdl(input: SqlDdlToDbmlInput, engine: SqlParseEngine):
   }
   converter.applyDeferred();
   const refs = converter.resolveRefs();
+  if (converter.appliedChanges > 0) {
+    converter.notes.push(`${converter.appliedChanges} later schema ${converter.appliedChanges === 1 ? 'change was' : 'changes were'} applied in file order (columns added, renamed, changed or dropped; tables renamed or dropped).`);
+  }
   converter.sanitiseNames();
   const usedEnums = converter.enums.filter((e) =>
     converter.tables.some((tb) => tb.fields.some((f) => {

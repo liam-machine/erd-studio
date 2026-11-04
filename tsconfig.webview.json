@@ -24,6 +24,6 @@
       "@erd-studio/renderer/sizing": ["./packages/renderer/src/sizing.ts"]
     }
   },
-  "include": ["webview/**/*", "src/types/**/*"],
+  "include": ["webview/**/*", "webview-draft/**/*", "src/types/**/*"],
   "exclude": ["node_modules"]
 }

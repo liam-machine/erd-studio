@@ -10,6 +10,7 @@ import * as vscode from 'vscode';
 
 import {
   DRAFT_MODEL_LIMIT,
+  chooseModelsDescription,
   customDraftScope,
   narrowDraftScope,
   type DraftModelEntry,
@@ -68,7 +69,7 @@ export async function pickDraftScope(
   if (models.length > 0) {
     items.push({
       label: CHOOSE_MODELS_LABEL,
-      description: `pick up to ${limit} of ${models.length}`,
+      description: chooseModelsDescription(limit, models.length),
       choose: true,
     });
   }

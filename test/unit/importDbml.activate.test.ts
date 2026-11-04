@@ -4,6 +4,8 @@
  * the real services over a temp copy of the fixture project — a DBML file
  * picked in the Open dialog, read through `workspace.fs`, written as a new
  * subject area and opened on the canvas, through the real `vscodeImportDbmlUi`.
+ * The dry run is the draft preview (Draft-first, `docs/dev/draft-first.md`
+ * §5.1): nothing is written until its Keep.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
@@ -14,6 +16,7 @@ import * as vscode from 'vscode';
 import { activate, _resetFirstRunGuardForTests } from '../../src/extension';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import { subjectAreaTableNames } from '../../src/services/domainService';
+import { answerDraft, nextDraft } from './helpers/draftDriver';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
@@ -109,11 +112,19 @@ describe('erdStudio.importDbml in activate()', () => {
     // One layer: no layer question.
     const pick = vi.spyOn(vscode.window, 'showQuickPick');
     vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o?: { value?: string }) => o?.value) as never);
-    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
-      (typeof args[1] === 'object' && (args[1] as { modal?: boolean }).modal ? 'Import' : undefined)) as never);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
 
-    await vscode.commands.executeCommand('erdStudio.importDbml');
+    const run = vscode.commands.executeCommand('erdStudio.importDbml');
+    const draft = await nextDraft();
+    // The palette's import ends in the draft: nothing written yet, no modal.
+    expect(draft.trigger).toBe('palette');
+    expect(draft.keep).toMatchObject({ writer: 'importDbml', importSource: 'file', target: { layer: 'main', name: 'shop' } });
+    expect(draft.logicalOnly).toBe(true);
+    expect(fs.existsSync(path.join(plain, '.erd-studio'))).toBe(false);
+    answerDraft({ type: 'keep' });
+    await run;
 
+    expect(info.mock.calls.some((c) => typeof c[1] === 'object')).toBe(false);
     expect(pick).not.toHaveBeenCalled();
     expect(JSON.parse(fs.readFileSync(path.join(plain, '.erd-studio', 'layers.json'), 'utf-8')).layers.map((l: { id: string }) => l.id)).toEqual(['main']);
     // A new project stores its model as DBML (native DBML storage, §3.2).
@@ -142,13 +153,15 @@ describe('erdStudio.importDbml in activate()', () => {
     vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ id?: string }>) =>
       items.find((i) => i.id === 'gold')) as never);
     vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o?: { value?: string }) => o?.value) as never);
-    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
-      (typeof args[1] === 'object' && (args[1] as { modal?: boolean }).modal ? 'Import' : undefined)) as never);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
     const real = vscode.commands.executeCommand;
     const exec = vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) =>
       real(command, ...args)) as never);
 
-    await vscode.commands.executeCommand('erdStudio.importDbml');
+    const run = vscode.commands.executeCommand('erdStudio.importDbml');
+    const draft = await nextDraft();
+    answerDraft({ type: 'keep' });
+    await run;
 
     expect(dialog.mock.calls[0][0]).toMatchObject({ filters: { DBML: ['dbml'] }, canSelectMany: false, openLabel: 'Import' });
     const domainPath = path.join(root, '.erd-studio', 'gold', 'shop.json');
@@ -157,10 +170,11 @@ describe('erdStudio.importDbml in activate()', () => {
     expect(doc.viewConfig.positions).toEqual({ shop_customer: { x: 1, y: 2 } });
     // The fixture library is flat: the new tables go at its top level.
     expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'shop_customer.yml'))).toBe(true);
-    // The dry run was a modal whose detail lists the layout.
-    const modal = info.mock.calls.find((c) => typeof c[1] === 'object')!;
-    expect(String(modal[0])).toBe('Import 2 tables and 1 relationship into a new diagram "shop" in the Gold layer.');
-    expect((modal[1] as { detail: string }).detail).toContain("1 of 2 tables placed from the file's erd_layout");
+    // The draft drew the file's tables, the one placed where its erd_layout put it; dbt here: stage colours.
+    expect(draft.banner.headline).toBe('Draft from shop.dbml · 2 tables, 1 relationship · not saved');
+    expect(draft.logicalOnly).toBe(false);
+    expect(draft.display.viewConfig.positions?.shop_customer).toEqual({ x: 1, y: 2 });
+    expect(draft.display.models.map((m) => m.name).sort()).toEqual(['shop_customer', 'shop_order']);
     expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: domainPath }), SUBJECT_AREA_EDITOR_VIEW_TYPE);
   });
 });

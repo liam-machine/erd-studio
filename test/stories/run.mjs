@@ -2,15 +2,12 @@
 // Onboarding stories: user stories as code, run against a real VS Code with
 // the extension, each optionally filmed as a captioned MP4.
 //
-//   node test/stories/run.mjs [--record] [--narrate] [--publish] [--only <id|substring>] [--keep] [--headed-slow] [--no-build] [--list]
+//   node test/stories/run.mjs [--record] [--narrate] [--only <id|substring>] [--keep] [--headed-slow] [--no-build] [--list]
 //
 //   --record       film each story: test/stories/out/<id>.mp4 (+ .srt)
 //   --narrate      with --record: speak each caption (or the step's `say`) in the getting-started tour's voice
 //                  (Kokoro via uv: test/stories/lib/tts.py, lines cached in test/stories/.cache/); a frame is held
 //                  wherever a line runs past the next caption. Needs uv; nothing else does
-//   --publish      re-encode the clip stories into media/onboarding/stories/ (the Welcome panel's "Watch how", narrated);
-//                  with --record, those that pass in this run (--record --publish implies --narrate); alone, from the
-//                  narrated recordings in out/
 //   --only X       run the stories whose id or file name contains X (repeatable, or comma-separated)
 //   --keep         keep each story's temp folder (/tmp/erds-…: profile, workspace, frames) and print it
 //   --headed-slow  slow pacing, to watch a story run (implies the record pacing, slower)
@@ -21,8 +18,7 @@
 // VS Code processes are killed by --user-data-dir, and its temp folders removed
 // (unless --keep), whatever happens, Ctrl+C included. Writes
 // out/<id>.log, out/<id>.vscode.log, out/<id>-failure.jpg and out/<id>-logs/
-// (VS Code's own logs) on failure, and out/summary.json. Exits 1 on any failure
-// (a story, or a clip that cannot be published within its limits).
+// (VS Code's own logs) on failure, and out/summary.json. Exits 1 on any failed story.
 // See docs/dev/onboarding-stories.md.
 
 import fs from 'node:fs';
@@ -30,10 +26,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { sleep } from './lib/act.mjs';
-import { REPO, buildExtension, killByProfile, launchVSCode, shortTempDir, stageExtension } from './lib/launch.mjs';
+import { REPO, buildExtension, killByProfile, launchVSCode, packageVsix, shortTempDir, stageExtension } from './lib/launch.mjs';
 import { Recorder } from './lib/recorder.mjs';
 import { PACES, StepFailure, StoryContext, failureScreenshot } from './lib/story.mjs';
-import { CLIPS, CLIP_DIR, publishClip } from './lib/publish.mjs';
 import { narratorProblem } from './lib/narrate.mjs';
 import { encode } from './lib/video.mjs';
 import { prepareWorkspace } from './lib/workspaces.mjs';
@@ -43,19 +38,18 @@ const OUT = path.join(HERE, 'out');
 const STORIES = path.join(HERE, 'stories');
 
 function parseArgs(argv) {
-  const opts = { record: false, narrate: false, publish: false, only: [], keep: false, slow: false, build: true, list: false };
+  const opts = { record: false, narrate: false, only: [], keep: false, slow: false, build: true, list: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--record') opts.record = true;
     else if (a === '--narrate') opts.narrate = true;
-    else if (a === '--publish') opts.publish = true;
     else if (a === '--keep') opts.keep = true;
     else if (a === '--headed-slow') opts.slow = true;
     else if (a === '--no-build') opts.build = false;
     else if (a === '--list') opts.list = true;
     else if (a === '--only') opts.only.push(...String(argv[++i] ?? '').split(',').filter(Boolean));
     else if (a.startsWith('--only=')) opts.only.push(...a.slice(7).split(',').filter(Boolean));
-    else if (a === '--help' || a === '-h') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 25).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(0); }
+    else if (a === '--help' || a === '-h') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 22).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(0); }
     else { console.error(`unknown option ${a} (see --help)`); process.exit(2); }
   }
   return opts;
@@ -79,7 +73,7 @@ async function loadStories(only) {
 
 /** Profiles of the VS Code instances still running, killed on any exit. */
 const live = new Set();
-/** Temp folders still on disk → whether --keep keeps them (a story's) or not (the staged extension, publish's work). */
+/** Temp folders still on disk → whether --keep keeps them (a story's) or not (the staged extension). */
 const temps = new Map();
 let keepTemps = false;
 function killAll() {
@@ -109,7 +103,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 }
 process.on('exit', () => { killAll(); removeTemps(); });
 
-async function runOne({ def, file }, { extDir, opts }) {
+async function runOne({ def, file }, { extDir, vsix, opts }) {
   const pace = opts.slow ? PACES.slow : opts.record && opts.narrate ? PACES.narrate : opts.record ? PACES.record : PACES.fast;
   const logFile = path.join(OUT, `${def.id}.log`);
   for (const f of fs.readdirSync(OUT)) if (f === `${def.id}.mp4` || f.startsWith(`${def.id}.`) || f.startsWith(`${def.id}-`)) fs.rmSync(path.join(OUT, f), { recursive: true, force: true });
@@ -128,16 +122,30 @@ async function runOne({ def, file }, { extDir, opts }) {
   const marks = [];
   try {
     const workspace = await prepareWorkspace(def.workspace, home);
+    if (def.realistic) {
+      // As from the Marketplace: the packaged VSIX, downloaded, installed in the window by the story.
+      if (!vsix) throw new Error('no VSIX to install (packaging failed: see the runner\'s output)');
+      fs.mkdirSync(path.join(home, 'Downloads'), { recursive: true });
+      fs.copyFileSync(vsix, path.join(home, 'Downloads/erd-studio.vsix'));
+    }
     live.add(path.join(root, 'ud'));
-    handle = await launchVSCode({ extDir, folder: workspace, root, settings: def.settings, logFile: path.join(root, 'code.log') });
+    handle = await launchVSCode({ extDir: def.realistic ? undefined : extDir, folder: workspace, root, settings: def.settings, env: def.env, logFile: path.join(root, 'code.log'), realistic: def.realistic });
     const port = handle.port;
-    log(`profile ${root}, port ${port}, workspace ${workspace ?? '(empty window)'}`);
-    ctx = new StoryContext({ def, port, home, workspace, marks, pace, log, outDir: OUT });
+    log(`profile ${root}, port ${port}, workspace ${workspace ?? '(empty window)'}${def.realistic ? ', realistic (no ERD Studio until the story installs it)' : ''}`);
+    ctx = new StoryContext({ def, port, home, workspace, marks, pace, log, outDir: OUT, ud: handle.ud });
+    if (def.realistic) {
+      // VS Code's own first launch of a brand-new profile (sign in, theme) was answered long
+      // before anyone installs ERD Studio: closed before the story, and its clock, start.
+      const closed = await ctx.ui.dismissVSCodeFirstLaunch({ waitMs: 8000 });
+      log(`closed VS Code's first-launch welcome (${closed})`);
+    }
     if (opts.record) {
       recorder = new Recorder({ port, dir: path.join(root, 'frames') });
       recorder.start();
+      ctx.wb.recorder = recorder;
       await ctx.eventually(() => recorder.frames.length > 0, { timeout: 15000, message: 'the recorder took no frames' });
     }
+    // The title card: the story's title and its persona.
     ctx.mark(`${def.title}\n${def.persona},\n${def.want},\n${def.soThat}.`, 'intro', def.say);
     await sleep(pace.intro);
     await def.steps(ctx);
@@ -157,6 +165,8 @@ async function runOne({ def, file }, { extDir, opts }) {
     }
   } finally {
     result.steps = ctx?.steps ?? [];
+    ctx?.noise.stop();
+    if (ctx?.noise.events.length) result.interruptions = ctx.noise.events;
     if (recorder) {
       const frames = await recorder.stop(pace.tail);
       try {
@@ -183,57 +193,9 @@ async function runOne({ def, file }, { extDir, opts }) {
   return result;
 }
 
-/**
- * Publish `chosen` (entries of lib/publish.mjs's CLIPS; none, nothing) whose
- * story is in `passed` (ids): each from out/<id>.mp4 to
- * media/onboarding/stories/<clip>.mp4. Returns the number that could not be published.
- */
-function publish(passed, chosen) {
-  if (chosen.length === 0) {
-    console.log('[stories] publish: none of these stories has a "Watch how" clip');
-    return 0;
-  }
-  let failed = 0;
-  const work = tempDir('erds-pub-', false);
-  try {
-    for (const c of chosen) {
-      const source = path.join(OUT, `${c.story}.mp4`);
-      const out = path.join(REPO, ...CLIP_DIR, c.clip);
-      process.stdout.write(`[stories] publish ${c.clip} ← ${c.story} … `);
-      if (!passed.has(c.story) || !fs.existsSync(source)) {
-        console.log('SKIPPED (no passing recording: run it with --record)');
-        failed++;
-        continue;
-      }
-      try {
-        const r = publishClip({ source, srt: path.join(OUT, `${c.story}.srt`), out, workDir: work });
-        console.log(`${(r.bytes / 1024).toFixed(0)} KB, ${r.seconds.toFixed(1)} s, ${r.width}×${r.height}, ${r.codec} + ${r.audioCodec} ${r.sampleRate / 1000} kHz ${r.channels === 1 ? 'mono' : `${r.channels} ch`}`);
-      } catch (e) {
-        console.log(`FAILED: ${e.message}`);
-        failed++;
-      }
-    }
-  } finally {
-    dropTemp(work);
-  }
-  return failed;
-}
-
-/** Stories whose last run, as its log says, passed with a recording (for `--publish` alone). */
-function passedRecordings() {
-  const passed = new Set();
-  for (const c of CLIPS) {
-    const log = path.join(OUT, `${c.story}.log`);
-    if (fs.existsSync(log) && fs.existsSync(path.join(OUT, `${c.story}.mp4`)) && /\bPASSED\b/.test(fs.readFileSync(log, 'utf8'))) passed.add(c.story);
-  }
-  return passed;
-}
-
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   keepTemps = opts.keep;
-  // The "Watch how" clips are narrated: filming them for --publish speaks them.
-  if (opts.record && opts.publish) opts.narrate = true;
   if (opts.narrate && !opts.record && !opts.list) {
     console.error('--narrate narrates a recording: add --record');
     return 2;
@@ -244,11 +206,6 @@ async function main() {
       console.error(`[stories] ${problem}`);
       return 2;
     }
-  }
-  if (opts.publish && !opts.record) {
-    fs.mkdirSync(OUT, { recursive: true });
-    const chosen = CLIPS.filter((c) => !opts.only.length || opts.only.some((o) => c.story.includes(o) || c.clip.includes(o) || c.key.includes(o)));
-    return publish(passedRecordings(), chosen) ? 1 : 0;
   }
   const stories = await loadStories(opts.only);
   if (opts.list) {
@@ -264,12 +221,22 @@ async function main() {
   buildExtension({ skip: !opts.build });
   const extRoot = tempDir('erds-ext-', false);
   const extDir = stageExtension(path.join(extRoot, 'ext'));
+  // The first-60-seconds stories install the extension as from the Marketplace: package it once.
+  let vsix;
+  if (stories.some((s) => s.def.realistic)) {
+    try {
+      vsix = packageVsix(path.join(extRoot, 'erd-studio.vsix'));
+      console.log(`[stories] packaged ${path.relative(extRoot, vsix)} for the realistic stories`);
+    } catch (e) {
+      console.log(`[stories] could not package the VSIX: ${e.message}`);
+    }
+  }
 
   const results = [];
   try {
     for (const s of stories) {
       process.stdout.write(`[stories] ${s.def.id} … `);
-      const r = await runOne(s, { extDir, opts });
+      const r = await runOne(s, { extDir, vsix, opts });
       results.push(r);
       const secs = (r.durationMs / 1000).toFixed(1);
       if (r.status === 'passed') console.log(`PASS (${secs} s)${r.video ? `  ${r.video} (${r.seconds} s${r.narration ? ', narrated' : ''})` : ''}`);
@@ -288,14 +255,7 @@ async function main() {
   const failed = results.filter((r) => r.status !== 'passed');
   fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify({ at: new Date().toISOString(), record: opts.record, narrate: opts.narrate, passed: results.length - failed.length, failed: failed.length, stories: results }, null, 2) + '\n');
   console.log(`[stories] ${results.length - failed.length} passed, ${failed.length} failed — test/stories/out/summary.json`);
-  let unpublished = 0;
-  if (opts.publish) {
-    const passed = new Set(results.filter((r) => r.status === 'passed' && r.video).map((r) => r.id));
-    // Only the clips whose story ran here.
-    const ran = new Set(results.map((r) => r.id));
-    unpublished = publish(passed, CLIPS.filter((c) => ran.has(c.story)));
-  }
-  return failed.length || unpublished ? 1 : 0;
+  return failed.length ? 1 : 0;
 }
 
 main().then((code) => process.exit(code), (err) => {

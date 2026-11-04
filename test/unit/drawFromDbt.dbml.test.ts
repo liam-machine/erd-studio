@@ -36,6 +36,7 @@ import { drawFromDbt, type DrawFromDbtDeps } from '../../src/commands/drawFromDb
 import { LayerService } from '../../src/services/layerService';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
+import { fakeDraftPreview } from './helpers/draftDriver';
 
 const DBML_NATIVE = path.resolve(__dirname, '../fixtures/dbml-native');
 
@@ -180,5 +181,76 @@ describe('Draw from dbt: where a new DBML table goes (§2.4)', () => {
     expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'fct_visit.dbml'), 'utf-8')).toMatch(/^Table gold\.fct_visit \{/);
     expect(fs.existsSync(erd('logical-models', 'gold'))).toBe(false);
     expect(fs.existsSync(erd('logical-models', 'fct_visit.yml'))).toBe(false);
+  });
+});
+
+describe('Draw from dbt ending in the draft (Draft-first §5.2)', () => {
+  it('nothing written before Keep; Keep writes exactly what the draft-less flow writes, byte for byte', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const before = snapshot();
+    // The flow as it was (no preview): the reference.
+    await drawFromDbt(deps());
+    const reference = snapshot();
+    fs.rmSync(erd(), { recursive: true });
+    fs.cpSync(path.join(DBML_NATIVE, '.erd-studio'), erd(), { recursive: true });
+    fs.mkdirSync(erd('silver', 'tables', 'silver'), { recursive: true });
+    fs.writeFileSync(erd('silver', 'tables', 'silver', 'dim_store.dbml'), STORE);
+    fs.writeFileSync(erd('silver', 'diagrams', 'plain.dbml'), PLAIN);
+    expect(snapshot()).toEqual(before);
+
+    let checked = false;
+    const preview = fakeDraftPreview(['keep']);
+    const ask = preview.ask.bind(preview);
+    preview.ask = async (d) => {
+      // The draft is shown before any write.
+      expect(snapshot()).toEqual(before);
+      checked = true;
+      return ask(d);
+    };
+    // Change options… (the picker and the name box, as before), then the draft.
+    const result = await drawFromDbt({ ...deps(), draft: { preview, trigger: 'changeOptions' } });
+    expect(checked).toBe(true);
+    expect(result?.domainPath).toBe(erd('silver', 'diagrams', 'visits.dbml'));
+    expect(preview.drafts[0]).toMatchObject({ source: 'dbt', trigger: 'changeOptions', keep: { writer: 'drawFromDbt', target: { layer: 'silver', name: 'visits' } } });
+    expect(preview.settled).toEqual([{ kept: true }]);
+    expect(snapshot()).toEqual(reference);
+  });
+
+  it('a Keep that does not save (the name was taken since) says why and asks the same draft again; a second Keep is answered', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const errors = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    const target = erd('silver', 'diagrams', 'visits.dbml');
+    const preview = fakeDraftPreview(['keep', 'keep']);
+    const ask = preview.ask.bind(preview);
+    preview.ask = async (d) => {
+      // Before the first Keep: another window saves a diagram of the same name. Before the second: it is gone again.
+      if (preview.drafts.length === 0) fs.writeFileSync(target, 'Project visits {\n}\n');
+      else fs.rmSync(target);
+      return ask(d);
+    };
+    const result = await drawFromDbt({ ...deps(), draft: { preview, trigger: 'changeOptions' } });
+    expect(errors.mock.calls.some((c) => /visits/.test(String(c[0])))).toBe(true);
+    expect(preview.drafts).toHaveLength(2);
+    expect(preview.drafts[1]).toBe(preview.drafts[0]);
+    expect(preview.settled).toEqual([{ kept: false }, { kept: true }]);
+    expect(result?.domainPath).toBe(target);
+    expect(fs.readFileSync(target, 'utf-8')).not.toBe('Project visits {\n}\n');
+  });
+
+  it('Discard writes nothing; a change outside ERD Studio that leaves the plan the same writes at once', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const before = snapshot();
+    const discard = fakeDraftPreview(['discard']);
+    expect(await drawFromDbt({ ...deps(), draft: { preview: discard, trigger: 'changeOptions' } })).toBeUndefined();
+    expect(snapshot()).toEqual(before);
+
+    let generation = 0;
+    const keep = fakeDraftPreview(['keep']);
+    const ask = keep.ask.bind(keep);
+    keep.ask = async (d) => { const a = await ask(d); generation += 1; return a; };
+    const result = await drawFromDbt({ ...deps(), draft: { preview: keep, trigger: 'changeOptions', generation: () => generation } });
+    expect(result?.domainPath).toBe(erd('silver', 'diagrams', 'visits.dbml'));
+    expect(keep.drafts).toHaveLength(1);
+    expect(keep.settled).toEqual([{ kept: true }]);
   });
 });

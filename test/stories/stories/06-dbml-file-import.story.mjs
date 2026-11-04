@@ -2,17 +2,16 @@
 // its public syntax docs: inline and block refs, a composite ref, a table
 // partial, an enum, records, a second schema), opened for the first time.
 // ERD Studio's quick look finds the file, and the window's one prompt is the
-// start suggestion: "ERD Studio found a DBML file in this folder. Create a
-// diagram from it?". Create Diagram is the quick import: no file dialog,
-// layer pick or name box (asserted: no quick input shows before the
-// confirm); the file, the Main layer and the name from its Project
-// ("ecommerce") are chosen, and it asks once. Proves the file is split into
-// one DBML file per table (by schema), its references land in one
-// relationships file, the confirm counts six relationships as the canvas
-// does (the composite once), says they are saved as optional (?) as the file
-// then shows, says what ERD Studio leaves out (the first thing and a count)
-// in plain words, and the diagram opens with all six tables.
+// start suggestion: "ERD Studio found a DBML file in this folder. Show it as
+// a diagram? Nothing is saved until you keep it." Show Me is Draft-first: no
+// file dialog, layer pick or name box, a read-only "Draft: ecommerce" (the
+// name from the file's Project) of all six tables and six relationships (the
+// composite once), and nothing on disk; the banner counts what ERD Studio
+// leaves out and the details drawer lists it in plain words. Keep as Diagram
+// splits the file into one DBML file per table (by schema), its references
+// into one relationships file, saved as optional (?), and opens the diagram.
 
+import { DRAFT, waitForDraft } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
 const TABLES = ['users', 'countries', 'ecommerce.merchants', 'ecommerce.products', 'orders', 'order_items'];
@@ -33,42 +32,49 @@ export default story({
     }, { say: 'Given I open my project folder, with an e-commerce DBML file from dbdiagram dot io.' });
 
     const FOUND = 'ERD Studio found a DBML file in this folder';
-    await s.step('ERD Studio finds the file and offers to create a diagram from it', async () => {
+    await s.step('ERD Studio finds the file and offers to show it as a diagram', async () => {
       const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      s.assert.equal(toast.message, `${FOUND}. Create a diagram from it?`);
-      s.assert.deepEqual(toast.buttons, ['Create Diagram', 'More Options…', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
+      s.assert.equal(toast.message, `${FOUND}. Show it as a diagram? Nothing is saved until you keep it.`);
+      s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
       await s.wb.highlight(s.sel.notification(FOUND));
       await s.pause(1800);
       await s.wb.unhighlight();
     }, { at: 'left' });
 
-    let dialog;
-    await s.step('I click "Create Diagram": no file to pick, no name to type', async () => {
-      await s.ui.notificationButton(FOUND, 'Create Diagram');
-      // No file dialog, layer or name question: the confirm is the first thing it shows.
-      dialog = await s.ui.waitForDialogAskingNothingFirst();
-    }, { say: "I click Create Diagram. There's no file to pick and no name to type: it asks me nothing.", at: 'left' });
-
-    await s.step('It shows what it will import, and what it leaves out', async () => {
-      s.assert.equal(dialog.message, 'Import 6 tables and 6 relationships into a new diagram "ecommerce" in the Main layer.', 'the confirm\'s headline');
-      s.assert.deepEqual([...dialog.buttons].sort(), ['Cancel', 'Change Options…', 'Import', 'Review All…'], 'the confirm\'s buttons (VS Code orders them by platform)');
-      // What is left out, the first thing and a count (the database type, the sample rows, …); Review All… lists them all.
-      s.expect(/^• Not imported: .+; and \d+ more\.$/m.test(dialog.detail), `the confirm should say what is left out: ${dialog.detail}`);
-      s.expect(dialog.detail.includes('saved as optional (?'), `the confirm should say the relationships are saved as optional: ${dialog.detail}`);
-      s.expect(!/plain relationships|\bmeta\b|under "dbml"/.test(dialog.detail), `the confirm should use plain words: ${dialog.detail}`);
-      s.expectNoFile('.erd-studio/main/diagrams/ecommerce.dbml');
-      await s.wb.highlight(s.sel.dialog);
-      await s.pause(3500);
+    let draft;
+    await s.step('I click "Show Me": no file to pick, no name to type, just the draft', async () => {
+      await s.ui.notificationButton(FOUND, 'Show Me');
+      draft = await waitForDraft(s, 'Draft: ecommerce', { tables: 6 });
+      s.assert.deepEqual([...draft.tables].sort(), [...TABLES].sort(), `the draft should draw ${TABLES.join(', ')}, but draws ${draft.tables.join(', ')}`);
+      // Six references, the composite one (two column pairs) drawn as one line.
+      await draft.page.waitFor(`${DRAFT.edges} === 6`, { what: 'six relationship lines in the draft' });
+      s.assert.equal(draft.headline, 'Draft from ecommerce.dbml · 6 tables, 6 relationships · not saved');
+      s.assert.equal(draft.detail, 'Keep saves it as ecommerce in the Main layer (.erd-studio/main/diagrams/ecommerce.dbml).');
+      s.expectNoFile('.erd-studio');
+      await s.wb.highlight(s.sel.activeEditor);
+      await s.pause(2000);
       await s.wb.unhighlight();
-    }, { say: 'It shows what it will import, six tables and six relationships, and what it leaves out.' });
+    }, { say: "I click Show Me. There's no file to pick and no name to type: the draft opens, with its six tables.", at: 'left' });
 
-    await s.step('When I press Import, the diagram opens with all six tables', async () => {
-      await s.ui.dialogButton('Import');
-      await s.ui.waitForActiveTab('ecommerce.dbml');
+    await s.step('Its details say what ERD Studio leaves out, in plain words', async () => {
+      // What is left out (the database type, the sample rows, …): counted in the banner, listed in the drawer.
+      s.expect(/left out: Show details$/.test(draft.links), `the banner should count what is left out: ${draft.links}`);
+      await draft.page.click(DRAFT.link('Show details'));
+      await draft.page.waitFor(DRAFT.drawer, { what: 'the details drawer' });
+      const text = await draft.page.ev(`${DRAFT.drawer}.innerText`);
+      s.expect(!/plain relationships|\bmeta\b|under "dbml"/.test(text), `the details should use plain words: ${text.slice(0, 600)}`);
+      await draft.page.highlight(DRAFT.drawer);
+      await s.pause(3000);
+      await s.wb.unhighlight();
+    }, { say: 'Its details say what ERD Studio leaves out, in plain words.' });
+
+    await s.step('When I press "Keep as Diagram", the diagram opens with all six tables', async () => {
+      await draft.page.click(DRAFT.button('Keep as Diagram'));
+      draft.page.close();
+      await s.ui.waitForActiveTab('ecommerce.dbml', { timeout: 45000 });
       const canvas = await s.webview();
       const names = await canvas.waitFor(`(() => { const n=[...doc.querySelectorAll('.react-flow__node')].map(n => n.innerText.split('\\n')[0]); return n.length === 6 && n; })()`, { what: 'six tables on the canvas' });
       s.assert.deepEqual([...names].sort(), [...TABLES].sort(), `the canvas should show ${TABLES.join(', ')}, but shows ${names.join(', ')}`);
-      // Six references, the composite one (two column pairs) drawn as one line.
       await canvas.waitFor(`doc.querySelectorAll('.react-flow__edge').length === 6`, { what: 'six relationship lines' });
       await s.wb.highlight(s.sel.activeEditor);
       await s.pause(2500);

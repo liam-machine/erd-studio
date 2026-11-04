@@ -1,11 +1,10 @@
 // Someone whose warehouse is in Microsoft Fabric, in a folder of their own
-// with nothing to import yet. The empty Diagrams view's "import a data model"
-// link opens Import…'s picker, whose last item is "How do I export from
-// Databricks, Snowflake, Power BI…?" (for a model that is not a file yet).
-// It opens the Bring In Your Data Model tab, whose Microsoft Fabric card has
-// two parts: a semantic model (Git integration) and a Warehouse or SQL
-// analytics endpoint (SQL Server Management Studio's Script Table as …,
-// read as SQL Server).
+// with nothing in it to bring in yet. The empty Diagrams view's "More ways to
+// start…" link opens the other starts; Import… opens its picker, whose last
+// item is "Bring In Your Data Model…" (for a model that is not a file yet).
+// It opens the import guide, whose Microsoft Fabric card has two parts: a
+// semantic model (Git integration) and a Warehouse or SQL analytics endpoint
+// (SQL Server Management Studio's Script Table as …, read as SQL Server).
 //
 // The scripting happens in SSMS, outside VS Code: the story puts
 // test/fixtures/sql-ddl/fabric-warehouse/warehouse.sql into the folder only
@@ -13,18 +12,19 @@
 // scripts instead of the blank start this story begins from). The Warehouse
 // part's Import SQL Server DDL… reads the picked script as SQL Server without
 // asking the dialect (asserted: no dialect pick shows; the name box is kept
-// as suggested), and the one confirm says "Import 2 tables and 1
-// relationship from 1 SQL file (SQL Server / Azure SQL) …". Proves the
-// NOT ENFORCED keys and foreign key of a Fabric Warehouse come in, and the
-// diagram opens with both tables and their relationship.
+// as suggested), and ends in a draft: "Draft from 1 SQL file (SQL Server /
+// Azure SQL) · 2 tables, 1 relationship · not saved". Proves the NOT
+// ENFORCED keys and foreign key of a Fabric Warehouse come in, and Keep opens
+// the diagram with both tables and their relationship.
 
 import fs from 'node:fs';
 
 import { sleep } from '../lib/act.mjs';
 import { REPO } from '../lib/launch.mjs';
+import { DRAFT, waitForDraft, waitForDraftKeepingName } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
-const GUIDE_ITEM = 'How do I export from Databricks, Snowflake, Power BI…?';
+const GUIDE_ITEM = 'Bring In Your Data Model…';
 const GUIDE_TAB = 'Bring In Your Data Model';
 const CARD = `doc.querySelector('[data-card="fabric"]')`;
 const WAREHOUSE = `[...${CARD}.querySelectorAll('.ig-section')].find(s => s.querySelector('[data-guide-action="fabricWarehouse"]'))`;
@@ -38,7 +38,7 @@ export default story({
   want: 'I want Import… to show me how to export it',
   soThat: 'so that my warehouse tables become a diagram',
   workspace: { name: 'fabric-reporting', add: { 'README.md': 'test/stories/workspaces/plain/README.md' } },
-  // Import…'s path: no popup over it (a plain folder would get the nothing-found one; story 13 is that path).
+  // Import…'s path: no automatic example draft over it (story 13 is that path).
   settings: { 'erdStudio.startSuggestions': false },
   steps: async (s) => {
     await s.step('Given my project folder, with nothing to import yet', async () => {
@@ -47,15 +47,17 @@ export default story({
       await s.eventually(async () => (await s.ui.windowTitle()).includes('fabric-reporting'), { message: 'the fabric-reporting folder did not open' });
     });
 
-    const link = s.sel.welcomeLink('import a data model');
-    await s.step('When I open the ERD Studio sidebar and click "import a data model"', async () => {
+    const MORE = s.sel.welcomeLink('More ways to start…');
+    await s.step('When I open the ERD Studio sidebar and click "More ways to start…"', async () => {
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(link, { what: 'the empty Diagrams view\'s "import a data model" link' });
-      await s.wb.highlight(link);
+      await s.expectVisible(MORE, { what: 'the empty Diagrams view\'s "More ways to start…" link' });
+      await s.wb.highlight(MORE);
       await s.pause(1000);
       await s.wb.unhighlight();
-      await s.wb.click(link);
-    });
+      await s.wb.click(MORE);
+      await s.ui.waitForQuickPick({ title: 'More ways to start' });
+      await s.ui.pick('Import…');
+    }, { say: 'When I open the ERD Studio sidebar, click More ways to start, and choose Import.' });
 
     await s.step(`Import… ends with "${GUIDE_ITEM}"`, async () => {
       const pick = await s.ui.waitForQuickPick({ title: 'Import' });
@@ -64,7 +66,7 @@ export default story({
       await s.wb.highlight(s.sel.quickPickRow(GUIDE_ITEM));
       await s.pause(1500);
       await s.wb.unhighlight();
-    }, { say: 'Import offers my files, and last: how do I export from Databricks, Snowflake, Power BI and more?' });
+    }, { say: 'Import offers my files, and last: bring in your data model, from Databricks, Snowflake, Power BI and more.' });
 
     let guide;
     await s.step('My model is not a file yet, so I pick it: the guide opens', async () => {
@@ -101,24 +103,24 @@ export default story({
       await s.ui.chooseInFileDialog('warehouse.sql', 'Import');
     }, { say: 'I click Import SQL Server DDL, and pick my file.' });
 
-    let dialog;
-    let diagram;
-    await s.step('No dialect question: one message, 2 tables and 1 relationship, as SQL Server', async () => {
-      ({ dialog } = await s.ui.waitForDialogKeepingName({ never: /dialect/i }));
-      const m = /^Import 2 tables and 1 relationship from 1 SQL file \(SQL Server \/ Azure SQL\) into a new diagram "([^"]+)" in the Main layer\.$/.exec(dialog.message);
-      s.expect(m, `the confirm's headline is "${dialog.message}"`);
-      diagram = m[1];
-      s.expect(dialog.buttons.includes('Import'), `the confirm's buttons: ${dialog.buttons.join(', ')}`);
+    let draft;
+    await s.step('No dialect question: a draft of 2 tables and 1 relationship, read as SQL Server', async () => {
+      // The step-by-step flow names the diagram (kept as suggested); no dialect pick may show.
+      const { tab } = await waitForDraftKeepingName(s, { never: /dialect/i });
+      draft = await waitForDraft(s, tab, { tables: 2 });
+      s.expect(/^Draft from 1 SQL file \(SQL Server \/ Azure SQL\) · 2 tables, 1 relationship · not saved$/.test(draft.headline), `the headline: ${draft.headline}`);
       s.expectNoFile('.erd-studio/main/tables');
-      await s.wb.highlight(s.sel.dialog);
+      await draft.page.highlight(DRAFT.banner);
       await s.pause(2500);
       await s.wb.unhighlight();
-    }, { say: 'It does not ask the dialect. One message: two tables and one relationship, read as SQL Server.' });
+    }, { say: 'It does not ask the dialect. A draft: two tables and one relationship, read as SQL Server.' });
 
-    await s.step('When I press Import, both tables are on the canvas, joined', async () => {
-      await s.ui.dialogButton('Import');
+    await s.step('When I press "Keep as Diagram", both tables are on the canvas, joined', async () => {
+      const diagram = (await s.ui.tabs()).find((t) => t.active).label.slice('Draft: '.length);
+      await draft.page.click(DRAFT.button('Keep as Diagram'));
+      draft.page.close();
       guide.close();
-      await s.ui.waitForActiveTab(`${diagram}.dbml`);
+      await s.ui.waitForActiveTab(`${diagram}.dbml`, { timeout: 45000 });
       const canvas = await s.webview();
       const names = await canvas.waitFor(`(() => { const n=[...doc.querySelectorAll('.react-flow__node')].map(n => n.innerText.split('\\n')[0]); return n.length === 2 && n; })()`, { what: 'two tables on the canvas' });
       for (const t of ['dim_customer', 'fct_order']) s.expect(names.some((n) => n.endsWith(t)), `the canvas should show ${t}, but shows ${names.join(', ')}`);
@@ -130,6 +132,6 @@ export default story({
       await s.pause(2200);
       await s.wb.unhighlight();
       canvas.close();
-    }, { say: 'I press Import: both tables, joined, and saved in my project.' });
+    }, { say: 'I press Keep as Diagram: both tables, joined, and saved in my project.' });
   },
 });

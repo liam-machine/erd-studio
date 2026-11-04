@@ -73,7 +73,7 @@ describe('logical-only mode (no dbt project)', () => {
     expect(sent().some((m) => m.type === 'dismissWelcome')).toBe(false);
 
     expect(screen.queryByRole('button', { name: 'Add Tables from dbt' })).toBeNull();
-    expect(screen.getByText('Add your first table. Each one is a file you can commit.')).toBeTruthy();
+    expect(screen.getByText('Add your first table.')).toBeTruthy();
   });
 
   it('draws the neutral canvas without dbt, and the stage colours with it', () => {

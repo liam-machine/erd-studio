@@ -438,14 +438,16 @@ describe('the layer commands (#229)', () => {
 });
 
 describe('the Welcome tab with no folder open (#229)', () => {
-  it("Open canvas says to open a folder, with Open Folder… and Open Settings", async () => {
+  it("Open Diagram says to open a folder, with Open Folder… and Open Settings; the tab no longer sends openDomain (Draft-first) and ignores it", async () => {
     const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
     await activate(context);
     await vscode.commands.executeCommand('erdStudio.showGettingStarted');
     const panel = vscode.window._webviewPanels.find((p) => p.viewType === GETTING_STARTED_VIEW_TYPE)!;
 
     await panel._simulateMessage({ type: 'openDomain' });
+    expect(warn).not.toHaveBeenCalled();
 
+    await vscode.commands.executeCommand('erdStudio.openDomain');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Open a folder first'), 'Open Folder…', 'Open Settings');
   });
 });

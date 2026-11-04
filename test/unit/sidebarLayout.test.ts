@@ -60,7 +60,7 @@ describe('sidebar views', () => {
     ]);
     expect(titles.filter((m) => m.when?.startsWith('view == erdStudio.domainTree') && m.group?.startsWith('navigation')))
       .toEqual([{ submenu: 'erdStudio.newMenu', when: 'view == erdStudio.domainTree && erdStudio.hasProject', group: 'navigation@0' }]);
-    // With no folder open, the + menu is gone and the one icon is ▶ (Watch Getting Started Video): the
+    // With no folder open, the + menu is gone and the one icon is ▶ (Watch the One-Minute Tour): the
     // Welcome tab one click away (onboarding story 09). In a project, Help & Feedback has that row.
     expect(contributes.menus['view/title'].filter(emptyWindowOnly)).toEqual([
       { command: 'erdStudio.showGettingStarted', when: 'view == erdStudio.domainTree && !erdStudio.hasProject', group: 'navigation@0' },
@@ -159,7 +159,7 @@ describe('HelpTreeProvider', () => {
     const provider = new HelpTreeProvider(tracking([]));
     const rows = provider.getChildren();
     expect(rows.map((r) => provider.getTreeItem(r).label)).toEqual([
-      'Set Up My AI Helper', 'Watch Getting Started Video', 'Send Feedback', 'Show Logs',
+      'Set Up My AI Helper', 'Watch the One-Minute Tour', 'Show Me Around', 'Send Feedback', 'Show Logs',
     ]);
     const contributed = new Set(contributes.commands.map((c) => c.command));
     for (const action of HELP_ACTIONS) expect(contributed.has(action.command), action.command).toBe(true);
@@ -169,10 +169,10 @@ describe('HelpTreeProvider', () => {
   it('adds My Reports after Send Feedback once there is a report, with the open count', () => {
     const provider = new HelpTreeProvider(tracking([report(2), report(1, 'closed')]));
     const rows = provider.getChildren();
-    expect(rows[3]).toEqual({ type: 'reports' });
-    const item = provider.getTreeItem(rows[3]);
+    expect(rows[4]).toEqual({ type: 'reports' });
+    const item = provider.getTreeItem(rows[4]);
     expect([item.label, item.description, item.contextValue]).toEqual(['My Reports', '1 open', 'myReports']);
-    expect(provider.getChildren(rows[3]).map((r) => provider.getTreeItem(r).label)).toEqual(['#2 Issue 2', '#1 Issue 1']);
+    expect(provider.getChildren(rows[4]).map((r) => provider.getTreeItem(r).label)).toEqual(['#2 Issue 2', '#1 Issue 1']);
     provider.dispose();
   });
 });

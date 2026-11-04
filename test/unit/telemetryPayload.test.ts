@@ -561,7 +561,7 @@ describe('allowlists agree with the Worker', () => {
       'importSemanticModel', 'importSemanticModelCancelled', 'importSemanticModelInvalid',
       'firstRun', 'firstRunHasDiagrams', 'diagramsNudgeShown', 'diagramsNudgeOpened', 'walkthroughWaited',
     ]);
-    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('exampleWriteFailed'))).toEqual([
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('exampleWriteFailed'), ERROR_CODES.indexOf('importSemanticModelFailed') + 1)).toEqual([
       'exampleWriteFailed', 'importSqlDdlFailed', 'importSemanticModelFailed',
     ]);
   });
@@ -582,10 +582,10 @@ describe('allowlists agree with the Worker', () => {
     ]);
   });
 
-  it('appends the import guide and nothing-found keys at the very end, after the start-suggestion ones', () => {
+  it('appends the import guide and nothing-found keys after the start-suggestion ones', () => {
     const at = FEATURES.indexOf('importGuideOpened');
     expect(at).toBe(FEATURES.indexOf('importReviewOpened') + 1);
-    expect(FEATURES.slice(at)).toEqual([
+    expect(FEATURES.slice(at, FEATURES.indexOf('suggestPromptNothingOff') + 1)).toEqual([
       'importGuideOpened',
       'importGuideFromWelcome', 'importGuideFromWalkthrough', 'importGuideFromSidebar',
       'importGuideFromPicker', 'importGuideFromStartPick', 'importGuideFromPrompt',
@@ -596,6 +596,62 @@ describe('allowlists agree with the Worker', () => {
       'importGuideCopied',
       'suggestPromptNothingShown', 'suggestPromptNothingNewDiagram', 'suggestPromptNothingGuide', 'suggestPromptNothingOff',
     ]);
+  });
+
+  it('appends the Draft-first keys after the nothing-found ones (which stay listed)', () => {
+    const at = FEATURES.indexOf('draftShown');
+    expect(at).toBe(FEATURES.indexOf('suggestPromptNothingOff') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('activatedDbt'))).toEqual([
+      'draftShown', 'draftShownAuto', 'draftExampleShown',
+      'draftSourceSqlDdl', 'draftSourceSemanticModel', 'draftSourceDbml', 'draftSourceDbt',
+      'draftKept', 'draftChangeOptions', 'draftDiscarded', 'draftClosed', 'draftOtherStart',
+      'draftScopeChanged', 'draftDetailsOpened', 'draftRefreshed', 'draftUnavailable',
+      'suggestPromptShowMe', 'importGuideFromDraft',
+    ]);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('importSemanticModelFailed') + 1)).toEqual(['draftBuildFailed', 'draftLayoutFailed']);
+  });
+
+  it('the Worker README documents the Draft-first keys: a Draft funnel row, and chose_start counts draftKept', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    for (const key of FEATURES.slice(FEATURES.indexOf('draftShown'))) expect(readme, key).toContain(`\`${key}\``);
+    for (const code of ['draftBuildFailed', 'draftLayoutFailed']) expect(readme, code).toContain(`\`${code}\``);
+    expect(readme).toMatch(/^\| Draft \|/m);
+    const choseStart = readme.split('\n').find((l) => l.includes('AS chose_start'))!;
+    expect(choseStart).toContain("'draftKept'");
+    expect(choseStart).toContain("'suggestPromptShowMe'");
+  });
+
+  it('appends the per-window activation and unused-dbt keys at the very end, after the Draft-first ones', () => {
+    const at = FEATURES.indexOf('activatedDbt');
+    expect(at).toBe(FEATURES.indexOf('importGuideFromDraft') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('dbtProjectUnused') + 1)).toEqual(['activatedDbt', 'activatedLogical', 'activatedNoFolder', 'dbtProjectUnused']);
+  });
+
+  it('appends the onboarding guide keys at the very end, after the activation ones, in their fixed order', () => {
+    const at = FEATURES.indexOf('guideStarted');
+    expect(at).toBe(FEATURES.indexOf('dbtProjectUnused') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('guideLeftDraft') + 1)).toEqual([
+      'guideStarted', 'guideStartedFromCommand', 'guideDraftDone', 'guideCanvasStarted', 'guideCompleted',
+      'guideSkippedOnDraft', 'guideSkippedOnCanvas', 'guideStarClicked', 'guideAiHelperClicked',
+      'guideStepDraftBanner', 'guideStepDraftMoreWays', 'guideStepDraftKeep',
+      'guideStepCanvasTable', 'guideStepCanvasRelationship', 'guideStepCanvasToolbar', 'guideStepCanvasStages',
+      'guideStepCanvasSidebar', 'guideStepCanvasFiles', 'guideStepCanvasFinish',
+      'guideBack', 'guideLeftDraft',
+    ]);
+    // The no-longer-sent clip key stays listed (append-only).
+    expect(FEATURES).toContain('howToClipPlayed');
+  });
+
+  it('appends the existing-diagrams notice\'s Show Me Around key at the very end, after the guide ones', () => {
+    expect(FEATURES.indexOf('diagramsNudgeShowMeAround')).toBe(FEATURES.indexOf('guideLeftDraft') + 1);
+    expect(FEATURES.at(-1)).toBe('draftAfterOpenFolder');
+    expect(FEATURES.indexOf('draftAfterOpenFolder')).toBe(FEATURES.indexOf('diagramsNudgeShowMeAround') + 1);
+  });
+
+  it('the Worker README documents the onboarding guide keys in a Guide funnel row', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    expect(readme).toMatch(/^\| Guide \|/m);
+    for (const key of FEATURES.slice(FEATURES.indexOf('guideStarted'))) expect(readme, key).toContain(`\`${key}\``);
   });
 
   it('telemetry.json documents every feature key', () => {

@@ -8,7 +8,10 @@
 
 import {
   START_ACTION_COMMANDS,
+  START_ACTION_LABELS,
+  moreStartsFor,
   parseStartArgs,
+  parseStartPickArgs,
   startActionArgs,
   startActionsFor,
   type StartAction,
@@ -56,15 +59,15 @@ export const START_FEATURES: Readonly<Record<StartSurface, Readonly<Record<Start
 
 /** What a start's quick pick shows, when the command runs without an argument. */
 export const START_PICK_ITEMS: Readonly<Record<StartAction, { label: string; detail: string }>> = {
-  convert: { label: '$(arrow-swap) Convert to DBML', detail: 'Move this project from its YAML and JSON files to DBML, an open format' },
-  drawFromDbt: { label: '$(wand) Draw from dbt', detail: 'Copy your dbt models and their relationships into a diagram' },
-  importSemanticModel: { label: '$(graph) Import your Power BI semantic model', detail: 'Start from a Power BI or Fabric semantic model in this folder' },
-  importSqlDdl: { label: '$(database) Import your SQL scripts', detail: 'Start from CREATE TABLE scripts in this folder' },
-  importDbmlFile: { label: '$(file-code) Import your DBML file', detail: 'Start from a DBML file (an open format) in this folder' },
-  blank: { label: '$(add) New Diagram', detail: 'Start with an empty canvas and add your own tables' },
-  import: { label: '$(cloud-download) Import…', detail: 'Start from a DBML file, SQL DDL scripts or a Power BI semantic model' },
-  example: { label: '$(book) Open an Example…', detail: 'See a finished data model first: eight common warehouse patterns' },
-};
+  convert: { label: `$(arrow-swap) ${START_ACTION_LABELS.convert}`, detail: 'Move this project from its YAML and JSON files to DBML' },
+  drawFromDbt: { label: `$(wand) ${START_ACTION_LABELS.drawFromDbt}`, detail: 'Your dbt models and their relationships, as a diagram' },
+  importSemanticModel: { label: `$(graph) ${START_ACTION_LABELS.importSemanticModel}`, detail: 'The semantic model in this folder, as a diagram' },
+  importSqlDdl: { label: `$(database) ${START_ACTION_LABELS.importSqlDdl}`, detail: 'The CREATE TABLE scripts in this folder, as a diagram' },
+  importDbmlFile: { label: `$(file-code) ${START_ACTION_LABELS.importDbmlFile}`, detail: 'The DBML file in this folder, as a diagram' },
+  blank: { label: `$(add) ${START_ACTION_LABELS.blank}`, detail: 'An empty canvas for your own tables' },
+  import: { label: `$(cloud-download) ${START_ACTION_LABELS.import}`, detail: 'A DBML file, SQL scripts or a Power BI semantic model' },
+  example: { label: `$(book) ${START_ACTION_LABELS.example}`, detail: 'A finished data model to look around' },
+}
 
 /**
  * What each suggestion is counted as when a surface the host can see shows it
@@ -108,12 +111,16 @@ export function recordStart(action: StartAction, from: StartSurface): void {
 }
 
 /**
- * Run `erdStudio.start`. A valid `{ action, from }` is counted and run; anything
- * else (the start suggestion's More Options…) shows the starts that apply
- * here, then the import guide's "How do I export from Databricks, Snowflake,
- * Power BI…?", and runs the one picked (a start is not counted: it came from
- * no start surface; the guide counts `importGuideFromStartPick`).
- * A direct import runs its quick path either way (`startActionArgs`).
+ * Run `erdStudio.start`. A valid `{ action, from }` is counted and run. `{ from }`
+ * alone is a surface's **More ways to start…** link: the starts other than
+ * that surface's button (`moreStartsFor`), then **Bring In Your Data Model…**
+ * (the import guide), the pick counted as that surface's start (or the
+ * guide's `importGuideFrom<Surface>`). Anything else (a stray link, an old
+ * keybinding) shows every start that applies here and the guide, and counts
+ * no start (the guide counts `importGuideFromStartPick`).
+ * A direct import runs its quick path and Draw from dbt its folder draft
+ * either way, each ending in the draft preview (`startActionArgs`, trigger
+ * `start`): nothing is written until Keep.
  */
 export async function runStart(arg: unknown, deps: StartDeps): Promise<void> {
   const args = parseStartArgs(arg);
@@ -122,12 +129,16 @@ export async function runStart(arg: unknown, deps: StartDeps): Promise<void> {
     await deps.executeCommand(START_ACTION_COMMANDS[args.action], ...startActionArgs(args.action));
     return;
   }
-  const actions = startActionsFor(deps.context());
+  // "More ways to start…" under a surface's button: the other starts, counted as that surface's.
+  const from = parseStartPickArgs(arg);
+  const ctx = deps.context();
+  const actions = from ? moreStartsFor(ctx) : startActionsFor(ctx);
   const choice = await deps.pick([...actions.map((action): StartPickItem => ({ ...START_PICK_ITEMS[action], action })), START_PICK_GUIDE_ITEM]);
   if (!choice) return;
   if ('guide' in choice) {
-    await deps.executeCommand(IMPORT_GUIDE_COMMAND, { from: 'startPick' });
+    await deps.executeCommand(IMPORT_GUIDE_COMMAND, { from: from ?? 'startPick' });
     return;
   }
+  if (from) recordStart(choice.action, from);
   await deps.executeCommand(START_ACTION_COMMANDS[choice.action], ...startActionArgs(choice.action));
 }

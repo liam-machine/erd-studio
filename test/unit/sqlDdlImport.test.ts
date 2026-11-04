@@ -18,8 +18,12 @@ import {
   SQL_DIALECTS,
   SQL_DIALECT_LABELS,
   convertSqlDdl,
+  countCreateTablesWithColumns,
   detectSqlDialect,
   isSqlDialect,
+  looksLikeMigrationFile,
+  looksLikeOracleSql,
+  withoutSqlData,
   type SqlDdlFile,
   type SqlDdlToDbmlResult,
   type SqlDialect,
@@ -298,7 +302,7 @@ describe('dialect details', () => {
     expect(both.dbml.match(/^Ref: "sales"\."fct_order_line"\."customer_id"/gm)).toHaveLength(1);
     // Constraint names and ON DELETE actions are not written: Import would read the name as a role.
     expect(both.dbml).not.toMatch(/fct_order_line_product_fk|delete:/);
-    expect(both.skipped).toContain('02_constraints.sql: skipped 1 ALTER TABLE other than adding a key');
+    expect(both.skipped).toContain('02_constraints.sql: skipped 1 ALTER TABLE other than a key or a column change');
   });
 
   it('postgres: an enum type is kept for the column that uses it; identity, defaults, checks and unique come through', () => {
@@ -616,5 +620,116 @@ describe('bundle boundary', () => {
     expect(pkg.dependencies['@dbml/core']).toBe('11.0.0');
     expect(pkg.dependencies['@dbml/parse']).toBe('11.0.0');
     expect(fs.existsSync(path.join(ROOT, 'node_modules/@dbml/core/node_modules/@dbml/parse'))).toBe(false);
+  });
+});
+
+describe('migrations: later schema changes applied in file order', () => {
+  const flyway: SqlDdlFile[] = [
+    { name: 'V1__init.sql', text: 'CREATE TABLE public.customer (\n  customer_id serial PRIMARY KEY,\n  email text NOT NULL UNIQUE\n);\nCREATE TABLE public.orders (\n  order_id bigserial PRIMARY KEY,\n  customer_id integer NOT NULL REFERENCES public.customer(customer_id)\n);\nCREATE TABLE public.legacy (id int);\n' },
+    { name: 'V2__add_product.sql', text: 'CREATE TABLE public.product (\n  product_id serial PRIMARY KEY,\n  sku varchar(40) NOT NULL\n);\nALTER TABLE public.orders ADD COLUMN product_id integer;\n' },
+    { name: 'V3__fk.sql', text: 'ALTER TABLE public.orders ADD CONSTRAINT fk_orders_product FOREIGN KEY (product_id) REFERENCES public.product(product_id);\n' },
+    { name: 'V4__rename.sql', text: 'ALTER TABLE public.customer RENAME COLUMN email TO email_address;\nDROP TABLE IF EXISTS public.legacy;\nALTER TABLE public.orders RENAME TO purchase;\n' },
+    { name: 'V5__drop.sql', text: 'ALTER TABLE public.product DROP COLUMN sku;\nALTER TABLE public.purchase ALTER COLUMN order_id SET DATA TYPE numeric(20,0);\nCREATE TABLE IF NOT EXISTS public.customer (id int);\n' },
+  ];
+
+  it('Flyway: columns added, renamed, retyped and dropped, a table renamed and one dropped, and the keys follow', () => {
+    const result = convert('postgres', flyway);
+    expect(result.tableCount).toBe(3);
+    expect(result.dbml).toContain('"email_address" text [not null, unique]');
+    expect(result.dbml).not.toMatch(/"email" text|legacy|"sku"/);
+    expect(result.dbml).toMatch(/Table "public"\."purchase" \{[\s\S]*"order_id" numeric\(20,0\)[\s\S]*"product_id" integer/);
+    expect(result.dbml).toContain('Ref: "public"."purchase"."product_id" > "public"."product"."product_id"');
+    expect(result.dbml).toContain('Ref: "public"."purchase"."customer_id" > "public"."customer"."customer_id"');
+    expect(result.notes.some((n) => /^\d+ later schema changes were applied in file order/.test(n))).toBe(true);
+    expect(result.skipped).toContain('V5__drop.sql: skipped 1 CREATE TABLE IF NOT EXISTS of a table already defined');
+  });
+
+  it('what cannot be applied is skipped and said, with its file and line, never silently', () => {
+    const result = convert('postgres', [
+      { name: 'a.sql', text: 'CREATE TABLE t (id int);\n' },
+      { name: 'b.sql', text: 'ALTER TABLE missing ADD COLUMN x int;\nALTER TABLE t RENAME COLUMN nope TO yes;\nALTER TABLE t DROP COLUMN gone;\n' },
+    ]);
+    expect(result.skipped).toEqual(expect.arrayContaining([
+      'b.sql line 1: a column added on missing, which is not in the files (not applied)',
+      'b.sql line 2: t.nope renamed, but it has no such column (not applied)',
+      'b.sql line 3: t.gone dropped, but it has no such column (not applied)',
+    ]));
+  });
+
+  it('MySQL CHANGE / MODIFY / RENAME TABLE, SQL Server ADD a, b and sp_rename, Databricks ADD COLUMNS (…)', () => {
+    const mysql = convert('mysql', [{ name: 'm.sql', text: 'CREATE TABLE `c` (`id` int NOT NULL, `nm` varchar(10));\nALTER TABLE `c` CHANGE COLUMN `nm` `name` varchar(100) NOT NULL AFTER `id`, MODIFY `id` bigint NOT NULL;\nRENAME TABLE `c` TO `customer`;\n' }]);
+    expect(mysql.dbml).toMatch(/Table "customer" \{\n  "id" bigint \[not null\]\n  "name" varchar\(100\) \[not null\]\n\}/);
+    const mssql = convert('sqlserver', [{ name: 's.sql', text: 'CREATE TABLE [dbo].[Customer] ([Id] INT NOT NULL, [Email] NVARCHAR(256));\nGO\nALTER TABLE [dbo].[Customer] ADD [Phone] NVARCHAR(20) NULL, [Tier] INT;\nGO\nEXEC sp_rename \'dbo.Customer.Email\', \'EmailAddress\', \'COLUMN\';\nGO\n' }]);
+    expect(mssql.dbml).toMatch(/"EmailAddress" NVARCHAR\(256\)/);
+    expect(mssql.dbml).toMatch(/"Phone" NVARCHAR\(20\)/);
+    expect(mssql.dbml).toMatch(/"Tier" INT/);
+    const spark = convert('databricks', [{ name: 'd.sql', text: 'CREATE TABLE main.s.t (id BIGINT);\nALTER TABLE main.s.t ADD COLUMNS (tags ARRAY<STRING> COMMENT \'labels\', amount DECIMAL(12,2));\n' }]);
+    expect(spark.dbml).toMatch(/"tags" "ARRAY<STRING>" \[note: 'labels'\]|"tags" ARRAY<STRING> \[note: 'labels'\]/);
+    expect(spark.dbml).toMatch(/"amount" DECIMAL\(12,2\)/i);
+  });
+
+  it('a teardown script read after the CREATEs (a folder or a multi-pick) drops nothing: its DROPs are skipped, as before', () => {
+    const result = convert('postgres', [
+      { name: 'sql/create_tables.sql', text: 'CREATE TABLE customer (id int PRIMARY KEY);\nCREATE TABLE orders (id int, customer_id int REFERENCES customer(id));\n' },
+      { name: 'sql/drop_tables.sql', text: 'DROP TABLE IF EXISTS orders;\nDROP TABLE IF EXISTS customer;\n' },
+    ]);
+    expect(result.tableCount).toBe(2);
+    expect(result.skipped).toContain('sql/drop_tables.sql: skipped 2 DROP statements');
+    expect(result.notes.some((n) => /later schema change/.test(n))).toBe(false);
+  });
+
+  it('a migration of DROPs alone is still applied when it is named like one', () => {
+    const files = [
+      { name: 'V1__init.sql', text: 'CREATE TABLE a (id int);\nCREATE TABLE b (id int);\n' },
+      { name: 'V2__drop_b.sql', text: 'DROP TABLE b;\n' },
+    ];
+    expect(convert('postgres', files).tableCount).toBe(1);
+    expect(convert('postgres', [files[0], { name: 'db/migrations/drop_b.sql', text: 'DROP TABLE b;\n' }]).tableCount).toBe(1);
+    expect(convert('postgres', [files[0], { name: '002_drop_b.sql', text: 'DROP TABLE b;\n' }]).tableCount).toBe(1);
+    expect(looksLikeMigrationFile('sql/teardown.sql')).toBe(false);
+    expect(looksLikeMigrationFile('reset.sql')).toBe(false);
+  });
+
+  it('a dump that drops each table before creating it is unchanged (nothing to drop yet)', () => {
+    const result = convert('mysql', [{ name: 'dump.sql', text: 'DROP TABLE IF EXISTS `a`;\nCREATE TABLE `a` (`id` int);\nDROP TABLE IF EXISTS `b`;\nCREATE TABLE `b` (`id` int);\n' }]);
+    expect(result.tableCount).toBe(2);
+    expect(result.skipped).toContain('dump.sql: skipped 2 DROP statements');
+    expect(result.notes.some((n) => /later schema change/.test(n))).toBe(false);
+  });
+});
+
+describe('what the folder looks count, and a dump without its data', () => {
+  it('counts CREATE TABLEs with a column list by the converter\'s own reading', () => {
+    expect(countCreateTablesWithColumns('CREATE TABLE a (id int);\nCREATE TABLE b AS SELECT 1;\ncreate table c as (select 1);\nCREATE TABLE d (x, y) AS SELECT 1, 2;\n')).toBe(1);
+    expect(countCreateTablesWithColumns("{% macro m() %}\ncreate or replace table {{ relation }}\n as (\n {{ sql }} );\n{% endmacro %}")).toBe(0);
+    expect(countCreateTablesWithColumns("SELECT 'CREATE TABLE x (id int)';")).toBe(0);
+    expect(countCreateTablesWithColumns('CREATE TABLE [dbo].[A]([Id] [int])\nGO\nCREATE TABLE `b` (`id` INT) ENGINE=InnoDB;')).toBe(2);
+    expect(countCreateTablesWithColumns('CREATE TABLE IF NOT EXISTS "users" ("id" SERIAL PRIMARY KEY);')).toBe(1);
+  });
+
+  it('knows Oracle DDL, and not Snowflake\'s NUMBER', () => {
+    expect(looksLikeOracleSql('CREATE TABLE HR.E (ID NUMBER(6), EMAIL VARCHAR2(25 BYTE));')).toBe(true);
+    expect(looksLikeOracleSql('create or replace TABLE A.B.C (ID NUMBER(38,0), E VARCHAR(16777216));')).toBe(false);
+  });
+
+  it('takes pg_dump\'s COPY rows and a big dump\'s INSERTs out, keeping every line break and the statements to count', () => {
+    const dump = 'CREATE TABLE a (id int, note text);\nCOPY public.a (id, note) FROM stdin;\n1\tO\'Brien;\n2\tx\n\\.\nALTER TABLE ONLY a ADD CONSTRAINT a_pkey PRIMARY KEY (id);\n';
+    const out = withoutSqlData(dump);
+    expect(out.text.split('\n')).toHaveLength(dump.split('\n').length);
+    expect(out.text).not.toContain("O'Brien");
+    expect(out.text).toContain('ALTER TABLE ONLY a ADD CONSTRAINT a_pkey PRIMARY KEY (id);');
+    expect(out.sqlChars).toBeLessThan(dump.length);
+    const result = convert('postgres', [{ name: 'd.sql', text: out.text }]);
+    expect(result.dbml).toContain('"id" int [pk]');
+    // A small script keeps its INSERTs; a big one loses them (strings with ; and \' respected).
+    expect(withoutSqlData("INSERT INTO a VALUES (1, 'x;y');\n").text).toBe("INSERT INTO a VALUES (1, 'x;y');\n");
+    const rows = Array.from({ length: 30_000 }, (_, i) => `INSERT INTO \`a\` VALUES (${i},'it\\'s; fine'),(${i},'b');`).join('\n');
+    const big = `-- MySQL dump 10.13\nCREATE TABLE \`a\` (\`id\` int, \`note\` text);\n${rows}\nCREATE TABLE \`b\` (\`id\` int);\n`;
+    const stripped = withoutSqlData(big);
+    expect(stripped.text.split('\n')).toHaveLength(big.split('\n').length);
+    expect(stripped.sqlChars).toBeLessThan(200);
+    const converted = convert('mysql', [{ name: 'dump.sql', text: stripped.text }]);
+    expect(converted.tableCount).toBe(2);
+    expect(converted.skipped).toContain('dump.sql: skipped 30000 data statements (INSERT, UPDATE…)');
   });
 });

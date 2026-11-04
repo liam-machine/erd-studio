@@ -92,21 +92,15 @@ describe('package.json storage wording (native DBML storage, 2.0)', () => {
     expect(storageClaims.map(([at, text]) => `${at}: ${text}`)).toEqual([]);
   });
 
-  it('keeps "an open format, no lock-in" where DBML import and export are offered', () => {
+  it('says "an open format, no lock-in" once, where DBML is introduced (the empty window), and the file sentence once', () => {
     const welcome = pkg.contributes.viewsWelcome as Array<{ contents: string; when?: string }>;
-    // The import start (Import…, whose first source is DBML) and any direct Import DBML link.
-    const offersImport = welcome.filter((w) => w.contents.includes('command:erdStudio.importDbml') || w.contents.includes(startCommandLink('import', 'sidebar')));
-    expect(offersImport.length).toBeGreaterThanOrEqual(2);
-    for (const entry of offersImport) {
-      expect(entry.contents).toContain('an open format, no lock-in');
-      expect(entry.contents).not.toMatch(/open standard/i);
-    }
-    const steps = pkg.contributes.walkthroughs[0].steps as Array<{ description: string }>;
-    for (const step of steps.filter((s) => s.description.includes(startCommandLink('import', 'walkthrough')))) {
-      expect(step.description).toContain('an open format, no lock-in');
-    }
+    const all = JSON.stringify(pkg.contributes);
+    expect(all.split('no lock-in').length - 1).toBe(1);
+    expect(welcome.find((w) => w.when === 'workspaceFolderCount == 0')?.contents).toContain('an open format, no lock-in');
+    // The Table Library's empty state is the one place that says each table is a file.
+    expect(all.split('Each table is a file').length - 1).toBe(1);
     const library = welcome.find((w) => w.contents.startsWith('No tables yet.'));
-    expect(library?.contents).toContain('Each table is a file in .erd-studio/ you can commit.');
+    expect(library?.contents).toContain('Each table is a file in .erd-studio/ you can commit and review like code.');
   });
 
   it('the ERD Studio view says "Loading diagrams…" while it loads, and "No diagrams yet." only once loaded', () => {
@@ -254,9 +248,9 @@ describe('package.json: dbt shows up only in dbt projects', () => {
     expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && erdStudio.hasMultipleDbtProjects')?.contents).toContain('[Select dbt Project](command:erdStudio.selectDbtProject)');
     const steps = (pkg.contributes.walkthroughs[0].steps as Array<{ id: string; title: string; when?: string }>);
     expect(steps.filter((s) => dbtOnly(s.when)).map((s) => [s.id, s.title])).toEqual([
-      ['convertDbt', 'Move this project to DBML'],
-      ['draw', 'Draw your dbt project — no AI needed'],
-      ['watch', 'Watch the one-minute tour'],
+      ['convertDbt', 'Convert to DBML'],
+      ['draw', 'Draw from dbt'],
+      ['watch', 'Watch the One-Minute Tour'],
     ]);
   });
 });

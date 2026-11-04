@@ -8,9 +8,11 @@
  *
  * Steps: file → read it (`workspace.fs`) → `readDbml` (a file that is not
  * valid DBML is reported with its line numbers and an Open File button) →
- * layer → name (the rule New Subject Area uses) → a dry-run summary with
- * Import / Cancel → write → open the new diagram. Cancelling any step writes
- * nothing.
+ * layer → name (the rule New Subject Area uses) → the **draft** (Draft-first,
+ * `docs/dev/draft-first.md` §5.1: the read-only preview of the diagram, with
+ * Keep, Change options…, Discard and More ways to start) → write → open the
+ * new diagram. Cancelling any step writes nothing. With no preview (a test's
+ * fake, a host without one) the dry run is the old modal, Import / Cancel.
  *
  * The mapping is the pure planner's (`planDbmlImport` in
  * `src/services/dbmlImport.ts`); the files are written the way Draw from dbt
@@ -43,12 +45,8 @@ import {
   type DbmlImportPlan,
   type DescribeDbmlImportOptions,
 } from '../services/dbmlImport';
-import {
-  CHANGE_OPTIONS_BUTTON,
-  REVIEW_ALL_BUTTON,
-  buildImportReview,
-  type ImportReviewView,
-} from '../services/importReview';
+import { afterScope, draftFromImportPlan, importPlanFingerprint, DRAFT_REDRAWN_NOTICE } from '../services/draftModel';
+import type { Draft, DraftKeepOutcome, DraftPreview, DraftScopes, DraftTarget, DraftTrigger } from '../types/draft';
 import type { DbmlDiagnostic } from '../services/dbmlImportParse';
 import {
   ADD_LAYER_BUTTON,
@@ -88,7 +86,6 @@ import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
 import { log } from '../services/logger';
 import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
-import { ImportReviewPanel, type ImportReviewChoice } from '../providers/ImportReviewPanel';
 
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
 
@@ -145,8 +142,9 @@ export interface ImportDbmlOrigin {
 }
 
 export { ADD_LAYER_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON, NO_LAYERS_MESSAGE, OPEN_IT_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
-export { CHANGE_OPTIONS_BUTTON, REVIEW_ALL_BUTTON };
+/** The fallback dry run's buttons (no preview): Import, and Change Options… on a quick import. */
 export const IMPORT_BUTTON = 'Import';
+export const CHANGE_OPTIONS_BUTTON = 'Change Options…';
 export { OPEN_FILE_BUTTON };
 
 /** How many of a file's DBML problems the message names; the rest are counted. */
@@ -169,13 +167,11 @@ export interface ImportDbmlUi {
   /** A modal: `message`, the `detail` under it, `button` and Cancel. True when `button` was picked. */
   confirm(message: string, detail: string, button: string): Promise<boolean>;
   /**
-   * The dry run's modal with several buttons (Import, Review All…, Change
+   * The fallback dry run's modal with several buttons (Import, Change
    * Options…) and Cancel: the button picked, undefined for Cancel. Absent
    * (a test's fake): {@link confirm} with Import alone.
    */
   choose?(message: string, detail: string, buttons: readonly string[]): Promise<string | undefined>;
-  /** Review All…: the full review page; resolves with what the user chose on it. */
-  review?(view: ImportReviewView): Promise<ImportReviewChoice>;
   showInformationMessage(message: string, ...items: string[]): Promise<string | undefined>;
   /** Resolves the button picked; the flow never awaits it. */
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
@@ -231,10 +227,41 @@ export interface ImportDbmlDeps {
    */
   findDefaultFile?: () => Promise<string | undefined>;
   /**
-   * A quick import's **Change Options…** on the dry run: the step-by-step
-   * flow, preselected with what the quick path chose. Absent: no such button.
+   * A quick import's **Change options…** on the draft (or the fallback dry
+   * run): the step-by-step flow, preselected with what the quick path chose.
+   * Absent: no such link. The flow it runs ends in a draft again (its trigger
+   * `changeOptions`).
    */
   changeOptions?: (chosen: { layer: string; name: string }) => unknown;
+  /**
+   * The draft preview (Draft-first, §5.1): step 5 shows the plan as a
+   * read-only diagram and waits for Keep instead of the dry run's modal.
+   * Absent (a test's fake, a host with no preview): the modal.
+   */
+  draft?: ImportDraftOptions;
+}
+
+/** How an import shows its draft (`docs/dev/draft-first.md` §5.1). */
+export interface ImportDraftOptions {
+  /** The one preview of this extension host. */
+  preview: DraftPreview;
+  /** What opened it (telemetry and focus only). */
+  trigger: DraftTrigger;
+  /**
+   * The automatic draft (the ERD Studio icon): no question is asked and no
+   * message shown before the draft (they go to the log), and an early end
+   * counts nothing here (the host counts `draftUnavailable`); never a
+   * `*Cancelled` or `*Invalid` key.
+   */
+  quiet?: boolean;
+  /** The switcher (several semantic models, the examples). */
+  scopes?: DraftScopes;
+  /** The switcher was used: the caller re-enters with that choice and the same preview. */
+  onScope?(scopeId: string): unknown;
+  /** Bumped by the semantic-dir watchers for changes that are not ERD Studio's own: a Keep after one re-plans. */
+  generation?(): number;
+  /** No stage colours: a folder without dbt (default true). */
+  logicalOnly?: boolean;
 }
 
 /**
@@ -258,6 +285,15 @@ export interface ImportDbmlResume {
   quick?: boolean;
   /** The layer the layer pick starts on (Change Options…), ahead of the file's suggestion. */
   preferredLayer?: string;
+  /**
+   * A Keep found the project's files changed since its draft was planned
+   * (§5.1 Staleness): the plan is made again, and when its fingerprint is
+   * `fingerprint` it is written at once, settling the waiting Keep with
+   * `settle`; otherwise the Keep is settled `{ kept: false }` and the new
+   * draft is shown with the redrawn notice. `draft` is the draft that Keep
+   * answered, asked again when the write does not land.
+   */
+  redraw?: { fingerprint: string; settle(outcome: DraftKeepOutcome): void; draft?: Draft };
 }
 
 export interface ImportDbmlResult {
@@ -271,9 +307,10 @@ export interface ImportDbmlResult {
  * Anything that throws is counted and rethrown.
  */
 export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume): Promise<ImportDbmlResult | undefined> {
-  const ui = deps.ui ?? vscodeImportDbmlUi();
+  const base = deps.ui ?? vscodeImportDbmlUi();
+  const ui = deps.draft?.quiet ? quietImportDbmlUi(base, IMPORT_TITLES[deps.source ?? 'file']) : base;
   try {
-    return await runImportDbml(deps, ui, resume);
+    return await runImportDbml(deps, ui, base, resume);
   } catch (err) {
     telemetry.error(IMPORT_SOURCE_TELEMETRY[deps.source ?? 'file'].failed);
     throw err;
@@ -298,15 +335,23 @@ export function describeInvalidDbml(fileName: string, diagnostics: readonly Dbml
   return `${TITLE}: ${fileName} isn't valid DBML, so nothing was imported. ${shown.join(' ')}${tail}${hint}`;
 }
 
-async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: ImportDbmlResume): Promise<ImportDbmlResult | undefined> {
+async function runImportDbml(
+  deps: ImportDbmlDeps,
+  ui: ImportDbmlUi,
+  loudUi: ImportDbmlUi,
+  resume?: ImportDbmlResume,
+): Promise<ImportDbmlResult | undefined> {
   const { workspaceRoot, semanticDir, layerService, subjectAreaService, tableLibraryService } = deps;
   const source = deps.source ?? 'file';
   const counts = IMPORT_SOURCE_TELEMETRY[source];
   const title = IMPORT_TITLES[source];
   /** DBML ERD Studio wrote itself (a conversion, the example): a problem in it is ours, not the user's. */
   const generated = source !== 'file';
+  const draftOptions = deps.draft;
+  /** The automatic draft: an early end is not the user's cancel or file (the host counts `draftUnavailable`). */
+  const quiet = draftOptions?.quiet === true;
   const cancelled = (): undefined => {
-    if (counts.cancelled) telemetry.feature(counts.cancelled);
+    if (counts.cancelled && !quiet) telemetry.feature(counts.cancelled);
     return undefined;
   };
 
@@ -327,8 +372,14 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   if (!filePath) return cancelled();
   const fileName = path.basename(filePath);
   const quick = resume?.quick === true;
+  /**
+   * The deps a re-run takes: the automatic draft's own until its Keep, then
+   * never quiet (the user is waiting on that Keep: its messages, a redraw's
+   * name box and a Try Again all speak).
+   */
+  let rerunDeps = deps;
   const again = (more: Omit<ImportDbmlResume, 'filePath'> = {}): (() => unknown) =>
-    () => importDbml(deps, { filePath, ...(quick ? { quick } : {}), ...more });
+    () => importDbml(rerunDeps, { filePath, ...(quick ? { quick } : {}), ...more });
 
   let text: string;
   try {
@@ -355,7 +406,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     return undefined;
   }
   if (!read.ok) {
-    if (counts.invalid) telemetry.feature(counts.invalid);
+    if (counts.invalid && !quiet) telemetry.feature(counts.invalid);
     const first = read.diagnostics[0];
     showError(read.importsOtherFiles ? `${title}: ${first.message}` : describeInvalidDbml(fileName, read.diagnostics), {
       [OPEN_FILE_BUTTON]: () => ui.openFileAt(filePath, first?.line, first?.column),
@@ -414,7 +465,10 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     .filter((d) => d.layer === chosenLayer).map((d) => d.domain);
   const suggestedName = resume?.name ?? suggestDbmlSubjectAreaName(model, fileName, taken);
   // The quick path takes the suggestion when it is a valid, free name; otherwise it asks, as the step-by-step flow does.
-  const quickName = quick && deps.validateDomainName(slugFromName(suggestedName), chosenLayer) === undefined ? suggestedName : undefined;
+  // A redraw (§5.1) keeps the name the draft showed: nothing is asked again.
+  const quickName = (quick || resume?.redraw) && deps.validateDomainName(slugFromName(suggestedName), chosenLayer) === undefined
+    ? suggestedName
+    : undefined;
   const name = quickName ?? await ui.showInputBox({
     title: title,
     prompt: `Name the diagram. It is saved in the ${layerLabel} layer.`,
@@ -456,6 +510,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   let planned: string[] = [];
   /** New tables whose schema is written as the layer's existing folder spells it (or, `newFolder`, as an earlier table of the file does). */
   let respelled: Array<{ table: string; from: string; to: string; newFolder?: boolean }> = [];
+  // The project's files as this plan saw them: a Keep after a change re-plans (§5.1).
+  const planGeneration = draftOptions?.generation?.();
   try {
     // A DBML table always goes to the chosen layer's folder: groupsByFolder speaks for YAML libraries only.
     folder = dbml || tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
@@ -536,11 +592,15 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     return undefined;
   }
 
-  // 5. The dry run: what it creates, reuses and leaves out, before any write.
-  // A modal of at most ten lines whatever the size; Review All… shows everything.
+  // 5. The draft: the plan as a read-only diagram, what it creates, reuses and
+  // leaves out, before any write (or, with no preview, the dry run's modal).
   const semanticRoot = path.join(workspaceRoot, semanticDir);
   const describeOptions: DescribeDbmlImportOptions = {
     layerLabel,
+    // The bundled example carries no caveat about its references' `?`: on the
+    // first diagram a new user sees it reads as a warning, and the example
+    // with no folder has none (`exampleDbmlDraft`).
+    ...(source === 'example' ? { example: true } : {}),
     ...(dbml ? {
       dbml: {
         // Where the relationships go: the `<layer>/relationships/` files this save writes.
@@ -552,53 +612,177 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
     } : {}),
     ...(deps.origin ? { origin: deps.origin } : {}),
   };
-  const { headline, detail } = summariseDbmlImportPlan(plan, describeOptions);
   const changeOptions = deps.changeOptions;
   const chosen = { layer: chosenLayer, name: slug };
-  const answer = await dryRun(ui, headline, detail.join('\n'), {
-    changeOptions: changeOptions !== undefined,
-    review: () => buildImportReview(plan, {
-      ...describeOptions,
-      diagramFile: path.relative(workspaceRoot, domainPath).split(path.sep).join('/'),
-      changeOptions: changeOptions !== undefined,
-    }),
-  });
-  if (answer === 'changeOptions' && changeOptions) {
-    telemetry.feature('quickImportChangeOptions');
-    void Promise.resolve().then(() => changeOptions(chosen));
-    return undefined;
+  /** The waiting Keep, settled once the write ends (no draft: nothing to settle). */
+  let settleKeep: (outcome: DraftKeepOutcome) => void = () => {};
+  /** The draft the viewer answers: asked again after a Keep that did not save, or a switcher choice that drew nothing. */
+  let shown: Draft | undefined;
+  /** A redraw of the same plan: its Keep is already answered, so the first pass writes at once. */
+  let answered = false;
+  const fingerprint = importPlanFingerprint(plan);
+  if (draftOptions) {
+    const redraw = resume?.redraw;
+    if (redraw && redraw.fingerprint === fingerprint) {
+      // Files changed since the draft, but not this plan: write what was shown.
+      settleKeep = redraw.settle;
+      shown = redraw.draft;
+      answered = true;
+    } else {
+      if (redraw) {
+        // The plan is another one now: the Keep did not save, and the new draft says why.
+        redraw.settle({ kept: false });
+        telemetry.feature('draftRefreshed');
+      }
+      const target: DraftTarget = {
+        layer: chosenLayer,
+        layerLabel,
+        name: slug,
+        diagramFile: path.relative(workspaceRoot, domainPath).split(path.sep).join('/'),
+      };
+      try {
+        shown = draftFromImportPlan({
+          plan,
+          importSource: source,
+          trigger: draftOptions.trigger,
+          target,
+          fileName,
+          ...(deps.origin ? { origin: deps.origin } : {}),
+          describe: describeOptions,
+          libraryTable: (n) => tableLibraryService.getTable(n) ?? undefined,
+          layers: layerService.getAllLayers(),
+          logicalOnly: draftOptions.logicalOnly ?? true,
+          hasFolder: true,
+          changeOptions: changeOptions !== undefined,
+          ...(draftOptions.scopes ? { scopes: draftOptions.scopes } : {}),
+          ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : {}),
+        });
+      } catch (err) {
+        telemetry.error('draftBuildFailed');
+        log.error(`[ERD Studio] ${title}: could not build the draft:`, err);
+        const doing = 'while drawing the draft';
+        showError(oursMessage(title, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
+        return undefined;
+      }
+    }
   }
-  if (answer !== 'import') return cancelled();
 
-  // 6. Every file, or none.
-  const outcome = await writeNewSubjectArea({
-    workspaceRoot,
-    semanticDir,
-    domainPath,
-    newTables: plan.newTables,
-    folder,
-    ...(dbml ? { schemaFromSource: true } : {}),
-    changedTables: plan.changedLibraryTables,
-    documentText: (tableNaming) => serializeDbmlImportDocument(plan.document, tableNaming),
-    // The source's positions and sticky-note boxes go where the project keeps a new diagram's layout.
-    document: () => ({ ...plan.document, logical: { ...plan.document.logical, relationships: [] } }) as unknown as Record<string, unknown>,
-  }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
-  if (!outcome.ok) {
-    const { error: err, undone } = outcome;
-    if (outcome.nameTaken) {
-      nameTaken();
+  for (;;) {
+    if (draftOptions && shown && !answered) {
+      const asked: Draft = shown;
+      const answer = await draftOptions.preview.ask(asked);
+      switch (answer.kind) {
+        case 'keep': {
+          // The user waits on this Keep: what follows is said, even on the automatic draft.
+          ui = loudUi;
+          if (draftOptions.quiet) rerunDeps = { ...deps, draft: { ...draftOptions, quiet: false } };
+          if (planGeneration !== undefined && draftOptions.generation?.() !== planGeneration) {
+            // The project's files changed since this plan (another window, git, an assistant): plan again.
+            let settled = false;
+            const settle = (outcome: DraftKeepOutcome): void => {
+              if (settled) return;
+              settled = true;
+              answer.settle(outcome);
+            };
+            try {
+              return await importDbml(rerunDeps, {
+                filePath,
+                ...(quick ? { quick } : {}),
+                layer: chosenLayer,
+                name: slug,
+                redraw: { fingerprint, settle, draft: asked },
+              });
+            } finally {
+              // A re-plan that ended early (it said why) leaves the Keep unsaved.
+              settle({ kept: false });
+            }
+          }
+          settleKeep = answer.settle;
+          break;
+        }
+        case 'changeOptions':
+          if (!changeOptions) return undefined;
+          telemetry.feature('quickImportChangeOptions');
+          void Promise.resolve().then(() => changeOptions(chosen));
+          return undefined;
+        case 'scope': {
+          const onScope = draftOptions.onScope;
+          if (!onScope) return undefined;
+          const next = await afterScope(draftOptions.preview, asked, () => onScope(answer.scopeId));
+          if (!next) return undefined;
+          shown = next;
+          continue;
+        }
+        case 'discard':
+        case 'closed':
+          return cancelled();
+        // More ways to start: the host ran its fixed command. Superseded: another flow has the page.
+        case 'otherStart':
+        case 'superseded':
+          return undefined;
+      }
+    } else if (!draftOptions) {
+      const { headline, detail } = summariseDbmlImportPlan(plan, describeOptions);
+      const answer = await dryRun(ui, headline, detail.join('\n'), changeOptions !== undefined);
+      if (answer === 'changeOptions' && changeOptions) {
+        telemetry.feature('quickImportChangeOptions');
+        void Promise.resolve().then(() => changeOptions(chosen));
+        return undefined;
+      }
+      if (answer !== 'import') return cancelled();
+    }
+    answered = false;
+
+    // 6. Every file, or none.
+    const outcome = await writeNewSubjectArea({
+      workspaceRoot,
+      semanticDir,
+      domainPath,
+      newTables: plan.newTables,
+      folder,
+      ...(dbml ? { schemaFromSource: true } : {}),
+      changedTables: plan.changedLibraryTables,
+      documentText: (tableNaming) => serializeDbmlImportDocument(plan.document, tableNaming),
+      // The source's positions and sticky-note boxes go where the project keeps a new diagram's layout.
+      document: () => ({ ...plan.document, logical: { ...plan.document.logical, relationships: [] } }) as unknown as Record<string, unknown>,
+    }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
+    if (!outcome.ok) {
+      reportWriteFailure(outcome);
+      // After its own message: the draft's buttons come back, and answer again.
+      settleKeep({ kept: false });
+      settleKeep = () => {};
+      if (shown) continue;
       return undefined;
+    }
+
+    deps.onWritten({ domainPath, modelNames: outcome.written, changedModelNames: outcome.changed });
+    telemetry.feature(counts.done);
+    if (quick) telemetry.feature('quickImport');
+    if (source === 'file' && layout) telemetry.feature('importDbmlLayout');
+
+    // Kept: the draft closes and the new diagram opens.
+    settleKeep({ kept: true });
+    await ui.openDiagram(domainPath);
+    return { domainPath, plan };
+  }
+
+  /** Say why the write did not land (each case its own message). */
+  function reportWriteFailure(failed: Extract<Awaited<ReturnType<typeof writeNewSubjectArea>>, { ok: false }>): void {
+    const { error: err, undone } = failed;
+    if (failed.nameTaken) {
+      nameTaken();
+      return;
     }
     // A file the write would change (another diagram it re-renders, §5.7) has unsaved edits.
     if (err instanceof UnsavedFilesRefused) {
       showUnsaved(err.filePaths[0]);
-      return undefined;
+      return;
     }
     const result = writeOutcome(undone, semanticDir);
     // A refusal is explained, not a failure, so it is not counted (as on the canvas).
     if (isRefusedWrite(err)) {
       showRefusal(err, result);
-      return undefined;
+      return;
     }
     telemetry.error(counts.failed);
     const why = environmentWriteProblem(err, workspaceRoot, `${semanticDir}/${chosenLayer}`);
@@ -609,19 +793,10 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err),
         [TRY_AGAIN_BUTTON]: tryAgain,
       });
-      return undefined;
+      return;
     }
     showError(`${title} couldn't save the diagram: ${why} ${result}`, { [TRY_AGAIN_BUTTON]: tryAgain });
-    return undefined;
   }
-
-  deps.onWritten({ domainPath, modelNames: outcome.written, changedModelNames: outcome.changed });
-  telemetry.feature(counts.done);
-  if (quick) telemetry.feature('quickImport');
-  if (source === 'file' && layout) telemetry.feature('importDbmlLayout');
-
-  await ui.openDiagram(domainPath);
-  return { domainPath, plan };
 
   /** The refusal's own sentence, with Open File when it knows the file. */
   function showRefusal(err: RefusedWrite, outcomeSentence: string): void {
@@ -633,31 +808,45 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
 }
 
 /**
- * The dry run: the modal (Import, Review All…, Change Options… on a quick
- * import, Cancel), and Review All…'s page, whose own buttons answer it; a
- * page closed without an answer shows the modal again. With a UI that has no
- * `choose` (a test's fake), the modal is `confirm` with Import alone.
+ * The fallback dry run (no preview): the modal, Import, Change Options… on a
+ * quick import, and Cancel. With a UI that has no `choose` (a test's fake),
+ * the modal is `confirm` with Import alone.
  */
 async function dryRun(
   ui: ImportDbmlUi,
   headline: string,
   detail: string,
-  options: { changeOptions: boolean; review: () => ImportReviewView },
+  changeOptions: boolean,
 ): Promise<'import' | 'changeOptions' | 'cancel'> {
   if (!ui.choose) return (await ui.confirm(headline, detail, IMPORT_BUTTON)) ? 'import' : 'cancel';
-  const buttons = [IMPORT_BUTTON, ...(ui.review ? [REVIEW_ALL_BUTTON] : []), ...(options.changeOptions ? [CHANGE_OPTIONS_BUTTON] : [])];
-  for (;;) {
-    const choice = await ui.choose(headline, detail, buttons);
-    if (choice === IMPORT_BUTTON) return 'import';
-    if (choice === CHANGE_OPTIONS_BUTTON && options.changeOptions) return 'changeOptions';
-    if (choice !== REVIEW_ALL_BUTTON || !ui.review) return 'cancel';
-    telemetry.feature('importReviewOpened');
-    const reviewed = await ui.review(options.review());
-    if (reviewed === 'import') return 'import';
-    if (reviewed === 'cancel') return 'cancel';
-    if (reviewed === 'changeOptions' && options.changeOptions) return 'changeOptions';
-    // Closed without an answer: the modal again.
-  }
+  const choice = await ui.choose(headline, detail, [IMPORT_BUTTON, ...(changeOptions ? [CHANGE_OPTIONS_BUTTON] : [])]);
+  if (choice === IMPORT_BUTTON) return 'import';
+  if (choice === CHANGE_OPTIONS_BUTTON && changeOptions) return 'changeOptions';
+  return 'cancel';
+}
+
+/**
+ * The import UI of an automatic draft (§3.1): it asks nothing (every picker
+ * and box resolves undefined, every modal Cancel) and shows nothing (each
+ * message goes to the log), so anything the quick path would ask or say
+ * before the draft ends it silently. Reading the file and opening the kept
+ * diagram are `base`'s.
+ */
+export function quietImportDbmlUi(base: ImportDbmlUi, title: string): ImportDbmlUi {
+  const logged = async (message: string): Promise<undefined> => {
+    log.info(`[ERD Studio] ${title} (automatic draft, not shown): ${message}`);
+    return undefined;
+  };
+  return {
+    ...base,
+    pickFile: async () => undefined,
+    showQuickPick: async () => undefined,
+    showInputBox: async () => undefined,
+    confirm: async () => false,
+    choose: async () => undefined,
+    showInformationMessage: (message) => logged(message),
+    showErrorMessage: (message) => logged(message),
+  };
 }
 
 /**
@@ -670,13 +859,26 @@ async function dryRun(
 export async function quickImportDbml(deps: ImportDbmlDeps): Promise<ImportDbmlResult | undefined> {
   const filePath = await deps.findDefaultFile?.().catch(() => undefined);
   if (!filePath) {
+    // The automatic draft never asks: nothing to take is the end of it.
+    if (deps.draft?.quiet) return undefined;
     telemetry.feature('quickImportFellBack');
     return importDbml(deps);
   }
   return importDbml({
     ...deps,
-    changeOptions: ({ layer, name }) => importDbml({ ...deps, findDefaultFile: async () => filePath }, { preferredLayer: layer, name }),
+    // The step-by-step flow, ending in a draft of its own (never quiet: the user asked for it).
+    changeOptions: ({ layer, name }) => importDbml(
+      { ...deps, findDefaultFile: async () => filePath, ...changeOptionsDraft(deps.draft) },
+      { preferredLayer: layer, name },
+    ),
   }, { filePath, quick: true });
+}
+
+/** Change options…'s draft: the same preview, the `changeOptions` trigger, never quiet, no switcher. */
+export function changeOptionsDraft(draft: ImportDraftOptions | undefined): { draft?: ImportDraftOptions } {
+  if (!draft) return {};
+  const { quiet: _quiet, scopes: _scopes, onScope: _onScope, ...rest } = draft;
+  return { draft: { ...rest, trigger: 'changeOptions' } };
 }
 
 /**
@@ -754,7 +956,6 @@ export function vscodeImportDbmlUi(): ImportDbmlUi {
     confirm: async (message, detail, button) =>
       (await vscode.window.showInformationMessage(message, { modal: true, detail }, button)) === button,
     choose: async (message, detail, buttons) => vscode.window.showInformationMessage(message, { modal: true, detail }, ...buttons),
-    review: (view) => ImportReviewPanel.show(view),
     showInformationMessage: async (message, ...items) => vscode.window.showInformationMessage(message, ...items),
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     openFileAt: (filePath, line, column) => openTableFileAt(filePath, line, column),
