@@ -170,7 +170,7 @@ export interface DraftBanner {
   changeOptions: boolean;
   /** Other starts drawn as buttons beside the primary; the rest go in `More ways to start ▾`. */
   shownStarts: DraftOtherStart[];
-  /** A one-off line under the detail (`Your files changed, so the draft was redrawn. Check it and keep it again.`). */
+  /** A one-off line under the detail (`Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.`). */
   notice?: string;
 }
 

@@ -9,6 +9,7 @@
  * notification are gone.
  */
 
+import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { StartIntentTracker } from '../../src/commands/startIntent';
@@ -26,6 +27,7 @@ import {
   readStartSuggestionState,
   runStartSuggestion,
   startSuggestionDue,
+  dbtProjectAboveOpenFolders,
   startSuggestionMessage,
   startSuggestionsOff,
   type StartSuggestionDeps,
@@ -44,6 +46,9 @@ describe('the notification text', () => {
     expect(startSuggestionMessage('importSemanticModel')).toBe('ERD Studio found a Power BI or Fabric semantic model in this folder. Show it as a diagram? Nothing is saved until you keep it.');
     expect(startSuggestionMessage('importDbmlFile')).toBe('ERD Studio found a DBML file in this folder. Show it as a diagram? Nothing is saved until you keep it.');
     expect(startSuggestionMessage('drawFromDbt')).toBe('ERD Studio found a dbt project in this folder. Show its models as a diagram? Nothing is saved until you keep it.');
+    // Opened from one of its subfolders (models/): the project is not in this folder.
+    expect(startSuggestionMessage('drawFromDbt', { dbtAbove: true })).toBe('ERD Studio found a dbt project in a folder above this one. Show its models as a diagram? Nothing is saved until you keep it.');
+    expect(startSuggestionMessage('drawFromDbt', { dbtAbove: false })).toBe(startSuggestionMessage('drawFromDbt'));
     expect(startSuggestionMessage('convert')).toBe('This project is from an older ERD Studio. Convert it once to DBML, an open format: your tables stay as they are.');
     // dbt is named only for a dbt project.
     for (const intent of ['importSqlDdl', 'importSemanticModel', 'importDbmlFile', 'convert'] as const) {
@@ -286,5 +291,41 @@ describe('nothing found: no notification any more (the example draft on the ERD 
     });
     expect(due(false)).toBe('example');
     expect(due(true)).toBeUndefined();
+  });
+});
+
+describe('dbtProjectAboveOpenFolders', () => {
+  const root = path.join(path.sep, 'repo', 'analytics');
+  it('is true only when every open folder is strictly inside the dbt project', () => {
+    expect(dbtProjectAboveOpenFolders(root, [path.join(root, 'models')])).toBe(true);
+    expect(dbtProjectAboveOpenFolders(root, [path.join(root, 'models'), path.join(root, 'seeds')])).toBe(true);
+    // The project root itself, a folder holding it, or any folder outside it: the project is "in this folder".
+    expect(dbtProjectAboveOpenFolders(root, [root])).toBe(false);
+    expect(dbtProjectAboveOpenFolders(root, [path.dirname(root)])).toBe(false);
+    expect(dbtProjectAboveOpenFolders(root, [path.join(root, 'models'), path.join(path.sep, 'elsewhere')])).toBe(false);
+    expect(dbtProjectAboveOpenFolders(root, [path.join(path.dirname(root), 'analytics-docs')])).toBe(false);
+    expect(dbtProjectAboveOpenFolders(root, [])).toBe(false);
+  });
+
+  it('goes into the message through the run\'s dbtAbove dependency', async () => {
+    const show = vi.fn(async () => undefined);
+    const run = await startSuggestion.runStartSuggestion({
+      intent: async () => 'drawFromDbt',
+      sqlTables: () => undefined,
+      dbtAbove: () => true,
+      hasDiagrams: () => false,
+      settingOn: () => true,
+      convertApplies: () => false,
+      state: () => ({ shown: 0 }),
+      saveState: async () => undefined,
+      show,
+      info: async () => undefined,
+      executeCommand: async () => undefined,
+      recordSuggested: () => undefined,
+      feature: () => undefined,
+      setOffContext: () => undefined,
+    });
+    await run.done;
+    expect(show.mock.calls[0][0]).toBe('ERD Studio found a dbt project in a folder above this one. Show its models as a diagram? Nothing is saved until you keep it.');
   });
 });

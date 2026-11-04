@@ -185,6 +185,7 @@ import {
   START_SUGGESTION_STATE_KEY,
   TURN_OFF_START_SUGGESTIONS_COMMAND,
   TURN_ON_START_SUGGESTIONS_COMMAND,
+  dbtProjectAboveOpenFolders,
   readStartSuggestionState,
   runStartSuggestion,
   startSuggestionDue,
@@ -4618,6 +4619,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void runStartSuggestion({
             intent: () => startIntent.refresh(),
             sqlTables: () => startIntent.sqlTableCount(),
+            dbtAbove: () => dbtProjectAboveOpenFolders(workspaceRoot, (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath)),
             hasDiagrams: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
             settingOn: startSuggestionsSettingOn,
             // No second Convert prompt: the Convert offer's own checks decide.

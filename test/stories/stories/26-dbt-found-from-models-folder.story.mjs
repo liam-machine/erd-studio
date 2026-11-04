@@ -12,7 +12,7 @@ import path from 'node:path';
 import { DRAFT, waitForDraft } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
-const FOUND = 'ERD Studio found a dbt project in this folder';
+const FOUND = 'ERD Studio found a dbt project in a folder above this one';
 
 export default story({
   id: 'dbt-found-from-models-folder',

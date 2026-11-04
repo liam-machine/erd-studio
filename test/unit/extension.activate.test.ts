@@ -3900,7 +3900,7 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
 
     answerDraft({ type: 'keep' });
     const redrawn = await nextDraft(first);
-    expect(redrawn.banner.notice).toBe('Your files changed, so the draft was redrawn. Check it and keep it again.');
+    expect(redrawn.banner.notice).toBe('Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.');
     expect(redrawn.summary.reusedTables).toBe(1);
     expect(keys()).toContain('draftRefreshed');
     expect(keys().filter((k) => k === 'draftShown')).toHaveLength(1);
@@ -3927,7 +3927,7 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
 
     answerDraft({ type: 'keep' });
     const redrawn = await nextDraft(first);
-    expect(redrawn.banner.notice).toBe('Your files changed, so the draft was redrawn. Check it and keep it again.');
+    expect(redrawn.banner.notice).toBe('Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.');
     expect(redrawn.summary.reusedTables).toBe(1);
     expect(fs.readFileSync(table, 'utf-8')).toBe(tableText);
     expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'diagrams', 'shop.dbml'))).toBe(false);

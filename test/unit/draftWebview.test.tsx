@@ -98,10 +98,10 @@ describe('small (a SQL find)', () => {
     expect((screen.getByRole('button', { name: 'Keep as Diagram' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Discard' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Change options…' }) as HTMLButtonElement).disabled).toBe(true);
-    send({ type: 'idle', notice: 'Your files changed, so the draft was redrawn. Check it and keep it again.' });
+    send({ type: 'idle', notice: 'Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.' });
     expect(screen.queryByText('Saving…')).toBeNull();
     expect((screen.getByRole('button', { name: 'Keep as Diagram' }) as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByText('Your files changed, so the draft was redrawn. Check it and keep it again.')).toBeTruthy();
+    expect(screen.getByText('Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.')).toBeTruthy();
   });
 
   it('posts changeOptions and discard', () => {

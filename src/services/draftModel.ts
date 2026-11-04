@@ -76,7 +76,7 @@ export const KEEP_THIS_EXAMPLE = 'Keep This Example';
 export const SAVE_THIS_EXAMPLE = 'Save This Example…';
 
 /** The notice a redrawn draft carries (Keep found the files changed since it was drawn, §5.1). */
-export const DRAFT_REDRAWN_NOTICE = 'Your files changed, so the draft was redrawn. Check it and keep it again.';
+export const DRAFT_REDRAWN_NOTICE = 'Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.';
 
 /** The notice a draft carries when a switcher choice drew nothing (§2.2): the draft before it stays. */
 export const DRAFT_SCOPE_EMPTY_NOTICE = 'Nothing could be drawn from that choice, so this draft is still the one on show.';

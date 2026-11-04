@@ -74,9 +74,9 @@ export default story({
 
     await s.step('When I press "Keep as Diagram", the draft is redrawn instead, and says why', async () => {
       await draft.page.click(DRAFT.button('Keep as Diagram'));
-      await draft.page.waitFor(`${DRAFT.notice} === 'Your files changed, so the draft was redrawn. Check it and keep it again.' && !${DRAFT.busy}`, { timeout: 30000, what: 'the redrawn notice' });
+      await draft.page.waitFor(`${DRAFT.notice} === 'Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.' && !${DRAFT.busy}`, { timeout: 30000, what: 'the redrawn notice' });
       const state = await draftState(draft.page);
-      s.assert.equal(state.notice, 'Your files changed, so the draft was redrawn. Check it and keep it again.');
+      s.assert.equal(state.notice, 'Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.');
       s.expect(state.primary.includes('Keep as Diagram'), `Keep as Diagram is still the primary: ${state.primary.join(', ')}`);
       // Nothing was saved by that Keep: only the assistant's table is on disk.
       s.expectNoFile('.erd-studio/main/diagrams');

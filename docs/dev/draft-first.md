@@ -58,7 +58,7 @@ Detail line:
 - Example with no folder open: `Open a folder to keep a copy of it.`
 - Example project: `Save This Example… copies it to a folder of its own and opens it there.`
 
-Second line, each part only when it applies: `Change options…` (a link), then `<n> notes, <m> left out: Show details` (`Show details` opens the drawer). A redraw adds the notice line `Your files changed, so the draft was redrawn. Check it and keep it again.`
+Second line, each part only when it applies: `Change options…` (a link), then `<n> notes, <m> left out: Show details` (`Show details` opens the drawer). A redraw adds the notice line `Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.`
 
 Buttons (Title Case, one primary):
 
@@ -127,7 +127,7 @@ Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`),
 - `ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.` (no count: `…in this folder. Show them as a diagram? …`)
 - `ERD Studio found a Power BI or Fabric semantic model in this folder. Show it as a diagram? Nothing is saved until you keep it.`
 - `ERD Studio found a DBML file in this folder. Show it as a diagram? Nothing is saved until you keep it.`
-- `ERD Studio found a dbt project in this folder. Show its models as a diagram? Nothing is saved until you keep it.`
+- `ERD Studio found a dbt project in this folder. Show its models as a diagram? Nothing is saved until you keep it.` (opened from one of its subfolders, such as `models/`: `…in a folder above this one…`, `dbtProjectAboveOpenFolders`)
 - Convert unchanged: `This project is from an older ERD Studio. Convert it once to DBML, an open format: your tables stay as they are.` with **Convert to DBML…**.
 
 Buttons: **Show Me** (Convert: **Convert to DBML…**) and **Don't Ask Again for This Folder**. **More Options…** is gone (the draft's More ways to start replaces it). Show Me answers it for good and opens the draft (`prompt`); Don't Ask Again turns suggestions off for the folder (same message as today) and the folder then gets **no** automatic draft and **no** walkthrough.

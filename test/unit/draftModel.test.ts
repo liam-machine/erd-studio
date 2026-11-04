@@ -421,7 +421,7 @@ describe('banner strings', () => {
   it('a notice is carried on the banner', () => {
     const plan = planOf(EXAMPLE_DBML, 'coffee-shop', 'gold');
     const draft = draftFromImportPlan(importInput(plan, { notice: DRAFT_REDRAWN_NOTICE }));
-    expect(draft.banner.notice).toBe('Your files changed, so the draft was redrawn. Check it and keep it again.');
+    expect(draft.banner.notice).toBe('Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.');
     expect(draftFromImportPlan(importInput(plan)).banner.notice).toBeUndefined();
     expect(DRAFT_OTHER_START_LABELS.openFolder).toBe('Open Folder…');
   });

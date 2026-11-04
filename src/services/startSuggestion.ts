@@ -30,6 +30,8 @@
  * vscode-free: the look, the state, the notification and the commands are injected.
  */
 
+import * as path from 'path';
+
 import {
   START_ACTION_COMMANDS,
   startActionArgs,
@@ -127,7 +129,7 @@ const NOTHING_SAVED = 'Nothing is saved until you keep it.';
  * SQL, how many tables when the look could count them exactly — never a file
  * name) and the one question.
  */
-export function startSuggestionMessage(intent: SuggestedStart, found: { sqlTables?: number } = {}): string {
+export function startSuggestionMessage(intent: SuggestedStart, found: { sqlTables?: number; dbtAbove?: boolean } = {}): string {
   switch (intent) {
     case 'importSqlDdl': {
       const n = found.sqlTables;
@@ -139,10 +141,25 @@ export function startSuggestionMessage(intent: SuggestedStart, found: { sqlTable
     case 'importDbmlFile':
       return `ERD Studio found a DBML file in this folder. Show it as a diagram? ${NOTHING_SAVED}`;
     case 'drawFromDbt':
-      return `ERD Studio found a dbt project in this folder. Show its models as a diagram? ${NOTHING_SAVED}`;
+      // Opened from inside it (its models/, say): the project is in a folder above, not this one.
+      return `ERD Studio found a dbt project in ${found.dbtAbove ? 'a folder above this one' : 'this folder'}. Show its models as a diagram? ${NOTHING_SAVED}`;
     case 'convert':
       return 'This project is from an older ERD Studio. Convert it once to DBML, an open format: your tables stay as they are.';
   }
+}
+
+/**
+ * Whether the dbt project root sits above every open folder: the window
+ * opened one of its subfolders (its models/, say), and upward discovery found
+ * the project. False with no folder open, or when any open folder is the root
+ * or contains it.
+ */
+export function dbtProjectAboveOpenFolders(projectRoot: string, openFolders: readonly string[]): boolean {
+  if (openFolders.length === 0) return false;
+  return openFolders.every((folder) => {
+    const rel = path.relative(projectRoot, folder);
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  });
 }
 
 /** The primary button: Show Me (the draft), or Convert's own (it creates no diagram). */
@@ -166,6 +183,8 @@ export interface StartSuggestionDeps {
   intent(): Promise<StartIntent | undefined>;
   /** The CREATE TABLE count the look made, when exact. */
   sqlTables(): number | undefined;
+  /** Whether the dbt project sits above every open folder (one of its subfolders, such as models/, was opened). */
+  dbtAbove?(): boolean;
   /** Whether the folder has a diagram now (it may have one since activation). */
   hasDiagrams(): boolean;
   /** `erdStudio.startSuggestions` (default on). */
@@ -217,7 +236,7 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
   deps.recordSuggested(intent);
   const primary = startSuggestionPrimary(intent);
   const start: StartAction = intent;
-  const done = Promise.resolve(deps.show(startSuggestionMessage(intent, { sqlTables: deps.sqlTables() }), primary, DONT_ASK_AGAIN_FOLDER_BUTTON))
+  const done = Promise.resolve(deps.show(startSuggestionMessage(intent, { sqlTables: deps.sqlTables(), dbtAbove: deps.dbtAbove?.() }), primary, DONT_ASK_AGAIN_FOLDER_BUTTON))
     .then(async (choice) => {
       const latest = deps.state();
       if (choice === primary) {
