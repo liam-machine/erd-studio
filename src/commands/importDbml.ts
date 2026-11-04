@@ -10,7 +10,7 @@
  * valid DBML is reported with its line numbers and an Open File button) →
  * layer → name (the rule New Subject Area uses) → the **draft** (Draft-first,
  * `docs/dev/draft-first.md` §5.1: the read-only preview of the diagram, with
- * Keep, Change options…, Discard and Other Ways to Start) → write → open the
+ * Keep, Change options…, Discard and More ways to start) → write → open the
  * new diagram. Cancelling any step writes nothing. With no preview (a test's
  * fake, a host without one) the dry run is the old modal, Import / Cancel.
  *
@@ -684,7 +684,7 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         case 'discard':
         case 'closed':
           return cancelled();
-        // Other Ways to Start: the host ran its fixed command. Superseded: another flow has the page.
+        // More ways to start: the host ran its fixed command. Superseded: another flow has the page.
         case 'otherStart':
         case 'superseded':
           return undefined;

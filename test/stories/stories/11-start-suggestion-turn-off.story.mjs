@@ -13,7 +13,7 @@ import { sleep } from '../lib/act.mjs';
 import { story } from '../lib/story.mjs';
 
 const FOUND = 'ERD Studio found CREATE TABLE scripts in this folder';
-const OFF = "ERD Studio won't suggest a start for this folder again.";
+const OFF = 'Start suggestions are off for this folder.';
 const TURN_ON = 'ERD Studio: Turn On Start Suggestions for This Folder';
 const TURN_OFF = 'ERD Studio: Turn Off Start Suggestions for This Folder';
 
@@ -37,7 +37,8 @@ export default story({
     await s.step('I click "Don\'t Ask Again for This Folder": it tells me how to turn it back on', async () => {
       await s.ui.notificationButton(FOUND, "Don't Ask Again for This Folder");
       const toast = await s.ui.waitForNotification(OFF);
-      s.assert.equal(toast.message, `${OFF} To turn suggestions back on, run ${TURN_ON}.`);
+      s.assert.equal(toast.message, OFF);
+      s.assert.deepEqual(toast.buttons, ['Undo'], 'the confirmation offers Undo');
       await s.wb.highlight(s.sel.notification(OFF));
       await s.pause(2500);
       await s.wb.unhighlight();

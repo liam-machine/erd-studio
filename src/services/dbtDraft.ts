@@ -421,6 +421,16 @@ function draftClusters(models: readonly DraftModelEntry[], tests: readonly Draft
     .sort((a, b) => b.length - a.length || a[0].name.localeCompare(b[0].name));
 }
 
+/**
+ * The picker's "Choose models…" description: how many the user may pick, and
+ * of how many — never "pick up to 15 of 9" when there are fewer than the
+ * limit (then every one of them can be picked).
+ */
+export function chooseModelsDescription(limit: number, total: number): string {
+  if (total <= limit) return `choose from ${total} ${total === 1 ? 'model' : 'models'}`;
+  return `pick up to ${limit} of ${total}`;
+}
+
 /** `scope` holding only `names` (count, description and detail recomputed). */
 export function narrowDraftScope(scope: DraftScope, names: readonly string[]): DraftScope {
   if (names.length === scope.modelNames.length && names.every((n, i) => n === scope.modelNames[i])) { return scope; }

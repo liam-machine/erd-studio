@@ -6,7 +6,7 @@
 
 Many installs never come back. The first minute asks too much (a popup, then a picker, a layer, a name, a ten-line modal) before the user sees anything, and the same offer is repeated on four surfaces with different labels.
 
-Draft-first turns that round: **the first time someone deliberately turns to ERD Studio in a folder with no diagram, it shows a draft of their logical model, built from what it found, as a read-only diagram in an editor tab, and writes nothing until they press Keep.** Nothing found: the draft is an example. Every capability stays; it moves behind the draft (Change options…, Other Ways to Start, the switcher, the details drawer).
+Draft-first turns that round: **the first time someone deliberately turns to ERD Studio in a folder with no diagram, it shows a draft of their logical model, built from what it found, as a read-only diagram in an editor tab, and writes nothing until they press Keep.** Nothing found: the draft is an example. Every capability stays; it moves behind the draft (Change options…, More ways to start, the switcher, the details drawer).
 
 Rules that hold everywhere:
 
@@ -27,7 +27,7 @@ An editor tab (`WebviewPanel`, view type `erdStudio.draftPreview`, title `Draft:
 │ Draft from 4 SQL files (PostgreSQL) · 24 tables, 31 relationships · not saved        │
 │ Keep saves it as sales in the Main layer (.erd-studio/main/diagrams/sales.dbml).     │
 │ Change options… · 2 notes, 3 left out: Show details                                  │
-│                         [Keep as Diagram]  [Other Ways to Start ▾]  [Discard]        │
+│                         [Keep as Diagram]  [More ways to start ▾]  [Discard]        │
 ├──────────────┬─────────────────────────────────────────────────────────────────────┤
 │ Schemas  «   │                                                                       │
 │ All tables 24│         ErdCanvas (viewer): the diagram exactly as the canvas        │
@@ -64,11 +64,11 @@ Buttons (Title Case, one primary):
 
 | Draft | Primary | Others |
 |---|---|---|
-| A find (`sqlDdl`, `semanticModel`, `dbml`) | **Keep as Diagram** | **Other Ways to Start ▾** (Start Blank · Import… · Bring In My Model… · See an Example), **Discard** |
-| `dbt` | **Keep as Diagram** | **Other Ways to Start ▾** (Start Blank · Import… · See an Example), **Discard** |
-| `example`, folder open | **Start Blank** | **Bring In My Model…**, `Keep This Example` (a quiet link-style button), **Other Ways to Start ▾** (Import…), **Discard** |
-| `example`, no folder | **Open a Folder…** | **Discard** |
-| `exampleProject` | **Save This Example…** | **Start Blank** and **Bring In My Model…** (folder open) or **Open a Folder…** (no folder), **Discard** |
+| A find (`sqlDdl`, `semanticModel`, `dbml`) | **Keep as Diagram** | **More ways to start ▾** (New Diagram… · Import… · Bring In Your Data Model… · Open an Example…), **Discard** |
+| `dbt` | **Keep as Diagram** | **More ways to start ▾** (New Diagram… · Import… · Open an Example…), **Discard** |
+| `example`, folder open | **New Diagram…** | **Bring In Your Data Model…**, `Keep This Example` (a quiet link-style button), **More ways to start ▾** (Import…), **Discard** |
+| `example`, no folder | **Open Folder…** | **Discard** |
+| `exampleProject` | **Save This Example…** | **New Diagram…** and **Bring In Your Data Model…** (folder open) or **Open Folder…** (no folder), **Discard** |
 
 `DraftOtherStart` → command (host table, P3; never from the page): `blank` → `erdStudio.createDomain`; `import` → `erdStudio.importModel`; `guide` → `erdStudio.showImportGuide` `{ from: 'draft' }`; `example` → the example draft (§9); `openFolder` → `vscode.openFolder` (VS Code's picker). Choosing one closes the draft first.
 
@@ -107,7 +107,7 @@ Changing it answers `scope`; the page shows **Drawing…** until the flow asks w
 | `start` | A start surface's primary import or Draw from dbt (walkthrough, empty Diagrams view, start quick pick) | Explicit: never checks the gate; claims `draft` if free, so nothing pops over it |
 | `palette` | Import DBML… / Import SQL DDL… / Import Semantic Model… run step by step | Explicit, as above |
 | `changeOptions` | The step-by-step flow a draft's Change options… ran | Explicit |
-| `example` | **Open an Example…**, a draft's **See an Example** | Explicit |
+| `example` | **Open an Example…**, a draft's **Open an Example…** | Explicit |
 
 The `sidebar` draft opens with `preserveFocus` (the Diagrams view keeps the focus) and a progress bar on the Diagrams view (`withProgress({ location: { viewId } })`) while it builds; it is **quiet**: any question or error the quick path would raise before the draft (several dialects, no CREATE TABLE after all, no layer, an unreadable file) ends it silently (logged, `draftUnavailable`), leaving the sidebar's starts; the explicit starts keep today's questions and messages.
 
@@ -122,7 +122,7 @@ An automatic draft is due when all hold: `erdStudio.startSuggestions` is on; the
 
 ### 3.3 The start suggestion (the one popup)
 
-Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`), at most three times per folder, shown only after the bounded look. New text and buttons:
+Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`), once per folder (Simplify: it was three times), shown only after the bounded look. New text and buttons:
 
 - `ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.` (no count: `…in this folder. Show them as a diagram? …`)
 - `ERD Studio found a Power BI or Fabric semantic model in this folder. Show it as a diagram? Nothing is saved until you keep it.`
@@ -130,7 +130,7 @@ Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`),
 - `ERD Studio found a dbt project in this folder. Show its models as a diagram? Nothing is saved until you keep it.`
 - Convert unchanged: `This project is from an older ERD Studio. Convert it once to DBML, an open format: your tables stay as they are.` with **Convert to DBML…**.
 
-Buttons: **Show Me** (Convert: **Convert to DBML…**) and **Don't Ask Again for This Folder**. **More Options…** is gone (the draft's Other Ways to Start replaces it). Show Me answers it for good and opens the draft (`prompt`); Don't Ask Again turns suggestions off for the folder (same message as today) and the folder then gets **no** automatic draft and **no** walkthrough.
+Buttons: **Show Me** (Convert: **Convert to DBML…**) and **Don't Ask Again for This Folder**. **More Options…** is gone (the draft's More ways to start replaces it). Show Me answers it for good and opens the draft (`prompt`); Don't Ask Again turns suggestions off for the folder (same message as today) and the folder then gets **no** automatic draft and **no** walkthrough.
 
 The **nothing-found notification** (`runNothingFoundPrompt`) is removed: a folder with nothing found gets the example draft on the ERD Studio icon, once per machine, and otherwise only the sidebar.
 
@@ -147,8 +147,8 @@ The **nothing-found notification** (`runNothingFoundPrompt`) is removed: a folde
 
 | Workspace | What the user meets | Keep writes |
 |---|---|---|
-| **No folder** | First run: the walkthrough (Open Folder, Open an Example…). The Diagrams view: **Open Folder**, `Open an example` link. Open an Example… → the coffee-shop example draft, primary **Open a Folder…**; the switcher's projects offer **Save This Example…** | An example project, in a folder of its own (new window) |
-| **Empty folder** (plain, nothing found) | ERD Studio icon → the example draft once per machine (**Start Blank**, **Bring In My Model…**, `Keep This Example`). Later: the sidebar's **New Diagram** and links | `Keep This Example`: the coffee-shop diagram into this folder (`importDbml` source `example`); `.erd-studio/` and `layers.json` only then |
+| **No folder** | First run: the walkthrough (Open Folder, Open an Example…). The Diagrams view: **Open Folder**, `Open an example` link. Open an Example… → the coffee-shop example draft, primary **Open Folder…**; the switcher's projects offer **Save This Example…** | An example project, in a folder of its own (new window) |
+| **Empty folder** (plain, nothing found) | ERD Studio icon → the example draft once per machine (**New Diagram…**, **Bring In Your Data Model…**, `Keep This Example`). Later: the sidebar's **New Diagram** and links | `Keep This Example`: the coffee-shop diagram into this folder (`importDbml` source `example`); `.erd-studio/` and `layers.json` only then |
 | **SQL scripts** | Activation: the popup (Show Me). Or the icon: the draft directly. The draft of every CREATE TABLE script (the quick path's files and dialect) | `importDbml` source `sql` (quick answers: layer, name) |
 | **Power BI / Fabric** | As SQL; several models: the first, with the `Model` switcher | `importDbml` source `semanticModel` |
 | **A DBML file** | As SQL (`findDefaultFile`) | `importDbml` source `file` |
@@ -206,14 +206,14 @@ Building is bounded by what the quick paths already bound (the start look's shar
 |---|---|
 | Quick import confirm (the ten-line modal) | The draft preview's banner. The modal remains only as the no-preview fallback |
 | **Review All…** and the Review Import page (`ImportReviewPanel`, `isImportReviewToHost`, `buildImportReviewHtml`) | The details drawer and schema panel. `ImportReviewPanel.ts` deleted; `importReview.ts` keeps `buildImportReview`, `describeImportTable`, `relationshipLines` (P1 uses them) |
-| Start suggestion's **Create Diagram** / **More Options…** | **Show Me** / the draft's Other Ways to Start |
+| Start suggestion's **Create Diagram** / **More Options…** | **Show Me** / the draft's More ways to start |
 | Nothing-found notification | The example draft on the icon (once per machine) |
-| Welcome tab's start card, Convert card and "Open your diagrams" card | Gone: the Welcome tab is the tour, the AI helper section and a small **How-to clips** section with the six narrated clips (the dbt clip on the dbt page only), none on the start path. The no-folder page keeps **Open a Folder…** |
+| Welcome tab's start card, Convert card and "Open your diagrams" card | Gone: the Welcome tab is the tour, the AI helper section and a small **How-to clips** section with the six narrated clips (the dbt clip on the dbt page only), none on the start path. The no-folder page keeps **Open Folder…** |
 | Open Example Diagram / Open an Example Project… / the example quick pick | **Open an Example…** and its switcher |
 | Walkthrough auto-open on a folder's first run | The draft. Walkthrough auto-opens only with no folder |
 | Name and layer questions on the quick paths | Answered (asked only when the default is not valid); Change options… asks them |
 
-Capabilities and where they are now: pick SQL files / dialect / layer / name → Change options…; choose among semantic models → switcher; choose dbt models → switcher (folders) or Change options… (picker, clusters, hand-picked); see everything an import brings in or leaves out → Show details; read a big import → schema panel; start blank / Import… / the import guide / an example → Other Ways to Start; turn suggestions off → Don't Ask Again for This Folder and the two palette commands (unchanged); Convert → unchanged; Try the Sample Project → dbt Welcome page.
+Capabilities and where they are now: pick SQL files / dialect / layer / name → Change options…; choose among semantic models → switcher; choose dbt models → switcher (folders) or Change options… (picker, clusters, hand-picked); see everything an import brings in or leaves out → Show details; read a big import → schema panel; start blank / Import… / the import guide / an example → More ways to start; turn suggestions off → Don't Ask Again for This Folder and the two palette commands (unchanged); Convert → unchanged; Try the Sample Project → dbt Welcome page.
 
 ## 11. Telemetry (append-only)
 
@@ -229,7 +229,7 @@ New `FEATURES` keys, mirrored in `telemetry/src/index.js`, `telemetry.json`'s co
 | `draftChangeOptions` | Change options… |
 | `draftDiscarded` | Discard (a user cancel: a feature) |
 | `draftClosed` | The tab was closed without a choice |
-| `draftOtherStart` | One of Other Ways to Start (the start's own key counts which) |
+| `draftOtherStart` | One of More ways to start (the start's own key counts which) |
 | `draftScopeChanged` | The switcher was used |
 | `draftDetailsOpened` | The schema panel or details drawer was opened |
 | `draftRefreshed` | Keep found the files changed and redrew |
@@ -260,7 +260,7 @@ Three packages, built in parallel, on **disjoint files**. Each codes against `sr
 - `draftSchemas(tables: readonly { schema?: string }[]): DraftSchemaCount[]` (biggest first, then name). Schema filtering is the page's (P2), not here.
 
 `draftModel.ts`:
-- `DRAFT_LARGE_TABLES = 60`; `DRAFT_SCOPE_LIMIT = 12`; `DRAFT_OTHER_START_LABELS: Record<DraftOtherStart, string>` (`Start Blank`, `Import…`, `Bring In My Model…`, `See an Example`, `Open a Folder…`); `KEEP_AS_DIAGRAM = 'Keep as Diagram'`, `KEEP_THIS_EXAMPLE = 'Keep This Example'`, `SAVE_THIS_EXAMPLE = 'Save This Example…'`, `DRAFT_REDRAWN_NOTICE`.
+- `DRAFT_LARGE_TABLES = 60`; `DRAFT_SCOPE_LIMIT = 12`; `DRAFT_OTHER_START_LABELS: Record<DraftOtherStart, string>` (`New Diagram…`, `Import…`, `Bring In Your Data Model…`, `Open an Example…`, `Open Folder…`); `KEEP_AS_DIAGRAM = 'Keep as Diagram'`, `KEEP_THIS_EXAMPLE = 'Keep This Example'`, `SAVE_THIS_EXAMPLE = 'Save This Example…'`, `DRAFT_REDRAWN_NOTICE`.
 - `draftFromImportPlan(input: ImportPlanDraftInput): Draft` with `ImportPlanDraftInput = { plan: DbmlImportPlan; importSource: 'file' | 'sql' | 'semanticModel' | 'example'; trigger: DraftTrigger; target: DraftTarget; fileName: string; origin?: { from: string; notes?: readonly string[]; skipped?: readonly string[] } /* ImportDbmlOrigin's shape */; describe: DescribeDbmlImportOptions; libraryTable(name: string): SemanticTable | undefined; layers: readonly LayerConfig[]; logicalOnly: boolean; hasFolder: boolean; changeOptions: boolean; scopes?: DraftScopes; notice?: string }` — display from `plan.newTables` + `changedLibraryTables` + reused library tables and `plan.relationships`, `plan.document.viewConfig` (positions, stickies); summary from `plan.report`; details from `buildImportReview(plan, describe)` mapped to `DraftDetailSection`; banner per §2.1; `keep: { writer: 'importDbml', importSource, target, fingerprint: importPlanFingerprint(plan) }`. `source` = `sqlDdl` | `semanticModel` | `dbml` | `example` from `importSource`.
 - `draftFromDbt(input: DbtDraftInput): Draft` with `{ draft: DbtDraft; relationships: readonly Relationship[] /* routed: every one drawn */; scope: DraftScope; scopes: readonly DraftScope[]; trigger; target; libraryTable; layers; notice? }`.
 - `dbtDraftScopes(scopes: readonly DraftScope[]): { scopes: DraftScopes | undefined; defaultScope: DraftScope | undefined }` — folder scopes only, ranked by `folderRank`, count, path; at most `DRAFT_SCOPE_LIMIT`.

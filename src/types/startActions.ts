@@ -46,6 +46,42 @@ export const START_ACTION_COMMANDS: Readonly<Record<StartAction, string>> = {
 };
 
 /**
+ * One label per action, on every surface (the walkthrough, the empty
+ * Diagrams view, the start quick pick, a draft's buttons, the Welcome tab,
+ * `package.json`'s command titles): `docs/dev/onboarding-and-cli.md` →
+ * "One label per action" lists them, and `test/unit/startActions.test.ts`
+ * holds every surface to them. A walkthrough step's title is its action's
+ * label without the ellipsis.
+ */
+export const START_ACTION_LABELS: Readonly<Record<StartAction, string>> = {
+  convert: 'Convert to DBML…',
+  drawFromDbt: 'Draw from dbt',
+  importSemanticModel: 'Import your Power BI semantic model',
+  importSqlDdl: 'Import your SQL scripts',
+  importDbmlFile: 'Import your DBML file',
+  blank: 'New Diagram…',
+  import: 'Import…',
+  example: 'Open an Example…',
+};
+
+/** The import guide (`erdStudio.showImportGuide`): its command title, its tab and every link to it. */
+export const IMPORT_GUIDE_LABEL = 'Bring In Your Data Model…';
+/** The one link under a start surface's button: the other starts, in a quick pick (`erdStudio.start` with `{ from }` alone). */
+export const MORE_STARTS_LABEL = 'More ways to start…';
+/** The start quick pick's title (the same words as the link that opens it). */
+export const START_PICK_TITLE = 'More ways to start';
+export const START_PICK_PLACEHOLDER = 'Choose how to start your data model';
+/** The one name of the getting-started video, `erdStudio.showGettingStarted`'s title. */
+export const TOUR_LABEL = 'Watch the One-Minute Tour';
+/** Opening a folder, wherever ERD Studio offers it (VS Code's own command). */
+export const OPEN_FOLDER_LABEL = 'Open Folder…';
+
+/** A label as a walkthrough step's title: without its ellipsis. */
+export function stepTitleOf(label: string): string {
+  return label.replace(/…$/, '');
+}
+
+/**
  * What opened a start's draft (`DraftTrigger`, `src/types/draft.ts`), as a
  * command argument may carry it: a start surface or the start quick pick
  * (`start`), the start suggestion's Show Me (`prompt`). The automatic draft
@@ -192,6 +228,17 @@ export function startActionsForIntent(intent: StartIntent | undefined, hasDbt = 
 }
 
 /**
+ * What the {@link MORE_STARTS_LABEL} link offers: in a folder, every start but
+ * the surface's button (the suggestion); in an empty window, whose button is
+ * Open Folder…, every start there is (the example). The quick pick adds the
+ * import guide last.
+ */
+export function moreStartsFor(ctx: StartContext): StartAction[] {
+  const all = startActionsFor(ctx);
+  return ctx.hasProject ? all.slice(1) : all;
+}
+
+/**
  * The starts to offer, primary first: {@link INTENT_STARTS} of the folder's
  * {@link startIntentFor}. An empty window offers only the example (it opens in
  * a folder of its own; everything else needs a folder first).
@@ -229,28 +276,40 @@ export function parseStartArgs(arg: unknown): StartArgs | undefined {
   return { action: action as StartAction, from: from as StartSurface };
 }
 
+/**
+ * The surface a {@link MORE_STARTS_LABEL} link came from (`{ from }` with no
+ * action), or undefined for anything else: the quick pick it opens counts
+ * the start picked as that surface's (`START_FEATURES[from][action]`).
+ */
+export function parseStartPickArgs(arg: unknown): Exclude<StartSurface, 'welcome'> | undefined {
+  if (typeof arg !== 'object' || arg === null || Array.isArray(arg)) return undefined;
+  const { action, from } = arg as Record<string, unknown>;
+  if (action !== undefined) return undefined;
+  return from === 'walkthrough' || from === 'sidebar' ? from : undefined;
+}
+
 /** A `command:` link for a walkthrough step or welcome view: runs {@link START_COMMAND} with `{ action, from }`. */
 export function startCommandLink(action: StartAction, from: Exclude<StartSurface, 'welcome'>): string {
   return `command:${START_COMMAND}?${encodeURIComponent(JSON.stringify([{ action, from }]))}`;
+}
+
+/** The {@link MORE_STARTS_LABEL} link: {@link START_COMMAND} with `{ from }` alone opens the other starts in a quick pick. */
+export function moreStartsCommandLink(from: Exclude<StartSurface, 'welcome'>): string {
+  return `command:${START_COMMAND}?${encodeURIComponent(JSON.stringify([{ from }]))}`;
 }
 
 // ---------------------------------------------------------------------------
 // The import guide: one quiet link on every start surface
 // ---------------------------------------------------------------------------
 
-/** **Bring In an Existing Data Model…** (`src/services/importGuide.ts`). */
+/** **Bring In Your Data Model…** (`src/services/importGuide.ts`). */
 export const IMPORT_GUIDE_COMMAND = 'erdStudio.showImportGuide';
 
 /**
- * The line the start surfaces carry (the Welcome panel's start card, the
- * walkthrough's blank step, the empty Diagrams view's blank variant): the
- * question, then the link. A link inside a sentence, never a button of its
- * own: each surface keeps one primary button, the start.
+ * A `command:` link to the guide, saying where it was opened from. The start
+ * surfaces no longer carry one: the guide is the last item of the
+ * {@link MORE_STARTS_LABEL} quick pick (and of Import…'s picker).
  */
-export const IMPORT_GUIDE_LINK_QUESTION = 'Have a data model in Databricks, Snowflake, Power BI or Fabric?';
-export const IMPORT_GUIDE_LINK_TEXT = 'See how to bring it in';
-
-/** A `command:` link to the guide for a walkthrough step or welcome view, saying where it was opened from. */
 export function importGuideCommandLink(from: 'walkthrough' | 'sidebar'): string {
   return `command:${IMPORT_GUIDE_COMMAND}?${encodeURIComponent(JSON.stringify([{ from }]))}`;
 }

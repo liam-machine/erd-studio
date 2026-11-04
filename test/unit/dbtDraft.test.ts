@@ -19,6 +19,7 @@ import {
   suggestDraftLayer,
   toSubjectAreaSlug,
   type DraftScope,
+  chooseModelsDescription,
 } from '../../src/services/dbtDraft';
 import { CHOOSE_MODELS_LABEL, pickDraftScope } from '../../src/providers/dbtDraftPicker';
 import { YmlParserService } from '../../src/services/ymlParserService';
@@ -665,5 +666,14 @@ describe('pickDraftScope', () => {
     const spy = vi.spyOn(vscode.window, 'showQuickPick');
     expect(await pickDraftScope([], { models: [] })).toBeUndefined();
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('chooseModelsDescription: the "Choose models…" line reads right', () => {
+  it('never says "pick up to 15 of 9": with no more models than the limit, every one can be picked', () => {
+    expect(chooseModelsDescription(15, 9)).toBe('choose from 9 models');
+    expect(chooseModelsDescription(15, 15)).toBe('choose from 15 models');
+    expect(chooseModelsDescription(15, 1)).toBe('choose from 1 model');
+    expect(chooseModelsDescription(15, 40)).toBe('pick up to 15 of 40');
   });
 });

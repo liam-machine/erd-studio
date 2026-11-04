@@ -33,7 +33,7 @@ import { sleep } from './lib/act.mjs';
 import { REPO, buildExtension, killByProfile, launchVSCode, shortTempDir, stageExtension } from './lib/launch.mjs';
 import { Recorder } from './lib/recorder.mjs';
 import { PACES, StepFailure, StoryContext, failureScreenshot } from './lib/story.mjs';
-import { CLIPS, CLIP_DIR, publishClip } from './lib/publish.mjs';
+import { CLIPS, CLIP_DIR, publishClip, titleCard } from './lib/publish.mjs';
 import { narratorProblem } from './lib/narrate.mjs';
 import { encode } from './lib/video.mjs';
 import { prepareWorkspace } from './lib/workspaces.mjs';
@@ -138,7 +138,9 @@ async function runOne({ def, file }, { extDir, opts }) {
       recorder.start();
       await ctx.eventually(() => recorder.frames.length > 0, { timeout: 15000, message: 'the recorder took no frames' });
     }
-    ctx.mark(`${def.title}\n${def.persona},\n${def.want},\n${def.soThat}.`, 'intro', def.say);
+    // A clip recorded to publish opens on words for the viewer, never the persona (publish.mjs titleCard).
+    const card = titleCard(def, opts.publish);
+    ctx.mark(card.text, 'intro', card.say);
     await sleep(pace.intro);
     await def.steps(ctx);
     result.status = 'passed';

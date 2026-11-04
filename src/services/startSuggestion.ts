@@ -14,10 +14,10 @@
  * **Convert to DBML…**. **Don't Ask Again for This Folder** turns it off for
  * this folder (workspace state: machine-local, nothing written into the
  * repo), and the folder then gets no automatic draft and no walkthrough.
- * Closing it asks again in a later window, at most
- * {@link MAX_START_SUGGESTION_SHOWS} times per folder; it is the window's one
- * activation prompt (`SessionPromptGate`, kind `startSuggestion`), so never
- * twice in a window.
+ * It is shown once per folder ({@link MAX_START_SUGGESTION_SHOWS}): closing it
+ * leaves the sidebar's button and the automatic draft on the ERD Studio icon,
+ * never another notification. It is the window's one activation prompt
+ * (`SessionPromptGate`, kind `startSuggestion`).
  *
  * Turned off by the button, by **ERD Studio: Turn Off Start Suggestions for
  * This Folder**, or by the `erdStudio.startSuggestions` setting (resource
@@ -50,8 +50,8 @@ export const TURN_ON_START_SUGGESTIONS_COMMAND = 'erdStudio.turnOnStartSuggestio
 export const TURN_OFF_START_SUGGESTIONS_TITLE = 'ERD Studio: Turn Off Start Suggestions for This Folder';
 export const TURN_ON_START_SUGGESTIONS_TITLE = 'ERD Studio: Turn On Start Suggestions for This Folder';
 
-/** Shown at most this many times per folder in all; closing it without a choice asks again in a later window. */
-export const MAX_START_SUGGESTION_SHOWS = 3;
+/** Shown at most this many times per folder in all: once. Closing it never brings it back in a later window. */
+export const MAX_START_SUGGESTION_SHOWS = 1;
 
 /** Opens the start's draft (nothing is written until Keep). */
 export const SHOW_ME_BUTTON = 'Show Me';
@@ -59,9 +59,13 @@ export const DONT_ASK_AGAIN_FOLDER_BUTTON = "Don't Ask Again for This Folder";
 /** Convert creates no diagram: its button says what it does (the opening notice's own). */
 export const CONVERT_BUTTON = 'Convert to DBML…';
 
-/** What "Don't Ask Again" answers with: it is off, and how to turn it back on. */
-export const START_SUGGESTIONS_OFF_MESSAGE =
-  `ERD Studio won't suggest a start for this folder again. To turn suggestions back on, run ${TURN_ON_START_SUGGESTIONS_TITLE}.`;
+/**
+ * What "Don't Ask Again" (and Turn Off) answers with: one short line, and
+ * {@link UNDO_BUTTON}, which runs Turn On Start Suggestions for This Folder
+ * (also in the palette).
+ */
+export const START_SUGGESTIONS_OFF_MESSAGE = 'Start suggestions are off for this folder.';
+export const UNDO_BUTTON = 'Undo';
 export const START_SUGGESTIONS_ON_MESSAGE =
   'Start suggestions are on for this folder: ERD Studio suggests a start the next time it opens this folder without a diagram.';
 /** Turn On while the setting is false: the folder's flag is cleared, but the setting still decides. */
@@ -172,7 +176,8 @@ export interface StartSuggestionDeps {
   saveState(state: StartSuggestionState): PromiseLike<unknown>;
   /** The notification (non-modal); resolves with the button chosen, undefined when closed. */
   show(message: string, ...buttons: string[]): PromiseLike<string | undefined>;
-  info(message: string): void;
+  /** A short non-modal message with optional buttons; resolves with the one chosen. */
+  info(message: string, ...buttons: string[]): PromiseLike<string | undefined> | void;
   executeCommand(command: string, ...args: unknown[]): PromiseLike<unknown>;
   /** The start-screen count for a shown suggestion (`startSuggested<Intent>`). */
   recordSuggested(intent: StartIntent): void;
@@ -224,7 +229,8 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
         deps.feature(START_SUGGESTION_FEATURES.off);
         await deps.saveState({ ...latest, off: true });
         deps.setOffContext(true);
-        deps.info(START_SUGGESTIONS_OFF_MESSAGE);
+        const undo = await deps.info(START_SUGGESTIONS_OFF_MESSAGE, UNDO_BUTTON);
+        if (undo === UNDO_BUTTON) await deps.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND);
       } else {
         deps.feature(START_SUGGESTION_FEATURES.dismissed);
       }

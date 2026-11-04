@@ -26,11 +26,11 @@ The video and the picture show a project from before ERD Studio 2.0, with YAML t
 
 The draft is a starting point for your design: it is saved as ordinary ERD Studio files you can change, and the Physical stage is still read from dbt every time, never saved. An empty diagram offers an **Add Tables from dbt** button that does the same for one diagram, and the **ERD** count in the status bar (for example **ERD 3**) takes you back to your diagrams at any time. Rather start blank? **New Diagram…** (in the sidebar's Diagrams view, or **ERD Studio: New Diagram…** in the Command Palette) and **Import DBML…** work in a dbt project too.
 
-**Prefer to watch first?** The [getting-started video](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4) (1:00) shows these three steps. The **Welcome** tab has the same video and a short checklist. Open it any time with **Get started** in the ERD Studio sidebar (or its ▶ button), or **ERD Studio: Watch Getting Started Video**.
+**Prefer to watch first?** The [one-minute tour](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4) (1:00) shows these three steps. The **Welcome** tab has the same video and a short checklist. Open it any time with **Get started** in the ERD Studio sidebar (or its ▶ button), or **ERD Studio: Watch Getting Started Video**.
 
 ## No dbt project yet? Try the sample
 
-The [ERD Studio sample project](https://github.com/liam-machine/erd-studio-sample) is a small Kimball-style dbt project with fake coffee-shop data (DuckDB, no account needed). It ships its dbt artifacts, so both the Logical and Physical stages work without installing dbt. Run **ERD Studio: Try the Sample Project** (also on the Welcome tab) and VS Code clones it to a folder you choose and offers to open it, or use **Code → Download ZIP** on GitHub and open the unzipped folder.
+The [ERD Studio sample project](https://github.com/liam-machine/erd-studio-sample) is a small Kimball-style dbt project with fake coffee-shop data (DuckDB, no account needed). It ships its dbt artifacts, so both the Logical and Physical stages work without installing dbt. Run **ERD Studio: Try the Sample Project** (also on the ERD Studio Tour tab) and VS Code clones it to a folder you choose and offers to open it, or use **Code → Download ZIP** on GitHub and open the unzipped folder.
 
 ## What the Physical stage reads
 

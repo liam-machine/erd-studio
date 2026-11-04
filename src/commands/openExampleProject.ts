@@ -230,7 +230,7 @@ async function handOff(
 export interface ExampleDraftDeps {
   /** The one preview of this extension host. */
   preview: DraftPreview;
-  /** `example` (Open an Example…, a draft's See an Example), or `sidebar` (the automatic example draft). */
+  /** `example` (Open an Example…, a draft's Open an Example…), or `sidebar` (the automatic example draft). */
   trigger: DraftTrigger;
   /** The automatic draft: nothing is shown when the draft cannot be built. */
   quiet?: boolean;
@@ -244,7 +244,7 @@ export interface ExampleDraftDeps {
  * Open the example draft on `scopeId` (default the coffee shop): in a folder
  * the coffee shop is drafted by Import DBML (`openExampleDiagram`, quick, so
  * Keep This Example writes it here); with no folder it is planned in memory
- * (`exampleDbmlDraft`, nothing to keep into: Open a Folder…). A project is
+ * (`exampleDbmlDraft`, nothing to keep into: Open Folder…). A project is
  * read from the bundled files (`draftFromExampleProject`); its Save This
  * Example… runs {@link openExampleProject} from the folder dialog onward.
  * The switcher re-enters here with the same preview. Writes nothing itself.
@@ -322,7 +322,7 @@ export async function openExampleDraft(deps: ExampleDraftDeps, scopeId: string =
     return;
   }
   const answer = await deps.preview.ask(draft);
-  // Nothing to keep into here: Open a Folder… is the host's; the switcher re-enters.
+  // Nothing to keep into here: Open Folder… is the host's; the switcher re-enters.
   if (answer.kind === 'scope') void again(answer.scopeId);
 }
 

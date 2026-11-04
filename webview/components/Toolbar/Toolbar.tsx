@@ -35,7 +35,7 @@ import {
 } from '../../lib/elkLayout';
 import { FIRST_OPEN_LAYOUT, buildLayoutOptions } from '../../lib/firstOpenLayout';
 import { StageTabs } from './StageTabs';
-import { fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
+import { FIT_MAX_ZOOM, fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
 import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
 import type { Stage } from '../../../src/types/semantic';
@@ -221,7 +221,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   // Top padding = the toolbar's own bottom edge, so Fit never leaves the top
   // row of cards under it (Logical and Physical alike).
   const handleFitView = useCallback(() => {
-    fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)), duration: 200 });
+    fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)), maxZoom: FIT_MAX_ZOOM, duration: 200 });
   }, [fitView]);
 
   // --- Layout options click-outside handler --------------------------------
@@ -510,7 +510,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
       // Wait one frame for React to flush, then fit viewport
       requestAnimationFrame(() => {
-        fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)) });
+        fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)), maxZoom: FIT_MAX_ZOOM });
       });
 
       // Persist to extension host
@@ -613,7 +613,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const isReadOnly = domain.readOnly;
   const exportTitle = domain.stage === 'physical'
     ? 'Export the logical design as Mermaid or DBML (the physical stage is not exported)'
-    : 'Export as DBML or Mermaid — open formats, no lock-in';
+    : 'Export as DBML or Mermaid';
 
   // Use layerConfig for dynamic abbreviation and color, with fallbacks
   const layerAbbrev = domain.layerConfig?.abbreviation

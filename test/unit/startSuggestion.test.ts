@@ -1,6 +1,6 @@
 /**
  * The start suggestion (A), its pure half: the wording per start (counts and
- * kinds only, never a file name), when it is due (at most three times per
+ * kinds only, never a file name), when it is due (once per
  * folder, never once answered or turned off), what each button does, and the
  * pieces it rests on — the look's exact CREATE TABLE count, the tracker that
  * keeps it, and the session gate it hands on when there is nothing concrete.
@@ -49,7 +49,9 @@ describe('the notification text', () => {
     for (const intent of ['importSqlDdl', 'importSemanticModel', 'importDbmlFile', 'convert'] as const) {
       expect(startSuggestionMessage(intent)).not.toMatch(/\bdbt\b/i);
     }
-    expect(START_SUGGESTIONS_OFF_MESSAGE).toContain(TURN_ON_START_SUGGESTIONS_TITLE);
+    // Turning it off is answered in one short line, with Undo (Turn On is in the palette too).
+    expect(START_SUGGESTIONS_OFF_MESSAGE).toBe('Start suggestions are off for this folder.');
+    expect(START_SUGGESTIONS_OFF_MESSAGE.split(/\s+/).length).toBeLessThanOrEqual(8);
   });
 
   it('every command a message names exists as written', () => {
@@ -61,10 +63,10 @@ describe('the notification text', () => {
 
 describe('when it is due', () => {
   const state = (s: Partial<StartSuggestionState> = {}): StartSuggestionState => ({ shown: 0, ...s });
-  it('at most three times per folder, never with a diagram, once answered, turned off or with the setting off', () => {
-    expect(MAX_START_SUGGESTION_SHOWS).toBe(3);
+  it('once per folder (no drip across windows), never with a diagram, once answered, turned off or with the setting off', () => {
+    expect(MAX_START_SUGGESTION_SHOWS).toBe(1);
     expect(startSuggestionDue({ settingOn: true, state: state(), hasDiagrams: false })).toBe(true);
-    expect(startSuggestionDue({ settingOn: true, state: state({ shown: 2 }), hasDiagrams: false })).toBe(true);
+    expect(startSuggestionDue({ settingOn: true, state: state({ shown: 1 }), hasDiagrams: false })).toBe(false);
     expect(startSuggestionDue({ settingOn: true, state: state({ shown: 3 }), hasDiagrams: false })).toBe(false);
     expect(startSuggestionDue({ settingOn: true, state: state(), hasDiagrams: true })).toBe(false);
     expect(startSuggestionDue({ settingOn: true, state: state({ answered: true }), hasDiagrams: false })).toBe(false);
@@ -86,7 +88,7 @@ describe('when it is due', () => {
   });
 });
 
-function harness(options: { intent?: StartIntent; choice?: string; state?: StartSuggestionState; convertApplies?: boolean; sqlTables?: number } = {}) {
+function harness(options: { intent?: StartIntent; choice?: string; state?: StartSuggestionState; convertApplies?: boolean; sqlTables?: number; undo?: boolean } = {}) {
   let stored: StartSuggestionState = options.state ?? { shown: 0 };
   const calls = {
     shows: [] as Array<{ message: string; buttons: string[] }>,
@@ -94,6 +96,7 @@ function harness(options: { intent?: StartIntent; choice?: string; state?: Start
     features: [] as string[],
     suggested: [] as StartIntent[],
     infos: [] as string[],
+    infoButtons: [] as string[][],
     offContext: [] as boolean[],
     savedBeforeShow: undefined as StartSuggestionState | undefined,
   };
@@ -106,7 +109,7 @@ function harness(options: { intent?: StartIntent; choice?: string; state?: Start
     state: () => stored,
     saveState: async (s) => { stored = s; },
     show: async (message, ...buttons) => { calls.savedBeforeShow = stored; calls.shows.push({ message, buttons }); return options.choice; },
-    info: (m) => { calls.infos.push(m); },
+    info: async (m, ...buttons) => { calls.infos.push(m); calls.infoButtons.push(buttons); return options.undo ? buttons[0] : undefined; },
     executeCommand: async (...args) => { calls.commands.push(args); },
     recordSuggested: (i) => { calls.suggested.push(i); },
     feature: (k) => { calls.features.push(k); },
@@ -169,7 +172,14 @@ describe('runStartSuggestion', () => {
     expect('MORE_OPTIONS_BUTTON' in startSuggestion).toBe(false);
   });
 
-  it("Don't Ask Again turns it off for this folder and says how to turn it back on", async () => {
+  it("Don't Ask Again's Undo turns suggestions back on with the palette's own command", async () => {
+    const h = harness({ intent: 'importSqlDdl', choice: DONT_ASK_AGAIN_FOLDER_BUTTON, undo: true });
+    await (await runStartSuggestion(h.deps)).done;
+    expect(h.calls.infoButtons).toEqual([['Undo']]);
+    expect(h.calls.commands).toEqual([['erdStudio.turnOnStartSuggestions']]);
+  });
+
+  it("Don't Ask Again turns it off for this folder and says so in one line, with Undo", async () => {
     const h = harness({ intent: 'importSemanticModel', choice: DONT_ASK_AGAIN_FOLDER_BUTTON });
     await (await runStartSuggestion(h.deps)).done;
     expect(h.stored()).toEqual({ shown: 1, off: true });
@@ -184,13 +194,17 @@ describe('runStartSuggestion', () => {
     })).toBeUndefined();
   });
 
-  it('closed without a choice: counted as dismissed, asked again later (the count only grows)', async () => {
-    const h = harness({ intent: 'importSqlDdl', state: { shown: 2 } });
+  it('closed without a choice: counted as dismissed, and never asked again (the sidebar and the icon\'s draft remain)', async () => {
+    const h = harness({ intent: 'importSqlDdl' });
     await (await runStartSuggestion(h.deps)).done;
-    expect(h.stored()).toEqual({ shown: 3 });
+    expect(h.stored()).toEqual({ shown: 1 });
     expect(h.calls.features).toEqual(['suggestPromptShown', 'suggestPromptDismissed']);
-    // The third time was the last.
     expect((await runStartSuggestion(h.deps)).shown).toBe(false);
+    // The folder's automatic draft is still due: closing the notification is not an answer.
+    expect(autoDraftDue({
+      settingOn: true, state: h.stored(), hasDiagrams: false, hasTables: false, canvasOpen: false,
+      intent: 'importSqlDdl', exampleShownOnMachine: false,
+    })).toBe('find');
   });
 });
 

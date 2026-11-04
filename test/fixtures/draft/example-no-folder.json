@@ -12,7 +12,7 @@
   "otherStarts": [
     {
       "id": "openFolder",
-      "label": "Open a Folder…"
+      "label": "Open Folder…"
     }
   ],
   "scopes": {

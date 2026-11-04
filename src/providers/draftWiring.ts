@@ -3,7 +3,7 @@
  * every flow shares around the one preview of the extension host.
  *
  *  - {@link DRAFT_OTHER_START_COMMANDS}: the fixed command each of a draft's
- *    Other Ways to Start runs. The page sends an id only; the host maps it,
+ *    More ways to start runs. The page sends an id only; the host maps it,
  *    never a command from the page.
  *  - {@link trackedDraftPreview}: the preview every flow is handed. It
  *    claims the window's one prompt for the draft (so nothing pops over it),
@@ -69,7 +69,7 @@ export interface TrackedDraftPreviewDeps {
 
 /**
  * The preview the flows are given: `inner` (`createDraftPreview`), with the
- * gate, the funnel keys, Other Ways to Start and Keep's bookkeeping around
+ * gate, the funnel keys, More ways to start and Keep's bookkeeping around
  * it. A redraw of the page on show (the switcher's next draft, a Keep that
  * found the files changed) is not counted as another `draftShown`.
  */

@@ -164,7 +164,7 @@ describe('the 257-table SQL draft (large)', () => {
     expect(draft.banner.primary).toBe('keep');
     expect(draft.banner.keepLabel).toBe(KEEP_AS_DIAGRAM);
     expect(draft.banner.changeOptions).toBe(true);
-    expect(draft.otherStarts.map((s) => s.label)).toEqual(['Start Blank', 'Import…', 'Bring In My Model…', 'See an Example']);
+    expect(draft.otherStarts.map((s) => s.label)).toEqual(['New Diagram…', 'Import…', 'Bring In Your Data Model…', 'Open an Example…']);
     expect(draft.keep).toMatchObject({ writer: 'importDbml', importSource: 'sql', target: target('warehouse') });
     expect(draft.autoLayout).toBe(true);
     expect(draft.trigger).toBe('sidebar');
@@ -191,7 +191,7 @@ describe('the 257-table SQL draft (large)', () => {
 });
 
 describe('the coffee shop', () => {
-  it('in a folder: Start Blank leads, Keep This Example is quiet', () => {
+  it('in a folder: New Diagram… leads, Keep This Example is quiet', () => {
     const plan = planOf(EXAMPLE_DBML, 'coffee-shop', 'gold');
     const draft = draftFromImportPlan(importInput(plan, {
       importSource: 'example',
@@ -212,7 +212,7 @@ describe('the coffee shop', () => {
     noDbtWord(draft);
   });
 
-  it('with no folder: Open a Folder…, nothing to keep', async () => {
+  it('with no folder: Open Folder…, nothing to keep', async () => {
     const scopes = exampleScopes('example:coffee-shop', EXAMPLE_PROJECTS.map((p) => ({ id: p.id, title: p.label })));
     const draft = await exampleDbmlDraft({ dbmlText: EXAMPLE_DBML, fileName: EXAMPLE_DBML_FILE_NAME, trigger: 'example', scopes });
     expect(draft.keep).toEqual({ writer: 'none' });
@@ -263,7 +263,7 @@ describe('every bundled example project', () => {
     noDbtWord(draft);
   });
 
-  it('with no folder, Save This Example… stays and Open a Folder… is offered', async () => {
+  it('with no folder, Save This Example… stays and Open Folder… is offered', async () => {
     const project = EXAMPLE_PROJECTS[0];
     const draft = await draftFromExampleProject({
       id: project.id, title: project.label, files: exampleFiles(project.id), startDiagram: project.startDiagram,
@@ -423,7 +423,7 @@ describe('banner strings', () => {
     const draft = draftFromImportPlan(importInput(plan, { notice: DRAFT_REDRAWN_NOTICE }));
     expect(draft.banner.notice).toBe('Your files changed, so the draft was redrawn. Check it and keep it again.');
     expect(draftFromImportPlan(importInput(plan)).banner.notice).toBeUndefined();
-    expect(DRAFT_OTHER_START_LABELS.openFolder).toBe('Open a Folder…');
+    expect(DRAFT_OTHER_START_LABELS.openFolder).toBe('Open Folder…');
   });
 
   it('every draft gets a fresh id', () => {

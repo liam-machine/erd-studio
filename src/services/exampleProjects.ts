@@ -46,7 +46,7 @@ export const EXAMPLE_PROJECTS: readonly ExampleProject[] = [
     feature: 'exampleEnterpriseWarehouse',
     label: 'Enterprise warehouse',
     description: 'Landing, Enterprise warehouse, Marts, Reporting',
-    detail: 'Start here. A normalised core and team-owned marts (Inmon): many source schemas, a join across layers, two teams in one schema, and a ten-minute walkthrough in its README.',
+    detail: 'Start here. Source data cleaned into one shared core, then a set of tables for each team. Its README walks you through it in ten minutes.',
     // The walkthrough's first diagram (its step 2, "Many sources, one file").
     startDiagram: '.erd-studio/landing/diagrams/source-systems.dbml',
     recommended: true,
@@ -56,7 +56,7 @@ export const EXAMPLE_PROJECTS: readonly ExampleProject[] = [
     feature: 'exampleMedallion',
     label: 'Medallion lakehouse',
     description: 'Bronze, Silver, Gold',
-    detail: 'Databricks style: one schema per layer, the same warehouse name in two layers, relationships split by owner, a wide reporting table.',
+    detail: 'Raw, cleaned and business-ready layers, as many Databricks teams set them up.',
     startDiagram: '.erd-studio/gold/diagrams/sales.dbml',
   },
   {
@@ -64,7 +64,7 @@ export const EXAMPLE_PROJECTS: readonly ExampleProject[] = [
     feature: 'exampleDbtProjectLayers',
     label: 'Staging, intermediate and marts',
     description: 'Staging, Intermediate, Marts',
-    detail: 'A layer per stage: a diagram per source and per department, plain mart names with Kimball roles, one table shared by two departments.',
+    detail: 'A layer for each step from raw data to reports, with a diagram for each source and each department.',
     startDiagram: '.erd-studio/marts/diagrams/finance.dbml',
   },
   {
@@ -72,7 +72,7 @@ export const EXAMPLE_PROJECTS: readonly ExampleProject[] = [
     feature: 'exampleKimballBusMatrix',
     label: 'Kimball bus matrix',
     description: 'Presentation',
-    detail: 'A star per business process: conformed dimensions on every star, the three fact types, role-playing dates, a relationships file per team.',
+    detail: 'A star schema for each business process, all sharing the same customers, products and dates.',
     startDiagram: '.erd-studio/presentation/diagrams/retail-sales.dbml',
   },
   {
@@ -80,7 +80,7 @@ export const EXAMPLE_PROJECTS: readonly ExampleProject[] = [
     feature: 'exampleDataVault',
     label: 'Data Vault 2.0',
     description: 'Raw Vault, Business Vault, Information Marts',
-    detail: 'Hubs, links, satellites, PIT and bridge tables; composite keys; relationships and diagrams across layers.',
+    detail: 'Business keys, the links between them and their history, each in tables of their own.',
     startDiagram: '.erd-studio/raw_vault/diagrams/customer-and-policy.dbml',
   },
   {
@@ -88,7 +88,7 @@ export const EXAMPLE_PROJECTS: readonly ExampleProject[] = [
     feature: 'exampleGitlabStyle',
     label: 'A database per stage',
     description: 'RAW, PREP, PROD',
-    detail: "GitLab's handbook layout: the database as the layer, the same schema in two layers, the same table name in two schemas.",
+    detail: "One database for each stage, as GitLab's data team lays it out.",
     startDiagram: '.erd-studio/prod/diagrams/arr.dbml',
   },
   {
@@ -96,7 +96,7 @@ export const EXAMPLE_PROJECTS: readonly ExampleProject[] = [
     feature: 'exampleBigqueryVersioned',
     label: 'Stage in the dataset name',
     description: 'Live, Stable, Derived, User-facing views',
-    detail: "Mozilla's BigQuery layout: dataset suffixes as layers, versioned tables and the views over them.",
+    detail: "The stage in each dataset's name, as Mozilla does on BigQuery.",
     startDiagram: '.erd-studio/derived/diagrams/clients.dbml',
   },
   {
@@ -104,7 +104,7 @@ export const EXAMPLE_PROJECTS: readonly ExampleProject[] = [
     feature: 'exampleDataMesh',
     label: 'Data mesh',
     description: 'Source-aligned, Aggregate, Consumer-aligned',
-    detail: "Domains as schema folders, a relationships file per domain team, CODEOWNERS, another domain's table on a diagram.",
+    detail: "Each team owns the tables for its own part of the business, and can use another team's.",
     startDiagram: '.erd-studio/source_aligned/diagrams/shipping.dbml',
   },
 ];

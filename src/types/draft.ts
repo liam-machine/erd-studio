@@ -132,7 +132,7 @@ export type DraftOtherStart = (typeof DRAFT_OTHER_STARTS)[number];
 
 export interface DraftOtherStartItem {
   id: DraftOtherStart;
-  /** `Start Blank`, `Import…`, `Bring In My Model…`, `See an Example`, `Open a Folder…`. */
+  /** `New Diagram…`, `Import…`, `Bring In Your Data Model…`, `Open an Example…`, `Open Folder…`. */
   label: string;
 }
 
@@ -164,11 +164,11 @@ export interface DraftBanner {
   detail: string;
   /** Keep's label (`Keep as Diagram`, `Keep This Example`, `Save This Example…`); absent: nothing can be kept here. */
   keepLabel?: string;
-  /** Which action is the one primary button: Keep, or one of `otherStarts` (an example: Start Blank). */
+  /** Which action is the one primary button: Keep, or one of `otherStarts` (an example: New Diagram…). */
   primary: 'keep' | DraftOtherStart;
   /** Show the `Change options…` link (the step-by-step flow, preselected). */
   changeOptions: boolean;
-  /** Other starts drawn as buttons beside the primary; the rest go in `Other Ways to Start ▾`. */
+  /** Other starts drawn as buttons beside the primary; the rest go in `More ways to start ▾`. */
   shownStarts: DraftOtherStart[];
   /** A one-off line under the detail (`Your files changed, so the draft was redrawn. Check it and keep it again.`). */
   notice?: string;
@@ -352,7 +352,7 @@ export type DraftKeepOutcome =
 
 /**
  * The viewer's decision on a draft: each of Keep / Change options… /
- * Discard / Other Ways to Start / the switcher is one kind (the "handlers"
+ * Discard / More ways to start / the switcher is one kind (the "handlers"
  * of the preview, in promise form, so a flow awaits the preview exactly where
  * it awaited its dry run).
  *

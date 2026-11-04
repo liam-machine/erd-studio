@@ -11,9 +11,10 @@ import { describe, expect, it } from 'vitest';
 
 import { HOW_TO_CLIPS, HOW_TO_CLIP_DIR, HOW_TO_CLIP_KEYS } from '../../src/types/startActions';
 // @ts-expect-error: a plain .mjs module of the story harness (no types).
-import { AUDIO, CLIPS, CLIP_DIR, LIMITS, clipProblems, cropTitleBarFilter, leadIn, pathInCaption } from '../stories/lib/publish.mjs';
+import { AUDIO, CLIPS, CLIP_DIR, LIMITS, clipProblems, cropTitleBarFilter, leadIn, pathInCaption, titleCard } from '../stories/lib/publish.mjs';
+import { HOW_TO_CLIP_CAPTIONS } from '../../src/types/gettingStarted';
 
-type Clip = { key: string; story: string; clip: string };
+type Clip = { key: string; story: string; clip: string; card: string };
 const STORIES = path.join(__dirname, '../stories/stories');
 
 describe('publishing the "Watch how" clips', () => {
@@ -21,6 +22,20 @@ describe('publishing the "Watch how" clips', () => {
     expect((CLIPS as Clip[]).map((c) => c.key).sort()).toEqual([...HOW_TO_CLIP_KEYS].sort());
     for (const c of CLIPS as Clip[]) expect(c.clip, c.key).toBe(HOW_TO_CLIPS[c.key as keyof typeof HOW_TO_CLIPS]);
     expect(CLIP_DIR).toEqual([...HOW_TO_CLIP_DIR]);
+  });
+
+  it('opens on a title card for the viewer: the start\'s one label, then one short line, never the story\'s persona', () => {
+    for (const c of CLIPS as Clip[]) {
+      const [title, line, ...rest] = c.card.split('\n');
+      expect(title, c.key).toBe(HOW_TO_CLIP_CAPTIONS[c.key as keyof typeof HOW_TO_CLIP_CAPTIONS]);
+      expect(rest, c.key).toEqual([]);
+      expect(line.split(/\s+/).length, c.key).toBeLessThanOrEqual(12);
+      expect(c.card, c.key).not.toMatch(/\bAs (someone|an?)\b|\bI want\b|\bso that\b|\bGiven\b/);
+    }
+    const def = { id: CLIPS[0].story, title: 'T', persona: 'As someone', want: 'I want x', soThat: 'so that y', say: 'spoken' };
+    expect(titleCard(def, true).text).toBe((CLIPS[0] as Clip).card);
+    // The test run's own recording (not published) keeps the user story.
+    expect(titleCard(def, false)).toEqual({ text: 'T\nAs someone,\nI want x,\nso that y.', say: 'spoken' });
   });
 
   it('each clip comes from a story that exists', () => {

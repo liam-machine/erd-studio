@@ -178,3 +178,13 @@ describe('takePendingExample', () => {
     }
   });
 });
+
+describe('the example descriptions read plainly', () => {
+  it('say what you will see in a sentence or two, without modelling jargon', () => {
+    const JARGON = /\b(Inmon|PIT|conformed|role-playing|CODEOWNERS|normali[sz]ed|composite|satellites?|hubs?|fact types?|warehouse name|dataset suffix|marts?)\b/i;
+    for (const e of EXAMPLE_PROJECTS) {
+      expect(e.detail, e.id).not.toMatch(JARGON);
+      expect(e.detail.split(/\s+/).length, e.id).toBeLessThanOrEqual(26);
+    }
+  });
+});

@@ -1466,7 +1466,7 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   if (report.keptInMeta > 0) {
     // Plain words (onboarding story 06): where they are kept (`meta.dbml`) is the reference doc's
     // business, and no count (it mixes tables and columns, and read like a wrong table count).
-    lines.push('• Not null, defaults, indexes and other details ERD Studio has no field for are kept in the table files, so they are not lost.');
+    lines.push(`• ${keptInMetaNote(options)}`);
   }
   if (report.renamed.length > 0) {
     const renames = renameEntries(report.renamed);
@@ -1537,6 +1537,16 @@ export function importLayoutSentence(plan: DbmlImportPlan, options: DescribeDbml
 }
 
 /**
+ * Where the details ERD Studio has no field for go. A DBML file keeps its
+ * indexes; a conversion (SQL scripts, a semantic model) leaves plain indexes
+ * out (its own note says so), so this note does not claim them too.
+ */
+function keptInMetaNote(options: DescribeDbmlImportOptions): string {
+  const what = options.origin ? 'Not null, defaults' : 'Not null, defaults, indexes';
+  return `${what} and other details ERD Studio has no field for are kept in the table files, so they are not lost.`;
+}
+
+/**
  * Everything the import has to say beyond the counts, most important first,
  * one sentence each: the file's layout lines that could not be read, values
  * ERD Studio keeps but does not recognise, the conversion's own notes,
@@ -1567,7 +1577,7 @@ export function importPlanNotes(plan: DbmlImportPlan, options: DescribeDbmlImpor
   }
   if (report.stickyNotes > 0) notes.push(`${plural(report.stickyNotes, 'sticky note')}.`);
   if (report.keptInMeta > 0) {
-    notes.push('Not null, defaults, indexes and other details ERD Studio has no field for are kept in the table files, so they are not lost.');
+    notes.push(keptInMetaNote(options));
   }
   return notes;
 }

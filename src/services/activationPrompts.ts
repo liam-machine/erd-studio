@@ -45,6 +45,12 @@ export type SessionPromptKind =
    */
   | 'exampleOpen'
   /**
+   * The folder's first diagram was made in this window (a Keep, New
+   * Diagram…, an import): nothing else pops over its canvas, and the "This
+   * project has N diagrams" notice never names it (`DIAGRAMS_NUDGE_SHOWN_KEY`).
+   */
+  | 'firstDiagram'
+  /**
    * The Get Started walkthrough a fresh install owes (once per machine),
    * offered only in an empty window (`walkthroughAutoOpens`): in a folder the
    * draft takes its place.
@@ -96,6 +102,8 @@ export function pickActivationPrompt(candidates: Iterable<SessionPromptKind>): S
  */
 export class SessionPromptGate {
   private claimedBy: SessionPromptKind | undefined;
+  /** A start that came while another prompt held the session (it may still release it): it takes it then. */
+  private reservedBy: SessionPromptKind | undefined;
 
   /** True when `kind` may show now; it then holds the session. */
   claim(kind: SessionPromptKind): boolean {
@@ -105,12 +113,26 @@ export class SessionPromptGate {
   }
 
   /**
+   * A start is on screen (a draft, the folder's first diagram): it holds the
+   * session now when it is free, else as soon as the holder gives it back
+   * (the start suggestion still looking), so nothing that was waiting (the
+   * AI helper offer, the upgrade notice) pops over it.
+   */
+  reserve(kind: SessionPromptKind): void {
+    if (this.claimedBy === undefined) this.claimedBy = kind;
+    else if (this.claimedBy !== kind) this.reservedBy ??= kind;
+  }
+
+  /**
    * Give the session back: `kind` held it but showed nothing (the start
    * suggestion's look found nothing concrete), so the next prompt may have
-   * it. A no-op when another prompt holds it.
+   * it — unless a start was reserved meanwhile, which then holds it. A no-op
+   * when another prompt holds it.
    */
   release(kind: SessionPromptKind): void {
-    if (this.claimedBy === kind) this.claimedBy = undefined;
+    if (this.claimedBy !== kind) return;
+    this.claimedBy = this.reservedBy;
+    this.reservedBy = undefined;
   }
 
   /** The prompt this session showed, if any. */
@@ -120,5 +142,6 @@ export class SessionPromptGate {
 
   reset(): void {
     this.claimedBy = undefined;
+    this.reservedBy = undefined;
   }
 }

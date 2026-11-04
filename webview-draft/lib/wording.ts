@@ -26,7 +26,7 @@ export function layingOutLabel(tables: number): string {
   return `Laying out ${countOf(tables, 'table', 'tables')}…`;
 }
 
-export const OTHER_WAYS_TO_START = 'Other Ways to Start';
+export const OTHER_WAYS_TO_START = 'More ways to start';
 export const DISCARD = 'Discard';
 export const CHANGE_OPTIONS = 'Change options…';
 export const SHOW_DETAILS = 'Show details';

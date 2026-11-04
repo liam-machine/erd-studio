@@ -20,15 +20,29 @@ import path from 'node:path';
 
 import { findFfmpeg } from './video.mjs';
 
-/** Which story each clip comes from (by `HOW_TO_CLIPS` key). Convert has no clip. */
+/**
+ * Which story each clip comes from (by `HOW_TO_CLIPS` key). Convert has no clip.
+ * `card` is the published clip's title card (its first frame, the panel's
+ * poster, and its first spoken line): words for the person watching — the
+ * start's one label, then what it does — never the story's persona ("As
+ * someone who…, I want…, so that…"), which stays in the test run's own
+ * recording.
+ */
 export const CLIPS = [
-  { key: 'example', story: 'empty-window-opens-an-example', clip: 'open-an-example.mp4' },
-  { key: 'blank', story: 'plain-folder-new-diagram-add-table', clip: 'start-a-blank-diagram.mp4' },
-  { key: 'importSqlDdl', story: 'sql-scripts-import', clip: 'import-sql-scripts.mp4' },
-  { key: 'importSemanticModel', story: 'power-bi-model-import', clip: 'import-power-bi-model.mp4' },
-  { key: 'importDbmlFile', story: 'dbml-file-import', clip: 'import-a-dbml-file.mp4' },
-  { key: 'drawFromDbt', story: 'dbt-project-draw', clip: 'draw-from-dbt.mp4' },
+  { key: 'example', story: 'empty-window-opens-an-example', clip: 'open-an-example.mp4', card: 'Open an Example\nSee a finished data model, with nothing to set up.' },
+  { key: 'blank', story: 'plain-folder-new-diagram-add-table', clip: 'start-a-blank-diagram.mp4', card: 'New Diagram\nStart from an empty canvas and add your first table.' },
+  { key: 'importSqlDdl', story: 'sql-scripts-import', clip: 'import-sql-scripts.mp4', card: 'Import your SQL scripts\nTurn CREATE TABLE scripts into a diagram.' },
+  { key: 'importSemanticModel', story: 'power-bi-model-import', clip: 'import-power-bi-model.mp4', card: 'Import your Power BI semantic model\nSee its tables and relationships as a diagram.' },
+  { key: 'importDbmlFile', story: 'dbml-file-import', clip: 'import-a-dbml-file.mp4', card: 'Import your DBML file\nBring a dbdiagram.io model into your repo.' },
+  { key: 'drawFromDbt', story: 'dbt-project-draw', clip: 'draw-from-dbt.mp4', card: 'Draw from dbt\nYour dbt models and their relationships, as a diagram.' },
 ];
+
+/** The title card a story's recording opens on: its clip's `card` when it is recorded to publish, else the user story itself. */
+export function titleCard(def, publishing) {
+  const clip = publishing ? CLIPS.find((c) => c.story === def.id) : undefined;
+  if (clip) return { text: clip.card, say: clip.card.replace('\n', '. ') };
+  return { text: `${def.title}\n${def.persona},\n${def.want},\n${def.soThat}.`, say: def.say };
+}
 
 export const LIMITS = { width: 1280, maxSeconds: 60, maxBytes: 2 * 1024 * 1024, fps: 25 };
 

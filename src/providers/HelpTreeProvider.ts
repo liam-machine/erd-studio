@@ -11,6 +11,7 @@ import * as vscode from 'vscode';
 
 import type { ReportTrackingService } from '../services/reportTrackingService';
 import { MyReportsTreeProvider, type MyReportNode } from './MyReportsTreeProvider';
+import { TOUR_LABEL } from '../types/startActions';
 
 export interface HelpActionNode {
   readonly type: 'action';
@@ -34,7 +35,7 @@ export const HELP_ACTIONS: readonly HelpActionNode[] = [
     tooltip: 'Teach your AI assistant (Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) to read and write your diagrams.',
   },
   {
-    type: 'action', id: 'gettingStarted', label: 'Watch Getting Started Video', icon: 'play-circle', command: 'erdStudio.showGettingStarted',
+    type: 'action', id: 'gettingStarted', label: TOUR_LABEL, icon: 'play-circle', command: 'erdStudio.showGettingStarted',
     // Neutral in every folder: the panel plays the cut that matches it.
     tooltip: 'A one-minute video and your first steps.',
   },

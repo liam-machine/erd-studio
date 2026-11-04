@@ -131,7 +131,7 @@ import {
 } from './providers/GettingStartedPanel';
 import { listDraftModels } from './services/dbtDraft';
 import { readManifestMtime } from './services/manifestStaleness';
-import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
+import { UPGRADE_NOTICE_MESSAGE, deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
 import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt, type DbtDraftOptions, type DrawFromDbtDeps } from './commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND, importDbml, quickImportDbml, type ImportDbmlDeps, type ImportDraftOptions } from './commands/importDbml';
@@ -151,7 +151,7 @@ import { IMPORT_SEMANTIC_MODEL_COMMAND, importSemanticModel, quickImportSemantic
 import { recordStartSuggested, runStart } from './commands/start';
 import { OPEN_EXAMPLE_PROJECT_COMMAND, openExampleDraft } from './commands/openExampleProject';
 import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/exampleProjects';
-import { START_COMMAND, START_INTENT_CONTEXT_KEY, isQuickImportArg, startDraftTriggerOf, type StartContext, type StartIntent } from './types/startActions';
+import { START_COMMAND, START_INTENT_CONTEXT_KEY, START_PICK_PLACEHOLDER, START_PICK_TITLE, TOUR_LABEL, isQuickImportArg, startDraftTriggerOf, type StartContext, type StartIntent } from './types/startActions';
 import { createDraftPreview } from './providers/DraftPreviewPanel';
 import { DraftGeneration, draftPreviewEvents, trackedDraftPreview } from './providers/draftWiring';
 import { EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, walkthroughAutoOpens, type AutoDraft } from './services/draftTriggers';
@@ -181,6 +181,7 @@ import {
   START_SUGGESTIONS_ON_MESSAGE,
   START_SUGGESTIONS_SETTING,
   START_SUGGESTIONS_SETTING_OFF_MESSAGE,
+  UNDO_BUTTON,
   START_SUGGESTION_STATE_KEY,
   TURN_OFF_START_SUGGESTIONS_COMMAND,
   TURN_ON_START_SUGGESTIONS_COMMAND,
@@ -1139,7 +1140,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
   );
 
-  // "Watch Getting Started Video" works without a project too: the panel
+  // "Watch the One-Minute Tour" works without a project too: the panel
   // asks for a folder. The project path fills in
   // gettingStartedDeps below (late-bound, like editorProviderForFeedback).
   let gettingStartedDeps: GettingStartedDeps | undefined;
@@ -1178,7 +1179,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const draftPreview: DraftPreview = trackedDraftPreview(
     createDraftPreview(context.extensionUri, draftPreviewEvents((key) => telemetry.feature(key), (code) => telemetry.error(code))),
     {
-      claim: () => { sessionPrompts.claim('draft'); },
+      // Held at once, or as soon as the start suggestion's look hands the window on:
+      // nothing that was waiting (the AI helper offer, the upgrade notice) pops over a draft.
+      claim: () => { sessionPrompts.reserve('draft'); },
       executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
       feature: (key) => telemetry.feature(key),
       onKept: (draft) => onDraftKept(draft),
@@ -1200,18 +1203,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(
     vscode.commands.registerCommand(OPEN_EXAMPLE_PROJECT_COMMAND, () => runExampleDraft('example')),
-    // Open Example Diagram stays registered (hidden from the palette): the same draft.
-    vscode.commands.registerCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND, () => runExampleDraft('example')),
+    // Open Example Diagram stays registered (hidden from the palette) as an alias of the
+    // one example command, so old keybindings and the setup skill's mention keep working.
+    vscode.commands.registerCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND, () => vscode.commands.executeCommand(OPEN_EXAMPLE_PROJECT_COMMAND)),
   );
   context.subscriptions.push(
     vscode.commands.registerCommand(START_COMMAND, (arg?: unknown) => runStart(arg, {
       context: () => startContext(),
       // With its arguments: a direct import's { quick: true } (startActionArgs) is its quick path.
       executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
-      pick: (items) => vscode.window.showQuickPick(items, { title: 'Start your data model', placeHolder: 'How would you like to start?' }),
+      pick: (items) => vscode.window.showQuickPick(items, { title: START_PICK_TITLE, placeHolder: START_PICK_PLACEHOLDER }),
     })),
   );
-  // Bring In an Existing Data Model… (src/services/importGuide.ts): how to export from
+  // Bring In Your Data Model… (src/services/importGuide.ts): how to export from
   // Databricks, Snowflake, Power BI, Fabric and more, each card's import one click away.
   // Pre-registered, so it opens in an empty window too (its imports then say "Open a
   // folder first"). The project path fills in the folder's context and suggestion.
@@ -1704,6 +1708,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let hasDiagramsKey: boolean | undefined;
   const refreshDiagramsStatus = (): void => {
     const count = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length;
+    // The folder's first diagram was made while this window was open (a Keep, New
+    // Diagram…, an import, the user's AI assistant): the "This project has N diagrams"
+    // notice never names it, and nothing else pops over its canvas in this window.
+    if (hasDiagramsKey === false && count > 0) {
+      void context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
+      sessionPrompts.reserve('firstDiagram');
+    }
     if (hasDiagramsKey !== count > 0) {
       hasDiagramsKey = count > 0;
       void vscode.commands.executeCommand('setContext', 'erdStudio.hasDiagrams', hasDiagramsKey);
@@ -4361,7 +4372,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await saveStartSuggestionState({ ...startSuggestionState(), off: true });
       telemetry.feature('startSuggestionsOff');
       publishStartSuggestionsOff();
-      void vscode.window.showInformationMessage(START_SUGGESTIONS_OFF_MESSAGE);
+      void vscode.window.showInformationMessage(START_SUGGESTIONS_OFF_MESSAGE, UNDO_BUTTON).then((choice) => {
+        if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND);
+      });
     }),
     vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async () => {
       // A fresh start: the count and an earlier answer are forgotten too.
@@ -4502,17 +4515,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
       // Without dbt the guided setup and the dbt video don't apply: the notice
       // offers the Welcome page's logical-only start instead.
-      const OPEN = hasDbt ? 'Watch' : 'Open Welcome';
-      void vscode.window.showInformationMessage(
-        hasDbt
-          ? 'ERD Studio: new short getting-started video and a guided setup for your AI assistant ' +
-            '(Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor).'
-          : 'ERD Studio: a new Welcome page: draw a diagram, import DBML, and set up your AI assistant ' +
-            '(Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) to work on the same files.',
-        OPEN,
-        'Not now',
-      ).then((choice) => {
-        if (choice === OPEN) { void vscode.commands.executeCommand('erdStudio.showGettingStarted'); }
+      void vscode.window.showInformationMessage(UPGRADE_NOTICE_MESSAGE, TOUR_LABEL, 'Not now').then((choice) => {
+        if (choice === TOUR_LABEL) { void vscode.commands.executeCommand('erdStudio.showGettingStarted'); }
       });
     });
   }
@@ -4604,7 +4608,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             state: startSuggestionState,
             saveState: saveStartSuggestionState,
             show: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
-            info: (message) => { void vscode.window.showInformationMessage(message); },
+            info: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
             executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
             recordSuggested: recordStartSuggested,
             feature: (key) => telemetry.feature(key),
@@ -4674,9 +4678,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         });
       });
     } else if (
-      // Offered where there is a dbt project or ERD data to describe, never
-      // to a plain folder that has neither (logical-only, nothing yet).
+      // Offered where there are diagrams to describe ("read and write these
+      // diagrams"), never in a folder that has none yet: there the start
+      // (the draft, the sidebar) is the one thing on offer.
       !quietActivation &&
+      existingDiagrams.length > 0 &&
       installedCount === 0 &&
       !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)
     ) {

@@ -1,5 +1,5 @@
 /**
- * Welcome panel ("Welcome to ERD Studio") — the protocol between the panel's
+ * Welcome panel (the "ERD Studio Tour" tab) — the protocol between the panel's
  * webview and `GettingStartedPanel` (host), plus the pure HTML builder.
  *
  * Deliberately NOT part of the canvas `WebviewMessage` union: the canvas union
@@ -25,7 +25,11 @@ import {
 } from './aiAssistants';
 import {
   HOW_TO_CLIP_KEYS,
+  OPEN_FOLDER_LABEL,
   START_ACTIONS,
+  START_ACTION_LABELS,
+  TOUR_LABEL,
+  stepTitleOf,
   type HowToClipKey,
   type StartAction,
   type StartIntent,
@@ -389,14 +393,14 @@ export function setupReadyMessage(assistants: readonly AiAssistantId[], opts: { 
   const purpose = opts.logicalOnly ? ' to design your data model with you' : '';
   if (assistants.length === 0) {
     return `AI helper ready for ${joinNames(AI_ASSISTANTS.map((a) => a.name))}. ` +
-      `Install one, then start the guided setup${purpose} (the Welcome panel shows what to type).`;
+      `Install one, then start the guided setup${purpose} (the ERD Studio Tour tab shows what to type).`;
   }
   if (assistants.length === 1) {
     return `AI helper ready for ${assistantInfo(assistants[0]).name}: ${startLine(assistants[0])} there${purpose} ` +
       "(restart it if it's already open).";
   }
   return `AI helper ready for ${joinNames(assistantNames(assistants))}. Start the guided setup in any of them${purpose} ` +
-    "(the Welcome panel shows what to type; restart your assistant if it's already open).";
+    "(the ERD Studio Tour tab shows what to type; restart your assistant if it's already open).";
 }
 
 function startLine(id: AiAssistantId): string {
@@ -809,19 +813,18 @@ const SCRIPT = `
     if (source) { source.addEventListener('error', function () { fallBack(4); }); }
     setTimeout(function () { if (video.readyState < 1) { fallBack(0); } }, 5000);
 
-    // The narration is the point of the video, so start with sound. Only if the editor's
-    // autoplay policy refuses does it play muted (captions still carry it) behind a clear
-    // "Turn on sound" button — a muted start with a small corner button read as "no audio".
+    // Never by itself: the tour waits behind its play button on every page, and plays with
+    // sound once clicked. Only if the editor still refuses sound does it play muted
+    // (captions still carry it) behind a clear "Turn on sound" button.
     function startMuted() {
       video.muted = true;
       sound.hidden = false;
       var q = video.play();
       if (q && q.catch) { q.catch(function () { /* the viewer can press play */ }); }
     }
-    // The video plays by itself in an open folder: the dbt tour on the dbt page,
-    // the logical-first cut in a folder without dbt (the host picks the file by
-    // page). Without a folder the poster waits behind "Watch the one-minute
-    // tour" until the viewer asks for it.
+    // The dbt tour on the dbt page, the logical-first cut elsewhere (the host
+    // picks the file by page); either waits behind its play button until the
+    // viewer asks for it.
     startWithSound = function () {
       if (started || fellBack) { return; }
       started = true;
@@ -926,9 +929,9 @@ const SCRIPT = `
     return out.slice(0, -1).join(', ') + ' and ' + out[out.length - 1];
   }
 
-  // The How-to clips: one per start the extension ships (rendered up front by
+  // The short videos: one per start the extension ships (rendered up front by
   // the host, never built here). Each plays, with its narration, only when
-  // clicked (the tour above already autoplays). One voice at a time: a clip's play
+  // clicked, as the tour above does. One voice at a time: a clip's play
   // pauses the tour, the tour's pauses any clip; a clip's play is counted once per clip.
   var clips = document.querySelectorAll('.gs-howto__clip');
   var clipsPlayed = {};
@@ -958,7 +961,7 @@ const SCRIPT = `
     for (var i = 0; i < els.length; i++) {
       els[i].hidden = els[i].getAttribute('data-modes').split(' ').indexOf(mode) < 0;
     }
-    if (mode === 'dbt' || mode === 'logical') { startWithSound(); } else if (mode === 'nofolder') { offerTour(); }
+    offerTour();
   }
 
   function showStep(step, show) {
@@ -1055,27 +1058,37 @@ const SCRIPT = `
 })();
 `;
 
-/** Each How-to clip's caption (fixed text; no dbt word but on the dbt clip, shown on the dbt page only). */
+/**
+ * Each short video's caption: the label of the start it shows, without its
+ * ellipsis (one label per action; no dbt word but on the dbt clip, shown on
+ * the dbt page only).
+ */
 export const HOW_TO_CLIP_CAPTIONS: Readonly<Record<HowToClipKey, string>> = {
-  example: 'Open an example',
-  blank: 'Start a blank diagram',
-  importSqlDdl: 'Import SQL scripts',
-  importSemanticModel: 'Import a Power BI semantic model',
-  importDbmlFile: 'Import a DBML file',
-  drawFromDbt: 'Draw from dbt',
+  example: stepTitleOf(START_ACTION_LABELS.example),
+  blank: stepTitleOf(START_ACTION_LABELS.blank),
+  importSqlDdl: START_ACTION_LABELS.importSqlDdl,
+  importSemanticModel: START_ACTION_LABELS.importSemanticModel,
+  importDbmlFile: START_ACTION_LABELS.importDbmlFile,
+  drawFromDbt: START_ACTION_LABELS.drawFromDbt,
 };
 
-/** What each start's button says on the Welcome panel (HTML, fixed text). */
-export const START_LABELS: Readonly<Record<StartAction, string>> = {
-  convert: 'Convert to DBML',
-  drawFromDbt: 'Draw from dbt',
-  importSemanticModel: 'Import your Power BI semantic model',
-  importSqlDdl: 'Import your SQL scripts',
-  importDbmlFile: 'Import your DBML file',
-  blank: 'New diagram',
-  import: 'Import&hellip;',
-  example: 'Open an example&hellip;',
-};
+/** What each start's button says on the tab (HTML, fixed text): the one label per action. */
+export const START_LABELS: Readonly<Record<StartAction, string>> = Object.fromEntries(
+  START_ACTIONS.map((action) => [action, escapeHtml(START_ACTION_LABELS[action])]),
+) as Record<StartAction, string>;
+
+/** The tab's title: distinct from VS Code's own Welcome tab (the walkthrough's), named for the tour it leads with. */
+export const GETTING_STARTED_TAB_TITLE = 'ERD Studio Tour';
+
+/** The tab's heading. */
+export const GETTING_STARTED_HEADING = 'The one-minute tour';
+
+/** The short videos' section: one per way to start (none on the start path). */
+export const HOW_TO_SECTION_TITLE = 'Ways to start, in short videos';
+export const HOW_TO_SECTION_INTRO = 'Each one shows a start from the first click, in under a minute.';
+
+/** The upgrader's one notice (once per machine): what is new, in one line, and the tour. */
+export const UPGRADE_NOTICE_MESSAGE = 'ERD Studio has a one-minute tour, and can set up your AI assistant to work on the same files.';
 
 /** Step 3's row for one assistant: what to type, Copy, and an Open button where the editor can open it. */
 function launchRow(id: AiAssistantId): string {
@@ -1130,7 +1143,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         <source src="${escapeHtml(videoUri)}" type="video/mp4">
       </video>
       <button class="gs-video__sound" type="button" hidden>${ICON_SOUND}<span>Turn on sound</span></button>
-      <button class="gs-video__tour" type="button" hidden>${ICON_PLAY}<span ${only('unknown', 'dbt')}>Watch the one-minute dbt tour</span><span ${only('nofolder', 'logical')}>Watch the one-minute tour</span></button>`
+      <button class="gs-video__tour" type="button" hidden>${ICON_PLAY}<span>${escapeHtml(TOUR_LABEL)}</span></button>`
     : '';
   // The online copy of the cut this page plays: the host picks the logical cut for these pages.
   const videoOnlineTarget: GettingStartedExternalTarget = mode === 'logical' || mode === 'nofolder' ? 'videoOnlineLogical' : 'videoOnline';
@@ -1141,7 +1154,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     `<button class="gs-link" type="button" data-action="openExternal" data-target="${ASSISTANT_INSTALL_TARGETS[a.id]}">${escapeHtml(a.name)}</button>`,
   ).join('\n              ');
   const launchRows = AI_ASSISTANTS.map((a) => launchRow(a.id)).join('\n            ');
-  // How-to clips (§10 of docs/dev/draft-first.md): one per start the extension ships
+  // Short videos (§10 of docs/dev/draft-first.md): one per start the extension ships
   // (the host checked the files), the dbt one on the dbt page only. Narrated (MP3, as
   // the tour), captions burned in, played with sound by a click (no autoplay, so the
   // editor's autoplay policy never mutes it). No poster file: preload="metadata" loads
@@ -1159,8 +1172,9 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         </figure>`];
   });
   const howToSection = clipEls.length > 0
-    ? `<section class="gs-howto-section" aria-label="How-to clips">
-    <h2 class="gs-section-title">How-to clips</h2>
+    ? `<section class="gs-howto-section" aria-label="${escapeHtml(HOW_TO_SECTION_TITLE)}">
+    <h2 class="gs-section-title">${escapeHtml(HOW_TO_SECTION_TITLE)}</h2>
+    <p class="gs-section-intro">${escapeHtml(HOW_TO_SECTION_INTRO)}</p>
     <div class="gs-howto">
         ${clipEls.join('\n        ')}
     </div>
@@ -1173,19 +1187,19 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${escapeHtml(buildGettingStartedCsp(cspSource, nonce))}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Welcome to ERD Studio</title>
+<title>${escapeHtml(GETTING_STARTED_TAB_TITLE)}</title>
 <style nonce="${n}">${STYLE}</style>
 </head>
 <body>
 <main class="gs" data-project="${initialProject}" data-mode="${mode}">
   <header class="gs-hero">
     <p class="gs-hero__kicker">ERD Studio</p>
-    <h1 class="gs-hero__title">Welcome to ERD Studio</h1>
+    <h1 class="gs-hero__title">${escapeHtml(GETTING_STARTED_HEADING)}</h1>
     <p class="gs-hero__sub" ${only('unknown', 'nofolder', 'logical')}>Design your data model in Git. Let your AI build from it.</p>
     <p class="gs-hero__sub" ${only('dbt')}>Turn the dbt project you already have into a data model you can see.</p>
   </header>
 
-  <section class="gs-video${videoUri ? '' : ' gs-video--fallback'}" aria-label="Getting-started video">
+  <section class="gs-video${videoUri ? '' : ' gs-video--fallback'}" aria-label="The one-minute tour">
     ${player}
     <div class="gs-video__fallback">
       ${fallbackPoster}
@@ -1202,8 +1216,8 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 
   <section class="gs-noproject" aria-label="Open a folder">
     <h2 class="gs-sample__title">Open the folder your data model lives in</h2>
-    <p class="gs-sample__text">Any folder works: your design is saved in <code>.erd-studio/</code>, next to your code (a new project as DBML, an open format; a project from an older ERD Studio keeps its YAML and JSON files).</p>
-    <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">Open a folder&hellip;</button>
+    <p class="gs-sample__text">Any folder works: ERD Studio keeps your design in <code>.erd-studio/</code>, next to your code.</p>
+    <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">${escapeHtml(OPEN_FOLDER_LABEL)}</button>
     <p class="gs-noproject__example">Or see a finished data model first: ${startButton('example', 'gs-btn', false)}</p>
   </section>
 
@@ -1268,7 +1282,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
   ${howToSection}
 
   <footer class="gs-footer">
-    <span>Rewatch any time: ERD Studio sidebar &#9654; button, or Command Palette &rarr; <em>ERD Studio: Watch Getting Started Video</em>.</span>
+    <span>Rewatch any time: ERD Studio sidebar &#9654; button, or Command Palette &rarr; <em>ERD Studio: ${escapeHtml(TOUR_LABEL)}</em>.</span>
     <button class="gs-link" type="button" data-action="openExternal" data-target="dbtInstallDocs" ${only('unknown', 'dbt')}>New to dbt? How to install it${ICON_EXTERNAL}</button>
   </footer>
 </main>

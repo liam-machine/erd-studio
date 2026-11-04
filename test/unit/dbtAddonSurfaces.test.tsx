@@ -96,7 +96,7 @@ import { App } from '../../webview/App';
 import { useEditorStore } from '../../webview/store/editorStore';
 import { orientDraggedRelationship } from '../../webview/lib/relationshipDirection';
 import { evalWhen, type WhenContext } from './helpers/whenClause';
-import { START_INTENTS, START_INTENT_CONTEXT_KEY } from '../../src/types/startActions';
+import { START_INTENTS, START_INTENT_CONTEXT_KEY, moreStartsFor } from '../../src/types/startActions';
 
 // ---------------------------------------------------------------------------
 // The matcher
@@ -914,9 +914,11 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     for (const step of ['watch', 'convertDbt']) {
       expect(shown.some((s) => s.where === `walkthrough step ${step} title`), step).toBe(true);
     }
-    expect(shown.some((s) => s.where === 'walkthrough step convertDbt description' && s.text.includes('[draw from dbt]'))).toBe(true);
+    // Draw from dbt is one of its "More ways to start…" (the quick pick: moreStartsFor).
+    expect(shown.some((s) => s.where === 'walkthrough step convertDbt description' && s.text.includes('[More ways to start…]'))).toBe(true);
+    expect(moreStartsFor({ hasProject: true, hasDbt: true, storage: 'yaml' })).toContain('drawFromDbt');
     expect(shown.some((s) => s.where.startsWith('walkthrough step watchLogical'))).toBe(false);
-    expect(all('package.json')).toContain('draw your dbt project with Draw from dbt');
+    expect(all('package.json')).toContain('Draw your dbt project, explore the diagram');
     expect(all('package.json')).toContain('ERD Studio: Draw from dbt…');
     expect(all('package.json')).toContain('ERD Studio: Regenerate dbt selectors.yml');
     expect(shown.some((s) => s.where.startsWith('viewsWelcome') && DBT_WORD.test(s.text))).toBe(true);

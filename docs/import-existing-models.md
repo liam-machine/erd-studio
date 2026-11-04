@@ -2,7 +2,7 @@
 
 Your data model probably exists already: as tables in Databricks or Snowflake, as a Power BI or Fabric semantic model, in a database, or in a modelling tool. ERD Studio turns it into DBML, an open format your team can read, review and diff in Git, and that other DBML tools open. ERD Studio is free to use, source available under the PolyForm Shield License.
 
-The same steps are inside ERD Studio: run **ERD Studio: Bring In an Existing Data Model…**, or click **See how to bring it in** on the Welcome tab, the walkthrough or the empty **Diagrams** view. Each card there has a **Copy** button for its command and a button that runs the right import, with the source already chosen.
+The same steps are inside ERD Studio: run **ERD Studio: Bring In Your Data Model…**, or choose it under **More ways to start…** on the walkthrough or the empty **Diagrams** view. Each card there has a **Copy** button for its command and a button that runs the right import, with the source already chosen.
 
 Every import works the same way once you have the files: you pick the files (or a folder), a layer and a name, and ERD Studio shows what it will create before anything is written. **Review All…** lists every table, relationship and anything it left out. Nothing leaves your machine.
 

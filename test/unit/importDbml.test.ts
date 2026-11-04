@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { startCommandLink } from '../../src/types/startActions';
+import { moreStartsCommandLink, moreStartsFor, startCommandLink } from '../../src/types/startActions';
 import * as vscode from 'vscode';
 
 import { toDbmlRich } from '@erd-studio/core';
@@ -1102,12 +1102,12 @@ describe('Import DBML — contributed', () => {
     expect(dbt.contents.startsWith('No diagrams yet.')).toBe(true);
     // Each start goes through erdStudio.start, which counts the sidebar click (src/types/startActions.ts).
     expect(dbt.contents).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
-    expect(dbt.contents).toContain(`[blank](${startCommandLink('blank', 'sidebar')})`);
-    // The import start is Import… (DBML, SQL DDL or a semantic model), whose first source is this command.
-    expect(dbt.contents).toContain(`[from an import](${startCommandLink('import', 'sidebar')}) (DBML, an open format, no lock-in;`);
+    // The other starts (New Diagram…, Import…, whose first source is this command) are behind "More ways to start…".
+    expect(dbt.contents).toContain(`[More ways to start…](${moreStartsCommandLink('sidebar')})`);
+    expect(moreStartsFor({ hasProject: true, hasDbt: true })).toEqual(['blank', 'import', 'example']);
     const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when?.startsWith('erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading') && v.when.includes('erdStudio.startIntent == blank'))!;
-    expect(plain.contents.startsWith(`No diagrams yet.\n\n[New Diagram](${startCommandLink('blank', 'sidebar')})`)).toBe(true);
-    expect(plain.contents).toContain(`[import a data model](${startCommandLink('import', 'sidebar')}): DBML from dbdiagram.io or any DBML tool (an open format, no lock-in)`);
+    expect(plain.contents.startsWith(`No diagrams yet.\n\n[New Diagram…](${startCommandLink('blank', 'sidebar')})`)).toBe(true);
+    expect(moreStartsFor({ hasProject: true, hasDbt: false, found: [] })).toEqual(['example', 'import']);
     expect(plain.contents).not.toContain('drawFromDbt');
   });
 });

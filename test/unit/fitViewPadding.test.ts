@@ -10,6 +10,11 @@ import * as path from 'path';
 
 import {
   BESIDE_DETAIL_MIN_FLOW_PX,
+  FIT_MAX_ZOOM,
+  LARGE_DIAGRAM_TABLES,
+  READABLE_ZOOM,
+  clustersOf,
+  initialFitViewOptions,
   DETAIL_PANEL_WIDTH_PX,
   DISC_PANEL_GAP_PX,
   DISC_PANEL_MAX_WIDTH_PX,
@@ -122,5 +127,41 @@ describe('the panel widths match the CSS', () => {
     expect(rule(text, '.disc-panel')).toMatch(new RegExp(`max-width: ${DISC_PANEL_MAX_WIDTH_PX}px;`));
     expect(rule(text, '.react-flow__panel.disc-panel--beside-detail'))
       .toContain(`margin-right: calc(${DETAIL_PANEL_WIDTH_PX}px + ${PANEL_MARGIN_PX}px + ${DISC_PANEL_GAP_PX}px);`);
+  });
+});
+
+describe('the first-open fit: never past 100%, and a large diagram opens readable', () => {
+  it('fits a small diagram whole, never past 100% (no jump to 200% after the first table)', () => {
+    expect(FIT_MAX_ZOOM).toBe(1);
+    expect(INITIAL_FIT_VIEW_OPTIONS.maxZoom).toBe(1);
+    const one = initialFitViewOptions([{ id: 'a', type: 'model' }], []);
+    expect(one).toBe(INITIAL_FIT_VIEW_OPTIONS);
+    expect(one.nodes).toBeUndefined();
+  });
+
+  it('opens a 257-table diagram on its biggest cluster at a readable zoom', () => {
+    const nodes = Array.from({ length: 257 }, (_, i) => ({ id: `t${i}`, type: 'model' }));
+    // Two clusters: t0..t9 (10 tables) and t20..t49 (30 tables); the rest unrelated. A sticky note links too.
+    const edges = [
+      ...Array.from({ length: 9 }, (_, i) => ({ source: `t${i}`, target: `t${i + 1}` })),
+      ...Array.from({ length: 29 }, (_, i) => ({ source: `t20`, target: `t${21 + i}` })),
+      { source: 'note1', target: 't0' },
+    ];
+    const options = initialFitViewOptions([...nodes, { id: 'note1', type: 'annotation' }], edges);
+    expect(options.minZoom).toBe(READABLE_ZOOM);
+    expect(options.maxZoom).toBe(FIT_MAX_ZOOM);
+    expect((options.nodes ?? []).map((n) => n.id).sort()).toEqual(Array.from({ length: 30 }, (_, i) => `t${20 + i}`).sort());
+  });
+
+  it('a large diagram with no relationships opens on its centre at a readable zoom', () => {
+    const nodes = Array.from({ length: LARGE_DIAGRAM_TABLES }, (_, i) => ({ id: `t${i}`, type: 'model' }));
+    const options = initialFitViewOptions(nodes, []);
+    expect(options.nodes).toBeUndefined();
+    expect(options.minZoom).toBe(READABLE_ZOOM);
+  });
+
+  it('groups related tables, biggest first', () => {
+    expect(clustersOf(['a', 'b', 'c', 'd'], [{ source: 'c', target: 'd' }, { source: 'd', target: 'b' }, { source: 'x', target: 'a' }]))
+      .toEqual([['b', 'c', 'd'], ['a']]);
   });
 });

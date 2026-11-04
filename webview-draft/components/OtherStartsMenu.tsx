@@ -1,5 +1,5 @@
 /**
- * **Other Ways to Start ▾**: the draft's other starts that are not drawn as
+ * **More ways to start ▾**: the draft's other starts that are not drawn as
  * buttons. Each item posts its id only (`otherStart`); the host maps it to a
  * fixed command. Keyboard: Enter / Space / ArrowDown open it on the first
  * item, the arrows move, Escape closes it back to the button.

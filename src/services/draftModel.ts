@@ -43,6 +43,7 @@ import {
   type DbmlImportPlan,
   type DescribeDbmlImportOptions,
 } from './dbmlImport';
+import { IMPORT_GUIDE_LABEL, OPEN_FOLDER_LABEL, START_ACTION_LABELS } from '../types/startActions';
 import { readDbml, readDbmlImportLayout } from './dbmlImportParse';
 import { folderRank, type DbtDraft, type DraftScope, type DraftSkipped } from './dbtDraft';
 import { describeImportTable, relationshipLines, buildImportReview } from './importReview';
@@ -60,11 +61,12 @@ export const DRAFT_SCOPE_LIMIT = 12;
 
 /** The other starts' labels, as the banner and its menu show them. */
 export const DRAFT_OTHER_START_LABELS: Readonly<Record<DraftOtherStart, string>> = Object.freeze({
-  blank: 'Start Blank',
-  import: 'Import…',
-  guide: 'Bring In My Model…',
-  example: 'See an Example',
-  openFolder: 'Open a Folder…',
+  // One label per action (src/types/startActions.ts): the same words as every other surface.
+  blank: START_ACTION_LABELS.blank,
+  import: START_ACTION_LABELS.import,
+  guide: IMPORT_GUIDE_LABEL,
+  example: START_ACTION_LABELS.example,
+  openFolder: OPEN_FOLDER_LABEL,
 });
 
 export const KEEP_AS_DIAGRAM = 'Keep as Diagram';
@@ -379,7 +381,7 @@ const IMPORT_SOURCE_DRAFT: Readonly<Record<ImportPlanDraftInput['importSource'],
   example: 'example',
 };
 
-/** The banner for a coffee-shop example (in a folder, Keep This Example; without one, Open a Folder…). */
+/** The banner for a coffee-shop example (in a folder, Keep This Example; without one, Open Folder…). */
 function exampleBanner(headline: string, detail: string, hasFolder: boolean, notice?: string): { banner: DraftBanner; otherStarts: DraftOtherStartItem[] } {
   if (!hasFolder) {
     return {
@@ -722,7 +724,7 @@ export interface ExampleDbmlDraftInput {
 /**
  * The coffee shop with no folder open: planned in memory as Import DBML would
  * plan it into a new project (an empty Table Library, the default layers),
- * nothing to keep into; the primary is Open a Folder…. Rejects when the DBML
+ * nothing to keep into; the primary is Open Folder…. Rejects when the DBML
  * does not read (the bundled example always does).
  */
 export async function exampleDbmlDraft(input: ExampleDbmlDraftInput): Promise<Draft> {

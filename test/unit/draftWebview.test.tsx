@@ -2,7 +2,7 @@
 /**
  * The draft preview page (`webview-draft/DraftApp.tsx`, docs/dev/draft-first.md
  * §2) per fixture: the banner text and its buttons (one primary), the
- * switcher posting `scope`, Other Ways to Start posting `otherStart` ids, the
+ * switcher posting `scope`, More ways to start posting `otherStart` ids, the
  * busy and notice lines, the schema panel filtering the canvas locally, the
  * details drawer rendering text only, and the layout state.
  */
@@ -83,7 +83,7 @@ describe('small (a SQL find)', () => {
     expect(primaries(container)).toHaveLength(1);
     expect(primaries(container)[0].textContent).toBe('Keep as Diagram');
     const labels = buttons().map((b) => b.textContent);
-    expect(labels).toEqual(expect.arrayContaining(['Change options…', 'Show details', 'Keep as Diagram', 'Other Ways to Start▾', 'Discard']));
+    expect(labels).toEqual(expect.arrayContaining(['Change options…', 'Show details', 'Keep as Diagram', 'More ways to start▾', 'Discard']));
     // No switcher (no scopes) and no schema panel (one schema).
     expect(container.querySelector('select')).toBeNull();
     expect(container.querySelector('.draft-schemas')).toBeNull();
@@ -111,21 +111,21 @@ describe('small (a SQL find)', () => {
     expect(posts.slice(1)).toEqual([{ type: 'changeOptions' }, { type: 'discard' }]);
   });
 
-  it('Other Ways to Start lists the other starts and posts their ids only', () => {
+  it('More ways to start lists the other starts and posts their ids only', () => {
     const { posts } = renderPage(fixture('small'));
-    const menuButton = screen.getByRole('button', { name: /Other Ways to Start/ });
+    const menuButton = screen.getByRole('button', { name: /More ways to start/ });
     expect(menuButton.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(menuButton);
     const menu = screen.getByRole('menu');
-    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Start Blank', 'Import…', 'Bring In My Model…', 'See an Example']);
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Bring In My Model…' }));
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['New Diagram…', 'Import…', 'Bring In Your Data Model…', 'Open an Example…']);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Bring In Your Data Model…' }));
     expect(posts.at(-1)).toEqual({ type: 'otherStart', start: 'guide' });
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
   it('the menu is keyboard reachable: ArrowDown opens it, arrows move, Escape closes it', () => {
     renderPage(fixture('small'));
-    const menuButton = screen.getByRole('button', { name: /Other Ways to Start/ });
+    const menuButton = screen.getByRole('button', { name: /More ways to start/ });
     fireEvent.keyDown(menuButton, { key: 'ArrowDown' });
     const items = screen.getAllByRole('menuitem');
     expect(document.activeElement).toBe(items[0]);
@@ -261,50 +261,50 @@ describe('dbt (a folder switcher)', () => {
 
   it('lists only the starts the dbt draft offers', () => {
     renderPage(fixture('dbt'), vi.fn<Layout>(async () => ({})));
-    fireEvent.click(screen.getByRole('button', { name: /Other Ways to Start/ }));
-    expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Start Blank', 'Import…', 'See an Example']);
+    fireEvent.click(screen.getByRole('button', { name: /More ways to start/ }));
+    expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['New Diagram…', 'Import…', 'Open an Example…']);
   });
 });
 
 describe('example with no folder open', () => {
-  it('has Open a Folder… as the one primary, Discard, no Keep, no menu and no Change options…', async () => {
+  it('has Open Folder… as the one primary, Discard, no Keep, no menu and no Change options…', async () => {
     const { container, posts } = renderPage(fixture('example-no-folder'), vi.fn<Layout>(async () => ({})));
     await act(async () => {});
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Example: a coffee-shop star schema · 2 tables, 1 relationship · not saved');
     expect(screen.getByText('Open a folder to keep a copy of it.')).toBeTruthy();
     expect(primaries(container)).toHaveLength(1);
-    expect(primaries(container)[0].textContent).toBe('Open a Folder…');
+    expect(primaries(container)[0].textContent).toBe('Open Folder…');
     const labels = buttons().map((b) => b.textContent);
     expect(labels).not.toContain('Change options…');
     expect(labels.some((l) => /Keep/.test(l ?? ''))).toBe(false);
-    expect(labels.some((l) => /Other Ways to Start/.test(l ?? ''))).toBe(false);
+    expect(labels.some((l) => /More ways to start/.test(l ?? ''))).toBe(false);
     expect(labels).toContain('Discard');
     expect((screen.getByLabelText('Example') as HTMLSelectElement).value).toBe('example:coffee-shop');
     fireEvent.click(primaries(container)[0]);
     expect(posts.at(-1)).toEqual({ type: 'otherStart', start: 'openFolder' });
   });
 
-  it('example in a folder: Start Blank primary, Bring In My Model… beside it, Keep This Example quiet, Import… in the menu', () => {
+  it('example in a folder: New Diagram… primary, Bring In Your Data Model… beside it, Keep This Example quiet, Import… in the menu', () => {
     const base = fixture('example-no-folder');
     const view: DraftView = {
       ...base,
       banner: { ...base.banner, keepLabel: 'Keep This Example', primary: 'blank', shownStarts: ['guide'] },
       otherStarts: [
-        { id: 'blank', label: 'Start Blank' },
-        { id: 'guide', label: 'Bring In My Model…' },
+        { id: 'blank', label: 'New Diagram…' },
+        { id: 'guide', label: 'Bring In Your Data Model…' },
         { id: 'import', label: 'Import…' },
       ],
     };
     const { container, posts } = renderPage(view, vi.fn<Layout>(async () => ({})));
     expect(primaries(container)).toHaveLength(1);
-    expect(primaries(container)[0].textContent).toBe('Start Blank');
+    expect(primaries(container)[0].textContent).toBe('New Diagram…');
     const keep = screen.getByRole('button', { name: 'Keep This Example' });
     expect(keep.classList.contains('draft-button--quiet')).toBe(true);
     fireEvent.click(keep);
     expect(posts.at(-1)).toEqual({ type: 'keep' });
-    fireEvent.click(screen.getByRole('button', { name: 'Bring In My Model…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bring In Your Data Model…' }));
     expect(posts.at(-1)).toEqual({ type: 'otherStart', start: 'guide' });
-    fireEvent.click(screen.getByRole('button', { name: /Other Ways to Start/ }));
+    fireEvent.click(screen.getByRole('button', { name: /More ways to start/ }));
     expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Import…']);
   });
 });

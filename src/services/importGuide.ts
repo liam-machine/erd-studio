@@ -1,5 +1,5 @@
 /**
- * **Bring In an Existing Data Model…** (`erdStudio.showImportGuide`): the
+ * **Bring In Your Data Model…** (`erdStudio.showImportGuide`): the
  * guide to turning the model a team already has — in Databricks, Snowflake,
  * Power BI, Fabric, SQL Server, PostgreSQL, MySQL, a DBML tool or another
  * modelling tool — into DBML, an open format, with ERD Studio's own imports.
@@ -29,8 +29,7 @@ import type { SqlDialect } from './sqlDdlImport';
 import type { TelemetryFeature } from './telemetryPayload';
 import {
   IMPORT_GUIDE_COMMAND,
-  IMPORT_GUIDE_LINK_QUESTION,
-  IMPORT_GUIDE_LINK_TEXT,
+  IMPORT_GUIDE_LABEL,
   START_ACTION_COMMANDS,
   START_INTENT_REASONS,
   importGuideCommandLink,
@@ -38,12 +37,12 @@ import {
   type StartIntent,
 } from '../types/startActions';
 
-export { IMPORT_GUIDE_COMMAND, IMPORT_GUIDE_LINK_QUESTION, IMPORT_GUIDE_LINK_TEXT, importGuideCommandLink };
-/** The command's title, as the palette names it (category ERD Studio). */
-export const IMPORT_GUIDE_COMMAND_TITLE = 'Bring In an Existing Data Model…';
+export { IMPORT_GUIDE_COMMAND, IMPORT_GUIDE_LABEL, importGuideCommandLink };
+/** The command's title, as the palette names it (category ERD Studio): the guide's one label. */
+export const IMPORT_GUIDE_COMMAND_TITLE = IMPORT_GUIDE_LABEL;
 export const IMPORT_GUIDE_VIEW_TYPE = 'erdStudio.importGuide';
-/** The tab's title. */
-export const IMPORT_GUIDE_TITLE = 'Bring In Your Data Model';
+/** The tab's title: the same words, without the ellipsis. */
+export const IMPORT_GUIDE_TITLE = IMPORT_GUIDE_LABEL.replace(/…$/, '');
 
 // ---------------------------------------------------------------------------
 // Where it was opened from (the command's one optional argument)
@@ -66,10 +65,10 @@ export function parseImportGuideArgs(arg: unknown): ImportGuideSurface | undefin
   return (IMPORT_GUIDE_SURFACES as readonly unknown[]).includes(from) ? from as ImportGuideSurface : undefined;
 }
 
-/** The last item of Import…'s picker and of the start quick pick. */
+/** The last item of Import…'s picker and of the start quick pick ("More ways to start…"). */
 export const IMPORT_GUIDE_PICK_ITEM = {
-  label: '$(question) How do I export from Databricks, Snowflake, Power BI…?',
-  detail: 'Step by step: turn the data model you already have into a file ERD Studio imports',
+  label: `$(question) ${IMPORT_GUIDE_LABEL}`,
+  detail: 'How to export from Databricks, Snowflake, Power BI, Fabric and more',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -454,8 +453,8 @@ export function isImportGuideToHost(value: unknown): value is ImportGuideToHost 
 
 /** The page's intro: what it is for, in the wording rules' words. */
 export const IMPORT_GUIDE_INTRO =
-  'Turn the data model you already have into DBML, an open format your team can read, review and diff in Git, and that other DBML tools open. ERD Studio is free to use.';
-export const IMPORT_GUIDE_INTRO_DRY_RUN = 'Each import shows what it will bring in before it writes anything.';
+  'Turn the data model you already have into DBML, an open format your team can read, review and diff in Git.';
+export const IMPORT_GUIDE_INTRO_DRY_RUN = 'Each import shows you a draft first: nothing is saved until you keep it.';
 export const IMPORT_GUIDE_NO_FOLDER = 'Open the folder you keep your data model in first: each import saves into it.';
 
 export function buildImportGuideCsp(nonce: string): string {
@@ -581,7 +580,7 @@ export function buildImportGuideHtml(ctx: ImportGuideContext, nonce: string): st
   const noFolder = ctx.hasProject ? '' : `
   <div class="ig__nofolder">
     <p class="ig__nofolder-text">${escapeHtml(IMPORT_GUIDE_NO_FOLDER)}</p>
-    <button class="ig-btn" type="button" data-action="openFolder">Open a folder&hellip;</button>
+    <button class="ig-btn" type="button" data-action="openFolder">Open Folder&hellip;</button>
   </div>`;
   return `<!DOCTYPE html>
 <html lang="en">
@@ -594,7 +593,7 @@ export function buildImportGuideHtml(ctx: ImportGuideContext, nonce: string): st
 </head>
 <body>
 <main class="ig" data-project="${ctx.hasProject}">
-  <h1 class="ig__heading">Bring in your data model</h1>
+  <h1 class="ig__heading">${escapeHtml(IMPORT_GUIDE_TITLE)}</h1>
   <p class="ig__intro">${escapeHtml(IMPORT_GUIDE_INTRO)}</p>
   <p class="ig__note">${escapeHtml(IMPORT_GUIDE_INTRO_DRY_RUN)}</p>${noFolder}
   <ol class="ig__cards">${cards}

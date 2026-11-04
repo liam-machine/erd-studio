@@ -1,5 +1,5 @@
 /**
- * GettingStartedPanel — the "Welcome to ERD Studio" webview panel: the
+ * GettingStartedPanel — the "ERD Studio Tour" webview panel (the Welcome tab): the
  * getting-started video (the tour), a one-line project summary, the optional
  * AI cards (your AI assistant, set up the AI helper, start the guided setup)
  * and a small **How-to clips** section. Draft-first (`docs/dev/draft-first.md`
@@ -50,6 +50,7 @@ import {
   type GettingStartedToWebview,
   type ProjectSummary,
   type SetupOutcome,
+  GETTING_STARTED_TAB_TITLE,
 } from '../types/gettingStarted';
 import {
   HOW_TO_CLIPS,
@@ -84,7 +85,7 @@ import { hasDbtProjectFile } from '../services/projectDiscovery';
 import { venvActivateCommand } from '../services/dbtEnv';
 
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
-export const GETTING_STARTED_TITLE = 'Welcome to ERD Studio';
+export const GETTING_STARTED_TITLE = GETTING_STARTED_TAB_TITLE;
 
 /**
  * Shipped media, relative to the extension root (spec addendum V4/V5): the

@@ -4,7 +4,7 @@
  * Change options… link and the notes count with Show details, the switcher,
  * and the buttons — exactly one primary (`banner.primary`), the starts the
  * banner shows beside it, Keep as a quiet button when it is not the primary,
- * Other Ways to Start ▾ for the rest, and Discard.
+ * More ways to start ▾ for the rest, and Discard.
  */
 
 import type { DraftOtherStart, DraftView } from '../../src/types/draft';

@@ -9,20 +9,29 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import {
+  IMPORT_GUIDE_LABEL,
   INTENT_STARTS,
+  MORE_STARTS_LABEL,
+  OPEN_FOLDER_LABEL,
   START_ACTIONS,
+  START_ACTION_LABELS,
   START_ACTION_COMMANDS,
   START_COMMAND,
   START_INTENTS,
   START_INTENT_CONTEXT_KEY,
   START_SURFACES,
+  TOUR_LABEL,
   isStartIntent,
+  moreStartsCommandLink,
+  moreStartsFor,
   parseStartArgs,
+  parseStartPickArgs,
   startActionsFor,
   startActionsForIntent,
   startCommandLink,
   startIntentFor,
   startNeedsLook,
+  stepTitleOf,
   type DetectedImportSource,
   type StartAction,
   type StartContext,
@@ -33,7 +42,9 @@ import {
   START_FEATURES, START_INTENT_FEATURES, START_PICK_GUIDE_ITEM, START_PICK_ITEMS, recordStart, recordStartSuggested, runStart,
   type StartPickGuideItem, type StartPickItem,
 } from '../../src/commands/start';
-import { START_LABELS } from '../../src/types/gettingStarted';
+import { HOW_TO_CLIP_CAPTIONS, START_LABELS } from '../../src/types/gettingStarted';
+import { DRAFT_OTHER_START_LABELS } from '../../src/services/draftModel';
+import { HELP_ACTIONS } from '../../src/providers/HelpTreeProvider';
 import { IMPORT_MODEL_SOURCES } from '../../src/services/importSources';
 import { FEATURES } from '../../src/services/telemetryPayload';
 import { telemetry } from '../../src/services/telemetryService';
@@ -50,12 +61,14 @@ const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'
 
 /** Every start link in a piece of markdown, as `{ action, from }`, in order. */
 function startLinks(markdown: string): Array<{ action: StartAction; from: string }> {
-  return [...markdown.matchAll(/\(command:erdStudio\.start\?([^)]*)\)/g)].map(([, query]) => {
+  return [...markdown.matchAll(/\(command:erdStudio\.start\?([^)]*)\)/g)].flatMap(([, query]) => {
     const args = JSON.parse(decodeURIComponent(query)) as unknown[];
     expect(Array.isArray(args) && args.length === 1, query).toBe(true);
+    // A "More ways to start…" link: `{ from }` alone, checked by the surface tests.
+    if (parseStartPickArgs(args[0])) return [];
     const parsed = parseStartArgs(args[0]);
     expect(parsed, query).toBeDefined();
-    return parsed!;
+    return [parsed!];
   });
 }
 
@@ -243,10 +256,34 @@ describe('erdStudio.start', () => {
     const pick = vi.fn(async (items: Array<StartPickItem | StartPickGuideItem>) => items[items.length - 1]);
     await runStart(undefined, { context: () => ({ hasProject: false, hasDbt: false }), executeCommand, pick });
     expect(pick.mock.calls[0][0].map((i) => i.label)).toEqual([
-      '$(book) Open an Example…', '$(question) How do I export from Databricks, Snowflake, Power BI…?',
+      '$(book) Open an Example…', '$(question) Bring In Your Data Model…',
     ]);
     expect(executeCommand.mock.calls).toEqual([['erdStudio.showImportGuide', { from: 'startPick' }]]);
     expect(feature).not.toHaveBeenCalled();
+  });
+
+  it('"More ways to start…" offers the starts other than the surface\'s button, counted as that surface\'s', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    const executeCommand = vi.fn(async (..._args: unknown[]) => undefined);
+    const second = vi.fn(async (items: Array<StartPickItem | StartPickGuideItem>) => items[1]);
+    await runStart({ from: 'sidebar' }, { context: () => ({ hasProject: true, hasDbt: false, found: ['sqlDdl'] }), executeCommand, pick: second });
+    // The suggestion is the view's button: the pick holds the rest, then the guide.
+    expect(second.mock.calls[0][0].map((i) => ('action' in i ? i.action : 'guide'))).toEqual(['blank', 'import', 'example', 'guide']);
+    expect(feature.mock.calls).toEqual([['sidebarImport']]);
+    expect(executeCommand.mock.calls).toEqual([['erdStudio.importModel']]);
+
+    // The guide, opened from the walkthrough's link, says so.
+    const guide = vi.fn(async (items: Array<StartPickItem | StartPickGuideItem>) => items[items.length - 1]);
+    const ran = vi.fn(async (..._args: unknown[]) => undefined);
+    await runStart({ from: 'walkthrough' }, { context: () => ({ hasProject: true, hasDbt: true }), executeCommand: ran, pick: guide });
+    expect(guide.mock.calls[0][0].map((i) => ('action' in i ? i.action : 'guide'))).toEqual(['blank', 'import', 'example', 'guide']);
+    expect(ran.mock.calls).toEqual([['erdStudio.showImportGuide', { from: 'walkthrough' }]]);
+
+    // An empty window: its button is Open Folder…, so the pick keeps the example.
+    expect(moreStartsFor({ hasProject: false, hasDbt: false })).toEqual(['example']);
+    expect(parseStartPickArgs({ from: 'welcome' })).toBeUndefined();
+    expect(parseStartPickArgs({ from: 'sidebar', action: 'blank' })).toBeUndefined();
+    expect(parseStartPickArgs(JSON.parse(decodeURIComponent(moreStartsCommandLink('walkthrough').split('?')[1]))[0])).toBe('walkthrough');
   });
 
   it('records one key for recordStart', () => {
@@ -268,12 +305,18 @@ describe('the start surfaces in package.json', () => {
   const step = (id: string) => pkg.contributes.walkthroughs[0].steps.find((s) => s.id === id)!;
   const diagramsWelcome = pkg.contributes.viewsWelcome.filter((w) => w.view === 'erdStudio.domainTree');
 
-  /** A link alone on its line: VS Code draws it as a button. */
-  const buttons = (md: string) => md.split('\n').filter((line) => /^\[[^\]]+\]\(command:erdStudio\.start\?[^)]*\)$/.test(line));
-  const buttonLabel = (line: string) => /^\[([^\]]+)\]/.exec(line)![1];
+  /** A link alone on its line (paragraph): VS Code draws it as a full-width button. */
+  const isButtonLine = (line: string) => /^\[[^\]]+\]\([^)]*\)$/.test(line.trim());
+  const buttonLines = (md: string) => md.split('\n').filter(isButtonLine);
+  const labelOf = (line: string) => /\[([^\]]+)\]/.exec(line)![1];
+  /** Every markdown link: `[label](target)`. */
+  const allLinks = (md: string) => [...md.matchAll(/\[([^\]]+)\]\(([^)]*)\)/g)].map(([, label, target]) => ({ label, target }));
+  /** The text a reader reads: link labels kept, targets dropped, the button line left out. */
+  const proseLines = (md: string) => md.split('\n').filter((l) => l.trim() !== '' && !isButtonLine(l)).map((l) => l.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'));
+  const words = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
   /** `waiting`: the empty Diagrams view shows "Loading diagrams…" until the look publishes the suggestion. */
-  interface Window { name: string; keys: WhenContext; starts: StartAction[]; waiting?: boolean }
+  interface Window { name: string; keys: WhenContext; ctx: StartContext; starts: StartAction[]; waiting?: boolean }
 
   /**
    * Every window a start surface can be seen in, with the context keys the
@@ -281,7 +324,8 @@ describe('the start surfaces in package.json', () => {
    * dbt / storage / what-the-look-found combination, both before the look
    * has published `erdStudio.startIntent` and after.
    */
-  const windows: Window[] = [{ name: 'empty window', keys: { workspaceFolderCount: 0 }, starts: startActionsFor({ hasProject: false, hasDbt: false }) }];
+  const emptyCtx: StartContext = { hasProject: false, hasDbt: false };
+  const windows: Window[] = [{ name: 'empty window', keys: { workspaceFolderCount: 0 }, ctx: emptyCtx, starts: startActionsFor(emptyCtx) }];
   for (const hasDbt of [false, true]) for (const storage of STORAGES) for (const found of SOME_FOUND) for (const looked of [false, true]) {
     const ctx: StartContext = { hasProject: true, hasDbt, storage, hasDiagrams: false, found: looked ? found : undefined };
     const intent = startIntentFor(ctx);
@@ -296,6 +340,7 @@ describe('the start surfaces in package.json', () => {
         ...(storage ? { 'erdStudio.storage': storage } : {}),
         ...(looked ? { [START_INTENT_CONTEXT_KEY]: intent } : {}),
       },
+      ctx,
       starts: startActionsFor(ctx),
       // A folder without dbt whose files can decide: no start shows before the suggestion
       // (New Diagram first, then an import under the cursor, was the flash this prevents).
@@ -308,61 +353,81 @@ describe('the start surfaces in package.json', () => {
     for (const s of pkg.contributes.walkthroughs[0].steps) for (const link of startLinks(s.description)) expect(link.from).toBe('walkthrough');
   });
 
-  it.each(windows)('the empty Diagrams view offers exactly the rule\'s starts, one button for the suggestion: $name', ({ keys, starts, waiting }) => {
-    const shown = diagramsWelcome.filter((w) => evalWhen(w.when, keys));
-    if (waiting) {
+  /**
+   * The one shape every start surface has: the suggestion's button (an empty
+   * window's: Open Folder…), labelled with its action's one label, and one
+   * quiet "More ways to start…" link (inside a sentence, so never a second
+   * button) to the rest of the rule's starts.
+   */
+  function expectStartShape(md: string, w: Window, from: 'sidebar' | 'walkthrough'): void {
+    const btns = buttonLines(md);
+    expect(btns, md).toHaveLength(1);
+    if (w.keys.workspaceFolderCount === 0) {
+      expect(btns[0]).toBe(`[${OPEN_FOLDER_LABEL}](command:workbench.action.files.openFolder)`);
+    } else {
+      expect(startLinks(btns[0]).map((l) => l.action)).toEqual([w.starts[0]]);
+      expect(labelOf(btns[0])).toBe(START_ACTION_LABELS[w.starts[0]]);
+    }
+    const others = allLinks(md).filter((l) => !btns[0].includes(`(${l.target})`));
+    expect(others).toEqual([{ label: MORE_STARTS_LABEL, target: moreStartsCommandLink(from) }]);
+    // What that link offers, with the button, is exactly the rule's starts.
+    const offered = w.keys.workspaceFolderCount === 0 ? moreStartsFor(w.ctx) : [w.starts[0], ...moreStartsFor(w.ctx)];
+    expect(offered).toEqual(w.starts);
+  }
+
+  it.each(windows)('the empty Diagrams view: one button for the suggestion and one "More ways to start…" link: $name', (w) => {
+    const shown = diagramsWelcome.filter((e) => evalWhen(e.when, w.keys));
+    if (w.waiting) {
       // Until the suggestion is published: Loading, and no start that may change under the cursor.
-      expect(shown.map((w) => w.contents)).toEqual(['Loading diagrams…']);
+      expect(shown.map((e) => e.contents)).toEqual(['Loading diagrams…']);
       return;
     }
-    const links = shown.flatMap((w) => startLinks(w.contents).map((l) => l.action));
-    expect(links).toEqual(starts);
-    if (keys.workspaceFolderCount === 0) {
-      // Open Folder (VS Code's own command) is the empty window's button; the example a link.
-      expect(shown.flatMap((w) => w.contents.split('\n')).filter((l) => /^\[[^\]]+\]\([^)]*\)$/.test(l))).toEqual(['[Open Folder](command:workbench.action.files.openFolder)']);
-      return;
-    }
-    const startButtons = shown.flatMap((w) => buttons(w.contents));
-    expect(startButtons).toHaveLength(1);
-    expect(startLinks(startButtons[0])[0].action).toBe(starts[0]);
+    expect(shown).toHaveLength(1);
+    expectStartShape(shown[0].contents, w, 'sidebar');
   });
 
-  it.each(windows)('the empty Diagrams view has one button in all, and the tour as a quiet link: $name', ({ keys, waiting }) => {
-    // Any link alone on its line is a full-width button: "Get started" used
-    // to be one, a second blue button beside the start (onboarding story 03).
-    if (waiting) return; // Loading diagrams… (above)
-    const shown = diagramsWelcome.filter((w) => evalWhen(w.when, keys));
-    const anyButtons = shown.flatMap((w) => w.contents.split('\n')).filter((l) => /^\[[^\]]+\]\([^)]*\)$/.test(l));
-    expect(anyButtons).toHaveLength(1);
-    // Convert's entry keeps to Convert and the other starts; the ▶ button is above it.
-    const converting = keys['erdStudio.storage'] === 'yaml' || keys['erdStudio.storage'] === 'mixed';
-    if (!converting) expect(shown.map((w) => w.contents).join('\n')).toContain('](command:erdStudio.showGettingStarted)');
+  it.each(windows)('the empty Diagrams view stays short: at most two short lines, no question: $name', ({ keys, waiting }) => {
+    if (waiting) return;
+    for (const entry of diagramsWelcome.filter((e) => evalWhen(e.when, keys))) {
+      const prose = proseLines(entry.contents);
+      expect(prose.length, entry.contents).toBeLessThanOrEqual(2);
+      expect(words(prose.join(' ')), entry.contents).toBeLessThanOrEqual(22);
+      expect(prose.join(' '), 'no rhetorical questions').not.toContain('?');
+    }
+  });
+
+  it.each(windows)('the walkthrough has one start step, the same shape, its title the action\'s label: $name', (w) => {
+    const shown = pkg.contributes.walkthroughs[0].steps.filter((s) => evalWhen(s.when, w.keys));
+    const withStarts = shown.filter((s) => allLinks(s.description).some((l) => l.target.startsWith(`command:${START_COMMAND}`)));
+    expect(withStarts).toHaveLength(1);
+    const start = withStarts[0] as { title?: string; description: string };
+    expectStartShape(start.description, w, 'walkthrough');
+    if (w.keys.workspaceFolderCount !== 0) expect(start.title).toBe(stepTitleOf(START_ACTION_LABELS[w.starts[0]]));
+  });
+
+  it('every walkthrough step stays short: one button, at most one other link, no question', () => {
+    const steps = pkg.contributes.walkthroughs[0].steps as Array<{ id: string; title: string; description: string }>;
+    for (const s of steps) {
+      expect(buttonLines(s.description), s.id).toHaveLength(1);
+      expect(allLinks(s.description).length, s.id).toBeLessThanOrEqual(2);
+      expect(words(proseLines(s.description).join(' ')), s.id).toBeLessThanOrEqual(32);
+      expect(proseLines(s.description).join(' '), s.id).not.toContain('?');
+    }
+    // The walkthrough's subtitle fits VS Code's Welcome page without being cut off.
+    const { description } = pkg.contributes.walkthroughs[0] as unknown as { description: string };
+    expect(description.length).toBeLessThanOrEqual(60);
   });
 
   it('the Welcome tab is one click away in an empty window: the Diagrams view\'s ▶ button', () => {
-    // The Welcome tab's footer names it ("ERD Studio sidebar ▶ button"); in a project it is Help & Feedback's ▶ row.
+    // The tab's footer names it ("ERD Studio sidebar ▶ button"); in a project it is Help & Feedback's ▶ row.
     const play = pkg.contributes.menus['view/title'].find((m) => m.command === 'erdStudio.showGettingStarted');
     expect(play).toEqual({ command: 'erdStudio.showGettingStarted', when: 'view == erdStudio.domainTree && !erdStudio.hasProject', group: expect.stringMatching(/^navigation/) });
     expect(pkg.contributes.commands.find((c) => c.command === 'erdStudio.showGettingStarted')?.icon).toBe('$(play-circle)');
   });
 
-  it.each(windows)('the walkthrough offers the same starts in one start step, its button the suggestion: $name', ({ keys, starts }) => {
-    const shown = pkg.contributes.walkthroughs[0].steps.filter((s) => evalWhen(s.when, keys));
-    const withStarts = shown.filter((s) => startLinks(s.description).length > 0);
-    expect(withStarts).toHaveLength(1);
-    expect(startLinks(withStarts[0].description).map((l) => l.action)).toEqual(starts);
-    if (keys.workspaceFolderCount === 0) return; // Open Folder is that step's button (VS Code's own command).
-    const startButtons = buttons(withStarts[0].description);
-    expect(startButtons).toHaveLength(1);
-    expect(startLinks(startButtons[0])[0].action).toBe(starts[0]);
-  });
-
-  it('a direct import\'s button says what the Welcome panel and the quick pick say, and its step completes on that import', () => {
+  it('a direct import\'s step completes on that import, and no surface names the file', () => {
     for (const intent of ['importSemanticModel', 'importSqlDdl', 'importDbmlFile'] as const) {
       const entry = diagramsWelcome.find((w) => w.when?.includes(`${START_INTENT_CONTEXT_KEY} == ${intent}`))!;
-      expect(buttons(entry.contents).map(buttonLabel)).toEqual([START_LABELS[intent]]);
-      expect(buttons(step(intent).description).map(buttonLabel)).toEqual([START_LABELS[intent]]);
-      expect(START_PICK_ITEMS[intent].label).toContain(START_LABELS[intent]);
       expect(step(intent).completionEvents).toContain(`onCommand:${START_ACTION_COMMANDS[intent]}`);
       expect(step(intent).completionEvents).toContain('onCommand:erdStudio.start');
       // The kind of file only, never its name.
@@ -378,5 +443,62 @@ describe('the start surfaces in package.json', () => {
       'erdStudio.diagramsLoading', 'erdStudio.hasDbtProject', 'erdStudio.hasDiagrams', 'erdStudio.hasMultipleDbtProjects',
       'erdStudio.hasProject', 'erdStudio.startIntent', 'erdStudio.storage',
     ]);
+  });
+});
+
+describe('one label per action, on every surface', () => {
+  const titleOf = (id: string) => pkg.contributes.commands.find((c) => c.command === id) as { title?: string } | undefined;
+  const allText = () => {
+    const files = [
+      'package.json',
+      ...['src/types/startActions.ts', 'src/commands/start.ts', 'src/types/gettingStarted.ts', 'src/services/importGuide.ts', 'src/services/draftModel.ts',
+        'src/services/startSuggestion.ts', 'src/providers/HelpTreeProvider.ts', 'src/extension.ts', 'webview-draft/lib/wording.ts'],
+    ];
+    return files.map((f) => fs.readFileSync(path.join(__dirname, '../..', f), 'utf8')).join('\n');
+  };
+
+  it('every surface takes its label from START_ACTION_LABELS', () => {
+    for (const action of START_ACTIONS) {
+      expect(START_PICK_ITEMS[action].label.endsWith(` ${START_ACTION_LABELS[action]}`), action).toBe(true);
+      expect(START_LABELS[action].replace('&hellip;', '…'), action).toBe(START_ACTION_LABELS[action]);
+    }
+    expect(DRAFT_OTHER_START_LABELS).toEqual({
+      blank: START_ACTION_LABELS.blank, import: START_ACTION_LABELS.import, guide: IMPORT_GUIDE_LABEL,
+      example: START_ACTION_LABELS.example, openFolder: OPEN_FOLDER_LABEL,
+    });
+    expect(START_PICK_GUIDE_ITEM.label).toBe(`$(question) ${IMPORT_GUIDE_LABEL}`);
+    expect(HOW_TO_CLIP_CAPTIONS).toEqual({
+      example: 'Open an Example', blank: 'New Diagram', importSqlDdl: 'Import your SQL scripts',
+      importSemanticModel: 'Import your Power BI semantic model', importDbmlFile: 'Import your DBML file', drawFromDbt: 'Draw from dbt',
+    });
+  });
+
+  it('the palette says the same words', () => {
+    expect(titleOf('erdStudio.createDomain')?.title).toBe(START_ACTION_LABELS.blank);
+    expect(titleOf('erdStudio.importModel')?.title).toBe(START_ACTION_LABELS.import);
+    expect(titleOf('erdStudio.openExampleProject')?.title).toBe(START_ACTION_LABELS.example);
+    expect(titleOf('erdStudio.showImportGuide')?.title).toBe(IMPORT_GUIDE_LABEL);
+    expect(titleOf('erdStudio.showGettingStarted')?.title).toBe(TOUR_LABEL);
+    expect(HELP_ACTIONS.find((a) => a.command === 'erdStudio.showGettingStarted')?.label).toBe(TOUR_LABEL);
+  });
+
+  it('no surface keeps an old name for an action or for the tour', () => {
+    const text = allText();
+    for (const old of [
+      'See how to bring it in', 'Show Me How', 'Bring In an Existing Data Model', 'Bring In My Model', 'Start Blank', 'See an Example',
+      'Other Ways to Start', 'Create Diagram', 'Start from your SQL scripts', 'Start your data model', 'Watch Getting Started Video',
+      'Watch the video', 'one-minute dbt tour', 'Welcome to ERD Studio', 'Get started</a>', '[Get started]',
+    ]) expect(text, old).not.toContain(old);
+  });
+
+  it('says "an open format, no lock-in" once, where DBML is introduced, and "Each table is a file in .erd-studio/" once', () => {
+    const json = fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8');
+    expect(json.split('no lock-in').length - 1).toBe(1);
+    expect(pkg.contributes.viewsWelcome.find((w) => w.when === 'workspaceFolderCount == 0')!.contents).toContain('DBML files: an open format, no lock-in');
+    const sources = [json, ...['src/types/gettingStarted.ts', 'src/services/importGuide.ts', 'webview/components/EmptyCanvas/EmptyCanvas.tsx', 'webview/components/Toolbar/Toolbar.tsx']
+      .map((f) => fs.readFileSync(path.join(__dirname, '../..', f), 'utf8'))].join('\n');
+    expect(sources.split(/Each (?:table|one) is a file/).length - 1).toBe(1);
+    expect(sources).not.toContain('(DBML, an open format, no lock-in; SQL DDL scripts; or a Power BI semantic model)');
+    expect(sources).not.toContain('open formats, no lock-in');
   });
 });

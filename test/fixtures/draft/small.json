@@ -13,7 +13,7 @@
   "otherStarts": [
     {
       "id": "blank",
-      "label": "Start Blank"
+      "label": "New Diagram…"
     },
     {
       "id": "import",
@@ -21,11 +21,11 @@
     },
     {
       "id": "guide",
-      "label": "Bring In My Model…"
+      "label": "Bring In Your Data Model…"
     },
     {
       "id": "example",
-      "label": "See an Example"
+      "label": "Open an Example…"
     }
   ],
   "summary": {
