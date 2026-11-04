@@ -40,6 +40,7 @@ import { filterDisplayToSchema, tablesInSchema } from '../../webview-draft/lib/f
 import { FIRST_OPEN_LAYOUT, buildLayoutOptions, firstOpenLayoutOptions } from '../../webview/lib/firstOpenLayout';
 import { DEFAULT_ELK_OPTIONS, SPACING_PRESETS, detectLayerBound } from '../../webview/lib/elkLayout';
 import { transformSubjectArea } from '@erd-studio/renderer';
+import { countVisibleColumnRows, estimateNodeHeight, resolveNodeDimensions } from '@erd-studio/renderer/sizing';
 import type { DisplaySubjectArea } from '../../src/types/display';
 import type { DraftView } from '../../src/types/draft';
 import type { FkFlowEdge, TableFlowNode } from '@erd-studio/renderer/editor';
@@ -123,6 +124,23 @@ describe('layoutDraft', () => {
     expect(draftCall[3]).toEqual(canvasCall[3]);
     expect((draftCall[0] as TableFlowNode[]).map((n) => n.id)).toEqual((canvasCall[0] as TableFlowNode[]).map((n) => n.id));
     expect((draftCall[1] as FkFlowEdge[]).map((e) => e.id)).toEqual((canvasCall[1] as FkFlowEdge[]).map((e) => e.id));
+  });
+
+  it('sizes every table expanded, as ErdCanvas draws a diagram under NODE_THRESHOLD', async () => {
+    const base = fixture('small').display;
+    const wide = {
+      ...base.models[0],
+      columns: Array.from({ length: 12 }, (_, i) => ({ ...base.models[0].columns[0], name: `col_${i}` })),
+    };
+    const display: DisplaySubjectArea = { ...base, models: [wide, ...base.models.slice(1)] };
+    await layoutDraft(display);
+    const [nodes] = mockRunElkLayout.mock.calls[0] as [TableFlowNode[]];
+    const node = nodes.find((n) => n.id === wide.name)!;
+    expect(node.data.isExpanded).toBe(true);
+    const expandedHeight = resolveNodeDimensions(node).height;
+    const collapsedHeight = resolveNodeDimensions({ ...node, data: { ...node.data, isExpanded: false } }).height;
+    expect(expandedHeight).toBeGreaterThan(collapsedHeight);
+    expect(expandedHeight).toBe(estimateNodeHeight(countVisibleColumnRows({ ...node.data, isExpanded: true }), !!node.data.grain));
   });
 
   it('lays nothing out for an empty draft', async () => {

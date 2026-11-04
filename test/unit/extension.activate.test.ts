@@ -44,6 +44,8 @@ import { DBML_CONVERSION_DECLINED_KEY } from '../../src/providers/SemanticEditor
 
 import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import { answerDraft, closeDraft, flush, nextDraft } from './helpers/draftDriver';
+import { DraftPreviewPanel } from '../../src/providers/DraftPreviewPanel';
+import { DRAFT_SCOPE_EMPTY_NOTICE } from '../../src/services/draftModel';
 
 /** The message of the last "Found dbt project" line in the ERD Studio log (it no longer goes to console.log). */
 const lastFoundProjectLine = (): string | undefined =>
@@ -849,6 +851,8 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
       expect(draft.scopes?.label).toBe('Example');
       expect(draft.scopes?.current).toBe('example:coffee-shop');
       expect(draft.keep).toMatchObject({ writer: 'importDbml', importSource: 'example', target: { layer: 'main', name: 'coffee-shop' } });
+      // No caveat on the bundled example (where its relationships are saved, their `?`), as with no folder.
+      expect(draft.summary.notes).toBe(0);
       // Nothing written, nothing asked, before Keep.
       expect(listTree(ws)).toEqual([]);
       if (command === 'erdStudio.openExampleProject') {
@@ -2416,13 +2420,14 @@ describe('erdStudio.drawFromDbt', () => {
 
     // The switcher: silver, the same preview, its own layer and name.
     answerDraft({ type: 'scope', scopeId: folderScope(draft, 'silver') });
-    await run;
     const silver = await nextDraft(draft);
     expect(silver.scopes?.current).toBe(folderScope(draft, 'silver'));
     expect(silver.keep).toMatchObject({ writer: 'drawFromDbt', target: { layer: 'silver', name: 'silver', diagramFile: '.erd-studio/silver/diagrams/silver.dbml' } });
     expect(fs.existsSync(erd())).toBe(false);
     answerDraft({ type: 'keep' });
     await vi.waitFor(() => expect(opened()).toHaveLength(1));
+    // The first draft's flow waited on the switcher's re-entry, which kept.
+    await run;
 
     expect(input).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(erd(), 'layers.json'))).toBe(true);
@@ -2472,6 +2477,49 @@ describe('erdStudio.drawFromDbt', () => {
     expect(fs.existsSync(path.join(lib(), 'dim_project.yml'))).toBe(true);
     expect(fs.existsSync(path.join(lib(), 'silver'))).toBe(false);
     expect(fs.readFileSync(path.join(lib(), 'dim_customer.yml'), 'utf-8')).toBe(customerBefore);
+  });
+
+  it('the Folder switcher on a Change options… draft draws the chosen folder, with no picker or name box again', async () => {
+    await activate(context);
+    const { quickPick, input } = answer('silver', 'drawn');
+    const { run, draft } = await drawToDraft();
+    answerDraft({ type: 'changeOptions' });
+    const chosen = await nextDraft(draft);
+    expect(chosen.trigger).toBe('changeOptions');
+    expect(quickPick).toHaveBeenCalledTimes(1);
+    expect(input).toHaveBeenCalledTimes(1);
+    expect(chosen.scopes?.label).toBe('Folder');
+    answerDraft({ type: 'scope', scopeId: folderScope(chosen, 'gold') });
+    const gold = await nextDraft(chosen);
+    expect(gold.keep).toMatchObject({ writer: 'drawFromDbt', target: { layer: 'gold' } });
+    // The switcher's choice is the answer: the picker and the name box are not asked again.
+    expect(quickPick).toHaveBeenCalledTimes(1);
+    expect(input).toHaveBeenCalledTimes(1);
+    answerDraft({ type: 'discard' });
+    await run;
+  });
+
+  it('the Folder switcher on a folder with nothing to draw says so and brings the same draft back with a notice (never stuck on Drawing…)', async () => {
+    // A folder the switcher lists (its model declares columns) whose only model cannot be drawn (a name ERD Studio cannot use).
+    fs.mkdirSync(path.join(root, 'models', 'raw'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'models', 'raw', 'raw.yml'), 'version: 2\nmodels:\n  - name: raw..events\n    columns:\n      - name: id\n        data_type: INT\n');
+    await activate(context);
+    answer('silver');
+    // The folder names no layer and the project has diagrams: the layer pick asks (the first layer here).
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: readonly unknown[]) => items[0]) as never);
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
+    const { run, draft } = await drawToDraft();
+    const raw = draft.scopes?.options.find((o) => o.label === 'raw');
+    expect(raw, 'the switcher lists the folder by its model count').toBeDefined();
+    answerDraft({ type: 'scope', scopeId: raw!.id });
+    const back = await nextDraft(draft);
+    expect(back.id).toBe(draft.id);
+    expect(back.banner.notice).toBe(DRAFT_SCOPE_EMPTY_NOTICE);
+    expect(warn.mock.calls.some((c) => /none of the chosen models could be drawn/.test(String(c[0])))).toBe(true);
+    // Its buttons answer again.
+    answerDraft({ type: 'discard' });
+    await run;
+    expect(DraftPreviewPanel.currentPanel).toBeUndefined();
   });
 
   it('writes nothing when the draft is discarded, or Change options…\'s name box is cancelled', async () => {
@@ -3211,7 +3259,6 @@ describe('the start screen (first five minutes)', () => {
     const first = await nextDraft();
     const project = first.scopes!.options.find((o) => o.id.startsWith('exampleProject:'))!;
     answerDraft({ type: 'scope', scopeId: project.id });
-    await run;
     const second = await nextDraft(first);
     expect(second.source).toBe('exampleProject');
     expect(second.keep).toEqual({ writer: 'exampleProject', exampleId: project.id.slice('exampleProject:'.length) });
@@ -3219,6 +3266,16 @@ describe('the start screen (first five minutes)', () => {
     answerDraft({ type: 'keep' });
     // The folder dialog onward, unchanged (cancelled here: nothing written).
     await vi.waitFor(() => expect(dialog).toHaveBeenCalledTimes(1));
+    // A Keep that did not save: the same draft is asked again, so the buttons still answer.
+    await flush();
+    expect(DraftPreviewPanel.currentPanel?.shownDraft).toBe(second);
+    answerDraft({ type: 'keep' });
+    await vi.waitFor(() => expect(dialog).toHaveBeenCalledTimes(2));
+    await flush();
+    // Discard still closes the tab, and every flow ends.
+    answerDraft({ type: 'discard' });
+    await run;
+    expect(DraftPreviewPanel.currentPanel).toBeUndefined();
   });
 
   // The empty Diagrams view's, the walkthrough's and the Welcome tab's primary import is
@@ -3847,6 +3904,32 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
     expect(redrawn.summary.reusedTables).toBe(1);
     expect(keys()).toContain('draftRefreshed');
     expect(keys().filter((k) => k === 'draftShown')).toHaveLength(1);
+    expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'diagrams', 'shop.dbml'))).toBe(false);
+  });
+
+  it('staleness sees ERD Studio\'s own writes too: a library edit made in this window while the draft is open → planned again at Keep, nothing overwritten', async () => {
+    const { ownWrites } = await import('../../src/services/ownWriteTracker');
+    const ws = folderWith({ 'design/shop.dbml': DBML });
+    context = makeContext(root, { workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], SUGGESTION_USED]) });
+    await activate(context);
+    await settle();
+    await openDiagramsView();
+    const first = await nextDraft();
+    expect(first.summary.newTables).toBe(2);
+    // A canvas in this window writes a library table of the same name: an own write, which the watchers drop.
+    const table = path.join(ws, '.erd-studio', 'main', 'tables', 'main', 'customers.dbml');
+    fs.mkdirSync(path.dirname(table), { recursive: true });
+    fs.writeFileSync(path.join(ws, '.erd-studio', 'layers.json'), LAYERS_JSON);
+    ownWrites.recordWrite(path.join(ws, '.erd-studio', 'layers.json'));
+    const tableText = 'Table main.customers {\n  id int [pk]\n  name varchar\n  segment varchar\n}\n';
+    fs.writeFileSync(table, tableText);
+    ownWrites.recordWrite(table);
+
+    answerDraft({ type: 'keep' });
+    const redrawn = await nextDraft(first);
+    expect(redrawn.banner.notice).toBe('Your files changed, so the draft was redrawn. Check it and keep it again.');
+    expect(redrawn.summary.reusedTables).toBe(1);
+    expect(fs.readFileSync(table, 'utf-8')).toBe(tableText);
     expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'diagrams', 'shop.dbml'))).toBe(false);
   });
 

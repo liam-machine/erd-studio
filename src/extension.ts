@@ -136,7 +136,7 @@ import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt, type DbtDraftOptions, type DrawFromDbtDeps } from './commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND, importDbml, quickImportDbml, type ImportDbmlDeps, type ImportDraftOptions } from './commands/importDbml';
 import { OPEN_EXAMPLE_DIAGRAM_COMMAND } from './commands/openExampleDiagram';
-import { IMPORT_MODEL_COMMAND, runImportModel, vscodeFindFirstFile, vscodeImportModelDeps, vscodeStartLook } from './commands/importModel';
+import { IMPORT_MODEL_COMMAND, runImportModel, vscodeFindImportDbmlFile, vscodeImportModelDeps, vscodeStartLook } from './commands/importModel';
 import { IMPORT_SQL_DDL_COMMAND, importSqlDdl, quickImportSqlDdl, type ImportSqlDdlDeps } from './commands/importSqlDdl';
 import { sqlDialectOfImportArg } from './services/sqlDdlImport';
 import {
@@ -1347,9 +1347,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
   // Draft-first's staleness (§5.1): bumped by the semantic-dir watchers below for
-  // changes that are not ERD Studio's own (the watchers drop own writes); a Keep
-  // after a bump plans the draft again.
+  // changes that are not ERD Studio's own (the watchers drop own writes), and
+  // for ERD Studio's own writes under the semantic dir as each lands (a canvas
+  // edit in this window while a draft is open). A Keep after a bump plans the
+  // draft again, so it never writes a library snapshot older than the file.
   const draftGeneration = new DraftGeneration();
+  const draftSemanticRoot = path.normalize(path.join(workspaceRoot, semanticDir)) + path.sep;
+  context.subscriptions.push(ownWrites.onRecorded((filePath) => {
+    if (path.normalize(filePath).startsWith(draftSemanticRoot)) draftGeneration.bump();
+  }));
 
   // More than one dbt project in the workspace (multi-root or monorepo, #82):
   // reveal the sidebar's Select dbt Project button. Re-checked when folders
@@ -2572,8 +2578,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tableLibraryService,
     validateDomainName: validateNewSlug,
     onWritten: refreshAfterNewSubjectArea,
-    // "This folder has a DBML file": the Open dialog starts on it, chosen.
-    findDefaultFile: () => vscodeFindFirstFile(workspaceRoot, semanticDir, '**/*.[dD][bB][mM][lL]'),
+    // "This folder has a DBML file": the one the look counted (never ERD Studio's own export);
+    // the quick path drafts it and the Open dialog starts on it, chosen.
+    findDefaultFile: () => vscodeFindImportDbmlFile(workspaceRoot, semanticDir),
     ...(draft ? { draft } : {}),
   });
   const sqlDeps = (draft?: ImportDraftOptions): ImportSqlDdlDeps => ({

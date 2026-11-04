@@ -225,7 +225,7 @@ describe('a 6-table import (the coffee-shop example)', () => {
     expect(visibleLines(r.chooses[0].detail)).toEqual([
       '• 6 new tables.',
       '• 8 relationships saved in main/relationships/main.dbml.',
-      '• Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, 8 references were not optional.',
+      // No caveat about the references' `?` on the bundled example (as with no folder open).
       '• Layout: The diagram is laid out automatically when it opens, and that layout is saved in the diagram file.',
     ]);
     expect(IMPORT_MODAL_NOTES_SHOWN).toBe(2);

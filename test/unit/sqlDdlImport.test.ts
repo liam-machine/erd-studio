@@ -21,6 +21,7 @@ import {
   countCreateTablesWithColumns,
   detectSqlDialect,
   isSqlDialect,
+  looksLikeMigrationFile,
   looksLikeOracleSql,
   withoutSqlData,
   type SqlDdlFile,
@@ -665,6 +666,28 @@ describe('migrations: later schema changes applied in file order', () => {
     const spark = convert('databricks', [{ name: 'd.sql', text: 'CREATE TABLE main.s.t (id BIGINT);\nALTER TABLE main.s.t ADD COLUMNS (tags ARRAY<STRING> COMMENT \'labels\', amount DECIMAL(12,2));\n' }]);
     expect(spark.dbml).toMatch(/"tags" "ARRAY<STRING>" \[note: 'labels'\]|"tags" ARRAY<STRING> \[note: 'labels'\]/);
     expect(spark.dbml).toMatch(/"amount" DECIMAL\(12,2\)/i);
+  });
+
+  it('a teardown script read after the CREATEs (a folder or a multi-pick) drops nothing: its DROPs are skipped, as before', () => {
+    const result = convert('postgres', [
+      { name: 'sql/create_tables.sql', text: 'CREATE TABLE customer (id int PRIMARY KEY);\nCREATE TABLE orders (id int, customer_id int REFERENCES customer(id));\n' },
+      { name: 'sql/drop_tables.sql', text: 'DROP TABLE IF EXISTS orders;\nDROP TABLE IF EXISTS customer;\n' },
+    ]);
+    expect(result.tableCount).toBe(2);
+    expect(result.skipped).toContain('sql/drop_tables.sql: skipped 2 DROP statements');
+    expect(result.notes.some((n) => /later schema change/.test(n))).toBe(false);
+  });
+
+  it('a migration of DROPs alone is still applied when it is named like one', () => {
+    const files = [
+      { name: 'V1__init.sql', text: 'CREATE TABLE a (id int);\nCREATE TABLE b (id int);\n' },
+      { name: 'V2__drop_b.sql', text: 'DROP TABLE b;\n' },
+    ];
+    expect(convert('postgres', files).tableCount).toBe(1);
+    expect(convert('postgres', [files[0], { name: 'db/migrations/drop_b.sql', text: 'DROP TABLE b;\n' }]).tableCount).toBe(1);
+    expect(convert('postgres', [files[0], { name: '002_drop_b.sql', text: 'DROP TABLE b;\n' }]).tableCount).toBe(1);
+    expect(looksLikeMigrationFile('sql/teardown.sql')).toBe(false);
+    expect(looksLikeMigrationFile('reset.sql')).toBe(false);
   });
 
   it('a dump that drops each table before creating it is unchanged (nothing to drop yet)', () => {

@@ -45,6 +45,7 @@ import {
 import { OPEN_IT_BUTTON, oursMessage, showErrorWithActions, type ErrorActions } from '../services/commandErrors';
 import {
   EXAMPLE_COFFEE_SHOP_SCOPE_ID,
+  afterScope,
   draftFromExampleProject,
   exampleDbmlDraft,
   exampleScopes,
@@ -282,18 +283,28 @@ export async function openExampleDraft(deps: ExampleDraftDeps, scopeId: string =
         failed(err);
         return;
       }
-      const answer = await deps.preview.ask(draft);
-      if (answer.kind === 'keep') {
-        // Save This Example…: the folder dialog onward, unchanged.
-        const saved = await openExampleProject(deps.project, { example }).catch((err: unknown) => {
-          log.error(`[ERD Studio] ${OPEN_EXAMPLE_PROJECT_TITLE}: Save This Example failed:`, err);
-          return undefined;
-        });
-        answer.settle(saved ? { kept: true } : { kept: false });
-      } else if (answer.kind === 'scope') {
-        void again(answer.scopeId);
+      for (;;) {
+        const answer = await deps.preview.ask(draft);
+        if (answer.kind === 'keep') {
+          // Save This Example…: the folder dialog onward, unchanged.
+          const saved = await openExampleProject(deps.project, { example }).catch((err: unknown) => {
+            log.error(`[ERD Studio] ${OPEN_EXAMPLE_PROJECT_TITLE}: Save This Example failed:`, err);
+            return undefined;
+          });
+          answer.settle(saved ? { kept: true } : { kept: false });
+          if (saved) return;
+          // Not saved (the folder dialog cancelled, a refusal): the same draft answers again.
+          continue;
+        }
+        if (answer.kind === 'scope') {
+          const next = await afterScope(deps.preview, draft, () => again(answer.scopeId));
+          if (next) {
+            draft = next;
+            continue;
+          }
+        }
+        return;
       }
-      return;
     }
   }
 
@@ -321,9 +332,14 @@ export async function openExampleDraft(deps: ExampleDraftDeps, scopeId: string =
     failed(err);
     return;
   }
-  const answer = await deps.preview.ask(draft);
   // Nothing to keep into here: Open Folder… is the host's; the switcher re-enters.
-  if (answer.kind === 'scope') void again(answer.scopeId);
+  for (;;) {
+    const answer = await deps.preview.ask(draft);
+    if (answer.kind !== 'scope') return;
+    const next = await afterScope(deps.preview, draft, () => again(answer.scopeId));
+    if (!next) return;
+    draft = next;
+  }
 }
 
 function isDirectory(p: string): boolean {

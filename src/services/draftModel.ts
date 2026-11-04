@@ -25,6 +25,7 @@ import type {
   DraftKeep,
   DraftOtherStart,
   DraftOtherStartItem,
+  DraftPreview,
   DraftScopes,
   DraftSource,
   DraftSummary,
@@ -32,6 +33,7 @@ import type {
   DraftTrigger,
 } from '../types/draft';
 import type { DisplaySubjectArea } from '../types/display';
+import { createLogger } from './logger';
 import type { LayerConfig } from '../types/layer';
 import type { ColumnDef, Relationship, SemanticTable } from '../types/semantic';
 import {
@@ -75,6 +77,30 @@ export const SAVE_THIS_EXAMPLE = 'Save This Example…';
 
 /** The notice a redrawn draft carries (Keep found the files changed since it was drawn, §5.1). */
 export const DRAFT_REDRAWN_NOTICE = 'Your files changed, so the draft was redrawn. Check it and keep it again.';
+
+/** The notice a draft carries when a switcher choice drew nothing (§2.2): the draft before it stays. */
+export const DRAFT_SCOPE_EMPTY_NOTICE = 'Nothing could be drawn from that choice, so this draft is still the one on show.';
+
+const draftLog = createLogger('Draft');
+
+/**
+ * A switcher choice (`scope`, §2.2): run the flow's re-entry for it, then
+ * say whether the flow asks again. The page shows Drawing… until someone
+ * asks; a re-entry that asked nothing (nothing to draw, a problem it
+ * reported, a question cancelled, a throw) would leave it there with every
+ * button off, so `shown` comes back with {@link DRAFT_SCOPE_EMPTY_NOTICE}
+ * for the flow to ask again. Undefined when the re-entry showed a draft of
+ * its own or the tab closed: the flow stops.
+ */
+export async function afterScope(preview: DraftPreview, shown: Draft, reenter: () => unknown): Promise<Draft | undefined> {
+  try {
+    await reenter();
+  } catch (err) {
+    draftLog.error('A switcher choice failed:', err instanceof Error ? err.message : String(err));
+  }
+  if (!preview.showing || preview.showing() !== shown.id) return undefined;
+  return { ...shown, banner: { ...shown.banner, notice: DRAFT_SCOPE_EMPTY_NOTICE } };
+}
 
 /** The coffee-shop example's switcher entry. */
 export const EXAMPLE_COFFEE_SHOP_SCOPE_ID = 'example:coffee-shop';

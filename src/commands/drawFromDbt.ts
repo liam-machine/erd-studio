@@ -28,7 +28,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { dbtDraftFingerprint, dbtDraftScopes, draftFromDbt as buildDbtDraftView, DRAFT_REDRAWN_NOTICE } from '../services/draftModel';
+import { afterScope, dbtDraftFingerprint, dbtDraftScopes, draftFromDbt as buildDbtDraftView, DRAFT_REDRAWN_NOTICE } from '../services/draftModel';
 import type { Draft, DraftKeepOutcome, DraftPreview, DraftTarget, DraftTrigger } from '../types/draft';
 import {
   buildDbtDraft,
@@ -148,8 +148,12 @@ export interface DrawFromDbtResume {
   name?: string;
   /** The draft's Folder switcher: draw this folder scope (`listDraftScopes` id). */
   scopeId?: string;
-  /** A Keep after the project's files changed: write at once when the fingerprint is the same (§5.1). */
-  redraw?: { fingerprint: string; settle(outcome: DraftKeepOutcome): void };
+  /**
+   * A Keep after the project's files changed: write at once when the
+   * fingerprint is the same (§5.1). `draft` is the draft that Keep answered,
+   * asked again when this write does not land.
+   */
+  redraw?: { fingerprint: string; settle(outcome: DraftKeepOutcome): void; draft?: Draft };
 }
 
 export { ADD_LAYER_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON, NO_LAYERS_MESSAGE, OPEN_FILE_BUTTON, OPEN_IT_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
@@ -197,8 +201,13 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   const draftOptions = deps.draft;
   /** The automatic draft: nothing asked or shown before it (the Diagrams view shows the progress). */
   const quiet = draftOptions?.quiet === true;
-  /** Asked as before: no draft, Change options…, or a Try Again with the user's own pick. */
-  const asks = !draftOptions || draftOptions.trigger === 'changeOptions' || resume?.pick !== undefined;
+  /**
+   * Asked as before: no draft, Change options…, or a Try Again with the user's
+   * own pick. Never for the switcher's folder (`scopeId`), even on a Change
+   * options… draft: that choice is the answer.
+   */
+  const asks = !draftOptions
+    || ((draftOptions.trigger === 'changeOptions' || resume?.pick !== undefined) && resume?.scopeId === undefined);
   const say = (message: string): void => {
     if (quiet) log.info(`[ERD Studio] ${TITLE} (automatic draft, not shown): ${message}`);
     else void vscode.window.showInformationMessage(message);
@@ -401,21 +410,26 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
 
   // The draft (§5.2): the diagram as Keep writes it, read-only, before any write.
   let settleKeep: (outcome: DraftKeepOutcome) => void = () => {};
+  /** The draft the viewer answers: asked again after a Keep that did not save, or a switcher choice that drew nothing. */
+  let shown: Draft | undefined;
+  /** A redraw of the same plan: its Keep is already answered, so the first pass writes at once. */
+  let answered = false;
+  const diagramFile = path.relative(workspaceRoot, domainPath).split(path.sep).join('/');
+  const fingerprint = dbtDraftFingerprint(draft, draft.relationships, diagramFile);
   if (draftOptions) {
-    const diagramFile = path.relative(workspaceRoot, domainPath).split(path.sep).join('/');
-    const fingerprint = dbtDraftFingerprint(draft, draft.relationships, diagramFile);
     const redraw = resume?.redraw;
     if (redraw && redraw.fingerprint === fingerprint) {
       settleKeep = redraw.settle;
+      shown = redraw.draft;
+      answered = true;
     } else {
       if (redraw) {
         redraw.settle({ kept: false });
         telemetry.feature('draftRefreshed');
       }
       const target: DraftTarget = { layer: chosenLayer, layerLabel, name: slug, diagramFile };
-      let built: Draft;
       try {
-        built = buildDbtDraftView({
+        shown = buildDbtDraftView({
           draft,
           relationships: draft.relationships,
           scope: pick.scope,
@@ -436,7 +450,13 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
         }
         return undefined;
       }
-      const answer = await draftOptions.preview.ask(built);
+    }
+  }
+
+  for (;;) {
+    if (draftOptions && shown && !answered) {
+      const asked: Draft = shown;
+      const answer = await draftOptions.preview.ask(asked);
       switch (answer.kind) {
         case 'keep': {
           if (planGeneration !== undefined && draftOptions.generation?.() !== planGeneration) {
@@ -452,7 +472,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
                 layer: chosenLayer,
                 name: slug,
                 ...(pick.scope.kind === 'folder' ? { scopeId: pick.scope.id } : {}),
-                redraw: { fingerprint, settle },
+                redraw: { fingerprint, settle, draft: asked },
               });
             } finally {
               settle({ kept: false });
@@ -461,10 +481,13 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
           settleKeep = answer.settle;
           break;
         }
-        case 'scope':
-          // The switcher: the same preview, another folder (its own layer and name).
-          void Promise.resolve().then(() => drawFromDbt(deps, { scopeId: answer.scopeId }));
-          return undefined;
+        case 'scope': {
+          // The switcher: the same preview, another folder (its own layer and name), never quiet (the user chose it).
+          const next = await afterScope(draftOptions.preview, asked, () => drawFromDbt(loudDeps, { scopeId: answer.scopeId }));
+          if (!next) return undefined;
+          shown = next;
+          continue;
+        }
         case 'changeOptions':
           // The picker, layer pick and name box, as before, ending in a draft.
           void Promise.resolve().then(() => drawFromDbt({ ...deps, draft: { ...draftOptions, quiet: false, trigger: 'changeOptions' } }));
@@ -478,44 +501,56 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
           return undefined;
       }
     }
-  }
+    answered = false;
 
-  // Writes start here: every file, or none (`writeNewSubjectArea`). A project
-  // with no ERD folder yet gets the default layers.json first, exactly as Set
-  // Up Semantic Domains Directory writes it.
-  const outcome = await writeNewSubjectArea({
-    workspaceRoot,
-    semanticDir,
-    domainPath,
-    newTables: draft.newModels,
-    folder,
-    changedTables: routed.changed,
-    documentText: (tableNaming) => serializeDraftSubjectAreaDocument(buildDraftSubjectAreaDocument({
-      domain: slug,
-      layer: chosenLayer,
-      description: `Drawn from dbt: ${pick.scope.label}.`,
-      modelNames: draft.modelNames,
-      relationships: routed.kept,
-    }), tableNaming),
-    document: () => buildDraftSubjectAreaDocument({
-      domain: slug,
-      layer: chosenLayer,
-      description: `Drawn from dbt: ${pick.scope.label}.`,
-      modelNames: draft.modelNames,
-      relationships: [],
-    }) as unknown as Record<string, unknown>,
-  }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
-  if (!outcome.ok) {
-    reportWriteFailure();
-    // After its own message: the draft's buttons come back.
-    settleKeep({ kept: false });
-    return undefined;
+    // Writes start here: every file, or none (`writeNewSubjectArea`). A project
+    // with no ERD folder yet gets the default layers.json first, exactly as Set
+    // Up Semantic Domains Directory writes it.
+    const outcome = await writeNewSubjectArea({
+      workspaceRoot,
+      semanticDir,
+      domainPath,
+      newTables: draft.newModels,
+      folder,
+      changedTables: routed.changed,
+      documentText: (tableNaming) => serializeDraftSubjectAreaDocument(buildDraftSubjectAreaDocument({
+        domain: slug,
+        layer: chosenLayer,
+        description: `Drawn from dbt: ${pick.scope.label}.`,
+        modelNames: draft.modelNames,
+        relationships: routed.kept,
+      }), tableNaming),
+      document: () => buildDraftSubjectAreaDocument({
+        domain: slug,
+        layer: chosenLayer,
+        description: `Drawn from dbt: ${pick.scope.label}.`,
+        modelNames: draft.modelNames,
+        relationships: [],
+      }) as unknown as Record<string, unknown>,
+    }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
+    if (!outcome.ok) {
+      reportWriteFailure(outcome);
+      // After its own message: the draft's buttons come back, and answer again.
+      settleKeep({ kept: false });
+      settleKeep = () => {};
+      if (shown) continue;
+      return undefined;
+    }
+    const written = outcome.written;
+
+    deps.onWritten({ domainPath, modelNames: written, changedModelNames: outcome.changed });
+    telemetry.feature('drawFromDbt');
+    settleKeep({ kept: true });
+
+    await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE);
+
+    const notice = [describeDraftNotice(draft), describeUnstoredRelationships(unstored)].filter(Boolean).join(' ');
+    if (notice) { void vscode.window.showInformationMessage(notice); }
+    return { domainPath, draft };
   }
 
   /** Say why the write did not land (each case its own message). */
-
-  function reportWriteFailure(): void {
-    if (outcome.ok) return;
+  function reportWriteFailure(outcome: Extract<Awaited<ReturnType<typeof writeNewSubjectArea>>, { ok: false }>): void {
     const { error: err, undone } = outcome;
     if (outcome.nameTaken) {
       nameTaken();
@@ -545,17 +580,6 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     }
     showErrorWithActions(`${TITLE} couldn't save the diagram: ${why} ${result}`, { [TRY_AGAIN_BUTTON]: tryAgain });
   }
-  const written = outcome.written;
-
-  deps.onWritten({ domainPath, modelNames: written, changedModelNames: outcome.changed });
-  telemetry.feature('drawFromDbt');
-  settleKeep({ kept: true });
-
-  await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE);
-
-  const notice = [describeDraftNotice(draft), describeUnstoredRelationships(unstored)].filter(Boolean).join(' ');
-  if (notice) { void vscode.window.showInformationMessage(notice); }
-  return { domainPath, draft };
 }
 
 /** The refusal's own sentence, with Open File when it knows the file. */

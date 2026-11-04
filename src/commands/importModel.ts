@@ -231,6 +231,37 @@ export async function detectImportFindings(
   };
 }
 
+/**
+ * The `.dbml` file the look counted (§13.2: one listing for the look and the
+ * quick import): the first of the listing's first {@link DETECT_DBML_FILES}
+ * that is not ERD Studio's own export, or undefined. Import DBML…'s quick
+ * path drafts this one, and its Open dialog starts on it.
+ */
+export async function findImportDbmlFile(io: DetectImportIo, semanticDir: string): Promise<string | undefined> {
+  const listing = await listImportFiles(io.root, (f) => io.readDirectory(f), { semanticDir, cancelled: io.cancelled })
+    .catch(() => undefined);
+  for (const file of listing?.dbml.slice(0, DETECT_DBML_FILES) ?? []) {
+    if (io.cancelled?.()) return undefined;
+    const head = await io.readStart(file, 512).catch(() => undefined);
+    if (head !== undefined && !isOwnDbmlExport(head)) return file;
+  }
+  return undefined;
+}
+
+/** {@link findImportDbmlFile} on the open folder, or undefined after `timeoutMs`. */
+export async function vscodeFindImportDbmlFile(root: string, semanticDir: string, timeoutMs = DETECT_TIMEOUT_MS): Promise<string | undefined> {
+  const source = new vscode.CancellationTokenSource();
+  try {
+    return await withTimeout(findImportDbmlFile(vscodeDetectImportIo(root, source.token), semanticDir), timeoutMs, undefined);
+  } catch (err) {
+    log.warn('[ERD Studio] Import: could not look for a DBML file to suggest:', err);
+    return undefined;
+  } finally {
+    source.cancel();
+    source.dispose();
+  }
+}
+
 /** {@link detectImportFindings}' sources: Import…'s picker order. */
 export async function detectImportSources(io: DetectImportIo, semanticDir: string): Promise<Set<ImportModelSource>> {
   return (await detectImportFindings(io, semanticDir)).sources;
@@ -247,28 +278,6 @@ export function vscodeDetectImportIo(root: string, token?: vscode.CancellationTo
     size: (filePath) => fileSize(filePath),
     cancelled: () => token?.isCancellationRequested === true,
   };
-}
-
-/**
- * The first file matching `glob` in the open folder, by the look's own rules
- * (never under a tool's folder or the ERD Studio folder), or undefined after
- * `timeoutMs`: Import DBML…'s Open dialog starts on the DBML file the start
- * screen found (`ImportDbmlDeps.findDefaultFile`).
- */
-export async function vscodeFindFirstFile(root: string, semanticDir: string, glob: string, timeoutMs = DETECT_TIMEOUT_MS): Promise<string | undefined> {
-  const source = new vscode.CancellationTokenSource();
-  try {
-    const found = Promise.resolve(vscode.workspace.findFiles(
-      new vscode.RelativePattern(vscode.Uri.file(root), glob), detectExcludeGlob(semanticDir), 1, source.token,
-    )).then((files) => files[0]?.fsPath);
-    return await withTimeout(found, timeoutMs, undefined);
-  } catch (err) {
-    log.warn('[ERD Studio] Import: could not look for a file to suggest:', err);
-    return undefined;
-  } finally {
-    source.cancel();
-    source.dispose();
-  }
 }
 
 /**

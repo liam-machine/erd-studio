@@ -358,12 +358,13 @@ export type DraftKeepOutcome =
  *
  * After the answer the page:
  *  - `keep`: shows Saving… until the flow calls `settle` exactly once
- *    (`{ kept: true }` closes it; `{ kept: false }` brings the buttons back).
- *    A flow that redraws (files changed since) settles `{ kept: false }`
- *    and then calls `ask` with the new draft;
+ *    (`{ kept: true }` closes it; `{ kept: false }` brings the buttons back,
+ *    and the flow then calls `ask` again with the SAME draft object, so the
+ *    buttons keep answering). A flow that redraws (files changed since)
+ *    settles `{ kept: false }` and then calls `ask` with the new draft;
  *  - `scope`: shows Drawing… until the flow calls `ask` with the next draft
  *    (or `ask` again with the same draft and a `banner.notice` when that
- *    scope drew nothing);
+ *    scope drew nothing: {@link afterScope});
  *  - `changeOptions`, `discard`, `otherStart`: has closed;
  *  - `closed`: the user closed the tab;
  *  - `superseded`: another `ask` took the page over (a newer draft from
@@ -393,6 +394,12 @@ export interface DraftPreview {
   ask(draft: Draft): Promise<DraftAnswer>;
   /** Whether the tab is open. */
   isOpen(): boolean;
+  /**
+   * The id of the draft on show (undefined: no tab). After a switcher choice
+   * the flow re-enters, then compares: still its own draft means the
+   * re-entry drew nothing, so it asks that draft again with a notice.
+   */
+  showing?(): string | undefined;
   /** Close the tab; a pending `ask` resolves `closed`. */
   close(): void;
 }

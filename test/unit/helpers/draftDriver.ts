@@ -40,6 +40,7 @@ export function fakeDraftPreview(answers: ScriptedAnswer[] = []): FakeDraftPrevi
     settled,
     get last() { return drafts.at(-1); },
     isOpen: () => open,
+    showing: () => (open ? drafts.at(-1)?.id : undefined),
     close: () => { open = false; },
     async ask(draft: Draft): Promise<DraftAnswer> {
       drafts.push(draft);

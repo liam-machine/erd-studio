@@ -17,8 +17,12 @@ import type { NodePosition } from '../../src/types/semantic';
 export async function layoutDraft(display: DisplaySubjectArea): Promise<Record<string, NodePosition>> {
   // Sized as ErdCanvas draws them: every table's columns open below NODE_THRESHOLD.
   const expanded = display.models.length < NODE_THRESHOLD;
+  // `isExpanded` here only sizes the edge handles; the nodes ELK sizes must
+  // carry the expansion themselves, or every table is estimated collapsed.
   const { nodes, edges } = transformSubjectArea(display, { isExpanded: () => expanded });
-  const tableNodes = nodes.filter((n): n is TableFlowNode => n.type === 'model');
+  const tableNodes = nodes
+    .filter((n): n is TableFlowNode => n.type === 'model')
+    .map((n) => ({ ...n, data: { ...n.data, isExpanded: expanded } }));
   const fkEdges = edges.filter((e): e is FkFlowEdge => e.type === 'fk');
   if (tableNodes.length === 0) return {};
   return runElkLayout(

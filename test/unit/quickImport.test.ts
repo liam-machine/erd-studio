@@ -494,14 +494,21 @@ describe('Draft-first: the quick path ends in the draft (docs/dev/draft-first.md
   it('staleness: files changed since the draft but the plan is the same → written at once; another plan → redrawn with the notice', async () => {
     copy('sql-ddl/postgres', 'database');
     let generation = 0;
-    // Same plan: a change elsewhere in the folder.
+    // Same plan: a change elsewhere in the folder, between the draft (the plan) and Keep.
     const same = draft(['keep'], { generation: () => generation });
-    const run = quickImportSqlDdl({ ...sqlDeps(sqlUi(), dbmlUi(), { plain: true }), draft: same.options });
-    generation += 1;
-    const written = await run;
+    const sameAsk = same.preview.ask.bind(same.preview);
+    same.preview.ask = async (d) => {
+      const answer = await sameAsk(d);
+      generation += 1;
+      return answer;
+    };
+    const written = await quickImportSqlDdl({ ...sqlDeps(sqlUi(), dbmlUi(), { plain: true }), draft: same.options });
     expect(written).toBeDefined();
+    // Planned again, the same plan: written at once, the one Keep settled kept, no second draft.
     expect(same.preview.drafts).toHaveLength(1);
     expect(same.preview.settled).toEqual([{ kept: true }]);
+    expect(fs.existsSync(written!.domainPath)).toBe(true);
+    expect(features()).not.toContain('draftRefreshed');
 
     // Another plan: a table of the same name appeared in the library since.
     fs.rmSync(erd(), { recursive: true });
@@ -526,6 +533,28 @@ describe('Draft-first: the quick path ends in the draft (docs/dev/draft-first.md
     expect(preview.settled[0]).toEqual({ kept: false });
     expect(preview.drafts[1].banner.notice).toBe(DRAFT_REDRAWN_NOTICE);
     expect(features()).toContain('draftRefreshed');
+  });
+
+  it('a Keep that does not save (the name was taken since) says why, even on the automatic draft, then asks the same draft again', async () => {
+    copy('sql-ddl/postgres', 'database');
+    const ui = dbmlUi();
+    const { preview, options } = draft(['keep', 'discard'], { quiet: true });
+    const ask = preview.ask.bind(preview);
+    preview.ask = async (d) => {
+      if (preview.drafts.length === 0) {
+        // Between the draft and Keep: another window saves a diagram of the same name.
+        fs.mkdirSync(erd('main', 'diagrams'), { recursive: true });
+        fs.writeFileSync(erd('main', 'diagrams', 'sales.dbml'), 'Project sales {\n}\n');
+      }
+      return ask(d);
+    };
+    expect(await quickImportSqlDdl({ ...sqlDeps(sqlUi(), ui, { plain: true }), draft: options })).toBeUndefined();
+    expect(preview.settled).toEqual([{ kept: false }]);
+    // The same Draft object again, so the page's buttons keep answering (Discard here).
+    expect(preview.drafts).toHaveLength(2);
+    expect(preview.drafts[1]).toBe(preview.drafts[0]);
+    // Shown, not only logged: the user pressed Keep and is waiting on it.
+    expect(ui.errors.some((e) => /sales/.test(e) && /already/i.test(e))).toBe(true);
   });
 
   it('quiet (the automatic draft): nothing asked or shown, and an early end counts no cancel and no invalid', async () => {

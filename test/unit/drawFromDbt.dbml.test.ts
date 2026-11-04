@@ -216,6 +216,27 @@ describe('Draw from dbt ending in the draft (Draft-first §5.2)', () => {
     expect(snapshot()).toEqual(reference);
   });
 
+  it('a Keep that does not save (the name was taken since) says why and asks the same draft again; a second Keep is answered', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const errors = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    const target = erd('silver', 'diagrams', 'visits.dbml');
+    const preview = fakeDraftPreview(['keep', 'keep']);
+    const ask = preview.ask.bind(preview);
+    preview.ask = async (d) => {
+      // Before the first Keep: another window saves a diagram of the same name. Before the second: it is gone again.
+      if (preview.drafts.length === 0) fs.writeFileSync(target, 'Project visits {\n}\n');
+      else fs.rmSync(target);
+      return ask(d);
+    };
+    const result = await drawFromDbt({ ...deps(), draft: { preview, trigger: 'changeOptions' } });
+    expect(errors.mock.calls.some((c) => /visits/.test(String(c[0])))).toBe(true);
+    expect(preview.drafts).toHaveLength(2);
+    expect(preview.drafts[1]).toBe(preview.drafts[0]);
+    expect(preview.settled).toEqual([{ kept: false }, { kept: true }]);
+    expect(result?.domainPath).toBe(target);
+    expect(fs.readFileSync(target, 'utf-8')).not.toBe('Project visits {\n}\n');
+  });
+
   it('Discard writes nothing; a change outside ERD Studio that leaves the plan the same writes at once', async () => {
     vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
     const before = snapshot();

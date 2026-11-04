@@ -143,7 +143,13 @@ export class DraftPreviewPanel {
   static show(extensionUri: vscode.Uri, draft: Draft, events: Partial<DraftPreviewEvents> = {}): Promise<DraftAnswer> {
     const preserveFocus = draft.trigger === 'sidebar';
     let page = DraftPreviewPanel.current;
-    if (page) {
+    if (page && page.draft === draft) {
+      // The same draft asked again (after a Keep that did not save): the page
+      // keeps what it shows (its buttons and notice already came back), and a
+      // choice made in between is answered now.
+      page.events = events;
+      page.answer({ kind: 'superseded' });
+    } else if (page) {
       page.events = events;
       page.redraw(draft);
       page.panel.reveal(undefined, preserveFocus);
@@ -248,8 +254,8 @@ export class DraftPreviewPanel {
       return;
     }
     if (!this.pending) {
-      // Nobody is asking (a Keep that did not save, before the flow asks
-      // again): keep the choice for the next ask of this same draft.
+      // Nobody is asking (a Keep that did not save, before the flow asks the
+      // same draft again): keep the choice for that ask.
       this.queued = { viewId: this.view.id, message };
       return;
     }
@@ -335,6 +341,7 @@ export function createDraftPreview(extensionUri: vscode.Uri, events: Partial<Dra
   return {
     ask: (draft) => DraftPreviewPanel.show(extensionUri, draft, events),
     isOpen: () => DraftPreviewPanel.currentPanel !== undefined,
+    showing: () => DraftPreviewPanel.currentPanel?.shownDraft.id,
     close: () => DraftPreviewPanel.close(),
   };
 }

@@ -82,7 +82,7 @@ A labelled `<select>` in the banner, only when there is a choice:
 - **Several semantic models** (`Model`): each model the folder holds, by path, at most 12; the draft starts on the first.
 - **Examples** (`Example`): `Coffee shop` (6 tables) then the eight `docs/examples` projects in `docs/examples/README.md`'s order.
 
-Changing it answers `scope`; the page shows **Drawing…** until the flow asks with the next draft. A scope that draws nothing comes back as the same draft with a notice (`None of the models in staging/raw have columns to draw.`).
+Changing it answers `scope`; the page shows **Drawing…** until the flow asks with the next draft. A scope that draws nothing comes back as the same draft with a notice: the flow awaits its re-entry (`afterScope`, `draftModel.ts`), and when the preview still shows its own draft (`DraftPreview.showing()`) it asks that draft again with `DRAFT_SCOPE_EMPTY_NOTICE`. A switcher re-entry is never quiet: the user chose it, so a reason it stops is shown.
 
 ### 2.3 Large drafts and the schema panel
 
@@ -165,8 +165,8 @@ The three quick imports, the step-by-step imports and the coffee-shop example al
 
 - `ImportDbmlDeps` gains `draft?: ImportDraftOptions` — `{ preview: DraftPreview; trigger: DraftTrigger; quiet?: boolean; scopes?: DraftScopes; onScope?(scopeId: string): unknown; generation?(): number }`.
 - With `draft`, step 5 builds the `Draft` (`draftFromImportPlan`, P1) from the plan it just made and **awaits `preview.ask(draft)` in place of `dryRun`**. Without it (tests' fakes, a host with no preview) the modal stays, as the fallback.
-- `keep` → step 6 unchanged (`writeNewSubjectArea`, the same error handling), then `settle({ kept: true })` and the diagram opens; a write that fails settles `{ kept: false }` after its own message.
-- **Staleness.** The plan is the one shown; if the semantic dir changed since it was made (`generation()`, bumped by the existing watchers for writes that are not ERD Studio's own), Keep settles `{ kept: false }`, re-enters `importDbml` with the same file, layer and name (`ImportDbmlResume.redraw: fingerprint`) and plans again: the same `importPlanFingerprint` → it writes at once; another → it asks again with the notice line.
+- `keep` → step 6 unchanged (`writeNewSubjectArea`, the same error handling), then `settle({ kept: true })` and the diagram opens; a write that fails settles `{ kept: false }` after its own message, then asks the SAME `Draft` object again, so the page's buttons keep answering (the panel replays a choice made in between, and a same-object ask redraws nothing). From the Keep on, the automatic draft's quiet UI is dropped: what follows the Keep (a write failure, a redraw's name box, Try Again) is said.
+- **Staleness.** The plan is the one shown; if the semantic dir changed since it was made (`generation()`, bumped by the existing watchers for writes that are not ERD Studio's own, and by `ownWrites.onRecorded` for ERD Studio's own writes under the semantic dir, such as a canvas edit in this window while the draft is open), Keep settles `{ kept: false }`, re-enters `importDbml` with the same file, layer and name (`ImportDbmlResume.redraw: fingerprint`) and plans again: the same `importPlanFingerprint` → it writes at once; another → it asks again with the notice line.
 - `changeOptions` → the existing `deps.changeOptions(chosen)` (quick paths only; the step-by-step flow has no link). The step-by-step flow it runs ends in a draft again (`trigger: 'changeOptions'`).
 - `scope` → `draft.onScope(scopeId)` (the semantic model or example caller re-enters with that choice and the same preview).
 - `discard` / `closed` → the source's `*Cancelled` key plus `draftDiscarded` / `draftClosed`. `otherStart` → the mapped command. `superseded` → stop, counting nothing.

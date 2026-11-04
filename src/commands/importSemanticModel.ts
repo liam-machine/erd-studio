@@ -191,9 +191,13 @@ export async function importSemanticModel(
           description: e.kind === 'tmdl' ? 'TMDL' : 'model.bim',
         })),
       },
-      onScope: (id) => (quick
-        ? importSemanticModel(deps, { folder, model: id })
-        : importSemanticModel(deps, undefined, { folder, model: id })),
+      // The user's own choice: never quiet from here on (a model that does not convert says why).
+      onScope: (id) => {
+        const loud = deps.draft?.quiet ? { ...deps, draft: { ...deps.draft, quiet: false } } : deps;
+        return quick
+          ? importSemanticModel(loud, { folder, model: id })
+          : importSemanticModel(loud, undefined, { folder, model: id });
+      },
     };
   } else if (entries.length > 1) {
     const picked = await ui.pickModel(

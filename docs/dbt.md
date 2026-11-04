@@ -26,7 +26,7 @@ The video and the picture show a project from before ERD Studio 2.0, with YAML t
 
 The draft is a starting point for your design: it is saved as ordinary ERD Studio files you can change, and the Physical stage is still read from dbt every time, never saved. An empty diagram offers an **Add Tables from dbt** button that does the same for one diagram, and the **ERD** count in the status bar (for example **ERD 3**) takes you back to your diagrams at any time. Rather start blank? **New Diagram…** (in the sidebar's Diagrams view, or **ERD Studio: New Diagram…** in the Command Palette) and **Import DBML…** work in a dbt project too.
 
-**Prefer to watch first?** The [one-minute tour](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4) (1:00) shows these three steps. The **Welcome** tab has the same video and a short checklist. Open it any time with **Get started** in the ERD Studio sidebar (or its ▶ button), or **ERD Studio: Watch Getting Started Video**.
+**Prefer to watch first?** The [one-minute tour](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4) (1:00) shows these three steps. The **ERD Studio Tour** tab has the same video and a short checklist. Open it any time from **Watch the One-Minute Tour** in the sidebar's **Help & Feedback**, or run **ERD Studio: Watch the One-Minute Tour**.
 
 ## No dbt project yet? Try the sample
 

@@ -1387,6 +1387,8 @@ export interface DescribeDbmlImportOptions {
    * `skipped` lines (counts by kind) are listed, the first few of each.
    */
   origin?: { from: string; notes?: readonly string[]; skipped?: readonly string[] };
+  /** The bundled example (Open an Example… in a folder): no note that its references are saved optional. */
+  example?: boolean;
 }
 
 /** How many of a conversion's notes, and of its skipped lines, the dry run lists. */
@@ -1440,7 +1442,7 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   if (options.dbml) {
     // A DBML project writes every Ref as `>?` (D18): say so when the file had required ones
     // (not for a conversion: there was no DBML file to compare with).
-    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin) {
+    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin && !options.example) {
       lines.push(`• Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, ${plural(report.requiredRefs, 'reference was', 'references were')} not optional.`);
     }
   } else if (report.optionalRefs > 0 && !report.erdStudioExport) {
@@ -1569,7 +1571,7 @@ export function importPlanNotes(plan: DbmlImportPlan, options: DescribeDbmlImpor
     notes.push(`Schema ${key.split('\u0000')[0]} is written ${to}, ${why}: ${someOf(tables)}.`);
   }
   if (options.dbml) {
-    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin) {
+    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin && !options.example) {
       notes.push(`Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, ${plural(report.requiredRefs, 'reference was', 'references were')} not optional.`);
     }
   } else if (report.optionalRefs > 0 && !report.erdStudioExport) {

@@ -104,6 +104,14 @@ describe('trackedDraftPreview: the gate and the funnel', () => {
     }
   });
 
+  it('passes the draft on show through (a switcher choice that drew nothing asks its draft again)', async () => {
+    const w = wired([{ scope: 'b' }]);
+    expect(w.preview.showing?.()).toBeUndefined();
+    const shown = draft('dbt', 'sidebar');
+    await w.preview.ask(shown);
+    expect(w.preview.showing?.()).toBe(shown.id);
+  });
+
   it('a redraw of the page on show (the switcher\'s next draft, a Keep that found the files changed) is not another draftShown', async () => {
     const w = wired([{ scope: 'b' }, 'keep', 'discard']);
     await w.preview.ask(draft('dbt', 'sidebar'));

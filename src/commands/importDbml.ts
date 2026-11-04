@@ -45,7 +45,7 @@ import {
   type DbmlImportPlan,
   type DescribeDbmlImportOptions,
 } from '../services/dbmlImport';
-import { draftFromImportPlan, importPlanFingerprint, DRAFT_REDRAWN_NOTICE } from '../services/draftModel';
+import { afterScope, draftFromImportPlan, importPlanFingerprint, DRAFT_REDRAWN_NOTICE } from '../services/draftModel';
 import type { Draft, DraftKeepOutcome, DraftPreview, DraftScopes, DraftTarget, DraftTrigger } from '../types/draft';
 import type { DbmlDiagnostic } from '../services/dbmlImportParse';
 import {
@@ -290,9 +290,10 @@ export interface ImportDbmlResume {
    * (§5.1 Staleness): the plan is made again, and when its fingerprint is
    * `fingerprint` it is written at once, settling the waiting Keep with
    * `settle`; otherwise the Keep is settled `{ kept: false }` and the new
-   * draft is shown with the redrawn notice.
+   * draft is shown with the redrawn notice. `draft` is the draft that Keep
+   * answered, asked again when the write does not land.
    */
-  redraw?: { fingerprint: string; settle(outcome: DraftKeepOutcome): void };
+  redraw?: { fingerprint: string; settle(outcome: DraftKeepOutcome): void; draft?: Draft };
 }
 
 export interface ImportDbmlResult {
@@ -309,7 +310,7 @@ export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume
   const base = deps.ui ?? vscodeImportDbmlUi();
   const ui = deps.draft?.quiet ? quietImportDbmlUi(base, IMPORT_TITLES[deps.source ?? 'file']) : base;
   try {
-    return await runImportDbml(deps, ui, resume);
+    return await runImportDbml(deps, ui, base, resume);
   } catch (err) {
     telemetry.error(IMPORT_SOURCE_TELEMETRY[deps.source ?? 'file'].failed);
     throw err;
@@ -334,7 +335,12 @@ export function describeInvalidDbml(fileName: string, diagnostics: readonly Dbml
   return `${TITLE}: ${fileName} isn't valid DBML, so nothing was imported. ${shown.join(' ')}${tail}${hint}`;
 }
 
-async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: ImportDbmlResume): Promise<ImportDbmlResult | undefined> {
+async function runImportDbml(
+  deps: ImportDbmlDeps,
+  ui: ImportDbmlUi,
+  loudUi: ImportDbmlUi,
+  resume?: ImportDbmlResume,
+): Promise<ImportDbmlResult | undefined> {
   const { workspaceRoot, semanticDir, layerService, subjectAreaService, tableLibraryService } = deps;
   const source = deps.source ?? 'file';
   const counts = IMPORT_SOURCE_TELEMETRY[source];
@@ -366,8 +372,14 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   if (!filePath) return cancelled();
   const fileName = path.basename(filePath);
   const quick = resume?.quick === true;
+  /**
+   * The deps a re-run takes: the automatic draft's own until its Keep, then
+   * never quiet (the user is waiting on that Keep: its messages, a redraw's
+   * name box and a Try Again all speak).
+   */
+  let rerunDeps = deps;
   const again = (more: Omit<ImportDbmlResume, 'filePath'> = {}): (() => unknown) =>
-    () => importDbml(deps, { filePath, ...(quick ? { quick } : {}), ...more });
+    () => importDbml(rerunDeps, { filePath, ...(quick ? { quick } : {}), ...more });
 
   let text: string;
   try {
@@ -585,6 +597,10 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   const semanticRoot = path.join(workspaceRoot, semanticDir);
   const describeOptions: DescribeDbmlImportOptions = {
     layerLabel,
+    // The bundled example carries no caveat about its references' `?`: on the
+    // first diagram a new user sees it reads as a warning, and the example
+    // with no folder has none (`exampleDbmlDraft`).
+    ...(source === 'example' ? { example: true } : {}),
     ...(dbml ? {
       dbml: {
         // Where the relationships go: the `<layer>/relationships/` files this save writes.
@@ -600,12 +616,18 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
   const chosen = { layer: chosenLayer, name: slug };
   /** The waiting Keep, settled once the write ends (no draft: nothing to settle). */
   let settleKeep: (outcome: DraftKeepOutcome) => void = () => {};
+  /** The draft the viewer answers: asked again after a Keep that did not save, or a switcher choice that drew nothing. */
+  let shown: Draft | undefined;
+  /** A redraw of the same plan: its Keep is already answered, so the first pass writes at once. */
+  let answered = false;
+  const fingerprint = importPlanFingerprint(plan);
   if (draftOptions) {
-    const fingerprint = importPlanFingerprint(plan);
     const redraw = resume?.redraw;
     if (redraw && redraw.fingerprint === fingerprint) {
       // Files changed since the draft, but not this plan: write what was shown.
       settleKeep = redraw.settle;
+      shown = redraw.draft;
+      answered = true;
     } else {
       if (redraw) {
         // The plan is another one now: the Keep did not save, and the new draft says why.
@@ -618,9 +640,8 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         name: slug,
         diagramFile: path.relative(workspaceRoot, domainPath).split(path.sep).join('/'),
       };
-      let built: Draft;
       try {
-        built = draftFromImportPlan({
+        shown = draftFromImportPlan({
           plan,
           importSource: source,
           trigger: draftOptions.trigger,
@@ -643,9 +664,18 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         showError(oursMessage(title, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
         return undefined;
       }
-      const answer = await draftOptions.preview.ask(built);
+    }
+  }
+
+  for (;;) {
+    if (draftOptions && shown && !answered) {
+      const asked: Draft = shown;
+      const answer = await draftOptions.preview.ask(asked);
       switch (answer.kind) {
         case 'keep': {
+          // The user waits on this Keep: what follows is said, even on the automatic draft.
+          ui = loudUi;
+          if (draftOptions.quiet) rerunDeps = { ...deps, draft: { ...draftOptions, quiet: false } };
           if (planGeneration !== undefined && draftOptions.generation?.() !== planGeneration) {
             // The project's files changed since this plan (another window, git, an assistant): plan again.
             let settled = false;
@@ -655,12 +685,12 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
               answer.settle(outcome);
             };
             try {
-              return await importDbml(deps, {
+              return await importDbml(rerunDeps, {
                 filePath,
                 ...(quick ? { quick } : {}),
                 layer: chosenLayer,
                 name: slug,
-                redraw: { fingerprint, settle },
+                redraw: { fingerprint, settle, draft: asked },
               });
             } finally {
               // A re-plan that ended early (it said why) leaves the Keep unsaved.
@@ -675,12 +705,14 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
           telemetry.feature('quickImportChangeOptions');
           void Promise.resolve().then(() => changeOptions(chosen));
           return undefined;
-        case 'scope':
-          if (draftOptions.onScope) {
-            const onScope = draftOptions.onScope;
-            void Promise.resolve().then(() => onScope(answer.scopeId));
-          }
-          return undefined;
+        case 'scope': {
+          const onScope = draftOptions.onScope;
+          if (!onScope) return undefined;
+          const next = await afterScope(draftOptions.preview, asked, () => onScope(answer.scopeId));
+          if (!next) return undefined;
+          shown = next;
+          continue;
+        }
         case 'discard':
         case 'closed':
           return cancelled();
@@ -689,47 +721,50 @@ async function runImportDbml(deps: ImportDbmlDeps, ui: ImportDbmlUi, resume?: Im
         case 'superseded':
           return undefined;
       }
+    } else if (!draftOptions) {
+      const { headline, detail } = summariseDbmlImportPlan(plan, describeOptions);
+      const answer = await dryRun(ui, headline, detail.join('\n'), changeOptions !== undefined);
+      if (answer === 'changeOptions' && changeOptions) {
+        telemetry.feature('quickImportChangeOptions');
+        void Promise.resolve().then(() => changeOptions(chosen));
+        return undefined;
+      }
+      if (answer !== 'import') return cancelled();
     }
-  } else {
-    const { headline, detail } = summariseDbmlImportPlan(plan, describeOptions);
-    const answer = await dryRun(ui, headline, detail.join('\n'), changeOptions !== undefined);
-    if (answer === 'changeOptions' && changeOptions) {
-      telemetry.feature('quickImportChangeOptions');
-      void Promise.resolve().then(() => changeOptions(chosen));
+    answered = false;
+
+    // 6. Every file, or none.
+    const outcome = await writeNewSubjectArea({
+      workspaceRoot,
+      semanticDir,
+      domainPath,
+      newTables: plan.newTables,
+      folder,
+      ...(dbml ? { schemaFromSource: true } : {}),
+      changedTables: plan.changedLibraryTables,
+      documentText: (tableNaming) => serializeDbmlImportDocument(plan.document, tableNaming),
+      // The source's positions and sticky-note boxes go where the project keeps a new diagram's layout.
+      document: () => ({ ...plan.document, logical: { ...plan.document.logical, relationships: [] } }) as unknown as Record<string, unknown>,
+    }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
+    if (!outcome.ok) {
+      reportWriteFailure(outcome);
+      // After its own message: the draft's buttons come back, and answer again.
+      settleKeep({ kept: false });
+      settleKeep = () => {};
+      if (shown) continue;
       return undefined;
     }
-    if (answer !== 'import') return cancelled();
+
+    deps.onWritten({ domainPath, modelNames: outcome.written, changedModelNames: outcome.changed });
+    telemetry.feature(counts.done);
+    if (quick) telemetry.feature('quickImport');
+    if (source === 'file' && layout) telemetry.feature('importDbmlLayout');
+
+    // Kept: the draft closes and the new diagram opens.
+    settleKeep({ kept: true });
+    await ui.openDiagram(domainPath);
+    return { domainPath, plan };
   }
-
-  // 6. Every file, or none.
-  const outcome = await writeNewSubjectArea({
-    workspaceRoot,
-    semanticDir,
-    domainPath,
-    newTables: plan.newTables,
-    folder,
-    ...(dbml ? { schemaFromSource: true } : {}),
-    changedTables: plan.changedLibraryTables,
-    documentText: (tableNaming) => serializeDbmlImportDocument(plan.document, tableNaming),
-    // The source's positions and sticky-note boxes go where the project keeps a new diagram's layout.
-    document: () => ({ ...plan.document, logical: { ...plan.document.logical, relationships: [] } }) as unknown as Record<string, unknown>,
-  }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
-  if (!outcome.ok) {
-    reportWriteFailure(outcome);
-    // After its own message: the draft's buttons come back.
-    settleKeep({ kept: false });
-    return undefined;
-  }
-
-  deps.onWritten({ domainPath, modelNames: outcome.written, changedModelNames: outcome.changed });
-  telemetry.feature(counts.done);
-  if (quick) telemetry.feature('quickImport');
-  if (source === 'file' && layout) telemetry.feature('importDbmlLayout');
-
-  // Kept: the draft closes and the new diagram opens.
-  settleKeep({ kept: true });
-  await ui.openDiagram(domainPath);
-  return { domainPath, plan };
 
   /** Say why the write did not land (each case its own message). */
   function reportWriteFailure(failed: Extract<Awaited<ReturnType<typeof writeNewSubjectArea>>, { ok: false }>): void {

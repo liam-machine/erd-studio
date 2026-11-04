@@ -191,12 +191,13 @@ describe('DraftPreviewPanel: the tab', () => {
 describe('DraftPreviewPanel: the answers', () => {
   async function opened(name = 'small', trigger: DraftTrigger = 'start') {
     const preview = createDraftPreview(extensionUri);
-    const asked = track(preview.ask(draftOf(name, trigger)));
+    const draft = draftOf(name, trigger);
+    const asked = track(preview.ask(draft));
     const panel = lastPanel();
     await panel._simulateMessage({ type: 'ready' });
     await flush();
     panel._postedMessages.length = 0;
-    return { preview, asked, panel };
+    return { preview, asked, panel, draft };
   }
 
   it('keep: busy until settled; kept closes the tab', async () => {
@@ -239,18 +240,40 @@ describe('DraftPreviewPanel: the answers', () => {
     expect(panel._postedMessages.filter((m) => (m as { type: string }).type === 'idle')).toEqual([]);
   });
 
-  it('a choice made while nobody asks (after a Keep that did not save) answers the next ask of the same draft', async () => {
-    const { preview, asked, panel } = await opened();
+  it('a choice made while nobody asks (after a Keep that did not save) answers the flow\'s next ask of the same Draft object, which redraws nothing', async () => {
+    const { preview, asked, panel, draft } = await opened();
+    expect(preview.showing?.()).toBe(draft.id);
     await panel._simulateMessage({ type: 'keep' });
     await flush();
     const answer = asked.answer();
     if (answer?.kind !== 'keep') throw new Error('expected keep');
-    answer.settle({ kept: false });
+    answer.settle({ kept: false, notice: 'Nothing was saved.' });
     await panel._simulateMessage({ type: 'discard' });
     expect(panel._disposed).toBe(false);
-    const again = track(preview.ask(draftOf('small')));
+    // What every flow does after a Keep that did not save: ask the draft it showed again.
+    const again = track(preview.ask(draft));
     await flush();
     expect(again.answer()).toEqual({ kind: 'discard' });
+    expect(panel._disposed).toBe(true);
+    // The page kept what it showed (its notice included): no second `draft` post.
+    expect(panel._postedMessages).toEqual([{ type: 'busy', action: 'keep' }, { type: 'idle', notice: 'Nothing was saved.' }]);
+    expect(preview.showing?.()).toBeUndefined();
+  });
+
+  it('after a Keep that did not save, a second Keep on the same draft is answered (the flow re-asks)', async () => {
+    const { preview, asked, panel, draft } = await opened();
+    await panel._simulateMessage({ type: 'keep' });
+    await flush();
+    const first = asked.answer();
+    if (first?.kind !== 'keep') throw new Error('expected keep');
+    first.settle({ kept: false });
+    const again = track(preview.ask(draft));
+    await panel._simulateMessage({ type: 'keep' });
+    await flush();
+    const second = again.answer();
+    expect(second?.kind).toBe('keep');
+    if (second?.kind !== 'keep') return;
+    second.settle({ kept: true });
     expect(panel._disposed).toBe(true);
   });
 

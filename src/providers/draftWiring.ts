@@ -78,6 +78,7 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
   let lastAnswer: DraftAnswer['kind'] | undefined;
   return {
     isOpen: () => inner.isOpen(),
+    showing: () => inner.showing?.(),
     close: () => inner.close(),
     async ask(draft) {
       deps.claim();

@@ -610,6 +610,25 @@ const upper = (t: Token | undefined): string => (t && t.kind === 'word' ? t.valu
 const isPunct = (t: Token | undefined, p: string): boolean => !!t && t.kind === 'punct' && t.value === p;
 const isName = (t: Token | undefined): boolean => !!t && (t.kind === 'word' || t.kind === 'ident');
 
+/**
+ * Whether a statement defines or changes tables: CREATE … TABLE, ALTER TABLE,
+ * RENAME TABLE, or SQL Server's `sp_rename`. A file with none (only DROPs) is
+ * a teardown, not a migration.
+ */
+function definesOrChangesTables(t: Token[]): boolean {
+  const w0 = upper(t[0]);
+  if (w0 === 'CREATE') return t.slice(1, 8).some((tok) => upper(tok) === 'TABLE');
+  if (w0 === 'ALTER' || w0 === 'RENAME') return upper(t[1]) === 'TABLE';
+  if (w0 === 'EXEC' || w0 === 'EXECUTE') return t.slice(1, 6).some((tok) => /(^|\.)sp_rename$/i.test(tok.value));
+  return false;
+}
+
+/** A file named like an ordered migration (Flyway `V3__…`, a numbered `003_…`, or one under a `migrations/` folder): its DROPs apply. */
+export function looksLikeMigrationFile(name: string): boolean {
+  return /(^|[\\/])(migrations?|flyway|changelogs?)[\\/]/i.test(name)
+    || /(^|[\\/])(V\d+(?:[._]\d+)*__|\d{3,}[_-])[^\\/]*$/i.test(name);
+}
+
 /** A dotted name from `i` (`a`, `a.b`, `[a].[b].[c]`); its parts, and the index after it. */
 function readName(tokens: Token[], i: number): { parts: string[]; next: number; first: number } | undefined {
   if (!isName(tokens[i])) return undefined;
@@ -776,6 +795,8 @@ class Converter {
   private placeholderCount = 0;
   /** Schema changes applied in file order (ALTER TABLE column changes, renames, DROP TABLE). */
   appliedChanges = 0;
+  /** Whether the file being read applies its DROP TABLEs (a migration, not a teardown script). */
+  private dropsApply = true;
 
   constructor(private readonly dialect: SqlDialect, private readonly engine: SqlParseEngine) {}
 
@@ -804,7 +825,13 @@ class Converter {
     const before = count();
     const appliedBefore = this.appliedChanges;
     const text = file.text.replace(/^\ufeff/, '');
-    for (const statement of splitStatements(text, this.dialect)) {
+    const statements = splitStatements(text, this.dialect);
+    // DROP TABLE is applied only in a migration: a file that also defines or
+    // changes tables, or one named like a migration. A file of DROPs alone (a
+    // teardown or reset script, read after the CREATEs it undoes) is skipped
+    // DROP statements, as the quick path never takes it (`isSqlScriptTaken`).
+    this.dropsApply = looksLikeMigrationFile(file.name) || statements.some((st) => definesOrChangesTables(st.tokens));
+    for (const statement of statements) {
       this.readStatement(file.name, text, statement);
     }
     const applied = this.appliedChanges - appliedBefore;
@@ -1283,8 +1310,16 @@ class Converter {
     if (!renamed) this.skip(origin.file, 'other');
   }
 
-  /** `DROP TABLE [IF EXISTS] a [, b]`: a table the files defined earlier is gone; one they never defined is a skipped DROP. */
+  /**
+   * `DROP TABLE [IF EXISTS] a [, b]` in a migration: a table the files defined
+   * earlier is gone; one they never defined is a skipped DROP. In a file of
+   * DROPs alone (`dropsApply` false) every one is a skipped DROP.
+   */
   private readDropTable(st: Statement, origin: Origin): void {
+    if (!this.dropsApply) {
+      this.skip(origin.file, 'drop');
+      return;
+    }
     const t = st.tokens;
     let i = 2;
     if (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'EXISTS') i += 2;

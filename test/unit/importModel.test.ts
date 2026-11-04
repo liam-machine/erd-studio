@@ -20,6 +20,7 @@ import {
   SEMANTIC_MODEL_GLOB,
   detectExcludeGlob,
   detectImportFindings,
+  findImportDbmlFile,
   detectImportSources,
   vscodeDetectImportIo,
   importSourceItems,
@@ -184,6 +185,25 @@ function memIo(files: Record<string, string>, root = '/w', more: Partial<DetectI
     ...more,
   };
 }
+
+describe('findImportDbmlFile (the quick DBML import\'s file: the one the look counted)', () => {
+  it('takes the first listed .dbml that is not ERD Studio\'s own export, from the same listing as the look', async () => {
+    const io = memIo({
+      'exports/sales.dbml': '// erd-studio dbml-export v1\nTable a {\n  id int\n}\n',
+      'model/schema.dbml': 'Table b {\n  id int\n}\n',
+      '.erd-studio/silver/x.dbml': 'Table x {\n  id int\n}\n',
+    });
+    expect(await findImportDbmlFile(io, '.erd-studio')).toBe('/w/model/schema.dbml');
+    expect((await detectImportFindings(io, '.erd-studio')).sources.has('dbml')).toBe(true);
+    expect(io.listed.some((f) => f.includes('.erd-studio'))).toBe(false);
+  });
+
+  it('finds nothing when every .dbml is an export (the look offers no DBML either)', async () => {
+    const io = memIo({ 'exports/sales.dbml': '// erd-studio dbml-export v1\nTable a {\n  id int\n}\n' });
+    expect(await findImportDbmlFile(io, '.erd-studio')).toBeUndefined();
+    expect((await detectImportFindings(io, '.erd-studio')).sources.has('dbml')).toBe(false);
+  });
+});
 
 describe('detectImportSources', () => {
   it('finds a semantic model, a .dbml file and a .sql file holding CREATE TABLE, skipping the ERD Studio folder', async () => {
