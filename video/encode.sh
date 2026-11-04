@@ -51,8 +51,9 @@ else
     echo "crf $CRF -> $SIZE bytes"
     (( SIZE <= MAX_BYTES )) && break
   done
-  # Poster: the end card once everything on it has landed.
-  POSTER_T=$(node -e "const t=require('./'+process.env.B+'/timeline.json');console.log((t.scenes.at(-1).start+1.5).toFixed(3))")
+  # Poster: the opening (hook) scene once everything on it has landed, just before the next
+  # scene. Never the end card: its "Install ERD Studio" chip reads wrong to someone who has.
+  POSTER_T=$(node -e "const t=require('./'+process.env.B+'/timeline.json');console.log(Math.max(0,t.scenes[1].start-0.6).toFixed(3))")
   ffmpeg -v error -y -ss "$POSTER_T" -i $B/master.mkv -frames:v 1 -vf "scale=1280:720:flags=lanczos,format=yuvj420p" -q:v 3 "$POSTER"
 fi
 

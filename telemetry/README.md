@@ -29,7 +29,11 @@ behalf (its `telemetry.json` lists every field):
    `schema.sql`, every one of them an enum, a bucket, a bounded integer, a date,
    a strictly matched version string or the install id — plus `received_day`,
    the UTC date the Worker received it. There is no free text anywhere in the
-   schema. Unknown keys in the body are **dropped**, not stored.
+   schema. Unknown keys in the body are **dropped**, not stored. The one
+   ordered field, `trail` (an install's first week and days the guide runs),
+   is a list of `[event, gap, window, repeat]` whose event is a listed
+   feature key, `!` + a listed error code or a fixed marker, and whose numbers
+   are bounded integers; it carries no time of day.
 2. **No IP addresses, no user-agents, no location, no headers.** The Worker
    never reads `request.cf` and reads exactly one header, `Content-Length`, as a
    size pre-check. Cloudflare itself sees the connecting IP to route the
@@ -65,9 +69,11 @@ the local archive together.
   path). No CORS headers: the caller is the VS Code extension host, not a
   browser.
 - `KILL_SWITCH` truthy → every request `503` before any D1 access.
-- Body over **8,192 bytes** → `413`, counted while streaming, so a missing or
-  lying `Content-Length` does not help. (A heartbeat with every feature and
-  error key at its cap is about 4.5 KB; the extension's `telemetryPayload`
+- Body over **16,384 bytes** → `413`, counted while streaming, so a missing or
+  lying `Content-Length` does not help. (A real heartbeat is under a kilobyte;
+  one with every feature and error key at its cap passed 8 KB with the import
+  guide's keys, so the cap went from 8,192 to 16,384 bytes in the same change:
+  deploy the Worker before that release. The extension's `telemetryPayload`
   test reads this limit and fails if that ever stops fitting.)
 - A known field with a wrong type or out-of-range value → `400`, nothing
   written. `day` must be a real calendar date, not in the future and at most 7
@@ -317,7 +323,11 @@ name, path or message:
 - **`features`**: `dbmlProject` (at most once a day: a DBML project was
   open), `convertToDbml` (Convert Project to DBML finished),
   `convertToDbmlOffered`, `convertToDbmlDeclined`, `convertToDbmlNotNow`
-  (the offer and its answers), `convertToDbmlCancelled`,
+  (the offer and its answers: a diagram's offer, or the opening notice of a
+  project from before 2.0, whose dismissal is `convertToDbmlNotNow`; the two
+  share these keys, and while the notice holds a window's one prompt the
+  diagram's offer does not come in that window; `diagramsNudgeShown` on the
+  same day marks a notice), `convertToDbmlCancelled`,
   `convertToDbmlRefused` (the command refused the project: a project state,
   not a failure) and `dbmlForeignFormatWarned` (an older helper wrote a `.yml`
   table or `.json` diagram into a DBML project, and the user was told).
@@ -330,6 +340,169 @@ name, path or message:
 says it was DBML. A new `schemaFormats` value would make a deployed Worker
 reject whole heartbeats; new `features` / `errors` keys are only dropped by an
 older one, so deploy the Worker before the release.
+
+### Onboarding funnel (the first five minutes)
+
+Why installs stop using ERD Studio, step by step. The start screen
+(`src/types/startActions.ts`) offers the same one-click starts on the Welcome
+panel, the Get Started walkthrough and the empty Diagrams view, led by the one
+the folder **suggests**: Convert to DBML (projects from before 2.0), Draw from
+dbt (dbt projects), one of three direct imports when a quick local look at
+the folder finds that kind of file (a Power BI / Fabric semantic model,
+CREATE TABLE scripts, a DBML file), else New Diagram; Import… and Open an
+Example stay as quieter choices. Every click goes through `erdStudio.start`,
+which counts **which start, on which surface**. Import…
+(`erdStudio.importModel`) then asks which source: a DBML file, SQL DDL
+scripts or a Power BI / Fabric semantic model, each its own command with its
+own keys. All keys are `features` or `errors`, so no D1 migration was needed;
+none holds a name, path or message (the conversions' skipped lists name
+tables and measures, so only their outcome is counted; the folder look's
+findings never leave the machine, only the suggestion's fixed key). They are
+appended after the native DBML keys:
+
+| Step | Keys |
+|---|---|
+| A true first run | `firstRun` (at most 1: the first activation on this machine, the one that owes the walkthrough; from the 2.0 release on). `tenure = '0'` alone is **not** a new install: see below |
+| Saw a start screen | `walkthroughOpened` (opened by ERD Studio on first run), `gettingStartedOpened`, `sidebarStartShown` (once a day: the empty Diagrams view, with its starts, was drawn), `diagramsNudgeShown` (a project that already had diagrams got "This project has N ERD Studio diagrams" instead: a teammate's clone's start screen; `firstRunHasDiagrams` marks such a first run; in a project from before 2.0 the notice leads with **Convert to DBML** and also counts `convertToDbmlOffered`, and closing it `convertToDbmlNotNow`; its **Show Me Around** button is `diagramsNudgeShowMeAround`) |
+| Owed but waited | `walkthroughWaited` (at most 1: the walkthrough was owed, but another prompt had this window. Since 2.0 that includes the start suggestion taking the walkthrough's place on a first run with an obvious start, so read it beside `suggestPromptShown`; without one it is expected near 0) |
+| Offered its start | `suggestPromptShown` (the **start suggestion**, `src/services/startSuggestion.ts`: one notification in a folder with no diagram whose start is obvious, "ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.", once per folder (at most three times before the Simplify release); counts as having seen a start). Its answer: `suggestPromptShowMe` (Show Me: the draft opens; from Draft-first on), `suggestPromptAccepted` (Convert to DBML…; before Draft-first also Create Diagram; counts as having chosen a start), `suggestPromptMore` (More Options…; no longer sent since Draft-first, whose draft has Other Ways to Start), `suggestPromptOff` (Don't Ask Again for This Folder), `suggestPromptDismissed` (closed: asked again in a later window). `startSuggestionsOff`: **Turn Off Start Suggestions for This Folder** was run, or (once a day) a folder with no diagram opened with `erdStudio.startSuggestions` false. What the look found, and the count it shows, never leave the machine: `startSuggested<Intent>` says which start it was |
+| Draft | the **Draft-first** start (`docs/dev/draft-first.md`): a read-only draft of the folder's logical model in an editor tab, nothing written until **Keep**. `draftShown` (a draft was shown, any source and trigger; a redraw of the page on show is not another), `draftShownAuto` (opened by the ERD Studio icon alone: the empty Diagrams view, once per folder for a find, once per machine for the example), `draftExampleShown` (an example: the coffee shop or a bundled project), `draftSourceSqlDdl` `draftSourceSemanticModel` `draftSourceDbml` `draftSourceDbt` (which kind of find, never a name, path or count). Its answer: `draftKept` (Keep wrote it, beside the source's own `importSqlDdl` / `importSemanticModel` / `importDbml` / `drawFromDbt` / `exampleDiagram` / `exampleOpened`; counts as having chosen a start), `draftChangeOptions` (Change options…: the step-by-step flow, ending in a draft again), `draftDiscarded` (Discard), `draftClosed` (the tab was closed without a choice), `draftOtherStart` (one of Other Ways to Start; the start's own key says which), `draftScopeChanged` (the Folder / Model / Example switcher), `draftDetailsOpened` (the schema panel or details drawer), `draftRefreshed` (Keep found the project's files changed and redrew). `draftAfterOpenFolder`: a draft's **Open Folder…** (the no-folder example's primary, the guide's *Open your folder*) reloaded the window into a folder and that folder's draft showed at once, in place of its start suggestion (the guide carries on, without More ways to start; with diagrams there, the guide carries on on the newest instead and this is not counted). `draftUnavailable`: the automatic draft could not be built (several dialects, nothing readable after all) and was dropped quietly, leaving the sidebar's starts; a quiet run never counts the import's `*Cancelled` or `*Invalid` keys. Errors: `draftBuildFailed` (building a draft threw: ours), `draftLayoutFailed` (the page's ELK layout failed; the fallback placement was drawn) |
+| Guide | the onboarding guide, **Show Me Around** (`src/types/onboardingGuide.ts`): coach marks on the first draft (phase A: the banner, More ways to start, Keep) and then on the first diagram opened after it (phase B: a table, a relationship, the toolbar, Logical / Physical in a dbt project, the sidebar, the files and the AI helper, a finish with Star on GitHub). `guideStarted` (it began: once per run), `guideStartedFromCommand` (the **Show Me Around** command started it, beside `guideStarted`), `guideDraftDone` (phase A ended with Keep), `guideCanvasStarted` (phase B began), `guideCompleted` (Done or Star on GitHub on the last step), `guideSkippedOnDraft` / `guideSkippedOnCanvas` (Skip guide or Esc: it ends for good on that machine), `guideStarClicked` (Star on GitHub; the host opens the repository's page), `guideAiHelperClicked` (the files step's Set Up My AI Helper, beside the command's own `setupAiHelper`). Where people stop, step by step: `guideStepDraftBanner` `guideStepDraftMoreWays` `guideStepDraftKeep` `guideStepCanvasTable` `guideStepCanvasRelationship` `guideStepCanvasToolbar` `guideStepCanvasStages` `guideStepCanvasSidebar` `guideStepCanvasFiles` `guideStepCanvasFinish` (each the first time that step showed in a run; Back and Next never count a step twice), `guideBack` (Back was pressed: a step was read twice), `guideLeftDraft` (the draft was discarded or its tab closed while the guide ran on it: left without Keep or Skip). `diagramsNudgeShowMeAround` (the existing-diagrams notice's **Show Me Around**: a project that already has diagrams shows no draft, so phase A never runs there; the button opens the newest diagram and runs phase B on it, counted beside `guideStarted`, `guideStartedFromCommand` and `guideCanvasStarted`). Read `guideCompleted / guideCanvasStarted` for how many finish, and `guideDraftDone / guideStarted` beside `draftKept / draftShown` for whether the guide helps a draft become a diagram. Read the step keys in order as a funnel (installs per key): the biggest fall from one step to the next is the step people stop at; the skip keys say whether they chose to (Skip guide or Esc), `guideLeftDraft` that they left the draft, and the rest closed the tab or the window. `guideStepCanvasRelationship` is missing for a diagram with no relationship and `guideStepCanvasStages` outside a dbt project, `guideStepDraftMoreWays` when the draft offers no other start: compare each with the step before it only on installs that can see it |
+| Trail | the **onboarding trail** (`trail` and `trailDropped`, migrations/0004; not `features`): an install's first 7 days (`TRAIL_DAYS`), and any later day from `guideStarted` on, send the day's events **in order**, at most 100 (`trailDropped` counts the rest), each `[event, gap, window, repeat]`. `event` is any `features` key, any `errors` code written `!code` (`layoutFailed` is both a feature and an error), or a marker: `windowOpened` (an activation), `windowClosed` (best effort: VS Code may not wait for it, so a trail can simply stop), `windowAway` / `windowBack` (the window lost and regained the focus for 5 s or more: another app or another VS Code window), `canvasOpened`, `canvasClosed`, `canvasHidden` / `canvasShown` (a diagram went behind another tab for 5 s or more). `gap` is whole seconds since the previous entry (0 first, capped at 3600 = an hour or more), `window` numbers that day's windows 1, 2, … in the order they joined, `repeat` folds the same event straight after (a run of `editLayout`). **Time on a guide step** is the `gap` of the entry after its `guideStep*`; **what happened next** is that entry: `windowAway` (went to another app), `canvasHidden` (another tab: often their own files), `!code` (something broke), an edit (they did what the step said), `canvasClosed` / `windowClosed` or nothing at all (they left). Read trails per install and day with the query under *Reading trails* |
+| What it suggested | `startSuggestedConvert`, `startSuggestedDrawFromDbt`, `startSuggestedImportSemanticModel`, `startSuggestedImportSqlDdl`, `startSuggestedImportDbmlFile`, `startSuggestedBlank` (each at most 1 a day: the empty Diagrams view, or the Welcome panel's leading card, showed that suggestion; which surface is `sidebarStartShown` / `gettingStartedOpened`. One key per suggestion rather than per surface: the walkthrough's display cannot be observed, and the click keys already name the surface) |
+| Chose a start | `welcomeBlank` `welcomeImport` `welcomeExample` `welcomeConvert` `welcomeDrawFromDbt`; `walkthroughBlank` … `walkthroughDrawFromDbt`; `sidebarBlank` … `sidebarDrawFromDbt` (`welcomeOpenDiagram` is a returning user's "Open your diagrams"); the direct imports, a click less than Import…'s picker: `welcomeImportSemanticModel` `welcomeImportSqlDdl` `welcomeImportDbmlFile`, `walkthroughImportSemanticModel` `walkthroughImportSqlDdl` `walkthroughImportDbmlFile`, `sidebarImportSemanticModel` `sidebarImportSqlDdl` `sidebarImportDbmlFile`; `diagramsNudgeOpened` (its Open button), `diagramsNudgeShowMeAround` (its **Show Me Around**: the same diagram, with the guide's canvas part) |
+| Watched how | No longer sent since Show Me Around replaced the six short clips; kept for older versions: `howToClipPlayed` (the Welcome panel's short "Watch how" clip for the suggestion was played; which clip follows from that day's `startSuggested*`, or, with none that day, the example's (no folder open). Passive: a viewer who watched and closed the panel still counts `welcomeLeftNoChoice`) |
+| Picked an import source | `importPickDbml`, `importPickSqlDdl`, `importPickSemanticModel`; `importPickCancelled` (the source picker was closed) |
+| Nothing to start from | No longer sent since Draft-first (a folder with nothing found gets the example draft on the ERD Studio icon instead, `draftShownAuto` + `draftExampleShown`); kept for older versions: `suggestPromptNothingShown` (the **nothing-found** notification, `runNothingFoundPrompt` in `src/services/startSuggestion.ts`: a folder with no diagram, no table and nothing obvious to import, shown only once its empty Diagrams view was opened — never on activation alone — at most three times per folder, never on a first run, whose walkthrough keeps the window). Its answer: `suggestPromptNothingNewDiagram` (New Diagram; counts as having chosen a start), `suggestPromptNothingGuide` (Show Me How: the import guide), `suggestPromptNothingOff` (Don't Ask Again for This Folder). Closed without a choice is shown minus the three: no key of its own |
+| Windows and dbt detection | `activatedDbt`, `activatedLogical`, `activatedNoFolder`: each window's activation outcome (a dbt project, a folder without dbt, no folder), counted on every activation, so a day with several windows shows all of them (the `activation` field keeps only the day's last). `dbtProjectUnused` (featureOnce): a `dbt_project.yml` exists in the workspace that this window does not use, seen by project discovery (`erdStudio.projectPath` names a plain folder), the host's late search, the start screen's look at the folder, or the tooling scan (`noteUnusedDbtProject` in `src/extension.ts`); the user sees one log line, never a prompt |
+| Import guide | `importGuideOpened` (**Bring In an Existing Data Model…** opened, from anywhere), and where from: `importGuideFromWelcome`, `importGuideFromWalkthrough`, `importGuideFromSidebar` (the quiet "See how to bring it in" link on each start surface), `importGuideFromPicker` (Import…'s last item), `importGuideFromStartPick` (the start quick pick's last item), `importGuideFromPrompt` (Show Me How, before Draft-first), `importGuideFromDraft` (a draft's Bring In My Model…); the palette is opened minus the others. One feature key per surface rather than a surface field: the heartbeat's `features` is a flat allowlisted key → count map, and a new field would need a schema change. Which card's button: `importGuideActionDatabricks`, `importGuideActionSnowflake`, `importGuideActionPowerBi`, `importGuideActionFabric` (a Fabric semantic model), `importGuideActionFabricWarehouse` (a Warehouse / SQL analytics endpoint), `importGuideActionSqlServer`, `importGuideActionPostgres`, `importGuideActionMysql`, `importGuideActionDbml`, `importGuideActionOtherTools`, `importGuideActionDbt`, `importGuideActionFound` (the import of what the folder holds), `importGuideActionFeedback` (Not yet → Send Feedback: someone wants a source ERD Studio lacks); `importGuideCopied` (a Copy button; never what was copied). Read a card's action against its import's own key (`importSqlDialectDatabricks`, `importSqlDdl`, `importSqlDdlInvalid`…): many presses with few finished imports means its export step is wrong |
+| Quick import | the start suggestion's Create Diagram and a surface's primary import run the **quick path** (defaults chosen, one confirm): `quickImport` (it created a diagram, beside the source's own `importSqlDdl` / `importSemanticModel` / `importDbml`), `quickImportChangeOptions` (its Change Options… was chosen: a default was wrong), `quickImportFellBack` (it found nothing to take, so it asked step by step); `importReviewOpened` (any import's dry run: Review All… was opened; no longer sent since Draft-first, whose details drawer counts `draftDetailsOpened`). Since Draft-first the quick path ends in the draft rather than a confirm |
+| Gave up inside a start | `blankDiagramCancelled`, `importDbmlCancelled`, `importSqlDdlCancelled`, `importSemanticModelCancelled`, `exampleCancelled`, `drawCancelScope` / `drawCancelLayer` / `drawCancelName`, `convertToDbmlCancelled` |
+| The user's files did not read | `importDbmlInvalid`, `importSqlDdlInvalid` (+ the dialect it ran as: `importSqlDialectPostgres`, `importSqlDialectMysql`, `importSqlDialectSqlserver`, `importSqlDialectSnowflake`, `importSqlDialectDatabricks`, counted when the conversion runs), `importSemanticModelInvalid` |
+| Got a diagram | `domainCreated` / `blankDiagram`, `importDbml`, `importSqlDdl`, `importSemanticModel`, `exampleOpened` / `exampleReopened` (+ which: `exampleEnterpriseWarehouse`, `exampleMedallion`, `exampleDbtProjectLayers`, `exampleKimballBusMatrix`, `exampleDataVault`, `exampleGitlabStyle`, `exampleBigqueryVersioned`, `exampleDataMesh`), `drawFromDbt`, `convertToDbml` |
+| Landed on the canvas | `canvasOpens`, `exampleDiagramShown` (the example's first diagram opened in its new window) |
+| Broke | errors `exampleWriteFailed`, `importDbmlFailed`, `importSqlDdlFailed` (the SQL importer did not load, or converting or writing failed), `importSemanticModelFailed`, `drawFromDbtFailed`, `walkthroughFailed`, `welcomePanelFailed`, `domainLoad*` |
+
+A row is one install-day, so the funnel is built per install over its first
+days (the install id stays inside the query; only counts come out). Read it
+for a cohort that has had a week to come back, and compare cohorts across
+releases: a step that falls is where to look.
+
+**Who counts as a new install.** `tenure = '0'` means the first activation
+of a **telemetry-bearing version** on that machine (`firstSeenDay` is set by
+the first 1.5.0+ activation), not the install date: anyone who installed
+before telemetry shipped (2026-09-25) got tenure `0` the day they first ran
+1.5.0 or later, with their old `gettingStartedShown` state, so no start
+screen. The start keys exist only from **1.6.3** (`walkthroughOpened`,
+`gettingStartedOpened`), so a day-0 row from 1.5.0–1.6.2 cannot show a
+start. So the funnel drops installs whose day-0 row is from a version before
+1.6.3 or from the launch period (before 2026-10-05), and `fresh` marks
+day-0 rows with no `.erd-studio`, no diagrams and no harness. From the 2.0
+release on, `firstRun` is the denominator: a tenure-0 install without it is
+a returning user. A day-0 row only arrives when the install activates again
+on a later UTC day (the heartbeat for a day is sent by a later activation),
+so an install that tried ERD Studio once and never came back is not in any
+cohort.
+
+```bash
+# The funnel: installs first seen 8–35 days ago (and on or after 2026-10-05), each counted once at the furthest step it reached.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH firsts0 AS (
+     SELECT install_id, MIN(day) AS d0 FROM heartbeats
+     WHERE tenure = '0' AND COALESCE(dev, 0) = 0
+     GROUP BY install_id),
+   firsts AS (
+     SELECT f.install_id, f.d0,
+       (d.has_semantic_dir = 0 AND d.domain_count = '0'
+         AND NOT EXISTS (SELECT 1 FROM json_each(d.features) j WHERE j.key GLOB 'harness*')) AS fresh
+     FROM firsts0 f JOIN heartbeats d ON d.install_id = f.install_id AND d.day = f.d0
+     WHERE f.d0 >= '2026-10-05' AND f.d0 >= date('now', '-35 days') AND f.d0 < date('now', '-7 days')
+       AND d.ext_version NOT IN ('1.5.0', '1.5.1', '1.6.0', '1.6.1', '1.6.2')),
+   per AS (
+     SELECT f.install_id, MAX(f.fresh) AS fresh,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key = 'firstRun')) AS first_run,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('walkthroughOpened', 'gettingStartedOpened', 'sidebarStartShown', 'diagramsNudgeShown', 'suggestPromptShown', 'draftShown'))) AS saw_start,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE ((j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough[A-Z]*' OR j.key GLOB 'sidebar[A-Z]*')
+         AND j.key NOT IN ('walkthroughOpened', 'walkthroughWaited', 'sidebarStartShown', 'welcomeLeftNoChoice', 'welcomeOpenDiagram'))
+         OR j.key IN ('drawStarted', 'diagramsNudgeOpened', 'diagramsNudgeShowMeAround', 'suggestPromptAccepted', 'suggestPromptShowMe', 'suggestPromptNothingNewDiagram', 'draftKept') OR j.key GLOB 'importGuideAction*')) AS chose_start,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('domainCreated', 'blankDiagram', 'importDbml', 'importSqlDdl', 'importSemanticModel', 'exampleDiagram', 'exampleOpened', 'exampleReopened', 'drawFromDbt', 'convertToDbml', 'domainCreatedExternal'))) AS got_diagram,
+       MAX(h.canvas_opens > 0) AS opened_canvas,
+       MAX(EXISTS (SELECT 1 FROM json_each(h.features) j WHERE j.key IN ('editModel', 'editColumn', 'editKey', 'editDetails', 'editRelationship', 'addModel', 'addRelationship', 'addFromDbt'))) AS edited,
+       MAX(h.day > f.d0) AS came_back,
+       MAX(h.day > f.d0 AND h.canvas_opens > 0) AS canvas_later,
+       MAX(h.day >= date(f.d0, '+7 days')) AS week_later
+     FROM firsts f JOIN heartbeats h ON h.install_id = f.install_id AND COALESCE(h.dev, 0) = 0
+     GROUP BY f.install_id)
+   SELECT COUNT(*) AS s1_installed, SUM(fresh) AS s1_fresh, SUM(first_run) AS s1_first_run,
+     SUM(saw_start) AS s2_saw_start, SUM(saw_start AND fresh) AS s2_fresh_saw_start, SUM(saw_start AND first_run) AS s2_first_run_saw_start,
+     SUM(chose_start) AS s3_chose_start,
+     SUM(got_diagram) AS s4_got_diagram, SUM(opened_canvas) AS s5_opened_canvas, SUM(edited) AS s6_edited,
+     SUM(came_back) AS s7_came_back, SUM(canvas_later) AS s8_canvas_another_day, SUM(week_later) AS s9_week_later
+   FROM per"
+
+# Which start was suggested, which was clicked on which surface, and which import source (28 days, installs): what to keep, what to drop.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS clicks FROM heartbeats h, json_each(h.features) j
+   WHERE h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0
+     AND (j.key GLOB 'welcome*' OR j.key GLOB 'walkthrough*' OR j.key GLOB 'sidebar*' OR j.key GLOB 'example*' OR j.key GLOB 'import*'
+       OR j.key GLOB 'startSuggested*' OR j.key = 'howToClipPlayed' OR j.key GLOB 'suggestPrompt*' OR j.key GLOB 'quickImport*' OR j.key = 'startSuggestionsOff'
+       OR j.key GLOB 'importGuide*' OR j.key GLOB 'draft*' OR j.key GLOB 'guide*'
+       OR j.key GLOB 'firstRun*' OR j.key GLOB 'diagramsNudge*' OR j.key GLOB '*Cancel*')
+   GROUP BY j.key ORDER BY installs DESC"
+```
+
+Read `s2_saw_start / s1_installed` per weekly cohort (from 2026-10-05 it is
+about 64%; about 73% of fresh-looking installs). Once 2.0 ships, read
+`s2_first_run_saw_start / s1_first_run` instead (expected above 90%): a
+first run that saw no start is a real miss.
+
+Read the start suggestion on its own: `suggestPromptAccepted / suggestPromptShown`
+is how often an obvious start was taken at once; a high `suggestPromptOff` or
+`quickImportChangeOptions` next to it says the folder look or the quick
+defaults guess wrong.
+
+Read the draft on its own: `draftKept / draftShown` is how often a draft became a
+diagram, and `draftShownAuto` against `draftKept`, `draftDiscarded` and
+`draftClosed` says whether opening it on the ERD Studio icon helps; a high
+`draftChangeOptions` says a default (files, layer, name, folder) guesses wrong,
+and a high `draftUnavailable` that the automatic draft is often not buildable.
+
+Read the suggestion against the click: for each `startSuggested<X>`, the
+installs that clicked the matching start (`*Import<X>` for the imports,
+`*Blank`, `*DrawFromDbt`, `*Convert`) versus those that clicked another one or
+none. A suggestion whose matching click is rare is a bad guess (or a bad
+label); a direct import whose `import<X>Cancelled` / `*Invalid` is high next
+to its clicks found files that are not what the user wanted to start from.
+
+Investigate when: `s2_first_run_saw_start` is well below `s1_first_run`
+(a true first run missed the walkthrough: look at `walkthroughWaited` and
+`walkthroughFailed`); `s3_chose_start` is far below `s2_saw_start` (the start
+screen does not persuade); `s4_got_diagram` is far below `s3_chose_start` (a
+start's own prompts lose people: look at its `*Cancelled` key, and for an
+import at `importPickCancelled` and the source's `*Invalid`); a SQL dialect
+whose `importSqlDialect*` count is high next to `importSqlDdlInvalid` (its
+scripts fail to read); `exampleOpened` well above `exampleDiagramShown` (the
+new window does not open the diagram); `welcomeLeftNoChoice` above half of
+`gettingStartedOpened`; any `exampleWriteFailed`, `importSqlDdlFailed` or
+`importSemanticModelFailed`. D1 refuses a compound `SELECT` of many
+`UNION`s, which is why the funnel is one row of columns.
+
+### Reading trails (the onboarding trail)
+
+Each row's `trail` is that install's day in order. The guide's drop-offs, with
+what followed each install's last step (the archive's report does the same
+from `telemetry-trails.jsonl`, without install ids):
+
+```bash
+npx wrangler d1 execute erd-studio-telemetry --remote --command "
+SELECT day, tenure, ext_version, trail_dropped, trail FROM heartbeats
+WHERE trail IS NOT NULL AND COALESCE(dev, 0) = 0
+  AND trail LIKE '%guideStarted%' AND trail NOT LIKE '%guideCompleted%'
+ORDER BY day DESC LIMIT 50"
+```
+
+To follow one install over its first week, add `install_id` to the SELECT and
+`ORDER BY install_id, day` — in D1 only, never into the archive.
 
 ### Relationship health (#133)
 

@@ -201,6 +201,7 @@ import type { RelationshipWriteInput, RelationshipWriteOp } from '../services/li
 import { auditRelationshipWrite, surveyLibrary } from '../services/relationshipHealth';
 import { namingMigrationIsEmpty } from '../services/namingMigration';
 import type { DbmlConversionCandidates } from '../services/dbmlConversionFiles';
+import { convertOfferApplies } from '../services/convertOffer';
 import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
@@ -237,6 +238,7 @@ import { yieldToEventLoop } from '../services/libraryWarmUp';
 import { createLogger, elapsedMs, log, phaseTimer, plural } from '../services/logger';
 import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
 import type { SessionPromptKind } from '../services/activationPrompts';
+import { parseGuideAction, type CanvasGuideStart, type GuideActionPayload } from '../types/onboardingGuide';
 
 /** The canvas's lines in the ERD Studio log: opening a diagram, position saves. */
 const canvasLog = createLogger('Canvas');
@@ -502,6 +504,7 @@ import {
   validateDismissManifestHintPayload,
   validateImportEmbeddedTablesPayload,
   validateExportDiagramPayload,
+  validateGuidePayload,
   validateAnnotationUpdate,
   validateTableNameSafety,
   validateNewDbmlTableName,
@@ -1572,6 +1575,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'openModelFile', 'layoutFinished', 'exportDiagram', 'requestExistingTables', 'requestNewRelationshipFiles',
           // Finding a table elsewhere: they open, select or copy, never write.
           'goToTable', 'showTableOnOtherDiagrams', 'copyTablePath', 'revealTableInLibrary',
+          // The onboarding guide: fixed action ids mapped to fixed commands and a fixed URL; writes no file.
+          'guide',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           log.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
@@ -1611,6 +1616,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 entry.loaded = true;
                 this.flushPendingReveal(document.uri.fsPath, webviewPanel.webview);
                 this.flushPendingTableAction(document.uri.fsPath, panelKey);
+                // The onboarding guide's phase B: the first diagram opened after its
+                // draft part. Taken before the canvas's own offers, so it holds the
+                // window's one prompt and none of them pops over it.
+                const guideStart = this.onboardingGuide?.takeCanvas();
+                if (guideStart) this.post(webviewPanel.webview, { type: 'guideStart', payload: guideStart });
               }
             }
             void this.offerRelationshipPrompts(document, webviewPanel.webview, panelKey);
@@ -1665,6 +1675,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             await this.context.workspaceState?.update(MANIFEST_HINT_DISMISSED_KEY, true);
             telemetry.featureOnce('manifestHintDismissed');
+            break;
+          }
+          case 'guide': {
+            // The onboarding guide (Show Me Around): a fixed action id, rebuilt from
+            // its checked fields; the host maps it (src/providers/guideWiring.ts).
+            const raw = (message as { payload?: unknown }).payload;
+            const payloadError = validateGuidePayload(raw);
+            const action = payloadError ? undefined : parseGuideAction(raw);
+            if (!action) {
+              log.warn(`[SemanticEditorProvider] Ignoring a guide message: ${payloadError ?? 'unknown action'}`);
+              break;
+            }
+            this.onboardingGuide?.onCanvasAction(action);
             break;
           }
           case 'openGettingStarted':
@@ -2386,9 +2409,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey);
     });
 
+    // The onboarding trail: the canvas went behind another tab and came back, or closed.
+    const viewStateSubscription = webviewPanel.onDidChangeViewState((e) => telemetry.canvasVisible(panelKey, e.webviewPanel.visible));
     webviewPanel.onDidDispose(() => {
       messageSubscription.dispose();
       changeSubscription.dispose();
+      viewStateSubscription.dispose();
+      telemetry.canvasClosed(panelKey);
       this.forgetPanel(panelKey, webviewPanel.webview);
       this.backwardsDrawn.delete(document.uri.toString());
     });
@@ -2693,6 +2720,31 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.libraryWarmUp = warmUp;
   }
 
+  /** The onboarding guide's host (Show Me Around, `src/providers/guideWiring.ts`); the extension sets it once. */
+  private onboardingGuide: {
+    takeCanvas(): CanvasGuideStart | undefined;
+    startOnCanvas(): CanvasGuideStart;
+    onCanvasAction(action: GuideActionPayload): void;
+  } | undefined;
+
+  /** Wire the onboarding guide (phase B runs on a canvas); the extension calls it once. */
+  setOnboardingGuide(guide: SemanticEditorProvider['onboardingGuide']): void {
+    this.onboardingGuide = guide;
+  }
+
+  /**
+   * Show Me Around on the active canvas: phase B starts there now. False when
+   * no canvas of ours is the active tab, or it has not loaded its diagram yet.
+   */
+  startGuideOnActiveCanvas(): boolean {
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    if (!(input instanceof vscode.TabInputCustom) || !this.onboardingGuide) return false;
+    const panel = this.openPanels.get(input.uri.toString());
+    if (!panel?.loaded) return false;
+    this.post(panel.webview, { type: 'guideStart', payload: this.onboardingGuide.startOnCanvas() });
+    return true;
+  }
+
   /** Wire the window session's one-prompt gate; the extension calls it once. */
   setSessionPrompts(gate: { claim(kind: SessionPromptKind): boolean }): void {
     this.sessionPrompts = gate;
@@ -2724,13 +2776,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (!hooks || this.dbmlConversionOffered) return false;
     this.dbmlConversionOffered = true;
     try {
-      if (this.context.workspaceState?.get<boolean>(DBML_CONVERSION_DECLINED_KEY)) return false;
-      if (!getErdStudioSetting<boolean>(DBML_OFFER_CONVERT_SETTING, true)) return false;
+      const declined = this.context.workspaceState?.get<boolean>(DBML_CONVERSION_DECLINED_KEY) === true;
+      const offerSetting = getErdStudioSetting<boolean>(DBML_OFFER_CONVERT_SETTING, true) !== false;
+      // Checked before the storage is worked out: a turned-down offer costs nothing.
+      if (declined || !offerSetting) return false;
       const storage = this.tableLibraryService.projectStorage();
       if (storage === 'dbml') return false;
-      const candidates = hooks.candidates();
-      if (candidates.tablesDirIsLayer || candidates.files === 0) return false;
-      if (hooks.goesNowhere?.()) return false;
+      let candidates: DbmlConversionCandidates = { files: 0, tablesDirIsLayer: false };
+      // The rule activation's opening notice uses too (src/services/convertOffer.ts).
+      if (!convertOfferApplies({
+        storage, declined, offerSetting,
+        candidates: () => (candidates = hooks.candidates()),
+        goesNowhere: () => hooks.goesNowhere?.() === true,
+      })) return false;
       this.dbmlConversionEligible = true;
       // Another prompt already showed in this window: ask in the next one.
       if (this.sessionPrompts && !this.sessionPrompts.claim('dbmlConversion')) return false;

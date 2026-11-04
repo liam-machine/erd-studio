@@ -89,10 +89,11 @@ const KNOWN_FIXES_BODY = JSON.stringify(KNOWN_FIXES);
 
 /**
  * Largest body accepted. A real heartbeat is under a kilobyte; every feature
- * and error key at once, each at its cap, is about 4.5 KB (the extension's
- * telemetryPayload test holds that under this limit).
+ * and error key at once, each at its cap, passed 8 KB with the import guide's
+ * keys (2.0), so the cap is 16 KB (the extension's telemetryPayload test holds
+ * that worst case under this limit).
  */
-const MAX_BODY_BYTES = 8192;
+const MAX_BODY_BYTES = 16384;
 
 /** A heartbeat may describe a day at most this many days before it is received. */
 const MAX_DAY_AGE_DAYS = 7;
@@ -144,6 +145,27 @@ const PLATFORMS = [
   'databricks', 'snowflake', 'bigquery', 'postgres', 'redshift', 'fabric', 'synapse', 'sqlserver',
   'duckdb', 'spark', 'trino', 'athena', 'mysql', 'oracle', 'clickhouse', 'other',
 ];
+
+/**
+ * The onboarding trail's own events (the extension's `TRAIL_MARKERS`), beside
+ * every FEATURES key and ERROR_CODES code. Append-only, in the same order.
+ */
+const TRAIL_MARKERS = [
+  'windowOpened',
+  'windowClosed',
+  'windowAway',
+  'windowBack',
+  'canvasOpened',
+  'canvasClosed',
+  'canvasHidden',
+  'canvasShown',
+];
+/** The trail's limits (the extension's MAX_TRAIL, MAX_TRAIL_GAP_S, MAX_TRAIL_WINDOWS, MAX_COUNTER, MAX_TRAIL_DROPPED). */
+const MAX_TRAIL = 100;
+const MAX_TRAIL_GAP_S = 3600;
+const MAX_TRAIL_WINDOWS = 20;
+const MAX_TRAIL_REPEAT = 100;
+const MAX_TRAIL_DROPPED = 10000;
 
 /** Array fields keep this order when stored, whatever order the client sent. */
 const STAGES = ['logical', 'physical'];
@@ -296,6 +318,200 @@ const FEATURES = [
   'convertToDbmlCancelled',
   'convertToDbmlRefused',
   'dbmlForeignFormatWarned',
+  // The start screen (the first five minutes; the extension's startActions.ts): a
+  // start clicked on the Welcome panel (welcome*, beside the older
+  // welcomeDrawFromDbt / welcomeOpenDiagram), the Get Started walkthrough
+  // (walkthrough*) or the empty Diagrams view (sidebar*); the empty view's
+  // starts were on screen (once a day); the Welcome panel closed with no
+  // button pressed.
+  'welcomeBlank',
+  'welcomeImport',
+  'welcomeExample',
+  'welcomeConvert',
+  'walkthroughBlank',
+  'walkthroughImport',
+  'walkthroughExample',
+  'walkthroughConvert',
+  'walkthroughDrawFromDbt',
+  'sidebarBlank',
+  'sidebarImport',
+  'sidebarExample',
+  'sidebarConvert',
+  'sidebarDrawFromDbt',
+  'sidebarStartShown',
+  'welcomeLeftNoChoice',
+  // New Diagram… closed before it wrote (at the layer or the name).
+  'blankDiagramCancelled',
+  // Open an Example Project…: an example written and its window opened; an
+  // earlier copy opened instead; closed at the picker or the folder dialog;
+  // which example (fixed product ids); its first diagram opened in the new window.
+  'exampleOpened',
+  'exampleReopened',
+  'exampleCancelled',
+  'exampleEnterpriseWarehouse',
+  'exampleMedallion',
+  'exampleDbtProjectLayers',
+  'exampleKimballBusMatrix',
+  'exampleDataVault',
+  'exampleGitlabStyle',
+  'exampleBigqueryVersioned',
+  'exampleDataMesh',
+  'exampleDiagramShown',
+  // Import… (erdStudio.importModel): which source was picked, or the picker
+  // closed. Import SQL DDL… and Import Semantic Model…: finished, closed
+  // before writing, the user's files could not be read (not a failure of
+  // ours); which SQL dialect the conversion ran with.
+  'importPickDbml',
+  'importPickSqlDdl',
+  'importPickSemanticModel',
+  'importPickCancelled',
+  'importSqlDdl',
+  'importSqlDdlCancelled',
+  'importSqlDdlInvalid',
+  'importSqlDialectPostgres',
+  'importSqlDialectMysql',
+  'importSqlDialectSqlserver',
+  'importSqlDialectSnowflake',
+  'importSqlDialectDatabricks',
+  'importSemanticModel',
+  'importSemanticModelCancelled',
+  'importSemanticModelInvalid',
+  // First run, measured: a true first activation on this machine (at most 1);
+  // that first run was in a project that already had diagrams, so the
+  // walkthrough waited (at most 1); the "This project has N diagrams" notice
+  // shown, and its Open button pressed; the walkthrough was owed but another
+  // prompt had this window (at most 1).
+  'firstRun',
+  'firstRunHasDiagrams',
+  'diagramsNudgeShown',
+  'diagramsNudgeOpened',
+  'walkthroughWaited',
+  // The start screen's suggestion (src/types/startActions.ts): the three
+  // direct imports clicked on each surface (one click less than Import…'s
+  // picker); which start a surface the host can see suggested (at most once
+  // a day each); the Welcome panel's "Watch how" clip was played.
+  'welcomeImportSemanticModel',
+  'welcomeImportSqlDdl',
+  'welcomeImportDbmlFile',
+  'walkthroughImportSemanticModel',
+  'walkthroughImportSqlDdl',
+  'walkthroughImportDbmlFile',
+  'sidebarImportSemanticModel',
+  'sidebarImportSqlDdl',
+  'sidebarImportDbmlFile',
+  'startSuggestedConvert',
+  'startSuggestedDrawFromDbt',
+  'startSuggestedImportSemanticModel',
+  'startSuggestedImportSqlDdl',
+  'startSuggestedImportDbmlFile',
+  'startSuggestedBlank',
+  'howToClipPlayed',
+  // The start suggestion (src/services/startSuggestion.ts): the one
+  // notification a folder with no diagram gets when its start is obvious —
+  // shown, and the user's answer: Create Diagram, More Options…, Don't Ask
+  // Again, or closed; start suggestions turned off by the command (or, once
+  // a day, a due suggestion kept back by the erdStudio.startSuggestions setting).
+  'suggestPromptShown',
+  'suggestPromptAccepted',
+  'suggestPromptMore',
+  'suggestPromptOff',
+  'suggestPromptDismissed',
+  'startSuggestionsOff',
+  // The quick import (defaults chosen, one confirm): one finished, its
+  // Change Options… chosen, it fell back to the step-by-step flow (nothing
+  // found to take, or more files than it reads); the dry run's Review All…
+  // was opened (every import source).
+  'quickImport',
+  'quickImportChangeOptions',
+  'quickImportFellBack',
+  'importReviewOpened',
+  // The import guide (src/services/importGuide.ts, Bring In an Existing Data
+  // Model…): opened (every open), and from where (the palette has none); which
+  // card's button was pressed; a Copy button. Then the nothing-found
+  // notification (src/services/startSuggestion.ts): a folder with no diagram and
+  // nothing concrete, whose empty Diagrams view was opened — shown, and the
+  // answer (closed = shown minus the three).
+  'importGuideOpened',
+  'importGuideFromWelcome',
+  'importGuideFromWalkthrough',
+  'importGuideFromSidebar',
+  'importGuideFromPicker',
+  'importGuideFromStartPick',
+  'importGuideFromPrompt',
+  'importGuideActionFound',
+  'importGuideActionDbt',
+  'importGuideActionDatabricks',
+  'importGuideActionSnowflake',
+  'importGuideActionPowerBi',
+  'importGuideActionFabric',
+  'importGuideActionFabricWarehouse',
+  'importGuideActionSqlServer',
+  'importGuideActionPostgres',
+  'importGuideActionMysql',
+  'importGuideActionDbml',
+  'importGuideActionOtherTools',
+  'importGuideActionFeedback',
+  'importGuideCopied',
+  'suggestPromptNothingShown',
+  'suggestPromptNothingNewDiagram',
+  'suggestPromptNothingGuide',
+  'suggestPromptNothingOff',
+  // Draft-first (docs/dev/draft-first.md §11).
+  'draftShown',
+  'draftShownAuto',
+  'draftExampleShown',
+  'draftSourceSqlDdl',
+  'draftSourceSemanticModel',
+  'draftSourceDbml',
+  'draftSourceDbt',
+  'draftKept',
+  'draftChangeOptions',
+  'draftDiscarded',
+  'draftClosed',
+  'draftOtherStart',
+  'draftScopeChanged',
+  'draftDetailsOpened',
+  'draftRefreshed',
+  'draftUnavailable',
+  'suggestPromptShowMe',
+  'importGuideFromDraft',
+  // Each window's activation outcome, and an unused dbt project (presence).
+  'activatedDbt',
+  'activatedLogical',
+  'activatedNoFolder',
+  'dbtProjectUnused',
+  // The onboarding guide, Show Me Around (src/types/onboardingGuide.ts): it
+  // began (and whether the command asked), phase A ended by Keep on the
+  // draft, phase B began on the canvas, it finished, it was skipped on the
+  // draft or on the canvas, and its finish's Star on GitHub and its Set Up My
+  // AI Helper button. Fixed keys only: never a table, a path or a count.
+  'guideStarted',
+  'guideStartedFromCommand',
+  'guideDraftDone',
+  'guideCanvasStarted',
+  'guideCompleted',
+  'guideSkippedOnDraft',
+  'guideSkippedOnCanvas',
+  'guideStarClicked',
+  'guideAiHelperClicked',
+  // Each step the first time it shows in a run (a step-by-step funnel), Back,
+  // and a draft left (Discard or its tab closed) while the guide ran on it.
+  'guideStepDraftBanner',
+  'guideStepDraftMoreWays',
+  'guideStepDraftKeep',
+  'guideStepCanvasTable',
+  'guideStepCanvasRelationship',
+  'guideStepCanvasToolbar',
+  'guideStepCanvasStages',
+  'guideStepCanvasSidebar',
+  'guideStepCanvasFiles',
+  'guideStepCanvasFinish',
+  'guideBack',
+  'guideLeftDraft',
+  'diagramsNudgeShowMeAround',
+  // A draft's Open Folder… reloaded the window into a folder, and that folder's
+  // draft showed at once (the no-folder example's route; the guide carries on).
+  'draftAfterOpenFolder',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -385,7 +601,19 @@ const ERROR_CODES = [
   'modelFileDbmlStructure',
   'domainLoadDbml',
   'convertToDbmlFailed',
+  // Open an Example Project… could not write the example's files.
+  'exampleWriteFailed',
+  // Import SQL DDL… / Import Semantic Model… failed (loading the SQL
+  // importer, converting, or writing the new diagram) — not the user's files.
+  'importSqlDdlFailed',
+  'importSemanticModelFailed',
+  // Draft-first: a draft could not be built (ours); the preview's layout failed.
+  'draftBuildFailed',
+  'draftLayoutFailed',
 ];
+
+/** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */
+const TRAIL_EVENTS = new Set([...TRAIL_MARKERS, ...FEATURES, ...ERROR_CODES.map((code) => `!${code}`)]);
 
 /**
  * Last write wins for a given install and day. The extension sends once per
@@ -397,9 +625,9 @@ const UPSERT_SQL = `INSERT INTO heartbeats (
   has_semantic_dir, domain_count, activations, canvas_opens, stages, schema_formats,
   model_count, manifest, catalog, features, errors,
   host, remote, dev, assistants, harnesses, active_days_28, canvas_days_28, first_canvas,
-  physical_tools, platforms
+  physical_tools, platforms, trail, trail_dropped
 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)
+  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)
 ON CONFLICT(install_id, day) DO UPDATE SET
   received_day = excluded.received_day,
   ext_version = excluded.ext_version,
@@ -427,7 +655,9 @@ ON CONFLICT(install_id, day) DO UPDATE SET
   canvas_days_28 = excluded.canvas_days_28,
   first_canvas = excluded.first_canvas,
   physical_tools = excluded.physical_tools,
-  platforms = excluded.platforms`;
+  platforms = excluded.platforms,
+  trail = excluded.trail,
+  trail_dropped = excluded.trail_dropped`;
 
 const RETENTION_SQL = `DELETE FROM heartbeats WHERE received_day < date('now', '-${RETENTION_DAYS} days')`;
 
@@ -562,6 +792,8 @@ async function handleHeartbeat(request, env) {
       heartbeat.firstCanvas,
       heartbeat.physicalTools === null ? null : JSON.stringify(heartbeat.physicalTools),
       heartbeat.platforms === null ? null : JSON.stringify(heartbeat.platforms),
+      heartbeat.trail === null ? null : JSON.stringify(heartbeat.trail),
+      heartbeat.trailDropped,
     )
     .run();
 
@@ -624,6 +856,9 @@ function validateHeartbeat(raw, now) {
   const assistants = b.assistants === undefined ? null : subsetOf(b.assistants, ASSISTANTS);
   const harnesses = b.harnesses === undefined ? null : subsetOf(b.harnesses, HARNESSES);
   if ((b.assistants !== undefined && !assistants) || (b.harnesses !== undefined && !harnesses)) return null;
+  const trail = b.trail === undefined ? null : trailOf(b.trail);
+  if (trail === INVALID) return null;
+  if (b.trailDropped !== undefined && (b.trail === undefined || !isIntIn(b.trailDropped, 0, MAX_TRAIL_DROPPED))) return null;
   const physicalTools = b.physicalTools === undefined ? null : subsetOf(b.physicalTools, PHYSICAL_TOOLS);
   const platforms = b.platforms === undefined ? null : subsetOf(b.platforms, PLATFORMS);
   if ((b.physicalTools !== undefined && !physicalTools) || (b.platforms !== undefined && !platforms)) return null;
@@ -658,7 +893,32 @@ function validateHeartbeat(raw, now) {
     firstCanvas: /** @type {string | null} */ (firstCanvas),
     physicalTools,
     platforms,
+    trail: /** @type {Array<[string, number, number, number]> | null} */ (trail),
+    trailDropped: trail === null ? null : typeof b.trailDropped === 'number' ? b.trailDropped : 0,
   };
+}
+
+/**
+ * The onboarding trail: an array of at most {@link MAX_TRAIL} entries
+ * `[event, gap, window, repeat]`, every value checked. An event this Worker
+ * does not list (from a newer extension) is dropped and the rest keep their
+ * order; anything else malformed refuses the heartbeat ({@link INVALID}).
+ *
+ * @param {unknown} value
+ * @returns {Array<[string, number, number, number]> | typeof INVALID}
+ */
+function trailOf(value) {
+  if (!Array.isArray(value) || value.length > MAX_TRAIL) return INVALID;
+  /** @type {Array<[string, number, number, number]>} */
+  const out = [];
+  for (const entry of value) {
+    if (!Array.isArray(entry) || entry.length !== 4) return INVALID;
+    const [event, gap, window, repeat] = entry;
+    if (typeof event !== 'string' || !/^!?[A-Za-z0-9]{1,64}$/.test(event)) return INVALID;
+    if (!isIntIn(gap, 0, MAX_TRAIL_GAP_S) || !isIntIn(window, 1, MAX_TRAIL_WINDOWS) || !isIntIn(repeat, 1, MAX_TRAIL_REPEAT)) return INVALID;
+    if (TRAIL_EVENTS.has(event)) out.push([event, gap, window, repeat]);
+  }
+  return out;
 }
 
 /** Marks an optional field that is present but invalid. */
@@ -936,6 +1196,8 @@ function errorName(err) {
  * @property {string | null} firstCanvas
  * @property {string[] | null} physicalTools
  * @property {string[] | null} platforms
+ * @property {Array<[string, number, number, number]> | null} trail
+ * @property {number | null} trailDropped
  */
 
 /**

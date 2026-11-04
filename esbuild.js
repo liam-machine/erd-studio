@@ -1,10 +1,13 @@
 // esbuild.js — Build for ERD Studio VS Code extension
 // Targets: Extension host (Node.js, CJS), Webview (Browser, IIFE with React),
-// manifest worker (Node.js worker thread) and the standalone `erd-studio` CLI.
+// manifest worker (Node.js worker thread), the standalone `erd-studio` CLI,
+// the lazily loaded SQL importer (dist/sqlImport.js) and the draft preview
+// page (dist/draft.js).
 
 const esbuild = require('esbuild');
 const path = require('path');
 const fs = require('fs');
+const { exampleBundleDefine } = require('./scripts/exampleBundle.cjs');
 
 const args = process.argv.slice(2);
 const isWatch = args.includes('--watch');
@@ -58,6 +61,13 @@ const extensionConfig = {
   logLevel: 'warning',
   // Harness skill files (src/harness/**/*.md) are bundled as plain strings.
   loader: { '.md': 'text' },
+  define: {
+    // The example projects in docs/examples/, for Open an Example Project…
+    // (src/services/exampleProjects.ts). Inlined because the VSIX is capped
+    // at 60 files. Read once per build: `npm run watch` picks up an edit to
+    // docs/examples on its next start.
+    '__ERD_EXAMPLES__': exampleBundleDefine(),
+  },
   plugins: [problemMatcherPlugin],
 };
 
@@ -100,6 +110,41 @@ const cliConfig = {
   plugins: [problemMatcherPlugin],
 };
 
+// SQL importer — `dist/sqlImport.js`, loaded by the host only when an Import
+// SQL DDL… runs (src/services/sqlImportLoader.ts), so @dbml/core's SQL
+// grammars (several MB) never enter dist/extension.js or dist/cli.js. The
+// Oracle grammar (about 8 MB on its own) is stubbed out: the import does not
+// offer Oracle (src/services/sqlDdlImport.ts, SQL_DIALECTS). No source map:
+// the grammar tables dwarf the converter, which tests run from source.
+const ORACLE_GRAMMAR = /[\\/]ANTLR[\\/](parsers[\\/]oraclesql[\\/]|ASTGeneration[\\/]oraclesql[\\/])/;
+const stubOracleGrammarPlugin = {
+  name: 'stub-oracle-grammar',
+  setup(build) {
+    build.onResolve({ filter: /oraclesql[\\/]/ }, (args) => {
+      const resolved = path.resolve(args.resolveDir, args.path);
+      if (!ORACLE_GRAMMAR.test(resolved)) return undefined;
+      return { path: resolved, namespace: 'oracle-grammar-stub' };
+    });
+    build.onLoad({ filter: /.*/, namespace: 'oracle-grammar-stub' }, () => ({
+      contents: 'export default class OracleGrammarNotBundled { constructor() { throw new Error("The Oracle SQL grammar is not bundled."); } }',
+      loader: 'js',
+    }));
+  },
+};
+const sqlImportConfig = {
+  entryPoints: ['./src/services/sqlImportEngine.ts'],
+  bundle: true,
+  outfile: './dist/sqlImport.js',
+  format: 'cjs',
+  platform: 'node',
+  target: 'node18',
+  sourcemap: false,
+  minify: isProduction,
+  treeShaking: true,
+  logLevel: 'warning',
+  plugins: [stubOracleGrammarPlugin, problemMatcherPlugin],
+};
+
 // Webview build — Browser, IIFE, bundle everything including React
 const webviewConfig = {
   entryPoints: ['./webview/index.tsx'],
@@ -125,6 +170,21 @@ const webviewConfig = {
   plugins: [problemMatcherPlugin],
 };
 
+// Draft preview page — `dist/draft.js` + `dist/draft.css`, shown by
+// src/providers/DraftPreviewPanel.ts (docs/dev/draft-first.md). Its own
+// bundle, so the editor webview's protocol stays untouched: React, React
+// Flow, the renderer and the ELK worker (the page lays a draft out with the
+// canvas's own options) are repeated here.
+const draftConfig = {
+  ...webviewConfig,
+  entryPoints: ['./webview-draft/index.tsx'],
+  outfile: './dist/draft.js',
+  define: {
+    'process.env.NODE_ENV': isProduction ? '"production"' : '"development"',
+    '__ELK_WORKER_CODE__': JSON.stringify(elkWorkerCode),
+  },
+};
+
 async function build() {
   console.log(`Building [${isProduction ? 'production' : 'development'}]...`);
 
@@ -134,6 +194,8 @@ async function build() {
       esbuild.context(webviewConfig),
       esbuild.context(workerConfig),
       esbuild.context(cliConfig),
+      esbuild.context(sqlImportConfig),
+      esbuild.context(draftConfig),
     ]);
     await Promise.all(contexts.map((ctx) => ctx.watch()));
     console.log('Watching for changes...');
@@ -143,6 +205,8 @@ async function build() {
       esbuild.build(webviewConfig),
       esbuild.build(workerConfig),
       esbuild.build(cliConfig),
+      esbuild.build(sqlImportConfig),
+      esbuild.build(draftConfig),
     ]);
     console.log('Build complete.');
   }

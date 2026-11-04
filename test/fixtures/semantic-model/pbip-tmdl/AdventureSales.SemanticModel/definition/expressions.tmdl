@@ -1,0 +1,6 @@
+expression ServerName = "sql.contoso.com" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: 0b6c1f7e-1d2a-4f3b-9c8d-7e6f5a4b3c2d
+	queryGroup: Staging
+
+	annotation PBI_ResultType = Text
+

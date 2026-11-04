@@ -17,12 +17,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Send Feedback (dialog, AI analysis tiers, consent, redaction, My Reports) | `docs/dev/feedback.md` |
 | Usage telemetry (extension side and the Worker) | `telemetry/README.md` |
 | Getting Started panel, CLI launcher, the `erd-studio` CLI | `docs/dev/onboarding-and-cli.md` |
-| The README or a user guide (`docs/dbt.md`, `docs/ai-assistants.md`, `docs/project-folder.md`, `docs/modelling-patterns.md`), Marketplace copy, walkthrough or welcome-view text | the wording rules in `docs/dev/onboarding-and-cli.md` |
+| The onboarding guide, Show Me Around (coach marks on the draft and the canvas, `src/types/onboardingGuide.ts`) | `docs/dev/onboarding-and-cli.md` → Show Me Around |
+| The Draft-first start: the draft preview (`src/providers/DraftPreviewPanel.ts`, `webview-draft/`), the draft services (`src/services/draft*.ts`), `src/types/draft.ts`, the automatic draft on the empty Diagrams view, the start suggestion, or any import's dry run (now the draft) | `docs/dev/draft-first.md` |
+| The README or a user guide (`docs/dbt.md`, `docs/ai-assistants.md`, `docs/project-folder.md`, `docs/modelling-patterns.md`, `docs/import-existing-models.md`), Marketplace copy, walkthrough or welcome-view text | the wording rules in `docs/dev/onboarding-and-cli.md` |
 | DBML storage, import and export: `packages/core/src/dbml/`, the subject-area codec, `planDbmlLibraryWrites`, `applyFileWrites`, Convert Project to DBML, the `erd_layout` codec, Ref placement and diagram imports, the rich export, Export All Diagrams, Import DBML (parser pin, property names, `meta.dbml`) | `docs/dev/dbml.md` |
 | Native DBML storage: the decisions (D1–D33), the normative format, the stages and their review log | `docs/plans/native-dbml-storage.md` |
 | `SCHEMA_CONTENT`, harness generators, the `/erd-studio-setup` skill | `src/harness/CLAUDE.md` |
 | Releases, package publishing, manual publish | `docs/dev/releasing.md` |
 | Rendering the webview in Chrome | `docs/dev/webview-preview.md` |
+| The onboarding stories in `test/stories/` (user stories as code driving a real VS Code, filmed as captioned videos; `npm run stories`, `stories.yml`), or any first-run surface they cover (start links, walkthrough, empty Diagrams view, Open an Example) | `docs/dev/onboarding-stories.md` |
 | The on-disk file format (DBML tables, relationships and diagrams, `erd_layout`; legacy domain JSON and model yml; `layers.json`) | `docs/semantic-domain-json-reference.md` |
 | The example projects in `docs/examples/` (one per modelling pattern, the shapes customers' repos take) and their tests — see **Example projects** under Rules | `docs/modelling-patterns.md` |
 | `proxy/`, `telemetry/`, `video/` | their own `README.md` |
@@ -82,7 +85,7 @@ npm run build:packages # publishable dist/ of both packages
 
 ## Architecture map
 
-Four esbuild targets (`esbuild.js`, each in both build and watch branches):
+Six esbuild targets (`esbuild.js`, each in both build and watch branches):
 
 | Target | Source → output | Notes |
 |---|---|---|
@@ -90,6 +93,8 @@ Four esbuild targets (`esbuild.js`, each in both build and watch branches):
 | Webview | `webview/` → `dist/webview.js` + `.css` | browser IIFE, React; ELK worker injected via `define` (`importScripts()` is unavailable in webviews) |
 | Manifest worker | `src/workers/manifestWorker.ts` → `dist/manifestWorker.js` | worker thread, plain `JSON.parse` |
 | CLI | `src/cli/index.ts` → `dist/cli.js` | Node 18, **no `external`**: an `import 'vscode'` anywhere in its graph breaks the build (`test/unit/cli.noVscode.test.ts`) |
+| SQL importer | `src/services/sqlImportEngine.ts` → `dist/sqlImport.js` | Node 18, `@dbml/core`'s SQL grammars (Oracle stubbed); `require`d at run time by `sqlImportLoader.ts` on the first **Import SQL DDL…**. Never import `sqlImportEngine.ts` from host code (`test/unit/sqlDdlImport.test.ts` checks the bundles' inputs) |
+| Draft preview | `webview-draft/` → `dist/draft.js` + `.css` | browser IIFE, React, the renderer's `ErdCanvas` (viewer) and the ELK worker `define`; its own page and protocol (`src/types/draft.ts`, `parseDraftToHost`), nonce-only CSP with no `unsafe-inline`; writes nothing (`docs/dev/draft-first.md`) |
 
 - Two tsconfigs: `tsconfig.json` (Node) and `tsconfig.webview.json` (DOM, includes `src/types/**`). `@types/vscode` is pinned to `1.85.0` to match `engines.vscode` — **use no newer VS Code APIs**.
 - **Packages are built from source** in the extension: tsconfig `paths` and vitest aliases point `@erd-studio/core` / `@erd-studio/renderer` at `packages/*/src`; their `exports` point only at `dist/`. Core owns the pure raw-files → `DisplaySubjectArea` pipeline and the Mermaid / DBML exporters; host services delegate to it and keep only file access, caching and messaging. The renderer owns the canvas; its components post edits through `CanvasHost`, never `acquireVsCodeApi()`.

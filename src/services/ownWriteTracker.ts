@@ -97,6 +97,7 @@ export class OwnWriteTracker {
   /** Writes announced by {@link expectWrite} that have not landed yet: path → one per announcement. */
   private readonly pending = new Map<string, PendingWrite[]>();
   private nextToken = 1;
+  private readonly listeners = new Set<(filePath: string) => void>();
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
@@ -208,6 +209,17 @@ export class OwnWriteTracker {
     return this.live(this.key(filePath)) !== undefined;
   }
 
+  /**
+   * Call `listener` after every recorded write or delete (the bytes have
+   * landed). The watchers drop these events as ERD Studio's own, so this is
+   * how something that must see every change under a folder (Draft-first's
+   * staleness) sees ours too.
+   */
+  onRecorded(listener: (filePath: string) => void): { dispose(): void } {
+    this.listeners.add(listener);
+    return { dispose: () => { this.listeners.delete(listener); } };
+  }
+
   /** Drop all records (tests, disposal). */
   clear(): void {
     this.entries.clear();
@@ -226,6 +238,13 @@ export class OwnWriteTracker {
     if (waiting) {
       waiting.shift();
       if (waiting.length === 0) this.pending.delete(key);
+    }
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(key);
+      } catch {
+        // A listener never stops a write being recorded.
+      }
     }
   }
 

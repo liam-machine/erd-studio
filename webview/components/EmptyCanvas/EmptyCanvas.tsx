@@ -64,7 +64,7 @@ export const EmptyCanvas: React.FC = () => {
               ? 'Reuse tables from your Table Library, or add a new one.'
               : 'Reuse tables from your Table Library, start from your dbt project, or add a table by hand.')
             : logicalOnly
-              ? 'Add your first table. Each one is a file you can commit.'
+              ? 'Add your first table.'
               : 'Start from your dbt project, or add a table by hand.'}
         </p>
         <div className="empty-canvas__actions">

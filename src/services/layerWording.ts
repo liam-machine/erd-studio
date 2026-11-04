@@ -13,3 +13,15 @@ export const LAYER_DEFINITION_SHORT =
 
 /** The question a diagram's layer pick asks, with the short definition. */
 export const WHICH_LAYER_FOR_DIAGRAM = `Which layer is this diagram for? ${LAYER_DEFINITION_SHORT}`;
+
+/**
+ * The layer a diagram goes in without asking, by New Diagram's rule: the only
+ * creatable layer, or, while the project has no diagram yet (nothing to tell
+ * the layers apart by), the last creatable one in `layers.json` order (gold,
+ * of silver and gold; a new folder's one default layer). Undefined: ask.
+ */
+export function defaultDiagramLayer(creatableIds: readonly string[], diagramCount: number): string | undefined {
+  if (creatableIds.length === 1) return creatableIds[0];
+  if (creatableIds.length > 1 && diagramCount === 0) return creatableIds[creatableIds.length - 1];
+  return undefined;
+}

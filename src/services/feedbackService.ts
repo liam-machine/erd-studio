@@ -25,6 +25,7 @@ import * as vscode from 'vscode';
 
 import {
   applyRegressionPrefix,
+  GITHUB_REPO,
   type FeedbackDiagnosticsChip,
   type FeedbackDiagnosticsView,
   type FeedbackDraft,
@@ -37,8 +38,8 @@ import { LOG_BUFFER_CAPACITY, recentLogLines, writeLog } from './logger';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** GitHub `owner/repo` that receives bug reports. */
-export const GITHUB_REPO = 'liam-machine/erd-studio';
+/** GitHub `owner/repo` that receives bug reports (defined, vscode-free, in `src/types/feedback.ts`). */
+export { GITHUB_REPO };
 
 /** Issue form template file name under `.github/ISSUE_TEMPLATE/`. */
 export const BUG_REPORT_TEMPLATE = 'bug_report.yml';

@@ -13,6 +13,7 @@ import {
   ReactFlowProvider,
   useReactFlow,
   SelectionMode,
+  type FitViewOptions,
   type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -22,7 +23,7 @@ import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
 import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useStatePersistence } from './hooks/useStatePersistence';
 import { useVsCodeApi } from './hooks/useVsCodeApi';
-import { INITIAL_FIT_VIEW_OPTIONS } from './lib/fitViewPadding';
+import { INITIAL_FIT_VIEW_OPTIONS, initialFitViewOptions } from './lib/fitViewPadding';
 import {
   useColumnExpansion,
   NODE_THRESHOLD,
@@ -64,6 +65,8 @@ import { LOADING_STALL_MS, RECONNECT_GRACE_MS, useReconnectWatchdog } from './ho
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import { useLibraryDrop } from './hooks/useLibraryDrop';
 import { LibraryDropOverlay } from './components/Canvas/LibraryDropOverlay';
+import { CanvasGuide } from './components/Guide/CanvasGuide';
+import { isCanvasGuideStart, type CanvasGuideStart } from '../src/types/onboardingGuide';
 import type { DisplaySubjectArea } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
 import { orientDraggedRelationship } from './lib/relationshipDirection';
@@ -107,6 +110,11 @@ function EditorCanvas() {
   const errorFileProblem = useEditorStore((s) => s.errorFileProblem);
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
+  // The first-open fit, decided once from the first nodes the canvas gets: a
+  // large diagram opens on its biggest cluster at a readable zoom, a small one
+  // whole and never past 100% (src: webview/lib/fitViewPadding.ts).
+  const initialFitRef = useRef<FitViewOptions | null>(null);
+  if (initialFitRef.current === null && nodes.length > 0) initialFitRef.current = initialFitViewOptions(nodes, edges);
   const setError = useEditorStore((s) => s.setError);
   const setViewport = useEditorStore((s) => s.setViewport);
   const setFeedbackDialogOpen = useEditorStore((s) => s.setFeedbackDialogOpen);
@@ -215,6 +223,10 @@ function EditorCanvas() {
   // diagram or an error arrives: proof the host is connected.
   const [hostLoading, setHostLoading] = useState<{ tables?: number } | null>(null);
 
+  // The onboarding guide's phase B (Show Me Around), when the host starts it on this canvas.
+  const [guide, setGuide] = useState<CanvasGuideStart | null>(null);
+  const endGuide = useCallback(() => setGuide(null), []);
+
   // Drops of tables on the canvas (a Shift-drag from the Table Library or the
   // Explorer): the drop handlers, the highlight and the "Hold Shift" hint.
   const { dropHandlers, dropActive, hintTables, libraryDragStarted } = useLibraryDrop();
@@ -309,6 +321,9 @@ function EditorCanvas() {
           useEditorStore
             .getState()
             .setFeedbackContext(msg.payload.diagnostics, msg.payload.capabilities);
+          break;
+        case 'guideStart':
+          if (isCanvasGuideStart(msg.payload)) setGuide({ dbml: msg.payload.dbml, semanticDir: msg.payload.semanticDir });
           break;
       }
     },
@@ -720,7 +735,7 @@ function EditorCanvas() {
         {...hoverHandlers}
         fitView={!shouldSkipFitView}
         // Leave room for the floating toolbar above the top row of cards.
-        fitViewOptions={INITIAL_FIT_VIEW_OPTIONS}
+        fitViewOptions={initialFitRef.current ?? INITIAL_FIT_VIEW_OPTIONS}
         minZoom={0.05}
         selectionMode={SelectionMode.Partial}
         zoomOnDoubleClick={domain.readOnly}
@@ -780,6 +795,9 @@ function EditorCanvas() {
 
       {/* Feedback dialog (bug reports and feature requests) */}
       <FeedbackDialog />
+
+      {/* The onboarding guide's coach marks (Show Me Around), over the canvas. */}
+      {guide && <CanvasGuide start={guide} onEnd={endGuide} />}
     </div>
   );
 }

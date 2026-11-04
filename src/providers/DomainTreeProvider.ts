@@ -28,6 +28,8 @@ import { createLogger, elapsedMs, log, plural } from '../services/logger';
 import { layersFailure } from '../services/diagramCommandErrors';
 import { showCommandFailure } from '../commands/commandFailure';
 import type { DbmlFileIconResolver } from './dbmlFileKinds';
+import { CONVERT_ROW_DESCRIPTION, CONVERT_ROW_LABEL, CONVERT_ROW_TOOLTIP } from '../services/convertOffer';
+import { START_COMMAND } from '../types/startActions';
 import { layerSwatchIcon } from './layerSwatch';
 import { otherLayerCounts, type TableHome } from '../services/tableHomes';
 import { LAYER_DEFINITION } from '../services/layerWording';
@@ -102,7 +104,16 @@ interface ProjectNode {
   readonly location: string;
 }
 
-export type TreeElement = ProjectNode | LayerNode | SubjectAreaNode | NewSubjectAreaNode | NewLayerNode | NoMatchNode;
+/**
+ * **Convert to DBML…**, above the layers of a project from before 2.0 that has
+ * diagrams (`convertRowShows`, src/services/convertOffer.ts): the empty
+ * view's Convert entry is a welcome view, gone once the tree has rows.
+ */
+interface ConvertNode {
+  readonly type: 'convert';
+}
+
+export type TreeElement = ProjectNode | ConvertNode | LayerNode | SubjectAreaNode | NewSubjectAreaNode | NewLayerNode | NoMatchNode;
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -153,6 +164,9 @@ export class SubjectAreaTreeProvider
 
   /** The project row, or undefined while the workspace has one dbt project. */
   private projectRow: ProjectNode | undefined;
+
+  /** Whether the Convert to DBML… row shows (asked on every root listing); none until the extension wires it. */
+  private convertRow: (() => boolean) | undefined;
 
   /**
    * `erdStudio.diagramsLoading`: true until a root listing finds no rows.
@@ -389,6 +403,11 @@ export class SubjectAreaTreeProvider
    * Show (or, with `undefined`, hide) the switchable project row at the top
    * of the tree. Called at activation and when workspace folders change.
    */
+  /** Wire the Convert to DBML… row's rule; the extension calls it once. */
+  setConvertRow(shows: () => boolean): void {
+    this.convertRow = shows;
+  }
+
   setProjectRow(project: { name: string; location: string } | undefined): void {
     this.projectRow = project ? { type: 'project', ...project } : undefined;
     this._onDidChangeTreeData.fire(undefined);
@@ -398,6 +417,8 @@ export class SubjectAreaTreeProvider
     switch (element.type) {
       case 'project':
         return this.createProjectItem(element);
+      case 'convert':
+        return this.createConvertItem();
       case 'layer':
         return this.filteredLayerItem(element, this.createLayerItem(element));
       case 'domain':
@@ -485,8 +506,12 @@ export class SubjectAreaTreeProvider
     this._onDidFilter.fire(undefined);
     // Only alongside real content: an empty tree must stay empty so the
     // welcome view (which has its own Select dbt Project button) shows.
-    if (layerNodes.length === 0) return this.projectRow ? [this.projectRow] : [];
-    return [...(this.projectRow ? [this.projectRow] : []), ...layerNodes, { type: 'newLayer' }];
+    // No diagram anywhere yet (a new project's empty layer folders): show
+    // the welcome view's start buttons — New Diagram, Import, an example,
+    // Draw from dbt — rather than bare layer rows, until the first diagram.
+    if (layerNodes.length === 0 || this.diagramTotal === 0) return this.projectRow ? [this.projectRow] : [];
+    const convert = this.convertRowShows() ? [{ type: 'convert' } as const] : [];
+    return [...(this.projectRow ? [this.projectRow] : []), ...convert, ...layerNodes, { type: 'newLayer' }];
   }
 
   /**
@@ -600,6 +625,27 @@ export class SubjectAreaTreeProvider
 
     treeLog.debug(`Layer ${layer} listed ${plural(domainNodes.length, 'diagram')} in ${elapsedMs(start)} ms`);
     return children;
+  }
+
+  private convertRowShows(): boolean {
+    try {
+      return this.convertRow?.() === true;
+    } catch (err) {
+      treeLog.debug(`Convert row skipped: ${String(err)}`);
+      return false;
+    }
+  }
+
+  private createConvertItem(): vscode.TreeItem {
+    const item = new vscode.TreeItem(CONVERT_ROW_LABEL, vscode.TreeItemCollapsibleState.None);
+    item.id = 'erdStudio.convertProject';
+    item.description = CONVERT_ROW_DESCRIPTION;
+    item.tooltip = CONVERT_ROW_TOOLTIP;
+    item.contextValue = 'convertProject';
+    item.iconPath = new vscode.ThemeIcon('arrow-swap');
+    // The start screen's own Convert, so the funnel counts it as the sidebar's (sidebarConvert).
+    item.command = { command: START_COMMAND, title: CONVERT_ROW_LABEL, arguments: [{ action: 'convert', from: 'sidebar' }] };
+    return item;
   }
 
   private createProjectItem(element: ProjectNode): vscode.TreeItem {

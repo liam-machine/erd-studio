@@ -167,27 +167,28 @@ describe('the example DBML', () => {
 });
 
 describe('Open Example Diagram', () => {
-  it('is a post-rename command with no legacy alias, registered after project resolution', () => {
+  it('is a post-rename command with no legacy alias, pre-registered: it opens the example draft in an empty window too', () => {
     expect(OPEN_EXAMPLE_DIAGRAM_COMMAND).toBe('erdStudio.openExampleDiagram');
     expect(NO_LEGACY_ALIAS.has(OPEN_EXAMPLE_DIAGRAM_COMMAND)).toBe(true);
-    // An empty window gets the fallback "Open a folder first" with Open Folder….
-    expect(PRE_REGISTERED_COMMANDS.has(OPEN_EXAMPLE_DIAGRAM_COMMAND)).toBe(false);
+    // Draft-first §9: the same draft as Open an Example…, so it works before a folder is open.
+    expect(PRE_REGISTERED_COMMANDS.has(OPEN_EXAMPLE_DIAGRAM_COMMAND)).toBe(true);
   });
 
-  it('is contributed in the ERD Studio category and offered in the no-dbt sidebar welcome', () => {
+  it('is contributed in the ERD Studio category; the start surfaces offer the example projects instead', () => {
     const pkg = packageJson as unknown as {
       contributes: {
         commands: Array<{ command: string; title: string; category?: string }>;
         viewsWelcome: Array<{ view: string; contents: string; when?: string }>;
+        walkthroughs: Array<{ steps: Array<{ description: string }> }>;
       };
     };
+    // It adds the coffee-shop diagram to the open project; "Open an example" on the start
+    // surfaces opens a whole example project in a folder of its own (erdStudio.openExampleProject).
     expect(pkg.contributes.commands.find((c) => c.command === OPEN_EXAMPLE_DIAGRAM_COMMAND)).toEqual({
       command: OPEN_EXAMPLE_DIAGRAM_COMMAND, title: 'Open Example Diagram', category: 'ERD Studio',
     });
-    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
-    expect(plain.contents).toContain('New to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)');
-    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')!;
-    expect(dbt.contents).not.toContain('openExampleDiagram');
+    const surfaces = [...pkg.contributes.viewsWelcome.map((v) => v.contents), ...pkg.contributes.walkthroughs[0].steps.map((s) => s.description)];
+    expect(surfaces.filter((text) => text.includes(OPEN_EXAMPLE_DIAGRAM_COMMAND))).toEqual([]);
   });
 
   it('in a plain folder: name box, dry run, then .erd-studio/ with layers.json, the tables and the diagram, opened', async () => {
@@ -205,7 +206,7 @@ describe('Open Example Diagram', () => {
     expect(ui.reads).toEqual([]);
     expect(ui.inputs).toEqual(['coffee-shop']);
     expect(ui.confirms).toHaveLength(1);
-    expect(ui.confirms[0].message).toBe('Import 6 tables into a new diagram "coffee-shop" in the Gold layer.');
+    expect(ui.confirms[0].message).toBe('Import 6 tables and 8 relationships into a new diagram "coffee-shop" in the Gold layer.');
     expect(ui.confirms[0].detail).toContain('8 relationships');
     expect(ui.confirms[0].detail).toContain('laid out automatically');
     expect(ui.confirms[0].detail).not.toContain('Left out');
@@ -233,7 +234,7 @@ describe('Open Example Diagram', () => {
     const result = await openExampleDiagram(deps(ui));
     expect(ui.inputs).toEqual(['coffee-shop-2']);
     expect(result?.plan.reusedTables).toEqual(SAMPLE_TABLES);
-    expect(ui.confirms[0].detail).toContain('Already in your Table Library');
+    expect(ui.confirms[0].detail).toContain('6 tables already in your Table Library, used as they are');
   });
 
   it('cancelled at the dry run: nothing written, not counted as an example', async () => {
@@ -277,7 +278,8 @@ describe('Open Example Diagram', () => {
     services();
     const ui = recorder({ layer: 'marts' });
     const result = await openExampleDiagram(deps(ui));
-    expect(ui.picks).toEqual([['staging', 'marts']]);
+    // New Diagram's default for a first diagram (the last creatable layer) first: Enter takes it.
+    expect(ui.picks).toEqual([['marts', 'staging']]);
     // A project with no tables yet writes DBML (§3.2).
     expect(result?.domainPath).toBe(erd('marts', 'diagrams', 'coffee-shop.dbml'));
     expect(fs.existsSync(erd('marts', 'tables', 'marts', 'fct_orders.dbml'))).toBe(true);

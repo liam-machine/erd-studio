@@ -1,0 +1,27 @@
+model Model
+	culture: en-AU
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	sourceQueryCulture: en-AU
+	dataAccessOptions
+		legacyRedirects
+		returnErrorValuesAsNull
+
+queryGroup Staging
+
+	annotation PBI_QueryGroupOrder = 0
+
+annotation __PBI_TimeIntelligenceEnabled = 1
+
+annotation PBI_QueryOrder = ["Sales","Customer","Product"]
+
+annotation PBI_ProTooling = ["DevMode"]
+
+ref table Sales
+ref table Customer
+ref table Product
+ref table 'Date Table'
+ref table 'Time Intelligence'
+ref table LocalDateTable_8f1c2d3e-4b5a-4c6d-9e8f-0a1b2c3d4e5f
+
+ref cultureInfo en-AU
+

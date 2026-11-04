@@ -48,7 +48,7 @@ Greet the user in about four short lines:
   ERD Studio 2.0), so it is reviewed and versioned like code.
 - You will design one diagram with them, write its files, check them, and open it on the canvas.
   Nothing outside `.erd-studio/` changes.
-- Want to see a finished one first? **ERD Studio: Open Example Diagram** (Command Palette) opens
+- Want to see a finished one first? **ERD Studio: Open an Example…** (Command Palette) opens
   a small coffee-shop model — no AI needed.
 
 Then look before asking. Say "Checking this folder," and run

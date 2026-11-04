@@ -8,6 +8,14 @@
  * it out on first open. The physical stage stays derived; nothing here
  * persists it — the draft is a starting point the user asked for and edits.
  *
+ * **Draft-first** (`docs/dev/draft-first.md` §5.2): with a preview
+ * (`deps.draft`) nothing is asked up front. The folder drawn is the top-ranked
+ * models folder (`dbtDraftScopes`), the layer the one it names (else New
+ * Diagram's default), the name the folder's, made free; the draft (a
+ * read-only diagram, written only on Keep) carries a **Folder** switcher and
+ * **Change options…**, which runs the picker, layer pick and name box as
+ * before and ends in a draft again. Keep runs the same write step.
+ *
  * The scopes and the draft come from the pure `src/services/dbtDraft.ts`;
  * the picker is `src/providers/dbtDraftPicker.ts`; the files are written, all
  * or nothing, by `writeNewSubjectArea` (`src/services/newSubjectAreaWriter.ts`),
@@ -15,10 +23,13 @@
  * so `activate()` wires the real ones and the refreshes stay in extension.ts.
  */
 
+import { slugFromName, validateTypedDiagramName } from './diagramName';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
+import { afterScope, dbtDraftFingerprint, dbtDraftScopes, draftFromDbt as buildDbtDraftView, DRAFT_REDRAWN_NOTICE } from '../services/draftModel';
+import type { Draft, DraftKeepOutcome, DraftPreview, DraftTarget, DraftTrigger } from '../types/draft';
 import {
   buildDbtDraft,
   buildDraftSubjectAreaDocument,
@@ -69,7 +80,7 @@ import type { CatalogData } from '../types/catalog';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import { log } from '../services/logger';
-import { WHICH_LAYER_FOR_DIAGRAM } from '../services/layerWording';
+import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
 
 export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
 
@@ -109,18 +120,40 @@ export interface DrawFromDbtDeps {
    * existing library tables that gained a relationship.
    */
   onWritten: (written: { domainPath: string; modelNames: string[]; changedModelNames: string[] }) => void;
+  /** The draft preview (§5.2). Absent: the picker, layer pick and name box, then the write, as before. */
+  draft?: DbtDraftOptions;
+}
+
+/** How Draw from dbt shows its draft (`docs/dev/draft-first.md` §5.2). */
+export interface DbtDraftOptions {
+  preview: DraftPreview;
+  /** What opened it. `changeOptions`: the picker, layer pick and name box run as before, then the draft. */
+  trigger: DraftTrigger;
+  /** The automatic draft: nothing asked or shown before the draft; an early end counts nothing here. */
+  quiet?: boolean;
+  /** Bumped by the semantic-dir watchers for changes that are not ERD Studio's own. */
+  generation?(): number;
 }
 
 /**
  * Where Try Again and Choose Another Name re-enter the flow (#189): at the
  * name step, with the models and layer the user already chose, so a failed
- * draw never costs them their selection.
+ * draw never costs them their selection. With a draft: the switcher's folder
+ * (`scopeId`), or a Keep that found the files changed (`redraw`).
  */
 export interface DrawFromDbtResume {
-  pick: DraftScopePick;
-  layer: string;
+  pick?: DraftScopePick;
+  layer?: string;
   /** The name to offer again (Try Again); the suggested one when absent. */
   name?: string;
+  /** The draft's Folder switcher: draw this folder scope (`listDraftScopes` id). */
+  scopeId?: string;
+  /**
+   * A Keep after the project's files changed: write at once when the
+   * fingerprint is the same (§5.1). `draft` is the draft that Keep answered,
+   * asked again when this write does not land.
+   */
+  redraw?: { fingerprint: string; settle(outcome: DraftKeepOutcome): void; draft?: Draft };
 }
 
 export { ADD_LAYER_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON, NO_LAYERS_MESSAGE, OPEN_FILE_BUTTON, OPEN_IT_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
@@ -165,11 +198,27 @@ function sendFeedback(doing: string, err: unknown): () => unknown {
 
 async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume): Promise<DrawFromDbtResult | undefined> {
   const { workspaceRoot, semanticDir, layerService, subjectAreaService, tableLibraryService } = deps;
+  const draftOptions = deps.draft;
+  /** The automatic draft: nothing asked or shown before it (the Diagrams view shows the progress). */
+  const quiet = draftOptions?.quiet === true;
+  /**
+   * Asked as before: no draft, Change options…, or a Try Again with the user's
+   * own pick. Never for the switcher's folder (`scopeId`), even on a Change
+   * options… draft: that choice is the answer.
+   */
+  const asks = !draftOptions
+    || ((draftOptions.trigger === 'changeOptions' || resume?.pick !== undefined) && resume?.scopeId === undefined);
+  const say = (message: string): void => {
+    if (quiet) log.info(`[ERD Studio] ${TITLE} (automatic draft, not shown): ${message}`);
+    else void vscode.window.showInformationMessage(message);
+  };
 
-  const { ymlData, manifest, catalog } = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'Reading your dbt project…' },
-    () => deps.loadDbt(),
-  );
+  const { ymlData, manifest, catalog } = quiet
+    ? await deps.loadDbt()
+    : await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Reading your dbt project…' },
+      () => deps.loadDbt(),
+    );
   // #113: no manifest (never compiled, or removed) — `loadDbt` passes undefined then.
   if (!manifest) { telemetry.featureOnce('manifestMissingDraw'); }
 
@@ -177,26 +226,45 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   const source = { ymlData, manifest, projectRoot: workspaceRoot, modelPaths: deps.modelPaths, layerIds };
   const models = listDraftModels(source);
   if (models.length === 0) {
-    telemetry.feature('drawNoModels');
-    void vscode.window.showInformationMessage(NO_DBT_MODELS_MESSAGE);
+    if (!quiet) telemetry.feature('drawNoModels');
+    say(NO_DBT_MODELS_MESSAGE);
     return undefined;
   }
-  const pick = resume?.pick ?? await pickDraftScope(listDraftScopes(source), { models, title: TITLE });
+  const allScopes = listDraftScopes(source);
+  let pick = resume?.pick;
+  if (!pick && !asks) {
+    // The draft: the switcher's folder, else the top-ranked one; no picker.
+    const ranked = dbtDraftScopes(allScopes);
+    const scope = (resume?.scopeId !== undefined ? allScopes.find((s) => s.id === resume.scopeId) : undefined) ?? ranked.defaultScope;
+    if (scope) pick = { scope, modelNames: scope.modelNames };
+    else if (quiet) {
+      log.info(`[ERD Studio] ${TITLE}: no models folder to draft (automatic draft dropped).`);
+      return undefined;
+    }
+  }
+  if (!pick) pick = await pickDraftScope(allScopes, { models, title: TITLE });
   if (!pick) { telemetry.feature('drawCancelScope'); return undefined; }
 
   // Layer: the one the dbt folder names (marts → gold, …) when it is a layer
-  // here; otherwise ask, unless there is only one to choose.
+  // here; otherwise ask, unless there is only one to choose (a draft takes
+  // New Diagram's default instead of asking).
   const creatable = layerService.getCreatableLayers();
   if (creatable.length === 0) {
+    if (quiet) {
+      log.info(`[ERD Studio] ${TITLE}: ${NO_LAYERS_MESSAGE}`);
+      return undefined;
+    }
     telemetry.feature('drawNoLayers');
     showErrorWithActions(NO_LAYERS_MESSAGE, {
       [ADD_LAYER_BUTTON]: () => vscode.commands.executeCommand('erdStudio.addLayer'),
     });
     return undefined;
   }
+  const existingDomains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
   let layer = creatable.find((l) => l.id === resume?.layer)?.id
     ?? creatable.find((l) => l.id === pick.scope.suggestedLayer)?.id;
   if (!layer && creatable.length === 1) { layer = creatable[0].id; }
+  if (!layer && !asks) layer = defaultDiagramLayer(creatable.map((l) => l.id), existingDomains.length);
   if (!layer) {
     const choice = await vscode.window.showQuickPick(
       creatable.map((l) => ({ label: l.label, description: l.id === l.label.toLowerCase() ? undefined : l.id, id: l.id })),
@@ -207,18 +275,25 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   }
   const layerLabel = creatable.find((l) => l.id === layer)?.label ?? layer;
 
-  const existingDomains = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
   const suggested = suggestSubjectAreaName(pick.scope, existingDomains.filter((d) => d.layer === layer).map((d) => d.domain));
   const chosenLayer = layer;
-  const name = await vscode.window.showInputBox({
+  const offered = resume?.name ?? suggested;
+  // A draft (or its redraw) takes the folder's name when it is valid; the box only when it is not.
+  const takenAsIs = (!asks || resume?.redraw !== undefined) && deps.validateDomainName(slugFromName(offered), chosenLayer) === undefined;
+  if (!takenAsIs && quiet) {
+    log.info(`[ERD Studio] ${TITLE}: the folder's name is not a valid diagram name (automatic draft dropped).`);
+    return undefined;
+  }
+  const name = takenAsIs ? offered : await vscode.window.showInputBox({
     title: TITLE,
     prompt: `Name the diagram. It is saved in the ${layerLabel} layer.`,
-    value: resume?.name ?? suggested,
+    value: offered,
     ignoreFocusOut: true,
-    validateInput: (value: string) => deps.validateDomainName(value, chosenLayer),
+    // As New Diagram takes it: "Sales" is saved as sales.
+    validateInput: (value: string) => validateTypedDiagramName(value, (slug) => deps.validateDomainName(slug, chosenLayer)),
   });
   if (!name) { telemetry.feature('drawCancelName'); return undefined; }
-  const slug = name.trim();
+  const slug = slugFromName(name);
 
   // A project that writes DBML (§3.2) gets a `.dbml` diagram, whose members are DBML tables (D20).
   const dbml = tableLibraryService.writesDbml?.() ?? false;
@@ -231,6 +306,10 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     ...(dbml ? { dbml: { tableStorage: (n: string) => tableLibraryService.tableStorage?.(n) } } : {}),
   });
   if (draft.modelNames.length === 0) {
+    if (quiet) {
+      log.info(`[ERD Studio] ${TITLE}: none of the folder's models could be drawn (automatic draft dropped).`);
+      return undefined;
+    }
     telemetry.feature('drawNothingDrawable');
     void vscode.window.showWarningMessage(`${TITLE}: none of the chosen models could be drawn. ${describeSkipped(draft.skipped)}`);
     return undefined;
@@ -241,12 +320,14 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   const dbmlDiagramPath = path.join(workspaceRoot, semanticDir, ...diagramFilePath(chosenLayer, slug).split('/'));
   const domainPath = dbml ? dbmlDiagramPath : path.join(layerDir, `${slug}.json`);
   const again: DrawFromDbtResume = { pick, layer: chosenLayer, name: slug };
-  const tryAgain = (): unknown => drawFromDbt(deps, again);
+  // A retry the user asked for is never quiet (it may ask and say why).
+  const loudDeps: DrawFromDbtDeps = draftOptions?.quiet ? { ...deps, draft: { ...draftOptions, quiet: false } } : deps;
+  const tryAgain = (): unknown => drawFromDbt(loudDeps, again);
   // The name box already refuses a name in use; this is a diagram that
   // appeared since (another window, git), so the choices are kept.
   const nameTaken = (): void => showErrorWithActions(diagramNameTakenMessage(slug, layerLabel), {
     [OPEN_IT_BUTTON]: () => vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE),
-    [CHOOSE_ANOTHER_NAME_BUTTON]: () => drawFromDbt(deps, { pick, layer: chosenLayer }),
+    [CHOOSE_ANOTHER_NAME_BUTTON]: () => drawFromDbt(loudDeps, { pick, layer: chosenLayer }),
   });
   // A name is taken in either format: `<slug>.json` and `diagrams/<slug>.dbml` would be one diagram's name twice.
   if (fs.existsSync(path.join(layerDir, `${slug}.json`)) || fs.existsSync(dbmlDiagramPath)) {
@@ -266,6 +347,8 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   let dirty: string[];
   // Relationships a DBML diagram cannot store (their many-side table's file could not be read): named in the notice.
   let unstored: DbtDraft['relationships'] = [];
+  // The project's files as this plan saw them: a Keep after a change re-plans (§5.1).
+  const planGeneration = draftOptions?.generation?.();
   try {
     // A DBML table always goes to the chosen layer's folder: groupsByFolder speaks for YAML libraries only.
     folder = dbml || tableLibraryService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
@@ -325,47 +408,164 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     return undefined;
   }
 
-  // Writes start here: every file, or none (`writeNewSubjectArea`). A project
-  // with no ERD folder yet gets the default layers.json first, exactly as Set
-  // Up Semantic Domains Directory writes it.
-  const outcome = await writeNewSubjectArea({
-    workspaceRoot,
-    semanticDir,
-    domainPath,
-    newTables: draft.newModels,
-    folder,
-    changedTables: routed.changed,
-    documentText: (tableNaming) => serializeDraftSubjectAreaDocument(buildDraftSubjectAreaDocument({
-      domain: slug,
-      layer: chosenLayer,
-      description: `Drawn from dbt: ${pick.scope.label}.`,
-      modelNames: draft.modelNames,
-      relationships: routed.kept,
-    }), tableNaming),
-    document: () => buildDraftSubjectAreaDocument({
-      domain: slug,
-      layer: chosenLayer,
-      description: `Drawn from dbt: ${pick.scope.label}.`,
-      modelNames: draft.modelNames,
-      relationships: [],
-    }) as unknown as Record<string, unknown>,
-  }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
-  if (!outcome.ok) {
+  // The draft (§5.2): the diagram as Keep writes it, read-only, before any write.
+  let settleKeep: (outcome: DraftKeepOutcome) => void = () => {};
+  /** The draft the viewer answers: asked again after a Keep that did not save, or a switcher choice that drew nothing. */
+  let shown: Draft | undefined;
+  /** A redraw of the same plan: its Keep is already answered, so the first pass writes at once. */
+  let answered = false;
+  const diagramFile = path.relative(workspaceRoot, domainPath).split(path.sep).join('/');
+  const fingerprint = dbtDraftFingerprint(draft, draft.relationships, diagramFile);
+  if (draftOptions) {
+    const redraw = resume?.redraw;
+    if (redraw && redraw.fingerprint === fingerprint) {
+      settleKeep = redraw.settle;
+      shown = redraw.draft;
+      answered = true;
+    } else {
+      if (redraw) {
+        redraw.settle({ kept: false });
+        telemetry.feature('draftRefreshed');
+      }
+      const target: DraftTarget = { layer: chosenLayer, layerLabel, name: slug, diagramFile };
+      try {
+        shown = buildDbtDraftView({
+          draft,
+          relationships: draft.relationships,
+          scope: pick.scope,
+          scopes: allScopes,
+          trigger: draftOptions.trigger,
+          target,
+          libraryTable: (n) => tableLibraryService.getTable(n) ?? undefined,
+          layers: layerService.getAllLayers(),
+          changedTables: routed.changed,
+          ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : {}),
+        });
+      } catch (err) {
+        telemetry.error('draftBuildFailed');
+        log.error(`[ERD Studio] ${TITLE}: could not build the draft:`, err);
+        if (!quiet) {
+          const doing = 'while drawing the draft';
+          showErrorWithActions(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
+        }
+        return undefined;
+      }
+    }
+  }
+
+  for (;;) {
+    if (draftOptions && shown && !answered) {
+      const asked: Draft = shown;
+      const answer = await draftOptions.preview.ask(asked);
+      switch (answer.kind) {
+        case 'keep': {
+          if (planGeneration !== undefined && draftOptions.generation?.() !== planGeneration) {
+            let settled = false;
+            const settle = (outcome: DraftKeepOutcome): void => {
+              if (settled) return;
+              settled = true;
+              answer.settle(outcome);
+            };
+            try {
+              return await drawFromDbt(loudDeps, {
+                pick,
+                layer: chosenLayer,
+                name: slug,
+                ...(pick.scope.kind === 'folder' ? { scopeId: pick.scope.id } : {}),
+                redraw: { fingerprint, settle, draft: asked },
+              });
+            } finally {
+              settle({ kept: false });
+            }
+          }
+          settleKeep = answer.settle;
+          break;
+        }
+        case 'scope': {
+          // The switcher: the same preview, another folder (its own layer and name), never quiet (the user chose it).
+          const next = await afterScope(draftOptions.preview, asked, () => drawFromDbt(loudDeps, { scopeId: answer.scopeId }));
+          if (!next) return undefined;
+          shown = next;
+          continue;
+        }
+        case 'changeOptions':
+          // The picker, layer pick and name box, as before, ending in a draft.
+          void Promise.resolve().then(() => drawFromDbt({ ...deps, draft: { ...draftOptions, quiet: false, trigger: 'changeOptions' } }));
+          return undefined;
+        case 'discard':
+        case 'closed':
+          if (!quiet) telemetry.feature('drawCancelScope');
+          return undefined;
+        case 'otherStart':
+        case 'superseded':
+          return undefined;
+      }
+    }
+    answered = false;
+
+    // Writes start here: every file, or none (`writeNewSubjectArea`). A project
+    // with no ERD folder yet gets the default layers.json first, exactly as Set
+    // Up Semantic Domains Directory writes it.
+    const outcome = await writeNewSubjectArea({
+      workspaceRoot,
+      semanticDir,
+      domainPath,
+      newTables: draft.newModels,
+      folder,
+      changedTables: routed.changed,
+      documentText: (tableNaming) => serializeDraftSubjectAreaDocument(buildDraftSubjectAreaDocument({
+        domain: slug,
+        layer: chosenLayer,
+        description: `Drawn from dbt: ${pick.scope.label}.`,
+        modelNames: draft.modelNames,
+        relationships: routed.kept,
+      }), tableNaming),
+      document: () => buildDraftSubjectAreaDocument({
+        domain: slug,
+        layer: chosenLayer,
+        description: `Drawn from dbt: ${pick.scope.label}.`,
+        modelNames: draft.modelNames,
+        relationships: [],
+      }) as unknown as Record<string, unknown>,
+    }, { layerService, tableLibraryService, readText: openOrDiskText, dirtyFiles });
+    if (!outcome.ok) {
+      reportWriteFailure(outcome);
+      // After its own message: the draft's buttons come back, and answer again.
+      settleKeep({ kept: false });
+      settleKeep = () => {};
+      if (shown) continue;
+      return undefined;
+    }
+    const written = outcome.written;
+
+    deps.onWritten({ domainPath, modelNames: written, changedModelNames: outcome.changed });
+    telemetry.feature('drawFromDbt');
+    settleKeep({ kept: true });
+
+    await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE);
+
+    const notice = [describeDraftNotice(draft), describeUnstoredRelationships(unstored)].filter(Boolean).join(' ');
+    if (notice) { void vscode.window.showInformationMessage(notice); }
+    return { domainPath, draft };
+  }
+
+  /** Say why the write did not land (each case its own message). */
+  function reportWriteFailure(outcome: Extract<Awaited<ReturnType<typeof writeNewSubjectArea>>, { ok: false }>): void {
     const { error: err, undone } = outcome;
     if (outcome.nameTaken) {
       nameTaken();
-      return undefined;
+      return;
     }
     // A file the write would change (another diagram it re-renders, §5.7) has unsaved edits.
     if (err instanceof UnsavedFilesRefused) {
       showUnsaved(err.filePaths[0]);
-      return undefined;
+      return;
     }
     const result = writeOutcome(undone, semanticDir);
     // A refusal is explained, not a failure, so it is not counted (as on the canvas).
     if (isRefusedWrite(err)) {
       showRefusal(err, result, path.join(workspaceRoot, semanticDir));
-      return undefined;
+      return;
     }
     telemetry.error('drawWriteFailed');
     const why = environmentWriteProblem(err, workspaceRoot, `${semanticDir}/${chosenLayer}`);
@@ -376,21 +576,10 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
         [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err),
         [TRY_AGAIN_BUTTON]: tryAgain,
       });
-      return undefined;
+      return;
     }
     showErrorWithActions(`${TITLE} couldn't save the diagram: ${why} ${result}`, { [TRY_AGAIN_BUTTON]: tryAgain });
-    return undefined;
   }
-  const written = outcome.written;
-
-  deps.onWritten({ domainPath, modelNames: written, changedModelNames: outcome.changed });
-  telemetry.feature('drawFromDbt');
-
-  await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE);
-
-  const notice = [describeDraftNotice(draft), describeUnstoredRelationships(unstored)].filter(Boolean).join(' ');
-  if (notice) { void vscode.window.showInformationMessage(notice); }
-  return { domainPath, draft };
 }
 
 /** The refusal's own sentence, with Open File when it knows the file. */

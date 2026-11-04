@@ -1,5 +1,5 @@
 /**
- * Welcome panel ("Welcome to ERD Studio") — the pure protocol/HTML module
+ * Welcome panel (the "ERD Studio Tour" tab) — the pure protocol/HTML module
  * (`src/types/gettingStarted.ts`) and the host (`GettingStartedPanel.ts`):
  * CSP, the message validator, every host-bound type having a live sender in
  * the panel script and a handler in the host, fixed external URLs, the
@@ -16,7 +16,12 @@ import * as vscode from 'vscode';
 
 import {
   GETTING_STARTED_EXTERNAL_URLS,
+  GETTING_STARTED_PASSIVE_TYPES,
   GETTING_STARTED_TO_HOST_TYPES,
+  SHOW_ME_AROUND_COMMAND,
+  SHOW_ME_AROUND_LABEL,
+  SHOW_ME_AROUND_SECTION_INTRO,
+  SHOW_ME_AROUND_SECTION_TITLE,
   SAMPLE_CODESPACES_LIVE,
   SAMPLE_CODESPACES_URL,
   SAMPLE_REPO_CLONE_URL,
@@ -48,10 +53,6 @@ import {
   SAMPLE_FALLBACK_MESSAGE,
   SAMPLE_OPEN_ON_GITHUB_ACTION,
   TRY_SAMPLE_COMMAND,
-  DRAW_FROM_DBT_COMMAND,
-  CREATE_DOMAIN_COMMAND,
-  IMPORT_DBML_COMMAND,
-  OPEN_EXAMPLE_DIAGRAM_COMMAND,
   GETTING_STARTED_MEDIA,
   computeProjectSummary,
   gettingStartedCut,
@@ -74,6 +75,19 @@ import {
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../../src/types/gettingStartedTranscript';
 import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../../src/types/gettingStartedLogicalTranscript';
 import { HELP_ACTIONS } from '../../src/providers/HelpTreeProvider';
+import {
+  START_ACTIONS,
+  START_ACTION_COMMANDS,
+  START_INTENTS,
+  START_INTENT_REASONS,
+  startActionArgs,
+  startActionsFor,
+  startActionsForIntent,
+  startIntentFor,
+  type StartAction,
+  type StartIntent,
+} from '../../src/types/startActions';
+import { START_FEATURES, START_INTENT_FEATURES } from '../../src/commands/start';
 import { HARNESS_VERSION, HarnessService, extractHarnessVersion } from '../../src/services/harnessService';
 import type { RecommendedInstallResult } from '../../src/types/harness';
 import { telemetry } from '../../src/services/telemetryService';
@@ -174,21 +188,24 @@ describe('buildGettingStartedHtml', () => {
     }
   });
 
-  it('has the hero copy, a diagram first then the optional AI cards, and the rewatch footer', () => {
+  it('has the hero copy, the optional AI cards, the How-to clips and the rewatch footer; no start, Convert or "Open your diagrams" card (Draft-first)', () => {
     const html = buildGettingStartedHtml(HTML_INPUT);
-    expect(html).toContain('Welcome to ERD Studio');
+    // Its own name: never a second tab called Welcome beside VS Code's.
+    expect(html).toContain('<title>ERD Studio Tour</title>');
+    expect(html).toContain('<h1 class="gs-hero__title">The one-minute tour</h1>');
+    expect(html).not.toMatch(/Welcome to ERD Studio|getting-started video/i);
     expect(html).toContain('Turn the dbt project you already have into a data model you can see.');
-    const order = ['open', 'draw', 'assistant', 'helper', 'start'].map((step) => html.indexOf(`data-step="${step}"`));
+    const order = ['assistant', 'helper', 'start'].map((step) => html.indexOf(`data-step="${step}"`));
     expect(order.every((i) => i > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(html).not.toContain('data-step="canvas"');
-    expect(html).toContain('Draw your dbt project &mdash; no AI needed');
-    expect(html).toContain('Copies your dbt models and tests into a diagram you can edit.');
+    // The draft, the sidebar and the Convert offer are the starts: none of them here.
+    for (const gone of ['data-step="canvas"', 'data-step="convert"', 'data-step="open"', 'data-step="begin"', 'data-action="openDomain"',
+      'data-action="showImportGuide"', 'Draw your dbt project', '>Open your diagrams<', 'data-start-group', 'data-step="new"', 'data-step="dbml"', 'data-step="draw"']) {
+      expect(html, gone).not.toContain(gone);
+    }
     expect(html).toContain('Enrich with your AI assistant (optional)');
     expect(html).toContain('keys, grain, rationale and your team\'s modelling style');
-    // The AI section comes after both diagram cards.
-    expect(html.indexOf('Enrich with your AI assistant')).toBeGreaterThan(html.indexOf('data-step="draw"'));
-    expect(html).toContain('ERD Studio: Watch Getting Started Video');
+    expect(html).toContain('ERD Studio: Watch the One-Minute Tour');
     expect(html).toContain('Open the folder your data model lives in');
     expect(html).toContain('Any folder works');
     expect(html).toContain('data-action="openFolder"');
@@ -234,6 +251,16 @@ describe('buildGettingStartedHtml', () => {
 // Panel script (jsdom)
 // ---------------------------------------------------------------------------
 
+/** A status as the host posts it: `intent` and `starts` from the start rule unless the test set its own. */
+function withStarts(data: unknown): unknown {
+  const m = data as { type?: string; payload?: GettingStartedStatus };
+  if (m?.type !== 'status' || !m.payload || m.payload.starts !== undefined) { return data; }
+  const s = m.payload;
+  const hasDbt = s.hasProject && !s.logicalOnly;
+  const intent = s.intent ?? startIntentFor({ hasProject: s.hasProject, hasDbt, storage: s.storage, hasDiagrams: s.domainCount > 0 });
+  return { ...m, payload: { ...s, ...(intent ? { intent } : {}), starts: startActionsForIntent(intent, hasDbt) } };
+}
+
 function runPanelScript(html: string) {
   const posted: unknown[] = [];
   const dom = new JSDOM(html, {
@@ -246,7 +273,7 @@ function runPanelScript(html: string) {
       });
     },
   });
-  const send = (data: unknown) => dom.window.dispatchEvent(new dom.window.MessageEvent('message', { data }));
+  const send = (data: unknown) => dom.window.dispatchEvent(new dom.window.MessageEvent('message', { data: withStarts(data) }));
   const visible = (selector: string) =>
     [...dom.window.document.querySelectorAll<HTMLElement>(selector)].filter((el) => el.closest('[hidden]') === null).map((el) => el.textContent?.trim());
   return { dom, posted, send, visible, doc: dom.window.document };
@@ -271,12 +298,9 @@ describe('panel script', () => {
       // The skill detects the modelling style and confirms it (SKILL.md Stage 3b) — it never asks cold.
       expect(visible('[data-step="start"] .gs-step__text').join()).toContain('works out how your project is modelled and checks with you');
       expect(visible('[data-step="start"] .gs-step__text').join()).not.toContain('asks how your team');
-      // No domain yet: Draw from dbt leads (primary), numbered 1; "Open your diagrams" is not shown.
-      expect(visible('[data-step="open"]')).toEqual([]);
-      expect(visible('[data-step="draw"] .gs-step__title')).toEqual(['Draw your dbt project \u2014 no AI needed']);
-      expect(visible('[data-step="draw"] .gs-btn--primary')).toEqual(['Draw from dbt']);
-      expect(visible('[data-step="draw"] .gs-link')).toEqual(['Create a blank diagram']);
-      expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4']);
+      // Draft-first: no start card (the draft and the sidebar are the starts); the AI cards, numbered from 1.
+      expect(visible('.gs-steps-wrap [data-action="start"]')).toEqual([]);
+      expect(visible('.gs-step__num')).toEqual(['1', '2', '3']);
       expect(doc.querySelector('.gs-project-path')?.textContent).toBe('jaffle_shop');
 
       send({ type: 'status', payload: {
@@ -294,15 +318,10 @@ describe('panel script', () => {
       expect(visible('[data-step="start"] .gs-btn').join()).toContain('Open Copilot Chat');
       expect(visible('[data-step="start"] .gs-btn').join()).toContain('Copy start command'); // Claude, nested
       expect((doc.querySelector('.gs-nested-hint') as HTMLElement).hidden).toBe(false);
-      expect(doc.querySelector('.gs-domain-count')?.textContent).toBe('You have 3 diagrams.');
-      // Domains exist: "Open your diagrams" leads, Draw from dbt drops to a secondary button.
-      expect(visible('[data-step="open"] .gs-btn--primary')).toEqual(['Open your diagrams']);
-      expect(visible('[data-step="draw"] .gs-step__title')).toEqual(['Draw another area from dbt']);
-      expect(visible('[data-step="draw"] .gs-btn--primary')).toEqual([]);
-      expect(visible('[data-step="draw"] .gs-btn')).toEqual(['Draw from dbt']);
-      expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4', '5']);
+      // Diagrams or not, the same cards: no "Open your diagrams" (the sidebar opens them).
+      expect(visible('.gs-step__num')).toEqual(['1', '2', '3']);
       const shown = [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
-      expect(shown).toEqual(['open', 'draw', 'assistant', 'helper', 'start']);
+      expect(shown).toEqual(['assistant', 'helper', 'start']);
     } finally {
       dom.window.close();
     }
@@ -335,11 +354,12 @@ describe('panel script', () => {
     }
   });
 
-  it('the open-a-folder card says a new project is DBML and an older one keeps YAML/JSON, not "saved as DBML" for every folder', () => {
+  it('the open-a-folder card is one short line, a button and the example: no format parenthetical, not "saved as DBML"', () => {
     const html = buildGettingStartedHtml(HTML_INPUT);
     const card = html.slice(html.indexOf('<section class="gs-noproject"'), html.indexOf('<div class="gs-steps-wrap">'));
-    expect(card).toContain('a new project as DBML, an open format; a project from an older ERD Studio keeps its YAML and JSON files');
+    expect(card).toContain('Any folder works: ERD Studio keeps your design in <code>.erd-studio/</code>, next to your code.');
     expect(card).not.toContain('saved as DBML');
+    expect(card).not.toMatch(/open format|YAML|JSON/);
   });
 
   it('offers the sample project (a dbt project) only on the dbt page: a small link above the steps, no card without a folder', () => {
@@ -390,7 +410,7 @@ describe('panel script', () => {
 
   it('on the dbt page, the sample link can also open the sample in Codespaces', () => {
     const html = buildGettingStartedHtml({ ...HTML_INPUT, codespaces: true });
-    const sampleLink = html.slice(html.indexOf('<p class="gs-sample-link"'), html.indexOf('<div class="gs-steps">'));
+    const sampleLink = html.slice(html.indexOf('<p class="gs-sample-link"'), html.indexOf('<h2 class="gs-section-title">Enrich'));
     expect(sampleLink).toContain('data-action="openExternal" data-target="sampleCodespaces"');
     expect(sampleLink).toContain('Open it in Codespaces');
     expect(sampleLink).toContain('Runs in your browser &mdash; nothing to install.');
@@ -398,8 +418,7 @@ describe('panel script', () => {
     try {
       send({ type: 'status', payload: { ...STATUS, domainCount: 0 } });
       (doc.querySelector('.gs-sample-link [data-target="sampleCodespaces"]') as HTMLElement).click();
-      (doc.querySelector('[data-step="draw"] [data-action="drawFromDbt"]') as HTMLElement).click();
-      expect(posted.slice(1)).toEqual([{ type: 'openExternal', target: 'sampleCodespaces' }, { type: 'drawFromDbt' }]);
+      expect(posted.slice(1)).toEqual([{ type: 'openExternal', target: 'sampleCodespaces' }]);
     } finally {
       dom.window.close();
     }
@@ -413,14 +432,12 @@ describe('panel script', () => {
       click('[data-action="setupAiHelper"]');
       click('[data-action="refreshStatus"]');
       click('[data-target="claudeCodeDocs"]');
-      click('[data-action="openDomain"]');
       click('[data-action="copyPrompt"][data-assistant="codex"]');
       click('[data-action="openCopilotChat"]');
       expect(posted.slice(1)).toEqual([
         { type: 'setupAiHelper' },
         { type: 'refreshStatus' },
         { type: 'openExternal', target: 'claudeCodeDocs' },
-        { type: 'openDomain' },
         { type: 'copyPrompt', assistant: 'codex' },
         { type: 'openCopilotChat' },
       ]);
@@ -439,7 +456,7 @@ describe('panel script', () => {
     }
   });
 
-  it('logical-only: leads with New diagram, the example and Import DBML, keeps the AI cards and the guided setup, and hides every dbt step and line', () => {
+  it('logical-only: the AI cards and the guided setup, no start card, and no dbt step or line', () => {
     const { dom, posted, send, visible, doc } = runPanelScript(buildGettingStartedHtml(HTML_INPUT));
     try {
       const summary = { modelCount: 3, layering: null, manifest: { state: 'unknown' as const }, line: 'Found 3 dbt models' };
@@ -448,20 +465,9 @@ describe('panel script', () => {
       expect(doc.querySelector('.gs')?.getAttribute('data-project')).toBe('true');
       expect(visible('.gs-hero__sub')).toEqual(['Design your data model in Git. Let your AI build from it.']);
       const shown = [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
-      expect(shown).toEqual(['new', 'dbml', 'assistant', 'helper', 'start']);
-      expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4', '5']);
-      expect(visible('[data-step="new"] .gs-step__title')).toEqual(['Draw your first diagram']);
-      expect(visible('[data-step="new"] .gs-btn--primary')).toEqual(['New diagram']);
-      expect(visible('[data-step="new"] .gs-step__hint')).toEqual([
-        'New to data modelling? Open Example Diagram: a small coffee-shop star schema to explore and change.',
-      ]);
-      expect(visible('[data-step="dbml"] .gs-step__title')).toEqual(['Have a DBML file?']);
-      expect(visible('[data-step="dbml"] .gs-btn')).toEqual(['Import DBML\u2026']);
-      expect(visible('[data-step="dbml"] .gs-step__text').join()).toContain('an open format, no lock-in');
-      // Native DBML storage (2.0): the step is format-neutral, since a YAML project from before 2.0 shows it too.
-      expect(visible('[data-step="new"] .gs-step__text').join()).toContain('Each table is a file in .erd-studio/');
-      expect(visible('[data-step="new"] .gs-step__text').join()).not.toMatch(/YAML|JSON/);
-      expect(visible('[data-step="new"] .gs-step__text').join()).not.toMatch(/\bdbt\b/i);
+      expect(shown).toEqual(['assistant', 'helper', 'start']);
+      expect(visible('.gs-step__num')).toEqual(['1', '2', '3']);
+      expect(visible('.gs-steps-wrap [data-action="start"]')).toEqual([]);
       // No dbt wording where it no longer applies; the summary describes dbt models, so it stays off.
       expect(visible('.gs-section-intro').join()).not.toContain('dbt');
       expect(visible('.gs-sample-link')).toEqual([]);
@@ -494,25 +500,16 @@ describe('panel script', () => {
       expect(doc.querySelector('.gs-usedbt')).toBeNull();
       expect(visible('[data-target="dbtInstallDocs"]')).toEqual([]);
 
-      const click = (sel: string) => (doc.querySelector(sel) as HTMLElement).click();
-      click('[data-step="new"] [data-when="first"] [data-action="createDomain"]');
-      click('[data-step="new"] [data-action="openExample"]');
-      click('[data-step="dbml"] [data-action="importDbml"]');
-      expect(posted.slice(1)).toEqual([{ type: 'createDomain' }, { type: 'openExample' }, { type: 'importDbml' }]);
-
-      // With a diagram: "Open your diagrams" leads and New diagram drops to a secondary button.
+      // No start, no "Open your diagrams", whatever the diagrams.
       send({ type: 'status', payload: { ...STATUS, logicalOnly: true, domainCount: 2 } });
       const withDiagrams = [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
-      expect(withDiagrams).toEqual(['open', 'new', 'dbml', 'assistant', 'helper', 'start']);
-      expect(visible('[data-step="open"] .gs-step__text span')).toEqual(['You have 2 diagrams.', 'Open one to keep designing.']);
-      expect(visible('[data-step="new"] .gs-step__title')).toEqual(['Draw another diagram']);
-      expect(visible('[data-step="new"] .gs-btn--primary')).toEqual([]);
-      expect(visible('[data-step="new"] .gs-btn')).toEqual(['New diagram']);
+      expect(withDiagrams).toEqual(['assistant', 'helper', 'start']);
+      expect(posted.filter((m) => (m as { type: string }).type === 'start')).toEqual([]);
 
-      // The same panel turning into a dbt project (a status always wins) shows today's page.
+      // The same panel turning into a dbt project (a status always wins) shows the dbt page.
       send({ type: 'status', payload: STATUS });
       const dbt = [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
-      expect(dbt).toEqual(['draw', 'assistant', 'helper', 'start']);
+      expect(dbt).toEqual(['assistant', 'helper', 'start']);
       expect(visible('.gs-hero__sub')).toEqual(['Turn the dbt project you already have into a data model you can see.']);
       expect(visible('[data-target="dbtInstallDocs"]')).toEqual(['New to dbt? How to install it']);
     } finally {
@@ -520,13 +517,49 @@ describe('panel script', () => {
     }
   });
 
-  it('no folder: the open-a-folder and sample cards, under the tagline', () => {
-    const { dom, send, visible, doc } = runPanelScript(buildGettingStartedHtml(HTML_INPUT));
+  it('a project from before 2.0 (YAML or mixed) gets no Convert card here (the sidebar row, the notice and the canvas offer it)', () => {
+    const { dom, send, doc } = runPanelScript(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical' }));
+    try {
+      const steps = () => [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
+      for (const storage of ['yaml', 'mixed', 'dbml', undefined] as const) {
+        send({ type: 'status', payload: { ...STATUS, logicalOnly: true, storage } });
+        expect(steps(), String(storage)).toEqual(['assistant', 'helper', 'start']);
+      }
+      expect(doc.querySelector('[data-start="convert"]')).toBeNull();
+      // DBML is an open format, never an open standard.
+      expect(doc.body.textContent).not.toMatch(/open standard/i);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('the only start button is the no-folder page\'s example, rendered up front (no HTML from host data)', () => {
+    const html = buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical' });
+    const buttons = html.match(/<button[^>]*data-action="start"[^>]*>/g) ?? [];
+    expect(buttons).toEqual(['<button class="gs-btn" type="button" data-action="start" data-start="example">']);
+    const { dom, send, visible, doc } = runPanelScript(html);
+    try {
+      // A status listing every start (or nonsense) shows no start on a project page (the no-folder card is hidden by its CSS there).
+      send({ type: 'status', payload: { ...STATUS, logicalOnly: true, starts: ['nope', '<b>x</b>', ...START_ACTIONS] as unknown as StartAction[] } });
+      expect(visible('.gs-steps-wrap [data-action="start"]')).toEqual([]);
+      expect(doc.querySelector('.gs')?.getAttribute('data-project')).toBe('true');
+      expect(doc.querySelector('b')).toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('no folder: the open-a-folder card, with a finished example as the other start, under the tagline', () => {
+    const { dom, posted, send, visible, doc } = runPanelScript(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'nofolder' }));
     try {
       send({ type: 'status', payload: { ...STATUS, hasProject: false, logicalOnly: true, project: null } });
       expect(doc.querySelector('.gs')?.getAttribute('data-mode')).toBe('nofolder'); // no folder wins over logicalOnly
       expect(visible('.gs-hero__sub')).toEqual(['Design your data model in Git. Let your AI build from it.']);
       expect(visible('[data-target="dbtInstallDocs"]')).toEqual([]);
+      expect(visible('.gs-noproject .gs-btn')).toEqual(['Open Folder\u2026', 'Open an Example\u2026']);
+      expect(visible('.gs-noproject__example').join()).toContain('Or see a finished data model first:');
+      (doc.querySelector('.gs-noproject [data-start="example"]') as HTMLElement).click();
+      expect(posted.at(-1)).toEqual({ type: 'start', action: 'example' });
     } finally {
       dom.window.close();
     }
@@ -541,75 +574,58 @@ describe('panel script', () => {
     expect(subs(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'dbt' }))).toEqual(['Turn the dbt project you already have into a data model you can see.']);
     expect(subs(buildGettingStartedHtml({ ...HTML_INPUT, mode: 'nofolder' }))).toEqual(['Design your data model in Git. Let your AI build from it.']);
     expect(subs(buildGettingStartedHtml(HTML_INPUT))).toEqual(['Design your data model in Git. Let your AI build from it.']);
-    // Server-side: the logical page's dbt cards start hidden and its own cards start shown.
+    // Server-side: the AI cards, numbered from 1, on every page; no start card on any.
     const logical = buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical' });
     expect(logical).toContain('<main class="gs" data-project="unknown" data-mode="logical">');
-    expect(logical).toContain('<section class="gs-step" data-step="new" data-state="loading">');
-    expect(logical).toContain('<section class="gs-step" data-step="draw" data-state="loading" hidden>');
     expect(logical).toContain('<section class="gs-step" data-step="start" data-state="loading">');
-    const dbt = buildGettingStartedHtml({ ...HTML_INPUT, mode: 'dbt' });
-    expect(dbt).toContain('<section class="gs-step" data-step="new" data-state="loading" hidden>');
-    expect(dbt).toContain('<section class="gs-step" data-step="draw" data-state="loading">');
+    for (const mode of ['logical', 'dbt', 'nofolder'] as const) {
+      const page = buildGettingStartedHtml({ ...HTML_INPUT, mode });
+      expect(page, mode).not.toContain('data-step="begin"');
+      expect([...page.matchAll(/<span class="gs-step__num">(\d)<\/span>/g)].map((m) => m[1]), mode).toEqual(['1', '2', '3']);
+    }
   });
 
-  it('autoplays in an open folder (the dbt tour or the logical cut); without a folder the poster waits behind a Watch button', () => {
-    const playsOnLoad = (mode?: 'nofolder' | 'logical' | 'dbt') => {
+  it('never autoplays: on every page the tour waits behind its one button, and a click plays it with sound', () => {
+    const page = (mode?: 'nofolder' | 'logical' | 'dbt') => {
       let calls = 0;
+      let mutedAtPlay: boolean | undefined;
       const dom = new JSDOM(buildGettingStartedHtml({ ...HTML_INPUT, mode }), {
         runScripts: 'dangerously',
         virtualConsole: new VirtualConsole(),
         beforeParse(window) {
           (window as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({ postMessage: () => {} });
-          window.HTMLMediaElement.prototype.play = function () { calls += 1; return Promise.resolve(); };
+          window.HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) { calls += 1; mutedAtPlay = this.muted; return Promise.resolve(); };
           window.HTMLMediaElement.prototype.pause = function () {};
         },
       });
       const tour = dom.window.document.querySelector('.gs-video__tour') as HTMLElement;
+      const player = dom.window.document.querySelector('.gs-video__player') as HTMLVideoElement;
       const tourLabel = () => [...tour.querySelectorAll<HTMLElement>('span')].filter((el) => !el.hidden).map((el) => el.textContent).join('');
-      return { calls, tourHidden: tour.hidden, dom, tour, tourLabel, plays: () => calls };
+      return { dom, tour, player, tourLabel, plays: () => calls, muted: () => mutedAtPlay };
     };
 
-    for (const mode of ['dbt', 'logical'] as const) {
-      const page = playsOnLoad(mode);
-      expect(page.calls, mode).toBe(1);
-      expect(page.tourHidden, mode).toBe(true);
-      page.dom.window.close();
-    }
-
-    const page = playsOnLoad('nofolder');
-    expect(page.calls).toBe(0);
-    expect(page.tourHidden).toBe(false);
-    expect(page.tourLabel()).toBe('Watch the one-minute tour');
-    page.tour.click(); // the viewer asks: it plays with sound and the button goes
-    expect(page.plays()).toBe(1);
-    expect(page.tour.hidden).toBe(true);
-    // A later status never restarts what the viewer started, and never autoplays over it.
-    page.dom.window.dispatchEvent(new page.dom.window.MessageEvent('message', { data: { type: 'status', payload: STATUS } }));
-    expect(page.plays()).toBe(1);
-    page.dom.window.close();
-
-    // The tour button names dbt only on the dbt page (where it autoplays, so it rarely shows).
-    expect(playsOnLoad('logical').tourLabel()).toBe('Watch the one-minute tour');
-    expect(playsOnLoad('dbt').tourLabel()).toBe('Watch the one-minute dbt tour');
-
-    // No expected page: wait for the first status before deciding.
-    const unknown = playsOnLoad(undefined);
-    expect(unknown.calls).toBe(0);
-    expect(unknown.tourHidden).toBe(true);
-    unknown.dom.window.dispatchEvent(new unknown.dom.window.MessageEvent('message', {
-      data: { type: 'status', payload: { ...STATUS, hasProject: false, project: null } },
-    }));
-    expect(unknown.tour.hidden).toBe(false);
-    expect(unknown.tourLabel()).toBe('Watch the one-minute tour');
-    expect(unknown.plays()).toBe(0);
-    unknown.dom.window.close();
-
-    for (const payload of [STATUS, { ...STATUS, logicalOnly: true }]) {
-      const later = playsOnLoad(undefined);
-      later.dom.window.dispatchEvent(new later.dom.window.MessageEvent('message', { data: { type: 'status', payload } }));
-      expect(later.plays()).toBe(1);
-      expect(later.tour.hidden).toBe(true);
-      later.dom.window.close();
+    for (const mode of ['dbt', 'logical', 'nofolder', undefined] as const) {
+      const p = page(mode);
+      try {
+        expect(p.plays(), String(mode)).toBe(0);
+        expect(p.player.hasAttribute('autoplay'), String(mode)).toBe(false);
+        expect(p.tour.hidden, String(mode)).toBe(false);
+        // One name for the tour, on every page.
+        expect(p.tourLabel(), String(mode)).toBe('Watch the One-Minute Tour');
+        // A status (the dbt page, a folder without dbt) never starts it either.
+        for (const payload of [STATUS, { ...STATUS, logicalOnly: true }]) {
+          p.dom.window.dispatchEvent(new p.dom.window.MessageEvent('message', { data: { type: 'status', payload } }));
+        }
+        expect(p.plays(), String(mode)).toBe(0);
+        p.tour.click(); // the viewer asks: it plays with sound and the button goes
+        expect(p.plays()).toBe(1);
+        expect(p.muted()).toBe(false);
+        expect(p.tour.hidden).toBe(true);
+        p.dom.window.dispatchEvent(new p.dom.window.MessageEvent('message', { data: { type: 'status', payload: STATUS } }));
+        expect(p.plays()).toBe(1);
+      } finally {
+        p.dom.window.close();
+      }
     }
   });
 
@@ -664,6 +680,11 @@ describe('panel script', () => {
     const variants = (base: GettingStartedStatus): GettingStartedStatus[] => [
       base,
       { ...base, domainCount: 2 },
+      // A YAML project from before 2.0 (the Convert card), and a status listing every start: Draw from dbt
+      // is gated to the dbt page by its data-modes, so even a wrong list cannot show it elsewhere.
+      { ...base, storage: 'yaml' },
+      { ...base, starts: [...START_ACTIONS] },
+      { ...base, domainCount: 2, storage: 'mixed', starts: [...START_ACTIONS] },
       { ...base, assistants: ['claude', 'copilot'], claude: 'cli', helper: 'missing' },
       { ...base, assistants: ['claude', 'copilot'], claude: 'cli', helper: 'ready' },
       { ...base, assistants: ['claude'], claude: 'cli', helper: 'update' },
@@ -674,13 +695,15 @@ describe('panel script', () => {
     it('the logical page (a folder without dbt_project.yml) shows no dbt word, in any card state, video or transcript', () => {
       const text = reachableText('logical', variants({ ...STATUS, logicalOnly: true }));
       expect(text.join(' ')).toContain('Design your data model in Git');
-      expect(text.join(' ')).toContain('New diagram');
+      expect(text.join(' ')).toContain('Start the guided setup');
       expect(text.filter((t) => DBT.test(t))).toEqual([]);
     });
 
     it('the no-folder page shows no dbt word either', () => {
-      const text = reachableText('nofolder', [{ ...STATUS, hasProject: false, logicalOnly: true, project: null }]);
+      const noFolder = { ...STATUS, hasProject: false, logicalOnly: true, project: null };
+      const text = reachableText('nofolder', [noFolder, { ...noFolder, starts: [...START_ACTIONS] }]);
       expect(text.join(' ')).toContain('Open the folder your data model lives in');
+      expect(text.join(' ')).toContain('Or see a finished data model first:');
       expect(text.filter((t) => DBT.test(t))).toEqual([]);
     });
 
@@ -693,8 +716,6 @@ describe('panel script', () => {
       const text = reachableText('dbt', variants(STATUS)).join(' ').replace(/\s+/g, ' ');
       for (const line of [
         'Turn the dbt project you already have into a data model you can see.',
-        'Draw your dbt project',
-        'Draw from dbt',
         "Your assistant adds what dbt doesn't record",
         'Your assistant checks your dbt setup',
         'Start your assistant in your dbt project folder',
@@ -744,19 +765,26 @@ describe('isGettingStartedToHost', () => {
     const samples: Record<string, unknown> = {
       openExternal: { type: 'openExternal', target: 'videoOnline' },
       videoError: { type: 'videoError', code: 3 },
+      start: { type: 'start', action: 'blank' },
     };
     for (const type of GETTING_STARTED_TO_HOST_TYPES) {
       expect(isGettingStartedToHost(samples[type] ?? { type }), type).toBe(true);
     }
   });
 
-  it('accepts trySample, drawFromDbt, createDomain and importDbml (no payload needed)', () => {
+  it('accepts trySample (no payload needed) and start with a known action only', () => {
     expect(isGettingStartedToHost({ type: 'trySample' })).toBe(true);
-    expect(isGettingStartedToHost({ type: 'drawFromDbt' })).toBe(true);
-    expect(isGettingStartedToHost({ type: 'createDomain' })).toBe(true);
-    expect(isGettingStartedToHost({ type: 'importDbml' })).toBe(true);
-    expect(isGettingStartedToHost({ type: 'openExample' })).toBe(true);
     expect(isGettingStartedToHost({ type: 'openExternal', target: 'sampleCodespaces' })).toBe(true);
+    for (const action of START_ACTIONS) {
+      expect(isGettingStartedToHost({ type: 'start', action }), action).toBe(true);
+    }
+    for (const action of [undefined, null, 7, '', 'Blank', 'runCommand', 'erdStudio.createDomain', 'toString', '__proto__', ['blank']]) {
+      expect(isGettingStartedToHost({ type: 'start', action }), String(action)).toBe(false);
+    }
+    // The four separate start messages are gone: one `start` message replaced them.
+    for (const type of ['drawFromDbt', 'createDomain', 'importDbml', 'openExample']) {
+      expect(isGettingStartedToHost({ type }), type).toBe(false);
+    }
   });
 
   it('copyPrompt takes an optional known assistant only', () => {
@@ -1412,7 +1440,6 @@ function makeDeps(overrides: Partial<GettingStartedDeps> = {}): GettingStartedDe
     runSetup: vi.fn(async (): Promise<SetupOutcome> => ({ ok: true, filesWritten: ['.gitignore'], message: 'ok' })),
     getStatus: vi.fn(async () => STATUS),
     clipboardText: (assistant) => `COPY-ME:${assistant ?? 'none'}`,
-    openCanvas: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -1429,6 +1456,7 @@ describe('GettingStartedPanel', () => {
     expect(panel._column).toBe(vscode.ViewColumn.One);
     expect(panel.webview.options.enableScripts).toBe(true);
     expect(panel.webview.options.retainContextWhenHidden).toBe(false);
+    // The media folder only (the per-start clips' folder went with the clips).
     expect((panel.webview.options.localResourceRoots as Array<{ path: string }>).map((u) => u.path))
       .toEqual([`${REPO_ROOT}/media/onboarding`]);
     expect(panel.webview.html).toContain("media-src https://mock-csp-source");
@@ -1452,18 +1480,15 @@ describe('GettingStartedPanel', () => {
     vscode.commands.registerCommand(TRY_SAMPLE_COMMAND, trySample);
     const openFolder = vi.fn();
     vscode.commands.registerCommand('vscode.openFolder', openFolder);
-    const drawFromDbt = vi.fn();
-    vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, drawFromDbt);
     const createDomain = vi.fn();
-    vscode.commands.registerCommand(CREATE_DOMAIN_COMMAND, createDomain);
-    const importDbml = vi.fn();
-    vscode.commands.registerCommand(IMPORT_DBML_COMMAND, importDbml);
-    const openExample = vi.fn();
-    vscode.commands.registerCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND, openExample);
+    vscode.commands.registerCommand(START_ACTION_COMMANDS.blank, createDomain);
+    const showMeAround = vi.fn();
+    vscode.commands.registerCommand(SHOW_ME_AROUND_COMMAND, showMeAround);
 
     const messages: Record<string, unknown> = {
       openExternal: { type: 'openExternal', target: 'dbtInstallDocs' },
       videoError: { type: 'videoError', code: 4 },
+      start: { type: 'start', action: 'blank' },
     };
     for (const type of GETTING_STARTED_TO_HOST_TYPES) {
       await panel._simulateMessage(messages[type] ?? { type });
@@ -1472,26 +1497,21 @@ describe('GettingStartedPanel', () => {
     expect(trySample).toHaveBeenCalledTimes(1);
     expect(openFolder).toHaveBeenCalledTimes(1);
     expect(openFolder).toHaveBeenCalledWith(); // no URI: VS Code's own folder picker
-    expect(DRAW_FROM_DBT_COMMAND).toBe('erdStudio.drawFromDbt');
-    expect(drawFromDbt).toHaveBeenCalledTimes(1);
-    expect([CREATE_DOMAIN_COMMAND, IMPORT_DBML_COMMAND]).toEqual(['erdStudio.createDomain', 'erdStudio.importDbml']);
     expect(createDomain).toHaveBeenCalledTimes(1);
     expect(createDomain).toHaveBeenCalledWith(); // no argument from the webview
-    expect(importDbml).toHaveBeenCalledTimes(1);
-    expect(importDbml).toHaveBeenCalledWith();
-    expect(OPEN_EXAMPLE_DIAGRAM_COMMAND).toBe('erdStudio.openExampleDiagram');
-    expect(openExample).toHaveBeenCalledTimes(1);
-    expect(openExample).toHaveBeenCalledWith();
+    expect(showMeAround).toHaveBeenCalledTimes(1);
+    expect(showMeAround).toHaveBeenCalledWith();
 
-    // ready, refreshStatus, after setupAiHelper, before openClaude / openCopilotChat, after drawFromDbt,
-    // after createDomain, after importDbml, after openExample
-    expect(deps.getStatus).toHaveBeenCalledTimes(9);
+    // ready, refreshStatus, after setupAiHelper, before openClaude / openCopilotChat, after start
+    expect(deps.getStatus).toHaveBeenCalledTimes(6);
     expect(deps.runSetup).toHaveBeenCalledTimes(1);
     expect(clip).toHaveBeenCalledWith('COPY-ME:claude'); // copyPrompt without an assistant means Claude Code
     expect(clip).toHaveBeenCalledWith(SETUP_PROMPT); // openCopilotChat (no chat command here → docs page)
     await panel._simulateMessage({ type: 'copyPrompt', assistant: 'gemini' });
     expect(clip).toHaveBeenLastCalledWith('COPY-ME:gemini');
-    expect(deps.openCanvas).toHaveBeenCalledTimes(1);
+    // "Open your diagrams" is gone with the start card: openDomain is no longer a message.
+    expect(isGettingStartedToHost({ type: 'openDomain' })).toBe(false);
+    expect(isGettingStartedToHost({ type: 'showImportGuide' })).toBe(false);
     expect(String(open.mock.calls.at(-1)?.[0])).toBe(GETTING_STARTED_EXTERNAL_URLS.dbtInstallDocs);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('code 4'));
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Ignoring unknown'), expect.anything());
@@ -1506,6 +1526,112 @@ describe('GettingStartedPanel', () => {
     await panel._simulateMessage({ type: 'nope' });
     expect(open).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Ignoring unknown'), expect.anything());
+  });
+
+  it('start: records the welcome key, runs the start\'s fixed command with its fixed argument, then posts a fresh status', async () => {
+    const deps = makeDeps();
+    GettingStartedPanel.createOrShow(makeContext(), deps);
+    const panel = vscode.window._webviewPanels[0];
+    const feature = vi.spyOn(telemetry, 'feature');
+    expect(START_ACTION_COMMANDS).toEqual({
+      convert: 'erdStudio.convertProjectToDbml',
+      drawFromDbt: 'erdStudio.drawFromDbt',
+      importSemanticModel: 'erdStudio.importSemanticModel',
+      importSqlDdl: 'erdStudio.importSqlDdl',
+      importDbmlFile: 'erdStudio.importDbml',
+      blank: 'erdStudio.createDomain',
+      import: 'erdStudio.importModel',
+      example: 'erdStudio.openExampleProject',
+    });
+    const ran: Array<{ command: string; args: unknown[] }> = [];
+    for (const command of Object.values(START_ACTION_COMMANDS)) {
+      vscode.commands.registerCommand(command, (...args: unknown[]) => { ran.push({ command, args }); });
+    }
+    for (const action of START_ACTIONS) {
+      feature.mockClear();
+      const statusCalls = (deps.getStatus as ReturnType<typeof vi.fn>).mock.calls.length;
+      await panel._simulateMessage({ type: 'start', action });
+      expect(feature.mock.calls.map((c) => c[0]), action).toEqual([START_FEATURES.welcome[action]]);
+      // A fixed argument, never one from the webview: a direct import's quick path, nothing for the others.
+      expect(ran.at(-1), action).toEqual({ command: START_ACTION_COMMANDS[action], args: startActionArgs(action) });
+      expect((deps.getStatus as ReturnType<typeof vi.fn>).mock.calls.length, action).toBe(statusCalls + 1);
+    }
+    expect(Object.values(START_FEATURES.welcome)).toEqual([
+      'welcomeConvert', 'welcomeDrawFromDbt', 'welcomeImportSemanticModel', 'welcomeImportSqlDdl', 'welcomeImportDbmlFile',
+      'welcomeBlank', 'welcomeImport', 'welcomeExample',
+    ]);
+    expect(ran).toHaveLength(START_ACTIONS.length);
+
+    // A start the validator does not know runs nothing and counts nothing.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    feature.mockClear();
+    await panel._simulateMessage({ type: 'start', action: 'erdStudio.createDomain' });
+    await panel._simulateMessage({ type: 'start' });
+    expect(ran).toHaveLength(START_ACTIONS.length);
+    expect(feature).not.toHaveBeenCalled();
+  });
+
+  it('every status carries the suggestion and the starts the start rule gives: Convert alone for a YAML or mixed project, Draw from dbt with dbt, only the example with no folder', async () => {
+    const deps = makeDeps();
+    GettingStartedPanel.createOrShow(makeContext(), deps);
+    const panel = vscode.window._webviewPanels[0];
+    const lastStarts = () => (panel._postedMessages.filter((m) => (m as { type: string }).type === 'status').at(-1) as { payload: GettingStartedStatus }).payload.starts;
+    const lastIntent = () => (panel._postedMessages.filter((m) => (m as { type: string }).type === 'status').at(-1) as { payload: GettingStartedStatus }).payload.intent;
+    const cases: Array<[Partial<GettingStartedStatus>, StartIntent | undefined, StartAction[]]> = [
+      [{}, 'drawFromDbt', ['drawFromDbt', 'blank', 'import', 'example']], // no storage reads as DBML
+      [{ storage: 'dbml' }, 'drawFromDbt', ['drawFromDbt', 'blank', 'import', 'example']],
+      [{ storage: 'yaml' }, 'convert', ['convert', 'drawFromDbt', 'blank', 'import']],
+      [{ logicalOnly: true }, 'blank', ['blank', 'example', 'import']],
+      [{ logicalOnly: true, storage: 'mixed' }, 'convert', ['convert', 'blank', 'example', 'import']],
+      [{ hasProject: false, project: null }, undefined, ['example']],
+      [{ hasProject: false, project: null, storage: 'yaml' }, undefined, ['example']],
+    ];
+    for (const [over, intent, starts] of cases) {
+      (deps.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ...STATUS, ...over });
+      await panel._simulateMessage({ type: 'refreshStatus' });
+      expect(lastIntent(), JSON.stringify(over)).toBe(intent);
+      expect(lastStarts(), JSON.stringify(over)).toEqual(starts);
+    }
+    // The deps' logicalOnly counts when the status leaves it out.
+    panel.dispose();
+    GettingStartedPanel.createOrShow(makeContext(), makeDeps({ logicalOnly: true }));
+    const logical = vscode.window._webviewPanels.at(-1)!;
+    await logical._simulateMessage({ type: 'ready' });
+    const status = logical._postedMessages.filter((m) => (m as { type: string }).type === 'status').at(-1) as { payload: GettingStartedStatus };
+    expect(status.payload.starts).toEqual(['blank', 'example', 'import']);
+  });
+
+  it('closing the panel without choosing anything records welcomeLeftNoChoice, once; any choice clears it', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    const left = () => feature.mock.calls.filter((c) => c[0] === 'welcomeLeftNoChoice').length;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Only the page's own messages (and an invalid one): a bounce.
+    GettingStartedPanel.createOrShow(makeContext(), makeDeps());
+    let panel = vscode.window._webviewPanels.at(-1)!;
+    for (const m of [
+      { type: 'ready' }, { type: 'refreshStatus' }, { type: 'videoProgress', milestone: 'half' },
+      { type: 'videoError', code: 4 }, { type: 'start', action: 'nope' }, { type: 'nope' },
+    ]) { await panel._simulateMessage(m); }
+    expect(left()).toBe(0);
+    panel.dispose();
+    expect(left()).toBe(1);
+    panel.dispose();
+    expect(left()).toBe(1);
+
+    // A start or a link: a choice.
+    vscode.commands.registerCommand(START_ACTION_COMMANDS.example, () => undefined);
+    vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+    for (const choice of [
+      { type: 'start', action: 'example' }, { type: 'openExternal', target: 'claudeCodeDocs' }, { type: 'openFolder' },
+    ]) {
+      GettingStartedPanel.createOrShow(makeContext(), makeDeps());
+      panel = vscode.window._webviewPanels.at(-1)!;
+      await panel._simulateMessage({ type: 'ready' });
+      await panel._simulateMessage(choice);
+      panel.dispose();
+      expect(left(), choice.type).toBe(1);
+    }
   });
 
   it('offers step 2 instead of launching an assistant while no guide is installed', async () => {
@@ -1972,5 +2098,126 @@ describe('getting-started telemetry', () => {
     info.mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never).mockResolvedValueOnce(undefined);
     await trySampleProject();
     expect(keys(error)).toEqual(['sampleCloneFailed']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The suggested start's reason line, and Show Me Around (in place of the per-start clips)
+// ---------------------------------------------------------------------------
+
+describe('Show Me Around, and the suggested start (Draft-first: no clip, no start card)', () => {
+  it('reason lines name the kind of file only (no names), say "diagram", and never "open standard"', () => {
+    for (const reason of Object.values(START_INTENT_REASONS)) {
+      expect(reason).toMatch(/^This folder has /);
+      expect(reason).not.toMatch(/\.(sql|dbml|bim|pbip|tmdl)\b|open standard|\bdbt\b/i);
+    }
+    expect(Object.keys(START_INTENT_REASONS).sort()).toEqual(['importDbmlFile', 'importSemanticModel', 'importSqlDdl']);
+  });
+
+  it('the strings: a heading, one line and the button, with no dbt word, "diagram" in prose and no question', () => {
+    expect(SHOW_ME_AROUND_COMMAND).toBe('erdStudio.showMeAround');
+    expect(SHOW_ME_AROUND_LABEL).toBe('Show Me Around');
+    expect(SHOW_ME_AROUND_SECTION_TITLE).toBe('Find your way around');
+    expect(SHOW_ME_AROUND_SECTION_INTRO).toMatch(/^Show Me Around /);
+    for (const text of [SHOW_ME_AROUND_LABEL, SHOW_ME_AROUND_SECTION_TITLE, SHOW_ME_AROUND_SECTION_INTRO]) {
+      expect(text).not.toMatch(/\bdbt\b|\?/i);
+    }
+  });
+
+  it('every page shows the section and its button, after the AI cards, outside the steps (shown with no folder too); no clip, no video but the tour', () => {
+    for (const mode of [undefined, 'nofolder', 'logical', 'dbt'] as const) {
+      const html = buildGettingStartedHtml({ ...HTML_INPUT, ...(mode ? { mode } : {}) });
+      const label = mode ?? 'unknown';
+      expect(html.match(/data-action="showMeAround"/g), label).toHaveLength(1);
+      expect(html, label).toContain(`<section class="gs-around" aria-label="${SHOW_ME_AROUND_SECTION_TITLE}">`);
+      expect(html, label).toContain(`<h2 class="gs-section-title">${SHOW_ME_AROUND_SECTION_TITLE}</h2>`);
+      expect(html, label).toContain(`<p class="gs-section-intro">${SHOW_ME_AROUND_SECTION_INTRO}</p>`);
+      expect(html, label).toContain(`<button class="gs-btn" type="button" data-action="showMeAround">${SHOW_ME_AROUND_LABEL}</button>`);
+      expect(html.indexOf('class="gs-around"'), label).toBeGreaterThan(html.indexOf('data-step="start"'));
+      // The per-start clips are gone: no section, no clip, no second <video>.
+      expect(html, label).not.toMatch(/gs-howto|data-clip|Ways to start, in short videos|onboarding\/stories/);
+      expect(html.match(/<video /g) ?? [], label).toHaveLength(1);
+    }
+  });
+
+  it.each(['nofolder', 'logical', 'dbt'] as const)('%s page: the button is visible once the status lands, and a click posts showMeAround', (mode) => {
+    const status: GettingStartedStatus = mode === 'nofolder'
+      ? { ...STATUS, hasProject: false, project: null }
+      : mode === 'logical' ? { ...STATUS, logicalOnly: true } : STATUS;
+    const { dom, posted, send, visible, doc } = runPanelScript(buildGettingStartedHtml({ ...HTML_INPUT, mode }));
+    try {
+      send({ type: 'status', payload: status });
+      const button = doc.querySelector<HTMLElement>('[data-action="showMeAround"]')!;
+      expect(button.closest('[hidden]')).toBeNull();
+      expect(dom.window.getComputedStyle(button.closest('.gs-around')!).display).not.toBe('none');
+      expect(visible('.gs-around .gs-section-title')).toEqual([SHOW_ME_AROUND_SECTION_TITLE]);
+      expect(visible('[data-action="showMeAround"]')).toEqual([SHOW_ME_AROUND_LABEL]);
+      posted.length = 0;
+      button.click();
+      expect(posted).toEqual([{ type: 'showMeAround' }]);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('showMeAround is validated and runs exactly the fixed command, with no argument; it is a choice, not passive', async () => {
+    expect(isGettingStartedToHost({ type: 'showMeAround' })).toBe(true);
+    expect(GETTING_STARTED_TO_HOST_TYPES).toContain('showMeAround');
+    expect(GETTING_STARTED_PASSIVE_TYPES).not.toContain('showMeAround');
+    const feature = vi.spyOn(telemetry, 'feature');
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    GettingStartedPanel.createOrShow(makeContext(), makeDeps());
+    const panel = vscode.window._webviewPanels.at(-1)!;
+    await panel._simulateMessage({ type: 'ready' });
+    exec.mockClear();
+    // Whatever else the page sends rides along, never a command id.
+    await panel._simulateMessage({ type: 'showMeAround', command: 'workbench.action.terminal.new' });
+    expect(exec.mock.calls).toEqual([['erdStudio.showMeAround']]);
+    panel.dispose();
+    expect(feature.mock.calls.filter((c) => c[0] === 'welcomeLeftNoChoice')).toHaveLength(0);
+  });
+
+  it('howToClipPlayed is gone: rejected, not a type, never sent, never counted', async () => {
+    expect(isGettingStartedToHost({ type: 'howToClipPlayed' })).toBe(false);
+    expect(GETTING_STARTED_TO_HOST_TYPES as readonly string[]).not.toContain('howToClipPlayed');
+    expect(GETTING_STARTED_PASSIVE_TYPES as readonly string[]).not.toContain('howToClipPlayed');
+    expect(buildGettingStartedHtml(HTML_INPUT)).not.toContain('howToClipPlayed');
+    const feature = vi.spyOn(telemetry, 'feature');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    GettingStartedPanel.createOrShow(makeContext(), makeDeps());
+    const panel = vscode.window._webviewPanels.at(-1)!;
+    await panel._simulateMessage({ type: 'howToClipPlayed' });
+    expect(feature).not.toHaveBeenCalledWith('howToClipPlayed');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Ignoring unknown'), expect.anything());
+    panel.dispose();
+  });
+
+  it('with the host\'s tracker: the first status carries the known suggestion, a second the one after the look; nothing is counted as suggested (the tab shows no suggestion)', async () => {
+    const once = vi.spyOn(telemetry, 'featureOnce');
+    let resolveLook!: (i: StartIntent) => void;
+    const tracker = {
+      known: vi.fn((): StartIntent => 'blank'),
+      refresh: vi.fn(() => new Promise<StartIntent>((r) => { resolveLook = r; })),
+    };
+    const deps = makeDeps({ logicalOnly: true, startIntent: tracker });
+    (deps.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ...STATUS, logicalOnly: true });
+    GettingStartedPanel.createOrShow(makeContext(), deps);
+    const panel = vscode.window._webviewPanels[0];
+    const statuses = () => panel._postedMessages.filter((m) => (m as { type: string }).type === 'status') as Array<{ payload: GettingStartedStatus }>;
+    const ready = panel._simulateMessage({ type: 'ready' });
+    await vi.waitFor(() => expect(statuses().length).toBe(1));
+    expect(statuses()[0].payload).toMatchObject({ intent: 'blank' });
+    resolveLook('importSqlDdl');
+    await ready;
+    await vi.waitFor(() => expect(statuses().length).toBe(2));
+    expect(statuses()[1].payload).toMatchObject({ intent: 'importSqlDdl' });
+    expect(once).not.toHaveBeenCalledWith(START_INTENT_FEATURES.importSqlDdl);
+
+    // No folder: the tracker is not asked.
+    (deps.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ...STATUS, hasProject: false, project: null });
+    await panel._simulateMessage({ type: 'refreshStatus' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(tracker.refresh).toHaveBeenCalledTimes(1);
+    expect(statuses().at(-1)!.payload.intent).toBeUndefined();
   });
 });

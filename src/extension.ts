@@ -11,7 +11,7 @@ import { ManifestService, type ManifestLoadFailure } from './services/manifestSe
 import { TemplateService } from './services/templateService';
 import { LAYER_DRAG_MIME_TYPE, SubjectAreaTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { DeferredTreeDataProvider } from './providers/deferredTreeDataProvider';
-import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
+import { DBML_CONVERSION_DECLINED_KEY, DBML_OFFER_CONVERT_SETTING, SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { DiagramMembers } from './services/diagramMembers';
 import { CodeOwnersReader } from './services/codeOwners';
@@ -39,9 +39,10 @@ import { YmlParserService } from './services/ymlParserService';
 import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
-import { LAYER_DEFINITION, WHICH_LAYER_FOR_DIAGRAM } from './services/layerWording';
+import { LAYER_DEFINITION, WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from './services/layerWording';
 import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type DbtProjectConfig } from './services/dbtProjectConfig';
 import { detectPhysicalTooling, toolingExclude, type ToolingProbe } from './services/physicalTooling';
+import { DBT_SEARCH_EXCLUDE_GLOB, sortDbtCandidates } from './services/dbtProjectSearch';
 import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
 import {
   manifestAppearanceFeature,
@@ -59,7 +60,9 @@ import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
 import { convertProjectToDbml, dbmlConversionGoesNowhere } from './commands/convertProjectToDbml';
+import { slugFromName, validateTypedDiagramName } from './commands/diagramName';
 import { countDbmlConversionCandidates } from './services/dbmlConversionFiles';
+import { CONVERT_NOTICE_BUTTON, convertNoticeMessage, convertOfferApplies, convertRowShows, type ConvertOfferState } from './services/convertOffer';
 import { RefreshGate } from './services/refreshGate';
 import { projectNamingOf } from './services/projectNaming';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE, hasOpenSubjectAreaCanvas, saveAllAndReload } from './services/recoveryService';
@@ -128,11 +131,34 @@ import {
 } from './providers/GettingStartedPanel';
 import { listDraftModels } from './services/dbtDraft';
 import { readManifestMtime } from './services/manifestStaleness';
-import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
+import { UPGRADE_NOTICE_MESSAGE, deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
 import { assistantInfo } from './types/aiAssistants';
-import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
-import { IMPORT_DBML_COMMAND, importDbml } from './commands/importDbml';
-import { OPEN_EXAMPLE_DIAGRAM_COMMAND, openExampleDiagram } from './commands/openExampleDiagram';
+import { DRAW_FROM_DBT_COMMAND, drawFromDbt, type DbtDraftOptions, type DrawFromDbtDeps } from './commands/drawFromDbt';
+import { IMPORT_DBML_COMMAND, importDbml, quickImportDbml, type ImportDbmlDeps, type ImportDraftOptions } from './commands/importDbml';
+import { OPEN_EXAMPLE_DIAGRAM_COMMAND } from './commands/openExampleDiagram';
+import { IMPORT_MODEL_COMMAND, runImportModel, vscodeFindImportDbmlFile, vscodeImportModelDeps, vscodeStartLook } from './commands/importModel';
+import { IMPORT_SQL_DDL_COMMAND, importSqlDdl, quickImportSqlDdl, type ImportSqlDdlDeps } from './commands/importSqlDdl';
+import { sqlDialectOfImportArg } from './services/sqlDdlImport';
+import {
+  IMPORT_GUIDE_COMMAND,
+  IMPORT_GUIDE_OPENED_FEATURE,
+  IMPORT_GUIDE_SURFACE_FEATURES,
+  parseImportGuideArgs,
+  type ImportGuideContext,
+} from './services/importGuide';
+import { ImportGuidePanel } from './providers/ImportGuidePanel';
+import { IMPORT_SEMANTIC_MODEL_COMMAND, importSemanticModel, quickImportSemanticModel, type ImportSemanticModelDeps } from './commands/importSemanticModel';
+import { recordStartSuggested, runStart } from './commands/start';
+import { OPEN_EXAMPLE_PROJECT_COMMAND, openExampleDraft } from './commands/openExampleProject';
+import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/exampleProjects';
+import { START_COMMAND, START_INTENT_CONTEXT_KEY, START_PICK_PLACEHOLDER, START_PICK_TITLE, TOUR_LABEL, isQuickImportArg, startDraftTriggerOf, type StartContext, type StartIntent } from './types/startActions';
+import { createDraftPreview } from './providers/DraftPreviewPanel';
+import { DraftGeneration, draftPreviewEvents, trackedDraftPreview } from './providers/draftWiring';
+import { OnboardingGuide, guideDefersPrompt } from './providers/guideWiring';
+import { GUIDE_RERUN_STATUS_MS, GUIDE_STATE_KEY, SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL, isGuideStatus } from './types/onboardingGuide';
+import { DRAFT_AFTER_OPEN_FOLDER_KEY, EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, draftAfterOpenFolderDue, draftAfterOpenFolderShows, draftSourceForIntent, walkthroughAutoOpens, type AutoDraft, type DraftAfterOpenFolder } from './services/draftTriggers';
+import type { Draft, DraftPreview, DraftTrigger } from './types/draft';
+import { StartIntentTracker } from './commands/startIntent';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
 import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
 import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
@@ -150,6 +176,24 @@ import { registerDbmlFormatting } from './providers/dbmlFormattingProvider';
 import { dbmlFileIcon } from './providers/dbmlFileKinds';
 import { LOG_CHANNEL_NAME, SHOW_LOGS_COMMAND } from './services/showLogs';
 import { pickActivationPrompt, SessionPromptGate, type SessionPromptKind } from './services/activationPrompts';
+import {
+  OPEN_SETTINGS_BUTTON,
+  START_SUGGESTIONS_OFF_CONTEXT_KEY,
+  START_SUGGESTIONS_OFF_MESSAGE,
+  START_SUGGESTIONS_ON_MESSAGE,
+  START_SUGGESTIONS_SETTING,
+  START_SUGGESTIONS_SETTING_OFF_MESSAGE,
+  UNDO_BUTTON,
+  START_SUGGESTION_STATE_KEY,
+  TURN_OFF_START_SUGGESTIONS_COMMAND,
+  TURN_ON_START_SUGGESTIONS_COMMAND,
+  dbtProjectAboveOpenFolders,
+  readStartSuggestionState,
+  runStartSuggestion,
+  startSuggestionDue,
+  startSuggestionsOff,
+  type StartSuggestionState,
+} from './services/startSuggestion';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -186,6 +230,18 @@ export const GETTING_STARTED_SHOWN_KEY = 'erdStudio.gettingStartedShown';
  * that activation would otherwise look like an upgrade.
  */
 export const GETTING_STARTED_PENDING_KEY = 'erdStudio.gettingStartedPending';
+
+/**
+ * Set as activation starts. The walkthrough's `when` is
+ * `workspaceFolderCount == 0 || erdStudio.activated`: VS Code opens an
+ * extension's walkthrough the moment it is installed from the Marketplace
+ * (`workbench.welcomePage.walkthroughs.openOnInstall`) only when its `when`
+ * holds, so in a folder it no longer opens on install beside the start
+ * suggestion (two interruptions in the first minute; Draft-first §3.4: the
+ * walkthrough opens by itself only with no folder open). It is listed (the
+ * Welcome page, Welcome: Open Walkthrough…) once ERD Studio has activated.
+ */
+export const WALKTHROUGH_READY_CONTEXT_KEY = 'erdStudio.activated';
 
 /**
  * globalState: the Welcome panel has already opened once in a window with no
@@ -242,6 +298,7 @@ const sessionPrompts = new SessionPromptGate();
 /** Tests run activate() many times in one module instance. */
 export function _resetFirstRunGuardForTests(): void {
   gettingStartedAutoOpened = false;
+  unusedDbtProjectNoted = false;
   sessionPrompts.reset();
 }
 
@@ -267,13 +324,69 @@ function workspaceFolderPaths(): string[] {
  * Resolve the project for this window: `erdStudio.projectPath`, then the
  * picked project, then dbt auto-detection, then (logical-only) the first
  * folder holding ERD data, then the first folder. See `resolveDbtProject`.
+ * `hostCandidates`: the host's own search for dbt_project.yml
+ * ({@link findHostDbtProjects}), merged with the bounded walk.
  */
-function resolveWorkspaceProject(context: vscode.ExtensionContext): DbtProjectResolution {
+function resolveWorkspaceProject(context: vscode.ExtensionContext, hostCandidates?: readonly string[]): DbtProjectResolution {
   return resolveDbtProject(workspaceFolderPaths(), {
     projectPath: getErdStudioSetting('projectPath', ''),
     picked: context.workspaceState.get<string>(SELECTED_PROJECT_KEY),
     semanticDir: getErdStudioSetting('semanticDir', '.erd-studio'),
+    hostCandidates,
   });
+}
+
+/** How long activation waits for the host's dbt_project.yml search before the walk alone decides. */
+export const ACTIVATION_DBT_SEARCH_MS = 1000;
+/** At most this many dbt projects are listed by the host's search. */
+const HOST_DBT_SEARCH_MAX = 50;
+
+/**
+ * The folders holding dbt_project.yml by the host's own search
+ * (`workspace.findFiles`: every depth, hidden folders, symbolic links, as
+ * the `workspaceContains` activation event looks), skipping the folders the
+ * walk skips (`DBT_SEARCH_EXCLUDE_GLOB`), shallowest first. Undefined when
+ * it does not answer within `timeoutMs` or fails (the walk alone decides).
+ */
+async function findHostDbtProjects(timeoutMs: number): Promise<string[] | undefined> {
+  const folders = workspaceFolderPaths();
+  if (folders.length === 0) return [];
+  const source = new vscode.CancellationTokenSource();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const search = Promise.resolve(vscode.workspace.findFiles('**/dbt_project.yml', DBT_SEARCH_EXCLUDE_GLOB, HOST_DBT_SEARCH_MAX, source.token))
+      .then((uris) => sortDbtCandidates((uris ?? []).map((u) => u.fsPath), folders), () => undefined);
+    const timedOut = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), timeoutMs); });
+    return await Promise.race([search, timedOut]);
+  } catch {
+    return undefined;
+  } finally {
+    if (timer) clearTimeout(timer);
+    source.cancel();
+    source.dispose();
+  }
+}
+
+/** The one log line (per window) for a dbt project this window does not use. */
+let unusedDbtProjectNoted = false;
+
+/**
+ * Never miss a dbt project silently: the window opened `root` without dbt,
+ * yet a dbt_project.yml exists (`found`, from `seenBy`). One log line saying
+ * where and why, and the `dbtProjectUnused` presence flag; no prompt (the
+ * window's one prompt belongs to the start screen).
+ */
+function noteUnusedDbtProject(root: string, found: string | undefined, seenBy: 'discovery' | 'setting' | 'search' | 'look' | 'tooling'): void {
+  telemetry.featureOnce('dbtProjectUnused');
+  if (unusedDbtProjectNoted) return;
+  unusedDbtProjectNoted = true;
+  const why = seenBy === 'setting'
+    ? 'erdStudio.projectPath names a folder without dbt_project.yml'
+    : 'it was found after this window had opened';
+  log.info(
+    `ERD Studio: a dbt project${found ? ` at ${found}` : ''} is not used by this window, which opened ${root} without dbt (${why}). ` +
+    'Run Select dbt Project… or set erdStudio.projectPath to open it.',
+  );
 }
 
 /** Where a project sits in the workspace, for picker rows and messages. */
@@ -307,7 +420,8 @@ async function selectDbtProject(
   semanticDir: string,
   target?: string,
 ): Promise<void> {
-  const resolution = resolveWorkspaceProject(context);
+  // The host's whole search, so a project deeper than the walk is listed too.
+  const resolution = resolveWorkspaceProject(context, await findHostDbtProjects(5000));
   if (resolution.candidates.length === 0) {
     // A window always has a root here (the command is registered only then),
     // so no candidates means a plain folder: there is no dbt project to pick.
@@ -477,7 +591,7 @@ const PHYSICAL_TOOLING_DELAY_MS = 15_000;
  * reads the start of a few small files; it runs nothing and sends no path,
  * name or content.
  */
-function recordPhysicalTooling(context: vscode.ExtensionContext): void {
+function recordPhysicalTooling(context: vscode.ExtensionContext, session?: { root: string; hasDbt: boolean }): void {
   try {
     if (!telemetry.enabled() || !vscode.workspace.workspaceFolders?.length) return;
     const today = new Date().toISOString().slice(0, 10);
@@ -485,6 +599,9 @@ function recordPhysicalTooling(context: vscode.ExtensionContext): void {
     setTimeout(() => {
       void detectPhysicalTooling(hostToolingProbe()).then(found => {
         telemetry.physicalTooling(found);
+        if (session && !session.hasDbt && found.tools.includes('dbt')) {
+          noteUnusedDbtProject(session.root, undefined, 'tooling');
+        }
         void context.workspaceState.update(PHYSICAL_TOOLING_DAY_KEY, today);
       }, () => { /* telemetry must never break activation */ });
     }, PHYSICAL_TOOLING_DELAY_MS);
@@ -591,6 +708,15 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.cancelSidebarFilter',
   'erdStudio.showRowDetails',
   'erdStudio.hideRowDetails',
+  'erdStudio.start',
+  'erdStudio.openExampleProject',
+  'erdStudio.importModel',
+  'erdStudio.importSqlDdl',
+  'erdStudio.importSemanticModel',
+  'erdStudio.turnOffStartSuggestions',
+  'erdStudio.turnOnStartSuggestions',
+  'erdStudio.showImportGuide',
+  'erdStudio.showMeAround',
 ]);
 
 /**
@@ -603,6 +729,13 @@ export const PRE_REGISTERED_COMMANDS = new Set([
   'erdStudio.showGettingStarted',
   'erdStudio.trySampleProject',
   'erdStudio.showLogs',
+  'erdStudio.start',
+  'erdStudio.openExampleProject',
+  // Hidden from the palette (the setup skill names it): the same example draft as Open an Example….
+  'erdStudio.openExampleDiagram',
+  'erdStudio.showImportGuide',
+  // Show Me Around: the onboarding guide (an empty window gets the example's draft).
+  'erdStudio.showMeAround',
 ]);
 
 /**
@@ -801,15 +934,8 @@ async function handleUnsavedChanges(
   return true;
 }
 
-/**
- * The file name a typed name becomes, for a diagram or a layer folder: lower
- * case, every run of other characters one `-` ("Customer 360" →
- * `customer-360`), no `-` at either end. It may still start with a digit,
- * which the name checks refuse.
- */
-export function slugFromName(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-}
+/** The file name a typed name becomes (`src/commands/diagramName.ts`); re-exported for its tests. */
+export { slugFromName };
 
 /** A layer's id (its folder) from the name the user typed for it. */
 const layerIdFromName = slugFromName;
@@ -930,9 +1056,6 @@ function noProjectGettingStartedDeps(): GettingStartedDeps {
       project: null,
     }),
     clipboardText: (assistant) => (assistant && assistant !== 'claude' ? assistantInfo(assistant).prompt : SETUP_PROMPT),
-    openCanvas: async () => {
-      void showNoProjectWarning();
-    },
   };
 }
 
@@ -964,6 +1087,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // The ERD Studio output channel (a LogOutputChannel: the user picks its
   // level). Plugged in first so every later line reaches it.
   const activationStart = Date.now();
+  // The walkthrough is listed from now on (its `when`, WALKTHROUGH_READY_CONTEXT_KEY).
+  void vscode.commands.executeCommand('setContext', WALKTHROUGH_READY_CONTEXT_KEY, true);
   const outputChannel = vscode.window.createOutputChannel(LOG_CHANNEL_NAME, { log: true });
   setLogSink(outputChannel);
   context.subscriptions.push(outputChannel, { dispose: () => { setLogSink(undefined); } });
@@ -983,8 +1108,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const previousVersion = context.globalState.get<string>(LAST_ACTIVATED_VERSION_KEY);
   await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
   // Fresh install: remember that the Welcome panel is owed, even if this
-  // activation has no dbt project and returns early below.
-  if (previousVersion === undefined && !context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY)) {
+  // activation has no dbt project and returns early below. Captured here,
+  // before telemetry exists, for the funnel's `firstRun` (below).
+  const freshInstall = previousVersion === undefined && !context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY);
+  if (freshInstall) {
     await context.globalState.update(GETTING_STARTED_PENDING_KEY, true);
   }
   if (previousVersion && previousVersion !== currentVersion && hasOpenSubjectAreaCanvas()) {
@@ -1001,6 +1128,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const telemetryService = new TelemetryService(context);
   context.subscriptions.push(telemetryService);
   telemetryService.start();
+  // The onboarding funnel's denominator: a true first run on this machine
+  // (the one that owes the walkthrough), not an existing user's first
+  // heartbeat from a telemetry-bearing version (telemetry/README.md).
+  if (freshInstall) telemetry.featureOnce('firstRun');
 
   // "ERD Studio X fixes this — Update": checks recorded error codes against
   // the known-fixes registry. Independent of telemetry (it sends nothing about
@@ -1029,7 +1160,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
   );
 
-  // "Watch Getting Started Video" works without a project too: the panel
+  // "Watch the One-Minute Tour" works without a project too: the panel
   // asks for a folder. The project path fills in
   // gettingStartedDeps below (late-bound, like editorProviderForFeedback).
   let gettingStartedDeps: GettingStartedDeps | undefined;
@@ -1052,7 +1183,140 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(SHOW_LOGS_COMMAND, () => { outputChannel.show(true); }),
   );
 
-  const projectResolution = resolveWorkspaceProject(context);
+  // The start screen's one door (src/types/startActions.ts): every start
+  // button on the Welcome panel, the walkthrough and the empty Diagrams view
+  // runs it with `{ action, from }`, so the funnel counts where the click
+  // came from. Pre-registered: an empty window's Open an Example goes
+  // through it too. The project path fills in startContext below.
+  let startContext: () => StartContext = () => ({ hasProject: false, hasDbt: false });
+  // Draft-first (docs/dev/draft-first.md): the one draft preview of this
+  // extension host, shared by every flow. It writes nothing; the flow that
+  // asked writes on Keep. Wrapped so a draft claims the window's one prompt,
+  // counts its funnel keys (fixed keys only), runs an Other Way to Start's
+  // fixed command and, on Keep, marks the folder as started.
+  let onDraftKept: (draft: Draft) => unknown = () => undefined;
+  let onDraftAsk: (draft: Draft) => void = () => {};
+  // The onboarding guide, Show Me Around (src/providers/guideWiring.ts): phase A on the
+  // first draft, phase B on the first diagram opened after it. Its progress is per
+  // machine; the project path fills in the folder's semantic dir and storage.
+  let guideSemanticDir: () => string = () => '.erd-studio';
+  let guideDbml: () => boolean = () => true;
+  const onboardingGuide = new OnboardingGuide({
+    getStatus: () => {
+      const status = context.globalState.get<unknown>(GUIDE_STATE_KEY);
+      return isGuideStatus(status) ? status : undefined;
+    },
+    setStatus: (status) => context.globalState.update(GUIDE_STATE_KEY, status),
+    feature: (key) => telemetry.feature(key),
+    executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+    // The onboarding stories (test/stories) prove Star on GitHub by its log line without
+    // opening the machine's browser; nothing else sets this variable.
+    openExternal: (url) => (process.env.ERD_STUDIO_STORIES_NO_BROWSER === '1'
+      ? Promise.resolve(false)
+      : vscode.env.openExternal(vscode.Uri.parse(url))),
+    semanticDir: () => guideSemanticDir(),
+    dbml: () => guideDbml(),
+    holdPrompts: () => { sessionPrompts.reserve('guide'); },
+    statusMessage: (text) => { vscode.window.setStatusBarMessage(text, GUIDE_RERUN_STATUS_MS); },
+    log: (message) => log.info(message),
+    warn: (message, err) => log.warn(`[ERD Studio] ${message}`, err),
+  });
+  const draftPreview: DraftPreview = trackedDraftPreview(
+    createDraftPreview(context.extensionUri, draftPreviewEvents(
+      (key) => telemetry.feature(key),
+      (code) => telemetry.error(code),
+      (action) => onboardingGuide.onDraftAction(action),
+    )),
+    {
+      guide: {
+        takeDraft: (draft) => onboardingGuide.takeDraft(draft),
+        draftKept: (draft) => onboardingGuide.draftKept(draft),
+        draftLeft: (draft) => onboardingGuide.draftLeft(draft),
+      },
+      // Held at once, or as soon as the start suggestion's look hands the window on:
+      // nothing that was waiting (the AI helper offer, the upgrade notice) pops over a draft.
+      claim: () => { sessionPrompts.reserve('draft'); },
+      executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+      feature: (key) => telemetry.feature(key),
+      onKept: (draft) => onDraftKept(draft),
+      onAsk: (draft) => onDraftAsk(draft),
+      warn: (message, err) => log.warn(`[ERD Studio] ${message}`, err),
+      // The window Open Folder… reloads into shows that folder's draft at once (and the guide carries on).
+      beforeOpenFolder: () => context.globalState.update(DRAFT_AFTER_OPEN_FOLDER_KEY, { at: Date.now(), guide: onboardingGuide.draftRunning() } satisfies DraftAfterOpenFolder),
+    },
+  );
+  // Open an Example… (§9): the example draft (the coffee shop, with the Example
+  // switcher over the bundled projects). Works in an empty window too; in a
+  // folder Keep This Example writes the coffee shop there (exampleImportDeps,
+  // filled in once the folder's services exist).
+  let exampleImportDeps: () => ImportDbmlDeps | undefined = () => undefined;
+  const runExampleDraft = (trigger: DraftTrigger, quiet = false): Promise<void> => openExampleDraft({
+    preview: draftPreview,
+    trigger,
+    ...(quiet ? { quiet } : {}),
+    importDeps: () => exampleImportDeps(),
+    project: { globalState: context.globalState },
+  });
+  // Show Me Around (the onboarding guide): on an open diagram, phase B there; else the
+  // folder's draft (or, with nothing to draw or no folder, the example's) and phase A.
+  // The project path fills in the folder's part; an empty window gets the example.
+  let showMeAroundInProject: () => Promise<boolean> = async () => false;
+  context.subscriptions.push(
+    vscode.commands.registerCommand(SHOW_ME_AROUND_COMMAND, async () => {
+      if (await showMeAroundInProject()) return;
+      if (draftPreview.isOpen()) {
+        draftPreview.startGuide?.(onboardingGuide.startOnOpenDraft());
+        return;
+      }
+      onboardingGuide.requestDraft();
+      await runExampleDraft('example');
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(OPEN_EXAMPLE_PROJECT_COMMAND, () => runExampleDraft('example')),
+    // Open Example Diagram stays registered (hidden from the palette) as an alias of the
+    // one example command, so old keybindings and the setup skill's mention keep working.
+    vscode.commands.registerCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND, () => vscode.commands.executeCommand(OPEN_EXAMPLE_PROJECT_COMMAND)),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(START_COMMAND, (arg?: unknown) => runStart(arg, {
+      context: () => startContext(),
+      // With its arguments: a direct import's { quick: true } (startActionArgs) is its quick path.
+      executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+      pick: (items) => vscode.window.showQuickPick(items, { title: START_PICK_TITLE, placeHolder: START_PICK_PLACEHOLDER }),
+    })),
+  );
+  // Bring In Your Data Model… (src/services/importGuide.ts): how to export from
+  // Databricks, Snowflake, Power BI, Fabric and more, each card's import one click away.
+  // Pre-registered, so it opens in an empty window too (its imports then say "Open a
+  // folder first"). The project path fills in the folder's context and suggestion.
+  let importGuideContext: () => ImportGuideContext = () => ({ hasProject: false, hasDbt: false });
+  let refreshImportGuideIntent: () => Promise<unknown> = async () => undefined;
+  context.subscriptions.push(
+    vscode.commands.registerCommand(IMPORT_GUIDE_COMMAND, async (arg?: unknown) => {
+      const from = parseImportGuideArgs(arg);
+      telemetry.feature(IMPORT_GUIDE_OPENED_FEATURE);
+      if (from) telemetry.feature(IMPORT_GUIDE_SURFACE_FEATURES[from]);
+      const panel = ImportGuidePanel.createOrShow({
+        context: () => importGuideContext(),
+        executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+        writeClipboard: (text) => vscode.env.clipboard.writeText(text),
+        noFolder: () => { void showNoProjectWarning(); },
+        feature: (key) => telemetry.feature(key),
+      });
+      // The suggestion may not be known yet (no look so far): look (bounded), then lead with it.
+      const before = importGuideContext().intent;
+      try {
+        await refreshImportGuideIntent();
+      } catch { /* the guide still shows every source */ }
+      if (importGuideContext().intent !== before) panel.render();
+    }),
+  );
+
+  // The host's own search for dbt_project.yml (every depth), bounded so it
+  // never holds activation up; the walk alone decides when it is late.
+  const hostDbtProjects = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
+  const projectResolution = resolveWorkspaceProject(context, hostDbtProjects);
   const workspaceRoot = projectResolution.root;
   // Logical-only mode: a root without dbt_project.yml (any folder now opens).
   // No Physical stage, no dbt services or watchers, nothing written unasked.
@@ -1090,6 +1354,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', hasDbt);
   if (!workspaceRoot) {
     telemetry.activation('no_project', false, 0);
+    // Every window's outcome, not only the day's last (`activation`).
+    telemetry.feature('activatedNoFolder');
     recordDetectedAssistants();
     recordPhysicalTooling(context);
     // Register stub commands / editor so palette entries and the sidebar
@@ -1100,11 +1366,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // walkthrough: the video, the sample project and how to open a folder.
     const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
     // It is this session's one prompt (there is nothing else to offer here).
-    if (pending && !context.globalState.get<boolean>(GETTING_STARTED_NO_PROJECT_SHOWN_KEY) && !gettingStartedAutoOpened &&
-      sessionPrompts.claim('walkthrough')) {
-      gettingStartedAutoOpened = true;
-      await context.globalState.update(GETTING_STARTED_NO_PROJECT_SHOWN_KEY, true);
-      await openWalkthrough(() => GettingStartedPanel.createOrShow(context, noProjectGettingStartedDeps()));
+    // An empty window is the only place it opens by itself (walkthroughAutoOpens):
+    // in a folder the draft takes its place.
+    const owed = pending && !context.globalState.get<boolean>(GETTING_STARTED_NO_PROJECT_SHOWN_KEY) && !gettingStartedAutoOpened;
+    if (walkthroughAutoOpens({ hasFolder: false, owed })) {
+      if (sessionPrompts.claim('walkthrough')) {
+        gettingStartedAutoOpened = true;
+        await context.globalState.update(GETTING_STARTED_NO_PROJECT_SHOWN_KEY, true);
+        await openWalkthrough(() => GettingStartedPanel.createOrShow(context, noProjectGettingStartedDeps()));
+      } else {
+        // Owed, but another prompt had this window: it waits (measured, not guessed).
+        telemetry.featureOnce('walkthroughWaited');
+      }
     }
     // No toast for the ordinary case: an empty window is normal (the
     // extension activates on any of its commands), and the sidebar's welcome
@@ -1130,6 +1403,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     : `ERD Studio: Opened ${workspaceRoot} (no dbt_project.yml: logical-only)`);
 
   const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
+  // Draft-first's staleness (§5.1): bumped by the semantic-dir watchers below for
+  // changes that are not ERD Studio's own (the watchers drop own writes), and
+  // for ERD Studio's own writes under the semantic dir as each lands (a canvas
+  // edit in this window while a draft is open). A Keep after a bump plans the
+  // draft again, so it never writes a library snapshot older than the file.
+  const draftGeneration = new DraftGeneration();
+  const draftSemanticRoot = path.normalize(path.join(workspaceRoot, semanticDir)) + path.sep;
+  context.subscriptions.push(ownWrites.onRecorded((filePath) => {
+    if (path.normalize(filePath).startsWith(draftSemanticRoot)) draftGeneration.bump();
+  }));
 
   // More than one dbt project in the workspace (multi-root or monorepo, #82):
   // reveal the sidebar's Select dbt Project button. Re-checked when folders
@@ -1185,6 +1468,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
   const subjectAreaService = new SubjectAreaService(layerService);
   const tableLibraryService = new TableLibraryService(workspaceRoot, semanticDir);
+  // What the start screen suggests here (src/types/startActions.ts): Convert
+  // for a project from before 2.0, Draw from dbt in a dbt project, else what a
+  // bounded look at the folder finds (a Power BI semantic model, CREATE TABLE scripts,
+  // a DBML file) or a blank diagram. Looked up only when a start surface asks
+  // (the empty Diagrams view, the Welcome panel, the walkthrough), never here.
+  const startIntent = new StartIntentTracker({
+    context: () => ({
+      hasProject: true,
+      hasDbt,
+      storage: projectStorageOf(tableLibraryService),
+      hasDiagrams: subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
+    }),
+    look: vscodeStartLook(workspaceRoot, semanticDir),
+    publish: (intent) => { void vscode.commands.executeCommand('setContext', START_INTENT_CONTEXT_KEY, intent); },
+    onDbtProjectSeen: () => noteUnusedDbtProject(workspaceRoot, undefined, 'look'),
+  });
+  context.subscriptions.push({ dispose: () => startIntent.dispose() });
+  startContext = () => startIntent.startContext();
+  importGuideContext = () => ({ hasProject: true, hasDbt, intent: startIntent.known() });
+  refreshImportGuideIntent = () => startIntent.refresh();
   tableLibraryService.onParseFailure = (error) => {
     // Fixed keys only — `error.message` may quote the file and never leaves the machine.
     telemetry.error('modelFileParse');
@@ -1312,15 +1615,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   // Each DBML table's layer and schema, which every view groups and labels by.
   const tableHomes = (): Map<string, TableHome> => tableHomesOf(tableLibraryService.listTableFiles());
+  // The empty Diagrams view was drawn in this window: the user came to ERD Studio here
+  // (the nothing-found notification's one trigger, set up with the start suggestion below).
+  let emptyDiagramsViewShown = false;
+  let onEmptyDiagramsViewShown: () => void = () => {};
   const treeProvider = new SubjectAreaTreeProvider(
     subjectAreaService,
     layerService,
     workspaceRoot,
     semanticDir,
-    (loading) => { void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', loading); },
+    (loading) => {
+      void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', loading);
+      // VS Code lists a view only to draw it: a listing with no rows means the
+      // empty view, with its start buttons, is on screen (the funnel's sidebar step).
+      // Its start variants follow the suggestion, so look now (deferred: this
+      // can be the first listing, still inside activation) and count what it shows.
+      if (!loading) {
+        telemetry.featureOnce('sidebarStartShown');
+        emptyDiagramsViewShown = true;
+        setTimeout(() => {
+          void startIntent.refresh().then((intent) => {
+            if (intent) recordStartSuggested(intent);
+            onEmptyDiagramsViewShown();
+          });
+        }, 0);
+      }
+    },
     (kind) => dbmlFileIcon(context.extensionUri, kind),
     tableHomes,
   );
+  /** Where Convert Project to DBML stands in this project (src/services/convertOffer.ts). */
+  const convertOfferState = (): ConvertOfferState => ({
+    storage: projectStorageOf(tableLibraryService),
+    declined: context.workspaceState.get<boolean>(DBML_CONVERSION_DECLINED_KEY) === true,
+    offerSetting: getErdStudioSetting<boolean>(DBML_OFFER_CONVERT_SETTING, true) !== false,
+  });
+  // A pre-2.0 project with diagrams: Convert to DBML… above the layers (the empty view's Convert entry is gone once there are rows).
+  treeProvider.setConvertRow(() => convertRowShows(convertOfferState()));
   // `erdStudio.tablesLoading` (set above, before the views) holds until a
   // Table Library listing finds no rows, and while a full rebuild of the
   // library runs, so its view shows "Loading tables…" rather than the
@@ -1454,6 +1785,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let hasDiagramsKey: boolean | undefined;
   const refreshDiagramsStatus = (): void => {
     const count = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length;
+    // The folder's first diagram was made while this window was open (a Keep, New
+    // Diagram…, an import, the user's AI assistant): the "This project has N diagrams"
+    // notice never names it, and nothing else pops over its canvas in this window.
+    if (hasDiagramsKey === false && count > 0) {
+      void context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
+      sessionPrompts.reserve('firstDiagram');
+    }
     if (hasDiagramsKey !== count > 0) {
       hasDiagramsKey = count > 0;
       void vscode.commands.executeCommand('setContext', 'erdStudio.hasDiagrams', hasDiagramsKey);
@@ -1558,10 +1896,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await vscode.commands.executeCommand('erdStudio.openDomain', target);
   };
   telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length);
+  // Every window's outcome, not only the day's last (`activation`).
+  telemetry.feature(hasDbt ? 'activatedDbt' : 'activatedLogical');
   // A presence flag, once a day: activation resolved a root without dbt_project.yml.
   if (!hasDbt) { telemetry.featureOnce('logicalOnlyProject'); }
+  if (!hasDbt) {
+    // A dbt project this window does not use is never missed silently.
+    const unused = projectResolution.candidates[0];
+    if (unused) {
+      noteUnusedDbtProject(workspaceRoot, unused, projectResolution.source === 'setting' ? 'setting' : 'discovery');
+    } else if (hostDbtProjects === undefined) {
+      // The host's search was late: let it finish, off activation's path.
+      void findHostDbtProjects(60_000).then((late) => {
+        const found = late?.find((dir) => !samePath(dir, workspaceRoot));
+        if (found) noteUnusedDbtProject(workspaceRoot, found, 'search');
+      });
+    }
+  }
   recordDetectedAssistants();
-  recordPhysicalTooling(context);
+  recordPhysicalTooling(context, { root: workspaceRoot, hasDbt });
 
   // Surface a broken layers.json once per distinct error. LayerService falls
   // back to default layers in memory but refuses to overwrite the file, so the
@@ -1671,6 +2024,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // table (a Ref attaches wherever its owner is, from any file), so every open
   // canvas is redrawn (§5.4). Never a table event.
   const relationshipsChangedSubscription = fileWatcherService.onRelationshipsChanged(async () => {
+    draftGeneration.bump();
     tableLibraryService.invalidateRelationships();
     await editorProvider.refreshAllOpenSubjectAreas();
     treeProvider.refresh();
@@ -1719,6 +2073,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Semantic file changed externally → refresh tree view + model library
   const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri, created }) => {
+    draftGeneration.bump();
     // A change to a diagram file reaches an open canvas through its document
     // (a DBML diagram's positions are in it too, in its erd_layout).
     // A domain file ERD Studio did not write appeared: an AI assistant, a hand
@@ -1847,6 +2202,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // then-rename) and macOS (atomic rename via FSEvents), causing mass YAML
   // modifications. Instead, offer to run the manual sync command.
   const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(({ uris }) => {
+    draftGeneration.bump();
     // An open canvas whose file is gone says so at once, instead of staying
     // editable until a refresh fails (#161).
     editorProvider.syncSubjectAreaFilePresence();
@@ -1881,6 +2237,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // cached layer list so the tree, decorations and domain listing pick up the
   // new layers; warn if the file is now unreadable.
   const layerConfigChangedSubscription = fileWatcherService.onLayerConfigChanged(() => {
+    draftGeneration.bump();
     layerService.invalidateCache();
     treeProvider.invalidateSubjectArea();
     treeProvider.refresh();
@@ -1895,6 +2252,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // reports 1,100 tables in one batch while it is still deleting files, and
   // per-table work listed the library again for every one of them.
   const logicalModelChangedSubscription = fileWatcherService.onTablesChanged(({ tables: changed }) => {
+    draftGeneration.bump();
     const names = changed.map((t) => t.modelName);
     tableLibraryService.invalidateTables(names);
     // Batched: a bulk change (git checkout, an assistant's edit) redraws each canvas once.
@@ -2249,6 +2607,135 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       vscode.Uri.file(filePath),
       SUBJECT_AREA_EDITOR_VIEW_TYPE,
     );
+  };
+
+  // The deps of each draft-ending flow, shared by its command and the
+  // automatic draft (the ERD Studio icon), so both write exactly alike.
+  const existingSubjectAreas = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+  const validateNewSlug = (value: string, layer: string): string | undefined => validateSubjectAreaSlug(value, layer, existingSubjectAreas());
+  /** The draft an import shows: this host's preview, what opened it, staleness, and stage colours only with dbt. */
+  const importDraftFor = (trigger: DraftTrigger, quiet = false): ImportDraftOptions => ({
+    preview: draftPreview,
+    trigger,
+    ...(quiet ? { quiet } : {}),
+    generation: () => draftGeneration.value,
+    logicalOnly: !hasDbt,
+  });
+  const dbtDraftFor = (trigger: DraftTrigger, quiet = false): DbtDraftOptions => ({
+    preview: draftPreview,
+    trigger,
+    ...(quiet ? { quiet } : {}),
+    generation: () => draftGeneration.value,
+  });
+  const importDbmlDeps = (draft?: ImportDraftOptions): ImportDbmlDeps => ({
+    workspaceRoot,
+    semanticDir,
+    layerService,
+    subjectAreaService,
+    tableLibraryService,
+    validateDomainName: validateNewSlug,
+    onWritten: refreshAfterNewSubjectArea,
+    // "This folder has a DBML file": the one the look counted (never ERD Studio's own export);
+    // the quick path drafts it and the Open dialog starts on it, chosen.
+    findDefaultFile: () => vscodeFindImportDbmlFile(workspaceRoot, semanticDir),
+    ...(draft ? { draft } : {}),
+  });
+  const sqlDeps = (draft?: ImportDraftOptions): ImportSqlDdlDeps => ({
+    workspaceRoot,
+    semanticDir,
+    layerService,
+    subjectAreaService,
+    tableLibraryService,
+    extensionPath: context.extensionPath,
+    validateDomainName: validateNewSlug,
+    onWritten: refreshAfterNewSubjectArea,
+    ...(draft ? { draft } : {}),
+  });
+  const semanticModelDeps = (draft?: ImportDraftOptions): ImportSemanticModelDeps => ({
+    workspaceRoot,
+    semanticDir,
+    layerService,
+    subjectAreaService,
+    tableLibraryService,
+    validateDomainName: validateNewSlug,
+    onWritten: refreshAfterNewSubjectArea,
+    ...(draft ? { draft } : {}),
+  });
+  const dbtDeps = (draft?: DbtDraftOptions): DrawFromDbtDeps => ({
+    workspaceRoot,
+    semanticDir,
+    modelPaths: dbtConfig.modelPaths,
+    layerService,
+    subjectAreaService,
+    tableLibraryService,
+    loadDbt: async () => {
+      const ymlData = await ymlParserService.loadYmlData(workspaceRoot);
+      const manifest = await manifestService.loadManifest(workspaceRoot);
+      // The catalog only fills column types; undefined when there is none.
+      const catalog = await catalogService.loadCatalog(workspaceRoot);
+      return { ymlData, manifest: manifestService.isMissing ? undefined : manifest, catalog };
+    },
+    validateDomainName: validateNewSlug,
+    onWritten: refreshAfterNewSubjectArea,
+    ...(draft ? { draft } : {}),
+  });
+  // Open an Example… in this folder: the coffee shop's Keep This Example writes here, as an import.
+  exampleImportDeps = () => importDbmlDeps(importDraftFor('example'));
+  /**
+   * The automatic draft of the folder's find (§3.1), quiet: each flow's quick
+   * path with nothing asked or shown before the draft.
+   */
+  const runFindDraft = async (intent: StartIntent, trigger: DraftTrigger = 'sidebar', quiet = true): Promise<unknown> => {
+    switch (intent) {
+      case 'importSqlDdl': return quickImportSqlDdl(sqlDeps(importDraftFor(trigger, quiet)));
+      case 'importSemanticModel': return quickImportSemanticModel(semanticModelDeps(importDraftFor(trigger, quiet)));
+      case 'importDbmlFile': return quickImportDbml(importDbmlDeps(importDraftFor(trigger, quiet)));
+      case 'drawFromDbt': return hasDbt ? drawFromDbt(dbtDeps(dbtDraftFor(trigger, quiet))) : undefined;
+      default: return undefined;
+    }
+  };
+
+  // The onboarding guide in this folder (src/providers/guideWiring.ts): its text names
+  // the semantic dir and the storage; phase B runs on a canvas (taken when a diagram
+  // has loaded, before the canvas's own offers).
+  guideSemanticDir = () => semanticDir;
+  guideDbml = () => projectStorageOf(tableLibraryService) === 'dbml';
+  editorProvider.setOnboardingGuide({
+    takeCanvas: () => onboardingGuide.takeCanvas(),
+    startOnCanvas: () => onboardingGuide.startOnCanvas(),
+    onCanvasAction: (action) => onboardingGuide.onCanvasAction(action),
+  });
+  // Show Me Around here: phase B on the open diagram (or the folder's latest one),
+  // else phase A on the folder's draft — the find it suggests, or the example when
+  // there is nothing to draw. Explicit: it asks what an explicit start asks.
+  // Show Me Around on a diagram of this folder: it opens, and phase B runs on it once it
+  // has loaded (the command in a folder with diagrams, and the diagrams notice's button).
+  const showMeAroundOnDiagram = async (filePath: string): Promise<void> => {
+    onboardingGuide.requestCanvas();
+    await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
+    // Already open and loaded: no new load takes the request, so start it there.
+    if (onboardingGuide.canvasRequested()) editorProvider.startGuideOnActiveCanvas();
+  };
+  showMeAroundInProject = async () => {
+    if (editorProvider.startGuideOnActiveCanvas()) return true;
+    if (draftPreview.isOpen()) {
+      draftPreview.startGuide?.(onboardingGuide.startOnOpenDraft());
+      return true;
+    }
+    const latest = mostRecentlyModified(subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir));
+    if (latest) {
+      await showMeAroundOnDiagram(latest.filePath);
+      return true;
+    }
+    const intent = await startIntent.refresh();
+    if (intent && draftSourceForIntent(intent) !== undefined && (intent !== 'drawFromDbt' || hasDbt)) {
+      onboardingGuide.requestDraft();
+      await runFindDraft(intent, 'start', false);
+      return true;
+    }
+    onboardingGuide.requestDraft({ nothingFound: true });
+    await runExampleDraft('example');
+    return true;
   };
 
   context.subscriptions.push(
@@ -2952,63 +3439,51 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         projectRoot: workspaceRoot,
         semanticRoot: fullSemanticDirPath,
       })),
-    vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, async () => {
+    // Draw from dbt (§5.2): the top-ranked models folder as a draft, with the
+    // Folder switcher and Change options… (the picker). A start passes { draft }.
+    vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, async (arg?: unknown) => {
       if (!hasDbt) {
         void vscode.window.showInformationMessage(DRAW_FROM_DBT_NEEDS_DBT_MESSAGE);
         return;
       }
-      const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
-      await drawFromDbt({
-        workspaceRoot,
-        semanticDir,
-        modelPaths: dbtConfig.modelPaths,
-        layerService,
-        subjectAreaService,
-        tableLibraryService,
-        loadDbt: async () => {
-          const ymlData = await ymlParserService.loadYmlData(workspaceRoot);
-          const manifest = await manifestService.loadManifest(workspaceRoot);
-          // The catalog only fills column types; undefined when there is none.
-          const catalog = await catalogService.loadCatalog(workspaceRoot);
-          return { ymlData, manifest: manifestService.isMissing ? undefined : manifest, catalog };
-        },
-        validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
-        onWritten: refreshAfterNewSubjectArea,
-      });
+      await drawFromDbt(dbtDeps(dbtDraftFor(startDraftTriggerOf(arg) ?? 'palette')));
     }),
     // Import a DBML file (ERD Studio's own rich export, dbdiagram.io's, any
     // tool's) as a new subject area. Needs no dbt artifacts.
     // With a file URI (the canvas's "Import these tables…" banner over a
     // single-file DBML in a layer folder, §2.5) that file is imported;
-    // without one the user picks a file.
+    // without one the user picks a file. Every run ends in a draft (§5.1).
     vscode.commands.registerCommand(IMPORT_DBML_COMMAND, async (file?: unknown) => {
-      const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+      const deps = importDbmlDeps(importDraftFor(startDraftTriggerOf(file) ?? 'palette'));
+      // A start (Import your DBML file, the start suggestion's Show Me): the quick path, that file taken.
+      if (isQuickImportArg(file)) {
+        await quickImportDbml(deps);
+        return;
+      }
       const uri = file as { scheme?: unknown; fsPath?: unknown } | undefined;
       const filePath = uri && typeof uri === 'object' && uri.scheme === 'file' && typeof uri.fsPath === 'string' ? uri.fsPath : undefined;
-      await importDbml({
-        workspaceRoot,
-        semanticDir,
-        layerService,
-        subjectAreaService,
-        tableLibraryService,
-        validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
-        onWritten: refreshAfterNewSubjectArea,
-      }, filePath !== undefined ? { filePath } : undefined);
+      await importDbml(deps, filePath !== undefined ? { filePath } : undefined);
     }),
-    // A ready-made coffee-shop star schema, through the same Import DBML flow
-    // (name, dry run, Import). Works in any folder; an empty window gets the
-    // fallback "Open a folder first".
-    vscode.commands.registerCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND, async () => {
-      const existingDomains = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
-      await openExampleDiagram({
-        workspaceRoot,
-        semanticDir,
-        layerService,
-        subjectAreaService,
-        tableLibraryService,
-        validateDomainName: (value, layer) => validateSubjectAreaSlug(value, layer, existingDomains()),
-        onWritten: refreshAfterNewSubjectArea,
-      });
+    // Import… (the start screen's Import): DBML, SQL DDL or a Power BI /
+    // Fabric semantic model, the source the folder seems to hold first.
+    vscode.commands.registerCommand(IMPORT_MODEL_COMMAND, () => runImportModel(vscodeImportModelDeps(workspaceRoot, semanticDir))),
+    // CREATE TABLE scripts and semantic models are converted to DBML, then go
+    // through Import DBML's own flow (layer, name, the draft, Keep).
+    // A start (the start screen's primary import, the start suggestion) passes
+    // { quick: true, draft }: the quick path, defaults chosen and the draft the one question.
+    // The import guide's SQL cards pass { dialect }: the scripts are read as that dialect, not asked.
+    vscode.commands.registerCommand(IMPORT_SQL_DDL_COMMAND, async (arg?: unknown) => {
+      const deps = sqlDeps(importDraftFor(startDraftTriggerOf(arg) ?? 'palette'));
+      if (isQuickImportArg(arg)) {
+        await quickImportSqlDdl(deps);
+        return;
+      }
+      const dialect = sqlDialectOfImportArg(arg);
+      await importSqlDdl(deps, undefined, dialect ? { dialect, dialectChosen: true } : {});
+    }),
+    vscode.commands.registerCommand(IMPORT_SEMANTIC_MODEL_COMMAND, async (arg?: unknown) => {
+      const deps = semanticModelDeps(importDraftFor(startDraftTriggerOf(arg) ?? 'palette'));
+      await (isQuickImportArg(arg) ? quickImportSemanticModel : importSemanticModel)(deps);
     }),
     vscode.commands.registerCommand(
       'erdStudio.createDomain',
@@ -3025,15 +3500,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             showCommandFailure({ title: NEW_DIAGRAM_TITLE, message: NO_LAYERS_MESSAGE, buttons: [ADD_LAYER_BUTTON] }, undefined);
             return;
           }
-          if (creatableLayers.length === 1) {
-            layer = creatableLayers[0].id;
-          } else if (subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length === 0) {
-            // No diagrams yet, so nothing to tell the layers apart by: the
-            // first diagram goes in the last creatable layer in layers.json
-            // order (gold, of silver and gold). The question comes once
-            // there are diagrams to count.
-            layer = creatableLayers[creatableLayers.length - 1].id;
-            layerDefaulted = true;
+          // No diagrams yet, so nothing to tell the layers apart by: the first
+          // diagram goes in the last creatable layer in layers.json order (gold,
+          // of silver and gold; defaultDiagramLayer, the import's quick path
+          // shares it). The question comes once there are diagrams to count.
+          const defaulted = defaultDiagramLayer(
+            creatableLayers.map((l) => l.id),
+            subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length,
+          );
+          if (defaulted !== undefined) {
+            layer = defaulted;
+            layerDefaulted = creatableLayers.length > 1;
           } else {
             // Each layer with how many diagrams it holds, then a way to make another.
             const counts = new Map<string, number>();
@@ -3052,11 +3529,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               placeHolder: WHICH_LAYER_FOR_DIAGRAM,
               ignoreFocusOut: true,
             });
-            if (!layerChoice) { return; }
+            if (!layerChoice) { telemetry.feature('blankDiagramCancelled'); return; }
             layer = layerChoice.newLayer
               ? await vscode.commands.executeCommand<string | undefined>('erdStudio.addLayer', { thenNewDiagram: true })
               : layerChoice.value;
-            if (!layer) { return; }
+            if (!layer) { telemetry.feature('blankDiagramCancelled'); return; }
           }
         }
         const chosenLayer = layer;
@@ -3072,15 +3549,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             : `Name the diagram. It is saved in the ${layerLabel} layer.`,
           placeHolder: 'e.g. Customer 360, Sales, Orders',
           ignoreFocusOut: true,
-          validateInput: (value: string) => {
-            if (!value.trim()) { return 'Give the diagram a name'; }
-            const asSlug = slugFromName(value);
-            const problem = validateSubjectAreaSlug(asSlug, chosenLayer, existingDomains);
-            if (problem) { return problem; }
-            return asSlug === value.trim() ? undefined : { message: `Saved as ${asSlug}`, severity: vscode.InputBoxValidationSeverity.Info };
-          },
+          validateInput: (value: string) => validateTypedDiagramName(value, (slug) => validateSubjectAreaSlug(slug, chosenLayer, existingDomains)),
         });
-        if (!typed?.trim()) { return; }
+        if (!typed?.trim()) { telemetry.feature('blankDiagramCancelled'); return; }
         const slug = slugFromName(typed);
 
         // Create the diagram file, and open it. Its description and dbt folder
@@ -3886,6 +4357,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return {
       hasProject: true,
       logicalOnly: !hasDbt,
+      // Convert to DBML is offered only for a project from before 2.0.
+      storage: projectStorageOf(tableLibraryService),
       harness,
       cli,
       helper: deriveAiHelperState(harness, cli, assistants),
@@ -3942,7 +4415,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     getStatus: getGettingStartedStatus,
     clipboardText: setupClipboardText,
     workspaceFolder: projectWorkspaceFolder,
-    openCanvas,
+    // The folder's suggestion (the How-to clips follow it).
+    startIntent,
     // One text line above the Welcome panel's cards ("12 dbt models · medallion
     // layout · manifest 2 days old"). Reads what the canvas already caches;
     // a missing manifest is fine and is reported as such, never an error.
@@ -3996,6 +4470,114 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // The start suggestion (src/services/startSuggestion.ts): a folder with no
+  // diagram whose start is obvious gets one notification offering it. Its
+  // state is workspace state (machine-local: nothing goes into the repo);
+  // erdStudio.startSuggestions can be committed to turn it off for a team.
+  const startSuggestionState = (): StartSuggestionState =>
+    readStartSuggestionState(context.workspaceState.get(START_SUGGESTION_STATE_KEY));
+  const saveStartSuggestionState = (state: StartSuggestionState): Thenable<void> =>
+    context.workspaceState.update(START_SUGGESTION_STATE_KEY, state);
+  const startSuggestionsSettingOn = (): boolean => getErdStudioSetting<boolean>(START_SUGGESTIONS_SETTING, true) !== false;
+  // The palette shows Turn Off… or Turn On… (package.json gates them on this key).
+  const publishStartSuggestionsOff = (): void => {
+    void vscode.commands.executeCommand('setContext', START_SUGGESTIONS_OFF_CONTEXT_KEY,
+      startSuggestionsOff(startSuggestionState(), startSuggestionsSettingOn()));
+  };
+  publishStartSuggestionsOff();
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration(`erdStudio.${START_SUGGESTIONS_SETTING}`)) publishStartSuggestionsOff();
+    }),
+    vscode.commands.registerCommand(TURN_OFF_START_SUGGESTIONS_COMMAND, async () => {
+      await saveStartSuggestionState({ ...startSuggestionState(), off: true });
+      telemetry.feature('startSuggestionsOff');
+      publishStartSuggestionsOff();
+      void vscode.window.showInformationMessage(START_SUGGESTIONS_OFF_MESSAGE, UNDO_BUTTON).then((choice) => {
+        if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND);
+      });
+    }),
+    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async () => {
+      // A fresh start: the count and an earlier answer are forgotten too.
+      await saveStartSuggestionState({ shown: 0 });
+      publishStartSuggestionsOff();
+      if (!startSuggestionsSettingOn()) {
+        const choice = await vscode.window.showInformationMessage(START_SUGGESTIONS_SETTING_OFF_MESSAGE, OPEN_SETTINGS_BUTTON);
+        if (choice === OPEN_SETTINGS_BUTTON) {
+          void vscode.commands.executeCommand('workbench.action.openSettings', `erdStudio.${START_SUGGESTIONS_SETTING}`);
+        }
+        return;
+      }
+      void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
+    }),
+  );
+  /** Set by the end of activate(): show the next offered prompt when `from` held the window but showed nothing. */
+  let handOverActivationPrompt: (from: SessionPromptKind) => Promise<void> = async () => {};
+  // Activation's own prompt is decided: shown, or handed on by the start suggestion
+  // after its look. Until then the nothing-found notification does not ask for the
+  // window, so a first run's walkthrough (or any prompt activation offers) keeps it.
+  let settleActivationPrompts: () => void = () => {};
+  const activationPromptsSettled = new Promise<void>((resolve) => { settleActivationPrompts = resolve; });
+  // Keep marks the folder as started (§3.4): no "This project has 1 ERD Studio
+  // diagram" about the diagram just made, and the start suggestion is answered.
+  onDraftKept = async () => {
+    await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
+    await saveStartSuggestionState({ ...startSuggestionState(), answered: true });
+  };
+  // The automatic draft (Draft-first §3.1, src/services/draftTriggers.ts →
+  // autoDraftDue): only once the user opened the empty Diagrams view in this
+  // folder — never because activation ran — and only once activation's own
+  // prompt is decided (it claims the window's one prompt, kind `draft`). The
+  // folder's find (once per folder) or, with nothing found, the example (once
+  // per machine); never with a diagram, a table or an open canvas. Its flag is
+  // written before it shows, so a crash cannot make it repeat. It is quiet: a
+  // draft that cannot be built ends silently (`draftUnavailable`), leaving the
+  // sidebar's starts.
+  let autoDraftAsked = false;
+  onEmptyDiagramsViewShown = () => {
+    if (!emptyDiagramsViewShown || autoDraftAsked) return;
+    void activationPromptsSettled.then(async () => {
+      if (autoDraftAsked) return;
+      const intent = await startIntent.refresh();
+      const kind: AutoDraft | undefined = autoDraftDue({
+        settingOn: startSuggestionsSettingOn(),
+        state: startSuggestionState(),
+        hasDiagrams: subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
+        hasTables: tableLibraryService.listTableFiles().length > 0,
+        canvasOpen: hasOpenSubjectAreaCanvas(),
+        intent,
+        exampleShownOnMachine: context.globalState.get<boolean>(EXAMPLE_DRAFT_SHOWN_KEY) === true,
+      });
+      if (!kind || autoDraftAsked || draftPreview.isOpen()) return;
+      // Another prompt had this window: the draft waits for a later one.
+      if (!sessionPrompts.claim('draft')) return;
+      autoDraftAsked = true;
+      if (kind === 'find') await saveStartSuggestionState({ ...startSuggestionState(), draftShown: true });
+      else await context.globalState.update(EXAMPLE_DRAFT_SHOWN_KEY, true);
+      log.info(`Session prompt: draft (${kind}, the empty Diagrams view was opened)`);
+      let shown = false;
+      let markShown: () => void = () => {};
+      const firstShown = new Promise<void>((resolve) => { markShown = resolve; });
+      onDraftAsk = () => { shown = true; markShown(); };
+      // A progress bar on the Diagrams view while the draft builds (it opens with the focus left there).
+      const run = Promise.resolve()
+        .then(() => (kind === 'find' && intent ? runFindDraft(intent) : runExampleDraft('sidebar', true)))
+        .catch((err: unknown) => {
+          telemetry.error('draftBuildFailed');
+          log.warn('[ERD Studio] The automatic draft failed:', err);
+        })
+        .finally(() => markShown());
+      void vscode.window.withProgress({ location: { viewId: 'erdStudio.domainTree' } }, () => firstShown);
+      await firstShown;
+      onDraftAsk = () => {};
+      if (!shown) {
+        telemetry.feature('draftUnavailable');
+        log.info("[ERD Studio] The automatic draft could not be built; the sidebar's starts remain.");
+      }
+      await run;
+    }).catch((err: unknown) => log.warn('[ERD Studio] The automatic draft failed:', err));
+  };
+
   // First run (spec C.5, addendum P4). A fresh install opens the Get Started
   // walkthrough once per machine (the Welcome panel where the host has no
   // walkthrough command), but not in a project that already has diagrams (a
@@ -4011,15 +4593,40 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // unset, so they come in a folder that has something to work on.
   const quietActivation = !hasDbt && !fs.existsSync(fullSemanticDirPath);
   const existingDiagrams = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+  /** A first run in a folder with no diagram: the window is left for the draft (Draft-first §3.4). */
+  let firstRunLeftForDraft = false;
   {
     const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
     const shown = context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY) === true;
     if (pending && !shown && !gettingStartedAutoOpened) {
-      if (existingDiagrams.length === 0) activationPrompts.set('walkthrough', async () => {
+      // A first run in a project that already has diagrams (a teammate's
+      // clone) gets their notice instead; the walkthrough waits for a folder
+      // with none. Counted, so the funnel does not read it as "saw no start".
+      if (existingDiagrams.length > 0) telemetry.featureOnce('firstRunHasDiagrams');
+      // Draft-first (§3.4): in a folder the draft takes the walkthrough's place
+      // (walkthroughAutoOpens), and the walkthrough stays reachable (Help &
+      // Feedback, VS Code's Welcome page, the palette). The first run is spent
+      // here: this window is the draft's (the ERD Studio icon, or the start
+      // suggestion's Show Me), so no other activation prompt (the AI helper
+      // offer, the upgrade notice…) takes it; they ask in a later window.
+      if (existingDiagrams.length === 0 && !walkthroughAutoOpens({ hasFolder: true, owed: true })) {
+        if (sessionPrompts.claimed !== undefined) {
+          // Another prompt already had this window (an earlier folder of the
+          // same extension host): the first run waits for a window of its own.
+          telemetry.featureOnce('walkthroughWaited');
+        } else {
+          firstRunLeftForDraft = true;
+          await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
+          await context.globalState.update(GETTING_STARTED_PENDING_KEY, undefined);
+        }
+      }
+      if (existingDiagrams.length === 0 && walkthroughAutoOpens({ hasFolder: true, owed: true })) activationPrompts.set('walkthrough', async () => {
         gettingStartedAutoOpened = true;
         await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
         await context.globalState.update(GETTING_STARTED_PENDING_KEY, undefined);
         const deps = gettingStartedDeps;
+        // The walkthrough's start step follows the suggestion (erdStudio.startIntent).
+        startIntent.scheduleRefresh();
         await openWalkthrough(() => GettingStartedPanel.createOrShow(context, deps));
       });
     } else if (pending && shown) {
@@ -4029,19 +4636,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
       // Without dbt the guided setup and the dbt video don't apply: the notice
       // offers the Welcome page's logical-only start instead.
-      const OPEN = hasDbt ? 'Watch' : 'Open Welcome';
-      void vscode.window.showInformationMessage(
-        hasDbt
-          ? 'ERD Studio: new short getting-started video and a guided setup for your AI assistant ' +
-            '(Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor).'
-          : 'ERD Studio: a new Welcome page: draw a diagram, import DBML, and set up your AI assistant ' +
-            '(Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) to work on the same files.',
-        OPEN,
-        'Not now',
-      ).then((choice) => {
-        if (choice === OPEN) { void vscode.commands.executeCommand('erdStudio.showGettingStarted'); }
+      void vscode.window.showInformationMessage(UPGRADE_NOTICE_MESSAGE, TOUR_LABEL, 'Not now').then((choice) => {
+        if (choice === TOUR_LABEL) { void vscode.commands.executeCommand('erdStudio.showGettingStarted'); }
       });
     });
+  }
+
+  // An example project from Open an Example Project… opens in a window of
+  // its own; its first diagram opens here, so one click lands on a canvas.
+  // (No "This project has N diagrams" toast on top of it.)
+  {
+    const examplePath = takePendingExample(context.globalState.get(PENDING_EXAMPLE_OPEN_KEY), workspaceRoot, Date.now());
+    if (examplePath) {
+      // Its first canvas is this window's one prompt: no AI helper offer over it.
+      sessionPrompts.claim('exampleOpen');
+      await context.globalState.update(PENDING_EXAMPLE_OPEN_KEY, undefined);
+      await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
+      void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(examplePath), SUBJECT_AREA_EDITOR_VIEW_TYPE).then(
+        () => telemetry.feature('exampleDiagramShown'),
+        (err) => log.warn('[ERD Studio] Could not open the example\'s first diagram:', err),
+      );
+    }
   }
 
   // Existing diagrams, once per workspace: a teammate's clone already holds
@@ -4055,16 +4670,133 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (latest) activationPrompts.set('diagramsNudge', async () => {
       await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
       const open = `Open ${latest.domain}`;
+      telemetry.feature('diagramsNudgeShown');
+      const openLatest = (): void => {
+        telemetry.feature('diagramsNudgeOpened');
+        void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath);
+      };
+      // Show Me Around (the onboarding guide's canvas part): a project with diagrams shows
+      // no draft, so the guide would not start by itself here. It opens the same diagram.
+      const showMeAround = (): void => {
+        telemetry.feature('diagramsNudgeShowMeAround');
+        showMeAroundOnDiagram(latest.filePath).then(undefined, (err: unknown) => log.warn('[ERD Studio] Could not show the guide on the diagram:', err));
+      };
+      // A project from before 2.0: the one next step is Convert (the start screen's
+      // own suggestion), with its diagram second. This prompt holds the window's one
+      // prompt, so the canvas's Convert offer would not come until the next window.
+      const offerConvert = convertOfferApplies({
+        ...convertOfferState(),
+        candidates: () => countDbmlConversionCandidates(workspaceRoot, semanticDir),
+        goesNowhere: () => dbmlConversionGoesNowhere(context.workspaceState, workspaceRoot, semanticDir),
+      });
+      if (offerConvert) {
+        telemetry.feature('convertToDbmlOffered');
+        // Three buttons and no Not now (closing it is not now): Convert first, then the
+        // diagram, then the same diagram with the guide.
+        void vscode.window.showInformationMessage(convertNoticeMessage(domains.length), CONVERT_NOTICE_BUTTON, open, SHOW_ME_AROUND_LABEL).then((choice) => {
+          if (choice === CONVERT_NOTICE_BUTTON) void vscode.commands.executeCommand('erdStudio.convertProjectToDbml');
+          else if (choice === open) openLatest();
+          else if (choice === SHOW_ME_AROUND_LABEL) showMeAround();
+          else telemetry.feature('convertToDbmlNotNow');
+        });
+        return;
+      }
       void vscode.window.showInformationMessage(
         `This project has ${domains.length} ERD Studio diagram${domains.length === 1 ? '' : 's'}.`,
         open,
+        SHOW_ME_AROUND_LABEL,
         'Not now',
       ).then((choice) => {
-        if (choice === open) { void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath); }
+        if (choice === open) openLatest();
+        else if (choice === SHOW_ME_AROUND_LABEL) showMeAround();
       });
     });
   }
 
+
+  // A draft's Open Folder… (the no-folder example's primary, the guide's "Open your
+  // folder") reloaded this window into this folder: the folder's draft shows now, in
+  // place of the start suggestion (the user already asked to see what is here), with
+  // the guide carrying on when it was running. With diagrams here, the guide (if any)
+  // carries on on the newest one. The mark is taken once, and only while fresh.
+  const afterOpenFolder = draftAfterOpenFolderDue(context.globalState.get<unknown>(DRAFT_AFTER_OPEN_FOLDER_KEY), Date.now());
+  if (context.globalState.get<unknown>(DRAFT_AFTER_OPEN_FOLDER_KEY) !== undefined) void context.globalState.update(DRAFT_AFTER_OPEN_FOLDER_KEY, undefined);
+  const afterOpenFolderShows = afterOpenFolder && existingDiagrams.length > 0
+    ? draftAfterOpenFolderShows({ hasDiagrams: true, guide: afterOpenFolder.guide, intent: undefined })
+    : undefined;
+  if (afterOpenFolder && existingDiagrams.length === 0) {
+    // It holds the window: the start suggestion and the other activation prompts wait.
+    if (!sessionPrompts.claim('draft')) sessionPrompts.reserve('draft');
+    if (afterOpenFolder.guide) onboardingGuide.resumeDraft();
+    log.info(`Session prompt: draft (the folder opened from a draft's Open Folder…${afterOpenFolder.guide ? ', the guide carries on' : ''})`);
+    void (async () => {
+      const intent = await startIntent.refresh();
+      const shows = draftAfterOpenFolderShows({ hasDiagrams: false, guide: afterOpenFolder.guide, intent });
+      await saveStartSuggestionState({ ...startSuggestionState(), draftShown: true });
+      telemetry.feature('draftAfterOpenFolder');
+      if (shows === 'find' && intent) await runFindDraft(intent, 'sidebar');
+      else await runExampleDraft('sidebar', true);
+    })().catch((err: unknown) => {
+      telemetry.error('draftBuildFailed');
+      log.warn('[ERD Studio] The draft after Open Folder failed:', err);
+    });
+  } else if (afterOpenFolderShows === 'diagram') {
+    const newest = mostRecentlyModified(existingDiagrams);
+    if (newest) {
+      log.info('The folder opened from the guide\'s Open your folder has diagrams: the guide carries on on the newest');
+      void vscode.commands.executeCommand('erdStudio.openDomain', newest.filePath);
+    }
+  }
+
+  // The start suggestion: a folder with no diagram, where it is still due.
+  // (Not after a draft's Open Folder…: that folder's draft shows instead, above.)
+  // It decides only after the start screen's bounded look (deferred, never on
+  // activation's path): a concrete start shows the notification; nothing
+  // concrete hands the window to the next prompt (the walkthrough on a first
+  // run). On a first run with a concrete start it takes the walkthrough's
+  // place, and the walkthrough stays owed.
+  if (!afterOpenFolder && existingDiagrams.length === 0 && !hasOpenSubjectAreaCanvas()) {
+    const settingOn = startSuggestionsSettingOn();
+    if (startSuggestionDue({ settingOn, state: startSuggestionState(), hasDiagrams: false })) {
+      const walkthroughOwed = (): boolean => activationPrompts.has('walkthrough');
+      activationPrompts.set('startSuggestion', () => {
+        setTimeout(() => {
+          void runStartSuggestion({
+            intent: () => startIntent.refresh(),
+            sqlTables: () => startIntent.sqlTableCount(),
+            dbtAbove: () => dbtProjectAboveOpenFolders(workspaceRoot, (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath)),
+            hasDiagrams: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
+            settingOn: startSuggestionsSettingOn,
+            // No second Convert prompt: the Convert offer's own checks decide.
+            convertApplies: () => convertOfferApplies({
+              ...convertOfferState(),
+              candidates: () => countDbmlConversionCandidates(workspaceRoot, semanticDir),
+              goesNowhere: () => dbmlConversionGoesNowhere(context.workspaceState, workspaceRoot, semanticDir),
+            }),
+            state: startSuggestionState,
+            saveState: saveStartSuggestionState,
+            show: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
+            info: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
+            executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+            recordSuggested: recordStartSuggested,
+            feature: (key) => telemetry.feature(key),
+            setOffContext: (off) => { void vscode.commands.executeCommand('setContext', START_SUGGESTIONS_OFF_CONTEXT_KEY, off); },
+          }).then(async (run) => {
+            if (run.shown) {
+              log.info('Activation prompt: startSuggestion shown');
+              if (walkthroughOwed()) telemetry.featureOnce('walkthroughWaited');
+              return;
+            }
+            sessionPrompts.release('startSuggestion');
+            await handOverActivationPrompt('startSuggestion');
+          }).catch((err: unknown) => log.warn('[ERD Studio] The start suggestion failed:', err))
+            .finally(() => settleActivationPrompts());
+        }, 0);
+      });
+    } else if (!settingOn) {
+      telemetry.featureOnce('startSuggestionsOff');
+    }
+  }
 
   // AI coding harness — prompt to update stale files; offer install once per
   // workspace when none are present. Never overwrite anything silently:
@@ -4114,9 +4846,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         });
       });
     } else if (
-      // Offered where there is a dbt project or ERD data to describe, never
-      // to a plain folder that has neither (logical-only, nothing yet).
+      // Offered where there are diagrams to describe ("read and write these
+      // diagrams"), never in a folder that has none yet: there the start
+      // (the draft, the sidebar) is the one thing on offer.
       !quietActivation &&
+      existingDiagrams.length > 0 &&
       installedCount === 0 &&
       !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)
     ) {
@@ -4169,16 +4903,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // One prompt per window session: the most useful one offered above (the
   // existing diagrams, else the walkthrough, …), unless a canvas already
   // made its own offer. The others keep their flags and ask in a later window.
+  // The start suggestion holds the window while it looks, and hands it to the
+  // next prompt offered here when it has nothing concrete to offer.
   {
-    const offered = [...activationPrompts.keys()];
-    const picked = pickActivationPrompt(offered);
-    if (picked && sessionPrompts.claim(picked)) {
-      const waiting = offered.filter((kind) => kind !== picked);
-      log.info(`Activation prompt: ${picked}${waiting.length > 0 ? ` (next window: ${waiting.join(', ')})` : ''}`);
-      await activationPrompts.get(picked)?.();
-    } else if (offered.length > 0) {
-      log.info(`Activation prompts wait for the next window (${sessionPrompts.claimed ?? 'one'} already shown): ${offered.join(', ')}`);
+    // A first run left for the draft: only a start (the start suggestion, or a
+    // clone's diagrams) may have the window; the rest wait for a later one.
+    const leftForDraft = [...activationPrompts.keys()].filter((kind) =>
+      !firstRunLeftForDraft || kind === 'startSuggestion' || kind === 'diagramsNudge');
+    if (firstRunLeftForDraft && leftForDraft.length < activationPrompts.size) {
+      log.info(`Activation prompts wait for the next window (a first run: the draft has this one): ${[...activationPrompts.keys()].filter((k) => !leftForDraft.includes(k)).join(', ')}`);
     }
+    // The onboarding guide's canvas part is owed (its draft part ran): nothing that
+    // would pop over that canvas shows in this window; each keeps its own flag.
+    const guideStatus = context.globalState.get<unknown>(GUIDE_STATE_KEY);
+    const offered = leftForDraft.filter((kind) => !guideDefersPrompt(kind, isGuideStatus(guideStatus) ? guideStatus : undefined));
+    if (offered.length < leftForDraft.length) {
+      log.info(`Activation prompts wait for the next window (the onboarding guide's canvas part is owed): ${leftForDraft.filter((k) => !offered.includes(k)).join(', ')}`);
+    }
+    const showFrom = async (candidates: readonly SessionPromptKind[]): Promise<void> => {
+      const picked = pickActivationPrompt(candidates);
+      const claimed = picked !== undefined && sessionPrompts.claim(picked);
+      // The walkthrough was owed and offered, but another prompt has this window
+      // (the start suggestion counts it once it has really shown).
+      if (candidates.includes('walkthrough') && !(claimed && (picked === 'walkthrough' || picked === 'startSuggestion'))) {
+        telemetry.featureOnce('walkthroughWaited');
+      }
+      if (picked && claimed) {
+        const waiting = candidates.filter((kind) => kind !== picked);
+        log.info(`Activation prompt: ${picked}${waiting.length > 0 ? ` (next window: ${waiting.join(', ')})` : ''}`);
+        await activationPrompts.get(picked)?.();
+      } else if (candidates.length > 0) {
+        log.info(`Activation prompts wait for the next window (${sessionPrompts.claimed ?? 'one'} already shown): ${candidates.join(', ')}`);
+      }
+    };
+    handOverActivationPrompt = (from) => showFrom(offered.filter((kind) => kind !== from));
+    await showFrom(offered);
+    // The start suggestion, when it holds the window, settles once its look has decided.
+    if (sessionPrompts.claimed !== 'startSuggestion') settleActivationPrompts();
   }
 
   // Keep ~/.erd-studio-cli in step with this extension — only if the user
@@ -4224,5 +4985,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
-  // Cleanup will be added when services are implemented
+  // The onboarding trail's last entry: best effort, as VS Code may not wait for the write.
+  telemetry.marker('windowClosed');
 }

@@ -283,7 +283,7 @@ describe('logical-only mode (no dbt project)', () => {
     expect(screen.getByRole('button', { name: /add table or relationship/i })).toBeTruthy();
     expect(layoutButton()).toBeTruthy();
     const exportButton = screen.getByRole('button', { name: /export diagram as mermaid or dbml/i });
-    expect(exportButton.getAttribute('title')).toBe('Export as DBML or Mermaid — open formats, no lock-in');
+    expect(exportButton.getAttribute('title')).toBe('Export as DBML or Mermaid');
   });
 });
 
@@ -397,7 +397,7 @@ describe('the top-right corner actions', () => {
     render(<Toolbar {...defaultProps} />);
     const button = screen.getByRole('button', { name: /export diagram as mermaid or dbml/i });
     expect(button.className).toBe('toolbar__corner-button toolbar__corner-button--icon');
-    expect(button.getAttribute('title')).toBe('Export as DBML or Mermaid — open formats, no lock-in');
+    expect(button.getAttribute('title')).toBe('Export as DBML or Mermaid');
 
     fireEvent.click(button);
 
@@ -580,6 +580,7 @@ describe('Toolbar Fit leaves room for itself (dev-host finding 7)', () => {
     expect(mockFitView).toHaveBeenCalledTimes(1);
     expect(mockFitView.mock.calls[0][0]).toEqual({
       padding: { top: '99px', right: 0.1, bottom: 0.1, left: 0.1 },
+      maxZoom: 1,
       duration: 200,
     });
   });

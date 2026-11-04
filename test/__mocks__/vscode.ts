@@ -198,7 +198,17 @@ export const workspace = {
 /** Every output channel created, oldest first (tests read `_lines` and `_shown`). */
 export const _outputChannels: Array<{ name?: string; _lines: string[]; _shown: number }> = [];
 
+const _windowStateListeners: Array<(e: { focused: boolean }) => void> = [];
+/** Fire `window.onDidChangeWindowState` (the window gained or lost the focus). */
+export function _fireDidChangeWindowState(focused: boolean): void {
+  for (const listener of [..._windowStateListeners]) listener({ focused });
+}
+
 export const window = {
+  onDidChangeWindowState: (listener: (e: { focused: boolean }) => void) => {
+    _windowStateListeners.push(listener);
+    return { dispose: () => { const i = _windowStateListeners.indexOf(listener); if (i >= 0) _windowStateListeners.splice(i, 1); } };
+  },
   showInformationMessage: async () => undefined,
   showWarningMessage: async () => undefined,
   showErrorMessage: async () => undefined,
@@ -305,6 +315,13 @@ export interface MockStatusBarItem {
   show: () => void;
   hide: () => void;
   dispose: () => void;
+}
+
+export enum FileType {
+  Unknown = 0,
+  File = 1,
+  Directory = 2,
+  SymbolicLink = 64,
 }
 
 export enum QuickPickItemKind {
@@ -1080,8 +1097,9 @@ workspace.createFileSystemWatcher = ((pattern?: unknown) => {
 export class RelativePattern {
   base: string;
   pattern: string;
-  constructor(base: string | { uri: { fsPath: string } }, pattern: string) {
-    this.base = typeof base === 'string' ? base : base.uri.fsPath;
+  constructor(base: string | { uri: { fsPath: string } } | { fsPath: string }, pattern: string) {
+    // A folder path, a WorkspaceFolder or a Uri, as VS Code takes them.
+    this.base = typeof base === 'string' ? base : 'uri' in base ? base.uri.fsPath : base.fsPath;
     this.pattern = pattern;
   }
 }

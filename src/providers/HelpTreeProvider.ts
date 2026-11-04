@@ -11,6 +11,8 @@ import * as vscode from 'vscode';
 
 import type { ReportTrackingService } from '../services/reportTrackingService';
 import { MyReportsTreeProvider, type MyReportNode } from './MyReportsTreeProvider';
+import { TOUR_LABEL } from '../types/startActions';
+import { SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL } from '../types/onboardingGuide';
 
 export interface HelpActionNode {
   readonly type: 'action';
@@ -34,9 +36,13 @@ export const HELP_ACTIONS: readonly HelpActionNode[] = [
     tooltip: 'Teach your AI assistant (Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) to read and write your diagrams.',
   },
   {
-    type: 'action', id: 'gettingStarted', label: 'Watch Getting Started Video', icon: 'play-circle', command: 'erdStudio.showGettingStarted',
+    type: 'action', id: 'gettingStarted', label: TOUR_LABEL, icon: 'play-circle', command: 'erdStudio.showGettingStarted',
     // Neutral in every folder: the panel plays the cut that matches it.
     tooltip: 'A one-minute video and your first steps.',
+  },
+  {
+    type: 'action', id: 'showMeAround', label: SHOW_ME_AROUND_LABEL, icon: 'compass', command: SHOW_ME_AROUND_COMMAND,
+    tooltip: 'A short guide that points at each part of ERD Studio, using your own tables.',
   },
   {
     type: 'action', id: 'feedback', label: 'Send Feedback', icon: 'comment-discussion', command: 'erdStudio.reportBug',
@@ -67,7 +73,9 @@ export class HelpTreeProvider implements vscode.TreeDataProvider<HelpNode>, vsco
     if (!element) {
       const rows: HelpNode[] = [...HELP_ACTIONS];
       // After Send Feedback: the reports it filed, once there is one.
-      if (this.tracking.getReports().length > 0) rows.splice(3, 0, { type: 'reports' });
+      if (this.tracking.getReports().length > 0) {
+        rows.splice(rows.findIndex((r) => r.type === 'action' && r.id === 'feedback') + 1, 0, { type: 'reports' });
+      }
       return rows;
     }
     if (element.type === 'reports') return this.reports.getChildren() ?? [];

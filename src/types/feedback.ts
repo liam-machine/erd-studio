@@ -16,6 +16,14 @@
 /** What the user is filing. Drives the issue template, copy and field ids. */
 export type FeedbackKind = 'bug' | 'feature';
 
+/**
+ * GitHub `owner/repo` of ERD Studio: bug reports go there, and the onboarding
+ * guide's Star on GitHub opens its page (`src/providers/guideWiring.ts`). Here,
+ * vscode-free, so the guide's host wiring stays pure; `feedbackService`
+ * re-exports it.
+ */
+export const GITHUB_REPO = 'liam-machine/erd-studio';
+
 export const FEEDBACK_KINDS: readonly FeedbackKind[] = ['bug', 'feature'];
 
 // ---------------------------------------------------------------------------

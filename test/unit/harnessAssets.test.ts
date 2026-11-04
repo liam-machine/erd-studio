@@ -544,8 +544,9 @@ describe('setup skill: the Without dbt route', () => {
     expect(route()).toContain('**ERD Studio: Import DBML…**');
     expect(title('erdStudio.exportDiagram')).toBe('Export Diagram…');
     expect(route()).toContain('**ERD Studio: Export Diagram…**');
-    expect(title('erdStudio.openExampleDiagram')).toBe('Open Example Diagram');
-    expect(route()).toContain('**ERD Studio: Open Example Diagram**');
+    // The one example command (Open Example Diagram is its hidden alias, not in the palette).
+    expect(title('erdStudio.openExampleProject')).toBe('Open an Example…');
+    expect(route()).toContain('**ERD Studio: Open an Example…** (Command Palette)');
   });
 
   it("follows the product's wording rules", () => {
