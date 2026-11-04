@@ -630,7 +630,7 @@ describe('allowlists agree with the Worker', () => {
   it('appends the onboarding guide keys at the very end, after the activation ones, in their fixed order', () => {
     const at = FEATURES.indexOf('guideStarted');
     expect(at).toBe(FEATURES.indexOf('dbtProjectUnused') + 1);
-    expect(FEATURES.slice(at)).toEqual([
+    expect(FEATURES.slice(at, FEATURES.indexOf('guideLeftDraft') + 1)).toEqual([
       'guideStarted', 'guideStartedFromCommand', 'guideDraftDone', 'guideCanvasStarted', 'guideCompleted',
       'guideSkippedOnDraft', 'guideSkippedOnCanvas', 'guideStarClicked', 'guideAiHelperClicked',
       'guideStepDraftBanner', 'guideStepDraftMoreWays', 'guideStepDraftKeep',
@@ -640,6 +640,11 @@ describe('allowlists agree with the Worker', () => {
     ]);
     // The no-longer-sent clip key stays listed (append-only).
     expect(FEATURES).toContain('howToClipPlayed');
+  });
+
+  it('appends the existing-diagrams notice\'s Show Me Around key at the very end, after the guide ones', () => {
+    expect(FEATURES.indexOf('diagramsNudgeShowMeAround')).toBe(FEATURES.indexOf('guideLeftDraft') + 1);
+    expect(FEATURES.at(-1)).toBe('diagramsNudgeShowMeAround');
   });
 
   it('the Worker README documents the onboarding guide keys in a Guide funnel row', () => {

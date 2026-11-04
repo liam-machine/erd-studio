@@ -418,6 +418,7 @@ export const FEATURES = [
   'guideStepCanvasFinish',
   'guideBack',
   'guideLeftDraft',
+  'diagramsNudgeShowMeAround',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
