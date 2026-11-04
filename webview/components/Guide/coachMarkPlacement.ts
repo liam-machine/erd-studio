@@ -61,6 +61,18 @@ export function isUsableAnchor(rect: GuideRect | null | undefined, viewport: Gui
   return rect.left + rect.width > 0 && rect.top + rect.height > 0 && rect.left < viewport.width && rect.top < viewport.height;
 }
 
+/**
+ * The anchor among a step's targets (their rects, in the step's order): the
+ * first one in view, so a control scrolled or clipped out of a narrow editor
+ * (the toolbar's + Add) gives way to the next (Layout) rather than turning
+ * the callout into a centred card; else the first that draws anything (the
+ * caller centres it); else null.
+ */
+export function pickAnchor(rects: ReadonlyArray<GuideRect | null | undefined>, viewport: GuideSize): GuideRect | null {
+  const drawn = rects.filter((r): r is GuideRect => !!r && (r.width > 0 || r.height > 0));
+  return drawn.find((r) => isUsableAnchor(r, viewport)) ?? drawn[0] ?? null;
+}
+
 export function placeCallout(anchor: GuideRect | null | undefined, size: GuideSize, viewport: GuideSize, options: PlaceOptions = {}): CalloutPlacement {
   const gap = options.gap ?? 12;
   const margin = options.margin ?? 8;

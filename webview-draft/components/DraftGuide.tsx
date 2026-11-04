@@ -18,7 +18,7 @@ import {
   type GuideStep,
 } from '../../src/types/onboardingGuide';
 import { CoachMark } from '../../webview/components/Guide/CoachMark';
-import type { GuideRect } from '../../webview/components/Guide/coachMarkPlacement';
+import { pickAnchor, type GuideRect } from '../../webview/components/Guide/coachMarkPlacement';
 
 export interface DraftGuideProps {
   view: DraftView;
@@ -33,14 +33,13 @@ export interface DraftGuideProps {
 
 function anchorRect(step: GuideStep): GuideRect | null {
   if (step.anchor.kind !== 'target') return null;
-  for (const target of step.anchor.targets) {
+  const rects = step.anchor.targets.map((target) => {
     const el = document.querySelector(guideTargetSelector(target));
-    if (el) {
-      const r = el.getBoundingClientRect();
-      return { left: r.left, top: r.top, width: r.width, height: r.height };
-    }
-  }
-  return null;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  });
+  return pickAnchor(rects, { width: window.innerWidth, height: window.innerHeight });
 }
 
 /** The banner, its buttons and switcher included: a callout never covers what the step asks you to press. */

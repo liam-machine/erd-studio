@@ -26,7 +26,7 @@ import {
 import { useSend } from '../../hooks/useMessageBus';
 import { useEditorStore } from '../../store/editorStore';
 import { CoachMark } from './CoachMark';
-import type { GuideRect } from './coachMarkPlacement';
+import { pickAnchor, type GuideRect } from './coachMarkPlacement';
 
 /** How long the canvas settles (first-open layout, its fit) before the first step. */
 export const CANVAS_GUIDE_SETTLE_MS = 900;
@@ -75,11 +75,10 @@ export function canvasAnchorRect(step: GuideStep): GuideRect | null {
   const { anchor } = step;
   switch (anchor.kind) {
     case 'target':
-      for (const target of anchor.targets) {
-        const r = rectOf(document.querySelector(guideTargetSelector(target)));
-        if (r && (r.width > 0 || r.height > 0)) return r;
-      }
-      return null;
+      return pickAnchor(
+        anchor.targets.map((target) => rectOf(document.querySelector(guideTargetSelector(target)))),
+        { width: window.innerWidth, height: window.innerHeight },
+      );
     case 'table':
       return rectOf(tableElement(anchor.table));
     case 'relationship':

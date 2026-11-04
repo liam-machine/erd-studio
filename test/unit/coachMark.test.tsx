@@ -16,7 +16,7 @@ vi.mock('../../webview/hooks/useVsCodeApi', () => ({
   getVsCodeApi: () => mockVsCode,
 }));
 
-import { placeCallout, isUsableAnchor, type GuideRect } from '../../webview/components/Guide/coachMarkPlacement';
+import { placeCallout, isUsableAnchor, pickAnchor, type GuideRect } from '../../webview/components/Guide/coachMarkPlacement';
 import { CoachMark, type CoachMarkProps } from '../../webview/components/Guide/CoachMark';
 import { CanvasGuide, CANVAS_GUIDE_SETTLE_MS } from '../../webview/components/Guide/CanvasGuide';
 import { useEditorStore } from '../../webview/store/editorStore';
@@ -377,6 +377,37 @@ describe('phase B on the canvas', () => {
     expect(second.onEnd).toHaveBeenCalledTimes(1);
   });
 
+  it('in a narrow editor whose toolbar clips + Add, the toolbar step points at Layout rather than a centred card', () => {
+    const rects: Record<string, GuideRect> = {
+      'canvas-add': { left: VIEWPORT.width + 20, top: 22, width: 62, height: 26 },
+      'canvas-layout': { left: 316, top: 22, width: 93, height: 26 },
+    };
+    const targets = Object.keys(rects).map((id) => {
+      const el = document.createElement('div');
+      el.setAttribute('data-guide', id);
+      document.body.appendChild(el);
+      return el;
+    });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const r = rects[this.getAttribute('data-guide') ?? ''] ?? { left: 0, top: 0, width: 0, height: 0 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+    });
+    try {
+      const { container } = renderCanvasGuide();
+      while (screen.getByRole('dialog').querySelector('.guide-mark__title')!.textContent !== 'Add and arrange') {
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+      }
+      act(() => { window.dispatchEvent(new Event('resize')); });
+      const mark = container.querySelector('.guide-mark') as HTMLElement;
+      expect(mark.getAttribute('data-side')).toBe('below');
+      const ring = container.querySelector('.guide-ring') as HTMLElement;
+      expect(ring.hidden).toBe(false);
+      expect(ring.style.getPropertyValue('--guide-ring-x')).toBe('312px');
+    } finally {
+      for (const el of targets) el.remove();
+    }
+  });
+
   it('Done finishes', () => {
     const { onEnd } = renderCanvasGuide();
     while (screen.queryByRole('button', { name: 'Next' })) fireEvent.click(screen.getByRole('button', { name: 'Next' }));
@@ -402,5 +433,25 @@ describe('placeCallout: never over the controls it should leave free', () => {
     const anchor: GuideRect = { left: 400, top: 600, width: 200, height: 40 };
     const blocker: GuideRect = { left: 0, top: 640, width: 1000, height: 160 };
     expect(placeCallout(anchor, SIZE, VIEWPORT, { avoid: [blocker] }).side).toBe('above');
+  });
+});
+
+describe('pickAnchor: the first of a step\'s targets that is in view', () => {
+  const add: GuideRect = { left: 1020, top: 22, width: 62, height: 26 };   // + Add, clipped off a narrow editor
+  const layout: GuideRect = { left: 316, top: 22, width: 93, height: 26 };
+
+  it('skips a target wholly out of view for the next one in view', () => {
+    expect(pickAnchor([add, layout], VIEWPORT)).toEqual(layout);
+    expect(pickAnchor([layout, add], VIEWPORT)).toEqual(layout);
+  });
+
+  it('skips a target that draws nothing (absent, or zero-sized)', () => {
+    expect(pickAnchor([null, { left: 5, top: 5, width: 0, height: 0 }, layout], VIEWPORT)).toEqual(layout);
+  });
+
+  it('with none in view, the first that draws anything (the callout centres itself); with none at all, null', () => {
+    expect(pickAnchor([add], VIEWPORT)).toEqual(add);
+    expect(placeCallout(pickAnchor([add], VIEWPORT), SIZE, VIEWPORT).side).toBe('centre');
+    expect(pickAnchor([null, undefined], VIEWPORT)).toBeNull();
   });
 });
